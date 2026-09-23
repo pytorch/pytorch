@@ -2557,11 +2557,18 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
         self._layout = layout
         self._sub_parent_family = sub_parent_family
         self._sub_parent_factor = sub_parent_factor
-        if any(relation.translation is not None for relation in access_relations) and (
+        has_translated_relations = any(
+            relation.translation is not None for relation in access_relations
+        )
+        if has_translated_relations and (
             parent_numel is None or parent_rnumel is None
         ):
             raise AssertionError(
                 "translated sub-parent replay requires parent extents"
+            )
+        if has_translated_relations and layout.group_tree.is_loop:
+            raise AssertionError(
+                "translated projection requires the complete logical parent tile"
             )
         # Fusion checks each access. Replay only needs their consistent per-name
         # consequences: capture role and any permitted parent lanes. Translated
@@ -3412,8 +3419,8 @@ class SIMDScheduling(BaseScheduling):
             return _SubParentFusion.REJECT
 
         plan = fusion_result.plan
-        if plan is None or not self._sub_parent_tiling_is_2d(
-            nodes, parent_numel, plan.parent_rnumel
+        if plan is None or not self._sub_parent_plan_is_admitted(
+            nodes, parent_numel, plan
         ):
             return _SubParentFusion.REJECT
         epilogue_node_set = OrderedSet(plan.sub_parent_stages[0].epilogue_nodes)
@@ -3443,9 +3450,72 @@ class SIMDScheduling(BaseScheduling):
         plan = result.plan
         if plan is None:
             return None
-        if not self._sub_parent_tiling_is_2d(nodes, parent_numel, plan.parent_rnumel):
+        if not self._sub_parent_plan_is_admitted(nodes, parent_numel, plan):
             return None
         return plan
+
+    def _sub_parent_plan_is_admitted(
+        self,
+        nodes: Sequence[BaseSchedulerNode],
+        parent_numel: sympy.Expr,
+        plan: scheduler.StagedReductionPlan,
+    ) -> bool:
+        if not self._sub_parent_tiling_is_2d(nodes, parent_numel, plan.parent_rnumel):
+            return False
+        has_translated_relations = any(
+            relation.translation is not None
+            for stage in plan.sub_parent_stages
+            for relation in stage.access_relations
+        )
+        return not (
+            has_translated_relations
+            and not self._translated_projection_is_persistent(plan)
+        )
+
+    def _translated_projection_is_persistent(
+        self, plan: scheduler.StagedReductionPlan
+    ) -> bool:
+        """Whether the selected Triton reduction owns a complete parent tile."""
+        if not plan.parent_nodes:
+            return True
+        group_extent_subs: dict[sympy.Expr, sympy.Expr] = {}
+        for parent_node in plan.parent_nodes:
+            if not parent_node.is_reduction():
+                continue
+            _, (node_numel, node_rnumel) = parent_node.group
+            if (
+                V.graph.sizevars.statically_known_equals(
+                    node_numel, plan.parent_numel
+                )
+                and V.graph.sizevars.statically_known_equals(
+                    node_rnumel, plan.parent_rnumel
+                )
+                and node_rnumel != plan.parent_rnumel
+            ):
+                group_extent_subs[node_rnumel] = plan.parent_rnumel
+                break
+        parent_schedule = self.generate_node_schedule(
+            plan.parent_nodes,
+            plan.parent_numel,
+            plan.parent_rnumel,
+            required_post_reduction_index=plan.required_post_reduction_index,
+            group_extent_subs=group_extent_subs or None,
+        )
+        features = SIMDKernelFeatures(
+            parent_schedule,
+            plan.parent_numel,
+            plan.parent_rnumel,
+        )
+        _, tiling_scores = self.get_tiling_and_scores(
+            parent_schedule,
+            plan.parent_numel,
+            plan.parent_rnumel,
+            features.coalesce_analysis,
+        )
+        return V.choices.should_use_persistent_reduction(
+            features.with_tiling_scores(tiling_scores),
+            cooperative_reduction=False,
+        )
 
     def _sub_parent_tiling_is_2d(
         self,

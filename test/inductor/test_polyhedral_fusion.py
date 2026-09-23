@@ -22,6 +22,10 @@ from torch._inductor.scheduler import (
 from torch._inductor.test_case import TestCase, run_tests
 from torch._inductor.utils import fresh_inductor_cache
 from torch._inductor.virtualized import V
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -372,38 +376,43 @@ class PolyhedralMLAFusionTest(TestCase):
                         enabled.generated_kernel_count,
                         disabled.generated_kernel_count,
                     )
-
-    def test_looped_and_persistent_translated_fusion(self):
+    @parametrize("force_persistent", (True, False))
+    def test_looped_and_persistent_translated_fusion(self, force_persistent):
+        # if not force_persistent:
+        #     self.skipTest("non-persistent translated fusion is currently unsupported")
         inputs = _make_mla_inputs(batch_size=2, seq_len=8)
         eager = tuple(shifted_mla_indexer(*inputs))
-        for force_persistent in (False, True):
-            with self.subTest(force_persistent=force_persistent):
-                disabled = _observe(
-                    shifted_mla_indexer,
-                    inputs,
-                    polyhedral_fusion=False,
-                    force_persistent=force_persistent,
-                )
-                enabled = _observe(
-                    shifted_mla_indexer,
-                    inputs,
-                    polyhedral_fusion=True,
-                    force_persistent=force_persistent,
-                )
-                self.assertEqual(
-                    disabled.outputs,
-                    eager,
-                    atol=6e-2,
-                    rtol=2e-2,
-                )
-                self.assertEqual(
-                    enabled.outputs,
-                    eager,
-                    atol=6e-2,
-                    rtol=2e-2,
-                )
-                self.assertEqual(disabled.staged_fusion_count, 0)
+        with self.subTest(force_persistent=force_persistent):
+            disabled = _observe(
+                shifted_mla_indexer,
+                inputs,
+                polyhedral_fusion=False,
+                force_persistent=force_persistent,
+            )
+            enabled = _observe(
+                shifted_mla_indexer,
+                inputs,
+                polyhedral_fusion=True,
+                force_persistent=force_persistent,
+            )
+            self.assertEqual(
+                disabled.outputs,
+                eager,
+                atol=6e-2,
+                rtol=2e-2,
+            )
+            self.assertEqual(
+                enabled.outputs,
+                eager,
+                atol=6e-2,
+                rtol=2e-2,
+            )
+            self.assertEqual(disabled.staged_fusion_count, 0)
+            if force_persistent: 
                 self.assert_translated_plan(enabled)
+            else:
+                self.assertEqual(enabled.staged_fusion_count, 0)
+
 
     def test_nested_reduction_gate(self):
         inputs = _make_mla_inputs(batch_size=2, seq_len=8)
@@ -697,6 +706,9 @@ class PolyhedralMLAFusionTest(TestCase):
         self.assertEqual(disabled.staged_fusion_count, 0)
         self.assertEqual(enabled.staged_fusion_count, 0)
         self.assertEqual(enabled.translations, ())
+
+
+instantiate_parametrized_tests(PolyhedralMLAFusionTest)
 
 
 if __name__ == "__main__":
