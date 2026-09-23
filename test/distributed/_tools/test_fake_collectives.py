@@ -116,6 +116,7 @@ class CollectiveTest(TorchDispatchMode):
         c10d.barrier.default,
         c10d.monitored_barrier_.default,
         _c10d_functional.wait_tensor.default,
+        _c10d_functional.wait_tensors.default,
     }
 
     def __init__(self, test: TestFakeCollectives, _dispatch_key=None):
@@ -126,7 +127,10 @@ class CollectiveTest(TorchDispatchMode):
         res = func(*args, **(kwargs or {}))
 
         if func in collective_ops:
-            if func != _c10d_functional.wait_tensor.default:
+            if func not in (
+                _c10d_functional.wait_tensor.default,
+                _c10d_functional.wait_tensors.default,
+            ):
                 pg = CollectiveOp.get_process_group(func, args)
                 self.test.assertIsInstance(
                     pg, ProcessGroup, "Error: pg is not an instance of ProcessGroup"

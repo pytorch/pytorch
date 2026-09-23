@@ -17,12 +17,24 @@ if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
+from torch.distributed.distributed_c10d import _World
 from torch.testing._internal.common_distributed import (
     MultiThreadedTestCase,
     skip_if_lt_x_gpu,
     spawn_threads_and_init_comms,
 )
-from torch.testing._internal.common_utils import IS_SANDCASTLE, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    device_sleep,
+    get_cycles_per_ms,
+    IS_SANDCASTLE,
+    run_tests,
+    TestCase,
+)
+from torch.testing._internal.distributed.multi_threaded_pg import (
+    _install_threaded_pg,
+    _uninstall_threaded_pg,
+    ThreadLocalWorld,
+)
 
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
@@ -302,6 +314,45 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
         self.assertEqual(t1, torch.ones(3, 3) * (res_num * 2))
 
     @skip_if_lt_x_gpu(1)
+    def test_collectives_issued_from_side_stream(self):
+        # Threaded PG performs every rank's data movement on rank 0's stream, so
+        # it must synchronize with the stream each rank issued the collective
+        # from. FSDP2 relies on this: it all-gathers/reduce-scatters on private
+        # side streams.
+        device_module = torch.get_device_module(device_type)
+        # get_cycles_per_ms() is lru_cached and calibrates by timing a sleep
+        # kernel, so let one rank measure it on an otherwise idle device rather
+        # than have every rank contend and cache an under-measured value.
+        if self.rank == 0:
+            get_cycles_per_ms(device_type)
+        dist.barrier()
+        delay_cycles = int(200 * get_cycles_per_ms(device_type))
+        side_stream = device_module.Stream()
+        side_stream.wait_stream(device_module.current_stream())
+        with device_module.stream(side_stream):
+            if self.rank != 0:
+                # Rank 0 reads stale input unless it waits on this stream
+                device_sleep(device_type, delay_cycles)
+            inp = torch.full((8,), float(self.rank + 1), device=device_type)
+            all_gather_out = torch.empty((8 * self.world_size,), device=device_type)
+            dist.all_gather_single(all_gather_out, inp)
+            reduce_scatter_out = torch.empty((8,), device=device_type)
+            dist.reduce_scatter_single(reduce_scatter_out, all_gather_out)
+        device_module.current_stream().wait_stream(side_stream)
+
+        expected_all_gather = torch.cat(
+            [
+                torch.full((8,), float(rank + 1), device=device_type)
+                for rank in range(self.world_size)
+            ]
+        )
+        expected_reduce_scatter = torch.full(
+            (8,), float(self.world_size * (self.rank + 1)), device=device_type
+        )
+        self.assertEqual(all_gather_out, expected_all_gather)
+        self.assertEqual(reduce_scatter_out, expected_reduce_scatter)
+
+    @skip_if_lt_x_gpu(1)
     def test_bwd_sees_fwd_pg(self):
         fwd_tid = threading.current_thread().ident
 
@@ -339,6 +390,35 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
         )
         x = MyFunc.apply(x)
         x.sum().backward()
+
+
+class TestThreadLocalWorld(TestCase):
+    def test_mirrors_world_state(self):
+        # ThreadLocalWorld stands in for _World while a threaded PG is
+        # installed, and distributed_c10d reaches for world state by name. A
+        # state attribute added to _World alone makes those reads raise
+        # AttributeError under every MultiThreadedTestCase.
+        missing = sorted(
+            name
+            for name, attr in vars(_World).items()
+            if isinstance(attr, property) and not hasattr(ThreadLocalWorld, name)
+        )
+        self.assertEqual(missing, [])
+
+    def test_destroy_process_group_runs_to_completion(self):
+        world = _install_threaded_pg()
+        try:
+            dist.init_process_group(
+                backend="threaded", rank=0, world_size=1, store=dist.HashStore()
+            )
+            dist.destroy_process_group()
+            # Set by the last statement of destroy_process_group, so a non-zero
+            # count means teardown bailed out partway through.
+            self.assertEqual(world.group_count, 0)
+            self.assertEqual(len(world.pg_map), 0)
+            self.assertEqual(len(world.pg_flight_recorder_hooks), 0)
+        finally:
+            _uninstall_threaded_pg()
 
 
 if __name__ == "__main__":

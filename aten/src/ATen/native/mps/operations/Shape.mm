@@ -137,11 +137,11 @@ static void cat_out_mps_impl(const ITensorListRef& inputs, int64_t dimension, co
                                                                         get_type_str<idx_type_t>(),
                                                                         scalarToMetalTypeString(input),
                                                                         scalarToMetalTypeString(output)));
-          getMPSProfiler().beginProfileKernel(pipeline_state, "cat", {input});
+          getMPSProfiler().beginProfileKernel(pipeline_state, "cat", {input}, stream);
           [computeEncoder setComputePipelineState:pipeline_state];
           mtl_setArgs(computeEncoder, input, output, shared_params, input_params);
           mtl_dispatch1DJob(computeEncoder, pipeline_state, num_threads);
-          getMPSProfiler().endProfileKernel(pipeline_state);
+          getMPSProfiler().endProfileKernel(pipeline_state, stream);
         }
       });
     }
@@ -168,10 +168,12 @@ TORCH_IMPL_FUNC(cat_out_mps)
   }
 
   auto materialized_inputs = inputs.materialize();
-  bool has_large_tensor =
-      isTooLargeForMPSGraph(out) || std::any_of(materialized_inputs.begin(), materialized_inputs.end(), [](auto& t) {
-        return !cat_should_skip_tensor(t) && isTooLargeForMPSGraph(t);
-      });
+  // The int32 cat kernel needs each tensor's linear offset to fit in int32.
+  bool has_large_tensor = isTooLargeForMPSGraph(out, /*useMPSStridedAPI=*/true, /*checkLinearOffset=*/true) ||
+      std::any_of(materialized_inputs.begin(), materialized_inputs.end(), [](auto& t) {
+                            return !cat_should_skip_tensor(t) &&
+                                isTooLargeForMPSGraph(t, /*useMPSStridedAPI=*/true, /*checkLinearOffset=*/true);
+                          });
 
   if (all_contiguous && all_same_dtype && (memory_format == MemoryFormat::Contiguous)) {
     return mps::cat_out_mps_contiguous_impl(materialized_inputs, dimension, out);

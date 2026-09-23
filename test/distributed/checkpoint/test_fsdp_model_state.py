@@ -12,17 +12,24 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
+    _get_device_type,
+    DTensorContinuousTestBase,
+    NUM_DEVICES,
     with_comms,
 )
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
 
-class FsdpModelStateCheckpoint(DTensorTestBase):
-    @property
-    def backend(self):
-        curr_backend = dist.get_default_backend_for_device(self.device_type)
-        return f"cpu:gloo,{self.device_type}:{curr_backend}"
+class FsdpModelStateCheckpoint(DTensorContinuousTestBase):
+    world_size = NUM_DEVICES
+
+    @classmethod
+    def backend_str(cls):
+        device_type = _get_device_type(cls.world_size)
+        if device_type == "cpu":
+            return "gloo"
+        curr_backend = dist.get_default_backend_for_device(device_type)
+        return f"cpu:gloo,{device_type}:{curr_backend}"
 
     def _test_fsdp_model_state(self, process_group) -> None:
         CHECKPOINT_DIR = self.temp_dir
@@ -93,7 +100,9 @@ class FsdpModelStateCheckpoint(DTensorTestBase):
     @with_comms
     @with_temp_dir
     def test_fsdp_model_state_with_resharding(self):
-        self._test_fsdp_model_state(process_group=self._create_new_dist_group())
+        process_group = self._create_new_dist_group()
+        self._test_fsdp_model_state(process_group=process_group)
+        dist.destroy_process_group(process_group)
 
 
 if __name__ == "__main__":

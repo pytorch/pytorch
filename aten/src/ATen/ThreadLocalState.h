@@ -29,6 +29,7 @@ class TORCH_API ThreadLocalState {
   //  the current state object. This is used for example in the
   //  autograd engine.
   void set_grad_mode(bool enabled);
+  bool get_grad_mode() const;
 
   // set_multithreading_enabled - force the value of the multithreadinmaximum
   // threads TLS in

@@ -1,5 +1,5 @@
 diff --git a/test/cpython/v3_13/test_list.py b/test/cpython/v3_13/test_list.py
-index 23ef902aa0b..48e94062a45 100644
+index 23ef902aa0be34f6f15e41badfd5ebdeb22fe5d0..c6a36e8c9cb5c54f549d3f933de7560e2b4d62cd 100644
 --- a/test/cpython/v3_13/test_list.py
 +++ b/test/cpython/v3_13/test_list.py
 @@ -1,6 +1,60 @@
@@ -17,7 +17,7 @@ index 23ef902aa0b..48e94062a45 100644
 +import torch._dynamo.test_case
 +import unittest
 +from torch._dynamo.test_case import CPythonTestCase
-+from torch.testing._internal.common_utils import run_tests
++from torch.testing._internal.common_utils import run_tests, TEST_WITH_TORCHDYNAMO
 +
 +__TestCase = CPythonTestCase
 +
@@ -69,10 +69,44 @@ index 23ef902aa0b..48e94062a45 100644
              # earlier due to a newlib bug.  See the following mailing list
              # thread for the details:
 -
+-            #     http://sources.redhat.com/ml/newlib/2002/msg00369.html
              self.assertRaises(MemoryError, list, range(sys.maxsize // 2))
  
          # This code used to segfault in Py2.4a3
-@@ -324,6 +376,7 @@ class ListTest(list_tests.CommonTest):
+@@ -224,6 +276,10 @@ class ListTest(list_tests.CommonTest):
+         with self.assertRaises(TypeError):
+             (3,) + L([1,2])
+ 
++    @unittest.skipIf(
++        TEST_WITH_TORCHDYNAMO,
++        "__build_class__ with closed over objects not supported",
++    )
+     def test_equal_operator_modifying_operand(self):
+         # test fix for seg fault reported in bpo-38588 part 2.
+         class X:
+@@ -249,6 +305,10 @@ class ListTest(list_tests.CommonTest):
+         list4 = [1]
+         self.assertFalse(list3 == list4)
+ 
++    @unittest.skipIf(
++        TEST_WITH_TORCHDYNAMO,
++        "__build_class__ with closed over objects not supported",
++    )
+     def test_lt_operator_modifying_operand(self):
+         # See gh-120298
+         class evil:
+@@ -282,6 +342,10 @@ class ListTest(list_tests.CommonTest):
+         self.assertEqual(iter_size, sys.getsizeof(list([0] * 10)))
+         self.assertEqual(iter_size, sys.getsizeof(list(range(10))))
+ 
++    @unittest.skipIf(
++        TEST_WITH_TORCHDYNAMO,
++        "__build_class__ with closed over objects not supported",
++    )
+     def test_count_index_remove_crashes(self):
+         # bpo-38610: The count(), index(), and remove() methods were not
+         # holding strong references to list elements while calling
+@@ -324,6 +388,7 @@ class ListTest(list_tests.CommonTest):
              a.append(4)
              self.assertEqual(list(it), [])
  
@@ -80,7 +114,7 @@ index 23ef902aa0b..48e94062a45 100644
      def test_deopt_from_append_list(self):
          # gh-132011: it used to crash, because
          # of `CALL_LIST_APPEND` specialization failure.
-@@ -345,4 +398,4 @@ class ListTest(list_tests.CommonTest):
+@@ -345,4 +410,4 @@ class ListTest(list_tests.CommonTest):
          self.assertEqual(rc, 0)
  
  if __name__ == "__main__":
