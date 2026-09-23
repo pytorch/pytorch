@@ -1,6 +1,6 @@
 import math
 from collections.abc import Callable, Sequence
-from itertools import chain
+from itertools import chain, groupby
 from typing import Any, cast, Literal, NamedTuple
 
 import torch
@@ -614,18 +614,7 @@ def foreach_reduce(
         _raise_assert_with_print(
             f"FSDP reduce-scatter expects uniform gradient dtype but got {grad_dtypes}"
         )
-    # P: model parameter dtype before fully_shard; G: explicit input grad_dtype.
-    # M: explicit mp_policy.param_dtype; R: explicit mp_policy.reduce_dtype.
-    # FSDPParam.sharded_grad_dtype resolves input grad_dtype as:
-    # Not set -> P; Explicit G -> G; Explicit None -> None.
-    # FSDPParam.unsharded_grad_dtype is R when reduce_dtype is Explicit R;
-    # Explicit None / not set instead uses sharded_grad_dtype.
-    # Autograd accumulates in unsharded_grad_dtype; None accepts any incoming
-    # gradient dtype. Reduction therefore uses explicit R, otherwise P, G, or
-    # the actual gradient dtype for the respective input policies above.
-    # M controls compute dtype and does not change this fallback. The uniform
-    # dtype check above makes selecting the first gradient's dtype valid.
-    # On the FSDP path, reduce_dtype differs from unsharded_grads[0].dtype only
+    # reduce_dtype differs from unsharded_grads[0].dtype only
     # when reduce_dtype is None; unsharded_grads[0].dtype is always concrete.
     reduce_dtype = reduce_dtype or unsharded_grads[0].dtype
     (predivide_factor, postdivide_factor, reduce_scatter_op, all_reduce_op) = (
@@ -749,40 +738,38 @@ def foreach_reduce(
         # AR to finish. The reduce-dtype buffer is held across layers by
         # FSDPParamGroup._all_reduce_state (captured above) to prevent
         # this. See PR #140044, regression test PR #180900.
-        sharded_grad_dtypes = {p.sharded_grad_dtype for p in fsdp_params}
-        if len(sharded_grad_dtypes) == 1:
-            reduce_output = _to_dtype_if_needed(
-                reduce_output, next(iter(sharded_grad_dtypes))
-            )
-        # Keep the single flat cast for uniform dtypes; batch any per-parameter
-        # casts for groups whose sharded gradients have different dtypes.
+        # Inputs follow the sharded gradient dtype order cached at lazy init.
+        # Each contiguous region needs at most one flat cast/allocation after
+        # RS/AR; parameter gradients become views. Reduction uses one dtype.
+        # A fused heterogeneous cast kernel could combine per-dtype launches
+        # and fuse accumulation to avoid temporary buffers while preserving
+        # cast-before-add rounding.
         sharded_grads: list[torch.Tensor] = []
-        cast_groups: dict[
-            torch.dtype, tuple[list[torch.Tensor], list[torch.Tensor]]
-        ] = {}
         flat_grad_offset = 0  # [0, reduce_scatter_output_numel - 1]
-        for padded_unsharded_size, fsdp_param in zip(
-            padded_unsharded_sizes, fsdp_params
+        for grad_dtype, group in groupby(
+            zip(fsdp_params, padded_unsharded_sizes),
+            key=lambda param_and_size: param_and_size[0].sharded_grad_dtype,
         ):
-            # Assume even sharding for Shard(i), i > 0; otherwise would require
-            # copy-out for contiguous strides
-            new_sharded_grad = torch.as_strided(
-                reduce_output,
-                size=fsdp_param.sharded_size,
-                stride=fsdp_param.contiguous_sharded_stride,
-                storage_offset=flat_grad_offset,
-            )
-            grad_dtype = fsdp_param.sharded_grad_dtype
-            if grad_dtype is not None and new_sharded_grad.dtype != grad_dtype:
-                dst = torch.empty_like(new_sharded_grad, dtype=grad_dtype)
-                dsts, srcs = cast_groups.setdefault(grad_dtype, ([], []))
-                dsts.append(dst)
-                srcs.append(new_sharded_grad)
-                new_sharded_grad = dst
-            sharded_grads.append(new_sharded_grad)
-            flat_grad_offset += padded_unsharded_size.numel() // world_size
-        for dsts, srcs in cast_groups.values():
-            torch._foreach_copy_(dsts, srcs)
+            param_group = list(group)
+            group_numel = sum(size.numel() for _, size in param_group) // world_size
+            group_output = reduce_output
+            if group_numel != reduce_scatter_output_numel:
+                group_output = group_output.narrow(0, flat_grad_offset, group_numel)
+            group_output = _to_dtype_if_needed(group_output, grad_dtype)
+            group_offset = group_output.storage_offset()
+            for fsdp_param, padded_unsharded_size in param_group:
+                # Assume even sharding for Shard(i), i > 0; otherwise would
+                # require copy-out for contiguous strides.
+                sharded_grads.append(
+                    torch.as_strided(
+                        group_output,
+                        size=fsdp_param.sharded_size,
+                        stride=fsdp_param.contiguous_sharded_stride,
+                        storage_offset=group_offset,
+                    )
+                )
+                group_offset += padded_unsharded_size.numel() // world_size
+            flat_grad_offset += group_numel
 
         # Accumulate the reduced gradients in each parameter's sharded dtype.
         for fsdp_param, new_sharded_grad in zip(fsdp_params, sharded_grads):

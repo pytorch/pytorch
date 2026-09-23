@@ -18,6 +18,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     foreach_reduce_scatter_copy_in,
 )
 from torch.distributed.tensor import DTensor, Shard
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     requires_nccl_version,
     SaveForwardInputsModel,
@@ -1224,6 +1225,123 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
                 check_sharded_parity(self, ref_model, model)
 
 
+class TestFullyShardGradDtypePacking(FSDPTest):
+    @property
+    def world_size(self):
+        return 4
+
+    @skip_if_lt_x_gpu(4)
+    @parametrize("use_hsdp", [False, True])
+    @parametrize("shard_dim", [0, 1])
+    def test_packed_grad_dtypes(self, device, use_hsdp, shard_dim):
+        device = torch.device(device).type
+        grad_dtypes = (
+            torch.float16,
+            None,
+            "default",
+            torch.float32,
+            torch.float16,
+            "default",
+            None,
+            torch.float32,
+            "default",
+        )
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.params = nn.ParameterList(
+                    [
+                        nn.Parameter(torch.ones(2 * i + 1, 8, device=device))
+                        for i in range(len(grad_dtypes))
+                    ]
+                )
+
+            def forward(self, inp, active):
+                return sum((self.params[i] * inp).sum() * (i + 1) for i in active)
+
+        model = Model()
+        for param, grad_dtype in zip(model.parameters(), grad_dtypes):
+            if grad_dtype != "default":
+                param.grad_dtype = grad_dtype
+        ref_model = copy.deepcopy(model).bfloat16()
+        for param in ref_model.parameters():
+            param.grad_dtype = torch.float32
+        mesh = init_device_mesh(
+            device,
+            (2, 2) if use_hsdp else (self.world_size,),
+            mesh_dim_names=("replicate", "shard") if use_hsdp else ("shard",),
+        )
+        fully_shard(
+            model,
+            mesh=mesh,
+            shard_placement_fn=lambda _: Shard(shard_dim),
+            reshard_after_forward=False,
+            mp_policy=MixedPrecisionPolicy(reduce_dtype=torch.float32),
+        )
+        # The default sharded dtype changes before lazy init builds the order.
+        model.bfloat16()
+        expected_dtypes = [
+            torch.bfloat16 if dtype == "default" else dtype or torch.float32
+            for dtype in grad_dtypes
+        ]
+        active_sets = (
+            tuple(range(len(grad_dtypes))),
+            (2, 3, 5, 7, 8),
+            (1, 2, 4, 5, 6, 7),
+        )
+        for active in active_sets:
+            model.zero_grad(set_to_none=True)
+            expected_grads = {}
+            # Accumulate a second backward using a different parameter subset.
+            for step, selected in enumerate((active, active[::2])):
+                inp = torch.arange(8, device=device, dtype=torch.bfloat16) / 8
+                inp += self.rank / 4 + step / 8
+                with (
+                    patch.object(
+                        dist, "all_gather_single", wraps=dist.all_gather_single
+                    ) as all_gather,
+                    patch.object(
+                        dist, "reduce_scatter_single", wraps=dist.reduce_scatter_single
+                    ) as reduce_scatter,
+                    patch.object(
+                        dist, "all_reduce", wraps=dist.all_reduce
+                    ) as all_reduce,
+                ):
+                    model(inp, selected).backward()
+                    all_gather.assert_called_once()
+                    reduce_scatter.assert_called_once()
+                    self.assertEqual(all_reduce.call_count, int(use_hsdp))
+                    self.assertEqual(
+                        reduce_scatter.call_args.kwargs["input"].dtype, torch.float32
+                    )
+                ref_model.zero_grad(set_to_none=True)
+                ref_model(inp, selected).backward()
+                for i in selected:
+                    grad = ref_model.params[i].grad
+                    dist.all_reduce(grad)
+                    grad = (grad / self.world_size).to(expected_dtypes[i])
+                    if i in expected_grads:
+                        expected_grads[i] += grad
+                    else:
+                        expected_grads[i] = grad
+                storage_by_dtype = {}
+                for i, param in enumerate(model.params):
+                    if i not in expected_grads:
+                        self.assertIsNone(param.grad)
+                        continue
+                    self.assertEqual(param.grad.dtype, expected_dtypes[i])
+                    self.assertEqual(param.grad.full_tensor(), expected_grads[i])
+                    if step == 0:
+                        # Each dtype shares one flat allocation even when its
+                        # parameters were interleaved or skipped in this backward.
+                        storage = param.grad.to_local().untyped_storage().data_ptr()
+                        previous = storage_by_dtype.setdefault(
+                            param.grad.dtype, storage
+                        )
+                        self.assertEqual(storage, previous)
+
+
 class TestFullyShardMixedPrecisionJVP(FSDPTest):
     @property
     def world_size(self) -> int:
@@ -1591,6 +1709,9 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
 
 
 instantiate_parametrized_tests(TestFullyShardMixedPrecisionTraining)
+instantiate_device_type_tests(
+    TestFullyShardGradDtypePacking, globals(), only_for=(get_devtype().type,)
+)
 
 
 if __name__ == "__main__":

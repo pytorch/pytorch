@@ -213,6 +213,7 @@ class FSDPParamGroup:
         self.comm_ctx = FSDPCommContext()
         self._all_gather_output_fn: Callable = _default_all_gather_output_fn
         self._prepare_reduce_scatter_inputs: Callable = _default_reduce_scatter_input_fn
+        self._reduce_scatter_param_indices: list[int] = []
         self._param_group_index: int = 0
         self._num_param_groups: int = 1
         # Group's indices in the shared post-forward order
@@ -307,6 +308,14 @@ class FSDPParamGroup:
         self._reduce_dtype = (
             next(iter(reduce_dtypes)) if dtype_sets_are_uniform else None
         )
+        # Cache the packing order after resolving dtypes, keeping all-gather's
+        # parameter order unchanged. Backward filters this order to active grads.
+        dtype_indices: dict[torch.dtype | None, list[int]] = {}
+        for index, fsdp_param in enumerate(self.fsdp_params):
+            dtype_indices.setdefault(fsdp_param.sharded_grad_dtype, []).append(index)
+        self._reduce_scatter_param_indices = [
+            index for indices in dtype_indices.values() for index in indices
+        ]
 
     def lazy_init(self):
         # Lazy init should be idempotent
@@ -647,7 +656,8 @@ class FSDPParamGroup:
                 # access the unsharded parameters when their data is present
                 fsdp_params_with_grad: list[FSDPParam] = []
                 unsharded_grads: list[torch.Tensor] = []
-                for fsdp_param in self.fsdp_params:
+                for index in self._reduce_scatter_param_indices:
+                    fsdp_param = self.fsdp_params[index]
                     if not hasattr(fsdp_param, "_unsharded_param"):
                         continue
                     # A group unused in this microbatch may still own gradients
