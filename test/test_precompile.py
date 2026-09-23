@@ -4714,6 +4714,23 @@ class TestExportPython(TestCase):
         self.assertFalse(thread.is_alive())
         return (errors[0] if errors else None), concurrent
 
+    def test_deterministic_capture_ignores_a_concurrent_draw(self, device):
+        # The restore is keyed on whether the CAPTURED GRAPH draws, not on whether
+        # global generator state moved -- otherwise an unrelated thread's draw makes a
+        # deterministic capture look random, and rewinding it would replay that draw.
+        x = make_tensor((4,), device=device, dtype=torch.float32)
+
+        @torch.compiler.export_python(
+            path=self._tmp_path("rng_concurrent.py"), backend="eager"
+        )
+        def run(inp):
+            return inp + 1
+
+        torch.manual_seed(1234)
+        error, concurrent = self._capture_racing_a_concurrent_draw(run, x)
+        self.assertIsNone(error)
+        self.assertNotEqual(torch.rand(8), concurrent)
+
     def test_random_capture_restores_rng_off_the_main_thread(self, device):
         # Restoring the generators the capture drew from is what keeps a random fn's
         # first call faithful, and it is not conditioned on thread identity: the
@@ -5634,6 +5651,49 @@ class TestExportPython(TestCase):
                 run(x)
         self.assertNotEqual(torch.random.get_rng_state(), before)
 
+    def test_gated_op_configured_not_to_draw_does_not_count_as_drawing(self, device):
+        # nondeterministic_seeded marks ops that MAY draw; the gate reads the argument
+        # that decides. SDPA is what actually exercises it: dropout(train=False) traces
+        # to no seeded op at all, so it would pass without any gate, and
+        # dropout(train=True) decomposes to bernoulli_, which is not a gated name.
+        if torch.device(device).type != "cpu":
+            # capture lowers SDPA on other devices to its math decomposition, which
+            # holds no gated seeded op
+            self.skipTest("only the CPU SDPA kernel traces to a gated seeded op")
+        from torch._precompile import (
+            _capture,
+            _graph_rng_devices,
+            _op_can_draw,
+            _rng_devices_indicate_a_draw,
+        )
+
+        q = make_tensor((1, 1, 8, 16), device=device, dtype=torch.float32)
+
+        def sdpa(a, p):
+            return torch.nn.functional.scaled_dot_product_attention(
+                a, a, a, dropout_p=p
+            )
+
+        def seeded(gm):
+            return [
+                n.target
+                for n in gm.graph.nodes
+                if isinstance(n.target, torch._ops.OpOverload)
+                and torch.Tag.nondeterministic_seeded in n.target.tags
+            ]
+
+        dead = _capture(lambda a: sdpa(a, 0.0), (q,), None).gm
+        live = _capture(lambda a: sdpa(a, 0.2), (q,), None).gm
+        # The no-draw graph still CONTAINS a tagged op, so the gate is the only thing
+        # that can classify it as non-drawing; without this assertion the next one
+        # would hold vacuously (which is how the previous version of this test passed).
+        self.assertTrue(seeded(dead), "expected a tagged SDPA op in the graph")
+        self.assertFalse(_rng_devices_indicate_a_draw(_graph_rng_devices(dead)))
+        self.assertTrue(_rng_devices_indicate_a_draw(_graph_rng_devices(live)))
+        # dropout_p is omitted from node.args at 0.0, so the schema-default arm of the
+        # lookup is covered too.
+        self.assertFalse(any(_op_can_draw(n) for n in dead.graph.nodes))
+
     def test_capture_drawing_only_on_the_accelerator_leaves_cpu_rng_alone(self, device):
         # The restore is per generator, not all-or-nothing: rewinding the CPU generator
         # for a graph that only drew on CUDA replays an unrelated CPU draw.
@@ -5650,6 +5710,24 @@ class TestExportPython(TestCase):
         error, concurrent = self._capture_racing_a_concurrent_draw(run, x)
         self.assertIsNone(error)
         self.assertNotEqual(torch.rand(8), concurrent)
+
+    def test_gate_does_not_apply_to_a_lookalike_custom_op(self, device):
+        # The table is keyed on the qualified name. A custom op that merely shares a
+        # name with a gated aten op must stay conservative, or a graph that really
+        # draws is reported as not drawing and its consumed state is never restored.
+        from torch._precompile import _op_can_draw
+
+        lib = self._library("precompile_gate_test")
+        lib.define(
+            "dropout(Tensor input, float p, bool train) -> Tensor",
+            tags=(torch.Tag.nondeterministic_seeded,),
+        )
+        graph = torch.fx.Graph()
+        arg = graph.placeholder("x")
+        node = graph.call_function(
+            torch.ops.precompile_gate_test.dropout.default, (arg, 0.5, False)
+        )
+        self.assertTrue(_op_can_draw(node), "a lookalike op inherited aten's gate")
 
     def _rope_artifact(self, device, **kwargs):
         # Two outputs, both plain allocated buffers: the shape out= is designed for.
@@ -5782,6 +5860,55 @@ class TestExportPython(TestCase):
         )
         self.assertEqual(run(mod, ids), mod(ids))
 
+    def test_duplicate_input_objects_are_guarded(self, device):
+        # Byte overlap cannot tell "two views that intersect" from "one tensor passed
+        # twice", and AOTAutograd folds the second into a single graph slot. Both report
+        # the same overlapping index pair, so without the duplicate stamp an artifact
+        # captured from views silently computes the wrong thing on a repeated argument.
+        def fn(a, b):
+            a.add_(1.0)
+            return b * 10
+
+        path = self._tmp_path("dup.py")
+        wrapped = torch.compiler.export_python(path=path)(fn)
+
+        def arena():
+            return torch.zeros(8, device=device)
+
+        base = arena()
+        wrapped(base[0:4], base[2:6])  # capture: distinct, overlapping
+
+        # the same object twice: same pair set, different meaning
+        repeated = arena()[0:4]
+        with self.assertRaisesRegex(PrecompileError, "repeat tensor objects"):
+            wrapped(repeated, repeated)
+
+        # and the converse: captured from a repeat, called with distinct views
+        dup_path = self._tmp_path("dup2.py")
+        from_repeat = torch.compiler.export_python(path=dup_path)(fn)
+        first = arena()[0:4]
+        from_repeat(first, first)
+        other = arena()
+        with self.assertRaisesRegex(PrecompileError, "repeat tensor objects"):
+            from_repeat(other[0:4], other[2:6])
+
+        # a call that repeats the way capture did still runs, and matches eager
+        same = arena()[0:4]
+        eager_in = arena()[0:4]
+        self.assertEqual(from_repeat(same, same), fn(eager_in, eager_in))
+
+        # Identity, not address. These two have the SAME data_ptr and the same overlap
+        # pair set, but are distinct objects with different strides, so AOTAutograd does
+        # not fold them; keying the stamp on the address accepts this and returns wrong
+        # numbers with nothing else to catch it.
+        square = self._tmp_path("dup_square.py")
+        squared = torch.compiler.export_python(path=square)(fn)
+        cap = make_tensor((4, 4), device=device, dtype=torch.float32)
+        squared(cap, cap)
+        live = make_tensor((4, 4), device=device, dtype=torch.float32)
+        with self.assertRaisesRegex(PrecompileError, "repeat tensor objects"):
+            squared(live, live.t())
+
     def test_artifact_does_not_bake_the_capture_thread_count(self, device):
         # Inductor sizes a CPU reduction's per-thread accumulator array at codegen time
         # when the capturing process's thread count equals os.cpu_count(), while still
@@ -5816,6 +5943,34 @@ class TestExportPython(TestCase):
         # pinned it sizes itself from omp_get_max_threads() at run time instead.
         baked = re.findall(r"_arr\[(\d+)\]", source)
         self.assertEqual(baked, [], f"artifact bakes a fixed per-thread array: {baked}")
+
+    def test_indented_comment_does_not_stop_the_stamp_reader(self, device):
+        # The documented rule is that the reader stops at the first NON-COMMENT line. An
+        # indented comment is still a comment, but it ended the scan -- silently turning
+        # off every stamp below it, which is the degradation mode the design reserves
+        # for a stamp actually being deleted.
+        def fn(a, b):
+            a.add_(1.0)
+            return b * 10
+
+        path = self._tmp_path("indented.py")
+        wrapped = torch.compiler.export_python(path=path)(fn)
+
+        def arena():
+            return torch.zeros(8, device=device)
+
+        base = arena()
+        wrapped(base[0:4], base[2:6])
+        with open(path, encoding="utf-8") as f:
+            lines = f.read().splitlines(True)
+        lines.insert(1, "    # a note a human might indent\n")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("".join(lines))
+
+        # the duplicate stamp lives below the inserted line; it must still be read
+        repeated = arena()[0:4]
+        with self.assertRaisesRegex(PrecompileError, "repeat tensor objects"):
+            torch.compiler.export_python(path=path)(fn)(repeated, repeated)
 
     def test_pathological_version_stamp_warns_rather_than_raising(self, device):
         # torch.__version__ is a TorchVersion, whose __eq__ PEP-440-parses the operand
