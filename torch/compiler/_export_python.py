@@ -44,7 +44,7 @@ _R = TypeVar("_R")
 # by a different torch (see _warn_on_version_skew). It is a comment, so it does not
 # affect exec; a hand-edit that drops it just disables the skew warning, so
 # hill-climbing an artifact never triggers a spurious version warning.
-# All five stamps must stay in the artifact's LEADING comment block: the reader stops
+# All six stamps must stay in the artifact's LEADING comment block: the reader stops
 # at the first line that is not a comment, so inserting code above them turns every
 # check off -- each checked stamp warns per call while it is missing, and the version
 # warning is the only one that goes quiet.
@@ -65,6 +65,11 @@ _MODULE_TRAINING_TAG = "# torch.compiler.export_python module-training: "
 _INPUT_OVERLAP_TAG = "# torch.compiler.export_python input-overlap: "
 _INPUT_DUPLICATE_TAG = "# torch.compiler.export_python input-duplicates: "
 _AUTOCAST_TAG = "# torch.compiler.export_python autocast: "
+# Ambient process state the generated code bakes that no other stamp covers: the default
+# dtype and device a factory op with no explicit argument resolves against, and whether
+# deterministic algorithms were on when inductor chose between a deterministic and an
+# atomic lowering.
+_GLOBAL_STATE_TAG = "# torch.compiler.export_python global-state: "
 
 # os.link failures that mean the filesystem cannot do hard links at all, as opposed to
 # a real I/O problem (a full disk, a bad permission) that must not be swallowed.
@@ -456,6 +461,29 @@ def _autocast_state(
     ]
 
 
+def _global_state() -> list[list[Any]]:
+    """Ambient globals the emitted code resolves against, as sorted [key, value] pairs.
+
+    Recorded as strings so the stamp round-trips through ast.literal_eval. Both are read
+    at CAPTURE and baked: a factory op with no dtype= takes the default dtype then, and
+    inductor picks a deterministic or an atomic-add lowering from the determinism flag.
+    The artifact never re-consults either, so a process that changes one and replays gets
+    capture's answer with no error.
+
+    float32_matmul_precision is deliberately NOT here. torch.get_float32_matmul_precision
+    raises outright in a process that has used the per-backend fp32_precision API, so
+    stamping it killed capture there; and on the default config the artifact reaches
+    extern_kernels.mm, which re-reads the setting at run time, so the check refused calls
+    the artifact would have served correctly. Only a max_autotune Triton GEMM template
+    bakes it as a tl.constexpr.
+    """
+    return [
+        ["default_dtype", str(torch.get_default_dtype())],
+        ["default_device", str(torch.get_default_device())],
+        ["deterministic", str(torch.are_deterministic_algorithms_enabled())],
+    ]
+
+
 class ExportedPythonArtifact:
     """Materializes and disk-caches a ``torch.compiler.precompile`` artifact.
 
@@ -488,6 +516,7 @@ class ExportedPythonArtifact:
         self._module_training: list[tuple[int, list[tuple[str, bool]]]] | None = None
         self._input_overlaps: list[list[int]] | None = None
         self._input_duplicates: list[list[int]] | None = None
+        self._global_state: list[list[str]] | None = None
         self._code_devices: set[str] = set()
         self._autocast: list[list[Any]] | None = None
         self._loaded: Callable[..., Any] | None = None
@@ -556,7 +585,7 @@ class ExportedPythonArtifact:
             f"{_INPUT_DUPLICATE_TAG}{_input_duplicates(example, example_tensors)!r}\n"
             f"{_AUTOCAST_TAG}"
             f"{_autocast_state(example, example_tensors, _code_devices(code))!r}\n"
-            f"{code}"
+            f"{_GLOBAL_STATE_TAG}{_global_state()!r}\n{code}"
         )
         if _atomic_publish(self._path, code.encode("utf-8")):
             return code, False
@@ -669,6 +698,49 @@ class ExportedPythonArtifact:
                     "AOTAutograd folds arguments that are one object into a single "
                     "graph slot, so this call would compute against the wrong "
                     "assumption -- byte overlap alone cannot see the difference."
+                )
+        if self._global_state is None:
+            log.warning(
+                "torch.compiler.export_python: the artifact at %s carries no recorded "
+                "global-state stamp, so calling it under a different default dtype, "
+                "default device or determinism setting than capture "
+                "is unchecked. Delete %s to regenerate it.",
+                self._path,
+                self._path,
+            )
+        else:
+            actual_state = dict(_global_state())
+            try:
+                recorded = dict(self._global_state)
+            except (TypeError, ValueError):
+                # A hand-edit can leave a literal that is not [key, value] pairs. Every
+                # other stamp degrades to warn-and-continue for that; this one must not
+                # be the only one that raises a raw unpack error out of the load path.
+                log.warning(
+                    "torch.compiler.export_python: the global-state stamp at %s is not a "
+                    "list of [key, value] pairs, so that check is off. Delete %s to "
+                    "regenerate it.",
+                    self._path,
+                    self._path,
+                )
+                recorded = {}
+            for key, captured in recorded.items():
+                if key not in actual_state:
+                    continue  # a key this torch no longer records
+                live = actual_state[key]
+                if live == captured:
+                    continue
+                # Determinism is one-sided: capture with it OFF and replay with it ON
+                # means the artifact keeps a lowering the caller has asked not to run.
+                # ON at capture and OFF at replay is conservative, so it is not an error.
+                if key == "deterministic" and captured == "True":
+                    continue
+                raise _precompile_error(
+                    f"torch.compiler.export_python: {key} is {live} but the artifact "
+                    f"was captured with {key} {captured}. It is resolved when the code "
+                    "is generated and baked in, so this call would silently get "
+                    "capture's answer. Set it to the captured value, or delete "
+                    f"{self._path} to recapture."
                 )
         if self._autocast is None:
             log.warning(
@@ -796,6 +868,7 @@ class ExportedPythonArtifact:
         self._input_overlaps = self._read_stamp(code, _INPUT_OVERLAP_TAG)
         self._input_duplicates = self._read_stamp(code, _INPUT_DUPLICATE_TAG)
         self._autocast = self._read_stamp(code, _AUTOCAST_TAG)
+        self._global_state = self._read_stamp(code, _GLOBAL_STATE_TAG)
         self._code_devices = _code_devices(code)
         entry = self._load(code, from_disk=from_disk)
         self._example_inputs = None
