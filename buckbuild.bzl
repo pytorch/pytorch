@@ -430,6 +430,14 @@ def get_aten_generated_files(enabled_backends):
         # build CUDA is not enabled and thus the ufunc codegen for CUDA gets
         # skipped
         src_files.extend(aten_ufunc_generated_cuda_sources())
+        # AOTInductor CUDA C-shim (aoti_torch_cuda_*), the CUDA counterpart of
+        # c_shim_cpu.cpp above. torchgen always emits this when --aoti_install_dir
+        # is set (aoti_backends hardcodes DispatchKey.CUDA in torchgen/gen.py), but
+        # it must be declared as a genrule output to be consumable. Required so
+        # AOTInductor .pt2 models can resolve the CUDA fallback-op shim at runtime.
+        src_files.append(
+            "torch/csrc/inductor/aoti_torch/generated/c_shim_cuda.cpp",
+        )
 
     res = {}
     for file_name in src_files:

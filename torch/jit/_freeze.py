@@ -100,12 +100,12 @@ def freeze(
     Note:
         Because freezing makes weights constants and removes module hierarchy, `to` and other
         nn.Module methods to manipulate device or dtype no longer work. As a workaround,
-        You can remap devices by specifying `map_location` in `torch.jit.load`, however
+        you can remap devices by specifying `map_location` in `torch.jit.load`, however
         device-specific logic may have been baked into the model.
     """
     warnings.warn(
         "`torch.jit.freeze` is deprecated. Please use `torch.compile` instead.",
-        DeprecationWarning,
+        FutureWarning,
     )
     if not isinstance(mod, ScriptModule):
         raise RuntimeError(
@@ -229,7 +229,7 @@ def optimize_for_inference(
     """
     warnings.warn(
         "`torch.jit.optimize_for_inference` is deprecated. Please use `torch.compile` instead.",
-        DeprecationWarning,
+        FutureWarning,
     )
     if not isinstance(mod, ScriptModule):
         raise RuntimeError(
