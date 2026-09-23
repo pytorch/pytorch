@@ -193,49 +193,6 @@ def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
     return (div, permute_3, view_3)""",
         )
 
-    def _test_export_blockmask_with_mask_fn(self, make_mask_fn):
-        from torch.nn.attention.flex_attention import create_block_mask
-
-        _register_blockmask_pytree()
-
-        class Model(torch.nn.Module):
-            def __init__(self, mask_fn_factory):
-                super().__init__()
-                self.mask_fn_factory = mask_fn_factory
-
-            def forward(self, x):
-                mask_fn = self.mask_fn_factory()
-                block_mask = create_block_mask(
-                    mask_fn, B=1, H=1, Q_LEN=64, KV_LEN=64, device=x.device
-                )
-                return x, block_mask
-
-        x = torch.randn(2, 128, device="cuda")
-        module = Model(make_mask_fn)
-
-        out_eager, mask_eager = module(x)
-
-        compiled = _dynamo_graph_capture_for_export(module)(x)
-        out_compiled, mask_compiled = compiled(x)
-
-        self.assertEqual(out_eager, out_compiled)
-        self.assertEqual(
-            mask_eager.mask_mod(1, 1, 64, 64),
-            mask_compiled.mask_mod(1, 1, 64, 64),
-        )
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    def test_export_blockmask(self):
-        def make_mask_fn():
-            res = 4
-
-            def fn(b, h, q, k):
-                return q >= k + res
-
-            return fn
-
-        self._test_export_blockmask_with_mask_fn(make_mask_fn)
-
     def test_export_with_default_kwargs(self):
         class FunctionalWrapper(torch.nn.Module):
             """Wrapper with keyword-only argument in __call__."""
@@ -270,54 +227,6 @@ def forward(self, args_0):
     out = torch._C._nn.linear(l_args_0_, l_self_modules_module_parameters_weight_, l_self_modules_module_parameters_bias_);  l_args_0_ = l_self_modules_module_parameters_weight_ = l_self_modules_module_parameters_bias_ = None
     return self._dynamo_bytecode_unflatten((out,), _fn_args)""",
         )
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    def test_export_blockmask_mutated_closure(self):
-        def make_mask_fn():
-            res = 1
-
-            def fn(b, h, q, k):
-                return q >= k + res
-
-            res = 4  # mutation after function definition
-            return fn
-
-        self._test_export_blockmask_with_mask_fn(make_mask_fn)
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    def test_export_blockmask_closure_with_containers(self):
-        def make_mask_fn():
-            offsets = [1, 2, 3]
-            config = {"base": 4, "nested": {"scale": 2}}
-
-            def fn(b, h, q, k):
-                return q >= k + config["base"] + sum(offsets)
-
-            return fn
-
-        self._test_export_blockmask_with_mask_fn(make_mask_fn)
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    def test_export_blockmask_closure_triple_nested(self):
-        def make_mask_fn():
-            a = 1
-
-            def level1():
-                b = 2
-
-                def level2():
-                    c = 3
-
-                    def fn(bx, h, q, k):
-                        return q >= k + a + b + c
-
-                    return fn
-
-                return level2()
-
-            return level1()
-
-        self._test_export_blockmask_with_mask_fn(make_mask_fn)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_export_blockmask_closure_self_recursive(self):
@@ -1551,74 +1460,6 @@ def forward(self, arg0_1):
         _, spec_c = pytree.tree_flatten(mask_c)
         self.assertNotEqual(spec_a, spec_c)
 
-    def _assert_blockmask_partial_replays_bound_tensors(self, make_mask_mod):
-        from torch.fx.experimental.proxy_tensor import make_fx
-        from torch.nn.attention.flex_attention import BlockMask, create_block_mask
-
-        query_indices = torch.arange(8, dtype=torch.int32)[:, None]
-        key_indices = torch.arange(8, dtype=torch.int32)[None, :]
-        document_ids = torch.zeros(8, dtype=torch.int64)
-        batch0_attn_regions = torch.tensor([0, 0, 0, 0, 1, 1, 1, 1], dtype=torch.int32)
-        batch1_attn_regions = torch.tensor([0, 0, 1, 1, 0, 0, 1, 1], dtype=torch.int32)
-
-        def mask_rule(batch, head, query_idx, key_idx, attn_regions, document_ids):
-            return (
-                (query_idx >= key_idx)
-                & (attn_regions[query_idx] == attn_regions[key_idx])
-                & (document_ids[query_idx] == document_ids[key_idx])
-            )
-
-        def build_block_mask(attn_regions):
-            return create_block_mask(
-                make_mask_mod(mask_rule, attn_regions, document_ids),
-                B=1,
-                H=1,
-                Q_LEN=8,
-                KV_LEN=8,
-                device="cpu",
-                BLOCK_SIZE=4,
-            )
-
-        def trace_mask_mod(attn_regions):
-            block_mask = build_block_mask(attn_regions)
-            flat_leaves, spec = block_mask._flatten()
-            return make_fx(
-                lambda *flat_leaves: BlockMask._unflatten(flat_leaves, spec).mask_mod(
-                    0, 0, query_indices, key_indices
-                )
-            )(*flat_leaves)
-
-        traced_mask_mod = trace_mask_mod(batch0_attn_regions)
-        replayed_batch1 = traced_mask_mod(
-            *build_block_mask(batch1_attn_regions)._flatten()[0]
-        )
-        expected_batch0 = build_block_mask(batch0_attn_regions).mask_mod(
-            0, 0, query_indices, key_indices
-        )
-        expected_batch1 = build_block_mask(batch1_attn_regions).mask_mod(
-            0, 0, query_indices, key_indices
-        )
-
-        self.assertFalse(torch.equal(replayed_batch1, expected_batch0))
-        self.assertTrue(torch.equal(replayed_batch1, expected_batch1))
-
-    def test_blockmask_partial_extraction_replays_bound_tensors(self):
-        self._assert_blockmask_partial_replays_bound_tensors(
-            lambda mask_rule, attn_regions, document_ids: functools.partial(
-                mask_rule,
-                attn_regions=attn_regions,
-                document_ids=document_ids,
-            )
-        )
-
-    def test_blockmask_recursive_partial_extraction_replays_bound_tensors(self):
-        self._assert_blockmask_partial_replays_bound_tensors(
-            lambda mask_rule, attn_regions, document_ids: functools.partial(
-                functools.partial(mask_rule, attn_regions=attn_regions),
-                document_ids=document_ids,
-            )
-        )
-
     def test_mask_mod_wrapper_eq_for_partials(self):
         from torch.nn.attention.flex_attention import (
             _extract_callable_pytree,
@@ -1700,46 +1541,6 @@ def forward(self, arg0_1):
 
         self.assertEqual(wrapped_a, wrapped_b)
         self.assertEqual(hash(wrapped_a), hash(wrapped_b))
-
-    def test_blockmask_self_referential_function_closure_extraction(self):
-        from torch.nn.attention.flex_attention import create_block_mask
-
-        _register_blockmask_pytree()
-
-        def make_mask_mod():
-            def helper():
-                return helper
-
-            def mask_mod(batch, head, query_idx, key_idx):
-                del batch, head
-                _ = helper
-                return query_idx >= key_idx
-
-            return mask_mod
-
-        mask_a = create_block_mask(
-            make_mask_mod(), B=1, H=1, Q_LEN=8, KV_LEN=8, device="cpu", BLOCK_SIZE=4
-        )
-        mask_b = create_block_mask(
-            make_mask_mod(), B=1, H=1, Q_LEN=8, KV_LEN=8, device="cpu", BLOCK_SIZE=4
-        )
-
-        leaves_a, spec_a = pytree.tree_flatten(mask_a)
-        leaves_b, spec_b = pytree.tree_flatten(mask_b)
-
-        self.assertEqual(spec_a, spec_b)
-
-        restored = pytree.tree_unflatten(leaves_a, spec_a)
-        self.assertTrue(
-            torch.equal(
-                restored.mask_mod(
-                    0, 0, torch.arange(8)[:, None], torch.arange(8)[None, :]
-                ),
-                mask_a.mask_mod(
-                    0, 0, torch.arange(8)[:, None], torch.arange(8)[None, :]
-                ),
-            )
-        )
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_blockmask_and_masks_closure_extraction(self):
@@ -1883,6 +1684,205 @@ def forward(self, arg0_1):
                 eager_buf,
                 msg=lambda msg: f"{msg}\n{label}: buffer mutation mismatch",
             )
+
+    def _assert_blockmask_partial_replays_bound_tensors(self, make_mask_mod):
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch.nn.attention.flex_attention import BlockMask, create_block_mask
+
+        query_indices = torch.arange(8, dtype=torch.int32)[:, None]
+        key_indices = torch.arange(8, dtype=torch.int32)[None, :]
+        document_ids = torch.zeros(8, dtype=torch.int64)
+        batch0_attn_regions = torch.tensor([0, 0, 0, 0, 1, 1, 1, 1], dtype=torch.int32)
+        batch1_attn_regions = torch.tensor([0, 0, 1, 1, 0, 0, 1, 1], dtype=torch.int32)
+
+        def mask_rule(batch, head, query_idx, key_idx, attn_regions, document_ids):
+            return (
+                (query_idx >= key_idx)
+                & (attn_regions[query_idx] == attn_regions[key_idx])
+                & (document_ids[query_idx] == document_ids[key_idx])
+            )
+
+        def build_block_mask(attn_regions):
+            return create_block_mask(
+                make_mask_mod(mask_rule, attn_regions, document_ids),
+                B=1,
+                H=1,
+                Q_LEN=8,
+                KV_LEN=8,
+                device="cpu",
+                BLOCK_SIZE=4,
+            )
+
+        def trace_mask_mod(attn_regions):
+            block_mask = build_block_mask(attn_regions)
+            flat_leaves, spec = block_mask._flatten()
+            return make_fx(
+                lambda *flat_leaves: BlockMask._unflatten(flat_leaves, spec).mask_mod(
+                    0, 0, query_indices, key_indices
+                )
+            )(*flat_leaves)
+
+        traced_mask_mod = trace_mask_mod(batch0_attn_regions)
+        replayed_batch1 = traced_mask_mod(
+            *build_block_mask(batch1_attn_regions)._flatten()[0]
+        )
+        expected_batch0 = build_block_mask(batch0_attn_regions).mask_mod(
+            0, 0, query_indices, key_indices
+        )
+        expected_batch1 = build_block_mask(batch1_attn_regions).mask_mod(
+            0, 0, query_indices, key_indices
+        )
+
+        self.assertFalse(torch.equal(replayed_batch1, expected_batch0))
+        self.assertTrue(torch.equal(replayed_batch1, expected_batch1))
+
+    def test_blockmask_partial_extraction_replays_bound_tensors(self):
+        self._assert_blockmask_partial_replays_bound_tensors(
+            lambda mask_rule, attn_regions, document_ids: functools.partial(
+                mask_rule,
+                attn_regions=attn_regions,
+                document_ids=document_ids,
+            )
+        )
+
+    def test_blockmask_recursive_partial_extraction_replays_bound_tensors(self):
+        self._assert_blockmask_partial_replays_bound_tensors(
+            lambda mask_rule, attn_regions, document_ids: functools.partial(
+                functools.partial(mask_rule, attn_regions=attn_regions),
+                document_ids=document_ids,
+            )
+        )
+
+    def test_blockmask_self_referential_function_closure_extraction(self):
+        from torch.nn.attention.flex_attention import create_block_mask
+
+        _register_blockmask_pytree()
+
+        def make_mask_mod():
+            def helper():
+                return helper
+
+            def mask_mod(batch, head, query_idx, key_idx):
+                del batch, head
+                _ = helper
+                return query_idx >= key_idx
+
+            return mask_mod
+
+        mask_a = create_block_mask(
+            make_mask_mod(), B=1, H=1, Q_LEN=8, KV_LEN=8, device="cpu", BLOCK_SIZE=4
+        )
+        mask_b = create_block_mask(
+            make_mask_mod(), B=1, H=1, Q_LEN=8, KV_LEN=8, device="cpu", BLOCK_SIZE=4
+        )
+
+        leaves_a, spec_a = pytree.tree_flatten(mask_a)
+        leaves_b, spec_b = pytree.tree_flatten(mask_b)
+
+        self.assertEqual(spec_a, spec_b)
+
+        restored = pytree.tree_unflatten(leaves_a, spec_a)
+        self.assertTrue(
+            torch.equal(
+                restored.mask_mod(
+                    0, 0, torch.arange(8)[:, None], torch.arange(8)[None, :]
+                ),
+                mask_a.mask_mod(
+                    0, 0, torch.arange(8)[:, None], torch.arange(8)[None, :]
+                ),
+            )
+        )
+
+    def _test_export_blockmask_with_mask_fn(self, make_mask_fn):
+        from torch.nn.attention.flex_attention import create_block_mask
+
+        _register_blockmask_pytree()
+
+        class Model(torch.nn.Module):
+            def __init__(self, mask_fn_factory):
+                super().__init__()
+                self.mask_fn_factory = mask_fn_factory
+
+            def forward(self, x):
+                mask_fn = self.mask_fn_factory()
+                block_mask = create_block_mask(
+                    mask_fn, B=1, H=1, Q_LEN=64, KV_LEN=64, device=x.device
+                )
+                return x, block_mask
+
+        x = torch.randn(2, 128, device="cuda")
+        module = Model(make_mask_fn)
+
+        out_eager, mask_eager = module(x)
+
+        compiled = _dynamo_graph_capture_for_export(module)(x)
+        out_compiled, mask_compiled = compiled(x)
+
+        self.assertEqual(out_eager, out_compiled)
+        self.assertEqual(
+            mask_eager.mask_mod(1, 1, 64, 64),
+            mask_compiled.mask_mod(1, 1, 64, 64),
+        )
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_export_blockmask(self):
+        def make_mask_fn():
+            res = 4
+
+            def fn(b, h, q, k):
+                return q >= k + res
+
+            return fn
+
+        self._test_export_blockmask_with_mask_fn(make_mask_fn)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_export_blockmask_mutated_closure(self):
+        def make_mask_fn():
+            res = 1
+
+            def fn(b, h, q, k):
+                return q >= k + res
+
+            res = 4  # mutation after function definition
+            return fn
+
+        self._test_export_blockmask_with_mask_fn(make_mask_fn)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_export_blockmask_closure_with_containers(self):
+        def make_mask_fn():
+            offsets = [1, 2, 3]
+            config = {"base": 4, "nested": {"scale": 2}}
+
+            def fn(b, h, q, k):
+                return q >= k + config["base"] + sum(offsets)
+
+            return fn
+
+        self._test_export_blockmask_with_mask_fn(make_mask_fn)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_export_blockmask_closure_triple_nested(self):
+        def make_mask_fn():
+            a = 1
+
+            def level1():
+                b = 2
+
+                def level2():
+                    c = 3
+
+                    def fn(bx, h, q, k):
+                        return q >= k + a + b + c
+
+                    return fn
+
+                return level2()
+
+            return level1()
+
+        self._test_export_blockmask_with_mask_fn(make_mask_fn)
 
 
 if __name__ == "__main__":

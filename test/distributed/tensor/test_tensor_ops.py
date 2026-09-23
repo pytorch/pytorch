@@ -24,15 +24,14 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     serialTest,
-    TEST_WITH_ROCM,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorContinuousTestBase,
     DTensorConverter,
-    DTensorTestBase,
     LocalDTensorContinuousTestBase,
     LocalDTensorTestBase,
+    NUM_DEVICES,
     op_strategy_context,
     with_comms,
 )
@@ -798,7 +797,6 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
             self.assertEqual(output_dt.placements, [Shard(gather_dim)])
             self.assertEqual(output_dt.full_tensor(), global_output)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/175064")
     @serialTest()  # heavy combinatorial _test_op calls, serialize to avoid OOM
     def test_index(self):
         meshes = [
@@ -1904,7 +1902,9 @@ class DistTensorCppPyTree(DTensorContinuousTestBase):
         self.assertNotEqual(schema1, schema2)
 
 
-class TestNewEmptyStridedUneven(DTensorTestBase):
+class TestNewEmptyStridedUneven(DTensorContinuousTestBase):
+    world_size = NUM_DEVICES
+
     @with_comms
     def test_backward_no_allgather(self):
         """Backward on unevenly-sharded DTensor should not allgather (issue #107661)."""
