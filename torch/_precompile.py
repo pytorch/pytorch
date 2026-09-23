@@ -245,6 +245,7 @@ import hashlib
 import inspect
 import io
 import logging
+import operator
 import os
 import pickle
 import stat
@@ -849,10 +850,30 @@ def _resolved_get_attrs(
     return resolved
 
 
+def _aliased_input(node: torch.fx.Node) -> object:
+    """The argument a view, alias or in-place result aliases (the ``out`` of an
+    ``out=`` overload, the list behind a ``split`` piece), or None."""
+    if node.target is operator.getitem:
+        return node.args[0]
+    schema = getattr(node.target, "_schema", None)
+    ret = (
+        schema.returns[0].alias_info if schema is not None and schema.returns else None
+    )
+    if ret is None:
+        return None
+    for i, arg in enumerate(schema.arguments):
+        # A list-of-views return (split, unbind) keeps its alias set on the elements.
+        if arg.alias_info is not None and (
+            not ret.before_set or arg.alias_info.before_set & ret.before_set
+        ):
+            return node.args[i] if i < len(node.args) else node.kwargs.get(arg.name)
+    return None
+
+
 def _writes_a_parameter(gm: torch.fx.GraphModule, num_params: int) -> bool:
     """Whether a traced op writes into one of the first ``num_params`` placeholders
     (the lifted parameters), directly or through a view or alias of one such as
-    ``p.data``. Read off the graph because neither the version counter nor a view's
+    ``p.data`` or a ``chunk`` piece. Read off the graph because neither the version counter nor a view's
     own counter records a write through ``.data``."""
     placeholders = [n for n in gm.graph.nodes if n.op == "placeholder"]
     param_nodes = set(placeholders[:num_params])
@@ -867,12 +888,7 @@ def _writes_a_parameter(gm: torch.fx.GraphModule, num_params: int) -> bool:
             # A Tensor(a!)[] argument (_foreach_add_, _fused_adam_) writes each element.
             for base in value if isinstance(value, (list, tuple)) else [value]:
                 while isinstance(base, torch.fx.Node) and base not in param_nodes:
-                    base_schema = getattr(base.target, "_schema", None)
-                    if base_schema is None or not base_schema.returns:
-                        break
-                    if base_schema.returns[0].alias_info is None or not base.args:
-                        break
-                    base = base.args[0]
+                    base = _aliased_input(base)
                 if base in param_nodes:
                     return True
     return False
