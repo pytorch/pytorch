@@ -2479,6 +2479,9 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertEqual(meta["TRACER"], "dynamo")
         self.assertEqual(meta["FN_NAME"], step.__qualname__)
         self.assertEqual(sum(n for _, n in meta["FRAMES"]), summary.guarded_codes)
+        # The default policy renders a capture that dropped harmless guards.
+        self.assertTrue(summary.dropped_guards)
+        self.assertFalse(summary.risky_dropped_guards)
         self.assertEqual(
             meta["DROPPED_GUARDS"], [list(s) for s in summary.dropped_guards]
         )
