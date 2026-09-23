@@ -53,14 +53,17 @@ def inline_single_use_recursive(gm: GraphModule, global_counts: Counter[str]) ->
     if not invoke_nodes:
         return
 
-    single_use_nodes = [
-        node
-        for node in invoke_nodes
-        if global_counts[str(node.args[1])] == 1
-        and not getattr(gm, str(node.args[0].target)).meta.get(
-            "nested_region_config", None
-        )
-    ]
+    single_use_nodes = []
+    for node in invoke_nodes:
+        if global_counts[str(node.args[1])] != 1:
+            continue
+        # Preserve regions that must survive as HOPs even when single-use:
+        # nested_compile_region (carries dedup config) and checkpoint regions
+        # (needed for recompute-as-call in the partitioner).
+        sub_meta = getattr(gm, str(node.args[0].target)).meta
+        if sub_meta.get("nested_region_config") or sub_meta.get("_checkpoint_region"):
+            continue
+        single_use_nodes.append(node)
     if not single_use_nodes:
         return
 
@@ -148,6 +151,22 @@ def inline_invoke_subgraph(gm: GraphModule) -> GraphModule:
     )
     if not invoke_nodes:
         return gm
+
+    # Full inlining flattens the region away, erasing the `_checkpoint_region`
+    # marker before AOTAutograd and silently disabling checkpoint recompute-as-
+    # call. A fully flat graph and keeping the region as a HOP are mutually
+    # exclusive, so reject rather than silently break either one.
+    for node in invoke_nodes:
+        subgraph = getattr(gm, str(node.args[0].target))
+        if isinstance(subgraph, GraphModule) and subgraph.meta.get(
+            "_checkpoint_region"
+        ):
+            raise RuntimeError(
+                "inline_invoke_subgraph=True cannot flatten a checkpoint region "
+                "created with checkpoint_via_invoke_subgraph: inlining would erase "
+                "the recompute-as-call marker and silently disable checkpoint "
+                "recompute. Disable one of the two flags."
+            )
 
     inline_invoke_subgraph_nodes(gm, invoke_nodes)
     return gm
