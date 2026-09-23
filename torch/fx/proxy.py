@@ -242,8 +242,9 @@ class TracerBase:
         )
 
         # Optionally set stack trace on the created Node for debugging purposes
-        if fx_traceback.has_preserved_node_meta():
-            current_meta: dict[str, Any] = fx_traceback.get_current_meta()
+        traceback_state = fx_traceback._get_current_state()
+        if traceback_state.should_preserve_node_meta:
+            current_meta = traceback_state.current_meta
 
             stack_trace = current_meta.get("stack_trace")
             if stack_trace:
@@ -259,7 +260,7 @@ class TracerBase:
                 if field in current_meta:
                     node.meta[field] = copy.copy(current_meta[field])
 
-            new_seq_nr = _get_seq_nr(node.name)
+            new_seq_nr = _get_seq_nr(node.name, traceback_state)
             if new_seq_nr is not None:
                 annotation_log.debug(
                     "Assigning new_seq_nr %s to %s", new_seq_nr, node.name
@@ -269,7 +270,7 @@ class TracerBase:
             # See Note [Functionalization View Replay Annotation]
             # Overriding some node meta with the original node meta of the
             # regenerated node.
-            replay_node: Node | None = fx_traceback.get_current_replay_node()
+            replay_node = traceback_state.current_replay_node
             if replay_node is not None:
                 node.meta["is_functional_regenerated"] = True
                 if "custom" in replay_node.meta:
@@ -520,7 +521,9 @@ class TracerBase:
         return Attribute(obj, "keys")()
 
 
-def _get_seq_nr(node_name: str = "") -> int | None:
+def _get_seq_nr(
+    node_name: str, traceback_state: fx_traceback._TracebackState
+) -> int | None:
     """
     Returns the seq_nr node meta for the current proxy node that we're creating.
     The seq_nr number in node meta is related to but not the same as the "sequence number"
@@ -536,7 +539,7 @@ def _get_seq_nr(node_name: str = "") -> int | None:
 
     `node_name` is the name of the node that we're creating. It is used for logging only.
     """
-    current_meta: dict[str, Any] = fx_traceback.get_current_meta()
+    current_meta = traceback_state.current_meta
     new_seq_nr = None
     # The sequence_nr increments every time a new autograd Node
     # is created. During the FWD pass we store the sequence_nr
@@ -550,7 +553,7 @@ def _get_seq_nr(node_name: str = "") -> int | None:
         annotation_log.debug("%s: seq_nr from current_meta grad_fn_seq_nr", node_name)
         new_seq_nr = current_meta["grad_fn_seq_nr"][-1]
 
-    elif torch.fx.traceback._is_preserving_node_seq_nr():
+    elif traceback_state.should_preserve_node_seq_nr:
         # Special case where we preserve seq_nr from currently tracing node
         # Used to preserve seq_nr when re-tracing subgraphs in HOP
         annotation_log.debug("%s: seq_nr from current_meta seq_nr", node_name)
@@ -561,11 +564,11 @@ def _get_seq_nr(node_name: str = "") -> int | None:
         # This branch is used to get seq_nr for forward nodes
         new_seq_nr = torch.autograd._get_sequence_nr() - 1
 
-    if not torch.fx.traceback._is_preserving_node_seq_nr():
+    if not traceback_state.should_preserve_node_seq_nr:
         # See Note [Functionalization View Replay Annotation]
         # Overriding some node meta with the original node meta of the
         # regenerated node.
-        replay_node: Node | None = fx_traceback.get_current_replay_node()
+        replay_node = traceback_state.current_replay_node
         if replay_node is not None:
             if "seq_nr" in replay_node.meta:
                 annotation_log.debug("%s: seq_nr from replay_node", node_name)
