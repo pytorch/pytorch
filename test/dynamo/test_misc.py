@@ -225,6 +225,29 @@ class UserDefineSetAttr:
 
 
 class MiscTests(torch._inductor.test_case.TestCase):
+    def test_storage_offset_scalar_output(self):
+        def fn(x):
+            return x.storage_offset()
+
+        base = torch.arange(30)
+        inputs = (
+            base[:10],
+            base[5:15],
+            base[7:17],
+            base[:10],
+        )
+
+        compiled_fn = torch.compile(
+            fn,
+            backend="eager",
+            fullgraph=True,
+        )
+
+        for x in inputs:
+            result = compiled_fn(x)
+            self.assertIsInstance(result, int)
+            self.assertEqual(result, fn(x))
+
     def test_get_cache_entry(self):
         def f(x):
             return x + 1
@@ -5661,6 +5684,32 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         with self.assertRaises(TypeError):
             fn(torch.randn(4))
+
+    @parametrize(
+        "case",
+        [
+            subtest("no_args", name="no_args"),
+            subtest("one_arg", name="one_arg"),
+            subtest("too_many_args", name="too_many_args"),
+            subtest("keyword_arg", name="keyword_arg"),
+        ],
+    )
+    def test_getattr_wrong_args_raises(self, case):
+        def fn(x):
+            try:
+                if case == "no_args":
+                    return getattr()
+                if case == "one_arg":
+                    return getattr(x)
+                if case == "too_many_args":
+                    return getattr(x, "shape", None, None)
+                return getattr(x, name="shape")
+            except TypeError as exc:
+                return x.sin(), str(exc)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
 
     def test_user_defined_class_name(self):
         class MyClassFoo:
