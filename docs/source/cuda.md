@@ -466,7 +466,8 @@ ctx = GreenContext(sm_partition=second, workqueue_scope="balanced")
 ```
 
 Each split partitions its input resource. Its children and remainder are
-mutually disjoint, but overlap the parent. Separate split operations may overlap.
+mutually disjoint, but overlap the parent. Results of separate splits on the same
+or overlapping input resources may overlap.
 CUDA evaluates new constraints when subdividing a resource; the remainder does
 not inherit the earlier split's alignment.
 Partitioning does not reserve SMs against other contexts or guarantee concurrent
