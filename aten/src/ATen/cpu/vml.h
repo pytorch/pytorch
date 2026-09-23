@@ -131,9 +131,18 @@ static_assert(
     }                                                                   \
   }
 
+#ifdef AT_VEC_CUSTOM_MATH
+
+#define IMPLEMENT_VML_MKL(op, mklop)          \
+  IMPLEMENT_VML_MKL_STUB(op, mklop, double, d)
+
+#else
+
 #define IMPLEMENT_VML_MKL(op, mklop)          \
   IMPLEMENT_VML_MKL_STUB(op, mklop, float, s) \
   IMPLEMENT_VML_MKL_STUB(op, mklop, double, d)
+
+#endif
 
 // NB: abs, cosh and sinh were temporarily disabled due to issues with Apple
 // NB: expm1 is disabled because on some configs it produces expm1(nan)=-1

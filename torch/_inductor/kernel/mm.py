@@ -28,9 +28,11 @@ from ..codegen.rocm.ck_tile_universal_gemm_template import CKTileGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
 from ..codegen.wrapper import PythonWrapperCodegen
+from ..fx_utils import get_fake_args_kwargs
 from ..ir import (
     Buffer,
     ChoiceCaller,
+    ExternKernel,
     FallbackKernel,
     IRNode,
     is_triton,
@@ -77,6 +79,7 @@ from .mm_common import (
     _fits_int32_buffer_span,
     _is_static_problem,
     _use_small_mm_pointwise,
+    blackwell_persistent_mm_grid,
     load_kernel_template,
     mm_args,
     mm_grid,
@@ -157,7 +160,7 @@ flydsl_mm_template = FlyDSLTemplate(
 
 blackwell_ws_persistent_tma_mm_template = TritonTemplate(
     name="blackwell_ws_persistent_tma",
-    grid=persistent_mm_grid,
+    grid=blackwell_persistent_mm_grid,
     source=load_kernel_template("triton_blackwell_ws_persistent_tma_mm"),
 )
 
@@ -1283,6 +1286,78 @@ def get_scaling_options(
     )  # verify that shapes are supported by at least one existing pairing
 
 
+def scaled_mm_v2_constraint(
+    fx_node: torch.fx.Node, *args: Any, **kwargs: Any
+) -> tuple[tuple[Any, ...], dict[str, Any]]:
+    """Construct kernel-compatible layouts instead of preserving eager strides."""
+    if not isinstance(fx_node.target, torch._ops.OpOverload):
+        raise AssertionError("scaled_mm_v2_constraint expects an OpOverload")
+    names = [arg.name for arg in fx_node.target._schema.arguments]
+    operands = dict(zip(names, args))
+    operands.update(kwargs)
+
+    # The optimized lowering requires row-major A and column-major B. Keep
+    # compatible leading dimensions rather than making both matrices dense.
+    for name, inner_dim in (("self", 1), ("mat2", 0)):
+        matrix = operands[name]
+        strides = matrix.maybe_get_stride()
+        if strides is None or not V.graph.sizevars.statically_known_equals(
+            strides[inner_dim], 1
+        ):
+            m, n = matrix.get_size()
+            strides = (n, 1) if inner_dim == 1 else (1, m)
+            operands[name] = ExternKernel.require_exact_strides(matrix, strides)
+
+    device = operands["self"].get_device_or_error().type
+    for side in ("a", "b"):
+        scales = operands[f"scale_{side}"]
+        recipes = operands[f"recipe_{side}"]
+        constrained_scales = []
+        for index, (scale, recipe) in enumerate(zip(scales, recipes, strict=True)):
+            recipe = ScalingType(recipe)
+            if (
+                device == "cuda"
+                and not torch.version.hip
+                and recipe in (ScalingType.BlockWise1x128, ScalingType.BlockWise128x128)
+            ):
+                matrix = operands["self" if side == "a" else "mat2"]
+                if recipe == ScalingType.BlockWise128x128 and all(
+                    _blockwise128x128_shape_match(
+                        scale.get_size(), matrix.get_size(), transpose=side == "b"
+                    )[:2]
+                ):
+                    # Ambiguous scale shapes encode their orientation in strides.
+                    # Use FX metadata even when a producer's IR layout is flexible.
+                    _, fake_args, fake_kwargs = get_fake_args_kwargs(fx_node)
+                    fake_operands = dict(zip(names, fake_args))
+                    fake_operands.update(fake_kwargs)
+                    fake_scale = fake_operands[f"scale_{side}"][index]
+                    if not isinstance(fake_scale, torch.Tensor):
+                        raise AssertionError("expected scale tensor metadata")
+                    scale = L.constrain_to_fake_tensor(scale, fake_scale)
+                else:
+                    scale = ExternKernel.require_exact_strides(
+                        scale, (1, scale.get_size()[0])
+                    )
+            elif recipe != ScalingType.TensorWise:
+                # Rowwise and packed/swizzled MX/NV scales are dense. XPU
+                # consumes row-major DeepSeek scales via oneDNN as well.
+                scale = ExternKernel.require_contiguous(scale)
+            constrained_scales.append(scale)
+        operands[f"scale_{side}"] = constrained_scales
+
+    if operands.get("bias") is not None:
+        operands["bias"] = ExternKernel.require_contiguous(operands["bias"])
+
+    # Keep the caller's argument structure for mutation propagation (including out).
+    return tuple(operands[name] for name in names[: len(args)]), {
+        name: operands[name] for name in kwargs
+    }
+
+
+L.add_layout_constraint(aten._scaled_mm_v2, scaled_mm_v2_constraint)
+
+
 # Inductor has no template or extern choice that understands swizzled scale
 # layouts for _scaled_mm_v2 yet; defer those to the eager op. add_to_fallback_set
 # is False because this handler is invoked manually from the lowering below, not
@@ -1361,6 +1436,9 @@ def tuned_scaled_mm_v2(
         or not is_single_level_scale
         or scale_a[0].dtype != torch.float32
     ):
+        return fallback()
+
+    if mat_a.get_device().type == "mps":
         return fallback()
 
     def _is_dynamic(sz) -> bool:

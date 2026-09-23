@@ -2792,6 +2792,21 @@ def calc_conv_nd_return_shape(
         else:
             output_padding_list = output_padding
 
+    # Validate output_padding < stride or dilation in each dim (mirrors C++
+    # NaiveConvolutionTransposeNd check).
+    if is_transposed and output_padding_list:
+        torch._check(
+            all(
+                op < s or op < d
+                for op, s, d in zip(output_padding_list, stride, dilation, strict=True)
+            ),
+            lambda: (
+                f"output padding must be smaller than either stride or dilation, "
+                f"but got output_padding={output_padding_list}, "
+                f"stride={stride}, dilation={dilation}"
+            ),
+        )
+
     # Validate kernel size fits within padded input (mirrors C++ check_shape_forward
     # in aten/src/ATen/native/Convolution.cpp).
     if not is_transposed:
@@ -2935,6 +2950,17 @@ def meta_conv(
         groups,
         output_padding if is_transposed else None,
     )
+
+    if is_transposed and bias is not None:
+        expected = weight.shape[1] * groups
+        torch._check(
+            bias.ndim == 1 and bias.shape[0] == expected,
+            lambda: (
+                f"Given transposed=1, weight of size {list(weight.shape)}, "
+                f"expected bias to be 1-dimensional with {expected} elements, "
+                f"but got bias of size {list(bias.shape)} instead"
+            ),
+        )
 
     from torch.fx.experimental.symbolic_shapes import guard_or_false
 
@@ -4446,13 +4472,18 @@ def meta__dyn_quant_pack_4bit_weight(
         weights.dtype is torch.uint8,
         lambda: f"expected w to be uint8, got {weights.dtype}",
     )
-    if torch.backends.kleidiai.is_available() and (
-        (block_size == in_features and scales_zeros.dtype == torch.float)
-        or (
-            block_size < in_features
-            and block_size % 32 == 0
-            and in_features % block_size == 0
-            and scales_zeros.dtype == torch.bfloat16
+    # Mirror can_use_kleidiai
+    if (
+        torch.backends.kleidiai.is_available()
+        and torch.cpu.get_capabilities().get("dot")
+        and (
+            (block_size == in_features and scales_zeros.dtype == torch.float)
+            or (
+                block_size < in_features
+                and block_size % 32 == 0
+                and in_features % block_size == 0
+                and scales_zeros.dtype == torch.bfloat16
+            )
         )
     ):
         packed_weight_size = get_kai_packed_weight_size(
@@ -5926,12 +5957,13 @@ def check_grid_sampler_3d(input: Tensor, grid: Tensor, interpolation_mode: int):
             f" and grid with sizes {grid.shape}"
         ),
     )
+    # Only CPU and CUDA sample 5D bicubic; the trace refuses it elsewhere, as eager
+    # does. device_hint: a FakeTensor reports meta while a meta kernel runs.
     torch._check(
-        not (
-            input.ndim == 5
-            and interpolation_mode == GridSamplerInterpolation.BICUBIC.value
-        ),
-        lambda: "grid_sampler(): bicubic interpolation only supports 4D input",
+        interpolation_mode != GridSamplerInterpolation.BICUBIC.value
+        or device_hint(input) in ("cpu", "cuda"),
+        lambda: "grid_sampler(): bicubic interpolation with 5D input is not supported "
+        f"on {device_hint(input)}",
     )
 
 
@@ -8273,7 +8305,7 @@ def meta_bucketize_scalar(
 
 
 @register_meta([aten.histc])
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def meta_histc(input, bins=100, min=0, max=0):
     fn_name = "histc()"
     if device_hint(input) == "cpu":
@@ -9371,6 +9403,9 @@ def activate_meta():
                 "aten::rot90",  # requires_grad mismatch! test_ops.py -k test_fake_crossref_backward_amp_rot90_cuda_float32
                 "aten::as_strided_scatter",  # requires_grad mismatch, test_ops.py -k test_fake_crossref_backward_no_amp_as_strided_scatter_cuda_float32
                 "aten::stack",  # use the symint-aware C++ meta kernel (stack_meta)
+                "aten::arange",  # use the symint-aware C++ meta kernel (arange_meta)
+                "aten::arange.start",
+                "aten::arange.start_step",
             }
         ):
             pass

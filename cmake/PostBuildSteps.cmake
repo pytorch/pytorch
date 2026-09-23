@@ -99,6 +99,8 @@ if(WIN32 AND BUILD_PYTHON)
       "${_cuda_bin}/nvrtc*64_*.dll"
       "${_cuda_bin}/nvJitLink_*.dll"
       "${CUDA_TOOLKIT_ROOT_DIR}/bin/cudnn*64_*.dll"
+      "${CUDA_TOOLKIT_ROOT_DIR}/extras/CUPTI/lib/x64/cupti64_*.dll"
+      "${CUDA_TOOLKIT_ROOT_DIR}/extras/CUPTI/lib/x64/nvperf_host*.dll"
       "${CUDA_TOOLKIT_ROOT_DIR}/extras/CUPTI/lib64/cupti64_*.dll"
       "${CUDA_TOOLKIT_ROOT_DIR}/extras/CUPTI/lib64/nvperf_host*.dll"
     )

@@ -7,6 +7,7 @@ import os
 import sys
 import unittest
 from typing import Any
+from unittest.mock import patch
 
 import torch
 import torch.nn as nn
@@ -34,6 +35,7 @@ from torch.testing._internal.common_fsdp import (
     DEVICEInitMode,
     FSDPInitMode,
     FSDPTest,
+    FSDPTestContinuous,
     TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
@@ -566,7 +568,7 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
         self._check_ddp_fsdp_param_parity(ddp_model, fsdp_model)
 
 
-class TestFSDPUseOrigParamsUnshardReshard(FSDPTest):
+class TestFSDPUseOrigParamsUnshardReshard(FSDPTestContinuous):
     """Tests the unshard/reshard flow."""
 
     @property
@@ -870,7 +872,7 @@ class TestFSDPUseOrigParamsParamAccess(FSDPTest):
         check_parameter_parity(ddp_model, fsdp_model, True)
 
 
-class TestFSDPUseOrigParamsWriteback(FSDPTest):
+class TestFSDPUseOrigParamsWriteback(FSDPTestContinuous):
     """Tests parameter and gradient writeback."""
 
     class Model(nn.Module):
@@ -1109,6 +1111,7 @@ class TestFSDPUseOrigParamsWriteback(FSDPTest):
             loss.backward()
 
     @skip_if_lt_x_gpu(2)
+    @patch.dict(os.environ)
     def test_no_reshard_and_mixed_precision(self):
         """
         Tests that writeback does not falsely get triggered for a few
@@ -1205,10 +1208,8 @@ class TestFSDPUseOrigParamsFQNs(FSDPTest):
         fsdp_model(inp)
 
 
-class TestFSDPUseOrigParamsNoSync(FSDPTest):
-    @property
-    def world_size(self) -> int:
-        return 2
+class TestFSDPUseOrigParamsNoSync(FSDPTestContinuous):
+    world_size = 2
 
     @skip_if_lt_x_gpu(2)
     def test_no_sync_correctness(self):

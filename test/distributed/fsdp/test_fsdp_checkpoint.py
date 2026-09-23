@@ -20,7 +20,6 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     _maybe_wrap_fsdp,
-    FSDPTest,
     FSDPTestContinuous,
     get_devtype,
 )
@@ -62,6 +61,9 @@ def get_patched_save_on_cpu():
 
 @contextlib.contextmanager
 def patch_save_on_cpu(new_save_on_cpu):
+    global _save_on_cpu_called
+    previous_save_on_cpu_called = _save_on_cpu_called
+    _save_on_cpu_called = False
     orig_save_on_cpu = (
         torch.distributed.algorithms._checkpoint.checkpoint_wrapper.save_on_cpu
     )
@@ -71,12 +73,13 @@ def patch_save_on_cpu(new_save_on_cpu):
     try:
         yield
     finally:
+        _save_on_cpu_called = previous_save_on_cpu_called
         torch.distributed.algorithms._checkpoint.checkpoint_wrapper.save_on_cpu = (
             orig_save_on_cpu
         )
 
 
-class TestFSDPCheckpoint(FSDPTest):
+class TestFSDPCheckpoint(FSDPTestContinuous):
     class SequentialModule(nn.Module):
         def __init__(
             self,
@@ -129,8 +132,6 @@ class TestFSDPCheckpoint(FSDPTest):
             for ref_g, g in zip(ref_grads, grads):
                 self.assertEqual(ref_g, g)
 
-    # TODO: migrate this to use FSDPTestContinuous, currently relies on testing
-    # global state which will cause the test to fail when we dont tear down the process
     @skip_if_lt_x_gpu(2)
     @parametrize(
         "cpu_offload",

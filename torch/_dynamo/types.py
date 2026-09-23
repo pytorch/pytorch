@@ -47,6 +47,12 @@ class GuardFilterEntry:
     derived_guard_types: tuple[str, ...]
     is_global: bool
     orig_guard: Guard
+    # Snapshot of orig_guard.code_list (the rendered checks, as GuardFn's
+    # code_parts) as of the inspection build. A later build_guards over the
+    # kept guards rebinds that attribute, so reading it off orig_guard later
+    # yields whatever the last build that included the guard emitted; a
+    # dropped guard is never rebuilt, so for it the snapshot is only defensive.
+    code_parts: tuple[str, ...] = ()
 
 
 class GuardFn(Protocol):

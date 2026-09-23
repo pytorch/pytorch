@@ -51,6 +51,7 @@ def _matches_affine_index(
     strides: Sequence[Any],
     known_equals: Callable[[Any, Any], bool],
 ) -> bool:
+    range_vars = tuple(var for var in range_vars if var != 0)
     if not range_vars:
         range_vars = tuple(sorted(index.free_symbols, key=str))
     if len(range_vars) != len(strides):
@@ -192,6 +193,29 @@ class NVGemmEpilogueProgram:
             geometries[output_name] = match.geometry
         return geometries
 
+    @property
+    def has_composite_generated_reduction_plan(self) -> bool:
+        plan = self.reduction_plan
+        analysis = self.capture.analysis
+        if (
+            plan is None
+            or not plan.tensor_epilogue_returns_local_reduce
+            or plan.reduction_output is None
+            or analysis is None
+        ):
+            return False
+        try:
+            n = V.graph.sizevars.optimization_hint(self.capture.gemm.get_size()[1])
+        except (GuardOnDataDependentSymNode, TypeError, ValueError):
+            return False
+        match = analysis.synthetic_reduction_program(
+            plan.reduction_output,
+            self.capture.gemm.get_name(),
+            self.capture.gemm.get_dtype(),
+            n,
+        )
+        return match is not None and len(match.region.reductions) > 1
+
     def oriented_reduction_geometries(
         self, swap_ab: bool
     ) -> dict[str, GemmReductionGeometry]:
@@ -310,13 +334,19 @@ class NVGemmEpilogueProgram:
 
     @property
     def owned_nodes(self) -> tuple[BaseSchedulerNode, ...]:
+        reduction_plan = self.reduction_plan
+        generated_regions = (
+            self.generated_reduction_regions
+            if reduction_plan is not None
+            and reduction_plan.tensor_epilogue_returns_local_reduce
+            else ()
+        )
         generated = OrderedSet(
-            node for region in self.generated_reduction_regions for node in region.nodes
+            node for region in generated_regions for node in region.nodes
         )
         owned = OrderedSet(
             node for node in self.reduction_partition.nodes if node not in generated
         )
-        reduction_plan = self.reduction_plan
         feed_names = (
             (
                 reduction_plan.primary_output,
@@ -463,6 +493,10 @@ class NVGemmEpilogueLowering:
         )
         if len(buffers) == 2 and finalizer_store is None:
             return None
+        if len(buffers) == 2:
+            source_name = buffers[0].get_name()
+            if source_name in V.graph.get_output_names():
+                return None
         reduction_type = None
         if isinstance(node.data, Reduction):
             reduction_type = node.data.reduction_type
@@ -835,6 +869,37 @@ class NVGemmEpilogueLowering:
         candidates: Sequence[BaseSchedulerNode],
         analysis: GemmEpilogueIRAnalysis,
     ) -> NVGemmReductionRegion:
+        def is_mean_finalizer(store: GemmEpilogueIRStore) -> bool:
+            expression = store.value
+            while getattr(expression, "op", None) in (
+                "to_dtype",
+                "to_dtype_bitcast",
+                "identity",
+            ):
+                expression = expression.args[0]
+
+            if getattr(expression, "op", None) == "truediv":
+                value, divisor = expression.args
+                return (
+                    getattr(value, "op", None) == "load"
+                    and value.args[0] == config.output_name
+                    and getattr(divisor, "op", None) in ("constant", "index_expr")
+                    and divisor.args[0] == config.group
+                )
+
+            if getattr(expression, "op", None) != "mul":
+                return False
+            left, right = expression.args
+            for value, scale in ((left, right), (right, left)):
+                if (
+                    getattr(value, "op", None) == "load"
+                    and value.args[0] == config.output_name
+                    and getattr(scale, "op", None) in ("constant", "index_expr")
+                    and scale.args[0] == 1.0 / config.group
+                ):
+                    return True
+            return False
+
         source_buffers = _computed_buffers(source.get_nodes())
         if source_buffers is not None and len(source_buffers) == 2:
             finalizer = analysis.reduction_finalizer(
@@ -861,10 +926,33 @@ class NVGemmEpilogueLowering:
                 buffer.get_name(), config.output_name
             )
             if finalizer is not None:
-                matches.append((candidate, finalizer))
+                matches.append((candidate, finalizer, store))
         if len(matches) != 1:
             return NVGemmReductionRegion(config=config, nodes=(source,))
-        candidate, finalizer = matches[0]
+        candidate, finalizer, store = matches[0]
+        users = V.graph.scheduler.name_to_buf[config.output_name].users
+        if config.output_name in V.graph.get_output_names() or any(
+            user.get_name() == "OUTPUT" for user in users
+        ):
+            return NVGemmReductionRegion(config=config, nodes=(source,))
+        if (
+            config.reduction_type == "sum"
+            and finalizer.materialize
+            and config.output_name not in V.graph.get_output_names()
+            and len(users) == 1
+            and users[0].node in candidate.get_nodes()
+            and is_mean_finalizer(store)
+        ):
+            config = dataclasses.replace(
+                config,
+                output_name=finalizer.output_name,
+                reduction_type="mean",
+                finalizer_fn=None,
+            )
+            return NVGemmReductionRegion(
+                config=config,
+                nodes=(source, candidate),
+            )
         finalizer_fn = None
         if finalizer.materialize:
             buffer = cast(ComputedBuffer, candidate.get_nodes()[0].node)

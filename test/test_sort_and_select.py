@@ -28,6 +28,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfTorchDynamo,
     slowTest,
+    TEST_WITH_ROCM,
     TestCase,
 )
 
@@ -1423,6 +1424,9 @@ class TestSortAndSelectCUDA(TestCase):
         - GPU: ~72 GB (data ~16GB + values ~16GB + indices ~32GB + other ~8GB)
         - CPU: ~170 GB (indices copy ~32GB + torch.unique extra memory ~130GB + other ~8GB)
         """
+        if TEST_WITH_ROCM and dtype in (torch.float16, torch.bfloat16):
+            self.skipTest("half dtypes take the ROCm sort path, capped at INT_MAX")
+
         extra = random.randint(500, 2000)
         n = 2**32 + extra
         k = random.randint(2**32 + 100, n - 100)

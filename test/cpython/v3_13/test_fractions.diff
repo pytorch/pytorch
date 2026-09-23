@@ -1,0 +1,79 @@
+diff --git a/test/cpython/v3_13/test_fractions.py b/test/cpython/v3_13/test_fractions.py
+index 0cf789899b7b7e2fad3d9d65bfaf58ad2b1f1cef..aec58dfa07e40dd4918e621b3f65c5eacb562307 100644
+--- a/test/cpython/v3_13/test_fractions.py
++++ b/test/cpython/v3_13/test_fractions.py
+@@ -1,3 +1,57 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_fractions.py
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import run_tests
++
++__TestCase = CPythonTestCase
++
++
++# redirect import statements
++import sys
++import importlib.abc
++
++redirect_imports = (
++    "test.mapping_tests",
++    "test.typinganndata",
++    "test.test_grammar",
++    "test.test_math",
++    "test.test_iter",
++    "test.typinganndata.ann_module",
++)
++
++class RedirectImportFinder(importlib.abc.MetaPathFinder):
++    def find_spec(self, fullname, path, target=None):
++        # Check if the import is the problematic one
++        if fullname in redirect_imports:
++            try:
++                # Attempt to import the standalone module
++                name = fullname.removeprefix("test.")
++                r = importlib.import_module(name)
++                # Redirect the module in sys.modules
++                sys.modules[fullname] = r
++                # Return a module spec from the found module
++                return importlib.util.find_spec(name)
++            except ImportError:
++                return None
++        return None
++
++# Add the custom finder to sys.meta_path
++sys.meta_path.insert(0, RedirectImportFinder())
++
++
++# ======= END DYNAMO PATCH =======
++
+ """Tests for Lib/fractions.py."""
+ 
+ import cmath
+@@ -284,7 +338,7 @@ numbers.Complex.register(Rect)
+ class RectComplex(Rect, complex):
+     pass
+ 
+-class FractionTest(unittest.TestCase):
++class FractionTest(__TestCase):
+ 
+     def assertTypedEquals(self, expected, actual):
+         """Asserts that both the types and values are the same."""
+@@ -1622,5 +1676,5 @@ class FractionTest(unittest.TestCase):
+                                  divmod, b, a)
+ 
+ 
+-if __name__ == '__main__':
+-    unittest.main()
++if __name__ == "__main__":
++    run_tests()

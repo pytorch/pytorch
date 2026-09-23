@@ -2333,6 +2333,9 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         compiled = torch.compile(func, backend=counter)
         out = compiled(inputs, **self.get_world_trs())
         correct = func(inputs, **self.get_world_trs())
+        # The collective runs on the process group's stream; wait before comparing.
+        out = [torch.ops.c10d_functional.wait_tensor(t) for t in out]
+        correct = [torch.ops.c10d_functional.wait_tensor(t) for t in correct]
         if counter.frame_count != 1:
             raise AssertionError(
                 f"Expected frame_count == 1, got {counter.frame_count}"

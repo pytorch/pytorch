@@ -10,9 +10,9 @@ boto3==1.35.42
 #Pinned versions: 1.19.12, 1.16.34
 #test that import:
 
-build==1.3.0
+build==1.5.0
 #Description: A simple, correct Python build frontend.
-#Pinned versions: 1.3.0
+#Pinned versions: 1.5.0
 #test that import:
 
 click
@@ -31,7 +31,7 @@ coremltools==8.3 ; python_version == "3.12"
 #Pinned versions:
 #test that import:
 
-dill==0.3.7
+dill==0.3.7 ; python_version < "3.15"
 #Description: dill extends pickle with serializing and de-serializing for most built-ins
 #Pinned versions: 0.3.7
 #test that import: dynamo/test_replay_record.py test_dataloader.py test_datapipe.py test_serialization.py
@@ -141,7 +141,8 @@ numba==0.64.0 ; python_version == "3.12" and platform_machine != "s390x" and pla
 numpy==1.23.2; python_version == "3.10"
 numpy==1.26.4; python_version == "3.11" or python_version == "3.12"
 numpy==2.1.2; python_version >= "3.13" and python_version < "3.14"
-numpy==2.3.4; python_version >= "3.14"
+numpy==2.3.4; python_version == "3.14"
+numpy==2.4.6; python_version >= "3.15"
 
 pandas==2.0.3; python_version < "3.12"
 pandas==2.2.3; python_version >= "3.12" and python_version < "3.14"
@@ -264,7 +265,8 @@ scikit-image==0.26.0 ; python_version >= "3.13" or platform_machine == "s390x"
 
 scipy==1.10.1 ; python_version <= "3.11"
 scipy==1.14.1 ; python_version > "3.11" and python_version < "3.14"
-scipy==1.16.2 ; python_version >= "3.14"
+scipy==1.16.2 ; python_version == "3.14"
+scipy==1.18.1 ; python_version >= "3.15"
 # Pin SciPy because of failing distribution tests (see #60347)
 #Description: scientific python
 #Pinned versions: 1.10.1
@@ -344,7 +346,7 @@ pywavelets==1.7.0 ; python_version >= "3.12"
 #test that import:
 
 lxml==5.3.0 ; python_version < "3.14"
-lxml==6.1.0 ; python_version >= "3.14"
+lxml==6.1.3 ; python_version >= "3.14"
 #Description: This is a requirement of unittest-xml-reporting
 
 PyGithub==2.3.0
@@ -412,7 +414,7 @@ tlparse==0.4.0
 filelock==3.20.3
 #Description: required for inductor testing
 
-cuda-bindings>=13.0,<14.0 ; platform_machine != "s390x" and platform_machine != "riscv64" and platform_system != "Darwin"
+cuda-bindings>=13.0,<14.0 ; platform_machine != "s390x" and platform_machine != "riscv64" and platform_system != "Darwin" and python_version < "3.15"
 #Description: required for testing CUDAGraph::raw_cuda_graph(). See https://nvidia.github.io/cuda-python/cuda-bindings/latest/support.html for how this version was chosen. PyTorch CI CUDA builds use CUDA 13, so depend on the matching cuda-bindings major while allowing minor updates within that major.
 #test that import: test_cuda.py
 

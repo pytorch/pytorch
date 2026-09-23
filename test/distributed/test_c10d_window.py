@@ -6,7 +6,6 @@
 # backends like test_c10d_fault_tolerance.py so additional backends can be
 # enabled by extending WINDOW_BACKENDS.
 
-import os
 import sys
 import unittest
 from datetime import timedelta
@@ -19,7 +18,7 @@ if not dist.is_available():
     print("distributed package not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
-from torch.testing._internal.common_distributed import MultiProcessTestCase
+from torch.testing._internal.common_distributed import MultiProcContinuousTest
 from torch.testing._internal.common_utils import run_tests, TEST_CUDA
 
 
@@ -29,39 +28,24 @@ WINDOW_BACKENDS = [
 
 
 class AbstractWindowTest:
-    @property
-    def world_size(self):
-        return 2
+    world_size = 2
+    timeout = timedelta(seconds=60)
 
     @property
     def device(self):
         return torch.device(f"{self.device_type}:{self.rank}")
 
-    def setUp(self):
-        super().setUp()
-        self._spawn_processes()
+    @classmethod
+    def backend_str(cls):
+        return cls.backend_name
 
-    def tearDown(self):
-        if dist.is_initialized():
-            dist.destroy_process_group()
-        super().tearDown()
-        try:
-            os.remove(self.file_name)
-        except OSError:
-            pass
+    @classmethod
+    def _init_pg(cls, rank, world_size, rdvz_file):
+        if cls.device_type == "cuda":
+            torch.cuda.set_device(rank)
+        super()._init_pg(rank, world_size, rdvz_file)
 
-    def _init_pg(self):
-        os.environ["LOCAL_RANK"] = str(self.rank)
-        if self.device_type == "cuda":
-            torch.cuda.set_device(self.rank)
-        store = dist.FileStore(self.file_name, self.world_size)
-        dist.init_process_group(
-            self.backend_name,
-            world_size=self.world_size,
-            rank=self.rank,
-            store=store,
-            timeout=timedelta(seconds=60),
-        )
+    def _init_backend(self):
         self.backend = dist.get_backend_impl(device=self.device)
         if not dist._supports_window() or not self.backend.supports_window:
             self.skipTest(f"{self.backend_name} does not support windows")
@@ -136,15 +120,15 @@ class AbstractWindowTest:
         torch.cuda.synchronize()
 
     def test_put_signal_wait_sync(self):
-        self._init_pg()
+        self._init_backend()
         self._window_ring_put(1024, torch.float, False, False)
 
     def test_put_signal_wait_async(self):
-        self._init_pg()
+        self._init_backend()
         self._window_ring_put(1024, torch.float, True, False)
 
     def test_signal_wait(self):
-        self._init_pg()
+        self._init_backend()
         pool = self._make_pool()
         self._probe_window_support(pool)
         with torch.cuda.use_mem_pool(pool):
@@ -156,7 +140,7 @@ class AbstractWindowTest:
         win.tensor_deregister()
 
     def test_put_dtypes_and_sizes(self):
-        self._init_pg()
+        self._init_backend()
         for count, dtype in [
             (4, torch.float),
             (1024, torch.int),
@@ -165,11 +149,11 @@ class AbstractWindowTest:
             self._window_ring_put(count, dtype, False, False)
 
     def test_new_window_with_tensor(self):
-        self._init_pg()
+        self._init_backend()
         self._window_ring_put(1024, torch.float, False, True)
 
     def test_map_remote_tensor_local(self):
-        self._init_pg()
+        self._init_backend()
         pool = self._make_pool()
         self._probe_window_support(pool)
         count = 1024
@@ -187,7 +171,7 @@ class AbstractWindowTest:
         win.tensor_deregister()
 
     def test_window_attr(self):
-        self._init_pg()
+        self._init_backend()
         pool = self._make_pool()
         self._probe_window_support(pool)
         with torch.cuda.use_mem_pool(pool):
@@ -201,7 +185,7 @@ class AbstractWindowTest:
         win.tensor_deregister()
 
     def test_register_errors(self):
-        self._init_pg()
+        self._init_backend()
         pool = self._make_pool()
         win = dist._new_window()
         # These rejections are rank-local and return before any transport work,
@@ -236,7 +220,7 @@ class AbstractWindowTest:
         win.tensor_deregister()
 
     def test_put_out_of_bounds(self):
-        self._init_pg()
+        self._init_backend()
         pool = self._make_pool()
         self._probe_window_support(pool)
         with torch.cuda.use_mem_pool(pool):
@@ -249,7 +233,7 @@ class AbstractWindowTest:
         win.tensor_deregister()
 
     def test_put_argument_validation_is_rank_local(self):
-        self._init_pg()
+        self._init_backend()
         pool = self._make_pool()
         self._probe_window_support(pool)
         with torch.cuda.use_mem_pool(pool):
@@ -276,7 +260,7 @@ class AbstractWindowTest:
         win.tensor_deregister()
 
     def test_put_uses_destination_window_metadata(self):
-        self._init_pg()
+        self._init_backend()
         pool = self._make_pool()
         self._probe_window_support(pool)
         with torch.cuda.use_mem_pool(pool):
@@ -300,7 +284,7 @@ class AbstractWindowTest:
 
 
 def _make_window_test_class(backend_name, device_type):
-    class WindowTest(AbstractWindowTest, MultiProcessTestCase):
+    class WindowTest(AbstractWindowTest, MultiProcContinuousTest):
         pass
 
     WindowTest.backend_name = backend_name

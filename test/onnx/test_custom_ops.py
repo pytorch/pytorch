@@ -7,9 +7,12 @@ import torch
 import torch.utils.cpp_extension
 from torch.onnx import symbolic_helper
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class TestCustomAutogradFunction(pytorch_test_common.ExportTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     opset_version = 9
     keep_initializers_as_inputs = False
     onnx_shape_inference = True
@@ -83,6 +86,8 @@ class TestCustomAutogradFunction(pytorch_test_common.ExportTestCase):
 
 
 class TestExportAsContribOps(pytorch_test_common.ExportTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     opset_version = 14
     keep_initializers_as_inputs = False
     onnx_shape_inference = True

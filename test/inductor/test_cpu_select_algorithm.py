@@ -28,6 +28,7 @@ from torch.testing._internal.common_quantized import (
     _calculate_dynamic_per_channel_qparams,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_ARM64,
     IS_CPU_EXT_SVE_SUPPORTED,
     IS_MACOS,
@@ -164,6 +165,8 @@ class BaseTestSelectAlgorithm(TestCase):
 
 
 class TestSelectAlgorithm(BaseTestSelectAlgorithm):
+    hw_classification = HardwareClassification.CPU
+
     common = check_model
 
     @inductor_config.patch({"freezing": True})
@@ -3548,6 +3551,8 @@ class _DynamicShapesTestBase(BaseTestSelectAlgorithm):
 
 
 class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
+    hw_classification = HardwareClassification.CPU
+
     common = check_model
     test_linear_dynamic_shapes = TestSelectAlgorithm.test_linear_static_shapes
     test_linear_with_pointwise_dynamic_shapes = (

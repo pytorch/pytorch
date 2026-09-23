@@ -106,9 +106,6 @@ NSArray<NSNumber*>* getTensorAxes(const TensorBase& t);
 NSArray<NSNumber*>* getTensorAxes(const IntArrayRef& sizes, at::OptionalIntArrayRef dim);
 std::string getTensorsStringKey(const TensorList& tensors, bool short_dtype = true, bool exclude_shape = false);
 std::string getArrayRefString(const IntArrayRef s);
-// use has_storage() on the returned tensor to determine if src actually is a view
-Tensor gatherViewTensor(const Tensor& src, Tensor& dst);
-Tensor& scatterViewTensor(const Tensor& src, Tensor& output);
 
 MPSNDArray* getStridedMPSNDArray(const TensorBase& src, MPSNDArray* srcNDArray);
 MPSNDArray* getMPSNDArray(const TensorBase& t, const IntArrayRef& sizes = {}, const IntArrayRef& strides = {});
@@ -119,7 +116,7 @@ MPSShape* getMPSShape(const TensorBase& t, c10::MemoryFormat memory_format = Mem
 MPSShape* getMPSShape(IntArrayRef sizes, c10::MemoryFormat memory_format = MemoryFormat::Contiguous);
 
 // Determines whether a tensor is too large to use MPSGraph
-bool isTooLargeForMPSGraph(const Tensor& tensor, bool useMPSStridedAPI = true);
+bool isTooLargeForMPSGraph(const Tensor& tensor, bool useMPSStridedAPI = true, bool checkLinearOffset = false);
 
 static inline id<MTLBuffer> getMTLBufferStorage(const TensorBase& tensor) {
   return __builtin_bit_cast(id<MTLBuffer>, tensor.storage().data());
@@ -464,9 +461,6 @@ inline T* LookUpOrCreateCachedGraph(const std::string& key, std::function<void(M
     return newCachedGraph;
   });
 }
-
-// Common math operations
-MPSGraphTensor* log1p(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor);
 
 /**
  * Returns distance from lowest to highest element offset in given tensor.

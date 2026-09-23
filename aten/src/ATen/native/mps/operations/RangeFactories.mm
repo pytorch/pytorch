@@ -31,10 +31,9 @@ void arange_range_fill_mps(const Scalar& start, const Scalar& step, Tensor& resu
   const auto tname = scalarToMetalTypeString(result);
   const bool is_int = isIntegralType(result.scalar_type(), /*includeBool=*/false);
   auto stream = getCurrentMPSStream();
-  auto encoder = stream->commandEncoder();
 
   // Binds result and {start, step}: int64 for integer dtypes, float otherwise.
-  const auto bind_start_step = [&] {
+  const auto bind_start_step = [&](id<MTLComputeCommandEncoder> encoder) {
     if (is_int) {
       mtl_setArgs(encoder, result, std::array<int64_t, 2>{start.to<int64_t>(), step.to<int64_t>()});
     } else {
@@ -49,8 +48,9 @@ void arange_range_fill_mps(const Scalar& start, const Scalar& step, Tensor& resu
     auto pso = lib.getPipelineStateForFunc("arange_" + tname + (use32 ? "_i32" : "_i64"));
     dispatch_sync_with_rethrow(stream->queue(), ^() {
       @autoreleasepool {
+        auto encoder = stream->commandEncoder();
         [encoder setComputePipelineState:pso];
-        bind_start_step();
+        bind_start_step(encoder);
         if (use32) {
           mtl_setArgs<2>(encoder, static_cast<int32_t>(stride));
         } else {
@@ -67,8 +67,9 @@ void arange_range_fill_mps(const Scalar& start, const Scalar& step, Tensor& resu
     const std::vector<int64_t> strides(result.strides().rbegin(), result.strides().rend());
     dispatch_sync_with_rethrow(stream->queue(), ^() {
       @autoreleasepool {
+        auto encoder = stream->commandEncoder();
         [encoder setComputePipelineState:pso];
-        bind_start_step();
+        bind_start_step(encoder);
         mtl_setArgs<2>(encoder, ndim, sizes, strides);
         mtl_dispatch1DJob(encoder, pso, static_cast<NSUInteger>(steps));
       }
@@ -200,7 +201,6 @@ Tensor& linspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
   }
 
   auto stream = getCurrentMPSStream();
-  auto encoder = stream->commandEncoder();
   const auto tname = scalarToMetalTypeString(result);
   const auto kernel_prefix = use_integral_kernel ? "linspace_integral_" : "linspace_";
 
@@ -211,6 +211,7 @@ Tensor& linspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
     auto pso = lib.getPipelineStateForFunc(kernel_prefix + tname + (use32 ? "_i32" : "_i64"));
     dispatch_sync_with_rethrow(stream->queue(), ^() {
       @autoreleasepool {
+        auto encoder = stream->commandEncoder();
         [encoder setComputePipelineState:pso];
         if (use32) {
           std::array<int32_t, 2> p{int32_t(steps), int32_t(stride)};
@@ -240,6 +241,7 @@ Tensor& linspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
     const auto steps32 = static_cast<uint32_t>(steps);
     dispatch_sync_with_rethrow(stream->queue(), ^() {
       @autoreleasepool {
+        auto encoder = stream->commandEncoder();
         [encoder setComputePipelineState:pso];
         if (use_integral_kernel) {
           mtl_setArgs(encoder, result, integral_params, steps32, ndim, sizes, strides);
@@ -287,7 +289,6 @@ Tensor& logspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
   const std::array<float, 4> vals{s, (e - s) / static_cast<float>(steps - 1), e, static_cast<float>(base)};
 
   auto stream = getCurrentMPSStream();
-  auto encoder = stream->commandEncoder();
   const auto tname = scalarToMetalTypeString(result);
   if (result.is_contiguous() || result.dim() == 1) {
     const auto stride = result.is_contiguous() ? 1 : result.stride(0);
@@ -296,6 +297,7 @@ Tensor& logspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
     auto pso = lib.getPipelineStateForFunc("logspace_" + tname + (use32 ? "_i32" : "_i64"));
     dispatch_sync_with_rethrow(stream->queue(), ^() {
       @autoreleasepool {
+        auto encoder = stream->commandEncoder();
         [encoder setComputePipelineState:pso];
         if (use32) {
           std::array<int32_t, 2> p{int32_t(steps), int32_t(stride)};
@@ -315,6 +317,7 @@ Tensor& logspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
     const auto steps32 = static_cast<uint32_t>(steps);
     dispatch_sync_with_rethrow(stream->queue(), ^() {
       @autoreleasepool {
+        auto encoder = stream->commandEncoder();
         [encoder setComputePipelineState:pso];
         mtl_setArgs(encoder, result, vals, steps32, ndim, sizes, strides);
         mtl_dispatch1DJob(encoder, pso, static_cast<NSUInteger>(steps));

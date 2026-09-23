@@ -5730,6 +5730,34 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         run(torch.rand(2, 10), torch.rand(2, 10))
         self.assertEqual(cnt.frame_count, 2)
 
+    @skipIfTorchDynamo()
+    @torch.fx.experimental._config.patch("backed_size_oblivious", True)
+    def test_backed_size_oblivious_expand_outplace_hint_one(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        operations = (
+            ("binary", lambda lhs, rhs: (torch.logical_and(lhs, rhs),)),
+            ("tensor_list", torch.broadcast_tensors),
+        )
+        for name, operation in operations:
+            with self.subTest(name=name):
+                shape_env = ShapeEnv(specialize_zero_one=False)
+                s0 = create_symint(
+                    shape_env,
+                    1,
+                    duck=False,
+                    do_not_specialize_zero_one=True,
+                )
+                with FakeTensorMode(shape_env=shape_env):
+                    lhs = torch.empty((s0, 8), dtype=torch.bool)
+                    rhs = torch.empty((1, 8), dtype=torch.bool)
+                    outputs = operation(lhs, rhs)
+
+                for output in outputs:
+                    self.assertIsInstance(output.shape[0], torch.SymInt)
+                    self.assertEqual(output.shape[0].node.expr, s0.node.expr)
+                self.assertEqual(shape_env.guards, [])
+
     @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
     def test_unbacked_view_extra(self):
         def fn(x):

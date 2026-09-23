@@ -3,20 +3,25 @@
 
 import os
 import tempfile
+from contextlib import contextmanager, nullcontext
+from dataclasses import FrozenInstanceError
 from unittest import mock
 
 from model_registry import ExampleCode, ModelWithKwargs, MultiMLP
 
 import torch
 import torch.distributed as dist
+import torch.distributed.pipelining._p2p as p2p_module
 import torch.distributed.pipelining.stage as stage_module
+from torch._dynamo.testing import CompileCounter
 from torch.distributed.pipelining import (
     build_stage,
     pipeline,
     PipelineStage,
+    PipelineStageInfo,
     ScheduleGPipe,
 )
-from torch.distributed.pipelining._utils import PipeliningMetadataError
+from torch.distributed.pipelining._utils import InferenceMode, PipeliningMetadataError
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     requires_accelerator_dist_backend,
@@ -42,6 +47,27 @@ backend = dist.get_default_backend_for_device(device_type)
 torch.manual_seed(0)
 
 
+@contextmanager
+def single_rank_process_group():
+    """Provide a temporary local process group for stage unit tests."""
+    init_pg = not dist.is_initialized()
+    if not init_pg and dist.get_world_size() != 1:
+        raise RuntimeError("pipeline stage unit tests require a single-rank group")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        if init_pg:
+            dist.init_process_group(
+                "gloo",
+                init_method=f"file://{os.path.join(tmpdir, 'pg')}",
+                rank=0,
+                world_size=1,
+            )
+        try:
+            yield
+        finally:
+            if init_pg:
+                dist.destroy_process_group()
+
+
 class PipelineStageBackendWarningTest(TestCase):
     @parametrize(
         "backend,should_warn",
@@ -50,9 +76,9 @@ class PipelineStageBackendWarningTest(TestCase):
     def test_eager_nccl_warning(self, backend, should_warn):
         with (
             mock.patch.object(dist, "get_backend", return_value=backend),
-            mock.patch.object(stage_module, "warning_once") as warning,
+            mock.patch.object(p2p_module, "warning_once") as warning,
         ):
-            stage_module._warn_if_eager_nccl(None)
+            p2p_module._warn_if_eager_nccl(None)
 
         if should_warn:
             warning.assert_called_once()
@@ -64,6 +90,70 @@ instantiate_parametrized_tests(PipelineStageBackendWarningTest)
 
 
 class PipelineStageMetadataInferenceTest(TestCase):
+    def test_metadata_p2p_uses_directed_edge_groups(self):
+        with single_rank_process_group():
+            stage = PipelineStage(
+                torch.nn.Identity(),
+                stage_index=0,
+                num_stages=2,
+                device=torch.device("cpu"),
+            )
+            send_group = mock.MagicMock()
+            recv_group = mock.MagicMock()
+            stage.p2p_per_edge = True
+            stage.stage_index_to_group_rank = {0: 0, 1: 1}
+            stage._p2p_edge_groups = {
+                (0, 1): send_group,
+                (1, 0): recv_group,
+            }
+
+            with (
+                mock.patch.object(stage, "_resolve_peer_global_rank", return_value=1),
+                mock.patch.object(dist, "send_object_list") as send,
+                mock.patch.object(dist, "recv_object_list") as recv,
+            ):
+                stage._send_meta(object(), dst_stage=1)
+                stage._recv_meta(src_stage=1)
+
+            self.assertIs(send.call_args.kwargs["group"], send_group)
+            self.assertIs(recv.call_args.kwargs["group"], recv_group)
+
+    def test_recv_metadata_reinit_rejects_owned_buffers(self):
+        with single_rank_process_group():
+            activation = torch.ones(1, requires_grad=True)
+            forward_stage = PipelineStage(
+                torch.nn.Identity(),
+                stage_index=1,
+                num_stages=2,
+                device=torch.device("cpu"),
+                input_args=activation,
+                output_args=activation,
+            )
+            forward_stage._inference_mode = InferenceMode.STATIC
+            forward_stage._prepare_forward_infra(1, None)
+            forward_stage.args_recv_info[0][0].allocate_buffer("cpu")
+            with self.assertRaisesRegex(
+                PipeliningMetadataError, "incomplete pipeline step"
+            ):
+                forward_stage._prepare_forward_infra(1, None)
+
+            backward_stage = PipelineStage(
+                torch.nn.Identity(),
+                stage_index=0,
+                num_stages=2,
+                device=torch.device("cpu"),
+                input_args=activation,
+                output_args=activation,
+            )
+            backward_stage._inference_mode = InferenceMode.STATIC
+            backward_stage._prepare_forward_infra(1, (activation,))
+            backward_stage._prepare_backward_infra(1)
+            backward_stage.grad_recv_info[0][0].allocate_buffer("cpu")
+            with self.assertRaisesRegex(
+                PipeliningMetadataError, "incomplete pipeline step"
+            ):
+                backward_stage._prepare_backward_infra(1)
+
     def test_dynamic_metadata_inference_restores_module_buffers(self):
         class BufferMutatingModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -86,44 +176,195 @@ class PipelineStageMetadataInferenceTest(TestCase):
                 return grad
 
         device = torch.device("cpu")
-        init_pg = not dist.is_initialized()
-        with tempfile.TemporaryDirectory() as tmpdir:
-            if init_pg:
-                dist.init_process_group(
-                    "gloo",
-                    init_method=f"file://{os.path.join(tmpdir, 'pg')}",
-                    rank=0,
-                    world_size=1,
-                )
-            try:
-                mod = BufferMutatingModule().to(device)
-                stage = PipelineStage(
-                    mod,
-                    stage_index=0,
-                    num_stages=1,
-                    device=device,
-                )
-                schedule = ScheduleGPipe(
-                    stage,
-                    n_microbatches=1,
-                    loss_fn=lambda out, target: out.sum() + target.sum() * 0,
-                )
+        with single_rank_process_group():
+            mod = BufferMutatingModule().to(device)
+            stage = PipelineStage(
+                mod,
+                stage_index=0,
+                num_stages=1,
+                device=device,
+            )
+            schedule = ScheduleGPipe(
+                stage,
+                n_microbatches=1,
+                loss_fn=lambda out, target: out.sum() + target.sum() * 0,
+            )
 
-                initial_counter = mod.counter.clone()
-                initial_scale = mod.scale.clone()
-                x = torch.randn(2, 4, device=device, requires_grad=True)
-                target = torch.zeros((), device=device)
+            initial_counter = mod.counter.clone()
+            initial_scale = mod.scale.clone()
+            x = torch.randn(2, 4, device=device, requires_grad=True)
+            target = torch.zeros((), device=device)
 
-                # This exercises the full metadata-inference lifecycle. The
-                # scale buffer is saved by autograd, so restoring buffers before
-                # backward metadata inference would bump its version counter.
-                schedule._initialize_stage((x,), {}, target=target)
+            # This exercises the full metadata-inference lifecycle. The
+            # scale buffer is saved by autograd, so restoring buffers before
+            # backward metadata inference would bump its version counter.
+            schedule._initialize_stage((x,), {}, target=target)
 
-                self.assertEqual(mod.counter, initial_counter)
-                self.assertEqual(mod.scale, initial_scale)
-            finally:
-                if init_pg:
-                    dist.destroy_process_group()
+            self.assertEqual(mod.counter, initial_counter)
+            self.assertEqual(mod.scale, initial_scale)
+
+
+class PipelineStageForwardContextTest(TestCase):
+    @parametrize(
+        "registered,static_metadata",
+        [(False, False), (False, True), (True, False), (True, True)],
+    )
+    def test_forward_context(self, registered, static_metadata):
+        class StrictModule(torch.nn.Module):
+            def forward(self, x, *, scale):
+                return x * scale
+
+        with single_rank_process_group():
+            module = StrictModule()
+            x = torch.ones(2, requires_grad=True)
+            scale = torch.full((2,), 3.0, requires_grad=True)
+            stage_kwargs = (
+                {
+                    "input_args": torch.ones(1, requires_grad=True),
+                    "output_args": torch.ones(1, requires_grad=True),
+                }
+                if static_metadata
+                else {}
+            )
+            stage = PipelineStage(module, 0, 1, torch.device("cpu"), **stage_kwargs)
+            events: list[tuple[str, PipelineStageInfo]] = []
+
+            @contextmanager
+            def forward_context(info):
+                events.append(("enter", info))
+                try:
+                    yield
+                finally:
+                    events.append(("exit", info))
+
+            if registered:
+                stage.register_forward_context(forward_context)
+            schedule = ScheduleGPipe(
+                stage,
+                2,
+                loss_fn=lambda output, target: (output - target).square().sum(),
+                scale_grads=False,
+            )
+
+            info_patch = (
+                mock.patch.object(
+                    stage_module,
+                    "PipelineStageInfo",
+                    side_effect=AssertionError("unexpected stage info construction"),
+                )
+                if not registered
+                else nullcontext()
+            )
+            with info_patch:
+                output = schedule.step(x, scale=scale, target=torch.zeros(2))
+
+            self.assertEqual(output, x * scale)
+            self.assertEqual(x.grad, torch.full_like(x, 18))
+            self.assertEqual(scale.grad, torch.full_like(scale, 6))
+            if not registered:
+                self.assertEqual(events, [])
+                return
+
+            expected = [
+                PipelineStageInfo(stage_index=0, microbatch_index=0),
+                PipelineStageInfo(stage_index=0, microbatch_index=1),
+            ]
+            if not static_metadata:
+                expected.insert(
+                    0,
+                    PipelineStageInfo(
+                        stage_index=0,
+                        microbatch_index=0,
+                        is_metadata_inference=True,
+                    ),
+                )
+            self.assertEqual(
+                events,
+                [(phase, info) for info in expected for phase in ("enter", "exit")],
+            )
+            with self.assertRaises(FrozenInstanceError):
+                expected[0].__setattr__("stage_index", 1)
+            self.assertFalse(hasattr(expected[0], "__dict__"))
+
+    def test_forward_context_lifecycle_and_exceptions(self):
+        class RaisingModule(torch.nn.Module):
+            def forward(self, x):
+                raise ValueError("module failure")
+
+        with single_rank_process_group():
+            stage = PipelineStage(RaisingModule(), 0, 1, torch.device("cpu"))
+            events = []
+
+            @contextmanager
+            def forward_context(info):
+                events.append(("enter", info))
+                try:
+                    yield
+                finally:
+                    events.append(("exit", info))
+
+            handle = stage.register_forward_context(forward_context)
+            with self.assertRaisesRegex(RuntimeError, "already registered"):
+                stage.register_forward_context(forward_context)
+            with self.assertRaisesRegex(RuntimeError, "failed to run forward"):
+                stage.forward_one_chunk(0, (torch.ones(1),))
+            self.assertEqual([event[0] for event in events], ["enter", "exit"])
+
+            handle.remove()
+            replacement = stage.register_forward_context(forward_context)
+            replacement.remove()
+
+            @contextmanager
+            def suppressing_context(info):
+                try:
+                    yield
+                except ValueError:
+                    pass
+
+            stage.register_forward_context(suppressing_context)
+            with self.assertRaisesRegex(RuntimeError, "failed to run forward") as error:
+                stage.forward_one_chunk(1, (torch.ones(1),))
+            self.assertRegex(str(error.exception.__cause__), "must not suppress")
+
+    def test_forward_context_wraps_compiled_module(self):
+        class StrictModule(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        with single_rank_process_group():
+            counter = CompileCounter()
+            self.addCleanup(torch._dynamo.reset)
+            module = torch.compile(StrictModule(), backend=counter, fullgraph=True)
+            stage = PipelineStage(
+                module,
+                0,
+                1,
+                torch.device("cpu"),
+                input_args=torch.ones(1),
+                output_args=torch.ones(1),
+            )
+            observed = []
+
+            @contextmanager
+            def forward_context(info):
+                observed.append(info)
+                yield
+
+            stage.register_forward_context(forward_context)
+            output = ScheduleGPipe(stage, 2).step(torch.ones(2))
+
+            self.assertEqual(output, torch.full((2,), 2.0))
+            self.assertEqual(counter.frame_count, 1)
+            self.assertEqual(
+                observed,
+                [
+                    PipelineStageInfo(stage_index=0, microbatch_index=0),
+                    PipelineStageInfo(stage_index=0, microbatch_index=1),
+                ],
+            )
+
+
+instantiate_parametrized_tests(PipelineStageForwardContextTest)
 
 
 def get_dtype_change_hook(new_dtype):
@@ -187,6 +428,14 @@ class StageTest(MultiProcContinuousTest):
             self.rank,
             self.device,
         )
+        observed = []
+
+        @contextmanager
+        def forward_context(info):
+            observed.append(info)
+            yield
+
+        stage.register_forward_context(forward_context)
 
         # Attach to a schedule
         schedule = ScheduleGPipe(stage, chunks)
@@ -203,6 +452,16 @@ class StageTest(MultiProcContinuousTest):
         if self.rank == self.world_size - 1:
             ref_out = mod(x)
             torch.testing.assert_close(out, ref_out, atol=1e-3, rtol=5e-2)
+        self.assertEqual(
+            observed,
+            [
+                PipelineStageInfo(
+                    stage_index=self.rank,
+                    microbatch_index=microbatch_index,
+                )
+                for microbatch_index in range(chunks)
+            ],
+        )
 
         # Test qualname mapping
         submod_keys = stage.submod.state_dict().keys()

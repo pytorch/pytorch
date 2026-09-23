@@ -12,6 +12,7 @@ import expecttest
 import torch
 from torch._C._profiler import _ExtraFields_PyCall, _ExtraFields_PyCCall
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_ARM64,
     IS_WINDOWS,
     run_tests,
@@ -231,8 +232,7 @@ class ProfilerTree:
                     raise AssertionError(f"{parent_name} vs. {caller_name}")
 
 
-@unittest.skipIf(IS_ARM64, "Not working on ARM")
-class TestProfilerTree(TestCase):
+class _TestProfilerTreeBase(TestCase):
     def assertTreesMatch(self, actual: str, expected: str, allow_failure: bool = False):
         # Warning: Here be dragons
         #   Different platforms will have subtly different behavior for Python
@@ -275,15 +275,18 @@ class TestProfilerTree(TestCase):
                 else:
                     raise
 
+
+@unittest.skipIf(IS_ARM64, "Not working on ARM")
+class TestProfilerTree(_TestProfilerTreeBase):
+    hw_classification = HardwareClassification.GENERIC
+
     # TODO: Add logic for CUDA version of test
     @ProfilerTree.test
-    @unittest.skipIf(
-        torch.cuda.is_available() or torch.xpu.is_available(),
-        "Test not working for CUDA and XPU",
-    )
     def test_profiler_experimental_tree(self):
         t1, t2 = torch.ones(1, requires_grad=True), torch.ones(1, requires_grad=True)
-        with torch.profiler.profile() as p:
+        with torch.profiler.profile(
+            activities=[torch.profiler.ProfilerActivity.CPU]
+        ) as p:
             z = torch.add(t1, t2)
             y = torch.ones(1)
             loss = (y - z) ** 2
@@ -335,12 +338,10 @@ class TestProfilerTree(TestCase):
 
     # TODO: Add logic for CUDA version of test
     @ProfilerTree.test
-    @unittest.skipIf(
-        torch.cuda.is_available() or torch.xpu.is_available(),
-        "Test not working for CUDA and XPU",
-    )
     def test_profiler_experimental_tree_with_record_function(self):
-        with torch.profiler.profile() as p:
+        with torch.profiler.profile(
+            activities=[torch.profiler.ProfilerActivity.CPU]
+        ) as p:
             with torch.autograd.profiler.record_function("Top level Annotation"):
                 with torch.autograd.profiler.record_function("First Annotation"):
                     x = torch.ones((1,), requires_grad=True)
@@ -388,13 +389,11 @@ class TestProfilerTree(TestCase):
 
     # TODO: Add logic for CUDA version of test
     @ProfilerTree.test
-    @unittest.skipIf(
-        torch.cuda.is_available() or torch.xpu.is_available(),
-        "Test not working for CUDA and XPU",
-    )
     def test_profiler_experimental_tree_with_memory(self):
         t1, t2 = torch.ones(1, requires_grad=True), torch.ones(1, requires_grad=True)
-        with torch.profiler.profile(profile_memory=True) as p:
+        with torch.profiler.profile(
+            activities=[torch.profiler.ProfilerActivity.CPU], profile_memory=True
+        ) as p:
             z = torch.add(t1, t2)
             y = torch.ones(1)
             loss = (y - z) ** 2
@@ -786,6 +785,11 @@ class TestProfilerTree(TestCase):
                 torch/profiler/profiler.py(...): stop
                   ...""",
         )
+
+
+@unittest.skipIf(IS_ARM64, "Not working on ARM")
+class TestProfilerTreeCUDA(_TestProfilerTreeBase):
+    hw_classification = HardwareClassification.CUDA
 
     @unittest.skip("https://github.com/pytorch/pytorch/issues/83606")
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")

@@ -7,13 +7,7 @@
 import math
 import os
 from enum import auto, Enum
-from typing import (
-    _eval_type,  # pyrefly: ignore [missing-module-attribute]
-    Any,
-    Generic,
-    NamedTuple,
-    TypeVar,
-)
+from typing import Any, Generic, get_type_hints, NamedTuple, TypeVar
 
 from torch.distributed.flight_recorder.components.fr_logger import FlightRecorderLogger
 
@@ -56,7 +50,7 @@ class TypeInfo(NamedTuple):
             name = str(c)
         return cls(
             name,
-            [(f, _eval_type(c.__annotations__[f], globals(), {})) for f in c._fields],
+            [(f, t) for f, t in get_type_hints(c).items() if f in c._fields],
         )
 
 

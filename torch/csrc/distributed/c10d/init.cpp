@@ -4348,6 +4348,21 @@ Returns:
               "perform_nocolor_split",
               &::c10d::nccl2::ProcessGroupNCCL::performNocolorSplit)
           .def_property_readonly(
+              "comm_ptr",
+              &::c10d::nccl2::ProcessGroupNCCL::getCommPtr,
+              R"(
+            This process group's ``ncclComm_t``, as an opaque handle.
+
+            The process group holds a single communicator, created in its
+            constructor, so the value does not depend on the current device.
+
+            .. warning ::
+                The communicator is owned by the process group. Do not modify
+                or free it. Collectives launched into it from outside the
+                process group are not monitored by the watchdog, so check the
+                communicator's readiness before launching any.
+            )")
+          .def_property_readonly(
               "options",
               &::c10d::nccl2::ProcessGroupNCCL::getBackendOptions,
               R"(Return the options used to create this ProcessGroupNCCL2 instance.)");

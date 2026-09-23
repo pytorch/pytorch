@@ -23,16 +23,14 @@ from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import distribute_tensor, DTensor, Shard
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
+    DTensorContinuousTestBase,
     skip_if_lt_x_gpu,
     with_comms,
 )
 
 
-class TestStateDictUtils(DTensorTestBase):
-    @property
-    def world_size(self):
-        return min(4, torch.accelerator.device_count())
+class TestStateDictUtils(DTensorContinuousTestBase):
+    world_size = min(4, torch.accelerator.device_count())
 
     @with_comms
     @skip_if_lt_x_gpu(2)
