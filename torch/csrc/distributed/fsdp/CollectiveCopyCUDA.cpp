@@ -44,6 +44,10 @@ void all_gather_copy_out_cuda(
     int64_t num_chunks) {
   const bool needs_resize = check_all_gather_copy_out_inputs(
       out, input, split_sizes, outer_sizes, num_chunks);
+  if (!input.is_contiguous()) {
+    all_gather_copy_out(out, input, split_sizes, outer_sizes, num_chunks);
+    return;
+  }
   if (needs_resize) {
     if (std::all_of(
             outer_sizes.begin(), outer_sizes.end(), [](int64_t outer_size) {
@@ -186,8 +190,9 @@ at::Tensor& reduce_scatter_copy_in_cuda(
   }
   const c10::cuda::CUDAGuard device_guard(out.device());
   const auto src_dtype = tensors[0].scalar_type();
-  bool fast_path = src_dtype == out.scalar_type() ||
-      (src_dtype == at::kBFloat16 && out.scalar_type() == at::kFloat);
+  bool fast_path = out.is_contiguous() &&
+      (src_dtype == out.scalar_type() ||
+       (src_dtype == at::kBFloat16 && out.scalar_type() == at::kFloat));
   for (const auto& tensor : tensors) {
     fast_path &= tensor.is_contiguous();
   }
