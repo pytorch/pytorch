@@ -2458,8 +2458,11 @@ def generic_getattr(
     if obj.is_tensor() and name == "_grad":
         name = "grad"
 
-    # Side effects: check for pending attribute mutations.
-    if tx.output.side_effects.has_pending_mutation_of_attr(obj, name):
+    # Side effects: check for pending attribute mutations. The cell_contents
+    # getter reads its own pending mutation and raises for an emptied cell.
+    if tx.output.side_effects.has_pending_mutation_of_attr(
+        obj, name
+    ) and not isinstance(obj, variables.CellVariable):
         if not isinstance(obj, variables.UserDefinedObjectVariable):
             return tx.output.side_effects.load_attr(obj, name)
         if tx.output.side_effects.has_pending_mutation_of_attr(

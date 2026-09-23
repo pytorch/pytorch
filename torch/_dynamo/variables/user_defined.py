@@ -1468,6 +1468,20 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 args[1],
                 source=self.source,
             )
+        elif self.value is types.CellType:
+            # cell_new: https://github.com/python/cpython/blob/v3.13.0/Objects/cellobject.c#L23
+            if kwargs:
+                raise_type_error(tx, "cell() takes no keyword arguments")
+            if len(args) > 1:
+                raise_type_error(
+                    tx, f"cell expected at most 1 argument, got {len(args)}"
+                )
+            cell = tx.output.side_effects.track_cell_new()
+            # Store DeletedVariable for an empty cell so an escaping cell is
+            # replayed empty, not holding make_cell()'s None.
+            contents = args[0] if args else variables.DeletedVariable()
+            tx.output.side_effects.store_cell(cell, contents)
+            return cell
         elif self.value is weakref.ref:
             if len(args) > 1:
                 callback = args[1]
