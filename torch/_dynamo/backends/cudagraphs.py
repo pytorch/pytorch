@@ -29,6 +29,7 @@ from typing import Any
 
 import torch
 import torch.fx
+import torch._inductor.graph_tree_backend as tree_backend
 from torch._dynamo import config
 from torch._dynamo.backends.common import aot_autograd
 from torch._dynamo.backends.debugging import boxed_nop
@@ -136,8 +137,11 @@ def check_for_skip(aot_model: torch.fx.GraphModule, num_fixed: int) -> str | Non
 
 def get_device_index(gm: torch.fx.GraphModule) -> int:
     device = next(iter(get_device_node_mapping(gm)))
-    if device.type != "cuda":
-        raise AssertionError(f"Expected CUDA device, got {device.type}")
+    expected_device_type = tree_backend.get_device_type()
+    if device.type != expected_device_type:
+        raise AssertionError(
+            f"Expected {expected_device_type} device, got {device.type}"
+        )
     return device.index
 
 
@@ -265,7 +269,9 @@ class CudagraphsBackend:
 
 # aot_cudagraphs only applies CUDA graphs to the graph.  It is also helpful
 # for debugging and can serve as a perf baseline.
-register_backend(name="cudagraphs", compiler_fn=CudagraphsBackend())
+_cudagraphs_backend = CudagraphsBackend()
+register_backend(name="cudagraphs", compiler_fn=_cudagraphs_backend)
+register_backend(name="acceleratorgraphs", compiler_fn=_cudagraphs_backend)
 
 
 def cudagraphs_inner(

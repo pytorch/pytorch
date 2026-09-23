@@ -406,8 +406,8 @@ def register_graphsafe_rng_dispatch(dispatch_key: "DispatchKey") -> None:
     graphsafe_run_with_rng_state.py_impl(dispatch_key)(_impl_graphsafe_rng)
 
 
-# Register CUDA as a graphsafe RNG device by default
 register_graphsafe_rng_dispatch(DispatchKey.CUDA)
+register_graphsafe_rng_dispatch(DispatchKey.XPU)
 
 
 # Late-bind CustomClassBaseMeta as Generator's metaclass. This is done here
