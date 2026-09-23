@@ -1855,6 +1855,37 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         with self.assertRaises(torch._dynamo.exc.Unsupported):
             torch.compile(fn, backend="eager", fullgraph=True)()
 
+    def test_builtin_type_getattr_missing_attr_issue_198197(self):
+        def has(obj, name):
+            try:
+                getattr(obj, name)
+            except AttributeError:
+                return None
+            else:
+                return 1
+
+        def fn(x):
+            results = [
+                has(int, "__nonexistent__"),
+                has(str, "__nonexistent__"),
+                has(list, "__nonexistent__"),
+                has(dict, "__nonexistent__"),
+                has(type, "__nonexistent__"),
+                has(object, "__nonexistent__"),
+                has(float, "__nonexistent__"),
+                has(bool, "__nonexistent__"),
+                has(tuple, "__nonexistent__"),
+                has(set, "__nonexistent__"),
+            ]
+            all_none = all(r is None for r in results)
+            return torch.cos(x) if all_none else torch.sin(x)
+
+        x = torch.randn(4)
+        expected = fn(x)
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        actual = compiled_fn(x)
+        self.assertTrue(torch.allclose(actual, expected))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
