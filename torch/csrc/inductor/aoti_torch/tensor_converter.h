@@ -23,4 +23,15 @@ TORCH_API std::vector<at::Tensor> alloc_tensors_by_stealing_from_handles(
     AtenTensorHandle* handles,
     size_t length);
 
+// free_unstolen_handles frees any handles a stealing callee did not take. A
+// stealing run (the generated model.so, or
+// alloc_tensors_by_stealing_from_handles) nulls each slot it takes ownership
+// of, so this is safe to run on every exit of a run path: after a fully
+// successful, fully stealing run every slot is null and this is a no-op; if the
+// run throws before stealing, it releases the un-stolen handles instead of
+// leaking their tensor storage.
+//
+// WARNING: Can NOT be called in model.so
+TORCH_API void free_unstolen_handles(std::vector<AtenTensorHandle>& handles);
+
 } // namespace torch::aot_inductor

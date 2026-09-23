@@ -70,15 +70,15 @@ def patch_allreduce(new_allreduce):
 @contextlib.contextmanager
 def patch_reduce_scatter(new_reduce_scatter):
     """
-    Patches dist.reduce_scatter_tensor with a new reduce_scatter_tensor and
+    Patches dist.reduce_scatter_single with a new reduce_scatter_tensor and
     restores upon exiting.
     """
-    orig_reduce_scatter = dist.reduce_scatter_tensor
-    dist.reduce_scatter_tensor = new_reduce_scatter
+    orig_reduce_scatter = dist.reduce_scatter_single
+    dist.reduce_scatter_single = new_reduce_scatter
     try:
         yield
     finally:
-        dist.reduce_scatter_tensor = orig_reduce_scatter
+        dist.reduce_scatter_single = orig_reduce_scatter
 
 
 class MyModel(nn.Module):
@@ -312,7 +312,7 @@ class TestFSDPHybridShard(FSDPTestContinuous):
         self.assertEqual(1, len(inter_node_pgs))
 
         orig_ar = dist.all_reduce
-        orig_rs = dist.reduce_scatter_tensor
+        orig_rs = dist.reduce_scatter_single
 
         def patched_collective(orig_collective, counter, *args, **kwargs):
             counter[orig_collective] += 1

@@ -40,6 +40,7 @@ See {ref}`Linear Algebra Stability` for some common numerical edge-cases.
 
     cholesky
     qr
+    polar
     lu
     lu_factor
     eig
@@ -86,6 +87,7 @@ See {ref}`Linear Algebra Stability` for some common numerical edge-cases.
     :nosignatures:
 
     matrix_exp
+    matrix_sqrth
     matrix_power
 ```
 

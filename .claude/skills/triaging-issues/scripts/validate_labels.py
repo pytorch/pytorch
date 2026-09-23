@@ -43,6 +43,9 @@ FORBIDDEN_PATTERNS = [
 FORBIDDEN_EXACT = [
     "actionable",
     "merge blocking",
+    "needs design",
+    "needs reproduction",
+    "needs research",
     "oncall: releng",  # Not a triage redirect target; use module: ci instead
 ]
 
@@ -203,12 +206,17 @@ def main():
             )
 
         if not clean_labels:
-            debug_log("No valid labels remain after filtering, blocking")
+            # Blocking here would abandon triage entirely: the model retries, gets
+            # blocked again, and gives up, so the issue keeps no status label and the
+            # post-hook that stamps 'bot-triaged' never runs. Fall back to flagging it
+            # for a human, matching what the forbidden-label branch above already does.
+            debug_log("No valid labels remain after filtering, using 'triage review'")
+            clean_labels = ["triage review"]
             print(
-                "All requested labels were invalid. No labels to apply.",
+                "All requested labels were filtered out. "
+                "Applying 'triage review' for human attention.",
                 file=sys.stderr,
             )
-            sys.exit(2)
 
         existing_labels = fetch_existing_labels(owner, repo, issue_number)
         debug_log(f"Existing labels on issue: {existing_labels}")

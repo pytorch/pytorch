@@ -17,6 +17,19 @@ inline namespace CPU_CAPABILITY {
 
 #if defined(CPU_CAPABILITY_SVE256)
 
+#if defined(TORCH_INDUCTOR_PRECOMPILE_HEADERS) && defined(__GNUC__) && \
+    !defined(__clang__) &&                                             \
+    ((__GNUC__ == 14 && __GNUC_MINOR__ < 4) ||                         \
+     (__GNUC__ == 15 && __GNUC_MINOR__ < 3))
+// GCC 14/15 can ICE when compiling AArch64 SVE intrinsics with PCH enabled
+// (GCC PR target/123457). The fix is expected in GCC 14.4 and 15.3, and is
+// backported to only some 14.3 and 15.2 packages, so conservatively guard by
+// upstream minor version.
+#define VEC_INT_SVE_GCC_PCH_ICE_WORKAROUND __attribute__((optimize("O0")))
+#else
+#define VEC_INT_SVE_GCC_PCH_ICE_WORKAROUND
+#endif
+
 #define VEC_INT_SVE_TEMPLATE(vl, bit)                                         \
   template <>                                                                 \
   struct is_vec_specialized_for<int##bit##_t> : std::bool_constant<true> {};  \
@@ -181,7 +194,8 @@ inline namespace CPU_CAPABILITY {
     return svsub_s##bit##_x(ptrue, a, b);                                     \
   }                                                                           \
   template <>                                                                 \
-  Vectorized<int##bit##_t> inline operator*(                                  \
+  VEC_INT_SVE_GCC_PCH_ICE_WORKAROUND Vectorized<int##bit##_t> inline          \
+  operator*(                                                                  \
       const Vectorized<int##bit##_t>& a, const Vectorized<int##bit##_t>& b) { \
     return svmul_s##bit##_x(ptrue, a, b);                                     \
   }                                                                           \
@@ -279,14 +293,14 @@ Vectorized<T> inline intdiv_nosve(
 }
 
 template <>
-Vectorized<int64_t> inline operator/(
+VEC_INT_SVE_GCC_PCH_ICE_WORKAROUND Vectorized<int64_t> inline operator/(
     const Vectorized<int64_t>& a,
     const Vectorized<int64_t>& b) {
   return svdiv_s64_x(ptrue, a, b);
 }
 
 template <>
-Vectorized<int32_t> inline operator/(
+VEC_INT_SVE_GCC_PCH_ICE_WORKAROUND Vectorized<int32_t> inline operator/(
     const Vectorized<int32_t>& a,
     const Vectorized<int32_t>& b) {
   return svdiv_s32_x(ptrue, a, b);
@@ -492,6 +506,8 @@ Vectorized<int8_t> inline operator>>(
     const Vectorized<int8_t>& b) {
   return svasr_s8_x(ptrue, a, svreinterpret_u8_s8(b));
 }
+
+#undef VEC_INT_SVE_GCC_PCH_ICE_WORKAROUND
 
 #endif // defined(CPU_CAPABILITY_SVE256)
 
