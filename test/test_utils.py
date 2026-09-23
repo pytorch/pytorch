@@ -1005,6 +1005,10 @@ class TestTorchPathResolution(TestCase):
                 self.assertEqual(installed_torch_dir(checkout), spec_dir)
             with mock.patch.object(torch, "__loader__", types.SimpleNamespace()):
                 self.assertEqual(installed_torch_dir(checkout), spec_dir)
+            # A raising finder must not take `import torch` down with it.
+            err = mock.patch("importlib.util.find_spec", side_effect=ImportError)
+            with mock.patch.object(torch, "__loader__", types.SimpleNamespace()), err:
+                self.assertIsNone(installed_torch_dir(checkout))
 
     def test_stale_checkout_artifacts(self):
         with tempfile.TemporaryDirectory() as root:
@@ -1040,6 +1044,8 @@ class TestTorchPathResolution(TestCase):
 class TestCppExtensionUtils(TestCase):
     @unittest.skipIf(IS_FBCODE, "CMake package files are not shipped in fbcode")
     def test_cmake_prefix_path(self):
+        # TorchConfig.cmake ships only with libtorch; a BUILD_LIBTORCHLESS build
+        # (no CI job runs one) has no share/cmake and would fail here.
         prefix = torch.utils.cmake_prefix_path
         config = os.path.join(prefix, "Torch", "TorchConfig.cmake")
         self.assertTrue(os.path.isfile(config), f"{config} does not exist")

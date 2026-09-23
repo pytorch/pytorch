@@ -78,7 +78,12 @@ def _installed_torch_dir(torch_dir: str) -> str | None:
             continue
         if os.path.isdir(os.path.join(path, "lib")):
             return os.path.abspath(path)
-    spec = importlib.util.find_spec("torch._C")
+    # A third-party meta path finder may raise here; this runs during
+    # `import torch`, so degrade to __file__ rather than fail the import.
+    try:
+        spec = importlib.util.find_spec("torch._C")
+    except Exception:
+        return None
     if spec is None or not spec.origin:
         return None
     return os.path.dirname(spec.origin)
