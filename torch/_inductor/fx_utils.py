@@ -824,6 +824,69 @@ def get_node_storage(node: torch.fx.Node) -> int | None:
     return get_storage(node.meta["val"])
 
 
+def _same_size_stride_and_storage_offset(
+    lhs: torch.Tensor,
+    rhs: torch.Tensor,
+    *,
+    skip_strides: bool = False,
+    skip_storage_offset: bool = False,
+) -> bool:
+    """Check size and requested layout metadata without adding guards."""
+
+    return (
+        statically_known_true(sym_eq(lhs.size(), rhs.size()))
+        and (skip_strides or statically_known_true(sym_eq(lhs.stride(), rhs.stride())))
+        and (
+            skip_storage_offset
+            or statically_known_true(sym_eq(lhs.storage_offset(), rhs.storage_offset()))
+        )
+    )
+
+
+def same_tensor_meta(
+    lhs: torch.Tensor | torch.fx.Node,
+    rhs: torch.Tensor | torch.fx.Node,
+    *,
+    skip_strides: bool = False,
+    skip_storage_offset: bool = False,
+) -> bool:
+    """Check equal tensor metadata without comparing storage identity.
+
+    FX nodes are compared through their ``meta["val"]`` values and do not match
+    unless both values are tensors. For strided tensors this compares size,
+    requested stride and storage-offset properties, dtype, device, layout, and
+    conjugate and negative view bits. For other layouts, only size and the common
+    dtype, device, layout, and view-bit properties are compared.
+    """
+    lhs_val: object = lhs.meta.get("val") if isinstance(lhs, torch.fx.Node) else lhs
+    rhs_val: object = rhs.meta.get("val") if isinstance(rhs, torch.fx.Node) else rhs
+    if not isinstance(lhs_val, torch.Tensor) or not isinstance(rhs_val, torch.Tensor):
+        return False
+
+    return (
+        lhs_val.dtype == rhs_val.dtype
+        and lhs_val.device == rhs_val.device
+        and lhs_val.layout == rhs_val.layout
+        and (
+            (
+                lhs_val.layout == torch.strided
+                and _same_size_stride_and_storage_offset(
+                    lhs_val,
+                    rhs_val,
+                    skip_strides=skip_strides,
+                    skip_storage_offset=skip_storage_offset,
+                )
+            )
+            or (
+                lhs_val.layout != torch.strided
+                and statically_known_true(sym_eq(lhs_val.size(), rhs_val.size()))
+            )
+        )
+        and lhs_val.is_conj() == rhs_val.is_conj()
+        and lhs_val.is_neg() == rhs_val.is_neg()
+    )
+
+
 def get_fake(x: Any, gm: torch.fx.GraphModule | None) -> Any:
     """Return a fake tensor from the meta values of an input FX node.  If the input node
     is a get_attr node, we attempt to resolve it as a member of gm."""
