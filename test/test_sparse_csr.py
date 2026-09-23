@@ -3786,7 +3786,8 @@ class TestSparseCompressedTritonKernels(TestCase):
             bsr_dense_mm(lhs, rhs.cpu())
         if torch.accelerator.device_count() > 1:
             with self.assertRaisesRegex(ValueError, "on the same accelerator"):
-                bsr_dense_mm(lhs.to("cuda:0"), rhs.to("cuda:1"))
+                device_type = torch.accelerator.current_accelerator().type
+                bsr_dense_mm(lhs.to(f"{device_type}:0"), rhs.to(f"{device_type}:1"))
         with self.assertRaisesRegex(ValueError, "all inputs are expected to be of the same dtype"):
             bsr_dense_mm(lhs, rhs.to(torch.float))
         with self.assertRaisesRegex(ValueError, r"and one of \(half, bfloat16, float32\)"):
