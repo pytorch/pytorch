@@ -4125,34 +4125,27 @@ cuspy_core.enable_hes_early()
 
     @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
     def test_cuspy_observer_registration_failure_is_graceful(self):
-        # If the per-cycle ProfilerObserver fails to register with Cuspy (an
-        # intermittent CUPTI condition), the profiler must degrade gracefully: with no
-        # observer / trace window, stop_trace and export_chrome_trace skip the trace instead
-        # of asserting and taking down the run.
         from torch.profiler._cuspy import core as cuspy_core
 
         cfg = _ExperimentalConfig(custom_profiler_config='{"backend":"cuspy"}')
-        with patch.object(
-            cuspy_core.Cuspy,
-            "register",
-            side_effect=RuntimeError("simulated observer registration failure"),
+        error = RuntimeError("simulated observer registration failure")
+        with (
+            patch.object(cuspy_core.Cuspy, "register", side_effect=error),
+            self.assertLogs(
+                "torch.profiler._cuspy.observers.base", level="WARNING"
+            ) as logs,
+            TemporaryFileName(mode="w+") as trace_path,
         ):
-            with TemporaryFileName(mode="w+") as trace_path:
-                # Exiting the profiler runs stop_trace -- it must not raise even though the
-                # observer never registered.
-                with profile(
-                    activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-                    experimental_config=cfg,
-                ) as prof:
-                    a = torch.randn(64, 64, device="cuda")
-                    _ = (a @ a).cpu()
-                    torch.cuda.synchronize()
-                # Registration failed -> observer unavailable, no trace window.
-                obs = prof._cuspy_profiler_observer
-                self.assertTrue(obs is None or not obs.available)
-                # Must skip the export rather than assert/crash.
-                prof.export_chrome_trace(trace_path)
-                prof.wait_for_exports()
+            with profile(
+                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                experimental_config=cfg,
+            ) as prof:
+                pass
+            obs = prof._cuspy_profiler_observer
+            self.assertTrue(obs is None or not obs.available)
+            prof.export_chrome_trace(trace_path)
+            prof.wait_for_exports()
+        self.assertIn(str(error), logs.output[0])
 
     @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")

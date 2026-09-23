@@ -924,7 +924,6 @@ libtorch_python_xpu_sources = [
     "torch/csrc/xpu/Event.cpp",
     "torch/csrc/xpu/Module.cpp",
     "torch/csrc/xpu/Stream.cpp",
-    "torch/csrc/xpu/XPUPluggableAllocator.cpp",
     "torch/csrc/xpu/memory_snapshot.cpp",
     "torch/csrc/xpu/MemPool.cpp",
     "torch/csrc/xpu/Graph.cpp",
@@ -932,7 +931,9 @@ libtorch_python_xpu_sources = [
     "torch/csrc/inductor/aoti_torch/shim_xpu.cpp",
 ]
 
-libtorch_xpu_sources = libtorch_python_xpu_sources
+libtorch_xpu_sources = libtorch_python_xpu_sources + [
+    "torch/csrc/xpu/XPUPluggableAllocator.cpp",
+]
 
 libtorch_python_core_sources = [
     "torch/csrc/DataLoader.cpp",
