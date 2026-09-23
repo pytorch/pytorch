@@ -45,6 +45,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_inductor_cache
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
+    onlyAccelerator,
     onlyCUDA,
     ops,
 )
@@ -698,9 +699,104 @@ if TEST_WITH_ROCM and getRocmVersion() >= (7, 14):
     del ROCM_UNARY_NUMERICAL_XFAILS["inductor_numerics"]["log10"]
 
 
+# XPU compiled-path numerics differ from CUDA/ROCm, so it needs its own xfail
+# lists. Only test_eager_equivalence runs on XPU (@onlyAccelerator); the other
+# property tests are @onlyCUDA and never execute here.
+XPU_EAGER_EQUIV_XFAILS = {
+    "aot_eager_decomp_partition": {
+        "nn.functional.gelu": {fp32},
+        "nn.functional.layer_norm": {fp32},
+        "nn.functional.linear": {fp32},
+        "softmax": {fp32},
+        "log_softmax": {fp32},
+    },
+    "inductor_default": {
+        "exp": {fp32},
+        "exp2": {fp32},
+        "expm1": {fp32},
+        "log1p": {fp32},
+        "log2": {fp32},
+        "sigmoid": {fp32},
+        "sub": {fp32},
+        "tan": {fp32},
+        "tanh": {fp32},
+        "nn.functional.gelu": {fp32},
+        "nn.functional.layer_norm": {fp32},
+        "nn.functional.linear": {fp32},
+        "nn.functional.silu": {fp32},
+        "softmax": {fp32},
+        "log_softmax": {fp32},
+    },
+    "inductor_numerics": {
+        "exp": {fp32},
+        "exp2": {fp32},
+        "expm1": {fp32},
+        "log1p": {fp32},
+        "log2": {fp32},
+        "sigmoid": {fp32},
+        "sub": {ALL},
+        "tan": {fp32},
+        "tanh": {fp32},
+        "nn.functional.gelu": {fp32},
+        "nn.functional.layer_norm": {fp32},
+        "nn.functional.linear": {fp32},
+        "nn.functional.rms_norm": {fp32},
+        "nn.functional.silu": {fp32},
+        "softmax": {fp32},
+        "log_softmax": {fp32},
+    },
+}
+
+# XPU compiled-path numerics differ from CUDA, so the determinism and numerical
+# property tests need XPU-specific xfail lists.
+XPU_DETERMINISM_XFAILS = {
+    "inductor_default": {},
+    "inductor_numerics": {},
+}
+
+XPU_UNARY_NUMERICAL_XFAILS = {
+    "inductor_default": {
+        "exp": {fp32},
+        "exp2": {fp32},
+        "log1p": {fp32},
+        "log2": {fp32},
+        "sigmoid": {fp32},
+        "tan": {fp32},
+        "tanh": {fp32},
+    },
+    "inductor_numerics": {
+        "exp": {fp32},
+        "exp2": {fp32},
+        "log1p": {fp32},
+        "log2": {fp32},
+        "sigmoid": {fp32},
+        "tan": {fp32},
+        "tanh": {fp32},
+    },
+}
+
+XPU_BINARY_NUMERICAL_XFAILS = {
+    "inductor_default": {},
+    "inductor_numerics": {},
+}
+
+XPU_XFAIL_DICTS = {
+    "eager_equivalence": XPU_EAGER_EQUIV_XFAILS,
+    "determinism": XPU_DETERMINISM_XFAILS,
+    "batch_invariance": BATCH_INVARIANCE_XFAILS,
+    "unary_numerical": XPU_UNARY_NUMERICAL_XFAILS,
+    "binary_numerical": XPU_BINARY_NUMERICAL_XFAILS,
+}
+
+
 def is_expected_failure(device_type, op_name, backend, test_type, dtype=None):
     """Check if a test is expected to fail."""
-    xfail_dicts = ROCM_XFAIL_DICTS if torch.version.hip is not None else XFAIL_DICTS
+    if device_type == "xpu":
+        xfail_dicts = XPU_XFAIL_DICTS
+    elif torch.version.hip is not None:
+        xfail_dicts = ROCM_XFAIL_DICTS
+    else:
+        xfail_dicts = XFAIL_DICTS
     xfails = set(xfail_dicts.get(test_type, {}).get(backend, {}).get(op_name, set()))
     # fbcode's Triton fork + cuBLAS/GPU stack differ from OSS CI, so some combos
     # fail the compiled-vs-eager numerics only in fbcode. Gate on IS_FBCODE (CUDA
@@ -964,7 +1060,7 @@ class TestOpInfoProperties(TestCase):
     # Run-to-Run Determinism Tests
     # =========================================================================
 
-    @onlyCUDA
+    @onlyAccelerator
     @skipIfTorchDynamo("Test uses dynamo already")
     @ops(llm_ops, allowed_dtypes=DTYPES)
     @parametrize("backend", BACKENDS)
@@ -1036,7 +1132,7 @@ class TestOpInfoProperties(TestCase):
     # Numerical Equivalence with Eager Mode Tests
     # =========================================================================
 
-    @onlyCUDA
+    @onlyAccelerator
     @skipIfTorchDynamo("Test uses dynamo already")
     @ops(llm_ops, allowed_dtypes=DTYPES)
     @parametrize("backend", BACKENDS)
@@ -1080,7 +1176,7 @@ class TestOpInfoProperties(TestCase):
     # Exhaustive/Sampled Unary Ufunc Tests
     # =========================================================================
 
-    @onlyCUDA
+    @onlyAccelerator
     @skipIfTorchDynamo("Test uses dynamo already")
     @ops(llm_unary_ops, allowed_dtypes=DTYPES)
     @parametrize("backend", BACKENDS)
@@ -1135,7 +1231,7 @@ class TestOpInfoProperties(TestCase):
     # Sampled Binary Ufunc Tests
     # =========================================================================
 
-    @onlyCUDA
+    @onlyAccelerator
     @skipIfTorchDynamo("Test uses dynamo already")
     @ops(llm_binary_ops, allowed_dtypes=DTYPES)
     @parametrize("backend", BACKENDS)
@@ -1177,7 +1273,9 @@ class TestOpInfoProperties(TestCase):
         )
 
 
-instantiate_device_type_tests(TestOpInfoProperties, globals(), except_for=["cpu"])
+instantiate_device_type_tests(
+    TestOpInfoProperties, globals(), except_for=["cpu"], allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()
