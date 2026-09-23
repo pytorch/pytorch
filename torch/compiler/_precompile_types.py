@@ -120,7 +120,7 @@ class PrecompileSummary:
             cannot serve it: a thin wrapper whose graphs all landed in an inner
             frame, a frame Dynamo gave up on, or a frame whose compile raised
             (its message is in ``capture_errors``, so one failure shows in both
-            digest clauses). A different cause and remedy from ``bypassed``,
+            digest clauses). A different cause from ``bypassed``,
             never the same frame; a frame that hit the recompile limit before it
             recorded a guarded code is in ``truncated`` too. Not a remainder:
             which frames count as a gap is the producer's decision, and a frame
