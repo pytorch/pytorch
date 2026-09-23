@@ -198,7 +198,10 @@ class B2BGEMMTest(TestCase):
         self.assertTrue("B2B_GEMM_LEFT_TRITON_ENTRANCE" not in code)
         self.assertTrue("B2B_GEMM_RIGHT_TRITON_ENTRANCE" not in code)
 
-    @torch._inductor.config.patch(b2b_gemm_pass=True)
+    @torch._inductor.config.patch(
+        b2b_gemm_pass=True,
+        **{"test_configs.autotune_choice_name_regex": r"^triton_b2b_gemm_left_"},
+    )
     def test_b2b_gemm_good_shape_dynamic_shapes(self):
         """Backed SymInts must not crash or specialize the compiled graph."""
 
@@ -210,14 +213,19 @@ class B2BGEMMTest(TestCase):
 
         backend = CompileCounterWithBackend("inductor")
         f_opt = torch.compile(f, backend=backend, dynamic=True)
-        for M, N, O, P in ((256, 32, 256, 32), (128, 16, 128, 16)):
+        for i, (M, N, O, P) in enumerate(((256, 32, 256, 32), (128, 16, 128, 16))):
             A = torch.randn((M, N), device=GPU_TYPE, dtype=torch.float16)
             B = torch.randn((N, O), device=GPU_TYPE, dtype=torch.float16)
             C = torch.randn((O, P), device=GPU_TYPE, dtype=torch.float16)
             # The original bug hard-errors in ceildiv via load_ratio_left with
             # an AssertionError for SymInt versus int; this must not be weakened
             # to only check that shapes do not specialize.
-            self.assertEqual(f_32(A, B, C), f_opt(A, B, C), atol=0.1, rtol=0.01)
+            if i == 0:
+                actual, codes = run_and_get_code(f_opt, A, B, C)
+                self.assertIn("B2B_GEMM_LEFT_TRITON_ENTRANCE", "\n".join(codes))
+            else:
+                actual = f_opt(A, B, C)
+            self.assertEqual(f_32(A, B, C), actual, atol=0.1, rtol=0.01)
 
         self.assertEqual(backend.frame_count, 1)
         self.assertGreater(counters["inductor"]["b2b_gemm"], 0)
