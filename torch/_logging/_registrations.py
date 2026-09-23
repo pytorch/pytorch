@@ -136,6 +136,21 @@ register_artifact(
     off_by_default=True,
 )
 register_artifact(
+    "post_lowering_inductor_ir",
+    "Prints a compact, human-readable form of the Inductor IR after lowering.",
+    off_by_default=True,
+)
+register_artifact(
+    "post_scheduler_inductor_ir",
+    "Prints a compact, human-readable form of the Inductor IR after scheduler nodes are built, before fusion.",
+    off_by_default=True,
+)
+register_artifact(
+    "post_fusion_inductor_ir",
+    "Prints a compact, human-readable form of the Inductor IR after fusion.",
+    off_by_default=True,
+)
+register_artifact(
     "compiled_autograd",
     "Prints various logs in compiled_autograd, including but not limited to the graphs. Useful for debugging compiled_autograd.",
     visible=True,
