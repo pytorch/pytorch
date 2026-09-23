@@ -1,4 +1,4 @@
-import os
+qimport os
 import sys
 from collections.abc import Callable
 from typing import Any, cast, Literal, TYPE_CHECKING
@@ -1058,9 +1058,23 @@ score_fusion_memory_threshold = 10
 fusion_memory_timeline_peak_memory_increase_gb: float | None = None
 fusion_memory_timeline_peak_memory_pct_threshold: float | None = None
 
-# For Triton Templates, select fastest of best template + epilogue vs best template + separate epilogue kernel
-benchmark_epilogue_fusion = (
-    os.environ.get("TORCHINDUCTOR_BENCHMARK_EPILOGUE_FUSION", "1") == "1"
+# Benchmark template choices with legal prologue or epilogue fusion by deferring
+# choice selection from lowering to scheduling, where fused and unfused
+# alternatives can be compared. pipeline_max_autotune_gemm may independently
+# defer selection without benchmarking fusion when this option is disabled.
+benchmark_template_fusion: bool = Config(
+    default=True,
+    env_name_default=[
+        "TORCHINDUCTOR_BENCHMARK_TEMPLATE_FUSION",
+        "TORCHINDUCTOR_BENCHMARK_EPILOGUE_FUSION",
+    ],
+)
+
+# Deprecated compatibility alias for benchmark_template_fusion.
+benchmark_epilogue_fusion: bool = Config(
+    alias="torch._inductor.config.benchmark_template_fusion",
+    deprecated=True,
+    deprecation_message="use benchmark_template_fusion instead",
 )
 
 # Take how many of the top triton kernels to benchmark epilogue
