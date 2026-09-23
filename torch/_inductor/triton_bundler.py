@@ -522,19 +522,18 @@ class TritonBundler:
             key="TritonBundler.read_and_emit", log_pt2_compile_event=True
         ):
             kernel_names: list[str] = []
-            untrusted_artifact_groups: OrderedSet[_BinaryArtifactGroup] = OrderedSet()
+            binary_resolutions = _BundledBinaryResolutions({}, OrderedSet())
             if config.use_static_triton_launcher and bundle.static_autotuners:
                 binary_index = _BundledBinaryIndex.from_bundle(bundle)
                 binary_resolutions = _BundledBinaryResolutions.from_autotuners(
                     bundle.static_autotuners, binary_index
                 )
-                untrusted_artifact_groups = binary_resolutions.untrusted_groups
 
             for artifacts in bundle.kernel_artifacts:
                 if (
                     artifacts.device,
                     artifacts.kernel_hash,
-                ) in untrusted_artifact_groups:
+                ) in binary_resolutions.untrusted_groups:
                     log.warning(
                         "Skipping untrusted bundled Triton cache group %s",
                         artifacts.kernel_hash,
