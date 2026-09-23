@@ -221,6 +221,41 @@ class TestStreamsGeneric(torch._dynamo.test_case.TestCase):
             self.assertNotIn(DeviceInterface.Stream, in_graph_classes)
             self.assertNotIn(DeviceInterface.Event, in_graph_classes)
 
+    def test_register_stream_variable_cls(self) -> None:
+        from torch._dynamo.variables.streams import (
+            CudaStreamVariable,
+            StreamVariable,
+            XpuStreamVariable,
+            _get_stream_variable_cls,
+            _stream_fn_to_variable_cls,
+            register_stream_variable_cls,
+        )
+
+        def fake_current_stream():
+            pass
+
+        class FakeStreamVariable(StreamVariable):
+            pass
+
+        class FakeStreamVariableV2(StreamVariable):
+            pass
+
+        get_cls = _get_stream_variable_cls
+        self.assertIs(get_cls(torch.cuda.current_stream), CudaStreamVariable)
+        self.assertIs(get_cls(torch.xpu.current_stream), XpuStreamVariable)
+        self.assertIsNone(get_cls(fake_current_stream))
+
+        with patch.dict(_stream_fn_to_variable_cls):
+            register_stream_variable_cls(fake_current_stream, FakeStreamVariable)
+            self.assertIs(get_cls(fake_current_stream), FakeStreamVariable)
+            # Re-registration overrides the previous mapping.
+            register_stream_variable_cls(fake_current_stream, FakeStreamVariableV2)
+            self.assertIs(get_cls(fake_current_stream), FakeStreamVariableV2)
+            self.assertIs(get_cls(torch.cuda.current_stream), CudaStreamVariable)
+            self.assertIs(get_cls(torch.xpu.current_stream), XpuStreamVariable)
+        # Scoped by patch.dict: the added entry is gone after the block.
+        self.assertIsNone(get_cls(fake_current_stream))
+
     def test_full_barrier_forward_deps_respect_partition(self) -> None:
         from torch._functorch._aot_autograd.streams import _collect_sync_forward_deps
 
