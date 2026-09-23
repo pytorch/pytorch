@@ -755,10 +755,6 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         raise NotImplementedError(
             "FlexGEMM block-scaled GEMMs do not yet support chunked output contractions"
         )
-    if output_contraction is not None and epilogue_args[len(mainloop_scale_nodes) :]:
-        raise NotImplementedError(
-            "FlexGEMM grouped main outputs do not yet support captured tensors"
-        )
     local_reduce_store = (
         None if outputs.local_reduce is None else outputs.local_reduce.store
     )
@@ -794,14 +790,20 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             "FlexGEMM generic main outputs support only floating-point and bool dtypes"
         )
     local_reduce_metas = flex_gemm_local_reduce_metas(outputs.local_reduce)
-    output_stride = ir.convert_shape_to_inductor(output_meta.stride())
     if output_contraction is not None:
-        # Grouped main outputs use TMA stores, whose outer stride must preserve
-        # 16-byte alignment even when the contracted N extent is not aligned.
+        # Grouped-main kernel stores use compact N rows through TMA, even
+        # when the epilogue returns a strided lane view. Keep outer strides
+        # 16-byte aligned when the contracted N extent is not aligned.
+        # TODO: Consider relaxing exact output-stride preservation for epilogue
+        # views of acc, so bare lane selections can return this compact layout
+        # without Inductor adding a layout-restoration copy.
+        output_stride = ir.FlexibleLayout.contiguous_strides(logical_output_size)
         output_alignment = max(16 // output_storage_dtype.itemsize, 1)
         output_stride[-2] = (
             ceildiv(logical_output_size[-1], output_alignment) * output_alignment
         )
+    else:
+        output_stride = ir.convert_shape_to_inductor(output_meta.stride())
     layout = ir.FixedLayout(
         gemm_args[mat1_index].get_device_or_error(),
         output_storage_dtype,
@@ -865,6 +867,12 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             logical_output_size,
         ),
     )
+    if output_contraction is not None and any(
+        kind != "scalar" for kind in epilogue_arg_kinds
+    ):
+        raise NotImplementedError(
+            "FlexGEMM grouped main outputs only support scalar captured tensors"
+        )
     if grouped_mm and "tile" in epilogue_arg_kinds:
         raise NotImplementedError(
             "FlexGEMM QUACK grouped_mm (varlen) does not yet support captured "
