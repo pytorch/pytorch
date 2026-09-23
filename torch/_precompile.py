@@ -869,16 +869,18 @@ def _writes_a_parameter(gm: torch.fx.GraphModule, num_params: int) -> bool:
         for i, arg in enumerate(schema.arguments):
             if arg.alias_info is None or not arg.alias_info.is_write:
                 continue
-            base = node.args[i] if i < len(node.args) else node.kwargs.get(arg.name)
-            while isinstance(base, torch.fx.Node) and base not in param_nodes:
-                base_schema = getattr(base.target, "_schema", None)
-                if base_schema is None or not base_schema.returns:
-                    break
-                if base_schema.returns[0].alias_info is None or not base.args:
-                    break
-                base = base.args[0]
-            if base in param_nodes:
-                return True
+            value = node.args[i] if i < len(node.args) else node.kwargs.get(arg.name)
+            # A Tensor(a!)[] argument (_foreach_add_, _fused_adam_) writes each element.
+            for base in value if isinstance(value, (list, tuple)) else [value]:
+                while isinstance(base, torch.fx.Node) and base not in param_nodes:
+                    base_schema = getattr(base.target, "_schema", None)
+                    if base_schema is None or not base_schema.returns:
+                        break
+                    if base_schema.returns[0].alias_info is None or not base.args:
+                        break
+                    base = base.args[0]
+                if base in param_nodes:
+                    return True
     return False
 
 
