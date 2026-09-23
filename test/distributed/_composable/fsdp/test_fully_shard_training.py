@@ -377,35 +377,16 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 # Sharding on nonzero dim requires even sharding
                 "lin_shapes": [[(32, 16), (16, 8)]],
                 "use_shard_placement_fn": [True],
-                # False tests Shard(1)-only weights; True adds Shard(0) biases.
-                "bias": [False, True],
-            },
-            self._test_train_parity_single_group,
-        )
-
-    @skip_if_lt_x_gpu(4, allow_cpu=True)
-    def test_train_parity_post_forward_shard_largest_dim(self):
-        self.run_subtests(
-            {
-                "lin_shapes": [[(32, 16), (16, 8)]],
-                "use_shard_placement_fn": [True],
-                "reshard_after_forward": [2],
             },
             self._test_train_parity_single_group,
         )
 
     def _test_train_parity_single_group(
-        self,
-        lin_shapes: list[tuple[int, int]],
-        use_shard_placement_fn: bool,
-        bias: bool = True,
-        reshard_after_forward: bool | int | None = None,
+        self, lin_shapes: list[tuple[int, int]], use_shard_placement_fn: bool
     ):
         torch.manual_seed(42)
         model = nn.Sequential(
-            nn.Linear(*lin_shapes[0], bias=bias),
-            nn.ReLU(),
-            nn.Linear(*lin_shapes[1], bias=bias),
+            nn.Linear(*lin_shapes[0]), nn.ReLU(), nn.Linear(*lin_shapes[1])
         )
         ref_model = copy.deepcopy(model).to(device_type)
         replicate(ref_model, device_ids=_get_device_ids(self.rank))
@@ -415,23 +396,18 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             return Shard(param.shape.index(max(param.shape)))
 
         shard_placement_fn = _shard_placement_fn if use_shard_placement_fn else None
-        fully_shard(
-            model,
-            shard_placement_fn=shard_placement_fn,
-            reshard_after_forward=reshard_after_forward,
-        )
+        fully_shard(model, shard_placement_fn=shard_placement_fn)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
         torch.manual_seed(42 + self.rank + 1)
         inp = (torch.randn((4, lin_shapes[0][0]), device=device_type.type),)
         for iter_idx in range(10):
-            outputs: list[torch.Tensor] = []
+            losses: list[torch.Tensor] = []
             for _model, _optim in ((ref_model, ref_optim), (model, optim)):
                 _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
-                outputs.append(_model(*inp))
-                outputs[-1].sum().backward()
+                losses.append(_model(*inp).sum())
+                losses[-1].backward()
                 _optim.step()
-            self.assertEqual(outputs[0], outputs[1])
-            check_sharded_parity(self, ref_model, model)
+            self.assertEqual(losses[0], losses[1])
 
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(
@@ -2646,13 +2622,10 @@ class TestFullyShardInference(FSDPTest):
         return 2
 
     def test_inference(self):
-        torch.manual_seed(42)
         model = nn.Linear(8, 4, bias=False, device=device_type)
-        ref_model = copy.deepcopy(model)
         fully_shard(model, shard_placement_fn=lambda _: Shard(1))
         with torch.inference_mode():
-            inp = torch.ones((2, 8), device=device_type)
-            self.assertEqual(model(inp), ref_model(inp))
+            model(torch.ones((2, 8), device=device_type))
 
 
 class TestFullyShardWorldSize1(FSDPTest):

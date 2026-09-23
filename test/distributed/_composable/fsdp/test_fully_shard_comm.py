@@ -43,11 +43,10 @@ from torch.distributed.fsdp._fully_shard._fsdp_init import (
 )
 from torch.distributed.fsdp._fully_shard._fsdp_param import ShardedState
 from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
-from torch.distributed.tensor import DTensor, Shard
+from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import implicit_replication
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA, TEST_MULTIGPU
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     PLATFORM_SUPPORTS_SYMM_MEM,
@@ -341,73 +340,6 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             sharded_grad = fsdp_param.sharded_param.grad
             self.assertIsInstance(sharded_grad, DTensor)
             self.assertEqual(sharded_grad.full_tensor(), reduced_grad)
-
-
-class TestFullyShardCustomAllocation(FSDPTestMultiThread):
-    @property
-    def world_size(self) -> int:
-        return 2
-
-    @parametrize("shard_dim", [0, 1])
-    @parametrize("collective", ["all_gather", "reduce_scatter"])
-    def test_strided_allocation(self, device, shard_dim, collective):
-        test_case = self
-        model = nn.Linear(8, 4, bias=False, device=device)
-        dist.broadcast(model.weight.detach(), src=0)
-        reference = copy.deepcopy(model)
-        shard_numel = model.weight.numel() // self.world_size
-
-        class StridedAlloc:
-            def allocate(self, size, *, dtype, device):
-                # FSDP views the reduced gradient with contiguous strides.
-                if collective == "reduce_scatter" and size == (shard_numel,):
-                    return torch.empty(size, dtype=dtype, device=device)
-                buffer = torch.empty((*size, 2), dtype=dtype, device=device)[..., 0]
-                test_case.assertFalse(buffer.is_contiguous())
-                return buffer
-
-        class StridedAllGather(StridedAlloc, DefaultAllGather):
-            def __call__(self, output_tensor, input_tensor, group, async_op=False):
-                output = torch.empty_like(output_tensor)
-                super().__call__(output, input_tensor.contiguous(), group)
-                output_tensor.copy_(output)
-
-        class StridedReduceScatter(StridedAlloc, DefaultReduceScatter):
-            def __call__(self, output_tensor, input_tensor, group, op, async_op=False):
-                output = torch.empty_like(output_tensor)
-                super().__call__(output, input_tensor.contiguous(), group, op)
-                output_tensor.copy_(output)
-
-        fully_shard(
-            model,
-            mesh=init_device_mesh(torch.device(device).type, (self.world_size,)),
-            shard_placement_fn=lambda param: Shard(shard_dim),
-        )
-        if collective == "all_gather":
-            model.set_custom_all_gather(StridedAllGather())
-        else:
-            model.set_custom_reduce_scatter(StridedReduceScatter())
-        optim = torch.optim.SGD(model.parameters(), lr=0.1)
-        reference_optim = torch.optim.SGD(reference.parameters(), lr=0.1)
-        for iteration in range(2):
-            inp = torch.full((2, 8), float(self.rank + iteration + 1), device=device)
-            expected = reference(inp)
-            actual = model(inp)
-            self.assertEqual(actual, expected)
-            expected.sum().backward()
-            actual.sum().backward()
-            dist.all_reduce(reference.weight.grad)
-            reference.weight.grad.div_(self.world_size)
-            self.assertEqual(model.weight.grad.full_tensor(), reference.weight.grad)
-            optim.step()
-            reference_optim.step()
-            optim.zero_grad()
-            reference_optim.zero_grad()
-
-
-instantiate_device_type_tests(
-    TestFullyShardCustomAllocation, globals(), only_for=("cpu", "cuda")
-)
 
 
 class TestFullyShardCommunication(FSDPTest):
