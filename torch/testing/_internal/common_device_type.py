@@ -1750,27 +1750,48 @@ def _cgroup_available_memory():
     CI pod on a 768GiB node looks like it has hundreds of gigabytes free, so a
     largeTensorTest asking for 180GB is admitted and then killed mid-test.
     """
-    for limit_path, usage_path in (
-        ("/sys/fs/cgroup/memory.max", "/sys/fs/cgroup/memory.current"),
+    # (limit, usage, stat, stat key prefix) for cgroup v2 then v1.
+    for limit_path, usage_path, stat_path, prefix in (
+        (
+            "/sys/fs/cgroup/memory.max",
+            "/sys/fs/cgroup/memory.current",
+            "/sys/fs/cgroup/memory.stat",
+            "",
+        ),
         (
             "/sys/fs/cgroup/memory/memory.limit_in_bytes",
             "/sys/fs/cgroup/memory/memory.usage_in_bytes",
+            "/sys/fs/cgroup/memory/memory.stat",
+            "total_",
         ),
     ):
         try:
             with open(limit_path) as f:
                 raw = f.read().strip()
-            # cgroup v2 says "max" when uncapped; v1 reports a huge sentinel.
+            # v2 spells "no limit" as "max"; v1 uses a value at least as large as
+            # physical memory, which cannot constrain us either way.
             if raw == "max":
                 return None
             limit = int(raw)
-            if limit >= 2**62:
+            if limit >= psutil.virtual_memory().total:
                 return None
             with open(usage_path) as f:
                 usage = int(f.read().strip())
+            stat = {}
+            with open(stat_path) as f:
+                for line in f:
+                    key, _, value = line.partition(" ")
+                    stat[key] = int(value)
         except (OSError, ValueError):
             continue
-        return max(limit - usage, 0)
+
+        # Page cache counts towards usage but is reclaimed under pressure rather
+        # than triggering a kill, so charging it would understate what is free.
+        # A shard that has read a lot of test data can hold gigabytes of it.
+        reclaimable = stat.get(f"{prefix}inactive_file", 0) + stat.get(
+            f"{prefix}slab_reclaimable", 0
+        )
+        return max(limit - max(usage - reclaimable, 0), 0)
     return None
 
 
