@@ -239,6 +239,28 @@ class TestReadableWrapperCodegen(TestCase):
             self.assertEqual(config_to_dict(launcher.config), cfg, name)
 
     @requires_cuda_and_triton
+    @config.patch(coordinate_descent_tuning=True)
+    def test_dynamic_shape_kernel_keeps_its_pinned_config_at_every_size(self):
+        # Tuned once on the size hints, it launches with that config at other sizes.
+        def fn(x):
+            return x.sum(-1)
+
+        torch._dynamo.reset()
+        x = torch.randn(64, 3000, device="cuda")
+        with config.patch(readable_wrapper=True):
+            _, codes = run_and_get_code(torch.compile(fn, dynamic=True), x)
+        code = "\n".join(codes)
+        self.assertEqual(
+            re.findall(r"^@triton_heuristics\.(\w+)\(", code, re.MULTILINE),
+            ["fixed_config"],
+        )
+        with _no_runtime_tuning():
+            for shape in [(64, 3000), (17, 5000), (200, 129)]:
+                y = torch.randn(shape, device="cuda")
+                (out,) = self._run_standalone(code, [y, *shape])
+                self.assertEqual(out, fn(y), atol=1e-3, rtol=1e-3)
+
+    @requires_cuda_and_triton
     def test_triton_kernels_require_compile_time_autotuning(self):
         # Unset, the mode turns it on; turned off, the kernels could only be tuned on
         # first launch.
