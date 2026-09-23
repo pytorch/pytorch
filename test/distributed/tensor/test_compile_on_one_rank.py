@@ -536,6 +536,8 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @compiler_config.patch(compile_on_one_rank=True)
     def test_rng_ops_compile_under_coor(self):
+        from torch._inductor.utils import fresh_cache
+
         # Not a divergence -- a hard failure, and it covers every RNG op, not just
         # dropout:
         #
@@ -553,12 +555,43 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
             "randn_like": lambda x: (torch.randn_like(x) + x).sum(),
             "randint_like": lambda x: (torch.randint_like(x, 0, 10) * x).sum(),
         }
-        for name, fn in cases.items():
-            with self.subTest(op=name):
-                torch._dynamo.reset()
-                x = torch.randn(64, 128, device="cuda", requires_grad=True)
-                out = torch.compile(fn, backend="inductor")(x)
-                self.assertEqual(out.shape, torch.Size([]))
+        with fresh_cache():
+            for name, fn in cases.items():
+                with self.subTest(op=name):
+                    torch._dynamo.reset()
+                    x = torch.randn(64, 128, device="cuda", requires_grad=True)
+                    out = torch.compile(fn, backend="inductor")(x)
+                    self.assertEqual(out.shape, torch.Size([]))
+
+    @staticmethod
+    def _repro_storage_line(dev):
+        from torch._dynamo.debug_utils import InputWriter
+
+        with torch.cuda.device(dev):
+            w = InputWriter(None)
+            w.storage(torch.randn(4, device=f"cuda:{dev}").untyped_storage())
+            return "\n".join(w._lines)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_repro_writer_omits_current_device_index(self):
+        # fx_graph_runnable records each input storage's device. Writing the concrete
+        # index makes every rank's repro differ, and makes a rank-N repro unrunnable
+        # anywhere with fewer than N+1 GPUs. Under CooR the inputs are on the current
+        # accelerator by invariant, so an index-less device reproduces the same compile
+        # and is portable -- the reader puts the storage on whatever device is current.
+        self.assertNotIn("index=", self._repro_storage_line(0))
+
+    @requires_multigpu
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_repro_writer_storage_identical_across_devices(self):
+        self.assertEqual(self._repro_storage_line(0), self._repro_storage_line(1))
+
+    @requires_multigpu
+    def test_repro_writer_keeps_device_index_without_coor(self):
+        # Outside CooR several devices can be live, so the repro must say which one.
+        self.assertIn("index=0", self._repro_storage_line(0))
+        self.assertNotEqual(self._repro_storage_line(0), self._repro_storage_line(1))
 
     # ---- the fx graph cache key must not encode which rank compiled ----
     # The key is computed before post_grad runs, so the graph it hashes is the
@@ -2032,6 +2065,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
     @parametrize("origin", ("input", "factory"))
     def test_device_observations_track_current_device_under_coor(self, origin):
         from torch._dynamo.testing import CompileCounterWithBackend
+        from torch._inductor.utils import fresh_cache
 
         def f(x):
             y = torch.zeros(x.shape, device=x.device) if origin == "factory" else x
@@ -2045,13 +2079,14 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
 
         cnt = CompileCounterWithBackend("inductor")
         torch._dynamo.reset()
-        compiled = torch.compile(f, backend=cnt, fullgraph=True)
-        with torch.cuda.device(0):
-            x = torch.zeros(1, device="cuda:0")
-            self.assertEqual(compiled(x), f(x))
-        with torch.cuda.device(1):
-            x = torch.zeros(1, device="cuda:1")
-            self.assertEqual(compiled(x), f(x))
+        with fresh_cache():
+            compiled = torch.compile(f, backend=cnt, fullgraph=True)
+            with torch.cuda.device(0):
+                x = torch.zeros(1, device="cuda:0")
+                self.assertEqual(compiled(x), f(x))
+            with torch.cuda.device(1):
+                x = torch.zeros(1, device="cuda:1")
+                self.assertEqual(compiled(x), f(x))
 
         self.assertEqual(cnt.frame_count, 1)
 
