@@ -1,5 +1,7 @@
 # Owner(s): ["oncall: pt2"]
 
+from unittest import mock
+
 import torch
 from torch._prims.debug_prims import load_tensor_reader
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
@@ -167,6 +169,21 @@ class TestContentStore(TestCase):
         h = hash_storage(x.untyped_storage(), stable_hash=True)
         self.assertIsInstance(h, str)
         self.assertEqual(len(h), 40)
+
+    def test_hash_storage_device_without_generator_uses_sha1_fallback(self):
+        # Simulate a backend that opts into is_compile_supported (e.g. via
+        # its DeviceInterface) but has no default generator in
+        # _GENERATOR_DEVICE_TYPES: it must take the SHA-1 fallback instead
+        # of reaching the generator table.
+        storage = torch.empty(4, device="meta").untyped_storage()
+        with mock.patch(
+            "torch._dynamo.utils.is_compile_supported", return_value=True
+        ):
+            # meta has no data to copy out, so the SHA-1 fallback itself
+            # raises RuntimeError; reaching it (instead of the generator
+            # table's AssertionError) is the behavior under test.
+            with self.assertRaises(RuntimeError):
+                hash_storage(storage)
 
 
 instantiate_device_type_tests(
