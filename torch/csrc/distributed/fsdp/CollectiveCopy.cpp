@@ -27,9 +27,7 @@ bool check_all_gather_copy_out_inputs(
     at::IntArrayRef outer_sizes,
     int64_t num_chunks) {
   TORCH_CHECK(num_chunks > 0, "expected positive num_chunks");
-  TORCH_CHECK(
-      input.layout() == at::kStrided && input.is_contiguous(),
-      "expected a contiguous strided input");
+  TORCH_CHECK(input.layout() == at::kStrided, "expected a strided input");
   TORCH_CHECK(
       split_sizes.size() == out.size() && outer_sizes.size() == out.size(),
       "expected one split size and outer size per output");
@@ -195,9 +193,7 @@ void check_reduce_scatter_copy_in_inputs(
   TORCH_CHECK(
       tensors.size() == num_leading_dims.size(),
       "expected one leading dimension count per input");
-  TORCH_CHECK(
-      out.layout() == at::kStrided && out.is_contiguous(),
-      "expected a contiguous strided output");
+  TORCH_CHECK(out.layout() == at::kStrided, "expected a strided output");
 
   bool has_input = false;
   for (const auto i : c10::irange(tensors.size())) {
@@ -260,7 +256,7 @@ at::Tensor& reduce_scatter_copy_in(
 
 TORCH_LIBRARY_FRAGMENT(fsdp, m) {
   m.def(
-      "_all_gather_copy_out_(Tensor(a!)[] self, Tensor input, int[] split_sizes, int[] outer_sizes, int num_chunks) -> ()");
+      "_all_gather_copy_out_(Tensor(a!)[] self, Tensor src, int[] split_sizes, int[] outer_sizes, int num_chunks) -> ()");
   m.def(
       "_reduce_scatter_copy_in_(Tensor(a!) self, Tensor[] tensors, int[] num_leading_dims, int num_chunks) -> Tensor(a!)");
 }
