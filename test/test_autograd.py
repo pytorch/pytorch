@@ -18337,6 +18337,8 @@ class _InputGradBufferProducer(Function):
 
 @skipIfTorchDynamo("input_grad_buffers requires eager autograd engine state")
 class TestInputGradBuffers(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_first_producer_falls_back(self, device):
         observed_buffers = []
 
@@ -18604,27 +18606,6 @@ class TestInputGradBuffers(TestCase):
         with self.assertRaisesRegex(RuntimeError, "while autograd is executing"):
             out.grad_fn.input_grad_buffers
 
-    @onlyCUDA
-    def test_reentrant_backward_after_exposure_errors(self, device):
-        nested_input = torch.ones((), device=device, requires_grad=True)
-        nested_output = nested_input * 2
-
-        def reenter(buffers, _grad_input):
-            self.assertIsNotNone(buffers[0])
-            nested_output.backward()
-
-        x = torch.ones((), requires_grad=True)
-        last = _InputGradBufferProducer.apply(x, 1, False, None)
-        direct = _InputGradBufferProducer.apply(x, 2, True, reenter)
-        first = _InputGradBufferProducer.apply(x, 3, False, None)
-        grad_outputs = tuple(torch.ones_like(out) for out in (last, direct, first))
-
-        with self.assertRaisesRegex(RuntimeError, "input_grad_buffers"):
-            torch.autograd.backward((last, direct, first), grad_outputs)
-
-        # The exposure state must be restored when backward raises.
-        torch.ones((), requires_grad=True).backward()
-
     @parametrize("mode", ("create_graph", "grad_create_graph", "anomaly", "post_hook"))
     def test_unsupported_execution_modes_error(self, device, mode):
         class Producer(Function):
@@ -18675,7 +18656,30 @@ class TestInputGradBuffers(TestCase):
             with self.assertRaisesRegex(RuntimeError, "create_graph=True"):
                 Producer.apply(x).sum().backward(create_graph=True)
 
-    @onlyCUDA
+
+class TestInputGradBuffersCudaOnly(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def test_reentrant_backward_after_exposure_errors(self, device):
+        nested_input = torch.ones((), device=device, requires_grad=True)
+        nested_output = nested_input * 2
+
+        def reenter(buffers, _grad_input):
+            self.assertIsNotNone(buffers[0])
+            nested_output.backward()
+
+        x = torch.ones((), requires_grad=True)
+        last = _InputGradBufferProducer.apply(x, 1, False, None)
+        direct = _InputGradBufferProducer.apply(x, 2, True, reenter)
+        first = _InputGradBufferProducer.apply(x, 3, False, None)
+        grad_outputs = tuple(torch.ones_like(out) for out in (last, direct, first))
+
+        with self.assertRaisesRegex(RuntimeError, "input_grad_buffers"):
+            torch.autograd.backward((last, direct, first), grad_outputs)
+
+        # The exposure state must be restored when backward raises.
+        torch.ones((), requires_grad=True).backward()
+
     def test_user_stream_switch_does_not_change_execution_stream(self, device):
         observed_buffers = []
         other_stream = torch.cuda.Stream()
@@ -18705,7 +18709,6 @@ class TestInputGradBuffers(TestCase):
         self.assertEqual(observed_buffers, [True])
         self.assertEqual(x.grad, torch.full_like(x, 2))
 
-    @onlyCUDA
     def test_different_stream_errors(self, device):
         x = torch.randn(4, device=device, requires_grad=True)
         stream = torch.cuda.Stream()
@@ -18720,7 +18723,6 @@ class TestInputGradBuffers(TestCase):
             with self.assertRaisesRegex(RuntimeError, "same stream"):
                 torch.autograd.backward((direct, first), (torch.ones_like(x),) * 2)
 
-    @onlyCUDA
     def test_later_producer_on_different_stream_errors(self, device):
         x = torch.randn(4, device=device, requires_grad=True)
         accumulate_grad = torch.autograd.graph.get_gradient_edge(x).node
@@ -18735,7 +18737,6 @@ class TestInputGradBuffers(TestCase):
         with self.assertRaisesRegex(RuntimeError, "same stream"):
             torch.autograd.backward((last, direct, first), (torch.ones_like(x),) * 3)
 
-    @onlyCUDA
     @deviceCountAtLeast(2)
     def test_different_device_errors(self, devices):
         class Producer(Function):
@@ -18760,91 +18761,6 @@ class TestInputGradBuffers(TestCase):
                 (direct, first), (torch.ones_like(direct), torch.ones_like(first))
             )
 
-    @onlyCPU
-    def test_concurrent_graph_tasks_are_isolated(self, device):
-        x = torch.randn(4, device=device, requires_grad=True)
-        direct = _InputGradBufferProducer.apply(x, 2, True, None)
-        first = _InputGradBufferProducer.apply(x, 3, False, None)
-        errors = []
-
-        def run_backward():
-            try:
-                torch.autograd.backward(
-                    (direct, first),
-                    (torch.ones_like(direct), torch.ones_like(first)),
-                    retain_graph=True,
-                )
-            except Exception as error:
-                errors.append(error)
-
-        threads = [threading.Thread(target=run_backward) for _ in range(2)]
-        for thread in threads:
-            thread.start()
-        for thread in threads:
-            thread.join()
-
-        self.assertEqual(errors, [])
-        self.assertEqual(x.grad, torch.full_like(x, 10))
-
-    @onlyCPU
-    def test_access_from_reentrant_final_callback_errors(self, device):
-        script = """
-import torch
-from torch.autograd import Function
-
-callback = None
-
-class Inner(Function):
-    @staticmethod
-    def forward(ctx, value):
-        return value.clone()
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        torch.autograd.graph.queue_callback(callback)
-        return grad_output
-
-class Outer(Function):
-    @staticmethod
-    def forward(ctx, value):
-        return value.clone()
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        global callback
-
-        def check_access():
-            try:
-                ctx.input_grad_buffers
-            except RuntimeError as error:
-                if "post-processing" not in str(error):
-                    raise
-            else:
-                raise RuntimeError("input_grad_buffers access unexpectedly succeeded")
-
-        callback = check_access
-        with torch.enable_grad():
-            inner_input = torch.ones((), requires_grad=True)
-            inner_output = Inner.apply(inner_input)
-        inner_output.backward()
-        return grad_output
-
-x = torch.ones((), requires_grad=True)
-Outer.apply(x).backward()
-"""
-        try:
-            subprocess.check_output(
-                [sys.executable, "-c", script],
-                stderr=subprocess.STDOUT,
-                cwd=os.path.dirname(os.path.realpath(__file__)),
-                timeout=20,
-            )
-        except subprocess.TimeoutExpired:
-            self.fail("input_grad_buffers access during post-processing deadlocked")
-        except subprocess.CalledProcessError as error:
-            self.fail(error.output.decode("utf-8"))
-
-    @onlyCUDA
     def test_lookup_does_not_deadlock_with_python_dispatch(self, device):
         script = """
 import sys
@@ -18925,6 +18841,92 @@ Fanout.apply(getter_output, duplicated, duplicated).backward()
             )
         except subprocess.TimeoutExpired:
             self.fail("input_grad_buffers lookup deadlocked")
+        except subprocess.CalledProcessError as error:
+            self.fail(error.output.decode("utf-8"))
+
+
+class TestInputGradBuffersCpuOnly(TestCase):
+    hw_classification = HardwareClassification.CPU
+
+    def test_concurrent_graph_tasks_are_isolated(self):
+        x = torch.randn(4, device="cpu", requires_grad=True)
+        direct = _InputGradBufferProducer.apply(x, 2, True, None)
+        first = _InputGradBufferProducer.apply(x, 3, False, None)
+        errors = []
+
+        def run_backward():
+            try:
+                torch.autograd.backward(
+                    (direct, first),
+                    (torch.ones_like(direct), torch.ones_like(first)),
+                    retain_graph=True,
+                )
+            except Exception as error:
+                errors.append(error)
+
+        threads = [threading.Thread(target=run_backward) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        self.assertEqual(errors, [])
+        self.assertEqual(x.grad, torch.full_like(x, 10))
+
+    def test_access_from_reentrant_final_callback_errors(self):
+        script = """
+import torch
+from torch.autograd import Function
+
+callback = None
+
+class Inner(Function):
+    @staticmethod
+    def forward(ctx, value):
+        return value.clone()
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        torch.autograd.graph.queue_callback(callback)
+        return grad_output
+
+class Outer(Function):
+    @staticmethod
+    def forward(ctx, value):
+        return value.clone()
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        global callback
+
+        def check_access():
+            try:
+                ctx.input_grad_buffers
+            except RuntimeError as error:
+                if "post-processing" not in str(error):
+                    raise
+            else:
+                raise RuntimeError("input_grad_buffers access unexpectedly succeeded")
+
+        callback = check_access
+        with torch.enable_grad():
+            inner_input = torch.ones((), requires_grad=True)
+            inner_output = Inner.apply(inner_input)
+        inner_output.backward()
+        return grad_output
+
+x = torch.ones((), requires_grad=True)
+Outer.apply(x).backward()
+"""
+        try:
+            subprocess.check_output(
+                [sys.executable, "-c", script],
+                stderr=subprocess.STDOUT,
+                cwd=os.path.dirname(os.path.realpath(__file__)),
+                timeout=20,
+            )
+        except subprocess.TimeoutExpired:
+            self.fail("input_grad_buffers access during post-processing deadlocked")
         except subprocess.CalledProcessError as error:
             self.fail(error.output.decode("utf-8"))
 
@@ -19021,7 +19023,8 @@ instantiate_device_type_tests(
 instantiate_device_type_tests(
     TestSelectiveActivationCheckpointCudaOnly, globals(), only_for="cuda"
 )
-instantiate_device_type_tests(TestInputGradBuffers, globals(), only_for=("cpu", "cuda"))
+instantiate_device_type_tests(TestInputGradBuffers, globals())
+instantiate_device_type_tests(TestInputGradBuffersCudaOnly, globals(), only_for="cuda")
 
 instantiate_parametrized_tests(TestAutograd)
 instantiate_parametrized_tests(TestNestedCheckpoint)
