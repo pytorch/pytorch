@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 import contextlib
 import functools
+import gc
 import itertools
 import logging
 import os
@@ -113,8 +114,15 @@ from torch.testing._internal.triton_utils import requires_gpu
 from torch.utils import _pytree as pytree
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._triton import (
+    has_triton_cuda_tma_device,
     has_triton_experimental_host_tma,
     has_triton_tensor_descriptor_host_tma,
+)
+
+
+requires_cuda_tma = unittest.skipIf(
+    GPU_TYPE == "cuda" and not has_triton_cuda_tma_device(),
+    "requires CUDA TMA device support",
 )
 
 
@@ -597,8 +605,8 @@ class AOTInductorTestsTemplate:
             self.check_model(Model().to(self.device), example_inputs)
 
     @unittest.skipIf(
-        not HAS_GPU or GPU_TYPE != "cuda" or TEST_WITH_ROCM,
-        "Pinned async constant copy is CUDA-only",
+        not HAS_GPU or GPU_TYPE != "cuda",
+        "Pinned async constant copy is CUDA/ROCm-only",
     )
     @patch.dict(
         os.environ,
@@ -1086,6 +1094,7 @@ class AOTInductorTestsTemplate:
             },
         )
 
+    @requires_cuda_tma
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("tma_version", ["new", "old"])
     def test_triton_kernel_on_device_tma(self, dynamic, tma_version):
@@ -1312,6 +1321,73 @@ class AOTInductorTestsTemplate:
         )
         with config.patch({"aot_inductor.force_mmap_weights": True}):
             self.check_model(Model(), example_inputs)
+
+    @unittest.skipUnless(
+        sys.platform == "linux" and os.path.exists("/proc/self/maps"),
+        "requires /proc/self/maps",
+    )
+    def test_mmaped_weights_unmapped_on_model_delete(self):
+        if self.device != "cpu":
+            raise unittest.SkipTest("CPU coverage is sufficient")
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.randn(16, 16))
+
+            def forward(self, x):
+                return x @ self.weight
+
+        example_inputs = (torch.randn(4, 16, device=self.device),)
+        ep = torch.export.export(Model().to(self.device), example_inputs)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            package_path = os.path.join(tmp_dir, "model.pt2")
+            torch._inductor.aoti_compile_and_package(
+                ep,
+                package_path=package_path,
+                inductor_configs={"aot_inductor.force_mmap_weights": True},
+            )
+
+            with zipfile.ZipFile(package_path) as package:
+                wrapper_files = [
+                    info
+                    for info in package.infolist()
+                    if info.filename.endswith(".wrapper.so")
+                ]
+            self.assertEqual(len(wrapper_files), 1)
+            wrapper_name = pathlib.PurePosixPath(wrapper_files[0].filename).name
+            wrapper_size = wrapper_files[0].file_size
+
+            # Only the constants mapping reaches the tail of the wrapper file;
+            # the loader's own writable segment stops well before it. Counting
+            # by exact numbers rather than by delta keeps a mistargeted
+            # predicate from making this test pass without observing anything.
+            def count_weight_mappings() -> int:
+                count = 0
+                with open("/proc/self/maps") as maps:
+                    for line in maps:
+                        if f"/{wrapper_name}" not in line:
+                            continue
+                        address_range, permissions, offset, *_ = line.split()
+                        start, end = (
+                            int(value, 16) for value in address_range.split("-")
+                        )
+                        if (
+                            permissions == "rw-p"
+                            and int(offset, 16) + end - start >= wrapper_size
+                        ):
+                            count += 1
+                return count
+
+            gc.collect()
+            self.assertEqual(count_weight_mappings(), 0)
+            for _ in range(2):
+                runner = torch._inductor.aoti_load_package(package_path)
+                self.assertEqual(count_weight_mappings(), 1)
+
+                del runner
+                gc.collect()
+                self.assertEqual(count_weight_mappings(), 0)
 
     def test_large_mmaped_weights_on_disk(self):
         class Model(torch.nn.Module):
@@ -4463,6 +4539,7 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(10, 20, device=self.device),)
         self.check_model(Model(), example_inputs)
 
+    @requires_cuda_tma
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("tma_version", ["new", "old"])
     def test_triton_kernel_tma_descriptor_1d(self, dynamic, tma_version):
@@ -4525,6 +4602,7 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    @requires_cuda_tma
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("tma_version", ["new", "old"])
     def test_triton_kernel_tma_descriptor_2d(self, dynamic, tma_version):
@@ -7913,7 +7991,7 @@ class AOTInductorTestsTemplate:
 
     @requires_multigpu()
     def test_cuda_to_cuda_device_copy(self):
-        if self.device != GPU_TYPE or GPU_TYPE != "cuda" or TEST_WITH_ROCM:
+        if self.device != GPU_TYPE or GPU_TYPE != "cuda":
             raise unittest.SkipTest("This test requires CUDA")
 
         device0 = torch.device(type=GPU_TYPE, index=0)
@@ -8831,6 +8909,25 @@ class AOTInductorTestsTemplate:
         misaligned_arg.copy_(arg)
         actual = optimized(misaligned_arg)
         torch.testing.assert_close(actual, expected)
+
+    @config.patch({"alignment_asserts_inputs": True, "size_asserts": False})
+    @patch.dict(os.environ, {"AOTI_RUNTIME_CHECK_INPUTS": "0"})
+    def test_input_alignment_asserts_without_runtime_checks(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("GPU alignment checks only")
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        # One element avoids a misaligned vector load if the assertion is missing.
+        x = torch.randn(1, device=self.device)
+        package_path = AOTIRunnerUtil.compile(Model(), (x,))
+        optimized = torch._inductor.aoti_load_package(package_path)
+        optimized(x)
+        misaligned = torch.randn(2, device=self.device)[1:]
+        with self.assertRaisesRegex(RuntimeError, "bytes aligned"):
+            optimized(misaligned)
 
     def test_misaligned_input_2(self):
         if self.device != GPU_TYPE:
