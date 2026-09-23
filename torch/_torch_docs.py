@@ -398,6 +398,15 @@ See :meth:`~Tensor.index_reduce_` for function description.
 )
 
 add_docstr(
+    torch.index_put_,
+    r"""
+index_put_(input, indices, values, accumulate=False) -> Tensor
+
+See :meth:`~Tensor.index_put_` for function description.
+""",
+)
+
+add_docstr(
     torch.add,
     r"""
 add(input, other, *, alpha=1, out=None) -> Tensor
@@ -6862,6 +6871,36 @@ Example::
 )
 
 add_docstr(
+    torch.masked_fill,
+    r"""
+masked_fill(input, mask, value) -> Tensor
+
+Returns a new tensor with elements of :attr:`input` replaced by :attr:`value`
+where :attr:`mask` is ``True``. The shape of :attr:`mask` must be
+:ref:`broadcastable <broadcasting-semantics>` with the shape of :attr:`input`.
+
+Args:
+    {input}
+    mask (BoolTensor): the boolean mask
+    value (Number): the value to fill in with
+
+Example::
+
+    >>> x = torch.arange(6).reshape(2, 3)
+    >>> x
+    tensor([[0, 1, 2],
+            [3, 4, 5]])
+    >>> mask = x.ge(3)
+    >>> mask
+    tensor([[False, False, False],
+            [ True,  True,  True]])
+    >>> torch.masked_fill(x, mask, -1)
+    tensor([[ 0,  1,  2],
+            [-1, -1, -1]])
+""".format(**common_args),
+)
+
+add_docstr(
     torch.masked_select,
     r"""
 masked_select(input, mask, *, out=None) -> Tensor
@@ -11733,6 +11772,38 @@ Example::
 )
 
 add_docstr(
+    torch.put,
+    r"""
+put(input, index, source, accumulate=False) -> Tensor
+
+Copies the elements from :attr:`source` into the positions specified by
+:attr:`index`. For the purpose of indexing, :attr:`input` is treated as if
+it were a 1-D tensor.
+
+:attr:`index` and :attr:`source` need to have the same number of elements, but not necessarily
+the same shape.
+
+If :attr:`accumulate` is ``True``, the elements in :attr:`source` are added to
+:attr:`input`. If accumulate is ``False``, the behavior is undefined if :attr:`index`
+contains duplicate elements.
+
+Args:
+    {input}
+    index (LongTensor): the indices into input
+    source (Tensor): the tensor containing values to copy from
+    accumulate (bool, optional): whether to accumulate into input. Default: ``False``
+
+Example::
+
+    >>> src = torch.tensor([[4, 3, 5],
+    ...                     [6, 7, 8]])
+    >>> torch.put(src, torch.tensor([1, 3]), torch.tensor([9, 10]))
+    tensor([[  4,   9,   5],
+            [ 10,   7,   8]])
+""".format(**common_args),
+)
+
+add_docstr(
     torch.take,
     r"""
 take(input, index) -> Tensor
@@ -12444,6 +12515,26 @@ Example::
             [[0.0000, 1.6134],
             [0.6323, 0.0000]]])
 """,
+)
+
+add_docstr(
+    torch.fill,
+    r"""
+fill(input, value) -> Tensor
+
+Returns a new tensor of the same shape as :attr:`input` filled with :attr:`value`.
+
+Args:
+    {input}
+    value (Number): the value to fill the output tensor with
+
+Example::
+
+    >>> x = torch.ones(2, 3)
+    >>> torch.fill(x, 5)
+    tensor([[5., 5., 5.],
+            [5., 5., 5.]])
+""".format(**common_args),
 )
 
 add_docstr(
@@ -14923,6 +15014,28 @@ This private API is maintained during migration to support backwards
 compatibility.
             """,
         )
+
+add_docstr(
+    torch.detach,
+    r"""
+detach(input) -> Tensor
+
+Returns a new Tensor, detached from the current graph.
+
+The result will never require gradient.
+
+This method also affects forward mode AD gradients and the result will never
+have forward mode AD gradients.
+
+.. note::
+
+  Returned Tensor shares the same storage with the original one.
+  In-place modifications on either of them will be seen, and may trigger
+  errors in correctness checks.
+
+See :meth:`torch.Tensor.detach`.
+""",
+)
 
 add_docstr(
     torch.detach_,
