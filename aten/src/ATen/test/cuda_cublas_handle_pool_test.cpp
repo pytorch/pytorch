@@ -12,6 +12,7 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAGraph.h>
 #include <ATen/cuda/Sleep.h>
+#include <c10/util/env.h>
 #include <rocblas/rocblas.h>
 
 #include <array>
@@ -110,6 +111,10 @@ TEST(CUDABlasHandlePoolTest, EagerWorkspaceLeavesPublicHandleArena) {
   if (at::cuda::isCUDABlasWorkspaceCachingEnabled()) {
     GTEST_SKIP() << "requires eager workspaces";
   }
+  if (c10::utils::has_env("ROCBLAS_DEVICE_MEMORY_SIZE")) {
+    GTEST_SKIP() << "rocBLAS reports an arena sized by "
+                    "ROCBLAS_DEVICE_MEMORY_SIZE as not its own";
+  }
 
   at::cuda::CUDAGuard device_guard(0);
   const auto public_handle = at::cuda::getCurrentCUDABlasHandle();
@@ -133,6 +138,45 @@ TEST(CUDABlasHandlePoolTest, EagerWorkspaceLeavesPublicHandleArena) {
   EXPECT_EQ(at::cuda::getCurrentCUDABlasHandle(), public_handle);
   EXPECT_TRUE(rocblasOwnsWorkspace(public_handle));
   EXPECT_EQ(rocblasWorkspaceSize(public_handle), arena_size);
+}
+
+// ATen binds its workspaces to separate handles, so a workspace the caller
+// binds to the public handle stays bound across ATen operations.
+TEST(CUDABlasHandlePoolTest, EagerCallerWorkspaceSurvivesAtenOps) {
+  if (!at::cuda::is_available()) {
+    return;
+  }
+  if (at::cuda::isCUDABlasWorkspaceCachingEnabled()) {
+    GTEST_SKIP() << "requires eager workspaces";
+  }
+
+  // The legacy backend is the one whose operations bind a rocBLAS workspace.
+  const auto prev_backend = at::globalContext().blasPreferredBackend();
+  at::globalContext().setBlasPreferredBackend(at::BlasBackend::Cublas);
+
+  at::cuda::CUDAGuard device_guard(0);
+  // Unbinding at the end leaves this stream's public handle without an arena,
+  // so the test uses a high-priority stream, which no other test here does.
+  c10::cuda::CUDAStreamGuard stream_guard(
+      c10::cuda::getStreamFromPool(/*isHighPriority=*/true));
+  const auto handle = at::cuda::getCurrentCUDABlasHandle();
+  const auto rocblas = reinterpret_cast<rocblas_handle>(handle);
+  constexpr int64_t size = 32 * 1024 * 1024;
+  const auto workspace = at::empty(
+      {size}, at::TensorOptions().device(at::kCUDA).dtype(at::kByte));
+  EXPECT_EQ(
+      rocblas_set_workspace(rocblas, workspace.data_ptr(), size),
+      rocblas_status_success);
+
+  const auto options =
+      at::TensorOptions().device(at::kCUDA).dtype(at::kBFloat16);
+  (void)at::mm(at::randn({64, 64}, options), at::randn({64, 64}, options));
+  EXPECT_EQ(at::cuda::getCurrentCUDABlasHandle(), handle);
+  EXPECT_FALSE(rocblasOwnsWorkspace(handle));
+  EXPECT_EQ(rocblasWorkspaceSize(handle), static_cast<size_t>(size));
+
+  EXPECT_EQ(rocblas_set_workspace(rocblas, nullptr, 0), rocblas_status_success);
+  at::globalContext().setBlasPreferredBackend(prev_backend);
 }
 
 // A rocBLAS arena must not be used by two streams at once, and
@@ -273,9 +317,10 @@ TEST(CUDABlasHandlePoolTest, CachedWorkspaceLeavesHandleUserOwned) {
 // rocblas_set_workspace frees whatever the handle currently manages, and a
 // handle owns an arena from creation, so the first bind performs a free. A free
 // is illegal under stream capture, which is why internal handles drop that
-// arena when they are created. Handles are thread local, so the capture must
-// run on a thread that has not issued a gemm yet or the hazard is already spent
-// and the test is vacuous.
+// arena when they are created. The capture runs on a new thread so that the
+// thread's internal handle is created by the getCurrentCUDABlasHandle() call
+// below and first bound inside the capture. On a thread that had already run a
+// GEMM, both would have happened earlier and the test would check neither.
 TEST(CUDABlasHandlePoolTest, EagerWorkspaceBindIsCaptureSafe) {
   if (!at::cuda::is_available()) {
     return;
