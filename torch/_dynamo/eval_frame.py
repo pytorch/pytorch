@@ -210,7 +210,7 @@ _stance = DynamoStance()
 
 @dataclass(slots=True)
 class _ForceEagerNestedCompile(threading.local):
-    depth: int = 1
+    depth: int = 0
 
 
 _force_eager_nested_compile = _ForceEagerNestedCompile()
