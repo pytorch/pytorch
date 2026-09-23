@@ -4,13 +4,14 @@
 #include <ATen/ceil_div.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/native/mkldnn/xpu/detail/Attr.h>
+#include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNNContext.h>
 #include <c10/core/ScalarType.h>
 
 #include <oneapi/dnnl/dnnl.hpp>
 
 namespace at::native::onednn {
-at::Tensor broadcast_bias2D(
+static at::Tensor broadcast_bias2D(
     at::Tensor& dst,
     at::Tensor& bias,
     int64_t m,
@@ -42,7 +43,7 @@ at::Tensor broadcast_bias2D(
   return bias;
 }
 
-at::Tensor broadcast_bias3D(
+static at::Tensor broadcast_bias3D(
     at::Tensor& dst,
     at::Tensor bias,
     int64_t mb,
@@ -74,7 +75,7 @@ at::Tensor broadcast_bias3D(
   return bias;
 }
 
-at::Tensor broadcast_bias(
+static at::Tensor broadcast_bias(
     at::Tensor& dst,
     at::Tensor bias,
     int64_t mb,
@@ -88,14 +89,14 @@ at::Tensor broadcast_bias(
 }
 
 void quantized_matmul(
-    at::Tensor mat1, // act
+    const at::Tensor& mat1, // act
     double input_scale,
     int64_t input_zero_point,
-    at::Tensor mat2, // weight
+    const at::Tensor& mat2, // weight
     at::Tensor& weight_scales,
     at::Tensor& weight_zero_points,
     at::Tensor& bias,
-    at::Tensor result, // output
+    const at::Tensor& result, // output
     double output_scale,
     int64_t output_zero_point,
     std::optional<c10::ScalarType> output_dtype,
@@ -168,7 +169,7 @@ void quantized_matmul(
   auto m1_dt = m1_usr_dt;
   auto m2_dt = m2_usr_dt;
   auto dst_dt = dst_usr_dt;
-  dnnl::memory::data_type bias_dt;
+  dnnl::memory::data_type bias_dt = dnnl::memory::data_type::f32;
 
   dnnl::memory::desc m1_md, m1_usr_md;
   dnnl::memory::desc m2_md, m2_usr_md;
@@ -274,7 +275,8 @@ void quantized_matmul(
   dnnl::memory m1_m = m1_usr_m, m2_m = m2_usr_m, dst_m = dst_usr_m;
   at::Tensor m1_, m2_, dst_;
 
-  int scratchpad_size = matmul_pd.scratchpad_desc().get_size();
+  int64_t scratchpad_size =
+      static_cast<int64_t>(matmul_pd.scratchpad_desc().get_size());
   at::Tensor scratchpad_tensor =
       at::empty({scratchpad_size}, m1.options().dtype(at::kByte), std::nullopt);
   auto scratchpad_memory = make_onednn_memory(
@@ -415,7 +417,7 @@ struct ScaleSpec {
 //
 // The returned value will be used in
 // `set_scales(arg, mask, groups, data_type)`.
-inline ScaleSpec make_scale_spec(
+static inline ScaleSpec make_scale_spec(
     at::blas::ScalingType scaling_type,
     int64_t M,
     int64_t K,
@@ -686,7 +688,8 @@ sycl::event scaled_matmul(
   int post_op_idx = 0;
   if (with_alpha) {
     alpha_f32 = alpha->to(at::kFloat).contiguous();
-    auto alpha_mem = make_onednn_memory(alpha_md, engine, alpha_f32.data_ptr());
+    auto alpha_mem =
+        make_onednn_memory(alpha_md, engine, alpha_f32.const_data_ptr());
     args.insert(
         {DNNL_ARG_ATTR_MULTIPLE_POST_OP(post_op_idx) | DNNL_ARG_SRC_1,
          alpha_mem});

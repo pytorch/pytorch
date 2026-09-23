@@ -112,11 +112,11 @@ Tensor mkldnn_linear(
   const ideep::tensor x = itensor_from_mkldnn(self_reshaped);
   // weight_t can be a mkldnn tensor or dense tensor.
   const Tensor weight = (weight_t.is_mkldnn() || weight_t.is_contiguous()) ? weight_t : weight_t.contiguous();
-  const ideep::tensor w = itensor_from_tensor(weight);
+  const ideep::tensor w = itensor_from_const_tensor(weight);
 
   ideep::tensor y;
   if (bias.defined()) {
-    const ideep::tensor b = itensor_from_tensor(bias);
+    const ideep::tensor b = itensor_from_const_tensor(bias);
     ideep::inner_product_forward::compute(x, w, b, y);
   } else {
     ideep::inner_product_forward::compute(x, w, y);
@@ -147,7 +147,7 @@ Tensor mkldnn_linear_backward_input(
   ideep::tensor& grady = itensor_from_mkldnn(grad_output_reshaped);
   // weight_t always dense tensor for training.
   const Tensor weight = weight_t.is_contiguous() ? weight_t : weight_t.contiguous();
-  const ideep::tensor w = itensor_view_from_dense(weight);
+  const ideep::tensor w = itensor_view_from_const_dense(weight);
 
   std::vector<int64_t> input_reshaped_size;
   input_reshaped_size.push_back(grad_output_reshaped.size(0));
@@ -251,13 +251,13 @@ Tensor mkldnn_linear_pointwise(
       at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
-  const ideep::tensor mkldnn_input = itensor_view_from_dense(input_reshaped);
+  const ideep::tensor mkldnn_input = itensor_view_from_const_dense(input_reshaped);
 
   std::optional<ideep::tensor> mkldnn_bias{std::nullopt};
   if (bias.defined()) {
-    mkldnn_bias = itensor_from_tensor(bias);
+    mkldnn_bias = itensor_from_const_tensor(bias);
   }
-  const ideep::tensor w = itensor_from_tensor(weight_t);
+  const ideep::tensor w = itensor_from_const_tensor(weight_t);
 
   ideep::attr_t op_attr = ideep::attr_t();
   if (attr != "none") {
@@ -348,14 +348,14 @@ Tensor mkldnn_linear_pointwise_binary(
 
   c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
   ideep::tensor mkldnn_output = itensor_from_tensor(output);
-  const ideep::tensor mkldnn_other = itensor_from_tensor(other_reshaped);
-  const ideep::tensor mkldnn_input = itensor_view_from_dense(input_reshaped);
+  const ideep::tensor mkldnn_other = itensor_from_const_tensor(other_reshaped);
+  const ideep::tensor mkldnn_input = itensor_view_from_const_dense(input_reshaped);
 
   std::optional<ideep::tensor> mkldnn_bias{std::nullopt};
   if (bias.defined()) {
-    mkldnn_bias = itensor_from_tensor(bias);
+    mkldnn_bias = itensor_from_const_tensor(bias);
   }
-  const ideep::tensor w = itensor_from_tensor(weight_t);
+  const ideep::tensor w = itensor_from_const_tensor(weight_t);
 
   auto other_desc = mkldnn_other.get_desc();
   auto op_attr = ideep::attr_t::fuse_binary(it_binary->second, other_desc);
@@ -441,7 +441,7 @@ Tensor mkl_linear(
     const ideep::tensor& w = itensor_from_mkldnn(mkl_weight_t);
     auto in_ptr = self_.const_data_ptr<float>();
     auto weight_ptr = (float*)(w.get_data_handle());
-    auto out_ptr = output.data_ptr<float>();
+    auto out_ptr = output.mutable_data_ptr<float>();
     if (bias.defined()) {
       auto bias_ = bias.is_contiguous() ? bias : bias.contiguous();
       const auto bias_ptr = bias_.const_data_ptr<float>();
@@ -538,8 +538,8 @@ mkldnn_scaled_mm(const Tensor& mat1, const Tensor& mat2,
        *out_dtype == ScalarType::Float8_e5m2)) {
     output_scale = scale_result.value().item<float>();
   }
-  auto src = at::native::itensor_view_from_dense(mat1_c);
-  auto weight_t = at::native::itensor_view_from_dense(mat2_c);
+  auto src = at::native::itensor_view_from_const_dense(mat1_c);
+  auto weight_t = at::native::itensor_view_from_const_dense(mat2_c);
   bool with_bias = bias.has_value();
   int64_t K = mat1_sizes[1], M = mat1_sizes[0],
           N = mat2_sizes[1];
@@ -566,9 +566,9 @@ mkldnn_scaled_mm(const Tensor& mat1, const Tensor& mat2,
     auto bias_value = bias.value();
     if (bias_value.dim() == 1) {
       auto b_reshape = bias_value.reshape({1, bias_value.size(0)});
-      onednn_bias = at::native::itensor_view_from_dense(b_reshape);
+      onednn_bias = at::native::itensor_view_from_const_dense(b_reshape);
     } else {
-      onednn_bias = at::native::itensor_view_from_dense(bias_value);
+      onednn_bias = at::native::itensor_view_from_const_dense(bias_value);
     }
   }
   auto bias_desc = ideep::tensor::desc();
