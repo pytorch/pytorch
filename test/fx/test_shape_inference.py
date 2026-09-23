@@ -38,7 +38,9 @@ class TestShapeInference(TestCase):
         constraints.append(
             f"Expected size for first two dimensions of batch2 tensor to be: [{name[0]}, ({name[2]}//2) + 12] but got: [{name[0]}, 120]."
         )
-        constraints.append(f"shape '[{name[0]}, -1, 32]' is invalid for input of size {name[0]}*{name[3]}")
+        constraints.append(
+            f"shape '[{name[0]}, -1, 32]' is invalid for input of size {name[0]}*{name[3]}"
+        )
         constraints.append(
             f"a and b must have same reduction dim, but got [32*{name[0]}, {name[3]}] X [20, 15]."
         )
@@ -57,7 +59,9 @@ class TestShapeInference(TestCase):
         constraints.append(
             f"Expected size for first two dimensions of batch2 tensor to be: [{name[0]}, 47*{name[6]}] but got: [{name[0]}*{name[6]}, 47]."
         )
-        constraints.append(f"Split sizes add up to 4258 but got the tensor's size of {name[7]}")
+        constraints.append(
+            f"Split sizes add up to 4258 but got the tensor's size of {name[7]}"
+        )
 
         for constraint in constraints:
             infer_symbol_values(
