@@ -4106,6 +4106,7 @@ class TestProfilerEventsParity(TestCase):
 
     hw_classification = HardwareClassification.GENERIC
 
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     def test_python_function_events_in_events(self):
         class DummyModule(nn.Module):
             def forward(self, x):
@@ -4178,6 +4179,7 @@ class TestProfilerEventsParity(TestCase):
             "key_averages(include_python_functions=True) should include threading.py events",
         )
 
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     def test_profiler_fwdbwd_flow_events_parity(self):
         """Verify that fwd->bwd flow fields on events() match Chrome trace JSON."""
         with profile(activities=[ProfilerActivity.CPU]) as prof:
@@ -4222,6 +4224,7 @@ class TestProfilerEventsParity(TestCase):
                 "fwdbwd flow end IDs differ between events() and Chrome trace",
             )
 
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     def test_profiler_op_args_events_parity(self):
         """Verify that cpu_op args on events() match Chrome trace JSON args."""
         base_tensor = torch.randn(1024, dtype=torch.float32)
