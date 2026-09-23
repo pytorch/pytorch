@@ -241,15 +241,17 @@ def bind_args_cached(
     spec = _get_spec(func)
 
     se = tx.output.side_effects
+    has_pending_defaults = se.has_pending_mutation_of_attr(vt, "__defaults__")
+    has_pending_kwdefaults = se.has_pending_mutation_of_attr(vt, "__kwdefaults__")
     pending_defaults: tuple[object, ...] = func.__defaults__ or ()
     pending_kwdefaults: dict[str, object] = func.__kwdefaults__ or {}
 
-    if se.has_pending_mutation_of_attr(vt, "__defaults__"):
+    if has_pending_defaults:
         d = vt.tp_getattro_impl(tx, "__defaults__")
         pending_defaults = (
             tuple(d.items) if isinstance(d, variables.TupleVariable) else ()
         )
-    if se.has_pending_mutation_of_attr(vt, "__kwdefaults__"):
+    if has_pending_kwdefaults:
         kd = vt.tp_getattro_impl(tx, "__kwdefaults__")
         pending_kwdefaults = (
             {key.vt.as_python_constant(): val for key, val in kd.items.items()}
@@ -260,8 +262,8 @@ def bind_args_cached(
     # Fast path: simple positional-only, no defaults, no varargs/varkw
     # This is the common case for small utility functions called repeatedly.
     if (
-        pending_defaults is None
-        and pending_kwdefaults is None
+        not has_pending_defaults
+        and not has_pending_kwdefaults
         and len(args) == spec.arg_count
         and not func.__defaults__
         and not kwargs
@@ -296,7 +298,7 @@ def bind_args_cached(
             ba[name] = wrap_bound_arg(tx, rem_kw.pop(name))
         elif name in spec.pos_default_map:
             idx = spec.pos_default_map[name]
-            if fn_source and pending_defaults is None and not guarded_pos_defaults_len:
+            if fn_source and not has_pending_defaults and not guarded_pos_defaults_len:
                 # The parameter-to-default mapping depends on __defaults__
                 # length; guard it without wrapping every default value.
                 install_guard(
@@ -308,7 +310,7 @@ def bind_args_cached(
             default_source = None
             if (
                 fn_source
-                and pending_defaults is None
+                and not has_pending_defaults
                 and not (
                     ConstantVariable.is_literal(spec.defaults[idx])
                     and config.skip_guards_on_constant_func_defaults
@@ -334,7 +336,7 @@ def bind_args_cached(
             ba[name] = wrap_bound_arg(tx, rem_kw.pop(name))
         elif name in spec.kwdefaults:
             kwdefault_source = None
-            if fn_source and pending_kwdefaults is None:
+            if fn_source and not has_pending_kwdefaults:
                 kwdefault_source = DefaultsSource(fn_source, name, is_kw=True)
             ba[name] = wrap_bound_arg(tx, spec.kwdefaults[name], kwdefault_source)
         else:

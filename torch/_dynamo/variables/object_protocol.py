@@ -2570,10 +2570,28 @@ def object_generic_setattr_str(
                         hints=[*graph_break_hints.SUPPORTABLE],
                     )
             se.track_attribute_mutation_new(obj)
+
+        if value is None:
+            # Can only delete attributes that exists
+            def raise_missing_attr():
+                raise_attribute_error(
+                    tx,
+                    f"'{obj.python_type_name()}' object has no attribute '{name}'",
+                )
+
+            if se.has_pending_mutation_of_attr(obj, name):
+                attr = se.load_attr(obj, name, deleted_ok=True)
+                if isinstance(attr, variables.DeletedVariable):
+                    raise_missing_attr()
+            elif obj.lookup_instance_dict(tx, name) is None:
+                # No write during tracing, so the instance dict of the object
+                # itself decides whether there is anything to delete.
+                raise_missing_attr()
+
         se.store_attr(
             obj,
             name,
-            value if value is not None else variables.DeletedVariable(),
+            variables.DeletedVariable() if value is None else value,
             AttrMutationKind.INSTANCE_DICT,
         )
     return ConstantVariable.create(None)

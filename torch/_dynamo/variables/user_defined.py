@@ -3351,6 +3351,17 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             raise_attribute_error(
                 tx, f"'{self.python_type_name()}' object has no __dict__"
             )
+        se = tx.output.side_effects
+        names = [
+            name
+            for name, kind in se.attr_mutation_kinds.get(self, {}).items()
+            if kind is AttrMutationKind.INSTANCE_DICT
+        ]
+        for name in names:
+            del se.store_attr_mutations[self][name]
+            del se.attr_mutation_kinds[self][name]
+        # A dict view built earlier snapshotted the old contents.
+        self.dict_vt = None
         return store_attr_mutation(tx, self, "__dict__", value)
 
     tp_getset = {
