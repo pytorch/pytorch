@@ -500,4 +500,29 @@ Tensor& mse_loss_backward_out(const Tensor& grad_output,
 Tensor l1_loss(const Tensor& input, const Tensor& target, int64_t reduction) {
   return apply_loss_reduction((input - target).abs(), reduction);
 }
+
+// Soft Dice, scored per sample over dim 0 then reduced:
+// 1 - 2*sum(p*t)/(sum(p)+sum(t)+eps).
+// reduction is at::Reduction (None, Mean, Sum). Floating point only,
+// self and target must have the same shape with a leading batch dim.
+Tensor dice_loss(
+    const Tensor& self,
+    const Tensor& target,
+    double eps,
+    int64_t reduction) {
+  TORCH_CHECK(
+      self.is_floating_point() && target.is_floating_point(),
+      "dice_loss is defined on floating point tensors");
+  TORCH_CHECK(
+      self.sizes() == target.sizes(),
+      "dice_loss expects self and target of the same shape");
+  TORCH_CHECK(
+      self.dim() >= 1 && self.size(0) > 0,
+      "dice_loss expects a leading batch dimension");
+  auto p = self.reshape({self.size(0), -1});
+  auto t = target.reshape({target.size(0), -1});
+  auto inter = (p * t).sum(1);
+  auto denom = p.sum(1) + t.sum(1) + eps;
+  return apply_loss_reduction(1 - 2 * inter / denom, reduction);
+}
 }  // namespace at::native

@@ -2933,6 +2933,13 @@
 
 - func: hinge_embedding_loss(Tensor self, Tensor target, float margin=1.0, int reduction=Mean) -> Tensor
 
+# Soft Dice per sample: 1 - 2*sum(p*t)/(sum(p)+sum(t)+eps), then reduction.
+# Floating point only; shapes must match.
+- func: dice_loss(Tensor self, Tensor target, float eps=1e-6, int reduction=Mean) -> Tensor
+  python_module: nn
+  dispatch:
+    CompositeImplicitAutograd: dice_loss
+
 - func: group_norm(Tensor input, int num_groups, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enabled=True) -> Tensor
 
 - func: native_group_norm(Tensor input, Tensor? weight, Tensor? bias, SymInt N, SymInt C, SymInt HxW, int group, float eps) -> (Tensor, Tensor, Tensor)
