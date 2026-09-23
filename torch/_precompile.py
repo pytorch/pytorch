@@ -392,12 +392,14 @@ class DynamoTracer:
     ``guard_filter_fn`` takes the ``GuardFilterEntry`` records (``guard_type``,
     ``name``, ...) and returns one keep flag per entry, filtering the guards kept
     in the SERIALIZED artifact (runtime capture guards are always retained; the
-    default drops only what cannot be serialized); ``recompile_limit`` caps recompilations per frame; ``dynamic``
-    forces dynamic shapes as ``torch.compile(dynamic=)`` does. The ``require_*``
-    gates refuse, at write time, an artifact with a coverage gap
-    (``require_complete``: a bypassed or uncovered frame, a call that raised), one
-    whose dropped guards told captured variants apart or hang off a
-    configuration-chosen slot (``require_no_risky_drops``). Other dropped guards,
+    default drops only what cannot be serialized); ``recompile_limit`` caps
+    recompilations per frame, and a call past it runs eager and is absent from
+    the artifact without any gate refusing it; ``dynamic`` forces dynamic shapes
+    as ``torch.compile(dynamic=)`` does. The ``require_*`` gates refuse, at write
+    time, an artifact with a coverage gap (``require_complete``: a bypassed or
+    uncovered frame, a call that raised) or one whose dropped guards told
+    captured variants apart or hang off a configuration-chosen slot
+    (``require_no_risky_drops``). Other dropped guards,
     such as the identity guards every model drops because they cannot be
     serialized, are listed in the artifact rather than refused.
     """
