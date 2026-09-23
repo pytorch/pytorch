@@ -3467,6 +3467,11 @@ class SIMDScheduling(BaseScheduling):
             for stage in plan.sub_parent_stages
             for relation in stage.access_relations
         )
+        if has_translated_relations and any(
+            node.get_device() is None or node.get_device().type != "cuda"
+            for node in nodes
+        ):
+            return False
         return not (
             has_translated_relations
             and not self._translated_projection_is_persistent(plan)
