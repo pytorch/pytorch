@@ -101,14 +101,11 @@ def _no_reduction_passthrough(
     acc_policy: str,
     acc_dtype: torch.dtype,
 ) -> torch.Tensor:
-    # Mirrors the op's body: the accumulator's loss-only branch, selected by
-    # reduction='none' with nothing precomputed. No checks to call -- this op
-    # takes no compute_*_grad flags, and its probability-target guard lives in
-    # its backward, which is registered above this dispatch key and so is not
-    # displaced by the override.
-    #
-    # A kernel replacing this call inherits the same obligation as the scalar
-    # op's impl: re-enforce the checks inside the accumulator.
+    # The op's body: the accumulator's loss-only branch. It needs no checks --
+    # the op takes no compute_*_grad flags, and its probability-target guard is
+    # in its backward, registered above this dispatch key. A kernel replacing
+    # this call must re-enforce the accumulator's checks, as the scalar op's
+    # impl does.
     from torch.nn.modules.linear_cross_entropy import (
         _linear_cross_entropy_batch_chunked_accumulator,
     )
@@ -133,15 +130,9 @@ def _no_reduction_passthrough(
 
 @functools.cache
 def _arch_supported(device_index: int = 0) -> bool:
-    """Whether the kernel can run on this device: the CuTeDSL runtime's floor.
-
-    8.0 is also where this path's own arithmetic becomes available -- the logits
-    matmul asks cuBLAS for an fp32 output from low-precision inputs, which is
-    rejected below it. A floor rather than a list of architectures this was
-    measured on is deliberate: waiting for a measurement on every capability,
-    minor revisions included, would keep the kernel off hardware it runs on
-    perfectly well. What is unmeasured below sm_90 is PERFORMANCE, not
-    correctness.
+    """Whether the kernel can run on this device: sm_80, the CuTeDSL runtime's
+    floor, which is also where cuBLAS gives the logits matmul an fp32 output
+    from low-precision inputs.
 
     Called from `cond`, i.e. at dispatch and never at registration, so the
     `cuInit` this performs cannot poison a fork before torch is used.
@@ -168,30 +159,19 @@ def _kernel_eligible(
     *,
     dtypes: tuple[torch.dtype, ...] = (torch.bfloat16,),
 ) -> bool:
-    """What the kernel variants implement. Shapes, dtypes and device only --
-    no data reads, so this is safe under FakeTensor tracing.
-
-    Everything outside this set stays with the op: `cond` evaluates the
+    """What the kernel variants implement. Shapes, dtypes and device only -- no
+    data reads, so this is safe under FakeTensor tracing. `cond` evaluates the
     selected variant's eligibility, so an ineligible input never enters the
-    override at all and the router falls back, which keeps "the kernel ran"
-    observable in a profile.
-
-    The architecture condition is the DSL runtime's floor rather than a list of
-    architectures this was measured on -- see `_arch_supported`.
-
-    `dtypes` is a parameter because a future variant may implement a different
-    set. fp16 is in this one because eager keeps fp16 logits under `compact`
-    (fp32 for bf16), so at fp16 a chunk is two bytes per element -- which this
-    kernel matches by aliasing `g` into the logits rather than allocating a
-    second buffer.
+    override: the router falls back, and a profile shows whether the kernel ran.
+    `dtypes` is the variant's input-dtype set; fp16 can be in it because eager's
+    `compact` logits buffer is fp16 too, and aliasing `g` into it keeps the
+    kernel at eager's memory.
     """
     return (
         input.device.type == "cuda"
         and _arch_supported(input.device.index or 0)
-        # Every tensor the launch touches has to be on that same device. The
-        # gate is the only place that can say so: past it, a stray CPU tensor
-        # surfaces as an FFI argument-type error from the launcher rather than
-        # as eager's "expected all tensors to be on the same device".
+        # Every tensor the launch touches must be on that device; declining
+        # lets eager raise its own device-mismatch error.
         and linear_weight.device == input.device
         and target.device == input.device
         and (linear_bias is None or linear_bias.device == input.device)
@@ -208,20 +188,11 @@ def _kernel_eligible(
         and label_smoothing == 0.0
         and input.dim() == 2
         and linear_weight.dim() == 2
-        # Both ends of the class count. Zero classes leaves the kernel no
-        # column to read: every target is out of range, the clamp sends the
-        # read to column 0, and on a (Bc, 0) buffer that is out of bounds --
-        # an illegal access rather than a wrong number. Eager raises on the
-        # empty reduction, so decline and let the router fall back to it.
-        # The upper end crosses the FFI as int32 and the kernel indexes
-        # columns in int32, so a larger one would truncate rather than
-        # decline. It guards that rather than marking the exact limit: the
-        # kernel's own arithmetic strides PAST V -- pass 1 by up to
-        # `threads_per_block`, pass 2 by up to a staging group more -- so the
-        # largest count that is actually safe sits below this by a margin the
-        # knobs set, which the gate cannot see. The difference is unreachable:
-        # a (C, F) weight anywhere near it fits in no memory, and cuBLAS takes
-        # GEMM dimensions as int.
+        # Both ends of the class count. With zero classes every target is out
+        # of range and the kernel traps, where eager raises on the empty
+        # reduction. V crosses the FFI and indexes columns as int32; the kernel
+        # strides up to a staging group past V, so the exact safe bound sits
+        # slightly lower, but no (C, F) weight near it fits in memory.
         and 1 <= linear_weight.shape[0] <= 2**31 - 1
     )
 
@@ -245,59 +216,20 @@ def _batch_chunked_kernel(
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Chunked loss and gradients with the softmax-gradient transform fused.
 
-    Same four outputs as the op, and the same chunking contract: the caller's
-    `batch_chunk_size` bounds the per-chunk footprint. What differs is the
-    middle of the loop. Eager walks the `(Bc, V)` logits buffer five more
-    times (row max, subtract, gather, `exp_`, row sum, scale) and then
-    scatters the one-hot correction into `grad_linear_weight` with
-    `index_add_`; here one kernel reads the logits twice and writes the dense
-    gradient-of-logits `g`, which turns both parameter gradients into plain
-    GEMMs -- `grad_input = g @ W`, `grad_linear_weight = g^T @ X` -- and
-    removes the scatter entirely, so the result is also deterministic where
-    eager's was not.
+    Same four outputs and chunking contract as the op: `batch_chunk_size`
+    bounds the per-chunk footprint. Per chunk, one kernel reads the logits
+    twice and writes the dense gradient-of-logits `g`, which makes both
+    parameter gradients plain GEMMs -- `grad_input = g @ W`,
+    `grad_linear_weight = g^T @ X` -- with no one-hot scatter, so the result is
+    deterministic. `g` aliases the logits storage, so a chunk costs one
+    `(Bc, V)` buffer and no value loses precision. The forward-only path has no
+    `g` to write and forms its statistics from eager ops.
 
-    The scalar loss accumulates in `acc_dtype` here, where eager keeps it in
-    the input dtype for bf16 (`acc_dtype if dtype == float16 else dtype`) and
-    rounds it twice per chunk. This path is the more accurate of the two, and
-    the returned value is cast back to the input dtype either way -- but the
-    two are not bit-comparable, so a test that compares them needs a tolerance
-    in ULP of that dtype rather than an absolute one.
-
-    The row statistics follow eager's buffer discipline rather than calling
-    `torch.logsumexp`: that is a composite which materializes `self - maxes`,
-    a full `(Bc, V)` fp32 temporary per chunk, which showed up as a peak-memory
-    regression against eager. Shifting and exponentiating in place costs the
-    same traffic and allocates nothing.
-
-    One launch computes the row statistics and `g` together from the raw
-    logits, so the shift, the `exp_` and the two reductions never run as
-    separate passes -- two reads of the logits buffer and one write of `g`,
-    against five more passes over it. The forward-only path (no gradient
-    requested) has no `g` to write, so it takes its statistics from eager ops;
-    fusing that path is separate work.
-
-    The logits buffer follows eager: `acc_dtype` for bf16 input, and fp16 for
-    fp16 input, which is eager's own choice there. Carrying bf16 input at a
-    low-precision buffer was measured and dropped: it halves the buffer and the
-    kernel's reads of it, but bf16 stores the logits with absolute error
-    ~|z| * 2^-9 while the softmax depends on their differences, so the
-    gradients degrade once |z| reaches the tens -- the regime a trained head
-    operates in.
-
-    `g` is a VIEW of the logits storage rather than a second buffer, which
-    reaches a low-precision buffer's footprint without its rounding: a chunk
-    costs one `(Bc, V)` buffer and no value loses precision. Only a kernel that
-    owns a whole row in one block can do this, since it has to order its writes
-    against its reads; a row split across blocks would need a grid-wide
-    barrier.
-
-    At fp16 the buffer follows eager down to two bytes per element, which makes
-    the aliasing overlap exact rather than half-offset, and is also why fp16 is
-    only offered where `g` aliases the logits storage: a separate `g` would
-    double eager's chunk footprint. The rounded fp16 logits carry eager's own
-    accuracy behaviour, measured and recorded in the plan -- what this path
-    does not inherit is the fp16 rounding of `exp()` and of the scaled
-    gradient, which stay in fp32 registers here.
+    The logits buffer dtype is eager's (fp16 for fp16 input, `acc_dtype`
+    otherwise), while `exp()` and the scaled gradient stay in fp32 registers.
+    The scalar loss accumulates in `acc_dtype`, where eager rounds it to bf16
+    twice per chunk, so for bf16 the two agree to a few ULP of that dtype, not
+    bit for bit.
     """
     from torch.nn.modules.linear_cross_entropy import (
         _check_acc_dtype_compatible,
@@ -310,12 +242,9 @@ def _batch_chunked_kernel(
         _neg_weight_target,
     )
 
-    # Installed at a backend key, so the op's body never runs and its checks
-    # have to run here -- including the ones inside the accumulator this
-    # replaces. Two of the four can fire: the grad-flag and bias-shape checks
-    # read arguments the gate does not constrain. The acc ones cannot, since
-    # the gate already admits only `compact` with fp32 -- they are kept so the
-    # set stays the op's, not a subset chosen to match today's gate.
+    # Installed at a backend key, so the op's body never runs: all of its
+    # checks, including the accumulator's, run here, so the set stays the op's
+    # whatever the gate admits.
     _check_batch_chunked_grad_flags(
         input,
         linear_weight,
@@ -336,15 +265,11 @@ def _batch_chunked_kernel(
     num_batches, _ = input.shape
     num_classes = linear_weight.shape[0]
 
-    # Per-row prep from the op's own functions rather than a restatement of
-    # them: same clamped target, same class weight, mean divisor and ignored
-    # rows. The sign is the one difference -- the accumulator consumes
-    # `neg_weight_target * (onehot - softmax)` while the kernel writes
-    # `s * (softmax - onehot)` -- and the negation is in place on a tensor the
-    # function allocates fresh.
-    # `.contiguous()`: the kernel is compiled for a stride-1 target, and
-    # `_corrected_target` hands a caller's tensor straight back when
-    # `ignore_index` is itself a valid class. A no-op in the common case.
+    # The op's own per-row prep: clamped target, class weight, mean divisor and
+    # ignored rows. Negated, since the kernel writes `s * (softmax - onehot)`;
+    # in place is safe, as `_neg_weight_target` returns a fresh tensor.
+    # `.contiguous()` because the kernel is compiled for a stride-1 target and
+    # `_corrected_target` may return the caller's tensor.
     target_hat = _corrected_target(target, ignore_index, num_classes).contiguous()
     row_scale = _neg_weight_target(
         target_hat, target == ignore_index, weight, acc_dtype, reduction
@@ -352,16 +277,14 @@ def _batch_chunked_kernel(
 
     loss = _make_zeros((), acc_dtype, device)
     grad_input = _make_empty(input.shape, dtype, device, when=compute_input_grad)
-    # The accumulator is fully written by the first chunk (beta=0 below), so
-    # zeroing it first is a (C, F) write nothing reads. The empty-batch early
-    # return has no first chunk, so it keeps the zeros.
+    # Uninitialized, since the first chunk writes all of it (beta=0 below); the
+    # empty-batch early return has no first chunk, so it gets zeros.
     _make_accumulator = _make_empty if num_batches > 0 else _make_zeros
     grad_linear_weight = _make_accumulator(
         linear_weight.shape, dtype, device, when=compute_linear_weight_grad
     )
-    # The post-loop `copy_` writes all of this, so the zeros it used to be
-    # allocated with were a (C,) fill nothing read. The empty-batch early
-    # return has no loop to write it, so that path keeps the zeros.
+    # Uninitialized, since the post-loop `copy_` writes all of it; the
+    # empty-batch early return has no loop, so it gets zeros.
     _make_bias = _make_empty if num_batches > 0 else _make_zeros
     grad_linear_bias = _make_bias(
         linear_weight.shape[:-1], dtype, device, when=compute_linear_bias_grad
@@ -378,35 +301,28 @@ def _batch_chunked_kernel(
         compute_input_grad or compute_linear_weight_grad or compute_linear_bias_grad
     )
     chunk_rows = min(batch_chunk_size, num_batches)
-    # Eager's buffer dtype, verbatim: fp16 input under `compact` keeps its
-    # logits at fp16 (two bytes per element, and the softmax input rounded with
-    # it); everything else upcasts to acc_dtype for softmax stability.
+    # Eager's logits dtype under `compact`; a bf16 buffer would round the softmax
+    # input, measured in https://github.com/pytorch/pytorch/pull/195829.
     logits_dtype = dtype if dtype is torch.float16 else acc_dtype
     # Allocated once and reused: the peak is one chunk of each, which is what
     # `batch_chunk_size` promises.
     logits_buf = torch.empty(
         (chunk_rows, num_classes), dtype=logits_dtype, device=device
     )
-    # `g` shares the logits storage: row n's gradients occupy the first half
-    # of the bytes that held its logits, so a chunk is one buffer, not two. The
-    # kernel orders its writes against its reads, which is what makes that safe.
+    # `g` aliases the logits storage, so a chunk is one buffer; the kernel
+    # orders its writes against its reads (see its module docstring).
     g_alias = logits_buf.view(dtype).narrow(1, 0, num_classes)
-    # Only the forward-only branch shifts in place, so this is the one buffer
-    # here the gradient path never touches.
+    # Only the forward-only branch uses a row max.
     row_max_buf = _make_empty(
         (chunk_rows, 1), logits_dtype, device, when=not compute_grads
     )
-    # One slot per row of the call: the kernel writes each row's loss
-    # contribution and the reduction happens once, after the loop, instead of
-    # four launches per chunk on (Bc,) data. The forward-only path forms the
-    # loss chunk by chunk and never reads this, so it does not allocate it.
+    # One slot per row of the call, filled by the kernel and summed once after
+    # the loop; the forward-only path never reads it.
     term_buf = _make_empty((num_batches,), acc_dtype, device, when=compute_grads)
     weight_t = linear_weight.t()
-    # `addmm` takes `self` only in `out_dtype` or in `mat1`'s dtype, which is
-    # narrower than what the op accepts: with fp16 inputs the buffer is fp16, so
-    # an fp32 bias matches neither. Cast just that combination -- where `addmm`
-    # takes the bias in `mat1`'s dtype it gives the same bits as a pre-cast one,
-    # so casting there would be a round trip for nothing.
+    # `addmm` takes `self` only in `out_dtype` or `mat1`'s dtype, so an fp32
+    # bias with fp16 inputs (fp16 buffer) matches neither and is cast; the
+    # other combinations pass through unchanged.
     bias_arg = linear_bias
     if linear_bias is not None and linear_bias.dtype not in (logits_dtype, dtype):
         bias_arg = linear_bias.to(logits_dtype)
@@ -440,17 +356,17 @@ def _batch_chunked_kernel(
                 target_chunk,
             )
         else:
-            # Shift in place by the row max, then read the target logit BEFORE
-            # exponentiating -- `exp_` overwrites the shifted logits.
+            # Shift in place -- so this pass allocates no (Bc, V) temporary --
+            # then read the target logit BEFORE exponentiating, since `exp_`
+            # overwrites the shifted logits.
             row_max = row_max_buf.narrow(0, 0, rows)
             torch.amax(logits, dim=1, keepdim=True, out=row_max)
             logits.sub_(row_max)
             target_logit = logits.gather(1, target_chunk.unsqueeze(1)).squeeze(1)
             logits.exp_()
             row_sum = logits.sum(dim=1, dtype=acc_dtype)
-            # Shifted by the row max on both sides: the unshifted difference
-            # is the same number in exact arithmetic, but in fp32 a large row
-            # offset rounds both terms to it and the difference collapses.
+            # Both terms shifted by the row max, which keeps their difference
+            # from collapsing in fp32 at large row offsets.
             loss.add_((scale_chunk * (row_sum.log() - target_logit)).sum())
             continue
 
@@ -461,17 +377,13 @@ def _batch_chunked_kernel(
         if compute_input_grad:
             torch.mm(g, linear_weight, out=grad_input.narrow(0, start, rows))
         if compute_linear_weight_grad:
-            # The first chunk WRITES the accumulator (beta=0), which is why it
-            # is not zeroed above: that fill plus this chunk's read of it were
-            # (C, F) of traffic nothing consumed.
+            # The first chunk writes the accumulator (beta=0) rather than adding to it.
             if start == 0:
                 torch.mm(g.t(), input_chunk, out=grad_linear_weight)
             else:
                 grad_linear_weight.addmm_(g.t(), input_chunk)
 
     if compute_grads:
-        # `out=loss` rather than `loss.add_(...)`: nothing else writes `loss`
-        # on this path, so the reduction lands directly in it.
         torch.sum(term_buf, dim=0, out=loss)
     if compute_linear_bias_grad:
         grad_linear_bias.copy_(bias_grad_acc)
