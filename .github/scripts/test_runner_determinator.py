@@ -794,6 +794,7 @@ class TestRunnerDeterminatorAmdSandboxExperiment(TestCase):
         self.assertEqual("lf-", result.prefix)
         self.assertEqual("amd-sandbox-", result.amd_sandbox_prefix)
 
+
 class TestRunnerDeterminatorNoRunnerExperimentsLabel(TestCase):
     """no-runner-experiments opts out of lf, so the run stays on the default Meta fleet."""
 
