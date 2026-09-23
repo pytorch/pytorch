@@ -449,9 +449,10 @@ class FSDPModule:
         unsharded. Gradients on other parameter owners and HSDP partial buffers
         are unchanged.
         Reduction consumes the unsharded ``grad`` and sets it to ``None``; HSDP
-        partial buffers are consumed when all-reduce completes. Synchronize
-        pending gradients before global gradient clipping or an optimizer step,
-        and reshard parameters before updating them.
+        partial buffers are consumed when all-reduce completes. Before global
+        gradient clipping or an optimizer step, enable the required reductions
+        and call ``set_is_last_backward(True)`` for the final backward. Reshard
+        parameters before updating them.
 
         Args:
             requires_gradient_sync (bool): Whether to reduce gradients for the
@@ -483,34 +484,6 @@ class FSDPModule:
                 state = module._get_fsdp_state()
                 for fsdp_param_group in state._fsdp_param_groups:
                     fsdp_param_group.all_reduce_grads = requires_all_reduce
-
-    def synchronize_gradients(self, *, recurse: bool = True) -> None:
-        """Complete pending gradient reductions without running another backward.
-
-        Call this method on all participating ranks after backward. It consumes
-        pending contributions, adds them to any previously reduced gradients,
-        and stores sharded DTensor gradients in each parameter's sharded
-        ``grad_dtype``. Custom communication hooks execute as part of
-        this reduction. Future backward synchronization settings are unchanged.
-
-        Call this method before global gradient clipping or an optimizer step
-        when gradients still contain pending contributions. When retaining
-        unsharded parameters, also call :meth:`reshard` on each FSDP module before
-        reading or updating the sharded parameters and their gradients.
-
-        Args:
-            recurse (bool): Whether to synchronize all FSDP submodules or only
-                this module.
-        """
-        self_module = cast(nn.Module, self)
-        modules = self_module.modules() if recurse else (self_module,)
-        seen_groups: set[FSDPParamGroup] = set()
-        for module in modules:
-            if isinstance(module, FSDPModule):
-                for group in module._get_fsdp_state()._fsdp_param_groups:
-                    if group not in seen_groups:
-                        group.synchronize_gradients()
-                        seen_groups.add(group)
 
     def set_reshard_after_forward(
         self, reshard_after_forward: bool, recurse: bool = True

@@ -787,10 +787,10 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
 
     @skip_if_lt_x_gpu(2)
     @parametrize("use_hsdp", [False, True])
-    @parametrize("sync_in_backward", [False, True])
+    @parametrize("use_no_sync", [False, True])
     @parametrize("reduce_dtype", [None, torch.float32])
     def test_grad_dtype_none_requires_uniform_gradients(
-        self, use_hsdp: bool, sync_in_backward: bool, reduce_dtype: torch.dtype | None
+        self, use_hsdp: bool, use_no_sync: bool, reduce_dtype: torch.dtype | None
     ):
         if use_hsdp and self.world_size != 4:
             self.skipTest("HSDP requires four devices")
@@ -823,7 +823,6 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
             reshard_after_forward=False,
             mp_policy=MixedPrecisionPolicy(reduce_dtype=reduce_dtype),
         )
-        model.set_requires_gradient_sync(sync_in_backward)
         model.set_reshard_after_backward(False)
         with (
             patch.object(
@@ -834,25 +833,24 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
             ) as reduce_scatter,
             patch.object(dist, "all_reduce", wraps=dist.all_reduce) as all_reduce,
         ):
+            if use_no_sync:
+                model.set_requires_gradient_sync(False)
+                model.set_is_last_backward(False)
+                model().backward()
+                reduce_scatter.assert_not_called()
+                all_reduce.assert_not_called()
+            model.set_requires_gradient_sync(True)
+            model.set_is_last_backward(True)
             loss = model()
             if reduce_dtype is None:
-                if not sync_in_backward:
-                    loss.backward()
                 with self.assertRaisesRegex(AssertionError, "uniform gradient dtype"):
-                    if sync_in_backward:
-                        loss.backward()
-                    else:
-                        model.synchronize_gradients()
+                    loss.backward()
                 self.assertEqual(model.first.grad.dtype, torch.float32)
                 self.assertEqual(model.second.grad.dtype, torch.bfloat16)
                 reduce_scatter.assert_not_called()
                 all_reduce.assert_not_called()
             else:
                 loss.backward()
-                if not sync_in_backward:
-                    reduce_scatter.assert_not_called()
-                    all_reduce.assert_not_called()
-                    model.synchronize_gradients()
                 reduce_scatter.assert_called_once()
                 self.assertEqual(all_reduce.call_count, int(use_hsdp))
             all_gather.assert_called_once()
@@ -944,7 +942,8 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
             self.assertEqual(model.weight.grad.dtype, torch.float16)
             self.assertEqual(model.weight.grad, torch.zeros_like(inp).half())
             model.reshard()
-            model.synchronize_gradients()
+            model.set_requires_gradient_sync(True)
+            model(torch.zeros_like(inp)).sum().backward()
             self.assertEqual(model.weight.grad.full_tensor(), expected)
 
     @skip_if_lt_x_gpu(2)

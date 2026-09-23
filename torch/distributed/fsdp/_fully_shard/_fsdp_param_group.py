@@ -896,31 +896,6 @@ class FSDPParamGroup:
                 "Synchronize pending gradients before changing their reduction policy"
             )
 
-    @torch.no_grad()
-    def synchronize_gradients(self) -> None:
-        # A standalone backward through part of a grouped module may finish
-        # without the root final callback resetting POST_BACKWARD to IDLE.
-        if is_bw() or self._training_state not in (
-            TrainingState.IDLE,
-            TrainingState.POST_BACKWARD,
-        ):
-            raise RuntimeError(
-                "synchronize_gradients() must be called outside forward and backward"
-            )
-        reduce_grads, all_reduce_grads = self.reduce_grads, self.all_reduce_grads
-        try:
-            self.reduce_grads = self.all_reduce_grads = True
-            self.post_backward()
-            self._wait_for_post_backward()
-            # CPU optimizers need the offloaded gradients before this returns.
-            for fsdp_param in self.fsdp_params:
-                if fsdp_param.grad_offload_event is not None:
-                    fsdp_param.grad_offload_event.synchronize()
-                    fsdp_param.grad_offload_event = None
-        finally:
-            self.reduce_grads, self.all_reduce_grads = reduce_grads, all_reduce_grads
-            self._training_state = TrainingState.IDLE
-
     def _wait_for_post_backward(self):
         if self._post_reduce_event is not None:
             self.device_handle.current_stream().wait_event(self._post_reduce_event)

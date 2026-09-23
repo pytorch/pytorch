@@ -341,21 +341,24 @@ class TestFullyShardConversion(TestCase):
                 param_dtype=param_dtype, reduce_dtype=reduce_dtype
             ),
         )
-        model.set_requires_gradient_sync(False)
         model.set_reshard_after_backward(False)
-        for value in (256, 1, -256):
+        for step, value in enumerate((256, 1, -256)):
+            sync = step == 2
+            model.set_requires_gradient_sync(sync)
+            model.set_is_last_backward(sync)
             inp = torch.full((1, 1), value, device=device, dtype=param_dtype)
             model(inp).sum().backward()
             reference(inp).sum().backward()
+            self.assertEqual(model.weight.dtype, param_dtype)
+            self.assertEqual(model.weight.grad_dtype, unsharded_grad_dtype)
+            if not sync:
+                self.assertEqual(model.weight.grad.dtype, unsharded_grad_dtype)
+                self.assertEqual(model.weight.grad, reference.weight.grad)
         expected = 0 if unsharded_grad_dtype == torch.bfloat16 else 1
         self.assertEqual(
             reference.weight.grad, torch.full_like(reference.weight.grad, expected)
         )
-        self.assertEqual(model.weight.dtype, param_dtype)
-        self.assertEqual(model.weight.grad_dtype, unsharded_grad_dtype)
-        self.assertEqual(model.weight.grad.dtype, unsharded_grad_dtype)
-        self.assertEqual(model.weight.grad, reference.weight.grad)
-        model.synchronize_gradients()
+        self.assertIsNone(model.weight.grad)
         model.reshard()
         self.assertEqual(model.weight.grad_dtype, orig_dtype)
         self.assertEqual(model.weight.grad.dtype, orig_dtype)
@@ -382,16 +385,19 @@ class TestFullyShardConversion(TestCase):
             mesh=self.mesh,
             mp_policy=MixedPrecisionPolicy(param_dtype=param_dtype),
         )
-        model.set_requires_gradient_sync(False)
         model.set_reshard_after_backward(False)
-        for value in (256, 1, -256):
+        for step, value in enumerate((256, 1, -256)):
+            sync = step == 2
+            model.set_requires_gradient_sync(sync)
+            model.set_is_last_backward(sync)
             inp = torch.full((1, 1), value, device=device, dtype=torch.bfloat16)
             model(inp).sum().backward()
             reference(inp).sum().backward()
+            if not sync:
+                self.assertEqual(model.weight.grad, reference.weight.grad)
         self.assertEqual(reference.weight.grad, torch.ones_like(reference.weight.grad))
-        self.assertEqual(model.weight.grad, reference.weight.grad)
         self.assertEqual(model.weight.grad_dtype, torch.float32)
-        model.synchronize_gradients()
+        self.assertIsNone(model.weight.grad)
         model.reshard()
         self.assertEqual(model.weight.grad.full_tensor(), reference.weight.grad)
 
@@ -424,16 +430,19 @@ class TestFullyShardConversion(TestCase):
             mesh=self.mesh,
             mp_policy=MixedPrecisionPolicy(reduce_dtype=reduce_dtype),
         )
-        model.set_requires_gradient_sync(False)
         model.set_reshard_after_backward(False)
-        for value in (256, 1, -256):
+        for step, value in enumerate((256, 1, -256)):
+            sync = step == 2
+            model.set_requires_gradient_sync(sync)
+            model.set_is_last_backward(sync)
             inp = torch.full((2,), value, device=device, dtype=torch.bfloat16)
             model(inp).sum().backward()
             reference(inp).sum().backward()
+            if not sync:
+                self.assertEqual(model.weight.grad.dtype, reference.weight.grad.dtype)
+                self.assertEqual(model.weight.grad, reference.weight.grad)
         self.assertEqual(model.weight.grad_dtype, reduce_dtype)
-        self.assertEqual(model.weight.grad.dtype, reference.weight.grad.dtype)
-        self.assertEqual(model.weight.grad, reference.weight.grad)
-        model.synchronize_gradients()
+        self.assertIsNone(model.weight.grad)
         model.reshard()
         self.assertIsNone(model.weight.grad_dtype)
         self.assertEqual(model.weight.grad.full_tensor(), reference.weight.grad)
@@ -469,14 +478,13 @@ class TestFullyShardConversion(TestCase):
             mesh_dim_names=("replicate", "shard"),
         )
         fully_shard(model, mesh=mesh)
-        model.set_requires_all_reduce(False)
         second_dtype = (
             torch.float32 if first_dtype == torch.bfloat16 else torch.bfloat16
         )
-        for dtype in (first_dtype, second_dtype):
+        for step, dtype in enumerate((first_dtype, second_dtype)):
+            model.set_requires_all_reduce(step == 1)
             value = 257 if dtype == torch.float32 else -256
             model(torch.full((2,), value, device=device, dtype=dtype)).sum().backward()
-        model.synchronize_gradients()
         self.assertIsNone(model.weight.grad_dtype)
         self.assertEqual(model.weight.grad.dtype, torch.float32)
         self.assertEqual(model.weight.grad.full_tensor(), torch.ones(2, device=device))
