@@ -1085,6 +1085,9 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         with self.assertWarnsRegex(FutureWarning, "_set_pg_timeout"):
             c10d.distributed_c10d._set_pg_timeout(timedelta(seconds=99), pg)
         self._check_nccl_timeout(timedelta(seconds=99))
+        # Tear down explicitly so the nccl2 watchdog is stopped before
+        # interpreter shutdown unloads CUDA (avoids a teardown race).
+        dist.destroy_process_group()
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
@@ -1134,6 +1137,9 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             w = pg.allreduce(torch.rand(10).cuda(self.rank))
             self.assertEqual(w.timeout, timedelta(seconds=8))
             w.wait()
+        # Tear down explicitly so the nccl2 watchdog is stopped before
+        # interpreter shutdown unloads CUDA (avoids a teardown race).
+        dist.destroy_process_group()
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
