@@ -54,16 +54,22 @@ _pytree.register_pytree_node(
 
 
 def _precompile_pair(fn, *args, **kwargs):
-    """One indirection point over the callable entry point: every test below drives
-    the make_fx capture through this helper rather than spelling the callable, so a
-    change of entry point re-points the whole suite here."""
-    return torch.compiler.precompile(fn, *args, **kwargs)
+    """A rendered (python_code, cache) pair, built the way the callable
+    ``torch.compiler.precompile(fn, *args, **kwargs)`` builds the one it returns.
+    The suite drives the capture through this one indirection point, so the
+    retirement of the callable does not touch the tests that use it."""
+    from torch._precompile import PrecompiledModule
+
+    compiled = PrecompiledModule(fn, **kwargs)
+    compiled._compile(args)
+    python_code = compiled.to_python_code()
+    return python_code, compiled.to_cache_bytes(python_code)
 
 
 def _load_pair(python_code, cache):
-    """Reconstruct a runnable from an in-memory ``(python_code, cache)`` pair through
-    the callable API's ``load``; the second indirection point, for the same reason."""
-    return torch.compiler.precompile.load(python_code, cache)
+    """Reconstruct a runnable from an in-memory pair, through the loader core the
+    callable API's ``load`` delegates to; the second indirection point."""
+    return torch._precompile._runnable_from_pair(python_code, cache)
 
 
 def _strip_artifact(cache: bytes) -> bytes:
@@ -1675,12 +1681,16 @@ class TestPrecompile(TestCase):
         # enforces this for every torch.compiler.__all__ member.
         self.assertEqual(torch.compiler.precompile.__module__, "torch.compiler")
 
-    def test_backend_invalid_raises(self):
-        a, b = torch.randn(4, 4), torch.randn(4, 4)
-        with self.assertRaisesRegex(
-            ValueError, "backend must be 'inductor' or 'eager'"
-        ):
-            _precompile_pair(lambda x, y: x + y, a, b, backend="nope")
+    @parametrize("backend", ("inductor", "eager"))
+    def test_callable_api_end_to_end(self, backend):
+        # The helpers above bypass the public callable, so this is its one end-to-end
+        # check until the callable is retired.
+        m = torch.nn.Linear(4, 3).eval()
+        x = torch.randn(2, 4)
+        python_code, cache = torch.compiler.precompile(
+            lambda model, xx: model(xx), m, x, backend=backend
+        )
+        self.assertEqual(torch.compiler.precompile.load(python_code, cache)(m, x), m(x))
 
     def test_tracer_default_and_explicit_make_fx(self):
         # tracer defaults to "make_fx"; passing it explicitly is equivalent and works.
@@ -1698,10 +1708,34 @@ class TestPrecompile(TestCase):
         with self.assertRaisesRegex(NotImplementedError, "tracer='dynamo'"):
             _precompile_pair(lambda model, xx: model(xx), m, x, tracer="dynamo")
 
+    def test_backend_invalid_raises(self):
+        a, b = torch.randn(4, 4), torch.randn(4, 4)
+        with self.assertRaisesRegex(
+            ValueError, "backend must be 'inductor' or 'eager'"
+        ):
+            _precompile_pair(lambda x, y: x + y, a, b, backend="nope")
+
     def test_tracer_invalid_raises(self):
         a, b = torch.randn(4, 4), torch.randn(4, 4)
         with self.assertRaisesRegex(ValueError, "tracer must be 'make_fx' or 'dynamo'"):
             _precompile_pair(lambda x, y: x + y, a, b, tracer="nope")
+
+    def test_artifact_backend_value_is_validated_before_exec(self):
+        # A source whose BACKEND tag names an unknown backend is refused as a
+        # malformed artifact, with the loader's own error type and before any
+        # exec: the source is parsed before the cache is read.
+        from torch._precompile import _parse_artifact_metadata
+
+        m, x = torch.nn.Linear(4, 3).eval(), torch.randn(2, 4)
+        code, cache = _precompile_pair(
+            lambda model, xx: model(xx), m, x, backend="eager"
+        )
+        bad_code = code.replace("BACKEND = 'eager'", "BACKEND = 'nope'")
+        self.assertNotEqual(bad_code, code)
+        with self.assertRaisesRegex(PrecompileError, "unknown backend 'nope'"):
+            _parse_artifact_metadata(bad_code)
+        with self.assertRaisesRegex(PrecompileError, "unknown backend 'nope'"):
+            _load_pair(bad_code, cache)
 
     def test_backend_default_is_inductor(self):
         # The default lowers through Inductor: the generated code inlines the Inductor
