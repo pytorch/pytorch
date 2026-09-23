@@ -11561,6 +11561,114 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ),
         )
 
+    def test_index_put_as_masked_fill_mask_reads_target_view(self):
+        # The mask reads y through a transposed view of y's realized buffer;
+        # it must see y from before the fill, not the fill's own output. This
+        # needs y to be realized, which the sum and the two reads of y make it.
+        def fn(x):
+            y = x + x.sum(-2, keepdim=True)
+            mask = y.roll(-1, -2) == y.transpose(-1, -2)
+            y.index_put_((mask,), torch.tensor(7.0, device=x.device))
+            return y
+
+        for shape in [(4, 5, 5), (3, 7, 7)]:
+            x = (torch.arange(math.prod(shape)) % 3).float().view(shape)
+            self.common(fn, (x,))
+
+    def test_index_put_as_masked_fill_mask_reads_target_by_extern_kernel(self):
+        # mm reads y through a transposed view of y's realized buffer, before
+        # the fill.
+        def fn(x, w):
+            y = x + 1
+            mask = (y.t() @ w) > 0
+            y.index_put_((mask,), torch.tensor(7.0, device=x.device))
+            return y
+
+        # Integer values keep the mm, and so the mask, exact in low precision.
+        x = torch.randint(-2, 3, (8, 8)).float()
+        w = torch.randint(-2, 3, (8, 8)).float()
+        self.common(fn, (x, w))
+
+    @skip_if_halide  # won't fuse a read of the buffer it writes in place
+    def test_masked_fill_of_realized_buffer_kernel_count(self):
+        # The fill writes the realized mm output in place, in one kernel.
+        def fn(x, w, m):
+            s = x @ w
+            s.index_put_((m,), torch.tensor(float("-inf"), device=x.device))
+            return s
+
+        x, w = torch.randn(16, 16), torch.randn(16, 16)
+        self.common(fn, (x, w, x > 0.5))
+        assertGeneratedKernelCountEqual(self, 1)
+
+    def test_mutate_realized_buffer_in_make_fx_graph(self):
+        # make_fx keeps the mutations that torch.compile functionalizes away.
+        from torch._inductor.decomposition import select_decomp_table
+
+        def copy_then_mutate(x):
+            # copy_ must give y its own buffer: mutating y afterwards must not
+            # change z or the input x.
+            y = x + 1
+            z = x * 2
+            y.copy_(z)
+            y.add_(1)
+            w = x + 3
+            w.copy_(x)
+            w.add_(1)
+            return y, z, w
+
+        def foreach_reads_target_elsewhere(x):
+            # The value reads y at other positions, so it can't be computed
+            # straight into y.
+            y = x @ x.t()
+            torch._foreach_add_([y], [y.flip(0)])
+            return (y,)
+
+        def copy_into_strided_empty(x):
+            # The view of e must read the copy through e's strides.
+            e = torch.empty_strided((4, 8), (1, 4), device=x.device)
+            v = e.t()
+            e.copy_(x)
+            return (v + 0,)
+
+        for fn in (
+            copy_then_mutate,
+            foreach_reads_target_elsewhere,
+            copy_into_strided_empty,
+        ):
+            x = torch.randn(4, 8, device=self.device)
+            gm = make_fx(fn, decomposition_table=select_decomp_table())(x.clone())
+            xc = x.clone()
+            out = compile_fx_inner(gm, [xc])([xc])
+            self.assertEqual(out, fn(x.clone()))
+            self.assertEqual(xc, x)
+
+    def test_cat_input_mutated_after_cat(self):
+        # The concat may compute an input straight into its own storage, which
+        # is only valid if that input is not mutated in place afterwards.
+        def fn_index(x, idx, src):
+            a = x + 1
+            c = torch.cat([a, x * 2])
+            a.index_put_((idx,), src)
+            return c, a
+
+        def fn_view_index(x, idx, src):
+            a = x + 1
+            c = torch.cat([a, x * 2])
+            a.t().index_put_((idx,), src)
+            return c, a
+
+        def fn_mask(x, idx, src):
+            a = x + 1
+            c = torch.cat([a, x * 2])
+            a.index_put_((a > 1.5,), src[0, 0])
+            return c, a
+
+        x = torch.randn(8, 8)
+        idx = torch.arange(4)
+        for fn in (fn_index, fn_view_index, fn_mask):
+            self.common(fn, (x, idx, torch.ones(4, 8)))
+
     def test_index_put_deterministic_fallback(self):
         if is_mps_backend(self.device):
             # MPS has no deterministic implementation for

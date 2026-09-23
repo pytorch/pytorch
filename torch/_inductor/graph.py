@@ -74,7 +74,7 @@ from .exc import (
     MissingOperatorWithDecomp,
     MissingOperatorWithoutDecomp,
 )
-from .fx_utils import count_flops_fx
+from .fx_utils import count_flops_fx, get_mutated_storages
 from .ir import (
     assign_origin_node,
     Constant,
@@ -520,6 +520,9 @@ class GraphLowering(torch.fx.Interpreter):
         self.removed_buffers: OrderedSet[str] = OrderedSet()
         self.removed_inplace_buffers: OrderedSet[str] = OrderedSet()
         self.mutated_buffers: OrderedSet[str] = OrderedSet()
+        # Fake storages some node writes in place. A buffer over such storage
+        # must not be computed straight into another buffer (see ConcatKernel).
+        self.mutated_storages: OrderedSet[int] = get_mutated_storages(gm)
         self.sdpa_constraint_cache: dict[tuple, ir.IRNode] = {}
         # Buffers that are neither recycled nor freed. Aliasing kernels rely on
         # the second half: some have no output variable to free at all.
