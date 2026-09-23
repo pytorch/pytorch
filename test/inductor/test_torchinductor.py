@@ -9000,7 +9000,7 @@ for dtype in (torch.int32, torch.int64):
         self.common(fn, (torch.randn(2, 4),))
 
     def test_same_meta_non_tensor(self):
-        from torch._inductor.fx_passes.post_grad import same_meta
+        from torch._inductor.fx_utils import same_tensor_meta
 
         g = torch.fx.Graph()
         n1 = g.create_node("placeholder", "x")
@@ -9008,16 +9008,16 @@ for dtype in (torch.int32, torch.int64):
 
         n1.meta["val"] = torch.SymInt(42)
         n2.meta["val"] = torch.SymInt(42)
-        self.assertFalse(same_meta(n1, n2))
+        self.assertFalse(same_tensor_meta(n1, n2))
 
         n1.meta["val"] = None
         n2.meta["val"] = torch.randn(4)
-        self.assertFalse(same_meta(n1, n2))
+        self.assertFalse(same_tensor_meta(n1, n2))
 
         t = torch.randn(4)
         n1.meta["val"] = t
         n2.meta["val"] = t
-        self.assertTrue(same_meta(n1, n2))
+        self.assertTrue(same_tensor_meta(n1, n2))
 
     @unittest.skipIf(
         TEST_WITH_ASAN or IS_LINUX or IS_MACOS or TEST_WITH_ROCM,
