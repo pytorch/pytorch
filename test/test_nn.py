@@ -17531,6 +17531,70 @@ instantiate_parametrized_tests(TestFusedRMSNormOverrideRouting)
 instantiate_parametrized_tests(TestFusedRMSNormOverrideNumerics)
 
 
+class TestSmapeAndSquaredHinge(TestCase):
+    # at.Reduction: None=0, Mean=1, Sum=2
+    def _smape(self, pred, target, eps=1e-8, reduction=1):
+        out = 2 * (pred - target).abs() / (pred.abs() + target.abs() + eps)
+        if reduction == 1:
+            return out.mean()
+        if reduction == 2:
+            return out.sum()
+        return out
+
+    def _squared_hinge(self, pred, target, reduction=1):
+        margin = torch.clamp(1 - pred * target, min=0)
+        out = margin * margin
+        if reduction == 1:
+            return out.mean()
+        if reduction == 2:
+            return out.sum()
+        return out
+
+    def test_smape_loss_matches_definition(self):
+        pred = torch.tensor([3.0, 0.0, -2.0])
+        target = torch.tensor([1.0, 0.0, 2.0])
+        got = torch.ops.aten.smape_loss(pred, target)
+        self.assertEqual(got, self._smape(pred, target))
+        self.assertEqual(got, torch.tensor(1.0))
+        none = torch.ops.aten.smape_loss(pred, target, 1e-8, 0)
+        self.assertEqual(none, torch.tensor([1.0, 0.0, 2.0]))
+        total = torch.ops.aten.smape_loss(pred, target, 1e-8, 2)
+        self.assertEqual(total, torch.tensor(3.0))
+
+    def test_smape_loss_rejects_integer_and_negative_eps(self):
+        pred = torch.tensor([1, 2])
+        target = torch.tensor([0, 1])
+        with self.assertRaises(RuntimeError):
+            torch.ops.aten.smape_loss(pred, target)
+        pred_f = pred.float()
+        target_f = target.float()
+        with self.assertRaises(RuntimeError):
+            torch.ops.aten.smape_loss(pred_f, target_f, -1.0)
+
+    def test_smape_loss_backward_matches_definition(self):
+        pred = torch.tensor([3.0, 0.0, -2.0], requires_grad=True)
+        target = torch.tensor([1.0, 0.0, 2.0])
+        torch.ops.aten.smape_loss(pred, target).backward()
+        ref = pred.detach().clone().requires_grad_()
+        self._smape(ref, target).backward()
+        self.assertEqual(pred.grad, ref.grad)
+
+    def test_squared_hinge_loss_matches_definition(self):
+        pred = torch.tensor([0.5, 2.0, -1.5])
+        target = torch.tensor([1.0, -1.0, -1.0])
+        got = torch.ops.aten.squared_hinge_loss(pred, target)
+        self.assertEqual(got, self._squared_hinge(pred, target))
+        self.assertEqual(got, torch.tensor(9.25 / 3))
+        none = torch.ops.aten.squared_hinge_loss(pred, target, 0)
+        self.assertEqual(none, torch.tensor([0.25, 9.0, 0.0]))
+
+    def test_squared_hinge_loss_rejects_integer(self):
+        pred = torch.tensor([1, -1])
+        target = torch.tensor([1, 1])
+        with self.assertRaises(RuntimeError):
+            torch.ops.aten.squared_hinge_loss(pred, target)
+
+
 instantiate_device_type_tests(TestNNCUDA, globals(), only_for="cuda")
 instantiate_device_type_tests(TestNNDeviceType, globals(), allow_mps=True)
 instantiate_parametrized_tests(TestNN)
