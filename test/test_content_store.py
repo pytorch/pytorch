@@ -137,7 +137,8 @@ class TestContentStore(TestCase):
 
     def test_hash_consistency_same_storage(self, device):
         # Hashing the same storage twice should give identical results
-        # Uses stable_hash to stay on the (non-compile) slow path for both calls
+        # Without stable_hash this runs the fast path on compile-capable
+        # devices and the SHA-1 fallback elsewhere; both are deterministic.
         x = torch.randn(8, device=device)
         h1 = hash_storage(x.untyped_storage())
         h2 = hash_storage(x.untyped_storage())
