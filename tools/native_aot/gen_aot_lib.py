@@ -195,10 +195,17 @@ def _first_tensor_name(params: str) -> str | None:
     return None
 
 
-def _device_match(major: int, minor: int) -> str:
-    """The device predicate for one compute capability, read through the local
-    _gate_for assigns the properties expression to."""
-    return f"{_PROPS_LOCAL}->major == {major} && {_PROPS_LOCAL}->minor == {minor}"
+def _device_match(arch: str) -> str:
+    """The device predicate for one compile target.
+
+    Family targets are minor-version forward-compatible within their major family;
+    native-AOT keeps baseline and architecture-specific targets exact.
+    """
+    major, minor = decl.cc_of(arch)
+    minor_op = ">=" if decl.suffix_of(arch) == "f" else "=="
+    return (
+        f"{_PROPS_LOCAL}->major == {major} && {_PROPS_LOCAL}->minor {minor_op} {minor}"
+    )
 
 
 def _spec_from_json(spec):
@@ -216,17 +223,16 @@ def _spec_from_json(spec):
     return spec
 
 
-def _by_arch(sidecars: list[dict]) -> dict[tuple[int, int], list[dict]]:
-    """Group sidecars by the compute capability they were compiled for, in ascending
-    order, dropping the loser of the arch-conditional tie-break.
+def _by_arch(sidecars: list[dict]) -> dict[str, list[dict]]:
+    """Group sidecars by compile target in runtime dispatch order.
 
-    Grouped rather than one gate over the union, because each device must run kernels
-    built for exactly its capability; a union gate would accept a device nothing was
-    compiled for. Within one capability both "sm_100a" and "sm_100" run on the
-    hardware and the conditional wins, being what the kernels were written against. A
-    sidecar with no recorded arch is rejected: there is no hardware to match it to."""
-    groups: dict[tuple[int, int], list[dict]] = {}
-    conditional: dict[tuple[int, int], bool] = {}
+    Major families retain ascending dispatch order. Within one family, newer minor
+    targets precede older forward-compatible ones. For one capability, an exact
+    ``a`` target runs first, followed by ``f`` and baseline targets. Either stronger
+    feature target makes an exact baseline artifact redundant, while ``a`` and ``f``
+    are both retained because the latter also serves later family members.
+    """
+    groups: dict[str, list[dict]] = {}
     for sc in sidecars:
         arch = sc.get("arch")
         if not isinstance(arch, str):
@@ -235,16 +241,26 @@ def _by_arch(sidecars: list[dict]) -> dict[tuple[int, int], list[dict]]:
                 f"records no arch. Re-export: the runtime gate is built from "
                 f"the arch each artifact was compiled for."
             )
-        cc = decl.cc_of(arch)
-        is_cond = arch.endswith("a")
-        if cc in groups and conditional.get(cc, False) != is_cond:
-            # A conditional build for this cc wins outright; a plain one loses.
-            if not is_cond:
-                continue
-            groups[cc] = []
-        groups.setdefault(cc, []).append(sc)
-        conditional[cc] = conditional.get(cc, False) or is_cond
-    return {cc: groups[cc] for cc in sorted(groups)}
+        decl.cc_of(arch)
+        groups.setdefault(arch, []).append(sc)
+
+    for arch in tuple(groups):
+        if decl.suffix_of(arch) != "":
+            continue
+        conditional = (f"{arch}a", f"{arch}f")
+        if any(target in groups for target in conditional):
+            del groups[arch]
+
+    suffix_rank = {"": 0, "f": 1, "a": 2}
+    ordered = sorted(
+        groups,
+        key=lambda arch: (
+            decl.cc_of(arch)[0],
+            -decl.cc_of(arch)[1],
+            -suffix_rank[decl.suffix_of(arch)],
+        ),
+    )
+    return {arch: groups[arch] for arch in ordered}
 
 
 # Tensor-shaped C++ types the gate must recognize or refuse: torchgen renders
@@ -337,7 +353,7 @@ def gen_op(
             f"{pad}  return true;\n{pad}}}"
         )
 
-    # One cond chain per compute capability (see _by_arch).
+    # One cond chain per compile target (see _by_arch).
     groups = _by_arch(sidecars)
     # Shipping an arch the declaration disowns is a packaging bug: error rather
     # than gate on kernels the op does not claim to support. Over EVERY exported
@@ -368,10 +384,10 @@ def gen_op(
     sidecars = surviving_sidecars(op, sidecars)
 
     def _gate_for(props: str) -> str:
-        accept = " || ".join(f"({_device_match(*cc)})" for cc in groups)
+        accept = " || ".join(f"({_device_match(arch)})" for arch in groups)
         return (
-            f"  // Device gate: one branch per shipped capability "
-            f"({', '.join(f'{maj}.{min_}' for maj, min_ in groups)})\n"
+            f"  // Device gate: one branch per shipped target "
+            f"({', '.join(groups)})\n"
             f"  // Read once into a local: this gate and every branch below ask\n"
             f"  // the same question, and the accessor is a call per read.\n"
             f"  const auto* {_PROPS_LOCAL} = {props};\n"
@@ -380,10 +396,10 @@ def gen_op(
 
     arch_gate = _gate_for(_CURRENT_PROPS)
     branches = [
-        f"  if ({_device_match(*cc)}) {{\n"
+        f"  if ({_device_match(arch)}) {{\n"
         + "\n".join(_branch(s, "    ") for s in scs)
         + "\n  }"
-        for cc, scs in groups.items()
+        for arch, scs in groups.items()
     ]
     # Defaulted to a callable so the use sites need no condition. `or (lambda)`
     # rather than a getattr default: the contract's other spelling of "no hook" is
@@ -593,8 +609,8 @@ def surviving_sidecars(op: str, sidecars: list[dict]) -> list[dict]:
     kept = [sc for scs in _by_arch(sidecars).values() for sc in scs]
     if dropped := {sc["arch"] for sc in sidecars} - {sc["arch"] for sc in kept}:
         print(
-            f"{op}: ignoring artifacts for {sorted(dropped)} -- an "
-            f"arch-conditional build for the same capability wins. They are not "
+            f"{op}: ignoring artifacts for {sorted(dropped)} -- a stronger target "
+            f"with the same device coverage wins. They are not "
             f"linked; delete those trees to reclaim the disk."
         )
     return kept

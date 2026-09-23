@@ -623,13 +623,16 @@ class TestArch(unittest.TestCase):
                 # Only where no arch can be resolved at all is it a match.
                 self.assertFalse(export._job_needed(job, force=False))
 
-    def test_cc_of_reads_the_capability_both_spellings_name(self):
+    def test_cc_of_reads_the_capability_all_feature_sets_name(self):
         # The exporter matches ARCHS by string while the generator groups by
         # capability, so both spellings of one piece of hardware must parse equal.
         self.assertEqual(native_aot_decl.cc_of("sm_90"), (9, 0))
         self.assertEqual(native_aot_decl.cc_of("sm_103a"), (10, 3))
         self.assertEqual(
             native_aot_decl.cc_of("sm_100a"), native_aot_decl.cc_of("sm_100")
+        )
+        self.assertEqual(
+            native_aot_decl.cc_of("sm_100f"), native_aot_decl.cc_of("sm_100")
         )
 
     def test_cc_of_refuses_what_it_cannot_read(self):
@@ -638,7 +641,7 @@ class TestArch(unittest.TestCase):
         for bad in (
             "sm_9",
             "sm_1000",
-            "sm_100f",
+            "sm_100af",
             "sm_",
             "",
             "100a",
@@ -675,27 +678,26 @@ class TestArch(unittest.TestCase):
             self.assertIsNone(export._detected_arch())
 
     def test_archs_from_cuda_arch_list(self):
-        # TORCH_CUDA_ARCH_LIST -> the EXPORTABLE_ARCHES subset; named,
-        # malformed, +PTX and non-exportable entries drop out.
+        # TORCH_CUDA_ARCH_LIST -> compatible portable native-AOT targets; named,
+        # malformed, +PTX and unsupported entries drop out.
         f = export.archs_from_cuda_arch_list
         self.assertEqual(f("7.5 8.9"), [])
         # Hopper and Blackwell together: one tree per arch, selected at
         # runtime by capability.
-        self.assertEqual(f("9.0a;10.0a"), ["sm_90a", "sm_100a"])
-        self.assertEqual(f("8.0 9.0 10.0+PTX"), ["sm_90", "sm_100"])
-        # Both spellings of a CC are separate nvcc targets, and both are
-        # exportable: CI passes "10.0a", the wheel builds pass "10.0".
-        self.assertEqual(f("10.0"), ["sm_100"])
-        # 10.3 stays unexportable -- nothing names it, so shipping it would
-        # only grow wheels (the gate itself is major.minor and would be safe).
-        self.assertEqual(f("Hopper 10.3a"), [])
+        self.assertEqual(f("9.0a;10.0a"), ["sm_90", "sm_100f"])
+        self.assertEqual(f("8.0 9.0 10.0+PTX"), ["sm_90", "sm_100f"])
+        # Plain and architecture-specific SM100 builds both use the portable family
+        # artifact, which also serves SM103 without another copy of every kernel.
+        self.assertEqual(f("10.0"), ["sm_100f"])
+        self.assertEqual(f("Hopper 10.3a"), ["sm_100f"])
 
     def test_archs_from_cuda_arch_list_dedups(self):
         # "10.0;10.0+PTX" names one arch twice; a repeated entry would read as
         # multi-arch downstream and export a second full set of kernels.
         f = export.archs_from_cuda_arch_list
-        self.assertEqual(f("10.0;10.0+PTX"), ["sm_100"])
-        self.assertEqual(f("10.0a 10.0a"), ["sm_100a"])
+        self.assertEqual(f("10.0;10.0+PTX"), ["sm_100f"])
+        self.assertEqual(f("10.0a 10.0a"), ["sm_100f"])
+        self.assertEqual(f("10.0 10.3"), ["sm_100f"])
 
     def test_the_shipped_arches_are_ones_the_tooling_can_target(self):
         # The two sets live beside each other so they cannot drift; the import-time
@@ -707,14 +709,14 @@ class TestArch(unittest.TestCase):
         self.assertIs(export.EXPORTABLE_ARCHES, native_aot_decl.EXPORTABLE_ARCHES)
 
     def test_archs_from_cuda_arch_list_collapses_one_capability(self):
-        # Both spellings are the same hardware and generation uses one, so exporting
-        # both compiles a second full set of kernels no launcher references.
+        # The main build may name either feature set for one capability; both map to
+        # the one portable native-AOT target, so embedded kernels are not duplicated.
         f = export.archs_from_cuda_arch_list
-        self.assertEqual(f("10.0;10.0a"), ["sm_100a"])
-        self.assertEqual(f("10.0a;10.0"), ["sm_100a"])
+        self.assertEqual(f("10.0;10.0a"), ["sm_100f"])
+        self.assertEqual(f("10.0a;10.0"), ["sm_100f"])
         # Different capabilities are untouched, and order is preserved.
-        self.assertEqual(f("9.0a;10.0;10.0a"), ["sm_90a", "sm_100a"])
-        self.assertEqual(f("10.0a;9.0"), ["sm_100a", "sm_90"])
+        self.assertEqual(f("9.0a;10.0;10.0a"), ["sm_90", "sm_100f"])
+        self.assertEqual(f("10.0a;9.0"), ["sm_100f", "sm_90"])
 
     def test_collect_jobs_respects_declaration_archs(self):
         # A declaration pinning ARCHS gets no jobs for other arches; an
@@ -769,9 +771,10 @@ class TestArch(unittest.TestCase):
             {"prefix": "k2__sm90a", "arch": "sm_90a"},
         ]
         groups = gen_aot_lib._by_arch(scs)
-        self.assertEqual(list(groups), [(9, 0), (10, 0)])
+        self.assertEqual(list(groups), ["sm_90a", "sm_100a"])
         self.assertEqual(
-            [s["prefix"] for s in groups[(9, 0)]], ["k__sm90a", "k2__sm90a"]
+            [s["prefix"] for s in groups["sm_90a"]],
+            ["k__sm90a", "k2__sm90a"],
         )
 
     def test_by_arch_prefers_the_arch_conditional_build(self):
@@ -783,8 +786,16 @@ class TestArch(unittest.TestCase):
         ):
             scs = [{"prefix": n, "arch": a} for a, n in order]
             groups = gen_aot_lib._by_arch(scs)
-            self.assertEqual(list(groups), [(10, 0)])
-            self.assertEqual([s["prefix"] for s in groups[(10, 0)]], ["c"])
+            self.assertEqual(list(groups), ["sm_100a"])
+            self.assertEqual([s["prefix"] for s in groups["sm_100a"]], ["c"])
+
+    def test_by_arch_keeps_family_target_beside_exact_target(self):
+        scs = [
+            {"prefix": "exact", "arch": "sm_100a"},
+            {"prefix": "family", "arch": "sm_100f"},
+        ]
+        groups = gen_aot_lib._by_arch(scs)
+        self.assertEqual(list(groups), ["sm_100a", "sm_100f"])
 
     def test_by_arch_rejects_an_arch_less_sidecar(self):
         # Export names the arch of everything it writes, so this is an older tree.
@@ -825,9 +836,12 @@ class TestArch(unittest.TestCase):
 
     def test_device_match_renders_the_full_capability(self):
         # cc_of itself is covered above, against native_aot_decl directly.
-        m = gen_aot_lib._device_match(10, 3)
+        m = gen_aot_lib._device_match("sm_103a")
         self.assertIn("major == 10", m)
         self.assertIn("minor == 3", m)
+        family = gen_aot_lib._device_match("sm_100f")
+        self.assertIn("major == 10", family)
+        self.assertIn("minor >= 0", family)
 
 
 class TestSidecarIntegrity(unittest.TestCase):
@@ -2933,7 +2947,12 @@ class TestShouldRun(unittest.TestCase):
     def test_on_device_export_checks_the_local_arch(self):
         # Without this gate a dev box outside EXPORTABLE_ARCHES exports for its own arch
         # and fails in generation, leaving a tree that will not configure.
-        for local, expected in (("sm_86", False), ("sm_120", False), ("sm_100", True)):
+        for local, expected in (
+            ("sm_86", False),
+            ("sm_120", False),
+            ("sm_100", True),
+            ("sm_103", True),
+        ):
             with self.subTest(local=local):
                 with (
                     mock.patch.object(
@@ -3076,7 +3095,7 @@ class TestShouldRun(unittest.TestCase):
         self.assertTrue(ran)
         # The report is the branch's only observable, and on stderr: this is the one
         # gate that reports AND proceeds, where stdout carries the verdict.
-        self.assertIn("multi-arch: sm_90 sm_100", err.getvalue())
+        self.assertIn("multi-arch: sm_90 sm_100f", err.getvalue())
         self.assertEqual(out.getvalue(), "")
 
     def test_both_spellings_of_one_capability_run_as_one_arch(self):
@@ -3723,6 +3742,9 @@ class TestClaimedSpellingPreference(unittest.TestCase):
     def test_a_capability_that_is_not_claimed_has_no_spelling(self):
         self.assertIsNone(export._claimed_spelling("sm_103", ("sm_100a",)))
 
+    def test_a_family_target_serves_a_later_minor_capability(self):
+        self.assertEqual(export._claimed_spelling("sm_103", ("sm_100f",)), "sm_100f")
+
     def test_the_plain_spelling_is_used_when_it_is_the_only_claim(self):
         # A declaration pinning the plain build must not be handed a conditional
         # target its kernels were not written for.
@@ -4078,7 +4100,7 @@ class TestExportMain(unittest.TestCase):
     def test_the_arch_list_is_translated_into_arches(self):
         seen = []
         self._main([], {"TORCH_CUDA_ARCH_LIST": "9.0a;10.0a"}, seen)
-        self.assertEqual(seen, [["sm_90a", "sm_100a"]])
+        self.assertEqual(seen, [["sm_90", "sm_100f"]])
 
     def test_an_explicit_arch_wins_over_the_arch_list(self):
         seen = []
