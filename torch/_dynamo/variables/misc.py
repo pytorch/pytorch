@@ -94,7 +94,7 @@ from .functions import (
     UserFunctionVariable,
     UserMethodVariable,
 )
-from .object_protocol import generic_str
+from .object_protocol import generic_repr, generic_str
 from .user_defined import call_random_fn, is_standard_setattr, UserDefinedObjectVariable
 
 
@@ -901,6 +901,9 @@ class ExceptionVariable(VariableTracker):
         if len(self.args) == 0:
             return VariableTracker.build(tx, "")
         elif len(self.args) == 1:
+            # KeyError.__str__ uses repr for a single key, unlike BaseException.
+            if self.exc_type is KeyError:
+                return generic_repr(tx, self.args[0])
             return generic_str(tx, self.args[0])
         else:
             from . import TupleVariable
