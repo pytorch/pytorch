@@ -962,17 +962,23 @@ class TestPatternMatcher(TestCase):
         torch.testing.assert_close(gm(*args), expected)
 
     @inductor_config.patch(fallback_random=True)
-    def test_reuse_conversion_skips_fallback_random(self):
+    def test_reuse_conversion_after_fallback_random_ordering(self):
         def fn(x):
-            base = convert(x, torch.bfloat16)
-            viewed = convert(aten.permute.default(x, [1, 0]), torch.bfloat16)
-            return aten.sum.default(base), aten.sum.default(viewed)
+            base = x.to(torch.bfloat16)
+            first_random = torch.rand_like(x)
+            viewed = x.permute(1, 0).to(torch.bfloat16)
+            second_random = torch.rand_like(x)
+            return base.sum(), first_random, viewed.sum(), second_random
 
         x = torch.randn(5, 7, device=GPU_TYPE)
-        gm = make_fx(fn, tracing_mode="fake")(x)
-        self._run_reuse_dtype_conversions(
-            gm, expected_conversions=2, expected_rewrites=0
-        )
+        torch.manual_seed(0)
+        expected = fn(x)
+        counters.clear()
+        torch.manual_seed(0)
+        actual = torch.compile(fn)(x)
+
+        self.assertEqual(counters["inductor"]["reuse_dtype_conversions"], 1)
+        torch.testing.assert_close(actual, expected)
 
     # Reuse is safe when at most one conversion storage reaches a graph output,
     # but must be skipped when both do to preserve output-output aliasing.
