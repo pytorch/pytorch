@@ -15591,6 +15591,7 @@ class TestAutogradStreamSynchronization(_TestAutogradStreamSynchronizationBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     # AttributeError: module 'torch.mps' has no attribute 'default_stream'
+    @onlyAccelerator
     @expectedFailureMPS
     @skipCUDANonDefaultStreamIf(True)
     def test_consumer_to_single_producer_case_2_correctness(self, device):
