@@ -6,6 +6,7 @@ import inspect
 import io
 import os
 import pickle
+import re
 import shutil
 import stat
 import subprocess
@@ -4406,6 +4407,78 @@ class TestExportPython(TestCase):
             self.assertEqual(build()(x, y), expected)
         self.assertIn("about to EXEC", "\n".join(cm.output))
 
+    def test_inductor_writes_output_code(self, device):
+        path = self._tmp_path("inductor.py")
+        m = torch.nn.Sequential(torch.nn.Linear(4, 3)).to(device).eval()
+        x = make_tensor((5, 4), device=device, dtype=torch.float32)
+
+        @torch.compiler.export_python(path=path, backend="inductor")
+        def run(model, inp):
+            return model(inp)
+
+        self.assertEqual(run(m, x), m(x))
+        with open(path, encoding="utf-8") as f:
+            self.assertIn("Inductor output code", f.read())
+        # export_python writes only the self-contained source; there is no cache.
+        self.assertFalse(os.path.exists(path + ".cache"))
+
+    def test_inductor_reload_from_disk(self, device):
+        # Inductor analogue of test_eager_write_then_load: the first build() lowers
+        # through Inductor and commits the emitted source; a SECOND fresh decorator over
+        # the SAME path must load that source from disk and run it instead of
+        # recompiling, exercising the inductor load-from-disk path.
+        path = self._tmp_path("inductor_reload.py")
+        m = torch.nn.Sequential(torch.nn.Linear(4, 3)).to(device).eval()
+        x = make_tensor((5, 4), device=device, dtype=torch.float32)
+        expected = m(x)
+
+        def build():
+            @torch.compiler.export_python(path=path, backend="inductor")
+            def run(model, inp):
+                return model(inp)
+
+            return run
+
+        self.assertEqual(build()(m, x), expected)
+        self.assertTrue(os.path.exists(path))
+        self.assertEqual(build()(m, x), expected)
+
+    def test_inductor_edited_source_takes_effect(self, device):
+        # Inductor hill-climb (ejectable compilation): the emitted source is the source
+        # of truth, so an edit that CHANGES THE MATH must take effect on the next load.
+        # A comment-only edit cannot show that, since it is exec-inert either way.
+        path = self._tmp_path("inductor_edit.py")
+        m = torch.nn.Sequential(torch.nn.Linear(4, 3)).to(device).eval()
+        x = make_tensor((5, 4), device=device, dtype=torch.float32)
+        expected = m(x)
+
+        @torch.compiler.export_python(path=path, backend="inductor")
+        def run(model, inp):
+            return model(inp)
+
+        self.assertEqual(run(m, x), expected)
+
+        # Wrap the artifact's own entry point so the edit is backend-agnostic: whatever
+        # forward() computes, the edited file must return twice it.
+        with open(path, encoding="utf-8") as f:
+            code = f.read()
+        code = code.replace("def forward(", "def _orig_forward(", 1)
+        code += textwrap.dedent(
+            """
+
+            def forward(*args, **kwargs):
+                return _orig_forward(*args, **kwargs) * 2
+            """
+        )
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(code)
+
+        @torch.compiler.export_python(path=path, backend="inductor")
+        def run2(model, inp):
+            return model(inp)
+
+        self.assertEqual(run2(m, x), expected * 2)
+
     def test_creates_parent_dirs(self, device):
         path = self._tmp_path(os.path.join("nested", "deep", "artifact.py"))
         x = make_tensor((4,), device=device, dtype=torch.float32)
@@ -4637,6 +4710,59 @@ class TestExportPython(TestCase):
         self.assertEqual(run2(x), x + 1)
         with open(path, encoding="utf-8") as f:
             self.assertEqual(f.read(), first)
+
+    def test_artifact_does_not_bake_the_capture_thread_count(self, device):
+        # Inductor sizes a CPU reduction's per-thread accumulator array at codegen time
+        # when the capturing process's thread count equals os.cpu_count(), while still
+        # emitting a team whose size is decided at run time. Replaying under a larger
+        # OMP team then indexes past the end -- a SIGSEGV on the SAME machine, reachable
+        # by one torch.set_num_threads() call, which no part of the artifact contract
+        # covers. Capture runs in a subprocess because it has to change a process-global
+        # thread count, and the invariant is asserted on the emitted source rather than
+        # by replaying: replaying a regression is a crash, which in-process would abort
+        # the interpreter and hide every later test, and out-of-process needs a second
+        # compile that made this test load-sensitive.
+        if torch.device(device).type != "cpu":
+            self.skipTest("the baked array is CPU reduction codegen")
+        path = self._tmp_path("threads.py")
+        code = textwrap.dedent(
+            f"""
+            import os, torch
+            torch.set_num_threads(os.cpu_count())
+            run = torch.compiler.export_python(path={path!r})(lambda a: a.sum())
+            run(torch.randn(1 << 20))
+            """
+        )
+        proc = subprocess.run(
+            [sys.executable, "-c", code], capture_output=True, text=True, timeout=600
+        )
+        self.assertEqual(
+            proc.returncode, 0, f"{proc.returncode}\n{proc.stderr[-2000:]}"
+        )
+        with open(path, encoding="utf-8") as f:
+            source = f.read()
+        # A team-sized array is written as e.g. tmp_acc0_arr[384]; with dynamic_threads
+        # pinned it sizes itself from omp_get_max_threads() at run time instead.
+        baked = re.findall(r"_arr\[(\d+)\]", source)
+        self.assertEqual(baked, [], f"artifact bakes a fixed per-thread array: {baked}")
+
+    def test_loading_an_artifact_leaves_its_directory_alone(self, device):
+        # The artifact is documented as self-contained and meant to be committed, but
+        # inductor's autotune cache wrote a <hash>.best_config next to it, keyed on the
+        # file's BASENAME -- so two unrelated artifacts both called artifact.py shared an
+        # entry and could pick up each other's launch config.
+        path = self._tmp_path("artifact.py")
+        directory = os.path.dirname(path)
+
+        def fn(x, w, b):
+            return torch.nn.functional.layer_norm(x, (x.shape[-1],), w, b)
+
+        x = make_tensor((256, 1024), device=device, dtype=torch.float32)
+        w = torch.ones(1024, device=device)
+        b = torch.zeros(1024, device=device)
+        torch.compiler.export_python(path=path)(fn)(x, w, b)
+        torch.compiler.export_python(path=path)(fn)(x, w, b)
+        self.assertEqual(sorted(os.listdir(directory)), ["artifact.py"])
 
 
 instantiate_device_type_tests(TestExportPython, globals())
