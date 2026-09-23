@@ -624,6 +624,34 @@ class CPFlexAttentionTest(DTensorTestBase):
 
     @skip_if_lt_x_gpu(2)
     @with_comms
+    def test_cp_flex_attention_preserves_block_size(self) -> None:
+        qkv_size = 256 * self.world_size
+        device_mesh = init_device_mesh(
+            device_type=self.device_type,
+            mesh_shape=(self.world_size,),
+            mesh_dim_names=("cp",),
+        )
+        block_mask = create_block_mask(
+            causal_mask,
+            B=1,
+            H=1,
+            Q_LEN=qkv_size,
+            KV_LEN=qkv_size,
+            device=self.device_type,
+            BLOCK_SIZE=(256, 128),
+        )
+
+        (cp_block_mask,) = _context_parallel_shard(
+            device_mesh,
+            [block_mask],
+            [2],
+        )
+        self.assertEqual(cp_block_mask.BLOCK_SIZE, block_mask.BLOCK_SIZE)
+        expected_mask = block_mask.to_dense().chunk(self.world_size, dim=-2)[self.rank]
+        self.assertEqual(cp_block_mask.to_dense(), expected_mask)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
     )
@@ -1195,6 +1223,7 @@ CPFlexAttentionTestWithLocalTensor = create_local_tensor_test_class(
     skipped_tests=[
         # Missing support for batched tensors
         "test_cp_flex_attention_document_mask",
+        "test_cp_flex_attention_preserves_block_size",
     ],
 )
 
