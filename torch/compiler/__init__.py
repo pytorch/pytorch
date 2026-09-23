@@ -1158,37 +1158,15 @@ def export_python(
     ``nn.Module`` arguments. Python scalar/config arguments are rejected because
     ``make_fx`` specializes their values without emitting runtime guards; close such
     constants over in ``fn`` instead. Other keyword-only parameters are not expressible
-    in the artifact's positional convention and are rejected. Five things that
-    ``make_fx`` or the code generator resolves without emitting a guard are recorded as
-    comment stamps and checked on every call:
-    each ``nn.Module`` argument's per-submodule ``training`` state, which input tensors
-    shared memory at capture (aliasing decides what an in-place mutation means), which
-    input positions held the *same* tensor object (AOTAutograd folds those into a single
-    graph slot, which byte overlap alone cannot distinguish from two views that merely
-    intersect), and the ambient ``torch.autocast`` state (which picks the dtypes the
-    kernels were built for, for every device type the artifact's own source names, not
-    only the ones its inputs live on), and the ambient globals the generated code
-    resolves against rather than re-reads: the default dtype and device a factory op
-    with no explicit argument takes, and whether deterministic algorithms were enabled
-    when inductor chose
-    between a deterministic and an atomic lowering (checked one-way -- capturing with
-    determinism on and calling with it off is safe, the reverse is not), and, for an
-    artifact containing a C++ kernel, the CPU vector ISA it was generated against (the
-    vector width is baked into the loop strides while the ISA is re-picked at compile
-    time, so a narrower host would leave part of the output uninitialized with no error
-    at all -- this one refuses to run rather than warning). What is *not*
-    guarded is a change in *how* two aliased
-    inputs overlap: when capture and the call both pass intersecting views, the artifact
-    runs with capture's relative offsets baked in and may compute the wrong thing.
-    ``torch.compile`` has the same hole *there*, but this list is not a complete
-    account of what the artifact bakes: a tensor subclass's inner shapes and a DTensor's
-    placements are unrecorded, and so is the CPU vector ISA (see the machine-type warning
-    above). Where ``torch.compile`` would recompile, an artifact cannot, so treat any
+    in the artifact's positional convention and are rejected. Each ``nn.Module``
+    argument's per-submodule ``training`` state, which ``make_fx`` resolves without
+    emitting a guard, is recorded as a comment stamp and checked on every call.
+    Where ``torch.compile`` would recompile, an artifact cannot, so treat any
     ambient change between capture and call as needing a fresh capture unless a stamp
     covers it. A hand-edit that drops a stamp turns that one check off with a warning.
-    All seven stamps (these six plus the version stamp) must stay in the artifact's
+    Both stamps (that one and the version stamp) must stay in the artifact's
     leading comment block: the reader stops at the first non-comment line, so inserting code above them
-    turns every check off -- loudly for the checked stamps, each of which warns per
+    turns every check off -- loudly for the training check, which warns per
     call while it is missing, and silently for the version warning, which just
     returns. Other Python attributes and Python
     control flow are specialized at capture and must remain compatible with the example.
