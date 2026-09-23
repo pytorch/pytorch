@@ -204,6 +204,10 @@ case "$tag" in
   pytorch-linux-jammy-py3.11-clang21)
     ANACONDA_PYTHON_VERSION=3.11
     CLANG_VERSION=21
+    GCC_VERSION=11
+    KATEX=yes
+    DOCS=yes
+    ONNX=yes
     TVM=yes
     ;;
   pytorch-linux-jammy-py3.12-clang21)
