@@ -242,7 +242,8 @@ class _ReadableSubgraphPythonWrapperCodegen(
 
     MRO puts ReadablePythonWrapperCodegen first, so kernels stay unstringified while the
     subgraph overrides (no header, triton imports and the AsyncCompile wait left to the
-    root, no benchmark harness) still apply: the readable class overrides none of those.
+    root) still apply: the readable class overrides none of those. Both drop the
+    benchmark harness.
     """
 
     def __init__(self, *args: object, **kwargs: object) -> None:
@@ -285,3 +286,34 @@ def readable_wrapper_requested() -> bool:
             "readable_wrapper leaves out of the module."
         )
     return True
+
+
+def select_wrapper_codegen(
+    device: str,
+    registered: type[PythonWrapperCodegen],
+    cpp_wrapper: bool,
+    fx_wrapper: bool,
+) -> type[PythonWrapperCodegen]:
+    """The wrapper class this compile uses: the device's registered one, or the readable one.
+
+    readable_wrapper is a per-compile config, so it is resolved here, at the compile's
+    own call site, and never by get_wrapper_codegen_for_device, which also serves as the
+    accessor for what a device has registered.
+    """
+    if config.readable_wrapper and (cpp_wrapper or fx_wrapper):
+        raise RuntimeError(
+            "torch._inductor.config.readable_wrapper emits a python wrapper and is "
+            "incompatible with cpp_wrapper and fx_wrapper; disable one of them."
+        )
+    if not readable_wrapper_requested():
+        return registered
+    if registered is not PythonWrapperCodegen:
+        # An out-of-tree python wrapper (or PythonWrapperMtia) cannot be replaced by one
+        # that knows nothing about that backend, and keeping it would silently ignore
+        # the flag.
+        raise RuntimeError(
+            "torch._inductor.config.readable_wrapper replaces the stock python wrapper, "
+            f"but {device} registers {registered.__name__}; disable readable_wrapper "
+            "for this device."
+        )
+    return ReadablePythonWrapperCodegen
