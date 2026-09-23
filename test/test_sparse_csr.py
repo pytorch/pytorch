@@ -63,6 +63,7 @@ from torch.testing._internal.common_utils import (
     suppress_warnings,
     TEST_CUDA_CUDSS,
     TEST_MKL,
+    TEST_MPS,
     TEST_NUMPY,
     TEST_SCIPY,
     TEST_WITH_ROCM,
@@ -1082,6 +1083,80 @@ class TestSparseCompressedDevice(TestCase):
                         sparse_select = torch.select_copy(sparse, dim, index)
                         self.assertEqual(sparse_select, dense_select)
                         self.assertFalse(is_view_of(sparse_select.values(), sparse.values()))
+
+
+@unittest.skipIf(not TEST_MPS, "MPS not available")
+class TestSparseCompressedMPS(TestCase):
+    """Construction of sparse compressed tensors on MPS.
+
+    Index validation has no MPS kernel, so check_invariants=True is expected to
+    raise until one is added.
+    """
+    hw_classification = HardwareClassification.MPS
+
+    def _sample(self, layout, index_dtype):
+        blocked = layout in {torch.sparse_bsr, torch.sparse_bsc}
+        compressed_indices = torch.tensor([0, 1, 2] if blocked else [0, 1, 2, 3, 4], dtype=index_dtype)
+        plain_indices = torch.tensor([0, 1] if blocked else [0, 1, 2, 3], dtype=index_dtype)
+        values = torch.arange(1, 9 if blocked else 5, dtype=torch.float32)
+        if blocked:
+            values = values.reshape(2, 2, 2)
+        return compressed_indices, plain_indices, values, (4, 4)
+
+    def _indices(self, sparse):
+        if sparse.layout in {torch.sparse_csr, torch.sparse_bsr}:
+            return sparse.crow_indices(), sparse.col_indices()
+        return sparse.ccol_indices(), sparse.row_indices()
+
+    @all_sparse_compressed_layouts()
+    @parametrize("index_dtype", [torch.int32, torch.int64])
+    def test_unsafe_construction(self, layout, index_dtype):
+        compressed_indices, plain_indices, values, size = self._sample(layout, index_dtype)
+        with torch.sparse.check_sparse_tensor_invariants(False):
+            sparse = torch.ops.aten._sparse_compressed_tensor_unsafe(
+                compressed_indices.to("mps"), plain_indices.to("mps"), values.to("mps"), size,
+                layout=layout, device="mps")
+
+        self.assertEqual(sparse.layout, layout)
+        self.assertEqual(sparse.device.type, "mps")
+        self.assertEqual(sparse.shape, size)
+        self.assertEqual(sparse._nnz(), values.shape[0])
+
+        actual_compressed, actual_plain = self._indices(sparse)
+        self.assertEqual(actual_compressed.cpu(), compressed_indices)
+        self.assertEqual(actual_plain.cpu(), plain_indices)
+        self.assertEqual(sparse.values().cpu(), values)
+
+    @all_sparse_compressed_layouts()
+    @parametrize("index_dtype", [torch.int32, torch.int64])
+    def test_construction_infers_device(self, layout, index_dtype):
+        compressed_indices, plain_indices, values, size = self._sample(layout, index_dtype)
+        sparse = torch.sparse_compressed_tensor(
+            compressed_indices.to("mps"), plain_indices.to("mps"), values.to("mps"), size,
+            layout=layout, check_invariants=False)
+        self.assertEqual(sparse.device.type, "mps")
+        self.assertEqual(sparse.layout, layout)
+
+    @all_sparse_compressed_layouts()
+    @parametrize("index_dtype", [torch.int32, torch.int64])
+    def test_to_mps_roundtrip(self, layout, index_dtype):
+        compressed_indices, plain_indices, values, size = self._sample(layout, index_dtype)
+        expected = torch.sparse_compressed_tensor(
+            compressed_indices, plain_indices, values, size, layout=layout)
+
+        with torch.sparse.check_sparse_tensor_invariants(False):
+            sparse = expected.to("mps")
+            self.assertEqual(sparse.device.type, "mps")
+            self.assertEqual(sparse.layout, layout)
+            self.assertEqual(sparse.to("cpu"), expected)
+
+    @all_sparse_compressed_layouts()
+    def test_check_invariants_not_implemented(self, layout):
+        compressed_indices, plain_indices, values, size = self._sample(layout, torch.int64)
+        with self.assertRaisesRegex(RuntimeError, "_validate_compressed_sparse_indices"):
+            torch.sparse_compressed_tensor(
+                compressed_indices.to("mps"), plain_indices.to("mps"), values.to("mps"), size,
+                layout=layout, check_invariants=True)
 
 
 def _npref_block_addmm_addmv(c, a, b, alpha, beta):
@@ -4398,6 +4473,7 @@ class TestSparseCompressedTritonKernels(TestCase):
 
 
 instantiate_parametrized_tests(TestSparseCompressed)
+instantiate_parametrized_tests(TestSparseCompressedMPS)
 instantiate_device_type_tests(TestSparseCompressedDevice, globals(), allow_xpu=True)
 
 instantiate_device_type_tests(TestSparseCSR, globals())

@@ -57,6 +57,8 @@ SparseCsrTensorImpl::SparseCsrTensorImpl(
                          || (key_set.has(DispatchKey::SparseCsrCPU) && device().type() == kMeta)   // fake tensor
                          || (key_set.has(DispatchKey::SparseCsrCUDA) && device().type() == kMeta)  // fake tensor
                          || (key_set.has(DispatchKey::SparseCsrXPU) && device().type() == kMeta)   // fake tensor
+                         || (key_set.has(DispatchKey::SparseCsrMPS) && device().type() == kMPS)
+                         || (key_set.has(DispatchKey::SparseCsrMPS) && device().type() == kMeta)   // fake tensor
                          || (key_set.has(DispatchKey::SparseCsrPrivateUse1) && device().type() == kPrivateUse1)),
                         "Inconsistent key_set (=", key_set, ") and device (=", device(), ")");
 
