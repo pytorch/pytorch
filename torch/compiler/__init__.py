@@ -1221,9 +1221,9 @@ def export_python(
             existing artifact also warns before executing it because ``path`` is trusted
             executable Python and may have been edited or replaced. A CUDA artifact
             additionally embeds inductor's kernel-cache paths, so it is not byte-stable
-            across machines or users even when the numerics are. Triton autotuning is
-            re-run on load rather than recorded, so a cold start may pick a different
-            config and return slightly different floating-point results. Concurrent first
+            across machines or users even when the numerics are. Each Triton kernel
+            launches with the config autotuning chose at capture, which the artifact
+            records in ``KERNEL_CONFIGS``, so a cold start does not retune. Concurrent first
             writers use first-publisher-wins semantics: every loser loads the complete
             artifact that won instead of executing different generated source. (On a
             filesystem without hard links this degrades to last-writer-wins; the file
