@@ -4,6 +4,9 @@
 import cutlass
 import cutlass.cute as cute
 
+from torch._inductor.kernel.flex_gemm.quack_ops.grouped_reduce import (
+    grouped_reduce_supports_config,
+)
 from torch._vendor.quack.epilogue.ops import setup_epi_tensor, TileStore
 
 
@@ -62,6 +65,11 @@ class GroupedMainStore(TileStore):
 
     def supports_config(self, config):
         """Return whether a config has validated grouped-main store ownership."""
+        # Feed-main fragment reductions need this even without a partial-output sink.
+        if self.min_fragment_n is not None and not grouped_reduce_supports_config(
+            config, 1, self.min_fragment_n
+        ):
+            return False
         supported_arch = (
             config.device_capacity in (10, 11)
             if self.group == 2
@@ -82,7 +90,11 @@ class GroupedMainStore(TileStore):
 
     def supports_problem(self, config, m, n):
         """Apply problem-size legality not expressible from config fields alone."""
-        return n % self.group == 0 and config.tile_n <= n
+        return (
+            n % self.group == 0
+            and config.tile_n <= n
+            and (self.min_fragment_n is None or n % self.min_fragment_n == 0)
+        )
 
     def config_support_error(self, configs):
         if self.group == 4:
