@@ -7692,6 +7692,31 @@ class TestNNDeviceType(NNTestCase):
         if self.device_type == 'cuda':
             self._test_InstanceNorm_cuda_half(nn.InstanceNorm3d, input, device)
 
+    @parametrize_test(
+        "instance_norm_cls,memory_format",
+        [(nn.InstanceNorm2d, torch.channels_last), (nn.InstanceNorm3d, torch.channels_last_3d)],
+        name_fn=lambda c, f: c.__name__,
+    )
+    @parametrize_test("batch", [1, 3])
+    @parametrize_test("affine", [True, False])
+    @parametrize_test("track_running_stats", [True, False])
+    def test_instancenorm_preserves_memory_format(self, device, instance_norm_cls, memory_format, batch, affine, track_running_stats):
+        # instance_norm output must keep the input's memory format.
+        ndim = 4 if instance_norm_cls is nn.InstanceNorm2d else 5
+        shape = [batch, 5] + [4] * (ndim - 2)
+        m = instance_norm_cls(5, affine=affine, track_running_stats=track_running_stats).to(device)
+        m_ref = deepcopy(m)
+        for training in (True, False):
+            m.train(training)
+            m_ref.train(training)
+            base = torch.randn(shape, device=device)
+            out = m(base.to(memory_format=memory_format))
+            self.assertTrue(out.is_contiguous(memory_format=memory_format))
+            self.assertEqual(out, m_ref(base.contiguous()))
+            if track_running_stats:
+                self.assertEqual(m.running_mean, m_ref.running_mean)
+                self.assertEqual(m.running_var, m_ref.running_var)
+
     @parametrize_test("instance_norm_cls", [nn.InstanceNorm1d, nn.InstanceNorm2d, nn.InstanceNorm3d], name_fn=lambda c: c.__name__)
     @parametrize_test("no_batch_dim", [True, False])
     @parametrize_test("affine", [True, False])

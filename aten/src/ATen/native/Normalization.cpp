@@ -756,7 +756,9 @@ Tensor instance_norm(
   Tensor running_var_ = repeat_if_defined(
       mixed_dtype_stats ? running_var.to(stats_dtype) : running_var, b);
 
-  auto input_reshaped = input.contiguous().view_symint(shape);
+  // Preserve the input's memory format instead of forcing contiguous.
+  auto memory_format = input.suggest_memory_format();
+  auto input_reshaped = input.reshape_symint(shape);
   auto out = at::batch_norm(input_reshaped, weight_, bias_, running_mean_, running_var_,
                             use_input_stats, momentum, eps, cudnn_enabled);
 
@@ -783,7 +785,7 @@ Tensor instance_norm(
     }
   }
 
-  return out.view_symint(input.sym_sizes());
+  return out.view_symint(input.sym_sizes()).contiguous(memory_format);
 }
 
 std::tuple<Tensor, Tensor> batch_norm_update_stats_cpu(
