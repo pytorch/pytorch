@@ -172,6 +172,13 @@ def _unsupported_state_dict_config(params):
     )
 
 
+# Skip no-op combinations at collection time instead of after spawning ranks.
+_skip_unsupported_config = decorateIf(
+    unittest.skip("Unsupported state-dict configuration"),
+    _unsupported_state_dict_config,
+)
+
+
 class TestFSDPStateDict(FSDPTest):
     @property
     def world_size(self):
@@ -392,10 +399,7 @@ class TestFSDPStateDict(FSDPTest):
     @skip_if_lt_x_gpu(2)
     @parametrize("state_dict_type", _UNFLATTENED_STATE_DICT_IMPLS)
     @parametrize("rank0_only_and_offload", [False, True])
-    @decorateIf(
-        unittest.skip("Unsupported state-dict configuration"),
-        _unsupported_state_dict_config,
-    )
+    @_skip_unsupported_config
     def test_state_dict_with_manual_ac_wrapper(
         self,
         state_dict_type: str,
@@ -553,10 +557,7 @@ class TestFSDPStateDict(FSDPTest):
     @parametrize("fp16", [True, False])
     @parametrize("state_dict_rank0_and_offload", [True, False])
     @parametrize("use_orig_params", [True, False])
-    @decorateIf(
-        unittest.skip("Unsupported state-dict configuration"),
-        _unsupported_state_dict_config,
-    )
+    @_skip_unsupported_config
     def test_basic_save_and_load_state_dict(
         self,
         state_dict_type: str,
@@ -656,10 +657,7 @@ class TestFSDPStateDict(FSDPTest):
     @parametrize("mixed_precision", [True, False])
     @parametrize("state_dict_rank0_and_offload", [True, False])
     @parametrize("use_orig_params", [True, False])
-    @decorateIf(
-        unittest.skip("Unsupported state-dict configuration"),
-        _unsupported_state_dict_config,
-    )
+    @_skip_unsupported_config
     def test_buffers_save_and_load_state_dict(
         self,
         state_dict_type: str,
@@ -722,10 +720,7 @@ class TestFSDPStateDict(FSDPTest):
     @parametrize("state_dict_type", _SUPPORTED_STATE_DICT_IMPLS)
     @parametrize("mixed_precision", [True, False])
     @parametrize("state_dict_rank0_and_offload", [True, False])
-    @decorateIf(
-        unittest.skip("Unsupported state-dict configuration"),
-        _unsupported_state_dict_config,
-    )
+    @_skip_unsupported_config
     def test_save_and_load_after_forward_state_dict(
         self, state_dict_type, mixed_precision, state_dict_rank0_and_offload
     ):
@@ -899,10 +894,7 @@ class TestFSDPStateDict(FSDPTest):
     @parametrize("state_dict_type", _UNFLATTENED_STATE_DICT_IMPLS)
     @parametrize("state_dict_rank0_and_offload", [True, False])
     @parametrize("fsdp_root", [True, False])
-    @decorateIf(
-        unittest.skip("Unsupported state-dict configuration"),
-        _unsupported_state_dict_config,
-    )
+    @_skip_unsupported_config
     def test_state_dict_load_into_local_module(
         self,
         state_dict_type,
