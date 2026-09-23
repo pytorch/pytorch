@@ -4,6 +4,7 @@ import copy
 import functools
 import itertools
 import os
+import re
 import tempfile
 import unittest
 from collections.abc import Callable
@@ -50,7 +51,12 @@ from torch.distributed.fsdp._fully_shard._fsdp_param_group import (
 from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import implicit_replication
-from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA, TEST_MULTIGPU
+from torch.testing._internal.common_cuda import (
+    SM90OrLater,
+    TEST_CUDA,
+    TEST_MULTIGPU,
+    with_tf32_off,
+)
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     PLATFORM_SUPPORTS_SYMM_MEM,
@@ -502,6 +508,7 @@ class TestFullyShardCommunication(FSDPTestContinuous):
 
     @skip_if_lt_x_gpu(2)
     @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/1571
+    @with_tf32_off
     def test_set_reduce_scatter_divide_factor(self):
         self.run_subtests(
             {
@@ -1868,7 +1875,11 @@ class TestFullyShardAllocFromPG(FSDPTest):
         torch.cuda.synchronize()
 
         with open(self.nccl_log_dir.name + "/nccl_log") as f:
-            self.assertNotRegex(f.read(), self.MEMORY_REGISTER_RE)
+            # NCCL may register internal buffers independently of FSDP's
+            # allocation strategy, so use the current count as a baseline.
+            num_memory_registrations = len(
+                re.findall(self.MEMORY_REGISTER_RE, f.read())
+            )
 
         for module in model.modules():
             if isinstance(module, TransformerBlock):
@@ -1882,7 +1893,12 @@ class TestFullyShardAllocFromPG(FSDPTest):
         torch.cuda.synchronize()
 
         with open(self.nccl_log_dir.name + "/nccl_log") as f:
-            self.assertRegex(f.read(), self.MEMORY_REGISTER_RE)
+            # Allocating FSDP communication buffers from the process group
+            # should result in additional registrations with NCCL.
+            self.assertGreater(
+                len(re.findall(self.MEMORY_REGISTER_RE, f.read())),
+                num_memory_registrations,
+            )
 
     @skip_if_lt_x_gpu(2)
     def test_exception_when_used_together_with_comm_hooks(self):
