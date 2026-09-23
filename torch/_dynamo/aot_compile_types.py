@@ -4,6 +4,7 @@ import pickle
 from typing import Any
 
 import torch
+from torch._dynamo.utils import _DynamoRuntimeModuleProvider
 
 
 def _serialize_triton_kernel(kernel: Any) -> tuple[str, str]:
@@ -84,7 +85,9 @@ class SerializableCallable(abc.ABC):
         pass
 
 
-class GraphModuleSerializableCallable(SerializableCallable):
+class GraphModuleSerializableCallable(
+    SerializableCallable, _DynamoRuntimeModuleProvider
+):
     def __init__(self, graph_module: torch.fx.GraphModule) -> None:
         if not isinstance(graph_module, torch.fx.GraphModule):
             raise AssertionError(
@@ -132,6 +135,9 @@ class GraphModuleSerializableCallable(SerializableCallable):
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         return self.graph_module.forward(*args, **kwargs)
+
+    def _dynamo_runtime_module_values(self) -> tuple[Any, ...]:
+        return (self.graph_module,)
 
 
 class BundledAOTAutogradSerializableCallable(SerializableCallable):
