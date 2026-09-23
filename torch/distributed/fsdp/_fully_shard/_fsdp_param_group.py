@@ -656,41 +656,8 @@ class FSDPParamGroup:
                 unsharded_grads: list[torch.Tensor] = []
                 for index in self._reduce_scatter_param_indices:
                     fsdp_param = self.fsdp_params[index]
-                    if not hasattr(fsdp_param, "_unsharded_param"):
+                    if (grad := self._get_unsharded_grad_to_reduce(fsdp_param)) is None:
                         continue
-                    grad_pending_all_reduce = self._get_partial_reduce_grad(fsdp_param)
-                    # A group unused in this microbatch may still own gradients
-                    # from an earlier backward without synchronization.
-                    if fsdp_param.unsharded_param.grad is not None:
-                        grad = fsdp_param.unsharded_grad_data
-                    elif grad_pending_all_reduce is not None:
-                        grad = fsdp_param.get_unsharded_zero_grad_data(
-                            dtype=grad_pending_all_reduce.dtype
-                        )
-                    elif (
-                        self.reduce_scatter_unused_params
-                        and fsdp_param.unsharded_param.requires_grad
-                    ):
-                        zero_grad_dtype = (
-                            fsdp_param.unsharded_grad_dtype
-                            or fsdp_param.unsharded_param.dtype
-                        )
-                        grad = fsdp_param.get_unsharded_zero_grad_data(
-                            dtype=zero_grad_dtype
-                        )
-                    else:
-                        continue
-                    if (
-                        grad_pending_all_reduce is not None
-                        and grad_pending_all_reduce.dtype != grad.dtype
-                    ):
-                        # An unrestricted gradient policy may produce a new
-                        # dtype; preserve higher-precision pending reductions.
-                        grad = grad.to(
-                            torch.promote_types(
-                                grad.dtype, grad_pending_all_reduce.dtype
-                            )
-                        )
                     fsdp_params_with_grad.append(fsdp_param)
                     unsharded_grads.append(grad)
                     fsdp_param.unsharded_param.grad = None
@@ -868,6 +835,31 @@ class FSDPParamGroup:
         return output.narrow(0, offset, param.sharded_size.numel()).view(
             param.sharded_size
         )
+
+    def _get_unsharded_grad_to_reduce(self, param: FSDPParam) -> torch.Tensor | None:
+        """Returns the unsharded gradient to reduce-scatter, or ``None`` to skip."""
+        if not hasattr(param, "_unsharded_param"):
+            return None
+        unsharded_param = param.unsharded_param
+        grad_pending_all_reduce = self._get_partial_reduce_grad(param)
+        # A group unused in this microbatch may still own gradients from an
+        # earlier backward without synchronization.
+        if unsharded_param.grad is not None:
+            grad = param.unsharded_grad_data
+            if grad_pending_all_reduce is not None:
+                # An unrestricted gradient policy may produce a new dtype;
+                # preserve higher-precision pending reductions.
+                grad = grad.to(
+                    torch.promote_types(grad.dtype, grad_pending_all_reduce.dtype)
+                )
+            return grad
+        if grad_pending_all_reduce is not None:
+            return param.get_unsharded_zero_grad_data(grad_pending_all_reduce.dtype)
+        if self.reduce_scatter_unused_params and unsharded_param.requires_grad:
+            return param.get_unsharded_zero_grad_data(
+                param.unsharded_grad_dtype or unsharded_param.dtype
+            )
+        return None
 
     def _prepare_partial_reduce_output(
         self,
