@@ -16,7 +16,7 @@ from torch.autograd.grad_mode import _unsafe_preserve_version_counter
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
 from torch.distributed.fsdp.experimental import (
-    all_gather_output_fn_with_intermediate_copy,
+    all_gather_output_fn_with_native_copy,
     AllGatherInput,
 )
 from torch.distributed.tensor import Shard
@@ -349,6 +349,7 @@ class TestFullyShardAllGatherExtensionsMultiProcess(
             shard_placement_fn=lambda _: Shard(shard_dim),
             reshard_after_forward=True,
         )
+        model.set_all_gather_output_fn(all_gather_output_fn_with_native_copy)
         local_weight = model.weight._local_tensor
         local_weight.fsdp_pre_all_gather = fsdp_pre_all_gather.__get__(local_weight)
         local_weight.fsdp_post_all_gather = fsdp_post_all_gather.__get__(local_weight)
@@ -426,14 +427,14 @@ class TestFullyShardAllGatherExtensionsMultiProcess(
         self.run_subtests(
             {
                 "shard_world_size": [1, 2],
-                "intermediate_copy": [False, True],
+                "native_copy": [False, True],
                 "release_outputs": [False, True],
             },
             self._test_all_gather_input_layouts,
         )
 
     def _test_all_gather_input_layouts(
-        self, shard_world_size: int, intermediate_copy: bool, release_outputs: bool
+        self, shard_world_size: int, native_copy: bool, release_outputs: bool
     ):
         mesh = init_device_mesh(
             device_type.type,
@@ -531,8 +532,8 @@ class TestFullyShardAllGatherExtensionsMultiProcess(
             shard_placement_fn=lambda _: Shard(1),
             reshard_after_forward=True,
         )
-        if intermediate_copy:
-            model.set_all_gather_output_fn(all_gather_output_fn_with_intermediate_copy)
+        if native_copy:
+            model.set_all_gather_output_fn(all_gather_output_fn_with_native_copy)
         local_weight = model.weight._local_tensor
         local_weight.fsdp_pre_all_gather = fsdp_pre_all_gather.__get__(local_weight)
         local_weight.fsdp_post_all_gather = fsdp_post_all_gather.__get__(local_weight)

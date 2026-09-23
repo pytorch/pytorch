@@ -39,8 +39,8 @@ from torch.distributed.fsdp._fully_shard._fsdp_common import (
     ShardPlacementResult,
 )
 from torch.distributed.fsdp.experimental import (
-    all_gather_output_fn_with_intermediate_copy,
-    reduce_scatter_input_fn_with_intermediate_copy,
+    all_gather_output_fn_with_native_copy,
+    reduce_scatter_input_fn_with_native_copy,
     ReduceScatterInput,
 )
 from torch.distributed.tensor import DTensor, init_device_mesh, Shard
@@ -389,18 +389,18 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(2, allow_cpu=True)
-    def test_train_parity_intermediate_copy_fns(self):
+    def test_train_parity_native_copy_fns(self):
         self.run_subtests(
             {
                 "lin_shapes": [[(32, 16), (16, 8)]],
                 "use_shard_placement_fn": [True],
                 "bias": [False, True],
                 "copy_fns": [
-                    (all_gather_output_fn_with_intermediate_copy, None),
-                    (None, reduce_scatter_input_fn_with_intermediate_copy),
+                    (all_gather_output_fn_with_native_copy, None),
+                    (None, reduce_scatter_input_fn_with_native_copy),
                     (
-                        all_gather_output_fn_with_intermediate_copy,
-                        reduce_scatter_input_fn_with_intermediate_copy,
+                        all_gather_output_fn_with_native_copy,
+                        reduce_scatter_input_fn_with_native_copy,
                     ),
                 ],
             },
@@ -416,7 +416,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 "reshard_after_forward": [2],
                 "copy_fns": [
                     (None, None),
-                    (all_gather_output_fn_with_intermediate_copy, None),
+                    (all_gather_output_fn_with_native_copy, None),
                 ],
             },
             self._test_train_parity_single_group,
@@ -2744,7 +2744,7 @@ class TestFullyShardInference(FSDPTest):
         return 2
 
     def test_inference(self):
-        copy_fns = [None, all_gather_output_fn_with_intermediate_copy]
+        copy_fns = [None, all_gather_output_fn_with_native_copy]
         self.run_subtests(
             {"all_gather_output_fn": copy_fns},
             self._test_inference,

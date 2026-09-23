@@ -17,7 +17,7 @@ from ._fsdp_common import (
     _raise_assert_with_print,
     _to_dtype_if_needed,
 )
-from ._fsdp_param import FSDPParam, ShardedState
+from ._fsdp_param import _AllGatherOutputLayout, FSDPParam, ShardedState
 
 
 class AllGatherResult(NamedTuple):
@@ -432,35 +432,50 @@ def _default_all_gather_output_fn(
     all_gather_result: AllGatherResult,
     world_size: int,
 ) -> None:
-    r"""Copy all-gather outputs into their final layout.
+    r"""Copy gathered payloads through intermediate buffers when needed.
 
-    Each payload's prepared layout determines its copy into the final output.
+    Nonempty payloads concatenated along a nonzero dimension copy through
+    intermediate buffers, then concatenate into their final layout. Dimension-0
+    and empty payloads copy directly.
     """
-    all_gather_output = all_gather_result.all_gather_output
+    (
+        all_gather_output,
+        _,
+        _,
+        param_all_gather_input_dtypes,
+        param_all_gather_input_numels,
+        all_gather_input_split_sizes,
+    ) = all_gather_result
     device = all_gather_output.device
-    copy_outputs: list[torch.Tensor] = []
-    outer_sizes: list[int] = []
+    split_with_sizes_out: list[torch.Tensor] = []
+    reorder_infos: list[tuple[torch.Tensor, torch.Tensor, _AllGatherOutputLayout]] = []
     for all_gather_input_numels, all_gather_input_dtypes, fsdp_param in zip(
-        all_gather_result.param_all_gather_input_numels,
-        all_gather_result.param_all_gather_input_dtypes,
-        fsdp_params,
+        param_all_gather_input_numels, param_all_gather_input_dtypes, fsdp_params
     ):
         fsdp_param.init_all_gather_outputs(
-            all_gather_input_numels, all_gather_input_dtypes, world_size, device
+            all_gather_input_numels,
+            all_gather_input_dtypes,
+            world_size,
+            device,
         )
         fsdp_param.alloc_all_gather_outputs()
-        copy_outputs.extend(fsdp_param.all_gather_outputs)
-        for layout in fsdp_param.all_gather_copy_layouts:
-            outer_sizes.append(layout.outer_size)
-    non_inference_outputs = tuple(t for t in copy_outputs if not t.is_inference())
-    with torch.autograd._unsafe_preserve_version_counter(non_inference_outputs):
-        torch.ops.fsdp._all_gather_copy_out_(
-            copy_outputs,
-            all_gather_output,
-            all_gather_result.all_gather_input_split_sizes,
-            outer_sizes,
-            world_size,
-        )
+        for output, layout in zip(
+            fsdp_param.all_gather_outputs, fsdp_param.all_gather_copy_layouts
+        ):
+            if layout.dim != 0 and output.numel():
+                copy_output = torch.empty_like(output)
+                reorder_infos.append((copy_output, output, layout))
+            else:
+                copy_output = output
+            split_with_sizes_out.append(copy_output)
+
+    _copy_all_gather_outputs(
+        all_gather_output,
+        all_gather_input_split_sizes,
+        split_with_sizes_out,
+        world_size,
+    )
+    _reassemble_all_gather_outputs(reorder_infos, world_size)
 
 
 @torch.no_grad()
@@ -488,6 +503,8 @@ def _copy_all_gather_outputs(
     split_with_sizes_out: list[torch.Tensor],
     world_size: int,
 ) -> None:
+    if all_gather_output.numel() == 0:
+        return
     all_gather_output = all_gather_output.view(world_size, -1)
     if all_gather_output.dtype == torch.uint8:
         out = [t.view(world_size, -1).view(torch.uint8) for t in split_with_sizes_out]
@@ -508,55 +525,45 @@ def _copy_all_gather_outputs(
         )
 
 
+def _reassemble_all_gather_outputs(
+    reorder_infos: list[tuple[torch.Tensor, torch.Tensor, _AllGatherOutputLayout]],
+    world_size: int,
+) -> None:
+    outputs = tuple(out for _, out, _ in reorder_infos if not out.is_inference())
+    with torch.autograd._unsafe_preserve_version_counter(outputs):
+        for copy_output, output, layout in reorder_infos:
+            chunks = copy_output.view(world_size, layout.outer_size, -1).unbind(0)
+            torch.cat(chunks, dim=1, out=output.view(layout.outer_size, -1))
+
+
 def _default_reduce_scatter_input_fn(
     fsdp_params: list[FSDPParam],
     unsharded_grads: list[torch.Tensor],
     world_size: int,
 ) -> ReduceScatterInput:
-    r"""Prepare gradients and their reduce-scatter copy.
+    r"""Pack nonzero-dimension gradients into intermediate buffers before copying.
 
-    Contiguous nonzero-dimension shards copy directly into the collective buffer.
-    Noncontiguous gradients use the existing chunk-and-concatenate reorder.
-    Groups with only Shard(0) gradients, or of size one, use the original operator.
+    When the group has more than one rank, nonzero-dimension gradients are
+    chunked and concatenated into intermediate buffers grouped by destination
+    rank, then copied into the reduce-scatter buffer.
     """
-    padded_unsharded_sizes: list[torch.Size] = []
-    num_leading_dims: list[int] = []
-    for i, (fsdp_param, unsharded_grad) in enumerate(zip(fsdp_params, unsharded_grads)):
-        shard_dim = fsdp_param.fsdp_placement.dim
-        if world_size > 1 and shard_dim != 0:
+    if world_size > 1:
+        for i, (fsdp_param, unsharded_grad) in enumerate(
+            zip(fsdp_params, unsharded_grads)
+        ):
+            if (shard_dim := fsdp_param.fsdp_placement.dim) == 0:
+                continue
             if unsharded_grad.size(shard_dim) % world_size != 0:
                 raise AssertionError(
-                    f"Shard({shard_dim}) requires even sharding: {unsharded_grad.size()=} "
-                    f"{world_size=}"
+                    f"Shard({shard_dim}) requires even sharding: {unsharded_grad.size()=} {world_size=}"
                 )
-            if unsharded_grad.is_contiguous():
-                num_leading_dims.append(shard_dim)
-                # Even nonzero-dim shards need no padding.
-                padded_unsharded_sizes.append(unsharded_grad.size())
-                continue
-            unsharded_grad = torch.cat(
-                torch.chunk(unsharded_grad, world_size, dim=shard_dim),
-                dim=0,
-            )
-            unsharded_grads[i] = unsharded_grad
-        num_leading_dims.append(0)
-        padded_unsharded_sizes.append(
-            _get_dim0_padded_size(unsharded_grad.size(), world_size)
-        )
+            chunks = torch.chunk(unsharded_grad, world_size, dim=shard_dim)
+            unsharded_grads[i] = torch.cat(chunks, dim=0)
 
-    def copy_in(
-        unsharded_grads: list[torch.Tensor],
-        output: torch.Tensor,
-        world_size: int,
-    ) -> None:
-        torch.ops.fsdp._reduce_scatter_copy_in_(
-            output.view(world_size, -1),
-            unsharded_grads,
-            num_leading_dims,
-            world_size,
-        )
-
-    return ReduceScatterInput(padded_unsharded_sizes, copy_in)
+    padded_unsharded_sizes = tuple(
+        _get_dim0_padded_size(grad.size(), world_size) for grad in unsharded_grads
+    )
+    return ReduceScatterInput(padded_unsharded_sizes, foreach_reduce_scatter_copy_in)
 
 
 @torch.no_grad()

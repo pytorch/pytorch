@@ -43,6 +43,10 @@ from torch.distributed.fsdp._fully_shard._fsdp_init import (
 )
 from torch.distributed.fsdp._fully_shard._fsdp_param import ShardedState
 from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
+from torch.distributed.fsdp.experimental import (
+    all_gather_output_fn_with_native_copy,
+    reduce_scatter_input_fn_with_native_copy,
+)
 from torch.distributed.tensor import DTensor, Shard
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import implicit_replication
@@ -350,7 +354,8 @@ class TestFullyShardCustomAllocation(FSDPTestMultiThread):
 
     @parametrize("shard_dim", [0, 1])
     @parametrize("collective", ["all_gather", "reduce_scatter"])
-    def test_strided_allocation(self, device, shard_dim, collective):
+    @parametrize("native_copy", [False, True])
+    def test_strided_allocation(self, device, shard_dim, collective, native_copy):
         test_case = self
         model = nn.Linear(8, 4, bias=False, device=device)
         dist.broadcast(model.weight.detach(), src=0)
@@ -385,17 +390,40 @@ class TestFullyShardCustomAllocation(FSDPTestMultiThread):
         )
         if collective == "all_gather":
             model.set_custom_all_gather(StridedAllGather())
+            if native_copy:
+                model.set_all_gather_output_fn(all_gather_output_fn_with_native_copy)
         else:
             model.set_custom_reduce_scatter(StridedReduceScatter())
+            if native_copy:
+                model.set_reduce_scatter_input_fn(
+                    reduce_scatter_input_fn_with_native_copy
+                )
+        native_ops = {
+            "all_gather": torch.ops.fsdp._all_gather_copy_out_.default,
+            "reduce_scatter": torch.ops.fsdp._reduce_scatter_copy_in_.default,
+        }
+
+        class RecordCopies(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                if func in native_counts:
+                    native_counts[func] += 1
+                return func(*args, **(kwargs or {}))
+
         optim = torch.optim.SGD(model.parameters(), lr=0.1)
         reference_optim = torch.optim.SGD(reference.parameters(), lr=0.1)
         for iteration in range(2):
             inp = torch.full((2, 8), float(self.rank + iteration + 1), device=device)
             expected = reference(inp)
-            actual = model(inp)
-            self.assertEqual(actual, expected)
             expected.sum().backward()
-            actual.sum().backward()
+            native_counts = dict.fromkeys(native_ops.values(), 0)
+            with RecordCopies():
+                actual = model(inp)
+                actual.sum().backward()
+            self.assertEqual(actual, expected)
+            for direction, op in native_ops.items():
+                self.assertEqual(
+                    native_counts[op] > 0, native_copy and direction == collective
+                )
             dist.all_reduce(reference.weight.grad)
             reference.weight.grad.div_(self.world_size)
             self.assertEqual(model.weight.grad.full_tensor(), reference.weight.grad)
