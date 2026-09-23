@@ -103,28 +103,25 @@ class PrecompileSummary:
         resume_functions: Of those, the graph-break continuations.
         guarded_codes: Guarded code objects across all frames.
         backend_graphs: Compiled backend graphs.
-        bypassed: ``co_name``s of frames the package holds nothing installable
-            for: no compile of the frame recorded a guarded code and one was
-            bypassed (its guards could not be serialized, or its graph held
-            parameters by static address), or a backend artifact was missing
-            when the package was saved. Not an eager fallback: the frame ran
-            compiled during capture, the package kept no variant of it a load
-            can serve, and an install re-traces it rather than skipping it as
-            trivial.
+        bypassed: The ``co_name`` of each frame the package holds nothing
+            servable for: no compile of the frame recorded a guarded code and
+            one was bypassed (its guards could not be serialized, or its graph
+            held parameters by static address), or a backend artifact was
+            missing when the package was saved. Not an eager fallback: the
+            frame ran compiled during capture, but the package kept no variant
+            of it a load can serve, so a call that reaches it raises.
         truncated: ``co_name (filename:firstlineno)`` of each frame that hit the
             recompile limit. A lower bound, which is why the digest prints it
             as ``>=``: from a limit hit on, that frame and the frames it calls
             run without tracing, so a limit hit that would follow it there is
             never recorded.
-        uncovered_frames: ``co_name``s of frames the capture ran that ended with
-            no guarded code and were not bypassed, so the artifact cannot serve
-            them: a thin wrapper whose graphs all landed in an inner frame, a
-            frame Dynamo gave up on, or a frame whose compile raised (its
-            message is in ``capture_errors``, so one failure shows in both
-            digest clauses). A different cause and remedy from ``bypassed`` (an
-            install leaves an uncovered frame to run eagerly, so only a
-            re-capture recovers it, where it re-traces a bypassed one), never
-            the same frame; a frame that hit the recompile limit before it
+        uncovered_frames: The ``co_name`` of each frame the capture ran that
+            ended with no guarded code and was not bypassed, so the artifact
+            cannot serve it: a thin wrapper whose graphs all landed in an inner
+            frame, a frame Dynamo gave up on, or a frame whose compile raised
+            (its message is in ``capture_errors``, so one failure shows in both
+            digest clauses). A different cause and remedy from ``bypassed``,
+            never the same frame; a frame that hit the recompile limit before it
             recorded a guarded code is in ``truncated`` too. Not a remainder:
             which frames count as a gap is the producer's decision, and a frame
             the package holds an entry for but never ran is not one, so this is
