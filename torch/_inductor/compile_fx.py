@@ -1060,6 +1060,10 @@ def compile_fx_inner(
             stack.enter_context(
                 config.patch(get_cpp_wrapper_config(log_cudagraph_skip=False))
             )
+        # readable_wrapper pins each Triton kernel to its compile-time tuned config.
+        # Applied here, like the cpp_wrapper patch, so a lazy backward compile sees it.
+        if config.readable_wrapper and config.triton.autotune_at_compile_time is None:
+            stack.enter_context(config.patch({"triton.autotune_at_compile_time": True}))
         # Host-side TMA only selects the descriptor flavor; it needs the TMA path
         # itself enabled. Warn (don't silently no-op) if it's set without its
         # prerequisites.
@@ -3166,6 +3170,20 @@ def compile_fx(
                 example_inputs_,
                 # need extra layer of patching as backwards is compiled out of scope
                 inner_compile=patch_compile_options(config_patches)(inner_compile),
+                decompositions=decompositions,
+                ignore_shape_env=ignore_shape_env,
+                compile_region_name=compile_region_name,
+            )
+
+    if config.readable_wrapper and config.triton.autotune_at_compile_time is None:
+        # readable_wrapper pins each Triton kernel to its compile-time tuned config.
+        # Decompositions read the flag too, so it is set before tracing, and again in
+        # compile_fx_inner for a lazy backward.
+        with config.patch({"triton.autotune_at_compile_time": True}):
+            return compile_fx(
+                model_,
+                example_inputs_,
+                inner_compile=inner_compile,
                 decompositions=decompositions,
                 ignore_shape_env=ignore_shape_env,
                 compile_region_name=compile_region_name,
