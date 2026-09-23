@@ -1140,6 +1140,8 @@ class HuberLoss(_Loss):
     __constants__ = ["reduction", "delta"]
 
     def __init__(self, reduction: str = "mean", delta: float = 1.0) -> None:
+        if not isinstance(delta, (float, int)):
+            raise TypeError(f"delta must be a float or int, got: {type(delta)}")
         super().__init__(reduction=reduction)
         self.delta = delta
 
@@ -1424,10 +1426,10 @@ class LinearCrossEntropyLoss(_WeightedLoss):
             for the same reason as ``self.linear.weight`` -- reshaping
             happens in :meth:`forward` before passing through to
             :func:`~torch.nn.functional.linear_cross_entropy` as
-            ``linear_bias``. Currently supported only on the reference
-            path (``options=None``); with a non-``None`` ``options``
-            the forward warns and falls back to the reference path.
-            Default: ``False``.
+            ``linear_bias``. With ``options != None``, K-dimensional
+            bias (``out_features != ()``) falls back to the reference
+            implementation with a warning; the chunked path supports
+            only ``(C,)``-shaped bias. Default: ``False``.
         device (:class:`torch.device`, optional): the desired device
             of linear weight.  Default: ``None``.
         dtype (:class:`torch.dtype`, optional): the desired dtype of

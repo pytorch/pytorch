@@ -31,6 +31,11 @@ struct CompressedEvent {
   c10::time_t enter_t_{};
 };
 
+// Bounds Python events by their nearest same-thread Python ancestor.
+// `sorted_events` must be ordered by start time.
+TORCH_API void clampOverrunningPythonEvents(
+    const std::vector<std::shared_ptr<Result>>& sorted_events);
+
 /*
 Libtorch does not depend on Python (e.g. cannot #include <Python.h>); however
 when we call the profiler from libtorch_python we need the profiler to be able

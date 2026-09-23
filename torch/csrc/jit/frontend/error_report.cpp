@@ -78,13 +78,13 @@ static std::string get_stacked_errors(const std::vector<Call>& error_stack) {
     for (auto it = error_stack.rbegin(); it != error_stack.rend() - 1; ++it) {
       auto callee = it + 1;
 
-      msg << "'" << it->fn_name
+      msg << '\'' << it->fn_name
           << "' is being compiled since it was called from '" << callee->fn_name
           << "'\n";
       callee->caller_range.highlight(msg);
     }
   }
-  return msg.str();
+  return std::move(msg).str();
 }
 
 std::string ErrorReport::current_call_stack() {
@@ -103,7 +103,7 @@ const char* ErrorReport::what() const noexcept {
 
   msg << get_stacked_errors(error_stack);
 
-  the_message = msg.str();
+  the_message = std::move(msg).str();
   return the_message.c_str();
 }
 

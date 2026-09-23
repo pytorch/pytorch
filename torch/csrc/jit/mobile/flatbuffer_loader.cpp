@@ -323,7 +323,14 @@ mobile::Module FlatbufferLoader::parseModule(
   for (const auto& f : all_functions_) {
     uint32_t class_index =
         ivalues->Get(f.first)->val_as_Function()->class_type();
-    ClassTypePtr class_type = all_types_[class_index];
+    // class_index comes from the flatbuffer but is not range-checked by
+    // VerifyModuleBuffer; validate it before indexing so a malformed module
+    // fails with a clear error instead of crashing.
+    ClassTypePtr class_type = getType(class_index);
+    TORCH_CHECK(
+        class_type != nullptr,
+        "Parsing flatbuffer module: function references uninitialized class type at index ",
+        class_index);
     class_type->addMethod(f.second);
   }
 
@@ -379,7 +386,7 @@ std::unique_ptr<mobile::Function> FlatbufferLoader::parseFunction(
     function->append_type(getOrCreateTypeAnnotations(i));
   }
 
-  // 3. If upgrader is needed, change change the OP instruction to CALL
+  // 3. If upgrader is needed, change the OP instruction to CALL
   // instruction (In next PR, use_upgrader will be parsed to parseInstruction
   // function and do the actual change)
   if (use_upgrader) {
@@ -744,7 +751,13 @@ void FlatbufferLoader::extractJitSourceAndConstants(
     if (f.first >= mobile_ivalue_size_) {
       uint32_t class_index =
           ivalues->Get(f.first)->val_as_Function()->class_type();
-      ClassTypePtr class_type = all_types_[class_index];
+      // See note in parseModule: class_index is not range-checked by
+      // VerifyModuleBuffer, so validate it before indexing all_types_.
+      ClassTypePtr class_type = getType(class_index);
+      TORCH_CHECK(
+          class_type != nullptr,
+          "Parsing flatbuffer module: function references uninitialized class type at index ",
+          class_index);
       class_type->addMethod(f.second);
     }
   }
