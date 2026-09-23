@@ -291,6 +291,9 @@ def fused_grad_logits_into(
         raise ValueError(f"tiles_per_stage must be at least 1, got {tiles}")
     num_rows, V = logits.shape
     compiled = _compile_fused_grad_logits(logits.dtype, g.dtype, threads, tiles)
-    compiled(
-        logits, row_scale, target, g, log_row_sum, shifted_target_logit, V, num_rows
-    )
+    # The Python-native dispatch path sets no CUDA device guard, and the launch
+    # runs on the current device, so make that the one the tensors are on.
+    with torch.accelerator.device_index(logits.device.index):
+        compiled(
+            logits, row_scale, target, g, log_row_sum, shifted_target_logit, V, num_rows
+        )
