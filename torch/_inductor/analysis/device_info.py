@@ -270,17 +270,26 @@ _device_mapping: dict[str, DeviceInfo] = {
     # Source:
     # @lint-ignore https://www.intel.com/content/www/us/en/ark/products/series/232874/
     # intel-data-center-gpu-max-series.html
+    # The card has two tiles but a process normally uses one, so bandwidth and
+    # memory are per-tile (half the datasheet values). No native fp8 rate is
+    # listed; fp8 matmuls run at the fp16 rate.
     "Intel(R) Data Center GPU Max 1550": DeviceInfo(
         tops={
             torch.float32: 26.2,
             "torch.tf32": 26.2,
             torch.float16: 419.43,
             torch.bfloat16: 419.43,
+            torch.float8_e4m3fn: 419.43,
+            torch.float8_e4m3fnuz: 419.43,
+            torch.float8_e5m2: 419.43,
+            torch.float8_e5m2fnuz: 419.43,
+            torch.float8_e8m0fnu: 419.43,
             torch.int8: 838.86,
         },
-        dram_bw_gbs=3276.8,
-        dram_gb=128,
+        dram_bw_gbs=1638.4,
+        dram_gb=64,
     ),
+}
 }
 _device_mapping["AMD INSTINCT MI350X"] = _device_mapping["AMD MI350X"]
 _device_mapping["AMD INSTINCT MI300X"] = _device_mapping["AMD MI300X"]
