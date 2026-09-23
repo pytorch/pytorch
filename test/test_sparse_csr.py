@@ -28,7 +28,6 @@ from torch.testing._internal.common_device_type import (
     precisionOverride,
     skipCPUIfNoMklSparse,
     skipCUDAIfNoSparseGeneric,
-    skipCUDAIfRocm,
     skipMeta,
     tol,
     toleranceOverride,
@@ -2622,7 +2621,6 @@ class TestSparseCSR(TestCase):
             self.assertEqual(a.grad, a1.grad)
             self.assertEqual(b.grad, b1.grad)
 
-    @skipCUDAIfRocm
     @onlyCUDA
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
