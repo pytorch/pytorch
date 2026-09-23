@@ -66,6 +66,7 @@ scaled_dot_product_attention.
     :nosignatures:
 
     scaled_dot_product_attention
+    gated_delta_rule
 ```
 
 ## Non-linear activation functions
