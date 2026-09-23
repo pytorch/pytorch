@@ -703,32 +703,22 @@ static ReductionPlan select_outer_reduction(const ReductionLayout& layout, Reduc
   const auto [outer_size, dim_size, inner_size, strides, is_contiguous] = layout;
   const bool is_arg = family == ReductionFamily::Arg;
   const auto natural_tgs = outer_size * at::ceil_div(inner_size, OUTER_TG_WIDTH);
-  // Tall skinny case (few columns, long reduced dim): too few
-  // threadgroups to fill the GPU, so split the reduced dim into segments
-  // and fold the [num_segs, inner_size] partials in a second pass.
+  // Tall skinny: too few threadgroups to fill the GPU, so split the reduced dim and combine partials in pass 2.
   const bool split = outer_size == 1 && dim_size >= OUTER_SPLIT_MIN_DIM_SIZE && natural_tgs < OUTER_SPLIT_MIN_TGS;
-  // Short reduced dim: a 32-row threadgroup would idle most rows, so use
-  // the small-dim layout (one thread walks the whole reduced dim) when
-  // there are enough columns to fill the GPU with 32-wide threadgroups.
+  // Short reduced dim: one thread walks it (a 32-row threadgroup would mostly idle) when enough columns fill the GPU.
   const bool small_dim = !is_arg && dim_size <= OUTER_SMALL_DIM_MAX_SIZE && natural_tgs >= SPLIT_MIN_TGS;
   // Only the sum family has narrow_strided kernels; value ops fall
   // through to the strided outer / small-dim layout below.
   const bool supports_narrow = is_contiguous || family == ReductionFamily::Sum;
-  // inner_size narrower than a threadgroup row: the narrow layout is the
-  // only one that keeps a full threadgroup busy. Tensors below
-  // CHUNK_MIN_NUMEL are enqueue-bound and stay on the single-dispatch
-  // outer kernel below. When the small-dim layout is available and the
-  // reduced dim is short, its serial row walk beats narrow's mostly-idle
-  // threadgroups.
+  // Only narrow keeps a full threadgroup busy when inner_size < a threadgroup row. Skip it for enqueue-bound tensors
+  // (< CHUNK_MIN_NUMEL) and short dims, where small_dim's serial walk beats narrow's mostly idle threadgroups.
   const bool use_narrow =
       is_arg ? split : numel >= CHUNK_MIN_NUMEL && !(small_dim && dim_size < NARROW_BATCHED_MIN_DIM_SIZE);
   ReductionPlan plan{.kernel = ReductionKernel::Outer, .layout = layout};
 
   if (supports_narrow && inner_size < OUTER_TG_WIDTH && use_narrow) {
     plan.kernel = is_contiguous ? ReductionKernel::Narrow : ReductionKernel::NarrowStrided;
-    // A single narrow threadgroup saturates at ~NARROW_SPLIT_ELEMS_PER_TG
-    // elements; past that, split the reduced dim into segments reduced in
-    // parallel and fold the [num_segs, inner_size] partials in a second pass.
+    // A narrow threadgroup saturates at ~NARROW_SPLIT_ELEMS_PER_TG elements; split larger dims into segments.
     plan.num_segments = outer_size > 1
         ? 1u
         : std::clamp(dim_size * inner_size / NARROW_SPLIT_ELEMS_PER_TG, is_arg ? 2u : 1u, SPLIT_MAX_SEGS);
@@ -748,22 +738,15 @@ static ReductionPlan select_inner_reduction(const ReductionLayout& layout, Reduc
   const bool is_arg = family == ReductionFamily::Arg;
   ReductionPlan plan{.kernel = ReductionKernel::Inner, .layout = layout};
 
-  // Tensors too small to fill the GPU gain nothing from packing rows
-  // into simdgroups; keep them on the inner kernel below (the pre-chunk
-  // routing, whose enqueue floor measures ~10% lower there).
+  // Tensors too small to fill the GPU gain nothing from row packing; the inner kernel's enqueue floor is ~10% lower.
   if (!is_arg && row_len <= CHUNK_MAX_ROW_LEN && numel >= CHUNK_MIN_NUMEL) {
     plan.kernel = ReductionKernel::InnerChunk;
-    // Smallest power-of-two lane count keeping at most CHUNK_ELEMS_PER_LANE
-    // elements per lane; the chunk kernel then packs simdgroup_size / lanes
-    // rows into one simdgroup instead of letting a short row idle most lanes.
+    // Fewest power-of-two lanes with <= CHUNK_ELEMS_PER_LANE elements each, so short rows share a simdgroup.
     plan.lanes = std::min(c10::metal::simdgroup_size, std::bit_ceil(at::ceil_div(row_len, CHUNK_ELEMS_PER_LANE)));
     return plan;
   }
 
-  // Skinny-M/huge-K: one simdgroup per row would leave the GPU
-  // under-occupied below SPLIT_MIN_TGS threadgroups, so split each
-  // row into segments and fold the [num_rows, num_segs] partials in
-  // pass 2.
+  // Skinny-M/huge-K: one simdgroup per row under-fills the GPU, so split rows into segments combined in pass 2.
   const auto num_tgs = at::ceil_div(num_rows, INNER_TG_SIZE / c10::metal::simdgroup_size);
   if (num_tgs < (is_arg ? ARG_SPLIT_MIN_TGS : SPLIT_MIN_TGS) && row_len >= SPLIT_MIN_ROW_LEN) {
     uint32_t segments;
@@ -771,10 +754,7 @@ static ReductionPlan select_inner_reduction(const ReductionLayout& layout, Reduc
       segments = std::clamp(ARG_SPLIT_TARGET_PARTIALS / num_rows, 2u, std::max(row_len / ARG_SPLIT_MIN_SEG_LEN, 2u));
     } else {
       plan.kernel = ReductionKernel::InnerChunk;
-      // Segments per row for split-K: aim for ~SPLIT_TARGET_PARTIALS partials
-      // (rows * segments) so pass 1 fills the GPU, cap so a segment keeps
-      // >= SPLIT_MIN_SEG_LEN elements, then round so the segments come out
-      // equal-sized.
+      // Aim for ~SPLIT_TARGET_PARTIALS partials with >= SPLIT_MIN_SEG_LEN elements per segment.
       const auto max_segments = std::min(SPLIT_MAX_SEGS, at::ceil_div(row_len, SPLIT_MIN_SEG_LEN));
       segments = std::clamp(at::ceil_div(SPLIT_TARGET_PARTIALS, num_rows), 2u, std::max(max_segments, 2u));
     }
@@ -988,11 +968,7 @@ static void encode_reduction(MPSStream* stream,
         }
       }
       mtl_setArgs(encoder, input, output, params);
-      // Round per-TG thread count up to a full simdgroup (32 lanes). With
-      // fewer threads, inactive lanes still participate in simd_shuffle but
-      // carry register-zero, corrupting min/max reductions whose identity
-      // is not zero. Padding threads load Op::identity() and contribute
-      // nothing to the result.
+      // Full simdgroups only: inactive lanes would feed zeros into simd_shuffle and corrupt min/max.
       const auto threads = std::min(MAX_THREADGROUP_SIZE, c10::metal::round_up(params.reduction_size, 32u));
       grid = MTLSizeMake(static_cast<uint64_t>(output.numel()) * threads, 1, 1);
       group = MTLSizeMake(threads, 1, 1);
@@ -1046,9 +1022,7 @@ static void reduction_dispatch_mps(Tensor input,
     input = input.contiguous();
   }
   ReductionPartials partials;
-  // pass-1 output dtype: opmath of output.scalar_type() for sum
-  // (fp16/bf16/chalf partials would round once per segment),
-  // output.scalar_type() for min/max, uchar for all/any.
+  // Sum partials use opmath: fp16/bf16/chalf partials would round once per segment.
   const auto num_partials = output.numel() * plan.num_segments;
   partials.values = at::empty({num_partials * static_cast<int64_t>(partial_type.size)}, output.options().dtype(kByte));
   if (is_arg) {
@@ -1145,9 +1119,8 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
   reduction_dispatch_mps(input, output_view, op, in_kdtype, op.prefix, func_name);
 }
 
-// Shared implementation for sum/nansum/count_nonzero/mean. `divisor` > 0
-// divides the accumulator (in opmath_t) before casting to output, enabling
-// fused mean.
+// `divisor` > 0 divides the accumulator (in opmath_t) before casting to output,
+// enabling fused mean.
 static void sum_nansum_kernel_mps(TensorIterator& iter, const std::string& kernel_prefix, float divisor = 0.0f) {
   const Tensor& input = iter.input(0);
   const Tensor& output = iter.output(0);
@@ -1192,9 +1165,6 @@ static void count_nonzero_kernel_mps(TensorIterator& iter) {
   sum_nansum_kernel_mps(iter, "count_nonzero_");
 }
 
-// Value reductions: min/max (Op + identity load on T), all/any (Op +
-// predicate load with uchar accumulator). Delegates to the shared
-// reduction_dispatch_mps.
 static void value_reduction_kernel_mps(TensorIterator& iter, const std::string& op_prefix) {
   const Tensor& input = iter.input(0);
   const Tensor& output = iter.output(0);
