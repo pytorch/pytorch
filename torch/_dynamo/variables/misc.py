@@ -77,11 +77,13 @@ from ..utils import (
     unpack_iterable,
 )
 from .base import (
+    _check_method_arity,
     AsPythonConstantNotImplementedError,
     GetSet,
     getset_build,
     Member,
     Method,
+    MethodFlags,
     NO_SUCH_SUBOBJ,
     readonly_setter,
     Setter,
@@ -106,6 +108,46 @@ if TYPE_CHECKING:
 
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
+
+
+def add_exception_note(
+    owner: VariableTracker,
+    tx: "InstructionTranslatorBase",
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> VariableTracker:
+    [note] = args
+    if not issubclass(note.python_type(), str):
+        if sys.version_info >= (3, 14):
+            msg = f"add_note() argument must be str, not {note.python_type_name()}"
+        else:
+            msg = f"note must be a str, not '{note.python_type_name()}'"
+        raise_type_error(tx, msg)
+
+    se = tx.output.side_effects
+    notes: VariableTracker | None = None
+    if se.has_pending_mutation_of_attr(owner, "__notes__"):
+        pending = se.load_attr(owner, "__notes__", deleted_ok=True)
+        if not isinstance(pending, variables.DeletedVariable):
+            notes = pending
+
+    if notes is None:
+        notes = variables.ListVariable(
+            [], mutation_type=variables.base.ValueMutationNew()
+        )
+        if not se.is_attribute_mutation(owner):
+            se.track_attribute_mutation_new(owner)
+        se.store_instance_dict_attr(owner, "__notes__", notes)
+    elif not pylist_check(notes):
+        raise_type_error(tx, "Cannot add note: __notes__ is not a list")
+
+    if isinstance(notes, variables.UserDefinedListVariable):
+        if notes._base_vt is None:
+            raise AssertionError("UserDefinedListVariable must have a base VT")
+        # CPython uses PyList_Append, bypassing list subclass overrides.
+        notes = notes._base_vt
+    notes.call_method(tx, "append", [note], {})
+    return variables.ConstantVariable.create(None)
 
 
 class SuperVariable(VariableTracker):
@@ -407,6 +449,13 @@ class SuperVariable(VariableTracker):
                 self.objvar, attr, variables.DeletedVariable()
             )
             return variables.ConstantVariable.create(None)
+        elif (
+            sys.version_info >= (3, 11)
+            and inner_fn is BaseException.add_note
+            and isinstance(self.objvar, variables.UserDefinedExceptionObjectVariable)
+        ):
+            _check_method_arity(self.objvar, tx, name, MethodFlags.O, args, kwargs)
+            return add_exception_note(self.objvar, tx, args, kwargs)
         elif (
             isinstance(self.objvar, variables.UserDefinedObjectVariable)
             and self.objvar._base_vt is not None
@@ -886,38 +935,7 @@ class ExceptionVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        [note] = args
-        if not issubclass(note.python_type(), str):
-            if sys.version_info >= (3, 14):
-                msg = f"add_note() argument must be str, not {note.python_type_name()}"
-            else:
-                msg = f"note must be a str, not '{note.python_type_name()}'"
-            raise_type_error(tx, msg)
-
-        se = tx.output.side_effects
-        notes: VariableTracker | None = None
-        if se.has_pending_mutation_of_attr(self, "__notes__"):
-            pending = se.load_attr(self, "__notes__", deleted_ok=True)
-            if not isinstance(pending, variables.DeletedVariable):
-                notes = pending
-
-        if notes is None:
-            notes = variables.ListVariable(
-                [], mutation_type=variables.base.ValueMutationNew()
-            )
-            if not se.is_attribute_mutation(self):
-                se.track_attribute_mutation_new(self)
-            se.store_instance_dict_attr(self, "__notes__", notes)
-        elif not pylist_check(notes):
-            raise_type_error(tx, "Cannot add note: __notes__ is not a list")
-
-        if isinstance(notes, variables.UserDefinedListVariable):
-            if notes._base_vt is None:
-                raise AssertionError("UserDefinedListVariable must have a base VT")
-            # CPython uses PyList_Append, bypassing list subclass overrides.
-            notes = notes._base_vt
-        notes.call_method(tx, "append", [note], {})
-        return variables.ConstantVariable.create(None)
+        return add_exception_note(self, tx, args, kwargs)
 
     tp_methods = {
         "with_traceback": Method(with_traceback),
