@@ -4887,12 +4887,6 @@ class TestPrecompileDynamoCapture(TestCase):
         for guard_type, source in summary.dropped_guards:
             self.assertIn(f"[{guard_type!r}, {source!r}]", python_code)
 
-    def test_the_strict_gate_refuses_dropped_guards(self):
-        strict = DynamoTracer(require_no_dropped_guards=True)
-        with self.assertRaisesRegex(PrecompileError, "dropped .* guard"):
-            with self._capture(self.mod.single, backend="eager", tracer=strict) as cap:
-                cap(self.model, self.x2)
-
     def test_entries_a_standalone_artifact_cannot_rebuild_are_refused(self):
         # A bare nn.Module compiles Dynamo's wrapper frame, whose graphs close
         # over the module; a closure entry cannot be rebuilt from a code object.

@@ -396,9 +396,9 @@ class DynamoTracer:
     gates refuse, at write time, an artifact with a coverage gap
     (``require_complete``: a bypassed or uncovered frame, a call that raised), one
     whose dropped guards told captured variants apart or hang off a
-    configuration-chosen slot (``require_no_risky_drops``), or one that dropped any
-    guard at all (``require_no_dropped_guards``, off by default since every model
-    drops identity guards that cannot be serialized).
+    configuration-chosen slot (``require_no_risky_drops``). Other dropped guards,
+    such as the identity guards every model drops because they cannot be
+    serialized, are listed in the artifact rather than refused.
     """
 
     guard_filter_fn: Callable[[Sequence[Any]], Sequence[bool]] | None = None
@@ -406,7 +406,6 @@ class DynamoTracer:
     dynamic: bool | None = None
     require_complete: bool = True
     require_no_risky_drops: bool = True
-    require_no_dropped_guards: bool = False
 
 
 class PrecompiledRunnable:
@@ -666,7 +665,6 @@ class _DynamoCapture(Capture):
         *,
         require_complete: bool,
         require_no_risky_drops: bool,
-        require_no_dropped_guards: bool,
     ) -> None:
         self._session = session
         self._artifact_path = artifact_path
@@ -674,7 +672,6 @@ class _DynamoCapture(Capture):
         self._gates = {
             "require_complete": require_complete,
             "require_no_risky_drops": require_no_risky_drops,
-            "require_no_dropped_guards": require_no_dropped_guards,
         }
         self._call: Callable[..., object] | None = None
         self._fresh_cache: AbstractContextManager[None] | None = None
@@ -3240,7 +3237,6 @@ def capture(
         cache_path,
         require_complete=tracer.require_complete,
         require_no_risky_drops=tracer.require_no_risky_drops,
-        require_no_dropped_guards=tracer.require_no_dropped_guards,
     )
 
 
