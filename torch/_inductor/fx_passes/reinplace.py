@@ -227,7 +227,15 @@ def should_reinplace_scatter(node: torch.fx.Node) -> bool:
     input and output would have been realized anyway.
 
     """
-    inp, _src, _view_ops = node.args
+    inp, src, _view_ops = node.args
+
+    # The mutating decomposition is view(inp).copy_(src). If src is itself a
+    # view of inp's storage (x[1:] = x[:-1].clone(), once the clone has been
+    # removed as a no-op), that copy reads what it is overwriting.
+    if isinstance(inp, torch.fx.Node) and isinstance(src, torch.fx.Node):
+        inp_storage = get_node_storage(inp)
+        if inp_storage is not None and inp_storage == get_node_storage(src):
+            return False
 
     # Mutating scatter ops unconditionally realize input and output
     if scatter_always_uses_mutation(node):
