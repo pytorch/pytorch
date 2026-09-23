@@ -30,6 +30,15 @@ log = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass
+class TritonTmaDescriptorMetadata:
+    block_size: list[int]
+    elem_size: int
+    elem_type: int
+    swizzle: int
+    fp4_padded: bool
+
+
+@dataclasses.dataclass
 class TritonKernelCompileResult:
     cubin_path: str
     mangled_name: str
@@ -44,6 +53,7 @@ class TritonKernelCompileResult:
     config_index: int | None
     global_scratch: int | None
     profile_scratch: int | None
+    tensordesc_meta: list[TritonTmaDescriptorMetadata]
 
 
 _async_compile: Any = None
@@ -238,6 +248,26 @@ def run_triton_kernel_with_autotune(
 
     global_scratch: int | None = cached_params.get("global_scratch")
     profile_scratch: int | None = cached_params.get("profile_scratch")
+    tensordesc_meta = []
+    for metadata in cached_params.get("tensordesc_meta") or []:
+        if metadata is None:
+            raise RuntimeError(f"Missing final TMA metadata for {kernel_name}")
+        if metadata.get("is_im2col", False):
+            raise RuntimeError("AOTInductor does not support TMA im2col descriptors")
+        if metadata.get("fp4_padded", False):
+            raise RuntimeError(
+                "Inductor C++ wrappers do not support fp4-padded TMA descriptors"
+            )
+        device_elem_type = int(metadata["elem_type"])
+        tensordesc_meta.append(
+            TritonTmaDescriptorMetadata(
+                block_size=[int(value) for value in metadata["block_size"]],
+                elem_size=int(metadata["elem_size"]),
+                elem_type={8: 10, 9: 8, 10: 9}.get(device_elem_type, device_elem_type),
+                swizzle=int(metadata["swizzle"]),
+                fp4_padded=bool(metadata.get("fp4_padded", False)),
+            )
+        )
 
     log.debug(
         "Successfully autotuned Triton kernel: cubin_path=%s, "
@@ -274,5 +304,6 @@ def run_triton_kernel_with_autotune(
         config_index=config_index,
         global_scratch=global_scratch,
         profile_scratch=profile_scratch,
+        tensordesc_meta=tensordesc_meta,
     )
     return result
