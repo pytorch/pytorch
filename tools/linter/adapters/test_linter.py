@@ -18,6 +18,8 @@ The requirements for each `hw_classification` are summarized below:
   GENERIC
     - Class must not be used with instantiate_device_type_tests.
     - Test methods must not accept device/devices parameter.
+    - Class body must not check accelerator availability, e.g.
+      torch.cuda.is_available().
 
   ACCELERATOR
     - Class must be used with instantiate_device_type_tests.
@@ -27,13 +29,8 @@ The requirements for each `hw_classification` are summarized below:
       as a blacklist approach instead).
 
   CPU / CUDA / MPS / XPU (device-specific)
-    - Class must be used with instantiate_device_type_tests.
-    - Every test method must accept device/devices parameter.
-    - instantiate_device_type_tests must use only_for matching the device
-      (e.g. only_for='cuda').
-    - instantiate_device_type_tests must not use except_for.
-    - MPS classes must pass allow_mps=True and XPU classes must pass
-      allow_xpu=True
+    - Only the hw_classification declaration is required; nothing else is
+      checked for these classes.
 
 The scan covers module-level statements and statements recursively nested within
 ``if``, ``try`` (including ``except`` handlers), ``with``, ``for``, and ``while``
@@ -82,13 +79,6 @@ class HardwareClassification(Enum):
     MPS = "MPS"
     XPU = "XPU"
 
-
-DEVICE_SPECIFIC_CLASSIFICATIONS = {
-    HardwareClassification.CPU,
-    HardwareClassification.CUDA,
-    HardwareClassification.MPS,
-    HardwareClassification.XPU,
-}
 
 # Files in this allowlist are temporarily excluded from test linter checks
 ALLOWLIST_PATH = Path(__file__).resolve().parent / "test_linter_allowlist.json"
@@ -370,42 +360,16 @@ def _get_string_list_kwarg(
     return None
 
 
-def _get_bool_kwarg(call: ast.Call, param_name: str) -> bool | _UnknownKwarg:
-    """Return the bool value of a keyword argument.
-
-    Returns _KWARG_UNKNOWN when the argument is present but is not a literal, so
-    callers can skip a rule instead of defaulting to False.
-    """
-    for kw_item in call.keywords:
-        if kw_item.arg != param_name:
-            continue
-        node = kw_item.value
-        if isinstance(node, ast.Constant) and isinstance(node.value, bool):
-            return node.value
-        return _KWARG_UNKNOWN
-
-    return False
-
-
 @dataclass(frozen=True)
 class InstantiationContext:
     """Context for an ``instantiate_device_type_tests`` call."""
 
     call: ast.Call
     only_for: list[str] | None | _UnknownKwarg
-    except_for: list[str] | None | _UnknownKwarg
-    allow_mps: bool | _UnknownKwarg
-    allow_xpu: bool | _UnknownKwarg
 
     @classmethod
     def from_call(cls, call: ast.Call) -> InstantiationContext:
-        return cls(
-            call=call,
-            only_for=_get_string_list_kwarg(call, "only_for"),
-            except_for=_get_string_list_kwarg(call, "except_for"),
-            allow_mps=_get_bool_kwarg(call, "allow_mps"),
-            allow_xpu=_get_bool_kwarg(call, "allow_xpu"),
-        )
+        return cls(call=call, only_for=_get_string_list_kwarg(call, "only_for"))
 
 
 @dataclass(frozen=True)
@@ -523,7 +487,7 @@ def _check_instantiation(
 # ---------------------------------------------------------------------------
 
 
-@_register(HardwareClassification.ACCELERATOR, *DEVICE_SPECIFIC_CLASSIFICATIONS)
+@_register(HardwareClassification.ACCELERATOR)
 def _check_requires_instantiation(ctx: RuleContext) -> list[LintMessage]:
     return _check_instantiation(ctx, required=True)
 
@@ -533,7 +497,7 @@ def _check_forbids_instantiation(ctx: RuleContext) -> list[LintMessage]:
     return _check_instantiation(ctx, required=False)
 
 
-@_register(HardwareClassification.ACCELERATOR, *DEVICE_SPECIFIC_CLASSIFICATIONS)
+@_register(HardwareClassification.ACCELERATOR)
 def _check_requires_device_param(ctx: RuleContext) -> list[LintMessage]:
     return _check_device_param(ctx, required=True)
 
@@ -541,6 +505,64 @@ def _check_requires_device_param(ctx: RuleContext) -> list[LintMessage]:
 @_register(HardwareClassification.GENERIC)
 def _check_forbids_device_param(ctx: RuleContext) -> list[LintMessage]:
     return _check_device_param(ctx, required=False)
+
+
+# ---------------------------------------------------------------------------
+# GENERIC rules
+# ---------------------------------------------------------------------------
+
+# Device modules an availability check may probe. "accelerator" is included on
+# purpose: torch.accelerator.is_available() still needs some accelerator.
+ACCELERATOR_MODULES = {
+    "accelerator",
+    "cuda",
+    "hpu",
+    "ipu",
+    "mps",
+    "mtia",
+    "xla",
+    "xpu",
+}
+
+
+def _accelerator_availability_check(call: ast.Call) -> str | None:
+    """Return the dotted name of an accelerator is_available() call, or None."""
+    func = call.func
+    if not (isinstance(func, ast.Attribute) and func.attr == "is_available"):
+        return None
+
+    name = ast.unparse(func)
+    parts = name.split(".")
+    if parts[0] != "torch" or not ACCELERATOR_MODULES.intersection(parts):
+        return None
+    return name
+
+
+@_register(HardwareClassification.GENERIC)
+def _check_no_accelerator_availability(ctx: RuleContext) -> list[LintMessage]:
+    """GENERIC classes must not check accelerator availability in the class body."""
+    messages: list[LintMessage] = []
+    for stmt in ctx.class_node.body:
+        owner = ctx.class_node.name
+        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            owner = f"{owner}.{stmt.name}"
+        for node in ast.walk(stmt):
+            if not isinstance(node, ast.Call):
+                continue
+            check = _accelerator_availability_check(node)
+            if check is None:
+                continue
+            messages.append(
+                error_msg(
+                    name="[accelerator_availability]",
+                    path=ctx.filename,
+                    line=node.lineno,
+                    description=f"{ctx.classification.value} class '{ctx.class_node.name}' "
+                    f"must not check accelerator availability in '{owner}': "
+                    f"'{check}()'. Use an appropriately classified test instead.",
+                )
+            )
+    return messages
 
 
 # ---------------------------------------------------------------------------
@@ -612,116 +634,6 @@ def _check_no_only_for(ctx: RuleContext) -> list[LintMessage]:
                 description=f"{ctx.classification.value} class '{ctx.class_node.name}' "
                 f"must not use only_for in instantiate_device_type_tests. "
                 f"Use except_for instead (blacklist approach).",
-            )
-        ]
-    return []
-
-
-# ---------------------------------------------------------------------------
-# CPU / CUDA / MPS / XPU (device-specific) rules
-# ---------------------------------------------------------------------------
-
-
-@_register(*DEVICE_SPECIFIC_CLASSIFICATIONS)
-def _check_no_except_for(ctx: RuleContext) -> list[LintMessage]:
-    """Device-specific classes: instantiate_device_type_tests must not use except_for."""
-    if ctx.instantiation is not None and ctx.instantiation.except_for is not None:
-        return [
-            error_msg(
-                name="[except_for]",
-                path=ctx.filename,
-                line=ctx.instantiation.call.lineno,
-                description=f"{ctx.classification.value} class '{ctx.class_node.name}' "
-                f"must not use except_for in instantiate_device_type_tests.",
-            )
-        ]
-    return []
-
-
-# MPS and XPU are opt-in in instantiate_device_type_tests: they are only
-# included when allow_mps / allow_xpu is set. Without the corresponding flag,
-# a class targeting either device would silently generate zero tests.
-@_register(HardwareClassification.MPS)
-def _check_mps_requires_allow_mps(ctx: RuleContext) -> list[LintMessage]:
-    if ctx.instantiation is None:
-        return []
-    # A non-literal allow_mps (e.g. `allow_mps=MACOS_VERSION >= 15.0`) cannot be
-    # resolved statically; assuming False would only cause a false positive, so
-    # skip the check instead.
-    if ctx.instantiation.allow_mps is _KWARG_UNKNOWN or ctx.instantiation.allow_mps:
-        return []
-    return [
-        error_msg(
-            name="[allow_mps]",
-            path=ctx.filename,
-            line=ctx.instantiation.call.lineno,
-            description=f"{ctx.classification.value} class '{ctx.class_node.name}' "
-            f"must use allow_mps=True in instantiate_device_type_tests, "
-            f"otherwise no tests are generated.",
-        )
-    ]
-
-
-@_register(HardwareClassification.XPU)
-def _check_xpu_requires_allow_xpu(ctx: RuleContext) -> list[LintMessage]:
-    if ctx.instantiation is None:
-        return []
-    # A non-literal allow_xpu cannot be resolved statically; assuming False would
-    # only cause a false positive, so skip the check instead.
-    if ctx.instantiation.allow_xpu is _KWARG_UNKNOWN or ctx.instantiation.allow_xpu:
-        return []
-    return [
-        error_msg(
-            name="[allow_xpu]",
-            path=ctx.filename,
-            line=ctx.instantiation.call.lineno,
-            description=f"{ctx.classification.value} class '{ctx.class_node.name}' "
-            f"must use allow_xpu=True in instantiate_device_type_tests, "
-            f"otherwise no tests are generated.",
-        )
-    ]
-
-
-@_register(*DEVICE_SPECIFIC_CLASSIFICATIONS)
-def _check_only_for_matches_device(ctx: RuleContext) -> list[LintMessage]:
-    """Device-specific classes: instantiate_device_type_tests must specify
-    only_for matching exactly the class's classification."""
-    if ctx.instantiation is None:
-        return []
-    expected = ctx.classification.value.lower()
-
-    if ctx.instantiation.only_for is None:
-        return [
-            error_msg(
-                name="[only_for]",
-                path=ctx.filename,
-                line=ctx.instantiation.call.lineno,
-                description=f"{ctx.classification.value} class '{ctx.class_node.name}' "
-                f"must use only_for='{expected}' "
-                f"in instantiate_device_type_tests.",
-            )
-        ]
-    if ctx.instantiation.only_for is _KWARG_UNKNOWN:
-        return [
-            error_msg(
-                name="[only_for]",
-                path=ctx.filename,
-                line=ctx.instantiation.call.lineno,
-                description=f"{ctx.classification.value} class '{ctx.class_node.name}' "
-                f"has a non-literal only_for in instantiate_device_type_tests "
-                f"that could not be resolved statically; "
-                f"use a literal only_for='{expected}'.",
-            )
-        ]
-    if ctx.instantiation.only_for != [expected]:
-        return [
-            error_msg(
-                name="[only_for]",
-                path=ctx.filename,
-                line=ctx.instantiation.call.lineno,
-                description=f"{ctx.classification.value} class '{ctx.class_node.name}' "
-                f"has only_for values {ctx.instantiation.only_for}, "
-                f"but must be exactly {[expected]}.",
             )
         ]
     return []
