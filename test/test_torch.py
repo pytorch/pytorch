@@ -99,22 +99,6 @@ class TestTorchDeviceType(TestCase):
             shape.append(random.randint(min_size, max_size))
         return tuple(shape)
 
-    # Validates that mathematical constants are defined properly, as required by
-    # the Python Array API (https://data-apis.org/array-api/latest/API_specification/constants.html)
-    @onlyCPU
-    def test_constants(self, device):
-        self.assertIsInstance(torch.e, float)
-        self.assertEqual(torch.e, math.e, atol=0, rtol=0)
-
-        self.assertIsInstance(torch.pi, float)
-        self.assertEqual(torch.pi, math.pi, atol=0, rtol=0)
-
-        self.assertIsInstance(torch.nan, float)
-        self.assertEqual(torch.nan, math.nan, equal_nan=True)
-
-        self.assertIsInstance(torch.inf, float)
-        self.assertEqual(torch.inf, math.inf)
-
     @onlyNativeDeviceTypes
     @slowTestIf(IS_WINDOWS)
     @dtypes(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64,
@@ -174,47 +158,6 @@ class TestTorchDeviceType(TestCase):
         raw = torch.ones(1024, dtype=torch.uint8, device=device)
         raw.view(dtype).zero_()
         self.assertEqual(raw.count_nonzero().item(), 0)
-
-    @onlyCUDA
-    @unittest.skipIf(not torch.autograd.kineto_available(), "Kineto is required")
-    @unittest.skipIf(TEST_WITH_ROCM, "which path dense zero_ takes is ROCm-version dependent; see zero_cuda_")
-    def test_zero_dense_emits_memset(self, device):
-        base = torch.ones(64, 96, device=device)
-        with torch.profiler.profile() as prof:
-            base[16:32].zero_()
-            torch.cuda.synchronize()
-        names = tuple(event.key for event in prof.key_averages())
-        self.assertTrue(any("Memset" in name for name in names), names)
-
-    @onlyCUDA
-    @unittest.skipIf(not torch.autograd.kineto_available(), "Kineto is required")
-    def test_zero_strided_emits_fill_kernel(self, device):
-        base = torch.ones(64, 96, device=device)
-        with torch.profiler.profile() as prof:
-            base[:, ::2].zero_()
-            torch.cuda.synchronize()
-        names = tuple(event.key for event in prof.key_averages())
-        self.assertTrue(any("elementwise_kernel" in name for name in names), names)
-
-    @onlyCUDA
-    @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCm >= 5.3 required for graphs")
-    def test_zero_dense_inside_graph_capture(self, device):
-        # Whichever path zero_ takes has to survive being captured and replayed.
-        base = torch.ones(64, 96, device=device)
-        graph = torch.cuda.CUDAGraph()
-        stream = torch.cuda.Stream()
-        stream.wait_stream(torch.cuda.current_stream())
-        with torch.cuda.stream(stream):
-            base.zero_()
-            with torch.cuda.graph(graph):
-                base.zero_()
-        torch.cuda.current_stream().wait_stream(stream)
-
-        for _ in range(8):
-            base.fill_(1)
-            graph.replay()
-            torch.cuda.synchronize()
-            self.assertEqual(base.count_nonzero().item(), 0)
 
     # For testing in64 support in upsample_nearest3d
     @skipIfRocmArch(MI200_ARCH)
@@ -1016,27 +959,6 @@ class TestTorchDeviceType(TestCase):
             # Checks the Python features of the warning
             self.assertEqual(frameinfo.lineno - 12, warning.lineno)
             self.assertEqual(len(w), 1)
-
-    # FIXME: move to test_testing
-    @onlyCPU
-    def test_warn_always_caught(self, device):
-        # Check that we can catch a TORCH_WARN_ONCE warning twice
-        # since assertWarnsOnceRegex uses set_warn_always(True) which changes
-        # TORCH_WARN_ONCE to TORCH_WARN
-        a = np.arange(10)
-        a.flags.writeable = False
-        with self.assertWarnsOnceRegex(UserWarning, '.*non-writable.*'):
-            torch.from_numpy(a)
-
-        # OK, got it once, now try again
-        with self.assertWarnsOnceRegex(UserWarning, '.*non-writable.*'):
-            torch.from_numpy(a)
-
-        # Make sure emitting two warnings will pass the assertWarnsOnceRegex
-        # context manager
-        with self.assertWarnsOnceRegex(UserWarning, '.*non-writable.*'):
-            torch.from_numpy(a)
-            torch.from_numpy(a)
 
     @onlyNativeDeviceTypes
     def test_complex_half_experimental_warning(self, device):
@@ -3343,18 +3265,6 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(
             dense.to(torch.float32).view(torch.uint8),
             strided.to(torch.float32).view(torch.uint8))
-
-    @onlyCUDA
-    @unittest.skipIf(not kineto_available(), "Kineto is required")
-    @dtypes(torch.bfloat16, torch.half)
-    def test_reduced_type_float_copy_emits_vectorized_kernel(self, device, dtype):
-        src = make_tensor((1024, 1024), dtype=dtype, device=device)
-        torch.cuda.synchronize()
-        with torch.profiler.profile() as prof:
-            src.to(torch.float32)
-            torch.cuda.synchronize()
-        names = tuple(event.key for event in prof.key_averages())
-        self.assertTrue(any("vectorized_elementwise_kernel" in name for name in names), names)
 
     # FIXME: move to data movement test suite
     @onlyNativeDeviceTypes
@@ -6771,6 +6681,55 @@ class TestTorchCUDA(TestCase):
         with self.assertWarnsOnceRegex(UserWarning, msg):
             torch.cuda.DoubleTensor([0])
 
+    @unittest.skipIf(not torch.autograd.kineto_available(), "Kineto is required")
+    @unittest.skipIf(TEST_WITH_ROCM, "which path dense zero_ takes is ROCm-version dependent; see zero_cuda_")
+    def test_zero_dense_emits_memset(self, device):
+        base = torch.ones(64, 96, device=device)
+        with torch.profiler.profile() as prof:
+            base[16:32].zero_()
+            torch.cuda.synchronize()
+        names = tuple(event.key for event in prof.key_averages())
+        self.assertTrue(any("Memset" in name for name in names), names)
+
+    @unittest.skipIf(not torch.autograd.kineto_available(), "Kineto is required")
+    def test_zero_strided_emits_fill_kernel(self, device):
+        base = torch.ones(64, 96, device=device)
+        with torch.profiler.profile() as prof:
+            base[:, ::2].zero_()
+            torch.cuda.synchronize()
+        names = tuple(event.key for event in prof.key_averages())
+        self.assertTrue(any("elementwise_kernel" in name for name in names), names)
+
+    @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCm >= 5.3 required for graphs")
+    def test_zero_dense_inside_graph_capture(self, device):
+        # Whichever path zero_ takes has to survive being captured and replayed.
+        base = torch.ones(64, 96, device=device)
+        graph = torch.cuda.CUDAGraph()
+        stream = torch.cuda.Stream()
+        stream.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(stream):
+            base.zero_()
+            with torch.cuda.graph(graph):
+                base.zero_()
+        torch.cuda.current_stream().wait_stream(stream)
+
+        for _ in range(8):
+            base.fill_(1)
+            graph.replay()
+            torch.cuda.synchronize()
+            self.assertEqual(base.count_nonzero().item(), 0)
+
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @dtypes(torch.bfloat16, torch.half)
+    def test_reduced_type_float_copy_emits_vectorized_kernel(self, device, dtype):
+        src = make_tensor((1024, 1024), dtype=dtype, device=device)
+        torch.cuda.synchronize()
+        with torch.profiler.profile() as prof:
+            src.to(torch.float32)
+            torch.cuda.synchronize()
+        names = tuple(event.key for event in prof.key_averages())
+        self.assertTrue(any("vectorized_elementwise_kernel" in name for name in names), names)
+
     @unittest.skipIf(not TEST_CUDNN, "CUDNN not available")
     @skipIfRocm
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
@@ -7096,6 +7055,41 @@ class TestTorch(TestCase):
 
     def test_wildcard_import(self):
         exec('from torch import *')
+
+    # Validates that mathematical constants are defined properly, as required by
+    # the Python Array API (https://data-apis.org/array-api/latest/API_specification/constants.html)
+    def test_constants(self):
+        self.assertIsInstance(torch.e, float)
+        self.assertEqual(torch.e, math.e, atol=0, rtol=0)
+
+        self.assertIsInstance(torch.pi, float)
+        self.assertEqual(torch.pi, math.pi, atol=0, rtol=0)
+
+        self.assertIsInstance(torch.nan, float)
+        self.assertEqual(torch.nan, math.nan, equal_nan=True)
+
+        self.assertIsInstance(torch.inf, float)
+        self.assertEqual(torch.inf, math.inf)
+
+    # FIXME: move to test_testing
+    def test_warn_always_caught(self):
+        # Check that we can catch a TORCH_WARN_ONCE warning twice
+        # since assertWarnsOnceRegex uses set_warn_always(True) which changes
+        # TORCH_WARN_ONCE to TORCH_WARN
+        a = np.arange(10)
+        a.flags.writeable = False
+        with self.assertWarnsOnceRegex(UserWarning, '.*non-writable.*'):
+            torch.from_numpy(a)
+
+        # OK, got it once, now try again
+        with self.assertWarnsOnceRegex(UserWarning, '.*non-writable.*'):
+            torch.from_numpy(a)
+
+        # Make sure emitting two warnings will pass the assertWarnsOnceRegex
+        # context manager
+        with self.assertWarnsOnceRegex(UserWarning, '.*non-writable.*'):
+            torch.from_numpy(a)
+            torch.from_numpy(a)
 
     def test_newaxis_numpy_comparison(self):
         def run_test(tensor, *idx):
