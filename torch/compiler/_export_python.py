@@ -16,6 +16,7 @@ production as much as in development. There is no acceleration cache and no
 responsibility.
 """
 
+import ast
 import copy
 import errno
 import functools
@@ -37,6 +38,21 @@ log = logging.getLogger(__name__)
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
 
+# Written as the artifact's first line so a later load can detect it was produced
+# by a different torch (see _warn_on_version_skew). It is a comment, so it does not
+# affect exec; a hand-edit that drops it just disables the skew warning, so
+# hill-climbing an artifact never triggers a spurious version warning.
+# Both stamps must stay in the artifact's LEADING comment block: the reader stops
+# at the first line that is not a comment, so inserting code above them turns every
+# check off -- each checked stamp warns per call while it is missing, and the version
+# warning is the only one that goes quiet.
+_VERSION_TAG = "# torch.compiler.export_python torch-version: "
+# The train()/eval() flags of every nn.Module argument at capture. Python control flow
+# on ``self.training`` is specialized into the graph with no runtime guard, so this
+# stamp is what catches an artifact captured in one mode being run in the other. Like
+# the version stamp it is exec-inert, and dropping it in a hand-edit just turns the
+# check off (see _check_module_training).
+_MODULE_TRAINING_TAG = "# torch.compiler.export_python module-training: "
 
 # os.link failures that mean the filesystem cannot do hard links at all, as opposed to
 # a real I/O problem (a full disk, a bad permission) that must not be swallowed.
@@ -130,6 +146,16 @@ def _precompile_error(msg: str) -> Exception:
     return PrecompileError(msg)
 
 
+def _module_training_state(
+    args: Sequence[Any],
+) -> list[tuple[int, list[tuple[str, bool]]]]:
+    return [
+        (pos, [(name, module.training) for name, module in arg.named_modules()])
+        for pos, arg in enumerate(args)
+        if isinstance(arg, torch.nn.Module)
+    ]
+
+
 class ExportedPythonArtifact:
     """Materializes and disk-caches a ``torch.compiler.precompile`` artifact.
 
@@ -159,6 +185,7 @@ class ExportedPythonArtifact:
         self._tracer = tracer
         self._decompositions = decompositions
         self._example_inputs = None if example_inputs is None else tuple(example_inputs)
+        self._module_training: list[tuple[int, list[tuple[str, bool]]]] | None = None
         self._loaded: Callable[..., Any] | None = None
         # (pid, tid) currently inside _materialize. There is deliberately no
         # per-artifact lock: capture is already serialized process-wide, so a second
@@ -202,6 +229,13 @@ class ExportedPythonArtifact:
         parent = os.path.dirname(self._path)
         if parent:
             os.makedirs(parent, exist_ok=True)
+        # The stamps lead the artifact as exec-inert comments, each guarding one thing
+        # make_fx specialized without a runtime guard. A hand-edit may drop any of them;
+        # each just turns its own check off.
+        code = (
+            f"{_VERSION_TAG}{torch.__version__!r}\n"
+            f"{_MODULE_TRAINING_TAG}{_module_training_state(example)!r}\n{code}"
+        )
         if _atomic_publish(self._path, code.encode("utf-8")):
             return code, False
         # Lost the publish race; the winner's file is complete and already linked.
@@ -228,6 +262,88 @@ class ExportedPythonArtifact:
                 f"{self._path} ({e.strerror}). Check that the path names a readable "
                 "file rather than a directory."
             ) from e
+
+    @staticmethod
+    def _read_raw_stamp(code: str, tag: str) -> str | None:
+        for line in code.splitlines():
+            if line.startswith(tag):
+                return line[len(tag) :].strip() or None
+            # An INDENTED comment is still a comment. The documented rule is "the
+            # first non-comment line", and stopping early here silently turns every
+            # later stamp's check off rather than reading it.
+            stripped = line.strip()
+            if stripped and not stripped.startswith("#"):
+                break
+        return None
+
+    @staticmethod
+    def _read_stamp(code: str, tag: str) -> Any:
+        for line in code.splitlines():
+            if line.startswith(tag):
+                try:
+                    return ast.literal_eval(line[len(tag) :])
+                except (ValueError, SyntaxError):
+                    # A mangled stamp is a hand-edit like any other: turn the check off
+                    # rather than raise a SyntaxError from a comment line that does not
+                    # affect what the artifact runs.
+                    return None
+            # An INDENTED comment is still a comment. The documented rule is "the
+            # first non-comment line", and stopping early here silently turns every
+            # later stamp's check off rather than reading it.
+            stripped = line.strip()
+            if stripped and not stripped.startswith("#"):
+                break
+        return None
+
+    def _check_module_training(self, args: tuple[Any, ...]) -> None:
+        actual = _module_training_state(args)
+        if not actual:
+            return
+        if self._module_training is None:
+            # Missing stamp means a hand-edit dropped it, the same as the version
+            # stamp: warn that the guard is off rather than refuse to run an artifact
+            # whose source is by design the thing the caller is free to edit.
+            log.warning(
+                "torch.compiler.export_python: the artifact at %s takes nn.Module "
+                "arguments but carries no recorded training state, so train()/eval() "
+                "skew against capture is unchecked. Delete %s to regenerate the stamp.",
+                self._path,
+                self._path,
+            )
+            return
+        if actual != self._module_training:
+            raise _precompile_error(
+                "torch.compiler.export_python: the runtime module training state does "
+                f"not match capture (expected {self._module_training!r}, got {actual!r}). "
+                "Restore train()/eval() state or regenerate the artifact."
+            )
+
+    def _warn_on_version_skew(self, code: str) -> None:
+        # Warn (but still run) when the artifact carries a version stamp that does
+        # not match the current torch, so a committed artifact gone stale across a
+        # torch upgrade is visible rather than silently running old logic. A missing
+        # stamp (dropped by a hand-edit) is silent, so hill-climbing never warns.
+        produced = self._read_stamp(code, _VERSION_TAG)
+        if produced is None:
+            # Artifacts written before the stamp became a repr() carry a bare version
+            # string, which literal_eval rejects. Falling back to the raw text keeps the
+            # skew warning working for every artifact already committed -- silently
+            # losing it is exactly the case the stamp exists for.
+            produced = self._read_raw_stamp(code, _VERSION_TAG)
+        # str(): TorchVersion.__eq__ PEP-440-parses its operand and re-raises anything
+        # that is not InvalidVersion, so a stamp of 4300+ digits took the whole load path
+        # down with a ValueError. Comparing text keeps a mangled stamp to a warning.
+        if produced is None or produced == str(torch.__version__):
+            return
+        log.warning(
+            "torch.compiler.export_python: the artifact at %s was produced by "
+            "torch %s but the current torch is %s; running it as-is. Delete %s "
+            "to regenerate against the current torch.",
+            self._path,
+            produced,
+            torch.__version__,
+            self._path,
+        )
 
     def _load(self, code: str, *, from_disk: bool) -> Callable[..., Any]:
         # The emitted source is self-contained: exec it directly (no cache, no
@@ -281,6 +397,9 @@ class ExportedPythonArtifact:
         from_disk = code is not None
         if code is None:
             code, from_disk = self._precompile_and_save(args)
+        if from_disk:
+            self._warn_on_version_skew(code)
+        self._module_training = self._read_stamp(code, _MODULE_TRAINING_TAG)
         entry = self._load(code, from_disk=from_disk)
         self._example_inputs = None
         self._decompositions = None
@@ -421,6 +540,7 @@ class ExportedPythonArtifact:
         loaded = self._loaded
         if loaded is None:
             loaded = self._materialize_once(args)
+        self._check_module_training(args)
         return loaded(*args)
 
 
