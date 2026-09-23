@@ -1255,46 +1255,6 @@ class FSDPParam:
                 f"Expects to be in one of {states}, not {self.sharded_state}"
             )
 
-    def check_gradient_conversion(
-        self,
-        converted_dtype: Callable[[torch.Tensor], torch.dtype],
-        converted_device: Callable[[torch.Tensor], torch.device] | None = None,
-        *,
-        grad_pending_all_reduce: torch.Tensor | None = None,
-    ) -> None:
-        param = self.sharded_param
-        has_override = self._has_sharded_grad_dtype_override
-        grad_dtype = self.sharded_grad_dtype
-        if (
-            self.unsharded_accumulated_grad is not None
-            or grad_pending_all_reduce is not None
-        ) and (
-            converted_dtype(param) != param.dtype
-            or (
-                converted_device is not None and converted_device(param) != param.device
-            )
-        ):
-            raise RuntimeError(
-                "FSDP module conversion is incompatible with a pending gradient. "
-                "Complete gradient reduction, reshard, and call "
-                "model.zero_grad(set_to_none=True) before converting the module."
-            )
-        if param.grad is not None:
-            target_dtype = converted_dtype(param)
-            target_grad_dtype = converted_dtype(param.grad)
-            expected_dtype = grad_dtype if has_override else target_dtype
-            incompatible = (
-                expected_dtype is not None and target_grad_dtype != expected_dtype
-            )
-            # Module._apply attaches the converted gradient before FSDP restores
-            # the override on the replacement parameter.
-            if incompatible or target_grad_dtype != target_dtype:
-                raise RuntimeError(
-                    "FSDP module conversion is incompatible with an existing gradient. "
-                    "Reshard and call model.zero_grad(set_to_none=True) "
-                    "before converting the module."
-                )
-
     def reset_sharded_param(self):
         # For ops like `nn.Module._apply` or `load_state_dict(assign=True)`
         # that change the sharded parameter tensor, we may need to re-pad the

@@ -36,45 +36,20 @@ class TestFullyShardConversion(TestCase):
                 self.assertEqual(
                     actual._has_grad_dtype_override, expected._has_grad_dtype_override
                 )
-            self.assertEqual(actual.full_tensor(), expected)
+            self.assertEqual(actual.to_local(), expected)
             if expected.grad is None:
                 self.assertIsNone(actual.grad)
             else:
                 self.assertIsInstance(actual.grad, DTensor)
                 self.assertEqual(actual.grad.dtype, expected.grad.dtype)
-                self.assertEqual(actual.grad.full_tensor(), expected.grad)
-
-    def _assert_conversion_requires_clear(self, model, target):
-        saved = [
-            (
-                param,
-                param.detach().clone(),
-                param.grad,
-                None if param.grad is None else param.grad.clone(),
-                param.grad_dtype,
-                param._has_grad_dtype_override,
-            )
-            for param in model.parameters()
-        ]
-        with self.assertRaisesRegex(RuntimeError, r"zero_grad\(set_to_none=True\)"):
-            model.to(target)
-        for actual, (param, value, grad, grad_value, grad_dtype, override) in zip(
-            model.parameters(), saved
-        ):
-            self.assertIs(actual, param)
-            self.assertEqual(actual, value)
-            self.assertEqual(actual.dtype, value.dtype)
-            self.assertIs(actual.grad, grad)
-            if grad is not None:
-                self.assertEqual(grad, grad_value)
-                self.assertEqual(grad.dtype, grad_value.dtype)
-            self.assertEqual(actual.grad_dtype, grad_dtype)
-            self.assertEqual(actual._has_grad_dtype_override, override)
+                self.assertEqual(actual.grad.to_local(), expected.grad)
 
     @parametrize("grad_dtype", ["default", torch.float32, None])
     @parametrize("existing_grad", [False, True])
-    def test_to_matches_plain_module(self, device, grad_dtype, existing_grad):
-        reference = nn.Linear(4, 4, device=device)
+    def test_device_conversion_matches_plain_module(
+        self, device, grad_dtype, existing_grad
+    ):
+        reference = nn.Linear(4, 4, device=device, dtype=torch.bfloat16)
         with torch.no_grad():
             reference.weight.fill_(0.25)
             reference.bias.fill_(0.125)
@@ -85,27 +60,26 @@ class TestFullyShardConversion(TestCase):
                 for param in module.parameters():
                     param.grad_dtype = grad_dtype
         fully_shard(model, mesh=self.mesh)
-        inp = torch.arange(8, device=device, dtype=torch.float32).view(2, 4) / 8
+        inp = torch.arange(8, device=device, dtype=torch.bfloat16).view(2, 4) / 8
         if existing_grad:
             for module in (model, reference):
                 for param in module.parameters():
                     if param.requires_grad:
-                        param.grad = torch.ones_like(param)
-
-        if existing_grad and grad_dtype == torch.float32:
-            self._assert_conversion_requires_clear(model, torch.bfloat16)
-            model.zero_grad(set_to_none=True)
-            reference.zero_grad(set_to_none=True)
+                        param.grad = torch.ones_like(
+                            param, dtype=param.grad_dtype or torch.float32
+                        )
 
         for module in (model, reference):
-            module.to(torch.bfloat16)
+            module.cpu()
+        self._assert_parity(model, reference, check_override=True)
+        for module in (model, reference):
+            module.to(device=device)
         self._assert_parity(model, reference, check_override=True)
         for group in model._get_fsdp_state()._fsdp_param_groups:
             for param in group.fsdp_params:
                 self.assertEqual(
                     param._has_sharded_grad_dtype_override, grad_dtype != "default"
                 )
-        inp = inp.to(torch.bfloat16)
         for iteration in range(2):
             if iteration:
                 model.zero_grad(set_to_none=True)
@@ -129,7 +103,7 @@ class TestFullyShardConversion(TestCase):
                     optimizer_type(module.parameters(), lr=0.01).step()
                 self._assert_parity(model, reference)
 
-    def test_same_dtype_to_after_backward(self, device):
+    def test_device_conversion_after_backward(self, device):
         reference = nn.Linear(4, 4, bias=False, device=device, dtype=torch.bfloat16)
         model = copy.deepcopy(reference)
         for module in (model, reference):
@@ -138,23 +112,28 @@ class TestFullyShardConversion(TestCase):
         inp = torch.ones(2, 4, device=device, dtype=torch.bfloat16)
         for module in (model, reference):
             module(inp).sum().backward()
-        self._assert_conversion_requires_clear(model, torch.bfloat16)
-        model.zero_grad(set_to_none=False)
-        self._assert_conversion_requires_clear(model, torch.bfloat16)
         for module in (model, reference):
-            module.zero_grad(set_to_none=True)
-            module.to(torch.bfloat16)
+            module.cpu()
+        self._assert_parity(model, reference, check_override=True)
+        for module in (model, reference):
+            if self.device_type == "cuda":
+                module.cuda(device=device)
+            else:
+                module.to(device=device)
         self._assert_parity(model, reference, check_override=True)
         for module in (model, reference):
             module(inp).sum().backward()
         self._assert_parity(model, reference, check_override=True)
 
     @parametrize("grouped", [False, True])
-    def test_nested_conversion_requires_clear(self, device, grouped):
+    def test_nested_device_conversion_with_grad(self, device, grouped):
         model = nn.Sequential(
-            nn.Linear(4, 4, device=device), nn.Linear(4, 4, device=device)
+            nn.Linear(4, 4, device=device, dtype=torch.bfloat16),
+            nn.Linear(4, 4, device=device, dtype=torch.bfloat16),
         )
-        model[1].weight.grad_dtype = torch.float32
+        reference = copy.deepcopy(model)
+        for module in (model, reference):
+            module[1].weight.grad_dtype = torch.float32
         mp_policy = MixedPrecisionPolicy(reduce_dtype=torch.float32)
         if grouped:
             fully_shard(list(model), mesh=self.mesh, mp_policy=mp_policy)
@@ -162,30 +141,39 @@ class TestFullyShardConversion(TestCase):
             for layer in model:
                 fully_shard(layer, mesh=self.mesh, mp_policy=mp_policy)
         fully_shard(model, mesh=self.mesh, mp_policy=mp_policy)
-        model[1].weight.grad = torch.ones_like(model[1].weight)
-        self._assert_conversion_requires_clear(model, torch.bfloat16)
-
-        model.zero_grad(set_to_none=True)
-        model.to(torch.bfloat16)
+        for module in (model, reference):
+            for param in module.parameters():
+                param.grad = torch.ones_like(param, dtype=param.grad_dtype)
+        for target in ("cpu", device):
+            for module in (model, reference):
+                module.to(device=target)
+            self._assert_parity(model, reference, check_override=True)
         model(torch.ones(2, 4, device=device, dtype=torch.bfloat16)).sum().backward()
         for param in model.parameters():
             self.assertEqual(param.dtype, torch.bfloat16)
             self.assertIsNotNone(param.grad)
             self.assertEqual(param.grad.dtype, param.grad_dtype)
 
-    def test_shared_parameter_conversion_requires_clear(self, device):
-        first = nn.Linear(4, 4, bias=False, device=device)
-        second = nn.Linear(4, 4, bias=False, device=device)
+    def test_shared_parameter_device_conversion_with_grad(self, device):
+        first = nn.Linear(4, 4, bias=False, device=device, dtype=torch.bfloat16)
+        second = nn.Linear(4, 4, bias=False, device=device, dtype=torch.bfloat16)
         second.weight = first.weight
         first.weight.grad_dtype = torch.float32
         fully_shard([first, second], mesh=self.mesh)
-        first.weight.grad = torch.ones_like(first.weight)
-        self._assert_conversion_requires_clear(second, torch.bfloat16)
-        self.assertIs(first.weight, second.weight)
-        self.assertEqual(first.weight.dtype, torch.float32)
+        first.weight.grad = torch.ones_like(first.weight, dtype=torch.float32)
+        for target in ("cpu", device):
+            second.to(device=target)
+            self.assertIs(first.weight, second.weight)
+            self.assertEqual(first.weight.dtype, torch.bfloat16)
+            self.assertEqual(first.weight.grad_dtype, torch.float32)
+            self.assertEqual(first.weight.grad.device, torch.device(target))
+            self.assertEqual(first.weight.grad.dtype, torch.float32)
+            self.assertEqual(first.weight.grad.to_local(), torch.ones(4, 4))
 
     @parametrize("grad_dtype", ["default", None])
-    def test_pending_grad_conversion_requires_clear(self, device, grad_dtype):
+    def test_device_conversion_leaves_pending_grad_on_compute_device(
+        self, device, grad_dtype
+    ):
         model = nn.Linear(4, 4, bias=False, device=device)
         if grad_dtype is None:
             model.weight.grad_dtype = None
@@ -208,27 +196,18 @@ class TestFullyShardConversion(TestCase):
         self.assertIsNotNone(pending)
         self.assertEqual(pending.dtype, torch.float32)
         self.assertNotIsInstance(pending, DTensor)
-        storage_size = param.unsharded_param.untyped_storage().nbytes()
         pending_value = pending.clone()
-        self._assert_conversion_requires_clear(model, torch.bfloat16)
-        self.assertTrue(group.is_unsharded)
-        self.assertEqual(param.unsharded_param.untyped_storage().nbytes(), storage_size)
-        self.assertIs(model.weight.grad, pending)
-        self.assertEqual(pending, pending_value)
-
-        model.reshard()
-        model.zero_grad(set_to_none=True)
-        self._assert_conversion_requires_clear(model, torch.bfloat16)
-        model.unshard()
-        self.assertIs(model.weight.grad, pending)
-        self.assertEqual(pending, pending_value)
-        model.zero_grad(set_to_none=True)
-        model.to(torch.bfloat16)
+        for target in ("cpu", device):
+            model.to(device=target)
+            self.assertTrue(group.is_sharded)
+            self.assertEqual(model.weight.device, torch.device(target))
+            self.assertIs(param.unsharded_accumulated_grad, pending)
+            self.assertEqual(pending.device, torch.device(device))
+            self.assertEqual(pending, pending_value)
         model.set_requires_gradient_sync(True)
         model(inp).sum().backward()
         model.reshard()
-        self.assertEqual(model.weight.dtype, torch.bfloat16)
-        self.assertIsNotNone(model.weight.grad)
+        self.assertEqual(model.weight.grad.to_local(), 2 * pending_value)
 
     def test_no_op_conversion_preserves_pending_grad(self, device):
         model = nn.Linear(4, 4, bias=False, device=device)
@@ -252,7 +231,7 @@ class TestFullyShardConversion(TestCase):
         pending_value = pending.clone()
         model.reshard()
 
-        model.float()
+        model.to(device=device)
         self.assertIs(model.weight, sharded_param)
         model.unshard()
         self.assertIs(model.weight.grad, pending)
@@ -268,7 +247,7 @@ class TestFullyShardConversion(TestCase):
         )
 
     @parametrize("grad_dtype", [torch.float32, None])
-    def test_device_only_conversion_requires_clear(self, device, grad_dtype):
+    def test_same_device_conversion_preserves_grad(self, device, grad_dtype):
         reference = nn.Linear(4, 4, bias=False, device=device, dtype=torch.bfloat16)
         model = copy.deepcopy(reference)
         for module in (model, reference):
@@ -276,10 +255,10 @@ class TestFullyShardConversion(TestCase):
         fully_shard(model, mesh=self.mesh)
         for module in (model, reference):
             module.weight.grad = torch.ones_like(module.weight, dtype=torch.float32)
-        self._assert_conversion_requires_clear(model, torch.device(device))
+        grad = model.weight.grad
         for module in (model, reference):
-            module.zero_grad(set_to_none=True)
             module.to(device=device)
+        self.assertIs(model.weight.grad, grad)
         self._assert_parity(model, reference, check_override=True)
         inp = torch.ones(2, 4, device=device, dtype=torch.bfloat16)
         for module in (model, reference):
@@ -471,10 +450,10 @@ class TestFullyShardConversion(TestCase):
 
     @parametrize("grad_dtype", ["default", torch.float32, None])
     @parametrize("assign", [False, True])
-    def test_grad_dtype_policy_preserved_after_conversion_and_load_state_dict(
+    def test_grad_dtype_policy_preserved_after_device_conversion_and_load_state_dict(
         self, device, grad_dtype, assign
     ):
-        reference = nn.Linear(4, 4, bias=False, device=device)
+        reference = nn.Linear(4, 4, bias=False, device=device, dtype=torch.bfloat16)
         model = copy.deepcopy(reference)
         if grad_dtype != "default":
             for module in (model, reference):
@@ -487,7 +466,7 @@ class TestFullyShardConversion(TestCase):
             ),
         )
         for module in (model, reference):
-            module.to(torch.bfloat16)
+            module.to(device=device)
         self._assert_parity(model, reference, check_override=True)
         previous = model.weight
         state_dict = model.state_dict()
@@ -499,7 +478,7 @@ class TestFullyShardConversion(TestCase):
         self.assertIs(model.weight, replacement if assign else previous)
         self._assert_parity(model, reference, check_override=grad_dtype != "default")
         for module in (model, reference):
-            module.to(torch.float32)
+            module.to(device=device)
         self._assert_parity(model, reference, check_override=grad_dtype != "default")
         dtype = reference.weight.dtype
         inp = torch.arange(8, device=device, dtype=dtype).view(2, 4) / 8

@@ -130,12 +130,9 @@ def fully_shard(
     on ``module`` frees them (if needed). Similar backward hooks all-gather
     parameters and later free parameters and reduce-scatter gradients.
 
-    Configure parameter dtypes before the first forward. A module conversion
-    that conflicts with existing gradients requires clearing those gradients
-    first. Complete pending reductions, reshard each FSDP module, and call
-    ``module.zero_grad(set_to_none=True)`` before such a conversion. Device
-    conversions also require clearing gradients whose dtype differs from the
-    converted parameter dtype.
+    Configure parameter dtypes before ``fully_shard``; later dtype changes are
+    unsupported. Device conversions preserve sharded gradient dtypes. Pending
+    unsharded gradients and buffers awaiting all-reduce are not moved.
 
     Since grouping multiple tensors together for one collective is critical for
     communication efficiency, this implementation makes this grouping first
@@ -963,57 +960,30 @@ class FSDPModule:
     def _apply(
         self, fn: Callable[[torch.Tensor], torch.Tensor], recurse: bool = True
     ) -> Any:
-        modules = set(cast(nn.Module, self).modules()) if recurse else {self}
-        checked_params = set()
-        converted_options = {}
-
-        def converted_dtype(tensor: torch.Tensor) -> torch.dtype:
-            key = (tensor.device, tensor.dtype)
-            if key not in converted_options:
-                # Probe dtype conversions without copying parameter/gradient storage.
-                with torch.no_grad():
-                    converted = fn(
-                        torch.empty(0, device=tensor.device, dtype=tensor.dtype)
-                    )
-                    converted_options[key] = (converted.dtype, converted.device)
-            return converted_options[key][0]
-
-        def converted_device(tensor: torch.Tensor) -> torch.device:
-            converted_dtype(tensor)
-            return converted_options[(tensor.device, tensor.dtype)][1]
-
-        # Check the whole subtree before _apply converts any child parameters.
-        for module in modules:
-            if isinstance(module, FSDPModule):
-                for group in module._get_fsdp_state()._fsdp_param_groups:
-                    pending_all_reduce = group._pending_all_reduce_state
-                    for param in group.fsdp_params:
-                        if param not in checked_params and (
-                            param._module_info.module in modules
-                            or any(
-                                m in modules for m in param._module_info.shared_modules
-                            )
-                        ):
-                            param.check_gradient_conversion(
-                                converted_dtype,
-                                converted_device,
-                                grad_pending_all_reduce=pending_all_reduce.get_grad(
-                                    param
-                                ),
-                            )
-                            checked_params.add(param)
         # Reshard to ensure that sharded parameters are registered
         self.reshard()
         state = self._get_fsdp_state()
+        fsdp_params = [
+            param for group in state._fsdp_param_groups for param in group.fsdp_params
+        ]
+        saved_grads = {}
+        for fsdp_param in fsdp_params:
+            param = fsdp_param.sharded_param
+            grad = param.grad
+            if grad is not None and grad.dtype != param.dtype:
+                # Module._apply attaches gradients before FSDP can restore
+                # grad_dtype on the converted parameter.
+                saved_grads[fsdp_param] = grad
+                param.grad = None
         ret = super()._apply(fn, recurse=recurse)  # type: ignore[misc]
-        if not state._fsdp_param_groups:
-            return ret
-        # TODO: Remove this padding logic once DTensor pads the local tensor:
-        # https://github.com/pytorch/pytorch/issues/113045
         with torch.no_grad():
-            for fsdp_param_group in state._fsdp_param_groups:
-                for fsdp_param in fsdp_param_group.fsdp_params:
-                    fsdp_param.reset_sharded_param()
+            for fsdp_param in fsdp_params:
+                fsdp_param.reset_sharded_param()
+                if (grad := saved_grads.get(fsdp_param)) is not None:
+                    param = fsdp_param.sharded_param
+                    param.grad = grad.to(device=param.device).requires_grad_(
+                        grad.requires_grad
+                    )
         return ret
 
 

@@ -985,8 +985,10 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
 
     @skip_if_lt_x_gpu(2)
     @parametrize("grad_dtype", ["default", torch.float32, None])
-    def test_grad_dtype_after_to(self, grad_dtype: str | torch.dtype | None):
-        model = nn.Linear(8, 8, bias=False, device=device_type)
+    def test_grad_dtype_after_device_conversion(
+        self, grad_dtype: str | torch.dtype | None
+    ):
+        model = nn.Linear(8, 8, bias=False, device=device_type, dtype=torch.bfloat16)
         if not isinstance(grad_dtype, str):
             model.weight.grad_dtype = grad_dtype
         fully_shard(
@@ -995,7 +997,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
                 param_dtype=torch.bfloat16, reduce_dtype=torch.float32
             ),
         )
-        model.to(torch.bfloat16)
+        model.to(device=device_type)
         expected_dtype = torch.bfloat16 if isinstance(grad_dtype, str) else grad_dtype
         self.assertEqual(model.weight.grad_dtype, expected_dtype)
         inp = torch.ones(2, 8, device=device_type, dtype=torch.bfloat16)
@@ -1017,21 +1019,22 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
             torch.optim.Adam(model.parameters()).step()
 
     @skip_if_lt_x_gpu(2)
-    def test_grad_dtype_to_with_existing_grad(self):
-        model = nn.Linear(8, 8, bias=False, device=device_type)
+    def test_grad_dtype_device_conversion_with_existing_grad(self):
+        model = nn.Linear(8, 8, bias=False, device=device_type, dtype=torch.bfloat16)
+        model.weight.grad_dtype = torch.float32
         fully_shard(model)
-        model.weight.grad = torch.ones_like(model.weight)
-        model.to(torch.bfloat16)
-        self.assertEqual(model.weight.grad_dtype, torch.bfloat16)
-        self.assertEqual(model.weight.grad.dtype, torch.bfloat16)
+        model.weight.grad = torch.ones_like(model.weight, dtype=torch.float32)
+        model.to(device=device_type)
+        self.assertEqual(model.weight.grad_dtype, torch.float32)
+        self.assertEqual(model.weight.grad.dtype, torch.float32)
         inp = torch.ones(2, 8, device=device_type, dtype=torch.bfloat16)
         model(inp).sum().backward()
-        self.assertEqual(model.weight.grad.dtype, torch.bfloat16)
+        self.assertEqual(model.weight.grad.dtype, torch.float32)
         self.assertEqual(
             model.weight.grad.to_local(),
             torch.full_like(model.weight.grad.to_local(), 3),
         )
-        torch.optim.Adam(model.parameters()).step()
+        torch.optim.SGD(model.parameters(), lr=0.01).step()
 
     @skip_if_lt_x_gpu(2)
     def test_grad_dtype_preserved_across_load_state_dict(self):
@@ -1322,10 +1325,8 @@ class TestFullyShardGradDtypePacking(FSDPTest):
             for param in model.params:
                 self.assertIsNone(param.grad)
             if step == 1:
-                model.bfloat16()  # A no-op conversion preserves pending reductions.
+                model.to(device=device)  # A no-op preserves pending reductions.
                 self.assertIs(pending_all_reduce.buffer, output)
-                with self.assertRaisesRegex(RuntimeError, "pending gradient"):
-                    model.float()
                 with self.assertRaisesRegex(RuntimeError, "pending gradients"):
                     model.set_gradient_divide_factor(2.0)
 
