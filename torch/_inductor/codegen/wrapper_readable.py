@@ -3,8 +3,9 @@
 Inductor's normal python wrapper is written to be loaded by inductor. This variant is
 written to be opened by a person (or an agent) who wants to retune the generated kernel
 in place: it emits Triton kernels as ordinary module-level code rather than as source
-strings handed to ``AsyncCompile``, and it emits only the preamble lines that the
-finished module uses. See ``torch.compiler.export_python``, which is the consumer.
+strings handed to ``AsyncCompile``, and it emits only the preamble lines (including the
+``AsyncCompile`` lifecycle) that the finished module uses. See
+``torch.compiler.export_python``, which is the consumer.
 
 The tradeoffs are deliberate and are the reason this is opt-in: a kernel defined at
 module level compiles serially, in process, on its first launch, instead of fanning out
@@ -204,7 +205,8 @@ class ReadablePythonWrapperCodegen(PythonWrapperCodegen):
             standalone=True,
             # The compile-time autotune block execs its kernels instead of emitting
             # them, and a module-level kernel there has no __file__ to name itself by,
-            # so that block keeps the AsyncCompile form.
+            # so that block keeps the AsyncCompile form. It runs at compile time only
+            # and is not carried in the emitted module.
             autotune_body=(
                 self.async_compile_triton_body(subs_name, src_code, device_type)
                 if config.triton.autotune_at_compile_time
