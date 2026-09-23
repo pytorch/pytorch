@@ -610,8 +610,6 @@ class FSDPModule:
         to have better control over the communication and memory usage.
         See `Comm` and `ReduceScatter` for details.
 
-        Complete pending gradient reductions before changing the communication.
-
         Args:
             comm (ReduceScatter): Custom reduce_scatter communication.
         """
@@ -623,9 +621,6 @@ class FSDPModule:
                 "The custom comm would be ambiguous across groups with different meshes."
             )
         for fsdp_param_group in state._fsdp_param_groups:
-            if fsdp_param_group._reduce_scatter_comm is not comm:
-                fsdp_param_group.check_pending_reduction_policy()
-        for fsdp_param_group in state._fsdp_param_groups:
             fsdp_param_group._reduce_scatter_comm = comm
 
     def set_all_reduce_hook(
@@ -635,8 +630,6 @@ class FSDPModule:
         stream: torch.cuda.Stream | None = None,
     ):
         """
-        Complete pending gradient reductions before changing the hook or stream.
-
         Args:
             hook (Callable[[torch.Tensor], None]): User-defined all-reduce hook
                 with expected signature ``hook(reduce_output: torch.Tensor) -> None``
@@ -654,12 +647,6 @@ class FSDPModule:
                 "groups (from per-param mesh via shard_placement_fn). "
                 "The hook would be ambiguous across groups with different meshes."
             )
-        for fsdp_param_group in state._fsdp_param_groups:
-            if fsdp_param_group._all_reduce_hook is not hook or (
-                stream is not None
-                and fsdp_param_group._all_reduce_hook_stream is not stream
-            ):
-                fsdp_param_group.check_pending_reduction_policy()
         for fsdp_param_group in state._fsdp_param_groups:
             fsdp_param_group._all_reduce_hook = hook
             if stream is not None:
@@ -697,15 +684,10 @@ class FSDPModule:
         a custom reduce op using NCCL's PreMulSum, which allows multiplying by
         the factor before reduction.
 
-        Complete pending gradient reductions before changing the factor.
-
         Args:
             factor (float): Custom divide factor.
         """
         state = self._get_fsdp_state()
-        for fsdp_param_group in state._fsdp_param_groups:
-            if fsdp_param_group.gradient_divide_factor != factor:
-                fsdp_param_group.check_pending_reduction_policy()
         for fsdp_param_group in state._fsdp_param_groups:
             fsdp_param_group.gradient_divide_factor = factor
 
@@ -723,15 +705,10 @@ class FSDPModule:
         to ensure the custom all-reduce across FSDP units follow this strategy
         as well, as FSDP can no longer automatically handle that.
 
-        Complete pending gradient reductions before changing this setting.
-
         Args:
             enable (bool): Whether to only ever use ReduceOp.SUM for comms.
         """
         state = self._get_fsdp_state()
-        for fsdp_param_group in state._fsdp_param_groups:
-            if fsdp_param_group.force_sum_reduction_for_comms != enable:
-                fsdp_param_group.check_pending_reduction_policy()
         for fsdp_param_group in state._fsdp_param_groups:
             fsdp_param_group.force_sum_reduction_for_comms = enable
 

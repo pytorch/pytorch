@@ -862,14 +862,6 @@ class FSDPParamGroup:
             self._all_gather_result = None
         self._post_forward_indices.clear()
 
-    def check_pending_reduction_policy(self) -> None:
-        if self._partial_reduce_output is not None or any(
-            param.unsharded_accumulated_grad is not None for param in self.fsdp_params
-        ):
-            raise RuntimeError(
-                "Synchronize pending gradients before changing their reduction policy"
-            )
-
     def _get_partial_reduce_grad(self, param: FSDPParam) -> torch.Tensor | None:
         output = self._partial_reduce_output
         if output is None or param not in self._partial_reduce_output_layout:

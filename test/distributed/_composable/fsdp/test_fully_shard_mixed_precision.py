@@ -1332,8 +1332,6 @@ class TestFullyShardGradDtypePacking(FSDPTest):
             if step == 1:
                 model.to(device=device)  # A no-op preserves pending reductions.
                 self.assertIs(group._partial_reduce_output, output)
-                with self.assertRaisesRegex(RuntimeError, "pending gradients"):
-                    model.set_gradient_divide_factor(2.0)
 
         for i, param in enumerate(model.params):
             expected = expected_grads[i]
