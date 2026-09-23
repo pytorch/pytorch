@@ -356,7 +356,6 @@ class TestFlyDSLTemplate(TestCase):
         ),
     )
     def test_mm_gate_rejects_invalid_inputs(self, size, dtype, stride, offset, n):
-        from torch._inductor.kernel import mm
 
         def node(size, stride, offset=0):
             return SimpleNamespace(
@@ -387,7 +386,6 @@ class TestFlyDSLTemplate(TestCase):
     )
     def test_mm_gate_accepts_all_layouts(self, a_is_transposed, b_is_transposed):
         from torch._inductor.heuristics.template import flydsl as flydsl_heuristics
-        from torch._inductor.kernel import mm
         from torch._inductor.kernel.vendored_templates.flydsl import (
             kernels as flydsl_kernels,
         )
