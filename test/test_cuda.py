@@ -12304,7 +12304,14 @@ class TestCudaGreenContexts(TestCase):
             self.skipTest("These splits require at least 32 SMs")
 
     def _check_disjoint_sm_ids(self, contexts, device):
-        if "CUDA_MPS_ACTIVE_THREAD_PERCENTAGE" in os.environ:
+        from torch.cuda._utils import _check_cuda_bindings, _cuda_bindings_driver as drv
+
+        if _check_cuda_bindings(
+            drv.cuDeviceGetAttribute(
+                drv.CUdevice_attribute.CU_DEVICE_ATTRIBUTE_MPS_ENABLED,
+                torch.device(device).index,
+            )
+        ):
             self.skipTest("MPS may allow green contexts to use additional SMs")
         kernel = torch.cuda._compile_kernel(
             r"""
@@ -12318,16 +12325,17 @@ class TestCudaGreenContexts(TestCase):
             """,
             "record_sm_ids",
         )
+        blocks = torch.cuda.get_device_properties(device).multi_processor_count * 4
         seen = set()
         for context in contexts:
             stream = context.Stream()
             with torch.cuda.stream(stream):
-                ids = torch.empty(1024, dtype=torch.int32, device=device)
-                kernel(grid=(1024, 1, 1), block=(128, 1, 1), args=[ids])
+                ids = torch.full((blocks,), -1, dtype=torch.int32, device=device)
+                kernel(grid=(blocks, 1, 1), block=(1024, 1, 1), args=[ids])
             stream.synchronize()
             used = set(ids.tolist())
-            self.assertGreater(len(used), 0)
-            self.assertLessEqual(len(used), context.sm_count)
+            self.assertNotIn(-1, used)
+            self.assertEqual(len(used), context.sm_count, "Incomplete SM coverage")
             self.assertTrue(seen.isdisjoint(used), f"Overlapping SMs: {seen & used}")
             seen.update(used)
 
@@ -12365,6 +12373,8 @@ class TestCudaGreenContexts(TestCase):
                     green_contexts._get_driver_version()
                 with self.assertRaisesRegex(RuntimeError, "unknown error"):
                     green_contexts.is_localization_supported()
+                with self.assertRaisesRegex(RuntimeError, "unknown error"):
+                    green_contexts.get_num_locality_domains()
         finally:
             green_contexts._get_driver_version.cache_clear()
 
@@ -12561,8 +12571,7 @@ print(resource.sm_count, torch.cuda.is_initialized(), int(_check_cuda_bindings(d
             green_contexts._ensure_locality_supported()
         except RuntimeError:
             self.assertFalse(green_contexts.is_localization_supported(device_id))
-            with self.assertRaisesRegex(RuntimeError, "13.4"):
-                green_contexts.get_num_locality_domains(device_id)
+            self.assertEqual(green_contexts.get_num_locality_domains(device_id), 1)
             return
         drv_device = _check_cuda_bindings(drv.cuDeviceGet(device_id))
         count = _check_cuda_bindings(
@@ -12603,7 +12612,14 @@ print(count, torch.cuda.is_initialized(), int(_check_cuda_bindings(drv.cuCtxGetC
             self.skipTest(str(error))
         device_id = torch.device(device).index
         uuid = f"GPU-{torch.cuda.get_device_properties(device).uuid}"
-        visible = str(device_id) if visibility == "ordinal" else uuid
+        # MIG UUIDs cannot be used as physical GPU UUIDs in CUDA_VISIBLE_DEVICES.
+        uuids = torch.cuda._raw_device_uuid_nvml()
+        if uuids is None or uuid not in uuids:
+            self.skipTest("Visibility tests require a full GPU with an NVML UUID")
+        visible = uuid
+        if visibility == "ordinal":
+            # Preserve the parent's CUDA_VISIBLE_DEVICES remapping in the child.
+            visible = str(torch.cuda._parse_visible_devices()[device_id])
         if visibility == "partial_uuid":
             visible = uuid[:20]
         code = """

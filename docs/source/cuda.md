@@ -466,7 +466,8 @@ ctx = GreenContext(sm_partition=second, workqueue_scope="balanced")
 ```
 
 Each split partitions its input resource. Its children and remainder are
-mutually disjoint, but overlap the parent. Separate split operations may overlap.
+mutually disjoint, but overlap the parent. Results of separate splits on the same
+or overlapping input resources may overlap.
 CUDA evaluates new constraints when subdividing a resource; the remainder does
 not inherit the earlier split's alignment.
 Partitioning does not reserve SMs against other contexts or guarantee concurrent
@@ -513,11 +514,11 @@ or locality constraints. It preserves the separation between sibling partitions.
 The `locality_domain_id` property on partitions and contexts reads CUDA's
 reported metadata and returns `None` if CUDA does not specify a domain.
 
-`get_num_locality_domains` queries CUDA directly and raises if the required
-software is unavailable or the query fails. Supplying an explicit device index
-initializes only the driver, without initializing PyTorch CUDA state or creating
-a primary context. Driver initialization can still prevent CUDA use in
-subsequently forked children.
+`get_num_locality_domains` returns `1` when the required software is unavailable.
+With CUDA driver and bindings 13.4+, it queries CUDA directly; invalid devices and
+failed queries raise. Supplying an explicit device index initializes only the
+driver, without initializing PyTorch CUDA state or creating a primary context.
+Driver initialization can still prevent CUDA use in subsequently forked children.
 
 `is_localization_supported` returns false for unsupported software or devices
 with at most one domain. Before driver initialization, it attempts a best-effort

@@ -81,6 +81,23 @@ def _ensure_locality_supported() -> None:
     _ensure_cuda_version(13040, message)
 
 
+def _is_locality_software_supported() -> bool:
+    if (
+        torch.version.cuda is None
+        or torch.version.hip is not None
+        or sys.platform == "win32"
+        or not _HAS_CUDA_BINDINGS
+    ):
+        return False
+    if _get_driver_version() < 13040:
+        return False
+    try:
+        _ensure_cuda_bindings_version(13040, "Locality domains require bindings 13.4+")
+    except RuntimeError:
+        return False
+    return True
+
+
 def _get_locality_domain_count(device: int) -> int:
     count = c_int()
     # pyrefly: ignore [missing-attribute]
@@ -94,17 +111,18 @@ def _get_locality_domain_count(device: int) -> int:
 def get_num_locality_domains(device_id: int | None = None) -> int:
     r"""Return the device's locality-domain count reported by CUDA.
 
-    Requires CUDA driver and bindings 13.4+. Initializes the CUDA driver.
-    This query does not create a context when ``device_id`` is specified.
-    Unsupported software and failed driver queries raise an error.
+    Returns ``1`` when the required software is unavailable. With CUDA driver
+    and bindings 13.4+, initializes the CUDA driver and queries the count.
+    This query does not create a context when ``device_id`` is specified;
+    invalid devices and failed driver queries raise an error.
     Initializing the driver can prevent CUDA use in subsequently forked children.
 
     Args:
         device_id (int, optional): Device index. When ``None``, uses the current
             PyTorch device, initializing PyTorch CUDA state if necessary.
     """
-    _ensure_supported()
-    _ensure_locality_supported()
+    if not _is_locality_software_supported():
+        return 1
     if device_id is None:
         device_id = torch.cuda.current_device()
     driver = _get_cuda_library()
@@ -130,18 +148,7 @@ def is_localization_supported(device_id: int | None = None) -> bool:
         device_id (int, optional): Device index. Default: current PyTorch device
             if PyTorch CUDA is initialized, otherwise ``0``.
     """
-    if (
-        torch.version.cuda is None
-        or torch.version.hip is not None
-        or sys.platform == "win32"
-        or not _HAS_CUDA_BINDINGS
-    ):
-        return False
-    if _get_driver_version() < 13040:
-        return False
-    try:
-        _ensure_cuda_bindings_version(13040, "Locality domains require bindings 13.4+")
-    except RuntimeError:
+    if not _is_locality_software_supported():
         return False
     if device_id is None:
         device_id = torch.cuda.current_device() if torch.cuda.is_initialized() else 0
@@ -163,11 +170,11 @@ def is_localization_supported(device_id: int | None = None) -> bool:
 
 
 def _is_localization_supported_nvml(device_id: int) -> bool | None:
-    from ctypes import byref, c_int, c_uint, c_void_p, CDLL
+    from ctypes import byref, c_int, c_uint, c_void_p, CDLL, create_string_buffer
 
     # NVML describes physical GPUs; MPS can expose a different CUDA topology.
-    if any(name.startswith("CUDA_MPS_") for name in os.environ) or os.path.exists(
-        "/tmp/nvidia-mps"
+    if any(name.startswith("CUDA_MPS_") for name in os.environ) or any(
+        os.path.exists(path) for path in ("/tmp/nvidia-mps", "/run/nvidia-mps")
     ):
         return None
     try:
@@ -178,6 +185,14 @@ def _is_localization_supported_nvml(device_id: int) -> bool | None:
         if nvml.nvmlInit_v2() != 0:
             return None
         try:
+            version = create_string_buffer(80)
+            if nvml.nvmlSystemGetDriverVersion(version, len(version)) != 0:
+                return None
+            branch = version.value.split(b".", 1)[0]
+            if not branch.isdigit():
+                return None
+            if int(branch) < 580:
+                return False
             if isinstance(visible[0], str):
                 indices = [torch.cuda._get_nvml_device_index(device_id)]
             else:
@@ -372,7 +387,7 @@ class SMPartition:
 
         Children are subsets of this resource and overlap it. Siblings from
         this operation, including the remainder, are disjoint. Results from
-        separate split operations may overlap.
+        separate splits on the same or overlapping input resources may overlap.
 
         Example::
 
