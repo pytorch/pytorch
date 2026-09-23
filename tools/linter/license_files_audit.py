@@ -21,10 +21,12 @@ except ModuleNotFoundError:
 from packaging.licenses import canonicalize_license_expression
 
 
+# glob magic keeps `*` from crossing `/`; with git's default pathspec matching
+# `LICENSE*` would also match any path with a component starting with "license".
 LICENSE_GLOBS = (
-    ":(icase)LICENSE",
-    ":(icase)third_party/**/LICENSE*",
-    ":(icase)third_party/**/COPYING*",
+    ":(icase,glob)LICENSE",
+    ":(icase,glob)third_party/**/LICENSE*",
+    ":(icase,glob)third_party/**/COPYING*",
 )
 
 _MANIFEST_PATH = Path(__file__).resolve().parent / "license_audit_manifest.toml"
@@ -39,7 +41,8 @@ _POPULATED_CHECKOUT_MIN_PRESENT_FRACTION = 0.9
 def _skip_discovery_path(path: str) -> bool:
     # REUSE-style license pools (e.g. ittapi, kleidiai, nlohmann) include GPL
     # texts for non-shipped files; handle separately from glob discovery.
-    return "/LICENSES/" in path or path.endswith("/LICENSES")
+    lowered = path.lower()
+    return "/licenses/" in lowered or lowered.endswith("/licenses")
 
 
 def _load_license_audit_tables() -> tuple[frozenset[str], dict[str, str]]:
@@ -75,7 +78,7 @@ def load_project(repo_root: Path) -> dict:
 
 def discover_license_files(repo_root: Path) -> tuple[set[str], str | None]:
     if not (repo_root / ".git").exists():
-        return set(), "no .git directory"
+        return set(), "no .git directory (license-file discovery needs a git checkout)"
     try:
         result = subprocess.run(
             ["git", "ls-files", "--recurse-submodules", "--", *LICENSE_GLOBS],
@@ -145,7 +148,7 @@ def audit_repo_license_files(repo_root: Path) -> tuple[list[str], str | None]:
 
     discovered, discovery_skip = discover_license_files(repo_root)
     if discovery_skip:
-        return ([], f"license-file discovery cannot run: {discovery_skip}")
+        return ([], discovery_skip)
 
     err: list[str] = []
     if bad := inc & excluded:
@@ -216,8 +219,10 @@ def audit_repo_license_files(repo_root: Path) -> tuple[list[str], str | None]:
 def main() -> None:
     errors, skip_reason = audit_repo_license_files(Path("."))
     if skip_reason:
-        print(f"license-files audit cannot run: {skip_reason}")
-        return
+        # quick-checks is the authoritative run and checks out submodules
+        # recursively; an audit that cannot run there is a job failure. The
+        # lintrunner adapter skips the same condition silently instead.
+        raise SystemExit(f"license-files audit cannot run: {skip_reason}")
     if errors:
         raise SystemExit("license-files audit failed:\n" + "\n".join(errors))
 

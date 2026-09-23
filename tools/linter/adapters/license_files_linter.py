@@ -1,7 +1,7 @@
 # /// script
 # requires-python = ">=3.10"
 # dependencies = [
-#   "packaging>=24.2",
+#   "packaging==25.0",
 #   "tomli==2.2.1 ; python_version < '3.11'",
 # ]
 # ///
@@ -77,15 +77,14 @@ def main() -> None:
         help="paths that triggered this linter (audit always uses full repo)",
     )
     parser.parse_args()  # filenames from lintrunner; audit always scans full REPO_ROOT
-    report_path = str(REPO_ROOT / "pyproject.toml")
     errors, skip_reason = audit_repo_license_files(REPO_ROOT)
     if skip_reason:
-        _emit(
-            report_path, LintSeverity.ADVICE, "license-files-audit-skipped", skip_reason
-        )
+        # Any emitted message, ADVICE included, fails lintrunner. A checkout
+        # without every submodule is normal locally; quick-checks is the run
+        # that must not skip (see license_files_audit.main).
         return
     for msg in errors:
-        _emit(report_path, LintSeverity.ERROR, "license-files-audit", msg)
+        _emit("pyproject.toml", LintSeverity.ERROR, "license-files-audit", msg)
 
 
 if __name__ == "__main__":

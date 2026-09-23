@@ -39,6 +39,7 @@ def _audit_fixture(
     project_body: str,
     manifest_body: str,
     files: list[tuple[str, str]],
+    git: bool = True,
 ) -> tuple[list[str], str | None]:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -51,8 +52,9 @@ def _audit_fixture(
             path = root / relpath
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(content, encoding="utf-8")
-        subprocess.run(["git", "init", "-q"], cwd=root, check=True)
-        subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+        if git:
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(["git", "add", "-A"], cwd=root, check=True)
         with patch("tools.linter.license_files_audit._MANIFEST_PATH", manifest):
             return audit_repo_license_files(root)
 
@@ -186,30 +188,33 @@ class TestLicense(TestCase):
         )
 
     def test_audit_no_git_dir_skips(self) -> None:
-        """Populated checkout without .git returns skip, not false errors."""
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            # NO git init — simulates sdist / release tarball
-            (root / "pyproject.toml").write_text(
-                '[project]\nlicense = "MIT"\n'
-                'license-files = ["third_party/dep/LICENSE"]\n',
-                encoding="utf-8",
+        """A populated tree without .git (sdist, release tarball) is a skip."""
+        errors, skip_reason = _audit_fixture(
+            'license = "MIT"\nlicense-files = ["third_party/dep/LICENSE"]',
+            'excluded = []\n\n[[spdx]]\nexpression = "MIT"\npaths = ["third_party/dep/LICENSE"]',
+            [("third_party/dep/LICENSE", "MIT\n")],
+            git=False,
+        )
+        self.assertEqual(errors, [])
+        self.assertIsNotNone(skip_reason)
+        self.assertIn("no .git directory", skip_reason)
+
+    def test_audit_git_failure_skips(self) -> None:
+        real_run = subprocess.run
+
+        def run(cmd, *args, **kwargs):
+            if "ls-files" in cmd:
+                raise subprocess.CalledProcessError(128, cmd)
+            return real_run(cmd, *args, **kwargs)
+
+        with patch("subprocess.run", side_effect=run):
+            errors, skip_reason = _audit_fixture(
+                'license = "MIT"\nlicense-files = ["third_party/dep/LICENSE"]',
+                'excluded = []\n\n[[spdx]]\nexpression = "MIT"\npaths = ["third_party/dep/LICENSE"]',
+                [("third_party/dep/LICENSE", "MIT\n")],
             )
-            manifest = root / "manifest.toml"
-            manifest.write_text(
-                'excluded = []\n\n[[spdx]]\nexpression = "MIT"\n'
-                'paths = ["third_party/dep/LICENSE"]',
-                encoding="utf-8",
-            )
-            (root / "third_party" / "dep").mkdir(parents=True)
-            (root / "third_party" / "dep" / "LICENSE").write_text(
-                "MIT\n", encoding="utf-8"
-            )
-            with patch("tools.linter.license_files_audit._MANIFEST_PATH", manifest):
-                errors, skip_reason = audit_repo_license_files(root)
-            self.assertEqual(errors, [])
-            self.assertIsNotNone(skip_reason)
-            self.assertIn("cannot run", skip_reason)
+        self.assertEqual(errors, [])
+        self.assertEqual(skip_reason, "git ls-files failed")
 
     @unittest.skipIf(len(distinfo) == 0, "no installation in site-package to test")
     def test_distinfo_license(self):
