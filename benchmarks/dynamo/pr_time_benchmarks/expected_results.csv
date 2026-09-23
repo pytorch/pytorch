@@ -90,6 +90,26 @@ basic_InlineMod_eager,compile_time_instruction_count,7964000000,0.1
 
 
 
+diffusion_dit_full_inductor,compile_time_instruction_count,16150000000,0.1
+
+
+
+diffusion_dit_regional_inductor,compile_time_instruction_count,4413000000,0.1
+
+
+
+diffusion_dit_hierarchical_inductor,compile_time_instruction_count,7885000000,0.1
+
+
+
+diffusion_dit_hierarchical_dynamic,compile_time_instruction_count,16370000000,0.1
+
+
+
+float_args,compile_time_instruction_count,550500000,0.1
+
+
+
 dtensor_dispatch_detach,instruction_count,57250,0.1
 
 
@@ -134,8 +154,44 @@ autograd_function_apply_13_in_2_out_no_save,instruction_count,31627,0.1
 
 
 
-runtime_overhead_eager_cpu,instruction_count,193900,0.1
+runtime_overhead_inductor,instruction_count,241400,0.1
+
+
+
+runtime_overhead_inductor_inference_mode,instruction_count,254300,0.1
+
+
+
+runtime_overhead_inductor_requires_grad,instruction_count,333000,0.1
+
+
+
+runtime_overhead_inductor_requires_grad_backward,instruction_count,126700,0.1
+
+
+
+runtime_overhead_inductor_dynamic,instruction_count,239300,0.1
+
+
+
+runtime_overhead_inductor_inference_mode_dynamic,instruction_count,252500,0.1
+
+
+
+runtime_overhead_inductor_requires_grad_dynamic,instruction_count,336700,0.1
+
+
+
+runtime_overhead_inductor_requires_grad_backward_dynamic,instruction_count,127100,0.1
+
+
+
+runtime_overhead_eager_cpu,instruction_count,171200,0.1
 
 
 
 unbind_split_flip_cat_iter40_batch128,instruction_count,260700000000,0.1
+
+
+
+disable_overhead,instruction_count,7855,0.1

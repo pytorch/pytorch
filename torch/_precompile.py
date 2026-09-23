@@ -1375,6 +1375,11 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
     # Artifacts predating the installed serving mode carry no SERVING_MODE, and
     # they were all standalone.
     found.setdefault("SERVING_MODE", "standalone")
+    if found["BACKEND"] not in ("inductor", "eager"):
+        raise PrecompileError(
+            f"python_code names an unknown backend {found['BACKEND']!r}; a "
+            "torch.compiler.precompile artifact is 'inductor' or 'eager'."
+        )
     return found
 
 
@@ -1773,6 +1778,14 @@ class PrecompiledModule(PrecompiledRunnable):
         # ``fn`` is the whole computation: an nn.Module, or a callable that closes
         # over the module(s) it uses (e.g. ``lambda x: model(x)``, or a training
         # step that computes a loss and torch.autograd.grad).
+        if backend not in ("inductor", "eager"):
+            raise ValueError(
+                f"precompile backend must be 'inductor' or 'eager', got {backend!r}."
+            )
+        if tracer not in ("make_fx", "dynamo"):
+            raise ValueError(
+                f"precompile tracer must be 'make_fx' or 'dynamo', got {tracer!r}."
+            )
         self._fn = fn
         self._backend = backend
         self._tracer = tracer
@@ -2561,14 +2574,6 @@ class _PrecompileApi:
         the example's (invariant 6).
         """
         torch._C._log_api_usage_once("torch.compiler.precompile")
-        if backend not in ("inductor", "eager"):
-            raise ValueError(
-                f"precompile backend must be 'inductor' or 'eager', got {backend!r}."
-            )
-        if tracer not in ("make_fx", "dynamo"):
-            raise ValueError(
-                f"precompile tracer must be 'make_fx' or 'dynamo', got {tracer!r}."
-            )
         compiled = PrecompiledModule(
             fn, backend=backend, tracer=tracer, decompositions=decompositions
         )
