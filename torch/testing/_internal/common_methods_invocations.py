@@ -45,7 +45,7 @@ from torch.testing._internal.common_quantized import (
 from torch.testing._internal.common_utils import (
     getRocmVersion,
     make_fullrank_matrices_with_distinct_singular_values,
-    TEST_WITH_ROCM, IS_FBCODE, IS_LINUX, IS_WINDOWS, IS_MACOS, MACOS_VERSION, TEST_SCIPY,
+    TEST_ACL, TEST_WITH_ROCM, IS_FBCODE, IS_LINUX, IS_WINDOWS, IS_MACOS, MACOS_VERSION, TEST_SCIPY,
     torch_to_numpy_dtype_dict, numpy_to_torch_dtype, TEST_WITH_ASAN,
     GRADCHECK_NONDET_TOL, slowTest, TEST_WITH_SLOW,
     TEST_WITH_TORCHINDUCTOR, skipIfNoTritonDSL, skipIfNoCuteDSL, skipIfRocm, TEST_XPU,
@@ -3315,6 +3315,19 @@ def sample_inputs_histc(op_info, device, dtype, requires_grad, **kwargs):
         # construct sample inputs with a few different bins values
         for bins in [1, 3, 10]:
             yield SampleInput(make_arg(size), bins=bins, min=min, max=max)
+
+    # Exercises implementations that switch algorithms for large bin counts.
+    yield SampleInput(make_arg((S,)), bins=8193, min=0, max=10)
+
+    if dtype.is_floating_point:
+        # Values just outside a narrow range must not produce an invalid bin.
+        narrow_range = torch.tensor(
+            [0.0, 5e-6, 1e-5, 1.2e-5],
+            device=device,
+            dtype=dtype,
+            requires_grad=requires_grad,
+        )
+        yield SampleInput(narrow_range, bins=1000, min=0.0, max=1e-5)
 
 def sample_inputs_bincount(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -12555,6 +12568,10 @@ op_db: list[OpInfo] = [
                    dtypes=(torch.complex64, torch.complex128)),
                DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-3, rtol=2e-3)}),
                             "TestConsistency", "test_output_grad_match", device_type="mps"),
+               # COW input materializes in the oneDNN/ACL matmul path (addmm_impl_cpu_ -> mkldnn_matmul)
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCompositeCompliance',
+                            'test_cow_input', device_type='cpu',
+                            dtypes=(torch.float32,), active_if=TEST_ACL),
            )),
     OpInfo('addmm',
            # When alpha=beta=1 as compile-time constants, JIT will decompose addmm into mm and add.
@@ -12584,6 +12601,10 @@ op_db: list[OpInfo] = [
                # https://github.com/pytorch/pytorch/issues/71784
                DecorateInfo(unittest.skip('Skipped!'), 'TestNNCOpInfo', 'test_nnc_correctness',
                             device_type='cpu', dtypes=(torch.float16,)),
+               # COW input materializes in the oneDNN/ACL matmul path (addmm_impl_cpu_ -> mkldnn_matmul)
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCompositeCompliance',
+                            'test_cow_input', device_type='cpu',
+                            dtypes=(torch.float32,), active_if=TEST_ACL),
            )),
     OpInfo('addmv',
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
@@ -13217,8 +13238,13 @@ op_db: list[OpInfo] = [
                DecorateInfo(
                    unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
                    device_type='mps', dtypes=(torch.complex64,)
-               ),),
+               ),
+               # COW input materializes in the oneDNN/ACL matmul path (addmm_impl_cpu_ -> mkldnn_matmul)
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCompositeCompliance',
+                            'test_cow_input', device_type='cpu',
+                            dtypes=(torch.float32,), active_if=TEST_ACL),
            ),
+    ),
     OpInfo('cholesky_solve',
            op=torch.cholesky_solve,
            dtypes=floating_and_complex_types(),
@@ -13239,6 +13265,10 @@ op_db: list[OpInfo] = [
                # https://github.com/pytorch/pytorch/issues/164194
                # https://github.com/pytorch/pytorch/issues/164235
                DecorateInfo(skipIfRocm, "TestFwdGradients", "test_forward_mode_AD", dtypes=(torch.float64, torch.complex128)),
+               # COW input materializes in the oneDNN/ACL matmul path (addmm_impl_cpu_ -> mkldnn_matmul)
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCompositeCompliance',
+                            'test_cow_input', device_type='cpu',
+                            dtypes=(torch.float32,), active_if=TEST_ACL),
            )
     ),
     OpInfo('chunk',
@@ -14586,6 +14616,10 @@ op_db: list[OpInfo] = [
            sample_inputs_func=sample_inputs_lu,
            decorators=[skipCUDAIfNoMagmaAndNoLinalgsolver, skipCPUIfNoLapack],
            skips=(
+               # COW input materializes in the oneDNN/ACL matmul path (addmm_impl_cpu_ -> mkldnn_matmul)
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCompositeCompliance',
+                            'test_cow_input', device_type='cpu',
+                            dtypes=(torch.float32,), active_if=TEST_ACL),
                # we skip jit tests because `lu` is a torch function
                # RuntimeError:
                # 'Tensor (inferred)' object has no attribute or method 'lu'.:
@@ -14717,6 +14751,10 @@ op_db: list[OpInfo] = [
                ),
            ],
            skips=(
+               # COW input materializes in the oneDNN/ACL matmul path (addmm_impl_cpu_ -> mkldnn_matmul)
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCompositeCompliance',
+                            'test_cow_input', device_type='cpu',
+                            dtypes=(torch.float32,), active_if=TEST_ACL),
                # Strides are not the same!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
                # https://github.com/pytorch/pytorch/issues/67470
@@ -17098,6 +17136,10 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.int64,)),
                # https://github.com/pytorch/pytorch/issues/156514
                DecorateInfo(unittest.skip, "TestInductorOpInfo", "test_comprehensive", device_type="cuda", dtypes=(torch.float16,)),
+               # COW input materializes in the oneDNN/ACL matmul path (addmm_impl_cpu_ -> mkldnn_matmul)
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCompositeCompliance',
+                            'test_cow_input', device_type='cpu',
+                            dtypes=(torch.float32,), active_if=TEST_ACL),
            ),
            decorators=(
                # Strides are not the same!
@@ -17431,7 +17473,8 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.skip('test_cow_input does not work with efficient attention on ROCM'),
                          'TestCompositeCompliance', 'test_cow_input',
                          device_type=('cuda', 'xpu'), dtypes=(torch.bfloat16, torch.float16, torch.float32),
-                         active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_MEM_EFF_ATTENTION),),
+                         active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_MEM_EFF_ATTENTION),
+        ),
     ),
     OpInfo(
         'torch.ops.aten._flash_attention_forward',
@@ -18040,6 +18083,10 @@ op_db: list[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_mm,
            skips=(
+               # COW input materializes in the oneDNN/ACL matmul path (addmm_impl_cpu_ -> mkldnn_matmul)
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCompositeCompliance',
+                            'test_cow_input', device_type='cpu',
+                            dtypes=(torch.float32,), active_if=TEST_ACL),
                # Issue with conj and torch dispatch, see https://github.com/pytorch/pytorch/issues/82479
                DecorateInfo(
                    unittest.skip("Skipped!"),
@@ -18711,6 +18758,10 @@ op_db: list[OpInfo] = [
                # https://github.com/pytorch/pytorch/issues/71774
                DecorateInfo(unittest.skip('Skipped!'), 'TestNNCOpInfo', 'test_nnc_correctness',
                             device_type='cpu', dtypes=(torch.long,)),
+               # COW input materializes in the oneDNN/ACL matmul path (addmm_impl_cpu_ -> mkldnn_matmul)
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCompositeCompliance',
+                            'test_cow_input', device_type='cpu',
+                            dtypes=(torch.float32,), active_if=TEST_ACL),
            )),
     BinaryUfuncInfo('__rmod__',
                     op=torch.Tensor.__rmod__,
@@ -19287,6 +19338,10 @@ op_db: list[OpInfo] = [
                        #              'TestFwdGradients', 'test_fn_fwgrad_bwgrad'),
                        ],
            skips=(
+               # COW input materializes in the oneDNN/ACL matmul path (addmm_impl_cpu_ -> mkldnn_matmul)
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCompositeCompliance',
+                            'test_cow_input', device_type='cpu',
+                            dtypes=(torch.float32,), active_if=TEST_ACL),
                # test does not work with passing lambda for op
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
@@ -19330,6 +19385,10 @@ op_db: list[OpInfo] = [
                            'TestConsistency', 'test_output_grad_match', device_type='mps'),
                        ],
            skips=(
+               # COW input materializes in the oneDNN/ACL matmul path (addmm_impl_cpu_ -> mkldnn_matmul)
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCompositeCompliance',
+                            'test_cow_input', device_type='cpu',
+                            dtypes=(torch.float32,), active_if=TEST_ACL),
                # test does not work with passing lambda for op
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
@@ -20642,12 +20701,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
            sample_inputs_func=sample_inputs_histc,
            supports_out=True,
            supports_autograd=False,
-           skips=(
-               # CUDA histc returns a float tensor but does not correctly warn when passed an integral out tensor
-               # "AssertionError: RuntimeError not raised : Expected RuntimeError when doing an unsafe cast
-               # from a result of dtype torch.float32 into an out= with dtype torch.long"
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type=('cuda', 'xpu')),
-           )),
+    ),
     OpInfo('bincount',
            dtypes=integral_types_and(),
            sample_inputs_func=sample_inputs_bincount,
@@ -21248,6 +21302,10 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
            check_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_tensordot,
            skips=(
+               # COW input materializes in the oneDNN/ACL matmul path (addmm_impl_cpu_ -> mkldnn_matmul)
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCompositeCompliance',
+                            'test_cow_input', device_type='cpu',
+                            dtypes=(torch.float32,), active_if=TEST_ACL),
                # Skip operator schema test because this is a functional and not an operator.
                # Reference: https://github.com/pytorch/pytorch/issues/54574
                DecorateInfo(unittest.skip("Skipped!"), 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
@@ -22053,6 +22111,10 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         dtypes=floating_types_and(torch.bfloat16, torch.float16),
         sample_inputs_func=sample_inputs_multi_head_attention_forward,
         skips=(
+            # COW input materializes in the oneDNN/ACL matmul path (addmm_impl_cpu_ -> mkldnn_matmul)
+            DecorateInfo(unittest.skip('Skipped!'), 'TestCompositeCompliance',
+                         'test_cow_input', device_type='cpu',
+                         dtypes=(torch.float32,), active_if=TEST_ACL),
             # Tensor-likes are not close
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_noncontiguous_samples', dtypes=(torch.float32,)),
             DecorateInfo(toleranceOverride({torch.float32: tol(atol=5e-3, rtol=0)}), 'TestDecomp', 'test_comprehensive'),
