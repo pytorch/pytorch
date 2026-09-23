@@ -26,6 +26,15 @@ namespace {
 
 constexpr int kCUDANumThreads = 256;
 
+// ROCm caps a grid dimension at 2^32-1 work-items, i.e. gridDim.x * blockDim.x,
+// so a one-block-per-output launch dies with hipErrorInvalidConfiguration past
+// 2^24 outputs. Cap the grid and let the kernels grid-stride over the rest.
+static dim3 dist_grid(int64_t total) {
+  const int64_t blocks_per_sm = 32;
+  const int64_t cap = static_cast<int64_t>(at::cuda::getCurrentDeviceProperties()->multiProcessorCount) * blocks_per_sm;
+  return dim3(static_cast<unsigned int>(std::min<int64_t>(total, cap)));
+}
+
 template <typename scalar_t>
 struct dists {
 
@@ -100,29 +109,34 @@ struct DistReduceOp {
 };
 
 template <typename scalar_t, typename F>
-__global__ static void pdist_kernel_cuda_impl(scalar_t * result, const scalar_t * self, const int64_t n, const int64_t m, const scalar_t p,
-                                              const double n2, const double n2_squared_minus_1) {
-  const int64_t k = blockIdx.x;
+__global__ static void pdist_kernel_cuda_impl(scalar_t * result, const scalar_t * self,
+    const int64_t n, const int64_t m, const scalar_t p,
+    const double n2, const double n2_squared_minus_1, const int64_t total) {
   const int stride = blockDim.x;
 
-  // The -1 accounts for floating point truncation issues
-  int64_t i = static_cast<int64_t>((n2 - device_sqrt<double>(n2_squared_minus_1 - 2 * k)));
-  int64_t j = k - n * i + i * (i + 1) / 2 + i + 1;
+  for (int64_t k = blockIdx.x; k < total; k += gridDim.x) {
+    // The -1 accounts for floating point truncation issues
+    int64_t i = static_cast<int64_t>((n2 - device_sqrt<double>(n2_squared_minus_1 - 2 * k)));
+    int64_t j = k - n * i + i * (i + 1) / 2 + i + 1;
 
-  const scalar_t * const start = self + i * m;
-  const scalar_t * const end = start + m;
-  const scalar_t * a = start + threadIdx.x;
-  const scalar_t * b = self + j * m + threadIdx.x;
-  scalar_t agg = 0.0;
-  for (; a < end; a += stride, b += stride) {
-    F::inc(agg, std::abs(*a - *b), p);
-  }
+    const scalar_t * const start = self + i * m;
+    const scalar_t * const end = start + m;
+    const scalar_t * a = start + threadIdx.x;
+    const scalar_t * b = self + j * m + threadIdx.x;
+    scalar_t agg = 0.0;
+    for (; a < end; a += stride, b += stride) {
+      F::inc(agg, std::abs(*a - *b), p);
+    }
 
-  __shared__ scalar_t agg_smem[kCUDANumThreads];
-  scalar_t agg_init{0.0};
-  agg = cuda_utils::BlockReduce(agg, DistReduceOp<scalar_t, F>{}, agg_init, agg_smem);
-  if (threadIdx.x == 0) {
-    result[k] = F::finish(agg, p);
+    __shared__ scalar_t agg_smem[kCUDANumThreads];
+    scalar_t agg_init{0.0};
+    // Safe to reuse agg_smem across grid-stride iterations without an extra
+    // barrier: BlockReduce syncs before its first shared write, which orders it
+    // after the previous iteration's shared reads.
+    agg = cuda_utils::BlockReduce(agg, DistReduceOp<scalar_t, F>{}, agg_init, agg_smem);
+    if (threadIdx.x == 0) {
+      result[k] = F::finish(agg, p);
+    }
   }
 }
 
@@ -193,27 +207,32 @@ __global__ static void pdist_backward_kernel_cuda_impl(scalar_t * buffer, const 
 
 template <typename scalar_t, typename F>
 __global__ static void cdist_kernel_cuda_impl(scalar_t * result, const scalar_t * x1, const scalar_t * x2,
-    const scalar_t p, const int64_t r2, const int64_t m, const int64_t r_size, const int64_t l1_size, const int64_t l2_size) {
-  const int64_t l = blockIdx.x / r_size;
-  const int64_t k = blockIdx.x % r_size;
-  const int64_t i = k / r2;
-  const int64_t j = k % r2;
+    const scalar_t p, const int64_t r2, const int64_t m, const int64_t r_size, const int64_t l1_size, const int64_t l2_size,
+    const int64_t total) {
   const int stride = blockDim.x;
 
-  const scalar_t * const start = x1 + l * l1_size + i * m;
-  const scalar_t * const end = start + m;
-  const scalar_t * a = start + threadIdx.x;
-  const scalar_t * b = x2 + l * l2_size + j * m + threadIdx.x;
+  for (int64_t idx = blockIdx.x; idx < total; idx += gridDim.x) {
+    const int64_t l = idx / r_size;
+    const int64_t k = idx % r_size;
+    const int64_t i = k / r2;
+    const int64_t j = k % r2;
 
-  scalar_t agg = 0.0;
-  for (; a < end; a += stride, b += stride) {
-    F::inc(agg, std::abs(*a - *b), p);
-  }
-  __shared__ scalar_t agg_smem[kCUDANumThreads];
-  scalar_t agg_init{0.0};
-  agg = cuda_utils::BlockReduce(agg, DistReduceOp<scalar_t, F>{}, agg_init, agg_smem);
-  if (threadIdx.x == 0) {
-    result[blockIdx.x] = F::finish(agg, p);
+    const scalar_t * const start = x1 + l * l1_size + i * m;
+    const scalar_t * const end = start + m;
+    const scalar_t * a = start + threadIdx.x;
+    const scalar_t * b = x2 + l * l2_size + j * m + threadIdx.x;
+
+    scalar_t agg = 0.0;
+    for (; a < end; a += stride, b += stride) {
+      F::inc(agg, std::abs(*a - *b), p);
+    }
+    __shared__ scalar_t agg_smem[kCUDANumThreads];
+    scalar_t agg_init{0.0};
+    // See the agg_smem reuse note in pdist_kernel_cuda_impl.
+    agg = cuda_utils::BlockReduce(agg, DistReduceOp<scalar_t, F>{}, agg_init, agg_smem);
+    if (threadIdx.x == 0) {
+      result[idx] = F::finish(agg, p);
+    }
   }
 }
 
@@ -224,7 +243,8 @@ void cdist_kernel_impl(Tensor& result, const Tensor& x1, const Tensor& x2, doubl
   const int64_t r_size = r1 * r2;
   const int64_t l1_size = r1 * m;
   const int64_t l2_size = r2 * m;
-  const dim3 grid(result.numel());
+  const int64_t total = result.numel();
+  const dim3 grid = dist_grid(total);
   const dim3 block(kCUDANumThreads);
 
   AT_DISPATCH_FLOATING_TYPES(x1.scalar_type(), "cdist_cuda", [&] {
@@ -238,13 +258,14 @@ void cdist_kernel_impl(Tensor& result, const Tensor& x1, const Tensor& x2, doubl
     } else if (std::isinf(p)) {
       impl_fptr = cdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::inf>;
     }
-    impl_fptr<<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(result.mutable_data_ptr<scalar_t>(), x1.const_data_ptr<scalar_t>(), x2.const_data_ptr<scalar_t>(), p, r2, m, r_size, l1_size, l2_size);
+    impl_fptr<<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(result.mutable_data_ptr<scalar_t>(), x1.const_data_ptr<scalar_t>(), x2.const_data_ptr<scalar_t>(), p, r2, m, r_size, l1_size, l2_size, total);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   });
 }
 
 void pdist_forward_kernel_impl(Tensor& result, const Tensor& self, double p) {
-  const dim3 grid(result.numel());
+  const int64_t total = result.numel();
+  const dim3 grid = dist_grid(total);
   const dim3 block(kCUDANumThreads);
   int64_t n = self.size(0);
   int64_t m = self.size(1);
@@ -264,7 +285,9 @@ void pdist_forward_kernel_impl(Tensor& result, const Tensor& self, double p) {
     } else if (std::isinf(p)) {
       impl_fptr = pdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::inf>;
     }
-    impl_fptr<<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(result.mutable_data_ptr<scalar_t>(), self.const_data_ptr<scalar_t>(), n, m, p, n2, n2_squared_minus_1);
+    impl_fptr<<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
+        result.mutable_data_ptr<scalar_t>(), self.const_data_ptr<scalar_t>(),
+        n, m, p, n2, n2_squared_minus_1, total);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   });
 }

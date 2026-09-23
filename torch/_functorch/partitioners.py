@@ -1329,7 +1329,7 @@ def enable_activation_quantization(
                 continue
             node.meta["saved_for_quantization"] = True
             node.meta["dequant_type"] = node.meta["val"].dtype
-            # some of the fwd outputs and bwd inputs are not share the same object
+            # some of the fwd outputs and bwd inputs do not share the same object
             bwd_module_inputs[node.name].meta["saved_for_quantization"] = True
             bwd_module_inputs[node.name].meta["dequant_type"] = node.meta["val"].dtype
             should_perform_fp8_quant = True
@@ -1370,6 +1370,24 @@ def _extract_fwd_bwd_modules(
     )
     placeholders = joint_module.graph.find_nodes(op="placeholder")
     primal_inputs = [*filter(_is_primal, placeholders)]
+    # Stamp is_static_input on primal placeholders for the backward
+    # compiler; see Note: [static_input_idxs semantics] in
+    # torch/_inductor/compile_fx.py. This must happen here, while primals
+    # are still 1:1 with flat forward inputs, because staticness is tracked
+    # positionally (static_lifetime_input_nodes derives from
+    # fw_metadata.static_input_indices) and the backward graph's input
+    # ordering destroys that correspondence. The meta dict is shared by
+    # reference with the extracted fwd/bwd placeholder nodes
+    # (_extract_graph_with_inputs_outputs), so the stamp is visible on
+    # bw_module's placeholders regardless of how saving reorders them.
+    #
+    # TODO: staticness arguably belongs on the AOTInput descriptors
+    # (meta["desc"]); today those cannot express it (the dynamo frontend
+    # emits PlainAOTInput even for lifted params, and mark_static_address
+    # lives on the tensor object), so we use a dedicated meta key.
+    if static_lifetime_input_nodes is not None:
+        for node in primal_inputs:
+            node.meta["is_static_input"] = node in static_lifetime_input_nodes
     tangent_inputs = (
         [] if omit_aot_autograd_runtime else [*filter(_is_tangent, placeholders)]
     )
@@ -1406,7 +1424,11 @@ def _extract_fwd_bwd_modules(
         # then the collective will generally by followed by a wait_tensor() call.
         # we need to peek one node further to see if this wait_tensor is dead as well.
         elif distributed_enabled and all(
-            n.target is torch.ops._c10d_functional.wait_tensor.default
+            n.target
+            in (
+                torch.ops._c10d_functional.wait_tensor.default,
+                torch.ops._c10d_functional.wait_tensors.default,
+            )
             and len(n.users) == 0
             for n in node.users
         ):
@@ -1701,7 +1723,11 @@ def default_partition(
             )
             and (
                 not distributed_enabled
-                or node.target is not torch.ops._c10d_functional.wait_tensor.default
+                or node.target
+                not in (
+                    torch.ops._c10d_functional.wait_tensor.default,
+                    torch.ops._c10d_functional.wait_tensors.default,
+                )
             )
         )
 
@@ -1855,6 +1881,13 @@ def _size_of(node: fx.Node) -> int:
             return sum(object_nbytes(n) for n in val.values())
         elif isinstance(val, torch.Tensor):
             return object_nbytes(val)
+        elif isinstance(val, torch.device):
+            # A device is metadata, not data: it holds no activation memory. Nodes
+            # carrying one show up as operands to factory ops (e.g. the
+            # current_device() node compile-on-one-rank substitutes for a baked
+            # device), and the partitioner sizes a node's fx.Node args, so this is
+            # reached during a normal partition.
+            return 0
         elif isinstance(val, (torch.ScriptObject, FakeScriptObject)):
             # A (Fake)ScriptObject may hold tensors internally, so we cannot
             # soundly compute its size here. Only treat it as zero size when the
@@ -2312,13 +2345,23 @@ def force_save_collectives(joint_module: fx.GraphModule) -> None:
     unless they come from a user-annotated AC region.
     See Note [Recomputing collectives in the partitioner]
     """
+
+    def mark_leaf_tensor_outputs(node: fx.Node) -> None:
+        getitem_users = [user for user in node.users if user.target is operator.getitem]
+        if getitem_users:
+            for user in getitem_users:
+                mark_leaf_tensor_outputs(user)
+            return
+        if not isinstance(node.meta.get("val"), (tuple, list)):
+            node.meta["recompute"] = CheckpointPolicy.MUST_SAVE
+
     for node in joint_module.graph.nodes:
         if (
             isinstance(node.target, torch._ops.OpOverload)
             and node.target.namespace == "_c10d_functional"
             and not must_recompute(node)
         ):
-            node.meta["recompute"] = CheckpointPolicy.MUST_SAVE
+            mark_leaf_tensor_outputs(node)
 
 
 def force_save_effectful_ops(joint_module: fx.GraphModule) -> None:
@@ -2333,6 +2376,10 @@ def force_save_effectful_ops(joint_module: fx.GraphModule) -> None:
     The with_effects node returns a tuple (token, result). We recursively find all
     leaf outputs extracted via getitem and mark them as MUST_SAVE. Since these are
     saved, the with_effects op doesn't need to be recomputed in backward.
+
+    AOTAutograd cannot rematerialize a forward effect because the backward token
+    chain is established before partitioning. Reject an explicit MUST_RECOMPUTE
+    policy instead of emitting an invalid saved-token calling convention.
     """
 
     def mark_getitem_outputs(node: fx.Node) -> None:
@@ -2343,12 +2390,15 @@ def force_save_effectful_ops(joint_module: fx.GraphModule) -> None:
                     user.meta["recompute"] = CheckpointPolicy.MUST_SAVE
 
     for node in joint_module.graph.nodes:
-        if (
-            is_with_effects(node)
-            and not must_recompute(node)
-            and not _has_tag_is_backward(node)
-        ):
-            mark_getitem_outputs(node)
+        if not is_with_effects(node) or _has_tag_is_backward(node):
+            continue
+        if node.meta.get("recompute") == CheckpointPolicy.MUST_RECOMPUTE:
+            raise RuntimeError(
+                "AOTAutograd does not support MUST_RECOMPUTE for effectful "
+                "operations because forward effects cannot join the backward "
+                "effect-token chain."
+            )
+        mark_getitem_outputs(node)
 
 
 def force_save_bw_mutation_src(joint_module: fx.GraphModule) -> None:
@@ -2544,6 +2594,16 @@ def solve_min_cut(
         if config.recompute_views and op_types.is_view(node):
             return None
         if node.target in [aten.lift_fresh_copy.default, aten.lift_fresh.default]:
+            return None
+        if isinstance(node.meta.get("val"), torch.device):
+            # A device-valued node (e.g. the coor::current_device() node
+            # compile_on_one_rank substitutes for a baked device) has no tensor to
+            # save, so get_node_weight would give it infinite weight as a non-tensor
+            # output and the allowlist check below would ban it as unrecomputable --
+            # leaving min-cut unable to place it at all once a backward op needs it.
+            # Recomputing is both free and correct: the op only reads the current
+            # accelerator, and doing so on the backward side is what makes the graph
+            # follow each rank's own device.
             return None
 
         if min_cut_options.ban_if_not_in_allowlist:
@@ -3388,12 +3448,10 @@ from torch.utils._mode_utils import no_dispatch
 
 # replace symbols in size and strides with their hints without guarding.
 def _remove_symbols_without_guarding(x: torch.Tensor, fallback: int) -> torch.Tensor:
-    shape = list(x.shape)
-
     def realize_symbol(d: torch.SymInt | int) -> int:
         return optimization_hint(d, fallback=fallback)
 
-    shape = [realize_symbol(s) for s in shape]
+    shape = [realize_symbol(s) for s in x.shape]
     stride = [realize_symbol(s) for s in x.stride()]
     return x.new_empty_strided(shape, stride=stride)
 
@@ -3836,6 +3894,7 @@ def _sync_decision_cross_ranks(
     joint_graph: torch.fx.Graph, saved_values: list[torch.fx.Node]
 ) -> list[torch.fx.Node]:
     # use the same policy across different GPUs
+    from torch._dynamo.distributed import get_compile_sync_pg
     from torch._subclasses.fake_tensor import unset_fake_temporarily
 
     def has_collectives(joint_graph: torch.fx.Graph) -> bool:
@@ -3853,6 +3912,11 @@ def _sync_decision_cross_ranks(
         and has_collectives(joint_graph)
     ):
         return saved_values
+
+    pg = get_compile_sync_pg()
+    if pg is None:
+        raise AssertionError("Compile sync process group must be available here")
+    coll_device = torch.distributed.distributed_c10d._get_object_coll_device(pg)
 
     canonical = _canonical_node_names(joint_graph)
     reverse_canonical = {v: k for k, v in canonical.items()}
@@ -3874,10 +3938,9 @@ def _sync_decision_cross_ranks(
             for n in sorted(joint_graph.nodes, key=lambda n: canonical[n])
         )
         inputs = hashlib.sha256(node_str.encode("utf-8")).hexdigest()
-        all_inputs = [None for _ in range(torch.distributed.get_world_size())]
+        all_inputs = [None for _ in range(pg.size())]
         with no_dispatch(), unset_fake_temporarily():
-            # TODO: maybe use a different process group?
-            torch.distributed.all_gather_object(all_inputs, inputs)
+            torch.distributed.all_gather_object(all_inputs, inputs, group=pg)
             for rank, x in enumerate(all_inputs):
                 if all_inputs[0] != x:
                     log.debug(
@@ -3892,10 +3955,10 @@ def _sync_decision_cross_ranks(
             # Communicate saved values using canonical names so that
             # node names (which may differ across ranks) don't matter.
             objects = [[canonical[x] for x in saved_values]]
-            saved_ops_names_all_ranks: list[list[str]] = [
-                [] for _ in range(torch.distributed.get_world_size())
-            ]
-            torch.distributed.all_gather_object(saved_ops_names_all_ranks, objects[0])
+            saved_ops_names_all_ranks: list[list[str]] = [[] for _ in range(pg.size())]
+            torch.distributed.all_gather_object(
+                saved_ops_names_all_ranks, objects[0], group=pg
+            )
             saved_sizes: list[int] = []
             saved_ops_with_sizes: dict[str, int] = {}
 
@@ -3907,17 +3970,16 @@ def _sync_decision_cross_ranks(
                 for node in saved_nodes:
                     size_of_node = _size_of(node)
                     saved_size += size_of_node
-                    if idx == torch.distributed.get_rank():
+                    if idx == pg.rank():
                         saved_ops_with_sizes[node.name] = size_of_node
                 saved_ops_with_sizes["total size"] = saved_size
                 saved_sizes.append(saved_size)
 
-            saved_sizes_tensor = torch.tensor(
-                saved_sizes,
-                device=torch.distributed.distributed_c10d._get_object_coll_device(),
-            )
+            saved_sizes_tensor = torch.tensor(saved_sizes, device=coll_device)
             torch.distributed.all_reduce(
-                saved_sizes_tensor, op=torch.distributed.distributed_c10d.ReduceOp.MAX
+                saved_sizes_tensor,
+                op=torch.distributed.distributed_c10d.ReduceOp.MAX,
+                group=pg,
             )
 
             picked_rank_idx = int(torch.argmin(saved_sizes_tensor).item())
@@ -4229,9 +4291,10 @@ def min_cut_rematerialization_partition(
             break
 
     # The partitioner applies a single budget per joint graph, so all annotated
-    # nodes must agree and the annotation must cover every forward op; otherwise
-    # the caller mixed budgets or annotated only part of a graph (across a graph
-    # break each graph is resolved independently). Collect both in one pass.
+    # nodes must agree. By default the annotation must cover every forward op;
+    # the full-coverage config can permit partial coverage and apply the budget
+    # to the entire graph. Collect the budget and any unannotated forward ops in
+    # one pass.
     region_budgets: OrderedSet[float] = OrderedSet()
     unannotated_fw_ops: list[fx.Node] = []
     for node in joint_graph.nodes:
@@ -4241,11 +4304,11 @@ def min_cut_rematerialization_partition(
         elif node.op == "call_function" and node_info.is_required_fw(node):
             unannotated_fw_ops.append(node)
 
-    # A budget must consistently cover the entire forward, including HOP bodies.
-    # Recurse into nested subgraph modules: collect their budgets (for the
-    # agreement check) and flag any unannotated call_function (for coverage). In
-    # a consistent graph every node in every body carries the budget, so an
-    # unannotated body op means the budget did not cover that HOP.
+    # Budget agreement and optional full-coverage checks include HOP bodies.
+    # Recurse into nested subgraph modules to collect their budgets and any
+    # unannotated call_function nodes. In a consistent graph every node in every
+    # body carries the budget, so an unannotated body op means the budget did not
+    # cover that HOP.
     all_budgets: OrderedSet[float] = OrderedSet(region_budgets)
     for _, sub in joint_module.named_modules():
         if isinstance(sub, fx.GraphModule) and sub.graph is not joint_graph:
@@ -4264,14 +4327,15 @@ def min_cut_rematerialization_partition(
         )
 
     if all_budgets:
-        if unannotated_fw_ops:
+        if config.activation_memory_budget_require_full_coverage and unannotated_fw_ops:
             raise RuntimeError(
                 f"torch.autograd.graph.region_activation_memory_budget: must "
                 f"cover the entire forward of a graph (including HOP bodies), but "
                 f"{len(unannotated_fw_ops)} forward op(s) are unannotated. Wrap "
-                f"the whole forward in a single region; use a graph break to scope "
-                f"different budgets to different graphs. Note that a graph break "
-                f"inside the annotated region can also cause unannotated ops here. "
+                f"the whole forward in a single region, or set "
+                f"torch._functorch.config."
+                f"activation_memory_budget_require_full_coverage=False to apply "
+                f"the budget to the entire graph. "
                 f"Unannotated ops: {[n.name for n in unannotated_fw_ops]}."
             )
         memory_budget = next(iter(all_budgets))
