@@ -578,11 +578,11 @@ def _default_reduce_scatter_input_fn(
 def foreach_reduce(
     fsdp_params: list[FSDPParam],
     unsharded_grads: list[torch.Tensor],
-    reduce_scatter_group: dist.ProcessGroup | None,
+    reduce_scatter_group: dist.ProcessGroup,
     reduce_scatter_stream: torch.Stream,
     reduce_scatter_comm: ReduceScatter,
     orig_dtype: torch.dtype | None,  # Unused; kept for backward compatibility.
-    reduce_dtype: torch.dtype | None,
+    reduce_dtype: torch.dtype | None,  # Raw mp_policy.reduce_dtype; no default applied.
     device: torch.device,
     gradient_divide_factor: float | None,
     all_reduce_group: dist.ProcessGroup | None,  # not `None` iff HSDP
@@ -614,6 +614,19 @@ def foreach_reduce(
         _raise_assert_with_print(
             f"FSDP reduce-scatter expects uniform gradient dtype but got {grad_dtypes}"
         )
+    # P: model parameter dtype before fully_shard; G: explicit input grad_dtype.
+    # M: explicit mp_policy.param_dtype; R: explicit mp_policy.reduce_dtype.
+    # FSDPParam.sharded_grad_dtype resolves input grad_dtype as:
+    # Not set -> P; Explicit G -> G; Explicit None -> None.
+    # FSDPParam.unsharded_grad_dtype is R when reduce_dtype is Explicit R;
+    # Explicit None / not set instead uses sharded_grad_dtype.
+    # Autograd accumulates in unsharded_grad_dtype; None accepts any incoming
+    # gradient dtype. Reduction therefore uses explicit R, otherwise P, G, or
+    # the actual gradient dtype for the respective input policies above.
+    # M controls compute dtype and does not change this fallback. The uniform
+    # dtype check above makes selecting the first gradient's dtype valid.
+    # On the FSDP path, reduce_dtype differs from unsharded_grads[0].dtype only
+    # when reduce_dtype is None; unsharded_grads[0].dtype is always concrete.
     reduce_dtype = reduce_dtype or unsharded_grads[0].dtype
     (predivide_factor, postdivide_factor, reduce_scatter_op, all_reduce_op) = (
         _get_gradient_divide_factors(
@@ -660,8 +673,6 @@ def foreach_reduce(
         )
         _div_if_needed(reduce_scatter_input, predivide_factor)
         if world_size > 1:
-            if reduce_scatter_group is None:
-                raise AssertionError("Expected a reduce-scatter process group")
             reduce_scatter_comm(
                 output_tensor=reduce_output,
                 input_tensor=reduce_scatter_input,
