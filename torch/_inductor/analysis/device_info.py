@@ -10,9 +10,10 @@ log = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class DeviceInfo:
     """
-    Theoretical numbers from data sheet.  When a data sheet reports both
-    Tensor/Matrix-Core and non-Tensor-Core numbers, the higher (Tensor Core)
-    number is used.
+    Device performance information. Built-in entries contain theoretical
+    datasheet values; backends may register their own estimates. When a data
+    sheet reports both Tensor/Matrix-Core and non-Tensor-Core numbers, the
+    higher (Tensor Core) number is used.
 
     NVIDIA data sheets since Hopper (H100) only publish Tensor-Core TFLOPS
     with 2:4 structured sparsity (marked ``*With sparsity``).  For devices
@@ -33,6 +34,48 @@ class DeviceInfo:
 # Indexing is based on `torch.cuda.get_device_name()`, normalized to upper-case.
 # TODO investigate profiler support for tf32 and allow device to report correct number when it's turned on.
 _device_mapping: dict[str, DeviceInfo] = {
+    # Source: NVIDIA GB300 NVL72, "Individual Blackwell Ultra GPU Specifications",
+    # GB300 column. Tensor Core rows there are SPARSE; dense is 1/2. FP32/FP64 are
+    # already dense. Values below are all DENSE, so no sparsity factor.
+    # @lint-ignore https://www.nvidia.com/en-us/data-center/gb300-nvl72/
+    "NVIDIA GB300": DeviceInfo(
+        tops={
+            torch.float64: 1.3,
+            torch.float32: 80.0,
+            "torch.tf32": 1250.0,
+            torch.bfloat16: 2500.0,
+            torch.float16: 2500.0,
+            torch.float8_e4m3fn: 5000.0,
+            torch.float8_e4m3fnuz: 5000.0,
+            torch.float8_e5m2: 5000.0,
+            torch.float8_e5m2fnuz: 5000.0,
+            torch.float8_e8m0fnu: 5000.0,
+            torch.int8: 165.0,
+        },
+        dram_bw_gbs=8000.0,
+        dram_gb=279.0,
+    ),
+    # Source: NVIDIA Blackwell datasheet, "Individual Blackwell GPU Specifications",
+    # HGX B200 column. Tensor Core rows there are SPARSE; dense is 1/2. FP32/FP64 are
+    # already dense. Values below are all DENSE, so no sparsity factor.
+    # @lint-ignore https://www.nvidia.com/en-us/data-center/hgx/
+    "NVIDIA B200": DeviceInfo(
+        tops={
+            torch.float64: 37.0,
+            torch.float32: 75.0,
+            "torch.tf32": 1125.0,
+            torch.bfloat16: 2250.0,
+            torch.float16: 2250.0,
+            torch.float8_e4m3fn: 4500.0,
+            torch.float8_e4m3fnuz: 4500.0,
+            torch.float8_e5m2: 4500.0,
+            torch.float8_e5m2fnuz: 4500.0,
+            torch.float8_e8m0fnu: 4500.0,
+            torch.int8: 4500.0,
+        },
+        dram_bw_gbs=7700.0,
+        dram_gb=180.0,
+    ),
     # Source:
     # @lint-ignore https://www.nvidia.com/en-us/data-center/h100/
     # Tensor Core values are *with sparsity* per the datasheet.
@@ -91,6 +134,27 @@ _device_mapping: dict[str, DeviceInfo] = {
         },
         dram_bw_gbs=3350,
         dram_gb=24,
+    ),
+    # Source:
+    # @lint-ignore https://www.amd.com/content/dam/amd/en/documents\
+    # /instinct-tech-docs/product-briefs/amd-instinct-mi355x-gpu-brochure.pdf
+    "AMD MI355X": DeviceInfo(
+        tops={
+            torch.float64: 78.6,
+            torch.float32: 157.3,
+            # not specified, fall back to float32 numbers
+            "torch.tf32": 157.3,
+            torch.bfloat16: 2516.6,
+            torch.float16: 2516.6,
+            torch.float8_e8m0fnu: 5033.2,
+            torch.float8_e4m3fn: 5033.2,
+            torch.float8_e4m3fnuz: 5033.2,
+            torch.float8_e5m2: 5033.2,
+            torch.float8_e5m2fnuz: 5033.2,
+            torch.int8: 5033.2,
+        },
+        dram_bw_gbs=8000.0,
+        dram_gb=288.0,
     ),
     # Source:
     # @lint-ignore https://www.amd.com/content/dam/amd/en/documents\
@@ -247,6 +311,7 @@ _device_mapping: dict[str, DeviceInfo] = {
         dram_gb=48,
     ),
 }
+_device_mapping["AMD INSTINCT MI355X"] = _device_mapping["AMD MI355X"]
 _device_mapping["AMD INSTINCT MI350X"] = _device_mapping["AMD MI350X"]
 _device_mapping["AMD INSTINCT MI300X"] = _device_mapping["AMD MI300X"]
 _device_mapping["AMD INSTINCT MI210X"] = _device_mapping["AMD MI210X"]
@@ -256,6 +321,11 @@ _device_mapping["Intel(R) Arc(TM) Pro B70 Graphics"] = _device_mapping["INTEL B7
 # Enforce the upper-case-key invariant so entries cannot silently miss
 # `lookup_device_info` (which upper-cases the query before lookup).
 _device_mapping = {k.upper(): v for k, v in _device_mapping.items()}
+
+
+def register_device_info(name: str, info: DeviceInfo) -> None:
+    """Register backend performance information before runtime estimation."""
+    _device_mapping[name.upper()] = info
 
 
 def lookup_device_info(name: str) -> DeviceInfo | None:

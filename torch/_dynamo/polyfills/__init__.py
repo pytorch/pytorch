@@ -109,6 +109,39 @@ def radians(x: float) -> float:
     return math.pi / 180.0 * x
 
 
+def infer_size(a: Sequence[Any], b: Sequence[Any]) -> torch.Size:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    # Keep this in sync with torch._subclasses.fake_impls.infer_size and
+    # aten/src/ATen/ExpandUtils.cpp::infer_size_impl.  In particular, check the
+    # broadcasting cases before size equality: the former are often statically
+    # known, while the latter may need to become a deferred runtime assertion.
+    dims_a = len(a)
+    dims_b = len(b)
+    ndim = max(dims_a, dims_b)
+    expanded_sizes = [0] * ndim
+
+    for i in range(ndim - 1, -1, -1):
+        offset = ndim - 1 - i
+        dim_a = dims_a - 1 - offset
+        dim_b = dims_b - 1 - offset
+        size_a = a[dim_a] if dim_a >= 0 else 1
+        size_b = b[dim_b] if dim_b >= 0 else 1
+
+        # Dynamo requires torch._check message closures to capture only Python
+        # constants, so report the static dimension without capturing sizes.
+        error_message = f"invalid broadcast shape at dimension {i}"
+        torch._check(
+            guard_or_false(size_a == 1)
+            or guard_or_false(size_b == 1)
+            or size_a == size_b,
+            lambda: error_message,
+        )
+        expanded_sizes[i] = size_b if guard_or_false(size_a == 1) else size_a
+
+    return torch.Size(expanded_sizes)
+
+
 def impl_IS_MAPPING(a: object) -> TypeIs[Mapping[Any, Any]]:
     return isinstance(a, Mapping)
 
@@ -468,7 +501,7 @@ def foreach_lerp_inplace(
     self,
     end: list[torch.Tensor] | tuple[torch.Tensor, ...],
     weight: float | int | torch.Tensor,
-) -> None:
+) -> list[torch.Tensor] | tuple[torch.Tensor, ...]:
     # Decompose lerp via addcmul_ for FMA.  Uses the same dual-formula
     # approach as CUDA's native lerp to get bitwise identical results:
     #   |w| <  0.5  (low):  fma(w, diff, start)

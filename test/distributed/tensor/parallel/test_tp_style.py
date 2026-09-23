@@ -20,7 +20,9 @@ from torch.distributed.tensor.placement_types import _Partial
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
+    DTensorContinuousTestBase,
     DTensorTestBase,
+    LocalDTensorContinuousTestBase,
     NUM_DEVICES,
     RMSNormPython,
     with_comms,
@@ -30,10 +32,8 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 c10d_functional = torch.ops.c10d_functional
 
 
-class TensorParallelStyleTest(DTensorTestBase):
-    @property
-    def world_size(self):
-        return NUM_DEVICES
+class TensorParallelStyleTest(DTensorContinuousTestBase):
+    world_size = NUM_DEVICES
 
     @with_comms
     def test_colwise_parallel_style(self):
@@ -365,6 +365,12 @@ class TensorParallelStyleTest(DTensorTestBase):
         output = chunk_mod(tensor)
         self.assertEqual(output, expected_tensor)
 
+
+class SequenceParallelStyleTest(DTensorTestBase):
+    @property
+    def world_size(self):
+        return NUM_DEVICES
+
     @with_comms
     def test_sequence_parallel_style(self):
         mesh = init_device_mesh(self.device_type, (self.world_size,))
@@ -463,6 +469,10 @@ class TensorParallelStyleTest(DTensorTestBase):
 
 TensorParallelStyleTestWithLocalTensor = create_local_tensor_test_class(
     TensorParallelStyleTest,
+    base_class=LocalDTensorContinuousTestBase,
+)
+SequenceParallelStyleTestWithLocalTensor = create_local_tensor_test_class(
+    SequenceParallelStyleTest,
 )
 
 if __name__ == "__main__":
