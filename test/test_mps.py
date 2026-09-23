@@ -1158,6 +1158,23 @@ class TestMPS(TestCaseMPS):
         # completed waiting on the events.
         self.assertTrue(finished_waiting.is_set())
 
+    def test_multithreaded_arange(self):
+        # arange used to take the command encoder outside the stream's serial
+        # queue, so another thread's synchronize() could end and release that
+        # encoder while arange was still binding to it. The synchronize() is
+        # what makes this race reachable: without it nothing ends the encoder.
+        # See https://github.com/pytorch/pytorch/issues/197805
+        def worker():
+            for i in range(30):
+                torch.arange(0, 4096 + i, 1, device="mps")
+                torch.mps.synchronize()
+
+        threads = [threading.Thread(target=worker) for _ in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
     def test_exp(self, device="mps", dtype=torch.float):
         for v in (2, -2) + ((1j, 1 + 1j) if dtype.is_complex else ()):
             b = torch.arange(18, dtype=dtype, device=device) / 3 * math.pi

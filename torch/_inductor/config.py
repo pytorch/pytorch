@@ -265,6 +265,13 @@ alignment_asserts = (
     == "1"
 )
 
+# Strict mode for input alignment: assert alignment of graph inputs which
+# were codegenned under the assumption that they are aligned, instead of the
+# runtime silently realigning misaligned inputs with a clone.
+alignment_asserts_inputs = (
+    os.environ.get("TORCHINDUCTOR_ALIGNMENT_ASSERTS_INPUTS") == "1"
+)
+
 # enable loop reordering based on input orders
 pick_loop_orders = True
 
@@ -1039,6 +1046,17 @@ loop_index_inversion_in_fusion: bool = True
 #
 # For the cases loop ordering after fusion does not help, we don't lose much.
 score_fusion_memory_threshold = 10
+
+# Memory-timeline fusion gating.
+#   None: disable that threshold dimension
+#   0: allow no graph-peak increase
+#   value: allow total graph-peak delta up to that limit
+# The absolute threshold is in GiB: 1 means 1024**3 bytes.
+# The percentage threshold is fractional: 0.1 means 10%.
+# The accepted delta is measured against the original graph peak before fusion.
+# When both thresholds are set, the tighter limit wins.
+fusion_memory_timeline_peak_memory_increase_gb: float | None = None
+fusion_memory_timeline_peak_memory_pct_threshold: float | None = None
 
 # For Triton Templates, select fastest of best template + epilogue vs best template + separate epilogue kernel
 benchmark_epilogue_fusion = (
@@ -2373,6 +2391,13 @@ class triton:
     # TMA descriptors are only going to be generated if the above conditions
     # can be satisfied, along with any existing requirements for index expressions
     use_tensor_descriptor = False
+
+    # Whether FlexAttention forward/decode may select AMD TDM descriptors on
+    # gfx1250. Defaults on: selection is capability-driven, so this is a kill
+    # switch for callers that do not own the flex_attention() call site and
+    # therefore cannot pass USE_TMA. It does not affect NVIDIA, XPU, dense GEMM
+    # or generic descriptor codegen.
+    enable_flex_tdm = True
 
     # (Experimental)
     # Whether to allow reordering tensor descriptor matches with descending
