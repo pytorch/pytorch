@@ -82,6 +82,11 @@ class TestTransportRegistry(TestCase):
         self.assertEqual(transport.device, torch.device("cpu"))
         self.assertEqual(transport.value, 3)
 
+    def test_unregister_unsupported(self):
+        with _TestTransport() as transport:
+            with self.assertRaisesRegex(NotImplementedError, "unregistration"):
+                transport.unregister_memory(None)
+
     def test_factory_without_device(self):
         register_transport("test", lambda *, value: _TestTransport(value=value))
         transport = new_transport("test", value=3)

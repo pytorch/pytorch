@@ -3394,7 +3394,7 @@ TEST(StaticRuntime, TupleIndex) {
   torch::jit::Module mod("module");
   mod.define(src);
   StaticModule smod(mod);
-  EXPECT_THROW(smod({100, tuple}), std::out_of_range);
+  EXPECT_THROW(smod({100, tuple}), c10::IndexError);
 }
 
 TEST(StaticRuntime, RaiseException) {
@@ -3593,10 +3593,9 @@ TEST(StaticRuntime, IntImplicit_ThrowOnBadInputs) {
   auto graph = getGraphFromIR(src);
   torch::jit::StaticModule smod(graph);
   // Not 0D tensor
-  EXPECT_THROW(smod({at::tensor({1, 2}, at::kInt)}), std::runtime_error);
+  EXPECT_THROW(smod({at::tensor({1, 2}, at::kInt)}), c10::Error);
   // Wrong dtype
-  EXPECT_THROW(
-      smod({at::tensor({1}, at::kFloat).squeeze()}), std::runtime_error);
+  EXPECT_THROW(smod({at::tensor({1}, at::kFloat).squeeze()}), c10::Error);
 }
 
 TEST(StaticRuntime, Select) {

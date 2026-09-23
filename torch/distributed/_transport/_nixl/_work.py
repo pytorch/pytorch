@@ -13,8 +13,7 @@ from .._work import _validate_timeout
 
 
 if TYPE_CHECKING:
-    from .._api import MemoryView
-    from ._memory import NIXLRemoteBuffer
+    from ._memory import NIXLMemoryView, NIXLRemoteBuffer
     from ._transport import NIXLTransport
 
 
@@ -106,7 +105,7 @@ class _NIXLWork(_PollingWork):
     def __init__(
         self,
         transport: NIXLTransport,
-        local: MemoryView,
+        local: NIXLMemoryView,
         remote: NIXLRemoteBuffer,
         timeout: float,
     ) -> None:
