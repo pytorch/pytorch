@@ -1,18 +1,20 @@
 # Copyright (c) 2026 PyTorch Contributors
 
 import math
-from functools import cache
 
 import torch
 
 
-@cache
-def _get_mirror_symmetric_pairs():
+try:
     import triton
     import triton.language as tl
+except ImportError:
+    triton = None
+    _mirror_symmetric_pairs = None
+else:
 
     @triton.jit
-    def kernel(
+    def _mirror_symmetric_pairs(
         output_ptrs,
         sizes,
         c_ptrs,
@@ -45,8 +47,6 @@ def _get_mirror_symmetric_pairs():
             value = alpha * tl.load(output + row * m + col, mask=mask)
             tl.store(output + row * m + col, value, mask=mask)
             tl.store(output + col * m + row, value, mask=mask)
-
-    return kernel
 
 
 class GroupedSymmetricPlan:
@@ -269,7 +269,9 @@ class GroupedSymmetricPlan:
 
     def __call__(self) -> list[torch.Tensor]:
         import cutlass.torch as cutlass_torch
-        import triton
+
+        if triton is None or _mirror_symmetric_pairs is None:
+            raise RuntimeError("grouped symmetric GEMM requires Triton")
 
         with torch.cuda.device(self.inputs[0].device):
             stream = cutlass_torch.current_stream()
@@ -289,7 +291,7 @@ class GroupedSymmetricPlan:
                 triton.cdiv(out.shape[0], block_m) * triton.cdiv(out.shape[0], block_n)
                 for out in self.outputs
             )
-            _get_mirror_symmetric_pairs()[(max_tiles, len(self.outputs))](
+            _mirror_symmetric_pairs[(max_tiles, len(self.outputs))](
                 self.output_ptrs,
                 self.output_sizes,
                 self.c_ptrs,
