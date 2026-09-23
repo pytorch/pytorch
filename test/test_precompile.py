@@ -3047,6 +3047,80 @@ class TestPrecompile(TestCase):
             with self.assertRaises(UnsupportedOperatorException):
                 _precompile_pair(lambda mm, t, u: mm(t) + op(u).sum(), m, x, y)
 
+    def test_capture_leaves_the_ambient_rng_state_alone(self):
+        # Capture runs fn for real under make_fx, so a graph that draws consumes the
+        # caller's RNG stream as a side effect of asking for an artifact. Nothing about
+        # requesting a compile should advance the caller's randomness, so capture
+        # snapshots the state and rewinds it once it knows the graph drew.
+        torch.manual_seed(0)
+        before = torch.random.get_rng_state()
+        torch.compiler.precompile(
+            lambda a: torch.rand_like(a), torch.empty(4), backend="eager"
+        )
+        self.assertEqual(torch.random.get_rng_state(), before)
+
+    @unittest.skipUnless(TEST_CUDA, "needs CUDA")
+    def test_capture_leaves_the_accelerator_rng_state_alone(self):
+        # Same guarantee on the device generator: a graph that draws on the accelerator
+        # advances that device's stream, not the CPU one, so the snapshot has to cover
+        # whichever generators the graph actually touched.
+        torch.manual_seed(0)
+        before = torch.cuda.get_rng_state()
+        torch.compiler.precompile(
+            lambda a: torch.rand_like(a),
+            torch.empty(4, device="cuda"),
+            backend="eager",
+        )
+        self.assertEqual(torch.cuda.get_rng_state(), before)
+
+    def _reseeded_cpu_state(self):
+        torch.random.default_generator.manual_seed(7)
+        return torch.random.get_rng_state()
+
+    def test_capture_of_a_graph_that_does_not_draw_restores_nothing(self):
+        # A reseed the trace cannot see stands in for a concurrent thread's draw: the
+        # graph has nothing of its own to undo, so restoring would replay that draw.
+        def reseed_then_add(a):
+            torch.random.default_generator.manual_seed(7)
+            return a + 1
+
+        torch.manual_seed(0)
+        with self.assertLogs("torch._precompile", level="WARNING") as cm:
+            torch.compiler.precompile(reseed_then_add, torch.empty(4), backend="eager")
+        self.assertTrue(any("does not draw" in m for m in cm.output), cm.output)
+        self.assertEqual(torch.random.get_rng_state(), self._reseeded_cpu_state())
+
+    @unittest.skipUnless(TEST_CUDA, "needs CUDA")
+    def test_capture_drawing_only_on_cuda_leaves_the_cpu_generator_alone(self):
+        # Attribution is per device: the CUDA draw is rewound, while a CPU generator
+        # change made during the same capture is not the graph's and stands.
+        def reseed_then_draw(a):
+            torch.random.default_generator.manual_seed(7)
+            return torch.rand_like(a)
+
+        torch.manual_seed(0)
+        before = torch.cuda.get_rng_state()
+        x = torch.empty(4, device="cuda")
+        torch.compiler.precompile(reseed_then_draw, x, backend="eager")
+        self.assertEqual(torch.cuda.get_rng_state(), before)
+        self.assertEqual(torch.random.get_rng_state(), self._reseeded_cpu_state())
+
+    def test_capture_through_an_opaque_op_restores_every_generator(self):
+        # A custom op can draw inside its own kernel with nothing in the graph to say
+        # so; its presence alone makes capture restore every saved generator.
+        from torch.library import _scoped_library
+
+        with _scoped_library("precompile_rng", "DEF") as lib:
+            lib.define("draw(Tensor x) -> Tensor")
+            lib.impl(
+                "draw", lambda x: x + torch.rand_like(x), "CompositeExplicitAutograd"
+            )
+            torch.manual_seed(0)
+            before = torch.random.get_rng_state()
+            op = torch.ops.precompile_rng.draw.default
+            torch.compiler.precompile(op, torch.empty(4), backend="eager")
+        self.assertEqual(torch.random.get_rng_state(), before)
+
     def test_concurrent_captures_are_serialized(self):
         # Capture clears the example tensors' .grad and reparametrizes the example
         # module in place, so two captures of a shared model in flight at once would

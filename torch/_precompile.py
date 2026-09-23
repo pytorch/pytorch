@@ -232,12 +232,14 @@ it.
 from __future__ import annotations
 
 import base64
+import contextlib
 import dataclasses
 import errno
 import hashlib
 import inspect
 import io
 import logging
+import operator
 import os
 import pickle
 import stat
@@ -273,6 +275,174 @@ def _reinit_capture_lock_after_fork() -> None:
 
 if hasattr(os, "register_at_fork"):
     os.register_at_fork(after_in_child=_reinit_capture_lock_after_fork)
+
+
+def _capture_rng_devices(args: tuple[object, ...]) -> list[torch.device]:
+    # The accelerator generators worth saving, found the way torch.random.fork_rng
+    # finds them: devices of the current accelerator reachable from the arguments (at
+    # any pytree depth, modules included) plus its current device if already
+    # initialized. Probing an uninitialized one would initialize it.
+    accelerator = torch.accelerator.current_accelerator()
+    if accelerator is None:
+        return []
+    devices: set[torch.device] = set()
+    for leaf in pytree.tree_leaves(args):
+        if isinstance(leaf, torch.nn.Module):
+            tensors = [*leaf.parameters(), *leaf.buffers()]
+        else:
+            tensors = [leaf] if isinstance(leaf, torch.Tensor) else []
+        devices.update(t.device for t in tensors if t.device.type == accelerator.type)
+    module = torch.get_device_module(accelerator.type)
+    if getattr(module, "is_initialized", lambda: True)():
+        index = torch.accelerator.current_device_index()
+        devices.add(torch.device(accelerator.type, index))
+    return sorted(devices, key=str)
+
+
+def _op_can_draw(node: torch.fx.Node) -> bool:
+    target = node.target
+    if not isinstance(target, torch._ops.OpOverload):
+        return False
+    return torch.Tag.nondeterministic_seeded in target.tags
+
+
+def _graph_rng_devices(gm: torch.fx.GraphModule) -> set[torch.device] | None:
+    """Default generators, by device, that the captured graph can draw from.
+
+    This is how a restore decides what it has of its own to undo. The alternative --
+    diffing global generator state across capture -- cannot tell the capture's own
+    draws from a concurrent thread's, so it rewinds unrelated work. Per device rather
+    than a single flag for the same reason: a graph that draws only on CUDA must not
+    rewind the CPU generator a concurrent thread is drawing from. None means "could be
+    any of them".
+    """
+    devices: set[torch.device] = set()
+    for node in gm.graph.nodes:
+        if node.op in ("placeholder", "output", "get_attr"):
+            continue
+        target = node.target
+        if target is operator.getitem:
+            continue
+        if not (
+            isinstance(target, torch._ops.OpOverload)
+            and target.name().startswith("aten::")
+        ):
+            # Fail closed: an opaque op (a custom op, or a HOP such as a user Triton
+            # kernel) can draw inside its own kernel with nothing in the graph to say so.
+            return None
+        if not _op_can_draw(node):
+            continue
+        val = node.meta.get("val")
+        if isinstance(val, (tuple, list)):
+            val = next((v for v in val if isinstance(v, torch.Tensor)), None)
+        if not isinstance(val, torch.Tensor):
+            return None
+        devices.add(val.device)
+    return devices
+
+
+def _rng_devices_indicate_a_draw(drawn: set[torch.device] | None) -> bool:
+    """None means "could be any generator"; a non-empty set names them."""
+    return drawn is None or bool(drawn)
+
+
+class _CaptureRngState:
+    """Generator state saved across capture, restored only if capture consumed it.
+
+    make_fx runs ``fn`` for real, so a traced ``torch.rand`` advances the very
+    generators the first real call is about to draw from; without a restore, capturing
+    would visibly change the numbers a first call produces. The restore is conditional
+    because it writes process-global state: rewinding when the capture drew nothing
+    would silently replay a concurrent thread's draws.
+    """
+
+    def __init__(self, args: tuple[object, ...]) -> None:
+        with self._raw():
+            self._cpu = torch.random.get_rng_state().clone()
+            self._devices = []
+            self._states = []
+            self._unsnapshotted: list[torch.device] = []
+            for device in _capture_rng_devices(args):
+                try:
+                    module = torch.get_device_module(device.type)
+                    state = module.get_rng_state(device).clone()
+                except Exception:
+                    # Reading a generator can fail (a fake tensor naming a device this
+                    # host does not have). Record it so settle can report it, rather
+                    # than dying with a bare driver error here or dropping it silently.
+                    self._unsnapshotted.append(device)
+                    continue
+                self._devices.append((module, device))
+                self._states.append(state)
+
+    @staticmethod
+    @contextlib.contextmanager
+    def _raw():
+        # Reading generator state must not be intercepted by whatever mode stack the
+        # caller is under; a tracing mode would turn these reads into graph nodes, and
+        # a torch-function mode can reject or rewrite the read outright.
+        with (
+            torch.utils._python_dispatch._disable_current_modes(),
+            torch._C._DisableFuncTorch(),
+            torch._C.DisableTorchFunction(),
+        ):
+            yield
+
+    def settle(
+        self, gm: torch.fx.GraphModule, args: tuple[object, ...], fn: object
+    ) -> None:
+        """Restore what the real-traced ``gm`` could have drawn, and warn on the rest."""
+        drawn = _graph_rng_devices(gm)
+        if _rng_devices_indicate_a_draw(drawn):
+            self._restore(drawn)
+            # Devices live now, re-enumerated so one first initialized during capture
+            # counts; any the graph could have drawn on but that were not saved cannot
+            # be rewound, and the capturing run will not reproduce on load.
+            live = _capture_rng_devices(args) if drawn is None else drawn
+            saved = {device for _module, device in self._devices}
+            missed = sorted(
+                {d for d in live if d.type != "cpu" and d not in saved}
+                | set(self._unsnapshotted),
+                key=str,
+            )
+            if missed:
+                log.warning(
+                    "precompile: the captured graph may draw on %s, whose generator "
+                    "state was not saved and so could not be restored; this capturing "
+                    "run may return different random values than later runs load from "
+                    "the artifact. Precompile with an example tensor on that device, "
+                    "or make it current.",
+                    ", ".join(str(d) for d in missed),
+                )
+        elif self._changed():
+            # No graph op draws, yet the state moved: fn reseeded outside the trace,
+            # or another thread drew. Neither is the capture's to undo.
+            log.warning(
+                "precompile: generator state changed during capture although the "
+                "captured graph does not draw (%s reseeded, or another thread drew), "
+                "so it was left as-is.",
+                getattr(fn, "__name__", "fn"),
+            )
+
+    def _changed(self) -> bool:
+        with self._raw():
+            if not torch.equal(torch.random.get_rng_state(), self._cpu):
+                return True
+            return any(
+                not torch.equal(module.get_rng_state(device), state)
+                for (module, device), state in zip(self._devices, self._states)
+            )
+
+    def _restore(self, drawn: set[torch.device] | None) -> None:
+        # Restore only the generators the capture could have drawn from. Writing back
+        # one it did not touch is not a no-op: it rewinds whatever another thread drew
+        # from that generator while capture ran.
+        with self._raw():
+            if drawn is None or any(d.type == "cpu" for d in drawn):
+                torch.random.set_rng_state(self._cpu)
+            for (module, device), state in zip(self._devices, self._states):
+                if drawn is None or device in drawn:
+                    module.set_rng_state(state, device)
 
 
 if TYPE_CHECKING:
@@ -880,7 +1050,6 @@ def _capture(
     interning/order established here for params then buffers is the calling
     convention the runtime model must reproduce (invariant 2).
     """
-    import contextlib
 
     args = tuple(args)
     module_positions = [i for i, a in enumerate(args) if isinstance(a, torch.nn.Module)]
@@ -1885,7 +2054,15 @@ class PrecompiledModule(PrecompiledRunnable):
                 "backend='inductor'; eager + unbacked is not supported."
             )
         with _CAPTURE_LOCK:
+            rng = _CaptureRngState(args)
+            # Nothing is restored if _capture raises, including a rejection after the
+            # trace completed.
             capture = _capture(self._fn, args, self._decompositions)
+            # A fake-traced capture (mark_unbacked) runs no real kernel, so nothing was
+            # consumed however the graph reads, and restoring could only rewind what
+            # another thread drew.
+            if capture.fake_mode is None:
+                rng.settle(capture.gm, args, self._fn)
         self._module_positions = capture.module_positions
         self._num_positional_args = capture.num_positional_args
         self._param_names = capture.param_names
@@ -2406,6 +2583,22 @@ class _PrecompileApi:
         lock, which a nested inductor precompile takes while holding it: do not call
         precompile from code that runs while torch.compile is compiling (a custom pass,
         or a function executed during its trace), or two threads can deadlock.
+
+        Capture restores the generator state it consumed, and only that: a graph
+        containing no op that can draw leaves the generators untouched even if a
+        concurrent thread advanced them. Every op tagged ``nondeterministic_seeded``
+        counts as a draw on its output's device, even one configured not to draw, and an
+        op that is not an aten op (a custom op, a higher-order op) could draw from any
+        generator, so every saved one is restored. A draw through an explicit
+        ``torch.Generator`` is attributed to its output's device, so that device's
+        default generator is restored and the named one is left advanced. When a restore
+        does happen it rewinds any draw a concurrent thread made while capture ran, so
+        precompile random computations before starting threads that share the default
+        generator. A capture that raises restores nothing, including one rejected after
+        tracing. The CPU generator is always saved; of the current accelerator (CUDA,
+        XPU, MPS, ...) only an already-initialized current device and the devices
+        reachable from the arguments are, and a draw on any other device warns and is
+        left as-is.
 
         ``backend`` selects how the captured graph is realized:
 
