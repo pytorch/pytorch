@@ -43,6 +43,7 @@ from torch._inductor.runtime.triton_heuristics import (
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_cuda import SM80OrLater, SM90OrLater
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_WINDOWS,
     parametrize,
@@ -70,6 +71,8 @@ def _patched_getitem(self, grid):
 
 @instantiate_parametrized_tests
 class TestStaticTritonLauncherUnit(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @staticmethod
     def _global_scratch_kernel(
         kernel_cls=StaticallyLaunchedCudaKernel, *, asm=None, **metadata_overrides
