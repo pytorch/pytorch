@@ -228,7 +228,7 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
         # cpu variant (nccl on cuda/xpu), so run there. This drives the full
         # dist.monitored_barrier dispatch onto BackendWrapper::monitoredBarrier
         # (the torchcomms reimplementation of ProcessGroupGloo::monitoredBarrier).
-        if self.device_type != "cpu":
+        if self._requires_accelerator():
             return
         self.assertEqual(dist.get_backend(self.pg), dist.Backend.GLOO)
         # All ranks check in -> the health-checking barrier returns cleanly.
