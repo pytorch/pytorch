@@ -293,6 +293,19 @@ class TracerBase:
         log.debug("create_node %s", node)
         return node
 
+    _INTERNAL_PT_FILES: list[str] = [
+        "torch/fx/proxy.py",
+        "torch/fx/_symbolic_trace.py",
+        "torch/fx/experimental/proxy_tensor.py",
+        "torch/_ops.py",
+        "torch/_tensor.py",
+        "torch/utils/_python_dispatch.py",
+        "torch/_prims_common/wrappers.py",
+        "torch/_refs/__init__.py",
+        "torch/_refs/nn/functional/__init__.py",
+        "torch/utils/_stats.py",
+    ]
+
     def _filter_traceback_frames(
         self, user_stack_summary: traceback.StackSummary
     ) -> traceback.StackSummary:
@@ -321,6 +334,24 @@ class TracerBase:
             # stacktrace will probably be irrelevant
             if first_forward == -1:
                 user_frames: list[traceback.FrameSummary] = []
+            else:
+                # When the CapturedTraceback (used instead of the old
+                # _find_user_frame) captures the stack, it includes internal
+                # PyTorch infrastructure frames (e.g. proxy.py, _ops.py,
+                # _tensor.py) at the end of the summary (most recent frames).
+                # Strip these so only user code frames remain.
+                end = len(user_frames)
+                for i in range(len(user_frames) - 1, -1, -1):
+                    frame = user_frames[i]
+                    is_internal = any(
+                        frame.filename.endswith(pt_file)
+                        for pt_file in self._INTERNAL_PT_FILES
+                    )
+                    if is_internal:
+                        end = i
+                    else:
+                        break
+                user_frames = user_frames[:end]
 
         from torch.fx.experimental.symbolic_shapes import uninteresting_files
 
@@ -373,41 +404,7 @@ class TracerBase:
 
         return proxy
 
-    def _find_user_frame(self) -> types.FrameType | None:
-        """
-        Find the Python stack frame executing the user code during
-        symbolic tracing.
-        """
-        # We have to do a little dance here. Basically, walk up the callstack and
-        # record the first frame not in the pytorch source. This is the frame executing
-        # the user code during tracing.
-        frame = inspect.currentframe()
-
-        pt_files = [
-            "torch/fx/proxy.py",
-            "torch/fx/_symbolic_trace.py",
-            "torch/fx/experimental/proxy_tensor.py",
-            "torch/_ops.py",
-            "torch/_tensor.py",
-            "torch/utils/_python_dispatch.py",
-            "torch/_prims_common/wrappers.py",
-            "torch/_refs/__init__.py",
-            "torch/_refs/nn/functional/__init__.py",
-            "torch/utils/_stats.py",
-        ]
-        while frame:
-            frame = frame.f_back
-            if frame and all(
-                not frame.f_code.co_filename.endswith(file) for file in pt_files
-            ):
-                break
-
-        if not frame:
-            return None
-
-        return frame
-
-    @compatibility(is_backward_compatible=True)
+        @compatibility(is_backward_compatible=True)
     def create_arg(self, a: Any) -> Argument:
         """
         A method that lowers the objects seen as arguments during symbolic evaluation
