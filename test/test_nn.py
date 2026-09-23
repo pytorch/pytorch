@@ -12993,14 +12993,14 @@ if __name__ == '__main__':
             F.rrelu(x, lower=0.5, upper=0.3)
 
     @onlyCUDA
-    def test_rrelu_with_noise_cuda_noncontiguous_noise_rejected(self, device):
+    def test_rrelu_with_noise_cuda_noncontiguous_noise(self, device):
         # A non-contiguous noise used to be copied into a temporary that
-        # the kernel wrote into and never copied back.
+        # the kernel wrote into and never copied back. It materializes now.
         x = torch.randn(64, device=device)
         noise = torch.empty(128, device=device)[::2]
         out = torch.empty(64, device=device)
-        with self.assertRaisesRegex(RuntimeError, "Expected contiguous tensor"):
-            torch._C._nn.rrelu_with_noise(x, noise, 0.1, 0.3, True, None, out=out)
+        torch._C._nn.rrelu_with_noise(x, noise, 0.1, 0.3, True, None, out=out)
+        self.assertEqual(out, x * noise)
 
     @onlyCPU
     def test_softshrink(self, device):
