@@ -685,7 +685,8 @@ sycl::event scaled_matmul(
   int post_op_idx = 0;
   if (with_alpha) {
     alpha_f32 = alpha->to(at::kFloat).contiguous();
-    auto alpha_mem = make_onednn_memory(alpha_md, engine, alpha_f32.data_ptr());
+    auto alpha_mem =
+      make_onednn_memory(alpha_md, engine, alpha_f32.const_data_ptr());
     args.insert(
         {DNNL_ARG_ATTR_MULTIPLE_POST_OP(post_op_idx) | DNNL_ARG_SRC_1,
          alpha_mem});
