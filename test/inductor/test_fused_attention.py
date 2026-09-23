@@ -17,7 +17,13 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
     SM80OrLater,
 )
-from torch.testing._internal.common_utils import IS_LINUX, skipIfXpu, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import (
+    IS_LINUX,
+    isRocmArchAnyOf,
+    MI200_ARCH,
+    skipIfXpu,
+    TEST_WITH_ROCM,
+)
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
@@ -169,6 +175,19 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             if TEST_WITH_ROCM and dtype == torch.float:
                 atol = 3e-3
                 rtol = 1e-2
+            if (
+                self.device == GPU_TYPE
+                and dtype == torch.half
+                and isRocmArchAnyOf(MI200_ARCH)
+            ):
+                # MI200 fp16 backward GEMMs use the bf16-intermediate alt
+                # implementation (fp16_on_mi200 in numerical_accuracy.md), so
+                # the eager reference grads are the less accurate side here
+                # (grad rmse vs fp64 gold ~2e-3 vs ~1e-4 for the fused
+                # kernel). Measured max grad diff 3.4e-3 on 1/4096 elements.
+                # The device check keeps this off test_sdpa_rewriter_1_cpu,
+                # which also binds this helper.
+                atol = 5e-3
             self._check_common(dot_prod_attention, dtype=dtype, atol=atol, rtol=rtol)
             self._check_common(
                 checkpoint_wrapper(dot_prod_attention),
@@ -449,6 +468,11 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         )
 
     def _test_sdpa_rewriter_7(self):
+        # MI200: the eager fp16 reference backward uses the bf16-intermediate
+        # alt implementation and is the less accurate side (see
+        # _test_sdpa_rewriter_1); measured max grad diff 2.7e-3.
+        atol = 4e-3 if isRocmArchAnyOf(MI200_ARCH) else 2e-3
+
         def sfdp_pattern_7(query, key, value, training):
             q = query.permute(0, 2, 1, 3)
             k = key.permute(0, 2, 1, 3)
@@ -484,7 +508,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             contains=SM80OrLater,
             has_dropout=True,
             override_check_equal=True,
-            atol=2e-3,
+            atol=atol,
         )
         args = (
             torch.randn((2, 8, 4, 16), device=self.device, dtype=torch.half),
@@ -497,7 +521,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             contains=False,
             has_dropout=True,
             override_check_equal=True,
-            atol=2e-3,
+            atol=atol,
         )
 
         args = (
@@ -511,7 +535,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             contains=SM80OrLater,
             has_dropout=True,
             override_check_equal=True,
-            atol=2e-3,
+            atol=atol,
         )
         args = (
             torch.randn((2, 8, 4, 16), device=GPU_TYPE, dtype=torch.half),
@@ -524,10 +548,15 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             contains=SM80OrLater,
             has_dropout=True,
             override_check_equal=True,
-            atol=2e-3,
+            atol=atol,
         )
 
     def _test_sdpa_rewriter_8(self):
+        # MI200: the eager fp16 reference backward uses the bf16-intermediate
+        # alt implementation and is the less accurate side (see
+        # _test_sdpa_rewriter_1); measured max grad diff 2.7e-3.
+        atol = 4e-3 if isRocmArchAnyOf(MI200_ARCH) else 2e-3
+
         def sfdp_pattern_8(query, key, value):
             q = query.permute(0, 2, 1, 3)
             k = key.permute(0, 2, 1, 3)
@@ -553,20 +582,20 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             torch.randn((2, 8, 4, 16), device=self.device, dtype=torch.half),
             torch.randn((2, 8, 4, 16), device=self.device, dtype=torch.half),
         )
-        self._check_common(sfdp_pattern_8, args, atol=2e-3)
+        self._check_common(sfdp_pattern_8, args, atol=atol)
         args = (
             torch.randn((2, 8, 4, 16), device=self.device, dtype=torch.half),
             torch.randn((2, 8, 4, 16), device=self.device, dtype=torch.half),
             torch.randn((2, 8, 4, 16), device=self.device, dtype=torch.half),
         )
-        self._check_common(sfdp_pattern_8_v2, args, atol=2e-3, contains=False)
+        self._check_common(sfdp_pattern_8_v2, args, atol=atol, contains=False)
 
         args = (
             torch.randn((2, 8, 4, 16), device=GPU_TYPE, dtype=torch.half),
             torch.randn((2, 8, 4, 16), device=GPU_TYPE, dtype=torch.half),
             torch.randn((2, 8, 4, 16), device=GPU_TYPE, dtype=torch.half),
         )
-        self._check_common(checkpoint_wrapper(sfdp_pattern_8), args, atol=2e-3)
+        self._check_common(checkpoint_wrapper(sfdp_pattern_8), args, atol=atol)
         args = (
             torch.randn((2, 8, 4, 16), device=GPU_TYPE, dtype=torch.half),
             torch.randn((2, 8, 4, 16), device=GPU_TYPE, dtype=torch.half),
@@ -575,7 +604,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         self._check_common(
             checkpoint_wrapper(sfdp_pattern_8_v2),
             args,
-            atol=2e-3,
+            atol=atol,
             contains=False,
         )
 
@@ -750,6 +779,267 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                 model, args1=args, contains=False, atol=1e-3, has_fuse_pattern=False
             )
 
+    def _test_pattern_fails_with_tensor_scale(self):
+        # https://github.com/pytorch/pytorch/issues/191203
+        def model(query, key, value, attn_mask, scale):
+            # Dividing by scale makes the scale gradients very unstable
+            scale = scale.detach()
+            scores = query @ key.transpose(-2, -1) / scale
+            weights = torch.softmax(scores + attn_mask, dim=-1)
+            return weights @ value
+
+        tensor_shape = (2, 4, 4, 4)
+        args = [
+            torch.randn(tensor_shape, device=self.device),
+            torch.randn(tensor_shape, device=self.device),
+            torch.randn(tensor_shape, device=self.device),
+            torch.randn((1, 1, 4, 4), device=self.device),
+            torch.tensor(0.5, device=self.device),
+        ]
+        self._check_common(
+            model, args1=args, contains=False, atol=1e-3, has_fuse_pattern=False
+        )
+        self.assertEqual(counters["inductor"]["fuse_attention"], 0)
+
+    def _test_pattern_fails_with_batch_permuted_key(self):
+        # https://github.com/pytorch/pytorch/issues/195320
+        def dot_prod_attention(query, key, value):
+            # key arrives as (B, T, H, D); permute(0, 2, 3, 1) also moves
+            # batch axes, so it is not key.transpose(-2, -1) and must not
+            # fuse as attention.
+            return (
+                torch.matmul(query, key.permute(0, 2, 3, 1))
+                .mul(1.0 / math.sqrt(key.shape[-1]))
+                .softmax(dim=-1)
+                .matmul(value)
+            )
+
+        def control_dot_prod_attention(query, key, value):
+            return (
+                torch.matmul(query, key.transpose(-2, -1))
+                .mul(1.0 / math.sqrt(key.shape[-1]))
+                .softmax(dim=-1)
+                .matmul(value)
+            )
+
+        # batch 1 keeps the permuted key viewable (no clone in the matmul
+        # decomposition) and T == H keeps the mis-bound replacement shape
+        # consistent, so before the fix this silently fused and produced
+        # wrong results instead of crashing.
+        tensor_shape = (1, 8, 8, 8)
+
+        def make_args():
+            return [torch.randn(tensor_shape, device=self.device) for _ in range(3)]
+
+        self._check_common(
+            dot_prod_attention,
+            args1=make_args(),
+            contains=False,
+            has_fuse_pattern=False,
+        )
+        self.assertEqual(counters["inductor"]["fuse_attention"], 0)
+        # the same shapes spelled with a genuine transpose must still fuse
+        self._check_common(control_dot_prod_attention, args1=make_args())
+
+        # a negative-dim spelling of the same transpose must also fuse
+        def negative_dims_dot_prod_attention(query, key, value):
+            return (
+                torch.matmul(query, key.permute(0, 1, -1, -2))
+                .mul(1.0 / math.sqrt(key.shape[-1]))
+                .softmax(dim=-1)
+                .matmul(value)
+            )
+
+        self._check_common(negative_dims_dot_prod_attention, args1=make_args())
+
+    def _test_pattern_fails_with_non_last_dim_softmax(self):
+        # https://github.com/pytorch/pytorch/issues/195320
+        def dot_prod_attention(query, key, value):
+            # softmax over dim=-2 is a different computation and must not
+            # fuse as attention
+            scores = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(
+                query.shape[-1]
+            )
+            return scores.softmax(dim=-2).matmul(value)
+
+        def positive_dim_dot_prod_attention(query, key, value):
+            scores = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(
+                query.shape[-1]
+            )
+            return scores.softmax(dim=3).matmul(value)
+
+        # T == H keeps the mis-bound replacement shape consistent, so before
+        # the fix this silently fused and produced wrong results.
+        tensor_shape = (1, 8, 8, 8)
+
+        def make_args():
+            return [torch.randn(tensor_shape, device=self.device) for _ in range(3)]
+
+        self._check_common(
+            dot_prod_attention,
+            args1=make_args(),
+            contains=False,
+            has_fuse_pattern=False,
+        )
+        self.assertEqual(counters["inductor"]["fuse_attention"], 0)
+        # softmax over the last dim spelled positively must still fuse
+        self._check_common(positive_dim_dot_prod_attention, args1=make_args())
+
+    def _test_pattern_fails_with_mismatched_view_grouping(self):
+        # The view sizes of _sfdp_pattern_24 are wildcards in the serialized
+        # pattern; grouping the scores heads-major instead of batch-major
+        # before the mask add coarse-matched anyway and crashed while tracing
+        # the replacement (the #195282 failure mode).  The match-time re-trace
+        # must reject it.
+        def dot_prod_attention(query, key, value, attn_mask, heads_major):
+            bs, n_head, seq_len, embed_dim = query.shape
+            q = query.view(bs * n_head, seq_len, embed_dim)
+            k = key.reshape(bs * n_head, seq_len, embed_dim)
+            v = value.reshape(bs * n_head, seq_len, embed_dim)
+            attn_weights = torch.bmm(q, k.transpose(1, 2))
+            grouping = (n_head, bs) if heads_major else (bs, n_head)
+            attn_weights = attn_weights.view(*grouping, seq_len, seq_len) + attn_mask
+            attn_weights = attn_weights.view(bs * n_head, seq_len, seq_len)
+            attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1)
+            return torch.bmm(attn_weights, v).view(bs, n_head, seq_len, embed_dim)
+
+        bs, n_head, seq_len, embed_dim = 4, 2, 16, 32
+        tensor_shape = (bs, n_head, seq_len, embed_dim)
+
+        def make_args(mask_shape):
+            return [
+                *[torch.randn(tensor_shape, device=self.device) for _ in range(3)],
+                torch.randn(mask_shape, device=self.device),
+            ]
+
+        self._check_common(
+            functools.partial(dot_prod_attention, heads_major=True),
+            args1=make_args((n_head, 1, seq_len, seq_len)),
+            contains=False,
+            has_fuse_pattern=False,
+            has_dropout=False,
+            check_train=False,
+        )
+        self.assertEqual(counters["inductor"]["fuse_attention"], 0)
+        # the batch-major grouping the pattern was traced from must still fuse
+        self._check_common(
+            functools.partial(dot_prod_attention, heads_major=False),
+            args1=make_args((1, 1, seq_len, seq_len)),
+            has_dropout=False,
+            check_train=False,
+        )
+
+    def _test_pattern_fails_with_lower_rank_inputs(self):
+        # Rank-3 inputs whose views mirror _sfdp_pattern_24's op structure
+        # coarse-match the 4-D-traced pattern (its view sizes are wildcards),
+        # so the match-time re-trace runs search_fn on them and indexes
+        # query.size(3).  The candidate must be rejected, not crash compile.
+        n_head, seq_len, head_size = 2, 16, 32
+
+        def dot_prod_attention(query, key, value, attn_mask):
+            bs_heads = query.size(0) * n_head
+            q = query.view(bs_heads, seq_len, head_size)
+            k = key.view(bs_heads, seq_len, head_size)
+            v = value.view(bs_heads, seq_len, head_size)
+            attn_weights = torch.bmm(q, k.transpose(1, 2))
+            attn_weights = attn_weights.view(-1, n_head, seq_len, seq_len) + attn_mask
+            attn_weights = attn_weights.view(bs_heads, seq_len, seq_len)
+            attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1)
+            return torch.bmm(attn_weights, v).view(-1, n_head, seq_len * head_size)
+
+        tensor_shape = (4, n_head, seq_len * head_size)
+        args = [
+            *[torch.randn(tensor_shape, device=self.device) for _ in range(3)],
+            torch.randn((1, 1, seq_len, seq_len), device=self.device),
+        ]
+        self._check_common(
+            dot_prod_attention,
+            args1=args,
+            contains=False,
+            has_fuse_pattern=False,
+            has_dropout=False,
+            check_train=False,
+        )
+        self.assertEqual(counters["inductor"]["fuse_attention"], 0)
+
+    def _test_pattern_fuses_with_symint_scale(self):
+        # A SymInt scale is a scalar the fused kernel accepts. _check_common
+        # only marks dim 0 dynamic, so the scale is taken from that dim.
+        if self.use_static_shapes:
+            self.skipTest("the scale is only symbolic under dynamic shapes")
+
+        # The mask is built inside the model: a mask input would require grad
+        # in the training run, which blocks the fusion for any scale.
+        def model(query, key, value):
+            scale = query.size(0) // 2
+            attn_mask = torch.ones(
+                query.size(-2), key.size(-2), dtype=torch.bool, device=query.device
+            ).tril(diagonal=0)
+            attn_mask = attn_mask.masked_fill(
+                torch.logical_not(attn_mask), -float("inf")
+            )
+            scores = query @ key.transpose(-2, -1) / scale
+            weights = torch.softmax(scores + attn_mask, dim=-1)
+            return weights @ value
+
+        tensor_shape = (8, 4, 4, 4)
+        args = [
+            torch.randn(tensor_shape, device=self.device),
+            torch.randn(tensor_shape, device=self.device),
+            torch.randn(tensor_shape, device=self.device),
+        ]
+        self._check_common(model, args1=args, contains=False)
+
+    def _test_pattern_fuses_with_symint_scale_div(self):
+        # Same SymInt scale, reaching the guard through _sfdp_extra_check
+        # instead of _sfdp_params_check.
+        if self.use_static_shapes:
+            self.skipTest("the scale is only symbolic under dynamic shapes")
+
+        def model(query, key, value):
+            scale = query.size(0) // 2
+            return (
+                torch.matmul(query, key.transpose(-2, -1))
+                .div(scale)
+                .softmax(dim=-1)
+                .matmul(value)
+            )
+
+        tensor_shape = (8, 4, 4, 4)
+        args = [
+            torch.randn(tensor_shape, device=self.device),
+            torch.randn(tensor_shape, device=self.device),
+            torch.randn(tensor_shape, device=self.device),
+        ]
+        self._check_common(model, args1=args)
+
+    def _test_pattern_fails_with_symfloat_scale(self):
+        # tensorify_python_scalars turns the SymFloat scale into a 0-d tensor
+        # before the pattern check, so the fusion is skipped.
+        # TODO: the scalar behind a tensorified SymFloat scale (e.g.
+        # head_dim**0.5 under dynamic shapes) could be recovered from the
+        # aten.scalar_tensor node to keep the fusion - tracked in #194444.
+        if self.use_static_shapes:
+            self.skipTest("the scale is only symbolic under dynamic shapes")
+
+        def model(query, key, value, attn_mask):
+            scale = query.size(0) ** 0.5
+            scores = query @ key.transpose(-2, -1) / scale
+            weights = torch.softmax(scores + attn_mask, dim=-1)
+            return weights @ value
+
+        tensor_shape = (8, 4, 4, 4)
+        args = [
+            torch.randn(tensor_shape, device=self.device),
+            torch.randn(tensor_shape, device=self.device),
+            torch.randn(tensor_shape, device=self.device),
+            torch.randn((1, 1, 4, 4), device=self.device),
+        ]
+        self._check_common(
+            model, args1=args, contains=False, atol=1e-3, has_fuse_pattern=False
+        )
+        self.assertEqual(counters["inductor"]["fuse_attention"], 0)
+
     def _test_pattern_fails_with_unsupported_mask(self):
         if not self.use_static_shapes:
             self.skipTest("Causes shape specialization. TODO: investigate")
@@ -913,6 +1203,35 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             rtol=1e-2,
         )
 
+    def _test_sdpa_rewriter_13_non_transpose_permute(self, dtype):
+        def dot_prod_attention(
+            query: torch.Tensor,
+            key: torch.Tensor,
+            value: torch.Tensor,
+            training: bool,
+        ) -> torch.Tensor:
+            attn_weight = torch.bmm(query, key.permute(1, 2, 0)).softmax(dim=-1)
+            attn_weight = torch.nn.functional.dropout(
+                attn_weight, p=0.5, training=training
+            )
+            return torch.bmm(attn_weight, value)
+
+        args = [
+            torch.randn((8, 3, 4), device=self.device, dtype=dtype),
+            torch.randn((3, 8, 4), device=self.device, dtype=dtype),
+            torch.randn((8, 3, 4), device=self.device, dtype=dtype),
+        ]
+        self._check_common(
+            dot_prod_attention,
+            args1=args,
+            contains=False,
+            has_fuse_pattern=False,
+            has_dropout=True,
+            check_train=False,
+            override_check_equal=True,
+        )
+        self.assertEqual(counters["inductor"]["fuse_attention"], 0)
+
     def _test_sdpa_rewriter_14(self):
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
@@ -956,7 +1275,11 @@ class TestSDPAPatternRewriterTemplate(TestCase):
 
         self._check_common(dot_prod_attention, check_train=False)
 
-    def _test_sdpa_rewriter_16(self):
+    def _test_sdpa_rewriter_16(
+        self,
+        check_train=True,
+        override_check_equal=False,
+    ):
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, training
         ) -> torch.Tensor:
@@ -983,7 +1306,13 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                 .matmul(v)
             )
 
-        self._check_common(dot_prod_attention, contains=False, has_dropout=True)
+        self._check_common(
+            dot_prod_attention,
+            contains=False,
+            has_dropout=True,
+            check_train=check_train,
+            override_check_equal=override_check_equal,
+        )
 
         # also check batch_size=1 because the graph is slightly different
         tensor_shape = (1, 2, 16, 32)
@@ -993,10 +1322,19 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             torch.randn(tensor_shape, device=self.device),
         ]
         self._check_common(
-            dot_prod_attention, args1=args, contains=False, has_dropout=True
+            dot_prod_attention,
+            args1=args,
+            contains=False,
+            has_dropout=True,
+            check_train=check_train,
+            override_check_equal=override_check_equal,
         )
 
-    def _test_sdpa_rewriter_16_fp32_mask(self):
+    def _test_sdpa_rewriter_16_fp32_mask(
+        self,
+        check_train=True,
+        override_check_equal=False,
+    ):
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, training
         ) -> torch.Tensor:
@@ -1020,7 +1358,13 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                 .matmul(v)
             )
 
-        self._check_common(dot_prod_attention, contains=False, has_dropout=True)
+        self._check_common(
+            dot_prod_attention,
+            contains=False,
+            has_dropout=True,
+            check_train=check_train,
+            override_check_equal=override_check_equal,
+        )
 
         # also check batch_size=1 because the graph is slightly different
         tensor_shape = (1, 2, 16, 32)
@@ -1030,7 +1374,12 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             torch.randn(tensor_shape, device=self.device),
         ]
         self._check_common(
-            dot_prod_attention, args1=args, contains=False, has_dropout=True
+            dot_prod_attention,
+            args1=args,
+            contains=False,
+            has_dropout=True,
+            check_train=check_train,
+            override_check_equal=override_check_equal,
         )
 
     def _test_sdpa_rewriter_17(self):
@@ -1528,7 +1877,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         self.assertLessEqual(
             copy_count_cached,
             copy_count_uncached,
-            f"Expected caching to produce <= copy_ ops (got {copy_count_cached}) "
+            lambda msg: f"{msg}\nExpected caching to produce <= copy_ ops (got {copy_count_cached}) "
             f"vs no caching ({copy_count_uncached})",
         )
 
@@ -1600,6 +1949,85 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             has_dropout=True,
             check_train=True,
         )
+
+    def _test_sdpa_rewriter_29(self):
+        def dot_prod_attention(
+            query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
+        ) -> torch.Tensor:
+            """Input tensors assumed to have shape (batch_size, seq_len, n_head, embed_dim)"""
+            q = query.permute(0, 2, 1, 3)
+            k = key.permute(0, 2, 1, 3)
+            v = value.permute(0, 2, 1, 3)
+            scale = 1.0 / query.size(-1) ** 0.5
+            q = torch.ops.aten.mul.Scalar(q, scale)
+            k_t = torch.ops.aten.mul.Scalar(k.transpose(-2, -1), scale)
+            attn_mask = torch.zeros(
+                1, 1, query.size(1), key.size(1), device=query.device, dtype=query.dtype
+            )
+            attn_weight = (q @ k_t) + attn_mask
+            attn_weight = torch.ops.aten._safe_softmax(attn_weight, -1)
+            return attn_weight @ v
+
+        for dtype in [torch.half, torch.float]:
+            # batch_size > 1 (generates clone nodes), also exercise training.
+            tensor_shape = (2, 8, 4, 16)
+            args = [
+                torch.randn(tensor_shape, device=self.device, dtype=dtype),
+                torch.randn(tensor_shape, device=self.device, dtype=dtype),
+                torch.randn(tensor_shape, device=self.device, dtype=dtype),
+            ]
+            self._check_common(
+                dot_prod_attention, args1=args, dtype=dtype, check_train=True
+            )
+
+            # batch_size = 1 (no clone)
+            tensor_shape_bs1 = (1, 8, 4, 16)
+            args_bs1 = [
+                torch.randn(tensor_shape_bs1, device=self.device, dtype=dtype),
+                torch.randn(tensor_shape_bs1, device=self.device, dtype=dtype),
+                torch.randn(tensor_shape_bs1, device=self.device, dtype=dtype),
+            ]
+            self._check_common(
+                dot_prod_attention, args1=args_bs1, dtype=dtype, check_train=False
+            )
+
+    def _test_sdpa_rewriter_30(self):
+        def dot_prod_attention(
+            query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
+        ) -> torch.Tensor:
+            """Input tensors assumed to have shape (batch_size, seq_len, n_head, embed_dim)"""
+            q = query.permute(0, 2, 1, 3)
+            k = key.permute(0, 2, 1, 3)
+            v = value.permute(0, 2, 1, 3)
+            scale = 1.0 / query.size(-1) ** 0.5
+            q = torch.ops.aten.mul.Scalar(q, scale)
+            k_t = torch.ops.aten.mul.Scalar(k.transpose(-2, -1), scale)
+            attn_weight = q @ k_t
+            attn_weight = torch.ops.aten._safe_softmax(attn_weight, -1)
+            return attn_weight @ v
+
+        for dtype in [torch.half, torch.float]:
+            # batch_size > 1 (generates clone nodes), also exercise training.
+            tensor_shape = (2, 8, 4, 16)
+            args = [
+                torch.randn(tensor_shape, device=self.device, dtype=dtype),
+                torch.randn(tensor_shape, device=self.device, dtype=dtype),
+                torch.randn(tensor_shape, device=self.device, dtype=dtype),
+            ]
+            self._check_common(
+                dot_prod_attention, args1=args, dtype=dtype, check_train=True
+            )
+
+            # batch_size = 1 (no clone)
+            tensor_shape_bs1 = (1, 8, 4, 16)
+            args_bs1 = [
+                torch.randn(tensor_shape_bs1, device=self.device, dtype=dtype),
+                torch.randn(tensor_shape_bs1, device=self.device, dtype=dtype),
+                torch.randn(tensor_shape_bs1, device=self.device, dtype=dtype),
+            ]
+            self._check_common(
+                dot_prod_attention, args1=args_bs1, dtype=dtype, check_train=False
+            )
 
     def _test_sdpa_rewriter_28(self):
         def dot_prod_attention(
@@ -1702,8 +2130,28 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
         test_pattern_fails_with_tensor_factor_gpu = (
             TestSDPAPatternRewriterTemplate._test_pattern_fails_with_tensor_factor
         )
+        test_pattern_fails_with_tensor_scale_gpu = (
+            TestSDPAPatternRewriterTemplate._test_pattern_fails_with_tensor_scale
+        )
+        test_pattern_fuses_with_symint_scale_gpu = (
+            TestSDPAPatternRewriterTemplate._test_pattern_fuses_with_symint_scale
+        )
+        test_pattern_fuses_with_symint_scale_div_gpu = (
+            TestSDPAPatternRewriterTemplate._test_pattern_fuses_with_symint_scale_div
+        )
+        test_pattern_fails_with_symfloat_scale_gpu = (
+            TestSDPAPatternRewriterTemplate._test_pattern_fails_with_symfloat_scale
+        )
         test_pattern_fails_with_unsupported_mask_gpu = (
             TestSDPAPatternRewriterTemplate._test_pattern_fails_with_unsupported_mask
+        )
+        test_pattern_fails_with_batch_permuted_key_gpu = (
+            TestSDPAPatternRewriterTemplate._test_pattern_fails_with_batch_permuted_key
+        )
+        test_pattern_fails_with_non_last_dim_softmax_gpu = TestSDPAPatternRewriterTemplate._test_pattern_fails_with_non_last_dim_softmax
+        test_pattern_fails_with_mismatched_view_grouping_gpu = TestSDPAPatternRewriterTemplate._test_pattern_fails_with_mismatched_view_grouping
+        test_pattern_fails_with_lower_rank_inputs_gpu = (
+            TestSDPAPatternRewriterTemplate._test_pattern_fails_with_lower_rank_inputs
         )
         test_sdpa_rewriter_11_gpu = (
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_11
@@ -1723,13 +2171,18 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
         test_sdpa_rewriter_15_gpu = functools.partialmethod(
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_15
         )
-        # Pattern 16 is disabled on NVIDIA CUDA (disable_cuda=True) but enabled on ROCm
         if TEST_WITH_ROCM:
             test_sdpa_rewriter_16_gpu = functools.partialmethod(
                 TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_16
             )
             test_sdpa_rewriter_16_fp32_mask_gpu = functools.partialmethod(
                 TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_16_fp32_mask
+            )
+        elif GPU_TYPE == "cuda":
+            test_sdpa_rewriter_16_inference_gpu = functools.partialmethod(
+                TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_16,
+                check_train=False,
+                override_check_equal=True,
             )
         test_sdpa_rewriter_17_gpu = functools.partialmethod(
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_17
@@ -1760,6 +2213,12 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
         )
         test_sdpa_rewriter_28_gpu = functools.partialmethod(
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_28
+        )
+        test_sdpa_rewriter_29_gpu = functools.partialmethod(
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_29
+        )
+        test_sdpa_rewriter_30_gpu = functools.partialmethod(
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_30
         )
         if HAS_XPU_AND_TRITON:
             test_sdpa_rewriter_25_gpu = functools.partialmethod(
@@ -1826,8 +2285,28 @@ if HAS_CPU:
         test_pattern_fails_with_tensor_factor_cpu = (
             TestSDPAPatternRewriterTemplate._test_pattern_fails_with_tensor_factor
         )
+        test_pattern_fails_with_tensor_scale_cpu = (
+            TestSDPAPatternRewriterTemplate._test_pattern_fails_with_tensor_scale
+        )
+        test_pattern_fuses_with_symint_scale_cpu = (
+            TestSDPAPatternRewriterTemplate._test_pattern_fuses_with_symint_scale
+        )
+        test_pattern_fuses_with_symint_scale_div_cpu = (
+            TestSDPAPatternRewriterTemplate._test_pattern_fuses_with_symint_scale_div
+        )
+        test_pattern_fails_with_symfloat_scale_cpu = (
+            TestSDPAPatternRewriterTemplate._test_pattern_fails_with_symfloat_scale
+        )
         test_pattern_fails_with_unsupported_mask_cpu = (
             TestSDPAPatternRewriterTemplate._test_pattern_fails_with_unsupported_mask
+        )
+        test_pattern_fails_with_batch_permuted_key_cpu = (
+            TestSDPAPatternRewriterTemplate._test_pattern_fails_with_batch_permuted_key
+        )
+        test_pattern_fails_with_non_last_dim_softmax_cpu = TestSDPAPatternRewriterTemplate._test_pattern_fails_with_non_last_dim_softmax
+        test_pattern_fails_with_mismatched_view_grouping_cpu = TestSDPAPatternRewriterTemplate._test_pattern_fails_with_mismatched_view_grouping
+        test_pattern_fails_with_lower_rank_inputs_cpu = (
+            TestSDPAPatternRewriterTemplate._test_pattern_fails_with_lower_rank_inputs
         )
         test_sdpa_rewriter_11_cpu = (
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_11
@@ -1883,9 +2362,22 @@ if HAS_CPU:
         test_sdpa_rewriter_28_cpu = functools.partialmethod(
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_28
         )
+        test_sdpa_rewriter_29_cpu = functools.partialmethod(
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_29
+        )
+        test_sdpa_rewriter_30_cpu = functools.partialmethod(
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_30
+        )
 
     class SDPAPatternRewriterCpuDynamicTests(SDPAPatternRewriterCpuTests):
         use_static_shapes = False
+
+    class SDPAPatternRewriterPatternGuardCpuTests(TestSDPAPatternRewriterTemplate):
+        device = "cpu"
+        test_sdpa_rewriter_13_non_transpose_permute_cpu = functools.partialmethod(
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_13_non_transpose_permute,
+            dtype=torch.float32,
+        )
 
 
 if __name__ == "__main__":

@@ -14,7 +14,7 @@ void CreateLlgaSubgraphs(std::shared_ptr<Graph>& graph) {
   // subgraphs and then recursively cleanup & unmerge the small subgraphs
   graphRewriter.buildupSubgraphs();
   graphRewriter.cleanupSubgraphs();
-  // Run CSE globally onceto eliminate duplicates that may have occurred
+  // Run CSE globally once to eliminate duplicates that may have occurred
   // while inlining subgraphs.
   EliminateCommonSubexpression(graph);
   EliminateDeadCode(graph);

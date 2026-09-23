@@ -5,6 +5,7 @@
 #include <typeinfo>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include <torch/csrc/jit/jit_log.h>
@@ -71,14 +72,16 @@ static std::tuple<std::vector<T>, std::vector<int>> select_n_randomly(
   std::vector<T> selected_objects;
   std::vector<int> selected_indices;
   if (static_cast<int>(indices.size()) < n) {
-    return std::make_tuple(selected_objects, selected_indices);
+    return std::make_tuple(
+        std::move(selected_objects), std::move(selected_indices));
   }
   for (int i = 0; i < n; i++) {
     int index = indices[i];
     selected_indices.push_back(index);
     selected_objects.push_back(objects[index]);
   }
-  return std::make_tuple(selected_objects, selected_indices);
+  return std::make_tuple(
+      std::move(selected_objects), std::move(selected_indices));
 }
 
 static int find_factor(const ForPtr& loop) {
@@ -638,7 +641,7 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
           // simplicity. For now, we collect producer and the immediate parent
           // loop of the consumer. We could collect all the consumer enclosing
           // loops, but then we will have to clean up the ones that are shared
-          // with the producer encloser loop. Currently, we only test on the
+          // with the producer enclosing loop. Currently, we only test on the
           // immediate parent loop.
           auto buffers = BufFinder::find(l.root_stmt());
           std::vector<std::pair<StmtPtr, ForPtr>> producer_consumer_pairs;

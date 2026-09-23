@@ -41,6 +41,10 @@ from torch.distributed.elastic.multiprocessing import (
 )
 from torch.distributed.elastic.utils import macros
 from torch.distributed.elastic.utils.logging import get_logger
+from torch.distributed.elastic.utils.process_state import (
+    is_uninterruptible_state,
+    read_proc_state,
+)
 
 
 if TYPE_CHECKING:
@@ -55,11 +59,37 @@ __all__ = [
     "TORCHELASTIC_ENABLE_FILE_TIMER",
     "TORCHELASTIC_TIMER_FILE",
     "TORCHELASTIC_HEALTH_CHECK_PORT",
+    "TORCHELASTIC_UNINTERRUPTIBLE_STATE_TIMEOUT",
 ]
 
 TORCHELASTIC_ENABLE_FILE_TIMER = "TORCHELASTIC_ENABLE_FILE_TIMER"
 TORCHELASTIC_HEALTH_CHECK_PORT = "TORCHELASTIC_HEALTH_CHECK_PORT"
 TORCHELASTIC_TIMER_FILE = "TORCHELASTIC_TIMER_FILE"
+# Seconds a worker may spend in Linux uninterruptible kernel sleep (D-state)
+# before the agent marks the worker group UNHEALTHY. Used as the default when
+# ``uninterruptible_state_timeout`` is not passed to ``LocalElasticAgent``.
+# Unset / non-positive disables the check. Linux-only.
+TORCHELASTIC_UNINTERRUPTIBLE_STATE_TIMEOUT = (
+    "TORCHELASTIC_UNINTERRUPTIBLE_STATE_TIMEOUT"
+)
+
+
+def _resolve_uninterruptible_state_timeout(explicit: float | None) -> float:
+    """Resolve the uninterruptible-state timeout once.
+
+    Precedence: explicit constructor arg > ``TORCHELASTIC_UNINTERRUPTIBLE_STATE_TIMEOUT``
+    env var > 0 (disabled). Non-positive / unparsable values disable the check.
+    """
+    if explicit is not None:
+        return max(0.0, float(explicit))
+    raw = os.environ.get(TORCHELASTIC_UNINTERRUPTIBLE_STATE_TIMEOUT, "")
+    if not raw:
+        return 0.0
+    try:
+        value = float(raw)
+    except ValueError:
+        return 0.0
+    return max(0.0, value)
 
 
 class _AliveCallbackProxy:
@@ -126,8 +156,13 @@ class LocalElasticAgent(SimpleElasticAgent):
     <https://docs.python.org/3/library/string.html#template-strings>`_ as the
     ``log_line_prefix_template`` argument.
     The following macros (identifiers) are substituted at runtime:
-    ``${role_name}, ${local_rank}, ${rank}``. For example, to prefix each log line with
+    ``${role_name}, ${local_rank}, ${rank}, ${hostname}``.
+    For example, to prefix each log line with
     global rank instead of the local rank, set ``log_line_prefix_template = "[${rank}]:``.
+    ``${hostname}`` expands to the name of the node the agent runs on, which
+    identifies the offending node in a multi-node job; for example
+    ``log_line_prefix_template = "${hostname}:${rank}: "`` renders as
+    ``r12i0n8:3: foobar``.
 
 
     Example launching function
@@ -183,6 +218,7 @@ class LocalElasticAgent(SimpleElasticAgent):
         log_line_prefix_template: str | None = None,
         shutdown_timeout: int = 30,
         health_check_server: HealthCheckServer | None = None,
+        uninterruptible_state_timeout: float | None = None,
     ):
         super().__init__(spec, exit_barrier_timeout, shutdown_timeout)
         self._start_method = start_method
@@ -192,6 +228,16 @@ class LocalElasticAgent(SimpleElasticAgent):
         self._worker_watchdog: timer.FileTimerServer | None = None
         self._logs_specs = logs_specs
         self._health_check_server = health_check_server
+        # Resolve the uninterruptible-state timeout once at construction time.
+        # Explicit constructor arg wins; otherwise fall back to the env var.
+        # Non-positive / unparsable values disable the check.
+        self._uninterruptible_state_timeout: float = (
+            _resolve_uninterruptible_state_timeout(uninterruptible_state_timeout)
+        )
+        # Maps PID -> monotonic timestamp when the PID was first observed in
+        # an uninterruptible (D-state) sleep. Cleared per-PID when the worker
+        # leaves that state or exits.
+        self._uninterruptible_state_first_seen: dict[int, float] = {}
 
     def _setup_local_watchdog(self, envs: dict[int, dict[str, str]]) -> None:
         enable_watchdog_env_name = TORCHELASTIC_ENABLE_FILE_TIMER
@@ -369,6 +415,10 @@ class LocalElasticAgent(SimpleElasticAgent):
         log_line_prefixes: dict[int, str] | None = (
             {} if self._log_line_prefix_template else None
         )
+        # Short name (e.g. "r12i0n8") rather than _get_fq_hostname(): the fq name
+        # eats horizontal space in every log line, and degrades to an unhelpful
+        # reverse-DNS record (e.g. "...ip6.arpa") when the node has no PTR entry.
+        hostname = socket.gethostname() if self._log_line_prefix_template else ""
         for worker in worker_group.workers:
             local_rank = worker.local_rank
             worker_env = {
@@ -401,6 +451,7 @@ class LocalElasticAgent(SimpleElasticAgent):
                     role_name=spec.role,
                     rank=worker.global_rank,
                     local_rank=local_rank,
+                    hostname=hostname,
                 )
                 # pyrefly: ignore [unsupported-operation]
                 log_line_prefixes[local_rank] = log_line_prefix
@@ -436,34 +487,38 @@ class LocalElasticAgent(SimpleElasticAgent):
     def _set_local_rank_env(
         self, worker_env: dict[str, str | None], local_rank: int, spec: WorkerSpec
     ) -> None:
-        # Set CUDA_VISIBLE_DEVICES and LOCAL_RANK based on virtual_local_rank mode.
+        # Set GPU visibility and LOCAL_RANK based on virtual_local_rank mode.
         # Virtual mode: Each worker sees only its assigned GPU as device 0, LOCAL_RANK=0
         # Traditional mode: Workers see all GPUs, LOCAL_RANK matches actual local rank
 
         if spec.virtual_local_rank:
-            # Set LOCAL_RANK=0 and use CUDA_VISIBLE_DEVICES to control the actual GPU access.
-
+            # Set LOCAL_RANK=0 and restrict each worker to its assigned GPU.
             worker_env["LOCAL_RANK"] = "0"
 
-            # Map local_rank through existing CUDA_VISIBLE_DEVICES
-            # HIP uses CUDA_VISIBLE_DEVICES as a compatibility hack:
-            # https://rocm.docs.amd.com/en/latest/conceptual/gpu-isolation.html#cuda-visible-devices
-            parent_visible_devices = os.getenv("CUDA_VISIBLE_DEVICES")
+            # HIP_VISIBLE_DEVICES takes precedence over CUDA_VISIBLE_DEVICES on
+            # ROCm, so use it as the source of the parent mapping when present.
+            parent_hip_visible_devices = os.getenv("HIP_VISIBLE_DEVICES")
+            if parent_hip_visible_devices:
+                visible_devices_env = "HIP_VISIBLE_DEVICES"
+                parent_visible_devices = parent_hip_visible_devices
+            else:
+                visible_devices_env = "CUDA_VISIBLE_DEVICES"
+                parent_visible_devices = os.getenv(visible_devices_env)
+
             if parent_visible_devices is not None:
-                # Parse comma-separated list of GPU IDs
                 available_gpus = parent_visible_devices.split(",")
                 if local_rank >= len(available_gpus):
                     raise ValueError(
                         f"local_rank {local_rank} exceeds available GPUs in "
-                        f"CUDA_VISIBLE_DEVICES={parent_visible_devices}"
+                        f"{visible_devices_env}={parent_visible_devices}"
                     )
-
                 visible_gpu = available_gpus[local_rank].strip()
             else:
-                # No restriction, use local_rank directly
                 visible_gpu = str(local_rank)
 
             worker_env["CUDA_VISIBLE_DEVICES"] = visible_gpu
+            if parent_hip_visible_devices:
+                worker_env["HIP_VISIBLE_DEVICES"] = visible_gpu
             return
 
         # In traditional mode, don't override CUDA_VISIBLE_DEVICES
@@ -484,6 +539,73 @@ class LocalElasticAgent(SimpleElasticAgent):
             self._health_check_server = None
         if self._pcontext:
             self._pcontext.close(death_sig, timeout)
+
+    def _check_uninterruptible_state_timeout(
+        self, worker_group: WorkerGroup, timeout: float
+    ) -> RunResult | None:
+        """Return UNHEALTHY when any worker has been in Linux uninterruptible
+        sleep (D-state) for at least ``timeout`` seconds; otherwise update
+        bookkeeping and return None.
+        """
+        if self._pcontext is None:
+            return None
+        role = worker_group.spec.role
+        live_pids = set(self._pcontext.pids().values())
+        # Drop bookkeeping for pids that have exited since the last check.
+        for pid in list(self._uninterruptible_state_first_seen):
+            if pid not in live_pids:
+                self._uninterruptible_state_first_seen.pop(pid, None)
+
+        timed_out: list[tuple[int, float]] = []
+        for pid in live_pids:
+            elapsed = self._update_uninterruptible_dwell(pid, role, timeout)
+            if elapsed is not None and elapsed >= timeout:
+                timed_out.append((pid, elapsed))
+
+        if not timed_out:
+            return None
+        for pid, elapsed in timed_out:
+            logger.error(
+                "[%s] Worker pid=%s stuck in uninterruptible sleep (D-state)"
+                " for %.1fs (>= %.1fs); marking worker group UNHEALTHY and"
+                " disabling restarts.",
+                role,
+                pid,
+                elapsed,
+                timeout,
+            )
+        # Disable restarts: a wedged worker is holding a kernel resource
+        # (GPU, NIC) that a fresh worker on the same host would conflict
+        # with. Force the supervising loop into the _stop_workers branch
+        # so the agent can exit promptly.
+        self._remaining_restarts = 0
+        return RunResult(state=WorkerState.UNHEALTHY)
+
+    def _update_uninterruptible_dwell(
+        self, pid: int, role: str, timeout: float
+    ) -> float | None:
+        """Update bookkeeping for ``pid`` and return how long (seconds) it has
+        been continuously in uninterruptible sleep, or ``None`` if it isn't
+        (or its state can't be read).
+        """
+        state = read_proc_state(pid)
+        if state is None:
+            return None
+        if not is_uninterruptible_state(state):
+            self._uninterruptible_state_first_seen.pop(pid, None)
+            return None
+        first = self._uninterruptible_state_first_seen.get(pid)
+        if first is None:
+            self._uninterruptible_state_first_seen[pid] = time.monotonic()
+            logger.warning(
+                "[%s] Worker pid=%s entered uninterruptible sleep (D-state);"
+                " will mark UNHEALTHY if it remains for %.1fs.",
+                role,
+                pid,
+                timeout,
+            )
+            return 0.0
+        return time.monotonic() - first
 
     # pyre-fixme[56]: Pyre was not able to infer the type of the decorator
     #  `torch.distributed.elastic.metrics.prof`.
@@ -517,7 +639,7 @@ class LocalElasticAgent(SimpleElasticAgent):
                     failures=worker_failures,
                 )
             else:
-                # copy ret_val_queue into a map with a global ranks
+                # copy ret_val_queue into a map with global ranks
                 workers_ret_vals = {}
                 for local_rank, ret_val in result.return_values.items():
                     worker = worker_group.workers[local_rank]
@@ -527,4 +649,11 @@ class LocalElasticAgent(SimpleElasticAgent):
                     return_values=workers_ret_vals,
                 )
         else:
+            timeout = self._uninterruptible_state_timeout
+            if timeout > 0:
+                ustate_result = self._check_uninterruptible_state_timeout(
+                    worker_group, timeout
+                )
+                if ustate_result is not None:
+                    return ustate_result
             return RunResult(state=WorkerState.HEALTHY)

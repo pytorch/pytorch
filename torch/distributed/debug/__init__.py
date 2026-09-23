@@ -102,6 +102,7 @@ def start_debug_server(
             enabled_dumps = {
                 "stacks",
                 "fr_trace",
+                "torchcomms_health_check",
             }
 
         main_kwargs = {

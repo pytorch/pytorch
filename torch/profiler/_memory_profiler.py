@@ -597,7 +597,7 @@ class DataFlowGraph:
         To address this issue we walk over the graph and select the topmost
         torch ops ** which match at least one operator schema **. These form
         the leaves of the first pass through the op tree. (As well as any
-        allocations or frees which do are not part of a kernel.) These events
+        allocations or frees which are not part of a kernel.) These events
         form the logical nodes in our data flow graph.
         """
 
@@ -927,7 +927,7 @@ class MemoryProfile:
         snapshot = self._category_snapshot()
 
         # Determine which Tensors might be parameters based on forward pass
-        # data flow. Note this these are only candidates; we filter nodes that
+        # data flow. Note that these are only candidates; we filter nodes that
         # we know are part of the backward pass but that doesn't guarantee that
         # they are part of the forward pass.
         candidate_parameters: set[TensorAndID] = set()

@@ -2,7 +2,7 @@
 r"""Contains definitions of the methods used by the _BaseDataLoaderIter workers.
 
 These methods are used to collate samples fetched from dataset into Tensor(s).
-These **needs** to be in global scope since Py2 doesn't support serializing
+These **need** to be in global scope since Py2 doesn't support serializing
 static methods.
 
 `default_collate` and `default_convert` are exposed to users via 'dataloader.py'.
@@ -25,7 +25,7 @@ def default_convert(data):
     Convert each NumPy array element into a :class:`torch.Tensor`.
 
     If the input is a `Sequence`, `Collection`, or `Mapping`, it tries to convert each element inside to a :class:`torch.Tensor`.
-    If the input is not an NumPy array, it is left unchanged.
+    If the input is not a NumPy array, it is left unchanged.
     This is used as the default function for collation when both `batch_sampler` and `batch_size`
     are NOT defined in :class:`~torch.utils.data.DataLoader`.
 
