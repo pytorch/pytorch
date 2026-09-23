@@ -236,6 +236,11 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         if type(reshard_after_forward) is not int:
             return
         fsdp_param_group._to_sharded_post_forward()
+        # The post-forward shards were just cloned on the current stream; the
+        # all-gather streams must wait for them, as unshard() does after reshard().
+        current_stream = device_module.current_stream()
+        all_gather_copy_in_stream.wait_stream(current_stream)
+        all_gather_stream.wait_stream(current_stream)
         all_gather(
             fsdp_param_group,
             fsdp_param_group.post_forward_mesh_info.shard_process_group,
@@ -343,7 +348,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             self.assertEqual(sharded_grad.full_tensor(), reduced_grad)
 
 
-class TestFullyShardCommunication(FSDPTest):
+class TestFullyShardCommunication(FSDPTestContinuous):
     @property
     def world_size(self) -> int:
         return min(4, torch.get_device_module(device_type).device_count())

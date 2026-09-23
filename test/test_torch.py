@@ -44,7 +44,7 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     bytes_to_scalar, parametrize, noncontiguous_like,
     AlwaysWarnTypedStorageRemoval, TEST_WITH_TORCHDYNAMO, xfailIfTorchDynamo,
     xfailIfS390X, set_warn_always_context, decorateIf, isRocmArchAnyOf,
-    IS_MACOS,
+    IS_MACOS, HardwareClassification,
 )
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
@@ -500,12 +500,12 @@ class TestTorchDeviceType(TestCase):
         # This is OK, it changes the meta storage size without allocating
         s0.resize_(10)
 
-    @onlyCUDA
-    def test_module_share_memory(self):
+    @onlyAccelerator
+    def test_module_share_memory(self, device):
         # Test fix for issue #80733
         # See https://github.com/pytorch/pytorch/issues/80733
         model = torch.nn.Linear(3, 1)
-        _model_cuda = model.to('cuda')
+        _model_device = model.to(device)
         model.share_memory()
 
     @dtypes(torch.float32, torch.complex64)
@@ -1074,15 +1074,6 @@ class TestTorchDeviceType(TestCase):
         with self.assertWarnsOnceRegex(UserWarning, msg):
             # t + 1 allocates a new tensor for result using empty
             t + 1
-
-    @onlyCUDA
-    def test_dtypetensor_warnings(self, device):
-        msg = 'The torch.cuda.*DtypeTensor constructors are no longer recommended'
-        with self.assertWarnsOnceRegex(UserWarning, msg):
-            torch.cuda.FloatTensor([0])
-
-        with self.assertWarnsOnceRegex(UserWarning, msg):
-            torch.cuda.DoubleTensor([0])
 
     def test_set_default_tensor_type_warnings(self, device):
         msg = '.*is deprecated as of PyTorch 2.1, please use torch.set_default_dtype().*'
@@ -1965,22 +1956,6 @@ class TestTorchDeviceType(TestCase):
             'grid_sampler_2d_backward_cuda',
             torch.device(device).type == 'cuda')
 
-    @unittest.skipIf(not TEST_CUDNN, "CUDNN not available")
-    @skipIfRocm
-    @onlyCUDA
-    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    def test_nondeterministic_alert_grid_sample_2d_cudnn(self, device):
-        def fn():
-            input = torch.empty(1, 1, 2, 2, device=device, requires_grad=True)
-            grid = torch.empty(1, 1, 1, 2, device=device)
-            with torch.backends.cudnn.flags(enabled=True):
-                res = torch.nn.functional.grid_sample(input, grid, align_corners=True)
-                res.backward(torch.ones_like(res))
-
-        self.check_nondeterministic_alert(
-            fn,
-            'cudnn_grid_sampler_backward')
-
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_grid_sample_3d(self, device):
         input = torch.empty(1, 1, 2, 2, 2, device=device, requires_grad=True)
@@ -2165,74 +2140,6 @@ class TestTorchDeviceType(TestCase):
         original = torch.arange(4, dtype=torch.float32)
         result = original.scatter(0, null_index, null_arr)
         self.assertEqual(result, original, atol=0, rtol=0)
-
-    @onlyCUDA
-    @skipIfTorchInductor("FIXME")
-    def test_sync_warning(self, device):
-
-        def _sync_raises_helper(f, level):
-            with CudaSyncGuard(level):
-                if level == 1:
-                    with self.assertWarnsRegex(UserWarning, "called a synchronizing "):
-                        f()
-                elif level == 2:
-                    with self.assertRaisesRegex(RuntimeError, "called a synchronizing "):
-                        f()
-
-        def _no_sync_helper(f, level):
-            with CudaSyncGuard(level):
-                f()
-
-        def _ind_put_fn(x, ind, val):
-            x[ind] = val
-            return x
-
-        def _ind_get_fn(x, ind):
-            return x[ind]
-
-        def _cond_fn(x):
-            if x:  # taking boolean value of a tensor synchronizes
-                return x
-            else:
-                return 2 * x
-
-        # prepare inputs for subsequent ops
-        size = 4
-        x = torch.rand(size, device=device)
-        y = torch.rand((), device=device)
-        ind = torch.randint(size, (3,), device=device)
-        ind_cpu = ind.cpu()
-        repeats = torch.full((1,), 2, device=device)
-        mask = torch.randint(2, (size,), device=device, dtype=bool)
-        mask_cpu = mask.cpu()
-        expect_no_sync = (lambda: _ind_put_fn(x, mask, 1.),
-                          lambda: _ind_put_fn(x, mask_cpu, y),
-                          lambda: _ind_put_fn(x, ind, y),
-                          lambda: _ind_put_fn(x, ind, 1.),
-                          lambda: _ind_put_fn(x, 0, 5.),
-                          lambda: _ind_put_fn(x, slice(0, 1), 5.),
-                          lambda: _ind_get_fn(x, mask_cpu),
-                          lambda: _ind_get_fn(x, ind),
-                          lambda: torch.nn.functional.one_hot(ind, num_classes=size),
-                          lambda: torch.randperm(20000, device=device),
-                          lambda: torch.repeat_interleave(x, 2, output_size=2 * size),
-                          lambda: torch.repeat_interleave(x, repeats, output_size=2 * size),
-                          lambda: torch.any(y),
-                          lambda: torch.combinations(x, r=2),
-                          lambda: torch.normal(x, x))
-        expect_sync = (lambda: _ind_put_fn(x, mask, y),
-                       lambda: _ind_put_fn(x, ind_cpu, y),
-                       lambda: _ind_get_fn(x, mask),
-                       lambda: _ind_get_fn(x, ind_cpu),
-                       lambda: x.nonzero(),
-                       lambda: _cond_fn(y),
-                       lambda: torch.nn.functional.one_hot(ind),
-                       lambda: torch.repeat_interleave(x, repeats))
-        for f, level in product(expect_no_sync, (1, 2)):
-            _no_sync_helper(f, level)
-        for f, level in product(expect_sync, (1, 2)):
-            _sync_raises_helper(f, level)
-
 
     @dtypes(*floating_types_and(torch.half, torch.bfloat16))
     def test_log_normal(self, device, dtype):
@@ -6852,6 +6759,100 @@ class TestTorchDeviceType(TestCase):
             torch.normal(tensor2345, tensor120, out=output345)
 
 
+class TestTorchCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+    exact_dtype = True
+
+    def test_dtypetensor_warnings(self, device):
+        msg = 'The torch.cuda.*DtypeTensor constructors are no longer recommended'
+        with self.assertWarnsOnceRegex(UserWarning, msg):
+            torch.cuda.FloatTensor([0])
+
+        with self.assertWarnsOnceRegex(UserWarning, msg):
+            torch.cuda.DoubleTensor([0])
+
+    @unittest.skipIf(not TEST_CUDNN, "CUDNN not available")
+    @skipIfRocm
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    def test_nondeterministic_alert_grid_sample_2d_cudnn(self, device):
+        def fn():
+            input = torch.empty(1, 1, 2, 2, device=device, requires_grad=True)
+            grid = torch.empty(1, 1, 1, 2, device=device)
+            with torch.backends.cudnn.flags(enabled=True):
+                res = torch.nn.functional.grid_sample(input, grid, align_corners=True)
+                res.backward(torch.ones_like(res))
+
+        self.check_nondeterministic_alert(
+            fn,
+            'cudnn_grid_sampler_backward')
+
+    @skipIfTorchInductor("FIXME")
+    def test_sync_warning(self, device):
+
+        def _sync_raises_helper(f, level):
+            with CudaSyncGuard(level):
+                if level == 1:
+                    with self.assertWarnsRegex(UserWarning, "called a synchronizing "):
+                        f()
+                elif level == 2:
+                    with self.assertRaisesRegex(RuntimeError, "called a synchronizing "):
+                        f()
+
+        def _no_sync_helper(f, level):
+            with CudaSyncGuard(level):
+                f()
+
+        def _ind_put_fn(x, ind, val):
+            x[ind] = val
+            return x
+
+        def _ind_get_fn(x, ind):
+            return x[ind]
+
+        def _cond_fn(x):
+            if x:  # taking boolean value of a tensor synchronizes
+                return x
+            else:
+                return 2 * x
+
+        # prepare inputs for subsequent ops
+        size = 4
+        x = torch.rand(size, device=device)
+        y = torch.rand((), device=device)
+        ind = torch.randint(size, (3,), device=device)
+        ind_cpu = ind.cpu()
+        repeats = torch.full((1,), 2, device=device)
+        mask = torch.randint(2, (size,), device=device, dtype=bool)
+        mask_cpu = mask.cpu()
+        expect_no_sync = (lambda: _ind_put_fn(x, mask, 1.),
+                          lambda: _ind_put_fn(x, mask_cpu, y),
+                          lambda: _ind_put_fn(x, ind, y),
+                          lambda: _ind_put_fn(x, ind, 1.),
+                          lambda: _ind_put_fn(x, 0, 5.),
+                          lambda: _ind_put_fn(x, slice(0, 1), 5.),
+                          lambda: _ind_get_fn(x, mask_cpu),
+                          lambda: _ind_get_fn(x, ind),
+                          lambda: torch.nn.functional.one_hot(ind, num_classes=size),
+                          lambda: torch.randperm(20000, device=device),
+                          lambda: torch.repeat_interleave(x, 2, output_size=2 * size),
+                          lambda: torch.repeat_interleave(x, repeats, output_size=2 * size),
+                          lambda: torch.any(y),
+                          lambda: torch.combinations(x, r=2),
+                          lambda: torch.normal(x, x))
+        expect_sync = (lambda: _ind_put_fn(x, mask, y),
+                       lambda: _ind_put_fn(x, ind_cpu, y),
+                       lambda: _ind_get_fn(x, mask),
+                       lambda: _ind_get_fn(x, ind_cpu),
+                       lambda: x.nonzero(),
+                       lambda: _cond_fn(y),
+                       lambda: torch.nn.functional.one_hot(ind),
+                       lambda: torch.repeat_interleave(x, repeats))
+        for f, level in product(expect_no_sync, (1, 2)):
+            _no_sync_helper(f, level)
+        for f, level in product(expect_sync, (1, 2)):
+            _sync_raises_helper(f, level)
+
+
 # Tests that compare a device's computation with the (gold-standard) CPU's.
 class TestDevicePrecision(TestCase):
     exact_dtype = True
@@ -11388,6 +11389,7 @@ add_neg_dim_tests()
 instantiate_device_type_tests(TestViewOps, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestTensorDeviceOps, globals())
 instantiate_device_type_tests(TestTorchDeviceType, globals())
+instantiate_device_type_tests(TestTorchCUDA, globals(), only_for="cuda")
 instantiate_device_type_tests(TestDevicePrecision, globals(), except_for='cpu', allow_xpu=True)
 
 if __name__ == '__main__':

@@ -17706,6 +17706,29 @@ fn
         x = torch.randn(4)
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_guard_filter_entry_snapshots_the_guard_code(self):
+        # entry.code_parts is populated from orig_guard.code_list at inspection
+        # time and owned by the entry: a later build_guards rebinds that
+        # attribute (to None, then to a fresh list), so an entry that read it
+        # through orig_guard would see the later build, not the one inspected.
+        from torch._dynamo.guards import make_guard_filter_entry
+        from torch._dynamo.source import LocalSource
+        from torch._guards import Guard
+
+        guard = Guard(LocalSource("x"), lambda *a: None)
+        guard.code_list = ["___check_type_id(L['x'], 1)"]
+        builder = types.SimpleNamespace(get=lambda g: 1)
+        entry = make_guard_filter_entry(guard, builder)
+        self.assertEqual(entry.code_parts, ("___check_type_id(L['x'], 1)",))
+        # Stricter than production, which never mutates the list in place:
+        # keeps the tuple() copy from being replaced by the list reference.
+        guard.code_list.clear()
+        guard.code_list.append("something else")
+        self.assertEqual(entry.code_parts, ("___check_type_id(L['x'], 1)",))
+        guard.code_list = None
+        self.assertEqual(entry.code_parts, ("___check_type_id(L['x'], 1)",))
+        self.assertEqual(make_guard_filter_entry(guard, builder).code_parts, ())
+
     def test_guard_filter_fn_by_id(self):
         def guard_filter_fn(entries):
             return [entry.guard_type != "ID_MATCH" for entry in entries]

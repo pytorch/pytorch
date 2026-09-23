@@ -240,43 +240,47 @@ High priority criteria:
 - Many users affected
 - Core component or popular model impact
 
-#### 5b) release triage — Affects an Upcoming Release
+#### 5b) release triage — Confirmed on the Latest Release
 
-Add `release triage` when an issue would affect a release if it went unfixed. The label
-only surfaces the issue for whoever owns the release; it is not a cherry-pick request and
-does not decide anything.
+`release triage` is a narrow flag, not a catch-all. It surfaces the issue for whoever
+owns the release; it is not a cherry-pick request and does not decide anything.
 
 **You are told which version is current — never guess it.** Your prompt carries a
-`RELEASE CONTEXT` block giving the most recent released minor version. If the block
-says `unknown`, skip the two version-dependent criteria below and judge the rest on their
-own merits.
+`RELEASE CONTEXT` block giving the most recent released minor version. **If the block
+says `unknown`, do not add `release triage` at all.**
 
-Add it when **any** of these hold:
+Add it only when **one of these two gates** is satisfied:
 
-- **Regression against the most recent released minor version.** The issue reports
-  something that worked on that minor (or later) and is broken now. Pair it with
-  `module: regression`. If the last-working version is older than that minor, it is not
-  release-relevant.
-- **Critical correctness or stability:** silent correctness (wrong results, no error),
-  backwards-compatibility break, crash / segfault, deadlock or hang, or a large memory
-  leak.
-- **Critical fix to a feature introduced in the most recent minor release** — new surface
-  that shipped broken. Go by what the issue says ("new in 2.x", "added in 2.x", "since
-  upgrading to 2.x") checked against the version in `RELEASE CONTEXT`; do not try to recall
-  which features shipped in which release.
-- **Binary / packaging:** anything affecting wheels, Docker images,
-  install, or the release build itself. Pair it with `module: binaries`.
-- **Would ship broken in the next release.** A defect on main, a nightly, an RC, or the
-  release branch that reaches users if nobody fixes it — including anything surfaced by
-  release validation or downstream canaries. This holds even when it is not a regression
-  against anything, e.g. a bug in code that has never shipped.
+**Gate 1 — confirmed on the most recent released minor.** The issue states a PyTorch
+version, and that version is the minor named in `RELEASE CONTEXT`, or one of its patch
+releases. "States a version" means the version is written in the issue: the
+`torch.__version__` line of the environment dump, a `pip install` line, or the reporter
+saying so in prose. Read it out of the issue; never infer it from the traceback, the
+issue date, or what you assume is current.
 
-Apply it generously. A false positive costs the release manager one glance; a miss costs
-a broken release. When unsure, add it.
+**Gate 2 — already labelled `high priority`.** The label is on the issue when you read
+it, applied by a human in an earlier pass. This is the existing label only — it is not
+your own 5a judgement. If *you* think an issue is high priority, 5a has you add
+`triage review` and stop; that alone does not earn `release triage`.
 
-`release triage` is independent of the `triage review` decision in 5a — an issue can carry
-both. Do not add it to feature requests, enhancements, or documentation-only issues, and do
-not add it for a regression against a version older than the last released minor.
+Do **not** add it for any of the following on its own:
+
+| Situation | Why not |
+|---|---|
+| Reproduces only on main, a nightly, or an RC | Not confirmed on a release. If it is serious, `triage review` in 5a is the path. |
+| No version stated anywhere in the issue | Unconfirmed. Do not guess. |
+| Stated version is older than the minor in `RELEASE CONTEXT` | Already shipped; not this train. |
+| Crash, silent correctness, BC break, packaging or install bug | Severity is not a gate. It qualifies only if it also clears gate 1 or gate 2. |
+| It looks like it *would* ship broken | Speculative. |
+| Feature request, enhancement, or documentation-only | Never `release triage`, under either gate. |
+
+**When unsure, leave it off.** This label is read as a short list that the release
+manager works through by hand, so a false positive costs more than a miss: a list that
+fills with maybes stops being read, and then it catches nothing. Anything genuinely
+urgent still reaches a human through `triage review` in 5a.
+
+`release triage` is independent of the 5a decision — an issue can carry both — and it
+remains a flag, not a verdict: whether to cherry-pick is never the bot's call.
 
 ### 6) bot-triaged (automatic)
 
@@ -301,7 +305,7 @@ If not transferred/redirected and not flagged for review, add `triaged`.
 **DO:**
 - Close clear usage questions and point to discuss.pytorch.org (per step 1)
 - Be conservative - when in doubt, add `triage review` for human attention
-- Add `release triage` whenever an issue would affect an upcoming release (step 5b); err toward adding it
+- Add `release triage` only when the issue is confirmed on the most recent released minor, or already carries `high priority` (step 5b); when unsure, leave it off
 - Apply type labels (`feature`, `enhancement`, `function request`) when confident
 - Add `triaged` label when classification is complete
 

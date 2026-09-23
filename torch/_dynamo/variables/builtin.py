@@ -2572,13 +2572,20 @@ class BuiltinVariable(BaseBuiltinVariable):
             if val is NotImplemented:
                 return default
             if not isinstance(val, int):
-                raise_type_error(
-                    tx,
-                    f"__length_hint__ must be an integer, not {type(val).__name__}",
-                )
+                if sys.version_info >= (3, 15):
+                    err_msg = f"{obj.python_qualified_name()}.__length_hint__() must return an int, not {type(val).__name__}"
+                else:
+                    err_msg = (
+                        f"__length_hint__ must be an integer, not {type(val).__name__}"
+                    )
+                raise_type_error(tx, err_msg)
             val = pylong_as_ssize_t(tx, hint)
             if val < 0:
-                raise_value_error(tx, "__length_hint__() should return >= 0")
+                if sys.version_info >= (3, 15):
+                    err_msg = f"{obj.python_qualified_name()}.__length_hint__() must return a non-negative int"
+                else:
+                    err_msg = "__length_hint__() should return >= 0"
+                raise_value_error(tx, err_msg)
             # The C entry point ends in PyLong_FromSsize_t, so an int subclass
             # such as bool is normalized to int before the caller sees it.
             return ConstantVariable.create(int(val))

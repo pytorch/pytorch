@@ -27,13 +27,13 @@ disable compilation are listed in the following table:
    "``torch._dynamo.disallow_in_graph``", "Disallows the marked op in the TorchDynamo graph. TorchDynamo causes graph break, and runs the op in the eager (no compile) mode.
 
       This is suitable for the ops, while ``torch.compiler.disable`` is suitable for decorating functions.", "This API is excellent for both debugging and unblocking if a custom op like ``torch.ops.fbgemm.*`` is causing issues with the ``torch.compile`` function."
-   "``torch.compiler.nonstrict_trace``", "Disables Dynamo and instead traces via PyTorch's operator overloading capabilities.  This has fewer guarantees than Dynamo and may result in incorrect compiled code, but is also more flexible.  See [Non-strict Tracing](programming_model.dynamo_nonstrict_trace) for more details", "Useful for functions that are known to be safe but are hard for Dynamo to trace"
+   "``torch.compiler.nonstrict_trace``", "Disables Dynamo and instead traces via PyTorch's operator overloading capabilities. This has fewer guarantees than Dynamo and may result in incorrect compiled code, but is also more flexible. See :doc:`Non-strict Tracing <compile/programming_model.dynamo_nonstrict_trace>` for more details", "Useful for functions that are known to be safe but are hard for Dynamo to trace. This avoids graph breaks at the cost of possibly losing soundness"
    "``torch.compile.allow_in_graph``", "The annotated callable goes as is in the TorchDynamo graph. For example, a black-box for TorchDynamo Dynamo.  Note that AOT Autograd will trace through it, so ``allow_in_graph`` is only a Dynamo-level concept.  This is similar to ``nonstrict_trace`` but has additional restrictions on the inputs - for this reason, prefer ``nonstrict_trace``", "This API is useful for portions of the model which have known TorchDynamo hard-to-support features, like hooks or ``autograd.Function``. However, each usage of ``allow_in_graph`` **must be carefully screened** (no graph breaks, no closures)."
    "``torch._dynamo.graph_break``", "Adds a graph break. The code before and after the graph break goes through TorchDynamo.", "**Rarely useful for deployment** - If you think you need this, most probably you need either ``disable`` or ``disallow_in_graph``."
-   "``torch.compiler.is_compiling``", "Indicates whether a graph is executed/traced as part of torch.compile() or torch.export().", "Useful for selectively disabling parts of a function that cannot be compiled (i.e. logging statements, general I/O, network access, etc).  See also ``torch._dynamo.config.ignore_logging_functions``"
+   "``torch.compiler.is_compiling``", "Indicates whether a graph is executed/traced as part of torch.compile() or torch.export().", "Useful for selectively disabling parts of a function that cannot be compiled (i.e. logging statements, general I/O, network access, etc). See also ``torch._dynamo.config.ignore_logging_functions``"
    "``torch.compiler.is_dynamo_compiling``", "Indicates whether a graph is traced via TorchDynamo. It's stricter than torch.compiler.is_compiling() flag, as it would only be set to True when TorchDynamo is used."
    "``torch.compiler.is_exporting``", "Indicates whether a graph is traced via export. It's stricter than torch.compiler.is_compiling() flag, as it would only be set to True when torch.export is used."
-   "``torch.compiler.assume_constant_result``", "Allows Dynamo to assume that the function always produces the same result.  The function is executed at trace time to determine the result, which is then baked into the graph", "Useful for functions with expensive and untraceable side effects that nevertheless produce constant results"
+   "``torch.compiler.assume_constant_result``", "Allows Dynamo to assume that the function always produces the same result. The function is executed at trace time to determine the result, which is then baked into the graph", "Useful for functions with expensive and untraceable side effects that nevertheless produce constant results"
    "``torch.compiler.substitute_in_graph``", "Registers a polyfill that Dynamo will trace instead of the substituted function", "Useful for adding compile support for native functions that Dynamo does not yet support."
 ```
 
@@ -100,6 +100,29 @@ components, such as AOTAutograd rely on TorchDynamo to handle complex Python
 features, but `allow_in_graph` bypasses TorchDynamo. Using `allow_in_graph`
 could lead to soundness and hard-to-debug issues.
 :::
+
+## `torch.compiler.assume_constant_result`
+
+This causes Dynamo to execute the function once at trace time, then assume the result
+never changes. In addition to making sure that this assumption holds, you should also
+make sure that the function has no side effects. As an example
+
+```
+@torch.compiler.assume_constant_result
+def use_fused_rmsnorm() -> bool:
+    with open(CONFIG_PATH) as fh:
+        return json.load(fh)["use_fused_rmsnorm"]
+
+@torch.compile(fullgraph=True)
+def rmsnorm(x, weight):
+    if use_fused_rmsnorm():
+        return torch.nn.functional.rms_norm(x, x.shape[-1:], weight)
+    return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + 1e-6) * weight
+```
+
+Dyanmo is unable to trace file reads, so compilation would fail without `assume_constant_result`.
+If the return value were to change (i.e. the contents of the config file changed, or `CONFIG_PATH`
+were changed), the compiled program would no longer be valid.
 
 ## Limitations
 
