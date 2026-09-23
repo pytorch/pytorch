@@ -35,6 +35,12 @@ _P = ParamSpec("_P")
 _R = TypeVar("_R")
 
 
+def _precompile_error(msg: str) -> Exception:
+    from torch._precompile import PrecompileError
+
+    return PrecompileError(msg)
+
+
 class ExportedPythonArtifact:
     """Materializes and disk-caches a ``torch.compiler.precompile`` artifact.
 
@@ -104,27 +110,74 @@ class ExportedPythonArtifact:
             f.write(code)
         return code
 
-    def _load_from_disk(self) -> str:
-        with open(self._path, encoding="utf-8") as f:
-            return f.read()
+    def _load_from_disk(self) -> str | None:
+        # None means "not there after all" -- the presence gate raced a peer deleting
+        # the artifact to force a regenerate, which should fall through to capture
+        # rather than surface a bare FileNotFoundError.
+        try:
+            with open(self._path, encoding="utf-8") as f:
+                return f.read()
+        except FileNotFoundError:
+            return None
+        except OSError as e:
+            raise _precompile_error(
+                f"torch.compiler.export_python: could not read the artifact at "
+                f"{self._path} ({e.strerror}). Check that the path names a readable "
+                "file rather than a directory."
+            ) from e
 
     def _load(self, code: str, *, from_disk: bool) -> Callable[..., Any]:
         # The emitted source is self-contained: exec it directly (no cache, no
-        # precompile.load round-trip).
-        from torch._precompile import _make_inlined_forward
+        # precompile.load round-trip). A clobbered hand-edit (dropped forward / syntax
+        # error) and an environment or version mismatch (an import that fails under the
+        # current torch) surface as distinct, actionable PrecompileErrors rather than
+        # one catch-all "delete to regenerate".
+        from torch._precompile import _make_inlined_forward, PrecompileError
 
-        if from_disk:
-            log.warning(
-                "torch.compiler.export_python is about to EXEC the artifact at %s; "
-                "the file is trusted executable Python and may have been edited or "
-                "replaced since export. Only load paths whose contents you trust.",
-                self._path,
-            )
-        return _make_inlined_forward(code, warn=False, filename=self._path)
+        try:
+            if from_disk:
+                log.warning(
+                    "torch.compiler.export_python is about to EXEC the artifact at %s; "
+                    "the file is trusted executable Python and may have been edited or "
+                    "replaced since export. Only load paths whose contents you trust.",
+                    self._path,
+                )
+            return _make_inlined_forward(code, warn=False, filename=self._path)
+        except SyntaxError as e:
+            # Kernels are hoisted to module level, so Python reports a typo in one
+            # against this file at the right line. Say so: telling someone to delete an
+            # artifact they are midway through tuning is the wrong advice.
+            where = f" at line {e.lineno}" if e.lineno else ""
+            raise PrecompileError(
+                f"torch.compiler.export_python: the artifact at {self._path} does not "
+                f"parse{where}: {e.msg}. Fix it there, or delete the file to regenerate "
+                "from the original function."
+            ) from e
+        except KeyError as e:
+            raise PrecompileError(
+                f"torch.compiler.export_python: the artifact at {self._path} could "
+                "not be run as precompile source; it is not a valid "
+                "torch.compiler.precompile artifact (a hand-edit may have clobbered "
+                "it, e.g. dropping forward()). Delete it to regenerate."
+            ) from e
+        except ImportError as e:
+            raise PrecompileError(
+                f"torch.compiler.export_python: the artifact at {self._path} failed "
+                "to import a dependency; it was likely produced by a different torch "
+                f"version or environment. Delete {self._path} to regenerate against "
+                "the current torch."
+            ) from e
+        except Exception as e:
+            raise PrecompileError(
+                "torch.compiler.export_python: an unexpected error occurred running "
+                f"the artifact at {self._path}. Delete it to regenerate."
+            ) from e
 
     def _materialize(self, args: tuple[Any, ...]) -> Callable[..., Any]:
-        from_disk = os.path.exists(self._path)
-        code = self._load_from_disk() if from_disk else self._precompile_and_save(args)
+        code = self._load_from_disk() if os.path.exists(self._path) else None
+        from_disk = code is not None
+        if code is None:
+            code = self._precompile_and_save(args)
         entry = self._load(code, from_disk=from_disk)
         self._example_inputs = None
         self._decompositions = None
