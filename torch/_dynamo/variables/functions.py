@@ -2362,11 +2362,20 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
                     value = cell_contents.as_python_constant()
                     cell = make_cell(value)
                     if allow_sourced_cells:
-                        # Let bind_args reuse the tracked contents so mutations
-                        # remain visible to the enclosing traced frame.
-                        tx.output.side_effects.track_cell_existing(
-                            None, cell, cell_contents
-                        )
+                        needs_tracking = False
+
+                        def check_mutation(var):
+                            nonlocal needs_tracking
+                            if var.mutation_type is not None:
+                                needs_tracking = True
+
+                        VariableTracker.visit(check_mutation, cell_contents)
+                        if needs_tracking:
+                            # Preserve tracked mutable contents, including
+                            # those nested inside immutable containers.
+                            tx.output.side_effects.track_cell_existing(
+                                None, cell, cell_contents
+                            )
                     cells.append(cell)
                     continue
                 except (NotImplementedError, Unsupported):
