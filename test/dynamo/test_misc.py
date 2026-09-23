@@ -5662,6 +5662,32 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         with self.assertRaises(TypeError):
             fn(torch.randn(4))
 
+    @parametrize(
+        "case",
+        [
+            subtest("no_args", name="no_args"),
+            subtest("one_arg", name="one_arg"),
+            subtest("too_many_args", name="too_many_args"),
+            subtest("keyword_arg", name="keyword_arg"),
+        ],
+    )
+    def test_getattr_wrong_args_raises(self, case):
+        def fn(x):
+            try:
+                if case == "no_args":
+                    return getattr()
+                if case == "one_arg":
+                    return getattr(x)
+                if case == "too_many_args":
+                    return getattr(x, "shape", None, None)
+                return getattr(x, name="shape")
+            except TypeError as exc:
+                return x.sin(), str(exc)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
     def test_user_defined_class_name(self):
         class MyClassFoo:
             pass
@@ -17705,6 +17731,29 @@ fn
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.randn(4)
         self.assertEqual(fn(x), opt_fn(x))
+
+    def test_guard_filter_entry_snapshots_the_guard_code(self):
+        # entry.code_parts is populated from orig_guard.code_list at inspection
+        # time and owned by the entry: a later build_guards rebinds that
+        # attribute (to None, then to a fresh list), so an entry that read it
+        # through orig_guard would see the later build, not the one inspected.
+        from torch._dynamo.guards import make_guard_filter_entry
+        from torch._dynamo.source import LocalSource
+        from torch._guards import Guard
+
+        guard = Guard(LocalSource("x"), lambda *a: None)
+        guard.code_list = ["___check_type_id(L['x'], 1)"]
+        builder = types.SimpleNamespace(get=lambda g: 1)
+        entry = make_guard_filter_entry(guard, builder)
+        self.assertEqual(entry.code_parts, ("___check_type_id(L['x'], 1)",))
+        # Stricter than production, which never mutates the list in place:
+        # keeps the tuple() copy from being replaced by the list reference.
+        guard.code_list.clear()
+        guard.code_list.append("something else")
+        self.assertEqual(entry.code_parts, ("___check_type_id(L['x'], 1)",))
+        guard.code_list = None
+        self.assertEqual(entry.code_parts, ("___check_type_id(L['x'], 1)",))
+        self.assertEqual(make_guard_filter_entry(guard, builder).code_parts, ())
 
     def test_guard_filter_fn_by_id(self):
         def guard_filter_fn(entries):
