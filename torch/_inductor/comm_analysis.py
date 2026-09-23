@@ -45,6 +45,7 @@ class InterconnectType(IntEnum):
     IB_HDR = 4  # 200 Gbps InfiniBand
     IB_NDR = 5  # 400 Gbps InfiniBand / RoCE
     PCIE = 6  # PCIe (no NVLink)
+    UNKNOWN = 7
 
 
 @dataclass(frozen=True)
@@ -99,6 +100,8 @@ def _has_nvlink() -> bool:
     """Detect NVLink via nvidia-smi topology, falling back to peer access check."""
     import subprocess
 
+    if torch.version.hip is not None:
+        return False
     if not torch.cuda.is_available() or torch.cuda.device_count() < 2:
         return True  # Single GPU: interconnect irrelevant
     try:
@@ -122,7 +125,10 @@ def _has_nvlink() -> bool:
 
 
 @functools.lru_cache
-def get_gpu_type() -> NVIDIA_GPU_TYPE:
+def get_gpu_type() -> NVIDIA_GPU_TYPE | None:
+    # HIP capability numbers are GFX versions, not NVIDIA compute capabilities.
+    if torch.version.hip is not None:
+        return None
     # Prefer compute capability (works for all NVIDIA GPUs, including H200, L40, etc.)
     if torch.cuda.is_available() and torch.cuda.device_count() > 0:
         major = torch.cuda.get_device_properties(0).major
@@ -152,6 +158,8 @@ def detect_interconnect(group_size: int) -> InterconnectType:
     """Auto-detect interconnect type from GPU generation and group topology."""
     gpus_per_node = torch.cuda.device_count() if torch.cuda.is_available() else 8
     gpu_gen = get_gpu_type()
+    if gpu_gen is None:
+        return InterconnectType.UNKNOWN
     if math.ceil(group_size / gpus_per_node) == 1:
         if not _has_nvlink():
             return InterconnectType.PCIE
@@ -427,21 +435,27 @@ _GPU_INTER_NODE_BW: dict[NVIDIA_GPU_TYPE, float] = {
 
 
 def get_intra_node_bw() -> float:
-    """Return intra-node bandwidth in GB/s. Config overrides auto-detection."""
+    """Return modeled intra-node bandwidth in GB/s, or 0 if unavailable."""
     override = torch._inductor.config.intra_node_bw
     if override is not None:
         return float(override)
+    gpu_type = get_gpu_type()
+    if gpu_type is None:
+        return 0.0
     if not _has_nvlink():
         return _PCIE_INTRA_NODE_BW
-    return _GPU_NVLINK_BW.get(get_gpu_type(), 240.0)
+    return _GPU_NVLINK_BW.get(gpu_type, 240.0)
 
 
 def get_inter_node_bw() -> float:
-    """Return inter-node (IB/RoCE) bandwidth in GB/s. Config overrides auto-detection."""
+    """Return modeled inter-node bandwidth in GB/s, or 0 if unavailable."""
     override = torch._inductor.config.inter_node_bw
     if override is not None:
         return float(override)
-    return _GPU_INTER_NODE_BW.get(get_gpu_type(), 25.0)
+    gpu_type = get_gpu_type()
+    if gpu_type is None:
+        return 0.0
+    return _GPU_INTER_NODE_BW.get(gpu_type, 25.0)
 
 
 def _log2i(n: int) -> int:
@@ -508,6 +522,8 @@ def _nccl_algo_time(
     nNodes = math.ceil(group_size / gpus_per_node)
     nRanks = group_size
     compCapIndex = get_gpu_type()
+    if compCapIndex is None:
+        return -1.0
     index2 = nNodes - 1 if nNodes <= 2 else 2
 
     # Total bus bandwidth (not per-channel). Auto-detected from GPU
@@ -684,6 +700,9 @@ def estimate_nccl_collective_runtime_impl(
     if coll == NCCL_COLL.UNSUPPORTED:
         return 0
 
+    if get_gpu_type() is None:
+        return 0
+
     time_us, _, _ = _nccl_best_algo_time(tensor_storage_size_bytes, group_size, coll)
     if time_us < 0 or time_us == float("inf"):
         return 0
@@ -709,7 +728,10 @@ def compute_min_saturation_bytes(
     if group_size <= 1:
         return 0
 
-    profile = INTERCONNECT_PROFILES[detect_interconnect(group_size)]
+    interconnect = detect_interconnect(group_size)
+    if interconnect == InterconnectType.UNKNOWN:
+        return 0
+    profile = INTERCONNECT_PROFILES[interconnect]
 
     if coll in (NCCL_COLL.ALL_GATHER, NCCL_COLL.REDUCE_SCATTER):
         nsteps = group_size - 1

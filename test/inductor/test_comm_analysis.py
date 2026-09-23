@@ -3,6 +3,7 @@
 import sys
 import unittest
 import warnings
+from unittest import mock
 
 import torch
 import torch.distributed as dist
@@ -38,6 +39,32 @@ def _get_all_gather_node(group_size, group_name):
         if n.op == "call_function" and "all_gather_into_tensor" in str(n.target):
             return n
     raise RuntimeError("No all_gather_into_tensor node found in traced graph")
+
+
+class TestRocmCommAnalysis(TestCase):
+    def test_rocm_does_not_use_nvidia_model(self):
+        from torch._inductor.comm_analysis import (
+            _has_nvlink,
+            detect_interconnect,
+            get_gpu_type,
+            get_intra_node_bw,
+            InterconnectType,
+        )
+
+        with mock.patch.object(torch.version, "hip", "7.0"):
+            _has_nvlink.cache_clear()
+            get_gpu_type.cache_clear()
+            self.assertEqual(
+                (
+                    get_gpu_type(),
+                    _has_nvlink(),
+                    detect_interconnect(2),
+                    get_intra_node_bw(),
+                ),
+                (None, False, InterconnectType.UNKNOWN, 0.0),
+            )
+        _has_nvlink.cache_clear()
+        get_gpu_type.cache_clear()
 
 
 class TestNcclEstimateDeviceResolution(TestCase):
@@ -83,7 +110,10 @@ class TestNcclEstimateDeviceResolution(TestCase):
             est_ms = estimate_nccl_collective_runtime_from_fx_node(
                 node, use_nccl_estimator=True
             )
-            self.assertGreater(est_ms, 0)
+            if torch.version.hip is not None:
+                self.assertEqual(est_ms, 0)
+            else:
+                self.assertGreater(est_ms, 0)
 
             est_ms_analytical = estimate_nccl_collective_runtime_from_fx_node(
                 node, use_nccl_estimator=False
