@@ -2127,12 +2127,32 @@ class BuiltinVariable(BaseBuiltinVariable):
             fail(args, kwargs)
 
         if check_constant_args(args[1:], kwargs):
+            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+            # The metaclass runs eagerly below. A closure cell of its methods
+            # that side_effects does not track (e.g. a copy made when the
+            # metaclass itself was built in this trace) is detached from the
+            # traced cell, so reads could be stale and writes would be lost.
+            meta = const_kwargs.get("metaclass")
+            side_effects = tx.output.side_effects
+            if isinstance(meta, type) and any(
+                name != "__class__"
+                and (
+                    cell not in side_effects
+                    or side_effects.is_modified(side_effects[cell])
+                )
+                for klass in meta.__mro__
+                for v in vars(klass).values()
+                if isinstance(f := getattr(v, "__func__", v), types.FunctionType)
+                for name, cell in zip(f.__code__.co_freevars, f.__closure__ or ())
+            ):
+                fail(args, kwargs)
             try:
                 r = builtins.__build_class__(
                     fn,  # type: ignore[possibly-undefined]
                     *[a.as_python_constant() for a in args[1:]],
+                    **const_kwargs,
                 )
-            except (TypeError, ValueError) as e:
+            except (TypeError, ValueError, RuntimeError) as e:
                 raise_observed_exception(type(e), tx, args=list(e.args))
             return VariableTracker.build(tx, r)
         else:
