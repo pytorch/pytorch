@@ -1812,10 +1812,8 @@ def _cgroup_available_memory():
         # Page cache counts towards usage but is reclaimed under pressure rather
         # than triggering a kill, so charging it would understate what is free.
         # A shard that has read a lot of test data can hold gigabytes of it.
-        reclaimable = stat.get(f"{prefix}inactive_file", 0) + stat.get(
-            f"{prefix}slab_reclaimable", 0
-        )
-        return max(limit - max(usage - reclaimable, 0), 0)
+        cache = stat.get(f"{prefix}inactive_file", 0)
+        return max(limit - max(usage - cache, 0), 0)
     return None
 
 
