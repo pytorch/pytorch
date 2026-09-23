@@ -37,6 +37,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     TEST_WITH_TORCHDYNAMO,
     xfailIfTorchDynamo,
+    skipIfTorchDynamo,
 )
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta, instantiate_device_type_tests, deviceCountAtLeast,
@@ -3979,6 +3980,19 @@ def may_require_grad(dtype):
 def get_dtype_size(dtype):
     return int(torch.empty((), dtype=dtype).element_size())
 
+class _BufferAndSequence:
+    """A numpy array exposed through both the PEP 688 buffer and sequence protocols."""
+    def __init__(self, array):
+        self._array = array
+
+    def __buffer__(self, flags):
+        return memoryview(self._array)
+
+    def __len__(self):
+        return len(self._array)
+
+    def __getitem__(self, index):
+        return self._array[index].item()
 
 class TestBufferProtocol(TestCase):
     hw_classification = HardwareClassification.CPU
@@ -4136,6 +4150,106 @@ class TestBufferProtocol(TestCase):
         tensor = torch.frombuffer(byte_array, dtype=torch.int32)
         self.assertEqual(tensor.numel(), 2)
         self.assertSequenceEqual(tensor, [255, 255])
+
+    @dtypes(*set(numpy_to_torch_dtype_dict.values()))
+    def test_asarray_infers_dtype_from_buffer(self, device, dtype):
+        original = make_tensor((5,), dtype=dtype, device="cpu")
+        numpy_arr = original.numpy()
+        view = memoryview(numpy_arr)
+        result = torch.asarray(view)
+        self.assertEqual(result.dtype, dtype)
+        self.assertEqual(result, original)
+        # Without a dtype the buffer is aliased, not copied.
+        self.assertEqual(result.data_ptr(), numpy_arr.__array_interface__["data"][0])
+
+    def test_asarray_bool_buffer_regression(self, device):
+        for values in ([True, False], [True, False, True, True]):
+            numpy_arr = np.array(values, dtype=np.bool_)
+            result = torch.asarray(memoryview(numpy_arr))
+            self.assertEqual(result.dtype, torch.bool)
+            self.assertEqual(result, torch.tensor(values))
+
+    def test_asarray_buffer_array_module(self, device):
+        import array
+        cases = [
+            (array.array("b", [1, -2, 3]), torch.int8),
+            (array.array("i", [1, 2, 3]), torch.int32),
+            (array.array("q", [1, 2, 3]), torch.int64),
+            (array.array("f", [1.0, 2.0, 3.0]), torch.float32),
+            (array.array("d", [1.0, 2.0, 3.0]), torch.float64),
+        ]
+        for arr, expected_dtype in cases:
+            result = torch.asarray(arr)
+            self.assertEqual(result.dtype, expected_dtype)
+            self.assertEqual(result.tolist(), list(arr))
+
+    @skipIfTorchDynamo("numpy non-native byteorder dtype ('>i4') isn't traceable by dynamo")
+    def test_asarray_buffer_non_native_byteorder_raises(self, device):
+        # dtype= would reinterpret in native order, so the error must not suggest it.
+        nonnative = ">" if sys.byteorder == "little" else "<"
+        view = memoryview(np.array([1, 2, 3], dtype=nonnative + "i4"))
+        with self.assertRaisesRegex(ValueError, "non-native byte order"):
+            torch.asarray(view)
+        try:
+            torch.asarray(view)
+        except ValueError as e:
+            self.assertIn("native byte order", str(e))
+            self.assertNotIn("explicit dtype", str(e))
+
+    @skipIfTorchDynamo("numpy structured dtype ('[(a, i4), (b, i4)]') isn't traceable by dynamo")
+    def test_asarray_buffer_struct_format_raises(self, device):
+        arr = np.zeros(3, dtype=[("a", "i4"), ("b", "i4")])
+        with self.assertRaisesRegex(ValueError, "could not infer a dtype"):
+            torch.asarray(memoryview(arr))
+
+    @skipIfTorchDynamo("numpy string dtypes ('S4'/'U2') aren't traceable by dynamo")
+    def test_asarray_buffer_multi_element_format_raises(self, device):
+        # numpy's bytes/unicode/void dtypes export count-prefixed formats ('4s', '2w', '4x').
+        for arr in (np.array([b"abcd"]), np.array(["ab"]), np.zeros(2, dtype="V4")):
+            with self.assertRaisesRegex(ValueError, "multi-element formats are not supported"):
+                torch.asarray(memoryview(arr))
+        # A count of 1 is a single scalar, but 's' still maps to no torch dtype.
+        with self.assertRaisesRegex(ValueError, r"format '1s'\. Please pass an explicit dtype"):
+            torch.asarray(memoryview(np.array([b"a"])))
+
+    def test_asarray_buffer_non_contiguous_raises(self, device):
+        # Must fail the same way with and without a dtype.
+        view = memoryview(np.arange(10, dtype=np.int64)[::2])
+        self.assertFalse(view.contiguous)
+        with self.assertRaisesRegex(RuntimeError, "non-contiguous"):
+            torch.asarray(view)
+        with self.assertRaisesRegex(RuntimeError, "non-contiguous"):
+            torch.asarray(view, dtype=torch.int64)
+
+    def test_asarray_buffer_ctypes_byteorder_prefix(self, device):
+        # ctypes formats carry an explicit native byte-order prefix (e.g. '<i').
+        import ctypes
+        arr = (ctypes.c_int * 4)(1, 2, 3, 4)
+        result = torch.asarray(arr)
+        self.assertEqual(result.dtype, torch.int32)
+        self.assertEqual(result.tolist(), [1, 2, 3, 4])
+
+    @unittest.skipIf(sys.version_info < (3, 12), "PEP 688 __buffer__ requires Python 3.12+")
+    def test_asarray_pep688_buffer(self, device):
+        for values, dtype in (
+            ([True, False, True], torch.bool),
+            ([1, 2, 3], torch.int32),
+            ([1.5, 2.5], torch.float32),
+        ):
+            arr = np.array(values, dtype=torch_to_numpy_dtype_dict[dtype])
+            result = torch.asarray(_BufferAndSequence(arr))
+            self.assertEqual(result.dtype, dtype)
+            self.assertEqual(result, torch.tensor(values, dtype=dtype))
+
+    @unittest.skipIf(sys.version_info < (3, 12), "PEP 688 __buffer__ requires Python 3.12+")
+    def test_tensor_pep688_buffer(self, device):
+        for values, dtype in (
+            ([True, False, True], torch.bool),
+            ([1, 2, 3], torch.int64),
+            ([1.5, 2.5], torch.float32),
+        ):
+            arr = np.array(values, dtype=torch_to_numpy_dtype_dict[dtype])
+            self.assertEqual(torch.tensor(_BufferAndSequence(arr)), torch.tensor(values))
 
 class TestFromBlob(TestCase):
     hw_classification = HardwareClassification.CPU
