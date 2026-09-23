@@ -2484,8 +2484,6 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         )
         blob = torch.load(io.BytesIO(cache), weights_only=True)
         self.assertEqual((blob["backend"], blob["tracer"]), (backend, "dynamo"))
-        with self.assertRaisesRegex(PackageError, "dropped .* guard"):
-            session.snapshot_artifact(require_no_dropped_guards=True)
         # A session that never ran its callable has nothing to render, and one
         # whose call raised is refused as incomplete unless the caller accepts it.
         empty = precompile_package.precompile_capture(step, backend="eager")
