@@ -214,7 +214,19 @@ class TestReadableWrapperCodegen(TestCase):
         # benchmarks or coordinate-descends on first launch.
         _, fn, shape = case
         x = torch.randn(shape, device="cuda")
-        expected, code = _code_for(fn, x, readable_wrapper=True)
+        # what tuning chose, read from the base class's scope, not from the table
+        tuned: dict[str, object] = {}
+        run_autotune_block = PythonWrapperCodegen.generate_and_run_autotune_block
+
+        def record_tuned(self):
+            scope = run_autotune_block(self)
+            tuned.update(scope or {})
+            return scope
+
+        with mock.patch.object(
+            PythonWrapperCodegen, "generate_and_run_autotune_block", record_tuned
+        ):
+            expected, code = _code_for(fn, x, readable_wrapper=True)
         decorators = re.findall(r"^@triton_heuristics\.(\w+)\(", code, re.MULTILINE)
         self.assertTrue(decorators)
         self.assertEqual(set(decorators), {"fixed_config"}, decorators)
@@ -235,6 +247,8 @@ class TestReadableWrapperCodegen(TestCase):
                 self.assertEqual(other, fn(-x), atol=1e-4, rtol=1e-4)
         kernel_configs = ns["KERNEL_CONFIGS"]
         for name, cfg in kernel_configs.items():  # type: ignore[attr-defined]
+            (tuned_launcher,) = tuned[name].launchers  # type: ignore[attr-defined]
+            self.assertEqual(config_to_dict(tuned_launcher.config), cfg, name)
             (launcher,) = ns[name].launchers  # type: ignore[attr-defined]
             self.assertEqual(config_to_dict(launcher.config), cfg, name)
 
