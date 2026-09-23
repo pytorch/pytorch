@@ -26,6 +26,7 @@ from torch.testing._internal.common_device_type import (
     ops,
     precisionOverride,
     skipCPUIfNoMklSparse,
+    skipCUDAIf,
     skipCUDAIfNoSparseGeneric,
     skipCUDAIfRocm,
     skipMeta,
@@ -2089,7 +2090,7 @@ class TestSparseCSR(TestCase):
     @skipCPUIfNoMklSparse
     @dtypes(*floating_and_complex_types())
     @sparse_compressed_nonblock_layouts()
-    @skipCUDAIfNoSparseGeneric
+    @skipCUDAIf(True, "_sparse_mm_reduce_impl only support SparseCsrCPU")
     def test_addmm_dense_result(self, device, dtype, layout):
         M = torch.randn(10, 25, device=device).to(dtype)
         m1 = torch.randn(10, 50, device=device).to(dtype)
@@ -2668,7 +2669,7 @@ class TestSparseCSR(TestCase):
 
     @dtypes(torch.float32, torch.float64, torch.bfloat16, torch.float16)
     @precisionOverride({torch.bfloat16: 0.01})
-    @skipCUDAIfNoSparseGeneric
+    @skipCUDAIf(True, "_sparse_mm_reduce_impl only support SparseCsrCPU")
     def test_sparse_mm_reduce_sum(self, device, dtype):
         def run_test(m, n, k, nnz, train):
             sparse = self.genSparseCSRTensor((m, k), nnz, dtype=dtype, device=device, index_dtype=torch.int64)
@@ -2706,7 +2707,7 @@ class TestSparseCSR(TestCase):
     @skipIfTorchDynamo()
     @dtypes(torch.float32, torch.float64, torch.bfloat16, torch.float16)
     @precisionOverride({torch.bfloat16: 0.02, torch.float16: 0.01})
-    @skipCUDAIfNoSparseGeneric
+    @skipCUDAIf(True, "_sparse_mm_reduce_impl only support SparseCsrCPU")
     def test_sparse_mm_reduce(self, device, dtype):
         def run_test(m, n, k, nnz, reduce_type, index_dtype, train):
             csr = self.genSparseCSRTensor((m, n), nnz, dtype=dtype, device=device, index_dtype=index_dtype)
@@ -3620,81 +3621,8 @@ class TestSparseCSRCudaOnly(TestCase):
             out = torch.linalg.solve(sample.input, *sample.args, **sample.kwargs)
             self.assertEqual(expect, out)
 
-
-def skipIfNoTriton(cls):
-    from torch.utils._triton import has_triton
-
-    # no-op if triton is present
-    if has_triton():
-        return cls
-    else:
-
-        @functools.wraps(cls, updated=())
-        class skipped_cls(cls):
-            def setUp(self):
-                self.skipTest("Triton is not available.")
-
-        return skipped_cls
-
-@skipIfNoTriton
-class TestSparseCompressedTritonKernels(TestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
-
-    def _to_block_triangular_inplace(self, d, row_block, col_block):
-        """
-        This function modifies `d` to become (upper/lower) block-triangular in-place.
-        It is assumed that `d.shape[-2]` is divisible by `row_block` and
-        `d.shape[-1]` is divisible by `col_block`.
-        """
-
-        from torch.sparse._triton_ops import tile_to_blocksize
-
-        m, n = d.shape[-2:]
-        d_tiled = tile_to_blocksize(d, (row_block, col_block))
-        d_tiled = d_tiled.moveaxis(-4, -1).moveaxis(-4, -1)
-        if m // row_block > n // col_block:
-            d_tiled.tril_()
-        else:
-            d_tiled.triu_()
-
-        return d
-
-    @onlyAccelerator
-    @dtypes(torch.half, torch.bfloat16, torch.float)
-    @dtypesIfCUDA(torch.half, *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16 else [], torch.float)
-    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
-    def test_triton_bsr_softmax(self, device, dtype):
-        from functools import partial
-        from torch.sparse._triton_ops import bsr_softmax
-
-        tensor = partial(make_tensor, device=device, dtype=dtype, low=1.0, high=3.0)
-
-        # NOTE: batch dims with zero sizes are not supported in `to_sparse_bsr`.
-        batches = [(), (2,), (2, 2)]
-        size = [6, 12, 0]
-        block_size = [2, 3]
-
-        # General correctness
-        for row_block, col_block, b, m, n in itertools.product(block_size, block_size, batches, size, size):
-            input = tensor(b + (m, n))
-            input.diagonal(dim1=-2, dim2=-1).fill_(m * n)
-            input = self._to_block_triangular_inplace(input, row_block, col_block)
-
-            bsr = input.to_sparse_bsr((row_block, col_block))
-            coo = input.to_sparse().to(torch.float)
-
-            res_tri = bsr_softmax(bsr)
-            res_coo = torch.sparse.softmax(coo, -1)
-            self.assertEqual(res_tri, res_coo.to(input.dtype))
-
-        # Test long rows which exceed Triton's max numel limit set to 2 ** 17
-        input = tensor(b + (1, 150000))
-        bsr = input.to_sparse_bsr(1)
-        self.assertEqual(input.softmax(-1), bsr_softmax(bsr))
-
     @parametrize("block_size", [16, 32, 64])
     @parametrize("index_dtype", [torch.int32, torch.int64])
-    @onlyAccelerator
     @dtypes(torch.half, torch.bfloat16, torch.float)
     @dtypesIfCUDA(torch.half, *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16 else [], torch.float)
     @unittest.skipIf((not TEST_WITH_TORCHINDUCTOR) or (IS_FBCODE and IS_REMOTE_GPU),
@@ -3772,6 +3700,77 @@ class TestSparseCompressedTritonKernels(TestCase):
                 )
                 self.assertEqual(res_tri, res_dense)
 
+def skipIfNoTriton(cls):
+    from torch.utils._triton import has_triton
+
+    # no-op if triton is present
+    if has_triton():
+        return cls
+    else:
+
+        @functools.wraps(cls, updated=())
+        class skipped_cls(cls):
+            def setUp(self):
+                self.skipTest("Triton is not available.")
+
+        return skipped_cls
+
+@skipIfNoTriton
+class TestSparseCompressedTritonKernels(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def _to_block_triangular_inplace(self, d, row_block, col_block):
+        """
+        This function modifies `d` to become (upper/lower) block-triangular in-place.
+        It is assumed that `d.shape[-2]` is divisible by `row_block` and
+        `d.shape[-1]` is divisible by `col_block`.
+        """
+
+        from torch.sparse._triton_ops import tile_to_blocksize
+
+        m, n = d.shape[-2:]
+        d_tiled = tile_to_blocksize(d, (row_block, col_block))
+        d_tiled = d_tiled.moveaxis(-4, -1).moveaxis(-4, -1)
+        if m // row_block > n // col_block:
+            d_tiled.tril_()
+        else:
+            d_tiled.triu_()
+
+        return d
+
+    @onlyAccelerator
+    @dtypes(torch.half, torch.bfloat16, torch.float)
+    @dtypesIfCUDA(torch.half, *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16 else [], torch.float)
+    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
+    def test_triton_bsr_softmax(self, device, dtype):
+        from functools import partial
+        from torch.sparse._triton_ops import bsr_softmax
+
+        tensor = partial(make_tensor, device=device, dtype=dtype, low=1.0, high=3.0)
+
+        # NOTE: batch dims with zero sizes are not supported in `to_sparse_bsr`.
+        batches = [(), (2,), (2, 2)]
+        size = [6, 12, 0]
+        block_size = [2, 3]
+
+        # General correctness
+        for row_block, col_block, b, m, n in itertools.product(block_size, block_size, batches, size, size):
+            input = tensor(b + (m, n))
+            input.diagonal(dim1=-2, dim2=-1).fill_(m * n)
+            input = self._to_block_triangular_inplace(input, row_block, col_block)
+
+            bsr = input.to_sparse_bsr((row_block, col_block))
+            coo = input.to_sparse().to(torch.float)
+
+            res_tri = bsr_softmax(bsr)
+            res_coo = torch.sparse.softmax(coo, -1)
+            self.assertEqual(res_tri, res_coo.to(input.dtype))
+
+        # Test long rows which exceed Triton's max numel limit set to 2 ** 17
+        input = tensor(b + (1, 150000))
+        bsr = input.to_sparse_bsr(1)
+        self.assertEqual(input.softmax(-1), bsr_softmax(bsr))
+
     @onlyAccelerator
     @dtypes(torch.half)
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU,
@@ -3785,8 +3784,8 @@ class TestSparseCompressedTritonKernels(TestCase):
             bsr_dense_mm(lhs.to_sparse_bsc(16), rhs)
         with self.assertRaisesRegex(ValueError, "on the same GPU device"):
             bsr_dense_mm(lhs, rhs.cpu())
-        if torch.cuda.device_count() > 1:
-            with self.assertRaisesRegex(ValueError, "on the same GPU device"):
+        if torch.accelerator.device_count() > 1:
+            with self.assertRaisesRegex(ValueError, "on the same accelerator"):
                 bsr_dense_mm(lhs.to("cuda:0"), rhs.to("cuda:1"))
         with self.assertRaisesRegex(ValueError, "all inputs are expected to be of the same dtype"):
             bsr_dense_mm(lhs, rhs.to(torch.float))
