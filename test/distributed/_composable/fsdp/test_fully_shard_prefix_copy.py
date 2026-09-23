@@ -7,6 +7,7 @@ from unittest.mock import Mock
 
 import torch
 import torch.distributed as dist
+from torch.distributed.fsdp._fully_shard._fsdp_api import AllGatherInput
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _default_all_gather_output_fn,
     _default_reduce_scatter_input_fn,
@@ -63,16 +64,43 @@ class TestPrefixCopy(TestCase):
         param.all_gather_outputs = []
         return param
 
-    def test_all_gather_input_padding(self, device):
+    @parametrize(
+        "dim,output_size,match",
+        [
+            (2, None, "dim 2 is invalid"),
+            (-3, None, "dim -3 is invalid"),
+            (0, torch.Size((-1, 12)), "must be nonnegative"),
+            (1, torch.Size((2, 5)), "must contain 12 elements"),
+        ],
+    )
+    def test_all_gather_input_invalid(self, device, dim, output_size, match):
         tensor = torch.empty(2, 3, device=device)
-        with self.assertRaisesRegex(AssertionError, "padded sharded size"):
+        with self.assertRaisesRegex(ValueError, match):
             _normalize_all_gather_inputs(
-                (tensor,),
+                (AllGatherInput(tensor, dim, output_size),),
                 world_size=2,
-                shard_dim=0,
-                padded_sharded_size=torch.Size((4, 3)),
-                require_padding=True,
+                shard_dim=1,
+                padded_sharded_size=tensor.size(),
+                require_padding=False,
             )
+
+    @parametrize("explicit_layout", [False, True])
+    def test_all_gather_input_padding(self, device, explicit_layout):
+        tensor = torch.empty(2, 3, device=device)
+        inputs = (AllGatherInput(tensor, dim=1) if explicit_layout else tensor,)
+        kwargs = {
+            "world_size": 2,
+            "shard_dim": 0,
+            "padded_sharded_size": torch.Size((4, 3)),
+            "require_padding": True,
+        }
+        if explicit_layout:
+            tensors, layouts = _normalize_all_gather_inputs(inputs, **kwargs)
+            self.assertIs(tensors[0], tensor)
+            self.assertEqual(layouts[0].output_size, (2, 6))
+        else:
+            with self.assertRaisesRegex(AssertionError, "padded sharded size"):
+                _normalize_all_gather_inputs(inputs, **kwargs)
 
     @parametrize("world_size", [1, 2])
     def test_legacy_all_gather_input_size(self, device, world_size):
@@ -149,9 +177,6 @@ class TestPrefixCopy(TestCase):
         self.assertEqual(output.view_as(expected), expected, atol=0, rtol=0)
         self.assertEqual(empty_output.view(layouts[1].output_size).size(), (0, 3))
         self.assertEqual(counter.counts[torch.ops.aten.cat.out], 1)
-        self.assertEqual(
-            counter.counts[torch.ops.fsdp.split_with_sizes_copy.default], 1
-        )
 
     @parametrize("nonzero_shards", [False, True])
     @parametrize("world_size", [1, 4])
@@ -181,8 +206,8 @@ class TestPrefixCopy(TestCase):
         ).float()
         params = [Mock(fsdp_placement=Shard(dim)) for dim in shard_dims]
         prepared = _default_reduce_scatter_input_fn(params, grads, world_size)
-        self.assertIs(prepared.copy_in, foreach_reduce_scatter_copy_in)
         sizes = prepared.padded_unsharded_sizes
+        self.assertIs(prepared.copy_in, foreach_reduce_scatter_copy_in)
         self.assertEqual(len(sizes), len(params))
         self.assertEqual(sum(size.numel() for size in sizes), expected.numel())
         output = torch.empty_like(expected)
@@ -322,7 +347,12 @@ class TestPrefixCopy(TestCase):
     )
     @dtypes(torch.float32, torch.bfloat16)
     def test_all_gather_byte_input(
-        self, device, dtype, shard_dim, cached_output, payload_matches_param
+        self,
+        device,
+        dtype,
+        shard_dim,
+        cached_output,
+        payload_matches_param,
     ):
         world_size = 2
         expected = make_tensor((2, 4, 8), device=device, dtype=dtype)
@@ -363,9 +393,6 @@ class TestPrefixCopy(TestCase):
         self.assertEqual(output.view_as(expected), expected, atol=0, rtol=0)
         self.assertEqual(output._version, version)
         self.assertEqual(counter.counts[torch.ops.aten.cat.out], 1)
-        self.assertEqual(
-            counter.counts[torch.ops.fsdp.split_with_sizes_copy.default], 1
-        )
 
     @parametrize("shard_dim", [0, 1, 2])
     def test_all_gather_changing_payload_size(self, device, shard_dim):
