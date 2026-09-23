@@ -1742,6 +1742,47 @@ class skipPRIVATEUSE1If(skipIf):
         super().__init__(dep, reason, device_type=device_type)
 
 
+def _cgroup_available_memory():
+    """Memory still usable inside this process's cgroup, or None if uncapped.
+
+    psutil reports the host's memory. In a container that is not the ceiling the
+    OOM killer enforces, and the two can differ by an order of magnitude: a 41GiB
+    CI pod on a 768GiB node looks like it has hundreds of gigabytes free, so a
+    largeTensorTest asking for 180GB is admitted and then killed mid-test.
+    """
+    for limit_path, usage_path in (
+        ("/sys/fs/cgroup/memory.max", "/sys/fs/cgroup/memory.current"),
+        (
+            "/sys/fs/cgroup/memory/memory.limit_in_bytes",
+            "/sys/fs/cgroup/memory/memory.usage_in_bytes",
+        ),
+    ):
+        try:
+            with open(limit_path) as f:
+                raw = f.read().strip()
+            # cgroup v2 says "max" when uncapped; v1 reports a huge sentinel.
+            if raw == "max":
+                return None
+            limit = int(raw)
+            if limit >= 2**62:
+                return None
+            with open(usage_path) as f:
+                usage = int(f.read().strip())
+        except (OSError, ValueError):
+            continue
+        return max(limit - usage, 0)
+    return None
+
+
+def _available_cpu_memory():
+    """Host memory available, clamped to what this cgroup will actually allow."""
+    available = psutil.virtual_memory().available
+    cgroup_available = _cgroup_available_memory()
+    if cgroup_available is None:
+        return available
+    return min(available, cgroup_available)
+
+
 def _has_sufficient_memory(device, size):
     device_ = torch.device(device)
     device_type = device_.type
@@ -1797,14 +1838,14 @@ def _has_sufficient_memory(device, size):
     if IS_S390X:
         effective_size = effective_size * 2
 
-    if psutil.virtual_memory().available < effective_size:
+    if _available_cpu_memory() < effective_size:
         gc.collect()
         # Sync and cleanup MPS memory before checking available memory
         if device_type == "mps":
             torch.mps.synchronize()
             torch.mps.empty_cache()
 
-    return psutil.virtual_memory().available >= effective_size
+    return _available_cpu_memory() >= effective_size
 
 
 def _parse_size(size):
