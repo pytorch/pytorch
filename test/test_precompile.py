@@ -115,6 +115,24 @@ def _default_and_inlined_loaders(code: str, cache: bytes, backend: str):
 _MULTIGRAPH_SCALE = 2
 
 
+def _closure_step(model, x):
+    # Module-level so Dynamo can name the nested lambda's code. The lambda is
+    # made after the break: in the entry, its code would be serialized with the
+    # module's globals.
+    loss = (model(x) * _MULTIGRAPH_SCALE).sum()
+    loss.backward()
+    get = lambda: loss  # noqa: E731
+    return get()
+
+
+# Module-level so the guards on it serialize and the entry is not bypassed.
+class _GraphBreakingChild(torch.nn.Module):
+    def forward(self, x):
+        y = x.sin()
+        torch._dynamo.graph_break()
+        return y.cos()
+
+
 # precompile drives make_fx internally, which cannot symbolically trace a
 # dynamo-optimized function; the whole suite is therefore incompatible with
 # PYTORCH_TEST_WITH_DYNAMO (dynamo_wrapped CI), so skip it there.
@@ -541,6 +559,7 @@ class TestPrecompile(TestCase):
             return {
                 "is_entry": is_entry,
                 "bypassed": nvariants == 0,
+                "trivial": False,
                 "code": code,
                 "python_module": "m",
                 "import_sources": {},
@@ -2880,11 +2899,14 @@ class TestPrecompile(TestCase):
             target = getattr(target, part)
         self.assertIs(target, getattr(member, "__func__", member))
 
-    def test_trivial_continuation_is_served_as_plain_python(self):
-        # The continuation after a trailing .backward() reaches no tensor, so
-        # Dynamo skips it before tracing and it runs as plain Python during
-        # capture. Its record says so, a standalone artifact counts it as
-        # covered, and the driver rebuilds it as the plain function it was.
+    @parametrize("shape", ["no_tensor", "no_ops", "closure"])
+    def test_trivial_continuation_is_served_as_plain_python(self, shape):
+        # Dynamo compiles nothing of the continuation after a trailing
+        # .backward(): it skips it when no tensor reaches it ("no_tensor") and
+        # traces no ops when one does ("no_ops"), so it runs as plain Python
+        # during capture. Its record says so, a standalone artifact counts it as
+        # covered, and the driver rebuilds it as the plain function it was, over
+        # the frame ahead's cells when it has free variables ("closure").
         import inspect
         from unittest import mock
 
@@ -2894,9 +2916,16 @@ class TestPrecompile(TestCase):
         from torch._dynamo.precompile_package import default_guard_filter_fn
         from torch._precompile import _b64, _multigraph_frames, _serving_mode
 
-        def step(model, x):
+        def no_tensor(model, x):
             (model(x) * _MULTIGRAPH_SCALE).sum().backward()
 
+        def no_ops(model, x):
+            loss = (model(x) * _MULTIGRAPH_SCALE).sum()
+            loss.backward()
+            return loss
+
+        steps = {"no_tensor": no_tensor, "no_ops": no_ops, "closure": _closure_step}
+        step = steps[shape]
         model = torch.nn.Linear(4, 4)
         x = torch.randn(3, 4)
         package = CompilePackage(step)
@@ -2906,10 +2935,12 @@ class TestPrecompile(TestCase):
         compiled(model, x)
         expected = torch.nn.Linear(4, 4)
         expected.load_state_dict(model.state_dict())
-        step(expected, x)
+        expected_out = step(expected, x)
         frames = _multigraph_frames(package.cache_entry())
-        self.assertEqual([f["trivial"] for f in frames], [False, True])
-        self.assertEqual([len(f["variants"]) for f in frames], [1, 0])
+        # The closure's lambda is recorded too, unreachable and harmless.
+        self.assertEqual([f["trivial"] for f in frames[:2]], [False, True])
+        self.assertTrue(all(f["trivial"] for f in frames[1:]))
+        self.assertEqual([len(f["variants"]) for f in frames[:2]], [1, 0])
         self.assertEqual(_serving_mode(frames), "standalone")
         # Only a continuation Dynamo never traced is served that way: one it
         # compiled but kept no variant of still sends the capture to installing.
@@ -2947,7 +2978,7 @@ class TestPrecompile(TestCase):
         forward = ns["_build_multigraph_forward"]()
         served = torch.nn.Linear(4, 4)
         served.load_state_dict(model.state_dict())
-        self.assertIsNone(forward(served, x))
+        self.assertEqual(forward(served, x), expected_out)
         self.assertEqual(served.weight.grad, expected.weight.grad)
         self.assertEqual(served.bias.grad, expected.bias.grad)
 
@@ -3037,6 +3068,41 @@ class TestPrecompile(TestCase):
         _, fx_cache = _precompile_pair(_files_fn, _FilesModel(), x2, backend="eager")
         with self.assertRaisesRegex(PrecompileError, "tracer"):
             _runnable_from_pair(python_code, fx_cache)
+        # Defaults ride in the artifact, so one that does not pickle is refused.
+        with mock.patch.object(step, "__kwdefaults__", {"scale": lambda: 2.0}):
+            with self.assertRaisesRegex(PrecompileError, "defaults must be picklable"):
+                _build_multigraph_artifact(entry, backends, summary, "eager", step)
+        # A bypassed entry reaches no continuation; it is refused as bypassed,
+        # not as a capture whose continuation is unreachable.
+        entry.codes[0].bypassed, entry.codes[0].guarded_codes = True, []
+        with self.assertRaisesRegex(PrecompileError, "entry frame was BYPASSED"):
+            _build_multigraph_artifact(entry, backends, summary, "eager", step)
+
+    def test_multigraph_artifact_refuses_a_frame_the_entry_cannot_reach(self):
+        # A graph break inside a child module's forward compiles that forward as
+        # its own frame, entered by an ordinary call the source artifact cannot
+        # intercept, so the capture is refused rather than served part eager.
+        from torch._dynamo.package import CompilePackage
+        from torch._dynamo.precompile_package import default_guard_filter_fn
+        from torch._precompile import _build_multigraph_artifact
+        from torch.compiler.precompile import PrecompileSummary
+
+        def step(child, x):
+            return child(x * 2) + 1
+
+        package = CompilePackage(step)
+        torch._dynamo.optimize(
+            backend="eager", package=package, guard_filter_fn=default_guard_filter_fn
+        )(step)(_GraphBreakingChild(), torch.randn(3))
+        entry = package.cache_entry()
+        summary = PrecompileSummary(
+            frames=len(entry.codes),
+            resume_functions=1,
+            guarded_codes=0,
+            backend_graphs=0,
+        )
+        with self.assertRaisesRegex(PrecompileError, "cannot reach from the entry"):
+            _build_multigraph_artifact(entry, {}, summary, "eager", step)
 
     def test_nested_input_refused(self):
         # A nested example input is refused up front with a named PrecompileError rather
@@ -4211,31 +4277,23 @@ class TestPrecompileLoad(TestCase):
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertIn("served", out.stdout)
 
-    def _read(self, path):
-        with open(path, "rb") as f:
-            return f.read().decode()
-
     def test_load_pairs_the_cache_on_its_tracer_tag(self):
         # The envelope names the tracer that produced it; a tag that differs from
         # the python_code's is a wrong pairing, and a pair written before the tag
         # (absent on both sides) still reads as make_fx.
-        _, cache = self._write(self.artifact, self.cache)
+        python_code, cache = self._write(self.artifact, self.cache)
         blob = torch.load(io.BytesIO(cache), weights_only=True)
         self.assertEqual(blob["tracer"], "make_fx")
         blob["tracer"] = "dynamo"
         buf = io.BytesIO()
         torch.save(blob, buf)
-        _write_artifact(
-            self.artifact, self.cache, self._read(self.artifact), buf.getvalue()
-        )
+        _write_artifact(self.artifact, self.cache, python_code, buf.getvalue())
         with self.assertRaisesRegex(PrecompileError, "tracer"):
             load(self.artifact, self.cache)
         del blob["tracer"]
         buf = io.BytesIO()
         torch.save(blob, buf)
-        _write_artifact(
-            self.artifact, self.cache, self._read(self.artifact), buf.getvalue()
-        )
+        _write_artifact(self.artifact, self.cache, python_code, buf.getvalue())
         self.assertEqual(
             load(self.artifact, self.cache)(self.model, self.x), self.model(self.x)
         )
@@ -4577,6 +4635,8 @@ model.load_state_dict(saved["state_dict"])
 f = torch.compiler.precompile.load(artifact, cache)
 for args, kwargs, expected in saved["calls"]:
     torch.testing.assert_close(f(model, *args, **kwargs), expected)
+for name, grad in saved["grads"].items():
+    torch.testing.assert_close(model.get_parameter(name).grad, grad)
 try:
     f(model, saved["calls"][0][0][0].double())
 except torch.compiler.PrecompileError as e:
@@ -4616,9 +4676,14 @@ class TestPrecompileDynamoCapture(TestCase):
         kwargs.setdefault("tracer", DynamoTracer())
         return capture(fn, artifact_path=self.artifact, cache_path=self.cache, **kwargs)
 
-    def _serve_in_fresh_process(self, calls):
+    def _serve_in_fresh_process(self, calls, grads=None):
         state = os.path.join(self.dir, "state.pt")
-        torch.save({"state_dict": self.model.state_dict(), "calls": calls}, state)
+        saved = {
+            "state_dict": self.model.state_dict(),
+            "calls": calls,
+            "grads": grads or {},
+        }
+        torch.save(saved, state)
         argv = [self.dir, self.module_name, self.artifact, self.cache, state]
         out = subprocess.run(
             [sys.executable, "-c", _GOLDEN_LOADER, *argv],
@@ -4675,14 +4740,19 @@ class TestPrecompileDynamoCapture(TestCase):
         with self.assertRaisesRegex(PrecompileError, "no captured variant"):
             f(self.model, self.x3)
 
-    def test_training_step_grads_match_eager_in_a_fresh_process(self):
+    @skipIfCrossRef
+    @parametrize("backend", ["inductor", "eager"])
+    def test_training_step_grads_match_eager_in_a_fresh_process(self, backend):
         expected = self.mod.Model()
         expected.load_state_dict(self.model.state_dict())
         expected(self.x2).sum().backward()
-        with self._capture(self.mod.train_step, backend="eager") as cap:
+        grads = {n: p.grad for n, p in expected.named_parameters()}
+        state = {k: v.clone() for k, v in self.model.state_dict().items()}
+        with self._capture(self.mod.train_step, backend=backend) as cap:
             self.assertIsNone(cap(self.model, self.x2))
-        self.assertEqual(self.model.lin.weight.grad, expected.lin.weight.grad)
-        self.assertEqual(self.model.lin.bias.grad, expected.lin.bias.grad)
+        self.assertEqual(self.model.lin.weight.grad, grads["lin.weight"])
+        self.model.load_state_dict(state)
+        self._serve_in_fresh_process([((self.x2,), {}, None)], grads)
 
     def test_a_raised_call_is_refused_at_exit_and_writes_nothing(self):
         # A call that raised inside the block is a coverage gap: the default gate
@@ -4694,6 +4764,71 @@ class TestPrecompileDynamoCapture(TestCase):
                     cap(self.model, torch.randn(2, 5))
         self.assertFalse(os.path.exists(self.artifact))
         self.assertFalse(os.path.exists(self.cache))
+        # A call that raised on every attempt still reaches that gate.
+        with self.assertRaisesRegex(PrecompileError, "captured call raised"):
+            with self._capture(self.mod.step, backend="eager") as cap:
+                with self.assertRaises(RuntimeError):
+                    cap(self.model, torch.randn(2, 5))
+        # require_complete=False writes the partial artifact instead.
+        partial = DynamoTracer(require_complete=False)
+        with self._capture(self.mod.step, backend="eager", tracer=partial) as cap:
+            cap(self.model, self.x2)
+            with self.assertRaises(RuntimeError):
+                cap(self.model, torch.randn(2, 5))
+        self.assertTrue(os.path.exists(self.artifact))
+
+    def test_misuse_is_refused(self):
+        with self.assertRaisesRegex(ValueError, "backend"):
+            self._capture(self.mod.single, backend="aot_eager")
+        with self.assertRaisesRegex(TypeError, "tracer must be"):
+            self._capture(self.mod.single, tracer=object())
+        cap = self._capture(self.mod.single, backend="eager")
+        with self.assertRaisesRegex(PrecompileError, "not active"):
+            cap(self.model, self.x2)
+        with self.assertRaisesRegex(PrecompileError, "nothing was captured"):
+            with cap:
+                pass
+        with self.assertRaisesRegex(PrecompileError, "already been entered"):
+            with cap:
+                pass
+        with self.assertRaisesRegex(PrecompileError, "not active"):
+            cap(self.model, self.x2)
+
+        class Reentrant(torch.nn.Module):
+            def forward(self, x):
+                return torch._dynamo.disable(lambda: cap(self, x))()
+
+        with self.assertRaisesRegex(PrecompileError, "re-entered recursively"):
+            with self._capture(self.mod.single, backend="eager") as cap:
+                cap(Reentrant(), self.x2)
+        # The block's own exception propagates unchanged and nothing is written.
+        with self.assertRaisesRegex(KeyError, "the block's own"):
+            with self._capture(self.mod.single, backend="eager") as cap:
+                cap(self.model, self.x2)
+                raise KeyError("the block's own")
+        self.assertFalse(os.path.exists(self.artifact))
+
+    def test_the_tracer_knobs_reach_the_session(self):
+        from torch._dynamo.precompile_package import default_guard_filter_fn
+
+        dynamic = DynamoTracer(dynamic=True)
+        with self._capture(self.mod.single, backend="eager", tracer=dynamic) as cap:
+            cap(self.model, self.x2)
+        f = load(self.artifact, self.cache)
+        self.assertEqual(f(self.model, self.x3), self.mod.single(self.model, self.x3))
+
+        # Dropping the guard on x drops what tells the shapes apart.
+        def drop_x(entries):
+            keep = default_guard_filter_fn(entries)
+            return [k and e.name != "x" for k, e in zip(keep, entries)]
+
+        risky = DynamoTracer(guard_filter_fn=drop_x)
+        with self.assertRaisesRegex(PrecompileError, "can affect dispatch"):
+            with self._capture(self.mod.single, backend="eager", tracer=risky) as cap:
+                cap(self.model, self.x2)
+        accept = DynamoTracer(guard_filter_fn=drop_x, require_no_risky_drops=False)
+        with self._capture(self.mod.single, backend="eager", tracer=accept) as cap:
+            cap(self.model, self.x2)
 
     def test_the_strict_gate_refuses_dropped_guards(self):
         # The default filter drops the identity guards that cannot be
