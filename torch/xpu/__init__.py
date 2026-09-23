@@ -57,6 +57,7 @@ class _ZesDeviceInfo:
     subdevice_id: int | None = None
     is_integrated: bool = False
     is_visible: bool = False
+    uuid: bytes | None = None
     temperature_handle: c_void_p | None = None
     frequency_handle: c_void_p | None = None
     power_handle: c_void_p | None = None
@@ -223,14 +224,38 @@ def _enum_zes_device_infos(visible_mask: list[int]) -> int:
         # Tiled dGPUs in FLAT/COMBINED mode expose each sub-device as a
         # separate logical device; everything else counts as one slot.
         tiled = not is_integrated and props.numSubdevices > 0 and expose_subdevices
-        num_slots = props.numSubdevices if tiled else 1
 
-        for slot in range(num_slots):
+        if not tiled:
             _cached_zes_device_infos.append(
                 _ZesDeviceInfo(
                     device_handle=device,
-                    subdevice_id=slot if tiled else None,
+                    subdevice_id=None,
                     is_integrated=is_integrated,
+                    uuid=bytes(ext_props.uuid.id),
+                )
+            )
+            continue
+
+        # Tiled dGPU: cache one entry per sub-device, keyed by subdeviceId.
+        num_subdevices = props.numSubdevices
+        sub_props = (pyzes.zes_subdevice_exp_properties_t * num_subdevices)()
+        for sub in sub_props:
+            sub.stype = pyzes.ZES_STRUCTURE_TYPE_SUBDEVICE_EXP_PROPERTIES
+        if _zes_check_warn(
+            pyzes.zesDeviceGetSubDevicePropertiesExp(
+                device, byref(c_uint32(num_subdevices)), sub_props
+            ),
+            "Can't get Level Zero Sysman sub-device properties",
+        ):
+            return -1
+
+        for sub in sub_props:
+            _cached_zes_device_infos.append(
+                _ZesDeviceInfo(
+                    device_handle=device,
+                    subdevice_id=sub.subdeviceId,
+                    is_integrated=is_integrated,
+                    uuid=bytes(sub.uuid.id),
                 )
             )
 
