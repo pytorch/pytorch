@@ -7,25 +7,36 @@ strings handed to ``AsyncCompile``, and it emits only the preamble lines (includ
 ``AsyncCompile`` lifecycle) that the finished module uses. See
 ``torch.compiler.export_python``, which is the consumer.
 
-The tradeoffs are deliberate and are the reason this is opt-in: a kernel defined at
-module level compiles serially, in process, on its first launch, instead of fanning out
-to the compile worker pool. And every hoisted kernel names itself by the wrapper's
-``__file__``, so they all share one autotune-cache key; that cache is effectively off in
-this mode (its configs_hash check keeps a wrong config from being applied).
+A kernel never autotunes at runtime, because the config a kernel launches with decides
+its numerics (a reduction's block sizes set its summation order) and so has to be fixed
+by the artifact. Triton kernels therefore require ``triton.autotune_at_compile_time``,
+which ``compile_fx`` turns on when it is unset: each hoisted kernel is pinned, through
+``triton_heuristics.fixed_config``, to the config that tuning chose, and those configs
+are listed in ``KERNEL_CONFIGS`` at the top of the module, where they can be edited. For
+the same reason ``triton.multi_kernel`` and user-defined kernels autotuned over several
+configs are refused.
+
+The tradeoff that makes this opt-in: a kernel defined at module level compiles serially,
+in process, on its first launch, instead of fanning out to the compile worker pool.
 
 Only Triton kernels inductor generates are hoisted. A user-defined ``@triton.jit`` kernel
 is still emitted as a source string passed to ``async_compile.triton``, and so are the
 kernels of other backends (C++, MPS, Halide, Pallas).
 """
 
+import ast
 import re
+from typing import Any
 from typing_extensions import override
+
+import sympy
 
 import torch._inductor.config as config
 from torch.utils._indented_buffer import DeferredLineBase, IndentedBuffer
 from torch.utils._ordered_set import OrderedSet
 
 from .. import ir
+from ..runtime.triton_heuristics import config_to_dict
 from .wrapper import PythonWrapperCodegen, SubgraphPythonWrapperCodegen
 
 
@@ -64,6 +75,92 @@ class _LineIfNamesUsed(DeferredLineBase):
         return _LineIfNamesUsed(line, self.names, self.wrapper)
 
 
+class _KernelConfigs(DeferredLineBase):
+    """``KERNEL_CONFIGS``: the config compile-time autotuning chose for each hoisted kernel.
+
+    The kernels below read it from their decorators, so it is written ahead of them, but
+    its contents are only known once the compile-time autotune block has run, after every
+    kernel (subgraphs' included) has been emitted.
+    """
+
+    def __init__(self, wrapper: "ReadablePythonWrapperCodegen") -> None:
+        super().__init__("")
+        self.wrapper = wrapper
+
+    def __call__(self) -> str | None:
+        configs = self.wrapper.kernel_configs
+        if self.wrapper.scanning_for_uses or not configs:
+            return None
+        rows = "".join(f"    {name!r}: {cfg!r},\n" for name, cfg in configs.items())
+        return (
+            "# The launch config of each kernel below, chosen by autotuning at compile time.\n"
+            "# Kernels launch with exactly these and never retune at runtime.\n"
+            f"KERNEL_CONFIGS = {{\n{rows}}}"
+        )
+
+    def _new_line(self, line: str) -> "_KernelConfigs":
+        return _KernelConfigs(self.wrapper)
+
+
+def _pin_to_tuned_config(src_code: str, kernel_name: str) -> str | None:
+    """Replace the kernel's heuristics decorator with a fixed_config reading KERNEL_CONFIGS.
+
+    Returns None for a template kernel, which is built with its one config and never
+    tuned again, so it has nothing to pin.
+
+    A FIXED autotuner has one config and is exempt from coordinate descent and from
+    dynamic RBLOCK scaling, so its first launch compiles that config and runs it.
+    """
+    defs = [
+        node
+        for node in ast.parse(src_code).body
+        if isinstance(node, ast.FunctionDef) and node.name == kernel_name
+    ]
+    if len(defs) != 1:
+        raise AssertionError(f"expected one def of {kernel_name}, found {len(defs)}")
+    (fn,) = defs
+    decorator = fn.decorator_list[0]
+    if not (
+        isinstance(decorator, ast.Call)
+        and isinstance(decorator.func, ast.Attribute)
+        and decorator.func.attr != "fixed_config"
+    ):
+        raise AssertionError(f"unexpected decorator on {kernel_name}")
+    if decorator.func.attr == "template":
+        return None
+    kwargs = {kw.arg: kw.value for kw in decorator.keywords}
+    meta = kwargs["inductor_meta"]
+    if not isinstance(meta, ast.Dict):
+        raise AssertionError(f"unexpected inductor_meta on {kernel_name}")
+    # Sequential combo-kernel tuning would retune the pinned config on first launch,
+    # coordinate_descent_tuning would have cached_autotune consult the autotune cache,
+    # whose best config for this file would replace the pinned one, and
+    # incremental_autotune installs a tuning plugin (get_caching_autotuner_plugins).
+    # Entries stay source text: values such as AutotuneHint members are not literals.
+    dropped = (
+        "combo_tuning_groups",
+        "coordinate_descent_tuning",
+        "incremental_autotune",
+    )
+    entries = [
+        f"{ast.get_source_segment(src_code, k)}: {ast.get_source_segment(src_code, v)}"
+        for k, v in zip(meta.keys, meta.values)
+        if k is not None and not (isinstance(k, ast.Constant) and k.value in dropped)
+    ]
+    inductor_meta = "{" + ", ".join(entries) + "}"
+    triton_meta = ast.get_source_segment(src_code, kwargs["triton_meta"])
+    lines = src_code.splitlines()
+    lines[decorator.lineno - 1 : decorator.end_lineno] = [
+        "@triton_heuristics.fixed_config(",
+        f"    config=KERNEL_CONFIGS[{kernel_name!r}],",
+        "    filename=__file__,",
+        f"    triton_meta={triton_meta},",
+        f"    inductor_meta={inductor_meta},",
+        ")",
+    ]
+    return "\n".join(lines)
+
+
 class ReadablePythonWrapperCodegen(PythonWrapperCodegen):
     """Emit kernels as code rather than as strings passed to AsyncCompile."""
 
@@ -74,6 +171,10 @@ class ReadablePythonWrapperCodegen(PythonWrapperCodegen):
         self.scanning_for_uses = False
         self._used_names: OrderedSet[str] | None = None
         self._kernel_texts: list[str] = []
+        # Filled in by generate_and_run_autotune_block; None until then.
+        self.kernel_configs: dict[str, dict[str, Any] | None] = {}
+        if not isinstance(self, SubgraphPythonWrapperCodegen):
+            self.header.writeline(_KernelConfigs(self))
 
     @override
     def _define_kernel_helper(
@@ -168,6 +269,57 @@ class ReadablePythonWrapperCodegen(PythonWrapperCodegen):
         return
 
     @override
+    def generate_and_run_autotune_block(self) -> dict[str, Any] | None:
+        scope = super().generate_and_run_autotune_block()
+        if scope is None:
+            # A subgraph: its kernels are tuned, and recorded, by the root.
+            return None
+        for name in self.kernel_configs:
+            autotuner = scope.get(name)
+            if autotuner is None or len(autotuner.launchers) != 1:
+                raise RuntimeError(
+                    f"torch._inductor.config.readable_wrapper: kernel {name} was not "
+                    "autotuned down to one config at compile time, so the emitted "
+                    "module would have to tune it at runtime."
+                )
+            self.kernel_configs[name] = config_to_dict(autotuner.launchers[0].config)
+        return scope
+
+    @override
+    def define_user_defined_triton_kernel(
+        self,
+        kernel,
+        configs,
+        kwargs,
+        restore_value_args,
+        reset_to_zero_args,
+        grids: list[list[int | sympy.Expr]],
+        epilogue_fusion: tuple[ir.ComputedBuffer, str] | None,
+        launch_kwargs: tuple[str, ...],
+    ):
+        if len(configs) > 1:
+            # The kernel is still a source string for AsyncCompile, whose autotuner
+            # would benchmark these configs on first launch.
+            raise RuntimeError(
+                "torch._inductor.config.readable_wrapper does not tune at runtime, but "
+                f"user-defined Triton kernel {kernel.__name__} is autotuned over "
+                f"{len(configs)} configs; give it a single config."
+            )
+        # Its decorator keeps filename=, so coordinate_descent_tuning in its meta would
+        # have a cached best config replace its own, as for the pinned kernels.
+        with config.patch(coordinate_descent_tuning=False, incremental_autotune=False):
+            return super().define_user_defined_triton_kernel(
+                kernel,
+                configs,
+                kwargs,
+                restore_value_args,
+                reset_to_zero_args,
+                grids,
+                epilogue_fusion,
+                launch_kwargs,
+            )
+
+    @override
     def emit_triton_kernel_definition(
         self,
         kernel_name: str,
@@ -176,6 +328,12 @@ class ReadablePythonWrapperCodegen(PythonWrapperCodegen):
         device_type: str,
         metadata: str | None = None,
     ) -> None:
+        if not config.triton.autotune_at_compile_time:
+            raise RuntimeError(
+                "torch._inductor.config.readable_wrapper pins each Triton kernel to the "
+                "config chosen by autotuning at compile time and requires "
+                "triton.autotune_at_compile_time; enable it."
+            )
         # src_code is already a complete module: the triton imports, the
         # @triton_heuristics.* decorator that builds the CachingAutotuner, and the
         # @triton.jit def. Spliced at module level it binds kernel_name to the same
@@ -198,19 +356,20 @@ class ReadablePythonWrapperCodegen(PythonWrapperCodegen):
         helpers = re.findall(r"^def (\w+)\(", src_code, re.MULTILINE)
         for helper in OrderedSet(helpers) - OrderedSet([kernel_name, subs_name]):
             src_code = re.sub(rf"\b{helper}\b", f"{helper}_{kernel_name}", src_code)
+        pinned = _pin_to_tuned_config(src_code, subs_name)
+        if pinned is not None:
+            self.kernel_configs[subs_name] = None
         self.define_kernel(
             kernel_name,
-            src_code,
+            src_code if pinned is None else pinned,
             metadata,
             standalone=True,
             # The compile-time autotune block execs its kernels instead of emitting
             # them, and a module-level kernel there has no __file__ to name itself by,
-            # so that block keeps the AsyncCompile form. It runs at compile time only
-            # and is not carried in the emitted module.
-            autotune_body=(
-                self.async_compile_triton_body(subs_name, src_code, device_type)
-                if config.triton.autotune_at_compile_time
-                else None
+            # so that block keeps the AsyncCompile form with the original heuristics.
+            # It runs at compile time only and is not carried in the emitted module.
+            autotune_body=self.async_compile_triton_body(
+                subs_name, src_code, device_type
             ),
         )
 
@@ -256,6 +415,7 @@ class _ReadableSubgraphPythonWrapperCodegen(
         # This subgraph's text is spliced into the root module, so the root's usage
         # scan has to leave out this subgraph's kernels too.
         self._kernel_texts = root._kernel_texts
+        self.kernel_configs = root.kernel_configs
 
 
 def readable_wrapper_requested() -> bool:
@@ -269,6 +429,14 @@ def readable_wrapper_requested() -> bool:
             "torch._inductor.config.readable_wrapper defines kernels at module level, "
             "which requires triton.unique_kernel_names so they do not shadow each "
             "other. Enable unique_kernel_names or disable readable_wrapper."
+        )
+    if config.triton.multi_kernel:
+        # MultiKernelCall benchmarks its candidate kernels on first launch and keeps the
+        # fastest, which is choosing a kernel at runtime.
+        raise RuntimeError(
+            "torch._inductor.config.readable_wrapper does not choose kernels at runtime "
+            "and is incompatible with triton.multi_kernel, which benchmarks its "
+            "candidates on first launch."
         )
     for flag in ("benchmark_kernel", "benchmark_combo_kernel"):
         if getattr(config, flag):

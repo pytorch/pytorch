@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 
+import contextlib
 import os
 import re
 import tempfile
@@ -32,6 +33,27 @@ def _code_for(fn, *args, **config_kwargs):
     with config.patch(**config_kwargs):
         result, codes = run_and_get_code(torch.compile(fn), *args)
     return result, "\n".join(codes)
+
+
+@contextlib.contextmanager
+def _no_runtime_tuning():
+    from torch._inductor.runtime.triton_heuristics import (
+        AutotuneCache,
+        CachingAutotuner,
+    )
+
+    def runtime_tuning(*args, **kwargs):
+        raise AssertionError("a readable module autotuned at runtime")
+
+    with (
+        mock.patch.object(CachingAutotuner, "autotune_to_one_config", runtime_tuning),
+        mock.patch.object(
+            CachingAutotuner, "_coordinate_descent_tuning", runtime_tuning
+        ),
+        # a cached best config would replace the pinned one
+        mock.patch.object(AutotuneCache, "create", runtime_tuning),
+    ):
+        yield
 
 
 def _softmax(x):
@@ -103,20 +125,15 @@ class TestReadableWrapperCodegen(TestCase):
             self.assertEqual(self._run_standalone(code, [p, x])[0], fn(p, x))
 
     @requires_cuda_and_triton
-    @parametrize("autotune_at_compile_time", [None, True])
-    def test_emitted_module_runs_standalone_and_matches_eager(
-        self, autotune_at_compile_time
-    ):
+    def test_emitted_module_runs_standalone_and_matches_eager(self):
         # The point of the mode: the file on its own is the program. Compile it from a
         # real path -- @triton.jit resolves its own source by filename, so a hoisted
-        # kernel cannot be exec'd from a bare string. autotune_at_compile_time=True is
-        # what export_python compiles under.
+        # kernel cannot be exec'd from a bare string.
         def fn(x):
             return torch.softmax(x * 2, dim=-1)
 
         x = torch.randn(64, 128, device="cuda")
-        cfg = {"triton.autotune_at_compile_time": autotune_at_compile_time}
-        expected, code = _code_for(fn, x, readable_wrapper=True, **cfg)
+        expected, code = _code_for(fn, x, readable_wrapper=True)
         self.assertEqual(expected, fn(x))
         # The compile-time autotune script is dropped from the module, and the wrapper
         # itself defines the kernel as code.
@@ -137,7 +154,12 @@ class TestReadableWrapperCodegen(TestCase):
     @parametrize(
         "cfg",
         [
-            {"max_autotune": True, "max_autotune_gemm_backends": "TRITON"},
+            # coordinate_descent_tuning would have the template read the autotune cache
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "coordinate_descent_tuning": True,
+            },
             {"combo_kernels": True},
         ],
         name_fn=lambda cfg: next(iter(cfg)),
@@ -160,20 +182,177 @@ class TestReadableWrapperCodegen(TestCase):
         self.assertIn(marker, code)
         expected = fn(a, b, x, y)
         self.assertEqual(result, expected)
-        self.assertEqual(self._run_standalone(code, [a, b, x, y]), expected)
+        with _no_runtime_tuning():
+            self.assertEqual(self._run_standalone(code, [a, b, x, y]), expected)
+        # A template is built with its one config, so it keeps its decorator unpinned.
+        configs = code[code.index("\nKERNEL_CONFIGS = {") :].split("\n}\n")[0]
+        for template in re.findall(r"^def (triton_tem_\w+)\(", code, re.MULTILINE):
+            self.assertNotIn(repr(template), configs)
 
     @requires_cuda_and_triton
-    @config.patch({"triton.multi_kernel": 1})
-    def test_multi_kernel_runs_standalone(self):
-        # The one module that mixes hoisted kernel defs with an async_compile binding:
-        # multi_kernel_N = async_compile.multi_kernel(..., [<hoisted kernels>]).
-        x = torch.rand(2, 1024, device="cuda")
-        result, code = _code_for(torch.softmax, x, -1, readable_wrapper=True)
-        self.assertIn("= async_compile.multi_kernel(", code)
-        self.assertNotIn("async_compile.triton", code)
-        expected = torch.softmax(x, -1)
-        self.assertEqual(result, expected)
-        self.assertEqual(self._run_standalone(code, [x])[0], expected)
+    @parametrize(
+        "case",
+        [
+            ("persistent_reduction", _softmax, (64, 128)),
+            ("reduction", lambda x: x.sum(-1), (64, 3000)),
+            ("pointwise", lambda x: (x.sin() * 2).relu(), (4096,)),
+            # its inductor_meta holds an AutotuneHint, which is not a literal
+            (
+                "bucketize",
+                lambda x: torch.bucketize(x, torch.linspace(-1, 1, 8, device=x.device)),
+                (4096,),
+            ),
+            ("subgraph", _cond_softmax, (64, 128)),
+        ],
+        name_fn=lambda case: case[0],
+    )
+    @config.patch(coordinate_descent_tuning=True, max_autotune_pointwise=True)
+    def test_kernels_launch_with_their_compile_time_config(self, case):
+        # A kernel's launch config decides its numerics (a reduction's block sizes set
+        # its summation order), so the artifact fixes it: every kernel is pinned to the
+        # config tuning chose at compile time, listed in KERNEL_CONFIGS, and nothing
+        # benchmarks or coordinate-descends on first launch.
+        _, fn, shape = case
+        x = torch.randn(shape, device="cuda")
+        # what tuning chose, read from the base class's scope, not from the table
+        tuned: dict[str, object] = {}
+        run_autotune_block = PythonWrapperCodegen.generate_and_run_autotune_block
+
+        def record_tuned(self):
+            scope = run_autotune_block(self)
+            tuned.update(scope or {})
+            return scope
+
+        with mock.patch.object(
+            PythonWrapperCodegen, "generate_and_run_autotune_block", record_tuned
+        ):
+            expected, code = _code_for(fn, x, readable_wrapper=True)
+        decorators = re.findall(r"^@triton_heuristics\.(\w+)\(", code, re.MULTILINE)
+        self.assertTrue(decorators)
+        self.assertEqual(set(decorators), {"fixed_config"}, decorators)
+        self.assertIn("\nKERNEL_CONFIGS = {\n", code)
+        from torch._inductor.runtime.triton_heuristics import config_to_dict
+
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "artifact.py")
+            with open(path, "w") as f:
+                f.write(code)
+            ns: dict[str, object] = {"__file__": path, "__name__": "_readable_artifact"}
+            with _no_runtime_tuning():
+                exec(compile(code, path, "exec"), ns)
+                # the same configs as the compile, so the same bits
+                self.assertEqual(ns["call"]([x])[0], expected, atol=0, rtol=0)  # type: ignore[operator]
+                # -x takes the other torch.cond branch, so every kernel launches
+                other = ns["call"]([-x])[0]  # type: ignore[operator]
+                self.assertEqual(other, fn(-x), atol=1e-4, rtol=1e-4)
+        kernel_configs = ns["KERNEL_CONFIGS"]
+        for name, cfg in kernel_configs.items():  # type: ignore[attr-defined]
+            (tuned_launcher,) = tuned[name].launchers  # type: ignore[attr-defined]
+            self.assertEqual(config_to_dict(tuned_launcher.config), cfg, name)
+            (launcher,) = ns[name].launchers  # type: ignore[attr-defined]
+            self.assertEqual(config_to_dict(launcher.config), cfg, name)
+
+    @requires_cuda_and_triton
+    @config.patch(coordinate_descent_tuning=True)
+    def test_dynamic_shape_kernel_keeps_its_pinned_config_at_every_size(self):
+        # Tuned once on the size hints, it launches with that config at other sizes.
+        def fn(x):
+            return x.sum(-1)
+
+        torch._dynamo.reset()
+        x = torch.randn(64, 3000, device="cuda")
+        with config.patch(readable_wrapper=True):
+            _, codes = run_and_get_code(torch.compile(fn, dynamic=True), x)
+        code = "\n".join(codes)
+        self.assertEqual(
+            re.findall(r"^@triton_heuristics\.(\w+)\(", code, re.MULTILINE),
+            ["fixed_config"],
+        )
+        with _no_runtime_tuning():
+            for shape in [(64, 3000), (17, 5000), (200, 129)]:
+                y = torch.randn(shape, device="cuda")
+                (out,) = self._run_standalone(code, [y, *shape])
+                self.assertEqual(out, fn(y), atol=1e-3, rtol=1e-3)
+
+    @requires_cuda_and_triton
+    def test_triton_kernels_require_compile_time_autotuning(self):
+        # Unset, the mode turns it on; turned off, the kernels could only be tuned on
+        # first launch.
+        x = torch.randn(64, 128, device="cuda")
+        _, code = _code_for(
+            _softmax,
+            x,
+            readable_wrapper=True,
+            **{"triton.autotune_at_compile_time": None},
+        )
+        self.assertIn("\nKERNEL_CONFIGS = {\n", code)
+        with self.assertRaisesRegex(Exception, "triton.autotune_at_compile_time"):
+            _code_for(
+                _softmax,
+                x,
+                readable_wrapper=True,
+                **{"triton.autotune_at_compile_time": False},
+            )
+
+    @requires_cuda_and_triton
+    def test_compile_time_autotuning_is_on_before_decompositions(self):
+        # repeat_interleave's data-dependent decomposition is skipped under
+        # autotune_at_compile_time, whose block runs kernels on generated inputs.
+        def fn(x, repeats):
+            return torch.repeat_interleave(x, repeats, output_size=6)
+
+        x = torch.randn(3, device="cuda")
+        repeats = torch.tensor([1, 2, 3], device="cuda")
+        result, code = _code_for(fn, x, repeats, readable_wrapper=True)
+        self.assertEqual(result, fn(x, repeats))
+        # decomposed, it would fuse into a Triton kernel
+        self.assertIsNone(
+            re.search(r"^def triton_\w*repeat_interleave", code, re.MULTILINE)
+        )
+
+    @requires_cuda_and_triton
+    @config.patch(coordinate_descent_tuning=True, incremental_autotune=True)
+    def test_user_kernel_does_not_read_the_autotune_cache(self):
+        # A user kernel keeps filename=, so coordinate_descent_tuning in its meta would
+        # have a cached best config replace its own.
+        from torch.testing._internal.triton_utils import add_kernel
+
+        def fn(x):
+            out = torch.empty_like(x)
+            add_kernel[(4,)](x, x, out, x.numel(), BLOCK_SIZE=64)
+            return out
+
+        x = torch.randn(256, device="cuda")
+        expected, code = _code_for(fn, x, readable_wrapper=True)
+        self.assertNotIn("'coordinate_descent_tuning'", code)
+        self.assertNotIn("'incremental_autotune': True", code)
+        with _no_runtime_tuning():
+            self.assertEqual(self._run_standalone(code, [x])[0], expected)
+
+    @requires_cuda_and_triton
+    def test_user_kernel_autotuned_over_several_configs_is_refused(self):
+        # It stays a source string for AsyncCompile, whose autotuner would benchmark
+        # its configs on first launch.
+        from torch.testing._internal.triton_utils import add_kernel_autotuned
+
+        def fn(x):
+            out = torch.empty_like(x)
+            add_kernel_autotuned[(4,)](x, x, out, x.numel())
+            return out
+
+        x = torch.randn(256, device="cuda")
+        with self.assertRaisesRegex(Exception, "add_kernel_autotuned"):
+            _code_for(fn, x, readable_wrapper=True)
+
+    def test_multi_kernel_is_refused(self):
+        # MultiKernelCall benchmarks its candidates on first launch.
+        with self.assertRaisesRegex(Exception, "multi_kernel"):
+            _code_for(
+                torch.relu,
+                torch.randn(8),
+                readable_wrapper=True,
+                **{"triton.multi_kernel": 1},
+            )
 
     @requires_cuda_and_triton
     @parametrize("case", ["scan", "flex_attention"])

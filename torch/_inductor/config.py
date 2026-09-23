@@ -226,10 +226,11 @@ fx_wrapper: bool = os.environ.get("TORCHINDUCTOR_FX_WRAPPER", "0") == "1"
 # strings handed to AsyncCompile. This trades compile throughput for legibility --
 # hoisted kernels compile serially, in process, on first launch instead of fanning out
 # to the worker pool -- so it is for artifacts a person tunes
-# (torch.compiler.export_python), not for a normal compile. Hoisted kernels also all
-# carry the wrapper's __file__ as their filename, so they share one autotune-cache key
-# and that cache is effectively off in this mode (its configs_hash check keeps a wrong
-# config from being applied). User-defined @triton.jit kernels stay source strings.
+# (torch.compiler.export_python), not for a normal compile. Nothing autotunes at
+# runtime: it requires triton.autotune_at_compile_time (turned on when unset) and
+# pins each hoisted kernel to the config chosen then (KERNEL_CONFIGS in the module),
+# and refuses multi_kernel.
+# User-defined @triton.jit kernels stay source strings.
 readable_wrapper: bool = os.environ.get("TORCHINDUCTOR_READABLE_WRAPPER", "0") == "1"
 
 # Controls automatic precompiling of common include files for codecache.CppCodeCache
