@@ -107,6 +107,16 @@ def _default_and_inlined_loaders(code: str, cache: bytes, backend: str):
 _MULTIGRAPH_SCALE = 2
 
 
+def _closure_step(model, x):
+    # Module-level so Dynamo can name the nested lambda's code. The lambda is
+    # made after the break: in the entry, its code would be serialized with the
+    # module's globals.
+    loss = (model(x) * _MULTIGRAPH_SCALE).sum()
+    loss.backward()
+    get = lambda: loss  # noqa: E731
+    return get()
+
+
 # precompile drives make_fx internally, which cannot symbolically trace a
 # dynamo-optimized function; the whole suite is therefore incompatible with
 # PYTORCH_TEST_WITH_DYNAMO (dynamo_wrapped CI), so skip it there.
@@ -533,6 +543,7 @@ class TestPrecompile(TestCase):
             return {
                 "is_entry": is_entry,
                 "bypassed": nvariants == 0,
+                "trivial": False,
                 "code": code,
                 "python_module": "m",
                 "import_sources": {},
@@ -2868,11 +2879,14 @@ class TestPrecompile(TestCase):
             target = getattr(target, part)
         self.assertIs(target, getattr(member, "__func__", member))
 
-    def test_trivial_continuation_is_served_as_plain_python(self):
-        # The continuation after a trailing .backward() reaches no tensor, so
-        # Dynamo skips it before tracing and it runs as plain Python during
-        # capture. Its record says so, a standalone artifact counts it as
-        # covered, and the driver rebuilds it as the plain function it was.
+    @parametrize("shape", ["no_tensor", "no_ops", "closure"])
+    def test_trivial_continuation_is_served_as_plain_python(self, shape):
+        # Dynamo compiles nothing of the continuation after a trailing
+        # .backward(): it skips it when no tensor reaches it ("no_tensor") and
+        # traces no ops when one does ("no_ops"), so it runs as plain Python
+        # during capture. Its record says so, a standalone artifact counts it as
+        # covered, and the driver rebuilds it as the plain function it was, over
+        # the frame ahead's cells when it has free variables ("closure").
         import inspect
         from unittest import mock
 
@@ -2882,9 +2896,16 @@ class TestPrecompile(TestCase):
         from torch._dynamo.precompile_package import default_guard_filter_fn
         from torch._precompile import _b64, _multigraph_frames, _serving_mode
 
-        def step(model, x):
+        def no_tensor(model, x):
             (model(x) * _MULTIGRAPH_SCALE).sum().backward()
 
+        def no_ops(model, x):
+            loss = (model(x) * _MULTIGRAPH_SCALE).sum()
+            loss.backward()
+            return loss
+
+        steps = {"no_tensor": no_tensor, "no_ops": no_ops, "closure": _closure_step}
+        step = steps[shape]
         model = torch.nn.Linear(4, 4)
         x = torch.randn(3, 4)
         package = CompilePackage(step)
@@ -2894,10 +2915,12 @@ class TestPrecompile(TestCase):
         compiled(model, x)
         expected = torch.nn.Linear(4, 4)
         expected.load_state_dict(model.state_dict())
-        step(expected, x)
+        expected_out = step(expected, x)
         frames = _multigraph_frames(package.cache_entry())
-        self.assertEqual([f["trivial"] for f in frames], [False, True])
-        self.assertEqual([len(f["variants"]) for f in frames], [1, 0])
+        # The closure's lambda is recorded too, unreachable and harmless.
+        self.assertEqual([f["trivial"] for f in frames[:2]], [False, True])
+        self.assertTrue(all(f["trivial"] for f in frames[1:]))
+        self.assertEqual([len(f["variants"]) for f in frames[:2]], [1, 0])
         self.assertEqual(_serving_mode(frames), "standalone")
         # Only a continuation Dynamo never traced is served that way: one it
         # compiled but kept no variant of still sends the capture to installing.
@@ -2935,7 +2958,7 @@ class TestPrecompile(TestCase):
         forward = ns["_build_multigraph_forward"]()
         served = torch.nn.Linear(4, 4)
         served.load_state_dict(model.state_dict())
-        self.assertIsNone(forward(served, x))
+        self.assertEqual(forward(served, x), expected_out)
         self.assertEqual(served.weight.grad, expected.weight.grad)
         self.assertEqual(served.bias.grad, expected.bias.grad)
 
