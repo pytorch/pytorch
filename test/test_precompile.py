@@ -3350,6 +3350,56 @@ class TestPrecompile(TestCase):
         )
         self.assertEqual(proc.returncode, 0, proc.stderr[-2000:])
 
+    def test_inlined_forward_names_the_artifact_in_tracebacks(self):
+        # The emitted source is meant to be read and edited, so every code object it
+        # creates carries the caller's filename. Under the anonymous default a hand-edit
+        # that raised produced a frame with no path and no source line.
+        from torch._precompile import _make_inlined_forward
+
+        code, _cache = torch.compiler.precompile(
+            lambda a: a + 1, torch.ones(2), backend="eager"
+        )
+        forward = _make_inlined_forward(code, warn=False, filename="/tmp/artifact.py")
+        self.assertEqual(forward.__code__.co_filename, "/tmp/artifact.py")
+
+    def test_inlined_forward_can_stay_quiet_about_the_exec(self):
+        # Loading warns because it execs untrusted source, but a caller that has already
+        # established its own trust boundary and warned would otherwise emit two
+        # warnings per load, so the warning is suppressible rather than unconditional.
+        from torch._precompile import _make_inlined_forward
+
+        code, _cache = torch.compiler.precompile(
+            lambda a: a + 1, torch.ones(2), backend="eager"
+        )
+        with self.assertLogs("torch._precompile", level="WARNING"):
+            _make_inlined_forward(code)
+        with self.assertNoLogs("torch._precompile", level="WARNING"):
+            _make_inlined_forward(code, warn=False)
+
+    def test_generated_source_says_it_may_be_edited(self):
+        # The artifact's own header is the only documentation most readers will see. It
+        # used to carry a generated-code "do not edit" banner, which is exactly backwards
+        # for source whose purpose is to be tuned in place.
+        for backend in ("eager", "inductor"):
+            code, _cache = torch.compiler.precompile(
+                lambda a: a + 1, torch.ones(2), backend=backend
+            )
+            self.assertIn("Editing it is supported", code)
+
+    @unittest.skipIf(not TEST_CUDA, "needs CUDA")
+    def test_load_from_a_code_string_gives_triton_a_file(self):
+        # Kernels are module-level code, and @triton.jit reads its own source off disk:
+        # it refuses a function whose module has no file. A caller loading from a string
+        # has no path to offer, so load parks a copy where triton can find it rather
+        # than failing on every CUDA artifact.
+        code, cache = torch.compiler.precompile(
+            lambda a: (a * 2).relu(), torch.ones(64, device="cuda")
+        )
+        self.assertIn("@triton.jit", code)
+        loaded = torch.compiler.precompile.load(code, cache)
+        x = torch.randn(64, device="cuda")
+        self.assertEqual(loaded(x), (x * 2).relu())
+
 
 class _FilesModel(torch.nn.Module):
     def __init__(self):
