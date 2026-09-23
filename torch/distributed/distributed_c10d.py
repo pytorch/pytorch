@@ -49,6 +49,7 @@ from torch._C._distributed_c10d import (
     BarrierOptions,
     BroadcastOptions,
     DebugLevel,
+    FlightRecorderHook,
     GatherOptions,
     get_debug_level,
     NanCheckHook,
@@ -208,8 +209,10 @@ try:
     # pyrefly: ignore [missing-import]
     from torchcomms import is_backend_built as _torchcomms_is_backend_built, new_comm
 
+    # Aliased: the unqualified name is the c10d hook imported above, which is
+    # attached to a ProcessGroup rather than to a TorchComms comm.
     # pyrefly: ignore [missing-import]
-    from torchcomms.hooks import FlightRecorderHook
+    from torchcomms.hooks import FlightRecorderHook as _TorchCommsFlightRecorderHook
 
     _TORCHCOMM_AVAILABLE = True
 except ImportError:
@@ -359,8 +362,8 @@ except ImportError:
     _NCCL_AVAILABLE = False
 
 try:
-    # In-tree NCCL backend built on the torchcomms engine (selected via the
-    # "nccl2" backend / entry point). Available whenever NCCL is built.
+    # In-tree NCCL backend built on the torchcomms engine (the default "nccl"
+    # implementation, also available explicitly as "nccl2").
     from torch._C._distributed_c10d import ProcessGroupNCCL2
 
     ProcessGroupNCCL2.__module__ = "torch.distributed.distributed_c10d"
@@ -729,6 +732,38 @@ def _nccl2_options(
     return backend_options
 
 
+def _nccl2_device(
+    opts: _DistributedBackendOptions,
+) -> torch.device | None:
+    if opts.enable_reconfigure:
+        return None
+
+    process_group = opts.process_group
+    device = process_group.bound_device_id if process_group is not None else None
+    if device is not None:
+        return device
+
+    device_count = torch.cuda.device_count()
+    if device_count == 0:
+        raise RuntimeError("nccl2 requires at least one CUDA device")
+
+    if "LOCAL_RANK" in os.environ:
+        device_index = get_node_local_rank() % device_count
+    else:
+        global_rank = (
+            opts.global_ranks_in_group[opts.group_rank]
+            if opts.global_ranks_in_group
+            else opts.group_rank
+        )
+        device_index = global_rank % device_count
+
+    device = torch.device("cuda", device_index)
+    if process_group is not None:
+        process_group.bound_device_id = device
+
+    return device
+
+
 def _create_nccl2_process_group(
     opts: _DistributedBackendOptions, backend_options: object | None
 ) -> C10DBackend:
@@ -747,7 +782,14 @@ def _create_nccl2_process_group(
         return opts.split_from.split(  # pyrefly: ignore[missing-attribute]
             opts.store, opts.global_ranks_in_group, pg_options
         )
-    return ProcessGroupNCCL2(opts.store, opts.group_rank, opts.group_size, pg_options)
+    backend = ProcessGroupNCCL2(
+        opts.store,
+        opts.group_rank,
+        opts.group_size,
+        pg_options,
+        _nccl2_device(opts),
+    )
+    return backend
 
 
 def _create_nccl_lazy_process_group(
@@ -768,9 +810,14 @@ def _create_nccl_lazy_process_group(
         return opts.split_from.split(  # pyrefly: ignore[missing-attribute]
             opts.store, opts.global_ranks_in_group, pg_options
         )
-    return ProcessGroupNCCLLazy(
-        opts.store, opts.group_rank, opts.group_size, pg_options
+    backend = ProcessGroupNCCLLazy(
+        opts.store,
+        opts.group_rank,
+        opts.group_size,
+        pg_options,
+        _nccl2_device(opts),
     )
+    return backend
 
 
 def _create_ucc_process_group(
@@ -828,10 +875,20 @@ def _register_builtin_gloo_backend() -> None:
 
 def _register_builtin_nccl_backend() -> None:
     creator_fn = (
-        _create_nccl2_process_group
-        if os.environ.get("TORCH_DIST_USE_NCCL2") == "1"
-        else _create_nccl_process_group
+        _create_nccl_process_group
+        if os.environ.get("TORCH_DIST_USE_NCCL2") == "0"
+        else _create_nccl2_process_group
     )
+    # Record what "nccl" actually resolved to for _maybe_attach_flight_recorder,
+    # which must skip a group only if every one of its backends feeds a
+    # FlightRecorder by itself: stock ProcessGroupNCCL does, nccl2 needs the
+    # hook. Derived from the creator picked above rather than re-read from the
+    # environment, which is only consulted here and could otherwise disagree
+    # with what was built.
+    if creator_fn is _create_nccl_process_group:
+        _FR_SELF_RECORDING_BACKENDS.add(Backend.NCCL)
+    else:
+        _FR_SELF_RECORDING_BACKENDS.discard(Backend.NCCL)
     Backend.register_backend(
         Backend.NCCL,
         creator_fn,
@@ -848,6 +905,17 @@ def _register_builtin_nccl_legacy_backend() -> None:
         extended_api=True,
         devices=["cuda"],
         _backend_type=ProcessGroup.BackendType.CUSTOM,
+    )
+
+
+def _register_builtin_nccl_as_legacy() -> None:
+    _FR_SELF_RECORDING_BACKENDS.add(Backend.NCCL)
+    Backend.register_backend(
+        Backend.NCCL,
+        _create_nccl_process_group,
+        extended_api=True,
+        devices=Backend.backend_capability[Backend.NCCL],
+        _backend_type=ProcessGroup.BackendType.NCCL,
     )
 
 
@@ -1232,6 +1300,7 @@ class _World:
     def __init__(self) -> None:
         self._default_pg = None
         self._pg_coalesce_state: dict[ProcessGroup, list[_CollOp]] = {}
+        self._pg_flight_recorder_hooks: dict[ProcessGroup, FlightRecorderHook] = {}
         self._comms: list[_TorchComm] = []
 
     @property
@@ -1324,6 +1393,17 @@ class _World:
         return self._pg_coalesce_state
 
     @property
+    def pg_flight_recorder_hooks(self) -> dict[ProcessGroup, FlightRecorderHook]:
+        """
+        Owning handles for the FlightRecorder hooks attached at group creation.
+
+        The hook's registered callbacks only hold a weak reference to it, so
+        dropping the handle detaches the hook; it has to live as long as the
+        group does.
+        """
+        return self._pg_flight_recorder_hooks
+
+    @property
     def comms(self) -> list[_TorchComm]:
         return self._comms
 
@@ -1386,7 +1466,7 @@ class GroupMember(metaclass=_WorldMeta):
 
 def _get_default_timeout(backend: str) -> timedelta:
     # see note on nccl vs other backend timeout (constants.py)
-    if backend == Backend.NCCL:
+    if backend in (Backend.NCCL, "nccl-legacy", "nccl2", "nccl-lazy"):
         if not isinstance(default_pg_nccl_timeout, timedelta):
             # TODO moco benchmark on CPU initializes pgnccl backend today, triggered this assert in CI before it was
             # changed to be a warning.  We should fix the moco model.
@@ -2619,7 +2699,17 @@ def init_process_group(
             _store_based_barrier(rank, store, group_name, world_size, timeout)
 
 
-def _get_split_source(pg: ProcessGroup) -> C10DBackend | None:
+def _get_split_source(
+    pg: ProcessGroup, requested_backend: str | Backend
+) -> C10DBackend | None:
+    """Return a split source only when the requested backend matches it.
+
+    An eagerly initialized default process group is not, by itself, enough to
+    make a subgroup eligible for communicator splitting. A split preserves the
+    parent's backend implementation, so a request for a different backend must
+    create a fresh communicator instead. In particular, non-members must not
+    issue a NOCOLOR split on the parent when members will create a fresh backend.
+    """
     split_from = None
     if pg.bound_device_id:
         split_from = pg._get_backend(pg.bound_device_id)
@@ -2640,7 +2730,117 @@ def _get_split_source(pg: ProcessGroup) -> C10DBackend | None:
     while is_gloo_available() and isinstance(split_from, _ProcessGroupWrapper):
         split_from = split_from.wrapped_pg
 
+    split_device = pg.bound_device_id
+    if split_device is None:
+        return None
+
+    parent_pg_state = _world.pg_map.get(pg)
+    if parent_pg_state is None:
+        return None
+
+    parent_backend, _ = parent_pg_state
+    parent_backend_name = _get_backend_name_for_device(
+        parent_backend, split_device.type
+    )
+    requested_backend_name = _get_backend_name_for_device(
+        requested_backend, split_device.type
+    )
+    if (
+        parent_backend_name is None
+        or requested_backend_name is None
+        or parent_backend_name != requested_backend_name
+    ):
+        return None
     return split_from
+
+
+def _get_backend_name_for_device(
+    backend: str | Backend, device_type: str
+) -> str | None:
+    """Resolve one device's backend name without registration or validation."""
+    normalized_backend = str(backend).lower()
+    if normalized_backend == Backend.UNDEFINED:
+        return Backend.default_device_backend_map.get(device_type)
+    if ":" not in normalized_backend:
+        supported_devices = Backend.backend_capability.get(normalized_backend)
+        if supported_devices is not None and device_type not in supported_devices:
+            return None
+        return normalized_backend or None
+
+    result: str | None = None
+    seen_devices: set[str] = set()
+    for pair in normalized_backend.split(","):
+        pieces = pair.split(":")
+        if len(pieces) != 2:
+            return None
+        device, backend_name = pieces
+        if not device or not backend_name or device in seen_devices:
+            return None
+        seen_devices.add(device)
+        if device != device_type:
+            continue
+        result = backend_name
+    return result
+
+
+# Backends that feed a FlightRecorder without any help: ProcessGroupGloo
+# unconditionally, ProcessGroupNCCL and ProcessGroupXCCL through their own
+# integrations. "fake" and "undefined" never communicate, so recording them is
+# pure noise. Everything else -- nccl2, nccl-lazy, mpi, ucc, out-of-tree
+# plugins -- is invisible to the flight recorder unless a hook is attached.
+#
+# Backend.NCCL is not in here by construction: which implementation the name
+# builds is a runtime choice, so its registrar puts it in or takes it out when
+# it makes that choice, and this stays the single answer to "does this backend
+# record itself".
+_FR_SELF_RECORDING_BACKENDS = {
+    Backend.GLOO,
+    "nccl-legacy",
+    Backend.XCCL,
+    Backend.FAKE,
+    Backend.UNDEFINED,
+}
+
+
+def _maybe_attach_flight_recorder(
+    pg: ProcessGroup, backend_config: BackendConfig, global_ranks: list[int]
+) -> None:
+    # Same variables and precedence as FlightRecorder's own constructor in
+    # FlightRecorder.hpp: first name that is set wins, 2000 if neither is, and
+    # 0 turns the recorder off entirely.
+    buffer_size = 2000
+    for var in ("TORCH_FR_BUFFER_SIZE", "TORCH_NCCL_TRACE_BUFFER_SIZE"):
+        value = os.environ.get(var)
+        if value:
+            buffer_size = int(value)
+            break
+    if buffer_size <= 0:
+        return
+
+    # A hook is attached per ProcessGroup but backends are per device, and the
+    # hook now resolves per op: it skips whatever a self-recording backend
+    # serves and records the rest into that backend's own recorder instance. So
+    # a mixed group ("cpu:gloo,cuda:nccl2") gets its nccl2 half without
+    # duplicating gloo's native entries, and only a group that is self-recording
+    # on every device is still skipped -- a hook there would record nothing.
+    if all(
+        backend_str in _FR_SELF_RECORDING_BACKENDS
+        for backend_str in backend_config.get_device_backend_map().values()
+    ):
+        return
+
+    # A backend creator that returns a ProcessGroup subclass replaces the group
+    # wholesale and never has a backend registered on it, so ProcessGroup::
+    # getGroupName() -- the key the recorder files entries under -- throws.
+    # Such a group cannot be recorded without changes on the C++ side.
+    if not pg._device_types:
+        return
+
+    # Unlike NanCheckHook, the group does not own this hook: its pre/post
+    # callbacks capture only a weak_ptr, so the hook detaches the moment the
+    # handle returned by attach() is dropped. Park it with the rest of the
+    # group's state, which destroy_process_group tears down.
+    _world.pg_flight_recorder_hooks[pg] = FlightRecorderHook.attach(pg, global_ranks)
 
 
 def _new_process_group_helper(
@@ -2702,7 +2902,7 @@ def _new_process_group_helper(
     # split when we *know* the default PG has already started communicator initialization.
     # We know this if we have bound a device id to the default pg (eager initialized).
     if is_initialized() and _get_default_group().bound_device_id:
-        split_from = _get_split_source(_get_default_group())
+        split_from = _get_split_source(_get_default_group(), backend)
     else:
         split_from = None
 
@@ -2830,7 +3030,7 @@ def _new_process_group_helper(
                 "TORCH_FR_BUFFER_SIZE",
                 os.environ.get("TORCH_NCCL_TRACE_BUFFER_SIZE", "0"),
             )
-            recorder = FlightRecorderHook(max_entries=int(buffer_size))
+            recorder = _TorchCommsFlightRecorderHook(max_entries=int(buffer_size))
             recorder.register_with_comm(comm)
             # Keep a reference so the comm outlives this function scope.
             _world.comms.append(comm)
@@ -2941,6 +3141,17 @@ def _new_process_group_helper(
     if os.environ.get("TORCH_DIST_NAN_CHECK", "0") == "1":
         NanCheckHook.attach(pg)
 
+    # Backend-agnostic FlightRecorder recording, for backends with no native
+    # integration. Attached here (rather than lazily) so a group is recorded
+    # from its very first collective, and after _set_group_name/_set_group_desc
+    # because the hook keys its entries on that pair.
+    # global_ranks_in_group is [] for the default group, which spans the world
+    # in rank order. The hook needs the real mapping either way: it is the
+    # group's published membership and it names this rank's dump file.
+    _maybe_attach_flight_recorder(
+        pg, backend_config, global_ranks_in_group or list(range(group_size))
+    )
+
     if device_id and pg._get_backend(device_id).supports_splitting:
         eager_backend = pg._get_backend(device_id)
         eager_backend.eager_connect_single_device(device_id)
@@ -3027,6 +3238,7 @@ def destroy_process_group(
         _world.pg_to_tag.clear()
         _world.tags_to_pg.clear()
         _world.pg_coalesce_state.clear()
+        _world.pg_flight_recorder_hooks.clear()
         _unregister_all_process_groups()
 
         # when process group doesn't have an explicit name (only WORLD (default)
@@ -3069,6 +3281,7 @@ def destroy_process_group(
                 stacklevel=2,
             )
             del _world.pg_coalesce_state[pg]
+        _world.pg_flight_recorder_hooks.pop(pg, None)
 
         tag = _world.pg_to_tag.get(pg)
         del _world.pg_to_tag[pg]
@@ -3146,6 +3359,7 @@ def _abort_process_group(
         _world.pg_to_tag.clear()
         _world.tags_to_pg.clear()
         _world.pg_coalesce_state.clear()
+        _world.pg_flight_recorder_hooks.clear()
         _unregister_all_process_groups()
 
         # when process group doesn't have an explicit name (only WORLD (default)
@@ -3170,6 +3384,7 @@ def _abort_process_group(
                 stacklevel=2,
             )
             del _world.pg_coalesce_state[pg]
+        _world.pg_flight_recorder_hooks.pop(pg, None)
 
         tag = _world.pg_to_tag.get(pg)
         del _world.pg_to_tag[pg]
@@ -3308,7 +3523,7 @@ def irecv(
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         tag (int, optional): Tag to match recv with remote send
-        group_src (int, optional): Destination rank on ``group``.  Invalid to specify both ``src`` and ``group_src``.
+        group_src (int, optional): Source rank on ``group``.  Invalid to specify both ``src`` and ``group_src``.
 
     Returns:
         A distributed request object.
@@ -3580,45 +3795,49 @@ def _time_estimator(
     group: ProcessGroup | None = None,
     device: torch.device | None = None,
 ) -> collections.abc.Iterator[_TimeEstimator]:
-    """
-    Context manager used to estimate time of collectives.
-    Within the context manager, nothing is actually run and the backend just simulates
-    the collective time only.
+    r"""_time_estimator(group=None, device=None) -> Iterator[_TimeEstimator]
 
-    Args:
-        group (`ProcessGroup`, optional): The process group to work on. If None,
-            the default process group will be used.
-        device (`torch.device`, optional): Default is None, set to a device if
-            there isn't a `**_coalesced` implementation by the backend.
+    Estimate the execution time of collectives without running them.
 
-    Examples:
-        >>> # xdoctest: +SKIP("no rank")
-        >>> # Synchronous ops
-        >>> with _time_estimator() as cm:
-        >>>     for i in range(num_colls):
-        >>>         dist.all_reduce(tensors[i])
-        >>> # estimate time is stored in cm.estimated_time
+    A supported backend simulates collectives issued inside the context. After the
+    context exits, ``estimated_time`` contains their total duration in microseconds.
 
     .. warning::
-       :func:`_time_estimator` currently only support NCCL backend but it can
-       easily be extended to other backends.
+        This API is experimental and subject to change. It currently supports only
+        NCCL-based backends. The NCCL communicator must be initialized before entering
+        the context so the estimate reflects its actual topology. Pass ``device_id``
+        to :func:`init_process_group` or issue a collective first.
 
-       Also a NCCL communicator needs to be created because only with a real communicator can we do accurate estimation.
-       The communicator internally has knowledge about the links it runs on
-       (e.g. intra-node or inter-node, whether the links are NVLink or PCI-e or IB).
+    Args:
+        group (ProcessGroup, optional): Process group whose backend should simulate the
+          collectives. Default: ``None`` uses the default process group.
+        device (torch.device, optional): Device whose backend should perform the
+          estimation. Default: ``None`` uses the process group's default device.
+
+    Yields:
+        _TimeEstimator: Context object whose ``estimated_time`` attribute is populated
+          when the context exits.
+
+    Examples::
+
+        >>> # xdoctest: +SKIP("no rank")
+        >>> tensor = torch.ones(1024, device="cuda")
+        >>> dist.all_reduce(tensor)  # Initialize the communicator.
+        >>> with dist._time_estimator() as estimate:
+        ...     dist.all_reduce(tensor)
+        >>> estimate.estimated_time  # Total simulated duration in microseconds.
     """
-    # TODO: We need to also support torch inductor for the time estimator.
     group = group or _get_default_group()
     device = device or _get_pg_default_device(group)
     backend = group._get_backend(device)
-    if not backend.supports_time_estimate:
+    if not backend._supports_time_estimate:
         raise NotImplementedError(
             f"collective time estimator is not supported in the current version of backend {backend}"
         )
-    backend._start_time_estimate()  # type: ignore[attr-defined]
+    backend._start_time_estimate()
     cm = _TimeEstimator()
     yield cm
-    cm.estimated_time = backend._end_time_estimate()  # type: ignore[attr-defined]
+    cm.estimated_time = backend._end_time_estimate()
 
 
 def batch_isend_irecv(p2p_op_list: list[P2POp]) -> list[Work]:
@@ -5173,11 +5392,6 @@ def all_gather_single(
 
 
 @_exception_logger
-@deprecated(
-    "`torch.distributed.all_gather_into_tensor` is deprecated. "
-    "Please use `torch.distributed.all_gather_single` instead.",
-    category=FutureWarning,
-)
 def all_gather_into_tensor(
     output_tensor: torch.Tensor,
     input_tensor: torch.Tensor,
@@ -5187,9 +5401,8 @@ def all_gather_into_tensor(
     """
     Gather tensors from all ranks and put them in a single output tensor.
 
-    .. warning::
-        `all_gather_into_tensor` is deprecated. Users should use
-        `all_gather_single` instead.
+    Alias of :func:`all_gather_single`, kept for backward compatibility. New
+    code should call :func:`all_gather_single`, which takes the same arguments.
 
     """
     return all_gather_single(output_tensor, input_tensor, group, async_op)
@@ -5570,11 +5783,6 @@ def gather_single(
 
 
 @_exception_logger
-@deprecated(
-    "`torch.distributed.gather_into_tensor` is deprecated. "
-    "Please use `torch.distributed.gather_single` instead.",
-    category=FutureWarning,
-)
 def gather_into_tensor(
     tensor: torch.Tensor,
     gather_tensor: torch.Tensor | None = None,
@@ -5586,9 +5794,8 @@ def gather_into_tensor(
     """
     Gather the input tensor from all ranks into a single output tensor on ``dst``.
 
-    .. warning::
-        `gather_into_tensor` is deprecated. Users should use `gather_single`
-        instead.
+    Alias of :func:`gather_single`, kept for backward compatibility. New code
+    should call :func:`gather_single`, which takes the same arguments.
 
     """
     return gather_single(tensor, gather_tensor, dst, group, async_op, group_dst)
@@ -5926,11 +6133,6 @@ def reduce_scatter_single(
 
 
 @_exception_logger
-@deprecated(
-    "`torch.distributed.reduce_scatter_tensor` is deprecated. "
-    "Please use `torch.distributed.reduce_scatter_single` instead.",
-    category=FutureWarning,
-)
 def reduce_scatter_tensor(
     output: torch.Tensor,
     input: torch.Tensor,
@@ -5941,9 +6143,9 @@ def reduce_scatter_tensor(
     """
     Reduces, then scatters a tensor to all ranks in a group.
 
-    .. warning::
-        `reduce_scatter_tensor` is deprecated. Users should use
-        `reduce_scatter_single` instead.
+    Alias of :func:`reduce_scatter_single`, kept for backward compatibility.
+    New code should call :func:`reduce_scatter_single`, which takes the same
+    arguments.
 
     """
     return reduce_scatter_single(output, input, op, group, async_op)
@@ -6536,16 +6738,6 @@ def _get_backend_from_str(backend: str | None = None) -> str:
     return Backend(backend)
 
 
-def _is_safe_to_split() -> bool:
-    """
-    Checks if it is safe to split the any process group in the world.
-    This is only safe if the default pg has a bound device id, otherwise
-    users must be aware that a pg is only splittable after the first collective is
-    issued.
-    """
-    return _get_default_group().bound_device_id is not None
-
-
 @_time_logger
 def split_group(
     parent_pg: ProcessGroup | None = None,
@@ -6558,8 +6750,13 @@ def split_group(
     """
     Create a new process group split from the given parent process group.
 
-    warning:: This is an experimental API. Only the ``NCCL`` and custom plugin backends
-    are supported. Other backends will raise an error.
+    .. warning::
+        This is an experimental API. The selected parent backend must
+        implement process-group splitting. Built-in support includes ``NCCL``,
+        ``XCCL``, and ``Gloo``. Custom backends are responsible for cloning the
+        prefixed child Store if they require an independent connection or mutate
+        connection-global state such as the Store timeout.
+
     Users of this API must guarantee that all ranks in the parent group enter this API call,
     and the split of the sub groups is the same across all ranks in the parent group.
 
@@ -6604,11 +6801,6 @@ def split_group(
 
     global _world
     default_pg = _get_default_group()
-    device_id = default_pg.bound_device_id
-    if not device_id and not _use_torchcomms_enabled():
-        raise RuntimeError(
-            "No device associated with the default pg, not safe to split any process groups"
-        )
     global_rank = default_pg.rank()
     global_world_size = default_pg.size()
 
@@ -6630,28 +6822,27 @@ def split_group(
 
     parent_group_rank = parent_global_to_group_ranks[global_rank]
 
-    if torch.accelerator.is_available():
-        parent_backend = parent_pg._get_backend(
-            torch.accelerator.current_accelerator()  # pyrefly: ignore[bad-argument-type]
-        )
-    elif _use_torchcomms_enabled():
-        # torchcomms supports CPU/gloo splitting; no accelerator is required.
-        parent_backend = parent_pg._get_backend(
-            torch.device("cpu")  # pyrefly: ignore[bad-argument-type]
-        )
+    parent_device_types = {device.type for device in parent_pg._device_types}
+    accelerator = torch.accelerator.current_accelerator()
+    if accelerator is not None and accelerator.type in parent_device_types:
+        parent_backend_device = accelerator
+    elif "cpu" in parent_device_types:
+        parent_backend_device = torch.device("cpu")
     else:
         raise RuntimeError(
             "No backend for the parent process group or its backend does not support splitting"
         )
+    parent_backend = parent_pg._get_backend(parent_backend_device)
 
-    # if the parent backend does not support splitting, raise error
-    # currently this API only support NCCL and XCCL backend
+    # If the parent backend does not support splitting, raise an error.
     if (
         not parent_backend or not parent_backend.supports_splitting
     ) and not _use_torchcomms_enabled():
         raise RuntimeError(
             "No backend for the parent process group or its backend does not support splitting"
         )
+
+    device_id = parent_pg.bound_device_id
 
     # set the group_desc before the color or no_color split
     if hasattr(parent_backend, "comm_split_count") and group_desc is None:
@@ -6787,6 +6978,8 @@ def split_group(
         raise AssertionError(
             f"group name should be set to {group_name} but got {split_pg.group_name}"
         )
+
+    _maybe_attach_flight_recorder(split_pg, backend_config, global_ranks_in_my_group)
 
     # update global state
     _register_pg_in_world(
@@ -7479,7 +7672,7 @@ def _prepare_shrink_target_group(
     target_pg = group if group is not None else _get_default_group()
 
     # Cache frequently accessed properties to avoid repeated calls
-    group_size = int(target_pg.size())
+    group_size = target_pg.size()
     group_info: _ShrinkGroupInfo = {
         "process_group": target_pg,
         "is_default_group": (target_pg == _get_default_group()),
@@ -7695,7 +7888,8 @@ def _create_shrunk_process_group(
     else:
         group_desc = f"{metadata['original_group_name']}:shrunk"
 
-    # Create process group with new communicator (clone the parent store like split does)
+    # A shrunk communicator is re-registered and may rendezvous later, so it
+    # retains an independent Store connection like both backend shrink paths.
     prefix_store = PrefixStore(
         f"{group_name}/",
         metadata["store"].clone(),
@@ -7842,6 +8036,7 @@ def _cleanup_process_group_global_state(pg: ProcessGroup) -> None:
 
         # Clean up coalesce state if present
         _world.pg_coalesce_state.pop(pg, None)
+        _world.pg_flight_recorder_hooks.pop(pg, None)
 
     except Exception:
         # Log cleanup failures but don't propagate - we want to continue with other cleanups
@@ -8036,6 +8231,11 @@ def _new_window(
 ) -> Window:
     """
     Create a new one-sided (RMA) communication window on ``group``.
+
+    This is a collective operation. Every rank in ``group`` must call it in
+    the same order. If ``tensor`` is omitted, the subsequent
+    ``Window.tensor_register`` call is also collective and must be called by
+    every rank in the same order.
 
     Args:
         tensor (torch.Tensor, optional): If provided, the tensor is registered

@@ -30,7 +30,7 @@ std::vector<at::Tensor> _to_eager(
             options,
             /*non_blocking*/ false,
             /*copy*/ false);
-        eager_tensors.push_back(eager_tensor);
+        eager_tensors.push_back(std::move(eager_tensor));
       }
       return eager_tensors;
     }
@@ -174,7 +174,7 @@ void ltc_eager_fallback(
   // because this boxed fallback kernel is used by multiple operators,
   // and the macro stamps out a static Counter object with a fixed name
   // at the code location that it was called.
-  if (_eager_fallback_counters.find(name) == _eager_fallback_counters.end()) {
+  if (!_eager_fallback_counters.contains(name)) {
     _eager_fallback_counters[name] = new ::torch::lazy::Counter(name);
   }
   _eager_fallback_counters[name]->AddValue(1);

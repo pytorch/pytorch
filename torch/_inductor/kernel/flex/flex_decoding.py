@@ -19,7 +19,7 @@ from ...select_algorithm import (
     SymbolicGridFn,
     TritonTemplate,
 )
-from ...utils import can_use_tma
+from ...utils import can_use_tma, use_flex_tdm_descriptor
 from .common import (
     _flex_kernel_options_example,
     _flex_kernel_tuning_options,
@@ -28,7 +28,6 @@ from .common import (
     create_num_blocks_fake_generator,
     freeze_irnodes,
     get_fwd_subgraph_outputs,
-    is_tensor_ir_node,
     load_flex_template,
     maybe_realize,
     set_head_dim_values,
@@ -349,9 +348,6 @@ def create_flex_decoding_kernel(*args, **kwargs):
     SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_KV_BLOCK_SIZE)
 
     original_kernel_options = kernel_options.copy()
-    # Note, we don't need to pass in the captured buffers explicitly
-    # because they're implicitly added by the score_mod function
-    # We do need to explicitly pass it in for autotuning though.
 
     # Default config for warp specialization
     num_consumer_groups, num_buffers_warp_spec = 0, 0
@@ -397,11 +393,35 @@ def create_flex_decoding_kernel(*args, **kwargs):
                 "num_buffers_warp_spec", num_buffers_warp_spec
             )
 
-        # Intel GPU enables TMA by default
-        cur_kernel_options.setdefault("USE_TMA", bool(torch.xpu.is_available()))
+        # A default of True means "absent": omission keeps automatic selection,
+        # while any explicit falsy value (False, 0, None) forces pointer loads.
+        tdm_requested = bool(cur_kernel_options.get("USE_TMA", True))
 
-        if cur_kernel_options["USE_TMA"] and not can_use_tma(query, key, value):
-            cur_kernel_options["USE_TMA"] = False
+        # ROCm reports device type "cuda", so route it exclusively. The generic
+        # probe excludes HIP only in its CUDA arm, so it can read true on a ROCm
+        # host and would then enable descriptors under NVIDIA's rules, skipping
+        # the ROCm floor, the gfx1250 probe and the operand policy.
+        if torch.version.hip is not None and key.get_device().type == "cuda":
+            cur_kernel_options["USE_TMA"] = tdm_requested and use_flex_tdm_descriptor(
+                key,
+                value,
+                block_shapes=[
+                    (
+                        cur_kernel_options["BLOCK_N"],
+                        cur_kernel_options["QK_HEAD_DIM_ROUNDED"],
+                    ),
+                    (
+                        cur_kernel_options["BLOCK_N"],
+                        cur_kernel_options["V_HEAD_DIM_ROUNDED"],
+                    ),
+                ],
+            )
+        else:
+            # Intel GPU enables TMA by default
+            cur_kernel_options.setdefault("USE_TMA", bool(torch.xpu.is_available()))
+
+            if cur_kernel_options["USE_TMA"] and not can_use_tma(query, key, value):
+                cur_kernel_options["USE_TMA"] = False
 
         # Add ROCm-specific parameters if they exist in the config
         for attrib in ["kpack", "matrix_instr_nonkdim", "waves_per_eu"]:
@@ -438,22 +458,6 @@ def create_flex_decoding_kernel(*args, **kwargs):
             SPARSE_KV_BLOCK_SIZE,
         )
 
-    inputs_for_flex_decoding = (
-        [
-            query,
-            key,
-            value,
-            buf_M,
-            buf_L,
-            kv_num_blocks,
-            kv_indices,
-            full_kv_num_blocks,
-            full_kv_indices,
-        ]
-        + list(score_mod_other_buffers)
-        + list(mask_mod_other_buffers)
-    )
-
     input_gen_fns = {
         5: create_num_blocks_fake_generator(kv_indices),
         6: create_indices_fake,
@@ -464,9 +468,8 @@ def create_flex_decoding_kernel(*args, **kwargs):
     buf_ACC, _ = autotune_select_algorithm(
         "flex_decoding",
         choices,
-        # Autotuning materializes benchmark tensors. Scalar shape captures stay
-        # in subgraph_inps below for dependency tracking and codegen.
-        [x for x in inputs_for_flex_decoding if is_tensor_ir_node(x)],
+        # Use generated inputs because codegen can inline capture producers.
+        list(choices[0].input_nodes) if choices else [],
         layout_acc,
         input_gen_fns=input_gen_fns,
     )

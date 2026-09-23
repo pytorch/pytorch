@@ -134,11 +134,23 @@ void LogitMKLKernel(T eps, TensorIteratorBase* it) {
 
 #endif // AT_MKL_ENABLED
 
+template<typename T>
+bool LogitMKLEnabled() {
+  return true;
+}
+
+#if defined(AT_VEC_CUSTOM_MATH)
+template<>
+bool LogitMKLEnabled<float>() {
+  return false;
+}
+#endif
+
 static void logit_kernel(TensorIteratorBase& iter, const Scalar& eps_scalar) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kBFloat16, kHalf, iter.common_dtype(), "logit_cpu", [&]() {
         const scalar_t eps = eps_scalar.to<scalar_t>();
-        if (at::hasMKL() && iter.is_contiguous()) {
+        if (LogitMKLEnabled<scalar_t>() && at::hasMKL() && iter.is_contiguous()) {
           LogitMKLKernel<scalar_t>(eps, &iter);
           iter.cast_outputs();
         } else if (eps < scalar_t(0)) {

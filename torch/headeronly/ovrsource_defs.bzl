@@ -31,6 +31,8 @@ def define_torch_headeronly_ovrsource(name, is_mobile):
         public_raw_headers = native.glob([
             "core/**/*.h",
             "cpu/**/*.h",
+            "cuda/*.h",
+            "cuda/detail/*.h",
             "macros/*.h",
             "util/*.h",
         ]),

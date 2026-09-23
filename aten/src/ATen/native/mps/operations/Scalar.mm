@@ -28,6 +28,7 @@ Scalar _local_scalar_dense_mps(const Tensor& self) {
                  at::ScalarType::Half,
                  at::ScalarType::Bool,
                  at::ScalarType::BFloat16,
+                 at::ScalarType::Float8_e4m3fn,
                  at::ScalarType::UInt16,
                  at::ScalarType::UInt32,
                  at::ScalarType::UInt64);
