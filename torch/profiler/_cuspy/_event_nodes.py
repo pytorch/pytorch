@@ -114,7 +114,7 @@ class _EventNodeRecorder:
             return
         # Track the exec id so the destroy hook can purge this entry.
         self.graph_event_nodes[exec_graph_id] = ordered
-        torch_cuda_graph._recorded_exec_ids.add(exec_graph_id)
+        torch_cuda_graph._owned_graph_ids.add(exec_graph_id)
 
     def purge_exec_ids(self, exec_ids: set[int]) -> None:
         """Drop recorded state for destroyed graphs (called from the graph-destroy hook)."""

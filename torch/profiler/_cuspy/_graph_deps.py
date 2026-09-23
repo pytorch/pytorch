@@ -106,7 +106,7 @@ class _GraphDependencyRecorder:
             if events
             else next(iter(host))
         )
-        torch_cuda_graph._recorded_exec_ids.add(any_id >> 32)
+        torch_cuda_graph._owned_graph_ids.add(any_id >> 32)
 
 
 def _reset_for_test() -> None:
