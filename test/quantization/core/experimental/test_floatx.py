@@ -467,8 +467,6 @@ instantiate_device_type_tests(TestFloat4Dtype, globals())
 
 
 class TestFloat8DtypeCPUOnly(TestCase):
-    hw_classification = HardwareClassification.CPU
-
     """
     Test of mul implementation
 
@@ -476,6 +474,8 @@ class TestFloat8DtypeCPUOnly(TestCase):
     another C++ dtype macro, and there is no use case yet for unscaled float8
     multiplication - doesn't seem worth it.
     """
+
+    hw_classification = HardwareClassification.CPU
 
     @dtypes(*CUDA_FLOAT8_DTYPES)
     def test_mul(self, dtype):
