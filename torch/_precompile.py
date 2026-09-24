@@ -2040,10 +2040,10 @@ _SERVING_NOTES = {
 # can only be served through Dynamo's frame evaluator. Its calls refuse to compile,
 # as under the fail_on_recompile stance (but without setting that process-wide
 # stance), so a call no captured variant covers raises rather than compiling a new
-# graph. Of the process-wide stances you can set yourself, "force_eager" and
-# "eager_on_recompile" run such a call eagerly instead, and under the ones that would
-# compile it (force_backend, "eager_then_compile", "aot_eager_then_compile") every
-# call raises.
+# graph, under every process-wide stance that would compile it (force_backend,
+# "eager_then_compile", ...) too. Two stances you set yourself do change serving:
+# "force_eager" runs every call eagerly, bypassing the installed entries, and
+# "eager_on_recompile" serves the captured variants and runs any other call eagerly.
 """,
 }
 
@@ -3311,11 +3311,11 @@ def load(
     inside a child module's forward): its artifact has ``SERVING_MODE =
     "installed"`` and serves by installing the captured entries onto the live
     code objects; its calls refuse to compile, as under the ``fail_on_recompile``
-    stance, without setting that process-wide stance. Under a process-wide
-    stance the caller sets, ``"force_eager"`` and ``"eager_on_recompile"`` run an
-    uncovered call eagerly instead, and the stances that would compile it
-    (``force_backend``, ``"eager_then_compile"``, ``"aot_eager_then_compile"``)
-    make every call raise ``PrecompileError``. A Dynamo artifact whose
+    stance, without setting that process-wide stance, and keep refusing under
+    every process-wide stance that would compile (``force_backend``,
+    ``"eager_then_compile"``, ...). Under ``"force_eager"`` every call runs
+    eagerly, bypassing the installed entries; under ``"eager_on_recompile"`` the
+    captured variants are served and any other call runs eagerly. A Dynamo artifact whose
     capture graph-broke cannot load beside the live compile that captured it
     (the continuation names collide): load it in a fresh process.
 
