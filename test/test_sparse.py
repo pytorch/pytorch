@@ -19,8 +19,7 @@ from torch.testing._internal.common_mps import mps_ops_modifier
 from numbers import Number
 from typing import Any
 from packaging import version
-from torch.testing._internal.common_cuda import \
-    (SM80OrLater, TEST_MULTIGPU)
+from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, dtypesIfCUDA, dtypesIfMPS, onlyCPU, precisionOverride,
      deviceCountAtLeast, OpDTypes, onlyNativeDeviceTypes, skipCUDAIf, expectedFailureMPS, onlyAccelerator,
@@ -2965,7 +2964,7 @@ class TestSparse(TestSparseBase):
         self._test_new_device((30, 20, 10, 0), device)
 
     @onlyAccelerator
-    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @deviceCountAtLeast(2)
     def test_new_device_multi_device(self, devices):
         secondary_device = devices[1]
         self._test_new_device((), secondary_device)
@@ -3285,8 +3284,8 @@ class TestSparse(TestSparseBase):
             self.assertIs(dtype, tensor.dtype)
             self.assertIs(layout, tensor.layout)
             self.assertEqual(tensor.requires_grad, requires_grad)
-            if tensor.is_cuda and device is not None:
-                self.assertEqual(device, tensor.device)
+            if device is not None:
+                self.assertEqual(torch.device(device), tensor.device)
             if value is not None:
                 fill = tensor.empty(shape, dtype=dtype).fill_(value)
                 self.assertEqual(tensor, fill)
@@ -3314,7 +3313,7 @@ class TestSparse(TestSparseBase):
 
         self._test_empty_full("cpu", dtype, requires_grad)
         self._test_empty_full(None, dtype, requires_grad)
-        self._test_empty_full(torch.device(device), dtype, requires_grad)
+        self._test_empty_full(device, dtype, requires_grad)
 
     def test_is_sparse(self, device):
         x = torch.randn(3, 3)
