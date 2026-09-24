@@ -4770,7 +4770,8 @@ class TestPrecompileDynamoCapture(TestCase):
             def forward(self, x):
                 return torch._dynamo.disable(cap.save)()
 
-        with self._capture(single, backend="eager") as cap, writes as write:
+        # The mock is entered first so it still counts the writes cap's exit makes.
+        with writes as write, self._capture(single, backend="eager") as cap:
             with self.assertRaisesRegex(PrecompileError, "nothing was captured"):
                 cap.save()
             cap(self.model, self.x2)
@@ -4785,10 +4786,11 @@ class TestPrecompileDynamoCapture(TestCase):
             cap(self.model, self.x3)
             cap.save()
             self.assertEqual(write.call_count, 2)
+            with open(self.artifact, "rb") as f:
+                last = f.read()
+            self.assertNotEqual(last, checkpoint)
         # The last save() covered every call, so exit writes nothing more.
         self.assertEqual(write.call_count, 2)
-        with open(self.artifact, "rb") as f:
-            self.assertNotEqual(f.read(), checkpoint)
         with self.assertRaisesRegex(PrecompileError, "not active"):
             cap.save()
         self.assertTrue(cap.summary().complete)
@@ -4799,6 +4801,8 @@ class TestPrecompileDynamoCapture(TestCase):
                 with self.assertRaisesRegex(PrecompileError, "from inside fn"):
                     cap(SavesFromFn(), self.x2)
                 raise KeyError("the block's own")
+        with open(self.artifact, "rb") as f:
+            self.assertEqual(f.read(), last)
 
     def test_a_raised_call_is_refused_at_exit_and_writes_nothing(self):
         # A call that raised inside the block is a coverage gap: the default gate
