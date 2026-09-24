@@ -122,29 +122,30 @@ const Expr* ExprArena::diff(const Expr* e, const Expr* x) {
 const Expr* ExprArena::xreplace(
     const Expr* e,
     c10::ArrayRef<std::pair<const Expr*, const Expr*>> reps) {
-  for (const auto& [old, rep] : reps) {
-    if (e == old) {
-      return rep;
+  // Basic._xreplace: a node is rebuilt with func(*args) whenever a rule
+  // matched below it, even if the new args are identical.
+  auto impl = [&](auto& self, const Expr* x) -> std::pair<const Expr*, bool> {
+    for (const auto& [old, rep] : reps) {
+      if (x == old) {
+        return {rep, true};
+      }
     }
-  }
-  if (e->args.empty()) {
-    return e;
-  }
-  c10::SmallVector<const Expr*, 8> args;
-  bool changed = false;
-  for (const Expr* a : e->args) {
-    args.push_back(xreplace(a, reps));
-    changed |= args.back() != a;
-  }
-  if (!changed) {
-    return e;
-  }
-  if (e->is_boolean()) {
-    // sympy rebuilds whenever a rule matched, even with identical args, and
-    // rebuilding an unevaluated relational or an Or is not a no-op.
-    throw NativeUnsupported("xreplace of a Boolean");
-  }
-  return rebuild(e, args);
+    if (x->args.empty()) {
+      return {x, false};
+    }
+    c10::SmallVector<const Expr*, 8> args;
+    bool changed = false;
+    for (const Expr* a : x->args) {
+      auto [r, c] = self(self, a);
+      args.push_back(r);
+      changed |= c;
+    }
+    if (!changed) {
+      return {x, false};
+    }
+    return {rebuild(x, args), true};
+  };
+  return impl(impl, e).first;
 }
 
 const Expr* ExprArena::keep_coeff(const Expr* coeff, const Expr* factors) {

@@ -9,7 +9,9 @@ import sympy
 from sympy.core.assumptions import _assume_defined, _assume_rules
 
 import torch
+from torch._dynamo.source import ConstantSource
 from torch.fx.experimental import symbolic_shapes
+from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -2136,6 +2138,240 @@ class TestNativeStaticPasses(TestCase):
         self.assertGreater(answered, calls // 2)
 
 
+class TestNativeShapeEnv(TestCase):
+    # (hint, positive, range override): Qwen-like [2, int_oo] sizes, tighter
+    # and shifted ranges, and symbols that are only integer.
+    SPECS = [
+        (3, True, None),
+        (5, True, None),
+        (7, True, (4, 64)),
+        (9, True, (1, int_oo)),
+        (11, None, None),
+        (13, None, (-3, 8)),
+        (15, None, (0, int_oo)),
+    ]
+    assertSameTree = TestNativeStaticPasses.assertSameTree
+
+    def make_envs(self):
+        env = ShapeEnv()
+        syms = []
+        for i, (hint, positive, vr) in enumerate(self.SPECS):
+            source = ConstantSource(f"x{i}")
+            s = env.create_symbol(hint, source, DimDynamic.DYNAMIC, positive=positive)
+            if vr is not None:
+                env.var_to_range[s] = ValueRanges(*vr)
+            syms.append(s)
+        native = torch._C._symbolic.NativeShapeEnv(torch._C._symbolic._Arena())
+        arena = native.arena
+        for s in syms:
+            vr = env.var_to_range[s]
+            lower, upper = arena.from_sympy(vr.lower), arena.from_sympy(vr.upper)
+            hint = int(env.backed_var_to_val[s])
+            native.add_symbol(
+                arena.from_sympy(s), hint, lower, upper, s in env.size_like
+            )
+        return env, native, syms
+
+    def check(self, name, e, hint=None):
+        """Differential test of a NativeShapeEnv entry point against a fresh Python ShapeEnv; returns whether native answered."""
+        env, native, _ = self.make_envs()
+        arena = native.arena
+        try:
+            n = arena.from_sympy(e)
+        except NativeUnsupported:
+            return False
+        guards = len(env.guards)
+        try:
+            if name == "simplify":
+                want = env.simplify(e)
+            elif name == "static_eval":
+                want = env._maybe_evaluate_static(e)
+            else:
+                want = env.evaluate_expr(e, hint)
+        except Exception:
+            want = NativeUnsupported
+        if name == "simplify":
+            try:
+                got = native.simplify(n)
+            except NativeUnsupported:
+                return False
+            self.assertIsNot(want, NativeUnsupported, str(e))
+            self.assertSameTree(arena.to_sympy(got), want, f"simplify({e})")
+            return True
+        if name == "static_eval":
+            answered, got = native.static_eval(n)
+            if not answered:
+                return False
+            self.assertIsNot(want, NativeUnsupported, str(e))
+            if want is None:
+                self.assertIsNone(got, str(e))
+            else:
+                self.assertSameTree(arena.to_sympy(got), want, f"static_eval({e})")
+            return True
+        got = native.evaluate_expr(n, hint)
+        if got is None:
+            return False
+        self.assertIsNot(want, NativeUnsupported, str(e))
+        self.assertEqual(len(env.guards), guards, f"evaluate_expr({e}) guarded")
+        self.assertSameTree(arena.to_sympy(got), want, f"evaluate_expr({e})")
+        return True
+
+    def test_known(self):
+        a, b, c, d, i, j, k = self.make_envs()[2]
+        static = [
+            sympy.Eq(a, 1),
+            sympy.Ne(a, 1),
+            a > 1,
+            a >= 2,
+            a < 2,
+            a**2 >= a,
+            a <= 9223372036854775807,
+            sympy.Eq(a * b, 1),
+            a * b > a,
+            c <= 64,
+            c > 64,
+            sympy.Eq(c, 3),
+            d >= 1,
+            d > 1,
+            i >= 0,
+            j <= 8,
+            j + 3 >= 0,
+            k >= 0,
+            2 * a >= a + 2,
+            FloorDiv(a, 2) >= 1,
+            Max(a, b) >= 2,
+            Min(a, 1) <= 1,
+            sympy.Eq(Mod(a, 2), 0),
+            sympy.And(a > 1, b > 1),
+            sympy.Or(sympy.Eq(a, 1), sympy.Eq(b, 1)),
+            a + b,
+            sympy.Integer(3),
+        ]
+        simplify = [
+            Max(1, a),
+            Max(0, a - 2),
+            Max(a, a**2),
+            Max(a, b),
+            Max(1, a - b),
+            Max(1, i),
+            Max(0, j),
+            Max(0, k),
+            Min(a, 1),
+            Min(a, b, 2 * a),
+            Max(a, b, a + b),
+            Min(c, 64),
+            Max(1, Min(a, b)),
+            Max(1, a) + Min(b, 2),
+            TruncToInt(IntTrueDiv(2 * a, 2)),
+            TruncToInt(IntTrueDiv(a, 2)),
+            sympy.Eq(Max(1, a), b),
+            (a + 1) ** 2,
+        ]
+        for e in static:
+            self.check("static_eval", e)
+            self.check("evaluate_expr", e)
+        for e in simplify:
+            self.assertTrue(self.check("simplify", e), str(e))
+            self.check("static_eval", e)
+        for e in [sympy.Eq(a, 1), a > 1, a**2 >= a, a >= 0, sympy.Eq(c, 3), Max(1, a)]:
+            self.assertTrue(self.check("static_eval", e), str(e))
+        for e in [a >= 0, a + b >= 0, sympy.Le(0, k + 1), a > 1, sympy.Integer(3)]:
+            self.assertTrue(self.check("evaluate_expr", e), str(e))
+        self.assertTrue(self.check("evaluate_expr", sympy.Integer(3), 3))
+        self.assertFalse(self.check("evaluate_expr", sympy.Integer(3), 4))
+        self.assertFalse(self.check("evaluate_expr", sympy.Eq(a, b)))
+
+    def test_pristine_gate(self):
+        env, native, syms = self.make_envs()
+        a, k = syms[0], syms[6]
+        arena = native.arena
+        ge = arena.from_sympy(k >= 0)
+        self.assertEqual(native.static_eval(ge), (True, arena.boolean(True)))
+        native.update_range(
+            arena.from_sympy(k), arena.integer(3), arena.from_sympy(int_oo)
+        )
+        self.assertFalse(native.pristine)
+        self.assertEqual(native.static_eval(ge), (False, None))
+        # The fast comparison path reads only the ranges.
+        self.assertEqual(native.evaluate_expr(ge), arena.boolean(True))
+        self.assertIsNone(native.evaluate_expr(arena.from_sympy(a > 2)))
+        native.mark_replacements()
+        self.assertIsNone(native.evaluate_expr(ge))
+        self.assertEqual(native.evaluate_expr(arena.boolean(True)), arena.boolean(True))
+        self.assertIsNone(native.evaluate_expr(arena.from_sympy(a >= 2), True))
+        other = sympy.Symbol("other", integer=True, positive=True)
+        _, native, syms = self.make_envs()
+        arena = native.arena
+        self.assertEqual(native.static_eval(arena.from_sympy(other > 1)), (False, None))
+        three = arena.integer(3)
+        self.assertEqual(native.evaluate_expr(three, 3), three)
+        self.assertIsNone(native.evaluate_expr(three, 3.0))
+        self.assertIsNone(native.evaluate_expr(three, 2**70))
+        with self.assertRaisesRegex(RuntimeError, "already mirrored"):
+            native.add_symbol(arena.from_sympy(syms[0]), 3, three, three, False)
+
+    def test_xreplace(self):
+        s2 = sympy.Symbol("s2", integer=True, positive=True)
+        cases = [
+            (sympy.Eq(s0, s1), {s0: s1}),
+            (sympy.And(sympy.Eq(s0, 1), s1 > 2), {s0: sympy.Integer(1)}),
+            (sympy.Or(sympy.Eq(s0, 1), s1 > 2), {s0: sympy.Integer(1)}),
+            (Max(s0, s1), {s1: s0}),
+            (sympy.Lt(s0, s0, evaluate=False), {s0: s0}),
+            (sympy.Lt(s0, s1, evaluate=False), {s1: s0 + 1}),
+            (sympy.Not(sympy.Eq(s0, s2)), {s2: s0}),
+            (sympy.Ge(s0**2, s0), {s0: s2 + 1}),
+            (sympy.Eq(s0 + 1, 3), {s1: s0}),
+            (sympy.Eq(s0 + 1, 3), {s0 + 1: s1}),
+            (s0 * s1 + 1, {s0: s1, s1: s0}),
+        ]
+        arena = torch._C._symbolic._Arena()
+        for e, rule in cases:
+            reps = [(arena.from_sympy(k), arena.from_sympy(v)) for k, v in rule.items()]
+            got = arena.to_sympy(arena.xreplace(arena.from_sympy(e), reps))
+            self.assertSameTree(got, e.xreplace(rule), f"{e}.xreplace({rule})")
+
+    def int_expr(self, rng, syms, depth):
+        if depth == 0 or rng.random() < 0.3:
+            return rng.choice([*syms, *map(sympy.Integer, range(-2, 4))])
+        a = self.int_expr(rng, syms, depth - 1)
+        b = self.int_expr(rng, syms, depth - 1)
+        op = rng.choice(
+            ["add", "add", "mul", "sub", "pow", "Max", "Min", "FloorDiv", "trunc"]
+        )
+        if op == "add":
+            return a + b
+        if op == "mul":
+            return a * b
+        if op == "sub":
+            return a - rng.randint(1, 3) * b
+        if op == "pow":
+            return a ** rng.choice([2, 3])
+        if op == "trunc":
+            return TruncToInt(IntTrueDiv(a, b))
+        return TestNativeFunctions.FUNCTIONS[op](a, b)
+
+    @parametrize("seed", range(4))
+    def test_fuzz(self, seed):
+        rng = random.Random(seed)
+        syms = self.make_envs()[2]
+        rels = TestNativeStaticPasses.RELATIONALS
+        calls = answered = 0
+        for _ in range(150):
+            name = rng.choice(["simplify", "static_eval", "evaluate_expr"])
+            try:
+                e = self.int_expr(rng, syms, 3)
+                if name != "simplify" or rng.random() < 0.3:
+                    e = rng.choice(rels)(e, self.int_expr(rng, syms, 2))
+            except (ZeroDivisionError, ValueError, TypeError, AssertionError):
+                continue
+            if e.has(sympy.zoo, sympy.nan):
+                continue
+            calls += 1
+            answered += self.check(name, e)
+        self.assertGreater(answered, calls // 3)
+
+
 instantiate_parametrized_tests(TestNativeExpr)
 instantiate_parametrized_tests(TestNativeCompoundAssumptions)
 instantiate_parametrized_tests(TestNativeExprTools)
@@ -2146,6 +2382,7 @@ instantiate_parametrized_tests(TestNativePrinter)
 instantiate_parametrized_tests(TestNativeFunctions)
 instantiate_parametrized_tests(TestNativeValueRanges)
 instantiate_parametrized_tests(TestNativeStaticPasses)
+instantiate_parametrized_tests(TestNativeShapeEnv)
 
 
 if __name__ == "__main__":

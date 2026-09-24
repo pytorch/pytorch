@@ -1058,6 +1058,7 @@ libtorch_python_core_sources = [
     "torch/csrc/symbolic/Expr.cpp",
     "torch/csrc/symbolic/ExprTools.cpp",
     "torch/csrc/symbolic/Functions.cpp",
+    "torch/csrc/symbolic/NativeShapeEnv.cpp",
     "torch/csrc/symbolic/Printer.cpp",
     "torch/csrc/symbolic/Relational.cpp",
     "torch/csrc/symbolic/Sorting.cpp",

@@ -1,6 +1,7 @@
 #include <torch/csrc/symbolic/python_symbolic.h>
 
 #include <torch/csrc/symbolic/Expr.h>
+#include <torch/csrc/symbolic/NativeShapeEnv.h>
 #include <torch/csrc/symbolic/ValueRanges.h>
 #include <torch/csrc/utils/pybind.h>
 
@@ -94,6 +95,15 @@ struct PyArena {
 struct PyExpr {
   std::shared_ptr<PyArena> owner;
   const Expr* expr;
+};
+
+struct PyShapeEnv {
+  explicit PyShapeEnv(std::shared_ptr<PyArena> owner)
+      : owner(std::move(owner)),
+        env(c10::make_intrusive<NativeShapeEnv>(this->owner->arena)) {}
+
+  std::shared_ptr<PyArena> owner;
+  c10::intrusive_ptr<NativeShapeEnv> env;
 };
 
 std::optional<Fact> fact_from_name(const std::string& name) {
@@ -790,6 +800,96 @@ void initSymbolicBindings(PyObject* module) {
             }
             return wrap(self, r);
           });
+  arena_cls.def(
+      "xreplace",
+      [wrap](
+          const Self& self,
+          const PyExpr& e,
+          const std::vector<std::pair<PyExpr, PyExpr>>& rule) {
+        std::vector<std::pair<const Expr*, const Expr*>> reps;
+        for (const auto& [old, rep] : rule) {
+          reps.emplace_back(unwrap(self, old), unwrap(self, rep));
+        }
+        return wrap(self, self->arena->xreplace(unwrap(self, e), reps));
+      });
+  auto wrap_opt = [wrap](const Self& self, const Expr* e) {
+    return e ? std::optional<PyExpr>(wrap(self, e)) : std::nullopt;
+  };
+  py::class_<PyShapeEnv>(sm, "NativeShapeEnv")
+      .def(py::init<Self>())
+      .def_property_readonly(
+          "arena", [](const PyShapeEnv& self) { return self.owner; })
+      .def_property_readonly(
+          "pristine", [](const PyShapeEnv& self) { return self.env->pristine(); })
+      .def(
+          "add_symbol",
+          [](PyShapeEnv& self,
+             const PyExpr& sym,
+             std::optional<int64_t> hint,
+             const PyExpr& lower,
+             const PyExpr& upper,
+             bool size_like) {
+            self.env->add_symbol(
+                unwrap(self.owner, sym),
+                hint,
+                ValueRanges(unwrap(self.owner, lower), unwrap(self.owner, upper)),
+                size_like);
+          })
+      .def(
+          "update_range",
+          [](PyShapeEnv& self,
+             const PyExpr& sym,
+             const PyExpr& lower,
+             const PyExpr& upper) {
+            self.env->update_range(
+                unwrap(self.owner, sym),
+                ValueRanges(unwrap(self.owner, lower), unwrap(self.owner, upper)));
+          })
+      .def(
+          "mark_not_pristine",
+          [](PyShapeEnv& self) { self.env->mark_not_pristine(); })
+      .def(
+          "mark_replacements",
+          [](PyShapeEnv& self) { self.env->mark_replacements(); })
+      .def(
+          "simplify",
+          [wrap](PyShapeEnv& self, const PyExpr& e) {
+            return wrap(self.owner, self.env->simplify(unwrap(self.owner, e)));
+          })
+      .def(
+          "maybe_evaluate_static",
+          [wrap_opt](PyShapeEnv& self, const PyExpr& e) {
+            return wrap_opt(
+                self.owner,
+                self.env->maybe_evaluate_static(unwrap(self.owner, e)));
+          })
+      .def(
+          "static_eval",
+          [wrap_opt](PyShapeEnv& self, const PyExpr& e) {
+            auto r = self.env->static_eval(unwrap(self.owner, e));
+            return std::make_pair(
+                r.has_value(), wrap_opt(self.owner, r.value_or(nullptr)));
+          })
+      .def(
+          "evaluate_expr",
+          [wrap_opt](PyShapeEnv& self, const PyExpr& e, py::handle hint) {
+            // Only None and int hints are ported.
+            std::optional<int64_t> h;
+            if (!hint.is_none()) {
+              if (!PyLong_CheckExact(hint.ptr())) {
+                return std::optional<PyExpr>();
+              }
+              int overflow = 0;
+              h = PyLong_AsLongLongAndOverflow(hint.ptr(), &overflow);
+              if (overflow != 0) {
+                return std::optional<PyExpr>();
+              }
+            }
+            auto r = self.env->evaluate_expr(unwrap(self.owner, e), h);
+            return wrap_opt(self.owner, r.value_or(nullptr));
+          },
+          py::arg("e"),
+          py::arg("hint") = py::none());
   for (auto [name, fn] :
        {std::pair{"as_ordered_terms", &ExprArena::as_ordered_terms},
         std::pair{"as_ordered_factors", &ExprArena::as_ordered_factors}}) {
