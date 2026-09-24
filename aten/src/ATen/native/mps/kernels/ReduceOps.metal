@@ -310,7 +310,7 @@ struct SumOp {
   }
   static inline TO finalize(acc_t v, float divisor) {
     if (divisor > 0) {
-      v /= static_cast<acc_t>(divisor);
+      v = c10::metal::div(v, c10::metal::cast_to<acc_t>(divisor));
     }
     return static_cast<TO>(finalize_val<FINAL>(v));
   }
@@ -341,7 +341,7 @@ struct IdentityLoad {
 struct PredicateLoad {
   template <typename TA, typename TI>
   static inline TA load(TI v) {
-    return load_is_nonzero(v) ? TA(1) : TA(0);
+    return c10::metal::cast_to<TA>(load_is_nonzero(v));
   }
 };
 
