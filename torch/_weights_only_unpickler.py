@@ -97,8 +97,11 @@ def _add_safe_globals(safe_globals: list[Callable | tuple[Callable, str]]):
 
 
 def _get_safe_globals() -> list[Callable | tuple[Callable, str]]:
-    global _marked_safe_globals_set
-    return list(_marked_safe_globals_set.union(*_safe_globals_context.get()))
+    return list(_marked_safe_globals_set)
+
+
+def _get_effective_safe_globals() -> set[Callable | tuple[Callable, str]]:
+    return _marked_safe_globals_set.union(*_safe_globals_context.get())
 
 
 def _clear_safe_globals():
@@ -142,7 +145,7 @@ class _PendingNewobj:
 # _get_allowed_globals due to the lru_cache
 def _get_user_allowed_globals():
     rc: dict[str, Any] = {}
-    for f in _get_safe_globals():
+    for f in _get_effective_safe_globals():
         if isinstance(f, tuple):
             if len(f) != 2:
                 raise ValueError(

@@ -270,7 +270,8 @@ def clear_safe_globals() -> None:
     """
     Clears the list of globals that are safe for ``weights_only`` load.
 
-    Clears process-wide additions and temporary additions in the current context.
+    Also clears temporary additions in the current context. Other contexts
+    that inherited those additions are unaffected.
     """
     _weights_only_unpickler._clear_safe_globals()
 
@@ -279,7 +280,7 @@ def get_safe_globals() -> list[Callable | tuple[Callable, str]]:
     """
     Returns the list of user-added globals that are safe for ``weights_only`` load.
 
-    Includes process-wide additions and temporary additions in the current context.
+    Temporary additions made with :func:`safe_globals` are not included.
     """
     return _weights_only_unpickler._get_safe_globals()
 
@@ -323,7 +324,10 @@ def add_safe_globals(safe_globals: list[Callable | tuple[Callable, str]]) -> Non
 class safe_globals(_weights_only_unpickler._safe_globals):
     r"""Context-manager that adds certain globals as safe for ``weights_only`` load.
 
-    Additions are local to the current context and are not shared with other threads.
+    Additions are local to the current context. New asyncio tasks inherit a copy
+    of that context, and ``asyncio.to_thread`` propagates it to the worker thread.
+    A copied context retains its additions after this context manager exits or
+    :func:`clear_safe_globals` is called in the parent context.
     Use :func:`add_safe_globals` for process-wide additions.
 
     Args:
