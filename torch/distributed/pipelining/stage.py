@@ -16,7 +16,7 @@ import torch.distributed.config as dist_config
 import torch.fx as fx
 import torch.nn as nn
 from torch._subclasses.fake_tensor import is_fake_tensor
-from torch.distributed.fsdp import FSDPModule
+from torch.distributed.fsdp import FSDPModule, GradientReductionHandle
 from torch.distributed.pipelining._utils import (
     _derive_grad_metas,
     _DTensorMeta,
@@ -207,6 +207,7 @@ class _PipelineStageBase(ABC):
         self.bwd_cache: dict[int, tuple[torch.Tensor | None, ...]] = {}
         # Caching chunk outputs for final output merge or reduction
         self.output_chunks: list[Any] = []
+        self._gradient_reduction_handle: GradientReductionHandle | None = None
 
         # Initialize has_backward to false; this will be set to true if loss
         # function is passed to pipeline schedule
@@ -814,6 +815,11 @@ class _PipelineStageBase(ABC):
         """
         Clear runtime states of the stage.
         """
+        if self._gradient_reduction_handle is not None:
+            self._gradient_reduction_handle.wait()
+            self._gradient_reduction_handle = None
+            if isinstance(self.submod, FSDPModule):
+                self.submod.set_manual_backward_finalization(False)
         # map microbatch ID to list of forward tensor args
         self.fwd_cache.clear()
         # Caching chunk outputs for final output merge or reduction
@@ -1299,12 +1305,33 @@ class _PipelineStageBase(ABC):
     def perform_reduce_grad(self, grad_scale_factor: int):
         r"""Finalize FSDP gradient accumulation and scale stage gradients."""
         if isinstance(self.submod, FSDPModule) and self.has_backward:
-            self.submod.set_requires_gradient_sync(True)
-            self.submod.set_reshard_after_backward(True)
-            self.submod.finalize_backward()
-            self.submod.set_manual_backward_finalization(False)
+            self.start_gradient_reduction()
+            self.wait_for_gradient_reduction(grad_scale_factor)
+            return
         # Call gradient scaling at the end of the backward pass
         # NOTE: this must happen after FSDP post_backward is FSDP is enabled
+        if grad_scale_factor != 1:
+            self.scale_grads(grad_scale_factor)
+
+    def start_gradient_reduction(self) -> None:
+        """Start FSDP gradient reduction without waiting for it."""
+        if not isinstance(self.submod, FSDPModule):
+            raise RuntimeError("Asynchronous gradient reduction requires FSDP")
+        if self._gradient_reduction_handle is not None:
+            raise RuntimeError("A gradient reduction is already pending")
+        self.submod.set_requires_gradient_sync(True)
+        self.submod.set_reshard_after_backward(True)
+        self._gradient_reduction_handle = self.submod.finalize_backward(async_op=True)
+
+    def wait_for_gradient_reduction(self, grad_scale_factor: int) -> None:
+        """Wait for FSDP gradient reduction and scale the gradients."""
+        if not isinstance(self.submod, FSDPModule):
+            raise RuntimeError("Asynchronous gradient reduction requires FSDP")
+        if self._gradient_reduction_handle is None:
+            raise RuntimeError("No gradient reduction is pending")
+        self._gradient_reduction_handle.wait()
+        self._gradient_reduction_handle = None
+        self.submod.set_manual_backward_finalization(False)
         if grad_scale_factor != 1:
             self.scale_grads(grad_scale_factor)
 

@@ -68,6 +68,7 @@ from torch.distributed.pipelining.schedules import (
     SEND_F,
     UNSHARD,
     W,
+    WAIT_REDUCE_GRAD,
 )
 from torch.distributed.pipelining.stage import _PipelineStageBase, PipelineStage
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -1861,6 +1862,174 @@ class TestSchedulePlan(TestCase):
             schedule.pipeline_order_with_comms,
             format="compute_comms",
         )
+
+    def test_wait_reduce_grad_round_trip(self):
+        action = _Action(3, WAIT_REDUCE_GRAD, None)
+        self.assertEqual(str(action), "3WAIT_REDUCE_GRAD")
+        self.assertEqual(_Action.from_str(str(action)), action)
+
+    def test_defer_reduce_grad_wait_lowering(self):
+        actions = [
+            _Action(6, B, 0),
+            _Action(4, B, 0),
+            _Action(2, B, 0),
+        ]
+        default = _add_reduce_grad(actions, n_microbatches=1)
+        self.assertEqual(
+            default,
+            [
+                _Action(6, B, 0),
+                _Action(6, REDUCE_GRAD, None),
+                _Action(4, B, 0),
+                _Action(4, REDUCE_GRAD, None),
+                _Action(2, B, 0),
+                _Action(2, REDUCE_GRAD, None),
+            ],
+        )
+
+        deferred = _add_reduce_grad(
+            actions,
+            n_microbatches=1,
+            defer_reduce_grad_wait=True,
+        )
+        self.assertEqual(
+            deferred,
+            [
+                _Action(6, B, 0),
+                _Action(6, REDUCE_GRAD, None),
+                _Action(4, B, 0),
+                _Action(6, WAIT_REDUCE_GRAD, None),
+                _Action(4, REDUCE_GRAD, None),
+                _Action(2, B, 0),
+                _Action(4, WAIT_REDUCE_GRAD, None),
+                _Action(2, REDUCE_GRAD, None),
+                _Action(2, WAIT_REDUCE_GRAD, None),
+            ],
+        )
+
+        schedule = _PipelineScheduleRuntime(
+            [MockPipelineStage(num_stages=1)],
+            n_microbatches=1,
+            defer_reduce_grad_wait=True,
+        )
+        with self.assertRaisesRegex(ValueError, "REDUCE_GRAD without WAIT_REDUCE_GRAD"):
+            schedule._prepare_schedule_with_comms(
+                {
+                    0: [
+                        _Action(0, F, 0),
+                        _Action(0, B, 0),
+                        _Action(0, REDUCE_GRAD),
+                    ]
+                },
+                format="compute_comms",
+            )
+
+        stages = [MockPipelineStage(num_stages=2) for _ in range(2)]
+        for stage_idx, stage in enumerate(stages):
+            stage.stage_index = stage_idx
+        multi_stage_schedule = _PipelineScheduleRuntime(
+            stages,
+            n_microbatches=1,
+            defer_reduce_grad_wait=True,
+        )
+        overlapping_reductions = {
+            0: [
+                _Action(0, F, 0),
+                _Action(0, B, 0),
+                _Action(0, REDUCE_GRAD),
+                _Action(1, F, 0),
+                _Action(1, B, 0),
+                _Action(1, REDUCE_GRAD),
+                _Action(0, WAIT_REDUCE_GRAD),
+                _Action(1, WAIT_REDUCE_GRAD),
+            ]
+        }
+        multi_stage_schedule._prepare_schedule_with_comms(
+            overlapping_reductions,
+            format="compute_comms",
+        )
+        self.assertEqual(
+            multi_stage_schedule.pipeline_order_with_comms,
+            overlapping_reductions,
+        )
+
+        with self.assertRaisesRegex(ValueError, "already has a pending REDUCE_GRAD"):
+            multi_stage_schedule._prepare_schedule_with_comms(
+                {
+                    0: [
+                        _Action(0, F, 0),
+                        _Action(0, B, 0),
+                        _Action(0, REDUCE_GRAD),
+                        _Action(0, REDUCE_GRAD),
+                        _Action(0, WAIT_REDUCE_GRAD),
+                        _Action(1, F, 0),
+                        _Action(1, B, 0),
+                        _Action(1, REDUCE_GRAD),
+                        _Action(1, WAIT_REDUCE_GRAD),
+                    ]
+                },
+                format="compute_comms",
+            )
+
+    def test_defer_reduce_grad_wait_schedule_invariants(self):
+        def make_schedule(defer_reduce_grad_wait):
+            stages = [
+                MockPipelineStage(group_size=2, group_rank=0, num_stages=8)
+                for _ in range(4)
+            ]
+            return ScheduleInterleaved1F1B(
+                stages,
+                n_microbatches=8,
+                defer_reduce_grad_wait=defer_reduce_grad_wait,
+            )
+
+        default = make_schedule(False).pipeline_order_with_comms
+        deferred = make_schedule(True).pipeline_order_with_comms
+        p2p_types = {SEND_F, RECV_F, SEND_B, RECV_B}
+
+        for rank in default:
+            default_actions = default[rank]
+            deferred_actions = deferred[rank]
+            default_compute = [
+                action
+                for action in default_actions
+                if action.computation_type not in p2p_types
+            ]
+            deferred_compute = [
+                action
+                for action in deferred_actions
+                if action.computation_type not in p2p_types
+                and action.computation_type != WAIT_REDUCE_GRAD
+            ]
+            self.assertEqual(deferred_compute, default_compute)
+
+            for p2p_type in p2p_types:
+                self.assertEqual(
+                    sum(
+                        action.computation_type == p2p_type
+                        for action in deferred_actions
+                    ),
+                    sum(
+                        action.computation_type == p2p_type
+                        for action in default_actions
+                    ),
+                )
+
+            pending_stage = None
+            num_reductions = 0
+            num_waits = 0
+            for action in deferred_actions:
+                if action.computation_type == REDUCE_GRAD:
+                    self.assertIsNone(pending_stage)
+                    pending_stage = action.stage_index
+                    num_reductions += 1
+                elif action.computation_type == WAIT_REDUCE_GRAD:
+                    self.assertEqual(action.stage_index, pending_stage)
+                    pending_stage = None
+                    num_waits += 1
+            self.assertIsNone(pending_stage)
+            self.assertEqual(num_waits, num_reductions)
+            self.assertEqual(deferred_actions[-1].computation_type, WAIT_REDUCE_GRAD)
 
     @parametrize(
         "ScheduleClass",
