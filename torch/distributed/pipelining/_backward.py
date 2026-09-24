@@ -279,9 +279,9 @@ def stage_backward_input(
                     inp.grad += dinput
 
         # drop output side graph state we no longer need
-        for t in stage_outputs_or_loss:
-            if isinstance(t, torch.Tensor):
-                t.detach_()
+        for stage_output in stage_outputs_or_loss:
+            if isinstance(stage_output, torch.Tensor):
+                stage_output.detach_()
 
         return dinputs, param_groups
     except Exception as e:

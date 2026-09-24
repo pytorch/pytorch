@@ -250,7 +250,10 @@ size_t parseCUDABlasLtWorkspaceSize() {
     // accept either env var
     val = c10::utils::get_env("HIPBLASLT_WORKSPACE_SIZE");
   }
-  size_t workspace_size = 76*1024; /* Use 76 MB for hipBLASLt */
+  // hipblaslt-bench defaults to a 128 MiB workspace (--workspace 134217728);
+  // 80 MiB covers the fp8 shapes that fail at 76 MiB on ROCm 7.14.
+  // https://rocm.docs.amd.com/projects/hipBLASLt/en/docs-7.14.1/conceptual/hipblaslt-clients.html
+  size_t workspace_size = 80*1024; /* Use 80 MiB for hipBLASLt */
 #else
   size_t workspace_size = 1024; /* default size in KiB according to #73328 */
 #endif
