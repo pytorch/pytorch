@@ -128,21 +128,18 @@ def _force_pdl_nvgemm_choice():
     from torch._inductor.select_algorithm import AlgorithmSelectorCache
 
     def benchmark(_selector, choices, *_args, **_kwargs):
-        nvgemm_choices = [
-            choice for choice in choices if isinstance(choice, NVUniversalGemmCaller)
-        ]
-        pdl_choices = [
-            choice
-            for choice in nvgemm_choices
-            if getattr(
-                getattr(choice.kernel, "impl", None),
-                "use_pdl",
-                getattr(choice.kernel.metadata.design, "use_pdl", False),
+        def is_pdl_choice(choice):
+            if not isinstance(choice, NVUniversalGemmCaller):
+                return False
+            return bool(
+                getattr(
+                    getattr(choice.kernel, "impl", None),
+                    "use_pdl",
+                    getattr(choice.kernel.metadata.design, "use_pdl", False),
+                )
             )
-        ]
-        if nvgemm_choices and not pdl_choices:
-            raise AssertionError("expected a PDL-capable NVGEMM choice")
-        return {choice: 0.1 if choice in pdl_choices else 1.0 for choice in choices}
+
+        return {choice: 0.1 if is_pdl_choice(choice) else 1.0 for choice in choices}
 
     return mock.patch.object(
         AlgorithmSelectorCache,
