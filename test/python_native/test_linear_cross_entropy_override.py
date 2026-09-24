@@ -570,12 +570,43 @@ torch.cuda.synchronize()
 
         # Any entry into the accumulator means the call fell back, and a
         # fallback would hide exactly the failure this test is about.
-        with self._assert_kernel_path():
+        # Under `fill_uninitialized_memory`, any gradient element the first chunk
+        # fails to write comes back NaN, which pins write-not-accumulate.
+        with (
+            self._assert_kernel_path(),
+            DeterministicGuard(True, fill_uninitialized_memory=True),
+        ):
             fused = once()
         with torch.backends.python_native.cutedsl.disabled():
             plain = once()
 
         self._assert_matches(fused, plain, dtype, atol=1e-3)
+
+    @_needs_kernel
+    def test_empty_batch_returns_a_zeroed_weight_gradient(self):
+        """An empty batch has no first chunk to write `grad_linear_weight`, so
+        the early return must zero it. `fill_uninitialized_memory` makes an
+        unzeroed allocation visible, since `torch.empty` often returns zeroed
+        pages."""
+        input, linear_weight, _, target = _problem(0, 64, 512, requires_grad=True)
+        options = _compact_options(batch_chunk_size=8)
+        with (
+            self._assert_kernel_path(),
+            DeterministicGuard(True, fill_uninitialized_memory=True),
+        ):
+            loss = torch.nn.functional.linear_cross_entropy(
+                input, linear_weight, target, options=options
+            )
+            loss.backward()
+        self.assertTrue(torch.isnan(loss), "mean over an empty batch is nan")
+        self.assertEqual(
+            linear_weight.grad,
+            torch.zeros_like(linear_weight.grad),
+            atol=0,
+            rtol=0,
+            msg="the weight gradient is not zeroed on the path that has no "
+            "chunk to write it",
+        )
 
     @_needs_kernel
     def test_kernel_path_is_deterministic(self):

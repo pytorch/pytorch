@@ -31,7 +31,7 @@ def _reference(logits, row_scale, target, out_dtype):
     g = e * (row_scale / row_sum).unsqueeze(1)
     rows = torch.arange(logits.shape[0], device=logits.device)
     g[rows, target] -= row_scale
-    # Both statistics shifted by the row max, as the kernel's are.
+    # Both statistics shifted by the row max, as in the kernel.
     return (
         g.to(out_dtype),
         row_sum.log(),
@@ -46,9 +46,8 @@ def _outputs(num_rows, V, dtype, device="cuda", row_stride=None):
         # A wider row stride than V: the kernel indexes through the tensor's
         # own strides, so this must work as well as the packed case.
         g = torch.empty(num_rows, row_stride, device=device, dtype=dtype)[:, :V]
-    log_row_sum = torch.empty(num_rows, device=device, dtype=torch.float32)
-    shifted_target = torch.empty(num_rows, device=device, dtype=torch.float32)
-    return g, log_row_sum, shifted_target
+    term = torch.empty(num_rows, device=device, dtype=torch.float32)
+    return g, term
 
 
 def _inputs(num_rows, V, device="cuda", logits_dtype=torch.float32):
@@ -76,15 +75,11 @@ class TestFusedGradLogitsKernel(TestCase):
     def _run(
         self, logits, row_scale, target, dtype, row_stride=None, aliased=False, **meta
     ):
-        g, log_row_sum, shifted_target = _outputs(
-            *logits.shape, dtype, row_stride=row_stride
-        )
+        g, term = _outputs(*logits.shape, dtype, row_stride=row_stride)
         if aliased:
             g = logits.view(dtype).narrow(1, 0, logits.shape[1])
-        self.kernel.fused_grad_logits_into(
-            g, log_row_sum, shifted_target, logits, row_scale, target, **meta
-        )
-        return g, log_row_sum, shifted_target
+        self.kernel.fused_grad_logits_into(g, term, logits, row_scale, target, **meta)
+        return g, term
 
     def _check(
         self, logits, row_scale, target, dtype, row_stride=None, aliased=False, **meta
@@ -93,7 +88,7 @@ class TestFusedGradLogitsKernel(TestCase):
         want_g, want_log_row_sum, want_shifted = _reference(
             logits, row_scale, target, dtype
         )
-        g, log_row_sum, shifted_target = self._run(
+        g, term = self._run(
             logits, row_scale, target, dtype, row_stride, aliased, **meta
         )
         if dtype is torch.float32:
@@ -102,9 +97,11 @@ class TestFusedGradLogitsKernel(TestCase):
             self.assertEqual(g, want_g, atol=1e-6, rtol=1e-5)
         else:
             self.assertEqual(g, want_g)
-        self.assertEqual(log_row_sum, want_log_row_sum, atol=1e-4, rtol=1e-5)
-        # A copy, not a computation.
-        self.assertEqual(shifted_target, want_shifted)
+        # The row max cancels out of `term` and `g`, so this sees only its effect
+        # on the row sum; `test_a_lone_high_column_pins_the_row_max` pins the rest.
+        self.assertEqual(
+            term, row_scale * (want_log_row_sum - want_shifted), atol=1e-4, rtol=1e-5
+        )
 
     @parametrize("dtype", [torch.bfloat16, torch.float16, torch.float32])
     @parametrize(
@@ -136,8 +133,8 @@ class TestFusedGradLogitsKernel(TestCase):
         [
             (1, 7),  # below one tile
             (4, 513),  # crosses the block width
-            (8, 2049),  # one column past a full staging group
-            (37, 4097),
+            (8, 2049),  # partial tiles inside one staging group
+            (37, 4097),  # one column past a full staging group
             (128, 32000),  # a realistic chunk, many staging groups
         ],
     )
@@ -145,9 +142,11 @@ class TestFusedGradLogitsKernel(TestCase):
         """`g` written into the logits' own bytes: `g[n, j]` occupies
         `z[n, j // 2]`. An element left unwritten would hold reinterpreted fp32
         bytes, so matching the reference everywhere also proves full coverage.
-        The write ordering is checked only probabilistically, since a missing
-        barrier is a data race; `compute-sanitizer --tool racecheck` checks it
-        deterministically."""
+        The target logit is read before any write could occupy its bytes,
+        which the loss term would expose: it is the only place that logit
+        reaches an output. The write ordering is not what this checks: at the
+        default staging depth a barrier-less kernel still passes.
+        `compute-sanitizer --tool racecheck` checks it."""
         logits, row_scale, target = _inputs(num_rows, V)
         self._check(logits, row_scale, target, dtype, aliased=True)
 
@@ -181,28 +180,40 @@ class TestFusedGradLogitsKernel(TestCase):
         logits, row_scale, target = _inputs(num_rows, V)
         self._check(logits + 10000.0, row_scale, target, torch.float32)
 
-    def test_uniform_row_sums_to_the_class_count(self):
+    def test_a_lone_high_column_pins_the_row_max(self):
+        """The row max cancels out of both outputs, so its one load-bearing job
+        is keeping `exp` in range. Here it sits alone in the last thread's
+        column, so the range depends on one partial surviving both reduction
+        stages."""
+        num_rows, V = 4, 4096
+        logits = torch.zeros((num_rows, V), device="cuda", dtype=torch.float32)
+        # Lane 31 of the last warp: `block_reduce` publishes only from lane 0, so
+        # this value must survive the warp butterfly and the cross-warp combine;
+        # exp(120) is inf in fp32.
+        logits[:, self.kernel._DEFAULT_THREADS_PER_BLOCK - 1] = 120.0
+        _, row_scale, target = _inputs(num_rows, V)
+        self._check(logits, row_scale, target, torch.float32)
+
+    def test_uniform_logits_give_the_log_class_count(self):
         num_rows, V = 4, 2048
         logits = torch.full((num_rows, V), 3.5, device="cuda", dtype=torch.float32)
         _, row_scale, target = _inputs(num_rows, V)
-        _, log_row_sum, shifted_target = self._run(
-            logits, row_scale, target, torch.float32
-        )
-        want = torch.full_like(log_row_sum, torch.tensor(float(V)).log().item())
-        self.assertEqual(log_row_sum, want, atol=1e-4, rtol=1e-6)
-        # Every logit is the row max, so the shifted target logit is 0.
-        self.assertEqual(shifted_target, torch.zeros_like(shifted_target))
+        _, term = self._run(logits, row_scale, target, torch.float32)
+        # Uniform logits: lse = z + log(V) and the target logit is z, so the
+        # row's whole loss term is scale * log(V) whatever z is.
+        want = row_scale * torch.tensor(float(V), device=term.device).log()
+        self.assertEqual(term, want, atol=1e-4, rtol=1e-6)
 
     def test_target_column_is_the_shifted_probability(self):
         """The one-hot subtract is what replaces eager's index_add_, so the
         target column is checked explicitly rather than only in aggregate."""
         num_rows, V = 16, 512
         logits, row_scale, target = _inputs(num_rows, V)
-        g, log_row_sum, shifted_target = self._run(
-            logits, row_scale, target, torch.float32
-        )
+        g, term = self._run(logits, row_scale, target, torch.float32)
         rows = torch.arange(num_rows, device=g.device)
-        p_target = (shifted_target - log_row_sum).exp()
+        # term = scale * (lse - z_target), so lse comes back out of it.
+        lse = term / row_scale + logits[rows, target]
+        p_target = (logits[rows, target] - lse).exp()
         self.assertEqual(
             g[rows, target], (p_target - 1.0) * row_scale, atol=1e-6, rtol=1e-5
         )
@@ -232,13 +243,9 @@ class TestFusedGradLogitsKernel(TestCase):
         num_rows, V = 4, 512
         logits, row_scale, target = _inputs(num_rows, V)
         logits[1] = float("-inf")
-        g, log_row_sum, shifted_target = self._run(
-            logits, row_scale, target, torch.float32
-        )
+        g, term = self._run(logits, row_scale, target, torch.float32)
         self.assertTrue(torch.isnan(g[1]).all())
-        # The loss the caller builds from the two statistics, whether the NaN
-        # arrives in `log_row_sum` or as `-inf - -inf`.
-        self.assertTrue(torch.isnan(log_row_sum[1] - shifted_target[1]))
+        self.assertTrue(torch.isnan(term[1]))
         self.assertTrue(torch.isfinite(g[0]).all())
 
     def test_nan_logit_poisons_its_row(self):
@@ -247,9 +254,9 @@ class TestFusedGradLogitsKernel(TestCase):
         num_rows, V = 4, 512
         logits, row_scale, target = _inputs(num_rows, V)
         logits[2, 7] = float("nan")
-        g, log_row_sum, _ = self._run(logits, row_scale, target, torch.float32)
+        g, term = self._run(logits, row_scale, target, torch.float32)
         self.assertTrue(torch.isnan(g[2]).all())
-        self.assertTrue(torch.isnan(log_row_sum[2]))
+        self.assertTrue(torch.isnan(term[2]))
         self.assertTrue(torch.isfinite(g[0]).all())
 
     # `1 << 32` is the one that needs int64 to catch: its low 32 bits are zero,
@@ -272,9 +279,9 @@ from torch._native.ops.linear_cross_entropy import fused_grad_logits_kernel as k
 logits = torch.randn(6, 256, device="cuda")
 target = torch.randint(0, 256, (6,), device="cuda")
 target[3] = {bad_target}
-stats = [torch.empty(6, device="cuda") for _ in range(2)]
+term = torch.empty(6, device="cuda")
 k.fused_grad_logits_into(
-    torch.empty_like(logits), *stats, logits, torch.ones(6, device="cuda"), target
+    torch.empty_like(logits), term, logits, torch.ones(6, device="cuda"), target
 )
 torch.cuda.synchronize()
 """)
@@ -282,13 +289,14 @@ torch.cuda.synchronize()
         self.assertIn(f"linear_cross_entropy: {message}", stdout.decode())
 
     def test_zero_row_scale_gives_a_zero_gradient(self):
-        """An ignored row carries scale 0, and its whole gradient row -- target
-        column included -- must be exactly zero."""
+        """An ignored row carries scale 0, so its whole gradient row -- target
+        column included -- and its loss contribution must both be exactly zero."""
         num_rows, V = 6, 300
         logits, row_scale, target = _inputs(num_rows, V)
         row_scale = torch.zeros_like(row_scale)
-        g, _, _ = self._run(logits, row_scale, target, torch.bfloat16)
+        g, term = self._run(logits, row_scale, target, torch.bfloat16)
         self.assertEqual(g, torch.zeros_like(g))
+        self.assertEqual(term, torch.zeros_like(term))
 
     def test_wider_row_stride(self):
         logits, row_scale, target = _inputs(24, 100)
@@ -298,7 +306,7 @@ torch.cuda.synchronize()
         "meta",
         [
             {},
-            {"threads_per_block": 128},
+            {"threads_per_block": 128, "tiles_per_stage": 4},
             {"tiles_per_stage": 1},
             {"threads_per_block": 1024, "tiles_per_stage": 8},
         ],

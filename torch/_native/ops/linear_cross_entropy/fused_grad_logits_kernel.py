@@ -7,13 +7,12 @@ the gradient-of-logits once. Per row ``n``, with ``m_n = max_v z[n, v]`` and
 ``l_n = sum_v exp(z[n, v] - m_n)``::
 
     g[n, v] = exp(z[n, v] - m_n) * (s_n / l_n) - s_n * [v == T_hat_n]
-    log_row_sum[n] = log(l_n)
-    shifted_target_logit[n] = z[n, T_hat_n] - m_n
+    term[n] = s_n * (log(l_n) - (z[n, T_hat_n] - m_n))
 
-The caller forms the loss term as ``s_n * (log_row_sum_n -
-shifted_target_logit_n)``. Both statistics are shifted by ``m_n`` because the
-unshifted ``m_n + log(l_n)`` and ``z[n, T_hat_n]`` cancel catastrophically in
-fp32 at large row offsets: logits of 2**24 turn a loss of log(2) into 0.
+The loss term is formed here, so the caller only sums it. Both halves of its
+difference are shifted by ``m_n`` because the unshifted ``m_n + log(l_n)`` and
+``z[n, T_hat_n]`` cancel catastrophically in fp32 at large row offsets: logits of
+2**24 turn a loss of log(2) into 0.
 
 One block per row, since a row's max and sum must be complete before any of its
 elements is written; parallelism is therefore the chunk's row count, so blocks
@@ -49,10 +48,10 @@ from torch._vendor.quack.reduce import block_reduce
 
 
 # Defaults for the kernel's two shape knobs, which a caller may override (see
-# `fused_grad_logits_into`), chosen from an H100 sweep over chunk shapes the
-# loop uses: https://github.com/pytorch/pytorch/pull/195829
+# `fused_grad_logits_into`), chosen from an H100 and B200 sweep over chunk shapes
+# the loop uses: https://github.com/pytorch/pytorch/pull/196134
 _DEFAULT_THREADS_PER_BLOCK = 512
-_DEFAULT_TILES_PER_STAGE = 4
+_DEFAULT_TILES_PER_STAGE = 8
 
 _LOG2E = 1.4426950408889634
 
@@ -80,8 +79,7 @@ def _make_kernel(out_dtype, threads_per_block, tiles_per_stage):
         mS: cute.Tensor,
         mTarget: cute.Tensor,
         mG: cute.Tensor,
-        mLogRowSum: cute.Tensor,
-        mShiftedTargetLogit: cute.Tensor,
+        mTerm: cute.Tensor,
         V: Int32,
     ):
         tidx, _, _ = cute.arch.thread_idx()
@@ -142,13 +140,12 @@ def _make_kernel(out_dtype, threads_per_block, tiles_per_stage):
         )
 
         s = mS[row]
-        target_logit = Float32(mZ[row, target_read])
         factor = s / row_sum
         if tidx == 0:
-            # Shifted, both of them -- see the module docstring for why the
-            # unshifted pair cannot be subtracted in fp32.
-            mLogRowSum[row] = cute.math.log(row_sum)
-            mShiftedTargetLogit[row] = target_logit - row_max
+            # Both halves shifted by the row max; see the module docstring.
+            mTerm[row] = s * (
+                cute.math.log(row_sum) - (Float32(mZ[row, target_read]) - row_max)
+            )
 
         # This read of the target logit has to be ordered against the writes
         # below, which may occupy its bytes.
@@ -182,13 +179,12 @@ def _make_kernel(out_dtype, threads_per_block, tiles_per_stage):
         mS: cute.Tensor,
         mTarget: cute.Tensor,
         mG: cute.Tensor,
-        mLogRowSum: cute.Tensor,
-        mShiftedTargetLogit: cute.Tensor,
+        mTerm: cute.Tensor,
         stream: cuda.CUstream,
         V: Int32,
         num_rows: Int32,
     ):
-        _kernel(mZ, mS, mTarget, mG, mLogRowSum, mShiftedTargetLogit, V).launch(
+        _kernel(mZ, mS, mTarget, mG, mTerm, V).launch(
             grid=[num_rows, 1, 1],
             block=[threads_per_block, 1, 1],
             stream=stream,
@@ -238,7 +234,6 @@ def _compile_fused_grad_logits(
             stride=(cute.sym_int64(), 1),
         ),
         f32_1d(),
-        f32_1d(),
         cute.runtime.make_fake_stream(use_tvm_ffi_env_stream=True),
         Int32(0),
         Int32(0),
@@ -248,14 +243,13 @@ def _compile_fused_grad_logits(
 
 def fused_grad_logits_into(
     g: torch.Tensor,
-    log_row_sum: torch.Tensor,
-    shifted_target_logit: torch.Tensor,
+    term: torch.Tensor,
     logits: torch.Tensor,
     row_scale: torch.Tensor,
     target: torch.Tensor,
     **meta: int,
 ) -> None:
-    """Writes ``g`` and the row statistics from the raw ``logits``.
+    """Writes ``g`` and the per-row loss term from the raw ``logits``.
 
     ``logits`` is (Bc, V) with unit inner stride, fp32 or a low-precision dtype.
     ``g`` is (Bc, V) at the input dtype: either a separate buffer, which leaves
@@ -264,15 +258,16 @@ def fused_grad_logits_into(
     they overwrite -- which consumes them: after the call that memory holds
     ``g``. The kernel is correct for either layout (see the module docstring).
 
-    ``log_row_sum``, ``shifted_target_logit`` and ``row_scale`` are fp32 (Bc,),
-    ``target`` is int64 (Bc,), all contiguous.
+    ``term`` and ``row_scale`` are fp32 (Bc,) and ``target`` is int64 (Bc,),
+    all contiguous. ``term`` receives each row's loss contribution,
+    ``row_scale * (log(l) - (z_target - m))``.
 
     ``meta`` takes the kernel's shape knobs; each combination compiles once:
 
     ``threads_per_block``
         Block width, default 512. A multiple of 32, at most 1024.
     ``tiles_per_stage``
-        Column tiles staged per barrier in pass 2, default 4. At least 1.
+        Column tiles staged per barrier in pass 2, default 8. At least 1.
     """
     threads = meta.pop("threads_per_block", _DEFAULT_THREADS_PER_BLOCK)
     tiles = meta.pop("tiles_per_stage", _DEFAULT_TILES_PER_STAGE)
@@ -291,6 +286,4 @@ def fused_grad_logits_into(
         raise ValueError(f"tiles_per_stage must be at least 1, got {tiles}")
     num_rows, V = logits.shape
     compiled = _compile_fused_grad_logits(logits.dtype, g.dtype, threads, tiles)
-    compiled(
-        logits, row_scale, target, g, log_row_sum, shifted_target_logit, V, num_rows
-    )
+    compiled(logits, row_scale, target, g, term, V, num_rows)
