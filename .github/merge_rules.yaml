@@ -587,6 +587,23 @@
   - Lint
   - pull
 
+- name: Complex Compilation
+  patterns:
+  - torch/_subclasses/complex_tensor/**
+  - test/complex_tensor/**
+  - torch/_functorch/_aot_autograd/complex_decomposition.py
+  - test/dynamo/test_complex.py
+  approved_by:
+  - hameerabbasi
+  - amjames
+  - eellison
+  - ezyang
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+  - inductor
+
 - name: Testing (Temporarily used for test refactoring)
   patterns:
   - torch/testing/**

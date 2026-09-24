@@ -73,6 +73,7 @@
 # /torch/_functorch/compilers.py
 # /torch/_functorch/partitioners.py
 /torch/_functorch/_aot_autograd/*.py @bdhirsh @aorenste
+/torch/_functorch/_aot_autograd/complex_decomposition.py @hameerabbasi @amjames
 #
 # [core_aten_linalg]
 /aten/src/ATen/native/**/*LinearAlgebra* @lezcano @nikitaved
@@ -410,7 +411,7 @@
 /test/allowlist_for_publicAPI.json @albanD
 # /test/backends/
 # /test/bench_mps_ops.py
-# /test/complex_tensor/
+/test/complex_tensor/ @hameerabbasi @amjames
 # /test/conftest.py
 # /test/create_dummy_torchscript_model.py
 # /test/error_messages/
@@ -693,6 +694,7 @@
 # /torch/_streambase.py
 # /torch/_strobelight/
 # /torch/_subclasses/
+/torch/_subclasses/complex_tensor/ @hameerabbasi @amjames
 # /torch/_tensor.py
 # /torch/_tensor_docs.py
 # /torch/_tensor_iterator.py
@@ -1126,6 +1128,7 @@
 # [compiler_dynamo]
 # /test/distributed/test_dynamo_distributed.py
 # /test/dynamo/
+/test/dynamo/test_complex.py @hameerabbasi @amjames
 # /test/dynamo_expected_failures/
 # /test/dynamo_skips/
 # /test/export/test_dynamic_shapes.py
