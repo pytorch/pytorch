@@ -575,6 +575,11 @@ void initSymbolicBindings(PyObject* module) {
             return self->arena->could_extract_minus_sign(unwrap(self, e));
           })
       .def(
+          "sstr",
+          [](const Self& self, const PyExpr& e) {
+            return self->arena->str(unwrap(self, e));
+          })
+      .def(
           "ask",
           [](const Self& self, const PyExpr& e, const std::string& fact) {
             auto f = fact_from_name(fact);

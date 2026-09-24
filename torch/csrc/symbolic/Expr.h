@@ -253,6 +253,9 @@ class ExprArena : public c10::intrusive_ptr_target {
   // Relational.canonical.
   const Expr* canonical(const Expr* r);
 
+  // str(e): sympy's StrPrinter (Printer.cpp).
+  std::string str(const Expr* e);
+
   // Ports of the sympy helpers behind the Add sign handlers (ExprTools.cpp).
   std::pair<const Expr*, const Expr*> as_coeff_Add(const Expr* e);
   c10::SmallVector<const Expr*, 4> free_symbols(const Expr* e) const;
@@ -268,6 +271,8 @@ class ExprArena : public c10::intrusive_ptr_target {
   }
 
  private:
+  friend class StrPrinter;
+
   const Expr* number(Num n);
   const Expr* intern(Kind kind, int64_t p, int64_t q, c10::ArrayRef<const Expr*> args);
   // Assoc node from already-processed args, like AssocOp._from_args.

@@ -810,12 +810,91 @@ class TestNativeLattice(TestCase):
         self.assertGreater(answered, 10 * unsupported)
 
 
+class TestNativePrinter(TestCase):
+    def check(self, v):
+        """Returns False if native raised NativeUnsupported, else checks
+        arena.sstr against str."""
+        arena = torch._C._symbolic._Arena()
+        try:
+            got = arena.sstr(arena.from_sympy(v))
+        except NativeUnsupported:
+            return False
+        self.assertEqual(got, str(v))
+        return True
+
+    def test_known(self):
+        u = sympy.Symbol("u", integer=True)
+        cases = [s0 / s1, -s0 / s1, s0 * u0 / s1, s0 / (2 * s1), 3 * s0 / 2, -s0 / 2]
+        cases += [1 / (s0 + 1), (s0 + 1) / (s1 + 2), s1 * (s0 + 1) ** 2, s0 * (s1 + 1)]
+        cases += [-s0 * (s1 + 1), 1 - s0, 2 - s0 / 2, 2 - 3 * s0, 3 - s0 * u0, u - 1]
+        cases += [s0**2 - 2 * s0 * s1 + s1**2, s0 / s1 + s1, s0**-2, -(s0**-2)]
+        cases += [(s0 + 1) ** -2 * s1, -3 * s0**-2 / 2, s0**-1 * s1**-1, -s0 - s1]
+        cases += [-((s0 + 1) ** 3), (s0 + 1) ** -1, 1 / (s0 * s1), s0 * s1 / 6 - 1]
+        cases += [sympy.Symbol("s10", integer=True) + sympy.Symbol("s2", integer=True)]
+        cases += [int_oo, -int_oo, sympy.Integer(-3), sympy.Integer(0)]
+        cases += [sympy.Rational(-1, 2), sympy.Rational(7, 2), s0, sympy.true]
+        cases += [sympy.false, zf / 3 + 1, -zf * u0 / 5, u0 * (s0 - 1) * (s1 + 1)]
+        for v in cases:
+            self.assertTrue(self.check(v), f"{v}")
+
+    def test_booleans(self):
+        eq = sympy.Eq(s0, 1, evaluate=False)
+        lt = sympy.Lt(u0, s1, evaluate=False)
+        cases = [eq, lt, sympy.Ne(s0 + 1, -s1), sympy.Ge(u0, s1), sympy.Gt(2, u0)]
+        cases += [sympy.Lt(s0 + 1, 2 * s1), sympy.Le(-s0, 3), sympy.Lt(-3, u0)]
+        cases += [sympy.Lt(u0 / 2, sympy.Rational(-1, 2)), sympy.Lt(u0, -int_oo)]
+        cases += [sympy.Eq(eq, sympy.true, evaluate=False), sympy.Not(s0 + 1)]
+        cases += [sympy.Not(u0), sympy.Not(lt), sympy.Not(eq), sympy.And(eq, lt)]
+        cases += [sympy.Or(eq, lt), sympy.And(sympy.Or(eq, lt), u0), sympy.Or(u0, zf)]
+        cases += [sympy.Or(sympy.And(eq, lt), sympy.Not(u0)), sympy.Ne(u0, 2) | ~lt]
+        cases += [sympy.Lt(eq, lt, evaluate=False), sympy.Eq(lt, eq, evaluate=False)]
+        for v in cases:
+            self.assertTrue(self.check(v), f"{v}")
+
+    @parametrize("seed", range(6))
+    def test_fuzz(self, seed):
+        rng = random.Random(seed)
+        pool = []
+        answered = unsupported = 0
+        for _ in range(80):
+            t = random_tree(rng, 4, FACT_LEAVES if seed % 2 else LEAVES)
+            for sub in subtrees(t):
+                v = sympy.sympify(sympy_eval(sub))
+                if v.has(sympy.zoo, sympy.nan):
+                    continue
+                pool.append(v)
+                if self.check(v):
+                    answered += 1
+                else:
+                    unsupported += 1
+        bools = []
+        for _ in range(150):
+            a, b = rng.sample(pool, 2)
+            r = getattr(sympy, rng.choice(RELATIONS))(a, b, evaluate=False)
+            bools.append(rng.choice([r, sympy.Not(r)]))
+        bools += TestNativeLattice.rels + TestNativeLattice.atoms
+        for _ in range(150):
+            args = rng.sample(bools, rng.randint(1, 4))
+            try:
+                v = getattr(sympy, rng.choice(["And", "Or"]))(*args)
+            except (TypeError, AttributeError):
+                continue
+            bools.append(v)
+        for v in bools:
+            if self.check(v):
+                answered += 1
+            else:
+                unsupported += 1
+        self.assertGreater(answered, 20 * unsupported)
+
+
 instantiate_parametrized_tests(TestNativeExpr)
 instantiate_parametrized_tests(TestNativeCompoundAssumptions)
 instantiate_parametrized_tests(TestNativeExprTools)
 instantiate_parametrized_tests(TestNativeRelational)
 instantiate_parametrized_tests(TestNativeSorting)
 instantiate_parametrized_tests(TestNativeLattice)
+instantiate_parametrized_tests(TestNativePrinter)
 
 
 if __name__ == "__main__":
