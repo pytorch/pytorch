@@ -16,7 +16,7 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, onlyNativeDeviceTypes,
      skipCPUIfNoFFT, deviceCountAtLeast, onlyCUDA, onlyOn, OpDTypes, toleranceOverride, tol,
-     largeTensorTest)
+     largeTensorTest, skipXPUIf)
 from torch.testing._internal.common_methods_invocations import (
     spectral_funcs, SpectralFuncType)
 from torch._prims_common import corresponding_complex_dtype
@@ -128,6 +128,7 @@ def skip_helper_for_fft(device, dtype):
 class TestFFT(TestCase):
     exact_dtype = True
 
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5440")
     @onlyNativeDeviceTypes
     @ops([op for op in spectral_funcs if op.ndimensional == SpectralFuncType.OneD],
          allowed_dtypes=(torch.float, torch.cfloat))
@@ -362,6 +363,7 @@ class TestFFT(TestCase):
             f"Expected complex64 or float32 output for bfloat16 input, got {result.dtype}"
         )
 
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5441")
     @onlyNativeDeviceTypes
     @ops(spectral_funcs, allowed_dtypes=(torch.half, torch.chalf))
     def test_fft_half_and_chalf_not_power_of_two_error(self, device, dtype, op):
@@ -930,7 +932,7 @@ class TestFFT(TestCase):
                             self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 10)  # default is cuda:0
                         self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 11)  # default is cuda:1
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @dtypes(torch.cfloat, torch.cdouble)
     def test_cufft_context(self, device, dtype):
         # Regression test for https://github.com/pytorch/pytorch/issues/109448
@@ -946,7 +948,7 @@ class TestFFT(TestCase):
         self.assertTrue((x.grad - dx).abs().max() == 0)
         self.assertFalse((x.grad - x).abs().max() == 0)
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @largeTensorTest("18GB")
     def test_fft_conjugate_symmetry_fill_int64_indexing(self, device):
         # The CUDA conjugate-symmetry fill uses 32-bit index math when numel and
@@ -1621,7 +1623,7 @@ class TestFFT(TestCase):
         self.assertEqual(i_original.repeat(1, 1), i_single, atol=1e-6, rtol=0, exact_dtype=True)
         self.assertEqual(i_original.repeat(4, 1), i_multi, atol=1e-6, rtol=0, exact_dtype=True)
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @requires_mkl
     def test_stft_window_device(self, device):
         # Test the (i)stft window must be on the same device as the input
@@ -1690,7 +1692,7 @@ for doc_test in FFTDocTestFinder().find(torch.fft, globs=dict(torch=torch)):
     generate_doc_test(doc_test)
 
 
-instantiate_device_type_tests(TestFFT, globals())
+instantiate_device_type_tests(TestFFT, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestFFTDocExamples, globals(), only_for='cpu')
 
 if __name__ == '__main__':
