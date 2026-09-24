@@ -2,6 +2,7 @@
 
 import asyncio
 import threading
+from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import patch
 
@@ -9,6 +10,8 @@ import torch
 from torch.distributed._transport import (
     _registry,
     available_transports,
+    MemoryView,
+    MutableMemoryView,
     new_transport,
     register_transport,
     Transport,
@@ -47,12 +50,14 @@ class _TestTransport(Transport):
     def register_memory(self, tensor):
         return tensor
 
-    def write(self, local_buffer, remote_buffer, *, async_op=False):
+    def write(self, local_buffer, remote_buffer, *, async_op=False, timeout=None):
         self.operation(local_buffer, remote_buffer)
         return _completed_work() if async_op else 0
 
-    def read(self, local_buffer, remote_buffer, *, async_op=False):
-        return self.write(local_buffer, remote_buffer, async_op=async_op)
+    def read(self, local_buffer, remote_buffer, *, async_op=False, timeout=None):
+        return self.write(
+            local_buffer, remote_buffer, async_op=async_op, timeout=timeout
+        )
 
     def close(self) -> None:
         self.closed = True
@@ -86,6 +91,13 @@ class TestTransportRegistry(TestCase):
         with _TestTransport() as transport:
             with self.assertRaisesRegex(NotImplementedError, "unregistration"):
                 transport.unregister_memory(None)
+
+    def test_mutable_view_protocol(self):
+        readonly = SimpleNamespace(size=lambda: 8)
+        mutable = SimpleNamespace(size=lambda: 8, writable=True)
+        self.assertIsInstance(readonly, MemoryView)
+        self.assertNotIsInstance(readonly, MutableMemoryView)
+        self.assertIsInstance(mutable, MutableMemoryView)
 
     def test_factory_without_device(self):
         register_transport("test", lambda *, value: _TestTransport(value=value))
@@ -191,6 +203,39 @@ class TestTransportWork(TestCase):
                 with self.assertRaises(ValueError):
                     asyncio.run(transport.write_async(None, None, timeout=timeout))
                 write.assert_not_called()
+
+    @parametrize("operation", ["read", "write"])
+    def test_async_timeout_reaches_submission(self, operation):
+        async def run():
+            with _TestTransport() as transport:
+                with patch.object(
+                    transport, operation, return_value=_completed_work()
+                ) as submit:
+                    await getattr(transport, operation + "_async")(
+                        None, None, timeout=0.5
+                    )
+                    submit.assert_called_once_with(
+                        None, None, async_op=True, timeout=0.5
+                    )
+
+        asyncio.run(run())
+
+    @parametrize("operation", ["read", "write"])
+    def test_async_submission_consumes_timeout(self, operation):
+        async def run():
+            with _TestTransport() as transport:
+                loop = asyncio.get_running_loop()
+                with (
+                    patch.object(transport, operation, return_value=_completed_work()),
+                    patch("torch.distributed._transport._api.wait_all") as wait,
+                    patch.object(loop, "time", side_effect=[10, 10.25]),
+                ):
+                    await getattr(transport, operation + "_async")(
+                        None, None, timeout=0.5
+                    )
+                    self.assertEqual(wait.call_args.kwargs["timeout"], 0.25)
+
+        asyncio.run(run())
 
     def test_async_close_requires_backend_support(self):
         with _TestTransport() as transport:
