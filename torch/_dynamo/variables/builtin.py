@@ -1325,7 +1325,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                 handlers.append(call_binop_handlers)
 
         self_handler = getattr(obj, f"call_{fn.__name__}", None)
-        if self_handler:
+        if self_handler and fn is not format:
 
             def call_self_handler(
                 tx: "InstructionTranslatorBase",

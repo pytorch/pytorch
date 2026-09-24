@@ -384,6 +384,13 @@ class ConstantVariable(VariableTracker):
                 return ConstantVariable.create(result, mutation_type=ValueMutationNew())
             return ConstantVariable.create(result)
         elif isinstance(self.value, (float, int)) and hasattr(self.value, name):
+            if name == "__format__":
+                try:
+                    return ConstantVariable.create(
+                        getattr(self.value, name)(*const_args, **const_kwargs)
+                    )
+                except Exception as e:
+                    raise_observed_exception(type(e), tx, args=list(e.args))
             if not (args or kwargs):
                 try:
                     return ConstantVariable.create(getattr(self.value, name)())
