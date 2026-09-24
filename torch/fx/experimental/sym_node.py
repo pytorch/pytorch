@@ -2171,4 +2171,10 @@ def _install_native_glue() -> None:
         promote = method in bool_becomes_int_magic_methods
         glue = _symbolic._SymGlueMethod(original, kind, method_attr, promote)
         setattr(user_type, attr, glue)
-    _symbolic._seal_glue(sym_node_log)
+    construct = all(
+        cls.__new__ is object.__new__
+        and getattr(cls.__init__, "__qualname__", None) == f"{cls.__name__}.__init__"
+        and getattr(cls.__init__, "__module__", None) == "torch"
+        for cls in (SymInt, SymBool)
+    )
+    _symbolic._seal_glue(sym_node_log, construct)

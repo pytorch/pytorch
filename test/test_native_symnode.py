@@ -4151,13 +4151,78 @@ class TestNativeSymIntGlue(TestCase):
 
         def trace():
             env, (a, b, *_), (p, _) = self.make_env()
-            gm = make_fx(f, tracing_mode="real", pre_dispatch=pre_dispatch)(a, b, p)
-            return gm.code, [str(g.expr) for g in env.guards]
+            with self.count_inits() as inits:
+                gm = make_fx(f, tracing_mode="real", pre_dispatch=pre_dispatch)(a, b, p)
+            return gm.code, [str(g.expr) for g in env.guards], len(inits)
 
-        got = trace()
+        *got, got_inits = trace()
         with python_glue():
-            want = trace()
+            *want, want_inits = trace()
         self.assertEqual(got, want)
+        self.assertLess(got_inits, want_inits)
+
+    @staticmethod
+    @contextlib.contextmanager
+    def count_inits():
+        codes = {torch.SymInt.__init__.__code__, torch.SymBool.__init__.__code__}
+        inits = []
+
+        def profile(frame, event, arg):
+            if event == "call" and frame.f_code in codes:
+                inits.append(frame.f_code.co_qualname)
+
+        prev = sys.getprofile()
+        sys.setprofile(profile)
+        try:
+            yield inits
+        finally:
+            sys.setprofile(prev)
+
+    def test_native_construction(self):
+        _, (a, b, *_), (p, _) = self.make_env()
+        t = torch.empty((a, b), device="meta")
+        with self.count_inits() as inits:
+            size, stride = t.size(0), t.stride(0)
+            numel = t.numel()
+            q = torch._C._symbolic._roundtrip_symbool(p)
+        self.assertEqual(inits, [])
+        self.assertIs(type(size), torch.SymInt)
+        self.assertEqual(size.__dict__, {"node": a.node})
+        self.assertEqual(str(stride), str(b))
+        self.assertEqual(str(numel), str(a * b))
+        self.assertIs(type(q), torch.SymBool)
+        self.assertEqual(q.__dict__, {"node": p.node})
+
+        calls = []
+        init = torch.SymInt.__init__
+
+        def counted(self, node):
+            calls.append(node)
+            init(self, node)
+
+        try:
+            with mock.patch.object(torch.SymInt, "__init__", counted):
+                self.assertIs(t.size(0).node, a.node)
+            self.assertEqual(calls, [a.node])
+        finally:
+            sym_node._install_native_glue()
+        with self.count_inits() as inits:
+            t.size(0)
+        self.assertEqual(inits, [])
+
+        init = torch.SymBool.__init__
+        try:
+            with mock.patch.object(torch.SymBool, "__init__", counted):
+                sym_node._install_native_glue()
+                self.assertIs(
+                    type(torch._C._symbolic._roundtrip_symbool(p)), torch.SymBool
+                )
+            self.assertEqual(calls, [a.node, p.node])
+        finally:
+            sym_node._install_native_glue()
+        with self.count_inits() as inits:
+            torch._C._symbolic._roundtrip_symbool(p)
+        self.assertEqual(inits, [])
 
     def test_flag_off_unchanged(self):
         script = (

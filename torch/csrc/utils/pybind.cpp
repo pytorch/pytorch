@@ -1,4 +1,6 @@
 #include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/symbolic/NativeSymNodeImpl.h>
+#include <torch/csrc/symbolic/python_symbolic.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_symnode.h>
 
@@ -65,6 +67,12 @@ py::handle type_caster<c10::SymInt>::cast(
       // Wrap the C++ into Python
       auto inner = py::cast(si.toSymNode());
       TORCH_CHECK_PYTHON(inner);
+      if (dynamic_cast<torch::symbolic::NativeSymNodeImpl*>(
+              si.toSymNodeImplUnowned())) {
+        return torch::symbolic::make_sym_object(
+                   torch::get_symint_class(), inner)
+            .release();
+      }
       return torch::get_symint_class()(inner).release();
     }
   } else {
@@ -121,11 +129,14 @@ py::handle type_caster<c10::SymBool>::cast(
     handle /* parent */) {
   if (auto m = si.maybe_as_bool()) {
     return py::cast(*m).release();
-  } else {
-    return torch::get_symbool_class()(
-               torch::impl::PythonSymNodeImpl::as_py_node(si.toSymNodeImpl()))
+  }
+  auto node = torch::impl::PythonSymNodeImpl::as_py_node(si.toSymNodeImpl());
+  if (dynamic_cast<torch::symbolic::NativeSymNodeImpl*>(
+          si.toSymNodeImplUnowned())) {
+    return torch::symbolic::make_sym_object(torch::get_symbool_class(), node)
         .release();
   }
+  return torch::get_symbool_class()(node).release();
 }
 
 bool type_caster<c10::Scalar>::load(py::handle src, bool /*unused*/) {

@@ -33,6 +33,8 @@ struct Glue {
   // logger._cache, which logging clears in place.
   PyObject* log_cache = nullptr;
   PyObject* sym_node_dict = nullptr;
+  // SymInt/SymBool construction is object.__new__ plus torch's __init__.
+  bool construct = false;
 };
 Glue glue;
 
@@ -497,6 +499,9 @@ py::object hint_to_py(const Hint& h) {
 }
 
 py::object make_sym_object(py::handle cls, py::handle node) {
+  if (!glue.construct || !intact()) {
+    return py::reinterpret_borrow<py::object>(cls)(node);
+  }
   py::object r = steal_or_throw(PyBaseObject_Type.tp_new(
       reinterpret_cast<PyTypeObject*>(cls.ptr()), names.empty_tuple, nullptr));
   if (PyObject_SetAttr(r.ptr(), names.node, node.ptr()) < 0) {
@@ -544,7 +549,7 @@ void initGlueBindings(py::module_& sm) {
 
   // Called after the descriptors are installed: the fast path runs only while
   // SymInt and SymBool are unchanged since.
-  sm.def("_seal_glue", [](py::handle logger) {
+  sm.def("_seal_glue", [](py::handle logger, bool construct) {
     glue.symint = reinterpret_cast<PyTypeObject*>(get_symint_class().ptr());
     glue.symbool = reinterpret_cast<PyTypeObject*>(get_symbool_class().ptr());
     glue.native_node = reinterpret_cast<PyTypeObject*>(
@@ -558,6 +563,7 @@ void initGlueBindings(py::module_& sm) {
               .release()
               .ptr();
     }
+    glue.construct = construct;
     glue.symint_tag = version_tag(glue.symint);
     glue.symbool_tag = version_tag(glue.symbool);
   });

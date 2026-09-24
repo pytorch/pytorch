@@ -805,10 +805,10 @@ c10::SymNode proxy_dispatch(
     auto* n = static_cast<NativeSymNodeImpl*>(args[i].get());
     if (!std::holds_alternative<std::monostate>(n->constant())) {
       wrapped[i] = hint_to_py(n->constant());
-    } else if (n->is_int()) {
-      wrapped[i] = get_symint_class()(node_to_py(args[i]));
     } else {
-      wrapped[i] = get_symbool_class()(node_to_py(args[i]));
+      wrapped[i] = make_sym_object(
+          n->is_int() ? get_symint_class() : get_symbool_class(),
+          node_to_py(args[i]));
     }
   }
   py::object op = sym_node.attr("METHOD_TO_OPERATOR")[op_name];

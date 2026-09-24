@@ -13,7 +13,8 @@ py::object node_to_py(const c10::SymNode& n);
 
 // python_symint_glue.cpp
 void initGlueBindings(py::module_& sm);
-// cls(node) for cls SymInt or SymBool, without running cls.__init__.
+// cls(node) for cls SymInt or SymBool, without running cls.__init__ while the
+// sealed glue is intact.
 py::object make_sym_object(py::handle cls, py::handle node);
 
 } // namespace torch::symbolic
