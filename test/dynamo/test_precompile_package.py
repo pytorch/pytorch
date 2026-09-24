@@ -56,6 +56,24 @@ def _user_op(x):
     return x + 1
 
 
+def _act(x):
+    return x.relu()
+
+
+_relu = _act
+
+
+def _act(x):
+    return x.sigmoid()
+
+
+_sigmoid = _act
+
+
+def _through_act(x):
+    return _act(x) + 1
+
+
 def _stack(*filenames):
     """A guard's user_stack, outermost frame first."""
     return traceback.StackSummary.from_list([(f, 1, "forward", "") for f in filenames])
@@ -2352,6 +2370,87 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         )
         self.assertEqual(summary.wont_generalize, ("mode",))
         self.assertEqual(summary.capture_errors, ("boom",))
+
+    def test_precompile_session_captures_variants_and_summarizes(self):
+        def step(model, x):
+            y = model(x)
+            torch._dynamo.graph_break()
+            return y.sum(dim=0) + y.shape[0]
+
+        model = torch.nn.Linear(4, 4)
+        x2, x3 = torch.ones(2, 4), torch.ones(3, 4)
+        session = precompile_package.precompile_capture(step, backend="eager")
+        with session as call:
+            self.assertEqual(call(model, x2), step(model, x2))
+            self.assertEqual(call(model, x3), step(model, x3))
+            summary = session.summary()
+        # The entry and its continuation, recompiled for the second shape; the
+        # default filter's drops (the model's MODULE_MATCH) are reported.
+        self.assertTrue(summary.complete, str(summary))
+        self.assertEqual((summary.frames, summary.resume_functions), (2, 1))
+        self.assertGreaterEqual(summary.guarded_codes, 3)
+        self.assertIn("MODULE_MATCH", summary.dropped_guard_types)
+        self.assertIn(
+            ("CLOSURE_MATCH", "G['torch']._dynamo.graph_break"), summary.dropped_guards
+        )
+        self.assertTrue(summary.kept_guards)
+        self.assertEqual(summary.risky_dropped_guards, ())
+        with self.assertRaisesRegex(PackageError, "not active"):
+            call(model, x2)
+        with self.assertRaisesRegex(PackageError, "cannot be re-entered"):
+            with session:
+                pass
+        # A call that raised is a capture error, and the summary is not complete.
+        failed = precompile_package.precompile_capture(step, backend="eager")
+        with failed as call:
+            with self.assertRaises(RuntimeError):
+                call(model, torch.ones(2, 5))
+        self.assertFalse(failed.summary().complete)
+        self.assertEqual(len(failed.summary().capture_errors), 1)
+        # A second session on the same function compiles into its own cache
+        # region rather than serving the first one's entries.
+        second = precompile_package.precompile_capture(step, backend="eager")
+        with second as call:
+            call(model, x2)
+        self.assertGreaterEqual(second.summary().guarded_codes, 2)
+        # A custom filter's drop the default filter would have kept is risky:
+        # nothing here can say what the caller gave up.
+        custom = precompile_package.precompile_capture(
+            step,
+            backend="eager",
+            guard_filter_fn=lambda es: [e.guard_type != "TENSOR_MATCH" for e in es],
+        )
+        with custom as call:
+            call(model, x2)
+        self.assertIn(("TENSOR_MATCH", "x"), custom.summary().risky_dropped_guards)
+        with self.assertRaisesRegex(PackageError, "partial"):
+            precompile_package.precompile_capture(functools.partial(step, model))
+        with self.assertRaisesRegex(PackageError, "CALLS the model"):
+            precompile_package.precompile_capture(model)
+        with self.assertRaisesRegex(PackageError, "bound method"):
+            precompile_package.precompile_capture(model.forward)
+
+    def test_a_dropped_guard_that_tells_variants_apart_is_risky(self):
+        # The default filter drops the CLOSURE_MATCH on _act, a global bound to
+        # a def of that name in this file. The static shapes recompile either
+        # way; a dropped slot that held a different def in each variant cannot
+        # pick between them at serve time.
+        def capture(acts):
+            session = precompile_package.precompile_capture(
+                _through_act, backend="eager", dynamic=False
+            )
+            with session as call:
+                for n, act in enumerate(acts):
+                    with mock.patch.object(sys.modules[__name__], "_act", act):
+                        call(torch.ones(2 + n))
+            return session.summary()
+
+        slot = ("CLOSURE_MATCH", "G['_act']")
+        same = capture([_relu, _relu])
+        self.assertIn(slot, same.dropped_guards)
+        self.assertGreaterEqual(same.guarded_codes, 2)
+        self.assertNotIn(slot, same.risky_dropped_guards)
+        self.assertIn(slot, capture([_relu, _sigmoid]).risky_dropped_guards)
 
     def test_capture_config_is_scoped_per_entry_and_per_thread(self):
         import torch._functorch.config as functorch_config
