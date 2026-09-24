@@ -7498,6 +7498,9 @@ def forward(self, primals_1, tangents_1):
         self.assertEqual(path[-1][1], "sink")  # last edge ends at sink
         self.assertIn("must be computed in backward", path[-1][2])
 
+        del nx_graph["source"]["node1_in"]["capacity"]
+        self.assertIsNotNone(_find_infinite_capacity_path(nx_graph))
+
         # Test 2: Verify path not found when there's no infinite capacity path
         nx_graph2 = nx.DiGraph()
         nx_graph2.add_edge(

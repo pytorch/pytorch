@@ -479,6 +479,20 @@ class TestMinimumCut(TestCase):
         self.assertEqual(value, 1)
         self.assertEqual(len(reachable) + len(non_reachable), node_count)
 
+    @parametrize("missing_capacity", [False, True])
+    def test_unbounded(self, missing_capacity: bool) -> None:
+        graph = nx.DiGraph()
+        graph.add_edge("source", "a", capacity=math.inf)
+        if missing_capacity:
+            graph.add_edge("a", "sink")
+        else:
+            graph.add_edge("a", "sink", capacity=math.inf)
+
+        with self.assertRaises(nx.NetworkXUnbounded):
+            nx.minimum_cut(graph, "source", "sink")
+        with self.assertRaises(nx.NetworkXUnbounded):
+            minimum_cut(graph, "source", "sink")
+
 
 if __name__ == "__main__":
     run_tests()

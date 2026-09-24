@@ -62,9 +62,9 @@ def minimum_cut(
     """Return the minimum-cut value and ``(source_side, sink_side)`` partition.
 
     ``graph`` must provide NetworkX-style node iteration and ``edges`` access.
-    Capacities must be nonnegative.  The caller checks for an all-infinite
-    source-to-sink path before entering this function; such a path has no
-    finite cut and is handled by the partitioner's diagnostic path instead.
+    Capacities must be nonnegative.  An all-infinite source-to-sink path has no
+    finite cut and raises ``NetworkXUnbounded``, matching NetworkX.  Missing
+    capacities are infinite under the NetworkX graph contract.
 
     Different maximum-flow algorithms may return different partitions when
     several cuts have the same minimum capacity.  The returned partition is
@@ -85,13 +85,15 @@ def minimum_cut(
     adjacency: list[list[int]] = [[] for _ in nodes]
     destinations: list[int] = []
     residual: list[float] = []
+    infinite: list[bool] = []
 
-    def add_edge(start: int, end: int, capacity: float) -> None:
+    def add_edge(start: int, end: int, capacity: float, *, is_infinite: bool) -> None:
         # Forward and reverse residual edges are adjacent, so toggling the low
         # bit moves between them without another lookup table.
         edge = len(destinations)
         destinations.extend((end, start))
         residual.extend((capacity, 0))
+        infinite.extend((is_infinite, False))
         adjacency[start].append(edge)
         adjacency[end].append(edge + 1)
 
@@ -102,7 +104,24 @@ def minimum_cut(
             node_index[start],
             node_index[end],
             min(capacity, infinite_capacity),
+            is_infinite=math.isinf(capacity),
         )
+
+    reachable = {source_index}
+    queue = deque([source_index])
+    while queue:
+        node = queue.popleft()
+        for edge in adjacency[node]:
+            end = destinations[edge]
+            if infinite[edge] and end not in reachable:
+                if end == sink_index:
+                    from networkx import NetworkXUnbounded
+
+                    raise NetworkXUnbounded(
+                        "Infinite capacity path, flow unbounded above."
+                    )
+                reachable.add(end)
+                queue.append(end)
 
     flow = 0.0
     while True:
@@ -166,5 +185,5 @@ def minimum_cut(
             if residual[edge] > 0 and end not in reachable_indices:
                 reachable_indices.add(end)
                 queue.append(end)
-    reachable = {nodes[index] for index in reachable_indices}
-    return flow, (reachable, set(nodes) - reachable)
+    source_side = {nodes[index] for index in reachable_indices}
+    return flow, (source_side, set(nodes) - source_side)

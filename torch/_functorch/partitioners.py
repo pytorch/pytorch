@@ -2940,8 +2940,6 @@ def solve_min_cut(
                         heapq.heappush(fusible, (node_info.get_fw_order(user), user))
 
     try:
-        if _find_infinite_capacity_path(nx_graph) is not None:
-            raise nx.NetworkXUnbounded("Infinite-capacity path from source to sink")
         cut_value, partition = minimum_cut(nx_graph, "source", "sink")
     except nx.NetworkXUnbounded as unbounded_exc:
         # Check if structured tracing is enabled (for production job debugging via tlparse)
@@ -3148,7 +3146,7 @@ def _find_infinite_capacity_path(
             if neighbor in visited:
                 continue
             edge_data = nx_graph[node][neighbor]
-            capacity = edge_data.get("capacity", 0)
+            capacity = edge_data.get("capacity", math.inf)
             if capacity == math.inf:
                 reason = edge_data.get("reason", "unknown")
                 new_edge = (node, neighbor, reason)
