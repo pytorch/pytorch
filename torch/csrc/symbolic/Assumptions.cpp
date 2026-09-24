@@ -1,11 +1,14 @@
 #include <torch/csrc/symbolic/Expr.h>
 
+#include <algorithm>
 #include <bit>
 #include <initializer_list>
 
 namespace torch::symbolic {
 
 namespace {
+
+using i128 = __int128;
 
 // Generated from sympy.core.assumptions._assume_rules (sympy 1.14); bit i is
 // Fact(i). test_native_symnode.py checks these against sympy.
@@ -216,6 +219,900 @@ bool is_prime(int64_t v) {
   return true;
 }
 
+using F = Fact;
+
+bool holds(ExprArena& A, const Expr* e, Fact f) {
+  return A.ask(e, f) == Tri::True;
+}
+
+bool fails(ExprArena& A, const Expr* e, Fact f) {
+  return A.ask(e, f) == Tri::False;
+}
+
+Tri fuzzy_not(Tri t) {
+  return t == Tri::Unknown ? t : tri(t == Tri::False);
+}
+
+// _fuzzy_group((a.is_<f> for a in args), quick_exit).
+Tri fuzzy_group(
+    ExprArena& A,
+    c10::ArrayRef<const Expr*> args,
+    Fact f,
+    bool quick_exit) {
+  bool saw_other = false;
+  for (const Expr* a : args) {
+    Tri v = A.ask(a, f);
+    if (v == Tri::True) {
+      continue;
+    }
+    if (v == Tri::Unknown || (quick_exit && saw_other)) {
+      return Tri::Unknown;
+    }
+    saw_other = true;
+  }
+  return tri(!saw_other);
+}
+
+bool all_hold(ExprArena& A, c10::ArrayRef<const Expr*> args, Fact f) {
+  return std::all_of(
+      args.begin(), args.end(), [&](const Expr* a) { return holds(A, a, f); });
+}
+
+bool any_holds(ExprArena& A, c10::ArrayRef<const Expr*> args, Fact f) {
+  return std::any_of(
+      args.begin(), args.end(), [&](const Expr* a) { return holds(A, a, f); });
+}
+
+c10::ArrayRef<const Expr*> make_args(const Expr* const& e) {
+  if (e->kind == Kind::Mul) {
+    return e->args;
+  }
+  return c10::ArrayRef<const Expr*>(&e, 1);
+}
+
+// abs(e) is S.One.
+bool is_unit(const Expr* e) {
+  return e->kind == Kind::Integer && (e->p == 1 || e->p == -1);
+}
+
+int64_t trailing(int64_t n) {
+  auto u = static_cast<uint64_t>(n);
+  return n == 0 ? 0 : std::countr_zero(n < 0 ? -u : u);
+}
+
+// Add(*[f.as_base_exp()[1] for f in factors if f.is_even]) - trailing(n),
+// where exponents are Integers (Pow bases are never Rational).
+int64_t even_exponents_minus_trailing(
+    ExprArena& A,
+    c10::ArrayRef<const Expr*> factors,
+    int64_t n) {
+  int64_t r = -trailing(n);
+  for (const Expr* f : factors) {
+    if (holds(A, f, F::even) &&
+        __builtin_add_overflow(
+            r, f->kind == Kind::Pow ? f->args[1]->p : 1, &r)) {
+      throw NativeUnsupported("integer overflow");
+    }
+  }
+  return r;
+}
+
+// sympy.simplify.radsimp.fraction(e) (exact=False).
+std::pair<const Expr*, const Expr*> fraction(ExprArena& A, const Expr* e) {
+  c10::SmallVector<const Expr*, 8> numer;
+  c10::SmallVector<const Expr*, 8> denom;
+  for (const Expr* term : make_args(e)) {
+    if (term->kind == Kind::Pow) {
+      const Expr* b = term->args[0];
+      const Expr* x = term->args[1];
+      if (holds(A, x, F::negative)) {
+        denom.push_back(x->p == -1 ? b : A.pow(b, A.neg(x)));
+      } else {
+        numer.push_back(term);
+      }
+    } else if (term->kind == Kind::Rational) {
+      if (term->p != 1) {
+        numer.push_back(A.integer(term->p));
+      }
+      denom.push_back(A.integer(term->q));
+    } else {
+      numer.push_back(term);
+    }
+  }
+  return {A.mul(numer), A.mul(denom)};
+}
+
+// sympy.core.relational.is_ge.
+Tri is_ge(ExprArena& A, const Expr* lhs, const Expr* rhs) {
+  if (lhs->is_rational() && rhs->is_rational()) {
+    return tri(i128(lhs->p) * rhs->q >= i128(rhs->p) * lhs->q);
+  }
+  for (const Expr* side : {lhs, rhs}) {
+    if (side->is_number() && !side->is_rational()) {
+      throw NativeUnsupported("is_ge with int_oo");
+    }
+  }
+  if (holds(A, lhs, F::extended_real) && holds(A, rhs, F::extended_real)) {
+    if ((holds(A, lhs, F::infinite) && holds(A, lhs, F::extended_positive)) ||
+        (holds(A, rhs, F::infinite) && holds(A, rhs, F::extended_negative))) {
+      return Tri::True;
+    }
+    return A.ask(A.sub(lhs, rhs), F::extended_nonnegative);
+  }
+  return Tri::Unknown;
+}
+
+// Mul._eval_is_zero_infinite_helper: (seen_zero, seen_infinite).
+std::pair<Tri, Tri> mul_zero_infinite(ExprArena& A, const Expr* e) {
+  constexpr std::pair<Tri, Tri> unknown{Tri::Unknown, Tri::Unknown};
+  Tri seen_zero = Tri::False;
+  Tri seen_infinite = Tri::False;
+  for (const Expr* a : e->args) {
+    if (holds(A, a, F::zero)) {
+      if (seen_infinite != Tri::False) {
+        return unknown;
+      }
+      seen_zero = Tri::True;
+    } else if (holds(A, a, F::infinite)) {
+      if (seen_zero != Tri::False) {
+        return unknown;
+      }
+      seen_infinite = Tri::True;
+    } else {
+      if (seen_zero == Tri::False && A.ask(a, F::zero) == Tri::Unknown) {
+        if (seen_infinite != Tri::False) {
+          return unknown;
+        }
+        seen_zero = Tri::Unknown;
+      }
+      if (seen_infinite == Tri::False &&
+          A.ask(a, F::infinite) == Tri::Unknown) {
+        if (seen_zero != Tri::False) {
+          return unknown;
+        }
+        seen_infinite = Tri::Unknown;
+      }
+    }
+  }
+  return {seen_zero, seen_infinite};
+}
+
+Tri mul_is_zero(ExprArena& A, const Expr* e) {
+  auto [seen_zero, seen_infinite] = mul_zero_infinite(A, e);
+  if (seen_zero == Tri::False) {
+    return Tri::False;
+  }
+  if (seen_zero == Tri::True && seen_infinite == Tri::False) {
+    return Tri::True;
+  }
+  return Tri::Unknown;
+}
+
+// Mul._eval_is_rational and Mul._eval_is_algebraic.
+Tri mul_rational_like(ExprArena& A, const Expr* e, Fact f) {
+  Tri r = fuzzy_group(A, e->args, f, true);
+  if (r == Tri::False &&
+      !std::all_of(e->args.begin(), e->args.end(), [&](const Expr* a) {
+        return fails(A, a, F::zero);
+      })) {
+    return Tri::Unknown;
+  }
+  return r;
+}
+
+Tri mul_is_integer(ExprArena& A, const Expr* e) {
+  if (mul_rational_like(A, e, F::rational) == Tri::False) {
+    return Tri::False;
+  }
+  c10::SmallVector<const Expr*, 4> numerators;
+  c10::SmallVector<const Expr*, 4> denominators;
+  bool unknown = false;
+  for (const Expr* a : e->args) {
+    if (holds(A, a, F::integer)) {
+      if (!is_unit(a)) {
+        numerators.push_back(a);
+      }
+    } else if (a->kind == Kind::Rational) {
+      if (a->p != 1 && a->p != -1) {
+        numerators.push_back(A.integer(a->p));
+      }
+      denominators.push_back(A.integer(a->q));
+    } else if (a->kind == Kind::Pow) {
+      const Expr* b = a->args[0];
+      const Expr* x = a->args[1];
+      if (!holds(A, b, F::integer) || !holds(A, x, F::integer)) {
+        unknown = true;
+      }
+      if (!holds(A, x, F::negative)) {
+        return Tri::Unknown;
+      }
+      denominators.push_back(A.pow(a, A.integer(-1)));
+    } else {
+      return Tri::Unknown;
+    }
+  }
+  if (denominators.empty() && !unknown) {
+    return Tri::True;
+  }
+  if (numerators.empty() && !denominators.empty() &&
+      std::all_of(denominators.begin(), denominators.end(), [&](auto d) {
+        return fuzzy_not(is_ge(A, A.integer(1), d)) == Tri::True;
+      })) {
+    return Tri::False;
+  }
+  if (unknown) {
+    return Tri::Unknown;
+  }
+  if (all_hold(A, numerators, F::odd) && any_holds(A, denominators, F::even)) {
+    return Tri::False;
+  }
+  if (any_holds(A, numerators, F::even) && denominators.size() == 1 &&
+      denominators[0]->kind == Kind::Integer && denominators[0]->p == 2) {
+    return Tri::True;
+  }
+  if (all_hold(A, numerators, F::even) && all_hold(A, denominators, F::odd)) {
+    // (Mul(*denominators, evaluate=False) - 1).is_positive: every Integer
+    // denominator is at least 2.
+    for (const Expr* d : denominators) {
+      if (d->kind != Kind::Integer) {
+        throw NativeUnsupported("unevaluated Mul in Mul._eval_is_integer");
+      }
+    }
+    return Tri::False;
+  }
+  if (denominators.size() == 1) {
+    const Expr* d = denominators[0];
+    if (d->kind == Kind::Integer && holds(A, d, F::even) &&
+        even_exponents_minus_trailing(A, numerators, d->p) >= 0) {
+      return Tri::True;
+    }
+  }
+  if (numerators.size() == 1) {
+    const Expr* n = numerators[0];
+    if (n->kind == Kind::Integer && holds(A, n, F::even) &&
+        even_exponents_minus_trailing(A, denominators, n->p) > 0) {
+      return Tri::False;
+    }
+  }
+  return Tri::Unknown;
+}
+
+// Mul._eval_real_imag.
+Tri mul_real_imag(ExprArena& A, const Expr* e, bool real) {
+  Tri zero = Tri::False;
+  const Expr* t_not_re_im = nullptr;
+  for (const Expr* t : e->args) {
+    Tri complex = A.ask(t, F::complex);
+    Tri complex_or_infinite =
+        complex == Tri::True ? complex : A.ask(t, F::infinite);
+    if (complex_or_infinite == Tri::False && fails(A, t, F::extended_real)) {
+      return Tri::False;
+    } else if (holds(A, t, F::imaginary)) {
+      real = !real;
+    } else if (holds(A, t, F::extended_real)) {
+      if (zero != Tri::True) {
+        Tri z = A.ask(t, F::zero);
+        if (z != Tri::True && zero == Tri::False) {
+          zero = z;
+        } else if (z == Tri::True) {
+          if (all_hold(A, e->args, F::finite)) {
+            return Tri::True;
+          }
+          return Tri::Unknown;
+        }
+      }
+    } else if (fails(A, t, F::extended_real) || fails(A, t, F::imaginary)) {
+      if (t_not_re_im) {
+        return Tri::Unknown;
+      }
+      t_not_re_im = t;
+    } else {
+      return Tri::Unknown;
+    }
+  }
+  if (t_not_re_im) {
+    if (fails(A, t_not_re_im, F::extended_real) && real) {
+      return zero;
+    }
+    if (fails(A, t_not_re_im, F::imaginary) && !real) {
+      return zero;
+    }
+  } else if (zero == Tri::False || real) {
+    return tri(real);
+  }
+  return Tri::Unknown;
+}
+
+// Mul._eval_herm_antiherm.
+Tri mul_herm_antiherm(ExprArena& A, const Expr* e, bool herm) {
+  for (const Expr* t : e->args) {
+    Tri h = A.ask(t, F::hermitian);
+    if (h == Tri::Unknown || A.ask(t, F::antihermitian) == Tri::Unknown) {
+      return Tri::Unknown;
+    }
+    if (h == Tri::True) {
+      continue;
+    }
+    if (holds(A, t, F::antihermitian)) {
+      herm = !herm;
+    } else {
+      return Tri::Unknown;
+    }
+  }
+  if (herm) {
+    return Tri::True;
+  }
+  return mul_is_zero(A, e);
+}
+
+// Mul._eval_pos_neg.
+Tri mul_pos_neg(ExprArena& A, const Expr* e, int sign) {
+  bool saw_non = false;
+  bool saw_not = false;
+  for (const Expr* t : e->args) {
+    if (holds(A, t, F::extended_positive)) {
+      continue;
+    } else if (holds(A, t, F::extended_negative)) {
+      sign = -sign;
+    } else if (holds(A, t, F::zero)) {
+      if (all_hold(A, e->args, F::finite)) {
+        return Tri::False;
+      }
+      return Tri::Unknown;
+    } else if (holds(A, t, F::extended_nonpositive)) {
+      sign = -sign;
+      saw_non = true;
+    } else if (holds(A, t, F::extended_nonnegative)) {
+      saw_non = true;
+    } else if (fails(A, t, F::positive)) {
+      sign = -sign;
+      if (saw_not) {
+        return Tri::Unknown;
+      }
+      saw_not = true;
+    } else if (fails(A, t, F::negative)) {
+      if (saw_not) {
+        return Tri::Unknown;
+      }
+      saw_not = true;
+    } else {
+      return Tri::Unknown;
+    }
+  }
+  if (sign == 1 && !saw_non && !saw_not) {
+    return Tri::True;
+  }
+  return sign < 0 ? Tri::False : Tri::Unknown;
+}
+
+Tri mul_fact(ExprArena& A, const Expr* e, Fact f) {
+  const auto& args = e->args;
+  switch (f) {
+    case F::complex: {
+      Tri comp = fuzzy_group(A, args, F::complex, false);
+      if (comp == Tri::False && any_holds(A, args, F::infinite)) {
+        for (const Expr* a : args) {
+          if (!fails(A, a, F::zero)) {
+            return Tri::Unknown;
+          }
+        }
+      }
+      return comp;
+    }
+    case F::zero:
+      return mul_is_zero(A, e);
+    case F::infinite: {
+      auto [seen_zero, seen_infinite] = mul_zero_infinite(A, e);
+      if (seen_infinite == Tri::True && seen_zero == Tri::False) {
+        return Tri::True;
+      }
+      return seen_infinite == Tri::False ? Tri::False : Tri::Unknown;
+    }
+    case F::rational:
+    case F::algebraic:
+      return mul_rational_like(A, e, f);
+    case F::integer:
+      return mul_is_integer(A, e);
+    case F::polar:
+      return tri(
+          any_holds(A, args, F::polar) &&
+          std::all_of(args.begin(), args.end(), [&](const Expr* a) {
+            return holds(A, a, F::polar) || holds(A, a, F::positive);
+          }));
+    case F::extended_real:
+      return mul_real_imag(A, e, true);
+    case F::imaginary:
+      for (const Expr* a : args) {
+        if (!fails(A, a, F::zero) || !holds(A, a, F::finite)) {
+          return Tri::Unknown;
+        }
+      }
+      return mul_real_imag(A, e, false);
+    case F::hermitian:
+    case F::antihermitian:
+      return mul_herm_antiherm(A, e, f == F::hermitian);
+    case F::irrational:
+      for (const Expr* t : args) {
+        Tri a = A.ask(t, F::irrational);
+        if (a == Tri::True) {
+          for (const Expr* x : args) {
+            if (x != t && !(holds(A, x, F::rational) && fails(A, x, F::zero))) {
+              return Tri::Unknown;
+            }
+          }
+          return Tri::True;
+        }
+        if (a == Tri::Unknown) {
+          return Tri::Unknown;
+        }
+      }
+      return all_hold(A, args, F::real) ? Tri::False : Tri::Unknown;
+    case F::extended_positive:
+      return mul_pos_neg(A, e, 1);
+    case F::extended_negative:
+      return mul_pos_neg(A, e, -1);
+    case F::odd: {
+      Tri is_integer = mul_is_integer(A, e);
+      if (is_integer != Tri::True) {
+        return is_integer;
+      }
+      auto [n, d] = fraction(A, e);
+      if (d->kind == Kind::Integer && holds(A, d, F::even)) {
+        if (even_exponents_minus_trailing(A, make_args(n), d->p) > 0) {
+          return Tri::False;
+        }
+        return Tri::Unknown;
+      }
+      Tri r = Tri::True;
+      const Expr* acc = nullptr;
+      for (const Expr* t : args) {
+        if (is_unit(t)) {
+          continue;
+        }
+        if (holds(A, t, F::even)) {
+          return Tri::False;
+        }
+        if (r != Tri::False && acc && holds(A, A.add({acc, t}), F::odd)) {
+          r = Tri::False;
+        } else if (r != Tri::False && A.ask(t, F::even) == Tri::Unknown) {
+          r = Tri::Unknown;
+        }
+        acc = t;
+      }
+      return r;
+    }
+    case F::even: {
+      auto [n, d] = fraction(A, e);
+      if (n->kind == Kind::Integer && holds(A, n, F::even) &&
+          even_exponents_minus_trailing(A, make_args(d), n->p) >= 0) {
+        return Tri::False;
+      }
+      return Tri::Unknown;
+    }
+    case F::composite: {
+      int count = 0;
+      for (const Expr* a : args) {
+        if (!(holds(A, a, F::integer) && holds(A, a, F::positive))) {
+          return Tri::Unknown;
+        }
+        if (holds(A, A.sub(a, A.integer(1)), F::positive)) {
+          ++count;
+        }
+      }
+      return count > 1 ? Tri::True : Tri::Unknown;
+    }
+    default:
+      return Tri::Unknown;
+  }
+}
+
+Tri pow_is_extended_negative(ExprArena& A, const Expr* b, const Expr* x) {
+  if (holds(A, b, F::extended_negative)) {
+    if (holds(A, x, F::odd) && holds(A, b, F::finite)) {
+      return Tri::True;
+    }
+    if (holds(A, x, F::even)) {
+      return Tri::False;
+    }
+  } else if (holds(A, b, F::extended_positive)) {
+    if (holds(A, x, F::extended_real)) {
+      return Tri::False;
+    }
+  } else if (holds(A, b, F::zero)) {
+    if (holds(A, x, F::extended_real)) {
+      return Tri::False;
+    }
+  } else if (holds(A, b, F::extended_nonnegative)) {
+    if (holds(A, x, F::extended_nonnegative)) {
+      return Tri::False;
+    }
+  } else if (
+      holds(A, b, F::extended_nonpositive) || holds(A, b, F::extended_real)) {
+    if (holds(A, x, F::even)) {
+      return Tri::False;
+    }
+  }
+  return Tri::Unknown;
+}
+
+Tri pow_is_finite(ExprArena& A, const Expr* b, const Expr* x) {
+  if (holds(A, x, F::negative)) {
+    if (holds(A, b, F::zero)) {
+      return Tri::False;
+    }
+    if (holds(A, b, F::infinite) || holds(A, b, F::nonzero)) {
+      return Tri::True;
+    }
+  }
+  Tri c1 = A.ask(b, F::finite);
+  if (c1 == Tri::Unknown) {
+    return c1;
+  }
+  Tri c2 = A.ask(x, F::finite);
+  if (c2 == Tri::Unknown) {
+    return c2;
+  }
+  if (c1 == Tri::True && c2 == Tri::True &&
+      (holds(A, x, F::nonnegative) || fails(A, b, F::zero))) {
+    return Tri::True;
+  }
+  return Tri::Unknown;
+}
+
+// ExprArena::pow only builds Pows whose base is not a number and whose
+// exponent is an Integer other than 0 and 1, so the Exp1, ImaginaryUnit and
+// Rational-base branches of the Pow handlers cannot be taken.
+Tri pow_fact(ExprArena& A, const Expr* e, Fact f) {
+  const Expr* b = e->args[0];
+  const Expr* x = e->args[1];
+  switch (f) {
+    case F::even:
+      if (holds(A, x, F::integer) && holds(A, x, F::positive)) {
+        return A.ask(b, F::even);
+      }
+      return Tri::Unknown;
+    case F::negative: {
+      Tri ext_neg = pow_is_extended_negative(A, b, x);
+      return ext_neg == Tri::True ? A.ask(e, F::finite) : ext_neg;
+    }
+    case F::extended_positive:
+      if (b == x) {
+        if (holds(A, b, F::extended_nonnegative)) {
+          return Tri::True;
+        }
+      } else if (holds(A, b, F::positive)) {
+        if (holds(A, x, F::real)) {
+          return Tri::True;
+        }
+      } else if (holds(A, b, F::extended_negative)) {
+        if (holds(A, x, F::even)) {
+          return Tri::True;
+        }
+        if (holds(A, x, F::odd)) {
+          return Tri::False;
+        }
+      } else if (holds(A, b, F::zero)) {
+        if (holds(A, x, F::extended_real)) {
+          return A.ask(x, F::zero);
+        }
+      } else if (holds(A, b, F::extended_nonpositive)) {
+        if (holds(A, x, F::odd)) {
+          return Tri::False;
+        }
+      } else if (holds(A, b, F::imaginary)) {
+        if (holds(A, x, F::integer)) {
+          return tri(x->p % 4 == 0);
+        }
+      }
+      return Tri::Unknown;
+    case F::extended_negative:
+      return pow_is_extended_negative(A, b, x);
+    case F::zero:
+      if (holds(A, b, F::zero)) {
+        if (holds(A, x, F::extended_positive)) {
+          return Tri::True;
+        }
+        if (holds(A, x, F::extended_nonpositive)) {
+          return Tri::False;
+        }
+      } else if (fails(A, b, F::zero)) {
+        if (holds(A, b, F::finite) && holds(A, x, F::finite)) {
+          return Tri::False;
+        }
+        if (holds(A, x, F::negative)) {
+          return A.ask(b, F::infinite);
+        }
+        if (holds(A, x, F::nonnegative)) {
+          return Tri::False;
+        }
+      } else if (holds(A, b, F::finite) && holds(A, x, F::negative)) {
+        return Tri::False;
+      }
+      return Tri::Unknown;
+    case F::integer:
+      if (holds(A, b, F::rational) && fails(A, b, F::integer) &&
+          holds(A, x, F::positive)) {
+        return Tri::False;
+      }
+      if (holds(A, b, F::integer) && holds(A, x, F::integer) &&
+          (holds(A, x, F::nonnegative) || holds(A, x, F::positive))) {
+        return Tri::True;
+      }
+      if (holds(A, b, F::integer) && holds(A, x, F::negative) &&
+          (holds(A, x, F::finite) || holds(A, x, F::integer)) &&
+          fails(A, A.sub(b, A.integer(1)), F::zero) &&
+          fails(A, A.add({b, A.integer(1)}), F::zero)) {
+        return Tri::False;
+      }
+      if (holds(A, x, F::negative) && holds(A, b, F::positive) &&
+          holds(A, A.sub(b, A.integer(1)), F::positive)) {
+        return Tri::False;
+      }
+      if (holds(A, x, F::negative) && holds(A, b, F::negative) &&
+          holds(A, A.add({b, A.integer(1)}), F::negative)) {
+        return Tri::False;
+      }
+      return Tri::Unknown;
+    case F::extended_real: {
+      Tri real_b = A.ask(b, F::extended_real);
+      if (real_b == Tri::Unknown) {
+        return real_b;
+      }
+      Tri real_e = A.ask(x, F::extended_real);
+      if (real_e == Tri::Unknown) {
+        return real_e;
+      }
+      if (real_b == Tri::True && real_e == Tri::True) {
+        if (holds(A, b, F::extended_positive) ||
+            (holds(A, b, F::extended_nonnegative) &&
+             holds(A, x, F::extended_nonnegative)) ||
+            (holds(A, x, F::integer) && holds(A, b, F::extended_nonzero)) ||
+            (holds(A, x, F::integer) && holds(A, x, F::nonnegative))) {
+          return Tri::True;
+        }
+        if (holds(A, b, F::extended_negative)) {
+          return Tri::False;
+        }
+      }
+      if (real_e == Tri::True && holds(A, x, F::extended_negative) &&
+          fails(A, b, F::zero)) {
+        return A.ask(A.pow(b, A.neg(x)), F::extended_real);
+      }
+      Tri im_b = A.ask(b, F::imaginary);
+      if (im_b == Tri::True && holds(A, x, F::integer)) {
+        if (holds(A, x, F::even)) {
+          return Tri::True;
+        }
+        if (holds(A, x, F::odd)) {
+          return Tri::False;
+        }
+      }
+      if (real_b == Tri::False && real_e == Tri::True) {
+        throw NativeUnsupported("Pow._eval_is_extended_real needs arg()");
+      }
+      return Tri::Unknown;
+    }
+    case F::complex:
+      if (all_hold(A, e->args, F::complex) &&
+          pow_is_finite(A, b, x) == Tri::True) {
+        return Tri::True;
+      }
+      return Tri::Unknown;
+    case F::imaginary:
+      if (holds(A, b, F::imaginary) && holds(A, x, F::integer)) {
+        return A.ask(x, F::odd);
+      }
+      if (holds(A, b, F::extended_real) && holds(A, x, F::extended_real)) {
+        if (holds(A, b, F::positive)) {
+          return Tri::False;
+        }
+        Tri rat = A.ask(x, F::rational);
+        if (rat != Tri::True) {
+          return rat;
+        }
+        if (holds(A, x, F::integer)) {
+          return Tri::False;
+        }
+        throw NativeUnsupported("Pow with a non-integer exponent");
+      }
+      if (fails(A, b, F::extended_real)) {
+        throw NativeUnsupported("Pow._eval_is_imaginary needs arg()");
+      }
+      return Tri::Unknown;
+    case F::odd:
+      if (holds(A, x, F::integer)) {
+        if (holds(A, x, F::positive)) {
+          return A.ask(b, F::odd);
+        }
+        if (holds(A, x, F::nonnegative) && holds(A, b, F::odd)) {
+          return Tri::True;
+        }
+      }
+      return Tri::Unknown;
+    case F::finite:
+      return pow_is_finite(A, b, x);
+    case F::prime:
+      if (holds(A, b, F::integer) && holds(A, x, F::integer) &&
+          holds(A, A.sub(x, A.integer(1)), F::positive)) {
+        return Tri::False;
+      }
+      return Tri::Unknown;
+    case F::composite:
+      if (holds(A, b, F::integer) && holds(A, x, F::integer) &&
+          ((holds(A, A.sub(b, A.integer(1)), F::positive) &&
+            holds(A, A.sub(x, A.integer(1)), F::positive)) ||
+           (holds(A, A.add({b, A.integer(1)}), F::negative) &&
+            holds(A, x, F::positive) && holds(A, x, F::even)))) {
+        return Tri::True;
+      }
+      return Tri::Unknown;
+    case F::polar:
+      return A.ask(b, F::polar);
+    case F::rational: {
+      if (holds(A, x, F::integer) && holds(A, b, F::rational)) {
+        Tri neg = A.ask(x, F::negative);
+        if (neg == Tri::False || fails(A, b, F::zero)) {
+          return Tri::True;
+        }
+      }
+      if (holds(A, x, F::integer)) {
+        if (holds(A, b, F::rational)) {
+          if (fails(A, b, F::zero) || holds(A, x, F::nonnegative)) {
+            return Tri::True;
+          }
+        } else if (holds(A, b, F::irrational)) {
+          return A.ask(x, F::zero);
+        }
+      }
+      return Tri::Unknown;
+    }
+    case F::algebraic:
+      if (holds(A, b, F::zero) || holds(A, A.sub(b, A.integer(1)), F::zero)) {
+        return Tri::True;
+      }
+      if (holds(A, x, F::rational)) {
+        if (fails(A, b, F::algebraic)) {
+          return A.ask(x, F::zero);
+        }
+        if (fails(A, b, F::zero)) {
+          if (holds(A, x, F::nonzero)) {
+            return A.ask(b, F::algebraic);
+          }
+          if (holds(A, b, F::algebraic)) {
+            return Tri::True;
+          }
+        }
+        if (holds(A, x, F::positive)) {
+          return A.ask(b, F::algebraic);
+        }
+      }
+      return Tri::Unknown;
+    default:
+      return Tri::Unknown;
+  }
+}
+
+Tri add_fact(ExprArena& A, const Expr* e, Fact f) {
+  const auto& args = e->args;
+  switch (f) {
+    case F::real:
+    case F::extended_real:
+    case F::complex:
+    case F::antihermitian:
+    case F::finite:
+    case F::hermitian:
+    case F::integer:
+    case F::rational:
+    case F::algebraic:
+      return fuzzy_group(A, args, f, true);
+    case F::infinite: {
+      bool sawinf = false;
+      for (const Expr* a : args) {
+        Tri ainf = A.ask(a, F::infinite);
+        if (ainf == Tri::Unknown || (ainf == Tri::True && sawinf)) {
+          return Tri::Unknown;
+        }
+        sawinf |= ainf == Tri::True;
+      }
+      return tri(sawinf);
+    }
+    case F::imaginary: {
+      c10::SmallVector<const Expr*, 8> nz;
+      for (const Expr* a : args) {
+        if (holds(A, a, F::extended_real)) {
+          Tri z = A.ask(a, F::zero);
+          if (z == Tri::False) {
+            nz.push_back(a);
+          } else if (z == Tri::Unknown) {
+            return Tri::Unknown;
+          }
+        } else if (holds(A, a, F::imaginary)) {
+          throw NativeUnsupported("Add._eval_is_imaginary needs I");
+        } else {
+          return Tri::Unknown;
+        }
+      }
+      const Expr* b = A.add(nz);
+      if (b != e) {
+        // Every term is real, so Add(*im_I) is 0.
+        return A.ask(b, F::zero) == Tri::Unknown ? Tri::Unknown : Tri::False;
+      }
+      return Tri::Unknown;
+    }
+    case F::zero: {
+      c10::SmallVector<const Expr*, 8> nz;
+      size_t z = 0;
+      size_t im = 0;
+      for (const Expr* a : args) {
+        if (holds(A, a, F::extended_real)) {
+          Tri az = A.ask(a, F::zero);
+          if (az == Tri::True) {
+            ++z;
+          } else if (az == Tri::False) {
+            nz.push_back(a);
+          } else {
+            return Tri::Unknown;
+          }
+        } else if (holds(A, a, F::imaginary)) {
+          ++im;
+        } else {
+          return Tri::Unknown;
+        }
+      }
+      if (z == args.size()) {
+        return Tri::True;
+      }
+      if (nz.empty() || nz.size() == args.size()) {
+        return Tri::Unknown;
+      }
+      Tri bz = A.ask(A.add(nz), F::zero);
+      if (bz == Tri::True && im <= 1) {
+        return tri(im == 0);
+      }
+      return bz == Tri::False ? Tri::False : Tri::Unknown;
+    }
+    case F::odd: {
+      c10::SmallVector<const Expr*, 8> l;
+      for (const Expr* a : args) {
+        if (!holds(A, a, F::even)) {
+          l.push_back(a);
+        }
+      }
+      if (l.empty()) {
+        return Tri::False;
+      }
+      if (holds(A, l[0], F::odd)) {
+        // _new_rawargs(*l[1:]): a subset of canonical args is canonical.
+        return A.ask(A.add(c10::ArrayRef<const Expr*>(l).slice(1)), F::even);
+      }
+      return Tri::Unknown;
+    }
+    case F::irrational:
+      for (const Expr* t : args) {
+        Tri a = A.ask(t, F::irrational);
+        if (a == Tri::True) {
+          for (const Expr* x : args) {
+            if (x != t && !holds(A, x, F::rational)) {
+              return Tri::Unknown;
+            }
+          }
+          return Tri::True;
+        }
+        if (a == Tri::Unknown) {
+          return Tri::Unknown;
+        }
+      }
+      return Tri::False;
+    case F::extended_positive:
+    case F::extended_negative:
+    case F::extended_nonnegative:
+    case F::extended_nonpositive:
+      throw NativeUnsupported("sign of an Add is not ported yet");
+    default:
+      return Tri::Unknown;
+  }
+}
+
 } // namespace
 
 AssumeRules assume_rules() {
@@ -267,41 +1164,47 @@ FactKB ExprArena::default_kb(const Expr* e) {
     };
     return std::array<FactKB, 6>{
         // Integer, NegativeOne
-        make({{F::commutative, true},
-              {F::integer, true},
-              {F::real, true},
-              {F::rational, true}}),
+        make(
+            {{F::commutative, true},
+             {F::integer, true},
+             {F::real, true},
+             {F::rational, true}}),
         // Zero
-        make({{F::commutative, true},
-              {F::integer, true},
-              {F::real, true},
-              {F::rational, true},
-              {F::zero, true},
-              {F::negative, false},
-              {F::positive, false}}),
+        make(
+            {{F::commutative, true},
+             {F::integer, true},
+             {F::real, true},
+             {F::rational, true},
+             {F::zero, true},
+             {F::negative, false},
+             {F::positive, false}}),
         // One
-        make({{F::commutative, true},
-              {F::integer, true},
-              {F::real, true},
-              {F::rational, true},
-              {F::positive, true}}),
+        make(
+            {{F::commutative, true},
+             {F::integer, true},
+             {F::real, true},
+             {F::rational, true},
+             {F::positive, true}}),
         // Rational, Half
-        make({{F::commutative, true},
-              {F::integer, false},
-              {F::real, true},
-              {F::rational, true}}),
+        make(
+            {{F::commutative, true},
+             {F::integer, false},
+             {F::real, true},
+             {F::rational, true}}),
         // IntInfinity
-        make({{F::commutative, true},
-              {F::integer, true},
-              {F::extended_positive, true},
-              {F::extended_real, true},
-              {F::prime, false}}),
+        make(
+            {{F::commutative, true},
+             {F::integer, true},
+             {F::extended_positive, true},
+             {F::extended_real, true},
+             {F::prime, false}}),
         // NegativeIntInfinity
-        make({{F::commutative, true},
-              {F::integer, true},
-              {F::extended_negative, true},
-              {F::extended_real, true},
-              {F::prime, false}}),
+        make(
+            {{F::commutative, true},
+             {F::integer, true},
+             {F::extended_negative, true},
+             {F::extended_real, true},
+             {F::prime, false}}),
     };
   }();
   switch (e->kind) {
@@ -388,9 +1291,18 @@ Tri ExprArena::eval_fact(const Expr* e, Fact f) {
       // Their only handlers decide extended_positive/negative, which their KBs
       // already know or which are None for symbols.
       return Tri::Unknown;
-    default:
-      throw NativeUnsupported("assumptions of Add/Mul/Pow are not ported yet");
+    case Kind::Pow:
+    case Kind::Mul:
+    case Kind::Add:
+      if (f == Fact::commutative) {
+        // AssocOp and Pow keep is_commutative in a slot, not in the KB.
+        return fuzzy_group(*this, e->args, f, false);
+      }
+      return e->kind == Kind::Pow ? pow_fact(*this, e, f)
+          : e->kind == Kind::Mul  ? mul_fact(*this, e, f)
+                                  : add_fact(*this, e, f);
   }
+  return Tri::Unknown;
 }
 
 } // namespace torch::symbolic

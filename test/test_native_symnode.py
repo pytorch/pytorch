@@ -26,6 +26,27 @@ zf = sympy.Symbol("zf", real=True, positive=True)
 LEAVES = [s0, s1, u0, zf, *map(sympy.Integer, range(-3, 4))]
 LEAVES += [sympy.Rational(1, 2), sympy.Rational(-2, 3)]
 FACTS = sorted(_assume_defined)
+W = sympy.Symbol("w", complex=True, real=False)
+FACT_LEAVES = [
+    s0,
+    s1,
+    u0,
+    zf,
+    W,
+    sympy.Symbol("e", even=True),
+    sympy.Symbol("o", odd=True),
+    sympy.Symbol("n", integer=True, nonnegative=True),
+    sympy.Symbol("m", integer=True, negative=True),
+    sympy.Symbol("r", real=True),
+    sympy.Symbol("i", imaginary=True),
+    sympy.Symbol("c", complex=True),
+    sympy.Symbol("q", rational=True, nonzero=True),
+    sympy.Symbol("t", irrational=True),
+    sympy.Symbol("p", prime=True),
+    *map(sympy.Integer, [-2, -1, 2, 3, 4, 6]),
+    sympy.Rational(1, 2),
+    sympy.Rational(-3, 4),
+]
 
 
 # Expression trees are nested tuples (op, *children); leaves are sympy atoms.
@@ -240,6 +261,7 @@ class TestNativeExpr(TestCase):
             lambda: arena.from_sympy(sympy.Mul(2, s0 + 1, evaluate=False)),
             lambda: arena.rational(2**64, 3),
             lambda: arena.ask(arena.from_sympy(s0 + 1), "positive"),
+            lambda: arena.ask(arena.from_sympy(W**2), "extended_real"),
         ]
         for f in cases:
             with self.assertRaises(NativeUnsupported):
@@ -302,7 +324,80 @@ class TestNativeAssumptions(TestCase):
                 self.check_facts(v, rng)
 
 
+class TestNativeCompoundAssumptions(TestCase):
+    def compare_facts(self, v, rng):
+        """Asks every fact of v natively in random order; returns how many were
+        answered and how many raised NativeUnsupported."""
+        arena = torch._C._symbolic._Arena()
+        n = arena.from_sympy(v)
+        facts = list(FACTS)
+        rng.shuffle(facts)
+        answered = unsupported = 0
+        for f in facts:
+            try:
+                got = arena.ask(n, f)
+            except NativeUnsupported:
+                unsupported += 1
+                continue
+            self.assertIs(got, getattr(v, "is_" + f), f"({v}).is_{f}")
+            answered += 1
+        return answered, unsupported
+
+    def test_known_answers(self):
+        e, o, i = (
+            sympy.Symbol(x, **{k: True})
+            for x, k in [("e", "even"), ("o", "odd"), ("i", "imaginary")]
+        )
+        cases = [
+            (2 * s0, "even", True),
+            (s0 * s1, "integer", True),
+            (s0**2, "positive", True),
+            (s0**-1, "positive", True),
+            (-s0, "negative", True),
+            (e / 2, "integer", True),
+            (e / 3, "integer", False),
+            (o / 2, "integer", False),
+            (o * o, "odd", True),
+            (i**2, "extended_real", True),
+            (i**3, "imaginary", True),
+            (i * zf, "imaginary", True),
+            (s0 * zf, "positive", True),
+            (s0 + 1, "integer", True),
+            (s0 + zf, "real", True),
+            (e + o, "odd", True),
+            (e + 2, "odd", False),
+            (sympy.Symbol("t", irrational=True) + 1, "irrational", True),
+            (zf**-2, "finite", True),
+            (u0**-1, "zero", False),
+        ]
+        for v, f, expected in cases:
+            arena = torch._C._symbolic._Arena()
+            self.assertIs(arena.ask(arena.from_sympy(v), f), expected, f"({v}).is_{f}")
+            self.assertIs(getattr(v, "is_" + f), expected)
+
+    @parametrize("seed", range(8))
+    def test_fuzz(self, seed):
+        rng = random.Random(seed)
+        # Signs of Adds are not ported yet, so only Add-free trees are expected
+        # to be mostly answered natively.
+        answered = unsupported = 0
+        for _ in range(150):
+            t = random_tree(rng, 3, FACT_LEAVES)
+            try:
+                v = sympy.sympify(sympy_eval(t))
+            except ZeroDivisionError:
+                continue
+            if v.has(sympy.zoo, sympy.nan):
+                continue
+            a, u = self.compare_facts(v, rng)
+            if not v.atoms(sympy.Add):
+                answered += a
+                unsupported += u
+        self.assertGreater(answered, 10 * unsupported)
+
+
 instantiate_parametrized_tests(TestNativeExpr)
+instantiate_parametrized_tests(TestNativeCompoundAssumptions)
 
 
 if __name__ == "__main__":
