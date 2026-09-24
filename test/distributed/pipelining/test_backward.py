@@ -355,9 +355,9 @@ class StageBackwardTests(TestCase):
         ref_out = ref_mod(ref_x)
         ref_out.backward(output_grad)
 
-        torch.testing.assert_close(grad_inputs[0], ref_x.grad)
+        self.assertEqual(grad_inputs[0], ref_x.grad)
         for name, p in mod.named_parameters():
-            torch.testing.assert_close(p.grad, ref_mod.get_parameter(name).grad)
+            self.assertEqual(p.grad, ref_mod.get_parameter(name).grad)
 
     def test_stage_backward_mixed_edge_and_tensor_outputs(self, device):
         """Handle edge, tensor, and non-grad outputs together."""
@@ -396,9 +396,9 @@ class StageBackwardTests(TestCase):
         ref_first, ref_second, _ = ref_mod(ref_x)
         torch.autograd.backward((ref_first, ref_second), (grads[0], grads[1]))
 
-        torch.testing.assert_close(grad_inputs[0], ref_x.grad)
+        self.assertEqual(grad_inputs[0], ref_x.grad)
         for name, p in mod.named_parameters():
-            torch.testing.assert_close(p.grad, ref_mod.get_parameter(name).grad)
+            self.assertEqual(p.grad, ref_mod.get_parameter(name).grad)
 
     def test_stage_backward_edge_keeps_python_autograd_function_alive(self, device):
         """Keep a Python autograd graph alive through its edge."""
@@ -425,7 +425,7 @@ class StageBackwardTests(TestCase):
             output_grads=(output_grad,),
             input_values=(x,),
         )
-        torch.testing.assert_close(grad_inputs[0], output_grad * 3.0)
+        self.assertEqual(grad_inputs[0], output_grad * 3.0)
 
     def test_stage_backward_input_from_gradient_edge(self, device):
         """Match tensor-rooted split backward."""
@@ -450,9 +450,9 @@ class StageBackwardTests(TestCase):
 
         ref_mod(ref_x).backward(output_grad)
 
-        torch.testing.assert_close(dinputs[0], ref_x.grad)
+        self.assertEqual(dinputs[0], ref_x.grad)
         for name, p in mod.named_parameters():
-            torch.testing.assert_close(p.grad, ref_mod.get_parameter(name).grad)
+            self.assertEqual(p.grad, ref_mod.get_parameter(name).grad)
 
     def test_stage_backward_input_edge_requires_output_grads(self, device):
         mod = MLPModule(d_hid).to(device)

@@ -9,7 +9,6 @@
 #include <ATen/native/TensorFactories.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/mps/OperationUtils.h>
-#include <fmt/format.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -160,6 +159,10 @@ static void laguerre_polynomial_l_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "laguerre_polynomial_l");
 }
 
+static void heaviside_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "heaviside");
+}
+
 static void polar_mps_kernel(TensorIterator& iter) {
   lib.exec_binary_kernel(iter, "polar");
 }
@@ -187,105 +190,23 @@ static void lerp_scalar_mps_kernel(at::TensorIteratorBase& iter, const Scalar& w
 }
 
 static void lerp_tensor_mps_kernel(at::TensorIteratorBase& iter) {
-  using namespace mps;
   // `lerp.Tensor` lets only a 0-dim `weight` differ in dtype from `self`/`end`, and
   // TensorIterator materializes that promotion only when the common device is CPU, leaving
-  // other backends to cast while loading.
+  // other backends to cast while loading. `exec_ternary_kernel` picks the cast flavor for
+  // anything that disagrees with the common dtype.
   const auto common_dtype = iter.common_dtype();
-  const bool tensors_match =
-      iter.dtype(0) == common_dtype && iter.dtype(1) == common_dtype && iter.dtype(2) == common_dtype;
 
   // Mirror the CUDA kernel: read a CPU scalar weight on the host, drop it from the iterator
   // and let the scalar-weight path cast it to the compute dtype. `lerp_alpha` is instantiated
   // for a single tensor dtype, so this needs the other operands to already agree.
-  if (tensors_match && iter.is_cpu_scalar(3)) {
+  if (iter.is_cpu_scalar(3) && iter.dtype(0) == common_dtype && iter.dtype(1) == common_dtype &&
+      iter.dtype(2) == common_dtype) {
     const auto weight = iter.tensor(3).item();
     iter.remove_operand(3);
     return lerp_scalar_mps_kernel(iter, weight);
   }
 
-  auto type_str = scalarToMetalTypeString(common_dtype);
-  auto numel = static_cast<uint32_t>(iter.numel());
-  auto ndim = static_cast<uint32_t>(iter.ndim());
-
-  // Anything still disagreeing goes through the runtime-cast kernel, which loads and stores
-  // through each operand's own dtype rather than reinterpreting it as `common_dtype`.
-  if (!tensors_match || iter.dtype(3) != common_dtype) {
-    std::array<int, 4> ndim_and_types = {
-        iter.ndim(), static_cast<int>(iter.dtype(1)), static_cast<int>(iter.dtype(3)), static_cast<int>(iter.dtype(0))};
-    auto pso = lib.getPipelineStateForFunc("lerp_tensor_strided_cast_" + type_str);
-    dispatch_sync_with_rethrow(getCurrentMPSStream()->queue(), ^() {
-      auto computeEncoder = getCurrentMPSStream()->commandEncoder();
-      [computeEncoder setComputePipelineState:pso];
-      bind_iter_tensors(computeEncoder, iter);
-      mtl_setArgs<4>(computeEncoder,
-                     iter.shape(),
-                     iter.strides(0),
-                     iter.strides(1),
-                     iter.strides(2),
-                     iter.strides(3),
-                     ndim_and_types);
-      mtl_dispatch1DJob(computeEncoder, pso, numel);
-    });
-    return;
-  }
-
-  // simple elementwise kernel for dense tensors
-  if (iter.is_contiguous()) {
-    auto pso = lib.getPipelineStateForFunc("lerp_tensor_dense_" + type_str);
-    dispatch_sync_with_rethrow(getCurrentMPSStream()->queue(), ^() {
-      auto computeEncoder = getCurrentMPSStream()->commandEncoder();
-      [computeEncoder setComputePipelineState:pso];
-      bind_iter_tensors(computeEncoder, iter);
-      mtl_dispatch1DJob(computeEncoder, pso, numel);
-    });
-    return;
-  }
-
-  // Scalar weight broadcast path. The kernel indexes self/end/out linearly, so all three have
-  // to be dense: `self` or `end` may itself be broadcast down to a zero stride.
-  if (ndim == 1 && iter.strides(3)[0] == 0 && iter.strides(0)[0] == iter.element_size(0) &&
-      iter.strides(1)[0] == iter.element_size(1) && iter.strides(2)[0] == iter.element_size(2)) {
-    auto pso = lib.getPipelineStateForFunc("lerp_tensor_scalar_weight_" + type_str);
-    dispatch_sync_with_rethrow(getCurrentMPSStream()->queue(), ^() {
-      auto computeEncoder = getCurrentMPSStream()->commandEncoder();
-      [computeEncoder setComputePipelineState:pso];
-      bind_iter_tensors(computeEncoder, iter);
-      mtl_dispatch1DJob(computeEncoder, pso, numel);
-    });
-    return;
-  }
-
-  // 2D/3D: multi-dimensional dispatch, to avoid integer division for coordinates
-  if (ndim >= 2 && ndim <= 3) {
-    auto pso = lib.getPipelineStateForFunc(fmt::format("lerp_tensor_strided_{}d_{}", ndim, type_str));
-    dispatch_sync_with_rethrow(getCurrentMPSStream()->queue(), ^() {
-      auto computeEncoder = getCurrentMPSStream()->commandEncoder();
-      [computeEncoder setComputePipelineState:pso];
-      bind_iter_tensors(computeEncoder, iter);
-      mtl_setArgs<4>(computeEncoder, iter.strides(0), iter.strides(1), iter.strides(2), iter.strides(3));
-      auto sizes = iter.shape();
-      auto maxTg = [pso maxTotalThreadsPerThreadgroup];
-      auto tg_x = std::min(static_cast<NSUInteger>(sizes[0]), maxTg);
-      auto tg_y = std::min(static_cast<NSUInteger>(sizes[1]), maxTg / tg_x);
-      auto grid_z = ndim > 2 ? static_cast<NSUInteger>(sizes[2]) : 1;
-      auto tg_z = std::clamp(grid_z, 1UL, maxTg / (tg_x * tg_y));
-      [computeEncoder dispatchThreads:MTLSizeMake(sizes[0], sizes[1], grid_z)
-                threadsPerThreadgroup:MTLSizeMake(tg_x, tg_y, tg_z)];
-    });
-    return;
-  }
-
-  // General strided fallback
-  auto pso = lib.getPipelineStateForFunc("lerp_tensor_strided_" + type_str);
-  dispatch_sync_with_rethrow(getCurrentMPSStream()->queue(), ^() {
-    auto computeEncoder = getCurrentMPSStream()->commandEncoder();
-    [computeEncoder setComputePipelineState:pso];
-    bind_iter_tensors(computeEncoder, iter);
-    mtl_setArgs<4>(
-        computeEncoder, iter.shape(), iter.strides(0), iter.strides(1), iter.strides(2), iter.strides(3), ndim);
-    mtl_dispatch1DJob(computeEncoder, pso, numel);
-  });
+  lib.exec_ternary_kernel(iter, "lerp");
 }
 
 static void mul_mps_kernel(TensorIteratorBase& iter) {
@@ -437,6 +358,7 @@ REGISTER_DISPATCH(mul_stub, &mul_mps_kernel)
 REGISTER_DISPATCH(div_true_stub, &div_true_mps_kernel)
 REGISTER_DISPATCH(div_floor_stub, &div_floor_mps_kernel)
 REGISTER_DISPATCH(div_trunc_stub, &div_trunc_mps_kernel)
+REGISTER_DISPATCH(heaviside_stub, &heaviside_mps_kernel)
 REGISTER_DISPATCH(fmod_stub, &fmod_mps_kernel)
 REGISTER_DISPATCH(remainder_stub, &remainder_mps_kernel)
 REGISTER_DISPATCH(igamma_stub, &igamma_mps_kernel)

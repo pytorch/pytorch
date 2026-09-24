@@ -457,7 +457,9 @@ if(USE_SOURCE_DEBUG_ON_MOBILE)
   # so this condition specifically says we are building for source debug
   # on mobile.
   if(BUILD_LITE_INTERPRETER)
-    set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/serialization/pickle.cpp PROPERTIES COMPILE_FLAGS "-DC10_MOBILE -DFEATURE_TORCH_MOBILE")
+    set_source_files_properties(
+      ${TORCH_SRC_DIR}/csrc/jit/serialization/pickle.cpp
+      PROPERTIES COMPILE_DEFINITIONS "C10_MOBILE;FEATURE_TORCH_MOBILE")
   endif()
 endif()
 
@@ -483,7 +485,7 @@ else()
   endif()
   if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     # TODO: Delete this when https://github.com/pytorch/pytorch/issues/35026 is fixed
-    set_source_files_properties(../torch/csrc/autograd/record_function_ops.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
+    set_source_files_properties(../torch/csrc/autograd/record_function_ops.cpp PROPERTIES COMPILE_OPTIONS -Wno-deprecated-declarations)
   endif()
 endif()
 list(APPEND TORCH_SRCS ${LIBTORCH_CMAKE_SRCS})
@@ -510,7 +512,7 @@ if(INTERN_BUILD_MOBILE)
       ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/objc/PTMCoreMLCompiler.mm
       ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/objc/PTMCoreMLFeatureProvider.mm
     )
-    set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/backends/coreml/objc/PTMCoreMLBackend.mm PROPERTIES COMPILE_FLAGS "-fno-objc-arc")
+    set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/backends/coreml/objc/PTMCoreMLBackend.mm PROPERTIES COMPILE_OPTIONS -fno-objc-arc)
     include_directories(${TORCH_ROOT}/third_party/nlohmann/single_include)
     list(APPEND TORCH_SRCS ${COREML_DELEGATE_SRCS})
   endif()
@@ -518,18 +520,18 @@ endif()
 
 # Required workaround for LLVM 9 includes.
 if(NOT MSVC)
-  set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_jit.cpp PROPERTIES COMPILE_FLAGS -Wno-noexcept-type)
+  set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_jit.cpp PROPERTIES COMPILE_OPTIONS -Wno-noexcept-type)
 endif()
 # Disable certain warnings for GCC-9.X
 if(CMAKE_COMPILER_IS_GNUCXX)
   # See https://github.com/pytorch/pytorch/issues/38856
-  set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_jit.cpp PROPERTIES COMPILE_FLAGS "-Wno-redundant-move -Wno-noexcept-type")
-  set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_codegen.cpp PROPERTIES COMPILE_FLAGS "-Wno-init-list-lifetime")
+  set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_jit.cpp PROPERTIES COMPILE_OPTIONS "-Wno-redundant-move;-Wno-noexcept-type")
+  set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_codegen.cpp PROPERTIES COMPILE_OPTIONS -Wno-init-list-lifetime)
 endif()
 
 # Enable conditional FP16 arithmetic intrinsics
 if(CPU_AARCH64 AND LINUX)
-set_source_files_properties(${TORCH_ROOT}/aten/src/ATen/native/BlasKernel.cpp PROPERTIES COMPILE_FLAGS "-march=armv8.2-a+fp16")
+set_source_files_properties(${TORCH_ROOT}/aten/src/ATen/native/BlasKernel.cpp PROPERTIES COMPILE_OPTIONS -march=armv8.2-a+fp16)
 endif()
 
 
@@ -634,12 +636,13 @@ if(USE_CUDA)
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryOps.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/GroupStreamGuard.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/nccl_extension.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/ops/nccl_reduce_scatter_offset.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/ops/nccl_all_to_all_nd.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/cuda_mem_pool.cpp
-        PROPERTIES COMPILE_FLAGS "-DPYTORCH_C10_DRIVER_API_SUPPORTED=1"
+        PROPERTIES COMPILE_DEFINITIONS "PYTORCH_C10_DRIVER_API_SUPPORTED=1"
       )
     endif()
 
@@ -656,8 +659,8 @@ if(USE_CUDA)
     ${TORCH_ROOT}/aten/src/ATen/cuda/detail/LazyNVRTC.cpp
     PROPERTIES COMPILE_DEFINITIONS "NVRTC_SHORTHASH=${CUDA_NVRTC_SHORTHASH}"
   )
-  set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/passes/frozen_conv_add_relu_fusion.cpp PROPERTIES COMPILE_FLAGS "-DUSE_CUDA=1")
-  set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/interface.cpp PROPERTIES COMPILE_FLAGS "-DUSE_CUDA=1")
+  set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/passes/frozen_conv_add_relu_fusion.cpp PROPERTIES COMPILE_DEFINITIONS "USE_CUDA=1")
+  set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/interface.cpp PROPERTIES COMPILE_DEFINITIONS "USE_CUDA=1")
 endif()
 
 if(BUILD_ONEDNN_GRAPH)
@@ -1007,8 +1010,11 @@ if(USE_ROCM)
     target_compile_definitions(torch_hip PRIVATE USE_NCCL)
   endif()
 
-  # IntraNodeComm loads libamd_smi at runtime via dlopen (avoids linking amd_smi
-  # which would cause bus errors if Python amdsmi loads a different copy).
+  # On ROCm < 7.14 IntraNodeComm loads libamd_smi at runtime via dlopen, because
+  # linking it would put its rsmi_* re-exports in the global scope and
+  # interpose the librocm_smi64 symbols RCCL resolves there. On ROCm >= 7.14
+  # RCCL no longer references rsmi_* at all, so there is nothing to interpose
+  # and amd_smi is linked directly (see cmake/Dependencies.cmake).
   if(USE_DISTRIBUTED)
     target_link_libraries(torch_hip PRIVATE ${CMAKE_DL_LIBS})
   endif()
@@ -1186,7 +1192,7 @@ elseif(USE_CUDA)
       target_link_libraries(torch_cuda_linalg PRIVATE
           CUDA::culibos ${CMAKE_DL_LIBS})
     endif()
-    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/cuda/LinearAlgebraStubs.cpp PROPERTIES COMPILE_FLAGS "-DBUILD_LAZY_CUDA_LINALG")
+    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/cuda/LinearAlgebraStubs.cpp PROPERTIES COMPILE_DEFINITIONS "BUILD_LAZY_CUDA_LINALG")
     install(TARGETS torch_cuda_linalg DESTINATION "${TORCH_INSTALL_LIB_DIR}")
   endif()
 
@@ -1197,20 +1203,23 @@ elseif(USE_CUDA)
 
   # Apply suggestion from comment https://github.com/pytorch/pytorch/issues/113053#issuecomment-2115375714
   if(LINUX)
-    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/cuda/CUDASparseDescriptors.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
-    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/cuda/CUDASparseBlas.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
-    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/sparse/cuda/SparseCUDABlas.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
-    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/sparse/cuda/SparseBlasImpl.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
+    set_source_files_properties(
+      ${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/cuda/CUDASparseDescriptors.cpp
+      ${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/cuda/CUDASparseBlas.cpp
+      ${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/sparse/cuda/SparseCUDABlas.cpp
+      ${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/sparse/cuda/SparseBlasImpl.cpp
+      PROPERTIES COMPILE_OPTIONS -Wno-deprecated-declarations)
   endif()
   # Set driver api defined for PeerToPeerAccess
   if(NOT WIN32)
-    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/cuda/PeerToPeerAccess.cpp PROPERTIES COMPILE_FLAGS "-DPYTORCH_C10_DRIVER_API_SUPPORTED=1")
+    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/cuda/PeerToPeerAccess.cpp PROPERTIES COMPILE_DEFINITIONS "PYTORCH_C10_DRIVER_API_SUPPORTED=1")
   endif()
 
 endif()
 
 if(USE_XPU)
   list(APPEND Caffe2_XPU_SRCS ${GENERATED_CXX_TORCH_XPU})
+  list(APPEND Caffe2_XPU_SRCS ${TORCH_SRC_DIR}/csrc/xpu/XPUPluggableAllocator.cpp)
   list(APPEND Caffe2_XPU_SRCS ${TORCH_SRC_DIR}/csrc/inductor/aoti_torch/shim_xpu.cpp)
   list(APPEND Caffe2_XPU_SRCS ${TORCH_SRC_DIR}/csrc/inductor/aoti_runner/model_container_runner_xpu.cpp)
   add_library(torch_xpu ${Caffe2_XPU_SRCS})
@@ -1231,18 +1240,29 @@ if(USE_XPU)
     endif()
   endif()
   execute_process(
-    COMMAND git fetch --quiet
+    COMMAND git rev-parse HEAD
     WORKING_DIRECTORY ${TORCH_XPU_OPS_DIR}
-    RESULT_VARIABLE _exitcode)
+    OUTPUT_VARIABLE TORCH_XPU_OPS_CURRENT_COMMIT
+    RESULT_VARIABLE _exitcode
+    OUTPUT_STRIP_TRAILING_WHITESPACE)
   if(NOT _exitcode EQUAL 0)
-    message(FATAL_ERROR "Fail to fetch ${TORCH_XPU_OPS_REPO_URL}")
+    set(TORCH_XPU_OPS_CURRENT_COMMIT "")
   endif()
-  execute_process(
-    COMMAND git checkout --quiet ${TORCH_XPU_OPS_COMMIT}
-    WORKING_DIRECTORY ${TORCH_XPU_OPS_DIR}
-    RESULT_VARIABLE _exitcode)
-  if(NOT _exitcode EQUAL 0)
-    message(FATAL_ERROR "Fail to checkout ${TORCH_XPU_OPS_REPO_URL} to ${TORCH_XPU_OPS_COMMIT}")
+  if(NOT TORCH_XPU_OPS_CURRENT_COMMIT STREQUAL TORCH_XPU_OPS_COMMIT)
+    execute_process(
+      COMMAND git fetch --quiet
+      WORKING_DIRECTORY ${TORCH_XPU_OPS_DIR}
+      RESULT_VARIABLE _exitcode)
+    if(NOT _exitcode EQUAL 0)
+      message(FATAL_ERROR "Fail to fetch ${TORCH_XPU_OPS_REPO_URL}")
+    endif()
+    execute_process(
+      COMMAND git checkout --quiet ${TORCH_XPU_OPS_COMMIT}
+      WORKING_DIRECTORY ${TORCH_XPU_OPS_DIR}
+      RESULT_VARIABLE _exitcode)
+    if(NOT _exitcode EQUAL 0)
+      message(FATAL_ERROR "Fail to checkout ${TORCH_XPU_OPS_REPO_URL} to ${TORCH_XPU_OPS_COMMIT}")
+    endif()
   endif()
 
   set(TORCH_XPU_OPS_INCLUDE_DIRS
@@ -1250,6 +1270,20 @@ if(USE_XPU)
       ${TORCH_SRC_DIR}/csrc/api/include
       ${Caffe2_CPU_INCLUDE}
       ${Caffe2_XPU_INCLUDE})
+  # Keep the torch-xpu-ops compute target Python-ABI-agnostic so unified
+  # manywheel jobs can reuse SYCL/C++ objects across Python versions. Future
+  # Python bindings should use a separate ABI-specific target.
+  if(DEFINED Python_INCLUDE_DIRS)
+    list(REMOVE_ITEM TORCH_XPU_OPS_INCLUDE_DIRS ${Python_INCLUDE_DIRS})
+  endif()
+  if(DEFINED Python3_INCLUDE_DIRS)
+    list(REMOVE_ITEM TORCH_XPU_OPS_INCLUDE_DIRS ${Python3_INCLUDE_DIRS})
+  endif()
+  # Some Python-derived include paths (for example NumPy/site-packages entries)
+  # can still arrive through transitive include sets and vary per CPython ABI.
+  # Strip them so FindSYCL custom-command scripts stay stable across iterations.
+  list(FILTER TORCH_XPU_OPS_INCLUDE_DIRS EXCLUDE REGEX "(^|/)site-packages(/|$)")
+  list(FILTER TORCH_XPU_OPS_INCLUDE_DIRS EXCLUDE REGEX "(^|/)python[0-9.]+(/|$)")
   # Pass the target as a dependency so that ATen headers generation
   # could be followed by torch-xpu-ops build.
   # 1. Sources in torch-xpu-ops depend on generated ATen headers.
@@ -1369,10 +1403,12 @@ set(ATen_CPU_INCLUDE
   ${CMAKE_BINARY_DIR}/aten/src)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-  set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/QuantizedLinear.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
-  set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/RNN.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
-  set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/quantized/cpu/qlinear_prepack.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
-  set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/quantized/qlinear_unpack.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
+  set_source_files_properties(
+    ${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/QuantizedLinear.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/RNN.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/quantized/cpu/qlinear_prepack.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/quantized/qlinear_unpack.cpp
+    PROPERTIES COMPILE_OPTIONS -Wno-deprecated-declarations)
 endif()
 
 if(USE_MKLDNN_ACL)
@@ -1423,7 +1459,7 @@ if(CUPTI_STUBS_GENERATED)
     ${TORCH_ROOT}/third_party/perfetto/sdk/perfetto.cc)
   set_source_files_properties(
     ${TORCH_ROOT}/third_party/perfetto/sdk/perfetto.cc
-    PROPERTIES COMPILE_FLAGS "-w")
+    PROPERTIES COMPILE_OPTIONS -w)
 endif()
 
 install(DIRECTORY
@@ -1664,7 +1700,7 @@ if(USE_DISTRIBUTED)
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
       set_source_files_properties(
         "${TORCH_SRC_DIR}/csrc/distributed/c10d/ProcessGroupMPI.cpp"
-        PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
+        PROPERTIES COMPILE_OPTIONS -Wno-deprecated-declarations)
     endif()
     target_compile_definitions(torch_cpu PUBLIC USE_C10D_MPI)
   endif()
@@ -1745,13 +1781,13 @@ endif()
 set(EXPERIMENTAL_SINGLE_THREAD_POOL "0" CACHE STRING
   "Experimental option to use a single thread pool for inter- and intra-op parallelism")
 if("${EXPERIMENTAL_SINGLE_THREAD_POOL}")
-  target_compile_definitions(torch_cpu PUBLIC "-DAT_EXPERIMENTAL_SINGLE_THREAD_POOL=1")
+  target_compile_definitions(torch_cpu PUBLIC AT_EXPERIMENTAL_SINGLE_THREAD_POOL=1)
 endif()
 
 if(MSVC AND BUILD_SHARED_LIBS)
   # ONNX is linked statically and needs to be exported from this library
   # to be used externally. Make sure that references match the export.
-  target_compile_options(torch_cpu PRIVATE "-DONNX_BUILD_MAIN_LIB")
+  target_compile_definitions(torch_cpu PRIVATE ONNX_BUILD_MAIN_LIB)
 endif()
 
 caffe2_interface_library(torch_cpu torch_cpu_library)

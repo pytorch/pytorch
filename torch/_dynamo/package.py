@@ -16,6 +16,7 @@ import functools
 import hashlib
 import importlib
 import inspect
+import io
 import itertools
 import json
 import logging
@@ -27,12 +28,12 @@ import sys
 import types
 from collections.abc import Callable, Generator, Iterator
 from contextlib import nullcontext
-from typing import Any, NewType, Optional, TYPE_CHECKING, Union
+from typing import Any, IO, NewType, Optional, TYPE_CHECKING, Union
 from typing_extensions import Never
 
 import torch
 from torch._dynamo.exc import PackageError
-from torch._dynamo.graph_utils import _graph_device_type
+from torch._dynamo.graph_utils import _graph_device_types
 from torch.utils.weak import WeakIdKeyDictionary
 
 from .bytecode_transformation import (
@@ -109,6 +110,32 @@ class SerializedCode:
         return types.CodeType(
             *kwargs.values(),
         )
+
+
+class _Missing:
+    def __init__(self, reason: str | None = None) -> None:
+        self._reason = reason
+
+    def __repr__(self) -> str:
+        return f"_Missing({self._reason})"
+
+    def __str__(self) -> str:
+        return f"_Missing({self._reason})"
+
+    # Sometimes _Missing object is used as the callable with functools.partial,
+    # so we add a dummy __call__ here to bypass TypeError from partial().
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        return _Missing()
+
+
+# The one persistent id a guards state may carry: a guards-state pickler emits it
+# for a pruned value that the C pickler saves by type (an exact builtin
+# container) without ever consulting reducer_override, and _GuardsStateUnpickler
+# turns it back into _Missing. Any other persistent id in a guards state is a
+# bug. An artifact is only ever read by the torch that wrote it (SystemInfo's
+# check_compatibility runs before load_guards_state), so no reader from before
+# this id existed sees one.
+_PRUNED_VALUE_PID = "pruned"
 
 
 class FunctionPicklerBase(pickle.Pickler):
@@ -288,9 +315,9 @@ class FunctionPicklerBase(pickle.Pickler):
         )
 
     @staticmethod
-    def _fqn_resolves(fn: types.FunctionType) -> bool:
-        """Whether pickling fn by reference (import __module__, walk __qualname__)
-        lands back on fn. False for a <locals> function, a functools.wraps
+    def _fqn_resolves(fn: types.FunctionType | type) -> bool:
+        """Whether pickling fn (a function or a class) by reference (import
+        __module__, walk __qualname__) lands back on fn. False for a <locals> one, a functools.wraps
         wrapper (it carries the wrappee's names), an exec-created function, or
         a module absent from sys.modules; pickling those by reference fails at
         dump with PicklingError (a bare AttributeError from the C pickler for a
@@ -325,7 +352,11 @@ class FunctionPicklerBase(pickle.Pickler):
         # not for a local function), so the caller prunes any it does not need.
         # `evaluate` asks for the VALUE format instead, for a caller that has to
         # serialize the values and cannot carry a proxy; that read raises for a
-        # name that does not resolve.
+        # name that does not resolve. Either format can raise -- FORWARDREF only
+        # when the annotation does real work outside a name lookup (formatting a
+        # proxy in an f-string, `()[0]`), which the guards.py caller explains --
+        # and both are left raising here: whether the set can be dropped is the
+        # caller's question, and each caller logs the drop it takes.
         if sys.version_info >= (3, 14):
             import annotationlib
 
@@ -468,6 +499,22 @@ class _GuardedCodeCacheEntry:
     dynamo_code: SerializedCode
 
 
+class _GuardsStateUnpickler(pickle.Unpickler):
+    def __init__(self, file: IO[bytes]) -> None:
+        super().__init__(file)
+        # One sentinel per load for every pruned container, aliases and distinct
+        # ones alike (reducer_override's memo would keep distinct ones distinct;
+        # a _Missing carries nothing but its reason, so collapsing them loses
+        # nothing). Per load rather than per process: loaded values are keyed
+        # by id elsewhere, and one artifact's sentinel has no business in another.
+        self._pruned = _Missing(_PRUNED_VALUE_PID)
+
+    def persistent_load(self, pid: str) -> _Missing:
+        if pid != _PRUNED_VALUE_PID:
+            raise pickle.UnpicklingError(f"unknown guards state persistent id {pid!r}")
+        return self._pruned
+
+
 def load_guards_state(guards_state: bytes) -> Any:
     try:
         import torch.distributed.fsdp._fully_shard._fully_shard as _fully_shard
@@ -476,7 +523,7 @@ def load_guards_state(guards_state: bytes) -> Any:
     except ImportError:
         ctx = nullcontext()  # type: ignore[assignment]
     with ctx:
-        return pickle.loads(guards_state)
+        return _GuardsStateUnpickler(io.BytesIO(guards_state)).load()
 
 
 def load_guard_manager(
@@ -484,6 +531,9 @@ def load_guard_manager(
     target_code: types.CodeType,
     runtime_global_scope: Any,
 ) -> "GuardManagerWrapper":
+    # An EMPTY runtime_global_scope is a scope and not the absence of one: a
+    # global guard then fails on a name it lacks, rather than falling back to the
+    # globals serialized with the artifact, which only None selects.
     from .output_graph import OutputGraphCommon
 
     return torch._dynamo.guards.CheckFunctionManager(
@@ -822,6 +872,20 @@ class SystemInfo:
                 )
 
 
+def _collapse_device_types(device_types: frozenset[str]) -> str:
+    """The single device type a package or an AOT artifact records: an
+    accelerator wins over cpu, and naming no device reads as cpu. Among several
+    accelerators one in `SystemInfo.CHECK_GPUS` wins, since any other name skips
+    the load check; the rest tie alphabetically. One string cannot say that a
+    graph needs two accelerators: it records the preferred one, and the load
+    check is for that one.
+    """
+    for device_type in SystemInfo.CHECK_GPUS:
+        if device_type in device_types:
+            return device_type
+    return next((d for d in sorted(device_types) if d != "cpu"), "cpu")
+
+
 @dataclasses.dataclass
 class _DynamoCacheEntry:
     codes: list[_DynamoCodeCacheEntry]
@@ -995,8 +1059,8 @@ class CompilePackage:
         # earlier, installed variant of the same code object still needs.
         self._current_backend_ids: list[_BackendId] = []
         self._installed_globals: dict[types.ModuleType, list[str]] = {}
-        # device_type that model compiled with.
-        self._device_type = "cpu"
+        # Every device type the graphs compiled into this package named.
+        self._device_types: frozenset[str] = frozenset()
 
         # For debugging/testing purpose only.
         self._cached_backends: dict[_BackendId, Any] = {}
@@ -1061,6 +1125,12 @@ class CompilePackage:
                         function_names=list(code.function_names),
                         import_sources=dict(code.import_sources),
                     )
+            # The codes come back, so the device they recorded must too, or one
+            # recompile after a reload re-saves the entry as what that frame
+            # alone named. The collapse is a maximum under one order, so
+            # re-collapsing its string with later frames gives what the full
+            # set would: the re-saved string is never below the loaded one.
+            self._device_types = frozenset((dynamo.device_type,))
         else:
             self._add_function(
                 self._innermost_fn.__code__, self._innermost_fn.__module__
@@ -1172,7 +1242,10 @@ class CompilePackage:
             self._source_info.add_code(code)
 
     def update_device_type(self, graph: torch.fx.Graph | None) -> None:
-        self._device_type = _graph_device_type(graph)
+        # One call per compiled frame, and a package spans frames (a graph
+        # break adds a resume code), so accumulate: a cpu-only resume frame
+        # must not erase the accelerator an earlier frame named.
+        self._device_types |= _graph_device_types(graph)
 
     def bypass_current_compile(self) -> None:
         """Drop the backend ids the current compile registered on its entry.
@@ -1244,14 +1317,21 @@ class CompilePackage:
             )
 
     def _install_global(
-        self, module: types.ModuleType, name: str, value: object
+        self,
+        module: types.ModuleType,
+        name: str,
+        value: object,
+        *,
+        record_only_if_new: bool = False,
     ) -> None:
         # A pre-reset compile in this process may still own `name` via a
         # CleanupHook that hasn't fired yet. We're taking over the binding now,
         # so that hook must not delete it once its code object is collected.
         CleanupHook.disown(module.__dict__, name)
+        record = not (record_only_if_new and name in module.__dict__)
         module.__dict__[name] = value
-        self._installed_globals.setdefault(module, []).append(name)
+        if record:
+            self._installed_globals.setdefault(module, []).append(name)
 
     def uninstall(self) -> None:
         from torch._C._dynamo.eval_frame import _reset_precompile_entries
@@ -1287,9 +1367,19 @@ class CompilePackage:
             )
             with context:
                 module = sys.modules[entry.python_module]
+                # An __import_* alias someone else bound first may be held BY
+                # REFERENCE by a loaded artifact's guards --
+                # AOTCompiledFunction._seed_guard_scope seeds those aliases into
+                # a live module scope and nothing re-seeds them -- so uninstall()
+                # must leave a binding this package did not create alone. The
+                # aliases are the only names install() records that are ever
+                # seeded that way.
                 for alias, module_name in entry.import_sources.items():
                     self._install_global(
-                        module, alias, importlib.import_module(module_name)
+                        module,
+                        alias,
+                        importlib.import_module(module_name),
+                        record_only_if_new=True,
                     )
                 target_code = code
                 if entry.install_to_global:
@@ -1393,7 +1483,7 @@ class CompilePackage:
         return _DynamoCacheEntry(
             codes=list(self._codes.values()),
             source_info=self._source_info,
-            device_type=self._device_type,
+            device_type=_collapse_device_types(self._device_types),
             fn_name=self._innermost_fn.__qualname__,
             fn_first_lineno=self._innermost_fn.__code__.co_firstlineno,
         )

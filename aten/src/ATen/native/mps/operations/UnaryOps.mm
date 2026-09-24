@@ -122,12 +122,6 @@ static void unary_op(const Tensor& self,
   unary_op_noresize(self, output_, op_name, unaryBlock);
 }
 
-MPSGraphTensor* log1p(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
-  MPSGraphTensor* oneTensor = [mpsGraph constantWithScalar:1.0 dataType:inputTensor.dataType];
-  MPSGraphTensor* addedTensor = [mpsGraph additionWithPrimaryTensor:inputTensor secondaryTensor:oneTensor name:nil];
-  return [mpsGraph logarithmWithTensor:addedTensor name:nil];
-}
-
 static MPSGraphTensor* lengthOfComplexAsReal(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
   auto squares = [mpsGraph squareWithTensor:inputTensor name:nil];
   auto sumSquares = [mpsGraph reductionSumWithTensor:squares axis:-1 name:nil];
