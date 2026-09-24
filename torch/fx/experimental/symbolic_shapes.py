@@ -4050,6 +4050,24 @@ class _NotifyingRangeDict(_NotifyingDict):  # type: ignore[valid-type, misc]
         dict.__setitem__(self, key, value)
 
 
+class _NativeSymopCache(dict):  # type: ignore[type-arg]
+    """
+    ShapeEnv._symop_cache under a native env. The native env memoizes its mod
+    results and flushes them here before leaving pristine; copies and pickles
+    flush first too, and produce a plain dict.
+    """
+
+    __slots__ = ("_flush",)
+
+    def __init__(self, data: dict[Any, Any], flush: Callable[[], None]) -> None:
+        super().__init__(data)
+        self._flush = flush
+
+    def __reduce__(self) -> tuple[type, tuple[dict[Any, Any]]]:
+        self._flush()
+        return (dict, (dict(self),))
+
+
 # ShapeEnvs with a native env. _native_envs_created gates the flush points.
 _native_shape_envs: weakref.WeakSet[ShapeEnv] = weakref.WeakSet()
 _native_envs_created = False
@@ -4216,6 +4234,9 @@ class ShapeEnv:
             self.size_like = _NotifyingSet(self.size_like, not_pristine)
             self.deferred_runtime_asserts = _NotifyingDict(
                 self.deferred_runtime_asserts, not_pristine
+            )
+            self._symop_cache = _NativeSymopCache(
+                self._symop_cache, native.flush_mod_memo
             )
 
     # Pro-tip: if you add new field to ShapeEnv, this affects some accept

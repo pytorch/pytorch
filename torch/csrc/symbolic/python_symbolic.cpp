@@ -632,6 +632,28 @@ py::object pytype_to_py(PyType t) {
       t == PyType::Int ? &PyLong_Type : &PyBool_Type));
 }
 
+// Puts the native mod choices where binary_magic_impl would have cached them.
+// Runs before the env leaves pristine and before _symop_cache is copied.
+void flush_mod_memo(PyShapeEnv& self) {
+  const py::object& ref = binding_of(*self.env).shape_env;
+  if (!self.env->pristine() || ref.is_none()) {
+    return;
+  }
+  py::object shape_env = ref();
+  if (shape_env.is_none()) {
+    return;
+  }
+  PyArena& a = *self.owner;
+  py::object cache = shape_env.attr("_symop_cache");
+  py::object version = shape_env.attr("_replacements_version_counter");
+  for (const auto& [key, out] : self.env->mod_memo()) {
+    cache.attr("setdefault")(
+        py::make_tuple(
+            "mod", a.to_sympy(key.first), a.to_sympy(key.second), version),
+        py::make_tuple(a.to_sympy(out), pytype_to_py(PyType::Int), false));
+  }
+}
+
 py::object node_expr(const NativeSymNodeImpl& node) {
   NativeShapeEnv& env = *node.env();
   auto lock = lock_env(env);
@@ -1123,6 +1145,7 @@ void initSymbolicBindings(PyObject* module) {
              const PyExpr& lower,
              const PyExpr& upper) {
             auto lock = lock_env(*self.env);
+            flush_mod_memo(self);
             self.env->update_range(
                 unwrap(self.owner, sym),
                 ValueRanges(unwrap(self.owner, lower), unwrap(self.owner, upper)));
@@ -1131,13 +1154,21 @@ void initSymbolicBindings(PyObject* module) {
           "mark_not_pristine",
           [](PyShapeEnv& self) {
             auto lock = lock_env(*self.env);
+            flush_mod_memo(self);
             self.env->mark_not_pristine();
           })
       .def(
           "mark_replacements",
           [](PyShapeEnv& self) {
             auto lock = lock_env(*self.env);
+            flush_mod_memo(self);
             self.env->mark_replacements();
+          })
+      .def(
+          "flush_mod_memo",
+          [](PyShapeEnv& self) {
+            auto lock = lock_env(*self.env);
+            flush_mod_memo(self);
           })
       .def(
           "simplify",

@@ -9,6 +9,7 @@
 #include <tuple>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -96,6 +97,14 @@ class NativeShapeEnv : public c10::intrusive_ptr_target {
   bool replacements_empty() const {
     return replacements_empty_;
   }
+  // Native mod results by (lhs, rhs), recorded while pristine. The
+  // Mod/PythonMod choice reads ranges and _symop_cache keeps the first
+  // answer, so the binding writes these into _symop_cache before the env
+  // leaves pristine, and afterwards a range-dependent choice is native only
+  // when memoized here.
+  std::map<std::pair<const Expr*, const Expr*>, const Expr*>& mod_memo() {
+    return mod_memo_;
+  }
   // (hint, range, size_like) of a mirrored symbol.
   std::optional<std::tuple<std::optional<int64_t>, ValueRanges, bool>> mirrored(
       const Expr* sym) const;
@@ -155,6 +164,7 @@ class NativeShapeEnv : public c10::intrusive_ptr_target {
   std::unordered_set<const Expr*> size_like_;
   bool pristine_ = true;
   bool replacements_empty_ = true;
+  std::map<std::pair<const Expr*, const Expr*>, const Expr*> mod_memo_;
   std::unordered_map<NativeQuery, std::pair<uint64_t, const Expr*>, QueryHash>
       queries_;
 };

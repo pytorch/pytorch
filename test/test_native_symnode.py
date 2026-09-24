@@ -2596,7 +2596,13 @@ class TestNativeShapeEnvSync(TestCase):
         self.assertIs(type(env2.replacements), dict)
         self.assertEqual(env2.replacements, env.replacements)
         self.assertIsNone(pickle.loads(pickle.dumps(env._native_env)))
-        for name in ("axioms", "replacements", "var_to_range", "size_like"):
+        for name in (
+            "axioms",
+            "replacements",
+            "var_to_range",
+            "size_like",
+            "_symop_cache",
+        ):
             value = getattr(env, name)
             self.assertIs(
                 type(pickle.loads(pickle.dumps(value))), type(value).__mro__[-2]
@@ -2954,6 +2960,48 @@ class TestNativeSymNode(TestCase):
         r = self.call(*e, "mod", c)
         self.assertIs(type(r[0]), SymNode)
         self.assertIs(type(r[0]._expr), Mod)
+
+    @parametrize("mutation", ["range", "replacement", "deepcopy", "pickle"])
+    def test_mod_memo(self, mutation):
+        # _symop_cache keeps the first Mod/PythonMod choice, which reads ranges.
+        import copy
+        import pickle
+
+        def mods(cache):
+            return {k: v for k, v in cache.items() if k[0] == "mod"}
+
+        caches = []
+        for native in (False, True):
+            env, syms = self.make_env(native)
+            a, c = self.node(env, syms[0], int, 5), self.node(env, syms[2], int, 3)
+            # a - 2 is nonnegative by range only.
+            x = a.sub(a.wrap_int(2))
+            self.assertIs(type(x.mod(c)._expr), Mod)
+            if mutation == "pickle":
+                caches.append(mods(pickle.loads(pickle.dumps(env._symop_cache))))
+                continue
+            if mutation == "replacement":
+                env._set_replacement(syms[3], sympy.Integer(-4), "test")
+                # Native results are Python from here on, and a Python node
+                # cannot take a native operand yet.
+                c = SymNode(syms[2], env, int, 3)
+            else:
+                if mutation == "deepcopy":
+                    env = copy.deepcopy(env)
+                    x = SymNode(syms[0] - 2, env, int, 3)
+                    c = SymNode(syms[2], env, int, 3)
+                env.var_to_range[syms[0]] = ValueRanges(-10, 10)
+            r = x.mod(c)
+            self.assertIs(type(r._expr), Mod)
+            self.assertIs(type(r) is SymNode, not native or mutation != "range")
+            # A new choice reads the current range.
+            r = x.sub(x.wrap_int(1)).mod(c)
+            self.assertIs(type(r._expr), PythonMod)
+            self.assertIs(type(r), SymNode)
+            caches.append(mods(env._symop_cache))
+        self.assertEqual(caches[0], caches[1])
+        want = {"range": 2, "replacement": 3, "deepcopy": 2, "pickle": 1}[mutation]
+        self.assertEqual(len(caches[0]), want)
 
     def test_hint_fallback(self):
         env, syms = self.make_env()

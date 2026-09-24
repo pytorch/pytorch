@@ -322,14 +322,23 @@ c10::SymNode NativeSymNodeImpl::try_binary(
       out = arena.function(Kind::FloorDiv, {a, b});
       break;
     case Op::Mod: {
-      // Range-dependent: the choice must match what _symop_cache would
-      // return, which holds only while the env is pristine.
+      // bound_lower_nonnegative throws once the env is not pristine, so then
+      // only the memo and the range-free answer are native.
+      auto& memo = env_->mod_memo();
+      auto it = memo.find({a, b});
+      if (it != memo.end()) {
+        out = it->second;
+        break;
+      }
       auto nonnegative = [&](const Expr* e) {
         return arena.ask(e, Fact::nonnegative) == Tri::True ||
             env_->bound_lower_nonnegative(e);
       };
       bool mod = nonnegative(a) && nonnegative(b);
       out = arena.function(mod ? Kind::Mod : Kind::PythonMod, {a, b});
+      if (env_->pristine()) {
+        memo.emplace(std::make_pair(a, b), out);
+      }
       break;
     }
     case Op::PowByNatural:
