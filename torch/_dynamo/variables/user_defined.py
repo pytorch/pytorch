@@ -3989,11 +3989,24 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             ):
                 return variables.ConstantVariable.create(True)
 
+
         try:
+            getset = self.lookup_tp_getset_member(name)
+
+            if getset is not None:
+                var_vt = getset.getter(self, tx)
+
+                if var_vt is not None:
+                    return variables.ConstantVariable.create(
+                        not isinstance(var_vt, variables.DeletedVariable)
+                    )
+
             var_vt = self.tp_getattro_impl(tx, name)
+
             return VariableTracker.build(
                 tx, not isinstance(var_vt, variables.DeletedVariable)
             )
+
         except ObservedAttributeError:
             handle_observed_exception(tx)
             return variables.ConstantVariable.create(False)

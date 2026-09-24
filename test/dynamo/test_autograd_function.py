@@ -874,6 +874,44 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         compiled_model = torch.compile(mod, backend="eager")
         after = compiled_model(*args, **kwargs)
         self.assertEqual(before, after)
+        
+    def test_ctx_saved_tensors_hasattr(self):
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                # saved_tensors should exist before saving anything.
+                assert hasattr(ctx, "saved_tensors")
+                assert getattr(ctx, "saved_tensors", None) is not None
+
+                ctx.save_for_backward(x)
+
+                # It should remain accessible after saving.
+                assert hasattr(ctx, "saved_tensors")
+                assert getattr(ctx, "saved_tensors", None) is not None
+
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output
+
+        def fn(x):
+            return Foo.apply(x)
+
+        x = torch.randn(3)
+
+        expected = fn(x)
+
+        compiled_fn = torch.compile(
+            fn,
+            backend="eager",
+            fullgraph=True,
+        )
+
+        actual = compiled_fn(x)
+
+        self.assertEqual(actual, expected)
+
 
     def test_function_context_mark_and_save(self):
         mod = ModuleWithGradFunc(ContextMarkAndSave)
