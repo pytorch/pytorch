@@ -60,7 +60,7 @@ import torch.utils._pytree as pytree
 # NB: The sym_* functions are used via getattr() and must be imported here.
 from torch import SymBool, SymFloat, SymInt
 from torch._C._functorch import get_unwrapped, is_batchedtensor, is_gradtrackingtensor
-from torch._C._symbolic import _NativeSymNode
+from torch._C._symbolic import _native_config_is_default, _NativeSymNode
 from torch._custom_class_base import CustomClassBase
 from torch._guards import ShapeGuard, SLoc, Source, TracingContext
 from torch._library.fake_class_registry import FakeScriptObject
@@ -1596,6 +1596,17 @@ def _guard_or(a: BoolLikeType, default: bool) -> bool:
             raise AssertionError(f"Expected bool, got {type(a)}")
         return a
 
+    # Native nodes check the config in C++, cheaper than the lookups below.
+    sym_node = a.node
+    if (
+        isinstance(sym_node, _NativeSymNode)
+        and _native_config_is_default()
+        and sym_node.shape_env is not None
+    ):
+        if default:
+            return sym_node.guard_or_true("", 0)
+        return sym_node.guard_or_false("", 0)
+
     # if backed_size_oblivious is True we treat backed as unbacked here.
     if torch.fx.experimental._config.backed_size_oblivious:
         result = _static_eval_sym_bool(a)
@@ -1607,7 +1618,6 @@ def _guard_or(a: BoolLikeType, default: bool) -> bool:
     if shape_env is None:
         return guard_bool(a)
 
-    sym_node = a.node
     if isinstance(sym_node, _NativeSymNode):
         if default:
             return sym_node.guard_or_true("", 0)

@@ -602,31 +602,47 @@ py::object sort_key_to_py(PyArena& arena, const SortKey& k) {
   return t;
 }
 
-// Whether a torch.fx.experimental._config entry is falsy, read the way
-// ConfigModule.__getattr__ resolves an entry without alias or justknob, but
-// without running Python code. Other entries count as set.
-bool config_entry_unset(py::handle entry, py::handle unset) {
-  if (!entry.attr("alias").is_none() || !entry.attr("justknob").is_none() ||
-      py::bool_(entry.attr("hide"))) {
-    return false;
-  }
-  py::object v = entry.attr("env_value_force");
-  if (v.is(unset)) {
-    PyObject* override_value = nullptr;
-    if (PyContextVar_Get(
-            entry.attr("user_override").ptr(), nullptr, &override_value) != 0) {
-      throw py::error_already_set();
+// A torch.fx.experimental._config entry, read the way ConfigModule.__getattr__
+// resolves an entry without alias or justknob, but without running Python
+// code. Everything but `hide` and the user override is fixed at creation.
+struct ConfigEntry {
+  ConfigEntry(py::handle entry, py::handle unset)
+      : entry(py::reinterpret_borrow<py::object>(entry)),
+        user_override(entry.attr("user_override")),
+        forced(entry.attr("env_value_force")) {
+    plain = entry.attr("alias").is_none() && entry.attr("justknob").is_none();
+    fallback = entry.attr("env_value_default");
+    if (fallback.is(unset)) {
+      fallback = entry.attr("default");
     }
-    v = py::reinterpret_steal<py::object>(override_value);
   }
-  if (v.is(unset)) {
-    v = entry.attr("env_value_default");
+
+  // Aliased, justknob and hidden entries count as set.
+  bool falsy(py::handle unset, py::handle hide_str) const {
+    if (!plain || py::bool_(entry.attr(hide_str))) {
+      return false;
+    }
+    py::object v = forced;
+    if (v.is(unset)) {
+      PyObject* override_value = nullptr;
+      if (PyContextVar_Get(user_override.ptr(), nullptr, &override_value) !=
+          0) {
+        throw py::error_already_set();
+      }
+      v = py::reinterpret_steal<py::object>(override_value);
+    }
+    if (v.is(unset)) {
+      v = fallback;
+    }
+    return !py::bool_(v);
   }
-  if (v.is(unset)) {
-    v = entry.attr("default");
-  }
-  return !py::bool_(v);
-}
+
+  py::object entry;
+  py::object user_override;
+  py::object forced;
+  py::object fallback;
+  bool plain;
+};
 
 EnvBinding& binding_of(NativeShapeEnv& env) {
   auto* b = static_cast<EnvBinding*>(env.binding());
@@ -725,18 +741,25 @@ py::object node_to_py(const c10::SymNode& n) {
 
 bool native_config_is_default() {
   py::gil_scoped_acquire gil;
+  struct Entries {
+    py::object unset;
+    py::object hide_str;
+    ConfigEntry backed;
+    ConfigEntry aggressive;
+  };
   static const auto* entries = [] {
     py::dict config =
         py::module_::import("torch.fx.experimental._config").attr("_config");
-    return new std::array<py::object, 3>{
-        config["backed_size_oblivious"],
-        config["aggressive_guard_free_semantics"],
-        py::module_::import("torch.utils._config_module")
-            .attr("_UNSET_SENTINEL")};
+    py::object unset = py::module_::import("torch.utils._config_module")
+                           .attr("_UNSET_SENTINEL");
+    return new Entries{
+        unset,
+        py::reinterpret_steal<py::object>(PyUnicode_InternFromString("hide")),
+        ConfigEntry(config["backed_size_oblivious"], unset),
+        ConfigEntry(config["aggressive_guard_free_semantics"], unset)};
   }();
-  const auto& [backed, aggressive, unset] = *entries;
-  return config_entry_unset(backed, unset) &&
-      config_entry_unset(aggressive, unset);
+  return entries->backed.falsy(entries->unset, entries->hide_str) &&
+      entries->aggressive.falsy(entries->unset, entries->hide_str);
 }
 
 void live_nodes_changed(NativeShapeEnv& env) {
