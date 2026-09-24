@@ -103,6 +103,40 @@ class End2EndTests(torch._dynamo.test_case.TestCase):
 
             self.assertEqual(params, opt_params)
 
+    def test_capturable_optim_on_privateuse1(self):
+        # Regression for safe_to_set_capturable: the PrivateUse1 backend
+        # (e.g. NPU) must be recognized as a capturable-supported device so
+        # Dynamo injects capturable=True into the traced param_groups. With the
+        # old cuda/xpu-only predicate the flag was dropped from the tracker and
+        # the inductor-compiled Adam step diverged from eager.
+        backend_name = torch._C._get_privateuse1_backend_name()
+        if (
+            backend_name == "privateuseone"
+            or not getattr(torch, backend_name).is_available()
+        ):
+            self.skipTest("no PrivateUse1 accelerator (e.g. NPU) available")
+        dev = backend_name
+
+        base = torch.randn(8, device=dev)
+        grad = torch.full_like(base, 1.0)
+
+        def run(compiled):
+            p = base.clone().requires_grad_(True)
+            p.grad = grad.clone()
+            opt = torch.optim.Adam([p], lr=1e-2, capturable=True)
+            if compiled:
+
+                @torch.compile  # noqa: UNSPECIFIED_BACKEND
+                def step(o, x):
+                    o.step()
+
+                step(opt, p)
+            else:
+                opt.step()
+            return p.detach()
+
+        self.assertEqual(run(True), run(False), atol=1e-5, rtol=1e-5)
+
     def test_stock_optimizer_init_group_after_disable_patch(self):
         # TorchPatcher wraps stock Optimizer._init_group with compiler.disable.
         # Compiling the inner step must still constant-fold _init_group via
