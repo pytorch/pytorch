@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 import gc
 import re
+import types
 import unittest
 import weakref
 from unittest.mock import patch
@@ -466,6 +467,61 @@ class TestStreamsGeneric(torch._dynamo.test_case.TestCase):
         res = torch.compile(fn, backend="eager", fullgraph=True)(MyEvent(device="cpu"))
         self.assertEqual(res, torch.ones(2))
 
+    def test_stream_context_type_subclass_override(self):
+        """Test _stream_context_type subclass override without requiring a device backend.
+
+        Out-of-tree backends (e.g. NPU) set _stream_context_type on a
+        StreamContextVariable subclass. This test verifies the override
+        mechanism works using a fake subclass, exercising the same
+        python_type() dispatch path without requiring the device hardware.
+
+        StreamContextVariable is constructed via __new__ (bypassing __init__)
+        because __init__ requires a real StreamVariable whose construction
+        chain depends on Dynamo tracer internals. This mirrors the pattern
+        in test_iterators.py where ConstantVariable.__new__ is used to test
+        tp_iter_impl in isolation.
+        """
+        from torch._dynamo.variables.streams import StreamContextVariable
+
+        class FakeStreamContext:
+            pass
+
+        class FakeStreamContextVariable(StreamContextVariable):
+            _stream_context_type = FakeStreamContext
+
+        self.assertIsNone(StreamContextVariable._stream_context_type)
+        self.assertIs(FakeStreamContextVariable._stream_context_type, FakeStreamContext)
+
+        fake_var = FakeStreamContextVariable.__new__(FakeStreamContextVariable)
+        fake_var.stream = None
+        self.assertIs(fake_var.python_type(), FakeStreamContext)
+
+    def test_stream_context_type_derivation_fallback(self):
+        """Test runtime derivation fallback for devices without a subclass.
+
+        When _stream_context_type is None, python_type() derives the type
+        from getattr(torch, device_type).StreamContext. This tests the
+        fallback path using a fake device module registered on torch,
+        without requiring real device hardware.
+
+        See test_stream_context_type_subclass_override for the __new__
+        construction rationale.
+        """
+        from torch._dynamo.variables.streams import StreamContextVariable
+
+        class FakeStreamContext:
+            pass
+
+        fake_module = types.SimpleNamespace(StreamContext=FakeStreamContext)
+
+        fake_var = StreamContextVariable.__new__(StreamContextVariable)
+        fake_var.stream = types.SimpleNamespace(
+            device=types.SimpleNamespace(type="fakedev")
+        )
+
+        with patch.object(torch, "fakedev", fake_module, create=True):
+            self.assertIs(fake_var.python_type(), FakeStreamContext)
+
 
 @requires_accelerator
 class TestStreams(torch._dynamo.test_case.TestCase):
@@ -476,6 +532,34 @@ class TestStreams(torch._dynamo.test_case.TestCase):
     @classmethod
     def tearDownClass(cls):
         super().tearDownClass()
+
+    def test_stream_context_python_type(self, device):
+        device_mod = getattr(torch, torch.device(device).type)
+
+        def fn(s):
+            ctx = device_mod.stream(s)
+            return (
+                torch.ones(2)
+                if isinstance(ctx, device_mod.StreamContext)
+                else torch.zeros(2)
+            )
+
+        s = device_mod.Stream()
+        res = torch.compile(fn, backend="eager", fullgraph=True)(s)
+        self.assertEqual(res, torch.ones(2))
+
+    def test_stream_context_attribute_access(self, device):
+        device_mod = getattr(torch, torch.device(device).type)
+
+        def fn(s):
+            ctx = device_mod.stream(s)
+            with ctx:
+                pass
+            return ctx.stream
+
+        s = device_mod.Stream()
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(s), fn(s))
 
     def test_stream_weakref(self, device):
         s = torch.Stream(device=device)
