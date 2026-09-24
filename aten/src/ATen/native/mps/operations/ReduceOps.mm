@@ -643,26 +643,6 @@ static std::tuple<Tensor, Tensor> min_max_mps_impl(const Tensor& input_t,
   return std::tuple<Tensor, Tensor>{output_t, indices_t};
 }
 
-// Unified host-side dispatch for reductions on MPS, shared by
-// sum/nansum/mean/count_nonzero, min/max/all/any and argmax/argmin. Kernel name
-// pattern is always `{prefix}reduction_{variant}_{TI}_{TO}` with variant in
-// `""/"outer"/"outer_small_dim"/"narrow"/"narrow_strided"/"inner"/
-// "inner_chunk"/"flat"/"strided"`; every op/dtype pair with a base kernel
-// also has every variant (narrow_strided is sum-family only). Selects among
-// these code paths:
-//   1. Non-innermost dim reduction, viewed as [outer_size, dim_size,
-//      inner_size] with the dim reduced (the CUDA spatial softmax / scan
-//      decomposition): narrow for inner_size below a simdgroup,
-//      outer_small_dim for short dim_size, split-K two-pass for tall skinny
-//      inputs, outer otherwise. Taken for contiguous inputs and for
-//      non-contiguous ones whose dims collapse to that view.
-//   2. Last-dim reduction on contiguous input: inner_chunk for short rows,
-//      split-K two-pass for skinny-M/huge-K, inner otherwise.
-//   3. Two-pass full reduction (scalar output, large input).
-//   4. Generic single-pass fallback.
-// argmax/argmin skip outer_small_dim, inner_chunk and path 3, use narrow only
-// as split-K pass 1, and name their split-K kernels
-// `{prefix}reduction_{variant}_p1_{TI}` / `{prefix}reduction_combine_{TI}`.
 enum class ReductionFamily { Sum, Value, Arg };
 
 enum class ReductionKernel {
@@ -838,12 +818,6 @@ static ReductionPlan select_reduction_plan(const Tensor& input, const Tensor& ou
         reduced_dim = d;
       }
     }
-    // Any non-innermost dim routes here, viewed as [outer_size, dim_size,
-    // inner_size] with the dim reduced (outer_size = 1 when reduced_dim ==
-    // 0). On a non-contiguous input whose dims still collapse to that view
-    // (e.g. a sliced or padded view), the strided outer / outer_small_dim /
-    // narrow kernels index through explicit strides, skipping the
-    // .contiguous() copy the generic path would need.
     if (num_reduced == 1 && reduced_dim < input.dim() - 1) {
       if (auto layout = outer_reduction_layout(input, reduced_dim)) {
         return select_outer_reduction(*layout, family, input.numel());
@@ -911,15 +885,10 @@ struct MetalType {
 
 struct ReductionOp {
   ReductionFamily family;
-  std::string prefix; // "sum_", "nansum_", "count_nonzero_", "min_", "max_",
-                      // "all_", "any_", "argmax_", "argmin_".
-  MetalType input_type; // may differ from input.scalar_type() (e.g.
-                        // bool -> char for min/max).
-  MetalType output_type; // may differ from output.scalar_type() for
-                         // the same remap reason.
-  float param = 0; // sum/mean only; appended as a float buffer
-                   // to the outer/inner kernel signatures, and
-                   // passed via NormParams.p elsewhere.
+  std::string prefix;
+  MetalType input_type;
+  MetalType output_type;
+  float param = 0;
 };
 
 struct ReductionPartials {
@@ -997,19 +966,10 @@ static void encode_reduction(MPSStream* stream,
         }
       }
       if (narrow) {
-        // Narrow (contiguous or strided) handles inner_size < simdgroup_size, where
-        // even the small-dim layout idles most of a threadgroup row; dispatched with
-        // the largest multiple of inner_size <= NARROW_TG_SIZE threads.
         const auto active = (NARROW_TG_SIZE / layout.inner_size) * layout.inner_size;
         grid = MTLSizeMake(active, plan.num_segments, layout.outer_size);
         group = MTLSizeMake(active, 1, 1);
       } else {
-        // The outer kernels view the input as [outer_size, dim_size, inner_size]
-        // with the dim reduced: each threadgroup covers OUTER_TG_WIDTH consecutive
-        // inner columns, its OUTER_TG_HEIGHT rows walking the reduced dim; grid y
-        // carries the split-K segments, grid z the outer batches. outer_small_dim
-        // is the height-1 variant for short dim_size, where a full-height
-        // threadgroup would mostly idle.
         const auto height = plan.kernel == ReductionKernel::OuterSmallDim ? 1u : OUTER_TG_HEIGHT;
         const auto num_tgs = at::ceil_div(layout.inner_size, OUTER_TG_WIDTH);
         grid = MTLSizeMake(num_tgs * OUTER_TG_WIDTH, plan.num_segments * height, layout.outer_size);
@@ -1091,9 +1051,6 @@ static void reduction_dispatch_mps(Tensor input,
     return;
   }
 
-  // Shared split-K driver: allocate the num_outputs * num_segs partials
-  // ((value, index) pairs for arg), run the layout-specific pass 1, resolve
-  // with combine.
   const auto combine_plan = reduction_combine_plan(plan, op.family);
   // For ops without a strided pass-1 kernel, .contiguous() the input
   // (no-op when already contiguous).
