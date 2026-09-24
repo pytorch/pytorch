@@ -1532,6 +1532,28 @@ class _SubParentSourceContract:
 
 
 @dataclasses.dataclass(frozen=True)
+class _LaneProjection:
+    """How a lane-width value relates to parent-resolution computation.
+
+    ``lane`` names which lane of ``parent`` the value is; None means every
+    lane is equal and parent resolution used the value itself (a lifted
+    per-group value). While ``split`` is False the value is a placeholder
+    whose tl.split has not been emitted; consumers that fold onto the parent
+    chain may keep it that way forever.
+    """
+
+    parent: CSEVariable
+    lane: int | None
+    split: bool
+
+
+class _SubParentFusion(enum.Enum):
+    DEFER = enum.auto()
+    REJECT = enum.auto()
+    FUSE = enum.auto()
+
+
+@dataclasses.dataclass(frozen=True)
 class _SubParentRelationDescriptor:
     """Immutable replay metadata for one planned source-to-consumer relation."""
 
@@ -1550,28 +1572,6 @@ class _SubParentReplayContext:
     output_group: int
     output_lanes: int
     output_lane: int
-
-
-class _SubParentFusion(enum.Enum):
-    DEFER = enum.auto()
-    REJECT = enum.auto()
-    FUSE = enum.auto()
-
-
-@dataclasses.dataclass(frozen=True)
-class _LaneProjection:
-    """How a lane-width value relates to parent-resolution computation.
-
-    ``lane`` names which lane of ``parent`` the value is; None means every
-    lane is equal and parent resolution used the value itself (a lifted
-    per-group value). While ``split`` is False the value is a placeholder
-    whose tl.split has not been emitted; consumers that fold onto the parent
-    chain may keep it that way forever.
-    """
-
-    parent: CSEVariable
-    lane: int | None
-    split: bool
 
 
 def _select_lane(
@@ -3193,6 +3193,10 @@ class SIMDScheduling(BaseScheduling):
                 reduction_can_fuse = MixOrderReduction.can_fuse(node1, node2)
 
             if not reduction_can_fuse:
+                # Scheduler legality creates the fused nested node, but SIMD
+                # still runs this backend fusion gate. The regular
+                # numel/rnumel checks reject nested reductions because the two
+                # reductions intentionally use different iteration spaces.
                 from torch._inductor.scheduler import NestedReduction
 
                 reduction_can_fuse = NestedReduction._is_dependent_reduction_pair(
@@ -3375,7 +3379,12 @@ class SIMDScheduling(BaseScheduling):
         parent_numel: sympy.Expr,
         parent_rnumel: sympy.Expr,
     ) -> bool:
-        """Whether ``node`` runs at a fraction of the parent tile."""
+        """Whether ``node`` runs at a fraction of the parent tile.
+
+        A group member is normally reduced ``(parent_numel, 1)``, full resolution
+        ``(parent_numel * parent_rnumel, 1)``, or the reduction itself. Anything
+        else only has meaning under a sub-parent plan.
+        """
         if node.is_reduction():
             return False
         _, (node_numel, node_rnumel) = node.group
@@ -3393,7 +3402,7 @@ class SIMDScheduling(BaseScheduling):
         node1: scheduler.BaseSchedulerNode,
         node2: scheduler.BaseSchedulerNode,
     ) -> _SubParentFusion:
-        """Map scheduler proof and SIMD admission to DEFER/REJECT/FUSE."""
+        """Decide whether sub-parent planning fuses, rejects, or defers."""
         if (
             not self.supports_sub_parent_epilogue
             or not torch._inductor.config.triton.nested_reduction
@@ -3401,7 +3410,6 @@ class SIMDScheduling(BaseScheduling):
             return _SubParentFusion.DEFER
         if node1.is_reduction() == node2.is_reduction():
             return _SubParentFusion.DEFER
-
         reduction_node = node1 if node1.is_reduction() else node2
         consumer_node = node2 if node1.is_reduction() else node1
         _, (parent_numel, parent_rnumel) = reduction_node.group
@@ -3419,9 +3427,7 @@ class SIMDScheduling(BaseScheduling):
             return _SubParentFusion.REJECT
 
         plan = fusion_result.plan
-        if plan is None or not self._sub_parent_plan_is_admitted(
-            nodes, parent_numel, plan
-        ):
+        if not self._sub_parent_plan_is_admitted(nodes, parent_numel, plan):
             return _SubParentFusion.REJECT
         epilogue_node_set = OrderedSet(plan.sub_parent_stages[0].epilogue_nodes)
         if self._is_standalone_staged_reduction(reduction_node):
@@ -3438,7 +3444,12 @@ class SIMDScheduling(BaseScheduling):
         parent_numel: sympy.Expr,
         parent_rnumel: sympy.Expr,
     ) -> scheduler.StagedReductionPlan | None:
-        """Return a proven logical plan when this SIMD backend can emit it."""
+        """The scheduler's plan, gated on this backend being able to emit it.
+
+        The backend gates (config, ``supports_sub_parent_epilogue``, 2D tiling)
+        belong here rather than in the scheduler, which has no view of them. See
+        Note [Sub-parent reduction epilogues].
+        """
         if (
             not self.supports_sub_parent_epilogue
             or not torch._inductor.config.triton.nested_reduction
@@ -3477,12 +3488,12 @@ class SIMDScheduling(BaseScheduling):
             and not self._translated_projection_is_persistent(plan)
         )
 
-    def _translated_projection_is_persistent(
-        self, plan: scheduler.StagedReductionPlan
-    ) -> bool:
-        """Whether the selected Triton reduction owns a complete parent tile."""
-        if not plan.parent_nodes:
-            return True
+    @staticmethod
+    def _translated_group_extent_subs(
+        plan: scheduler.StagedReductionPlan,
+    ) -> dict[sympy.Expr, sympy.Expr]:
+        # The final SchedulerNode groups may still spell the specialized
+        # parent width with the backed symbolic dimension.
         group_extent_subs: dict[sympy.Expr, sympy.Expr] = {}
         for parent_node in plan.parent_nodes:
             if not parent_node.is_reduction():
@@ -3499,6 +3510,15 @@ class SIMDScheduling(BaseScheduling):
             ):
                 group_extent_subs[node_rnumel] = plan.parent_rnumel
                 break
+        return group_extent_subs
+
+    def _translated_projection_is_persistent(
+        self, plan: scheduler.StagedReductionPlan
+    ) -> bool:
+        """Whether the selected Triton reduction owns a complete parent tile."""
+        if not plan.parent_nodes:
+            return True
+        group_extent_subs = self._translated_group_extent_subs(plan)
         parent_schedule = self.generate_node_schedule(
             plan.parent_nodes,
             plan.parent_numel,
@@ -3542,17 +3562,14 @@ class SIMDScheduling(BaseScheduling):
         )
         return len(tiling) == 2
 
-    def has_sub_parent_epilogue(
-        self,
-        nodes: Sequence[BaseSchedulerNode],
-    ) -> bool:
+    def has_sub_parent_epilogue(self, nodes: Sequence[BaseSchedulerNode]) -> bool:
         return self._find_sub_parent_epilogue_plan(list(nodes)) is not None
 
     def _find_sub_parent_epilogue_plan(
         self,
         nodes: Sequence[BaseSchedulerNode],
     ) -> scheduler.StagedReductionPlan | None:
-        """Return the first SIMD-representable standalone plan for ``nodes``."""
+        """Return the first valid standalone sub-parent plan for ``nodes``."""
         for node in nodes:
             if not node.is_reduction():
                 continue
@@ -3593,20 +3610,21 @@ class SIMDScheduling(BaseScheduling):
         current_loop_has_reduction = False
         completed_reduction_loop = False
 
-        def fits_in_main_body(n):
+        def node_group(n):
             _, (node_numel, node_rnumel) = n.group
             if group_extent_subs:
                 node_numel = sympy_subs(node_numel, group_extent_subs)
                 node_rnumel = sympy_subs(node_rnumel, group_extent_subs)
+            return node_numel, node_rnumel
+
+        def fits_in_main_body(n):
+            node_numel, node_rnumel = node_group(n)
             return (node_numel == numel and node_rnumel == rnumel) or (
                 node_numel == numel * rnumel and node_rnumel == 1
             )
 
         def fits_outside_reduction(n):
-            _, (node_numel, node_rnumel) = n.group
-            if group_extent_subs:
-                node_numel = sympy_subs(node_numel, group_extent_subs)
-                node_rnumel = sympy_subs(node_rnumel, group_extent_subs)
+            node_numel, node_rnumel = node_group(n)
             return node_numel == numel and node_rnumel == 1 and rnumel != 1
 
         def expect_improved_memory_usage(n):
@@ -4552,24 +4570,11 @@ class SIMDScheduling(BaseScheduling):
         rnumel = plan.parent_rnumel
         sub_parent_epilogue_nodes = stage.epilogue_nodes
         parent_nodes = list(plan.parent_nodes)
-        group_extent_subs = {}
-        if has_translated_relations:
-            # The scheduler specializes the canonical parent width, while the
-            # final SchedulerNode groups may still spell it with the backed
-            # symbolic dimension.  Normalize only this committed translated
-            # plan; ordinary dynamic reductions retain their existing group
-            # matching behavior.
-            for parent_node in parent_nodes:
-                if not parent_node.is_reduction():
-                    continue
-                _, (node_numel, node_rnumel) = parent_node.group
-                if (
-                    V.graph.sizevars.statically_known_equals(node_numel, numel)
-                    and V.graph.sizevars.statically_known_equals(node_rnumel, rnumel)
-                    and node_rnumel != rnumel
-                ):
-                    group_extent_subs[node_rnumel] = rnumel
-                    break
+        group_extent_subs = (
+            self._translated_group_extent_subs(plan)
+            if has_translated_relations
+            else {}
+        )
         required_replay_relations = tuple(
             relation
             for relation in stage.access_relations
@@ -4634,9 +4639,7 @@ class SIMDScheduling(BaseScheduling):
                 parent_rnumel,
                 local_reduction_in_r=True,
             )
-            sub_parent_family = layout.make_sub_parent_family(
-                sub_parent_factor,
-            )
+            sub_parent_family = layout.make_sub_parent_family(sub_parent_factor)
             with kernel:
                 value_resolver = _SubParentValueResolver(
                     V.get_ops_handler(),
