@@ -199,6 +199,7 @@ def _override_composite_implicit_decomp(cia_ops_to_callable):
     # functional but not really aka dropout), for these cases, we just decompose.
     saved_tables = {}
     patched_ops = set()
+    fake_impl_registered_ops = set()
     for op_overload, decomp_callable in cia_ops_to_callable.items():
         saved_tables[op_overload] = op_overload.py_kernels.copy()
         patched_ops.add(op_overload)
@@ -211,12 +212,9 @@ def _override_composite_implicit_decomp(cia_ops_to_callable):
         # See NOTE: Registering old CIA to Backend kernel
         # It is important that we cache this before we override py_kernels.
         orig_cia_callable = _get_decomp_for_cia(op_overload)
-        if torch._C.DispatchKey.CompositeImplicitAutograd in op_overload.py_kernels:
-            del op_overload.py_kernels[torch._C.DispatchKey.CompositeImplicitAutograd]
-
-        op_overload.py_impl(torch._C.DispatchKey.CompositeImplicitAutograd)(
-            decomp_callable
-        )
+        cia_key = torch._C.DispatchKey.CompositeImplicitAutograd
+        op_overload.py_kernels[cia_key] = decomp_callable
+        op_overload._dispatch_cache.clear()
 
         # [NOTE] Directly registering fake tensor rule to CIA ops
         # The problem we are facing here is if your CIA custom rule
@@ -242,6 +240,7 @@ def _override_composite_implicit_decomp(cia_ops_to_callable):
                     original_callable=orig_cia_callable,
                 )
             )
+            fake_impl_registered_ops.add(op_overload)
 
         for key in _BACKEND_KEYS_TO_OVERRIDE:
             if key not in op_overload.py_kernels:
@@ -269,7 +268,8 @@ def _override_composite_implicit_decomp(cia_ops_to_callable):
             op.py_kernels.clear()
             op.py_kernels.update(saved_tables[op])
             op._dispatch_cache.clear()
-            _deregister_op_impl(op)
+            if op in fake_impl_registered_ops:
+                _deregister_op_impl(op)
 
 
 def _split_decomp_table_to_cia_and_python_decomp(
