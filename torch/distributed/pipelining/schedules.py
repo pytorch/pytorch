@@ -8,7 +8,7 @@ import itertools
 import logging
 import re
 from abc import ABC, abstractmethod
-from collections import Counter, defaultdict
+from collections import Counter, defaultdict, deque
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
@@ -1915,6 +1915,234 @@ def _merge_bw(
     return merged_actions
 
 
+def _add_wait_send(
+    comm_actions: dict[int, list[_Action]],
+) -> dict[int, list[_Action]]:
+    """Wait for a forward send after its matching local backward."""
+    backward_types = (FULL_BACKWARD, BACKWARD_INPUT)
+
+    def backward_slots(action: _Action) -> list[tuple[int, int | None]]:
+        return [
+            (part.stage_index, part.microbatch_index)
+            for part in action.sub_actions or (action,)
+            if part.computation_type in backward_types
+        ]
+
+    actions_with_waits: dict[int, list[_Action]] = {}
+    for rank, actions in comm_actions.items():
+        sent = {
+            (action.stage_index, action.microbatch_index)
+            for action in actions
+            if action.computation_type == SEND_F
+        }
+        rank_actions_with_waits: list[_Action] = []
+        for action in actions:
+            rank_actions_with_waits.append(action)
+            for stage_index, microbatch_index in backward_slots(action):
+                if (stage_index, microbatch_index) in sent:
+                    rank_actions_with_waits.append(
+                        _Action(stage_index, WAIT_SEND_F, microbatch_index)
+                    )
+                    sent.remove((stage_index, microbatch_index))
+        actions_with_waits[rank] = rank_actions_with_waits
+
+    return actions_with_waits
+
+
+def _add_wait_send_budget(
+    comm_actions: dict[int, list[_Action]],
+    stage_to_rank: Callable[[int], int],
+    max_outstanding_sends: int,
+) -> dict[int, list[_Action]]:
+    """Insert waits that cap pending sends on each rank.
+
+    The pass matches each send to its peer receive and builds a dependency
+    graph from rank-local action order and send-to-receive edges. It walks
+    actions in causal order and tracks the peer progress known to each rank.
+
+    Before a send exceeds the limit, the pass first waits on sends known to be
+    complete. If needed, it waits on sends whose peer receive is posted; these
+    waits are safe but may stall. Existing waits remain unless an earlier
+    inserted wait already retired that send. The pass raises when no safe wait
+    placement can satisfy the limit.
+    """
+    ranks = sorted(comm_actions)
+    send_types = {SEND_F: (1, RECV_F), SEND_B: (-1, RECV_B)}
+
+    # Index receives so each send can find its matching peer receive.
+    recv_at: dict[tuple[int, _ComputationType, int, int | None], int] = {}
+    for rank in ranks:
+        for index, action in enumerate(comm_actions[rank]):
+            if action.computation_type in (RECV_F, RECV_B):
+                recv_at[
+                    (
+                        rank,
+                        action.computation_type,
+                        action.stage_index,
+                        action.microbatch_index,
+                    )
+                ] = index
+
+    # Match each send to its peer receive.
+    matching_recv: dict[tuple[int, int], tuple[int, int]] = {}
+    for rank in ranks:
+        for index, action in enumerate(comm_actions[rank]):
+            if action.computation_type not in send_types:
+                continue
+            stage_offset, recv_type = send_types[action.computation_type]
+            peer_stage = action.stage_index + stage_offset
+            peer_rank = stage_to_rank(peer_stage)
+            recv = (
+                peer_rank,
+                recv_at[(peer_rank, recv_type, peer_stage, action.microbatch_index)],
+            )
+            matching_recv[(rank, index)] = recv
+
+    recv_in_degree = Counter(matching_recv.values())
+    in_degree = {
+        (rank, index): int(index > 0) + recv_in_degree[(rank, index)]
+        for rank in ranks
+        for index in range(len(comm_actions[rank]))
+    }
+
+    def get_consumed_recv_indices(action: _Action, rank: int) -> list[int]:
+        """Return receive-action indices consumed by this compute action."""
+        result = []
+        for part in action.sub_actions or (action,):
+            if part.computation_type == F:
+                recv_type = RECV_F
+            elif part.computation_type in (FULL_BACKWARD, BACKWARD_INPUT):
+                recv_type = RECV_B
+            else:
+                continue
+            key = (rank, recv_type, part.stage_index, part.microbatch_index)
+            if key in recv_at:
+                result.append(recv_at[key])
+        return result
+
+    known_positions = {rank: dict.fromkeys(ranks, -1) for rank in ranks}
+    known_positions_at_recv: dict[tuple[int, int], dict[int, int]] = {}
+    pending_sends: dict[int, dict[_Action, tuple[int, int]]] = {
+        rank: {} for rank in ranks
+    }
+    inserted_waits: Counter[_Action] = Counter()
+    inserted_counts = {rank: Counter() for rank in ranks}
+    potentially_stalling = {rank: Counter() for rank in ranks}
+    actions_with_waits: dict[int, list[_Action]] = {rank: [] for rank in ranks}
+    posted_recvs: set[tuple[int, int]] = set()
+    peak_pending_sends = dict.fromkeys(ranks, 0)
+
+    def insert_waits_until(rank: int, limit: int) -> None:
+        """Insert safe waits until the rank has at most ``limit`` pending sends."""
+        known = known_positions[rank]
+        pending = pending_sends[rank]
+
+        def insert_wait(send: _Action) -> None:
+            wait_type = WAIT_SEND_F if send.computation_type == SEND_F else WAIT_SEND_B
+            actions_with_waits[rank].append(
+                _Action(send.stage_index, wait_type, send.microbatch_index)
+            )
+            inserted_waits[send] += 1
+            inserted_counts[rank][send.computation_type] += 1
+            del pending[send]
+
+        # First wait for sends known to have completed without stalling.
+        for send, (peer_rank, recv_index) in list(pending.items()):
+            if len(pending) <= limit:
+                return
+            if known[peer_rank] >= recv_index:
+                insert_wait(send)
+
+        # A posted receive makes the wait safe, but it may still stall.
+        for send, recv in list(pending.items()):
+            if len(pending) <= limit:
+                return
+            if recv in posted_recvs:
+                potentially_stalling[rank][send.computation_type] += 1
+                insert_wait(send)
+
+    # Walk actions in causal order. Track pending sends and peer progress,
+    # and insert waits before a rank exceeds its send limit.
+    queue = deque(sorted(node for node, degree in in_degree.items() if degree == 0))
+    num_walked = 0
+    while queue:
+        rank, index = queue.popleft()
+        num_walked += 1
+        action = comm_actions[rank][index]
+        known = known_positions[rank]
+        known[rank] = index
+
+        if action.computation_type in send_types:
+            # Make room before issuing another send.
+            insert_waits_until(rank, max_outstanding_sends - 1)
+            actions_with_waits[rank].append(action)
+            recv = matching_recv[(rank, index)]
+            known_positions_at_recv[recv] = dict(known)
+            pending_sends[rank][action] = recv
+            peak_pending_sends[rank] = max(
+                peak_pending_sends[rank], len(pending_sends[rank])
+            )
+            if len(pending_sends[rank]) > max_outstanding_sends:
+                prior = ", ".join(str(send) for send in list(pending_sends[rank])[:-1])
+                raise ValueError(
+                    f"Cannot satisfy max_outstanding_sends={max_outstanding_sends} "
+                    f"on pipeline rank {rank}: the safe static schedule requires "
+                    f"peak {len(pending_sends[rank])} before {action}. "
+                    f"Outstanding: [{prior}]. No causally safe release point "
+                    "existed before this send. Increase the limit or change the "
+                    "schedule."
+                )
+        elif action.computation_type in (WAIT_SEND_F, WAIT_SEND_B):
+            # Keep an existing wait unless an inserted wait retired its send.
+            send_type = SEND_F if action.computation_type == WAIT_SEND_F else SEND_B
+            send = _Action(action.stage_index, send_type, action.microbatch_index)
+            if pending_sends[rank].pop(send, None) is not None:
+                actions_with_waits[rank].append(action)
+            elif inserted_waits[send]:
+                inserted_waits[send] -= 1
+            else:
+                raise ValueError(f"{action} has no pending send")
+        else:
+            if action.computation_type in (RECV_F, RECV_B):
+                posted_recvs.add((rank, index))
+            actions_with_waits[rank].append(action)
+            # A consumed receive transfers the sender's known causal progress.
+            for recv_index in get_consumed_recv_indices(action, rank):
+                for peer_rank, position in known_positions_at_recv[
+                    (rank, recv_index)
+                ].items():
+                    known[peer_rank] = max(known[peer_rank], position)
+
+        successors = []
+        if index + 1 < len(comm_actions[rank]):
+            successors.append((rank, index + 1))
+        if action.computation_type in send_types:
+            successors.append(matching_recv[(rank, index)])
+        for successor in successors:
+            in_degree[successor] -= 1
+            if in_degree[successor] == 0:
+                queue.append(successor)
+
+    if num_walked != len(in_degree):
+        raise ValueError("Pipeline sends and receives form a cycle")
+
+    for rank in ranks:
+        logger.debug(
+            "Pipeline rank %d send budget %d: peak %d, inserted waits F=%d B=%d, "
+            "potentially stalling F=%d B=%d, final drain=%d",
+            rank,
+            max_outstanding_sends,
+            peak_pending_sends[rank],
+            inserted_counts[rank][SEND_F],
+            inserted_counts[rank][SEND_B],
+            potentially_stalling[rank][SEND_F],
+            potentially_stalling[rank][SEND_B],
+            len(pending_sends[rank]),
+        )
+
+    return actions_with_waits
+
+
 def _add_send_recv(
     compute_actions: dict[int, list[_Action]],
     stage_to_rank: Callable[[int], int],
@@ -2827,6 +3055,16 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
             "unshard_lookahead", "full"
         )
         self._defer_reduce_grad_wait: bool = kwargs.pop("defer_reduce_grad_wait", False)
+        self._max_outstanding_sends: int | None = kwargs.pop(
+            "max_outstanding_sends", None
+        )
+        self._inserted_send_waits: set[_SendKey] = set()
+        if self._max_outstanding_sends is not None and (
+            not isinstance(self._max_outstanding_sends, int)
+            or isinstance(self._max_outstanding_sends, bool)
+            or self._max_outstanding_sends < 0
+        ):
+            raise ValueError("max_outstanding_sends must be a non-negative integer")
         super().__init__(*args, **kwargs)
         # Action to custom function mapping
         self._comp_type_to_function_map: dict[_ComputationType, Callable] = {}
@@ -2901,6 +3139,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
         super()._validate_and_set_stage_mapping(actions)
 
         self.pipeline_order_with_comms: dict[int, list[_Action]] = {}
+        provided_send_waits: set[_SendKey] = set()
         unshard_lookahead = _resolve_unshard_lookahead(
             self._unshard_lookahead,
             num_pp_ranks=len(actions),
@@ -2921,6 +3160,16 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                             f"Expected action to be not None, got {type(action)}"
                         )
                     self.pipeline_order_with_comms[rank].append(action)
+                    if (
+                        action.computation_type in (WAIT_SEND_F, WAIT_SEND_B)
+                        and action.microbatch_index is not None
+                    ):
+                        send_type = (
+                            SEND_F if action.computation_type == WAIT_SEND_F else SEND_B
+                        )
+                        provided_send_waits.add(
+                            (send_type, action.stage_index, action.microbatch_index)
+                        )
             # TODO what level of validation should we offer for compute+comms schedule?
             if self._defer_reduce_grad_wait:
                 # Each stage must follow REDUCE -> WAIT. Different stages may
@@ -2980,6 +3229,12 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 num_stages=self._num_stages,
             )
 
+            # Release forward sends at no-stall causal points first. The optional
+            # budget pass below adds any remaining waits needed to enforce its limit.
+            self.pipeline_order_with_comms = _add_wait_send(
+                self.pipeline_order_with_comms
+            )
+
             if self._defer_pp_recv:
                 self.pipeline_order_with_comms = _defer_recv_ops(
                     self.pipeline_order_with_comms,
@@ -2987,6 +3242,25 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 )
         else:
             raise NotImplementedError(f"{format=} is not implemented")
+
+        if self._max_outstanding_sends is not None:
+            self.pipeline_order_with_comms = _add_wait_send_budget(
+                self.pipeline_order_with_comms,
+                stage_to_rank=lambda s: self.stage_index_to_group_rank[s],
+                max_outstanding_sends=self._max_outstanding_sends,
+            )
+
+        self._inserted_send_waits = {
+            (
+                SEND_F if action.computation_type == WAIT_SEND_F else SEND_B,
+                action.stage_index,
+                action.microbatch_index,
+            )
+            for actions in self.pipeline_order_with_comms.values()
+            for action in actions
+            if action.computation_type in (WAIT_SEND_F, WAIT_SEND_B)
+            and action.microbatch_index is not None
+        } - provided_send_waits
 
     def _load_csv(
         self,
@@ -3119,6 +3393,8 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
             if action.computation_type == WAIT_SEND_F
             and action.microbatch_index is not None
         }
+        if not self._has_backward:
+            explicit_fwd_waits.difference_update(self._inserted_send_waits)
 
         def _wait_fwd_send_if_implicit(stage_idx: int, mb_index: int) -> None:
             key = (SEND_F, stage_idx, mb_index)
@@ -3181,6 +3457,12 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
             elif comp_type in (WAIT_SEND_F, WAIT_SEND_B):
                 send_type = SEND_F if comp_type == WAIT_SEND_F else SEND_B
                 key = (send_type, stage_idx, mb_index)
+                if (
+                    not self._has_backward
+                    and key in self._inserted_send_waits
+                    and not pending_sends.is_pending(key)
+                ):
+                    return
                 pending_sends.wait(key)
             elif comp_type == RECV_F:
                 if (stage_idx, mb_index) in self.fwd_recv_ops:
@@ -3693,6 +3975,10 @@ class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
             at ``REDUCE_GRAD`` and wait at the matching ``WAIT_REDUCE_GRAD``.
             At most one reduction may be pending per pipeline rank. FSDP stages
             that use ``share_comm_ctx()`` are not supported.
+        max_outstanding_sends: Maximum number of pending forward and backward
+            send batches on each pipeline rank. ``None`` applies no hard limit.
+            Schedule construction raises ``ValueError`` when no causally safe
+            wait placement can meet the limit.
     """
 
     def __init__(
@@ -3710,6 +3996,7 @@ class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
         unshard_lookahead: Literal["full", "auto"] | tuple[int, ...] = "full",
         *,
         defer_reduce_grad_wait: bool = False,
+        max_outstanding_sends: int | None = None,
     ):
         self.pp_group_size = stages[0].group_size
         super().__init__(
@@ -3725,6 +4012,7 @@ class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
             max_active_stages=max_active_stages,
             unshard_lookahead=unshard_lookahead,
             defer_reduce_grad_wait=defer_reduce_grad_wait,
+            max_outstanding_sends=max_outstanding_sends,
         )
         self.n_local_stages = len(stages)
         self.rank = stages[0].group_rank
