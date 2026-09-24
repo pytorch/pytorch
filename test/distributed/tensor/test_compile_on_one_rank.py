@@ -307,7 +307,6 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
             lambda msg: f"{msg}\nno node should bake a concrete indexed accelerator device; found: {baked}",
         )
 
-    
     @unittest.skipIf(not torch.accelerator.is_available(), "requires an accelerator")
     @compiler_config.patch(compile_on_one_rank=True)
     def test_dynamo_output_graph_factory_device_not_baked(self):
@@ -1226,7 +1225,12 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         from torch._dynamo.exc import Unsupported
 
         def f(x):
-            return x + torch.accelerator.get_device_properties(x.device).multi_processor_count
+            return (
+                x
+                + torch.accelerator.get_device_properties(
+                    x.device
+                ).multi_processor_count
+            )
 
         # Not "compile_on_one_rank": this file's own name appears in the traceback.
         torch._dynamo.reset()
@@ -1323,7 +1327,9 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
             return x + x.device.index + x.get_device() + x.device.index
 
         torch._dynamo.reset()
-        torch.compile(f, backend=backend, fullgraph=True)(torch.zeros(1, device=device_type))
+        torch.compile(f, backend=backend, fullgraph=True)(
+            torch.zeros(1, device=device_type)
+        )
         nodes = [
             n
             for g in backend.graphs
@@ -1699,7 +1705,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
     @parametrize("consumer", ("synchronize", "current_stream", "get_device_module"))
     def test_current_device_consumers_under_coor(self, consumer):
         from torch._dynamo.testing import CompileCounter
-        
+
         def f(x):
             if consumer == "synchronize":
                 torch.accelerator.synchronize(x.device)
@@ -1720,7 +1726,9 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
                 with patch.object(torch.accelerator, "synchronize") as synchronize:
                     actual = compiled(x)
                 self.assertEqual(actual, x + 1)
-                self.assertEqual(synchronize.call_args.args, (torch.accelerator.current_device(),))
+                self.assertEqual(
+                    synchronize.call_args.args, (torch.accelerator.current_device(),)
+                )
             else:
                 self.assertEqual(compiled(x), f(x))
 
