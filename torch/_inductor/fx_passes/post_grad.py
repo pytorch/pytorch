@@ -2328,6 +2328,11 @@ def _can_fold_scaled_mm_output_scale(match: Match) -> bool:
     """
     if not (config.max_autotune or config.max_autotune_gemm):
         return False
+    # This rewrite needs to retry ordinary scaled-mm lowering when every
+    # native-output-scale choice fails. Pipelined autotuning defers failures
+    # until scheduler finalization, after this graph rewrite is irreversible.
+    if config.pipeline_max_autotune_gemm:
+        return False
     if not _use_autotune_backend("NVGEMM"):
         return False
 

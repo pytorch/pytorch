@@ -427,7 +427,7 @@ class ComposabilityTest(MultiProcContinuousTest):
                 for i in range(n_microbatches)
             )
             schedule._prepare_schedule_with_comms({0: actions})
-            return schedule
+            return schedule, stage
 
         def assert_unsharded(model, expected):
             states = [
@@ -442,7 +442,7 @@ class ComposabilityTest(MultiProcContinuousTest):
                 [expected] * len(states),
             )
 
-        schedule = make_schedule(model, microbatches_per_step)
+        schedule, stage = make_schedule(model, microbatches_per_step)
         for step in range(total_steps):
             start = step * microbatches_per_step
             end = start + microbatches_per_step
@@ -455,7 +455,7 @@ class ComposabilityTest(MultiProcContinuousTest):
             assert_unsharded(model, not finalize_gradients)
 
         self.assertNotIn(0, schedule.unsharded_stages)
-        ref_schedule = make_schedule(ref_model, total_microbatches)
+        ref_schedule, _ = make_schedule(ref_model, total_microbatches)
         ref_schedule.step(inputs, target=targets)
 
         ref_parameters = dict(ref_model.named_parameters())
@@ -469,6 +469,20 @@ class ComposabilityTest(MultiProcContinuousTest):
                 atol=1e-6,
                 rtol=1e-5,
             )
+
+        forward_only_schedule = ScheduleGPipe(
+            stage,
+            n_microbatches=1,
+            loss_fn=loss_fn,
+            scale_grads=False,
+        )
+        forward_only_schedule.eval(inputs[0], target=targets[0])
+
+        state = fully_shard.state(model)
+        self.assertFalse(state._state_ctx.manual_backward_finalization)
+        model.zero_grad(set_to_none=True)
+        model(inputs[0]).sum().backward()
+        self.assertEqual(state._comm_ctx.reduce_scatter_states, [])
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)

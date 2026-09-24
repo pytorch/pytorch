@@ -120,6 +120,34 @@ def _nvgemm_config(**overrides):
     return cfg
 
 
+def _force_pdl_nvgemm_choice():
+    """Return a selector patch that deterministically chooses a PDL provider."""
+    from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
+        NVUniversalGemmCaller,
+    )
+    from torch._inductor.select_algorithm import AlgorithmSelectorCache
+
+    def benchmark(_selector, choices, *_args, **_kwargs):
+        nvgemm_choices = [
+            choice for choice in choices if isinstance(choice, NVUniversalGemmCaller)
+        ]
+        pdl_choices = [
+            choice
+            for choice in nvgemm_choices
+            if getattr(choice.kernel.impl, "use_pdl", False)
+        ]
+        if nvgemm_choices and not pdl_choices:
+            raise AssertionError("expected a PDL-capable NVGEMM choice")
+        return {choice: 0.1 if choice in pdl_choices else 1.0 for choice in choices}
+
+    return mock.patch.object(
+        AlgorithmSelectorCache,
+        "benchmark",
+        autospec=True,
+        side_effect=benchmark,
+    )
+
+
 @unittest.skipIf(
     not (ensure_nv_universal_gemm_available() and SM90OrLater),
     "NVIDIA Universal GEMM (cutlass.operators) library not available or GPU is older than SM90",
@@ -516,14 +544,16 @@ class TestNVUniversalGemm(TestCase):
             a2, b2, scale_a2, scale_b2, side_input
         )
         torch._dynamo.reset()
-        with config.patch(
-            _nvgemm_config(
-                nvgemm_pdl="auto",
-                nvgemm_max_profiling_configs=1,
-                epilogue_fusion=False,
-                force_disable_caches=True,
-                **{"triton.enable_pdl": False},
-            )
+        with (
+            config.patch(
+                _nvgemm_config(
+                    nvgemm_pdl="auto",
+                    epilogue_fusion=False,
+                    force_disable_caches=True,
+                    **{"triton.enable_pdl": False},
+                )
+            ),
+            _force_pdl_nvgemm_choice(),
         ):
             compiled = torch.compile(scaled_mm_with_interleaved_streams)
             actual, (code,) = run_and_get_code(
@@ -571,18 +601,20 @@ class TestNVUniversalGemm(TestCase):
 
         expected = scaled_mm_then_reduce(a, b, scale_a, scale_b)
         torch._dynamo.reset()
-        with config.patch(
-            _nvgemm_config(
-                nvgemm_pdl="auto",
-                nvgemm_max_profiling_configs=1,
-                epilogue_fusion=False,
-                force_disable_caches=True,
-                **{
-                    "triton.cooperative_reductions": False,
-                    "triton.enable_pdl": False,
-                    "triton.multi_kernel": False,
-                },
-            )
+        with (
+            config.patch(
+                _nvgemm_config(
+                    nvgemm_pdl="auto",
+                    epilogue_fusion=False,
+                    force_disable_caches=True,
+                    **{
+                        "triton.cooperative_reductions": False,
+                        "triton.enable_pdl": False,
+                        "triton.multi_kernel": False,
+                    },
+                )
+            ),
+            _force_pdl_nvgemm_choice(),
         ):
             actual, (code,) = run_and_get_code(
                 torch.compile(scaled_mm_then_reduce), a, b, scale_a, scale_b
@@ -610,14 +642,16 @@ class TestNVUniversalGemm(TestCase):
 
         expected = scaled_mm_with_consumer_input(a, b, scale_a, scale_b, consumer_input)
         torch._dynamo.reset()
-        with config.patch(
-            _nvgemm_config(
-                nvgemm_pdl="auto",
-                nvgemm_max_profiling_configs=1,
-                epilogue_fusion=False,
-                force_disable_caches=True,
-                **{"triton.enable_pdl": False},
-            )
+        with (
+            config.patch(
+                _nvgemm_config(
+                    nvgemm_pdl="auto",
+                    epilogue_fusion=False,
+                    force_disable_caches=True,
+                    **{"triton.enable_pdl": False},
+                )
+            ),
+            _force_pdl_nvgemm_choice(),
         ):
             compiled = torch.compile(scaled_mm_with_consumer_input)
             actual, (code,) = run_and_get_code(
@@ -799,15 +833,26 @@ class TestNVUniversalGemm(TestCase):
         from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
             NVUniversalGemmCaller,
         )
+        from torch._inductor.select_algorithm import AlgorithmSelectorCache
 
-        def benchmark(caller, *args, **kwargs):
-            is_target = (
-                caller.swap_ab
+        def is_target(caller):
+            return (
+                isinstance(caller, NVUniversalGemmCaller)
+                and caller.swap_ab
                 and caller.kernel.metadata.design.use_prefetch
                 and caller.kernel.metadata.operator_class.__name__
                 == "VendoredDenseBlockScaledGemmKernel"
             )
-            return 0.1 if is_target else 1.0
+
+        def benchmark(_selector, choices, *_args, **_kwargs):
+            nvgemm_choices = [
+                choice
+                for choice in choices
+                if isinstance(choice, NVUniversalGemmCaller)
+            ]
+            if nvgemm_choices:
+                self.assertTrue(any(is_target(choice) for choice in nvgemm_choices))
+            return {choice: 0.1 if is_target(choice) else 1.0 for choice in choices}
 
         with (
             config.patch(
@@ -815,10 +860,14 @@ class TestNVUniversalGemm(TestCase):
                     nvgemm_max_profiling_configs=1,
                     benchmark_epilogue_fusion=False,
                     compile_threads=2,
+                    force_disable_caches=True,
                 )
             ),
             mock.patch.object(
-                NVUniversalGemmCaller, "benchmark", autospec=True, side_effect=benchmark
+                AlgorithmSelectorCache,
+                "benchmark",
+                autospec=True,
+                side_effect=benchmark,
             ),
         ):
             compiled = torch.compile(scaled_mm)
@@ -1258,6 +1307,18 @@ class TestNVUniversalGemm(TestCase):
             ),
         ):
             self.assertFalse(_can_fold_scaled_mm_output_scale(match))
+
+    def test_scaled_mm_output_scale_does_not_fold_with_pipelined_autotuning(self):
+        """Keep the original graph when native-choice failures are deferred."""
+        from torch._inductor.fx_passes.post_grad import _can_fold_scaled_mm_output_scale
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "pipeline_max_autotune_gemm": True,
+            }
+        ):
+            self.assertFalse(_can_fold_scaled_mm_output_scale(MagicMock()))
 
     def test_scaled_mm_public_scale_result_preserves_bf16_semantics(self):
         """A public scale_result is ignored for BF16 output, as in ATen."""
