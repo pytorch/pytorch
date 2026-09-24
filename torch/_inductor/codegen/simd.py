@@ -5279,6 +5279,14 @@ class SIMDScheduling(BaseScheduling):
 
     def codegen_combo_kernel(self, combo_kernel_node):
         subkernel_nodes = combo_kernel_node.get_subkernel_nodes()
+        extern_nodes = [node for node in subkernel_nodes if node.is_extern()]
+        if extern_nodes:
+            if not self.scheduler:
+                raise AssertionError("expected self.scheduler to be set")
+            for node in extern_nodes:
+                self.scheduler.codegen_extern_call(node, free_buffers=False)
+            subkernel_nodes = [node for node in subkernel_nodes if not node.is_extern()]
+
         custom_part_algorithm = combo_kernel_node.use_custom_partition_algo
         enable_autotune = combo_kernel_node.enable_autotune
         mixed_sizes = config.combo_kernel_allow_mixed_sizes > 1 or (
@@ -5287,19 +5295,20 @@ class SIMDScheduling(BaseScheduling):
 
         per_subkernel_blocks = combo_kernel_node.per_subkernel_blocks
 
-        kernel_code_list = self.generate_combo_kernel_code(
-            subkernel_nodes,
-            custom_part_algorithm,
-            enable_autotune,
-            mixed_sizes,
-            per_subkernel_blocks=per_subkernel_blocks,
-        )
+        if subkernel_nodes:
+            kernel_code_list = self.generate_combo_kernel_code(
+                subkernel_nodes,
+                custom_part_algorithm,
+                enable_autotune,
+                mixed_sizes,
+                per_subkernel_blocks=per_subkernel_blocks,
+            )
 
-        for src_code, kernel, _ in kernel_code_list:
-            kernel_name = self.define_kernel(src_code, [combo_kernel_node], kernel)
-            self.codegen_comment(combo_kernel_node.snodes, kernel_name)
-            log.debug("ComboKernels: generated kernel %s.", kernel_name)
-            kernel.call_kernel(kernel_name)
+            for src_code, kernel, _ in kernel_code_list:
+                kernel_name = self.define_kernel(src_code, [combo_kernel_node], kernel)
+                self.codegen_comment(combo_kernel_node.snodes, kernel_name)
+                log.debug("ComboKernels: generated kernel %s.", kernel_name)
+                kernel.call_kernel(kernel_name)
 
         self.free_buffers_in_scheduler()
 

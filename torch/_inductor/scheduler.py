@@ -11599,6 +11599,7 @@ class Scheduler:
     def codegen_extern_call(
         self,
         scheduler_node: BaseSchedulerNode,
+        free_buffers: bool = True,
     ) -> None:
         if not isinstance(
             scheduler_node,
@@ -11616,7 +11617,8 @@ class Scheduler:
             scheduler_node.decide_inplace_update()
             scheduler_node.mark_run()
         scheduler_node.codegen(V.graph.wrapper_code)
-        self.free_buffers()
+        if free_buffers:
+            self.free_buffers()
 
     def create_backend(self, device: torch.device) -> BaseScheduling:
         if is_gpu(device.type) and device.index is None:
