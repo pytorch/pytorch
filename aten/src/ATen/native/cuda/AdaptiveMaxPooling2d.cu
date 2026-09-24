@@ -52,8 +52,8 @@ __global__ void adaptivemaxpool(const T *input, T *output, int64_t *indices,
   int oh, ow;
 
   // compute offsets based on thread/block ID
-  int o_plane = blockIdx.x;
-  int i_plane = o_plane;
+  int64_t o_plane = blockIdx.x;
+  int64_t i_plane = o_plane;
 
   int ostartW = threadIdx.x;
   int oendW = osizeW;
@@ -117,8 +117,8 @@ __global__ void adaptivemaxgradinput(T *gradInput, const T *gradOutput, const in
   int oh, ow;
 
   // compute offsets based on thread/block ID
-  int o_plane = blockIdx.x;
-  int i_plane = o_plane;
+  int64_t o_plane = blockIdx.x;
+  int64_t i_plane = o_plane;
   //int k = blockIdx.x % sizeD;
 
   int ostartW = threadIdx.x;
@@ -165,8 +165,8 @@ __global__ void atomicadaptivemaxgradinput(
   int oh, ow;
 
   // compute offsets based on thread/block ID
-  int o_plane = blockIdx.x;
-  int i_plane = o_plane;
+  int64_t o_plane = blockIdx.x;
+  int64_t i_plane = o_plane;
 
   int ostartW = threadIdx.x;
   int oendW = osizeW;
