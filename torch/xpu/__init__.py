@@ -56,7 +56,6 @@ class _ZesDeviceInfo:
     device_handle: c_void_p
     subdevice_id: int | None = None
     is_integrated: bool = False
-    is_visible: bool = False
     temperature_handle: c_void_p | None = None
     frequency_handle: c_void_p | None = None
     power_handle: c_void_p | None = None
@@ -203,7 +202,6 @@ def _enum_zes_device_infos(visible_mask: list[int]) -> int:
     # --- Count visible dGPUs and iGPUs ---
     ZES_DEVICE_PROPERTY_FLAG_INTEGRATED = 1 << 0
     expose_subdevices = os.getenv("ZE_FLAT_DEVICE_HIERARCHY") != "COMPOSITE"
-
     _cached_zes_device_infos.clear()
 
     for device in devices:
@@ -245,13 +243,8 @@ def _enum_zes_device_infos(visible_mask: list[int]) -> int:
             continue
         if info.is_integrated:
             num_igpu += 1
-            # iGPUs sort after every dGPU, so num_dgpu is final here: an iGPU
-            # is visible only when no visible dGPU exists.
-            if num_dgpu == 0:
-                info.is_visible = True
         else:
             num_dgpu += 1
-            info.is_visible = True
     return num_dgpu or num_igpu
 
 
@@ -828,7 +821,7 @@ def _zes_ensure_device_infos(device: int):
         if _enum_zes_device_infos(_parse_visible_devices(strict=True)) < 0:
             raise RuntimeError("Failed to enumerate devices via Level Zero Sysman.")
 
-    total_devices = sum(1 for info in _cached_zes_device_infos if info.is_visible)
+    total_devices = len(_cached_zes_device_infos)
     if device >= total_devices:
         raise RuntimeError(
             f"The device {device} is out of range for Level Zero Sysman. It must be in the range [0, {total_devices})."
