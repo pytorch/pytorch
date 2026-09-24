@@ -615,12 +615,6 @@ exclude_patterns = [
     # that preserves bad_alloc's MemoryError anyway: torch.OutOfMemoryError
     # derives from RuntimeError, not MemoryError.
     'c10/util/SmallVector.cpp',
-    # Burned down later in this stack. Nothing may be added here.
-    # NNC. The TorchScript frontend is deprecated, but this is not dead code:
-    # it is compiled unconditionally, it is still the default fuser for a CUDA
-    # torch.jit.script, and Static Runtime and mkldnn_rewrite.cpp link it
-    # regardless of that. 294 findings, so it gets its own PR.
-    'torch/csrc/jit/tensorexpr/**',
 ]
 command = [
     'python3',
