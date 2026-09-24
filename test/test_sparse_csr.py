@@ -4440,8 +4440,8 @@ class TestSparseCSRGeneric(TestCase):
 instantiate_parametrized_tests(TestSparseCompressed)
 instantiate_device_type_tests(TestSparseCompressedDevice, globals(), allow_xpu=True)
 
-instantiate_device_type_tests(TestSparseCSR, globals(), allow_xpu=True)
-instantiate_device_type_tests(TestSparseCompressedTritonKernels, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestSparseCSR, globals())
+instantiate_device_type_tests(TestSparseCompressedTritonKernels, globals())
 instantiate_device_type_tests(TestSparseCSRCudaOnly, globals(), only_for="cuda")
 
 if __name__ == '__main__':
