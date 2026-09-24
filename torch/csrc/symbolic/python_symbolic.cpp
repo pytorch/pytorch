@@ -677,6 +677,20 @@ py::object node_to_py(const c10::SymNode& n) {
   return py::cast(n);
 }
 
+// sympy's node.expr.<attr>, computed by `native` from the native expr unless
+// replacements could change node.expr.
+template <typename F>
+bool expr_query(const NativeSymNodeImpl& node, const char* attr, F native) {
+  {
+    NativeShapeEnv& env = *node.env();
+    auto lock = lock_env(env);
+    if (env.replacements_empty()) {
+      return native(env.arena(), node.expr());
+    }
+  }
+  return node_to_py(materialize(node)).attr("expr").attr(attr).cast<bool>();
+}
+
 std::vector<c10::SymNode> nodes_from_py(const py::sequence& nodes) {
   std::vector<c10::SymNode> r;
   r.reserve(nodes.size());
@@ -1376,6 +1390,25 @@ void initSymbolicBindings(PyObject* module) {
               return node_expr(n);
             }
             return node_to_py(materialize(n)).attr("expr");
+          })
+      .def_property_readonly(
+          "_expr_is_number",
+          [](const NativeSymNodeImpl& n) {
+            // Boolean kinds are not Exprs (Basic.is_number is False), and no
+            // numeric kind has a Boolean arg.
+            return expr_query(
+                n, "is_number", [](const ExprArena& a, const Expr* e) {
+                  return !e->is_boolean() && a.free_symbols(e).empty();
+                });
+          })
+      .def_property_readonly(
+          "_expr_is_Boolean",
+          [](const NativeSymNodeImpl& n) {
+            // BooleanAtom and BooleanFunction; Relational is not.
+            return expr_query(
+                n, "is_Boolean", [](const ExprArena& /*a*/, const Expr* e) {
+                  return e->is_boolean() && !e->is_relational();
+                });
           })
       .def_property_readonly(
           "hint",

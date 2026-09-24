@@ -40,6 +40,7 @@ import torch.fx as fx
 import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch import SymBool, SymInt, Tensor
+from torch._C._symbolic import _NativeSymNode
 from torch._custom_class_base import CustomClassBase
 from torch._dispatch.python import enable_python_dispatcher
 from torch._library.fake_class_registry import FakeScriptObject
@@ -1058,7 +1059,7 @@ def fetch_sym_proxy(
         n = e.node
         if n.constant is not None:
             return n.constant
-        if e.node.expr.is_number:
+        if n._expr_is_number if isinstance(n, _NativeSymNode) else n.expr.is_number:
             if isinstance(e, SymBool):
                 return bool(e.node.expr)
             elif isinstance(e, SymInt):

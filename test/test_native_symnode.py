@@ -3490,6 +3490,49 @@ class TestNativeSymNode(TestCase):
         with self.assertRaises(ZeroDivisionError):
             make_fx(lambda x, y: x % y, tracing_mode="real")(a, zero)
 
+    def test_expr_facts(self):
+        # has_free_symbols and fetch_sym_proxy read expr.is_number / is_Boolean.
+        env, syms = self.make_env()
+        a, b, c = (self.node(env, s, int, h) for s, h in zip(syms, (5, 7, 3)))
+        lt = a.lt(b)
+        nodes = [
+            a,
+            a.add(b),
+            a.sub(a),
+            a.mul(a.wrap_int(3)),
+            a.int_floordiv(b),
+            a.wrap_int(4).int_floordiv(a.wrap_int(3)),
+            a.sym_max(b),
+            lt,
+            a.eq(a),
+            a.eq(a.add(a.wrap_int(1))),
+            lt.sym_and(b.lt(c)),
+            lt.sym_or(b.lt(c)),
+            lt.sym_and(b.lt(c)).sym_not(),
+            self.node(env, sympy.Integer(3), int, 3),
+            self.node(env, sympy.true, bool, True),
+            b.mul(b),
+        ]
+        for n in nodes:
+            self.assertIsInstance(n, _NativeSymNode)
+            self.assertIs(n._expr_is_number, n.expr.is_number, n.expr)
+            self.assertIs(n._expr_is_Boolean, n.expr.is_Boolean, n.expr)
+        self.assertEqual(
+            [symbolic_shapes.has_free_symbols(torch.SymInt(n)) for n in nodes[:7]],
+            [True, True, False, True, True, False, True],
+        )
+        env._set_replacement(syms[1], sympy.Integer(7), "test")
+        for n in nodes:
+            self.assertIs(n._expr_is_number, n.expr.is_number, n.expr)
+            self.assertIs(n._expr_is_Boolean, n.expr.is_Boolean, n.expr)
+        self.assertFalse(symbolic_shapes.has_free_symbols(torch.SymInt(nodes[-1])))
+
+        # A numeric SymInt enters the graph as its value.
+        fn = lambda a, b: torch.ones(2) + (a - a)  # noqa: E731
+        gm = self.trace(True, fn, False)[1]
+        self.assertEqual(gm.code, self.trace(False, fn, False)[1].code)
+        self.assertIn("add = torch.ops.aten.add.Tensor(ones, 0)", gm.code)
+
     def test_make_node(self):
         env, syms = self.make_env()
         native = env._native_env

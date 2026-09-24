@@ -44,6 +44,7 @@ from typing import (
     Generic,
     NamedTuple,
     NoReturn,
+    overload,
     TYPE_CHECKING,
     TypeAlias,
     TypeGuard,
@@ -970,9 +971,22 @@ IterateExprsAtom: TypeAlias = (
 IterateExprs: TypeAlias = IterateExprsAtom | Sequence[IterateExprsAtom]
 
 
-def _iterate_exprs(val: IterateExprs) -> Iterator[sympy.Basic]:
+@overload
+def _iterate_exprs(val: IterateExprs) -> Iterator[sympy.Basic]: ...
+
+
+@overload
+def _iterate_exprs(
+    val: IterateExprs, native_nodes: bool
+) -> Iterator[sympy.Basic | _NativeSymNode]: ...
+
+
+def _iterate_exprs(
+    val: IterateExprs, native_nodes: bool = False
+) -> Iterator[sympy.Basic | _NativeSymNode]:
     """
     Recursively iterate through a value and yield all sympy expressions contained within it.
+    With native_nodes, a native SymNode is yielded itself instead of its expr.
 
     This function traverses various data structures (tensors, lists, tuples, etc.) and extracts
     any symbolic expressions they contain. It's used for operations like finding free symbols
@@ -996,25 +1010,28 @@ def _iterate_exprs(val: IterateExprs) -> Iterator[sympy.Basic]:
         # This allow applies to the jagged layout NestedTensor case as
         # nested ints are not symbolic
         if is_symbolic(val):
-            yield val.node.expr
+            node = val.node
+            yield (
+                node if native_nodes and isinstance(node, _NativeSymNode) else node.expr
+            )
     elif isinstance(val, SymNodeTypes):
-        yield val.expr
+        yield val if native_nodes and isinstance(val, _NativeSymNode) else val.expr
     elif isinstance(val, sympy.Basic):
         yield val
     elif isinstance(val, (int, float, bool, str)):
         pass
     elif isinstance(val, (tuple, list)):
         for s in val:
-            yield from _iterate_exprs(s)
+            yield from _iterate_exprs(s, native_nodes)
     elif isinstance(val, dict):
         for s in itertools.chain(val.keys(), val.values()):
-            yield from _iterate_exprs(s)
+            yield from _iterate_exprs(s, native_nodes)
     elif is_sparse_any(val):
-        yield from _iterate_exprs(val.size())
+        yield from _iterate_exprs(val.size(), native_nodes)
     elif isinstance(val, torch.Tensor):
-        yield from _iterate_exprs(val.size())
-        yield from _iterate_exprs(val.stride())
-        yield from _iterate_exprs(val.storage_offset())
+        yield from _iterate_exprs(val.size(), native_nodes)
+        yield from _iterate_exprs(val.stride(), native_nodes)
+        yield from _iterate_exprs(val.storage_offset(), native_nodes)
     elif val is None:
         pass
     # see Note: [Generator arguments in AOTDispatcher]
@@ -1081,7 +1098,12 @@ def free_symbols(val: IterateExprs) -> OrderedSet[sympy.Symbol]:
 
 def has_free_symbols(val: IterateExprs) -> bool:
     """Faster version of bool(free_symbols(val))"""
-    return not all((e.is_number or e.is_Boolean) for e in _iterate_exprs(val))
+    return not all(
+        (e._expr_is_number or e._expr_is_Boolean)
+        if isinstance(e, _NativeSymNode)
+        else (e.is_number or e.is_Boolean)
+        for e in _iterate_exprs(val, native_nodes=True)
+    )
 
 
 def has_free_unbacked_symbols(x: IterateExprs) -> bool:
