@@ -520,7 +520,7 @@ class CPFlexAttentionTest(DTensorTestBase):
         lb_types: list[str],
     ) -> None:
         torch.use_deterministic_algorithms(True)
-        torch.accelerator.manual_seed(1234)
+        torch.manual_seed(1234)
 
         dtype = torch.float32
         bs = B if B > 1 else 2
