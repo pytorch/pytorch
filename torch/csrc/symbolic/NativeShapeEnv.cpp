@@ -424,6 +424,16 @@ const Expr* NativeShapeEnv::maybe_fast_eval_comparison(const Expr* e) {
   return nonneg ? arena_->boolean(true) : nullptr;
 }
 
+bool NativeShapeEnv::bound_lower_nonnegative(const Expr* e) {
+  if (!pristine_ || !all_symbols_mirrored(e)) {
+    throw NativeUnsupported("bound_sympy needs a pristine, mirrored env");
+  }
+  // ShapeEnv.bound_sympy passes a range for every free symbol, so the
+  // TracingContext ranges do not matter.
+  const Expr* lower = bound_sympy(*arena_, e, var_to_range_).lower;
+  return compare_numbers(lower, arena_->integer(0)) >= 0;
+}
+
 std::optional<const Expr*> NativeShapeEnv::static_eval(const Expr* e) {
   if (!pristine_ || !all_symbols_mirrored(e)) {
     return std::nullopt;

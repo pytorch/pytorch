@@ -3,6 +3,8 @@
 #include <torch/csrc/symbolic/ValueRanges.h>
 
 #include <map>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <tuple>
 #include <unordered_map>
@@ -63,6 +65,17 @@ class NativeShapeEnv : public c10::intrusive_ptr_target {
   ExprArena& arena() {
     return *arena_;
   }
+  // Guards the env and its arena (PyFallback.h: lock_env).
+  std::mutex& mutex() {
+    return mutex_;
+  }
+  // Python-side state (python_symbolic.cpp), opaque to the core.
+  void set_binding(std::shared_ptr<void> binding) {
+    binding_ = std::move(binding);
+  }
+  void* binding() const {
+    return binding_.get();
+  }
 
   void add_symbol(
       const Expr* sym,
@@ -94,6 +107,9 @@ class NativeShapeEnv : public c10::intrusive_ptr_target {
   const Expr* simplify(const Expr* e);
   const Expr* maybe_evaluate_static(const Expr* e);
   const Expr* maybe_fast_eval_comparison(const Expr* e);
+  // ShapeEnv.bound_sympy(e).lower >= 0. Throws NativeUnsupported unless the
+  // env is pristine and every free symbol is mirrored.
+  bool bound_lower_nonnegative(const Expr* e);
 
   // Entry points; nullopt means the caller must delegate to Python.
   // Answers are logged for replay.
@@ -132,6 +148,8 @@ class NativeShapeEnv : public c10::intrusive_ptr_target {
       LeCache& le_cache);
 
   c10::intrusive_ptr<ExprArena> arena_;
+  std::mutex mutex_;
+  std::shared_ptr<void> binding_;
   RangeMap var_to_range_;
   std::unordered_map<const Expr*, int64_t> backed_var_to_val_;
   std::unordered_set<const Expr*> size_like_;

@@ -4201,7 +4201,7 @@ class ShapeEnv:
             _native_envs_created = True
             _native_shape_envs.add(self)
             symbolic = torch._C._symbolic
-            native = self._native_env = symbolic.NativeShapeEnv(symbolic._Arena())
+            native = self._native_env = symbolic.NativeShapeEnv(symbolic._Arena(), self)
             not_pristine = functools.partial(
                 _native_pre_mutation, native.mark_not_pristine
             )

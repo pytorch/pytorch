@@ -2,8 +2,11 @@
 
 #include <torch/csrc/symbolic/Expr.h>
 #include <torch/csrc/symbolic/NativeShapeEnv.h>
+#include <torch/csrc/symbolic/NativeSymNodeImpl.h>
+#include <torch/csrc/symbolic/PyFallback.h>
 #include <torch/csrc/symbolic/ValueRanges.h>
 #include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/utils/python_symnode.h>
 
 #include <algorithm>
 #include <array>
@@ -98,10 +101,30 @@ struct PyExpr {
   const Expr* expr;
 };
 
+// NativeShapeEnv::binding().
+struct EnvBinding {
+  std::shared_ptr<PyArena> arena;
+  // A weakref to the ShapeEnv, or None. The ShapeEnv owns the native env.
+  py::object shape_env;
+};
+
 struct PyShapeEnv {
-  explicit PyShapeEnv(std::shared_ptr<PyArena> owner)
+  PyShapeEnv(std::shared_ptr<PyArena> owner, const py::object& shape_env)
       : owner(std::move(owner)),
-        env(c10::make_intrusive<NativeShapeEnv>(this->owner->arena)) {}
+        env(c10::make_intrusive<NativeShapeEnv>(this->owner->arena)) {
+    auto* binding = new EnvBinding{
+        this->owner,
+        shape_env.is_none() ? py::object(py::none())
+                            : py::object(py::weakref(shape_env))};
+    // Native nodes may drop the env without the GIL.
+    env->set_binding(std::shared_ptr<EnvBinding>(binding, [](EnvBinding* b) {
+      if (!Py_IsInitialized()) {
+        return;
+      }
+      py::gil_scoped_acquire gil;
+      delete b;
+    }));
+  }
 
   std::shared_ptr<PyArena> owner;
   c10::intrusive_ptr<NativeShapeEnv> env;
@@ -126,6 +149,38 @@ int64_t to_int64(py::handle obj) {
     throw py::error_already_set();
   }
   return v;
+}
+
+// A None, int or bool hint; nullopt for any other, or an int that does not
+// fit.
+std::optional<Hint> hint_from_py(py::handle hint) {
+  if (PyBool_Check(hint.ptr())) {
+    return Hint(hint.ptr() == Py_True);
+  }
+  if (PyLong_CheckExact(hint.ptr())) {
+    int overflow = 0;
+    int64_t v = PyLong_AsLongLongAndOverflow(hint.ptr(), &overflow);
+    if (overflow != 0) {
+      return std::nullopt;
+    }
+    return Hint(v);
+  }
+  if (hint.is_none()) {
+    return Hint();
+  }
+  return std::nullopt;
+}
+
+py::object hint_to_py(const Hint& h) {
+  return std::visit(
+      [](auto v) -> py::object {
+        if constexpr (std::is_same_v<decltype(v), std::monostate>) {
+          return py::none();
+        } else {
+          return py::cast(v);
+        }
+      },
+      h);
 }
 
 const Expr* PyArena::from_sympy(py::handle obj) {
@@ -577,7 +632,59 @@ bool native_config_is_default() {
       config_entry_unset(aggressive, unset);
 }
 
+EnvBinding& binding_of(NativeShapeEnv& env) {
+  auto* b = static_cast<EnvBinding*>(env.binding());
+  TORCH_CHECK(b != nullptr, "native env without a Python binding");
+  return *b;
+}
+
+py::object pytype_to_py(PyType t) {
+  return py::reinterpret_borrow<py::object>(reinterpret_cast<PyObject*>(
+      t == PyType::Int ? &PyLong_Type : &PyBool_Type));
+}
+
+py::object node_expr(const NativeSymNodeImpl& node) {
+  NativeShapeEnv& env = *node.env();
+  auto lock = lock_env(env);
+  return binding_of(env).arena->to_sympy(node.expr());
+}
+
 } // namespace
+
+std::unique_lock<std::mutex> lock_env(NativeShapeEnv& env) {
+  std::unique_lock<std::mutex> lock(env.mutex(), std::try_to_lock);
+  if (!lock.owns_lock()) {
+    if (PyGILState_Check()) {
+      py::gil_scoped_release no_gil;
+      lock.lock();
+    } else {
+      lock.lock();
+    }
+  }
+  return lock;
+}
+
+c10::SymNode materialize(const NativeSymNodeImpl& node) {
+  py::gil_scoped_acquire gil;
+  EnvBinding& binding = binding_of(*node.env());
+  py::object shape_env =
+      binding.shape_env.is_none() ? py::none() : binding.shape_env();
+  TORCH_CHECK(!shape_env.is_none(), "the ShapeEnv of a native SymNode is gone");
+  py::module_ sym_node = py::module_::import("torch.fx.experimental.sym_node");
+  py::object hint = std::holds_alternative<std::monostate>(node.hint())
+      ? py::object(sym_node.attr("_NO_HINT"))
+      : hint_to_py(node.hint());
+  py::object constant = hint_to_py(node.constant());
+  py::object r = sym_node.attr("SymNode")(
+      node_expr(node),
+      shape_env,
+      pytype_to_py(node.pytype()),
+      hint,
+      py::arg("constant") = constant,
+      py::arg("fx_node") = constant,
+      py::arg("optimized_summation") = node.optimized_summation());
+  return c10::make_intrusive<impl::PythonSymNodeImpl>(std::move(r));
+}
 
 void initSymbolicBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module_>();
@@ -864,7 +971,10 @@ void initSymbolicBindings(PyObject* module) {
     return e ? std::optional<PyExpr>(wrap(self, e)) : std::nullopt;
   };
   py::class_<PyShapeEnv>(sm, "NativeShapeEnv")
-      .def(py::init<Self>())
+      .def(
+          py::init<Self, const py::object&>(),
+          py::arg("arena"),
+          py::arg("shape_env") = py::none())
       .def_property_readonly(
           "arena", [](const PyShapeEnv& self) { return self.owner; })
       .def_property_readonly(
@@ -877,6 +987,7 @@ void initSymbolicBindings(PyObject* module) {
              const PyExpr& lower,
              const PyExpr& upper,
              bool size_like) {
+            auto lock = lock_env(*self.env);
             self.env->add_symbol(
                 unwrap(self.owner, sym),
                 hint,
@@ -893,6 +1004,7 @@ void initSymbolicBindings(PyObject* module) {
             // Takes sympy objects. A symbol that is not representable stays
             // unmirrored, so every query mentioning it delegates.
             PyArena& a = *self.owner;
+            auto lock = lock_env(*self.env);
             try {
               self.env->add_symbol(
                   a.from_sympy(sym),
@@ -907,6 +1019,7 @@ void initSymbolicBindings(PyObject* module) {
           [](PyShapeEnv& self, py::handle sym) -> py::object {
             std::optional<std::tuple<std::optional<int64_t>, ValueRanges, bool>>
                 m;
+            auto lock = lock_env(*self.env);
             try {
               m = self.env->mirrored(self.owner->from_sympy(sym));
             } catch (const NativeUnsupported&) {
@@ -940,24 +1053,33 @@ void initSymbolicBindings(PyObject* module) {
              const PyExpr& sym,
              const PyExpr& lower,
              const PyExpr& upper) {
+            auto lock = lock_env(*self.env);
             self.env->update_range(
                 unwrap(self.owner, sym),
                 ValueRanges(unwrap(self.owner, lower), unwrap(self.owner, upper)));
           })
       .def(
           "mark_not_pristine",
-          [](PyShapeEnv& self) { self.env->mark_not_pristine(); })
+          [](PyShapeEnv& self) {
+            auto lock = lock_env(*self.env);
+            self.env->mark_not_pristine();
+          })
       .def(
           "mark_replacements",
-          [](PyShapeEnv& self) { self.env->mark_replacements(); })
+          [](PyShapeEnv& self) {
+            auto lock = lock_env(*self.env);
+            self.env->mark_replacements();
+          })
       .def(
           "simplify",
           [wrap](PyShapeEnv& self, const PyExpr& e) {
+            auto lock = lock_env(*self.env);
             return wrap(self.owner, self.env->simplify(unwrap(self.owner, e)));
           })
       .def(
           "maybe_evaluate_static",
           [wrap_opt](PyShapeEnv& self, const PyExpr& e) {
+            auto lock = lock_env(*self.env);
             return wrap_opt(
                 self.owner,
                 self.env->maybe_evaluate_static(unwrap(self.owner, e)));
@@ -965,6 +1087,7 @@ void initSymbolicBindings(PyObject* module) {
       .def(
           "static_eval",
           [wrap_opt](PyShapeEnv& self, const PyExpr& e) {
+            auto lock = lock_env(*self.env);
             auto r = self.env->static_eval(unwrap(self.owner, e));
             return std::make_pair(
                 r.has_value(), wrap_opt(self.owner, r.value_or(nullptr)));
@@ -977,28 +1100,39 @@ void initSymbolicBindings(PyObject* module) {
               py::handle hint,
               std::optional<bool> fallback_value) {
             // Only None, int and bool hints are ported.
-            Hint h;
-            if (PyBool_Check(hint.ptr())) {
-              h = hint.ptr() == Py_True;
-            } else if (PyLong_CheckExact(hint.ptr())) {
-              int overflow = 0;
-              h = PyLong_AsLongLongAndOverflow(hint.ptr(), &overflow);
-              if (overflow != 0) {
-                return std::optional<PyExpr>();
-              }
-            } else if (!hint.is_none()) {
+            auto h = hint_from_py(hint);
+            if (!h || !native_config_is_default()) {
               return std::optional<PyExpr>();
             }
-            if (!native_config_is_default()) {
-              return std::optional<PyExpr>();
-            }
-            auto r =
-                self.env->evaluate_expr(unwrap(self.owner, e), h, fallback_value);
+            auto lock = lock_env(*self.env);
+            auto r = self.env->evaluate_expr(
+                unwrap(self.owner, e), *h, fallback_value);
             return wrap_opt(self.owner, r.value_or(nullptr));
           },
           py::arg("e"),
           py::arg("hint") = py::none(),
           py::arg("fallback_value") = py::none())
+      .def(
+          "make_node",
+          [](PyShapeEnv& self,
+             py::handle expr,
+             py::handle pytype,
+             py::handle hint) {
+            bool is_bool = pytype.is(pytype_to_py(PyType::Bool));
+            TORCH_CHECK(
+                is_bool || pytype.is(pytype_to_py(PyType::Int)),
+                "native nodes are int or bool");
+            auto h = hint_from_py(hint);
+            TORCH_CHECK(
+                h && (hint.is_none() || PyBool_Check(hint.ptr()) == is_bool),
+                "hint must be None or of the pytype");
+            auto lock = lock_env(*self.env);
+            return c10::make_intrusive<NativeSymNodeImpl>(
+                self.env,
+                self.owner->from_sympy(expr),
+                is_bool ? PyType::Bool : PyType::Int,
+                *h);
+          })
       .def(
           "take_queries",
           [](PyShapeEnv& self) {
@@ -1006,21 +1140,13 @@ void initSymbolicBindings(PyObject* module) {
             // result) with sympy exprs.
             PyArena& a = *self.owner;
             py::list out;
+            auto lock = lock_env(*self.env);
             for (const auto& [seq, q, result] : self.env->take_queries()) {
-              py::object hint = std::visit(
-                  [](auto v) -> py::object {
-                    if constexpr (std::is_same_v<decltype(v), std::monostate>) {
-                      return py::none();
-                    } else {
-                      return py::cast(v);
-                    }
-                  },
-                  q.hint);
               out.append(py::make_tuple(
                   seq,
                   a.to_sympy(q.expr),
                   q.evaluate,
-                  hint,
+                  hint_to_py(q.hint),
                   q.fallback_value,
                   q.suppress_guards,
                   result ? a.to_sympy(result) : py::object(py::none())));
@@ -1049,6 +1175,88 @@ void initSymbolicBindings(PyObject* module) {
         std::pair{"canonicalize_bool_expr", &ExprArena::canonicalize_bool_expr}}) {
     arena_cls.def(name, [wrap, fn](const Self& self, const PyExpr& r) {
       return wrap(self, (self->arena.get()->*fn)(unwrap(self, r)));
+    });
+  }
+
+  // Unlike the _SymNode methods it overrides, these take and return Python
+  // SymNodes as well.
+  auto node_from_py = [](py::handle obj) -> c10::SymNode {
+    if (py::isinstance<c10::SymNodeImpl>(obj)) {
+      return py::cast<c10::SymNode>(obj);
+    }
+    return c10::make_intrusive<impl::PythonSymNodeImpl>(
+        py::reinterpret_borrow<py::object>(obj));
+  };
+  auto node_to_py = [](const c10::SymNode& n) -> py::object {
+    if (auto* p = dynamic_cast<impl::PythonSymNodeImpl*>(n.get())) {
+      return py::reinterpret_borrow<py::object>(p->getPyObj());
+    }
+    return py::cast(n);
+  };
+  py::class_<
+      NativeSymNodeImpl,
+      c10::SymNodeImpl,
+      c10::intrusive_ptr<NativeSymNodeImpl>>
+      node_cls(sm, "_NativeSymNode");
+  node_cls
+      .def_property_readonly(
+          "_expr", [](const NativeSymNodeImpl& n) { return node_expr(n); })
+      .def_property_readonly(
+          "hint",
+          [](const NativeSymNodeImpl& n) { return hint_to_py(n.hint()); })
+      .def_property_readonly(
+          "constant",
+          [](const NativeSymNodeImpl& n) { return hint_to_py(n.constant()); })
+      .def_property_readonly(
+          "pytype",
+          [](const NativeSymNodeImpl& n) { return pytype_to_py(n.pytype()); })
+      .def_property_readonly(
+          "_optimized_summation", &NativeSymNodeImpl::optimized_summation)
+      .def("maybe_as_int", &NativeSymNodeImpl::maybe_as_int)
+      .def("str", &NativeSymNodeImpl::str)
+      .def("wrap_float", [node_to_py](NativeSymNodeImpl& self, double v) {
+        return node_to_py(self.wrap_float(v));
+      });
+  for (auto [name, fn] :
+       {std::pair{"add", &c10::SymNodeImpl::add},
+        std::pair{"sub", &c10::SymNodeImpl::sub},
+        std::pair{"mul", &c10::SymNodeImpl::mul},
+        std::pair{"truediv", &c10::SymNodeImpl::truediv},
+        std::pair{"float_truediv", &c10::SymNodeImpl::float_truediv},
+        std::pair{"int_truediv", &c10::SymNodeImpl::int_truediv},
+        std::pair{"pow", &c10::SymNodeImpl::pow},
+        std::pair{"float_pow", &c10::SymNodeImpl::float_pow},
+        std::pair{"pow_by_natural", &c10::SymNodeImpl::pow_by_natural},
+        std::pair{"floordiv", &c10::SymNodeImpl::floordiv},
+        std::pair{"int_floordiv", &c10::SymNodeImpl::int_floordiv},
+        std::pair{"mod", &c10::SymNodeImpl::mod},
+        std::pair{"eq", &c10::SymNodeImpl::eq},
+        std::pair{"ne", &c10::SymNodeImpl::ne},
+        std::pair{"gt", &c10::SymNodeImpl::gt},
+        std::pair{"lt", &c10::SymNodeImpl::lt},
+        std::pair{"le", &c10::SymNodeImpl::le},
+        std::pair{"ge", &c10::SymNodeImpl::ge},
+        std::pair{"sym_min", &c10::SymNodeImpl::sym_min},
+        std::pair{"sym_max", &c10::SymNodeImpl::sym_max},
+        std::pair{"sym_and", &c10::SymNodeImpl::sym_and},
+        std::pair{"sym_or", &c10::SymNodeImpl::sym_or},
+        std::pair{"and_", &c10::SymNodeImpl::sym_and},
+        std::pair{"or_", &c10::SymNodeImpl::sym_or}}) {
+    node_cls.def(
+        name,
+        [fn, node_from_py, node_to_py](
+            NativeSymNodeImpl& self, py::handle other) {
+          return node_to_py((self.*fn)(node_from_py(other)));
+        });
+  }
+  for (auto [name, fn] :
+       {std::pair{"neg", &c10::SymNodeImpl::neg},
+        std::pair{"sym_not", &c10::SymNodeImpl::sym_not},
+        std::pair{"ceil", &c10::SymNodeImpl::ceil},
+        std::pair{"floor", &c10::SymNodeImpl::floor},
+        std::pair{"sym_float", &c10::SymNodeImpl::sym_float}}) {
+    node_cls.def(name, [fn, node_to_py](NativeSymNodeImpl& self) {
+      return node_to_py((self.*fn)());
     });
   }
 }

@@ -12,6 +12,7 @@ from sympy.core.assumptions import _assume_defined, _assume_rules
 import torch
 from torch._dynamo.source import ConstantSource
 from torch.fx.experimental import symbolic_shapes
+from torch.fx.experimental.sym_node import _NO_HINT, SymNode
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -2786,6 +2787,265 @@ class TestNativeShapeEnvSync(TestCase):
         on.check_equal(off)
 
 
+class TestNativeSymNode(TestCase):
+    INT_OPS = [
+        "add",
+        "sub",
+        "mul",
+        "floordiv",
+        "int_floordiv",
+        "mod",
+        "sym_min",
+        "sym_max",
+        "eq",
+        "ne",
+        "gt",
+        "lt",
+        "le",
+        "ge",
+    ]
+
+    def make_env(self):
+        env = ShapeEnv(_allow_native=True)
+        syms = [
+            env.create_symbol(5, ConstantSource("a"), DimDynamic.DYNAMIC),
+            env.create_symbol(7, ConstantSource("b"), DimDynamic.DYNAMIC),
+            env.create_symbol(3, ConstantSource("c"), DimDynamic.DYNAMIC),
+            env.create_symbol(
+                -4, ConstantSource("d"), DimDynamic.DYNAMIC, positive=None
+            ),
+        ]
+        return env, syms
+
+    @staticmethod
+    def pair(env, expr, pytype, hint):
+        # A native None hint is no hint; a Python one is computed.
+        py_hint = _NO_HINT if hint is None else hint
+        native = env._native_env.make_node(expr, pytype, hint)
+        return native, SymNode(expr, env, pytype, py_hint)
+
+    def check(self, n, p):
+        self.assertEqual(sympy.srepr(n._expr), sympy.srepr(p._expr))
+        self.assertIs(n.pytype, p.pytype)
+        self.assertEqual(n.hint, p.hint)
+        self.assertIs(type(n.hint), type(p.hint))
+        self.assertEqual(n.constant, p.constant)
+        self.assertEqual(n._optimized_summation, p._optimized_summation)
+        self.assertEqual(n.str(), p.str())
+        try:
+            want = p.maybe_as_int()
+        except Exception as e:
+            # int(-int_oo) raises.
+            with self.assertRaises(type(e)):
+                n.maybe_as_int()
+        else:
+            self.assertEqual(n.maybe_as_int(), want)
+
+    def call(self, n, p, method, *args):
+        """Runs method on both; returns the native result or None if it raised."""
+        try:
+            want = getattr(p, method)(*(a[1] for a in args))
+        except Exception as e:
+            with self.assertRaises(type(e)):
+                getattr(n, method)(*(a[0] for a in args))
+            return None
+        got = getattr(n, method)(*(a[0] for a in args))
+        self.check(got, want)
+        return got, want
+
+    @parametrize("seed", range(8))
+    def test_differential(self, seed):
+        rng = random.Random(seed)
+        env, syms = self.make_env()
+        ints = [self.pair(env, s, int, int(env.backed_var_to_val[s])) for s in syms]
+        ints.append(self.pair(env, syms[0], int, None))
+        ints += [
+            (n.wrap_int(c), p.wrap_int(c)) for c in (0, 1, 2, -3) for n, p in ints[:1]
+        ]
+        bools = []
+        native = 0
+        for _ in range(120):
+            k = rng.randrange(10)
+            if k < 7 or not bools:
+                method = rng.choice(self.INT_OPS)
+                r = self.call(*rng.choice(ints), method, rng.choice(ints))
+            elif k < 8:
+                r = self.call(*rng.choice(ints), "neg")
+            elif k < 9:
+                r = self.call(
+                    *rng.choice(bools),
+                    rng.choice(["sym_and", "sym_or"]),
+                    rng.choice(bools),
+                )
+            else:
+                r = self.call(*rng.choice(bools), "sym_not")
+            if r is None or type(r[0]) is SymNode:
+                continue
+            native += 1
+            pool = ints if r[0].pytype is int else bools
+            if len(pool) < 16:
+                pool.append(r)
+            else:
+                pool[rng.randrange(len(pool))] = r
+        self.assertGreater(native, 80)
+        self.assertEqual(len(env.guards), 0)
+        self.assertTrue(env._native_env.pristine)
+
+    def test_optimized_summation(self):
+        env, syms = self.make_env()
+        a, b, c, d = (self.pair(env, s, int, 1) for s in syms)
+        ab = self.call(*a, "add", b)
+        self.assertTrue(ab[0]._optimized_summation)
+        abc = self.call(*ab, "add", c)
+        self.assertTrue(abc[0]._optimized_summation)
+        self.assertFalse(self.call(*abc, "add", a)[0]._optimized_summation)
+        cd = self.call(*c, "add", d)
+        self.call(*ab, "add", cd)
+        self.call(*abc, "add", cd)
+        self.call(*cd, "add", abc)
+        self.call(*a, "add", abc)
+        self.call(*ab, "add", ab)
+
+    def test_pow_by_natural(self):
+        env, syms = self.make_env()
+        a = self.pair(env, syms[0], int, 5)
+        for c in (0, 1, 3, -1):
+            r = self.call(*a, "pow_by_natural", (a[0].wrap_int(c), a[1].wrap_int(c)))
+            self.assertIs(type(r[0]) is SymNode, c < 0)
+        big = self.pair(env, syms[1], int, 7)
+        r = self.call(
+            *big, "pow_by_natural", (big[0].wrap_int(40), big[1].wrap_int(40))
+        )
+        self.assertIs(type(r[0]), SymNode)
+
+    def test_mod(self):
+        env, syms = self.make_env()
+        e = env.create_symbol(4, ConstantSource("e"), DimDynamic.DYNAMIC, positive=None)
+        a, c, d, e = (self.pair(env, s, int, 4) for s in (syms[0], syms[2], syms[3], e))
+        self.assertIs(type(self.call(*a, "mod", c)[0]._expr), Mod)
+        self.assertIs(type(self.call(*d, "mod", c)[0]._expr), PythonMod)
+        self.assertIs(type(self.call(*c, "mod", d)[0]._expr), PythonMod)
+        # a - 2 is nonnegative by range only.
+        two = (a[0].wrap_int(2), a[1].wrap_int(2))
+        r = self.call(*self.call(*a, "sub", two), "mod", c)
+        self.assertIsNot(type(r[0]), SymNode)
+        self.assertIs(type(r[0]._expr), Mod)
+        # A range answer needs a pristine env.
+        env._update_var_to_range(e[1]._expr, ValueRanges(0, 10))
+        r = self.call(*e, "mod", c)
+        self.assertIs(type(r[0]), SymNode)
+        self.assertIs(type(r[0]._expr), Mod)
+
+    def test_hint_fallback(self):
+        env, syms = self.make_env()
+        big = self.pair(env, syms[0], int, 2**62)
+        r = self.call(*big, "add", big)
+        self.assertIs(type(r[0]), SymNode)
+        self.assertEqual(r[0].hint, 2**63)
+        zero = (big[0].wrap_int(0), big[1].wrap_int(0))
+        self.assertIsNone(self.call(*big, "floordiv", zero))
+        self.assertIsNone(self.call(*big, "mod", zero))
+        low = self.pair(env, syms[3], int, -(2**63))
+        self.assertIs(type(self.call(*low, "neg")[0]), SymNode)
+        minus_one = (low[0].wrap_int(-1), low[1].wrap_int(-1))
+        self.assertIs(type(self.call(*low, "floordiv", minus_one)[0]), SymNode)
+        self.call(*low, "mod", minus_one)
+
+    def test_int_oo(self):
+        env, syms = self.make_env()
+        a = self.pair(env, syms[0], int, 5)
+        oo = self.pair(env, int_oo, int, None)
+        for method in ("add", "sub", "mul", "sym_max", "lt"):
+            self.call(*a, method, oo)
+            self.call(*oo, method, a)
+        self.call(*oo, "neg")
+        self.assertEqual(oo[0].str(), oo[1].str())
+
+    def test_unbacked(self):
+        env, _ = self.make_env()
+        u = env.create_unbacked_symint().node.expr
+        n, p = self.pair(env, u, int, None)
+        three = (n.wrap_int(3), p.wrap_int(3))
+        for method in ("eq", "ne", "lt", "ge"):
+            self.call(n, p, method, three)
+            self.call(*three, method, (n, p))
+        self.assertIsNone(self.call(n, p, "add", three)[0].hint)
+
+    def test_python_fallbacks(self):
+        env, syms = self.make_env()
+        a, b = (self.pair(env, s, int, 5) for s in syms[:2])
+        for method in ("truediv", "float_truediv", "int_truediv", "pow", "float_pow"):
+            r = self.call(*a, method, b)
+            self.assertIs(type(r[0]), SymNode)
+        for method in ("ceil", "floor", "sym_float"):
+            self.assertIs(type(self.call(*a, method)[0]), SymNode)
+        f = a[0].wrap_float(2.5)
+        self.assertIs(type(f), SymNode)
+        self.assertEqual(f.constant, 2.5)
+        # A Python operand makes the op Python.
+        r = self.call(a[0], a[1], "add", (b[1], b[1]))
+        self.assertIs(type(r[0]), SymNode)
+        # So does an int operand of a logical op.
+        t = self.call(*a, "lt", b)
+        self.assertIs(type(self.call(*t, "sym_and", a)[0]), SymNode)
+
+    def test_wrap(self):
+        env, syms = self.make_env()
+        n, p = self.pair(env, syms[0], int, 5)
+        self.check(n.wrap_int(3), p.wrap_int(3))
+        self.check(n.wrap_bool(True), p.wrap_bool(True))
+        self.assertIsNone(n.maybe_as_int())
+        self.assertEqual(n.wrap_int(-2).maybe_as_int(), -2)
+        self.assertTrue(n.has_hint())
+        self.assertTrue(n.is_int())
+        self.assertFalse(n.is_bool())
+        self.assertEqual(str(n), str(syms[0]))
+
+    def test_replacements(self):
+        env, syms = self.make_env()
+        a, b = (self.pair(env, s, int, 5) for s in syms[:2])
+        env._set_replacement(syms[1], syms[0] + 2, "test")
+        r = self.call(*a, "add", b)
+        self.assertIs(type(r[0]), SymNode)
+        self.assertEqual(b[0].str(), b[1].str())
+        self.assertIs(type(self.call(*b, "neg")[0]), SymNode)
+
+    def test_guards(self):
+        env, syms = self.make_env()
+        a = self.pair(env, syms[0], int, 5)
+        b = self.pair(env, syms[1], int, 7)
+        n, p = self.call(*a, "lt", b)
+        self.assertTrue(n.guard_bool("", 0))
+        self.assertEqual(len(env.guards), 1)
+        self.assertEqual(a[0].guard_int("", 0), 5)
+        self.assertEqual(n.bool_(), True)
+
+    def test_make_node(self):
+        env, syms = self.make_env()
+        native = env._native_env
+        with self.assertRaisesRegex(RuntimeError, "int or bool"):
+            native.make_node(syms[0], float, 5.0)
+        with self.assertRaisesRegex(RuntimeError, "pytype"):
+            native.make_node(syms[0], int, True)
+        with self.assertRaisesRegex(RuntimeError, "pytype"):
+            native.make_node(sympy.Eq(syms[0], 1), bool, 1)
+        with self.assertRaises(NativeUnsupported):
+            native.make_node(sympy.Float(1.5), int, None)
+
+    def test_env_gone(self):
+        import gc
+
+        env, syms = self.make_env()
+        n = env._native_env.make_node(syms[0], int, 5)
+        self.assertEqual(n.add(n).hint, 10)
+        del env
+        gc.collect()
+        with self.assertRaisesRegex(
+            RuntimeError, "ShapeEnv of a native SymNode is gone"
+        ):
+            n.truediv(n)
+
+
 instantiate_parametrized_tests(TestNativeExpr)
 instantiate_parametrized_tests(TestNativeCompoundAssumptions)
 instantiate_parametrized_tests(TestNativeExprTools)
@@ -2798,6 +3058,7 @@ instantiate_parametrized_tests(TestNativeValueRanges)
 instantiate_parametrized_tests(TestNativeStaticPasses)
 instantiate_parametrized_tests(TestNativeShapeEnv)
 instantiate_parametrized_tests(TestNativeShapeEnvSync)
+instantiate_parametrized_tests(TestNativeSymNode)
 
 
 if __name__ == "__main__":
