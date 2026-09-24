@@ -29,7 +29,6 @@ import dataclasses
 import enum
 import functools
 import inspect
-import pickle
 import random
 import sys
 import threading
@@ -145,22 +144,6 @@ try:
     from torch.utils._cxx_pytree import PyTreeSpec
 except ImportError:
     PyTreeSpec = type(None)  # type: ignore[misc, assignment]
-
-
-# C types whose tp_setattro is neither PyObject_GenericSetAttr nor
-# slot_tp_setattro, so neither object_generic_setattr nor tracing __setattr__
-# models them: proxies forward to the referent, thread-locals write a
-# per-thread dict, picklers reject unknown names without an instance dict.
-# Note that defining __setattr__ in the type's own __dict__ does NOT imply a
-# custom slot -- ast.AST and _struct.Struct do, yet keep the generic one.
-# Reads are unaffected: generic_getattr's step 5b consults the live object.
-_NON_GENERIC_SETATTRO_TYPES = (
-    weakref.ProxyType,
-    weakref.CallableProxyType,
-    threading.local,
-    pickle.Pickler,
-    pickle.Unpickler,
-)
 
 
 _SAFE_C_SLOTS: OrderedSet[object] | None = None
@@ -5573,6 +5556,51 @@ class MutableMappingVariable(UserDefinedObjectVariable):
 
 class RandomVariable(UserDefinedObjectVariable):
     pass
+
+
+class ThreadLocalVariable(UserDefinedObjectVariable):
+    """`threading.local`, whose instance dict belongs to the calling thread.
+
+    The dict is invisible from the type -- `tp_dictoffset` is 0 and
+    `local_getattro` synthesizes `__dict__` at lookup time.  `local_setattro`
+    rejects assignment to `__dict__` and otherwise defers to
+    `_PyObject_GenericSetAttrWithDict`, passing that dict.
+
+    ref: Modules/_threadmodule.c
+    """
+
+    @staticmethod
+    def is_matching_cls(cls: type) -> bool:
+        return issubclass(cls, threading.local)
+
+    def _get_dict(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # The base refuses on tp_dictoffset == 0; here the dict comes from the
+        # thread state rather than the object layout.
+        return self.get_dict_vt(tx)
+
+    def _set_dict(
+        self, tx: "InstructionTranslatorBase", value: VariableTracker | None
+    ) -> None:
+        raise_attribute_error(
+            tx,
+            f"'{self.python_type_name()}' object attribute '__dict__' is read-only",
+        )
+
+    # The base table binds UserDefinedObjectVariable._get_dict directly, so the
+    # overrides above only take effect through an entry of our own.
+    tp_getset = {"__dict__": GetSet(_get_dict, _set_dict)}
+
+    def tp_setattro_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        from .object_protocol import object_generic_setattr
+
+        # Without this the write stops at the C `__setattr__` slot, which has no
+        # Python body to trace.
+        return object_generic_setattr(tx, self, name, value)
 
 
 class SimpleNamespaceVariable(UserDefinedObjectVariable):

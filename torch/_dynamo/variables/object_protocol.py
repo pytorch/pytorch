@@ -2524,7 +2524,9 @@ def object_generic_setattr_str(
         if result is not None:
             return result
 
-    has_dict = py_type.__dictoffset__ != 0
+    has_dict = py_type.__dictoffset__ != 0 or isinstance(
+        obj, variables.ThreadLocalVariable
+    )
 
     if has_dict is False:
         if isinstance(obj, variables.UserDefinedObjectVariable):
@@ -2583,9 +2585,10 @@ def object_generic_setattr_str(
                 attr = se.load_attr(obj, name, deleted_ok=True)
                 if isinstance(attr, variables.DeletedVariable):
                     raise_missing_attr()
-            elif obj.lookup_instance_dict(tx, name) is None:
-                # No write during tracing, so the instance dict of the object
-                # itself decides whether there is anything to delete.
+            elif (
+                isinstance(obj, variables.UserDefinedObjectVariable)
+                and obj.lookup_instance_dict(tx, name) is None
+            ):
                 raise_missing_attr()
 
         se.store_attr(
