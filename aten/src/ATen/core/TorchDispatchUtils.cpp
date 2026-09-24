@@ -4,8 +4,11 @@
 namespace at::impl {
 
 bool tensor_has_dispatch(const at::Tensor& t) {
-  // Autograd fallback must recognize C++ fake tensors as having custom
-  // dispatch behavior.
+  // True if operators on this tensor are intercepted and implemented before
+  // reaching a backend kernel: Python __torch_dispatch__ subclasses
+  // (Python/PythonTLSSnapshot) and C++ FakeTensors (handled by the Fake
+  // fallback). Fake does not need a dispatch_mode_enabled() analog: under a
+  // C++ FakeTensorMode every tensor an operator produces has the Fake key.
   DispatchKeySet key_set(
       {DispatchKey::Python,
        DispatchKey::PythonTLSSnapshot,

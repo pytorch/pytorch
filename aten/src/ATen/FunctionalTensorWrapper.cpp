@@ -37,8 +37,10 @@ void FunctionalTensorWrapper::set_constructor_metadata() {
   // Functorch transforms all have their own wrapper tensors (e.g. BatchedTensorImpl) which expect
   // to participate in the functorch transforms.
   key_set_ = key_set_ - c10::functorch_transforms_ks - c10::python_ks;
-  // Functionalization must unwrap first, then redispatch to the underlying fake
-  // tensor. Otherwise Fake may receive the functional wrapper directly.
+  // Remove Fake when creating the wrapper: the wrapper is not a C++ FakeTensor,
+  // only value_ is (similar to removing python_ks so the wrapper is not treated
+  // as a tensor subclass). This matters because C++ FakeTensor is identified by
+  // the Fake key rather than isinstance(FakeTensor) as with Python FakeTensor.
   key_set_ = key_set_ - c10::DispatchKeySet(c10::DispatchKey::Fake);
   // We override a bunch of _custom(), so make sure they get called
   // TODO: metadata copying may not actually be necessary then
