@@ -4,6 +4,8 @@ import operator
 from dataclasses import dataclass
 from typing import Any, Literal, TYPE_CHECKING
 
+from .._serialization import _WireDescriptor
+
 
 if TYPE_CHECKING:
     import torch
@@ -12,8 +14,18 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True)
-class NIXLRemoteBuffer:
+class NIXLRemoteBuffer(_WireDescriptor):
     """A serializable descriptor for memory registered by a NIXL peer."""
+
+    _backend = "nixl"
+    _fields = {
+        "agent_name": str,
+        "address": int,
+        "length": int,
+        "device_id": int,
+        "memory_type": str,
+        "metadata": bytes,
+    }
 
     agent_name: str
     address: int

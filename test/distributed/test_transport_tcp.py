@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
 import gc
-import pickle
 import time
 import weakref
 from concurrent.futures import ThreadPoolExecutor
@@ -77,7 +76,7 @@ class TestTCPTransport(TransportTestMixin, TestCase):
             destination_memory = server.register_memory(destination)
 
             remote = destination_memory.to_remote_buffer()
-            self.assertEqual(pickle.loads(pickle.dumps(remote)), remote)
+            self.assertEqual(type(remote).deserialize(remote.serialize()), remote)
             self.assertEqual(
                 client.write(source_memory.to_view(4096 * 4, 4096 * 4), remote), 0
             )

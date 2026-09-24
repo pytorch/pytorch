@@ -2,7 +2,7 @@
 
 import asyncio
 import gc
-import pickle
+import json
 import threading
 import weakref
 from dataclasses import dataclass, replace
@@ -79,7 +79,7 @@ class _Agent:
             )
             for registration in registrations
         ]
-        return pickle.dumps((self.name, entries))
+        return json.dumps((self.name, entries)).encode()
 
     def get_agent_metadata(self):
         return self._metadata(self.registrations)
@@ -90,8 +90,8 @@ class _Agent:
         return self._metadata([registrations])
 
     def add_remote_agent(self, metadata):
-        name, entries = pickle.loads(metadata)
-        self.remote_metadata.setdefault(name, set()).update(entries)
+        name, entries = json.loads(metadata)
+        self.remote_metadata.setdefault(name, set()).update(map(tuple, entries))
         return name.encode()
 
     def remove_remote_agent(self, name):
@@ -322,7 +322,7 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
 
     def test_mismatched_peer_cleanup_failure_is_retryable(self):
         first, second, source, remote = self.registered_pair()
-        wrong = replace(remote, metadata=pickle.dumps(("unexpected", [])))
+        wrong = replace(remote, metadata=json.dumps(("unexpected", [])).encode())
         with patch.object(
             first._agent,
             "remove_remote_agent",
@@ -371,7 +371,8 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
             source = first.register_memory(torch.arange(8, dtype=torch.uint8))
             target_tensor = torch.zeros(8, dtype=torch.uint8)
             target = second.register_memory(target_tensor)
-            remote = pickle.loads(pickle.dumps(target.to_remote_buffer()))
+            descriptor = target.to_remote_buffer()
+            remote = type(descriptor).deserialize(descriptor.serialize())
 
             self.assertEqual(first.write(source.to_view(2, 4), remote), 0)
             self.assertEqual(first.write(source.to_view(2, 4), remote), 0)
@@ -707,8 +708,10 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
     def test_changed_remote_metadata_rebuilds_handle(self):
         first, second, source, remote = self.registered_pair()
         first.write(source.to_view(), remote)
-        name, entries = pickle.loads(remote.metadata)
-        updated = replace(remote, metadata=pickle.dumps((name, entries + entries)))
+        name, entries = json.loads(remote.metadata)
+        updated = replace(
+            remote, metadata=json.dumps((name, entries + entries)).encode()
+        )
         first.write(source.to_view(), updated)
         self.assertEqual(first._agent.released, 2)
         self.assertFalse(first._transfers)
@@ -721,7 +724,8 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
             first.write(source.to_view(), replace(remote, agent_name="other"))
         with self.assertRaisesRegex(ValueError, "different agent"):
             first.write(
-                source.to_view(), replace(remote, metadata=pickle.dumps(("other", [])))
+                source.to_view(),
+                replace(remote, metadata=json.dumps(("other", [])).encode()),
             )
         self.assertEqual(first._transfers, {})
 

@@ -13,6 +13,7 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 import torch
 
 from ._blocking import _BlockingTransport
+from ._serialization import _WireDescriptor
 
 
 if TYPE_CHECKING:
@@ -67,8 +68,11 @@ def _segments(length: int, flows: int, chunk_size: int):
 
 
 @dataclass(frozen=True)
-class TCPRemoteBuffer:
+class TCPRemoteBuffer(_WireDescriptor):
     """A serializable descriptor for memory registered by a TCP peer."""
+
+    _backend = "tcp"
+    _fields = {"buffer_id": int, "length": int, "access_key": int}
 
     buffer_id: int
     length: int
