@@ -9205,9 +9205,15 @@ def triton_kernel_wrap_(
     grid,
     tma_descriptor_metadata,
     kwargs,
+    aggregate_type_metadata,
     launch_kwargs=None,
 ):
     from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
+
+    if aggregate_type_metadata:
+        raise NotImplementedError(
+            "Inductor does not support tuple or NamedTuple arguments to user-defined Triton kernels"
+        )
 
     constant_args = kernel_side_table.get_constant_args(constant_args_idx)
     ir.UserDefinedTritonKernel(
