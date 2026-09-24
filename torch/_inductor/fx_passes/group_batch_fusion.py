@@ -190,7 +190,9 @@ class PostGradBatchLinearFusion(BatchFusion):
             and isinstance(input_shapes[1], int)
         )
 
-    def match(self, node: torch.fx.Node) -> tuple[str, int, int, int, bool, str] | None:
+    def match(
+        self, node: torch.fx.Node
+    ) -> tuple[str, int, int, int, bool, str, str] | None:
         if CallFunctionVarArgs(aten.mm).match(node):
             input_m, weight_m = node.args
             bias_m = None
@@ -211,7 +213,17 @@ class PostGradBatchLinearFusion(BatchFusion):
             return None
         m, k = input_m.meta["val"].shape  # type: ignore[union-attr]
         n = weight_m.meta["val"].shape[1]  # type: ignore[union-attr]
-        batch_key = ("batch_linear_post_grad", m, k, n, bias_m is not None, str(users))
+        batch_key = (
+            "batch_linear_post_grad",
+            m,
+            k,
+            n,
+            bias_m is not None,
+            str(users),
+            # mm/addmm operands share a dtype, so mixing an autocast-exempt fp32
+            # linear with bf16 ones would make the stack in fuse() fail.
+            str(input_m.meta["val"].dtype),  # type: ignore[union-attr]
+        )
         return batch_key
 
     def fuse(self, graph: torch.fx.GraphModule, subset: list[torch.fx.Node]):

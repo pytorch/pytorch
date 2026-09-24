@@ -11,6 +11,7 @@ import enum
 import functools
 import gc
 import importlib
+import inspect
 import itertools
 import json
 import logging
@@ -193,6 +194,20 @@ def closure_adder(val):
     return inner
 
 
+def compare_deleted_cell(x):
+    # `del` empties the cell a while keeping the cell objects themselves alive,
+    # so comparing the two cells must treat the emptied one as empty.
+    a = 1
+    b = 2
+
+    def inner():
+        return a, b
+
+    ca, cb = inner.__closure__
+    del a
+    return x + (1 if ca < cb else 0)
+
+
 class UserDefineSetAttr:
     setup = False
 
@@ -210,6 +225,29 @@ class UserDefineSetAttr:
 
 
 class MiscTests(torch._inductor.test_case.TestCase):
+    def test_storage_offset_scalar_output(self):
+        def fn(x):
+            return x.storage_offset()
+
+        base = torch.arange(30)
+        inputs = (
+            base[:10],
+            base[5:15],
+            base[7:17],
+            base[:10],
+        )
+
+        compiled_fn = torch.compile(
+            fn,
+            backend="eager",
+            fullgraph=True,
+        )
+
+        for x in inputs:
+            result = compiled_fn(x)
+            self.assertIsInstance(result, int)
+            self.assertEqual(result, fn(x))
+
     def test_get_cache_entry(self):
         def f(x):
             return x + 1
@@ -2852,6 +2890,19 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertIsNone(opt_fn(v, v))
         self.assertEqual(out[0], 1200)
         self.assertEqual(cnts.op_count, 3)
+
+    # Asserting on the graph break counters rather than on the compiled result:
+    # with PYTORCH_TEST_WITH_DYNAMO=1 the harness compiles the whole test method
+    # and turns a failure to trace the comparison into a silent fall back to
+    # eager, so the result alone would look correct either way.
+    def test_cell_comparison_deleted_cell(self):
+        x = torch.ones(2)
+        expected = torch.ones(2) + 1
+        self.assertEqual(compare_deleted_cell(x), expected)
+        counters.clear()
+        got = torch.compile(compare_deleted_cell, backend="eager")(x)
+        self.assertEqual(got, expected)
+        self.assertEqual(dict(counters["graph_break"]), {})
 
     def test_return_nested_function(self):
         out = None
@@ -5634,6 +5685,32 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         with self.assertRaises(TypeError):
             fn(torch.randn(4))
 
+    @parametrize(
+        "case",
+        [
+            subtest("no_args", name="no_args"),
+            subtest("one_arg", name="one_arg"),
+            subtest("too_many_args", name="too_many_args"),
+            subtest("keyword_arg", name="keyword_arg"),
+        ],
+    )
+    def test_getattr_wrong_args_raises(self, case):
+        def fn(x):
+            try:
+                if case == "no_args":
+                    return getattr()
+                if case == "one_arg":
+                    return getattr(x)
+                if case == "too_many_args":
+                    return getattr(x, "shape", None, None)
+                return getattr(x, name="shape")
+            except TypeError as exc:
+                return x.sin(), str(exc)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
     def test_user_defined_class_name(self):
         class MyClassFoo:
             pass
@@ -7712,6 +7789,19 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         # If this doesn't crash, the test passes
         fn(torch.ones(3))
 
+    @parametrize("sequence_type", [torch.Size, tuple, list])
+    @parametrize("shape", [(), (0,), (1, 4), (3, 4)])
+    @parametrize("dynamic", [False, True])
+    def test_tensor_ctor_sequence_shape(self, sequence_type, shape, dynamic):
+        def fn(x):
+            return torch.Tensor(sequence_type(x.size()))
+
+        x = torch.empty(shape)
+        expected_shape = shape if sequence_type is torch.Size else (len(shape),)
+        self.assertEqual(fn(x).shape, expected_shape)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True, dynamic=dynamic)
+        self.assertEqual(compiled(x).shape, expected_shape)
+
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_tensor_ctor_list_of_tensor(self):
         def fn(x):
@@ -8731,6 +8821,33 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             return C().fn(torch.ones(2, 3))
 
         self.assertTrue(torch.allclose(f(), torch.tensor([2.0])))
+
+    def test_opaque_value_instance_staticmethod(self):
+        from torch._library.opaque_object import register_opaque_type
+
+        class Quantizer:
+            def __eq__(self, other):
+                return type(self) is type(other)
+
+            def __hash__(self):
+                return hash(type(self))
+
+            def __fx_repr__(self):
+                name = type(self).__name__
+                return f"{name}()", {name: type(self)}
+
+            @staticmethod
+            def get_shape(shape):
+                return shape
+
+        register_opaque_type(Quantizer, typ="value")
+        q = Quantizer()
+
+        def fn(x):
+            return x + q.get_shape((3,))[0]
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(torch.zeros(3)), torch.full((3,), 3.0))
 
     def test_user_function_variable_supports_type_abcmeta_argument(self):
         class Foo(metaclass=abc.ABCMeta):
@@ -14077,8 +14194,13 @@ def ___make_guard_fn():
 
         x = torch.randn([0, 1, 2, 3, 4, 5])
         compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, "infinite generator"
+        # symbolic_convert imports the limit by value, so patch it there. A small
+        # limit exercises the same bail-out without tracing 100k YIELD_VALUEs.
+        with (
+            unittest.mock.patch.object(
+                torch._dynamo.symbolic_convert, "MAX_ITERATOR_LIMIT", 100
+            ),
+            self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "infinite generator"),
         ):
             compiled_fn(x)
 
@@ -15608,6 +15730,13 @@ fn
         self.assertEqual(f(torch.randn(0)).shape, (1,))
         self.assertEqual(f(torch.randn(2)).shape, (2,))
 
+    def _clear_inspect_mro_cache(self):
+        # Some Python 3.12 builds cache classes in inspect.getattr_static.
+        cache = getattr(inspect, "_shadowed_dict_from_mro_tuple", None)
+        cache_clear = getattr(cache, "cache_clear", None)
+        if cache_clear is not None:
+            cache_clear()
+
     def _test_compile_model_free(self, model_inp_ctr, weakref_watch):
         """
         Args:
@@ -15630,6 +15759,7 @@ fn
             torch.compile(mod, backend="eager")(inp)
 
         run()
+        self._clear_inspect_mro_cache()
         gc.collect()
         self.assertTrue(cleared)
 
@@ -15698,6 +15828,7 @@ fn
 
         run()
         # del fc  # This should delete all the references
+        self._clear_inspect_mro_cache()
         gc.collect()
         self.assertTrue(cleared)
 
@@ -16295,6 +16426,102 @@ fn
             ctx.exception.gb_type,
             "Sourceless _DecoratorContextManager method reconstruction unsupported",
         )
+
+    @parametrize("delete", [False, True])
+    def test_sourceless_bound_clone_self_mutation_graph_breaks(self, delete):
+        def make_method(bound):
+            def method(self, x):
+                if delete:
+                    del bound.__self__.foo
+                else:
+                    bound.__self__.foo = 1
+                return x + 1
+
+            return method
+
+        ctx_manager = torch.no_grad()
+        if delete:
+            ctx_manager.foo = 0
+
+        class A:
+            method = make_method(ctx_manager.clone)
+
+        def fn(x):
+            return A().method(x)
+
+        x = torch.tensor(1.0)
+        ref = fn(x)
+        if delete:
+            ctx_manager.foo = 0
+        else:
+            del ctx_manager.foo
+
+        torch._dynamo.reset()
+        res = torch.compile(fn, backend="eager", fullgraph=False)(x)
+        self.assertEqual(ref, res)
+        if delete:
+            self.assertFalse(hasattr(ctx_manager, "foo"))
+            ctx_manager.foo = 0
+        else:
+            self.assertEqual(ctx_manager.foo, 1)
+
+        torch._dynamo.reset()
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as ctx:
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(
+            ctx.exception.gb_type,
+            "Attribute mutation on an untracked user-defined object",
+        )
+
+    def test_sourced_untracked_mutation_reports_dynamo_bug(self):
+        @dataclasses.dataclass
+        class C:
+            foo: int
+
+        # Pins the reporting path, not desired behavior: _dataclasses_fields_lambda
+        # is missing track_object_existing.
+        field = dataclasses.fields(C)[0]
+
+        def fn(obj, x):
+            dataclasses.fields(obj)[0].name = "bar"
+            return x + 1
+
+        x = torch.ones(1)
+        with self.assertLogs(logger="torch._dynamo", level="WARNING") as logs:
+            result = torch.compile(fn, backend="eager", fullgraph=False)(C(1), x)
+        self.assertEqual(result, x + 1)
+        self.assertTrue(
+            any(
+                "Attribute mutation on a sourced but untracked user-defined object"
+                in record.getMessage()
+                for record in logs.records
+            )
+        )
+        self.assertEqual(field.name, "bar")
+
+        field.name = "foo"
+        torch._dynamo.reset()
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as ctx:
+            torch.compile(fn, backend="eager", fullgraph=True)(C(1), x)
+        self.assertEqual(
+            ctx.exception.gb_type,
+            "Attribute mutation on a sourced but untracked user-defined object",
+        )
+        self.assertEqual(field.name, "foo")
+
+    def test_enum_member_attribute_mutation_is_tracked(self):
+        class E(enum.Enum):
+            A = 1
+
+        def fn(x):
+            E.A.foo = x
+            return E.A.foo + 1
+
+        x = torch.ones(1)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(x)
+
+        self.assertEqual(result, x + 1)
+        self.assertIs(E.A.foo, x)
 
     def test_inspect_signature_parameters(self):
         import inspect
@@ -17559,6 +17786,29 @@ fn
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.randn(4)
         self.assertEqual(fn(x), opt_fn(x))
+
+    def test_guard_filter_entry_snapshots_the_guard_code(self):
+        # entry.code_parts is populated from orig_guard.code_list at inspection
+        # time and owned by the entry: a later build_guards rebinds that
+        # attribute (to None, then to a fresh list), so an entry that read it
+        # through orig_guard would see the later build, not the one inspected.
+        from torch._dynamo.guards import make_guard_filter_entry
+        from torch._dynamo.source import LocalSource
+        from torch._guards import Guard
+
+        guard = Guard(LocalSource("x"), lambda *a: None)
+        guard.code_list = ["___check_type_id(L['x'], 1)"]
+        builder = types.SimpleNamespace(get=lambda g: 1)
+        entry = make_guard_filter_entry(guard, builder)
+        self.assertEqual(entry.code_parts, ("___check_type_id(L['x'], 1)",))
+        # Stricter than production, which never mutates the list in place:
+        # keeps the tuple() copy from being replaced by the list reference.
+        guard.code_list.clear()
+        guard.code_list.append("something else")
+        self.assertEqual(entry.code_parts, ("___check_type_id(L['x'], 1)",))
+        guard.code_list = None
+        self.assertEqual(entry.code_parts, ("___check_type_id(L['x'], 1)",))
+        self.assertEqual(make_guard_filter_entry(guard, builder).code_parts, ())
 
     def test_guard_filter_fn_by_id(self):
         def guard_filter_fn(entries):

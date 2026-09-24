@@ -1748,6 +1748,7 @@ TEST_MPS = torch.backends.mps.is_available()
 MACOS_VERSION = float('.'.join(platform.mac_ver()[0].split('.')[:2]) or -1)
 TEST_XPU = torch.xpu.is_available()
 TEST_HPU = bool(hasattr(torch, "hpu") and torch.hpu.is_available())
+TEST_MTIA = LazyVal(lambda: hasattr(torch, "mtia") and torch.mtia.is_available())  # type: ignore[call-arg]
 TEST_CUDA = torch.cuda.is_available()
 TEST_ACCELERATOR = LazyVal(lambda: torch.accelerator.is_available())  # type: ignore[call-arg]
 TEST_MULTIACCELERATOR = LazyVal(lambda: torch.accelerator.device_count() > 1)  # type: ignore[call-arg]
@@ -2626,6 +2627,15 @@ def skipIfRocmVersionAtLeast(version=None):
         )
     return lazy_skip_if(_should_skip, f"ROCm version at least {version}: known failure")
 
+# Skips a test on ROCm when the version is in [first_bad, first_good), for a
+# regression introduced in one release and fixed in a later one. The window
+# lives only here, so the skip reason cannot drift from the version check.
+def skipIfRocmVersionInRange(first_bad, first_good, reason):
+    def _should_skip():
+        return TEST_WITH_ROCM and tuple(first_bad) <= getRocmVersion() < tuple(first_good)
+    window = f"ROCm >= {'.'.join(map(str, first_bad))}, < {'.'.join(map(str, first_good))}"
+    return lazy_skip_if(_should_skip, f"{reason} ({window})")
+
 def skipIfNotMiopenSuggestNHWC(fn):
     return lazy_skip_if(
         lambda: not TEST_WITH_MIOPEN_SUGGEST_NHWC,
@@ -2909,6 +2919,37 @@ def skipIfCachingAllocatorDisabled(fn):
         and not torch._C._cuda_cudaCachingAllocator_is_enabled(),
         "requires the CUDA/HIP caching allocator (current allocator is uncached)",
     )(fn)
+
+def requires_multigpu(fn):
+    """Marks a test that needs more than one GPU.
+
+    Attaches the pytest marker the distributed CI configs partition on, so the
+    test lands in the multi-GPU run rather than the single-GPU one where it
+    could only ever skip, and skips it wherever fewer than two GPUs are visible.
+
+    The marker is attached only when pytest is importable: files using this also
+    run under an internal test runner that has no pytest, where the skip alone
+    is the whole behaviour.
+    """
+    reason = "requires >= 2 GPUs"
+    skip = torch.cuda.device_count() < 2
+
+    if isinstance(fn, type):
+        if has_pytest:
+            fn = pytest.mark.multigpu(fn)
+        return unittest.skipIf(skip, reason)(fn)
+
+    # Isolate decorator metadata when parameter variants share the original
+    # test function.
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        return fn(*args, **kwargs)
+
+    if has_pytest:
+        wrapper = pytest.mark.multigpu(wrapper)
+
+    return unittest.skipIf(skip, reason)(wrapper)
+
 
 def periodic(fn):
     """Marks a test that CI runs only in periodic test mode.
@@ -4166,7 +4207,7 @@ class TestCase(expecttest.TestCase):
                 f"changed from {self._prev_torch_function_state} to {tf_state}"
             )
 
-        # Detect leaked mutations to the six fp32 precision flags. Tests that
+        # Detect leaked mutations to the fp32 precision flags. Tests that
         # legitimately mutate these globals must restore them themselves (e.g.
         # via recover_orig_fp32_precision or setUpClass/tearDownClass).
         # Escape hatch: PYTORCH_DISABLE_FP32_PRECISION_LEAK_CHECK=1 disables
@@ -6615,11 +6656,36 @@ def scoped_load_inline(func):
         return func(*args, load_inline=load_inline, **kwargs)
     return wrapper
 
+# The legacy getter cross-checks the Float32MatmulPrecision enum against the
+# new backend-specific values and raises when they disagree, so a snapshot
+# taken while a test has them out of sync would throw from setUp/tearDown
+# instead of reporting the leak. Report a sentinel instead; restoring the
+# backend-specific values is what puts the pair back in sync.
+_INCONSISTENT_MATMUL_PRECISION = "<inconsistent legacy/new matmul precision>"
+
+
+def _get_legacy_float32_matmul_precision():
+    try:
+        return torch.get_float32_matmul_precision()
+    except RuntimeError:
+        return _INCONSISTENT_MATMUL_PRECISION
+
+
+def _set_legacy_float32_matmul_precision(value):
+    if value != _INCONSISTENT_MATMUL_PRECISION:
+        torch.set_float32_matmul_precision(value)
+
+
 # Single source of truth for which globals count as "fp32 precision state".
 # Add a new flag here and both recover_orig_fp32_precision and the TestCase
 # leak detector pick it up automatically.
 def _fp32_precision_flag_specs():
     return (
+        # Must stay first: set_float32_matmul_precision also writes the cuda
+        # and mkldnn matmul entries, so it has to be restored before them.
+        ("torch.get_float32_matmul_precision()",
+            _get_legacy_float32_matmul_precision,
+            _set_legacy_float32_matmul_precision),
         ("torch.backends.cuda.matmul.fp32_precision",
             lambda: torch.backends.cuda.matmul.fp32_precision,
             lambda v: setattr(torch.backends.cuda.matmul, "fp32_precision", v)),
