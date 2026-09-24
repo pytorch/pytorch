@@ -120,6 +120,9 @@ int64_t integer_coefficient(const Expr* x) {
 } // namespace
 
 Tri ExprArena::is_ge(const Expr* lhs, const Expr* rhs) {
+  if (lhs->has_float || rhs->has_float) {
+    throw NativeUnsupported("is_ge of a Float");
+  }
   if (lhs->is_boolean() || rhs->is_boolean()) {
     // TypeError("Can only compare inequalities with Expr").
     throw NativeUnsupported("inequality of a Boolean");
@@ -152,6 +155,9 @@ Tri ExprArena::is_ge(const Expr* lhs, const Expr* rhs) {
 }
 
 Tri ExprArena::is_eq(const Expr* lhs, const Expr* rhs) {
+  if (lhs->has_float || rhs->has_float) {
+    throw NativeUnsupported("is_eq of a Float");
+  }
   // No _eval_Eq or _eval_is_eq handler applies to these kinds.
   if (lhs == rhs) {
     return Tri::True;
@@ -233,6 +239,9 @@ const Expr* ExprArena::rel(
     const Expr* lhs,
     const Expr* rhs,
     bool evaluate) {
+  if (lhs->has_float || rhs->has_float) {
+    throw NativeUnsupported("Relational of a Float");
+  }
   if (kind < Kind::Eq || kind > Kind::Ge) {
     throw NativeUnsupported("expected a Relational kind");
   }

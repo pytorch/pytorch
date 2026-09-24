@@ -418,6 +418,7 @@ ValueRanges Analysis::interp(const Expr* e) {
     case Kind::BooleanFalse:
       return {e, e};
     case Kind::Rational:
+    case Kind::Float:
       throw NativeUnsupported("float value range");
     case Kind::Symbol: {
       const ValueRanges* r = find_range(e);

@@ -4,8 +4,10 @@
 
 #include <algorithm>
 #include <bit>
+#include <cmath>
 #include <cstring>
 #include <limits>
+#include <tuple>
 
 namespace torch::symbolic {
 
@@ -28,6 +30,8 @@ int class_rank(const Expr* e) {
       return e->p == 0 ? 0 : e->p == 1 ? 1 : e->p == -1 ? 5 : 7;
     case Kind::Rational:
       return e->p == 1 && e->q == 2 ? 2 : 8;
+    case Kind::Float:
+      return 9;
     case Kind::Symbol:
       return 13;
     case Kind::Pow:
@@ -133,6 +137,91 @@ int64_t checked_mul(int64_t a, int64_t b) {
   return r;
 }
 
+// A Number during Add/Mul flattening: the Rational r, or the Float f.
+struct NumVal {
+  Num r;
+  bool is_float = false;
+  double f = 0;
+};
+
+NumVal num_val(const Expr* e) {
+  if (e->kind == Kind::Float) {
+    return {{0, 0}, true, e->float_value()};
+  }
+  if (!e->is_rational()) {
+    throw NativeUnsupported("expected a Rational or a Float");
+  }
+  return {{e->p, e->q}};
+}
+
+bool is_zero(const NumVal& n) {
+  return n.is_float ? n.f == 0 : n.r.p == 0;
+}
+
+// other._as_mpf_op(53) of Float's arithmetic: Integers round to nearest even
+// like the int64 conversion; p/q of doubles is rounded once only when both are
+// exact.
+double float_operand(const NumVal& n) {
+  if (n.is_float) {
+    return n.f;
+  }
+  if (n.r.q == 1) {
+    return static_cast<double>(n.r.p);
+  }
+  constexpr int64_t kExact = int64_t(1) << 53;
+  if (n.r.p < -kExact || n.r.p > kExact || n.r.q > kExact) {
+    throw NativeUnsupported("inexact Rational operand of a Float");
+  }
+  return static_cast<double>(n.r.p) / static_cast<double>(n.r.q);
+}
+
+// Float._new(mpf result, 53). mpmath rounds like IEEE doubles, but with an
+// unbounded exponent, so the results agree only when finite and normal.
+// A zero result is S.Zero.
+NumVal float_result(double v) {
+  if (v == 0) {
+    return {{0, 1}};
+  }
+  if (!std::isfinite(v) || std::abs(v) < std::numeric_limits<double>::min()) {
+    throw NativeUnsupported("Float result outside the normal doubles");
+  }
+  return {{0, 0}, true, v};
+}
+
+NumVal num_add(const NumVal& a, const NumVal& b) {
+  if (a.is_float || b.is_float) {
+    return float_result(float_operand(a) + float_operand(b));
+  }
+  return {
+      make_num(i128(a.r.p) * b.r.q + i128(b.r.p) * a.r.q, i128(a.r.q) * b.r.q)};
+}
+
+NumVal num_mul(const NumVal& a, const NumVal& b) {
+  if (a.is_float || b.is_float) {
+    if (is_zero(a) || is_zero(b)) {
+      return {{0, 1}};
+    }
+    double v = float_operand(a) * float_operand(b);
+    if (v == 0) {
+      throw NativeUnsupported("Float underflow");
+    }
+    return float_result(v);
+  }
+  return {make_num(i128(a.r.p) * b.r.p, i128(a.r.q) * b.r.q)};
+}
+
+// A Float's mpf tuple (sign, man, exp, bc), man odd; (0, 0, 0, 0) for zero.
+std::tuple<int, uint64_t, int64_t, int> float_mpf(double v) {
+  if (v == 0) {
+    return {0, 0, 0, 0};
+  }
+  int e = 0;
+  auto man = static_cast<uint64_t>(std::ldexp(std::frexp(std::abs(v), &e), 53));
+  int tz = std::countr_zero(man);
+  man >>= tz;
+  return {v < 0, man, int64_t(e) - 53 + tz, std::bit_width(man)};
+}
+
 } // namespace
 
 const char* fact_name(Fact f) {
@@ -196,6 +285,10 @@ const Expr* ExprArena::intern(
     c10::ArrayRef<const Expr*> args) {
   Expr key{kind, 0, 0, p, q, {}, {}};
   key.args.assign(args.begin(), args.end());
+  key.has_float =
+      kind == Kind::Float || std::any_of(args.begin(), args.end(), [](auto a) {
+        return a->has_float;
+      });
   size_t h = c10::get_hash(static_cast<int>(kind), p, q);
   for (const Expr* a : args) {
     h = c10::hash_combine(h, a->id);
@@ -221,6 +314,14 @@ const Expr* ExprArena::rational(int64_t p, int64_t q) {
     throw NativeUnsupported("Rational with zero denominator");
   }
   return number(make_num(p, q));
+}
+
+const Expr* ExprArena::float_number(double v) {
+  if (!std::isfinite(v)) {
+    throw NativeUnsupported("Float of inf or nan");
+  }
+  // Float(-0.0) is Float(0.0).
+  return intern(Kind::Float, std::bit_cast<int64_t>(v == 0 ? 0.0 : v), 0, {});
 }
 
 const Expr* ExprArena::number(Num n) {
@@ -341,6 +442,28 @@ const Expr* ExprArena::number_pow(Num b, int64_t e) {
   return number({p, q});
 }
 
+const Expr* ExprArena::float_pow(const Expr* b, int64_t e) {
+  // Pow.__new__ and Float._eval_power for e not in {0, 1}. Negating the base
+  // for an even e, or the result for an odd one, is exact.
+  double x = b->float_value();
+  if (x == 0) {
+    if (e > 0) {
+      return b;
+    }
+    throw NativeUnsupported("zoo");
+  }
+  // mpf_pow_int rounds x*x and 1/x once, like IEEE; other powers round the
+  // exact power.
+  if (e == 2) {
+    NumVal n = num_val(b);
+    return float_number(num_mul(n, n).f);
+  }
+  if (e == -1) {
+    return float_number(float_result(1 / x).f);
+  }
+  throw NativeUnsupported("Float power");
+}
+
 const Expr* ExprArena::add(c10::ArrayRef<const Expr*> in) {
   // Add.flatten (sympy/core/add.py), restricted to finite commutative terms.
   c10::SmallVector<const Expr*, 8> seq;
@@ -358,8 +481,11 @@ const Expr* ExprArena::add(c10::ArrayRef<const Expr*> in) {
   if (seq.size() == 1) {
     return seq[0];
   }
-  Num coeff{0, 1};
-  c10::SmallVector<std::pair<const Expr*, Num>, 8> terms;
+  auto to_expr = [this](const NumVal& n) {
+    return n.is_float ? float_number(n.f) : number(n.r);
+  };
+  NumVal coeff{{0, 1}};
+  c10::SmallVector<std::pair<const Expr*, NumVal>, 8> terms;
   std::unordered_map<const Expr*, size_t> term_index;
   for (size_t i = 0; i < seq.size(); ++i) {
     const Expr* o = seq[i];
@@ -367,11 +493,10 @@ const Expr* ExprArena::add(c10::ArrayRef<const Expr*> in) {
     const Expr* s = o;
     switch (o->kind) {
       case Kind::Integer:
-      case Kind::Rational: {
-        coeff = make_num(
-            i128(coeff.p) * o->q + i128(o->p) * coeff.q, i128(coeff.q) * o->q);
+      case Kind::Rational:
+      case Kind::Float:
+        coeff = num_add(coeff, num_val(o));
         continue;
-      }
       case Kind::IntInfinity:
       case Kind::NegativeIntInfinity:
         throw NativeUnsupported("int_oo in Add");
@@ -392,27 +517,26 @@ const Expr* ExprArena::add(c10::ArrayRef<const Expr*> in) {
       default:
         break;
     }
-    Num cn = as_num(c);
+    NumVal cn = num_val(c);
     auto it = term_index.find(s);
     if (it == term_index.end()) {
       term_index.emplace(s, terms.size());
       terms.emplace_back(s, cn);
     } else {
-      Num& acc = terms[it->second].second;
-      acc =
-          make_num(i128(acc.p) * cn.q + i128(cn.p) * acc.q, i128(acc.q) * cn.q);
+      NumVal& acc = terms[it->second].second;
+      acc = num_add(acc, cn);
     }
   }
   c10::SmallVector<const Expr*, 8> newseq;
   for (const auto& [s, c] : terms) {
-    if (c.p == 0) {
+    if (is_zero(c)) {
       continue;
     }
-    if (c.p == 1 && c.q == 1) {
+    if (!c.is_float && c.r.p == 1 && c.r.q == 1) {
       newseq.push_back(s);
       continue;
     }
-    const Expr* ce = number(c);
+    const Expr* ce = to_expr(c);
     if (s->kind == Kind::Mul) {
       c10::SmallVector<const Expr*, 4> margs{ce};
       margs.append(s->args.begin(), s->args.end());
@@ -426,8 +550,8 @@ const Expr* ExprArena::add(c10::ArrayRef<const Expr*> in) {
   std::sort(newseq.begin(), newseq.end(), [this](auto a, auto b) {
     return compare(a, b) < 0;
   });
-  if (coeff.p != 0) {
-    newseq.insert(newseq.begin(), number(coeff));
+  if (!is_zero(coeff)) {
+    newseq.insert(newseq.begin(), to_expr(coeff));
   }
   return from_args(Kind::Add, newseq);
 }
@@ -482,7 +606,7 @@ const Expr* ExprArena::mul(c10::ArrayRef<const Expr*> in) {
     }
   }
 
-  Num coeff{1, 1};
+  NumVal coeff{{1, 1}};
   c10::SmallVector<std::pair<const Expr*, int64_t>, 8> powers;
   std::unordered_map<const Expr*, size_t> power_index;
   for (size_t i = 0; i < seq.size(); ++i) {
@@ -494,10 +618,10 @@ const Expr* ExprArena::mul(c10::ArrayRef<const Expr*> in) {
         seq.append(o->args.begin(), o->args.end());
         continue;
       case Kind::Integer:
-      case Kind::Rational: {
-        coeff = make_num(i128(coeff.p) * o->p, i128(coeff.q) * o->q);
+      case Kind::Rational:
+      case Kind::Float:
+        coeff = num_mul(coeff, num_val(o));
         continue;
-      }
       case Kind::IntInfinity:
       case Kind::NegativeIntInfinity:
         throw NativeUnsupported("int_oo in Mul");
@@ -519,7 +643,7 @@ const Expr* ExprArena::mul(c10::ArrayRef<const Expr*> in) {
       }
     }
   }
-  if (coeff.p == 0) {
+  if (is_zero(coeff)) {
     return zero_;
   }
   c10::SmallVector<const Expr*, 8> c_part;
@@ -536,8 +660,8 @@ const Expr* ExprArena::mul(c10::ArrayRef<const Expr*> in) {
   std::sort(c_part.begin(), c_part.end(), [this](auto a, auto b) {
     return compare(a, b) < 0;
   });
-  if (!(coeff.p == 1 && coeff.q == 1)) {
-    const Expr* c = number(coeff);
+  if (coeff.is_float || !(coeff.r.p == 1 && coeff.r.q == 1)) {
+    const Expr* c = coeff.is_float ? float_number(coeff.f) : number(coeff.r);
     if (c_part.size() == 1 && c_part[0]->kind == Kind::Add) {
       c10::SmallVector<const Expr*, 8> terms;
       for (const Expr* f : c_part[0]->args) {
@@ -568,6 +692,8 @@ const Expr* ExprArena::pow(const Expr* b, const Expr* e) {
     case Kind::Integer:
     case Kind::Rational:
       return number_pow(as_num(b), e->p);
+    case Kind::Float:
+      return float_pow(b, e->p);
     case Kind::IntInfinity:
     case Kind::NegativeIntInfinity:
       throw NativeUnsupported("int_oo in Pow");
@@ -609,6 +735,12 @@ int ExprArena::compare(const Expr* a, const Expr* b) const {
     case Kind::Rational:
       c = cmp3(a->p, b->p);
       return c != 0 ? c : cmp3(a->q, b->q);
+    case Kind::Float: {
+      // _hashable_content is (_mpf_, _prec) and the precisions are equal.
+      auto ma = float_mpf(a->float_value());
+      auto mb = float_mpf(b->float_value());
+      return (ma > mb) - (ma < mb);
+    }
     case Kind::Symbol: {
       // _hashable_content is (name,) + tuple(sorted(assumptions0.items())).
       const FactKB& fa = symbol_info(a).facts;
@@ -660,10 +792,20 @@ const Expr* ExprArena::neg(const Expr* a) {
   if (a == int_oo_ || a == neg_int_oo_) {
     return a == int_oo_ ? neg_int_oo_ : int_oo_;
   }
+  // Float.__neg__ keeps a zero a Float.
+  if (a->kind == Kind::Float) {
+    return float_number(-a->float_value());
+  }
   return mul({neg_one_, a});
 }
 
 const Expr* ExprArena::sub(const Expr* a, const Expr* b) {
+  // Number.__sub__ with a Float skips Add, which would drop a Float zero.
+  if (a->is_number() && b->is_number() &&
+      (a->kind == Kind::Float || b->kind == Kind::Float)) {
+    NumVal r = num_add(num_val(a), num_val(neg(b)));
+    return r.is_float ? float_number(r.f) : number(r.r);
+  }
   return add({a, neg(b)});
 }
 

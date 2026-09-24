@@ -149,7 +149,7 @@ const Expr* ExprArena::xreplace(
 }
 
 const Expr* ExprArena::keep_coeff(const Expr* coeff, const Expr* factors) {
-  // _keep_coeff(coeff, factors) for a Rational coeff. Except for a Number times
+  // _keep_coeff(coeff, factors) for a Number coeff. Except for a Number times
   // an Add, which it leaves unevaluated, it equals the evaluated product.
   if (factors == one_) {
     return coeff;
@@ -275,6 +275,10 @@ c10::SmallVector<const Expr*, 2> ExprArena::real_roots(
     const Expr* p,
     const Expr* x) {
   // real_roots(p) for a polynomial in x of degree <= 1 (with multiplicity).
+  if (p->has_float) {
+    // sympy solves over the RR domain.
+    throw NativeUnsupported("real_roots of a Float polynomial");
+  }
   // Coefficients by expansion, lowest degree first.
   constexpr size_t kMaxDegree = 64;
   auto coeffs = [&](auto&& self, const Expr* e) -> std::vector<const Expr*> {

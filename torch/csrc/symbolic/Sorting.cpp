@@ -1,6 +1,8 @@
 #include <torch/csrc/symbolic/Expr.h>
 
 #include <algorithm>
+#include <bit>
+#include <cmath>
 
 namespace torch::symbolic {
 
@@ -45,7 +47,35 @@ int infinity_rank(const Expr* e) {
 }
 
 bool is_negative_number(const Expr* e) {
-  return e->kind == Kind::NegativeIntInfinity || (e->is_rational() && e->p < 0);
+  return e->kind == Kind::NegativeIntInfinity ||
+      (e->kind == Kind::Float ? e->float_value() < 0
+                              : e->is_rational() && e->p < 0);
+}
+
+int bit_width(unsigned __int128 x) {
+  auto hi = static_cast<uint64_t>(x >> 64);
+  return hi != 0 ? 64 + std::bit_width(hi)
+                 : std::bit_width(static_cast<uint64_t>(x));
+}
+
+// Float._Frel with a Rational: v*q against p, exactly.
+int compare_float_rational(double v, int64_t p, int64_t q) {
+  int c = cmp3(v > 0 ? 1 : v < 0 ? -1 : 0, cmp3(p, int64_t(0)));
+  if (c != 0 || p == 0) {
+    return c;
+  }
+  // |v|*q = m*q*2**e with m < 2**53, against |p| < 2**64.
+  int e = 0;
+  auto m = static_cast<uint64_t>(std::ldexp(std::frexp(std::abs(v), &e), 53));
+  e -= 53;
+  unsigned __int128 lhs = static_cast<unsigned __int128>(m) * q;
+  unsigned __int128 rhs = p < 0 ? -static_cast<uint64_t>(p) : p;
+  if (e >= 0) {
+    c = bit_width(lhs) + e > 64 ? 1 : cmp3(lhs << e, rhs);
+  } else {
+    c = bit_width(rhs) - e > 120 ? -1 : cmp3(lhs, rhs << -e);
+  }
+  return p < 0 ? -c : c;
 }
 
 const char* class_name(Kind k) {
@@ -100,6 +130,14 @@ int compare_numbers(const Expr* a, const Expr* b) {
   if (ra != 0 || rb != 0) {
     return cmp3(ra, rb);
   }
+  if (a->kind == Kind::Float) {
+    return b->kind == Kind::Float
+        ? cmp3(a->float_value(), b->float_value())
+        : compare_float_rational(a->float_value(), b->p, b->q);
+  }
+  if (b->kind == Kind::Float) {
+    return -compare_float_rational(b->float_value(), a->p, a->q);
+  }
   return cmp3(i128(a->p) * b->q, i128(b->p) * a->q);
 }
 
@@ -112,8 +150,15 @@ int compare_keys(const SortKey& a, const SortKey& b) {
       return cmp3(a.i, b.i);
     case T::Str:
       return cmp3(a.s.compare(b.s), 0);
-    case T::Num:
-      return compare_numbers(a.num, b.num);
+    case T::Num: {
+      int c = compare_numbers(a.num, b.num);
+      // Python stops a tuple comparison at Float(0.5) != Rational(1, 2), which
+      // then compares neither less nor greater.
+      if (c == 0 && a.num != b.num) {
+        throw NativeUnsupported("sort keys tie on a Float and a Rational");
+      }
+      return c;
+    }
     case T::Tuple:
       break;
   }
@@ -236,6 +281,12 @@ const SortKeyPtr& ExprArena::sort_key(const Expr* e) {
 }
 
 std::vector<const Expr*> ExprArena::ordered(c10::ArrayRef<const Expr*> seq) {
+  // sympy groups by key equality, and a Float key can compare equal to a
+  // Rational one without being ==.
+  if (std::any_of(
+          seq.begin(), seq.end(), [](auto e) { return e->has_float; })) {
+    throw NativeUnsupported("ordered with a Float");
+  }
   // Group by node count, then break ties with default_sort_key; keys are only
   // computed for groups of more than one element, as sympy does.
   std::vector<std::pair<size_t, const Expr*>> by_nodes;
@@ -322,7 +373,7 @@ c10::SmallVector<const Expr*, 4> ExprArena::as_ordered_terms(const Expr* e) {
   const Expr* m = e->args.size() == 2 ? e->args[1] : nullptr;
   if (m != nullptr && e->args[0]->is_number() && m->kind == Kind::Mul &&
       m->args.size() == 2 && m->args[0]->is_number() &&
-      e->args[0]->is_rational() && e->args[0]->p > 0 &&
+      compare_numbers(e->args[0], zero_) > 0 &&
       is_negative_number(m->args[0])) {
     return {e->args[0], m};
   }
@@ -338,12 +389,15 @@ c10::SmallVector<const Expr*, 4> ExprArena::as_ordered_terms(const Expr* e) {
   std::vector<const Expr*> gens;
   for (const Expr* t : e->args) {
     auto [coeff, rest] = as_coeff_Mul(t);
-    if (!coeff->is_rational()) {
+    if (!coeff->is_rational() && coeff->kind != Kind::Float) {
       throw NativeUnsupported("complex() of int_oo");
     }
     Term term{
         t,
-        static_cast<double>(static_cast<long double>(coeff->p) / coeff->q),
+        coeff->kind == Kind::Float
+            ? coeff->float_value()
+            : static_cast<double>(
+                  static_cast<long double>(coeff->p) / coeff->q),
         {},
         {}};
     if (rest != one_) {
@@ -406,6 +460,7 @@ bool ExprArena::could_extract_minus_sign(const Expr* e) {
   switch (e->kind) {
     case Kind::Integer:
     case Kind::Rational:
+    case Kind::Float:
     case Kind::IntInfinity:
     case Kind::NegativeIntInfinity:
       return is_negative_number(e);

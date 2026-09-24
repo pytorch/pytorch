@@ -183,6 +183,11 @@ const char* function_name(Kind k) {
 }
 
 const Expr* ExprArena::function(Kind kind, c10::ArrayRef<const Expr*> args) {
+  if (std::any_of(args.begin(), args.end(), [](const Expr* a) {
+        return a->has_float;
+      })) {
+    throw NativeUnsupported("function of a Float");
+  }
   if (kind == Kind::Max || kind == Kind::Min) {
     return minmax(kind, args);
   }
@@ -645,6 +650,11 @@ const Expr* ExprArena::minmax(
     Kind kind,
     c10::ArrayRef<const Expr*> args,
     bool evaluate) {
+  if (std::any_of(args.begin(), args.end(), [](const Expr* a) {
+        return a->has_float;
+      })) {
+    throw NativeUnsupported("Max/Min of a Float");
+  }
   // MinMaxBase.__new__. cls.zero and cls.identity are the float oo and -oo,
   // which are not in the arena; nullptr stands for cls.identity where
   // _collapse_arguments inserts it. The unique_summations_symbols fast path

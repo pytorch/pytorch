@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <cmath>
 #include <initializer_list>
 
 namespace torch::symbolic {
@@ -1280,7 +1281,11 @@ FactKB ExprArena::default_kb(const Expr* e) {
       deduce_all_facts(kb, extra);
       return kb;
     };
-    return std::array<FactKB, 10>{
+    // Float's rational and irrational are None.
+    FactKB float_kb = make(
+        {{F::commutative, true}, {F::real, true}, {F::extended_real, true}});
+    float_kb.known |= bit(F::rational) | bit(F::irrational);
+    return std::array<FactKB, 11>{
         // Integer, NegativeOne
         make(
             {{F::commutative, true},
@@ -1331,6 +1336,7 @@ FactKB ExprArena::default_kb(const Expr* e) {
         make({{F::commutative, true}}),
         // is_real = True
         make({{F::real, true}}),
+        float_kb,
     };
   }();
   switch (e->kind) {
@@ -1338,6 +1344,8 @@ FactKB ExprArena::default_kb(const Expr* e) {
       return kbs[e->p == 0 ? 1 : e->p == 1 ? 2 : 0];
     case Kind::Rational:
       return kbs[3];
+    case Kind::Float:
+      return kbs[10];
     case Kind::IntInfinity:
       return kbs[4];
     case Kind::NegativeIntInfinity:
@@ -1373,6 +1381,11 @@ Tri ExprArena::ask(const Expr* e, Fact fact) {
   // _ask (sympy/core/assumptions.py): breadth-first over the facts that can
   // determine `fact`, in Fact order where sympy shuffles (the result does not
   // depend on the order when handlers agree with the rules).
+  if (e->kind == Kind::Float &&
+      (fact == F::rational || fact == F::irrational)) {
+    // Float's class attributes shadow what its KB deduces.
+    return Tri::Unknown;
+  }
   FactKB& kb = e->kb;
   uint32_t queued = bit(fact);
   if (kb.known & queued) {
@@ -1433,6 +1446,26 @@ Tri ExprArena::eval_fact(const Expr* e, Fact f) {
         default:
           return Tri::Unknown;
       }
+    case Kind::Float: {
+      double v = e->float_value();
+      switch (f) {
+        case Fact::extended_negative:
+        case Fact::negative:
+          return tri(v < 0);
+        case Fact::extended_positive:
+        case Fact::positive:
+          return tri(v > 0);
+        case Fact::zero:
+          return tri(v == 0);
+        case Fact::integer:
+          // None when int_valued.
+          return v == 0            ? Tri::True
+              : std::trunc(v) != v ? Tri::False
+                                   : Tri::Unknown;
+        default:
+          return Tri::Unknown;
+      }
+    }
     case Kind::IntInfinity:
     case Kind::NegativeIntInfinity:
     case Kind::Symbol:

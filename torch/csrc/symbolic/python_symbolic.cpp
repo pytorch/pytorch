@@ -54,6 +54,7 @@ struct PyArena {
     py::module_ numbers = py::module_::import("torch.utils._sympy.numbers");
     Integer = sympy.attr("Integer");
     Rational = sympy.attr("Rational");
+    Float = sympy.attr("Float");
     Symbol = sympy.attr("Symbol");
     Dummy = sympy.attr("Dummy");
     Add = sympy.attr("Add");
@@ -91,8 +92,8 @@ struct PyArena {
   std::vector<py::object> symbol_objects;
   std::unordered_map<uint32_t, py::object> sympy_cache;
 
-  py::object Integer, Rational, Symbol, Dummy, Add, Mul, Pow, IntInfinity,
-      NegativeIntInfinity, int_oo, true_, false_, Not, And, Or;
+  py::object Integer, Rational, Float, Symbol, Dummy, Add, Mul, Pow,
+      IntInfinity, NegativeIntInfinity, int_oo, true_, false_, Not, And, Or;
   // super(AssocOp, cls).__new__, which LatticeOp.__new__ calls with the final
   // ordered args.
   py::object lattice_new;
@@ -186,6 +187,17 @@ const Expr* PyArena::from_sympy(py::handle obj) {
   }
   if (py::isinstance(obj, Rational)) {
     return arena->rational(to_int64(obj.attr("p")), to_int64(obj.attr("q")));
+  }
+  if (py::isinstance(obj, Float)) {
+    if (obj.attr("_prec").cast<int64_t>() != 53) {
+      throw NativeUnsupported("Float of precision other than 53");
+    }
+    auto v = obj.cast<double>();
+    // float() rounds Floats outside the doubles.
+    if (!Float(v).equal(obj)) {
+      throw NativeUnsupported("Float that is not a double");
+    }
+    return arena->float_number(v);
   }
   if (py::isinstance(obj, IntInfinity)) {
     return arena->int_oo();
@@ -309,6 +321,9 @@ py::object PyArena::to_sympy(const Expr* e) {
     case Kind::Rational:
       r = Rational(e->p, e->q);
       break;
+    case Kind::Float:
+      r = Float(e->float_value());
+      break;
     case Kind::IntInfinity:
       r = int_oo;
       break;
@@ -419,6 +434,8 @@ const char* kind_name(Kind k) {
       return "Integer";
     case Kind::Rational:
       return "Rational";
+    case Kind::Float:
+      return "Float";
     case Kind::IntInfinity:
       return "IntInfinity";
     case Kind::NegativeIntInfinity:
@@ -1306,11 +1323,12 @@ void initSymbolicBindings(PyObject* module) {
               throw NativeUnsupported("hint overflows int64");
             }
             auto lock = lock_env(*self.env);
+            const Expr* e = self.owner->from_sympy(expr);
+            if (e->has_float) {
+              throw NativeUnsupported("Float in a native node");
+            }
             return c10::make_intrusive<NativeSymNodeImpl>(
-                self.env,
-                self.owner->from_sympy(expr),
-                is_bool ? PyType::Bool : PyType::Int,
-                *h);
+                self.env, e, is_bool ? PyType::Bool : PyType::Int, *h);
           })
       .def(
           "take_queries",

@@ -165,6 +165,10 @@ const Expr* ExprArena::fast_expand(const Expr* e) {
 }
 
 const Expr* ExprArena::safe_expand(const Expr* e) {
+  // Float rounding depends on the multinomial expansion order.
+  if (e->has_float) {
+    throw NativeUnsupported("safe_expand of a Float");
+  }
   // And, Or and Not have no expand method.
   if (e->kind == Kind::And || e->kind == Kind::Or || e->kind == Kind::Not) {
     return e;

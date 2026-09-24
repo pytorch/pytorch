@@ -5,6 +5,7 @@
 #include <c10/util/intrusive_ptr.h>
 
 #include <array>
+#include <bit>
 #include <cstdint>
 #include <deque>
 #include <memory>
@@ -30,6 +31,7 @@ struct NativeUnsupported : std::runtime_error {
 enum class Kind : uint8_t {
   Integer,
   Rational,
+  Float,
   IntInfinity,
   NegativeIntInfinity,
   Symbol,
@@ -152,8 +154,9 @@ struct Expr {
   Kind kind;
   uint32_t id;
   size_t hash;
-  // Integer: value in p. Rational: p/q in lowest terms, q > 1. Symbol: index
-  // into ExprArena's symbol table in p.
+  // Integer: value in p. Rational: p/q in lowest terms, q > 1. Float: the
+  // bits of a finite double other than -0.0 in p (a sympy Float of precision
+  // 53). Symbol: index into ExprArena's symbol table in p.
   int64_t p;
   int64_t q;
   // Add/Mul: sympy's order (coefficient first, the rest by Basic.compare).
@@ -161,12 +164,17 @@ struct Expr {
   c10::SmallVector<const Expr*, 3> args;
   // Assumptions cache, like sympy's obj._assumptions.
   mutable FactKB kb;
+  // A Float occurs in the expression.
+  bool has_float = false;
 
   bool is_number() const {
     return kind <= Kind::NegativeIntInfinity;
   }
   bool is_rational() const {
     return kind == Kind::Integer || kind == Kind::Rational;
+  }
+  double float_value() const {
+    return std::bit_cast<double>(p);
   }
   // isinstance(e, Boolean) for everything but Symbol, which is both an Expr
   // and a Boolean in sympy.
@@ -223,6 +231,8 @@ class ExprArena : public c10::intrusive_ptr_target {
 
   const Expr* integer(int64_t v);
   const Expr* rational(int64_t p, int64_t q);
+  // Float(v) for a Python float v; throws for inf and nan.
+  const Expr* float_number(double v);
   const Expr* int_oo() const {
     return int_oo_;
   }
@@ -338,6 +348,7 @@ class ExprArena : public c10::intrusive_ptr_target {
   const Expr* canonicalize_bool_expr_impl(const Expr* e);
   const Expr* reduce_to_lowest_terms(const Expr* e);
   const Expr* number_pow(Num b, int64_t e);
+  const Expr* float_pow(const Expr* b, int64_t e);
   // Mod.eval and PythonMod.eval; nullptr for None.
   const Expr* eval_mod(Kind kind, const Expr* p, const Expr* q);
   // FloorDiv.eval, also for CleanDiv; nullptr for None.

@@ -263,6 +263,9 @@ bool NativeShapeEnv::definitely_le(
 }
 
 const Expr* NativeShapeEnv::simplify(const Expr* e) {
+  if (e->has_float) {
+    throw NativeUnsupported("simplify of a Float");
+  }
   if (!pristine_ || !all_symbols_mirrored(e)) {
     throw NativeUnsupported("simplify needs a pristine, mirrored env");
   }
@@ -468,7 +471,7 @@ std::optional<const Expr*> NativeShapeEnv::evaluate_expr_impl(
     return e;
   }
   // Python evaluates the replaced expr.
-  if (!replacements_empty_ || !all_symbols_mirrored(e)) {
+  if (e->has_float || !replacements_empty_ || !all_symbols_mirrored(e)) {
     return std::nullopt;
   }
   if (e->is_number()) {

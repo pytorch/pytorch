@@ -2,6 +2,10 @@
 
 #include <c10/util/StringUtil.h>
 
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
+
 namespace torch::symbolic {
 
 namespace {
@@ -34,6 +38,76 @@ const char* rel_op(Kind k) {
   }
 }
 
+// mlib.to_str(_mpf_, 15, strip_zeros=strip) of a Float, which is
+// _print_Float's result for precision 53.
+std::string print_float(double v, bool strip) {
+  if (v == 0) {
+    return "0.0";
+  }
+  constexpr int dps = 15;
+  // to_digits_exp(v, dps + 3): the digits of floor(|v| * 10**fixdps), with
+  // bitprec = int(18 * log2(10)) + 10 = 69.
+  int exp_bc = 0;
+  std::frexp(v, &exp_bc);
+  int fixprec = std::max(69 - exp_bc, 0);
+  auto fixdps =
+      static_cast<int>(fixprec / (std::log(10.0) / std::log(2.0)) + 0.5);
+  // A double has at most 1074 fractional digits, so this is exact.
+  std::string exact(1500, '\0');
+  exact.resize(
+      std::snprintf(exact.data(), exact.size(), "%.1074f", std::abs(v)));
+  size_t point = exact.find('.');
+  std::string digits = exact.substr(0, point) + exact.substr(point + 1, fixdps);
+  digits.erase(0, digits.find_first_not_of('0'));
+  int exponent = static_cast<int>(digits.size()) - fixdps - 1;
+  if (static_cast<int>(digits.size()) > dps && digits[dps] >= '5') {
+    digits.resize(dps);
+    int i = dps - 1;
+    while (i >= 0 && digits[i] == '9') {
+      --i;
+    }
+    if (i >= 0) {
+      ++digits[i];
+      std::fill(digits.begin() + i + 1, digits.end(), '0');
+    } else {
+      digits = "1" + std::string(dps - 1, '0');
+      ++exponent;
+    }
+  } else if (static_cast<int>(digits.size()) > dps) {
+    digits.resize(dps);
+  }
+  int split = 1;
+  // min_fixed = -5, max_fixed = dps.
+  if (-5 < exponent && exponent < dps) {
+    if (exponent < 0) {
+      digits = std::string(-exponent, '0') + digits;
+    } else {
+      split = exponent + 1;
+      if (split > dps) {
+        digits += std::string(split - dps, '0');
+      }
+    }
+    exponent = 0;
+  }
+  digits = digits.substr(0, split) + "." + digits.substr(split);
+  if (strip) {
+    digits.erase(digits.find_last_not_of('0') + 1);
+    if (digits.back() == '.') {
+      digits += '0';
+    }
+  }
+  std::string sign = v < 0 ? "-" : "";
+  if (exponent == 0) {
+    return sign + digits;
+  }
+  return sign + digits + (exponent > 0 ? "e+" : "e") + std::to_string(exponent);
+}
+
+bool is_negative(const Expr* c) {
+  return c->kind == Kind::Float ? c->float_value() < 0
+                                : c->is_rational() && c->p < 0;
+}
+
 } // namespace
 
 // sympy.printing.str.StrPrinter with the default settings.
@@ -42,11 +116,22 @@ class StrPrinter {
   explicit StrPrinter(ExprArena& arena) : arena_(arena) {}
 
   std::string print(const Expr* e) {
+    ++print_level_;
+    std::string s = print_node(e);
+    --print_level_;
+    return s;
+  }
+
+ private:
+  std::string print_node(const Expr* e) {
     switch (e->kind) {
       case Kind::Integer:
         return std::to_string(e->p);
       case Kind::Rational:
         return std::to_string(e->p) + "/" + std::to_string(e->q);
+      case Kind::Float:
+        // full_prec="auto" strips zeros below the top level.
+        return print_float(e->float_value(), print_level_ > 1);
       case Kind::IntInfinity:
         return "int_oo";
       case Kind::NegativeIntInfinity:
@@ -127,7 +212,6 @@ class StrPrinter {
     throw NativeUnsupported("str of an unknown kind");
   }
 
- private:
   // sympy.printing.precedence.precedence.
   int precedence(const Expr* e) {
     switch (e->kind) {
@@ -135,6 +219,8 @@ class StrPrinter {
         return e->p < 0 ? kAdd : kAtom;
       case Kind::Rational:
         return e->p < 0 ? kAdd : kMul;
+      case Kind::Float:
+        return is_negative(e) ? kAdd : kAtom;
       case Kind::Mul:
         for (const Expr* a : e->args) {
           if (a->is_function() && precedence(a) < kMul) {
@@ -233,7 +319,7 @@ class StrPrinter {
     auto [c, rest] = arena_.as_coeff_Mul(e);
     std::string sign;
     const Expr* expr = e;
-    if (c->is_rational() && c->p < 0) {
+    if (is_negative(c)) {
       expr = arena_.keep_coeff(arena_.neg(c), rest);
       sign = "-";
     }
@@ -279,6 +365,8 @@ class StrPrinter {
   }
 
   ExprArena& arena_;
+  // Printer._print_level.
+  int print_level_ = 0;
 };
 
 std::string ExprArena::str(const Expr* e) {
