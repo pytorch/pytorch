@@ -15,6 +15,7 @@
 #include <utility>
 
 #if defined(USE_ROCM)
+#include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <rocblas/rocblas.h>
 #endif
 
@@ -52,6 +53,15 @@ namespace {
 
 #if defined(USE_ROCM)
 void createCublasLtHandle(cublasLtHandle_t *handle) {
+  // hipblasLtCreate allocates device memory. Under stream capture that
+  // allocation fails and hipBLASLt exits the process, which can hang in
+  // teardown instead of reporting an error.
+  TORCH_CHECK(
+      c10::cuda::currentStreamCaptureStatusMayInitCtx() ==
+          c10::cuda::CaptureStatus::None,
+      "Cannot create a hipBLASLt handle while the current stream is being "
+      "captured. hipBLASLt handles are created per (thread, stream) on first "
+      "use; run a hipBLASLt op on this thread and stream before capture begins.");
   TORCH_CUDABLAS_CHECK(cublasLtCreate(handle));
 }
 

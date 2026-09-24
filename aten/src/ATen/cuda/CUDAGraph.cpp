@@ -148,8 +148,12 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*={0,0}*/, cudaStreamCaptureMode 
   // hipBLASLt handles are per-(device, stream) on ROCm and lazily created.
   // Ensure the handle for the intended capture stream exists before
   // capture begins, because hipblasLtCreate performs internal allocations
-  // that are not allowed once stream capture is active.
-  if (at::globalContext().blasPreferredBackend() == at::BlasBackend::Cublaslt) {
+  // that are not allowed once stream capture is active. Some ops (e.g.
+  // _scaled_mm, _int_mm) use hipBLASLt whatever the preferred backend is, so
+  // this is keyed on hipBLASLt being usable on the device.
+  auto& hooks = at::detail::getCUDAHooks();
+  if (at::globalContext().hasCuBLASLt() &&
+      hooks.isGPUArch(hooks.getHipblasltSupportedArchs(), capture_dev_)) {
     (void)at::cuda::getCurrentCUDABlasLtHandle();
     // The line above only covers this thread. Backward inside the capture
     // region runs its gemms from an autograd worker thread, whose first
