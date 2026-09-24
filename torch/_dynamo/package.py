@@ -726,7 +726,11 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
             if obj is code:
                 return ""
 
+            # Only a code constant can hold `code`. Adding the others to `seen`
+            # compares b"" with 0 (equal hashes), an error under python -bb.
             for i, const in enumerate(obj.co_consts):
+                if not inspect.iscode(const):
+                    continue
                 if (res := _find_code_source(const)) is not None:
                     return f".co_consts[{i}]{res}"
 
