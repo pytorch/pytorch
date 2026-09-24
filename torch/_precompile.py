@@ -2036,9 +2036,10 @@ _SERVING_NOTES = {
 # This artifact SERVES BY INSTALLING the captured guarded entries onto the live code
 # objects of the captured modules, so loading it mutates global state: a frame the
 # entry reaches by an ordinary call (a graph break inside a child module's forward)
-# can only be served through Dynamo's frame evaluator. Calls run under the
-# fail_on_recompile stance, so a call no captured variant covers raises rather than
-# compiling a new graph.
+# can only be served through Dynamo's frame evaluator. Its calls refuse to compile,
+# as under the fail_on_recompile stance (but without setting that process-wide
+# stance), so a call no captured variant covers raises rather than compiling a new
+# graph. A process-wide stance you set yourself (e.g. "force_eager") still wins.
 """,
 }
 
@@ -3305,7 +3306,9 @@ def load(
     compiled a frame the entry reaches only by an ordinary call (a graph break
     inside a child module's forward): its artifact has ``SERVING_MODE =
     "installed"`` and serves by installing the captured entries onto the live
-    code objects, under the ``fail_on_recompile`` stance. A Dynamo artifact whose
+    code objects; its calls refuse to compile, as under the ``fail_on_recompile``
+    stance, without setting that process-wide stance (a process-wide stance the
+    caller sets, such as ``"force_eager"``, still takes precedence). A Dynamo artifact whose
     capture graph-broke cannot load beside the live compile that captured it
     (the continuation names collide): load it in a fresh process.
 

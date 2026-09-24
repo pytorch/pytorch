@@ -4635,6 +4635,20 @@ def breaking_helper(y):
 
 def calls_breaking_helper(model, x):
     return breaking_helper(model(x)) + 1
+
+
+STANCES = []
+
+
+@torch._dynamo.disable
+def record_stance():
+    STANCES.append(torch._dynamo.eval_frame._stance.stance)
+
+
+def records_stance(model, x):
+    y = breaking_helper(model(x))
+    record_stance()
+    return y + 1
 """
 
 _GOLDEN_LOADER = """
@@ -4659,7 +4673,7 @@ except torch.compiler.PrecompileError as e:
     assert "no captured variant" in str(e), e
 else:
     raise AssertionError("an uncovered call was served")
-print("served")
+print("served", mod.STANCES)
 """
 
 
@@ -4708,6 +4722,7 @@ class TestPrecompileDynamoCapture(TestCase):
         )
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertIn("served", out.stdout)
+        return out.stdout
 
     def test_capture_takes_pathlike_paths(self):
         import pathlib
@@ -4778,6 +4793,42 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertIn(unreachable, python_code)
         calls = [((self.x2,), {}, y2), ((self.x3,), {}, y3)]
         self._serve_in_fresh_process(calls, mode="installed")
+
+    @skipIfCrossRef
+    def test_an_installed_artifact_leaves_the_global_stance_alone(self):
+        # Another thread's torch.compile reads the process-global stance, so a
+        # served call must refuse recompiles without setting it.
+        fn = self.mod.records_stance
+        with self._capture(fn, backend="eager") as cap:
+            y = cap(self.model, self.x2)
+        stdout = self._serve_in_fresh_process([((self.x2,), {}, y)], mode="installed")
+        self.assertIn("served ['default']", stdout)
+
+    @skipIfCrossRef
+    def test_an_installed_artifact_refuses_to_load_with_dynamo_disabled(self):
+        fn = self.mod.calls_breaking_helper
+        with self._capture(fn, backend="eager") as cap:
+            cap(self.model, self.x2)
+        script = (
+            "import sys, torch\n"
+            "sys.path.insert(0, sys.argv[1])\n"
+            "try:\n"
+            "    torch.compiler.precompile.load(sys.argv[2], sys.argv[3])\n"
+            "except torch.compiler.PrecompileError as e:\n"
+            "    assert 'disabled in this process' in str(e), e\n"
+            "    assert 'source' not in str(e), e\n"
+            "    print('refused')\n"
+        )
+        argv = [self.dir, self.artifact, self.cache]
+        env = {**os.environ, "TORCHDYNAMO_DISABLE": "1"}
+        out = subprocess.run(
+            [sys.executable, "-c", script, *argv],
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("refused", out.stdout)
 
     @skipIfCrossRef
     def test_an_installed_artifact_refuses_changed_source_at_load(self):
