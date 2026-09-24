@@ -1833,11 +1833,18 @@ def _multigraph_frames(entry: Any) -> list[dict[str, Any]]:
     keeps its record, flagged and without variants, the way install() keeps its
     global binding but none of its guarded codes: a continuation the frame ahead
     of it names must stay bound, and a bypassed code's guarded codes are dead.
+    A code that is neither bypassed nor has variants is ``trivial``: it ran as
+    plain Python during capture, and the driver rebuilds it as plain Python.
     """
     return [
         {
             "is_entry": i == 0,
             "bypassed": code.bypassed,
+            # No variant and not bypassed: Dynamo skipped the frame (no tensor
+            # reached it) or traced no ops in it, e.g. the continuation after a
+            # trailing .backward(). Either way it ran eager during capture, so
+            # the driver runs it eager too.
+            "trivial": not code.guarded_codes and not code.bypassed,
             "code": code.python_code,
             "python_module": code.python_module,
             "import_sources": dict(code.import_sources),
@@ -1900,11 +1907,14 @@ def _serving_mode(frames: list[dict[str, Any]]) -> str:
     A frame it cannot reach would run eager, silently giving up the compiled
     variant; a frame it reaches but has no variant of (a bypassed continuation)
     would raise on the very path capture exercised. Either way the capture is
-    served by installing instead, which has a compiler behind it.
+    served by installing instead, which has a compiler behind it. A trivial
+    continuation ran eager during capture and is served eager, so it counts as
+    covered when reached and costs nothing when not.
     """
     reachable = _reachable_frames(frames)
-    covered = {i for i, frame in enumerate(frames) if frame["variants"]}
-    return "standalone" if covered == reachable else "installed"
+    compiled = {i for i, frame in enumerate(frames) if frame["variants"]}
+    trivial = {i for i, f in enumerate(frames) if f["trivial"] and not f["is_entry"]}
+    return "standalone" if compiled <= reachable <= compiled | trivial else "installed"
 
 
 def _reject_uninstallable_entry(frames: list[dict[str, Any]], entry: Any) -> None:
