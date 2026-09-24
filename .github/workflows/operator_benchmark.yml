@@ -83,9 +83,9 @@ jobs:
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-aarch64-py3.10
+      build-environment: linux-jammy-aarch64-py3.11
       runner: linux.arm64.m7g.4xlarge
-      docker-image-name: ci-image:pytorch-linux-jammy-aarch64-py3.10-gcc13
+      docker-image-name: ci-image:pytorch-linux-jammy-aarch64-py3.11-gcc13
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
