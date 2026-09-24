@@ -141,7 +141,7 @@ kernel void segment_reduce_parallel(
   }
 }
 
-template <typename T, typename I, SegmentReduction R>
+template <typename T, typename I, SegmentReduction R, bool Parallel = false>
 kernel void segment_reduce_backward(
     constant T* grad,
     constant T* output,
@@ -152,8 +152,10 @@ kernel void segment_reduce_backward(
     constant SegmentReduceParams& p,
     constant ulong& base,
     device float* prod_prefix,
-    uint tid [[thread_position_in_grid]]) {
-  const ulong index = base + tid;
+    uint tid [[thread_position_in_grid]],
+    uint group [[threadgroup_position_in_grid]],
+    uint width [[threads_per_threadgroup]]) {
+  const ulong index = base + (Parallel ? group : tid);
   const ulong row = index / p.inner;
   const ulong outer = row / p.segments;
   if (!valid[outer]) {
@@ -165,8 +167,40 @@ kernel void segment_reduce_backward(
   const ulong data_base = outer * p.axis_size * p.inner + index % p.inner;
   const float g = float(grad[index]);
   float result = float(output[index]);
+  bool parallel_writes = Parallel;
+  if (Parallel && R == SegmentReduction::Prod && sizeof(T) < sizeof(float) &&
+      result != 0 && !isnan(result)) {
+    // Cooperative loads preserve the ordered FP32 product without serial
+    // device reads.
+    threadgroup float tile[1024];
+    threadgroup float product;
+    float prefix = T(p.has_initial ? p.initial : 1.0f);
+    const uint lane = tid % width;
+    for (ulong first = start; first < end; first += 1024) {
+      const uint count = uint(min(ulong(1024), end - first));
+      for (uint j = lane; j < count; j += width) {
+        tile[j] = float(data[data_base + (first + j) * p.inner]);
+      }
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+      if (lane == 0) {
+        for (uint j = 0; j < count; ++j) {
+          prefix *= tile[j];
+        }
+      }
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+    }
+    if (lane == 0) {
+      product = prefix;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    result = product;
+  }
   if (R == SegmentReduction::Prod &&
-      (sizeof(T) < sizeof(float) || result == 0 || isnan(result))) {
+      ((!Parallel && sizeof(T) < sizeof(float)) || result == 0 || isnan(result))) {
+    if (Parallel && tid % width != 0) {
+      return;
+    }
+    parallel_writes = false;
     // Exclusive prefix/suffix products keep zero/NaN handling linear.
     opmath_t<T> prefix = T(p.has_initial ? p.initial : 1.0f);
     for (ulong j = start; j < end; ++j) {
@@ -197,14 +231,20 @@ kernel void segment_reduce_backward(
       return;
     }
   }
-  ulong ties = 0;
+  const ulong first = start + (parallel_writes ? tid % width : 0);
+  const ulong step = parallel_writes ? width : 1;
+  long ties = 0;
   if (R == SegmentReduction::Min || R == SegmentReduction::Max) {
-    for (ulong j = start; j < end; ++j) {
+    for (ulong j = first; j < end; j += step) {
       const float x = float(data[data_base + j * p.inner]);
       ties += isnan(x) || x == result;
     }
+    if (Parallel) {
+      threadgroup long partial[8];
+      ties = threadgroup_sum(partial, ties, tid % width, width);
+    }
   }
-  for (ulong j = start; j < end; ++j) {
+  for (ulong j = first; j < end; j += step) {
     const ulong input_index = data_base + j * p.inner;
     const float x = float(data[input_index]);
     float value = g;
@@ -255,27 +295,52 @@ kernel void segment_reduce_backward(
       constant SegmentReduceParams&,                              \
       constant ulong&,                                            \
       device float*,                                              \
+      uint,                                                       \
+      uint,                                                       \
       uint)
 
-#define REGISTER_SEGMENT_REDUCTIONS(T, I) \
-  REGISTER_SEGMENT(T, I, Max);            \
-  REGISTER_SEGMENT(T, I, Mean);           \
-  REGISTER_SEGMENT(T, I, Min);            \
-  REGISTER_SEGMENT(T, I, Sum);            \
-  REGISTER_SEGMENT(T, I, Prod)
+#define REGISTER_SEGMENT_BACKWARD_PARALLEL(T, I, R)                      \
+  template [[host_name("segment_backward_parallel_" #T "_" #I "_" #R)]] \
+  kernel void segment_reduce_backward<T, I, SegmentReduction::R, true>( \
+      constant T*,                                                     \
+      constant T*,                                                     \
+      constant T*,                                                     \
+      device T*,                                                       \
+      constant I*,                                                     \
+      constant uint*,                                                  \
+      constant SegmentReduceParams&,                                   \
+      constant ulong&,                                                 \
+      device float*,                                                   \
+      uint,                                                            \
+      uint,                                                            \
+      uint)
 
-#define REGISTER_SEGMENT_INDEX(I)                \
-  template [[host_name("segment_validate_" #I)]] \
-  kernel void segment_validate<I>(               \
-      constant I*,                               \
-      device uint*,                              \
-      constant SegmentReduceParams&,             \
-      device ErrorMessages*,                     \
-      constant ulong&,                           \
-      uint);                                     \
-  REGISTER_SEGMENT_REDUCTIONS(float, I);         \
-  REGISTER_SEGMENT_REDUCTIONS(half, I);          \
-  REGISTER_SEGMENT_REDUCTIONS(bfloat, I)
+#define REGISTER_SEGMENT_REDUCTIONS(T, I)        \
+  REGISTER_SEGMENT(T, I, Max);                   \
+  REGISTER_SEGMENT(T, I, Mean);                  \
+  REGISTER_SEGMENT(T, I, Min);                   \
+  REGISTER_SEGMENT(T, I, Sum);                   \
+  REGISTER_SEGMENT(T, I, Prod);                  \
+  REGISTER_SEGMENT_BACKWARD_PARALLEL(T, I, Max);  \
+  REGISTER_SEGMENT_BACKWARD_PARALLEL(T, I, Mean); \
+  REGISTER_SEGMENT_BACKWARD_PARALLEL(T, I, Min);  \
+  REGISTER_SEGMENT_BACKWARD_PARALLEL(T, I, Sum)
+
+#define REGISTER_SEGMENT_INDEX(I)                    \
+  template [[host_name("segment_validate_" #I)]]     \
+  kernel void segment_validate<I>(                   \
+      constant I*,                                   \
+      device uint*,                                  \
+      constant SegmentReduceParams&,                 \
+      device ErrorMessages*,                         \
+      constant ulong&,                               \
+      uint);                                         \
+  REGISTER_SEGMENT_REDUCTIONS(float, I);             \
+  REGISTER_SEGMENT_REDUCTIONS(half, I);              \
+  REGISTER_SEGMENT_REDUCTIONS(bfloat, I);            \
+  REGISTER_SEGMENT_BACKWARD_PARALLEL(half, I, Prod);  \
+  REGISTER_SEGMENT_BACKWARD_PARALLEL(bfloat, I, Prod); \
+  REGISTER_SEGMENT_BACKWARD_PARALLEL(float, I, Prod)
 
 REGISTER_SEGMENT_INDEX(int);
 REGISTER_SEGMENT_INDEX(long);
