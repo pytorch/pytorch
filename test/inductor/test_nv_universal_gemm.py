@@ -371,7 +371,7 @@ class TestNVUniversalGemm(TestCase):
         with (
             config.patch(
                 _nvgemm_config(
-                    nvgemm_max_profiling_configs=1,
+                    nvgemm_max_profiling_configs=3,
                     benchmark_epilogue_fusion=False,
                     compile_threads=2,
                     force_disable_caches=True,
