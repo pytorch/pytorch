@@ -14,7 +14,11 @@ import torch.nn
 import torch.utils.checkpoint
 from torch._dynamo.bytecode_transformation import Instruction
 from torch._dynamo.exc import Unsupported
-from torch._dynamo.symbolic_convert import SpeculationLog, SpeculationLogDivergence
+from torch._dynamo.symbolic_convert import (
+    InstructionTranslatorBase,
+    SpeculationLog,
+    SpeculationLogDivergence,
+)
 from torch._dynamo.testing import CompileCounter
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -128,6 +132,71 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(ref, res)
+
+    def test_exception_target_cleanup(self):
+        def fn():
+            try:
+                raise ValueError
+            except ValueError as exc:
+                pass
+            return exc
+
+        opt_fn = torch.compile(fn, backend="eager")
+        with self.assertRaises(UnboundLocalError):
+            opt_fn()
+
+    def test_exception_target_cleanup_double_delete(self):
+        def fn():
+            try:
+                raise ValueError
+            except ValueError as exc:
+                pass
+            del exc
+
+        opt_fn = torch.compile(fn, backend="eager")
+        with self.assertRaises(UnboundLocalError):
+            opt_fn()
+
+    def test_exception_target_cleanup_graph_break(self):
+        def fn(read_exc):
+            try:
+                raise ValueError
+            except ValueError as exc:
+                pass
+            torch._dynamo.graph_break()
+            if read_exc:
+                return exc
+            return 0
+
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(opt_fn(False), 0)
+        with self.assertRaises(UnboundLocalError):
+            opt_fn(True)
+
+    def test_exception_target_cleanup_tensor_local(self):
+        dealloc_calls = []
+        sync_dealloc = InstructionTranslatorBase._maybe_emit_sync_dealloc
+
+        def record_sync_dealloc(tx, var):
+            dealloc_calls.append(var)
+            return sync_dealloc(tx, var)
+
+        def fn(x):
+            try:
+                raise ValueError
+            except ValueError as exc:
+                pass
+            del x
+            return 1
+
+        with unittest.mock.patch.object(
+            InstructionTranslatorBase,
+            "_maybe_emit_sync_dealloc",
+            record_sync_dealloc,
+        ):
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(opt_fn(torch.ones(1)), 1)
+        self.assertEqual(len(dealloc_calls), 1)
 
     def test_exception4(self):
         def fn(x):

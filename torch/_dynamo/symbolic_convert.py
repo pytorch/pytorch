@@ -2289,8 +2289,11 @@ class InstructionTranslatorBase(
             self._raise_unbound_local_error(name)
         if isinstance(var, TensorVariable):
             self._maybe_emit_sync_dealloc(var)
-        # Keep a tombstone so later fast-local loads raise UnboundLocalError.
-        self.symbolic_locals[name] = NullVariable()
+        if sys.version_info >= (3, 12):
+            # LOAD_FAST_CHECK handles NULL locals on Python 3.12 and newer.
+            self.symbolic_locals[name] = NullVariable()
+        else:
+            del self.symbolic_locals[name]
 
     def _maybe_emit_sync_dealloc(self, var: TensorVariable) -> None:
         from .variables.streams import get_current_stream, new_event
