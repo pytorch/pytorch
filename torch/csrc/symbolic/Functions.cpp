@@ -1,6 +1,7 @@
 #include <torch/csrc/symbolic/Expr.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <limits>
 #include <numeric>
@@ -160,6 +161,22 @@ const char* function_name(Kind k) {
       return "FloatTrueDiv";
     case Kind::IntTrueDiv:
       return "IntTrueDiv";
+    case Kind::CeilToInt:
+      return "CeilToInt";
+    case Kind::FloorToInt:
+      return "FloorToInt";
+    case Kind::TruncToInt:
+      return "TruncToInt";
+    case Kind::RoundToInt:
+      return "RoundToInt";
+    case Kind::RoundDecimal:
+      return "RoundDecimal";
+    case Kind::ToFloat:
+      return "ToFloat";
+    case Kind::TruncToFloat:
+      return "TruncToFloat";
+    case Kind::IsNonOverlappingAndDenseIndicator:
+      return "IsNonOverlappingAndDenseIndicator";
     default:
       throw NativeUnsupported("not a function kind");
   }
@@ -169,9 +186,26 @@ const Expr* ExprArena::function(Kind kind, c10::ArrayRef<const Expr*> args) {
   if (kind == Kind::Max || kind == Kind::Min) {
     return minmax(kind, args);
   }
-  if (args.size() != 2) {
+  size_t arity = 2;
+  switch (kind) {
+    case Kind::CeilToInt:
+    case Kind::FloorToInt:
+    case Kind::TruncToInt:
+    case Kind::RoundToInt:
+    case Kind::ToFloat:
+    case Kind::TruncToFloat:
+      arity = 1;
+      break;
+    case Kind::IsNonOverlappingAndDenseIndicator:
+      arity = args.size();
+      break;
+    default:
+      break;
+  }
+  if (args.size() != arity) {
     throw NativeUnsupported(
-        std::string(function_name(kind)) + " takes exactly 2 arguments");
+        std::string(function_name(kind)) + " takes exactly " +
+        std::to_string(arity) + " arguments");
   }
   for (const Expr* a : args) {
     if (a->is_boolean()) {
@@ -198,11 +232,27 @@ const Expr* ExprArena::function(Kind kind, c10::ArrayRef<const Expr*> args) {
       }
       [[fallthrough]];
     case Kind::FloatPow:
-      // The folds of numbers return sympy.Floats. IntTrueDiv leaves finite
-      // non-Integer numbers unevaluated, which the port rejects as well.
-      if (args[0]->is_number() && args[1]->is_number()) {
+    case Kind::RoundDecimal:
+    case Kind::ToFloat:
+    case Kind::TruncToFloat:
+      // The folds of numbers return sympy.Floats or oo, or raise for
+      // TruncToFloat(int_oo). The rest (IntTrueDiv of finite non-Integers,
+      // RoundDecimal with a non-Integer ndigits, ToFloat of a Rational) stay
+      // unevaluated, which the port rejects as well.
+      if (std::all_of(args.begin(), args.end(), [](const Expr* a) {
+            return a->is_number();
+          })) {
         throw NativeUnsupported("function of numbers gives a Float");
       }
+      break;
+    case Kind::CeilToInt:
+    case Kind::FloorToInt:
+    case Kind::TruncToInt:
+    case Kind::RoundToInt:
+      r = eval_to_int(kind, args[0]);
+      break;
+    case Kind::IsNonOverlappingAndDenseIndicator:
+      r = eval_is_non_overlapping_and_dense(args);
       break;
     default:
       throw NativeUnsupported("not a function kind");
@@ -396,6 +446,150 @@ const Expr* ExprArena::eval_pow_by_natural(const Expr* base, const Expr* exp) {
     }
   }
   return nullptr;
+}
+
+const Expr* ExprArena::eval_to_int(Kind kind, const Expr* number) {
+  if (is_int_oo(number)) {
+    if (kind == Kind::RoundToInt) {
+      // RoundToInt only checks for the float oo; float(int_oo) is inf.
+      throw NativeUnsupported("cannot convert float infinity to integer");
+    }
+    return number;
+  }
+  if (kind == Kind::TruncToInt) {
+    if (ask(number, Fact::integer) == Tri::True) {
+      return number;
+    }
+    if (number->kind == Kind::IntTrueDiv) {
+      if (number->args[1] == one_) {
+        return number->args[0];
+      }
+      if (number->args[1] == neg_one_) {
+        return neg(number->args[0]);
+      }
+    }
+  }
+  if (kind == Kind::FloorToInt && number->kind == Kind::Integer) {
+    return number;
+  }
+  if (!number->is_rational()) {
+    return nullptr;
+  }
+  // float(number), correctly rounded like sympy's Rational.__float__.
+  constexpr int64_t kExact = int64_t(1) << 53;
+  if (number->kind == Kind::Rational &&
+      (number->q > kExact || number->p > kExact || number->p < -kExact)) {
+    throw NativeUnsupported("float of a large Rational");
+  }
+  double x = static_cast<double>(number->p) / static_cast<double>(number->q);
+  double r = 0;
+  switch (kind) {
+    case Kind::CeilToInt:
+      r = std::ceil(x);
+      break;
+    case Kind::FloorToInt:
+      r = std::floor(x);
+      break;
+    case Kind::TruncToInt:
+      r = std::trunc(x);
+      break;
+    default:
+      // round(x, 0): to nearest, halfway cases to even.
+      r = std::round(x);
+      if (std::fabs(x - r) == 0.5) {
+        r = 2.0 * std::round(x / 2.0);
+      }
+      break;
+  }
+  if (!(r >= -0x1p63 && r < 0x1p63)) {
+    throw NativeUnsupported("integer overflow");
+  }
+  return integer(static_cast<int64_t>(r));
+}
+
+const Expr* ExprArena::eval_is_non_overlapping_and_dense(
+    c10::ArrayRef<const Expr*> args) {
+  if (args.size() % 2 != 0) {
+    throw NativeUnsupported("expected an even number of arguments");
+  }
+  const size_t dim = args.size() / 2;
+  auto sizes = args.slice(0, dim);
+  auto strides = args.slice(dim);
+  auto is_integer = [](const Expr* a) { return a->kind == Kind::Integer; };
+  // eval_is_non_overlapping_and_dense over (size, stride) pairs.
+  auto dense = [&](std::vector<std::pair<int64_t, int64_t>> dims) {
+    if (dims.size() == 1) {
+      return integer(dims[0].second == 1 || dims[0].first < 2);
+    }
+    std::stable_sort(dims.begin(), dims.end(), [](auto& a, auto& b) {
+      return a.second < b.second;
+    });
+    i128 expected_stride = 1;
+    for (auto [length, stride] : dims) {
+      if (length == 1) {
+        continue;
+      }
+      if (stride != expected_stride) {
+        return zero_;
+      }
+      expected_stride *= length;
+    }
+    return one_;
+  };
+  std::vector<std::pair<int64_t, int64_t>> dims;
+  if (std::all_of(args.begin(), args.end(), is_integer)) {
+    for (size_t i = 0; i < dim; ++i) {
+      dims.emplace_back(sizes[i]->p, strides[i]->p);
+    }
+    return dense(std::move(dims));
+  }
+  if (dim == 1) {
+    if (strides[0] == one_) {
+      return one_;
+    }
+    if (sizes[0]->is_number() && compare_numbers(sizes[0], integer(2)) < 0) {
+      return one_;
+    }
+  }
+  if (std::all_of(strides.begin(), strides.end(), is_integer)) {
+    std::vector<size_t> order(dim);
+    std::iota(order.begin(), order.end(), 0);
+    std::stable_sort(order.begin(), order.end(), [&](size_t a, size_t b) {
+      return strides[a]->p < strides[b]->p;
+    });
+    // The size of the largest stride is ignored, so it may be symbolic.
+    for (size_t i = 0; i < dim; ++i) {
+      const Expr* size = sizes[order[i]];
+      if (i + 1 < dim && !is_integer(size)) {
+        return nullptr;
+      }
+      dims.emplace_back(i + 1 < dim ? size->p : 42, strides[order[i]]->p);
+    }
+    return dense(std::move(dims));
+  }
+  return nullptr;
+}
+
+const Expr* ExprArena::lshift(const Expr* base, const Expr* shift) {
+  if (base->is_boolean() || shift->is_boolean()) {
+    throw NativeUnsupported("Boolean argument to a function");
+  }
+  if (ask(shift, Fact::negative) == Tri::True) {
+    throw NativeUnsupported("negative shift count");
+  }
+  const Expr* power = function(Kind::PowByNatural, {integer(2), shift});
+  return mul({base, power});
+}
+
+const Expr* ExprArena::rshift(const Expr* base, const Expr* shift) {
+  if (base->is_boolean() || shift->is_boolean()) {
+    throw NativeUnsupported("Boolean argument to a function");
+  }
+  if (ask(shift, Fact::negative) == Tri::True) {
+    throw NativeUnsupported("negative shift count");
+  }
+  const Expr* power = function(Kind::PowByNatural, {integer(2), shift});
+  return function(Kind::FloorDiv, {base, power});
 }
 
 const Expr* ExprArena::ceildiv(const Expr* base, const Expr* divisor) {

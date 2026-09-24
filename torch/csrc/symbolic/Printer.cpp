@@ -16,6 +16,7 @@ enum Precedence : int {
   kAdd = 40,
   kMul = 50,
   kPow = 60,
+  kFunc = 70,
   kNot = 100,
   kAtom = 1000,
 };
@@ -96,6 +97,14 @@ class StrPrinter {
       case Kind::FloatPow:
       case Kind::FloatTrueDiv:
       case Kind::IntTrueDiv:
+      case Kind::CeilToInt:
+      case Kind::FloorToInt:
+      case Kind::TruncToInt:
+      case Kind::RoundToInt:
+      case Kind::RoundDecimal:
+      case Kind::ToFloat:
+      case Kind::TruncToFloat:
+      case Kind::IsNonOverlappingAndDenseIndicator:
         // _print_Function.
         return std::string(function_name(e->kind)) + "(" +
             stringify(e->args, ", ", 0) + ")";
@@ -163,6 +172,16 @@ class StrPrinter {
         return kMul;
       case Kind::FloatPow:
         return kPow;
+      case Kind::CeilToInt:
+      case Kind::FloorToInt:
+      case Kind::TruncToInt:
+      case Kind::RoundToInt:
+      case Kind::RoundDecimal:
+      case Kind::ToFloat:
+      case Kind::TruncToFloat:
+      case Kind::IsNonOverlappingAndDenseIndicator:
+        // PRECEDENCE_VALUES["Function"].
+        return kFunc;
       default:
         return kAtom;
     }

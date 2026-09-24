@@ -17,16 +17,26 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils._sympy.functions import (
     CeilDiv,
+    CeilToInt,
     CleanDiv,
     FloatPow,
     FloatTrueDiv,
     FloorDiv,
+    FloorToInt,
     IntTrueDiv,
+    IsNonOverlappingAndDenseIndicator,
+    LShift,
     Max,
     Min,
     Mod,
     PowByNatural,
     PythonMod,
+    RoundDecimal,
+    RoundToInt,
+    RShift,
+    ToFloat,
+    TruncToFloat,
+    TruncToInt,
 )
 from torch.utils._sympy.numbers import int_oo
 
@@ -955,14 +965,31 @@ class TestNativeFunctions(TestCase):
         "FloatTrueDiv": FloatTrueDiv,
         "IntTrueDiv": IntTrueDiv,
     }
+    UNARY_FUNCTIONS = {
+        "CeilToInt": CeilToInt,
+        "FloorToInt": FloorToInt,
+        "TruncToInt": TruncToInt,
+        "RoundToInt": RoundToInt,
+        "ToFloat": ToFloat,
+        "TruncToFloat": TruncToFloat,
+    }
+    # Always evaluate, so they are arena methods rather than function kinds.
+    CONSTRUCTORS = {"CeilDiv": CeilDiv, "LShift": LShift, "RShift": RShift}
+    ALL_FUNCTIONS = {**FUNCTIONS, **UNARY_FUNCTIONS, **CONSTRUCTORS}
+    ALL_FUNCTIONS["RoundDecimal"] = RoundDecimal
+    ALL_FUNCTIONS["IsNonOverlappingAndDenseIndicator"] = (
+        IsNonOverlappingAndDenseIndicator
+    )
     NODE_TYPES = (Mod, PythonMod, FloorDiv, Max, Min, PowByNatural, FloatPow)
-    NODE_TYPES += (FloatTrueDiv, IntTrueDiv)
+    NODE_TYPES += (FloatTrueDiv, IntTrueDiv, CeilToInt, FloorToInt, TruncToInt)
+    NODE_TYPES += (RoundToInt, ToFloat, TruncToFloat, RoundDecimal)
+    NODE_TYPES += (IsNonOverlappingAndDenseIndicator,)
     PYTHON_ERRORS = (ZeroDivisionError, AssertionError, TypeError, ValueError)
     PYTHON_ERRORS += (OverflowError,)
 
     def check_call(self, name, *xs):
         """Returns the sympy result, or None if native raised
-        NativeUnsupported. CeilDiv is a constructor, not a function kind."""
+        NativeUnsupported."""
         arena = torch._C._symbolic._Arena()
         call = f"{name}{xs}"
         try:
@@ -971,12 +998,12 @@ class TestNativeFunctions(TestCase):
             return None
 
         def native():
-            if name == "CeilDiv":
-                return arena.ceildiv(*args)
+            if name in self.CONSTRUCTORS:
+                return getattr(arena, name.lower())(*args)
             return arena.function(name, args)
 
         try:
-            expected = (CeilDiv if name == "CeilDiv" else self.FUNCTIONS[name])(*xs)
+            expected = self.ALL_FUNCTIONS[name](*xs)
         except self.PYTHON_ERRORS:
             with self.assertRaises(NativeUnsupported, msg=call):
                 native()
@@ -1424,6 +1451,207 @@ class TestNativeFunctions(TestCase):
         rng = random.Random(0)
         for v in cases:
             self.assertTrue(self.check_expr(v, rng), f"{v}")
+
+    def test_to_int_known(self):
+        x = sympy.Symbol("x", real=True)
+        big = sympy.Integer(2**62 + 1)
+        half = sympy.Rational(5, 2)
+        cases = [
+            ("CeilToInt", int_oo, int_oo),
+            ("CeilToInt", -int_oo, -int_oo),
+            ("CeilToInt", big, 2**62),
+            ("CeilToInt", sympy.Integer(-(2**63)), -(2**63)),
+            ("CeilToInt", sympy.Rational(7, 2), 4),
+            ("CeilToInt", sympy.Rational(-5, 2), -2),
+            ("CeilToInt", s0, CeilToInt(s0)),
+            ("CeilToInt", x / 2, CeilToInt(x / 2)),
+            ("FloorToInt", big, big),
+            ("FloorToInt", sympy.Integer(2**63 - 1), 2**63 - 1),
+            ("FloorToInt", sympy.Rational(-5, 2), -3),
+            ("FloorToInt", -int_oo, -int_oo),
+            ("FloorToInt", IntTrueDiv(s0, 1), FloorToInt(IntTrueDiv(s0, 1))),
+            ("TruncToInt", big, big),
+            ("TruncToInt", sympy.Rational(-5, 2), -2),
+            ("TruncToInt", sympy.Rational(7, 2), 3),
+            ("TruncToInt", int_oo, int_oo),
+            ("TruncToInt", s0, s0),
+            ("TruncToInt", FloorDiv(s0, 2), FloorDiv(s0, 2)),
+            ("TruncToInt", IntTrueDiv(s0, 1), s0),
+            ("TruncToInt", IntTrueDiv(x, -1), -x),
+            ("TruncToInt", IntTrueDiv(s0, 2), TruncToInt(IntTrueDiv(s0, 2))),
+            ("TruncToInt", x, TruncToInt(x)),
+            ("RoundToInt", half, 2),
+            ("RoundToInt", sympy.Rational(7, 2), 4),
+            ("RoundToInt", sympy.Rational(-5, 2), -2),
+            ("RoundToInt", sympy.Rational(-7, 2), -4),
+            ("RoundToInt", sympy.Rational(-1, 4), 0),
+            ("RoundToInt", big, 2**62),
+            ("RoundToInt", s0, RoundToInt(s0)),
+            ("ToFloat", s0, ToFloat(s0)),
+            ("ToFloat", x + 1, ToFloat(x + 1)),
+            ("TruncToFloat", x, TruncToFloat(x)),
+        ]
+        for name, a, expected in cases:
+            got = self.check_call(name, sympy.sympify(a))
+            self.assertEqual(got, expected, f"{name}({a})")
+        cases = [
+            ("RoundDecimal", (x, 2), RoundDecimal(x, 2)),
+            ("RoundDecimal", (sympy.Integer(3), s0), RoundDecimal(3, s0)),
+            ("LShift", (s0, 3), 8 * s0),
+            ("LShift", (s0, u0), s0 * PowByNatural(2, u0)),
+            ("LShift", (3, 2), 12),
+            ("RShift", (s0, 3), FloorDiv(s0, 8)),
+            ("RShift", (s0, s1), FloorDiv(s0, PowByNatural(2, s1))),
+            ("RShift", (-7, 1), -4),
+        ]
+        for name, xs, expected in cases:
+            got = self.check_call(name, *map(sympy.sympify, xs))
+            self.assertEqual(got, expected, f"{name}{xs}")
+
+    def test_to_int_unsupported(self):
+        arena = torch._C._symbolic._Arena()
+        cases = [
+            ("RoundToInt", (int_oo,)),
+            ("RoundToInt", (-int_oo,)),
+            ("CeilToInt", (2**63 - 1,)),
+            ("CeilToInt", (sympy.Rational(2**60 + 1, 3),)),
+            ("ToFloat", (2,)),
+            ("ToFloat", (int_oo,)),
+            ("ToFloat", (sympy.Rational(1, 2),)),
+            ("TruncToFloat", (int_oo,)),
+            ("TruncToFloat", (sympy.Rational(1, 2),)),
+            ("RoundDecimal", (3, 2)),
+            ("RoundDecimal", (sympy.Rational(1, 2), sympy.Rational(1, 2))),
+            ("IsNonOverlappingAndDenseIndicator", (s0,)),
+            ("IsNonOverlappingAndDenseIndicator", (sympy.Rational(1, 2), 3, 1, 1)),
+            ("CeilToInt", (s0, s1)),
+            ("RoundDecimal", (s0,)),
+        ]
+        for name, xs in cases:
+            args = [arena.from_sympy(sympy.sympify(x)) for x in xs]
+            with self.assertRaises(NativeUnsupported, msg=f"{name}{xs}"):
+                arena.function(name, args)
+        m = sympy.Symbol("m", integer=True, negative=True)
+        for f in (arena.lshift, arena.rshift):
+            with self.assertRaises(NativeUnsupported):
+                f(arena.from_sympy(s0), arena.from_sympy(m))
+            with self.assertRaises(NativeUnsupported):
+                f(arena.from_sympy(s0), arena.integer(-1))
+
+    def test_is_non_overlapping_and_dense(self):
+        F = "IsNonOverlappingAndDenseIndicator"
+        cases = [
+            ((), 1),
+            ((s0, 1), 1),
+            ((s0, 2), 0),
+            ((1, s0), 1),
+            ((sympy.Rational(1, 2), s0), 1),
+            ((-int_oo, s0), 1),
+            ((int_oo, s0), IsNonOverlappingAndDenseIndicator(int_oo, s0)),
+            ((s0, int_oo), IsNonOverlappingAndDenseIndicator(s0, int_oo)),
+            ((3, 2), 0),
+            ((0, 5), 1),
+            ((2, 3, 3, 1), 1),
+            ((2, 3, 1, 2), 1),
+            ((2, 3, 1, 3), 0),
+            ((2, s0, 3, 1, 2, 1), 0),
+            ((s0, 2, 2, 1), 1),
+            ((2, s0, 1, 2), 1),
+            ((s0, 3, 1, s0), IsNonOverlappingAndDenseIndicator(s0, 3, 1, s0)),
+            ((s0, 2, 2 * s0, 1), IsNonOverlappingAndDenseIndicator(s0, 2, 2 * s0, 1)),
+            ((s0, s1, 2, 1), IsNonOverlappingAndDenseIndicator(s0, s1, 2, 1)),
+            ((2**62, 2**62, 2**62, 1, 2**62, 2**62), 0),
+            ((1, 2**62, 1, 5, 1, 1), 1),
+            ((1, 1, 1, 7, 1, 1), 1),
+        ]
+        for xs, expected in cases:
+            got = self.check_call(F, *map(sympy.sympify, xs))
+            self.assertEqual(got, expected, f"{F}{xs}")
+
+    def test_to_int_printing(self):
+        x = sympy.Symbol("x", real=True)
+        c, t = CeilToInt(x), ToFloat(s0)
+        i = IsNonOverlappingAndDenseIndicator(s0, 2, 2 * s0, 1)
+        cases = [c, FloorDiv(c, 2), c**2, 2 * c, -c, c + 1, t, t**2, -t, 1 / t]
+        cases += [FloorDiv(i, 2), i + 1, 2 * i, RoundDecimal(x, s0) * s0]
+        cases += [TruncToInt(x) * FloorToInt(x), Mod(RoundToInt(x), 3)]
+        cases += [sympy.Lt(TruncToFloat(x), 2), FloorDiv(s0, TruncToInt(x))]
+        rng = random.Random(0)
+        for v in cases:
+            self.assertTrue(self.check_expr(v, rng), f"{v}")
+        items = [CeilToInt(x), FloorToInt(x), ToFloat(s0), ToFloat(s1), i]
+        items += [IsNonOverlappingAndDenseIndicator(s0, 3, 1, s0), s0, Mod(s0, 2)]
+        items += [RoundDecimal(x, 2), RoundDecimal(x, s0), TruncToFloat(x)]
+        items += [RoundToInt(x), TruncToInt(x), FloorDiv(s0, 2), Max(s0, u0)]
+        arena = torch._C._symbolic._Arena()
+        natives = [arena.from_sympy(v) for v in items]
+        for a, na in zip(items, natives):
+            self.assertTrue(arena.sort_key(na) == a.sort_key(), f"sort_key({a})")
+            for b, nb in zip(items, natives):
+                self.assertEqual(arena.compare(na, nb), a.compare(b), f"{a}, {b}")
+        got = arena.ordered(natives)
+        self.assertEqual([arena.to_sympy(x) for x in got], list(sympy.ordered(items)))
+
+    @parametrize("seed", range(4))
+    def test_to_int_fuzz(self, seed):
+        rng = random.Random(seed)
+
+        def number():
+            k = rng.choice([1, 2, 3, 10, 30, 53, 54, 62, 63])
+            p = rng.randint(-(2**k), 2**k)
+            q = rng.choice([1, 2, 3, 4, 7, rng.randint(1, 2**k)])
+            return sympy.Rational(p, q)
+
+        leaves = FACT_LEAVES + [int_oo, -int_oo]
+        leaves += [IntTrueDiv(s0, 1), IntTrueDiv(u0, -1), IntTrueDiv(zf, 2)]
+        calls = supported = 0
+        nodes = []
+        for _ in range(200):
+            a = rng.choice(
+                [number, lambda: sympy.sympify(sympy_eval(random_tree(rng, 2, leaves)))]
+            )()
+            b = rng.choice([number, lambda: rng.choice(leaves)])()
+            if a.has(sympy.zoo, sympy.nan) or b.has(sympy.zoo, sympy.nan):
+                continue
+            for name in self.UNARY_FUNCTIONS:
+                calls += 1
+                r = self.check_call(name, a)
+                if r is not None:
+                    supported += 1
+                    if isinstance(r, self.NODE_TYPES):
+                        nodes.append(r)
+            for name in ("RoundDecimal", "LShift", "RShift"):
+                calls += 1
+                r = self.check_call(name, a, b)
+                if r is not None:
+                    supported += 1
+                    if isinstance(r, self.NODE_TYPES):
+                        nodes.append(r)
+        self.assertGreater(supported, calls // 2)
+        pool = [s0, s1, u0, 2 * s0, s0 * s1, s0 + 1, int_oo, sympy.Rational(1, 2)]
+        pool += [sympy.Integer(i) for i in (0, 1, 1, 2, 2, 3, 4, 6, 12)]
+        for _ in range(200):
+            dim = rng.randint(0, 3)
+            xs = [rng.choice(pool) for _ in range(2 * dim)]
+            calls += 1
+            r = self.check_call("IsNonOverlappingAndDenseIndicator", *xs)
+            if r is not None:
+                supported += 1
+                if isinstance(r, self.NODE_TYPES):
+                    nodes.append(r)
+        self.assertGreater(len(nodes), 20)
+        answered = unsupported = 0
+        for _ in range(40):
+            t = random_tree(rng, 3, LEAVES + nodes)
+            for sub in subtrees(t):
+                v = sympy.sympify(sympy_eval(sub))
+                if v.has(sympy.zoo, sympy.nan):
+                    continue
+                if self.check_expr(v, rng):
+                    answered += 1
+                else:
+                    unsupported += 1
+        self.assertGreater(answered, 5 * unsupported)
 
     @parametrize("seed", range(4))
     def test_minmax_fuzz(self, seed):

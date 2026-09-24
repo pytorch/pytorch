@@ -156,12 +156,14 @@ const SortKeyPtr& ExprArena::sort_key(const Expr* e) {
     if (x->kind == Kind::Symbol) {
       return key_tuple({key_int(2), key_int(0), key_str("Symbol")});
     }
-    // Function.class_key: nargs is a FiniteSet for every function kind.
-    // Max and Min are not Functions and use Basic.class_key.
+    // Function.class_key: nargs is a FiniteSet for every function kind but
+    // the variadic IsNonOverlappingAndDenseIndicator. Max and Min are not
+    // Functions and use Basic.class_key.
     bool minmax = x->kind == Kind::Max || x->kind == Kind::Min;
     bool function = x->is_function() && !minmax;
     int major = x->is_boolean() || minmax ? 5 : function ? 4 : 3;
-    int minor = function       ? 10000
+    bool variadic = x->kind == Kind::IsNonOverlappingAndDenseIndicator;
+    int minor = function       ? (variadic ? 0 : 10000)
         : x->kind == Kind::Add ? 1
         : x->kind == Kind::Pow ? 2
                                : 0;

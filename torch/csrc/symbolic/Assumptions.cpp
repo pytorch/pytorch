@@ -1346,6 +1346,11 @@ FactKB ExprArena::default_kb(const Expr* e) {
     case Kind::FloorDiv:
     case Kind::CleanDiv:
     case Kind::PowByNatural:
+    case Kind::CeilToInt:
+    case Kind::FloorToInt:
+    case Kind::TruncToInt:
+    case Kind::RoundToInt:
+    case Kind::IsNonOverlappingAndDenseIndicator:
       return kbs[6];
     case Kind::Mod:
       return kbs[7];
@@ -1355,6 +1360,9 @@ FactKB ExprArena::default_kb(const Expr* e) {
     case Kind::FloatPow:
     case Kind::FloatTrueDiv:
     case Kind::IntTrueDiv:
+    case Kind::RoundDecimal:
+    case Kind::ToFloat:
+    case Kind::TruncToFloat:
       return kbs[9];
     default:
       return {};
@@ -1447,6 +1455,14 @@ Tri ExprArena::eval_fact(const Expr* e, Fact f) {
     case Kind::FloatPow:
     case Kind::FloatTrueDiv:
     case Kind::IntTrueDiv:
+    case Kind::CeilToInt:
+    case Kind::FloorToInt:
+    case Kind::TruncToInt:
+    case Kind::RoundToInt:
+    case Kind::RoundDecimal:
+    case Kind::ToFloat:
+    case Kind::TruncToFloat:
+    case Kind::IsNonOverlappingAndDenseIndicator:
       // Expr's extended_positive/negative handlers return None unless
       // is_number, and function nodes always have free symbols.
       // Function._eval_is_commutative is shadowed by the class facts.

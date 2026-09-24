@@ -24,7 +24,15 @@ constexpr Kind kFunctionKinds[] = {
     Kind::PowByNatural,
     Kind::FloatPow,
     Kind::FloatTrueDiv,
-    Kind::IntTrueDiv};
+    Kind::IntTrueDiv,
+    Kind::CeilToInt,
+    Kind::FloorToInt,
+    Kind::TruncToInt,
+    Kind::RoundToInt,
+    Kind::RoundDecimal,
+    Kind::ToFloat,
+    Kind::TruncToFloat,
+    Kind::IsNonOverlappingAndDenseIndicator};
 
 // Python-side state for an ExprArena: the sympy Symbol objects that native
 // symbols came from and a conversion cache (conversion is pure per Expr).
@@ -318,7 +326,15 @@ py::object PyArena::to_sympy(const Expr* e) {
     case Kind::PowByNatural:
     case Kind::FloatPow:
     case Kind::FloatTrueDiv:
-    case Kind::IntTrueDiv: {
+    case Kind::IntTrueDiv:
+    case Kind::CeilToInt:
+    case Kind::FloorToInt:
+    case Kind::TruncToInt:
+    case Kind::RoundToInt:
+    case Kind::RoundDecimal:
+    case Kind::ToFloat:
+    case Kind::TruncToFloat:
+    case Kind::IsNonOverlappingAndDenseIndicator: {
       py::tuple args(e->args.size());
       for (size_t i = 0; i < e->args.size(); ++i) {
         args[i] = to_sympy(e->args[i]);
@@ -384,6 +400,14 @@ const char* kind_name(Kind k) {
     case Kind::FloatPow:
     case Kind::FloatTrueDiv:
     case Kind::IntTrueDiv:
+    case Kind::CeilToInt:
+    case Kind::FloorToInt:
+    case Kind::TruncToInt:
+    case Kind::RoundToInt:
+    case Kind::RoundDecimal:
+    case Kind::ToFloat:
+    case Kind::TruncToFloat:
+    case Kind::IsNonOverlappingAndDenseIndicator:
       return function_name(k);
   }
   return "?";
@@ -612,6 +636,18 @@ void initSymbolicBindings(PyObject* module) {
           [wrap](const Self& self, const PyExpr& a, const PyExpr& b) {
             return wrap(
                 self, self->arena->ceildiv(unwrap(self, a), unwrap(self, b)));
+          })
+      .def(
+          "lshift",
+          [wrap](const Self& self, const PyExpr& a, const PyExpr& b) {
+            return wrap(
+                self, self->arena->lshift(unwrap(self, a), unwrap(self, b)));
+          })
+      .def(
+          "rshift",
+          [wrap](const Self& self, const PyExpr& a, const PyExpr& b) {
+            return wrap(
+                self, self->arena->rshift(unwrap(self, a), unwrap(self, b)));
           })
       .def(
           "logical_not",

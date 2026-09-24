@@ -47,6 +47,14 @@ enum class Kind : uint8_t {
   FloatPow,
   FloatTrueDiv,
   IntTrueDiv,
+  CeilToInt,
+  FloorToInt,
+  TruncToInt,
+  RoundToInt,
+  RoundDecimal,
+  ToFloat,
+  TruncToFloat,
+  IsNonOverlappingAndDenseIndicator,
   // Boolean kinds: sympy Booleans that are not Exprs.
   BooleanTrue,
   BooleanFalse,
@@ -245,6 +253,9 @@ class ExprArena : public c10::intrusive_ptr_target {
   const Expr* minmax(Kind kind, c10::ArrayRef<const Expr*> args, bool evaluate = true);
   // CeilDiv(base, divisor), which is always a FloorDiv or a CleanDiv.
   const Expr* ceildiv(const Expr* base, const Expr* divisor);
+  // LShift(base, shift) and RShift(base, shift), which always evaluate.
+  const Expr* lshift(const Expr* base, const Expr* shift);
+  const Expr* rshift(const Expr* base, const Expr* shift);
 
   // Eq/Ne/Lt/Le/Gt/Ge(lhs, rhs, evaluate=evaluate) (Relational.cpp). These are
   // the sympy constructors, not IntInfinity's __ge__ etc. operator overloads.
@@ -315,6 +326,10 @@ class ExprArena : public c10::intrusive_ptr_target {
   const Expr* eval_floordiv(const Expr* base, const Expr* divisor);
   // PowByNatural.eval; nullptr for None.
   const Expr* eval_pow_by_natural(const Expr* base, const Expr* exp);
+  // CeilToInt/FloorToInt/TruncToInt/RoundToInt.eval; nullptr for None.
+  const Expr* eval_to_int(Kind kind, const Expr* number);
+  // IsNonOverlappingAndDenseIndicator.eval; nullptr for None.
+  const Expr* eval_is_non_overlapping_and_dense(c10::ArrayRef<const Expr*> args);
   const Expr* new_symbol(const std::string& name, const FactKB& kb);
   const Expr* as_boolean(const Expr* e);
   // The tail of LatticeOp.__new__.
