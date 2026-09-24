@@ -6943,6 +6943,41 @@ class AOTInductorTestsTemplate:
         sys.platform not in ["linux", "win32"],
         "enable_kernel_profile only supported on linux and win32",
     )
+    def test_kernel_profile_scatter_fallback_arg_order(self):
+        # scatter_reduce keeps `dim` between its tensors:
+        #   (Tensor self, int dim, Tensor index, Tensor src, str reduce,
+        #    *, bool include_self)
+        # Its wrapper hook reorders the node's inputs and constants to reach
+        # that order, so the profiling record has to be built alongside the
+        # call. The shared builder walks inputs then constants, which would
+        # put all three tensors first and leave `dim` among the placeholders.
+        class Model(torch.nn.Module):
+            def forward(self, inp, index, src):
+                # "prod" is not the reduction inductor can inline, so this
+                # lowers to the ATen fallback.
+                return torch.scatter_reduce(inp, 1, index, src, reduce="prod")
+
+        example_inputs = (
+            torch.randn(3, 5, device=self.device),
+            torch.tensor([[0, 1, 2, 0]], device=self.device, dtype=torch.int64),
+            torch.randn(2, 5, device=self.device),
+        )
+
+        with config.patch({"cpp.enable_kernel_profile": True}):
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile, Model(), example_inputs
+            )
+            self.assertEqual(
+                profiled_ivalue_kinds(code, r"aoti_torch_\w*scatter_reduce\w*"),
+                ["tensor", "scalar", "tensor", "tensor", "scalar", "scalar"],
+            )
+
+            self.check_model(Model(), example_inputs)
+
+    @unittest.skipIf(
+        sys.platform not in ["linux", "win32"],
+        "enable_kernel_profile only supported on linux and win32",
+    )
     def test_aoti_profiler_records_schema_arg_order(self):
         # index_reduce interleaves non-tensor and tensor arguments:
         #   (Tensor self, int dim, Tensor index, Tensor source, str reduce,
@@ -7075,6 +7110,128 @@ class AOTInductorTestsTemplate:
             # Conv on CUDA uses TF32, which differs from the fp32 reference by
             # ~1e-3; the profiling assertion above is this test's focus.
             self.check_model(Model(self.device), example_inputs, atol=1e-2, rtol=1e-2)
+
+    @unittest.skipIf(
+        sys.platform not in ["linux", "win32"],
+        "enable_kernel_profile only supported on linux and win32",
+    )
+    def test_kernel_profile_scatter_fallback(self):
+        # Scatter fallback kernels use a separate codegen path
+        # (_generate_scatter_fallback) that must also be wrapped in
+        # KernelContextGuard and RAIIAtenRecordFunctionHandle profiling
+        # blocks when profiling is enabled.  RAIIAtenRecordFunctionHandle
+        # is what actually creates the RecordFunction / External id linkage.
+        #
+        # "prod" is what forces the ATen fallback: use_scatter_fallback takes
+        # neither None nor the reduction inductor can inline.
+        class Model(torch.nn.Module):
+            def forward(self, inp, index, src):
+                return torch.scatter_reduce(inp, 1, index, src, reduce="prod")
+
+        example_inputs = (
+            torch.randn(3, 5, device=self.device),
+            torch.tensor([[0, 1, 2, 0]], device=self.device, dtype=torch.int64),
+            torch.randn(2, 5, device=self.device),
+        )
+
+        with config.patch(
+            {
+                "cpp.enable_kernel_profile": True,
+                "cpp.enable_kernel_context_guard": True,
+            }
+        ):
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile, Model(), example_inputs
+            )
+            # Anchored to the scatter kernel: both strings appear around every
+            # profiled kernel, so a bare FileCheck would pass without the
+            # fallback being wrapped at all. The inner alternative refuses a
+            # line that closes a block, so the record has to be inside the
+            # same braces as the guard rather than merely after it.
+            scatter = re.search(
+                r"\{\s*KernelContextGuard[^\n]*\n(?:(?!\s*\}).*\n)*?\s*"
+                r'RAIIAtenRecordFunctionHandle \w+\("(aoti_torch_\w*scatter_reduce\w*)"',
+                code,
+            )
+            self.assertIsNotNone(scatter, "scatter fallback is not inside a guard")
+
+            self.check_model(Model(), example_inputs)
+
+    @unittest.skipIf(
+        sys.platform not in ["linux", "win32"],
+        "enable_kernel_profile only supported on linux and win32",
+    )
+    def test_kernel_profile_index_put_fallback(self):
+        # index_put_(Tensor(a!) self, Tensor?[] indices, Tensor values,
+        #            bool accumulate). The index list is spread across the
+        # node's inputs and holds a None for every unindexed dimension, so the
+        # record has to be built alongside the call: the shared builder walks
+        # inputs then constants and would report (self, values, index,
+        # accumulate) with the hole dropped.
+        class Model(torch.nn.Module):
+            def forward(self, x, mask, values):
+                out = x.clone()
+                # Indexing only the second dimension puts a None in the index
+                # list; the boolean index is what forces the ATen fallback, on
+                # either device.
+                out[:, mask] = values
+                return out
+
+        example_inputs = (
+            torch.randn(4, 5, device=self.device),
+            torch.tensor([True, False, True, False, True], device=self.device),
+            torch.randn(4, 1, device=self.device),
+        )
+
+        with config.patch({"cpp.enable_kernel_profile": True}):
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile, Model(), example_inputs
+            )
+            self.assertEqual(
+                profiled_ivalue_kinds(code, "aoti_torch_index_put_out"),
+                ["tensor", "scalar", "tensor", "tensor", "scalar"],
+            )
+
+            self.check_model(Model(), example_inputs)
+
+    @unittest.skipIf(
+        sys.platform not in ["linux", "win32"],
+        "enable_kernel_profile only supported on linux and win32",
+    )
+    def test_kernel_profile_device_copy_records_destination(self):
+        # copy_(Tensor(a!) self, Tensor src, bool non_blocking). The
+        # destination is the node's own output rather than one of its inputs,
+        # so metadata derived from inputs alone would record src in self's
+        # place and drop the destination.
+        if self.device == "cpu":
+            raise unittest.SkipTest("device copy requires a non-cpu device")
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x.to("cpu") + 1
+
+        example_inputs = (torch.randn(8, 8, device=self.device),)
+        with config.patch({"cpp.enable_kernel_profile": True}):
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile, Model(), example_inputs
+            )
+            self.assertEqual(
+                profiled_ivalue_kinds(code, "aoti_torch_copy_"),
+                ["tensor", "tensor", "scalar"],
+            )
+            # Both entries are tensors, so the kinds alone would also accept
+            # the source in the destination's slot. Pin the first recorded
+            # handle to the first argument of the call it belongs to.
+            recorded = re.search(
+                r"aoti_torch_tensor_to_ivalue\((\w+), &tmp_aoti_torch_copy__input_0\)",
+                code,
+            )
+            self.assertIsNotNone(recorded, "no destination entry was recorded")
+            called = re.search(r"aoti_torch_copy_\((\w+),", code)
+            self.assertIsNotNone(called, "no aoti_torch_copy_ call was emitted")
+            self.assertEqual(recorded.group(1), called.group(1))
+
+            self.check_model(Model(), example_inputs)
 
     def test_aoti_user_defined_triton_kernel_profiling(self):
         if self.device != GPU_TYPE or self.device == "mps":
