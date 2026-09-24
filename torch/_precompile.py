@@ -1,22 +1,26 @@
-"""Ahead-of-time precompilation: the make_fx capture internals behind the public
+"""Ahead-of-time precompilation: the internals behind the public
 ``torch.compiler.precompile`` module.
 
 ``torch/compiler/precompile.py`` re-exports the public types defined here --
-``Capture``, ``MakeFxTracer``, ``PrecompiledRunnable`` -- beside
+``Capture``, ``DynamoTracer``, ``MakeFxTracer``, ``PrecompiledRunnable`` -- beside
 ``PrecompileSummary``, and the two caller-driven entry points defined here:
 ``capture``, which writes the pair from the calls the caller makes, and ``load``,
-which reconstructs a runnable from it.
-``PrecompiledModule`` drives a NON-STRICT make_fx trace of one execution of ``fn``
-and renders it as a self-contained, executable ``python_code`` string plus a
-companion integrity-tagged ``cache``: with ``backend="inductor"`` (the default) the
-captured graph is lowered through the AOT backend contract
+which reconstructs a runnable from it. Either front-end writes the same pair: a
+self-contained, executable ``python_code`` string plus a companion
+integrity-tagged ``cache``. ``_runnable_from_pair`` is the loader core that turns
+a pair back into a runnable.
+
+``DynamoTracer`` (the default) drives a ``PrecompileSession``
+(``torch/_dynamo/precompile_package.py``) across the caller's calls, and the
+multi-graph frame records and driver emitter at the end of this module render
+every frame Dynamo compiled: the entry, its graph-break continuations and its
+recompiled variants. ``MakeFxTracer`` drives ``PrecompiledModule``, a NON-STRICT
+make_fx trace of one execution of ``fn``: with ``backend="inductor"`` (the
+default) the captured graph is lowered through the AOT backend contract
 (``torch._functorch.aot_autograd.compile_to_python``, AOTAutograd + Inductor), and
 ``python_code`` JIT-compiles kernels on first call while the cache primes them so a
 warm reload skips JIT; with ``backend="eager"`` ``python_code`` inlines the captured
-graph and runs on its own. ``_runnable_from_pair`` is the loader core that turns a
-pair back into a runnable. The multi-graph (Dynamo) frame records and driver
-emitter at the end of the module serve the same artifact format for a capture that
-graph-breaks or recompiles.
+graph and runs on its own.
 
 The full contract, the calling convention, and the cache / code_hash design all live in
 Note [precompile programming model] below; every public entry point and guard references
@@ -505,7 +509,11 @@ class Capture(Generic[_P, _R]):
     def save(self) -> None:
         """Write everything captured so far to the artifact files without ending the capture.
 
-        Raises ``PrecompileError`` outside the capture's ``with`` block.
+        Each call re-renders and rewrites both files, so a job that dies between
+        saves leaves the last checkpoint loadable. A refusal (such as a
+        :class:`DynamoTracer` ``require_*`` gate) or a failed write raises but
+        writes nothing partial, and the capture stays open. Raises
+        ``PrecompileError`` outside the capture's ``with`` block.
         """
         with self._lock:
             self._check_active("calling save()")
@@ -764,12 +772,6 @@ class _DynamoCapture(Capture[_P, _R]):
         self._saved_calls = self._calls
 
     def _save(self) -> None:
-        r"""Checkpoint everything captured so far to the ``artifact_path`` /
-        ``cache_path`` files, without ending the capture. Each call re-renders
-        and rewrites both files, so a job that dies between saves leaves the
-        last checkpoint loadable. A gate refusal (``require_*``) or a write
-        failure raises but writes nothing partial, and the capture stays open.
-        """
         if self._in_call:
             raise PrecompileError(
                 "save() was called from inside fn while the capture is "
@@ -3160,7 +3162,9 @@ def capture(
     ATen trace: the capture takes exactly ONE positional call, refuses a second,
     and specializes control flow and shapes to that call, with the contract of
     Note [precompile programming model] in ``torch/_precompile.py``. ``fn`` is
-    the whole computation, e.g. ``lambda model, x: model(x)``: the ``nn.Module``
+    the whole computation, e.g. a module-level ``def step(model, x): return
+    model(x)`` (only a :class:`MakeFxTracer` capture also takes a lambda): the
+    ``nn.Module``
     arguments have their params/buffers lifted to graph inputs (no weights are
     baked in) and the rest are the runtime inputs; the reloaded callable is
     invoked with the same argument structure, and the runtime model must match
