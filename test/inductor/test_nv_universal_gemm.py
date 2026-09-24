@@ -2733,7 +2733,20 @@ class TestNVUniversalGemmHeuristics(TestCase):
         bitcast = Expr("to_dtype_bitcast", (load, torch.bfloat16, torch.bfloat16))
         self.assertIsNone(classify(Expr("to_dtype", (bitcast, torch.float32))))
 
-    def test_decode_m_nvfp4_cudagraph_unroll_is_scoped(self):
+    @parametrize(
+        "variant_name,dtype,m,expected",
+        (
+            ("SCALED_GEMM", torch.float4_e2m1fn_x2, 32, 16),
+            ("SCALED_GEMM", torch.bfloat16, 32, 1),
+            ("SCALED_GEMM", torch.float4_e2m1fn_x2, 64, 16),
+            ("SCALED_GEMM", torch.float4_e2m1fn_x2, 256, 16),
+            ("SCALED_GEMM", torch.float4_e2m1fn_x2, 257, 1),
+            ("GEMM", torch.float4_e2m1fn_x2, 32, 1),
+        ),
+    )
+    def test_decode_m_nvfp4_cudagraph_unroll_is_scoped(
+        self, variant_name, dtype, m, expected
+    ):
         from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
             _nvgemm_cudagraph_unroll,
             GemmVariant,
@@ -2747,69 +2760,14 @@ class TestNVUniversalGemmHeuristics(TestCase):
         ):
             self.assertEqual(
                 _nvgemm_cudagraph_unroll(
-                    GemmVariant.SCALED_GEMM,
-                    torch.float4_e2m1fn_x2,
-                    torch.float4_e2m1fn_x2,
-                    (32, 4096),
+                    getattr(GemmVariant, variant_name),
+                    dtype,
+                    dtype,
+                    (m, 4096),
                     ScalingType.BlockWise1x16,
                     ScalingType.BlockWise1x16,
                 ),
-                16,
-            )
-            self.assertEqual(
-                _nvgemm_cudagraph_unroll(
-                    GemmVariant.SCALED_GEMM,
-                    torch.bfloat16,
-                    torch.bfloat16,
-                    (32, 4096),
-                    ScalingType.BlockWise1x16,
-                    ScalingType.BlockWise1x16,
-                ),
-                1,
-            )
-            self.assertEqual(
-                _nvgemm_cudagraph_unroll(
-                    GemmVariant.SCALED_GEMM,
-                    torch.float4_e2m1fn_x2,
-                    torch.float4_e2m1fn_x2,
-                    (64, 4096),
-                    ScalingType.BlockWise1x16,
-                    ScalingType.BlockWise1x16,
-                ),
-                16,
-            )
-            self.assertEqual(
-                _nvgemm_cudagraph_unroll(
-                    GemmVariant.SCALED_GEMM,
-                    torch.float4_e2m1fn_x2,
-                    torch.float4_e2m1fn_x2,
-                    (256, 4096),
-                    ScalingType.BlockWise1x16,
-                    ScalingType.BlockWise1x16,
-                ),
-                16,
-            )
-            self.assertEqual(
-                _nvgemm_cudagraph_unroll(
-                    GemmVariant.SCALED_GEMM,
-                    torch.float4_e2m1fn_x2,
-                    torch.float4_e2m1fn_x2,
-                    (257, 4096),
-                    ScalingType.BlockWise1x16,
-                    ScalingType.BlockWise1x16,
-                ),
-                1,
-            )
-            self.assertEqual(
-                _nvgemm_cudagraph_unroll(
-                    GemmVariant.GEMM,
-                    torch.float4_e2m1fn_x2,
-                    torch.float4_e2m1fn_x2,
-                    (32, 4096),
-                    ScalingType.BlockWise1x16,
-                    ScalingType.BlockWise1x16,
-                ),
-                1,
+                expected,
             )
 
     def test_mixed_backend_nvfp4_cudagraph_unroll_uses_global_policy(self):
