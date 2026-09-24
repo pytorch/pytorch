@@ -744,7 +744,11 @@ def _build_installed_forward():
     import sys as _sys
 
     import torch
-    from torch._dynamo.eval_frame import _FailOnRecompileCallback, OptimizeContext
+    from torch._dynamo.eval_frame import (
+        _FailOnRecompileCallback,
+        _RecompileRefusedError,
+        OptimizeContext,
+    )
     from torch._dynamo.package import CompilePackage
     from torch._precompile import PrecompileError as _PrecompileError
 
@@ -781,6 +785,14 @@ def _build_installed_forward():
     try:
         # CompilePackage refuses a module whose captured source has changed.
         package = CompilePackage(fn, dynamo)
+        if torch._dynamo.config.compiled_autograd:
+            # OptimizeContext would compile backward graphs through a fresh,
+            # non-refusing callback.
+            raise _PrecompileError(
+                "precompile: an installed artifact cannot load with "
+                "torch._dynamo.config.compiled_autograd enabled: backward graphs "
+                "would compile outside the artifact. Disable it before load()."
+            )
         context = torch._dynamo.optimize(BACKEND, package=package)
         if not isinstance(context, OptimizeContext):
             raise _PrecompileError(
@@ -791,7 +803,7 @@ def _build_installed_forward():
         # The refusal is this callable's own callback, not the process-global
         # stance, so other threads' compiles are unaffected. It must be bound
         # before context(fn), which captures the callback when it wraps.
-        context.callback = _FailOnRecompileCallback(context.callback)
+        context.callback = _FailOnRecompileCallback(context.callback, bound=True)
         compiled = context(fn)
         package.install(package_state["backends"])
     except _PrecompileError:
@@ -806,9 +818,7 @@ def _build_installed_forward():
     def forward(*args, **kwargs):
         try:
             return compiled(*args, **kwargs)
-        except RuntimeError as _e:
-            if "stance is 'fail_on_recompile'" not in str(_e):
-                raise
+        except _RecompileRefusedError as _e:
             raise _PrecompileError(
                 f"precompile: no captured variant matches this call. Either a "
                 f"guard on the call's arguments or on a module global the graph "
