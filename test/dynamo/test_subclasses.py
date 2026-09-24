@@ -1270,7 +1270,7 @@ class SubclassTests(_SubclassCompileCheckMixin, torch._dynamo.test_case.TestCase
         from torch._functorch._aot_autograd.runtime_wrappers import (
             _AnalyzeCustomOpInputOutputMode,
         )
-        from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+        from torch._subclasses.fake_tensor import FakeTensorMode, is_fake_tensor
 
         class Bare(torch.Tensor):
             pass
@@ -1299,7 +1299,7 @@ class SubclassTests(_SubclassCompileCheckMixin, torch._dynamo.test_case.TestCase
             fake_inp = fake_mode.from_tensor(x)
             with _AnalyzeCustomOpInputOutputMode():
                 fake_out = torch.ops.aten.add.Tensor(fake_inp, 1)
-        self.assertIsInstance(fake_out, FakeTensor)
+        self.assertTrue(is_fake_tensor(fake_out))
 
     def test_inplace_op_preserves_subclass_type(self):
         # An inplace op resyncs the VariableTracker metadata from the fake tensor,

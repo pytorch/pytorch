@@ -19604,11 +19604,13 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
     def test_interpolate_propagate_real_tensors(self, device):
         real_tensor_refs = []
         from_tensor = torch._subclasses.FakeTensorMode.from_tensor
+        from torch._subclasses.fake_tensor import maybe_get_real_tensor
 
         def record_real_tensor(mode, tensor, **kwargs):
             fake = from_tensor(mode, tensor, **kwargs)
-            if mode.propagate_real_tensors and fake.real_tensor is not None:
-                real_tensor_refs.append(weakref.ref(fake.real_tensor))
+            real_tensor = maybe_get_real_tensor(fake)
+            if mode.propagate_real_tensors and real_tensor is not None:
+                real_tensor_refs.append(weakref.ref(real_tensor))
             return fake
 
         @torch.compile(backend="eager", fullgraph=True)
