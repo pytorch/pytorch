@@ -901,7 +901,16 @@ class NestedReduction:
         numel: sympy.Expr,
         rnumel: sympy.Expr,
     ) -> SubParentFusionResult:
-        """Classify and plan a sub-parent candidate in one pass."""
+        """Classify and plan a sub-parent candidate in one pass.
+
+        Args:
+            nodes: Candidate scheduler nodes.
+            numel: Parent non-reduction extent.
+            rnumel: Parent reduction extent.
+
+        Returns:
+            The candidate classification and any valid plan.
+        """
         if not all(isinstance(node, SchedulerNode) for node in nodes):
             return SubParentFusionResult(False, None)
         scheduler_nodes = typing.cast("Sequence[SchedulerNode]", nodes)
@@ -991,7 +1000,7 @@ class NestedReduction:
         )
         output_relations = ()
         if config.polyhedral_fusion:
-            output_relations = cls._sub_parent_output_access_relations(
+            output_relations = cls.sub_parent_output_access_relations(
                 parent_nodes,
                 numel,
                 parent_rnumel,
@@ -1017,7 +1026,7 @@ class NestedReduction:
         )
         if (
             config.polyhedral_fusion
-            and not cls._sub_parent_relations_are_replay_compatible(access_relations)
+            and not cls.sub_parent_relations_are_replay_compatible(access_relations)
         ):
             return plan_failure
         planned_source_names = OrderedSet(
@@ -1740,7 +1749,7 @@ class NestedReduction:
 
                 if not config.polyhedral_fusion:
                     return None
-                proof = cls._prove_sub_parent_translation(
+                proof = cls.prove_sub_parent_translation(
                     source_deps,
                     dep,
                     parent_numel,
@@ -1762,7 +1771,7 @@ class NestedReduction:
         return tuple(access_relations)
 
     @classmethod
-    def _prove_sub_parent_translation(
+    def prove_sub_parent_translation(
         cls,
         source_accesses: Sequence[MemoryDep],
         consumer_access: MemoryDep,
@@ -1771,7 +1780,19 @@ class NestedReduction:
         sub_parent_factor: int,
         extent_subs: dict[sympy.Expr, sympy.Expr],
     ) -> IdentityTranslationProof | None:
-        """Prove a translated access in the parent X/R coordinate frame."""
+        """Prove a translated access in the parent X/R coordinate frame.
+
+        Args:
+            source_accesses: Parent accesses for the shared source.
+            consumer_access: Sub-parent access to validate.
+            parent_numel: Parent non-reduction extent.
+            parent_rnumel: Parent reduction extent.
+            sub_parent_factor: Number of sub-parent lanes.
+            extent_subs: Proven extent substitutions.
+
+        Returns:
+            The translation proof, or None if the access is unsupported.
+        """
         from .utils import sympy_index_symbol
 
         row = sympy_index_symbol("_sub_parent_translation_row")
@@ -1780,6 +1801,7 @@ class NestedReduction:
         def common_frame(
             dep: MemoryDep, feature_extent: sympy.Expr
         ) -> MemoryDep | None:
+            """Express an access in the shared row/feature frame."""
             if dep.is_indirect() or dep.mode is not None:
                 return None
             framed = MemoryDep(
@@ -1876,10 +1898,18 @@ class NestedReduction:
         return proof
 
     @staticmethod
-    def _sub_parent_layout_access(
+    def sub_parent_layout_access(
         output: Any, source: MemoryDep
     ) -> MemoryDep | None:
-        """Express a graph-output view in the source's loop-variable frame."""
+        """Express a graph-output view in the source loop-variable frame.
+
+        Args:
+            output: Graph output to inspect.
+            source: Parent source dependency.
+
+        Returns:
+            A matching memory dependency, or None if the view is unsupported.
+        """
         layout = getattr(output, "get_layout", lambda: None)()
         if (
             layout is None
@@ -1922,7 +1952,7 @@ class NestedReduction:
         )
 
     @classmethod
-    def _sub_parent_output_access_relations(
+    def sub_parent_output_access_relations(
         cls,
         parent_nodes: Sequence[SchedulerNode],
         parent_numel: sympy.Expr,
@@ -1930,7 +1960,18 @@ class NestedReduction:
         extent_subs: dict[sympy.Expr, sympy.Expr],
         sub_parent_factor: int,
     ) -> tuple[SubParentAccessRelation, ...] | None:
-        """Record translated graph-output views of parent-produced buffers."""
+        """Record translated graph-output views of parent-produced buffers.
+
+        Args:
+            parent_nodes: Nodes that produce the parent buffers.
+            parent_numel: Parent non-reduction extent.
+            parent_rnumel: Parent reduction extent.
+            extent_subs: Proven extent substitutions.
+            sub_parent_factor: Number of sub-parent lanes.
+
+        Returns:
+            Output access relations, or None if they cannot be proved.
+        """
         if not config.polyhedral_fusion:
             return ()
         writes_by_name: dict[str, list[MemoryDep]] = defaultdict(list)
@@ -1948,7 +1989,7 @@ class NestedReduction:
             if len(writes) != 1:
                 return None
             source = writes[0]
-            output_access = cls._sub_parent_layout_access(output, source)
+            output_access = cls.sub_parent_layout_access(output, source)
             if output_access is None:
                 continue
             output_rnumel = V.graph.sizevars.simplify(
@@ -1958,7 +1999,7 @@ class NestedReduction:
                 output_rnumel, parent_rnumel
             ):
                 continue
-            proof = cls._prove_sub_parent_translation(
+            proof = cls.prove_sub_parent_translation(
                 (source,),
                 output_access,
                 parent_numel,
@@ -2474,7 +2515,7 @@ class NestedReduction:
             *broadcast_relations,
             *internal_relations,
         )
-        if not cls._sub_parent_relations_are_replay_compatible(access_relations):
+        if not cls.sub_parent_relations_are_replay_compatible(access_relations):
             return None
 
         return SubParentEpilogueStage(
@@ -2484,10 +2525,17 @@ class NestedReduction:
         )
 
     @staticmethod
-    def _sub_parent_relations_are_replay_compatible(
+    def sub_parent_relations_are_replay_compatible(
         relations: Sequence[SubParentAccessRelation],
     ) -> bool:
-        """Reject source-name contracts the replay resolver cannot represent."""
+        """Check whether relations can be represented by the replay resolver.
+
+        Args:
+            relations: Access relations to validate.
+
+        Returns:
+            True if all relations use compatible replay forms.
+        """
         relations_by_name: dict[str, list[SubParentAccessRelation]] = (
             collections.defaultdict(list)
         )
@@ -3044,6 +3092,7 @@ class SubParentFusionResult:
     reason: str | None = None
 
     def __post_init__(self) -> None:
+        """Validate candidate and plan consistency."""
         if self.plan is not None and not self.is_candidate:
             raise AssertionError("a sub-parent plan must belong to a candidate")
 
