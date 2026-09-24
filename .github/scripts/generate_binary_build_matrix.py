@@ -316,7 +316,6 @@ RELEASE = "release"
 DEBUG = "debug"
 
 FULL_PYTHON_VERSIONS = [
-    "3.10",
     "3.11",
     "3.12",
     "3.13",
@@ -523,11 +522,15 @@ def generate_libtorch_extraction_configs(
 ) -> list[dict[str, str]]:
     """Generate libtorch extraction configs from existing wheel build configs.
 
-    For each unique arch variant in wheel_configs, find the py3.10 config
-    (py3.11 for windows-arm64) and produce a config that the CI template
-    uses to add an extraction job that depends on that wheel's build job.
+    For each unique arch variant in wheel_configs, find the py3.11 config and
+    produce a config that the CI template uses to add an extraction job that
+    depends on that wheel's build job.
+
+    NB: this must name a version that is actually in FULL_PYTHON_VERSIONS. If
+    it names one that isn't built, no wheel config matches and libtorch stops
+    being produced entirely, silently.
     """
-    preferred_python = "3.11" if os == "windows-arm64" else "3.10"
+    preferred_python = FULL_PYTHON_VERSIONS[0]
     arch = "arm64" if os == "windows-arm64" else "x86_64"
 
     # Group wheel configs by (gpu_arch_type, gpu_arch_version)

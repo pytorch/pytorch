@@ -282,11 +282,21 @@ BUILTIN_TO_TENSOR_RFN_MAP: dict[Callable[..., Any], Callable[..., Any]] = {}
 # opt-out).
 _MISSING_SENTINEL = object()
 
+# Runtime-raising ops (e.g. truediv) excluded: recompute escapes traced handlers
 _COMPUTED_LAZY_CONSTANT_OPS: frozenset[Callable[..., Any]] = frozenset(
     [
         operator.add,
         operator.sub,
         operator.mul,
+        operator.and_,
+        operator.or_,
+        operator.xor,
+        operator.eq,
+        operator.ne,
+        operator.lt,
+        operator.le,
+        operator.gt,
+        operator.ge,
     ]
 )
 
@@ -1259,17 +1269,6 @@ class BuiltinVariable(BaseBuiltinVariable):
                 args: list[VariableTracker],
                 kwargs: dict[str, VariableTracker],
             ) -> VariableTracker:
-                if fn is AssertionError and not all(
-                    x.is_python_constant() and isinstance(x.as_python_constant(), str)
-                    for x in args
-                ):
-                    unimplemented(
-                        gb_type="assert with non-string message",
-                        context=str(args),
-                        explanation="Dynamo only supports asserts with string messages",
-                        hints=[*graph_break_hints.SUPPORTABLE],
-                    )
-
                 if fn is StopIteration:
                     return variables.StopIterationVariable(fn, args, kwargs)
                 elif fn is AttributeError:
@@ -3578,6 +3577,8 @@ class GetAttrBuiltinVariable(BaseBuiltinVariable):
             args = [
                 a.realize() if isinstance(a, LazyVariableTracker) else a for a in args
             ]
+        no_keywords(tx, "getattr", kwargs)
+        check_positional(tx, "getattr", len(args), 2, 3)
         try:
             return self._call_getattr(tx, args, kwargs)
         except Unsupported:
@@ -3617,6 +3618,9 @@ class GetAttrBuiltinVariable(BaseBuiltinVariable):
             )
 
         name = name_var.as_python_constant()
+        if not isinstance(name, str):
+            type_name = name_var.python_type_name()
+            raise_type_error(tx, f"attribute name must be string, not '{type_name}'")
         return generic_getattr(tx, obj, name, default)
 
 

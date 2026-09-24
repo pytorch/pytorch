@@ -1766,46 +1766,6 @@ def get_all_devices(gm: torch.fx.GraphModule) -> OrderedSet[torch.device]:
     return input_devices | out_devices
 
 
-import gc
-
-
-def unload_xpu_triton_pyds() -> None:
-    # unload __triton_launcher.pyd
-    for module_name in list(sys.modules.keys()):
-        if not module_name.startswith("torch._inductor.runtime.compile_tasks."):
-            continue
-        m = sys.modules[module_name]
-        for attr_name in m.__dict__:
-            if attr_name.startswith("triton_"):
-                kernel = getattr(m, attr_name)
-                if isinstance(
-                    kernel, torch._inductor.runtime.triton_heuristics.CachingAutotuner
-                ):
-                    for result in kernel.compile_results:
-                        if isinstance(
-                            result,
-                            torch._inductor.runtime.triton_heuristics.TritonCompileResult,
-                        ):
-                            # pyrefly: ignore [missing-attribute]
-                            run = result.kernel.run
-                            if hasattr(run, "mod"):
-                                run.mod.__del__()
-        del sys.modules[module_name]
-
-    # unload spirv_utils.pyd
-    if "triton.runtime.driver" in sys.modules:
-        driver_mod = sys.modules["triton.runtime.driver"]
-        if hasattr(driver_mod.driver.active, "utils"):
-            utils_cls = type(driver_mod.driver.active.utils)
-            if hasattr(utils_cls, "instance"):
-                del utils_cls.instance
-            elif hasattr(utils_cls, "_instance"):
-                utils_cls._instance = None
-            del driver_mod.driver.active.utils
-
-    gc.collect()
-
-
 _registered_caches: list[Any] = []
 
 
@@ -1888,9 +1848,6 @@ def fresh_cache(
                             }
                         )
         if delete:
-            if is_windows() and torch.xpu.is_available():
-                unload_xpu_triton_pyds()
-
             shutil.rmtree(
                 inductor_cache_dir,
                 # Let's not fail if we can't clean up the temp dir. Also note that for
@@ -2211,13 +2168,15 @@ def is_nvidia_sm100_or_later() -> bool:
     )
 
 
-def get_num_sms() -> int:
+def get_num_sms(two_ctas: bool = False) -> int:
     """Handle experimental carveout if set otherwise return hardware SM count"""
     # TODO we need to properly guard on this global
     if torch.xpu.is_available():
-        return get_max_num_sms()
-    carveout = torch._C._get_sm_carveout_experimental()
-    return get_max_num_sms() - (carveout if carveout is not None else 0)
+        num_sms = get_max_num_sms()
+    else:
+        carveout = torch._C._get_sm_carveout_experimental()
+        num_sms = get_max_num_sms() - (carveout if carveout is not None else 0)
+    return num_sms // 2 * 2 if two_ctas else num_sms
 
 
 def get_tma_workspace_arg(
@@ -3884,7 +3843,8 @@ def _get_device_tflops(dtype: torch.dtype, device: torch.device) -> float:
         # Triton API change in https://github.com/triton-lang/triton/pull/2293
         from torch._utils_internal import max_clock_rate
 
-        sm_clock = max_clock_rate(device_idx)
+        # Triton's tflops helpers are dimensioned in kHz; max_clock_rate is MHz.
+        sm_clock = max_clock_rate(device_idx) * 1e3
         if dtype in (torch.float16, torch.bfloat16) and SM80OrLater:
             return get_max_tensorcore_tflops(dtype, sm_clock, device_idx)
 
