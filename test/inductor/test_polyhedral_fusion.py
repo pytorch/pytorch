@@ -10,8 +10,9 @@ from unittest.mock import patch
 
 import torch
 import torch.nn.functional as F
-import torch._inductor.config as inductor_config
+from torch._dynamo.testing import CompileCounterWithBackend
 from torch._inductor import metrics
+import torch._inductor.config as inductor_config
 from torch._inductor.choices import InductorChoices
 from torch._inductor.scheduler import (
     FusedNestedReductions,
@@ -293,6 +294,7 @@ def _observe_dynamic(
     *,
     polyhedral_fusion: bool,
     dynamic_feature_width: bool = False,
+    backend=None,
 ):
     torch._dynamo.reset()
     metrics.reset()
@@ -315,7 +317,12 @@ def _observe_dynamic(
         inductor_config.patch("triton.nested_reduction", True),
         fresh_inductor_cache(),
     ):
-        compiled = torch.compile(fn, fullgraph=True, dynamic=True)
+        if backend is None:
+            compiled = torch.compile(fn, fullgraph=True, dynamic=True)
+        else:
+            compiled = torch.compile(
+                fn, backend=backend, fullgraph=True, dynamic=True
+            )
         for inputs in inputs_by_shape:
             result = compiled(*inputs)
             if not isinstance(result, tuple):
@@ -469,8 +476,8 @@ class PolyhedralMLAFusionTest(TestCase):
                 head_dim=head_dim,
             )
             for batch_size, seq_len, head_dim in (
-                (2, 8, 192),
                 (2, 8, 256),
+                (2, 8, 192),
                 (2, 8, 384),
                 (4, 5, 192),
                 (64, 1, 256),
@@ -505,6 +512,26 @@ class PolyhedralMLAFusionTest(TestCase):
             set(zip(enabled.parent_widths, enabled.logical_factors)),
             {(256, 4)},
         )
+
+    def test_dynamic_unsupported_width_reuses_fallback_graph(self):
+        inputs_by_shape = tuple(
+            _make_mla_inputs(batch_size=2, seq_len=8, head_dim=head_dim)
+            for head_dim in (192, 384)
+        )
+        eager = [tuple(shifted_mla_indexer(*inputs)) for inputs in inputs_by_shape]
+        counter = CompileCounterWithBackend("inductor")
+        outputs, observation = _observe_dynamic(
+            shifted_mla_indexer,
+            inputs_by_shape,
+            polyhedral_fusion=True,
+            dynamic_feature_width=True,
+            backend=counter,
+        )
+
+        for expected, result in zip(eager, outputs):
+            self.assertEqual(result, expected, atol=6e-2, rtol=2e-2)
+        self.assertEqual(observation.staged_fusion_count, 0)
+        self.assertEqual(counter.frame_count, 1)
 
     def test_wider_logical_factor_falls_back(self):
         inputs = _make_mla_inputs(batch_size=2, seq_len=8, head_dim=384)
