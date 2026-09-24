@@ -130,9 +130,12 @@ def fully_shard(
     on ``module`` frees them (if needed). Similar backward hooks all-gather
     parameters and later free parameters and reduce-scatter gradients.
 
-    Configure parameter dtypes and ``grad_dtype`` before ``fully_shard``;
-    later edits are unsupported and unchecked. Device moves preserve sharded
-    gradient dtypes and leave pending gradients on their original device.
+    Parameter dtypes and ``grad_dtype`` may change until the first forward (e.g.
+    ``module.bfloat16()``); later changes are unsupported. An explicit
+    ``grad_dtype`` survives dtype conversions and is inherited by a parameter
+    that ``load_state_dict(assign=True)`` registers without one. Device moves
+    preserve sharded gradient dtypes and leave pending gradients on their
+    original device.
 
     Since grouping multiple tensors together for one collective is critical for
     communication efficiency, this implementation makes this grouping first
@@ -918,6 +921,8 @@ class FSDPModule:
         saved_grads = {}
         for fsdp_param in fsdp_params:
             param = fsdp_param.sharded_param
+            # Module._apply swaps in parameters without grad_dtype.
+            fsdp_param._capture_grad_dtype_policy(param)
             grad = param.grad
             if grad is not None and fsdp_param._has_sharded_grad_dtype_override:
                 # Explicit grad_dtype, not the parameter dtype, owns this

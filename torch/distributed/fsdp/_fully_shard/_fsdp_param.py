@@ -241,8 +241,6 @@ class FSDPParam:
         self._init_extensions()
         self.all_gather_outputs: list[torch.Tensor] = []
         self._param_fqn: str | None = None  # prefixed from root module
-        # load_state_dict() intentionally ignores unsupported grad_dtype edits
-        # after fully_shard(); reset_sharded_param() restores the captured policy.
         # TODO: Remove this padding logic once DTensor pads the local tensor:
         # https://github.com/pytorch/pytorch/issues/113045
         self._post_load_hook_handle = (
@@ -279,8 +277,6 @@ class FSDPParam:
             raise NotImplementedError(
                 f"FSDP does not support non-contiguous parameters yet: {param.shape=} {param.stride()=}"
             )
-        # Configure grad_dtype before fully_shard(); later direct edits are
-        # unsupported and are not checked, including before lazy initialization.
         # Capture the policy before parameter rewrites (e.g. spmd_types -> DTensor).
         self._has_sharded_grad_dtype_override = param._has_grad_dtype_override
         self.sharded_grad_dtype = param.grad_dtype
@@ -1254,27 +1250,33 @@ class FSDPParam:
                 f"Expects to be in one of {states}, not {self.sharded_state}"
             )
 
+    def _capture_grad_dtype_policy(self, param: nn.Parameter) -> None:
+        # Parameters rebuilt by nn.Module._apply or load_state_dict(assign=True)
+        # lose grad_dtype, and an override cannot be unset, so only an explicit
+        # grad_dtype on the parameter updates the policy.
+        if param._has_grad_dtype_override:
+            self._has_sharded_grad_dtype_override = True
+            self.sharded_grad_dtype = param.grad_dtype
+
     def reset_sharded_param(self):
         # For ops like `nn.Module._apply` or `load_state_dict(assign=True)`
         # that change the sharded parameter tensor, we may need to re-pad the
         # sharded local tensor and re-save the reference.
         module_info = self._module_info
         new_param = getattr(module_info.module, module_info.param_name)
+        self._capture_grad_dtype_policy(self.sharded_param)
         if new_param is not self.sharded_param:
             if torch.__future__.get_swap_module_params_on_conversion():
                 raise AssertionError(
                     f"Expects swap_tensors to preserve object but got {new_param} "
                     f"instead of {self.sharded_param}"
                 )
+            self._capture_grad_dtype_policy(new_param)
             self.sharded_param = new_param
         if not self._has_sharded_grad_dtype_override:
             self.sharded_grad_dtype = new_param.dtype
-        grad_dtype = self.sharded_grad_dtype
-        if self.sharded_param.grad_dtype != grad_dtype or (
-            self._has_sharded_grad_dtype_override
-            and not self.sharded_param._has_grad_dtype_override
-        ):
-            self.sharded_param.grad_dtype = grad_dtype
+        elif not new_param._has_grad_dtype_override:
+            new_param.grad_dtype = self.sharded_grad_dtype
         local_tensor = new_param._local_tensor
         if local_tensor.is_meta:
             return

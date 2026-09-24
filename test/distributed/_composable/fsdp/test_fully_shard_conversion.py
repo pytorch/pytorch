@@ -267,21 +267,43 @@ class TestFullyShardConversion(TestCase):
 
     @parametrize("grad_dtype", [torch.float32, None])
     def test_dtype_conversion_preserves_explicit_grad_dtype(self, device, grad_dtype):
-        # An explicit grad_dtype matching the parameter dtype must not follow a
-        # parameter dtype conversion or be cast by Module._apply.
+        # As on an unwrapped module, an explicit grad_dtype survives a dtype
+        # conversion with an existing gradient.
         model = nn.Linear(4, 4, bias=False, device=device)
         model.weight.grad_dtype = grad_dtype
         fully_shard(model, mesh=self.mesh)
-        value = 1 + 2**-10  # Not representable in bfloat16
-        model.weight.grad = torch.full_like(model.weight, value)
+        model.weight.grad = torch.ones_like(model.weight)
         model.bfloat16()
         self.assertEqual(model.weight.dtype, torch.bfloat16)
         self.assertEqual(model.weight.grad_dtype, grad_dtype)
-        self.assertEqual(model.weight.grad.dtype, torch.float32)
-        self.assertEqual(
-            model.weight.grad.full_tensor(),
-            torch.full((4, 4), value, device=device),
-        )
+
+    @parametrize("before,after", [("default", torch.float32), (torch.float32, None)])
+    @parametrize("conversion", [None, "device", "dtype", "load_state_dict"])
+    def test_grad_dtype_edit_before_first_forward_matches_plain_module(
+        self, device, before, after, conversion
+    ):
+        reference = nn.Linear(4, 4, device=device, dtype=torch.bfloat16)
+        model = copy.deepcopy(reference)
+        if before != "default":
+            for param in (*model.parameters(), *reference.parameters()):
+                param.grad_dtype = before
+        fully_shard(model, mesh=self.mesh)
+        for module in (model, reference):
+            for param in module.parameters():
+                param.grad_dtype = after
+            if conversion == "device":
+                module.cpu()
+                module.to(device=device)
+            elif conversion == "dtype":
+                module.float()
+            elif conversion == "load_state_dict":
+                module.load_state_dict(module.state_dict())
+        self._assert_parity(model, reference, check_override=True)
+        dtype = reference.weight.dtype
+        inp = torch.arange(8, device=device, dtype=dtype).view(2, 4) / 8
+        for module in (model, reference):
+            module(inp).sum().backward()
+        self._assert_parity(model, reference, check_override=True)
 
     @parametrize(
         "orig_dtype,param_dtype",
@@ -489,31 +511,41 @@ class TestFullyShardConversion(TestCase):
             module.to(device=device)
         self._assert_parity(model, reference, check_override=True)
         previous = model.weight
-        state_dict = model.state_dict()
-        replacement = nn.Parameter(state_dict["weight"])
-        replacement.grad_dtype = torch.float64
-        state_dict["weight"] = replacement
-        model.weight.grad_dtype = torch.float64
-        model.load_state_dict(state_dict, assign=assign)
-        self.assertIs(model.weight, replacement if assign else previous)
-        self._assert_parity(model, reference, check_override=grad_dtype != "default")
+        # state_dict() values are not parameters, so assign=True registers a
+        # parameter without grad_dtype, which inherits the policy.
+        model.load_state_dict(model.state_dict(), assign=assign)
+        self.assertEqual(model.weight is previous, not assign)
+        self._assert_parity(model, reference, check_override=True)
         for module in (model, reference):
             module.to(device=device)
-        self._assert_parity(model, reference, check_override=grad_dtype != "default")
+        self._assert_parity(model, reference, check_override=True)
         dtype = reference.weight.dtype
         inp = torch.arange(8, device=device, dtype=dtype).view(2, 4) / 8
         for _ in range(2):
             for module in (model, reference):
                 module.zero_grad(set_to_none=True)
                 module(inp).sum().backward()
-            self._assert_parity(
-                model, reference, check_override=grad_dtype != "default"
-            )
+            self._assert_parity(model, reference, check_override=True)
             for group in model._get_fsdp_state()._fsdp_param_groups:
                 for param in group.fsdp_params:
                     self.assertEqual(
                         param._has_sharded_grad_dtype_override, grad_dtype != "default"
                     )
+
+    def test_load_state_dict_assign_grad_dtype(self, device):
+        model = nn.Linear(4, 4, bias=False, device=device, dtype=torch.bfloat16)
+        fully_shard(model, mesh=self.mesh)
+        model.weight.grad_dtype = torch.float32
+        model.load_state_dict(model.state_dict(), assign=True)
+        self.assertEqual(model.weight.grad_dtype, torch.float32)
+        # A replacement's own grad_dtype wins, as on an unwrapped module.
+        state_dict = model.state_dict()
+        state_dict["weight"] = nn.Parameter(state_dict["weight"])
+        state_dict["weight"].grad_dtype = None
+        model.load_state_dict(state_dict, assign=True)
+        self.assertIsNone(model.weight.grad_dtype)
+        model(torch.ones(1, 4, device=device, dtype=torch.bfloat16)).sum().backward()
+        self.assertEqual(model.weight.grad.dtype, torch.bfloat16)
 
 
 instantiate_device_type_tests(
