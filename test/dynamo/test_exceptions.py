@@ -1522,6 +1522,50 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(s, str(("hello", 42)))
         self.assertEqual(r, "ValueError('hello', 42)")
 
+    @parametrize(
+        "args", [(), ("k",), ("",), ("it's a key",), (42,), (("k", 1),), ("k", 1)]
+    )
+    def test_str_keyerror(self, args):
+        def fn(t):
+            try:
+                raise KeyError(*args)
+            except KeyError as e:
+                return t.sin(), str(e), f"key error: {e}", repr(e), e.args
+
+        t = torch.randn(2)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(t), fn(t))
+
+    @parametrize("key", ["missing", "", "it's a key", 42, ("k", 1)])
+    def test_str_keyerror_dict_lookup(self, key):
+        def fn(t):
+            try:
+                {}[key]
+            except KeyError as e:
+                return t.sin(), str(e), f"key error: {e}", repr(e), e.args
+
+        t = torch.randn(2)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(t), fn(t))
+
+    def test_str_keyerror_custom_key(self):
+        class Key:
+            def __str__(self):
+                return "key str"
+
+            def __repr__(self):
+                return "key repr"
+
+        def fn(t):
+            try:
+                raise KeyError(Key())
+            except KeyError as e:
+                return t.sin(), str(e), f"key error: {e}"
+
+        t = torch.randn(2)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(t), fn(t))
+
     def test_frozen_dataclass_setattr_raises(self):
         @dataclasses.dataclass(frozen=True)
         class TestDataClass:
