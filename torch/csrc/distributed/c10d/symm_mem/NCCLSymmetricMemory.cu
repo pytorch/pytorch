@@ -60,8 +60,7 @@ struct NCCLAllocation {
         device_idx(device_idx) {}
 
   ~NCCLAllocation() {
-    // Avoid calling CUDA functions after driver shutting down
-    if (is_finalizing()) {
+    if (should_skip_cuda_cleanup(device_idx)) {
       return;
     }
     c10::cuda::CUDAGuard guard(device_idx);
@@ -289,7 +288,7 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
   NCCLPeerAllocInfo& operator=(NCCLPeerAllocInfo&& other) = default;
 
   ~NCCLPeerAllocInfo() {
-    if (is_finalizing()) {
+    if (should_skip_cuda_cleanup(device_idx_)) {
       return;
     }
     c10::cuda::CUDAGuard guard(device_idx_);
