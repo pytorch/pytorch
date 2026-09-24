@@ -219,8 +219,9 @@ def _validated_user_cache_hash(node: Node) -> str | None:
     Admission (check_node_safe) and key collection
     (_collect_wrapped_user_cache_hashes) must apply the same rule: a missing
     or empty hash returns None so the node falls through to the ordinary
-    cacheability checks, and a non-string hash bypasses because it has no
-    stable reduction in the cache key (e.g. tensors reduce to metadata only).
+    cacheability checks. A non-string hash is a producer bug rather than an
+    uncacheable graph, since it has no stable reduction in the cache key (e.g.
+    tensors reduce to metadata only), so it raises instead of bypassing.
     """
     if not node.meta or not node.meta.get("is_wrapped", False):
         return None
@@ -228,8 +229,8 @@ def _validated_user_cache_hash(node: Node) -> str | None:
     if cache_hash is None:
         return None
     if not isinstance(cache_hash, str):
-        raise BypassAOTAutogradCache(
-            f"user_cache_hash must be a str, got {type(cache_hash).__name__}"
+        raise AssertionError(
+            f"user_cache_hash on {node.name} must be a str, got {type(cache_hash).__name__}"
         )
     return cache_hash or None
 

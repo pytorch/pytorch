@@ -3975,17 +3975,17 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
                 self.assertEqual(str(cm.exception), message)
 
     def test_wrapped_user_cache_hash_must_be_str(self):
-        # Bypass non-string hashes rather than key them: tensors reduce to
-        # metadata only, silently under-keying. The multi-element tensor also
+        # A non-string hash is a producer bug, not key material: tensors reduce
+        # to metadata only, silently under-keying. The multi-element tensor also
         # pins type-checking before truthiness, where bool() would raise.
         example = torch.ones(3)
+        target = _opaque_unsupported_function
         for bad_hash in (123, torch.ones(2)):
             with self.subTest(bad_hash=type(bad_hash).__name__):
-                gm = self._make_wrapped_gm(
-                    _opaque_unsupported_function, bad_hash, example
-                )
+                gm = self._make_wrapped_gm(target, bad_hash, example)
+                (node,) = gm.graph.find_nodes(op="call_function", target=target)
                 with self.assertRaisesRegex(
-                    BypassAOTAutogradCache, "user_cache_hash must be a str"
+                    AssertionError, f"user_cache_hash on {node.name} must be a str"
                 ):
                     check_cacheable(gm)
 
