@@ -3407,6 +3407,118 @@ partial_fn = functools.partial(fn, scale=2)
         self.assertEqual(symbolic(torch.ones(7)).shape[0], 4)
         self.assertEqual(symbolic(torch.ones(9)).shape[0], 5)
 
+    @parametrize("name", ("atan2", "copysign", "remainder"))
+    def test_math_two_doubles_custom_object(self, name):
+        class FloatLike:
+            def __float__(self):
+                return 2.5
+
+        class IndexLike:
+            def __index__(self):
+                return 3
+
+        class FloatSubclass(float):
+            pass
+
+        fn = getattr(math, name)
+        sub_arg = FloatSubclass(1.5)
+
+        def func(x):
+            sub = fn(sub_arg, 2.0)
+            return x + 1, fn(FloatLike(), 1.0), fn(1.0, IndexLike()), sub
+
+        x = torch.rand(10)
+        opt = torch.compile(func, backend="eager", fullgraph=True)
+        self.assertEqual(opt(x), func(x))
+
+    @parametrize("name", ("atan2", "copysign", "remainder"))
+    def test_math_two_doubles_conversion_order(self, name):
+        class FloatLike:
+            def __float__(self):
+                self.converted = True
+                return 2.5
+
+        fn = getattr(math, name)
+
+        def func(x, obj):
+            try:
+                fn("not a number", obj)
+            except TypeError as exc:
+                return x + 1, str(exc)
+            return x - 1, "no exception"
+
+        x = torch.rand(10)
+        eager_obj, opt_obj = FloatLike(), FloatLike()
+        opt = torch.compile(func, backend="eager", fullgraph=True)
+        self.assertEqual(opt(x, opt_obj), func(x, eager_obj))
+        self.assertFalse(hasattr(eager_obj, "converted"))
+        self.assertFalse(hasattr(opt_obj, "converted"))
+
+    @parametrize("name", ("atan2", "copysign", "remainder"))
+    @parametrize("call", ("non_numeric", "one_arg", "three_args", "keyword"))
+    def test_math_two_doubles_invalid_arguments(self, name, call):
+        class Bad:
+            pass
+
+        class C:
+            def __float__(self):
+                raise AssertionError("__float__ must not be called")
+
+        fn = getattr(math, name)
+
+        def func(x):
+            try:
+                if call == "non_numeric":
+                    fn(Bad(), C())
+                elif call == "one_arg":
+                    fn(C())
+                elif call == "three_args":
+                    fn(C(), 1.0, 2.0)
+                else:
+                    fn(C(), y=1.0)
+            except TypeError as exc:
+                return x + 1, str(exc)
+            return x - 1, "no exception"
+
+        x = torch.rand(10)
+        opt = torch.compile(func, backend="eager", fullgraph=True)
+        self.assertEqual(opt(x), func(x))
+
+    @parametrize("name", ("atan2", "copysign", "remainder"))
+    def test_math_two_doubles_symbolic(self, name):
+        class FloatLike:
+            def __init__(self, value):
+                self.value = value
+
+            def __float__(self):
+                return self.value / 2
+
+        fn = getattr(math, name)
+
+        def func(x):
+            return x + 1, fn(FloatLike(x.shape[0]), 2.0)
+
+        opt = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
+        for size in (7, 9, 11):
+            x = torch.rand(size)
+            self.assertEqual(opt(x), func(x))
+
+    def test_math_remainder_domain_error(self):
+        class FloatLike:
+            def __float__(self):
+                return 1.0
+
+        def func(x):
+            try:
+                math.remainder(FloatLike(), 0.0)
+            except ValueError as exc:
+                return x + 1, str(exc)
+            return x - 1, "no exception"
+
+        x = torch.rand(10)
+        opt = torch.compile(func, backend="eager", fullgraph=True)
+        self.assertEqual(opt(x), func(x))
+
     def test_math_radians(self):
         def func(x, a):
             return x + math.radians(a)

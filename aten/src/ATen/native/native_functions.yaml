@@ -765,10 +765,12 @@
 - func: arange(Scalar end, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
     CompositeExplicitAutograd: arange
+    Meta: arange_meta
 
 - func: arange.start(Scalar start, Scalar end, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
     CompositeExplicitAutograd: arange
+    Meta: arange_meta
 
 # This operator should be named `arange.start_out` if following the naming convention. However that
 # name is already taken. Disabled because of CI job failures.
@@ -780,6 +782,7 @@
 - func: arange.start_step(Scalar start, Scalar end, Scalar step=1, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
     CompositeExplicitAutograd: arange
+    Meta: arange_meta
   cpp_no_default_args: ['step']
   tags: core
 
