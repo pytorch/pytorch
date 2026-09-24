@@ -1152,14 +1152,12 @@ def export_graph_data(path: str) -> Callable[[CUDAGraph], None]:
     return _hook
 
 
-# Recognized keys of graph()'s annotation_config, each mapped to its allowed values.
-# Annotation options live in that dict rather than as separate arguments so later ones do
-# not each widen the signature; validating here means a typo raises instead of silently
-# leaving the default in place.
-# Recognized keys of graph()'s annotation_config, each mapped to (default, allowed values).
-_ANNOTATION_CONFIG_KEYS: dict[str, tuple[typing.Any, tuple[typing.Any, ...]]] = {
+# Defaults and allowed scalar values; directory lists are validated separately.
+_ANNOTATION_CONFIG_KEYS: dict[str, tuple[typing.Any, tuple[typing.Any, ...] | None]] = {
     "backend": ("auto", ("auto", "cupti", "edge_walk")),
     "key_by": ("exec", ("exec", "source", "auto")),
+    "record_py_stacks": (False, (False, True)),
+    "py_stack_filter_paths": (None, None),
 }
 
 
@@ -1179,11 +1177,22 @@ def _parse_annotation_config(
         )
     for key, value in config.items():
         allowed = _ANNOTATION_CONFIG_KEYS[key][1]
-        if value not in allowed:
+        if allowed is None:
+            if value is not None:
+                if not isinstance(value, (list, tuple)) or not all(
+                    isinstance(path, str) and path for path in value
+                ):
+                    raise ValueError(
+                        f"annotation_config[{key!r}] must be None or a list/tuple of nonempty path strings"
+                    )
+                value = tuple(value)
+        elif value not in allowed:
             raise ValueError(
                 f"annotation_config[{key!r}] must be one of {list(allowed)}, got {value!r}"
             )
         resolved[key] = value
+    if resolved["record_py_stacks"] and resolved["backend"] == "edge_walk":
+        raise ValueError("record_py_stacks=True requires the CUPTI annotation backend")
     return resolved
 
 
@@ -1233,6 +1242,20 @@ class graph:
             and ``"exec"`` where it does not, so it never raises. ``"exec"`` remains the
             default because kineto reports only the exec node id, so a trace exported
             through it cannot resolve capture-keyed annotations.
+            ``"record_py_stacks"`` (bool, default ``False``) records user Python launch
+            frames for kernel, memcpy, memset, batch-memory, event, and host nodes.
+            It requires CUPTI and single-threaded autograd: ``backend="auto"``
+            acquires a CUPTI subscription as with ``"cupti"``, and ``"edge_walk"`` is
+            rejected. By default, framework and generated Inductor frames are omitted. Conditional
+            and child-graph bodies require ``key_by="source"``. Use ``"exec"`` keys for
+            exported traces or ``"source"`` keys for CUPTI's ``sourceGraphNodeId``. Save stacks
+            separately with :func:`~torch.cuda.graph_annotations.dump_kernel_py_stacks`
+            or read them with :func:`~torch.cuda.graph_annotations.get_kernel_py_stacks`.
+            ``"py_stack_filter_paths"`` (list or tuple of str, default ``None``) replaces
+            the default stack filters with directories whose frames should be omitted.
+            Paths are matched on directory boundaries; relative paths are resolved when
+            capture begins. ``None`` uses the defaults; an empty list disables filtering.
+            Used only with ``record_py_stacks=True``.
         check_input_liveness (bool, optional): If ``True``, tracks external tensor inputs during graph capture and
             raises an error if any are deallocated before replay. This helps debug "use after free" errors
             where input tensors are garbage collected between capture and replay. Default: ``False``.
@@ -1340,8 +1363,11 @@ class graph:
 
         backend = "edge_walk"
         requested = self._annotation_config["backend"]
+        record_py_stacks = (
+            self._enable_annotations and self._annotation_config["record_py_stacks"]
+        )
         if self._enable_annotations and requested != "edge_walk":
-            force = requested == "cupti"
+            force = requested == "cupti" or record_py_stacks
             # The CUPTI backend attributes each node to the mark_kernels scope open on the
             # thread that created it, so multithreaded autograd would mis-attribute the nodes
             # its engine worker threads create -- their scope state is not the capturing
@@ -1351,19 +1377,31 @@ class graph:
             if torch._C._is_multithreading_enabled():
                 if force:
                     raise RuntimeError(
-                        "annotation_config={'backend': 'cupti'} requires single-threaded "
+                        "The CUPTI annotation backend requires single-threaded "
                         "autograd, so that graph nodes are created on the capturing thread and "
                         "attributed to the right mark_kernels scope. Wrap the capture in "
                         "torch.autograd.grad_mode.set_multithreading_enabled(False)."
                     )
-            elif _graph_node_callbacks.register(force=force):
+            elif _graph_node_callbacks.register(
+                force=force,
+                record_py_stacks=record_py_stacks,
+                py_stack_filter_paths=self._annotation_config["py_stack_filter_paths"],
+            ):
                 backend = "cupti"
             elif force:
+                reason = (
+                    "record_py_stacks=True" if record_py_stacks else "backend='cupti'"
+                )
+                fallback = (
+                    "Disable record_py_stacks and use backend='auto' to capture without stacks."
+                    if record_py_stacks
+                    else "Use backend='auto' to fall back to the dependent-edge walk."
+                )
                 raise RuntimeError(
-                    "annotation_config={'backend': 'cupti'} could not register CUPTI "
-                    "node-creation callbacks. This needs the cupti-python package and "
-                    "Cuspy able to subscribe; use 'auto' to fall back to the "
-                    "dependent-edge walk instead."
+                    f"{reason} could not register CUPTI node-creation callbacks. "
+                    "This requires cupti-python, CUPTI >= 13.3, and a CUPTI subscription "
+                    "not already held by another profiler (e.g. Kineto or Nsight Systems). "
+                    + fallback
                 )
 
         # Scope annotation recording to this capture: the capture-root stamp and
@@ -1400,6 +1438,10 @@ class graph:
             # would match nothing -- which is why the backend is published only now.
             if backend == "cupti" and not _graph_node_callbacks.arm():
                 _graph_node_callbacks.disarm()
+                if record_py_stacks:
+                    raise RuntimeError(
+                        "record_py_stacks=True could not arm CUPTI node-creation callbacks"
+                    )
                 backend = "edge_walk"
             _set_annotation_backend(backend)
         except BaseException:
