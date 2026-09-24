@@ -34,6 +34,7 @@ from torch.testing._internal.common_utils import (
     IS_SANDCASTLE,
     parametrize,
     run_tests,
+    skipIfRocm,
     TEST_CUDA,
     TestCase,
 )
@@ -888,6 +889,7 @@ class ProcessGroupNCCL2WatchdogNoTearDownTest(_ProcessGroupNCCL2SubgroupTest):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    @skipIfRocm
     def test_timeout_with_communicator_cleanup(self) -> None:
         env = {"TORCH_NCCL_ASYNC_ERROR_HANDLING": "2"}
         with mock.patch.dict(os.environ, env):
