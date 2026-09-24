@@ -66,6 +66,7 @@ from ..virtualized import (
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, MutableMapping, Sequence
 
+    from torch._higher_order_ops.triton_kernel_wrap import AggregateSpec
     from torch.fx import GraphModule
 
     from ..custom_graph_pass import CustomGraphModulePass
@@ -308,6 +309,14 @@ class TMADescriptorArg:
 
 
 @dataclasses.dataclass
+class AggregateArg:
+    """Associate an aggregate spec with a spec-aligned normalized value tree."""
+
+    spec: AggregateSpec
+    value: Any
+
+
+@dataclasses.dataclass
 class DeviceCodegen:
     scheduling: SchedulingConstructor
     wrapper_codegen: WrapperConstructor
@@ -315,7 +324,9 @@ class DeviceCodegen:
     fx_wrapper_codegen: WrapperConstructor | None = None
 
 
-KernelArgType = WorkspaceArg | TensorArg | SizeArg | TMADescriptorArg | ConstexprArg
+KernelArgType = (
+    WorkspaceArg | TensorArg | SizeArg | TMADescriptorArg | ConstexprArg | AggregateArg
+)
 
 # Device index to emit into generated code: either a literal compile-time index, or a
 # code expression evaluated at run time (e.g. current_device_idx_expr() under

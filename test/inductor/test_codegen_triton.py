@@ -2,6 +2,7 @@
 import ast
 import contextlib
 import dataclasses
+import pickle
 import re
 import unittest
 from collections import namedtuple, OrderedDict
@@ -16,7 +17,14 @@ import torch._inductor.config as inductor_config
 from torch._inductor import ir
 from torch._inductor.choices import InductorChoices
 from torch._inductor.codegen import triton_utils
-from torch._inductor.codegen.common import ArgName, CSEVariable, SizeArg, TensorArg
+from torch._inductor.codegen.common import (
+    AggregateArg,
+    ArgName,
+    ConstexprArg,
+    CSEVariable,
+    SizeArg,
+    TensorArg,
+)
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
 from torch._inductor.codegen.simd import IterationRangesRoot
 from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
@@ -34,6 +42,7 @@ from torch._inductor.codegen.wrapper import _escape_triton_kernel_source_for_wra
 from torch._inductor.dtype_propagation import DtypePropagationOpsHandler, promote_types
 from torch._inductor.graph import GraphLowering
 from torch._inductor.runtime.hints import AutotuneHint, DeviceProperties
+from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import (
     get_importable_constexpr_types,
@@ -206,6 +215,25 @@ class TestCodegenTriton(InductorTestCase):
                     "UserDefinedTritonKernelNestedConfig",
                     "UserDefinedTritonKernelNestedConfig",
                 ),
+            ],
+        )
+
+    def test_importable_constexpr_types_ignored_container(self):
+        # Generated structural classes cannot be imported by name, but their
+        # ordinary nested constexpr types still need imports.
+        ignored_type = namedtuple("GeneratedAggregate", ("nested",))
+        ignored_type.__torch_inductor_ignore_constexpr_import__ = True
+        nested = UserDefinedTritonKernelNestedConfig(
+            nested=UserDefinedTritonKernelConfigNamespace.Nested(offset=2)
+        )
+
+        type_specs = get_importable_constexpr_types([ignored_type(nested)])
+
+        self.assertEqual(
+            [type_spec.qualname for type_spec in type_specs],
+            [
+                "UserDefinedTritonKernelConfigNamespace.Nested",
+                "UserDefinedTritonKernelNestedConfig",
             ],
         )
 
@@ -755,6 +783,140 @@ def helper(x):
                 ]
             ),
         )
+
+    @inductor_config.patch("triton.divisible_by_16", True)
+    def test_config_of_nested_aggregate_alignment(self):
+        # Nested attributes use paths relative to the top-level argument index.
+        from torch._higher_order_ops import triton_kernel_wrap
+        from torch._inductor.utils import triton_version_uses_attrs_dict
+
+        if not triton_version_uses_attrs_dict():
+            self.skipTest("nested argument attributes require Triton's attrs dict")
+
+        config_arg = AggregateArg(
+            triton_kernel_wrap.create_named_tuple_spec(
+                "Config",
+                ("source", "parameters"),
+                (
+                    triton_kernel_wrap.create_leaf_spec("source"),
+                    triton_kernel_wrap.create_tuple_spec(
+                        (
+                            triton_kernel_wrap.create_leaf_spec("scale"),
+                            triton_kernel_wrap.create_leaf_spec("bias"),
+                        )
+                    ),
+                ),
+            ),
+            (
+                TensorArg(
+                    name="source",
+                    buffer="source",
+                    dtype=torch.float32,
+                ),
+                (
+                    SizeArg("scale", sympy.Integer(16)),
+                    SizeArg("bias", sympy.Integer(3)),
+                ),
+            ),
+        )
+
+        with patch.object(triton_utils, "is_unaligned_buffer", return_value=False):
+            triton_config = triton_utils.config_of([config_arg], indices=[3])
+
+        self.assertEqual(
+            triton_config,
+            {
+                (3, 0): [["tt.divisibility", 16]],
+                (3, 1, 0): [["tt.divisibility", 16]],
+            },
+        )
+
+    def test_signature_of_nested_namedtuple(self):
+        # Triton needs both levels of field names to resolve attribute access.
+        from torch._higher_order_ops import triton_kernel_wrap
+
+        config_arg = AggregateArg(
+            triton_kernel_wrap.create_named_tuple_spec(
+                "NestedType",
+                ("a", "nested_field"),
+                (
+                    triton_kernel_wrap.create_leaf_spec("a"),
+                    triton_kernel_wrap.create_named_tuple_spec(
+                        "FlatType",
+                        ("x", "y"),
+                        (
+                            triton_kernel_wrap.create_leaf_spec("x"),
+                            triton_kernel_wrap.create_leaf_spec("y"),
+                        ),
+                    ),
+                ),
+            ),
+            (
+                ConstexprArg("a"),
+                (ConstexprArg("x"), ConstexprArg("y")),
+            ),
+        )
+
+        signature = triton_utils.signature_of(
+            config_arg, size_dtype=(None, (None, None))
+        )
+
+        self.assertEqual(type(signature).__name__, "NestedType")
+        self.assertEqual(signature._fields, ("a", "nested_field"))
+        self.assertEqual(type(signature.nested_field).__name__, "FlatType")
+        self.assertEqual(signature.nested_field._fields, ("x", "y"))
+
+    def test_udtk_aggregate_pickle_roundtrip(self):
+        # Autotuner state must restore generated classes without importing them.
+        inner_type = namedtuple("InnerType", ("x", "y"))
+        outer_type = namedtuple("OuterType", ("value", "nested"))
+        inner_type.__reduce__ = CachingAutotuner.reduce_udtk_aggregate
+        outer_type.__reduce__ = CachingAutotuner.reduce_udtk_aggregate
+        value = outer_type(1, (inner_type(2, None), 3))
+
+        rebuild, (spec, leaves) = CachingAutotuner.reduce_udtk_aggregate(value)
+        self.assertIs(rebuild, CachingAutotuner.rebuild_udtk_aggregate)
+        self.assertEqual(
+            spec,
+            (
+                "namedtuple",
+                "OuterType",
+                ("value", "nested"),
+                (
+                    ("leaf", "0", False),
+                    (
+                        "tuple",
+                        (
+                            (
+                                "namedtuple",
+                                "InnerType",
+                                ("x", "y"),
+                                (("leaf", "1", False), ("leaf", "2", False)),
+                                False,
+                            ),
+                            ("leaf", "3", False),
+                        ),
+                        False,
+                    ),
+                ),
+                False,
+            ),
+        )
+        self.assertEqual(leaves, (1, 2, None, 3))
+
+        restored = CachingAutotuner.rebuild_udtk_aggregate(spec, leaves)
+
+        self.assertEqual(type(restored).__name__, "OuterType")
+        self.assertEqual(restored._fields, ("value", "nested"))
+        self.assertEqual(type(restored.nested[0]).__name__, "InnerType")
+        self.assertEqual(restored.nested[0]._fields, ("x", "y"))
+        self.assertEqual(restored, value)
+        self.assertIs(type(restored).__reduce__, CachingAutotuner.reduce_udtk_aggregate)
+        self.assertIs(
+            type(restored.nested[0]).__reduce__, CachingAutotuner.reduce_udtk_aggregate
+        )
+        self.assertEqual(pickle.loads(pickle.dumps(value)), value)
+        self.assertEqual(pickle.loads(pickle.dumps(restored)), value)
 
     def test_config_of_sizearg_with_check_constraint(self):
         from torch.utils._sympy.functions import Mod
