@@ -347,6 +347,19 @@ const Expr* NativeShapeEnv::simplify(const Expr* e) {
 }
 
 const Expr* NativeShapeEnv::maybe_evaluate_static(const Expr* e) {
+  // Answers need a pristine env (simplify throws otherwise), whose mirrored
+  // ranges never change, so they depend only on e.
+  if (pristine_) {
+    if (auto it = static_memo_.find(e); it != static_memo_.end()) {
+      return it->second;
+    }
+  }
+  const Expr* r = maybe_evaluate_static_uncached(e);
+  static_memo_.emplace(e, r);
+  return r;
+}
+
+const Expr* NativeShapeEnv::maybe_evaluate_static_uncached(const Expr* e) {
   ExprArena& a = *arena_;
   e = a.canonicalize_bool_expr(simplify(e));
   // Substituting the (empty) axioms is the identity.

@@ -149,6 +149,7 @@ class NativeShapeEnv : public c10::intrusive_ptr_target {
   };
 
   std::optional<const Expr*> evaluate_expr_impl(const Expr* e, const Hint& hint);
+  const Expr* maybe_evaluate_static_uncached(const Expr* e);
   void log_query(const NativeQuery& q, const Expr* result);
 
   using LeCache = std::map<std::tuple<const Expr*, const Expr*, bool>, bool>;
@@ -172,6 +173,7 @@ class NativeShapeEnv : public c10::intrusive_ptr_target {
   bool pristine_ = true;
   bool replacements_empty_ = true;
   std::map<std::pair<const Expr*, const Expr*>, const Expr*> mod_memo_;
+  std::unordered_map<const Expr*, const Expr*> static_memo_;
   std::unordered_map<NativeQuery, std::pair<uint64_t, const Expr*>, QueryHash>
       queries_;
 };

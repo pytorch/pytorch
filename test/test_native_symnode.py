@@ -2840,6 +2840,24 @@ class TestNativeShapeEnvSync(TestCase):
         )
         self.assertEqual(native.take_queries(), [])
 
+    def test_static_memo(self):
+        env, s, t = self.make_env()
+        native = env._native_env
+        a = native.arena
+        e = sympy.Ge(2 * s * t + s, t)
+        n = a.from_sympy(e)
+        # Memoized answers are still logged for replay.
+        for _ in range(2):
+            answered, got = native.static_eval(n)
+            self.assertTrue(answered)
+            self.assertEqual(a.to_sympy(got), sympy.true)
+            self.assertEqual([q[1] for q in native.take_queries()], [e])
+        env.guards.append(None)
+        self.assertFalse(native.pristine)
+        self.assertEqual(native.static_eval(n), (False, None))
+        with self.assertRaises(NativeUnsupported):
+            native.maybe_evaluate_static(n)
+
     def test_flush_populates_python_caches(self):
         env, s, t = self.make_env()
         native = env._native_env
