@@ -18,16 +18,7 @@ import traceback
 import typing
 from collections import Counter, defaultdict
 from concurrent.futures import as_completed, Future
-from typing import (
-    Any,
-    Generic,
-    Literal,
-    overload,
-    Protocol,
-    TYPE_CHECKING,
-    TypeAlias,
-    TypeVar,
-)
+from typing import Any, Generic, Literal, overload, TYPE_CHECKING, TypeAlias, TypeVar
 from typing_extensions import ParamSpec
 
 from torch.utils._ordered_set import OrderedSet
@@ -84,7 +75,7 @@ from .loop_body import LoopBody
 from .memory import MemoryPlanningInfoForBuffer, MemoryPlanningInfoForNode
 from .runtime.hints import DeviceProperties, ReductionHint
 from .runtime.runtime_utils import green_text, is_power_of_2, red_text
-from .sizevars import SimplifyIndexing
+from .sizevars import SimplifyIndexing, SizeVarAllocator
 from .utils import (
     _unstable_customized_partition_wrapper,
     cache_on_self,
@@ -121,18 +112,6 @@ def _real_dep_names(deps: OrderedSet[Dep]) -> OrderedSet[str]:
     return OrderedSet(dep.name for dep in deps if not isinstance(dep, WeakDep))
 
 
-class AffineProofContext(Protocol):
-    """Optional symbolic facts supplied by the caller's shape environment."""
-
-    def simplify(self, expr: sympy.Expr) -> sympy.Expr: ...
-
-    def statically_known_equals(self, left: Any, right: Any) -> bool: ...
-
-    def statically_known_geq(self, left: Any, right: Any) -> bool: ...
-
-    def statically_known_leq(self, left: Any, right: Any) -> bool: ...
-
-
 @dataclasses.dataclass(frozen=True)
 class MemoryDepMatch:
     """An exact producer write and consumer read relation."""
@@ -155,13 +134,13 @@ class IdentityTranslationProof:
 
 
 def _affine_proof_simplify(
-    expr: sympy.Expr, context: AffineProofContext | None
+    expr: sympy.Expr, context: SizeVarAllocator | None
 ) -> sympy.Expr:
     return context.simplify(expr) if context is not None else sympy.simplify(expr)
 
 
 def _affine_proof_equal(
-    left: sympy.Expr, right: sympy.Expr, context: AffineProofContext | None
+    left: sympy.Expr, right: sympy.Expr, context: SizeVarAllocator | None
 ) -> bool:
     if left == right:
         return True
@@ -174,7 +153,7 @@ def _affine_proof_equal(
 
 
 def _affine_proof_geq(
-    left: sympy.Expr, right: sympy.Expr, context: AffineProofContext | None
+    left: sympy.Expr, right: sympy.Expr, context: SizeVarAllocator | None
 ) -> bool:
     if left == right:
         return True
@@ -187,7 +166,7 @@ def _affine_proof_geq(
 
 
 def _affine_proof_leq(
-    left: sympy.Expr, right: sympy.Expr, context: AffineProofContext | None
+    left: sympy.Expr, right: sympy.Expr, context: SizeVarAllocator | None
 ) -> bool:
     if left == right:
         return True
@@ -200,7 +179,7 @@ def _affine_proof_leq(
 
 
 def _affine_proof_strides(
-    dep: MemoryDep, context: AffineProofContext | None
+    dep: MemoryDep, context: SizeVarAllocator | None
 ) -> tuple[sympy.Expr, ...] | None:
     """Extract and validate ordinary affine coefficients from an access."""
     zero = {var: sympy.S.Zero for var in dep.var_names}
@@ -227,7 +206,7 @@ def _affine_proof_strides(
 def _prove_identity_translation_pair(
     producer: MemoryDep,
     consumer: MemoryDep,
-    context: AffineProofContext | None,
+    context: SizeVarAllocator | None,
 ) -> IdentityTranslationProof | None:
     if producer.name != consumer.name:
         return None
@@ -330,7 +309,7 @@ def prove_identity_translation(
     source_accesses: MemoryDep | typing.Sequence[MemoryDep],
     consumer_access: MemoryDep,
     *,
-    context: AffineProofContext | None = None,
+    context: SizeVarAllocator | None = None,
 ) -> IdentityTranslationProof | None:
     """Prove a dense identity-plus-translation source-to-consumer relation."""
     if isinstance(source_accesses, MemoryDep):
@@ -2732,7 +2711,7 @@ class SubParentAccessRelation:
         source_accesses: MemoryDep | typing.Sequence[MemoryDep],
         consumer_access: MemoryDep,
         *,
-        sizevars: AffineProofContext | None = None,
+        sizevars: SizeVarAllocator | None = None,
     ) -> "IdentityTranslationProof | None":
         """Compatibility wrapper for the module-level affine proof."""
         return prove_identity_translation(
