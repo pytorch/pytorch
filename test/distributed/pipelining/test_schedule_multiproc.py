@@ -317,6 +317,34 @@ def step_with_optional_pre_split(
 
 
 @contextmanager
+def assert_explicit_forward_wait_ownership(test_case, stages):
+    """Check that explicit waits own sends until their scheduled retirement."""
+    storage_refs = []
+    with ExitStack() as stack:
+        for stage in stages:
+            original_get_fwd_send_ops = stage.get_fwd_send_ops
+
+            def get_fwd_send_ops(
+                microbatch_index, *, _original=original_get_fwd_send_ops
+            ):
+                test_case.assertTrue(all(ref() is not None for ref in storage_refs))
+                ops = _original(microbatch_index)
+                storage_refs.extend(
+                    weakref.ref(op.tensor.untyped_storage()) for op in ops
+                )
+                return ops
+
+            stack.enter_context(
+                mock.patch.object(
+                    stage, "get_fwd_send_ops", side_effect=get_fwd_send_ops
+                )
+            )
+        yield
+
+    test_case.assertTrue(all(ref() is None for ref in storage_refs))
+
+
+@contextmanager
 def assert_send_storage_released_before_backward(test_case, stages, overlap_actions=()):
     """Check that each remote forward-send allocation dies before backward."""
     storage_refs = {}
@@ -1407,7 +1435,7 @@ class ScheduleTest(MultiProcContinuousTest):
                     bwd_recv_ops.pop((backward_stage_index, backward_mb_index))
                 )
             loss = schedule._maybe_get_loss(backward_stage, backward_mb_index)
-            ctx.wait_fwd_send(backward_stage_index, backward_mb_index)
+            ctx.wait_fwd_send_if_implicit(backward_stage_index, backward_mb_index)
             schedule.backward_counter[backward_stage_index] += 1
             last_backward = (
                 schedule.backward_counter[backward_stage_index]
@@ -1843,6 +1871,43 @@ class CustomSchedulesTest(MultiProcContinuousTest):
 
         # Check gradients using helper method
         check_gradients(self.config, stage_modules, ref_mod, submod_names)
+
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+    )
+    @skip_if_lt_x_gpu(4)
+    def test_pipeline_schedule_runtime_eval_explicit_send_waits(self):
+        n_stages = ScheduleWithReorderedB.n_stages
+        mod, ref_mod, x, target, loss_fn = setup_models_and_data(
+            self.config, n_layers=n_stages
+        )
+        stages, stage_modules, _ = create_multi_stage_pipeline(
+            self.config, mod, 1, n_stages
+        )
+        schedule = ScheduleWithReorderedB(
+            stages,
+            ScheduleWithReorderedB.num_microbatches,
+            loss_fn=loss_fn,
+            scale_grads=False,
+        )
+
+        losses = []
+        with assert_explicit_forward_wait_ownership(self, stages):
+            if self.rank == 0:
+                schedule.eval(x)
+            else:
+                out = schedule.eval(target=target, losses=losses)
+
+        self.assertFalse(
+            any(
+                param.grad is not None
+                for stage_module in stage_modules
+                for param in stage_module.parameters()
+            )
+        )
+        if self.rank == self.world_size - 1:
+            torch.testing.assert_close(out, ref_mod(x))
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(

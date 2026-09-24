@@ -12,7 +12,7 @@ from collections import Counter, defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
-from functools import lru_cache
+from functools import lru_cache, partial
 from types import MappingProxyType
 from typing import Any, cast, Literal, NamedTuple, Protocol
 
@@ -74,6 +74,8 @@ class _ComputationType(str, Enum):
     RECV_F = "RECV_F"
     SEND_B = "SEND_B"
     RECV_B = "RECV_B"
+    WAIT_SEND_F = "WAIT_SEND_F"
+    WAIT_SEND_B = "WAIT_SEND_B"
     FULL_BACKWARD = "B"
     OVERLAP_F_B = "OVERLAP_F_B"
     REDUCE_GRAD = "REDUCE_GRAD"
@@ -96,6 +98,8 @@ SEND_F = _ComputationType.SEND_F
 RECV_F = _ComputationType.RECV_F
 SEND_B = _ComputationType.SEND_B
 RECV_B = _ComputationType.RECV_B
+WAIT_SEND_F = _ComputationType.WAIT_SEND_F
+WAIT_SEND_B = _ComputationType.WAIT_SEND_B
 FULL_BACKWARD = _ComputationType.FULL_BACKWARD
 OVERLAP_F_B = _ComputationType.OVERLAP_F_B
 REDUCE_GRAD = _ComputationType.REDUCE_GRAD
@@ -120,7 +124,7 @@ B = FULL_BACKWARD
 
 # Helper to parse an action string like 1F0 into a tuple of (stage_index, computation_type, microbatch_index)
 _action_regex = re.compile(
-    r"(\d+)(WAIT_REDUCE_GRAD|REDUCE_GRAD|UNSHARD|RESHARD|SEND_F|RECV_F|SEND_B|RECV_B|F|I|B|W)(\d*)"
+    r"(\d+)(WAIT_REDUCE_GRAD|WAIT_SEND_F|WAIT_SEND_B|REDUCE_GRAD|UNSHARD|RESHARD|SEND_F|RECV_F|SEND_B|RECV_B|F|I|B|W)(\d*)"
 )
 
 
@@ -966,6 +970,60 @@ def _wait_and_release_fwd_send(
         work.clear()
     ops.clear()
     stage.release_fwd_output_leases(microbatch_index)
+
+
+_SendKey = tuple[_ComputationType, int, int]
+
+
+@dataclass
+class _PendingSend:
+    """Own one send batch until its matching wait."""
+
+    ops: list[dist.P2POp]
+    works: list[dist.Work]
+    retire: Callable[[], None] | None = None
+
+
+class _PendingSendTracker:
+    """Track send work and ownership until retirement."""
+
+    def __init__(self) -> None:
+        self._pending: dict[_SendKey, _PendingSend] = {}
+
+    def register(
+        self,
+        key: _SendKey,
+        ops: list[dist.P2POp],
+        works: list[dist.Work],
+        retire: Callable[[], None] | None = None,
+    ) -> None:
+        """Register a pending send and its retirement callback."""
+        if key in self._pending:
+            raise AssertionError(f"Duplicate pipeline send {key}")
+        self._pending[key] = _PendingSend(ops, works, retire)
+
+    def assert_not_pending(self, key: _SendKey) -> None:
+        """Raise if the send is already pending."""
+        if key in self._pending:
+            raise AssertionError(f"Duplicate pipeline send {key}")
+
+    def wait(self, key: _SendKey) -> None:
+        """Wait for and retire the pending send."""
+        if key not in self._pending:
+            raise AssertionError(f"No pending pipeline send for {key}")
+        pending = self._pending[key]
+        _wait_batch_p2p(pending.works)
+        del self._pending[key]
+        if pending.retire is not None:
+            pending.retire()
+
+    def is_pending(self, key: _SendKey) -> bool:
+        return key in self._pending
+
+    def drain(self) -> None:
+        """Wait for sends without an explicit wait action."""
+        for key in list(self._pending):
+            self.wait(key)
 
 
 class PipelineScheduleSingle(_PipelineSchedule):
@@ -2724,12 +2782,13 @@ at time_step %s when running action %s",
 class _PipelineContext:
     """Context passed to custom functions during pipeline execution.
 
-    An overlap callback must call ``wait_fwd_send`` immediately before it
-    runs a backward sub-action.
+    An overlap callback must call ``wait_fwd_send_if_implicit`` immediately
+    before it runs a backward sub-action. This waits only when no explicit
+    ``WAIT_SEND_F`` owns the send.
     """
 
     schedule_ref: _PipelineSchedule
-    wait_fwd_send: Callable[[int, int], None]
+    wait_fwd_send_if_implicit: Callable[[int, int], None]
     arg_mbs: list[tuple] | None = None
     kwarg_mbs: list[dict] | None = None
     target_mbs: list | None = None
@@ -2753,6 +2812,12 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
 
     Deferred gradient waits require FSDP and matching ``WAIT_REDUCE_GRAD``
     actions in compute-comms schedules.
+
+    ``WAIT_SEND_F`` and ``WAIT_SEND_B`` match an earlier send for the same
+    stage and microbatch. Place each wait after the peer can post the matching
+    receive. An explicit wait owns that send until it runs. The runtime retires
+    sends without explicit waits at safe fallback points or before the step
+    returns.
     """
 
     def __init__(self, *args, **kwargs):
@@ -2928,10 +2993,15 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
         filename: str,
         format: Literal["compute_only", "compute_comms"] = "compute_only",
     ):
-        """Loads a csv in simple format and then lowers it to include communication actions
+        """Loads a csv in simple format and then lowers it to include communication actions.
 
         format must be either "compute_only" or "compute_comms".  If compute_only, the lowering passes
         will automatically be run to generate a compute_comms schedule.
+
+        A compute_comms row may place WAIT_SEND_F or WAIT_SEND_B after the
+        matching send and after the peer can post its receive. The wait matches
+        by stage and microbatch. It owns send retirement; the runtime drains
+        sends without explicit waits before the step returns.
         """
         if format == "compute_only":
             # this will populate self.pipeline_order
@@ -3042,19 +3112,18 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 "Must call _prepare_schedule_with_comms() before calling _step_microbatches()"
             )
 
-        # Send ops should be waited on before step() exits, mainly for hygiene.
-        pending_fwd_sends: dict[
-            tuple[int, int],
-            tuple[_PipelineStageBase, list[dist.P2POp], list[list[dist.Work]]],
-        ] = {}
-        pending_bwd_sends: list[tuple[list[dist.P2POp], list[dist.Work]]] = []
+        pending_sends = _PendingSendTracker()
+        explicit_fwd_waits = {
+            (SEND_F, action.stage_index, action.microbatch_index)
+            for action in self.pipeline_order_with_comms[self.rank]
+            if action.computation_type == WAIT_SEND_F
+            and action.microbatch_index is not None
+        }
 
-        def _wait_fwd_send(stage_idx: int, mb_index: int) -> None:
-            pending = pending_fwd_sends.pop((stage_idx, mb_index), None)
-            if pending is None:
-                return
-            stage, ops, work_batches = pending
-            _wait_and_release_fwd_send(stage, mb_index, ops, work_batches)
+        def _wait_fwd_send_if_implicit(stage_idx: int, mb_index: int) -> None:
+            key = (SEND_F, stage_idx, mb_index)
+            if key not in explicit_fwd_waits and pending_sends.is_pending(key):
+                pending_sends.wait(key)
 
         def _wait_fwd_send_before_backward(action: _Action) -> None:
             if action.computation_type not in (FULL_BACKWARD, BACKWARD_INPUT):
@@ -3064,7 +3133,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 raise AssertionError(
                     f"Backward action {action} has no microbatch index"
                 )
-            _wait_fwd_send(action.stage_index, microbatch_index)
+            _wait_fwd_send_if_implicit(action.stage_index, microbatch_index)
 
         def _perform_action(action: _Action) -> None:
             comp_type = action.computation_type
@@ -3095,18 +3164,24 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
             # However, I was wondering if I should avoid calling batched operators at all in the case that there is
             # only one operator per batch.  I could iterate through the 'fwd_send_ops' one by one and run them.
             if comp_type == SEND_F:
-                key = (stage_idx, mb_index)
-                if key in pending_fwd_sends:
-                    raise AssertionError(f"Duplicate forward send for {key}")
+                key = (SEND_F, stage_idx, mb_index)
+                pending_sends.assert_not_pending(key)
                 ops = stage.get_fwd_send_ops(mb_index)
-                pending_fwd_sends[key] = (
-                    stage,
+                pending_sends.register(
+                    key,
                     ops,
-                    [_batch_p2p(ops)],
+                    _batch_p2p(ops),
+                    partial(stage.release_fwd_output_leases, mb_index),
                 )
             elif comp_type == SEND_B:
+                key = (SEND_B, stage_idx, mb_index)
+                pending_sends.assert_not_pending(key)
                 ops = stage.get_bwd_send_ops(mb_index)
-                pending_bwd_sends.append((ops, _batch_p2p(ops)))
+                pending_sends.register(key, ops, _batch_p2p(ops))
+            elif comp_type in (WAIT_SEND_F, WAIT_SEND_B):
+                send_type = SEND_F if comp_type == WAIT_SEND_F else SEND_B
+                key = (send_type, stage_idx, mb_index)
+                pending_sends.wait(key)
             elif comp_type == RECV_F:
                 if (stage_idx, mb_index) in self.fwd_recv_ops:
                     raise AssertionError(
@@ -3299,7 +3374,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                     if action.computation_type in self._comp_type_to_function_map:
                         ctx = _PipelineContext(
                             schedule_ref=self,
-                            wait_fwd_send=_wait_fwd_send,
+                            wait_fwd_send_if_implicit=_wait_fwd_send_if_implicit,
                             arg_mbs=arg_mbs,
                             kwarg_mbs=kwarg_mbs,
                             target_mbs=target_mbs,
@@ -3333,13 +3408,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 )
                 raise e
 
-        for stage_idx, microbatch_index in list(pending_fwd_sends):
-            _wait_fwd_send(stage_idx, microbatch_index)
-        while pending_bwd_sends:
-            ops, work = pending_bwd_sends.pop()
-            _wait_batch_p2p(work)
-            work.clear()
-            ops.clear()
+        pending_sends.drain()
 
         if len(self.unshard_ops) != 0:
             raise AssertionError("Unused unshard operations")
@@ -4856,6 +4925,16 @@ def _simulate_comms_compute(
             peer_stage_idx = stage_idx + 1
             expected_send = _Action(peer_stage_idx, SEND_B, action.microbatch_index)
             return expected_send in _prev_ops_rank[stage_to_rank(peer_stage_idx)]
+        elif action.computation_type in (WAIT_SEND_F, WAIT_SEND_B):
+            # Require the peer recv to keep the simulation conservative.
+            forward = action.computation_type == WAIT_SEND_F
+            send_type = SEND_F if forward else SEND_B
+            if _Action(stage_idx, send_type, action.microbatch_index) not in prev_ops:
+                return False
+            peer_stage_idx = stage_idx + 1 if forward else stage_idx - 1
+            recv_type = RECV_F if forward else RECV_B
+            expected_recv = _Action(peer_stage_idx, recv_type, action.microbatch_index)
+            return expected_recv in _prev_ops_rank[stage_to_rank(peer_stage_idx)]
         else:
             raise ValueError(f"Unsupported action type {action}")
 
