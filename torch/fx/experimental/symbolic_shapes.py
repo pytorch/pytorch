@@ -77,7 +77,14 @@ from torch.fx.experimental.recording import (
     shape_env_check_state_equal,
     ShapeEnvEvent,
 )
-from torch.fx.experimental.sym_node import _NO_HINT, SymNode, SymNodeTypes, SymTypes
+from torch.fx.experimental.sym_node import (
+    _install_native_glue,
+    _native_glue_originals,
+    _NO_HINT,
+    SymNode,
+    SymNodeTypes,
+    SymTypes,
+)
 from torch.types import py_sym_types
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -4251,6 +4258,8 @@ class ShapeEnv:
             _native_shape_envs.add(self)
             symbolic = torch._C._symbolic
             native = self._native_env = symbolic.NativeShapeEnv(symbolic._Arena(), self)
+            if not _native_glue_originals:
+                _install_native_glue()
             not_pristine = functools.partial(
                 _native_pre_mutation, native.mark_not_pristine
             )

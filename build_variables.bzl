@@ -1065,6 +1065,7 @@ libtorch_python_core_sources = [
     "torch/csrc/symbolic/Sorting.cpp",
     "torch/csrc/symbolic/ValueRanges.cpp",
     "torch/csrc/symbolic/python_symbolic.cpp",
+    "torch/csrc/symbolic/python_symint_glue.cpp",
     "torch/csrc/tensor/python_tensor.cpp",
     "torch/csrc/utils/init.cpp",
     "torch/csrc/utils/throughput_benchmark.cpp",

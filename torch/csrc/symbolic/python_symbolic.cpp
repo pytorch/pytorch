@@ -179,18 +179,6 @@ std::optional<Hint> hint_from_py(py::handle hint) {
   return std::nullopt;
 }
 
-py::object hint_to_py(const Hint& h) {
-  return std::visit(
-      [](auto v) -> py::object {
-        if constexpr (std::is_same_v<decltype(v), std::monostate>) {
-          return py::none();
-        } else {
-          return py::cast(v);
-        }
-      },
-      h);
-}
-
 const Expr* PyArena::from_sympy(py::handle obj) {
   if (PyLong_CheckExact(obj.ptr()) || py::isinstance(obj, Integer)) {
     py::int_ v(py::reinterpret_borrow<py::object>(obj));
@@ -670,13 +658,6 @@ c10::SymNode node_from_py(py::handle obj) {
       py::reinterpret_borrow<py::object>(obj));
 }
 
-py::object node_to_py(const c10::SymNode& n) {
-  if (auto* p = dynamic_cast<impl::PythonSymNodeImpl*>(n.get())) {
-    return py::reinterpret_borrow<py::object>(p->getPyObj());
-  }
-  return py::cast(n);
-}
-
 // sympy's node.expr.<attr>, computed by `native` from the native expr unless
 // replacements could change node.expr.
 template <typename F>
@@ -717,6 +698,13 @@ py::handle python_symnode_class() {
 }
 
 } // namespace
+
+py::object node_to_py(const c10::SymNode& n) {
+  if (auto* p = dynamic_cast<impl::PythonSymNodeImpl*>(n.get())) {
+    return py::reinterpret_borrow<py::object>(p->getPyObj());
+  }
+  return py::cast(n);
+}
 
 bool native_config_is_default() {
   py::gil_scoped_acquire gil;
@@ -863,6 +851,7 @@ void initSymbolicBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module_>();
   auto sm = m.def_submodule("_symbolic", "native symbolic expressions");
   py::register_exception<NativeUnsupported>(sm, "NativeUnsupported");
+  initGlueBindings(sm);
   sm.def("_assume_rules", &assume_rules_to_py);
   sm.def("_native_config_is_default", &native_config_is_default);
   sm.def("_native_queries_pending", &NativeShapeEnv::queries_pending);

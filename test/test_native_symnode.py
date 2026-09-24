@@ -1,11 +1,15 @@
 # Owner(s): ["module: dynamic shapes"]
 import contextlib
 import copy
+import enum
+import inspect
+import operator
 import os
 import pickle
 import random
 import subprocess
 import sys
+import types
 from unittest import mock
 
 import sympy
@@ -13,7 +17,7 @@ from sympy.core.assumptions import _assume_defined, _assume_rules
 
 import torch
 from torch._dynamo.source import ConstantSource
-from torch.fx.experimental import symbolic_shapes
+from torch.fx.experimental import sym_node, symbolic_shapes
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.sym_node import _NO_HINT, SymNode
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
@@ -3887,6 +3891,291 @@ class TestNativeSymNodeCompile(TestCase):
         self.assertTrue(not any(isinstance(v.node, _NativeSymNode) for v in want_vals))
 
 
+@contextlib.contextmanager
+def python_glue():
+    """Puts the Python magic methods back for the duration."""
+    for (cls, attr), fn in sym_node._native_glue_originals.items():
+        setattr(cls, attr, fn)
+    try:
+        yield
+    finally:
+        sym_node._install_native_glue()
+
+
+class TestNativeSymIntGlue(TestCase):
+    ENTRIES = [
+        (cls, attr, kind)
+        for cls, attr, _, kind in sym_node._user_magic_entries
+        if cls is not torch.SymFloat and kind in ("unary", "binary", "rbinary")
+    ]
+    OPERATORS = {
+        "add": operator.add,
+        "sub": operator.sub,
+        "mul": operator.mul,
+        "mod": operator.mod,
+        "and": operator.and_,
+        "or": operator.or_,
+        "xor": operator.xor,
+        "eq": operator.eq,
+        "ne": operator.ne,
+        "lt": operator.lt,
+        "le": operator.le,
+        "gt": operator.gt,
+        "ge": operator.ge,
+        "lshift": operator.lshift,
+        "rshift": operator.rshift,
+    }
+    PLAIN = [0, 1, 2, -3, 6, True, False]
+    CORE = {"add", "sub", "mul", "mod", "int_floordiv", "and", "or", "eq", "ne"}
+    CORE |= {"lt", "le", "gt", "ge", "neg", "sym_not", "sym_min", "sym_max"}
+
+    def setUp(self):
+        super().setUp()
+        ShapeEnv(_allow_native=True)
+        self.assertTrue(sym_node._native_glue_originals)
+
+    @staticmethod
+    def make_env(native=True):
+        env = ShapeEnv(_allow_native=native)
+        hints = [5, 7, 3, -4, 6]
+        syms = [
+            env.create_symbol(
+                h, ConstantSource(f"x{i}"), DimDynamic.DYNAMIC, positive=h > 0 or None
+            )
+            for i, h in enumerate(hints)
+        ]
+        ints = [env.create_symintnode(s, hint=h) for s, h in zip(syms, hints)]
+        bools = [
+            env.create_symboolnode(sympy.Ne(syms[0], 3)),
+            env.create_symboolnode(sympy.Lt(syms[1], syms[2])),
+        ]
+        return env, ints, bools
+
+    @staticmethod
+    def describe(r):
+        if isinstance(r, torch.SymInt | torch.SymBool | torch.SymFloat):
+            n = r.node
+            return (type(r), type(n), str(n), n.hint, n.constant, n.pytype)
+        return (type(r), r)
+
+    def program(self, seed):
+        rng = random.Random(seed)
+        env, ints, bools = self.make_env()
+        out = []
+        core = [
+            e for e in self.ENTRIES if e[1].strip("_").removeprefix("r") in self.CORE
+        ]
+        for _ in range(150):
+            cls, attr, kind = rng.choice(core if rng.random() < 0.8 else self.ENTRIES)
+            pool = ints if cls is torch.SymInt else bools
+            x = rng.choice(pool)
+            method = attr[3:-2] if kind == "rbinary" else attr[2:-2]
+            try:
+                if kind == "unary":
+                    r = getattr(x, attr)()
+                else:
+                    if "pow" in method or "shift" in method:
+                        y = rng.choice([0, 1, 2])
+                    else:
+                        y = rng.choice(ints + bools + self.PLAIN)
+                    fn = self.OPERATORS.get(method)
+                    style = rng.randrange(3)
+                    if style == 0 or fn is None:
+                        r = getattr(x, attr)(y)
+                    elif style == 1:
+                        r = getattr(cls, attr)(x, y)
+                    elif kind == "binary":
+                        r = fn(x, y)
+                    else:
+                        r = fn(rng.choice(self.PLAIN), x)
+            except Exception as e:
+                out.append(("raise", type(e)))
+                continue
+            out.append(self.describe(r))
+            if isinstance(r, torch.SymInt):
+                target = ints
+            elif isinstance(r, torch.SymBool):
+                target = bools
+            else:
+                continue
+            if type(r.node) is not _NativeSymNode and rng.random() < 0.8:
+                continue
+            if len(target) < 12:
+                target.append(r)
+            else:
+                target[rng.randrange(len(target))] = r
+        out.append([q[1:] for q in env._native_env.take_queries()])
+        out.append([str(g.expr) for g in env.guards])
+        return out
+
+    @parametrize("seed", range(8))
+    def test_differential(self, seed):
+        got = self.program(seed)
+        with python_glue():
+            self.assertIsInstance(torch.SymInt.__add__, types.FunctionType)
+            want = self.program(seed)
+        self.assertEqual(got, want)
+        native = [r for r in got[:-2] if len(r) == 6 and r[1] is _NativeSymNode]
+        self.assertGreater(len(native), 40)
+
+    def test_installed(self):
+        originals = sym_node._native_glue_originals
+        self.assertEqual(len(originals), len(self.ENTRIES))
+        for cls, attr, _ in self.ENTRIES:
+            glue = cls.__dict__[attr]
+            self.assertIsInstance(glue, torch._C._symbolic._SymGlueMethod)
+            fn = originals[(cls, attr)]
+            self.assertIs(glue.__wrapped__, fn)
+            self.assertEqual(glue.__name__, fn.__name__)
+            self.assertEqual(glue.__qualname__, fn.__qualname__)
+            self.assertEqual(inspect.signature(glue), inspect.signature(fn))
+            self.assertIs(getattr(cls, attr), glue)
+        self.assertIsInstance(torch.SymFloat.__add__, types.FunctionType)
+        self.assertIsInstance(torch.SymBool.__sym_ite__, types.FunctionType)
+        _, ints, _ = self.make_env()
+        a = ints[0]
+        self.assertEqual(str(a.__add__(1)), f"{a} + 1")
+        self.assertIs(a.__add__.__self__, a)
+        self.assertEqual(str(torch.SymInt.__add__(a, 1)), f"{a} + 1")
+
+    def test_native_path(self):
+        calls = []
+
+        def counted(fn):
+            def wrapper(*args):
+                calls.append(fn.__name__)
+                return fn(*args)
+
+            return wrapper
+
+        def run(native):
+            env, (a, b, c, d, _), (p, q) = self.make_env(native)
+            out = [a + b, a * 2, 3 - a, a // b, a % 3, a == 5, a < b, -a, p & q]
+            out += [p | True, a > c, 2 * a, torch.sym_min(a, 3), a != 4, a - 5]
+            return [self.describe(r) for r in out]
+
+        with (
+            mock.patch.object(sym_node, "to_node", counted(sym_node.to_node)),
+            mock.patch.object(sym_node, "wrap_node", counted(sym_node.wrap_node)),
+        ):
+            got = run(True)
+            self.assertEqual(calls, [])
+            want = run(False)
+            self.assertGreater(len(calls), 20)
+        self.assertEqual([r[2:] for r in got], [r[2:] for r in want])
+        self.assertTrue(all(r[1] is _NativeSymNode for r in got))
+
+    def test_fallbacks(self):
+        reasons = []
+        to_node = sym_node.to_node
+
+        def recording(self_node, num):
+            reasons.append(torch._C._symbolic._glue_fallback_reason())
+            return to_node(self_node, num)
+
+        class Small(enum.IntEnum):
+            ONE = 1
+
+        cases = [
+            (lambda a, p: a + 1.5, "operand type"),
+            (lambda a, p: a * Small.ONE, "operand type"),
+            (lambda a, p: a + 2**70, "int beyond int64"),
+            (lambda a, p: torch.SymInt.__add__(a, other=1), "keywords"),
+            (lambda a, p: torch.SymInt.__sub__(a, 1, 2), "arity"),
+            (lambda a, p: torch.SymInt.__neg__(a, 1), "arity"),
+            (
+                lambda a, p: a
+                + torch.SymInt(SymNode(a.node._expr, a.node.shape_env, int, 5)),
+                "python node",
+            ),
+            (lambda a, p: a + "x", "operand type"),
+            (lambda a, p: 1.5 - a, "operand type"),
+            (lambda a, p: p & 1.5, "operand type"),
+            (lambda a, p: torch.SymInt.__add__(3, 4), "operand type"),
+        ]
+        for fn, reason in cases:
+            results = []
+            for glue in (True, False):
+                _, ints, bools = self.make_env()
+                reasons.clear()
+                ctx = contextlib.nullcontext() if glue else python_glue()
+                with ctx, mock.patch.object(sym_node, "to_node", recording):
+                    try:
+                        results.append(self.describe(fn(ints[0], bools[0])))
+                    except Exception as e:
+                        results.append(("raise", type(e)))
+                if glue and reasons:
+                    self.assertEqual(reasons[0], reason)
+            self.assertEqual(results[0], results[1])
+        self.assertIsNone(torch._C._symbolic._glue_fallback_reason())
+
+    def test_magic_logging(self):
+        _, (a, *_), _ = self.make_env()
+        with self.assertLogs(sym_node.sym_node_log, level="DEBUG") as logs:
+            r = a + 1
+        self.assertEqual(
+            logs.output, [f"DEBUG:{sym_node.sym_node_log.name}:MAGIC add {a} 1"]
+        )
+        self.assertIsInstance(r.node, _NativeSymNode)
+
+    def test_modified_class(self):
+        _, (a, *_), _ = self.make_env()
+        reasons = []
+        to_node = sym_node.to_node
+
+        def recording(self_node, num):
+            reasons.append(torch._C._symbolic._glue_fallback_reason())
+            return to_node(self_node, num)
+
+        with mock.patch.object(sym_node, "to_node", recording):
+            try:
+                torch.SymInt._glue_test_attr = 1
+                self.assertEqual(str(a + 1), f"{a} + 1")
+                del torch.SymInt._glue_test_attr
+                self.assertEqual(str(a + 1), f"{a} + 1")
+                self.assertEqual(reasons, ["glue modified"] * 2)
+            finally:
+                sym_node._install_native_glue()
+            reasons.clear()
+            self.assertEqual(str(a + 1), f"{a} + 1")
+            self.assertEqual(reasons, [])
+
+    @parametrize("pre_dispatch", [False, True])
+    def test_make_fx(self, pre_dispatch):
+        def f(a, b, p):
+            c = a + b
+            d = c * 2 - a // b
+            e = (d % 3 + 1) * 1
+            m = torch.sym_max(a, b) + 3 * torch.sym_min(a, 3)
+            return e, m, -a, 2 - a, a < b, (p & (a == b)) | (b > 2), p + 1, True * p
+
+        def trace():
+            env, (a, b, *_), (p, _) = self.make_env()
+            gm = make_fx(f, tracing_mode="real", pre_dispatch=pre_dispatch)(a, b, p)
+            return gm.code, [str(g.expr) for g in env.guards]
+
+        got = trace()
+        with python_glue():
+            want = trace()
+        self.assertEqual(got, want)
+
+    def test_flag_off_unchanged(self):
+        script = (
+            "import types, torch\n"
+            "from torch.fx.experimental import sym_node\n"
+            "from torch.fx.experimental.symbolic_shapes import ShapeEnv\n"
+            "ShapeEnv()\n"
+            "print(isinstance(torch.SymInt.__add__, types.FunctionType),"
+            " not sym_node._native_glue_originals)\n"
+        )
+        env = dict(os.environ)
+        env.pop("CPP_SYMNODE", None)
+        out = subprocess.check_output(
+            [sys.executable, "-c", script], env=env, text=True
+        )
+        self.assertEqual(out.strip().splitlines()[-1], "True True")
+
+
 instantiate_parametrized_tests(TestNativeExpr)
 instantiate_parametrized_tests(TestNativeCompoundAssumptions)
 instantiate_parametrized_tests(TestNativeExprTools)
@@ -3901,6 +4190,7 @@ instantiate_parametrized_tests(TestNativeShapeEnv)
 instantiate_parametrized_tests(TestNativeShapeEnvSync)
 instantiate_parametrized_tests(TestNativeSymNode)
 instantiate_parametrized_tests(TestNativeSymNodeCompile)
+instantiate_parametrized_tests(TestNativeSymIntGlue)
 
 
 if __name__ == "__main__":

@@ -1906,6 +1906,12 @@ for method, func in sizes_strides_methods.items():
     _make_node_sizes_strides(method, func)
 
 
+# (user_type, attr, method, kind) of every function _make_user_magic installs.
+_user_magic_entries: list[tuple[type, str, str, str]] = []
+# (user_type, attr) -> the function that _install_native_glue replaced.
+_native_glue_originals: dict[tuple[type, str], Callable[..., Any]] = {}
+
+
 def _make_user_magic(method: str, user_type: type) -> None:
     # User magic takes care of wrapping the other operand into a node,
     # so that our internal logic can assume everything is nodes
@@ -2054,7 +2060,7 @@ def _make_user_magic(method: str, user_type: type) -> None:
         ret = wrap_node(getattr(other_node, method_attr)(self.node))
         return get_constant(ret) if is_constant(ret) else ret
 
-    def setattrs(user_type: type, attr: str, symnode_impl: object) -> None:
+    def setattrs(user_type: type, attr: str, symnode_impl: object, kind: str) -> None:
         """
         Registers the SymNode magic method on SymInt/Float/Bool,
         and optionally registers a corresponding wrapped method on DynamicInt.
@@ -2062,6 +2068,7 @@ def _make_user_magic(method: str, user_type: type) -> None:
 
         # SymInt/Float/Bool
         setattr(user_type, attr, symnode_impl)
+        _user_magic_entries.append((user_type, attr, method, kind))
 
         # DynamicInt impl
         def dynamic_int_impl(*args: object) -> Any:
@@ -2077,10 +2084,10 @@ def _make_user_magic(method: str, user_type: type) -> None:
             setattr(DynamicInt, attr, dynamic_int_impl)
 
     if method in unary_magic_methods:
-        setattrs(user_type, f"__{method}__", unary_magic_impl)
+        setattrs(user_type, f"__{method}__", unary_magic_impl, "unary")
     elif method in unary_nonmagic_methods:
         orig = getattr(user_type, method)
-        setattrs(user_type, method, update_wrapper(unary_magic_impl, orig))
+        setattrs(user_type, method, update_wrapper(unary_magic_impl, orig), "nonmagic")
     elif method == "sym_ite":
 
         def sym_ite_magic_impl(
@@ -2107,7 +2114,7 @@ def _make_user_magic(method: str, user_type: type) -> None:
                 else ret
             )
 
-        setattrs(user_type, f"__{method}__", sym_ite_magic_impl)
+        setattrs(user_type, f"__{method}__", sym_ite_magic_impl, "sym_ite")
     elif method == "round":
 
         def round_magic_impl(self: SymFloat, ndigits: int | None = None) -> Any:
@@ -2116,14 +2123,14 @@ def _make_user_magic(method: str, user_type: type) -> None:
 
             return wrap_node(getattr(self.node, method)(ndigits))
 
-        setattrs(user_type, f"__{method}__", round_magic_impl)
+        setattrs(user_type, f"__{method}__", round_magic_impl, "round")
     else:
         method_name = method
         if method in bitwise_ops:
             method_name = bitwise_ops[method]
-        setattrs(user_type, f"__{method_name}__", binary_magic_impl)
+        setattrs(user_type, f"__{method_name}__", binary_magic_impl, "binary")
         if method in reflectable_magic_methods:
-            setattrs(user_type, f"__r{method_name}__", rbinary_magic_impl)
+            setattrs(user_type, f"__r{method_name}__", rbinary_magic_impl, "rbinary")
 
 
 for method in magic_methods:  # type: ignore[assignment]
@@ -2141,3 +2148,27 @@ for method in magic_methods:  # type: ignore[assignment]
 
 del method
 del func
+
+
+def _install_native_glue() -> None:
+    """
+    Replaces the unary and binary SymInt/SymBool magic methods by
+    torch._C._symbolic._SymGlueMethod descriptors, which run them natively when
+    every symbolic operand has a native node and call the replaced function
+    otherwise.
+    """
+    from torch._C import _symbolic
+
+    for user_type, attr, method, kind in _user_magic_entries:
+        if user_type is SymFloat or kind not in ("unary", "binary", "rbinary"):
+            continue
+        original = _native_glue_originals.setdefault(
+            (user_type, attr), user_type.__dict__[attr]
+        )
+        method_attr = method
+        if method in magic_methods_on_operator_with_trailing_underscore:
+            method_attr = f"sym_{method}"
+        promote = method in bool_becomes_int_magic_methods
+        glue = _symbolic._SymGlueMethod(original, kind, method_attr, promote)
+        setattr(user_type, attr, glue)
+    _symbolic._seal_glue(sym_node_log)
