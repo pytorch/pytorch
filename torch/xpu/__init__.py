@@ -56,6 +56,7 @@ class _ZesDeviceInfo:
     device_handle: c_void_p
     subdevice_id: int | None = None
     is_integrated: bool = False
+    uuid: bytes | None = None
     temperature_handle: c_void_p | None = None
     frequency_handle: c_void_p | None = None
     power_handle: c_void_p | None = None
@@ -128,7 +129,7 @@ def _parse_visible_devices(strict=False) -> list[int]:
 def _enum_zes_device_infos(visible_mask: list[int]) -> int:
     r"""Enumerate visible XPU devices via Level Zero Sysman and cache their info.
 
-    Enumerates devices from the first Level Zero Sysman driver and counts those
+    Enumerates devices from all Level Zero Sysman drivers and counts those
     whose logical index appears in *visible_mask*.  Only devices listed in
     the visible mask participate in counting.
     The populated ``_cached_zes_device_infos`` list is indexed by PyTorch
@@ -180,29 +181,29 @@ def _enum_zes_device_infos(visible_mask: list[int]) -> int:
     ):
         return -1
 
-    device_count = c_uint32(0)
-    if _zes_check_warn(
-        pyzes.zesDeviceGet(drivers[0], byref(device_count), None),
-        "Can't get Level Zero Sysman device count",
-    ):
-        return -1
-
-    devices = (pyzes.zes_device_handle_t * device_count.value)()
-    if _zes_check_warn(
-        pyzes.zesDeviceGet(drivers[0], byref(device_count), devices),
-        "Can't get Level Zero Sysman device handles",
-    ):
-        return -1
+    # Gather device handles from every Level Zero driver. See Note [Device Management]
+    devices: list[pyzes.zes_device_handle_t] = []
+    for driver in drivers:
+        device_count = c_uint32(0)
+        if _zes_check_warn(
+            pyzes.zesDeviceGet(driver, byref(device_count), None),
+            "Can't get Level Zero Sysman device count",
+        ):
+            return -1
+        if device_count.value == 0:
+            continue
+        driver_devices = (pyzes.zes_device_handle_t * device_count.value)()
+        if _zes_check_warn(
+            pyzes.zesDeviceGet(driver, byref(device_count), driver_devices),
+            "Can't get Level Zero Sysman device handles",
+        ):
+            return -1
+        devices.extend(driver_devices)
 
     # --- Count visible dGPUs and iGPUs ---
     ZES_DEVICE_PROPERTY_FLAG_INTEGRATED = 1 << 0
     expose_subdevices = os.getenv("ZE_FLAT_DEVICE_HIERARCHY") != "COMPOSITE"
-
     _cached_zes_device_infos.clear()
-    visible = set(visible_mask)
-    logical_index = 0
-    num_igpu = 0
-    num_dgpu = 0
 
     for device in devices:
         props = pyzes.zes_device_properties_t()
@@ -221,28 +222,53 @@ def _enum_zes_device_infos(visible_mask: list[int]) -> int:
         # Tiled dGPUs in FLAT/COMBINED mode expose each sub-device as a
         # separate logical device; everything else counts as one slot.
         tiled = not is_integrated and props.numSubdevices > 0 and expose_subdevices
-        num_slots = props.numSubdevices if tiled else 1
 
-        for slot in range(num_slots):
-            if logical_index in visible:
+        if not tiled:
+            _cached_zes_device_infos.append(
+                _ZesDeviceInfo(
+                    device_handle=device,
+                    subdevice_id=None,
+                    is_integrated=is_integrated,
+                    uuid=bytes(ext_props.uuid.id),
+                )
+            )
+        else:
+            sub_ext_props = (
+                pyzes.zes_subdevice_exp_properties_t * props.numSubdevices
+            )()
+            for sub_ext_prop in sub_ext_props:
+                sub_ext_prop.stype = pyzes.ZES_STRUCTURE_TYPE_SUBDEVICE_EXP_PROPERTIES
+            if _zes_check_warn(
+                pyzes.zesDeviceGetSubDevicePropertiesExp(
+                    device, byref(c_uint32(props.numSubdevices)), sub_ext_props
+                ),
+                "Can't get Level Zero Sysman subdevice properties",
+            ):
+                return -1
+
+            for sub_ext_prop in sub_ext_props:
                 _cached_zes_device_infos.append(
                     _ZesDeviceInfo(
                         device_handle=device,
-                        subdevice_id=slot if tiled else None,
+                        subdevice_id=sub_ext_prop.subdeviceId,
                         is_integrated=is_integrated,
+                        uuid=bytes(sub_ext_prop.uuid.id),
                     )
                 )
-                if is_integrated:
-                    num_igpu += 1
-                else:
-                    num_dgpu += 1
-            logical_index += 1
 
-    # dGPUs take priority; strip iGPUs when at least one dGPU is visible.
-    if num_dgpu and num_igpu:
-        _cached_zes_device_infos = [
-            info for info in _cached_zes_device_infos if not info.is_integrated
-        ]
+    # Sort iGPUs to the end, then count only the visible ordinals.
+    _cached_zes_device_infos.sort(key=lambda info: info.is_integrated)
+    visible = set(visible_mask)
+    num_igpu = 0
+    num_dgpu = 0
+
+    for logical_index, info in enumerate(_cached_zes_device_infos):
+        if logical_index not in visible:
+            continue
+        if info.is_integrated:
+            num_igpu += 1
+        else:
+            num_dgpu += 1
     return num_dgpu or num_igpu
 
 
