@@ -1,6 +1,8 @@
 #include <torch/csrc/symbolic/Expr.h>
 
 #include <algorithm>
+#include <limits>
+#include <numeric>
 
 namespace torch::symbolic {
 
@@ -63,6 +65,56 @@ void check_relational(const Expr* r) {
   if (!r->is_relational()) {
     throw NativeUnsupported("expected a Relational");
   }
+}
+
+bool is_literal(const Expr* e) {
+  // sympy.logic.boolalg.is_literal.
+  if (e->kind == Kind::Not) {
+    return is_literal(e->args[0]);
+  }
+  if (e->kind == Kind::And || e->kind == Kind::Or) {
+    return false;
+  }
+  return std::all_of(e->args.begin(), e->args.end(), [](const Expr* a) {
+    return a->args.empty();
+  });
+}
+
+bool is_cnf(const Expr* e) {
+  c10::ArrayRef<const Expr*> vals =
+      e->kind == Kind::And ? c10::ArrayRef<const Expr*>(e->args) : e;
+  for (const Expr* lit : vals) {
+    c10::ArrayRef<const Expr*> vals2 =
+        lit->kind == Kind::Or ? c10::ArrayRef<const Expr*>(lit->args) : lit;
+    if (!std::all_of(vals2.begin(), vals2.end(), is_literal)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// is_nnf(e, simplified=False).
+bool is_nnf(const Expr* e) {
+  if (e->kind == Kind::And || e->kind == Kind::Or) {
+    return std::all_of(e->args.begin(), e->args.end(), is_nnf);
+  }
+  return is_literal(e);
+}
+
+bool is_neg(ExprArena& arena, const Expr* t) {
+  const Expr* c = t->kind == Kind::Mul ? t->args[0] : t;
+  return c->is_number() && arena.ask(c, Fact::negative) == Tri::True;
+}
+
+int64_t integer_coefficient(const Expr* x) {
+  const Expr* c = x->kind == Kind::Mul ? x->args[0] : x;
+  if (c->kind != Kind::Integer) {
+    return 1;
+  }
+  if (c->p == std::numeric_limits<int64_t>::min()) {
+    throw NativeUnsupported("integer overflow");
+  }
+  return std::abs(c->p);
 }
 
 } // namespace
@@ -422,6 +474,181 @@ const Expr* ExprArena::canonical(const Expr* r) {
     return reversedsign(reversed(r));
   }
   return r;
+}
+
+
+const Expr* ExprArena::lattice_to_nnf(
+    Kind kind,
+    c10::ArrayRef<const Expr*> args) {
+  // BooleanFunction._to_nnf(*args, simplify=False).
+  std::vector<const Expr*> argset;
+  for (const Expr* a : args) {
+    const Expr* n = is_literal(a) ? a : to_nnf(a);
+    if (!contains(argset, n)) {
+      argset.push_back(n);
+    }
+  }
+  if (kind == Kind::And) {
+    return logical_and(argset);
+  }
+  // Or(*argset) iterates a Python set. Or drops all but the first of the
+  // relationals sharing a canonical form, and its negation check only looks
+  // back, which is not symmetric.
+  std::vector<std::pair<const Expr*, const Expr*>> rels;
+  for (const Expr* a : argset) {
+    if (!a->is_relational()) {
+      continue;
+    }
+    const Expr* c = canonical(a);
+    const Expr* n = canonical(negated(c));
+    for (const auto& [c2, n2] : rels) {
+      if (c == c2 || (n == c2) != (n2 == c)) {
+        throw NativeUnsupported("Or of relationals in set order");
+      }
+    }
+    rels.emplace_back(c, n);
+  }
+  return logical_or(argset);
+}
+
+const Expr* ExprArena::to_nnf(const Expr* e) {
+  // The to_nnf(simplify=False) methods.
+  if (e->kind == Kind::And || e->kind == Kind::Or) {
+    return lattice_to_nnf(e->kind, e->args);
+  }
+  if (e->kind != Kind::Not || is_literal(e)) {
+    return e;
+  }
+  const Expr* inner = e->args[0];
+  if (inner->kind != Kind::And && inner->kind != Kind::Or) {
+    throw NativeUnsupported("Illegal operator in Not.to_nnf");
+  }
+  c10::SmallVector<const Expr*, 4> negs;
+  for (const Expr* a : inner->args) {
+    negs.push_back(logical_not(a));
+  }
+  return lattice_to_nnf(inner->kind == Kind::And ? Kind::Or : Kind::And, negs);
+}
+
+const Expr* ExprArena::distribute_and_over_or(const Expr* e) {
+  if (e->kind == Kind::Or) {
+    auto it = std::find_if(e->args.begin(), e->args.end(), [](const Expr* a) {
+      return a->kind == Kind::And;
+    });
+    if (it == e->args.end()) {
+      return e;
+    }
+    const Expr* conj = *it;
+    c10::SmallVector<const Expr*, 4> others;
+    for (const Expr* a : e->args) {
+      if (a != conj) {
+        others.push_back(a);
+      }
+    }
+    const Expr* rest = logical_or(others);
+    c10::SmallVector<const Expr*, 4> clauses;
+    for (const Expr* c : conj->args) {
+      clauses.push_back(distribute_and_over_or(logical_or({c, rest})));
+    }
+    return logical_and(clauses);
+  }
+  if (e->kind == Kind::And) {
+    c10::SmallVector<const Expr*, 4> clauses;
+    for (const Expr* a : e->args) {
+      clauses.push_back(distribute_and_over_or(a));
+    }
+    return logical_and(clauses);
+  }
+  return e;
+}
+
+const Expr* ExprArena::reduce_to_lowest_terms(const Expr* e) {
+  auto div_by_factor = [&](const Expr* x, int64_t factor) {
+    if (x->kind == Kind::Integer) {
+      return integer(x->p / factor);
+    }
+    c10::SmallVector<const Expr*, 4> args(x->args.begin(), x->args.end());
+    // factor is 1 unless args[0] is an Integer.
+    if (args[0]->kind == Kind::Integer && args[0]->p == factor) {
+      args.erase(args.begin());
+    } else if (args[0]->kind == Kind::Integer) {
+      args[0] = integer(args[0]->p / factor);
+    }
+    return sorted_from_args(Kind::Mul, args);
+  };
+  if (e->kind == Kind::Add) {
+    int64_t factor = 0;
+    for (const Expr* a : e->args) {
+      factor = std::gcd(factor, integer_coefficient(a));
+    }
+    if (factor == 1) {
+      return e;
+    }
+    c10::SmallVector<const Expr*, 8> atoms;
+    for (const Expr* a : e->args) {
+      atoms.push_back(div_by_factor(a, factor));
+    }
+    return sorted_from_args(Kind::Add, atoms);
+  }
+  if (e->kind == Kind::Integer) {
+    return one_;
+  }
+  if (e->kind == Kind::Mul) {
+    return div_by_factor(e, integer_coefficient(e));
+  }
+  return e;
+}
+
+const Expr* ExprArena::canonicalize_bool_expr_impl(const Expr* e) {
+  if (e->kind == Kind::And || e->kind == Kind::Or) {
+    c10::SmallVector<const Expr*, 4> args;
+    for (const Expr* a : e->args) {
+      args.push_back(canonicalize_bool_expr(a));
+    }
+    return e->kind == Kind::And ? logical_and(args) : logical_or(args);
+  }
+  if (!e->is_relational()) {
+    throw NativeUnsupported("Expected Lt/Le/Eq/Ne");
+  }
+  bool swap = e->kind == Kind::Gt || e->kind == Kind::Ge;
+  Kind t = swap ? reversed_kind(e->kind) : e->kind;
+  const Expr* lhs = e->args[swap ? 1 : 0];
+  const Expr* rhs = e->args[swap ? 0 : 1];
+  if (lhs->is_boolean() || rhs->is_boolean()) {
+    return rel(
+        t, canonicalize_bool_expr(lhs), canonicalize_bool_expr(rhs), false);
+  }
+  rhs = reduce_to_lowest_terms(sub(rhs, lhs));
+  lhs = zero_;
+  if (rhs->kind == Kind::Add) {
+    c10::SmallVector<const Expr*, 8> pos;
+    c10::SmallVector<const Expr*, 8> negs;
+    for (const Expr* term : rhs->args) {
+      if (is_neg(*this, term)) {
+        negs.push_back(neg(term));
+      } else {
+        pos.push_back(term);
+      }
+    }
+    rhs = from_args(Kind::Add, pos);
+    lhs = sorted_from_args(Kind::Add, negs);
+  } else if (is_neg(*this, rhs)) {
+    lhs = neg(rhs);
+    rhs = zero_;
+  }
+  return rel(t, lhs, rhs, false);
+}
+
+const Expr* ExprArena::canonicalize_bool_expr(const Expr* e) {
+  if (e->kind == Kind::And || e->kind == Kind::Or || e->kind == Kind::Not) {
+    // to_cnf(e): eliminate_implications is to_nnf(e, simplify=False).
+    if (!is_cnf(e)) {
+      e = distribute_and_over_or(is_nnf(e) ? e : to_nnf(e));
+    }
+  } else if (!e->is_relational()) {
+    return e;
+  }
+  return canonicalize_bool_expr_impl(e);
 }
 
 } // namespace torch::symbolic

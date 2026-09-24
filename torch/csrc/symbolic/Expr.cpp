@@ -296,6 +296,19 @@ const Expr* ExprArena::from_args(
   return intern(kind, 0, 0, args);
 }
 
+const Expr* ExprArena::sorted_from_args(
+    Kind kind,
+    c10::SmallVectorImpl<const Expr*>& args) {
+  auto first = args.begin();
+  if (!args.empty() && args[0]->is_number()) {
+    ++first;
+  }
+  std::stable_sort(first, args.end(), [&](const Expr* a, const Expr* b) {
+    return compare(a, b) < 0;
+  });
+  return from_args(kind, args);
+}
+
 const Expr* ExprArena::number_pow(Num b, int64_t e) {
   if (e == 0) {
     return one_;

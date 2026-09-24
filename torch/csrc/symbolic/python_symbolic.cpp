@@ -807,7 +807,9 @@ void initSymbolicBindings(PyObject* module) {
         std::pair{"reversedsign", &ExprArena::reversedsign},
         std::pair{"negated", &ExprArena::negated},
         std::pair{"weak", &ExprArena::weak},
-        std::pair{"strict", &ExprArena::strict}}) {
+        std::pair{"strict", &ExprArena::strict},
+        std::pair{"safe_expand", &ExprArena::safe_expand},
+        std::pair{"canonicalize_bool_expr", &ExprArena::canonicalize_bool_expr}}) {
     arena_cls.def(name, [wrap, fn](const Self& self, const PyExpr& r) {
       return wrap(self, (self->arena.get()->*fn)(unwrap(self, r)));
     });

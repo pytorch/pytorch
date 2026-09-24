@@ -309,6 +309,11 @@ class ExprArena : public c10::intrusive_ptr_target {
   // sympy.core.exprtools._monotonic_sign; nullptr for None.
   const Expr* monotonic_sign(const Expr* e);
 
+  // symbolic_shapes.safe_expand (Expand.cpp).
+  const Expr* safe_expand(const Expr* e);
+  // symbolic_shapes.canonicalize_bool_expr.
+  const Expr* canonicalize_bool_expr(const Expr* e);
+
   size_t size() const {
     return storage_.size();
   }
@@ -320,6 +325,18 @@ class ExprArena : public c10::intrusive_ptr_target {
   const Expr* intern(Kind kind, int64_t p, int64_t q, c10::ArrayRef<const Expr*> args);
   // Assoc node from already-processed args, like AssocOp._from_args.
   const Expr* from_args(Kind kind, c10::SmallVectorImpl<const Expr*>& args);
+  // symbolic_shapes._sympy_from_args(sort=True).
+  const Expr* sorted_from_args(Kind kind, c10::SmallVectorImpl<const Expr*>& args);
+  // expr.func(*args).
+  const Expr* rebuild(const Expr* e, c10::ArrayRef<const Expr*> args);
+  const Expr* fast_expand(const Expr* e);
+  const Expr* expand_multinomial(const Expr* e);
+  std::pair<const Expr*, bool> expandsums(c10::ArrayRef<const Expr*> args);
+  const Expr* to_nnf(const Expr* e);
+  const Expr* lattice_to_nnf(Kind kind, c10::ArrayRef<const Expr*> args);
+  const Expr* distribute_and_over_or(const Expr* e);
+  const Expr* canonicalize_bool_expr_impl(const Expr* e);
+  const Expr* reduce_to_lowest_terms(const Expr* e);
   const Expr* number_pow(Num b, int64_t e);
   // Mod.eval and PythonMod.eval; nullptr for None.
   const Expr* eval_mod(Kind kind, const Expr* p, const Expr* q);

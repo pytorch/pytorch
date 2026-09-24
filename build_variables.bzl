@@ -1054,6 +1054,7 @@ libtorch_python_core_sources = [
     "torch/csrc/profiler/python/combined_traceback.cpp",
     "torch/csrc/serialization.cpp",
     "torch/csrc/symbolic/Assumptions.cpp",
+    "torch/csrc/symbolic/Expand.cpp",
     "torch/csrc/symbolic/Expr.cpp",
     "torch/csrc/symbolic/ExprTools.cpp",
     "torch/csrc/symbolic/Functions.cpp",

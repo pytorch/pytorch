@@ -144,12 +144,7 @@ const Expr* ExprArena::xreplace(
     // rebuilding an unevaluated relational or an Or is not a no-op.
     throw NativeUnsupported("xreplace of a Boolean");
   }
-  if (e->is_function()) {
-    return function(e->kind, args);
-  }
-  return e->kind == Kind::Add ? add(args)
-      : e->kind == Kind::Mul  ? mul(args)
-                              : pow(args[0], args[1]);
+  return rebuild(e, args);
 }
 
 const Expr* ExprArena::keep_coeff(const Expr* coeff, const Expr* factors) {

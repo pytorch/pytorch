@@ -9,6 +9,7 @@ import sympy
 from sympy.core.assumptions import _assume_defined, _assume_rules
 
 import torch
+from torch.fx.experimental import symbolic_shapes
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -1988,6 +1989,153 @@ class TestNativeValueRanges(TestCase):
         self.assertGreater(rewritten, calls // 10)
 
 
+class TestNativeStaticPasses(TestCase):
+    u1 = sympy.Symbol("u1", integer=True)
+    INT_LEAVES = [s0, s1, u0, u1, *map(sympy.Integer, range(-3, 5))]
+    RELATIONALS = [sympy.Eq, sympy.Ne, sympy.Lt, sympy.Le, sympy.Gt, sympy.Ge]
+
+    def assertSameTree(self, got, want, msg):
+        self.assertIs(type(got), type(want), msg)
+        self.assertEqual(got, want, msg)
+        self.assertEqual(len(got.args), len(want.args), msg)
+        for g, w in zip(got.args, want.args):
+            self.assertSameTree(g, w, msg)
+
+    def check(self, name, e):
+        """Differential test of arena.<name> against symbolic_shapes.<name>; returns whether native answered."""
+        arena = torch._C._symbolic._Arena()
+        try:
+            n = arena.from_sympy(e)
+        except NativeUnsupported:
+            return False
+        try:
+            want = getattr(symbolic_shapes, name)(e)
+        except (AssertionError, TypeError, ValueError, RecursionError):
+            with self.assertRaises(NativeUnsupported, msg=str(e)):
+                getattr(arena, name)(n)
+            return False
+        try:
+            got = arena.to_sympy(getattr(arena, name)(n))
+        except NativeUnsupported:
+            return False
+        self.assertSameTree(got, want, f"{name}({e})")
+        return True
+
+    def test_safe_expand_known(self):
+        u1 = self.u1
+        cases = [
+            (s0 + 1) ** 2,
+            (s0 + s1 + u0) ** 3,
+            (2 * s0 - 3 * s1) ** 4,
+            (s0 + s1 + u0 + 1) ** 6,
+            (s0 + 1) ** 20,
+            (s0 + 1) ** -1,
+            (s0 + u1) ** -3,
+            (s0 + 1) * (s1 + 2),
+            (s0 + 1) * (s1 + 2) * u0,
+            (s0 + 1) * (s1 + 2) / (u0 + 3),
+            (s0 + 1) / ((s1 + 2) * (u0 - 1)),
+            (s0 + 1) / (s1 + 2),
+            s0 / (u1 * (s1 + 1)),
+            (s0 + 1) ** 2 * (s1 - 1),
+            ((s0 + 1) ** 2 + u0) ** 2,
+            FloorDiv((s0 + 1) ** 2, 2),
+            Max((s0 + 1) * (s1 + 1), 3),
+            Mod((s0 + u1) * (s1 + 1), s0 + 2),
+            sympy.Eq((s0 + 1) ** 2, u1),
+            sympy.Lt((s0 + 1) * (s1 - 1), u1, evaluate=False),
+            sympy.And(sympy.Eq((s0 + 1) ** 2, u1), sympy.Lt(u0, 3)),
+            sympy.Or(sympy.Eq((s0 + 1) ** 2, u1), sympy.Lt(u0, 3)),
+            sympy.true,
+            s0,
+            sympy.Integer(3),
+        ]
+        for e in cases:
+            self.assertTrue(self.check("safe_expand", e), str(e))
+
+    def test_canonicalize_bool_expr_known(self):
+        u1 = self.u1
+        a, b, c = sympy.Gt(u0, 1), sympy.Le(u1, 2), sympy.Eq(u0, s0 + 1)
+        cases = [
+            sympy.Gt(s0, s1),
+            sympy.Ge(2 * u0, 4 * u1 + 6),
+            sympy.Eq(6 * u0 + 4 * u1, 2),
+            sympy.Eq(-6 * u0, 4 * u1 - 2),
+            sympy.Ne(u0, -3),
+            sympy.Lt(u0, 0),
+            sympy.Le(-3 * u0, 0),
+            sympy.Lt(3, u0 + u1),
+            sympy.Lt(u0, u0, evaluate=False),
+            sympy.Ge(s0 * u0 - 2 * s1, 4 * u1),
+            sympy.And(a, b),
+            sympy.And(a, sympy.Or(b, c)),
+            sympy.Or(sympy.And(a, b), c),
+            sympy.Or(sympy.And(a, b), sympy.And(c, sympy.Ne(u1, 0))),
+            sympy.Not(sympy.And(a, b)),
+            sympy.Not(sympy.Or(a, sympy.And(b, c))),
+            sympy.Eq(sympy.Lt(u0, 3), sympy.true, evaluate=False),
+            sympy.Ne(sympy.Gt(u0, 3), sympy.Lt(u1, u0), evaluate=False),
+            sympy.true,
+            s0 + 1,
+        ]
+        for e in cases:
+            self.assertTrue(self.check("canonicalize_bool_expr", e), str(e))
+        # Or(a, b) stays an Or but Or(b, a) is true, so to_nnf's Or(*set) depends
+        # on hash order.
+        a = sympy.Eq(-2 * u0 - 4, -4 * u0 - 4)
+        b = sympy.Ne(2 * u0 + 4, 4 * u0 + 4)
+        c = sympy.And(sympy.Ge(-3 * u1, -6 * u1), sympy.Gt(3 * u1, 6 * u1))
+        arena = torch._C._symbolic._Arena()
+        for e in [sympy.Or(a, b), sympy.Not(c)]:
+            with self.assertRaises(NativeUnsupported):
+                arena.canonicalize_bool_expr(arena.from_sympy(e))
+
+    def int_expr(self, rng, depth):
+        if depth == 0 or rng.random() < 0.25:
+            return rng.choice(self.INT_LEAVES)
+        a = self.int_expr(rng, depth - 1)
+        b = self.int_expr(rng, depth - 1)
+        op = rng.choice(["add", "add", "mul", "mul", "sub", "pow", "FloorDiv", "Max"])
+        if op == "add":
+            return a + b
+        if op == "mul":
+            return a * b
+        if op == "sub":
+            return a - rng.randint(1, 3) * b
+        if op == "pow":
+            return a ** rng.choice([-2, -1, 2, 3])
+        return TestNativeFunctions.FUNCTIONS[op](a, b)
+
+    def bool_expr(self, rng, depth):
+        if depth == 0 or rng.random() < 0.3:
+            op = rng.choice(self.RELATIONALS)
+            evaluate = rng.random() < 0.8
+            return op(self.int_expr(rng, 2), self.int_expr(rng, 2), evaluate=evaluate)
+        op = rng.choice([sympy.And, sympy.Or, sympy.Not])
+        if op is sympy.Not:
+            return op(self.bool_expr(rng, depth - 1))
+        return op(*(self.bool_expr(rng, depth - 1) for _ in range(rng.randint(2, 3))))
+
+    @parametrize("seed", range(4))
+    def test_fuzz(self, seed):
+        rng = random.Random(seed)
+        calls = answered = 0
+        for _ in range(400):
+            name = rng.choice(["safe_expand", "canonicalize_bool_expr"])
+            try:
+                if name == "safe_expand" and rng.random() < 0.8:
+                    e = self.int_expr(rng, 4)
+                else:
+                    e = self.bool_expr(rng, 3)
+            except (ZeroDivisionError, ValueError, TypeError, AssertionError):
+                continue
+            if e.has(sympy.zoo, sympy.nan):
+                continue
+            calls += 1
+            answered += self.check(name, e)
+        self.assertGreater(answered, calls // 2)
+
+
 instantiate_parametrized_tests(TestNativeExpr)
 instantiate_parametrized_tests(TestNativeCompoundAssumptions)
 instantiate_parametrized_tests(TestNativeExprTools)
@@ -1997,6 +2145,7 @@ instantiate_parametrized_tests(TestNativeLattice)
 instantiate_parametrized_tests(TestNativePrinter)
 instantiate_parametrized_tests(TestNativeFunctions)
 instantiate_parametrized_tests(TestNativeValueRanges)
+instantiate_parametrized_tests(TestNativeStaticPasses)
 
 
 if __name__ == "__main__":
