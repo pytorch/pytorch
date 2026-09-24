@@ -2272,7 +2272,10 @@ can use ``read_async``, ``write_async``, or ``wait_all``. Registration remains v
 until unregistration or close, and tensors must not be resized or have their storage replaced.
 
 CUDA stream semantics, graph capture, tracing, batching, remote slicing, and
-rank-based bootstrap helpers are outside this initial API.
+rank-based bootstrap helpers are outside this initial API. Rank-to-endpoint
+lookup belongs in a separate control-plane adapter. Descriptor exchange uses
+Python pickle between trusted peers; tensor contents and native handles are not
+serialized.
 
 .. autofunction:: torch.distributed._transport.new_transport
 .. autoclass:: torch.distributed._transport.Transport
@@ -2317,8 +2320,10 @@ exposed memory; close only drains locally submitted operations.
 
 ``NIXLTransport.close_async`` awaits pending transfers before native cleanup.
 A timed-out or cancelled close rejects new work and retains resources; retry
-close to finish cleanup. Forgotten pending work may retain resources indefinitely:
-call ``wait``, ``wait_all``, or ``close`` to complete cleanup.
+close to finish cleanup. Registrations keep the transport alive even after its last outgoing transfer,
+because peers may still access exposed memory. Forgotten registrations may retain
+resources indefinitely:
+call ``unregister_memory`` or ``close`` after coordinating with peers.
 Checking ``is_completed`` also releases completed requests.
 For pending NIXL work, ``get_future`` requires a running asyncio loop; the loop
 must remain running to drive that future. Completed work needs no event loop.
@@ -2328,7 +2333,7 @@ calls execute synchronously on the calling thread. Their timeouts bound lock
 acquisition and transfer completion waits, not execution inside NIXL. Python
 cannot interrupt a blocked native call, even when it releases the GIL.
 
-.. autoclass:: torch.distributed._transport._nixl.NIXLTransport
+.. autoclass:: torch.distributed._transport.nixl.NIXLTransport
    :members: close_async
 
 ```
