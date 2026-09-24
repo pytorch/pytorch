@@ -2139,6 +2139,7 @@ class TestFP8Matmul(TestCase):
         out_fp8 = f(x_fp8, y_fp8, scale_a, scale_b, out_dtype=out_dtype)
         self.assertEqual(out_dtype, out_fp8.dtype)
         self.assertEqual(out_fp32, out_fp8.to(torch.float))
+
     @skipXPU
     def test_pack_uint4(self):
         """
