@@ -342,7 +342,8 @@ class ReductionHeuristic(CodegenConfigHeuristics):
             configs.append(c)
 
         # Complex R<=2048 reductions can lose occupancy to the ordinary
-        # XBLOCK=2/RBLOCK=1024 tile.
+        # XBLOCK=2/RBLOCK=1024 tile. Simpler deep reductions can reload
+        # substantially more data with RBLOCK=1024 than with a larger tile.
         #
         # Use the measured alternative as the default contiguous config.  Under
         # max-autotune, retain the ordinary contiguous config and offer this as
@@ -368,6 +369,16 @@ class ReductionHeuristic(CodegenConfigHeuristics):
                 num_warps=4,
                 register_intensive=True,
             )
+        elif (
+            blackwell_inner
+            and not register_intensive
+            and not scalar_accumulators
+            and loads_and_red <= 9
+            and rnumel >= 4096
+            and (inductor_meta.get("num_load", 0) >= 7 or rnumel >= 32768)
+        ):
+            blackwell_inner_config = make_config(1, 2048, num_warps=8)
+
         if blackwell_inner_config is not None:
             if max_autotune_enabled:
                 configs.append(blackwell_inner_config)

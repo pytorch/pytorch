@@ -350,10 +350,16 @@ class TestTritonHeuristics(TestCase):
             }
 
         self.assertIn((1, 512, 4), config_values(2048, 13, 4))
+        self.assertIn((1, 2048, 8), config_values(32768, 7, 2))
+        self.assertIn((1, 2048, 8), config_values(32768, 3, 1))
 
         self.assertEqual(
             config_values(2048, 13, 4, max_autotune=False),
             {(1, 512, 4)},
+        )
+        self.assertEqual(
+            config_values(32768, 7, 2, max_autotune=False),
+            {(1, 2048, 8)},
         )
         # The bounded addition does not apply to smaller output grids or to
         # complex deeper reductions where the measured alternative regresses.
@@ -362,6 +368,18 @@ class TestTritonHeuristics(TestCase):
             config_values(2048, 13, 4, xnumel=1024),
         )
         self.assertNotIn((1, 512, 4), config_values(4096, 13, 2))
+        self.assertNotIn((1, 2048, 8), config_values(4096, 23, 6))
+        self.assertNotIn((1, 2048, 8), config_values(16384, 3, 1))
+        self.assertNotIn(
+            (1, 2048, 8),
+            config_values(
+                32768,
+                3,
+                1,
+                max_autotune=False,
+                autotune_hints={AutotuneHint.SCALAR_ACCUMULATORS},
+            ),
+        )
 
     def test_cached_autotune_enforces_reduction_min_block(self):
         def triton_fn(XBLOCK: tl.constexpr, R0_BLOCK: tl.constexpr):
