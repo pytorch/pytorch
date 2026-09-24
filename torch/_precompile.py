@@ -656,14 +656,10 @@ class _MakeFxCapture(Capture[_P, _R]):
         mods = [a for a in args if isinstance(a, torch.nn.Module)]
         # A parameter also passed as a plain argument is traced as that user input,
         # so it is snapshotted with the inputs rather than left to the refusal below.
-        leaves = pytree.tree_leaves(args)
+        leaves = [t for t in pytree.tree_leaves(args) if isinstance(t, torch.Tensor)]
         params = {id(p) for m in mods for p in m.parameters()} - {id(t) for t in leaves}
         tensors = [*(b for m in mods for b in m.buffers()), *leaves]
-        saved = {
-            id(t): (t, t.detach().clone())
-            for t in tensors
-            if isinstance(t, torch.Tensor) and id(t) not in params
-        }
+        saved = {id(t): (t, t.detach().clone()) for t in tensors if id(t) not in params}
         try:
             self._module._compile(args)
         finally:
