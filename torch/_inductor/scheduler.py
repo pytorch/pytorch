@@ -7492,7 +7492,8 @@ class Scheduler:
             get_choice_timings_async = (
                 use_pipelined_autotuning()
                 and not benchmark_template_fusion
-                and num_fusible_callers <= config.max_epilogue_benchmarked_choices
+                and num_fusible_callers
+                <= config.max_template_fusion_benchmarked_choices
             )
 
             ms1, ms2 = float("inf"), float("inf")
@@ -7636,7 +7637,7 @@ class Scheduler:
                     break
 
                 template_choices += 1
-                if template_choices > config.max_epilogue_benchmarked_choices:
+                if template_choices > config.max_template_fusion_benchmarked_choices:
                     break
 
                 try:

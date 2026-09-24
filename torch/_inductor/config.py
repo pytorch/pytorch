@@ -1077,8 +1077,15 @@ benchmark_epilogue_fusion: bool = Config(
     deprecation_message="use benchmark_template_fusion instead",
 )
 
-# Take how many of the top triton kernels to benchmark epilogue
-max_epilogue_benchmarked_choices = 1
+# Maximum number of top template choices to benchmark with fusion.
+max_template_fusion_benchmarked_choices: int = 1
+
+# Deprecated compatibility alias for max_template_fusion_benchmarked_choices.
+max_epilogue_benchmarked_choices: int = Config(
+    alias="torch._inductor.config.max_template_fusion_benchmarked_choices",
+    deprecated=True,
+    deprecation_message="use max_template_fusion_benchmarked_choices instead",
+)
 
 # how many nodes to allow into a single fusion
 max_fusion_size = 64

@@ -5148,7 +5148,7 @@ class TestPrologueFusion(TestCase):
         {
             "max_autotune_gemm_backends": "Triton",
             "benchmark_template_fusion": True,
-            "max_epilogue_benchmarked_choices": 3,
+            "max_template_fusion_benchmarked_choices": 3,
         }
     )
     @parametrize("use_async_compile", (True, False))
@@ -5202,7 +5202,7 @@ class TestPrologueFusion(TestCase):
         {
             "max_autotune_gemm_backends": "Triton",
             "benchmark_template_fusion": True,
-            "max_epilogue_benchmarked_choices": 3,
+            "max_template_fusion_benchmarked_choices": 3,
         }
     )
     @parametrize("use_async_compile", (True, False))
