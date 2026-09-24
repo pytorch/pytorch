@@ -185,6 +185,8 @@ REGISTER_NORM(half2, half);
 
 #include <c10/metal/reduction_utils.h>
 
+// Load modes for SumOp: identity (sum), nan-to-zero (nansum),
+// nonzero-as-one (count_nonzero), abs (L1 norm), or square (L2 norm).
 enum LoadMode : uint {
   LOAD_IDENTITY = 0,
   LOAD_NAN_TO_ZERO = 1,
@@ -276,6 +278,9 @@ inline T finalize_val(T v) {
   return static_cast<T>(::precise::sqrt(v));
 }
 
+// MODE: LOAD_IDENTITY (sum), LOAD_NAN_TO_ZERO (nansum),
+// LOAD_NONZERO (count_nonzero -- contributes 1 per nonzero element).
+// The compiler eliminates dead branches per instantiation.
 template <
     typename TO,
     LoadMode MODE = LOAD_IDENTITY,
@@ -311,6 +316,21 @@ struct SumOp {
   }
 };
 
+// =============================================================================
+// value reductions: amin/amax (Op = MinOp/MaxOp on T, identity load) and
+// all/any (Op = MinOp/MaxOp on uchar, predicate load).
+// any = max-of-bool, all = min-of-bool; the predicate load converts each
+// input element to {0, 1} (nonzero, NaN -> 1) before the reduction.
+// =============================================================================
+
+// Reduction op functors MaxOp / MinOp (identity, replace, combine,
+// simd_reduce, threadgroup_reduce) live in c10/metal/reduction_utils.h so the
+// inductor MPS codegen can reuse the same identity/replace pair; both are
+// pulled in via the file-scope `using namespace c10::metal`.
+
+// Load functors decide how an input element is converted into the
+// accumulator type. IdentityLoad casts (min/max keep the value unchanged);
+// PredicateLoad maps nonzero (and NaN) -> 1, zero -> 0 (any/all).
 struct IdentityLoad {
   template <typename TA, typename TI>
   static inline TA load(TI v) {
@@ -325,6 +345,8 @@ struct PredicateLoad {
   }
 };
 
+// For min/max, TI == TO and Load = IdentityLoad. For all/any, TO = uchar (a
+// 1-byte alias for the bool output buffer) and Load = PredicateLoad.
 template <template <typename> class OpFn, typename Load, typename TO>
 struct ValueOp {
   using acc_t = TO;
@@ -353,8 +375,17 @@ struct ValueOp {
   }
 };
 
-// NCHAINS independent accumulators per thread hide ALU latency; the thread cap
-// lets threadgroup_reduce constant-fold its size-vs-simdgroup_size branch.
+// Reduction kernel with multiple independent accumulation chains (ILP).
+// Each thread maintains NCHAINS independent accumulators to hide ALU latency
+// and keep the memory pipeline saturated.
+//
+// Two internal paths selected per-threadgroup (not per-element):
+//   - Single reduced dim (or full reduction): compute input_base + k * stride
+//     once per TG, then direct indexing — no per-element dim loop.
+//   - Multiple reduced dims: fall back to get_input_offset per element.
+// The max_total_threads_per_threadgroup hint lets the compiler bound the
+// runtime tptg value, which in turn lets c10::metal::threadgroup_min/max
+// constant-fold its size-vs-simdgroup_size branch.
 template <typename OP, typename TI, typename TO, uint NCHAINS = SUM_NCHAINS>
 [[max_total_threads_per_threadgroup(MAX_THREADGROUP_SIZE)]]
 kernel void reduction_generic(
@@ -366,6 +397,9 @@ kernel void reduction_generic(
     uint tgid [[threadgroup_position_in_grid]]) {
   using TA = typename OP::acc_t;
 
+  // Compute input_base (once per TG) and detect reduction pattern.
+  // For single reduced dim: input_base + k * reduction_stride gives
+  // the k-th reduction element — no per-element dim loop needed.
   uint32_t input_base = 0;
   uint32_t reduction_stride = 1;
   uint32_t num_reduced_dims = 0;
@@ -393,6 +427,7 @@ kernel void reduction_generic(
   uint32_t base = tid * NCHAINS;
 
   if (num_reduced_dims <= 1) {
+    // Fast path: direct indexing with base + k * reduction_stride
     for (; base + NCHAINS <= rsize; base += stride) {
       for (uint j = 0; j < NCHAINS; j++) {
         acc[j] = OP::combine(
@@ -406,6 +441,7 @@ kernel void reduction_generic(
           OP::load(input[input_base + idx * reduction_stride]));
     }
   } else {
+    // Generic path: per-element strided offset for multi-dim reductions
     for (; base + NCHAINS <= rsize; base += stride) {
       for (uint j = 0; j < NCHAINS; j++) {
         acc[j] = OP::combine(
@@ -419,11 +455,13 @@ kernel void reduction_generic(
     }
   }
 
+  // Collapse chains into a single value
   TA output_val = acc[0];
   for (uint j = 1; j < NCHAINS; j++) {
     output_val = OP::combine(output_val, acc[j]);
   }
 
+  // SIMD + threadgroup tree reduction
   threadgroup TA shared_outputs[MAX_THREADGROUP_SIZE / simdgroup_size];
   output_val = OP::threadgroup_reduce(shared_outputs, output_val, tid, tptg);
 
@@ -439,6 +477,9 @@ kernel void reduction_generic(
         output_offset += index_in_dim * params.output_strides[dim];
       }
     }
+    // params.p > 0 means "divide the accumulator by p before casting"
+    // (used by mean to keep the division in opmath_t precision so the
+    // fp32 accumulation isn't lost when TO is fp16/bf16/half2).
     output[output_offset] = OP::finalize(output_val, params.p);
   }
 }
@@ -469,6 +510,15 @@ kernel void reduction_strided(
   }
 }
 
+// Specialized kernel for reducing a non-innermost dim. The input is viewed
+// as [outer_size, dim_size, inner_size] with dim_size reduced (the same
+// decomposition the CUDA spatial softmax / scan_outer_dim kernels use);
+// explicit strides let the same kernel serve collapsible non-contiguous
+// inputs. TG_X threads cover adjacent inner columns (coalesced), TG_Y
+// row-workers split dim_size and combine via shared memory. Grid: x tiles
+// inner_size, y carries the split-K segments, z the outer batches.
+// Also registered with TG_Y == 1 as the "outer_small_dim" variant, where
+// one thread serially reduces the whole (short) reduced dim.
 template <
     typename OP,
     typename TI,
@@ -482,7 +532,7 @@ kernel void reduction_outer(
     device TO* output [[buffer(1)]],
     // [dim_size, inner_size, unused, num_segs]
     constant uint4& sizes [[buffer(2)]],
-    constant float& param [[buffer(3)]],
+    constant float& param [[buffer(3)]], // >0 divides accumulator before cast
     // [dim_stride, inner_stride, outer_stride, unused]
     constant uint4& strides [[buffer(4)]],
     uint3 tid_tg [[thread_position_in_threadgroup]],
@@ -502,10 +552,12 @@ kernel void reduction_outer(
   const uint seg_rows = ceil_div(dim_size, num_segs);
   const uint seg_start = tg_pos.y * seg_rows;
   const uint seg_end = min(seg_start + seg_rows, dim_size);
+  // Split the segment rows among TG_Y workers
   uint rows_per_y = ceil_div(seg_rows, TG_Y);
   uint row_start = seg_start + tid_tg.y * rows_per_y;
   uint row_end = min(row_start + rows_per_y, seg_end);
 
+  // Multiple accumulation chains for ILP
   metal::array<TA, NCHAINS> acc;
   for (uint j = 0; j < NCHAINS; j++)
     acc[j] = OP::identity();
@@ -527,6 +579,7 @@ kernel void reduction_outer(
   for (uint j = 1; j < NCHAINS; j++)
     val = OP::combine(val, acc[j]);
 
+  // Reduce across TG_Y row-workers via shared memory
   threadgroup TA shmem[TG_Y][TG_X];
   shmem[tid_tg.y][tid_tg.x] = val;
   threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -545,6 +598,8 @@ kernel void reduction_outer(
   }
 }
 
+// Narrow layout for inner_size < OUTER_TG_WIDTH: flat coalesced walk; the
+// thread count is a multiple of inner_size, pinning each thread to one column.
 template <
     typename OP,
     typename TI,
@@ -607,6 +662,8 @@ kernel void reduction_narrow(
   }
 }
 
+// Strided-input variant of reduction_narrow: identical thread-to-column
+// mapping, addressing through explicit dim/inner/outer strides.
 template <
     typename OP,
     typename TI,
@@ -682,12 +739,16 @@ kernel void reduction_narrow_strided(
   }
 }
 
+// Specialized kernel for reducing the innermost dim of a contiguous tensor.
+// Input [M, N] -> output [M], each SIMD group reduces one row of N elements.
+// Multiple SIMD groups per TG handle different rows for occupancy.
+// No shared memory needed since simd_reduce suffices for intra-row collapse.
 template <typename OP, typename TI, typename TO, uint NCHAINS = SUM_NCHAINS>
 kernel void reduction_inner(
     constant TI* input [[buffer(0)]],
     device TO* output [[buffer(1)]],
     constant uint2& sizes [[buffer(2)]], // [M, N]
-    constant float& param [[buffer(3)]],
+    constant float& param [[buffer(3)]], // >0 divides accumulator before cast
     uint tptg [[threads_per_threadgroup]],
     uint tgid [[threadgroup_position_in_grid]],
     uint simd_lane_id [[thread_index_in_simdgroup]],
@@ -697,6 +758,7 @@ kernel void reduction_inner(
   const uint N = sizes.y;
   const uint num_simd_groups = tptg / 32;
 
+  // Each SIMD group handles a different row
   uint row = tgid * num_simd_groups + simdgroup_id;
   if (row >= M)
     return;
@@ -707,6 +769,8 @@ kernel void reduction_inner(
   for (uint j = 0; j < NCHAINS; j++)
     acc[j] = OP::identity();
 
+  // Each of 32 lanes reads elements at stride 32, NCHAINS at a time.
+  // Align down to full blocks of stride = 32 * NCHAINS elements.
   const uint stride = 32 * NCHAINS;
   const uint aligned_N = (N / stride) * stride;
   uint base = simd_lane_id * NCHAINS;
@@ -715,6 +779,7 @@ kernel void reduction_inner(
       acc[j] = OP::combine(acc[j], OP::load(row_ptr[base + j]));
     }
   }
+  // Tail: remaining elements after last full block, one per lane
   for (uint i = aligned_N + simd_lane_id; i < N; i += 32) {
     acc[0] = OP::combine(acc[0], OP::load(row_ptr[i]));
   }
@@ -763,8 +828,13 @@ inline T chunk_shuffle_down(T val, ushort delta) {
       ::metal::simd_shuffle_down(static_cast<float>(val), delta));
 }
 
-// `ok` must be simdgroup-uniform (divergence measured 15% slower than scalar
-// on bf16 rows of 33) and imply an element-4 aligned segment start.
+// Consume the vec4-loadable prefix of a lane's segment: lane row_lane reads
+// quads row_lane, row_lane + lanes_per_row, ... of [seg_begin, seg_end) and
+// returns where its scalar loop should resume. The caller's `ok` must be
+// uniform across the simdgroup (rows that share a simdgroup would otherwise
+// diverge; measured 15% worse than all-scalar on bf16 rows of 33) and must
+// guarantee element-4 alignment of the segment start. Types with no vec4
+// (uchar/char/bool) always take the scalar loop.
 template <
     typename OPS,
     typename TA,
@@ -812,6 +882,13 @@ inline uint chunk_quads(
   return seg_begin + row_lane;
 }
 
+// Shared body of the *_inner_chunk kernels: each row of length row_len is
+// split across lanes_per_row lanes (simdgroup_size / lanes_per_row rows share
+// one simdgroup, a shuffle tree folds the per-lane partials) and, for split-K,
+// into segs_per_row segments per row producing [num_rows, segs_per_row]
+// partials the host combines with a second dispatch. Lanes read their rows
+// interleaved, as vec4 quads when chunk_quads allows and as chained scalar
+// loads otherwise.
 template <typename OP, typename TI, typename TO>
 kernel void reduction_inner_chunk(
     constant TI* input [[buffer(0)]],
@@ -881,8 +958,11 @@ kernel void reduction_inner_chunk(
   }
 }
 
-// Each chain step consumes 4 adjacent elements to cut loop overhead; loads
-// stay scalar so the slice base needs no vector alignment.
+// Pass-1 kernel for two-pass full reductions over a contiguous buffer:
+// threadgroup tgid reduces the slice input[tgid * E .. (tgid + 1) * E) with
+// flat indexing (params.y = E), no NormParams offset math. Each chain step
+// consumes 4 adjacent elements to cut loop overhead; loads stay scalar so
+// the slice base needs no vector alignment.
 template <typename OP, typename TI, typename TO, uint NCHAINS = SUM_NCHAINS>
 kernel void reduction_flat(
     constant TI* input [[buffer(0)]],
@@ -1041,12 +1121,15 @@ REGISTER_SUM(float2, half2);
 REGISTER_SUM(half2, half2);
 REGISTER_SUM(half2, float2);
 
+// nansum variants (floating-point only — integers can't have NaN)
 REGISTER_NANSUM(float, float);
 REGISTER_NANSUM(half, half);
 REGISTER_NANSUM(half, float);
 REGISTER_NANSUM(bfloat, bfloat);
 REGISTER_NANSUM(bfloat, float);
 
+// count_nonzero: output is always long; reuses sum-reduction machinery
+// with LOAD_NONZERO mode (1 per nonzero element, 0 otherwise).
 REGISTER_COUNT_NONZERO(float);
 REGISTER_COUNT_NONZERO(half);
 REGISTER_COUNT_NONZERO(bfloat);
@@ -1075,6 +1158,7 @@ REGISTER_NORM_INNER(bfloat, bfloat);
 #define REGISTER_ALL(TI) \
   REGISTER_VALUE_REDUCTION_IMPL(TI, uchar, "all", MinOp, PredicateLoad)
 
+// Numeric types that participate in min/max AND all/any.
 #define REGISTER_REDUCTIONS_OPS_FOR_TYPE(T) \
   REGISTER_MAX(T);                          \
   REGISTER_MIN(T);                          \
@@ -1099,6 +1183,14 @@ REGISTER_REDUCTIONS_OPS_FOR_TYPE(uchar);
 REGISTER_PRED_REDUCTIONS_FOR_TYPE(bool);
 REGISTER_PRED_REDUCTIONS_FOR_TYPE(float2);
 REGISTER_PRED_REDUCTIONS_FOR_TYPE(half2);
+
+// =============================================================================
+// argmax/argmin: per output element find the (linear) index of the max/min
+// input element along the reduced dim(s). Output is always int64. NaN
+// propagates (first NaN in source order wins); on ties the lowest index wins.
+// Mirrors the reduction_generic layout but tracks a (value, index) pair instead
+// of just a value.
+// =============================================================================
 
 // Arg-reductions reuse the same MaxOp / MinOp structs that drive value
 // reductions: identity and simd_reduce for the value side, replace for the
@@ -1178,6 +1270,8 @@ kernel void arg_reduction(
   using TA = opmath_t<TI>;
   using Op = OpFn<TA>;
 
+  // Compute input_base and detect reduction pattern (mirrors
+  // reduction_generic).
   uint32_t input_base = 0;
   uint32_t reduction_stride = 1;
   uint32_t num_reduced_dims = 0;

@@ -643,6 +643,26 @@ static std::tuple<Tensor, Tensor> min_max_mps_impl(const Tensor& input_t,
   return std::tuple<Tensor, Tensor>{output_t, indices_t};
 }
 
+// Unified host-side dispatch for reductions on MPS, shared by
+// sum/nansum/mean/count_nonzero, min/max/all/any and argmax/argmin. Kernel name
+// pattern is always `{prefix}reduction_{variant}_{TI}_{TO}` with variant in
+// `""/"outer"/"outer_small_dim"/"narrow"/"narrow_strided"/"inner"/
+// "inner_chunk"/"flat"/"strided"`; every op/dtype pair with a base kernel
+// also has every variant (narrow_strided is sum-family only). Selects among
+// these code paths:
+//   1. Non-innermost dim reduction, viewed as [outer_size, dim_size,
+//      inner_size] with the dim reduced (the CUDA spatial softmax / scan
+//      decomposition): narrow for inner_size below a simdgroup,
+//      outer_small_dim for short dim_size, split-K two-pass for tall skinny
+//      inputs, outer otherwise. Taken for contiguous inputs and for
+//      non-contiguous ones whose dims collapse to that view.
+//   2. Last-dim reduction on contiguous input: inner_chunk for short rows,
+//      split-K two-pass for skinny-M/huge-K, inner otherwise.
+//   3. Two-pass full reduction (scalar output, large input).
+//   4. Generic single-pass fallback.
+// argmax/argmin skip outer_small_dim, inner_chunk and path 3, use narrow only
+// as split-K pass 1, and name their split-K kernels
+// `{prefix}reduction_{variant}_p1_{TI}` / `{prefix}reduction_combine_{TI}`.
 enum class ReductionFamily { Sum, Value, Arg };
 
 enum class ReductionKernel {
@@ -703,22 +723,36 @@ static ReductionPlan select_outer_reduction(const ReductionLayout& layout, Reduc
   const auto [outer_size, dim_size, inner_size, strides, is_contiguous] = layout;
   const bool is_arg = family == ReductionFamily::Arg;
   const auto natural_tgs = outer_size * at::ceil_div(inner_size, OUTER_TG_WIDTH);
-  // Tall skinny: too few threadgroups to fill the GPU, so split the reduced dim and combine partials in pass 2.
+  // Tall skinny case (few columns, long reduced dim): too few
+  // threadgroups to fill the GPU, so split the reduced dim into segments
+  // and fold the [num_segs, inner_size] partials in a second pass.
   const bool split = outer_size == 1 && dim_size >= OUTER_SPLIT_MIN_DIM_SIZE && natural_tgs < OUTER_SPLIT_MIN_TGS;
-  // Short reduced dim: one thread walks it (a 32-row threadgroup would mostly idle) when enough columns fill the GPU.
+  // Short reduced dim: a 32-row threadgroup would idle most rows, so use
+  // the small-dim layout (one thread walks the whole reduced dim) when
+  // there are enough columns to fill the GPU with 32-wide threadgroups.
   const bool small_dim = !is_arg && dim_size <= OUTER_SMALL_DIM_MAX_SIZE && natural_tgs >= SPLIT_MIN_TGS;
   // Only the sum family has narrow_strided kernels; value ops fall
   // through to the strided outer / small-dim layout below.
   const bool supports_narrow = is_contiguous || family == ReductionFamily::Sum;
-  // Only narrow keeps a full threadgroup busy when inner_size < a threadgroup row. Skip it for enqueue-bound tensors
-  // (< CHUNK_MIN_NUMEL) and short dims, where small_dim's serial walk beats narrow's mostly idle threadgroups.
+  // inner_size narrower than a threadgroup row: the narrow layout is the
+  // only one that keeps a full threadgroup busy. Tensors below
+  // CHUNK_MIN_NUMEL are enqueue-bound and stay on the single-dispatch
+  // outer kernel below. When the small-dim layout is available and the
+  // reduced dim is short, its serial row walk beats narrow's mostly-idle
+  // threadgroups.
+  // argmax/argmin only have the narrow pass-1 layout, so they take it only
+  // when splitting.
   const bool use_narrow =
       is_arg ? split : numel >= CHUNK_MIN_NUMEL && !(small_dim && dim_size < NARROW_BATCHED_MIN_DIM_SIZE);
   ReductionPlan plan{.kernel = ReductionKernel::Outer, .layout = layout};
 
   if (supports_narrow && inner_size < OUTER_TG_WIDTH && use_narrow) {
     plan.kernel = is_contiguous ? ReductionKernel::Narrow : ReductionKernel::NarrowStrided;
-    // A narrow threadgroup saturates at ~NARROW_SPLIT_ELEMS_PER_TG elements; split larger dims into segments.
+    // Narrow routing, shared by contiguous and strided inputs:
+    // batched or single-threadgroup single dispatch, or split-K two-pass. A
+    // single narrow threadgroup saturates at ~NARROW_SPLIT_ELEMS_PER_TG
+    // elements; past that, split the reduced dim into segments reduced in
+    // parallel and fold the [num_segs, inner_size] partials in a second pass.
     plan.num_segments = outer_size > 1
         ? 1u
         : std::clamp(dim_size * inner_size / NARROW_SPLIT_ELEMS_PER_TG, is_arg ? 2u : 1u, SPLIT_MAX_SEGS);
@@ -738,15 +772,22 @@ static ReductionPlan select_inner_reduction(const ReductionLayout& layout, Reduc
   const bool is_arg = family == ReductionFamily::Arg;
   ReductionPlan plan{.kernel = ReductionKernel::Inner, .layout = layout};
 
-  // Tensors too small to fill the GPU gain nothing from row packing; the inner kernel's enqueue floor is ~10% lower.
+  // Tensors too small to fill the GPU gain nothing from packing rows
+  // into simdgroups; keep them on the inner kernel below (the pre-chunk
+  // routing, whose enqueue floor measures ~10% lower there).
   if (!is_arg && row_len <= CHUNK_MAX_ROW_LEN && numel >= CHUNK_MIN_NUMEL) {
     plan.kernel = ReductionKernel::InnerChunk;
-    // Fewest power-of-two lanes with <= CHUNK_ELEMS_PER_LANE elements each, so short rows share a simdgroup.
+    // Smallest power-of-two lane count keeping at most CHUNK_ELEMS_PER_LANE
+    // elements per lane; the chunk kernel then packs simdgroup_size / lanes
+    // rows into one simdgroup instead of letting a short row idle most lanes.
     plan.lanes = std::min(c10::metal::simdgroup_size, std::bit_ceil(at::ceil_div(row_len, CHUNK_ELEMS_PER_LANE)));
     return plan;
   }
 
-  // Skinny-M/huge-K: one simdgroup per row under-fills the GPU, so split rows into segments combined in pass 2.
+  // Skinny-M/huge-K: one simdgroup per row would leave the GPU
+  // under-occupied below SPLIT_MIN_TGS threadgroups, so split each
+  // row into segments and fold the [num_rows, num_segs] partials in
+  // pass 2.
   const auto num_tgs = at::ceil_div(num_rows, INNER_TG_SIZE / c10::metal::simdgroup_size);
   if (num_tgs < (is_arg ? ARG_SPLIT_MIN_TGS : SPLIT_MIN_TGS) && row_len >= SPLIT_MIN_ROW_LEN) {
     uint32_t segments;
@@ -754,7 +795,10 @@ static ReductionPlan select_inner_reduction(const ReductionLayout& layout, Reduc
       segments = std::clamp(ARG_SPLIT_TARGET_PARTIALS / num_rows, 2u, std::max(row_len / ARG_SPLIT_MIN_SEG_LEN, 2u));
     } else {
       plan.kernel = ReductionKernel::InnerChunk;
-      // Aim for ~SPLIT_TARGET_PARTIALS partials with >= SPLIT_MIN_SEG_LEN elements per segment.
+      // Segments per row for split-K: aim for ~SPLIT_TARGET_PARTIALS partials
+      // (rows * segments) so pass 1 fills the GPU, cap so a segment keeps
+      // >= SPLIT_MIN_SEG_LEN elements, then round so the segments come out
+      // equal-sized.
       const auto max_segments = std::min(SPLIT_MAX_SEGS, at::ceil_div(row_len, SPLIT_MIN_SEG_LEN));
       segments = std::clamp(at::ceil_div(SPLIT_TARGET_PARTIALS, num_rows), 2u, std::max(max_segments, 2u));
     }
@@ -768,18 +812,23 @@ static ReductionPlan select_reduction_plan(const Tensor& input, const Tensor& ou
   const auto num_outputs = safe_downcast<uint32_t, int64_t>(output.numel());
   ReductionPlan plan{.layout = ReductionLayout::contiguous(num_outputs, reduction_size, 1)};
 
+  // Two-pass for large full reductions: pass 1 splits input into <=512
+  // contiguous slices, each TG reduces one slice to a partial; pass 2
+  // collapses the num_groups partials into the final scalar.
   if (num_outputs == 1 && family != ReductionFamily::Arg) {
     auto num_groups = std::min(512u, at::ceil_div(reduction_size, MAX_THREADGROUP_SIZE * SUM_NCHAINS));
     while (num_groups > 1 && reduction_size % num_groups != 0) {
       num_groups--;
     }
     if (num_groups > 1) {
+      // sum has a `_strided_` pass-1 kernel; ops without it call .contiguous() first.
       plan.kernel =
           !input.is_contiguous() && family == ReductionFamily::Sum ? ReductionKernel::Strided : ReductionKernel::Flat;
       plan.num_segments = num_groups;
     }
     return plan;
   }
+  // The outer and inner kernels index in 32 bits.
   if (output.is_contiguous() && canUse32BitIndexMath(input)) {
     int num_reduced = 0;
     int64_t reduced_dim = -1;
@@ -789,14 +838,23 @@ static ReductionPlan select_reduction_plan(const Tensor& input, const Tensor& ou
         reduced_dim = d;
       }
     }
+    // Any non-innermost dim routes here, viewed as [outer_size, dim_size,
+    // inner_size] with the dim reduced (outer_size = 1 when reduced_dim ==
+    // 0). On a non-contiguous input whose dims still collapse to that view
+    // (e.g. a sliced or padded view), the strided outer / outer_small_dim /
+    // narrow kernels index through explicit strides, skipping the
+    // .contiguous() copy the generic path would need.
     if (num_reduced == 1 && reduced_dim < input.dim() - 1) {
       if (auto layout = outer_reduction_layout(input, reduced_dim)) {
         return select_outer_reduction(*layout, family, input.numel());
       }
     } else if (num_reduced <= 1 && input.is_contiguous()) {
+      // Innermost dim, which also covers the flattened dim=None argmax/argmin
+      // view. Strided innermost reductions stay on the generic kernel below.
       return select_inner_reduction(plan.layout, family, input.numel());
     }
   }
+  // Generic single-pass fallback.
   return plan;
 }
 
@@ -853,10 +911,15 @@ struct MetalType {
 
 struct ReductionOp {
   ReductionFamily family;
-  std::string prefix;
-  MetalType input_type;
-  MetalType output_type;
-  float param = 0;
+  std::string prefix; // "sum_", "nansum_", "count_nonzero_", "min_", "max_",
+                      // "all_", "any_", "argmax_", "argmin_".
+  MetalType input_type; // may differ from input.scalar_type() (e.g.
+                        // bool -> char for min/max).
+  MetalType output_type; // may differ from output.scalar_type() for
+                         // the same remap reason.
+  float param = 0; // sum/mean only; appended as a float buffer
+                   // to the outer/inner kernel signatures, and
+                   // passed via NormParams.p elsewhere.
 };
 
 struct ReductionPartials {
@@ -934,10 +997,19 @@ static void encode_reduction(MPSStream* stream,
         }
       }
       if (narrow) {
+        // Narrow (contiguous or strided) handles inner_size < simdgroup_size, where
+        // even the small-dim layout idles most of a threadgroup row; dispatched with
+        // the largest multiple of inner_size <= NARROW_TG_SIZE threads.
         const auto active = (NARROW_TG_SIZE / layout.inner_size) * layout.inner_size;
         grid = MTLSizeMake(active, plan.num_segments, layout.outer_size);
         group = MTLSizeMake(active, 1, 1);
       } else {
+        // The outer kernels view the input as [outer_size, dim_size, inner_size]
+        // with the dim reduced: each threadgroup covers OUTER_TG_WIDTH consecutive
+        // inner columns, its OUTER_TG_HEIGHT rows walking the reduced dim; grid y
+        // carries the split-K segments, grid z the outer batches. outer_small_dim
+        // is the height-1 variant for short dim_size, where a full-height
+        // threadgroup would mostly idle.
         const auto height = plan.kernel == ReductionKernel::OuterSmallDim ? 1u : OUTER_TG_HEIGHT;
         const auto num_tgs = at::ceil_div(layout.inner_size, OUTER_TG_WIDTH);
         grid = MTLSizeMake(num_tgs * OUTER_TG_WIDTH, plan.num_segments * height, layout.outer_size);
@@ -968,7 +1040,11 @@ static void encode_reduction(MPSStream* stream,
         }
       }
       mtl_setArgs(encoder, input, output, params);
-      // Full simdgroups only: inactive lanes would feed zeros into simd_shuffle and corrupt min/max.
+      // Round per-TG thread count up to a full simdgroup (32 lanes). With
+      // fewer threads, inactive lanes still participate in simd_shuffle but
+      // carry register-zero, corrupting min/max reductions whose identity
+      // is not zero. Padding threads load Op::identity() and contribute
+      // nothing to the result.
       const auto threads = std::min(MAX_THREADGROUP_SIZE, c10::metal::round_up(params.reduction_size, 32u));
       grid = MTLSizeMake(static_cast<uint64_t>(output.numel()) * threads, 1, 1);
       group = MTLSizeMake(threads, 1, 1);
@@ -1015,6 +1091,9 @@ static void reduction_dispatch_mps(Tensor input,
     return;
   }
 
+  // Shared split-K driver: allocate the num_outputs * num_segs partials
+  // ((value, index) pairs for arg), run the layout-specific pass 1, resolve
+  // with combine.
   const auto combine_plan = reduction_combine_plan(plan, op.family);
   // For ops without a strided pass-1 kernel, .contiguous() the input
   // (no-op when already contiguous).
@@ -1022,7 +1101,9 @@ static void reduction_dispatch_mps(Tensor input,
     input = input.contiguous();
   }
   ReductionPartials partials;
-  // Sum partials use opmath: fp16/bf16/chalf partials would round once per segment.
+  // pass-1 output dtype: opmath of output.scalar_type() for sum
+  // (fp16/bf16/chalf partials would round once per segment),
+  // output.scalar_type() for min/max, uchar for all/any.
   const auto num_partials = output.numel() * plan.num_segments;
   partials.values = at::empty({num_partials * static_cast<int64_t>(partial_type.size)}, output.options().dtype(kByte));
   if (is_arg) {
@@ -1030,7 +1111,8 @@ static void reduction_dispatch_mps(Tensor input,
   }
 
   // Two-pass paths divide on the final pass only, while the accumulator is
-  // still in opmath_t.
+  // still in opmath_t; sum and value kernels always take the param buffer, so
+  // pass 1 binds a no-op 0 (arg kernels take none).
   const ReductionOp first_op{op.family, op.prefix, op.input_type, partial_type};
   const ReductionOp combine_op{op.family, combine_prefix, partial_type, op.output_type, op.param};
   dispatch_sync_with_rethrow(stream->queue(), ^() {
@@ -1119,8 +1201,9 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
   reduction_dispatch_mps(input, output_view, op, in_kdtype, op.prefix, func_name);
 }
 
-// `divisor` > 0 divides the accumulator (in opmath_t) before casting to output,
-// enabling fused mean.
+// Shared implementation for sum/nansum/count_nonzero/mean. `divisor` > 0
+// divides the accumulator (in opmath_t) before casting to output, enabling
+// fused mean.
 static void sum_nansum_kernel_mps(TensorIterator& iter, const std::string& kernel_prefix, float divisor = 0.0f) {
   const Tensor& input = iter.input(0);
   const Tensor& output = iter.output(0);
@@ -1165,6 +1248,9 @@ static void count_nonzero_kernel_mps(TensorIterator& iter) {
   sum_nansum_kernel_mps(iter, "count_nonzero_");
 }
 
+// Value reductions: min/max (Op + identity load on T), all/any (Op +
+// predicate load with uchar accumulator). Delegates to the shared
+// reduction_dispatch_mps.
 static void value_reduction_kernel_mps(TensorIterator& iter, const std::string& op_prefix) {
   const Tensor& input = iter.input(0);
   const Tensor& output = iter.output(0);

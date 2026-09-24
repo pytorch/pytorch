@@ -49,8 +49,10 @@ C10_METAL_CONSTEXPR uint32_t OUTER_SPLIT_MIN_SEG_LEN = 512;
 C10_METAL_CONSTEXPR uint32_t OUTER_SPLIT_MAX_TGS = 2048;
 C10_METAL_CONSTEXPR uint32_t OUTER_SPLIT_STRIDED_TARGET_TGS = 256;
 
-// argmax/argmin inner split-K thresholds. One compare chain per lane (no
-// NCHAINS ILP) saturates the GPU later and needs a higher split threshold.
+// argmax/argmin inner split-K thresholds (select_inner_reduction in
+// ReduceOps.mm). The arg inner kernel keeps one compare chain per lane (no
+// NCHAINS ILP), so it saturates the GPU later than the value kernels and
+// splits at a higher threadgroup count.
 C10_METAL_CONSTEXPR uint32_t ARG_SPLIT_MIN_TGS = 512;
 C10_METAL_CONSTEXPR uint32_t ARG_SPLIT_MIN_SEG_LEN = 512;
 C10_METAL_CONSTEXPR uint32_t ARG_SPLIT_TARGET_PARTIALS = 16384;
