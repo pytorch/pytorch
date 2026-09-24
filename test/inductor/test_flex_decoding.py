@@ -38,6 +38,7 @@ from torch.testing._internal.common_device_type import (
     IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED as TEST_ON_CPU,
     IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED as TEST_ON_CUDA,
     IS_FLEX_ATTENTION_XPU_PLATFORM_SUPPORTED as TEST_ON_XPU,
+    IS_FLEX_ATTENTION_PRIVATEUSE1_PLATFORM_SUPPORTED as TEST_ON_PRIVATEUSE1,
     largeTensorTest,
     skipCPUIf,
     skipCUDAIf,
@@ -104,7 +105,20 @@ device_configs = {
         ),
         dtypes_fast=[torch.float32],
     ),
+    "privateuse1": DeviceConfig(
+        dtypes=[torch.float32, torch.bfloat16, torch.float16],
+        dtypes_fast=[torch.float16],
+    ),
 }
+
+# setUpClass rewrites device_type to the actual PrivateUse1 backend name,
+# so register the dtype config under that name.
+privateuse1_name = torch._C._get_privateuse1_backend_name()
+if privateuse1_name != "privateuseone":
+    device_configs[privateuse1_name] = DeviceConfig(
+        dtypes=[torch.float32, torch.bfloat16, torch.float16],
+        dtypes_fast=[torch.float16],
+    )
 
 test_device = ("cpu",)
 if TEST_ON_CUDA:
@@ -112,6 +126,8 @@ if TEST_ON_CUDA:
 elif TEST_ON_XPU:
     torch._C._set_onednn_allow_tf32(True)
     test_device = ("xpu",)
+elif TEST_ON_PRIVATEUSE1:
+    test_device = ("privateuse1",)
 
 torch_config_string = torch.__config__.show()
 LONG_COMPILATION_ON_CPU = False
