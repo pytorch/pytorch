@@ -2,8 +2,10 @@
 # ruff: noqa: F841
 # flake8: noqa: E731
 # Skip do not assign a lambda expression, use a def
+import collections
 import contextlib
 import functools
+import io
 import logging
 import os
 import subprocess
@@ -65,6 +67,11 @@ requires_cuda_tma = unittest.skipIf(
     "requires CUDA TMA device support",
 )
 
+requires_python_wrapper_for_aggregates = unittest.skipIf(
+    inductor_config.cpp_wrapper,
+    "C++ wrapper not yet supported for aggregate types",
+)
+
 
 @contextlib.contextmanager
 def _dump_launch_params(value: str):
@@ -77,6 +84,26 @@ def _dump_launch_params(value: str):
         finally:
             if value == "1" and os.path.exists(launch_params_file):
                 os.remove(launch_params_file)
+
+
+def _assert_no_mutation_fallback(test):
+    @functools.wraps(test)
+    def wrapped(self, *args, **kwargs):
+        log_stream = io.StringIO()
+        handler = logging.StreamHandler(log_stream)
+        logger = logging.getLogger("torch._dynamo")
+        logger.addHandler(handler)
+        try:
+            result = test(self, *args, **kwargs)
+        finally:
+            logger.removeHandler(handler)
+        self.assertNotIn(
+            "Encountered an exception in identify_accessed_tensors",
+            log_stream.getvalue(),
+        )
+        return result
+
+    return wrapped
 
 
 if HAS_GPU:
@@ -235,6 +262,622 @@ if HAS_GPU:
 
 
 class KernelTests(torch._inductor.test_case.TestCase):
+    @requires_gpu
+    @parametrize("backend", ("eager",))
+    @requires_python_wrapper_for_aggregates
+    @_assert_no_mutation_fallback
+    def test_triton_kernel_namedtuple_arg(self, backend):
+        # The eager HOP must rebuild the NamedTuple before Triton launches it.
+        import triton
+        import triton.language as tl
+
+        Config = collections.namedtuple("Config", ("source", "scale"))
+
+        @triton.jit
+        def namedtuple_kernel(config, out, n_elements, BLOCK_SIZE: tl.constexpr):
+            offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            values = tl.load(config.source + offsets, mask=mask)
+            tl.store(out + offsets, values * config.scale, mask=mask)
+
+        def fn(x):
+            out = torch.empty_like(x)
+            namedtuple_kernel[(triton.cdiv(x.numel(), 16),)](
+                Config(x, 3), out, x.numel(), BLOCK_SIZE=16
+            )
+            return out
+
+        x = torch.arange(32, dtype=torch.float32, device=GPU_TYPE)
+        actual = torch.compile(fn, backend=backend, fullgraph=True)(x)
+        self.assertEqual(actual, x * 3)
+
+    @unittest.skipUnless(HAS_GPU, "requires gpu")
+    @parametrize("version", ("V1_COMPILER", "V2_BACKENDS", "V3_BACKENDS_TUPLE"))
+    @parametrize("aggregate", ("tuple", "namedtuple"))
+    def test_triton_kernel_aggregate_rejected_before_v4(self, version, aggregate):
+        # Capture rejects both aggregate forms before any device kernel runs.
+        import triton
+        import triton.language as tl
+
+        from torch._inductor.utils import TritonAttrsDescriptorVersion
+
+        Config = collections.namedtuple("Config", ("source", "scale"))
+
+        @triton.jit
+        def aggregate_kernel(config, out, BLOCK_SIZE: tl.constexpr):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            values = tl.load(config[0] + offsets)
+            tl.store(out + offsets, values * config[1])
+
+        def tuple_fn(x):
+            out = torch.empty_like(x)
+            aggregate_kernel[(1,)]((x, 2), out, BLOCK_SIZE=16)
+            return out
+
+        def namedtuple_fn(x):
+            out = torch.empty_like(x)
+            aggregate_kernel[(1,)](Config(x, 2), out, BLOCK_SIZE=16)
+            return out
+
+        x = torch.arange(16, dtype=torch.float32, device=GPU_TYPE)
+        fn = tuple_fn if aggregate == "tuple" else namedtuple_fn
+        with (
+            mock.patch(
+                "torch._inductor.utils.get_triton_attrs_descriptor_version",
+                return_value=getattr(TritonAttrsDescriptorVersion, version),
+            ),
+            self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "require Triton's V4 attrs-dict interface or later",
+            ),
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+
+    @requires_gpu
+    @parametrize("backend", ("eager",))
+    @requires_python_wrapper_for_aggregates
+    @_assert_no_mutation_fallback
+    def test_triton_kernel_namedtuple_nested_constexpr(self, backend):
+        # All three ways to create a constexpr leaf must survive eager capture.
+        import triton
+        import triton.language as tl
+
+        Config = collections.namedtuple("Config", ("source", "mode"))
+
+        @triton.jit
+        def nested_constexpr_kernel(config, out, n_elements, BLOCK_SIZE: tl.constexpr):
+            offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            values = tl.load(config.source + offsets, mask=mask)
+            if config.mode == "double":
+                values *= 2
+            tl.store(out + offsets, values, mask=mask)
+
+        def fn(x):
+            out = torch.empty_like(x)
+            nested_constexpr_kernel[(1,)](
+                Config(x, tl.constexpr("double")),
+                out,
+                x.numel(),
+                BLOCK_SIZE=16,
+            )
+            return out
+
+        x = torch.arange(16, dtype=torch.float32, device=GPU_TYPE)
+        actual = torch.compile(fn, backend=backend, fullgraph=True)(x)
+        self.assertEqual(actual, x * 2)
+
+        def fn_with_keyword_constexpr(x):
+            out = torch.empty_like(x)
+            nested_constexpr_kernel[(1,)](
+                Config(x, tl.constexpr(value="double")),
+                out,
+                x.numel(),
+                BLOCK_SIZE=16,
+            )
+            return out
+
+        actual = torch.compile(
+            fn_with_keyword_constexpr, backend=backend, fullgraph=True
+        )(x)
+        self.assertEqual(actual, x * 2)
+
+        mode = tl.constexpr("double")
+
+        def fn_with_existing_constexpr(x):
+            out = torch.empty_like(x)
+            nested_constexpr_kernel[(1,)](
+                Config(x, mode), out, x.numel(), BLOCK_SIZE=16
+            )
+            return out
+
+        actual = torch.compile(
+            fn_with_existing_constexpr, backend=backend, fullgraph=True
+        )(x)
+        self.assertEqual(actual, x * 2)
+
+    @requires_gpu
+    def test_triton_kernel_constexpr_aggregate_rejects_tensor_leaf(self):
+        # Whole constexpr subtrees cannot include graph-owned tensor leaves.
+        import triton
+        import triton.language as tl
+
+        Config = collections.namedtuple("Config", ("source",))
+
+        @triton.jit
+        def kernel(config: tl.constexpr, out, BLOCK_SIZE: tl.constexpr):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            tl.store(out + offsets, 0.0)
+
+        def fn(source):
+            out = torch.empty_like(source)
+            kernel[(1,)](Config(source), out, BLOCK_SIZE=16)
+            return out
+
+        source = torch.arange(16, dtype=torch.float32, device=GPU_TYPE)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "must be Python constants",
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(source)
+
+    @requires_gpu
+    @_assert_no_mutation_fallback
+    def test_generate_ttir_namedtuple_nested_constexpr(self):
+        # Fake tensor leaves become real representatives for TTIR, while the
+        # nested constexpr leaf disappears from the native argument list.
+        import triton
+        import triton.language as tl
+
+        from torch._higher_order_ops import triton_kernel_wrap
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        @triton.jit
+        def nested_constexpr_kernel(config, out, BLOCK_SIZE: tl.constexpr):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            values = tl.load(config.source + offsets)
+            values *= config.parameters[0]
+            if config.parameters[1] == "double":
+                values *= 2
+            values += config.parameters[2]
+            tl.store(out + offsets, values)
+
+        fake_mode = FakeTensorMode()
+        source = fake_mode.from_tensor(
+            torch.empty(16, dtype=torch.float32, device=GPU_TYPE)
+        )
+        out = fake_mode.from_tensor(
+            torch.empty(16, dtype=torch.float32, device=GPU_TYPE)
+        )
+        spec = triton_kernel_wrap.create_named_tuple_spec(
+            "Config",
+            ("source", "parameters"),
+            (
+                triton_kernel_wrap.create_leaf_spec("flat_source"),
+                triton_kernel_wrap.create_tuple_spec(
+                    (
+                        triton_kernel_wrap.create_leaf_spec("flat_scale"),
+                        triton_kernel_wrap.create_leaf_spec(
+                            "flat_mode", is_constexpr=True
+                        ),
+                        triton_kernel_wrap.create_leaf_spec("flat_bias"),
+                    )
+                ),
+            ),
+        )
+
+        ttir, ordered_arg_names = generate_ttir(
+            nested_constexpr_kernel,
+            {
+                "flat_source": source,
+                "flat_scale": 3.0,
+                "flat_mode": "double",
+                "flat_bias": 1.0,
+                "out": out,
+                "BLOCK_SIZE": 16,
+            },
+            {},
+            {"config": spec},
+        )
+
+        self.assertEqual(
+            ordered_arg_names,
+            ["flat_source", "flat_scale", "flat_bias", "out"],
+        )
+        ttir_text = str(ttir)
+        self.assertIn("config.source", ttir_text)
+        self.assertIn("config.parameters.0", ttir_text)
+        self.assertNotIn("config.parameters.1:", ttir_text)
+        self.assertIn("config.parameters.2", ttir_text)
+
+    @requires_cuda_tma
+    @unittest.skipUnless(
+        HAS_GPU and has_triton_tensor_descriptor_host_tma(),
+        "requires gpu and TensorDescriptor support",
+    )
+    @_assert_no_mutation_fallback
+    def test_generate_ttir_namedtuple_with_tma_fake_tensor_leaves(self):
+        # TTIR generation needs representative descriptors, not runtime TMA
+        # materialization from the fake backing tensors.
+        import triton
+        import triton.language as tl
+
+        from torch._higher_order_ops import triton_kernel_wrap
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        @triton.jit
+        def copy_descriptor(config, BLOCK_SIZE: tl.constexpr):
+            offset = tl.program_id(0) * BLOCK_SIZE
+            value = tl.load_tensor_descriptor(config.source, [offset])
+            tl.store_tensor_descriptor(config.destination, [offset], value)
+
+        fake_mode = FakeTensorMode()
+        source = fake_mode.from_tensor(
+            torch.empty(16, dtype=torch.float32, device=GPU_TYPE)
+        )
+        destination = fake_mode.from_tensor(
+            torch.empty(16, dtype=torch.float32, device=GPU_TYPE)
+        )
+        spec = triton_kernel_wrap.create_named_tuple_spec(
+            "Config",
+            ("source", "destination"),
+            (
+                triton_kernel_wrap.create_leaf_spec("flat_source"),
+                triton_kernel_wrap.create_leaf_spec("flat_destination"),
+            ),
+        )
+
+        with mock.patch.object(
+            triton_kernel_wrap,
+            "reconstruct_tensor_descriptor_from_metadata",
+            side_effect=AssertionError("runtime TMA reconstruction was called"),
+        ):
+            ttir, ordered_arg_names = generate_ttir(
+                copy_descriptor,
+                {
+                    "flat_source": source,
+                    "flat_destination": destination,
+                    "BLOCK_SIZE": 16,
+                },
+                {
+                    "flat_source": ("stable", ([16],)),
+                    "flat_destination": ("stable", ([16],)),
+                },
+                {"config": spec},
+            )
+
+        self.assertEqual(
+            ordered_arg_names,
+            [
+                "flat_source",
+                "flat_source STRIDE PLACEHOLDER 0",
+                "flat_source SIZE PLACEHOLDER 0",
+                "flat_destination",
+                "flat_destination STRIDE PLACEHOLDER 0",
+                "flat_destination SIZE PLACEHOLDER 0",
+            ],
+        )
+        ttir_text = str(ttir)
+        self.assertIn("config.source", ttir_text)
+        self.assertIn("config.destination", ttir_text)
+
+    def test_reconstruct_triton_kernel_args_materializes_tma_first(self):
+        # Replace descriptor leaves before rebuilding their owning NamedTuple.
+        from torch._higher_order_ops import triton_kernel_wrap
+
+        spec = triton_kernel_wrap.create_named_tuple_spec(
+            "Config",
+            ("tensor", "nested"),
+            (
+                triton_kernel_wrap.create_leaf_spec("flat_tensor"),
+                triton_kernel_wrap.create_tuple_spec(
+                    (
+                        triton_kernel_wrap.create_leaf_spec("flat_descriptor"),
+                        triton_kernel_wrap.create_leaf_spec("flat_constant"),
+                    )
+                ),
+            ),
+        )
+        graph_kwargs = {
+            "out": "output",
+            "flat_tensor": "tensor",
+            "flat_descriptor": "descriptor base tensor",
+        }
+        constant_args = {
+            "flat_constant": 4,
+            "flat_static": 8,
+            "BLOCK_SIZE": 16,
+        }
+        descriptor_metadata = ("stable", ([8],))
+
+        def materialize_descriptor(value, metadata):
+            self.assertEqual(value, "descriptor base tensor")
+            self.assertEqual(metadata, descriptor_metadata)
+            return "materialized descriptor"
+
+        with mock.patch.object(
+            triton_kernel_wrap,
+            "reconstruct_tensor_descriptor_from_metadata",
+            side_effect=materialize_descriptor,
+        ):
+            graph_args, reconstructed_constant_args = (
+                triton_kernel_wrap.reconstruct_triton_kernel_args(
+                    graph_kwargs,
+                    {"flat_descriptor": descriptor_metadata},
+                    {
+                        "config": spec,
+                        "static_config": triton_kernel_wrap.create_tuple_spec(
+                            (triton_kernel_wrap.create_leaf_spec("flat_static"),)
+                        ),
+                    },
+                    constant_args=constant_args,
+                )
+            )
+
+        self.assertEqual(graph_args["config"].tensor, "tensor")
+        self.assertEqual(graph_args["config"].nested, ("materialized descriptor", 4))
+        self.assertEqual(graph_args["static_config"], (8,))
+        self.assertEqual(graph_args["out"], "output")
+        self.assertEqual(reconstructed_constant_args["BLOCK_SIZE"], 16)
+        for flat_key in (
+            "flat_tensor",
+            "flat_descriptor",
+            "flat_constant",
+            "flat_static",
+        ):
+            self.assertNotIn(flat_key, graph_args)
+            self.assertNotIn(flat_key, reconstructed_constant_args)
+        # Reconstruction must not mutate values owned by the FX node.
+        self.assertEqual(graph_kwargs["flat_descriptor"], "descriptor base tensor")
+        self.assertEqual(constant_args["flat_static"], 8)
+
+    def test_aggregate_unflatten_fold_and_materialize(self):
+        # The shared fold preserves nested shape and reports missing or reused
+        # synthetic leaf keys at the point of reconstruction.
+        from torch._higher_order_ops import triton_kernel_wrap
+
+        spec = triton_kernel_wrap.create_named_tuple_spec(
+            "Config",
+            ("source", "parameters"),
+            (
+                triton_kernel_wrap.create_leaf_spec("flat_source"),
+                triton_kernel_wrap.create_tuple_spec(
+                    (
+                        triton_kernel_wrap.create_leaf_spec("flat_scale"),
+                        triton_kernel_wrap.create_leaf_spec("flat_bias"),
+                    )
+                ),
+            ),
+        )
+        flat_values = {"flat_source": 0, "flat_scale": 2, "flat_bias": 3}
+        aggregate = triton_kernel_wrap.unflatten_aggregate(spec, flat_values)
+        self.assertIs(type(aggregate), tuple)
+        self.assertIs(type(aggregate[1]), tuple)
+        self.assertEqual(
+            aggregate,
+            (0, (2, 3)),
+        )
+
+        transformed = triton_kernel_wrap.fold_aggregate(
+            spec,
+            aggregate,
+            leaf_fn=lambda leaf_spec, values, path: (
+                7 if leaf_spec[1] == "flat_scale" else values[0] + len(leaf_spec[1])
+            ),
+            container_fn=lambda spec, values, children, path: children,
+        )
+        materialized = triton_kernel_wrap.materialize_aggregate(spec, transformed)
+
+        self.assertEqual(materialized.source, len("flat_source"))
+        self.assertEqual(materialized.parameters, (7, 3 + len("flat_bias")))
+        self.assertTrue(type(materialized).__torch_inductor_ignore_constexpr_import__)
+
+        none_spec = triton_kernel_wrap.create_tuple_spec(
+            (triton_kernel_wrap.create_leaf_spec("flat_none"),)
+        )
+        self.assertEqual(
+            triton_kernel_wrap.unflatten_aggregate(none_spec, {"flat_none": None}),
+            (None,),
+        )
+        empty_spec = triton_kernel_wrap.create_tuple_spec(())
+        self.assertEqual(triton_kernel_wrap.unflatten_aggregate(empty_spec, {}), ())
+        self.assertEqual(
+            triton_kernel_wrap.fold_aggregate(
+                empty_spec,
+                (),
+                leaf_fn=lambda spec, values, path: None,
+                container_fn=lambda spec, values, children, path: children,
+            ),
+            (),
+        )
+        with self.assertRaisesRegex(ValueError, r"path \(1, 1\)"):
+            triton_kernel_wrap.unflatten_aggregate(
+                spec, {"flat_source": 0, "flat_scale": 2}
+            )
+        duplicate_spec = triton_kernel_wrap.create_tuple_spec(
+            (
+                triton_kernel_wrap.create_leaf_spec("duplicate"),
+                triton_kernel_wrap.create_leaf_spec("duplicate"),
+            )
+        )
+        with self.assertRaisesRegex(AssertionError, "referenced more than once"):
+            triton_kernel_wrap.unflatten_aggregate(duplicate_spec, {"duplicate": 1})
+
+    def test_unsupported_aggregate_type_error(self):
+        # Direct validation and recursive traversal share the same path-aware
+        # unsupported-kind diagnostic.
+        from torch._higher_order_ops import triton_kernel_wrap
+
+        unsupported_spec = ("dict", (), False)
+        error = triton_kernel_wrap.unsupported_aggregate_type_error(
+            unsupported_spec, (1, 2)
+        )
+        self.assertIs(type(error), NotImplementedError)
+        self.assertEqual(
+            str(error), "Aggregate type 'dict' at path (1, 2) is not supported"
+        )
+
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            r"Aggregate type 'dict' at path \(\) is not supported",
+        ):
+            triton_kernel_wrap.get_aggregate_leaf_specs(unsupported_spec)
+
+    def test_fold_aggregate_aligned_trees(self):
+        # Parallel value trees must match the spec's exact built-in tuple shape.
+        from torch._higher_order_ops import triton_kernel_wrap
+
+        spec = triton_kernel_wrap.create_tuple_spec(
+            (
+                triton_kernel_wrap.create_leaf_spec("a"),
+                triton_kernel_wrap.create_named_tuple_spec(
+                    "Pair",
+                    ("left", "right"),
+                    (
+                        triton_kernel_wrap.create_leaf_spec("b"),
+                        triton_kernel_wrap.create_tuple_spec(
+                            (triton_kernel_wrap.create_leaf_spec("c"),)
+                        ),
+                    ),
+                ),
+                triton_kernel_wrap.create_tuple_spec(()),
+            )
+        )
+        value = (1, (2, (3,)), ())
+        second = (10, (20, (30,)), ())
+        third = (100, (200, (300,)), ())
+
+        result = triton_kernel_wrap.fold_aggregate(
+            spec,
+            value,
+            second,
+            third,
+            leaf_fn=lambda spec, values, path: sum(values),
+            container_fn=lambda spec, values, children, path: children,
+        )
+        self.assertEqual(result, (111, (222, (333,)), ()))
+
+        for value_idx in range(3):
+            trees = [value, second, third]
+            trees[value_idx] = (trees[value_idx][0], (1,), ())
+            with (
+                self.subTest(value_idx=value_idx),
+                self.assertRaisesRegex(
+                    AssertionError,
+                    rf"Aggregate value {value_idx} at path \(1,\)",
+                ),
+            ):
+                triton_kernel_wrap.fold_aggregate(
+                    spec,
+                    *trees,
+                    leaf_fn=lambda spec, values, path: values,
+                    container_fn=lambda spec, values, children, path: children,
+                )
+
+        Pair = collections.namedtuple("Pair", ("left", "right"))
+        with self.assertRaisesRegex(AssertionError, "exact built-in tuple"):
+            triton_kernel_wrap.fold_aggregate(
+                spec,
+                (1, Pair(2, (3,)), ()),
+                leaf_fn=lambda spec, values, path: values[0],
+                container_fn=lambda spec, values, children, path: children,
+            )
+
+    def test_fold_aggregate_short_circuit(self):
+        # A constexpr subtree can be handled as one node without visiting or
+        # validating its individual children.
+        from torch._higher_order_ops import triton_kernel_wrap
+
+        spec = triton_kernel_wrap.create_tuple_spec(
+            (
+                triton_kernel_wrap.create_leaf_spec("visited"),
+                triton_kernel_wrap.create_tuple_spec(
+                    (triton_kernel_wrap.create_leaf_spec("skipped"),),
+                    is_constexpr=True,
+                ),
+            )
+        )
+        visited = []
+
+        def enter(child_spec, values, path):
+            if child_spec[-1]:
+                return True, "constant"
+            return False, None
+
+        def leaf(leaf_spec, values, path):
+            visited.append((leaf_spec[1], path))
+            return values[0]
+
+        result = triton_kernel_wrap.fold_aggregate(
+            spec,
+            (1, "not a tuple"),
+            leaf_fn=leaf,
+            container_fn=lambda spec, values, children, path: children,
+            enter_fn=enter,
+        )
+        self.assertEqual(result, (1, "constant"))
+        self.assertEqual(visited, [("visited", (0,))])
+
+    def test_aggregate_type_metadata_uses_fx_literals(self):
+        # The spec stays in FX-native literals so retracing adds no constructors.
+        from torch._higher_order_ops import triton_kernel_wrap
+
+        spec = triton_kernel_wrap.create_named_tuple_spec(
+            "Config",
+            ("tensor", "parameters"),
+            (
+                triton_kernel_wrap.create_leaf_spec("flat_tensor"),
+                triton_kernel_wrap.create_tuple_spec(
+                    (
+                        triton_kernel_wrap.create_leaf_spec("flat_scale"),
+                        triton_kernel_wrap.create_leaf_spec(
+                            "flat_mode", is_constexpr=True
+                        ),
+                    )
+                ),
+            ),
+        )
+        self.assertEqual(
+            spec,
+            (
+                "namedtuple",
+                "Config",
+                ("tensor", "parameters"),
+                (
+                    ("leaf", "flat_tensor", False),
+                    (
+                        "tuple",
+                        (
+                            ("leaf", "flat_scale", False),
+                            ("leaf", "flat_mode", True),
+                        ),
+                        False,
+                    ),
+                ),
+                False,
+            ),
+        )
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        hop = graph.call_function(
+            triton_kernel_wrap.triton_kernel_wrapper_functional,
+            kwargs={
+                "kernel_idx": 0,
+                "constant_args_idx": 0,
+                "grid": [(1,)],
+                "tma_descriptor_metadata": {"x": ("stable", ([8],))},
+                "kwargs": {"x": x},
+                "tensors_to_clone": ["x"],
+                "aggregate_type_metadata": {"config": spec},
+            },
+        )
+
+        # FX recursively embeds tuple/dict metadata in the HOP arguments. It
+        # must not emit constructor nodes for aggregate metadata.
+        self.assertEqual(list(graph.nodes), [x, hop])
+        self.assertEqual(hop.kwargs["aggregate_type_metadata"], {"config": spec})
+
     def _kernel_launched_in_code(self, kernel_name: str, code: str) -> bool:
         if inductor_config.cpp_wrapper:
             return f"launchKernel({kernel_name}" in code
@@ -472,6 +1115,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
             constant_args_idx=constant_args_idx,
             grid=[grid],
             tma_descriptor_metadata={},
+            aggregate_type_metadata={},
             kwargs={
                 "in_ptr0": t1,
                 "in_ptr1": t2,
@@ -489,6 +1133,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
             constant_args_idx=constant_args_idx,
             grid=[grid],
             tma_descriptor_metadata={},
+            aggregate_type_metadata={},
             kwargs={
                 "in_ptr0": t1,
                 "in_ptr1": t2,
@@ -520,6 +1165,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
                 ),
                 grid=[(x.numel(),)],
                 tma_descriptor_metadata={},
+                aggregate_type_metadata={},
                 kwargs={
                     "in_ptr0": x,
                     "out_ptr": output,
@@ -548,7 +1194,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
             gm.code.strip(),
             """\
 def forward(self, x_1, output_1):
-    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 3, grid = [(5,)], tma_descriptor_metadata = {}, kwargs = {'in_ptr0': x_1, 'out_ptr': output_1}, tensors_to_clone = ['in_ptr0', 'out_ptr']);  x_1 = output_1 = None
+    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 3, grid = [(5,)], tma_descriptor_metadata = {}, kwargs = {'in_ptr0': x_1, 'out_ptr': output_1}, tensors_to_clone = ['in_ptr0', 'out_ptr'], aggregate_type_metadata = {});  x_1 = output_1 = None
     getitem = triton_kernel_wrapper_functional_proxy['in_ptr0'];  getitem = None
     getitem_1 = triton_kernel_wrapper_functional_proxy['out_ptr'];  triton_kernel_wrapper_functional_proxy = None
     return getitem_1""",
@@ -593,6 +1239,7 @@ def forward(self, x_1, output_1):
                     ),
                     grid=[(x_func.numel(),)],
                     tma_descriptor_metadata={},
+                    aggregate_type_metadata={},
                     kwargs={
                         "ptr": x_func,
                     },
@@ -615,6 +1262,7 @@ def forward(self, x_1, output_1):
                     ),
                     grid=[(x_func.numel(),)],
                     tma_descriptor_metadata={},
+                    aggregate_type_metadata={},
                     kwargs={
                         "ptr": x_func,
                     },
@@ -672,6 +1320,7 @@ def forward(self, x_1, output_1):
                     ),
                     grid=[grid],
                     tma_descriptor_metadata={},
+                    aggregate_type_metadata={},
                     kwargs={
                         "in_ptr0": x,
                         "out_ptr0": full_default,
@@ -2632,7 +3281,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     add_2 = arg0_1 + 256;  arg0_1 = None
     sub_1 = add_2 - 1;  add_2 = None
     floordiv = sub_1 // 256;  sub_1 = None
-    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(floordiv, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('stable', ([256],)), 'in_desc_ptr1': ('stable', ([256],)), 'out_desc_ptr': ('stable', ([256],))}, kwargs = {'in_desc_ptr0': arg1_1, 'in_desc_ptr1': arg2_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr']);  floordiv = arg1_1 = arg2_1 = zeros_like = None
+    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(floordiv, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('stable', ([256],)), 'in_desc_ptr1': ('stable', ([256],)), 'out_desc_ptr': ('stable', ([256],))}, kwargs = {'in_desc_ptr0': arg1_1, 'in_desc_ptr1': arg2_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr'], aggregate_type_metadata = {});  floordiv = arg1_1 = arg2_1 = zeros_like = None
     getitem = triton_kernel_wrapper_functional_proxy['out_desc_ptr'];  triton_kernel_wrapper_functional_proxy = None
     return (getitem,)""",
                 )
@@ -2645,7 +3294,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     add_2 = arg0_1 + 256
     sub_1 = add_2 - 1;  add_2 = None
     floordiv = sub_1 // 256;  sub_1 = None
-    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(floordiv, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('experimental', ([arg0_1], [256], 4)), 'in_desc_ptr1': ('experimental', ([arg0_1], [256], 4)), 'out_desc_ptr': ('experimental', ([arg0_1], [256], 4))}, kwargs = {'in_desc_ptr0': arg1_1, 'in_desc_ptr1': arg2_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr']);  floordiv = arg0_1 = arg1_1 = arg2_1 = zeros_like = None
+    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(floordiv, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('experimental', ([arg0_1], [256], 4)), 'in_desc_ptr1': ('experimental', ([arg0_1], [256], 4)), 'out_desc_ptr': ('experimental', ([arg0_1], [256], 4))}, kwargs = {'in_desc_ptr0': arg1_1, 'in_desc_ptr1': arg2_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr'], aggregate_type_metadata = {});  floordiv = arg0_1 = arg1_1 = arg2_1 = zeros_like = None
     getitem = triton_kernel_wrapper_functional_proxy['out_desc_ptr'];  triton_kernel_wrapper_functional_proxy = None
     return (getitem,)""",
                 )
@@ -2656,7 +3305,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                     """\
 def forward(self, arg0_1, arg1_1):
     zeros_like = torch.ops.aten.zeros_like.default(arg0_1, pin_memory = False)
-    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(2, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('stable', ([256],)), 'in_desc_ptr1': ('stable', ([256],)), 'out_desc_ptr': ('stable', ([256],))}, kwargs = {'in_desc_ptr0': arg0_1, 'in_desc_ptr1': arg1_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr']);  arg0_1 = arg1_1 = zeros_like = None
+    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(2, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('stable', ([256],)), 'in_desc_ptr1': ('stable', ([256],)), 'out_desc_ptr': ('stable', ([256],))}, kwargs = {'in_desc_ptr0': arg0_1, 'in_desc_ptr1': arg1_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr'], aggregate_type_metadata = {});  arg0_1 = arg1_1 = zeros_like = None
     getitem = triton_kernel_wrapper_functional_proxy['out_desc_ptr'];  triton_kernel_wrapper_functional_proxy = None
     return (getitem,)""",
                 )
@@ -2666,7 +3315,7 @@ def forward(self, arg0_1, arg1_1):
                     """\
 def forward(self, arg0_1, arg1_1):
     zeros_like = torch.ops.aten.zeros_like.default(arg0_1, pin_memory = False)
-    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(2, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('experimental', ([301], [256], 4)), 'in_desc_ptr1': ('experimental', ([301], [256], 4)), 'out_desc_ptr': ('experimental', ([301], [256], 4))}, kwargs = {'in_desc_ptr0': arg0_1, 'in_desc_ptr1': arg1_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr']);  arg0_1 = arg1_1 = zeros_like = None
+    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(2, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('experimental', ([301], [256], 4)), 'in_desc_ptr1': ('experimental', ([301], [256], 4)), 'out_desc_ptr': ('experimental', ([301], [256], 4))}, kwargs = {'in_desc_ptr0': arg0_1, 'in_desc_ptr1': arg1_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr'], aggregate_type_metadata = {});  arg0_1 = arg1_1 = zeros_like = None
     getitem = triton_kernel_wrapper_functional_proxy['out_desc_ptr'];  triton_kernel_wrapper_functional_proxy = None
     return (getitem,)""",
                 )
@@ -3893,7 +4542,12 @@ def forward(self, arg0_1, arg1_1):
             "BLOCK_SIZE": 256,
         }
 
-        ttir_module, _ = generate_ttir(copy_kernel, kwargs, tma_descriptor_metadata={})
+        ttir_module, _ = generate_ttir(
+            copy_kernel,
+            kwargs,
+            tma_descriptor_metadata={},
+            aggregate_type_metadata={},
+        )
         ttir_str = str(ttir_module)
 
         # `constexpr` and None values get inlined, and do not appear as function parameters.
@@ -3912,7 +4566,7 @@ def make_mutation_test(fn):
 
         kernel, inputs, tma_descriptor_metadata, outputs = fn()
         tensor_accesses = identify_accessed_tensors(
-            kernel, inputs, tma_descriptor_metadata
+            kernel, inputs, tma_descriptor_metadata, aggregate_type_metadata={}
         )
         mutated_tensor_names = [dep.name for dep in tensor_accesses.read_writes.writes]
         self.assertListEqual(
@@ -4086,7 +4740,9 @@ class MutationTests(torch._inductor.test_case.TestCase):
         # old TTIR string parsing-based one). remove this gating
         # and use ["c_ptr"] as `expected` after the new Triton
         # pin lands both in OSS and internally.
-        ttir_module, _ = generate_ttir(kernel, kwargs, tma_descriptor_metadata={})
+        ttir_module, _ = generate_ttir(
+            kernel, kwargs, tma_descriptor_metadata={}, aggregate_type_metadata={}
+        )
         if hasattr(ttir_module, "walk"):
             # with MLIR-based Triton analysis pass
             expected = ["c_ptr"]
@@ -4128,7 +4784,9 @@ class MutationTests(torch._inductor.test_case.TestCase):
         # old TTIR string parsing-based one). remove this gating
         # and use ["c_ptr"] as `expected` after the new Triton
         # pin lands both in OSS and internally.
-        ttir_module, _ = generate_ttir(kernel, kwargs, tma_descriptor_metadata={})
+        ttir_module, _ = generate_ttir(
+            kernel, kwargs, tma_descriptor_metadata={}, aggregate_type_metadata={}
+        )
         if hasattr(ttir_module, "walk"):
             # with MLIR-based Triton analysis pass
             expected = ["c_ptr"]
@@ -4185,7 +4843,9 @@ class MutationTests(torch._inductor.test_case.TestCase):
         # old TTIR string parsing-based one). remove this gating
         # and use ["out_ptr"] as `expected` after the new Triton
         # pin lands both in OSS and internally.
-        ttir_module, _ = generate_ttir(kernel, kwargs, tma_descriptor_metadata={})
+        ttir_module, _ = generate_ttir(
+            kernel, kwargs, tma_descriptor_metadata={}, aggregate_type_metadata={}
+        )
         if hasattr(ttir_module, "walk"):
             # with MLIR-based Triton analysis pass
             expected = ["out_ptr"]
@@ -4997,6 +5657,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
                 "BLOCK_N": 32,
             },
             {},
+            {},
         )
         read_names = [dep.name for dep in tensor_accesses.read_writes.reads]
         write_names = [dep.name for dep in tensor_accesses.read_writes.writes]
@@ -5081,6 +5742,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
                         "n_elements": x.numel(),
                         "BLOCK_SIZE": 16,
                     },
+                    {},
                     {},
                 )
                 read_names = [dep.name for dep in tensor_accesses.read_writes.reads]

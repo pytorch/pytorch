@@ -18182,6 +18182,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 ),
                 grid=[(x.numel(),)],
                 tma_descriptor_metadata={},
+                aggregate_type_metadata={},
                 kwargs={
                     "in_ptr0": x,
                     "out_ptr": output,
