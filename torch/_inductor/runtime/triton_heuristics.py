@@ -628,9 +628,7 @@ class CachingAutotuner(KernelInterface):
             fields = getattr(type(node), "_fields", None)
             if fields is None:
                 return create_tuple_spec(children)
-            return create_named_tuple_spec(
-                type(node).__name__, tuple(fields), children
-            )
+            return create_named_tuple_spec(type(node).__name__, tuple(fields), children)
 
         spec = create_spec(value)
         return (
@@ -3409,9 +3407,7 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
             def_args,
             none_args,
             bound_udtk_constexprs,
-        ) = self._get_arg_lists(
-            fn.arg_names, get_constexprs(fn)
-        )
+        ) = self._get_arg_lists(fn.arg_names, get_constexprs(fn))
         binary_shared = (
             binary.shared if hasattr(binary, "shared") else binary.metadata.shared
         )

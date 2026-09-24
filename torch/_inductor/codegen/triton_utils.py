@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-import collections
 import functools
 import itertools
 import warnings
@@ -145,9 +144,9 @@ def signature_of(
 
         def container(spec, values, children, path):
             if spec[0] == "namedtuple":
-                return triton_kernel_wrap.namedtuple_type_from_spec(
-                    spec[1], spec[2]
-                )(*children)
+                return triton_kernel_wrap.namedtuple_type_from_spec(spec[1], spec[2])(
+                    *children
+                )
             if spec[0] == "tuple":
                 return children
             raise triton_kernel_wrap.unsupported_aggregate_type_error(spec, path)

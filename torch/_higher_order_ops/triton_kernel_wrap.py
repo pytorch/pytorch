@@ -257,6 +257,8 @@ UDTK_AGGREGATE_VERSION_ERROR = (
     "Tuple and NamedTuple arguments to user-defined Triton kernels require "
     "Triton's V4 attrs-dict interface or later."
 )
+
+
 def triton_version_supports_udtk_aggregates() -> bool:
     # Aggregate signature entries and path-keyed constants use the raw attrs-dict
     # representation introduced by Triton V4.  The older AttrsDescriptor formats
@@ -327,6 +329,7 @@ def namedtuple_type_from_spec(
     type_name: str,
     field_names: tuple[str, ...],
 ) -> type[tuple]:
+    # pyrefly: ignore [bad-class-definition, invalid-argument]
     result = collections.namedtuple(type_name, field_names)
     result.__torch_inductor_ignore_constexpr_import__ = True
     return result

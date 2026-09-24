@@ -903,8 +903,7 @@ def helper(x):
         )
 
         with patch(
-            "torch._inductor.runtime.triton_heuristics."
-            "triton_version_uses_attrs_dict",
+            "torch._inductor.runtime.triton_heuristics.triton_version_uses_attrs_dict",
             return_value=True,
         ):
             (
@@ -930,8 +929,7 @@ def helper(x):
         )
 
         with patch(
-            "torch._inductor.runtime.triton_heuristics."
-            "triton_version_uses_attrs_dict",
+            "torch._inductor.runtime.triton_heuristics.triton_version_uses_attrs_dict",
             return_value=False,
         ):
             _, _, _, legacy_bound_udtk_constexprs = compile_result._get_arg_lists(

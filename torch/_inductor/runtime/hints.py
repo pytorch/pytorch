@@ -136,8 +136,7 @@ if has_triton_package():
             # Build the attr dict per argument path, merging attributes that
             # apply to the same leaf.
             result = {
-                arg_path(x): [["tt.divisibility", 16]]
-                for x in (divisible_by_16 or ())
+                arg_path(x): [["tt.divisibility", 16]] for x in (divisible_by_16 or ())
             }
             for x in pointer_range_32 or ():
                 key = arg_path(x)

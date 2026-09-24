@@ -8997,9 +8997,9 @@ class UserDefinedTritonKernel(ExternKernel):
 
         if V.graph.cpp_wrapper and self.aggregate_type_metadata:
             from .exc import CppWrapperCodegenError
+
             # TODO(mwizak): Add tuple and NamedTuple argument support to
             # CppWrapperCodegen
-
             # The Python wrapper reconstructs tuple and NamedTuple arguments at
             # the Triton launch boundary. The C++ wrapper has no equivalent
             # structured argument representation yet, so fail before emitting a

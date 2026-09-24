@@ -3798,17 +3798,17 @@ class SysFunctionVariable(VariableTracker):
 
 
 from torch._higher_order_ops.triton_kernel_wrap import (
+    AggregateSpec,
+    AggregateTypeMetadata,
     create_leaf_spec,
     create_named_tuple_spec,
     create_structural_named_tuple_name,
-    create_tuple_spec,
     create_tma_experimental_metadata,
     create_tma_stable_metadata,
-    triton_version_supports_udtk_aggregates,
-    AggregateSpec,
-    AggregateTypeMetadata,
+    create_tuple_spec,
     NamedTupleSpec,
     TMADescriptorMetadata,
+    triton_version_supports_udtk_aggregates,
     TritonHOPifier,
     TupleSpec,
     UDTK_AGGREGATE_VERSION_ERROR,
@@ -4006,9 +4006,10 @@ class DynamoTritonHOPifier(TritonHOPifier):
         Symbolic leaves below a constexpr node are specialized so their guards
         cover the complete constexpr subtree.
         """
+        from triton.runtime.autotuner import Autotuner
+
         from .lists import TupleVariable
         from .tensor import SymNodeVariable
-        from triton.runtime.autotuner import Autotuner
 
         if isinstance(kernel := kernel_variable.kernel, Autotuner) and (
             param_name in kernel.restore_value or param_name in kernel.reset_to_zero

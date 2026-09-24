@@ -360,7 +360,9 @@ class KernelTests(torch._inductor.test_case.TestCase):
         ):
             offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
             mask = offsets < n_elements
-            scaled = tl.load(scale_config.source + offsets, mask=mask) * scale_config.scale
+            scaled = (
+                tl.load(scale_config.source + offsets, mask=mask) * scale_config.scale
+            )
             biased = tl.load(bias_config.source + offsets, mask=mask) + bias_config.bias
             tl.store(out + offsets, scaled + biased, mask=mask)
 
@@ -554,9 +556,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
             )
 
         def fn(source, plain_source, nested_source, output):
-            source_descriptor = TensorDescriptor.from_tensor(
-                source, block_shape=[16]
-            )
+            source_descriptor = TensorDescriptor.from_tensor(source, block_shape=[16])
             config = Config(3.0, Nested(nested_source, 5.0))
             kernel[(2,)](
                 source_descriptor,
@@ -1060,9 +1060,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
         config_name = triton_kernel_wrap.create_structural_named_tuple_name(
             "Config", Config._fields
         )
-        FileCheck().check(
-            f"tl.constexpr({config_name}(scale=2.0, bias=1.0))"
-        ).run(code)
+        FileCheck().check(f"tl.constexpr({config_name}(scale=2.0, bias=1.0))").run(code)
 
     @unittest.skipUnless(
         HAS_CPU and TRITON_HAS_CPU,
@@ -8738,9 +8736,9 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
         output_name = triton_kernel_wrap.create_structural_named_tuple_name(
             "Output", Output._fields
         )
-        FileCheck().check(
-            f"{output_name}(nested={nested_name}(destination=buf"
-        ).run(code)
+        FileCheck().check(f"{output_name}(nested={nested_name}(destination=buf").run(
+            code
+        )
 
     @requires_cuda_and_triton
     def test_fusion_relu_epilogue(self):
