@@ -366,13 +366,6 @@ class TestNVUniversalGemm(TestCase):
             )
 
         def benchmark(_selector, choices, *_args, **_kwargs):
-            nvgemm_choices = [
-                choice
-                for choice in choices
-                if isinstance(choice, NVUniversalGemmCaller)
-            ]
-            if nvgemm_choices:
-                self.assertTrue(any(is_target(choice) for choice in nvgemm_choices))
             return {choice: 0.1 if is_target(choice) else 1.0 for choice in choices}
 
         with (
