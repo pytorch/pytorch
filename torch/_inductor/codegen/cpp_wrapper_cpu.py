@@ -289,6 +289,56 @@ def _ivalue_conversion(ivalue_var: str, to_ivalue_call: str) -> list[str]:
     ]
 
 
+def _profiling_ivalue_lines(
+    kernel_name: str,
+    profiling_args: Sequence[str | None],
+    output_handle: str | None = None,
+) -> tuple[list[str], str]:
+    """The IValue conversions a RecordFunction's argument metadata needs, and
+    the name of the vector they are collected into.
+
+    Recorded order is the operator's schema order, with `out` last where the
+    caller records one, matching the eager trace layout. It is not the shim's
+    argument order, which passes `out` first, so consumers must not zip "Input
+    Dims" against the shim signature. Tensors and placeholders are numbered
+    independently so a name identifies which kind of argument it holds.
+    """
+    lines: list[str] = []
+    ivalue_names: list[str] = []
+    num_inputs = 0
+    num_scalars = 0
+
+    for profiling_arg in profiling_args:
+        if profiling_arg is None:
+            # A non-tensor argument only has to hold its schema position, so
+            # record a dummy int64.
+            ivalue_var = f"tmp_{kernel_name}_scalar_{num_scalars}"
+            num_scalars += 1
+            to_ivalue = f"aoti_torch_int64_to_ivalue(0, &{ivalue_var})"
+        else:
+            ivalue_var = f"tmp_{kernel_name}_input_{num_inputs}"
+            num_inputs += 1
+            to_ivalue = f"aoti_torch_tensor_to_ivalue({profiling_arg}, &{ivalue_var})"
+        lines.extend(_ivalue_conversion(ivalue_var, to_ivalue))
+        ivalue_names.append(ivalue_var)
+
+    if output_handle:
+        ivalue_var = f"tmp_{kernel_name}_output"
+        lines.extend(
+            _ivalue_conversion(
+                ivalue_var,
+                f"aoti_torch_tensor_to_ivalue({output_handle}, &{ivalue_var})",
+            )
+        )
+        ivalue_names.append(ivalue_var)
+
+    inputs_vec_var = f"{kernel_name}_inputs_"
+    lines.append(
+        f"std::vector<C10IValueHandle> {inputs_vec_var}({{{', '.join(ivalue_names)}}});"
+    )
+    return lines, inputs_vec_var
+
+
 class CppWrapperCpu(PythonWrapperCodegen):
     """
     Generates cpp wrapper for running on CPU and calls cpp kernels
@@ -1938,49 +1988,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 if has_profiling_inputs:
                     # Generate IValue conversions so that tensor shapes
                     # and scalar types are recorded by the profiler.
-                    # Recorded order is the operator's schema order, with `out`
-                    # last where the caller records one, matching the eager
-                    # trace layout. It is not the shim's argument order, which
-                    # passes `out` first, so consumers must not zip "Input
-                    # Dims" against the shim signature.
-                    ivalue_lines: list[str] = []
-                    ivalue_names: list[str] = []
-                    # Tensors and placeholders are numbered independently so a
-                    # name identifies which kind of argument it holds.
-                    num_inputs = 0
-                    num_scalars = 0
-
-                    for profiling_arg in profiling_args or ():
-                        if profiling_arg is None:
-                            # A non-tensor argument only has to hold its schema
-                            # position, so record a dummy int64.
-                            ivalue_var = f"tmp_{shim_fn}_scalar_{num_scalars}"
-                            num_scalars += 1
-                            to_ivalue = f"aoti_torch_int64_to_ivalue(0, &{ivalue_var})"
-                        else:
-                            ivalue_var = f"tmp_{shim_fn}_input_{num_inputs}"
-                            num_inputs += 1
-                            to_ivalue = (
-                                f"aoti_torch_tensor_to_ivalue({profiling_arg}, "
-                                f"&{ivalue_var})"
-                            )
-                        ivalue_lines.extend(_ivalue_conversion(ivalue_var, to_ivalue))
-                        ivalue_names.append(ivalue_var)
-
-                    if output_handle:
-                        ivalue_var = f"tmp_{shim_fn}_output"
-                        ivalue_lines.extend(
-                            _ivalue_conversion(
-                                ivalue_var,
-                                f"aoti_torch_tensor_to_ivalue({output_handle}, "
-                                f"&{ivalue_var})",
-                            )
-                        )
-                        ivalue_names.append(ivalue_var)
-
-                    inputs_vec_var = f"{shim_fn}_inputs_"
-                    ivalue_lines.append(
-                        f"std::vector<C10IValueHandle> {inputs_vec_var}({{{', '.join(ivalue_names)}}});"
+                    ivalue_lines, inputs_vec_var = _profiling_ivalue_lines(
+                        shim_fn, profiling_args or (), output_handle
                     )
 
                     shim_fn_codes = ["{", *ivalue_lines]
@@ -2163,9 +2172,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         # call the ABI shim function instead of the ATen one
         self.add_device_include(device)
-        cpp_kernel_name = self.get_c_shim_func_name(cpp_kernel_name, device)
-        # TODO: consider remove "_out" and add missing inplace variants to fallback_ops.py
-        cpp_kernel_name = cpp_kernel_name.replace("__", "_") + "_out"
+        cpp_kernel_name = self.scatter_fallback_kernel_name(
+            self.get_c_shim_func_name(cpp_kernel_name, device)
+        )
         # str(output) ensures that CppWrapperCpuArrayRef borrows the output tensor
         args_wrapped = self._generate_scatter_fallback_args((str(output), *inputs))
         # Wrap in AOTI_TORCH_ERROR_CODE_CHECK so a shim failure
@@ -4582,3 +4591,29 @@ if (!custom_op_wrapper) {
             stack_trace_str += "\n"
         stack_trace_str += ')"'
         self.writeline(f'KernelContextGuard _ctx("{kernel_name}", {stack_trace_str});')
+
+    def records_profiling_args(self) -> bool:
+        return True
+
+    def scatter_fallback_kernel_name(self, kernel_name: str) -> str:
+        # TODO: consider remove "_out" and add missing inplace variants to fallback_ops.py
+        return kernel_name.replace("__", "_") + "_out"
+
+    def write_record_function_handle(
+        self,
+        kernel_name: str,
+        profiling_args: Sequence[str | None] | None = None,
+    ):
+        sanitized = kernel_name.replace("::", "_").replace(".", "_")
+        if profiling_args:
+            ivalue_lines, inputs_vec = _profiling_ivalue_lines(
+                sanitized, profiling_args
+            )
+            self.writelines(ivalue_lines)
+            self.writeline(
+                f'RAIIAtenRecordFunctionHandle record_{sanitized}_("{kernel_name}", nullptr, {inputs_vec});'
+            )
+        else:
+            self.writeline(
+                f'RAIIAtenRecordFunctionHandle record_{sanitized}_("{kernel_name}", nullptr);'
+            )
