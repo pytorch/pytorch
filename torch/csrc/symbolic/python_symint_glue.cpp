@@ -9,9 +9,9 @@
 #include <utility>
 
 // The torch.SymInt / torch.SymBool magic methods of
-// torch.fx.experimental.sym_node._make_user_magic, run natively when every
-// symbolic operand has a native node. Anything else calls the Python function
-// they replace.
+// torch.fx.experimental.sym_node._make_user_magic and of their class bodies in
+// torch/__init__.py, run natively when every symbolic operand has a native
+// node. Anything else calls the Python function they replace.
 
 namespace torch::symbolic {
 
@@ -20,7 +20,56 @@ namespace {
 using BinaryFn = c10::SymNode (c10::SymNodeImpl::*)(const c10::SymNode&);
 using UnaryFn = c10::SymNode (c10::SymNodeImpl::*)();
 
-enum class Entry : uint8_t { Unary, Binary, Reflected };
+enum class Entry : uint8_t {
+  Unary,
+  Binary,
+  Reflected,
+  SymIte,
+  // Class bodies. The Div/Pow/RPow method_attr is the int method they call.
+  SymIntBool,
+  SymBoolBool,
+  SymIntInt,
+  SymBoolInt,
+  SymIntHash,
+  SymBoolHash,
+  Repr,
+  HasHint,
+  Div,
+  Pow,
+  RPow
+};
+
+const std::pair<std::string_view, Entry> kinds[] = {
+    {"unary", Entry::Unary},
+    {"binary", Entry::Binary},
+    {"rbinary", Entry::Reflected},
+    {"sym_ite", Entry::SymIte},
+    {"symint_bool", Entry::SymIntBool},
+    {"symbool_bool", Entry::SymBoolBool},
+    {"symint_int", Entry::SymIntInt},
+    {"symbool_int", Entry::SymBoolInt},
+    {"symint_hash", Entry::SymIntHash},
+    {"symbool_hash", Entry::SymBoolHash},
+    {"repr", Entry::Repr},
+    {"has_hint", Entry::HasHint},
+    {"div", Entry::Div},
+    {"pow", Entry::Pow},
+    {"rpow", Entry::RPow}};
+
+Py_ssize_t arity(Entry e) {
+  switch (e) {
+    case Entry::Binary:
+    case Entry::Reflected:
+    case Entry::Div:
+    case Entry::Pow:
+    case Entry::RPow:
+      return 2;
+    case Entry::SymIte:
+      return 3;
+    default:
+      return 1;
+  }
+}
 
 // Set by _seal_glue; process lifetime.
 struct Glue {
@@ -33,6 +82,7 @@ struct Glue {
   // logger._cache, which logging clears in place.
   PyObject* log_cache = nullptr;
   PyObject* sym_node_dict = nullptr;
+  PyObject* torch_dict = nullptr;
   // SymInt/SymBool construction is object.__new__ plus torch's __init__.
   bool construct = false;
 };
@@ -47,6 +97,10 @@ struct Names {
   PyObject* isEnabledFor;
   PyObject* debug;
   PyObject* empty_tuple;
+  PyObject* zero;
+  PyObject* sym_float;
+  PyObject* pow;
+  PyObject* rpow;
 };
 Names names;
 
@@ -340,6 +394,145 @@ std::optional<py::object> unary_fast(
       false);
 }
 
+bool truthy(PyObject* obj) {
+  int r = PyObject_IsTrue(obj);
+  if (r < 0) {
+    throw py::error_already_set();
+  }
+  return r != 0;
+}
+
+py::object call_method(PyObject* self, PyObject* name, PyObject* arg) {
+  return steal_or_throw(PyObject_CallMethodOneArg(self, name, arg));
+}
+
+// sym_float(a).<name>(sym_float(b)), sym_float being torch's global.
+py::object float_pow(PyObject* a, PyObject* b, PyObject* name) {
+  PyObject* sym_float =
+      PyDict_GetItemWithError(glue.torch_dict, names.sym_float);
+  if (sym_float == nullptr) {
+    if (!PyErr_Occurred()) {
+      PyErr_SetObject(PyExc_NameError, names.sym_float);
+    }
+    throw py::error_already_set();
+  }
+  py::object fa = steal_or_throw(PyObject_CallOneArg(sym_float, a));
+  py::object fb = steal_or_throw(PyObject_CallOneArg(sym_float, b));
+  return call_method(fa.ptr(), name, fb.ptr());
+}
+
+// sym_ite_magic_impl.
+std::optional<py::object> sym_ite_fast(
+    Operand& pred,
+    PyObject* then_obj,
+    PyObject* else_obj,
+    const char*& reason) {
+  Operand a, b;
+  if ((reason = parse(then_obj, a)) || (reason = parse(else_obj, b))) {
+    return std::nullopt;
+  }
+  for (Operand* x : {&a, &b}) {
+    if (!x->node) {
+      x->node = x->is_bool ? pred.node->wrap_bool(x->value != 0)
+                           : pred.node->wrap_int(x->value);
+    }
+  }
+  auto* an = dynamic_cast<NativeSymNodeImpl*>(a.node.get());
+  auto* bn = dynamic_cast<NativeSymNodeImpl*>(b.node.get());
+  if (an == nullptr || bn == nullptr || an->pytype() != bn->pytype()) {
+    reason = "sym_ite pytype";
+    return std::nullopt;
+  }
+  py::object ret = wrap_result(pred.node->sym_ite(a.node, b.node), false);
+  if (!is_symint(ret) && !is_symbool(ret) && !is_symfloat(ret)) {
+    // ret.node.is_constant() on a plain constant: the AttributeError.
+    steal_or_throw(PyObject_GetAttr(ret.ptr(), names.node));
+  }
+  return constant_result(std::move(ret));
+}
+
+// The class-body methods and sym_ite; args[0] is self.
+std::optional<py::object> body_fast(
+    const GlueMethod& m,
+    PyObject* const* args,
+    const char*& reason) {
+  Operand self;
+  if ((reason = parse(args[0], self))) {
+    return std::nullopt;
+  }
+  bool want_symbool = m.entry == Entry::SymIte ||
+      m.entry == Entry::SymBoolBool || m.entry == Entry::SymBoolInt ||
+      m.entry == Entry::SymBoolHash;
+  bool any = m.entry == Entry::Repr || m.entry == Entry::HasHint;
+  if (!self.node || (!any && self.symbool != want_symbool)) {
+    reason = "operand type";
+    return std::nullopt;
+  }
+  switch (m.entry) {
+    case Entry::SymIte:
+      return sym_ite_fast(self, args[1], args[2], reason);
+    case Entry::SymIntBool: {
+      py::object ne =
+          steal_or_throw(PyObject_RichCompare(args[0], names.zero, Py_NE));
+      return py::bool_(truthy(ne.ptr()));
+    }
+    case Entry::SymBoolBool:
+      return py::bool_(self.node->bool_());
+    case Entry::SymIntInt:
+      return py::int_(self.node->int_());
+    case Entry::SymBoolInt:
+      return py::int_(self.node->bool_() ? 1 : 0);
+    case Entry::SymIntHash:
+      if (self.node->is_nested_int()) {
+        reason = "nested int";
+        return std::nullopt;
+      }
+      PyErr_SetString(PyExc_TypeError, "unhashable type: non-nested SymInt");
+      throw py::error_already_set();
+    case Entry::SymBoolHash:
+      return py::int_(
+          self.node->is_constant() ? self.node->bool_() : truthy(args[0]));
+    case Entry::Repr:
+      return py::str(self.node->_graph_repr());
+    case Entry::HasHint:
+      return py::bool_(self.node->has_hint());
+    default:
+      break;
+  }
+  // Div/Pow/RPow test isinstance(other, (int, SymInt)); floats and int
+  // subclasses are outside the domain.
+  Operand other;
+  if ((reason = parse(args[1], other))) {
+    return std::nullopt;
+  }
+  if (other.symbool) {
+    return py::reinterpret_borrow<py::object>(Py_NotImplemented);
+  }
+  if (m.entry == Entry::Div) {
+    return call_method(args[0], m.method_attr, args[1]);
+  }
+  // The exponent >= 0 guard decides between the int method and a float pow;
+  // nothing may fall back after it ran.
+  PyObject* exponent = m.entry == Entry::Pow ? args[1] : args[0];
+  bool nonneg = false;
+  if (m.entry == Entry::Pow && !other.node) {
+    if (other.value < 0) {
+      reason = "negative exponent";
+      return std::nullopt;
+    }
+    nonneg = true;
+  } else {
+    py::object ge =
+        steal_or_throw(PyObject_RichCompare(exponent, names.zero, Py_GE));
+    nonneg = truthy(ge.ptr());
+  }
+  if (nonneg) {
+    return call_method(args[0], m.method_attr, args[1]);
+  }
+  return float_pow(
+      args[0], args[1], m.entry == Entry::Pow ? names.pow : names.rpow);
+}
+
 PyObject* glue_vectorcall(
     PyObject* callable,
     PyObject* const* args,
@@ -352,14 +545,16 @@ PyObject* glue_vectorcall(
     std::optional<py::object> r;
     if (kwnames != nullptr) {
       reason = "keywords";
-    } else if (nargs != (m.entry == Entry::Unary ? 1 : 2)) {
+    } else if (nargs != arity(m.entry)) {
       reason = "arity";
     } else if (!intact()) {
       reason = "glue modified";
     } else if (m.entry == Entry::Unary) {
       r = unary_fast(m, args[0], reason);
-    } else {
+    } else if (m.entry == Entry::Binary || m.entry == Entry::Reflected) {
       r = binary_fast(m, args[0], args[1], reason);
+    } else {
+      r = body_fast(m, args, reason);
     }
     if (r) {
       return r->release().ptr();
@@ -397,8 +592,14 @@ PyObject* glue_new(PyTypeObject* type, PyObject* args, PyObject* kwds) {
           &promote)) {
     return nullptr;
   }
-  std::string_view k(kind);
-  if (k != "unary" && k != "binary" && k != "rbinary") {
+  const Entry* entry = nullptr;
+  for (const auto& [name, e] : kinds) {
+    if (name == kind) {
+      entry = &e;
+      break;
+    }
+  }
+  if (entry == nullptr) {
     PyErr_Format(PyExc_ValueError, "unknown glue kind '%s'", kind);
     return nullptr;
   }
@@ -413,11 +614,10 @@ PyObject* glue_new(PyTypeObject* type, PyObject* args, PyObject* kwds) {
   m->vectorcall = glue_vectorcall;
   m->original = Py_NewRef(original);
   m->method_attr = Py_NewRef(method_attr);
-  m->entry = k == "unary" ? Entry::Unary
-      : k == "binary"     ? Entry::Binary
-                          : Entry::Reflected;
+  m->entry = *entry;
   m->promote = promote != 0;
-  m->binary_fn = m->entry == Entry::Unary ? nullptr : binary_virtual(attr);
+  bool binary = m->entry == Entry::Binary || m->entry == Entry::Reflected;
+  m->binary_fn = binary ? binary_virtual(attr) : nullptr;
   m->unary_fn = m->entry == Entry::Unary ? unary_virtual(attr) : nullptr;
   PyObject_GC_Track(m);
   return reinterpret_cast<PyObject*>(m);
@@ -519,8 +719,13 @@ void initGlueBindings(py::module_& sm) {
       intern("wrap_node"),
       intern("isEnabledFor"),
       PyLong_FromLong(10),
-      PyTuple_New(0)};
-  if (names.debug == nullptr || names.empty_tuple == nullptr) {
+      PyTuple_New(0),
+      PyLong_FromLong(0),
+      intern("sym_float"),
+      intern("__pow__"),
+      intern("__rpow__")};
+  if (names.debug == nullptr || names.empty_tuple == nullptr ||
+      names.zero == nullptr) {
     throw py::error_already_set();
   }
 
@@ -560,6 +765,10 @@ void initGlueBindings(py::module_& sm) {
       glue.sym_node_dict =
           py::object(py::module_::import("torch.fx.experimental.sym_node")
                          .attr("__dict__"))
+              .release()
+              .ptr();
+      glue.torch_dict =
+          py::object(py::module_::import("torch").attr("__dict__"))
               .release()
               .ptr();
     }

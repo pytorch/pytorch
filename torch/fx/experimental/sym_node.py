@@ -2152,23 +2152,47 @@ del func
 
 def _install_native_glue() -> None:
     """
-    Replaces the unary and binary SymInt/SymBool magic methods by
-    torch._C._symbolic._SymGlueMethod descriptors, which run them natively when
-    every symbolic operand has a native node and call the replaced function
-    otherwise.
+    Replaces the SymInt/SymBool magic methods and the class-body methods that
+    read the node by torch._C._symbolic._SymGlueMethod descriptors, which run
+    them natively when every symbolic operand has a native node and call the
+    replaced function otherwise.
     """
     from torch._C import _symbolic
 
+    entries = []
     for user_type, attr, method, kind in _user_magic_entries:
         if user_type is SymFloat or kind not in ("unary", "binary", "rbinary"):
+            if user_type is SymBool and kind == "sym_ite":
+                entries.append((SymBool, attr, kind, method, False))
             continue
-        original = _native_glue_originals.setdefault(
-            (user_type, attr), user_type.__dict__[attr]
-        )
         method_attr = method
         if method in magic_methods_on_operator_with_trailing_underscore:
             method_attr = f"sym_{method}"
         promote = method in bool_becomes_int_magic_methods
+        entries.append((user_type, attr, kind, method_attr, promote))
+    entries += [
+        (SymInt, "__bool__", "symint_bool", "", False),
+        (SymInt, "__int__", "symint_int", "", False),
+        (SymInt, "__index__", "symint_int", "", False),
+        (SymInt, "__truediv__", "div", "__int_truediv__", False),
+        (SymInt, "__rtruediv__", "div", "__rint_truediv__", False),
+        (SymInt, "__floordiv__", "div", "__int_floordiv__", False),
+        (SymInt, "__rfloordiv__", "div", "__rint_floordiv__", False),
+        (SymInt, "__pow__", "pow", "__pow_by_natural__", False),
+        (SymInt, "__rpow__", "rpow", "__rpow_by_natural__", False),
+        (SymInt, "__repr__", "repr", "", False),
+        (SymInt, "__hash__", "symint_hash", "", False),
+        (SymInt, "has_hint", "has_hint", "", False),
+        (SymBool, "__bool__", "symbool_bool", "", False),
+        (SymBool, "__int__", "symbool_int", "", False),
+        (SymBool, "__hash__", "symbool_hash", "", False),
+        (SymBool, "__sym_float__", "unary", "sym_float", False),
+        (SymBool, "__repr__", "repr", "", False),
+    ]
+    for user_type, attr, kind, method_attr, promote in entries:
+        original = _native_glue_originals.setdefault(
+            (user_type, attr), user_type.__dict__[attr]
+        )
         glue = _symbolic._SymGlueMethod(original, kind, method_attr, promote)
         setattr(user_type, attr, glue)
     construct = all(

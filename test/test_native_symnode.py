@@ -3926,6 +3926,11 @@ class TestNativeSymIntGlue(TestCase):
         "rshift": operator.rshift,
     }
     PLAIN = [0, 1, 2, -3, 6, True, False]
+    SYMINT_BODY = ["__bool__", "__int__", "__index__", "__truediv__", "__rtruediv__"]
+    SYMINT_BODY += ["__floordiv__", "__rfloordiv__", "__pow__", "__rpow__"]
+    SYMINT_BODY += ["__repr__", "__hash__", "has_hint"]
+    SYMBOOL_BODY = ["__bool__", "__int__", "__hash__", "__sym_float__", "__repr__"]
+    SYMBOOL_BODY += ["__sym_ite__"]
     CORE = {"add", "sub", "mul", "mod", "int_floordiv", "and", "or", "eq", "ne"}
     CORE |= {"lt", "le", "gt", "ge", "neg", "sym_not", "sym_min", "sym_max"}
 
@@ -4018,10 +4023,157 @@ class TestNativeSymIntGlue(TestCase):
         native = [r for r in got[:-2] if len(r) == 6 and r[1] is _NativeSymNode]
         self.assertGreater(len(native), 40)
 
+    def body_program(self, seed):
+        rng = random.Random(seed)
+        env, ints, bools = self.make_env()
+        ints += [ints[0] + ints[1], ints[2] * 2, ints[3] - 1]
+        exponents = [0, 1, 2, -1, True, False]
+        ops = [
+            lambda x, y, p: bool(x),
+            lambda x, y, p: bool(p),
+            lambda x, y, p: int(p),
+            lambda x, y, p: x / y,
+            lambda x, y, p: y / x,
+            lambda x, y, p: x // y,
+            lambda x, y, p: y // x,
+            lambda x, y, p: x ** rng.choice(exponents),
+            lambda x, y, p: rng.choice([2, -2, 0]) ** x,
+            lambda x, y, p: x ** rng.choice(ints[:5]),
+            lambda x, y, p: x.__rpow__(y),
+            lambda x, y, p: x / p,
+            lambda x, y, p: x // p,
+            lambda x, y, p: x**p,
+            lambda x, y, p: x / 2.0,
+            lambda x, y, p: repr(x),
+            lambda x, y, p: repr(p),
+            lambda x, y, p: hash(x),
+            lambda x, y, p: hash(p),
+            lambda x, y, p: x.has_hint(),
+            lambda x, y, p: torch.sym_float(p),
+            lambda x, y, p: torch.sym_ite(p, x, y),
+            lambda x, y, p: torch.sym_ite(p, 3, 3),
+            lambda x, y, p: torch.sym_ite(p, rng.choice(bools), rng.choice(bools)),
+            lambda x, y, p: p.__sym_ite__(rng.choice(self.PLAIN), y),
+            lambda x, y, p: p.__sym_ite__(x, 1.5),
+        ]
+        out = []
+        for _ in range(120):
+            x = rng.choice(ints)
+            y = rng.choice(ints + self.PLAIN)
+            p = rng.choice(bools)
+            try:
+                r = rng.choice(ops)(x, y, p)
+            except Exception as e:
+                out.append(("raise", type(e), str(e)))
+                continue
+            out.append(self.describe(r))
+            if isinstance(r, torch.SymInt) and type(r.node) is _NativeSymNode:
+                ints[rng.randrange(5, len(ints))] = r
+        # int() specializes, so it goes last.
+        for x in rng.sample(ints, 3):
+            try:
+                out.append((int(x), operator.index(x)))
+            except Exception as e:
+                out.append(("raise", type(e)))
+        out.append([q[1:] for q in env._native_env.take_queries()])
+        out.append([str(g.expr) for g in env.guards])
+        return out
+
+    @parametrize("seed", range(6))
+    def test_body_differential(self, seed):
+        got = self.body_program(seed)
+        with python_glue():
+            self.assertIsInstance(torch.SymInt.__bool__, types.FunctionType)
+            want = self.body_program(seed)
+        self.assertEqual(got, want)
+        native = [r for r in got[:-2] if len(r) == 6 and r[1] is _NativeSymNode]
+        self.assertGreater(len(native), 10)
+
+    def test_body_native_path(self):
+        originals = sym_node._native_glue_originals.values()
+        codes = {fn.__code__ for fn in originals}
+
+        def run():
+            _, (a, b, _, d, e), (p, q) = self.make_env()
+            calls = []
+
+            def profile(frame, event, arg):
+                if event != "call" or frame.f_code not in codes:
+                    return
+                # SymFloat's magic methods share their code with SymInt's.
+                first = frame.f_locals[frame.f_code.co_varnames[0]]
+                if not isinstance(first, torch.SymFloat):
+                    calls.append(frame.f_code.co_qualname)
+
+            prev = sys.getprofile()
+            sys.setprofile(profile)
+            try:
+                out = [bool(a), bool(p), int(q), a / b, 3 / a, a // 2, 7 // a]
+                out += [a**2, a**True, a**b, 2**a, repr(a), repr(q), hash(p)]
+                out += [a.has_hint(), torch.sym_ite(p, a, b), torch.sym_ite(q, 1, 2)]
+                out += [a**d, 2**d]
+                # int() specializes, so it goes last.
+                out += [p.__sym_ite__(True, q), int(e), operator.index(e)]
+            finally:
+                sys.setprofile(prev)
+            return [self.describe(r) for r in out], calls
+
+        got, calls = run()
+        self.assertEqual(calls, [])
+        with python_glue():
+            want, calls = run()
+        self.assertGreater(len(calls), 20)
+        self.assertEqual(got, want)
+
+    def test_body_fallbacks(self):
+        reasons = []
+        sym_float = torch.sym_float
+
+        def recording(x):
+            reasons.append(torch._C._symbolic._glue_fallback_reason())
+            return sym_float(x)
+
+        _, (a, b, *_), (p, _) = self.make_env()
+        with mock.patch.object(torch, "sym_float", recording):
+            self.assertIsInstance(a**-1, torch.SymFloat)
+            self.assertIsInstance(a / 2.0, torch.SymFloat)
+        self.assertEqual(reasons[0], "negative exponent")
+        self.assertEqual(reasons[-1], "operand type")
+        with self.assertRaisesRegex(TypeError, "positional argument"):
+            torch.SymInt.__pow__(a, 2, 3)
+        with self.assertRaisesRegex(TypeError, "non-nested SymInt"):
+            hash(a)
+        with self.assertRaisesRegex(TypeError, "unsupported operand"):
+            a / p
+        with self.assertRaisesRegex(AssertionError, "same pytype"):
+            p.__sym_ite__(a, p)
+        unbound = [
+            lambda: torch.SymInt.__bool__(p),
+            lambda: torch.SymBool.__bool__(a),
+            lambda: torch.SymInt.__int__(p),
+            lambda: torch.SymBool.__hash__(a),
+            lambda: torch.SymInt.__truediv__(p, 2),
+            lambda: torch.SymInt.__pow__(p, 2),
+            lambda: torch.SymBool.__sym_ite__(a, 1, 2),
+        ]
+        for fn in unbound:
+            results = []
+            for ctx in (contextlib.nullcontext(), python_glue()):
+                with ctx:
+                    try:
+                        results.append(self.describe(fn()))
+                    except Exception as e:
+                        results.append(("raise", type(e), str(e)))
+            self.assertEqual(results[0], results[1])
+        self.assertIsNone(torch._C._symbolic._glue_fallback_reason())
+
     def test_installed(self):
         originals = sym_node._native_glue_originals
-        self.assertEqual(len(originals), len(self.ENTRIES))
-        for cls, attr, _ in self.ENTRIES:
+        body = {(torch.SymInt, a) for a in self.SYMINT_BODY}
+        body |= {(torch.SymBool, a) for a in self.SYMBOOL_BODY}
+        entries = {(cls, attr) for cls, attr, _ in self.ENTRIES}
+        self.assertEqual(set(originals), entries | body)
+        for cls, attr in originals:
             glue = cls.__dict__[attr]
             self.assertIsInstance(glue, torch._C._symbolic._SymGlueMethod)
             fn = originals[(cls, attr)]
@@ -4031,7 +4183,7 @@ class TestNativeSymIntGlue(TestCase):
             self.assertEqual(inspect.signature(glue), inspect.signature(fn))
             self.assertIs(getattr(cls, attr), glue)
         self.assertIsInstance(torch.SymFloat.__add__, types.FunctionType)
-        self.assertIsInstance(torch.SymBool.__sym_ite__, types.FunctionType)
+        self.assertIsInstance(torch.SymInt.__round__, types.FunctionType)
         _, ints, _ = self.make_env()
         a = ints[0]
         self.assertEqual(str(a.__add__(1)), f"{a} + 1")
@@ -4142,17 +4294,20 @@ class TestNativeSymIntGlue(TestCase):
 
     @parametrize("pre_dispatch", [False, True])
     def test_make_fx(self, pre_dispatch):
-        def f(a, b, p):
+        def f(a, b, p, d):
             c = a + b
             d = c * 2 - a // b
             e = (d % 3 + 1) * 1
             m = torch.sym_max(a, b) + 3 * torch.sym_min(a, 3)
-            return e, m, -a, 2 - a, a < b, (p & (a == b)) | (b > 2), p + 1, True * p
+            r = e, m, -a, 2 - a, a < b, (p & (a == b)) | (b > 2), p + 1, True * p
+            r += a**2, a**b, 2**a, a // 2, 7 // b, a / b, torch.sym_ite(p, a, b)
+            return *r, a**d, 2**d
 
         def trace():
-            env, (a, b, *_), (p, _) = self.make_env()
+            env, (a, b, _, d, _), (p, _) = self.make_env()
+            fx = make_fx(f, tracing_mode="real", pre_dispatch=pre_dispatch)
             with self.count_inits() as inits:
-                gm = make_fx(f, tracing_mode="real", pre_dispatch=pre_dispatch)(a, b, p)
+                gm = fx(a, b, p, d)
             return gm.code, [str(g.expr) for g in env.guards], len(inits)
 
         *got, got_inits = trace()
