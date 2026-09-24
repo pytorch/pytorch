@@ -36,26 +36,21 @@ struct LocalState {
       auto result =
           (ks | dispatch_modifier.included_) - dispatch_modifier.excluded_;
 
+      // Python FakeTensors carry the Python keys and C++ FakeTensors carry
+      // Fake; masking both lets guards built from fakes match real tensors.
       if (should_mask_python_keys) {
         result = result -
             c10::DispatchKeySet(
                      {c10::DispatchKey::Python,
                       c10::DispatchKey::PythonTLSSnapshot,
-                      c10::DispatchKey::PythonDispatcher});
+                      c10::DispatchKey::PythonDispatcher,
+                      c10::DispatchKey::Fake});
       }
 
       return result;
     } else {
       return override_dispatch_key_set;
     }
-  }
-
-  at::DispatchKeySet apply_for_tensor(at::DispatchKeySet ks) const {
-    auto result = apply(ks);
-    if (override_dispatch_key_set.empty()) {
-      result = result - c10::DispatchKeySet(c10::DispatchKey::Fake);
-    }
-    return result;
   }
 
   LocalState()
