@@ -31,6 +31,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <exception>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -878,13 +879,40 @@ void GraphTask::exec_post_processing() {
   }
 }
 
-void GraphTask::set_exception_without_signal(
-    const c10::intrusive_ptr<Node>& fn) {
-  if (!has_error_.exchange(true)) {
-    if (AnomalyMode::is_enabled() && fn) {
-      fn->metadata()->print_stack(fn->name());
-    }
+namespace {
+
+// Attach the anomaly-mode forward traceback to the exception that will be
+// rethrown after backward. Error-reporting frameworks surface exception
+// messages, not the UserWarning that print_stack() used to emit (#101069).
+std::exception_ptr wrap_exception_with_anomaly_trace(
+    std::exception_ptr eptr,
+    const std::string& trace) {
+  if (!eptr || trace.empty()) {
+    return eptr;
   }
+  std::string original = "Unknown exception";
+  try {
+    std::rethrow_exception(eptr);
+  } catch (const c10::Error& e) {
+    original = e.what_without_backtrace();
+  } catch (const std::exception& e) {
+    original = e.what();
+  } catch (...) {
+    original = "Unknown exception";
+  }
+  try {
+    TORCH_CHECK(false, original, "\n", trace);
+  } catch (...) {
+    return std::current_exception();
+  }
+  return eptr;
+}
+
+} // namespace
+
+void GraphTask::set_exception_without_signal(
+    const c10::intrusive_ptr<Node>& /*fn*/) {
+  has_error_.exchange(true);
 }
 
 void GraphTask::set_exception(
@@ -892,6 +920,14 @@ void GraphTask::set_exception(
     const c10::intrusive_ptr<Node>& fn) {
   set_exception_without_signal(fn);
   if (!future_completed_.exchange(true)) {
+    if (AnomalyMode::is_enabled() && fn) {
+      try {
+        eptr = wrap_exception_with_anomaly_trace(
+            std::move(eptr), fn->metadata()->format_stack(fn->name()));
+      } catch (...) {
+        // Keep the original exception if formatting the forward traceback fails.
+      }
+    }
     future_result_->setError(std::move(eptr));
   }
 }
