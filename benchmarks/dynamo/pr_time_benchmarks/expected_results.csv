@@ -46,7 +46,7 @@ symint_sum,compile_time_instruction_count,3992000000,0.1
 
 
 
-symint_sum_loop,compile_time_instruction_count,9407000000,0.1
+symint_sum_loop,compile_time_instruction_count,9206000000,0.1
 
 
 
@@ -74,7 +74,7 @@ aotdispatcher_training_subclass_cpu,compile_time_instruction_count,9157000000,0.
 
 
 
-mm_loop_inductor_gpu,compile_time_instruction_count,5380000000,0.1
+mm_loop_inductor_gpu,compile_time_instruction_count,5223000000,0.1
 
 
 
@@ -110,7 +110,7 @@ float_args,compile_time_instruction_count,550500000,0.1
 
 
 
-dtensor_dispatch_detach,instruction_count,50600,0.1
+dtensor_dispatch_detach,instruction_count,60230,0.1
 
 
 
@@ -146,7 +146,7 @@ nn_module_guard_eval,instruction_count,74550,0.1
 
 
 
-nn_module_guard_eval_dynamic,instruction_count,104100,0.1
+nn_module_guard_eval_dynamic,instruction_count,106900,0.1
 
 
 
