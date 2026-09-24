@@ -85,6 +85,7 @@ from ..utils import (
     _is_tensorify_enabled,
     check_positional,
     check_unspec_or_constant_args,
+    fqn,
     guard_if_dyn,
     has_torch_function,
     hashable,
@@ -1000,6 +1001,14 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     f"Expected first argument to be callable, got {type(fns[0])}"
                 )
             return _register
+
+        def as_python_device(device: VariableTracker, /) -> Any:
+            """Preserve CooR's indexless device when unwrapping device arguments."""
+            from .tensor import CurrentDeviceVariable
+
+            if isinstance(device, CurrentDeviceVariable):
+                return device.value
+            return device.as_python_constant()
 
         from torch.backends.cuda import SDPAParams
 
@@ -2822,9 +2831,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
             try:
                 if kwargs:
-                    device = kwargs["device"].as_python_constant()
+                    device = as_python_device(kwargs["device"])
                 elif args:
-                    device = args[0].as_python_constant()
+                    device = as_python_device(args[0])
                 else:
                     device = None
                 module = torch.get_device_module(device)
@@ -2875,9 +2884,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
             try:
                 if kwargs:
-                    device = torch.device(kwargs["device"].as_python_constant())
+                    device = torch.device(as_python_device(kwargs["device"]))
                 elif args:
-                    device = torch.device(args[0].as_python_constant())
+                    device = torch.device(as_python_device(args[0]))
                 else:
                     device = None
 
@@ -2926,9 +2935,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         ) -> VariableTracker:
             device = None
             if kwargs and "device" in kwargs:
-                device = torch.device(kwargs["device"].as_python_constant())
+                device = torch.device(as_python_device(kwargs["device"]))
             elif args:
-                device = torch.device(args[0].as_python_constant())
+                device = torch.device(as_python_device(args[0]))
 
             if device is None:
                 device_type = _synchronize_fn_to_device_type.get(self.value)
@@ -3697,6 +3706,34 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         if self.torch_function_override_enabled(tx, args, kwargs):
             return dispatch_torch_function(tx, self, args, kwargs)
+
+        if self.can_constant_fold_through():
+            from .tensor import CurrentDeviceVariable
+
+            if any(
+                isinstance(a, CurrentDeviceVariable) for a in (*args, *kwargs.values())
+            ):
+                # Under CooR the current device's index is only known at runtime, so
+                # there is no constant to fold to. Breaking is correct rather than
+                # merely conservative: get_device_properties mixes rank-invariant
+                # hardware facts with per-card identity (uuid, pci_bus_id), so the
+                # compiling rank's answer is not right for every rank. The eager
+                # fallback reads the running rank's.
+                unimplemented(
+                    gb_type="Constant fold with a rank-relative device",
+                    context=fqn(self.value),
+                    explanation=(
+                        f"`{fqn(self.value)}` was called with the current device, "
+                        "whose index is only known at runtime under "
+                        "compile_on_one_rank, so the result cannot be folded into "
+                        "the graph."
+                    ),
+                    hints=[
+                        "This graph break is expected under compile_on_one_rank.",
+                        "The resumed eager call observes the running rank's device.",
+                        "Pass an explicit device if the value is the same on every rank.",
+                    ],
+                )
 
         if self.can_constant_fold_through() and check_unspec_or_constant_args(
             args, kwargs
