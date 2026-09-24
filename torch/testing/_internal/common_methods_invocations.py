@@ -49,7 +49,7 @@ from torch.testing._internal.common_utils import (
     torch_to_numpy_dtype_dict, numpy_to_torch_dtype, TEST_WITH_ASAN,
     GRADCHECK_NONDET_TOL, slowTest, TEST_WITH_SLOW,
     TEST_WITH_TORCHINDUCTOR, skipIfNoTritonDSL, skipIfNoCuteDSL, skipIfRocm, TEST_XPU,
-    TEST_CUDA, skipIfNoFlyDSL
+    TEST_CUDA, skipIfNoFlyDSL, skipIfRocmArch, MI200_ARCH
 )
 from torch.testing._utils import wrapper_set_seed
 
@@ -15951,6 +15951,10 @@ op_db: list[OpInfo] = [
                             dtypes=(torch.int64,)),
                # RuntimeError: Convolution is supported only for Floating types
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+               # MIOpen's fp16 bwd-data solver ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC is inaccurate on gfx90a
+               # https://github.com/ROCm/rocm-libraries/issues/12322
+               DecorateInfo(skipIfRocmArch(MI200_ARCH), 'TestCommon', 'test_complex_half_reference_testing',
+                            device_type='cuda', dtypes=(torch.chalf,)),
                DecorateInfo(
                    unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
                    device_type='mps', dtypes=(torch.int64,)
@@ -16378,10 +16382,16 @@ op_db: list[OpInfo] = [
     OpInfo('constant_pad_nd',
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half, torch.float8_e4m3fn),
            sample_inputs_func=sample_inputs_constant_pad_nd,
            supports_out=False,
            skips=(
+               # SchemaCheckMode uses allclose, which does not support float8.
+               DecorateInfo(unittest.expectedFailure, 'TestSchemaCheckModeOpInfo', 'test_schema_correctness',
+                            dtypes=(torch.float8_e4m3fn,)),
+               # FP8 comparisons do not support the nonzero tolerances used by NNC.
+               DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness',
+                            dtypes=(torch.float8_e4m3fn,)),
                # bool can't be passed to Scalar arguments in JIT tracer because
                # BoolType is not a subtype of ScalarType.
                DecorateInfo(
@@ -16395,9 +16405,17 @@ op_db: list[OpInfo] = [
            gradcheck_fast_mode=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half, torch.float8_e4m3fn),
            sample_inputs_func=partial(sample_inputs_nn_pad, mode='constant'),
-           supports_out=False),
+           supports_out=False,
+           skips=(
+               # SchemaCheckMode uses allclose, which does not support float8.
+               DecorateInfo(unittest.expectedFailure, 'TestSchemaCheckModeOpInfo', 'test_schema_correctness',
+                            dtypes=(torch.float8_e4m3fn,)),
+               # FP8 comparisons do not support the nonzero tolerances used by NNC.
+               DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness',
+                            dtypes=(torch.float8_e4m3fn,)),
+           )),
     OpInfo('nn.functional.pad',
            variant_test_name='reflect',
            supports_forward_ad=True,
