@@ -39,6 +39,8 @@ enum class Kind : uint8_t {
   // Custom functions from torch/utils/_sympy/functions.py (Functions.cpp).
   Mod,
   PythonMod,
+  FloorDiv,
+  CleanDiv,
   // Boolean kinds: sympy Booleans that are not Exprs.
   BooleanTrue,
   BooleanFalse,
@@ -293,6 +295,8 @@ class ExprArena : public c10::intrusive_ptr_target {
   const Expr* number_pow(Num b, int64_t e);
   // Mod.eval and PythonMod.eval; nullptr for None.
   const Expr* eval_mod(Kind kind, const Expr* p, const Expr* q);
+  // FloorDiv.eval, also for CleanDiv; nullptr for None.
+  const Expr* eval_floordiv(const Expr* base, const Expr* divisor);
   const Expr* new_symbol(const std::string& name, const FactKB& kb);
   const Expr* as_boolean(const Expr* e);
   // The tail of LatticeOp.__new__.

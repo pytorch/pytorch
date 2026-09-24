@@ -14,7 +14,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TestCase,
 )
-from torch.utils._sympy.functions import Mod, PythonMod
+from torch.utils._sympy.functions import CleanDiv, FloorDiv, Mod, PythonMod
 from torch.utils._sympy.numbers import int_oo
 
 
@@ -890,13 +890,21 @@ class TestNativePrinter(TestCase):
 
 
 class TestNativeFunctions(TestCase):
-    FUNCTIONS = {"Mod": Mod, "PythonMod": PythonMod}
+    FUNCTIONS = {
+        "Mod": Mod,
+        "PythonMod": PythonMod,
+        "FloorDiv": FloorDiv,
+        "CleanDiv": CleanDiv,
+    }
 
     def check_call(self, name, a, b):
         """Returns the sympy result, or None if native raised
         NativeUnsupported."""
         arena = torch._C._symbolic._Arena()
-        args = [arena.from_sympy(a), arena.from_sympy(b)]
+        try:
+            args = [arena.from_sympy(a), arena.from_sympy(b)]
+        except NativeUnsupported:
+            return None
         try:
             expected = self.FUNCTIONS[name](a, b)
         except (ZeroDivisionError, AssertionError, TypeError):
@@ -952,6 +960,49 @@ class TestNativeFunctions(TestCase):
             ("PythonMod", -7, 2, 1),
             ("PythonMod", 2 * u0 + 1, 2, 1),
             ("PythonMod", s0, s0 + s1, s0),
+            ("FloorDiv", 7, -2, -4),
+            ("FloorDiv", -7, 2, -4),
+            ("FloorDiv", int_oo, 2, int_oo),
+            ("FloorDiv", int_oo, -2, -int_oo),
+            ("FloorDiv", -int_oo, sympy.Rational(1, 2), -int_oo),
+            ("FloorDiv", 5, int_oo, 0),
+            ("FloorDiv", -5, int_oo, 0),
+            ("FloorDiv", int_oo, 1, int_oo),
+            ("FloorDiv", 0, s0, 0),
+            ("FloorDiv", s0, 1, s0),
+            ("FloorDiv", u0, -1, -u0),
+            ("FloorDiv", s0, s0, 1),
+            ("FloorDiv", 2 * s0 + 3, 2, s0 + 1),
+            ("FloorDiv", 2 * u0 + 1, 2, u0),
+            ("FloorDiv", s0 + 2, 2, FloorDiv(s0, 2) + 1),
+            ("FloorDiv", s0 - 2, 2, FloorDiv(s0, 2) - 1),
+            ("FloorDiv", s0 + 2 * s1, 2, s1 + FloorDiv(s0, 2)),
+            ("FloorDiv", 2 * s0 + 3 * s1, 2, s0 + FloorDiv(3 * s1, 2)),
+            ("FloorDiv", 2 * s0, 4, FloorDiv(s0, 2)),
+            ("FloorDiv", 6 * s0 * s1, 4 * s1, FloorDiv(3 * s0, 2)),
+            ("FloorDiv", 3 * s0, 3 * s1, FloorDiv(s0, s1)),
+            ("FloorDiv", s0 * s1, s0, s1),
+            ("FloorDiv", 1024 * s0, 128 * s0, 8),
+            ("FloorDiv", 4096 * s0, s0, 4096),
+            ("FloorDiv", s0, -s0, -1),
+            ("FloorDiv", -s0, -s1, FloorDiv(s0, s1)),
+            ("FloorDiv", s0**2, s0, FloorDiv(s0**2, s0)),
+            ("FloorDiv", 1, s0, FloorDiv(1, s0)),
+            ("FloorDiv", FloorDiv(s0, 2), 3, FloorDiv(s0, 6)),
+            ("FloorDiv", FloorDiv(s0, s1), s1, FloorDiv(s0, s1**2)),
+            ("FloorDiv", CleanDiv(s0, s1), 2, FloorDiv(s0, 2 * s1)),
+            ("FloorDiv", s0, s1 * (s0 + 1), FloorDiv(s0, s1 * (s0 + 1))),
+            ("FloorDiv", s0, s1 + 1, FloorDiv(s0, s1 + 1)),
+            (
+                "FloorDiv",
+                3 * s0**2 * s1,
+                s0 * s1 + 2,
+                FloorDiv(3 * s0**2 * s1, s0 * s1 + 2),
+            ),
+            ("FloorDiv", 1, 2 * s0 + 3, FloorDiv(1, 2 * s0 + 3)),
+            ("CleanDiv", s0 * s1, s1, s0),
+            ("CleanDiv", s0, s1, CleanDiv(s0, s1)),
+            ("CleanDiv", 2 * s0 + 2, 2, s0 + 1),
         ]
         for name, a, b, expected in cases:
             got = self.check_call(name, sympy.sympify(a), sympy.sympify(b))
@@ -967,6 +1018,14 @@ class TestNativeFunctions(TestCase):
             ("Mod", s0, int_oo),
             ("PythonMod", u0, 2),
             ("PythonMod", s0 + 1, s1),
+            ("FloorDiv", s0, 0),
+            ("FloorDiv", int_oo, int_oo),
+            ("FloorDiv", s0, int_oo),
+            ("FloorDiv", s0 * s1 + s0, s1 + 1),
+            ("FloorDiv", 4 * s0 + 2, 4 * s1),
+            ("FloorDiv", s0, s0 * s1 + s0),
+            ("FloorDiv", s0 + 1, s1 + 1),
+            ("FloorDiv", sympy.Rational(7, 2), 2),
         ]
         for name, a, b in cases:
             args = [arena.from_sympy(sympy.sympify(x)) for x in (a, b)]
@@ -989,6 +1048,12 @@ class TestNativeFunctions(TestCase):
         cases = [s0 - m, -2 * m, m**2, 1 / m, s0 / m, m * s1, -m * s1, m + 1]
         cases += [sympy.Lt(m, s0), sympy.Eq(m, 1), Mod(s0 + 1, s1 + 2), -m]
         cases += [Mod(m + s1, 3), Mod(u0, 2) * u0, s0 * m / (s1 + 1)]
+        f = FloorDiv(s0, 2)
+        cases += [f, f + 1, 2 * f, f**2, sympy.Lt(FloorDiv(u0, 2), s0 + 1)]
+        cases += [Mod(f, 3), sympy.Eq(f, 1), FloorDiv(-u0, 2), FloorDiv(u0, -3)]
+        cases += [FloorDiv(s0 + 1, 2), FloorDiv(s0, s1 + 1), FloorDiv(2 * s0, s1)]
+        cases += [FloorDiv(s0**2, s0), FloorDiv(s0 * f, 2), CleanDiv(s0, s1)]
+        cases += [-f, s0 - f, f * Mod(s0, 3), 1 / f, CleanDiv(s0 + 1, s1) * s0]
         rng = random.Random(0)
         for v in cases:
             self.assertTrue(self.check_expr(v, rng), f"{v}")
@@ -997,6 +1062,7 @@ class TestNativeFunctions(TestCase):
         items = [Mod(s0, 2), Mod(s0, 3), Mod(s1, 2), Mod(u0, 2), s0, u0]
         items += [Mod(s0 + 1, s1), s0 + Mod(s0, 2), sympy.Integer(2), s0**2]
         items += [sympy.Eq(s0, 1, evaluate=False), sympy.Not(u0), sympy.true]
+        items += [FloorDiv(s0, 2), CleanDiv(s0, 2), CleanDiv(s0, s1), FloorDiv(u0, 2)]
         arena = torch._C._symbolic._Arena()
         natives = [arena.from_sympy(x) for x in items]
         for a, na in zip(items, natives):
@@ -1020,12 +1086,59 @@ class TestNativeFunctions(TestCase):
                 r = self.check_call(name, a, b)
                 if r is not None:
                     supported += 1
-                    if isinstance(r, (Mod, PythonMod)):
+                    if isinstance(r, (Mod, PythonMod, FloorDiv)):
                         nodes.append(r)
         self.assertGreater(supported, calls // 3)
         self.assertGreater(len(nodes), 10)
         answered = unsupported = 0
         for _ in range(60):
+            t = random_tree(rng, 3, LEAVES + nodes)
+            for sub in subtrees(t):
+                v = sympy.sympify(sympy_eval(sub))
+                if v.has(sympy.zoo, sympy.nan):
+                    continue
+                if self.check_expr(v, rng):
+                    answered += 1
+                else:
+                    unsupported += 1
+        self.assertGreater(answered, 5 * unsupported)
+
+    @parametrize("seed", range(4))
+    def test_floordiv_fuzz(self, seed):
+        # Shapes that FloorDiv sees on the SymNode path: sums of monomials over
+        # integer symbols divided by integers or monomials.
+        rng = random.Random(seed)
+        syms = [s0, s1, u0, sympy.Symbol("n", integer=True, nonnegative=True)]
+
+        def monomial():
+            c = rng.choice([-4, -2, -1, 1, 1, 2, 3, 4, 6, 8, 128])
+            return sympy.Mul(c, *rng.sample(syms, rng.randint(0, 2)))
+
+        def poly():
+            return sympy.Add(*(monomial() for _ in range(rng.randint(1, 3))))
+
+        calls = supported = 0
+        nodes = []
+        for _ in range(300):
+            a = rng.choice([poly, monomial])()
+            b = rng.choice(
+                [monomial, poly, lambda: sympy.Integer(rng.randint(-4, 8))]
+            )()
+            if rng.random() < 0.2:
+                a = FloorDiv(a, b) if b != 0 else a
+            for name in ("FloorDiv", "CleanDiv"):
+                calls += 1
+                r = self.check_call(name, a, b)
+                if r is not None:
+                    supported += 1
+                    nodes += [
+                        x
+                        for x in sympy.preorder_traversal(r)
+                        if isinstance(x, FloorDiv)
+                    ]
+        self.assertGreater(supported, calls // 2)
+        answered = unsupported = 0
+        for _ in range(40):
             t = random_tree(rng, 3, LEAVES + nodes)
             for sub in subtrees(t):
                 v = sympy.sympify(sympy_eval(sub))

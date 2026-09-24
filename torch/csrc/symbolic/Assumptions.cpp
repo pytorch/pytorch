@@ -1306,6 +1306,8 @@ FactKB ExprArena::default_kb(const Expr* e) {
     case Kind::NegativeIntInfinity:
       return kbs[5];
     case Kind::PythonMod:
+    case Kind::FloorDiv:
+    case Kind::CleanDiv:
       return kbs[6];
     case Kind::Mod:
       return kbs[7];
@@ -1403,6 +1405,23 @@ Tri ExprArena::eval_fact(const Expr* e, Fact f) {
           (f == F::nonnegative || f == F::nonpositive)) {
         Fact sign = f == F::nonnegative ? F::positive : F::negative;
         return ask(e->args[1], sign) == Tri::True ? Tri::True : Tri::Unknown;
+      }
+      return Tri::Unknown;
+    case Kind::FloorDiv:
+    case Kind::CleanDiv:
+      if (f == F::nonnegative) {
+        // all([p.is_integer, q.is_integer, p.is_nonnegative, q.is_nonnegative])
+        Tri facts[] = {
+            ask(e->args[0], F::integer),
+            ask(e->args[1], F::integer),
+            ask(e->args[0], F::nonnegative),
+            ask(e->args[1], F::nonnegative)};
+        return std::all_of(
+                   std::begin(facts),
+                   std::end(facts),
+                   [](Tri t) { return t == Tri::True; })
+            ? Tri::True
+            : Tri::Unknown;
       }
       return Tri::Unknown;
     case Kind::BooleanTrue:

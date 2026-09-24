@@ -14,7 +14,11 @@ namespace py = pybind11;
 
 namespace {
 
-constexpr Kind kFunctionKinds[] = {Kind::Mod, Kind::PythonMod};
+constexpr Kind kFunctionKinds[] = {
+    Kind::Mod,
+    Kind::PythonMod,
+    Kind::FloorDiv,
+    Kind::CleanDiv};
 
 // Python-side state for an ExprArena: the sympy Symbol objects that native
 // symbols came from and a conversion cache (conversion is pure per Expr).
@@ -294,7 +298,9 @@ py::object PyArena::to_sympy(const Expr* e) {
       break;
     }
     case Kind::Mod:
-    case Kind::PythonMod: {
+    case Kind::PythonMod:
+    case Kind::FloorDiv:
+    case Kind::CleanDiv: {
       py::tuple args(e->args.size());
       for (size_t i = 0; i < e->args.size(); ++i) {
         args[i] = to_sympy(e->args[i]);
@@ -352,6 +358,8 @@ const char* kind_name(Kind k) {
       return "Or";
     case Kind::Mod:
     case Kind::PythonMod:
+    case Kind::FloorDiv:
+    case Kind::CleanDiv:
       return function_name(k);
   }
   return "?";

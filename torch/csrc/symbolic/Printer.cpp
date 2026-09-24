@@ -95,6 +95,11 @@ class StrPrinter {
         // _print_Function.
         return std::string(function_name(e->kind)) + "(" +
             stringify(e->args, ", ", 0) + ")";
+      case Kind::FloorDiv:
+      case Kind::CleanDiv:
+        // FloorDiv._sympystr: parenthesize(arg, PRECEDENCE["Atom"] - 0.5).
+        return "(" + parenthesize(e->args[0], kAtom - 1) + "//" +
+            parenthesize(e->args[1], kAtom - 1) + ")";
     }
     throw NativeUnsupported("str of an unknown kind");
   }
@@ -134,6 +139,8 @@ class StrPrinter {
         return kOr;
       case Kind::Mod:
       case Kind::PythonMod:
+      case Kind::FloorDiv:
+      case Kind::CleanDiv:
         // The classes' precedence attribute.
         return 35;
       default:
