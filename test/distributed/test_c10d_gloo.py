@@ -1539,6 +1539,29 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         with torch.inference_mode():
             self._test_allgather_basics(lambda t: t.clone())
 
+    @requires_gloo()
+    def test_allgather_empty_tensor(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/85234:
+        # all_gather on a tensor with a zero-sized dimension (numel() == 0) used
+        # to abort every rank with SIGFPE inside gloo. It should instead be a
+        # no-op that returns the (empty) output tensors.
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_gloo(
+            store, self.rank, self.world_size, self.opts()
+        )
+
+        input = [torch.ones((1, 0, 2))]
+        output = [
+            [torch.zeros((1, 0, 2)) for _ in range(self.world_size)]
+        ]
+        fut = pg.allgather(output, input).get_future()
+        fut.wait()
+        result = fut.value()
+        self.assertEqual(len(result), self.world_size)
+        for t in result:
+            self.assertEqual(t.numel(), 0)
+            self.assertEqual(t.shape, torch.Size([1, 0, 2]))
+
     def _test_allgather_stress(self, inputs, fn):
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = self._create_process_group_gloo(
