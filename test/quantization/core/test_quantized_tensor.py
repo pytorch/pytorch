@@ -525,33 +525,6 @@ class TestQuantizedTensor(TestQuantizedTensorBase):
             rqr = qr.dequantize()
             self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
 
-    @unittest.skipIf(not torch.cuda.is_available(), 'CUDA is not available')
-    def test_compare_per_channel_device_numerics(self):
-        dtype_and_zero_types = [
-            (torch.quint8, torch.float),
-            (torch.qint8, torch.float),
-            #  (torch.qint32, torch.float) not supported for quantize_per_channel
-            (torch.quint8, torch.long),
-            (torch.qint8, torch.long),
-            (torch.qint32, torch.long),
-        ]
-        axis = 1
-        device = torch.device('cuda')
-        for _ in range(20):
-            for dtype, zero_type in dtype_and_zero_types:
-                r = torch.rand(2, 2) * 10
-                r[0, 0] = 2.5
-                scales = torch.rand(2).abs()
-                zero_points = (torch.rand(2) * 10).round().to(zero_type)
-
-                qr = torch.quantize_per_channel(r, scales, zero_points, axis, dtype)
-                dqr = qr.dequantize()
-                qr_cuda = torch.quantize_per_channel(r.to(device), scales.to(
-                    device), zero_points.to(device), axis, dtype)
-                dqr_cuda = qr_cuda.dequantize()
-                self.assertEqual(qr.int_repr(), qr_cuda.int_repr())
-                self.assertTrue(np.allclose(dqr, dqr_cuda.cpu()))
-
     def _test_quantize_per_channel(self, r, scales, zero_points, axis, float_params):
 
         def _quantize_per_channel_ref_nd(data, scales, zero_points, float_params):
@@ -833,151 +806,6 @@ class TestQuantizedTensor(TestQuantizedTensorBase):
         q = torch._make_per_tensor_quantized_tensor(q_int, scale=scale, zero_point=zero_point)
         qc = deepcopy(q)
         self.assertEqual(qc, q)
-
-    def test_qtensor_view(self):
-        scale, zero_point, dtype = 1.0, 2, torch.uint8
-        for device in get_supported_device_types():
-            q_int = torch.randint(0, 100, [1, 2, 3], device=device, dtype=dtype)
-            q = torch._make_per_tensor_quantized_tensor(q_int, scale=scale, zero_point=zero_point)
-            q2 = q.view(1, 3, 2)
-            self.assertEqual(q.numel(), q2.numel())
-            # testing -1
-            self.assertEqual(q, q2.view(1, -1, 3))
-
-            a_int = torch.randint(0, 100, [1, 2, 3, 4], device=device, dtype=dtype)
-            a = torch._make_per_tensor_quantized_tensor(a_int, scale=scale, zero_point=zero_point)
-            b = a.transpose(1, 2)  # swaps 2nd and 3rd dimension
-            c = a.view(1, 3, 2, 4)  # does not change tensor layout in memory
-            self.assertEqual(b.size(), c.size())
-            self.assertEqual(b.q_scale(), c.q_scale())
-            self.assertEqual(b.q_zero_point(), c.q_zero_point())
-            self.assertNotEqual(b.stride(), c.stride())
-            # size is the same but the underlying data is different
-            self.assertNotEqual(b.int_repr(), c.int_repr())
-            # torch.equal is not supported for the cuda backend
-            if device == 'cpu':
-                self.assertFalse(torch.equal(b, c))
-
-            # a case can't view non-contiguous Tensor
-            a_int = torch.randint(0, 100, [1, 2, 3, 4], device=device, dtype=dtype)
-            a = torch._make_per_tensor_quantized_tensor(a_int, scale=scale, zero_point=zero_point)
-            b = a.transpose(1, 2)  # swaps 2nd and 3rd dimension
-            err_str = "view size is not compatible with input tensor's size and stride*"
-            with self.assertRaisesRegex(RuntimeError, err_str):
-                b.view(1, 4, 2, 3)
-            # view on contiguous tensor is fine
-            b.contiguous().view(1, 4, 2, 3)
-
-    def test_qtensor_resize(self):
-        for device in get_supported_device_types():
-            scale, zero_point, dtype = 1.0, 2, torch.uint8
-            sizes1 = [1, 2, 3, 4]
-            sizes2 = [1 * 2, 3 * 4]
-            sizes3 = [1, 2 * 3, 4]
-            sizes4 = [1 * 2 * 3 * 4]
-            sizes5 = [1, 2, 1, 3, 1, 4]
-
-            q1_int = torch.randint(0, 100, sizes1, dtype=dtype, device=device)
-            q1 = torch._make_per_tensor_quantized_tensor(q1_int, scale=scale, zero_point=zero_point)
-            q2 = q1.resize(*sizes2)
-            q3 = q2.resize(*sizes3)
-            q4 = q3.resize(*sizes4)
-            q5 = q4.resize(*sizes5)
-
-            self.assertEqual(q1.numel(), q2.numel())
-            self.assertEqual(q1.numel(), q3.numel())
-            self.assertEqual(q1.numel(), q4.numel())
-            self.assertEqual(q1.numel(), q5.numel())
-
-            # Compare original and post-transpose
-            a_int = torch.randint(0, 100, sizes1, dtype=dtype, device=device)
-            a = torch._make_per_tensor_quantized_tensor(a_int, scale=scale, zero_point=zero_point)
-            b = a.transpose(1, 2)  # swaps 2nd and 3rd dimension
-            c = b.resize(*sizes1)  # Change the sizes back to the original
-
-            self.assertEqual(a.size(), c.size())
-            self.assertEqual(b.q_scale(), c.q_scale())
-            self.assertEqual(b.q_zero_point(), c.q_zero_point())
-            self.assertNotEqual(b.stride(), c.stride())
-            # size is the same but the underlying data is different
-            self.assertNotEqual(b.int_repr(), c.int_repr())
-            # torch.equal is not supported for the cuda backend
-            if device == 'cpu':
-                self.assertFalse(torch.equal(b, c))
-
-            # Throws an error if numel is wrong
-            q1_int = torch.randint(0, 100, sizes1, dtype=dtype, device=device)
-            q1 = torch._make_per_tensor_quantized_tensor(a_int, scale=scale, zero_point=zero_point)
-            err_str = "requested resize to*"
-            with self.assertRaisesRegex(RuntimeError, err_str):
-                q2 = q1.resize(*sizes1[:-1])
-            # resize on both contiguous and non-contiguous tensor should be fine
-            q3 = q1.resize(*sizes2)
-            q4 = q1.contiguous().resize(*sizes2)
-
-    def test_qtensor_reshape(self):
-        scale, zero_point, dtype = 1.0, 2, torch.uint8
-        for device in get_supported_device_types():
-            q_int = torch.randint(0, 100, [3, 5], dtype=dtype, device=device)
-            q = torch._make_per_tensor_quantized_tensor(q_int, scale=scale, zero_point=zero_point)
-            q2 = q.reshape([15])
-            self.assertEqual(q.numel(), q2.numel())
-            self.assertEqual(q2.size(), [15])
-            # testing -1
-            self.assertEqual(q, q2.reshape([3, -1]))
-
-            a_int = torch.randint(0, 100, [1, 2, 3, 4], dtype=dtype, device=device)
-            a = torch._make_per_tensor_quantized_tensor(a_int, scale=scale, zero_point=zero_point)
-            b = a.transpose(1, 2)  # swaps 2nd and 3rd dimension
-            c = a.reshape(1, 3, 2, 4)  # does not change tensor layout
-            self.assertEqual(b.size(), c.size())
-            self.assertEqual(b.q_scale(), c.q_scale())
-            self.assertEqual(b.q_zero_point(), c.q_zero_point())
-            self.assertNotEqual(b.stride(), c.stride())
-            self.assertNotEqual(b.int_repr(), c.int_repr())
-            # torch.equal is not supported for the cuda backend
-            if device == 'cpu':
-                self.assertFalse(torch.equal(b, c))
-
-            # we can use reshape for non-contiguous Tensor
-            a_int = torch.randint(0, 100, [1, 2, 3, 4], dtype=dtype, device=device)
-            a = torch._make_per_tensor_quantized_tensor(a_int, scale=scale, zero_point=zero_point)
-            b = a.transpose(1, 2)  # swaps 2nd and 3rd dimension
-            c = b.reshape(1, 4, 2, 3)
-
-    def test_qtensor_unsqueeze(self):
-        for device in get_supported_device_types():
-            x = torch.randn((1, 3, 4), device=device)
-            qx = torch.quantize_per_tensor(x, scale=1.0, zero_point=0, dtype=torch.quint8)
-            qy = qx.unsqueeze(2)
-            self.assertEqual(qy.size(), (1, 3, 1, 4))
-            qy = qy.squeeze(2)
-            self.assertEqual(qy.size(), qx.size())
-
-            # Per channel qtensor
-            scales = torch.tensor([1.0], device=device)
-            zero_points = torch.tensor([0], device=device)
-            qx = torch.quantize_per_channel(x, scales=scales, zero_points=zero_points, dtype=torch.quint8, axis=0)
-            qy = qx.unsqueeze(0)
-            self.assertEqual(qy.size(), (1, 1, 3, 4))
-            self.assertEqual(qy.q_per_channel_axis(), 1)
-
-            qz = qy.squeeze(0)
-            self.assertEqual(qz.size(), x.size())
-            self.assertEqual(qz.q_per_channel_axis(), 0)
-            with self.assertRaisesRegex(RuntimeError, "Squeeze is only possible on non-axis dimension for Per-Channel"):
-                qz = qy.squeeze(1)
-
-            # squeeze without dim specified
-            x = torch.randn((3, 1, 2, 1, 4), device=device)
-            scales = torch.tensor([1.0, 1.0], device=device)
-            zero_points = torch.tensor([0, 0], device=device)
-            qx = torch.quantize_per_channel(x, scales=scales, zero_points=zero_points, dtype=torch.quint8, axis=2)
-            qz = qx.squeeze()
-            self.assertEqual(qz.size(), (3, 2, 4))
-            self.assertEqual(qz.q_per_channel_axis(), 1)
-            with self.assertRaisesRegex(RuntimeError, "Squeeze is only possible on non-axis dimension for Per-Channel"):
-                qz = qy.squeeze()
 
     def test_qscheme_pickle(self):
         f = Foo()
@@ -1613,6 +1441,172 @@ class TestQuantizedTensorDevice(TestQuantizedTensorBase):
             # Make sure the scale and zero_point don't change
             self.assertEqual(q_filled.q_per_channel_scales(), scales)
             self.assertEqual(q_filled.q_per_channel_zero_points(), zero_points)
+
+    def test_compare_per_channel_device_numerics(self, device):
+        dtype_and_zero_types = [
+            (torch.quint8, torch.float),
+            (torch.qint8, torch.float),
+            #  (torch.qint32, torch.float) not supported for quantize_per_channel
+            (torch.quint8, torch.long),
+            (torch.qint8, torch.long),
+            (torch.qint32, torch.long),
+        ]
+        axis = 1
+        for _ in range(20):
+            for dtype, zero_type in dtype_and_zero_types:
+                r = torch.rand(2, 2) * 10
+                r[0, 0] = 2.5
+                scales = torch.rand(2).abs()
+                zero_points = (torch.rand(2) * 10).round().to(zero_type)
+
+                qr = torch.quantize_per_channel(r, scales, zero_points, axis, dtype)
+                dqr = qr.dequantize()
+                qr_cuda = torch.quantize_per_channel(r.to(device), scales.to(
+                    device), zero_points.to(device), axis, dtype)
+                dqr_cuda = qr_cuda.dequantize()
+                self.assertEqual(qr.int_repr(), qr_cuda.int_repr())
+                self.assertTrue(np.allclose(dqr, dqr_cuda.cpu()))
+
+    def test_qtensor_view(self, device):
+        scale, zero_point, dtype = 1.0, 2, torch.uint8
+        q_int = torch.randint(0, 100, [1, 2, 3], device=device, dtype=dtype)
+        q = torch._make_per_tensor_quantized_tensor(q_int, scale=scale, zero_point=zero_point)
+        q2 = q.view(1, 3, 2)
+        self.assertEqual(q.numel(), q2.numel())
+        # testing -1
+        self.assertEqual(q, q2.view(1, -1, 3))
+
+        a_int = torch.randint(0, 100, [1, 2, 3, 4], device=device, dtype=dtype)
+        a = torch._make_per_tensor_quantized_tensor(a_int, scale=scale, zero_point=zero_point)
+        b = a.transpose(1, 2)  # swaps 2nd and 3rd dimension
+        c = a.view(1, 3, 2, 4)  # does not change tensor layout in memory
+        self.assertEqual(b.size(), c.size())
+        self.assertEqual(b.q_scale(), c.q_scale())
+        self.assertEqual(b.q_zero_point(), c.q_zero_point())
+        self.assertNotEqual(b.stride(), c.stride())
+        # size is the same but the underlying data is different
+        self.assertNotEqual(b.int_repr(), c.int_repr())
+        # torch.equal is not supported for the cuda backend
+        if device == 'cpu':
+            self.assertFalse(torch.equal(b, c))
+
+        # a case can't view non-contiguous Tensor
+        a_int = torch.randint(0, 100, [1, 2, 3, 4], device=device, dtype=dtype)
+        a = torch._make_per_tensor_quantized_tensor(a_int, scale=scale, zero_point=zero_point)
+        b = a.transpose(1, 2)  # swaps 2nd and 3rd dimension
+        err_str = "view size is not compatible with input tensor's size and stride*"
+        with self.assertRaisesRegex(RuntimeError, err_str):
+            b.view(1, 4, 2, 3)
+        # view on contiguous tensor is fine
+        b.contiguous().view(1, 4, 2, 3)
+
+    def test_qtensor_resize(self, device):
+        scale, zero_point, dtype = 1.0, 2, torch.uint8
+        sizes1 = [1, 2, 3, 4]
+        sizes2 = [1 * 2, 3 * 4]
+        sizes3 = [1, 2 * 3, 4]
+        sizes4 = [1 * 2 * 3 * 4]
+        sizes5 = [1, 2, 1, 3, 1, 4]
+
+        q1_int = torch.randint(0, 100, sizes1, dtype=dtype, device=device)
+        q1 = torch._make_per_tensor_quantized_tensor(q1_int, scale=scale, zero_point=zero_point)
+        q2 = q1.resize(*sizes2)
+        q3 = q2.resize(*sizes3)
+        q4 = q3.resize(*sizes4)
+        q5 = q4.resize(*sizes5)
+
+        self.assertEqual(q1.numel(), q2.numel())
+        self.assertEqual(q1.numel(), q3.numel())
+        self.assertEqual(q1.numel(), q4.numel())
+        self.assertEqual(q1.numel(), q5.numel())
+
+        # Compare original and post-transpose
+        a_int = torch.randint(0, 100, sizes1, dtype=dtype, device=device)
+        a = torch._make_per_tensor_quantized_tensor(a_int, scale=scale, zero_point=zero_point)
+        b = a.transpose(1, 2)  # swaps 2nd and 3rd dimension
+        c = b.resize(*sizes1)  # Change the sizes back to the original
+
+        self.assertEqual(a.size(), c.size())
+        self.assertEqual(b.q_scale(), c.q_scale())
+        self.assertEqual(b.q_zero_point(), c.q_zero_point())
+        self.assertNotEqual(b.stride(), c.stride())
+        # size is the same but the underlying data is different
+        self.assertNotEqual(b.int_repr(), c.int_repr())
+        # torch.equal is not supported for the cuda backend
+        if device == 'cpu':
+            self.assertFalse(torch.equal(b, c))
+
+        # Throws an error if numel is wrong
+        q1_int = torch.randint(0, 100, sizes1, dtype=dtype, device=device)
+        q1 = torch._make_per_tensor_quantized_tensor(a_int, scale=scale, zero_point=zero_point)
+        err_str = "requested resize to*"
+        with self.assertRaisesRegex(RuntimeError, err_str):
+            q2 = q1.resize(*sizes1[:-1])
+        # resize on both contiguous and non-contiguous tensor should be fine
+        q3 = q1.resize(*sizes2)
+        q4 = q1.contiguous().resize(*sizes2)
+
+    def test_qtensor_reshape(self, device):
+        scale, zero_point, dtype = 1.0, 2, torch.uint8
+        q_int = torch.randint(0, 100, [3, 5], dtype=dtype, device=device)
+        q = torch._make_per_tensor_quantized_tensor(q_int, scale=scale, zero_point=zero_point)
+        q2 = q.reshape([15])
+        self.assertEqual(q.numel(), q2.numel())
+        self.assertEqual(q2.size(), [15])
+        # testing -1
+        self.assertEqual(q, q2.reshape([3, -1]))
+
+        a_int = torch.randint(0, 100, [1, 2, 3, 4], dtype=dtype, device=device)
+        a = torch._make_per_tensor_quantized_tensor(a_int, scale=scale, zero_point=zero_point)
+        b = a.transpose(1, 2)  # swaps 2nd and 3rd dimension
+        c = a.reshape(1, 3, 2, 4)  # does not change tensor layout
+        self.assertEqual(b.size(), c.size())
+        self.assertEqual(b.q_scale(), c.q_scale())
+        self.assertEqual(b.q_zero_point(), c.q_zero_point())
+        self.assertNotEqual(b.stride(), c.stride())
+        self.assertNotEqual(b.int_repr(), c.int_repr())
+        # torch.equal is not supported for the cuda backend
+        if device == 'cpu':
+            self.assertFalse(torch.equal(b, c))
+
+        # we can use reshape for non-contiguous Tensor
+        a_int = torch.randint(0, 100, [1, 2, 3, 4], dtype=dtype, device=device)
+        a = torch._make_per_tensor_quantized_tensor(a_int, scale=scale, zero_point=zero_point)
+        b = a.transpose(1, 2)  # swaps 2nd and 3rd dimension
+        c = b.reshape(1, 4, 2, 3)
+
+    def test_qtensor_unsqueeze(self, device):
+        x = torch.randn((1, 3, 4), device=device)
+        qx = torch.quantize_per_tensor(x, scale=1.0, zero_point=0, dtype=torch.quint8)
+        qy = qx.unsqueeze(2)
+        self.assertEqual(qy.size(), (1, 3, 1, 4))
+        qy = qy.squeeze(2)
+        self.assertEqual(qy.size(), qx.size())
+
+        # Per channel qtensor
+        scales = torch.tensor([1.0], device=device)
+        zero_points = torch.tensor([0], device=device)
+        qx = torch.quantize_per_channel(x, scales=scales, zero_points=zero_points, dtype=torch.quint8, axis=0)
+        qy = qx.unsqueeze(0)
+        self.assertEqual(qy.size(), (1, 1, 3, 4))
+        self.assertEqual(qy.q_per_channel_axis(), 1)
+
+        qz = qy.squeeze(0)
+        self.assertEqual(qz.size(), x.size())
+        self.assertEqual(qz.q_per_channel_axis(), 0)
+        with self.assertRaisesRegex(RuntimeError, "Squeeze is only possible on non-axis dimension for Per-Channel"):
+            qz = qy.squeeze(1)
+
+        # squeeze without dim specified
+        x = torch.randn((3, 1, 2, 1, 4), device=device)
+        scales = torch.tensor([1.0, 1.0], device=device)
+        zero_points = torch.tensor([0, 0], device=device)
+        qx = torch.quantize_per_channel(x, scales=scales, zero_points=zero_points, dtype=torch.quint8, axis=2)
+        qz = qx.squeeze()
+        self.assertEqual(qz.size(), (3, 2, 4))
+        self.assertEqual(qz.q_per_channel_axis(), 1)
+        with self.assertRaisesRegex(RuntimeError, "Squeeze is only possible on non-axis dimension for Per-Channel"):
+            qz = qy.squeeze()
 
 
 instantiate_device_type_tests(TestQuantizedTensorDevice, globals())
