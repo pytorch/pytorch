@@ -341,6 +341,39 @@ class ReductionHeuristic(CodegenConfigHeuristics):
             )
             configs.append(c)
 
+        # Complex R<=2048 reductions can lose occupancy to the ordinary
+        # XBLOCK=2/RBLOCK=1024 tile.
+        #
+        # Use the measured alternative as the default contiguous config.  Under
+        # max-autotune, retain the ordinary contiguous config and offer this as
+        # one additional candidate instead.
+        blackwell_inner = (
+            reduction_hint == ReductionHint.INNER
+            and triton_meta["device"].type == "cuda"
+            and torch.version.hip is None
+            and device_major is not None
+            and device_major >= 10
+            and size_hints["x"] >= 2048
+        )
+        blackwell_inner_config = None
+        if (
+            blackwell_inner
+            and register_intensive
+            and inductor_meta.get("num_reduction", 0) >= 4
+            and 1024 <= rnumel <= 2048
+        ):
+            blackwell_inner_config = make_config(
+                1,
+                min(rnumel, 512),
+                num_warps=4,
+                register_intensive=True,
+            )
+        if blackwell_inner_config is not None:
+            if max_autotune_enabled:
+                configs.append(blackwell_inner_config)
+            else:
+                contiguous_config = blackwell_inner_config
+
         # For 3d tiling, default to more autotuning initially
         if "y" in size_hints:
             pass
