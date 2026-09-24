@@ -489,6 +489,8 @@ class FSDPParamGroup:
             # directly initialize unsharded parameters from sharded parameters
 
             for fsdp_param in self.fsdp_params:
+                if fsdp_param.init_unsharded_param_from_sharded():
+                    continue
                 # Use all_gather_inputs which already handles conversion to param_dtype
                 # This is consistent with the world_size > 1 path
                 all_gather_input = fsdp_param.all_gather_inputs[0]
