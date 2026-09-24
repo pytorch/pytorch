@@ -151,6 +151,11 @@ def global_check_message():
     return "global check message"
 
 
+@torch.fx.wrap
+def set_tensor_test_attr(value, attr_value):
+    setattr(value, "_dynamo_test_attr", attr_value)  # noqa: B010
+
+
 # Specializes a test to run only if translation validation is set.
 def onlyIfTranslationValidation(fn: typing.Callable) -> typing.Callable:
     @functools.wraps(fn)
@@ -1216,6 +1221,81 @@ graph():
         res = opt_f(x, True)
         self.assertEqual(res, torch.ones(5) + 1)
         self.assertTrue(res.offloading_activation)
+
+    def test_tensor_setattr_on_split_outputs(self):
+        def fn(x, attr_input):
+            values = torch.split(x, 2)
+            attr_values = torch.split(attr_input, 2)
+            for value, attr_value in zip(values, attr_values):
+                set_tensor_test_attr(value, attr_value)
+            return values, attr_values, tuple(value * 2 for value in values)
+
+        x = torch.randn(4)
+        attr_input = torch.randn(4)
+        values, attr_values, result = torch.compile(
+            fn, backend="eager", fullgraph=True
+        )(x, attr_input)
+        self.assertEqual(result, tuple(value * 2 for value in values))
+        for value, attr_value in zip(values, attr_values):
+            self.assertIs(value._dynamo_test_attr, attr_value)
+
+    def test_tensor_setattr_on_repeated_tensor_object_graph_breaks(self):
+        def fn(x, attr_value):
+            values = torch.broadcast_tensors(x, x)
+            set_tensor_test_attr(values[0], attr_value)
+            return hasattr(values[1], "_dynamo_test_attr")
+
+        self.assertTrue(fn(torch.randn(4), torch.randn(4)))
+
+        x = torch.randn(4)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "setattr\\(\\) on unsupported type"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, torch.randn(4))
+        self.assertFalse(hasattr(x, "_dynamo_test_attr"))
+
+    def test_tensor_setattr_on_input_tensor_object_output_graph_breaks(self):
+        # Misclassifying the input object as new would hide its existing grad.
+        def read_existing_grad_through_output(x):
+            return torch.broadcast_tensors(x)[0].grad
+
+        def fn(x, attr_value):
+            value = torch.broadcast_tensors(x)[0]
+            set_tensor_test_attr(value, attr_value)
+            return value
+
+        x = torch.randn(4, requires_grad=True)
+        x.grad = torch.randn(4)
+        self.assertIs(
+            torch.compile(
+                read_existing_grad_through_output, backend="eager", fullgraph=True
+            )(x),
+            x.grad,
+        )
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "setattr\\(\\) on unsupported type"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, torch.randn(4))
+        self.assertFalse(hasattr(x, "_dynamo_test_attr"))
+
+    def test_tensor_setattr_on_nested_repeated_tensor_object_graph_breaks(self):
+        @torch.compiler.allow_in_graph
+        def nested_repeated_output(x):
+            value = x + 1
+            return value, (value,)
+
+        def fn(x, attr_value):
+            values = nested_repeated_output(x)
+            set_tensor_test_attr(values[0], attr_value)
+            return hasattr(values[1][0], "_dynamo_test_attr")
+
+        self.assertTrue(fn(torch.randn(4), torch.randn(4)))
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "setattr\\(\\) on unsupported type"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.randn(4), torch.randn(4)
+            )
 
     @unittest.skipIf(
         not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0),
