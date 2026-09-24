@@ -1,0 +1,75 @@
+# Owner(s): ["module: ci"]
+name: Claude Issue Triage Backfill
+
+on:
+  schedule:
+    - cron: "37 14 * * 1"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Only print the issues that would be triaged"
+        type: boolean
+        required: false
+        default: false
+
+concurrency:
+  group: claude-issue-triage-backfill
+  cancel-in-progress: false
+
+jobs:
+  backfill:
+    if: github.repository == 'pytorch/pytorch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: write
+      issues: read
+
+    steps:
+      - name: Trigger triage for untriaged issues
+        env:
+          DRY_RUN: ${{ inputs.dry_run || 'false' }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SEARCH_QUERY: >-
+            is:issue is:open
+            -label:fx
+            -label:"oncall: distributed checkpointing"
+            -label:"oncall: export"
+            -label:"oncall: cpu inductor"
+            -label:"oncall: fx"
+            -label:"ci: sev"
+            -label:"oncall: jit"
+            -label:caffe2
+            -label:"oncall: quantization"
+            -label:"oncall: java"
+            -label:"oncall: distributed"
+            -label:"oncall: visualization"
+            -label:"oncall: mobile"
+            -label:"triage review"
+            -label:triaged
+            -label:bot-triaged
+            -label:NNC
+            -label:"oncall: package/deploy"
+            -label:"oncall: profiler"
+            -label:"oncall: pt2"
+            -label:"oncall: releng"
+            updated:>=2019-04-02
+            sort:updated-desc
+        run: |
+          CUTOFF=$(date -u --date="24 hours ago" "+%Y-%m-%dT%H:%M:%SZ")
+          ISSUES=$(gh issue list \
+            --repo "${{ github.repository }}" \
+            --search "$SEARCH_QUERY created:<$CUTOFF" \
+            --limit 100 \
+            --json number \
+            --jq '.[].number')
+
+          for ISSUE_NUM in $ISSUES; do
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "Would trigger triage for #${ISSUE_NUM}"
+            else
+              gh workflow run claude-issue-triage.yml \
+                --repo "${{ github.repository }}" \
+                -f issue_number="$ISSUE_NUM"
+            fi
+          done
