@@ -368,6 +368,22 @@ CREATE_UNARY_TORCH_IMPL_FUNC(special_scaled_modified_bessel_k0_out, special_scal
 CREATE_UNARY_TORCH_IMPL_FUNC(special_scaled_modified_bessel_k1_out, special_scaled_modified_bessel_k1_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(special_spherical_bessel_j0_out, special_spherical_bessel_j0_stub)
 
+Tensor exp2_default(const Tensor& self) {
+  return at::pow(2.0, self);
+}
+
+Tensor& exp2_out_default(const Tensor& self, Tensor& result) {
+  auto tmp = at::pow(2.0, self);
+  TORCH_CHECK(
+      canCast(tmp.scalar_type(), result.scalar_type()),
+      "result type ",
+      tmp.scalar_type(),
+      " can't be cast to the desired output type ",
+      result.scalar_type());
+  at::native::resize_output(result, tmp.sizes());
+  return result.copy_(tmp);
+}
+
 TORCH_IMPL_FUNC(round_decimals_out)
 (const Tensor& self, int64_t decimals, const Tensor& result) {
   if (decimals != 0) {
