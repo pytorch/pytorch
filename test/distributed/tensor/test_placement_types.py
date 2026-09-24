@@ -156,6 +156,7 @@ class PlacementTypesTestCase(TestCase):
             (17, 4),  # uneven split, last chunk smaller
             (15, 4),  # uneven split
             (7, 4),  # fewer elements than chunks would like
+            (5, 4),  # non-last rank is already short; last rank empty
             (3, 4),  # very few elements
             (1, 4),  # single element
             (8, 1),  # single chunk
@@ -220,6 +221,68 @@ class PlacementTypesTestCase(TestCase):
                 index=symint_index,
                 with_padding=True,
             )
+
+    def test_select_split_tensor_symint_matches_split_tensor(self):
+        """The narrow/SymInt path must match _split_tensor, including empty trailing shards."""
+        from torch._dynamo.source import ConstantSource
+        from torch.fx.experimental.symbolic_shapes import SymNode
+
+        test_cases = [
+            (16, 4),  # even
+            (17, 4),  # only last shard short
+            (5, 4),  # non-last already short, last empty
+            (1, 4),  # single element, several empty ranks
+            (8, 16),  # more chunks than elements
+        ]
+        for dim in [0, 1]:
+            shard = Shard(dim)
+            for dim_size, num_chunks in test_cases:
+                if dim == 0:
+                    tensor = torch.arange(dim_size * 4).reshape(dim_size, 4)
+                else:
+                    tensor = torch.arange(4 * dim_size).reshape(4, dim_size)
+                shards, _ = shard._split_tensor(
+                    tensor, num_chunks, with_padding=False, contiguous=False
+                )
+                shape_env = ShapeEnv()
+                for rank in range(num_chunks):
+                    symbol = shape_env.create_symbol(
+                        rank, source=ConstantSource(f"rank_{dim}_{dim_size}_{rank}")
+                    )
+                    idx = torch.SymInt(SymNode(symbol, shape_env, int, hint=rank))
+                    self.assertIsInstance(idx, torch.SymInt)
+                    selected = shard._select_split_tensor(
+                        tensor,
+                        num_chunks,
+                        idx,
+                        with_padding=False,
+                        contiguous=False,
+                        clone=False,
+                    )
+                    self.assertEqual(
+                        selected,
+                        shards[rank],
+                        msg=lambda msg: f"{msg}\nMismatch for dim={dim}, dim_size={dim_size}, "
+                        f"num_chunks={num_chunks}, rank={rank}",
+                    )
+
+    def test_select_split_tensor_unbacked_symint_uneven_does_not_raise(self):
+        """Unbacked rank + dim_size=5 / 4 chunks used to set last_split=-1 and crash in narrow."""
+        fake_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv())
+        with fake_mode:
+            idx = fake_mode.shape_env.create_unbacked_symint()
+            tensor = torch.empty(5, 4)
+            result = Shard(0)._select_split_tensor(
+                tensor,
+                num_chunks=4,
+                index=idx,
+                with_padding=False,
+                clone=False,
+                contiguous=False,
+            )
+        self.assertEqual(result.ndim, 2)
+        self.assertEqual(result.size(1), 4)
+        self.assertIsInstance(result.size(0), torch.SymInt)
 
     def test_hinted_unbacked_even_shard_skips_padding(self):
         fake_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv())

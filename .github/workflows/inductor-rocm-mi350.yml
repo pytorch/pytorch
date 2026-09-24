@@ -40,15 +40,15 @@ jobs:
       opt_out_experiments: lf
       check_experiments: amd-dpx
 
-  linux-noble-rocm-py3_12-inductor-build:
-    name: linux-noble-rocm-py3.12-mi350
+  linux-noble-rocm-py3_11-inductor-build:
+    name: linux-noble-rocm-py3.11-mi350
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "mt-"
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
-      build-environment: linux-noble-rocm-py3.12-mi350
-      docker-image-name: ci-image:pytorch-linux-noble-rocm-n-py3
+      build-environment: linux-noble-rocm-py3.11-mi350
+      docker-image-name: ci-image:pytorch-linux-noble-rocm-n-py3.11
       test-matrix: |
         { include: [
           { config: "inductor", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.amd-dpx-label-type }}linux.rocm.gpu.gfx950.1" },
@@ -56,12 +56,12 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-noble-rocm-py3_12-inductor-test:
-    name: linux-noble-rocm-py3.12-mi350
+  linux-noble-rocm-py3_11-inductor-test:
+    name: linux-noble-rocm-py3.11-mi350
     uses: ./.github/workflows/_rocm-test.yml
-    needs: linux-noble-rocm-py3_12-inductor-build
+    needs: linux-noble-rocm-py3_11-inductor-build
     with:
-      build-environment: ${{ needs.linux-noble-rocm-py3_12-inductor-build.outputs.build-environment }}
-      docker-image: ${{ needs.linux-noble-rocm-py3_12-inductor-build.outputs.docker-image }}
-      test-matrix:  ${{ needs.linux-noble-rocm-py3_12-inductor-build.outputs.test-matrix }}
+      build-environment: ${{ needs.linux-noble-rocm-py3_11-inductor-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-noble-rocm-py3_11-inductor-build.outputs.docker-image }}
+      test-matrix:  ${{ needs.linux-noble-rocm-py3_11-inductor-build.outputs.test-matrix }}
     secrets: inherit
