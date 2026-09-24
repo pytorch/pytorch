@@ -4869,6 +4869,12 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             out_t_5 = m(in_t_9[:, :, :5])
         self.assertEqual(out_t_9[:, :, :15], out_t_5)
 
+    def test_upsampling_list_scale_factor(self):
+        in_t = torch.rand(1, 1, 2, 2)
+        m = nn.Upsample(scale_factor=[2, 3])
+        self.assertEqual(m.scale_factor, (2.0, 3.0))
+        self.assertEqual(m(in_t), F.interpolate(in_t, scale_factor=(2.0, 3.0)))
+
     @set_default_dtype(torch.double)
     def test_upsampling_not_recompute_scale_factor(self):
         # test output against known input: result must match opencv
