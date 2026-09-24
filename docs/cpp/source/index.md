@@ -49,7 +49,7 @@ auto c = a + b.to(at::kInt);
 
 This `Tensor` class and all other symbols in ATen are found in the `at::`
 namespace, documented
-[here](https://pytorch.org/cppdocs/api/namespace_at.html#namespace-at).
+[here](https://docs.pytorch.org/cppdocs/api/aten/index.html).
 
 ## Autograd
 
@@ -96,11 +96,11 @@ frontend includes the following:
 
 See [this document](https://pytorch.org/cppdocs/frontend.html) for a more
 detailed description of the C++ frontend. Relevant sections of the `torch::`
-namespace related to the C++ Frontend include [torch::nn](https://pytorch.org/cppdocs/api/namespace_torch__nn.html#namespace-torch-nn),
-[torch::optim](https://pytorch.org/cppdocs/api/namespace_torch__optim.html#namespace-torch-optim),
-[torch::data](https://pytorch.org/cppdocs/api/namespace_torch__data.html#namespace-torch-data),
+namespace related to the C++ Frontend include [torch::nn](https://docs.pytorch.org/cppdocs/api/nn/index.html),
+[torch::optim](https://docs.pytorch.org/cppdocs/api/optim/index.html),
+[torch::data](https://docs.pytorch.org/cppdocs/api/data/index.html),
 [torch::serialize](https://docs.pytorch.org/cppdocs/api/serialize/index.html),
-[torch::jit](https://pytorch.org/cppdocs/api/namespace_torch__jit.html#namespace-torch-jit)
+`torch::jit`
 and `torch::python`.
 Examples of the C++ frontend can be found in [this repository](https://github.com/pytorch/examples/tree/master/cpp) which is being
 expanded on a continuous and active basis.
