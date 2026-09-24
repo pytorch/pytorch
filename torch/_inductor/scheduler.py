@@ -47,7 +47,10 @@ from torch._inductor.codecache import LambdaFuture, PyCodeCache
 from torch._inductor.ir import TritonTemplateCallerBase
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch._inductor.stream_utils import get_stream_name
-from torch.fx.experimental.symbolic_shapes import free_symbols
+from torch.fx.experimental.symbolic_shapes import (
+    GuardOnDataDependentSymNode,
+    free_symbols,
+)
 from torch.utils._sympy.functions import FloorDiv, Identity
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from torch.utils._triton import has_triton
@@ -885,7 +888,7 @@ class NestedReduction:
         nodes: Sequence[SchedulerNode],
         parent_numel: sympy.Expr,
         parent_rnumel: sympy.Expr,
-    ) -> tuple[sympy.Expr, dict[sympy.Expr, sympy.Expr]]:
+    ) -> tuple[sympy.Expr, dict[sympy.Expr, sympy.Expr]] | None:
         """Specialize a translated sub-parent's canonical parent width.
 
         A translated sub-parent relation needs the concrete parent reduction
@@ -921,7 +924,10 @@ class NestedReduction:
             return parent_rnumel, {}
 
         sizevars = V.graph.sizevars
-        parent_width = sizevars.guarding_hint_or_throw(parent_rnumel)
+        try:
+            parent_width = sizevars.guarding_hint_or_throw(parent_rnumel)
+        except GuardOnDataDependentSymNode:
+            return None
         specialized_parent_rnumel = sympy.Integer(parent_width)
         width_subs = {parent_rnumel: specialized_parent_rnumel}
         specialized_full_numel = sizevars.simplify(
@@ -947,7 +953,10 @@ class NestedReduction:
 
         # The concrete result is used to rebuild every width-dependent plan
         # field before the candidate can commit fusion.
-        parent_width = sizevars.guard_int(parent_rnumel)
+        try:
+            parent_width = sizevars.guard_int(parent_rnumel)
+        except GuardOnDataDependentSymNode:
+            return None
         specialized_parent_rnumel = sympy.Integer(parent_width)
         if parent_rnumel == specialized_parent_rnumel:
             return specialized_parent_rnumel, {}
@@ -976,9 +985,12 @@ class NestedReduction:
         scheduler_nodes = typing.cast("Sequence[SchedulerNode]", nodes)
         width_subs: dict[sympy.Expr, sympy.Expr] = {}
         if config.polyhedral_fusion:
-            parent_rnumel, width_subs = cls._specialize_translated_parent_width(
+            specialization = cls._specialize_translated_parent_width(
                 scheduler_nodes, numel, parent_rnumel
             )
+            if specialization is None:
+                return None
+            parent_rnumel, width_subs = specialization
         planning_rnumel = parent_rnumel if config.polyhedral_fusion else rnumel
 
         # TODO: Consider an alternative to rediscovering the reduction here.
@@ -1125,6 +1137,10 @@ class NestedReduction:
         if not all(isinstance(node, SchedulerNode) for node in nodes):
             return SubParentFusionResult(False, None)
         scheduler_nodes = typing.cast("Sequence[SchedulerNode]", nodes)
+        plan = cls.sub_parent_epilogue_plan(nodes, numel, rnumel)
+        if plan is not None:
+            return SubParentFusionResult(True, plan)
+
         parent_rnumel = V.graph.sizevars.simplify(rnumel)
         if not cls._mutations_survive_hoisting(nodes):
             grouping = cls._sub_parent_epilogue_candidate_nodes(
@@ -1135,12 +1151,16 @@ class NestedReduction:
                 None,
                 reason="mutation prevents safe stage hoisting" if grouping else None,
             )
+
         width_subs: dict[sympy.Expr, sympy.Expr] = {}
         planning_rnumel = rnumel
         if config.polyhedral_fusion:
-            parent_rnumel, width_subs = cls._specialize_translated_parent_width(
+            specialization = cls._specialize_translated_parent_width(
                 scheduler_nodes, numel, parent_rnumel
             )
+            if specialization is None:
+                return SubParentFusionResult(False, None)
+            parent_rnumel, width_subs = specialization
             planning_rnumel = parent_rnumel
         if not any(node.is_reduction() for node in scheduler_nodes):
             return SubParentFusionResult(False, None)
@@ -1152,13 +1172,10 @@ class NestedReduction:
         )
         if grouping is None:
             return SubParentFusionResult(False, None)
-        plan = cls.sub_parent_epilogue_plan(nodes, numel, rnumel)
         return SubParentFusionResult(
             True,
-            plan,
-            reason=(
-                None if plan is not None else "sub-parent epilogue planning failed"
-            ),
+            None,
+            reason="sub-parent epilogue planning failed",
         )
 
     @staticmethod
@@ -2636,9 +2653,9 @@ class NestedReduction:
                 return False
             if not translated:
                 continue
-            source_sets = OrderedSet(
+            source_sets = {
                 frozenset(relation.source_accesses) for relation in translated
-            )
+            }
             # ``requires_live_source`` is relation-specific: the same source
             # name may be forwarded for one output and remain an external or
             # graph-output access for another.  The codegen descriptor retains
@@ -6492,11 +6509,6 @@ class Scheduler:
         self.nodes = [self.create_scheduler_node(n) for n in nodes]
         self.previous_node: BaseSchedulerNode | None = None
         self.current_node: BaseSchedulerNode | None = None
-
-        # Unlike V.graph.removed_buffers, the op recorded here is removed but
-        # we still need the buffer (generated in alternative ways).
-        self.removed_ops: OrderedSet[str] = OrderedSet()
-
         self.update_zero_dim_cpu_tensor()
         # some new constants could have been created above
         self.available_buffer_names.update(V.graph.constants.keys())
@@ -6740,6 +6752,10 @@ class Scheduler:
                 "num_nodes_after_fusion": len(self.nodes),
             }
         )
+
+        # Unlike V.graph.removed_buffers, the op recorded here is removed but
+        # we still need the buffer (generated in alternative ways)
+        self.removed_ops: OrderedSet[str] = OrderedSet()
 
     def get_donated_buffers(self) -> dict[str, SchedulerDonatedBuffer]:
         name_to_donated_buf = {}
@@ -10489,6 +10505,7 @@ class Scheduler:
                     extent_subs,
                 ):
                     return None
+
         writes_by_name: dict[str, list[tuple[MemoryDep, MemoryDep]]] = defaultdict(list)
         for raw_write in producer.read_writes.writes:
             if isinstance(raw_write, MemoryDep):
@@ -10863,6 +10880,7 @@ class Scheduler:
             why("device mismatch (%s vs %s)", device, device2)
             return False
         del device2
+
         # Path 1: append to an existing outer + grouped reduction pipeline.
         if isinstance(node1, FusedNestedReductions):
             append = node1._plan_fusion_with(node2)
@@ -10886,30 +10904,13 @@ class Scheduler:
             existing_standalone_epilogue = isinstance(node1, FusedStagedReduction)
             _, (numel, rnumel) = node1.group
             nodes = [*node1.get_nodes(), *node2.get_nodes()]
-            if config.polyhedral_fusion:
-                result = NestedReduction.sub_parent_epilogue_result(
-                    nodes, numel, rnumel
-                )
-                plan = result.plan
-                if plan is None and result.is_candidate:
-                    why("sub-parent epilogue planning failed: %s", result.reason)
-                    return False
-            else:
-                plan = NestedReduction.sub_parent_epilogue_plan(
-                    nodes, numel, rnumel
-                )
-                if plan is None and all(
-                    isinstance(node, SchedulerNode) for node in nodes
-                ):
-                    scheduler_nodes = typing.cast("Sequence[SchedulerNode]", nodes)
-                    if (
-                        NestedReduction._sub_parent_epilogue_candidate_nodes(
-                            scheduler_nodes, numel, rnumel
-                        )
-                        is not None
-                    ):
-                        why("sub-parent epilogue planning failed")
-                        return False
+            result = NestedReduction.sub_parent_epilogue_result(
+                nodes, numel, rnumel
+            )
+            plan = result.plan
+            if plan is None and result.is_candidate:
+                why("sub-parent epilogue planning failed: %s", result.reason)
+                return False
             if plan is not None and not existing_standalone_epilogue:
                 # Path 3: initially form reduction -> sub-parent epilogue.
                 new_nodes_are_epilogue = all(
@@ -11008,9 +11009,7 @@ class Scheduler:
             )
             if (
                 vertical_fusion_legal
-                and V.choices.can_fuse_vertical(
-                    self, node1, node2, shared_data_score
-                )
+                and V.choices.can_fuse_vertical(self, node1, node2, shared_data_score)
                 and backend.can_fuse_vertical(node1, node2)
             ):
                 return True
