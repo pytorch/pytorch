@@ -1,9 +1,34 @@
 # Owner(s): ["module: dynamo"]
 
+import itertools
+
 import torch
 import torch._dynamo.testing
 from torch._dynamo.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import HardwareClassification
+
+
+class TestPairwise(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_call_time_iteration(self):
+        def fn(iterable):
+            try:
+                itertools.pairwise(iterable)
+            except TypeError:
+                return "TypeError"
+            return "accepted"
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        for iterable in (0, None, [], [1, 2, 3]):
+            self.assertEqual(compiled(iterable), fn(iterable))
+
+        def pairs_fn(iterable):
+            return list(itertools.pairwise(iterable))
+
+        compiled_pairs = torch.compile(pairs_fn, backend="eager", fullgraph=True)
+        for iterable in ([], [1], [1, 2, 3]):
+            self.assertEqual(compiled_pairs(iterable), pairs_fn(iterable))
 
 
 class TestGroupTensorsByDeviceAndDtype(TestCase):
