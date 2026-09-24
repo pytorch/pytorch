@@ -623,58 +623,23 @@ fn = functools.partial(my_fn)
             self.assertTrue(same(compiled(x), x + 1))
             self.assertNotIn("flag", mod.__dict__)
 
-    def test_delete_global_then_store_order(self):
-        # Eager `del g; g = 7` re-adds the name at the end of the module
-        # __dict__; the replayed delete has to run before the store to match.
-        with temp_globals(globals(), _dg_a=1, _dg_order_marker=2):
-            x = torch.ones(2, 2)
-
-            def fn(x):
-                global _dg_a
-                del _dg_a
-                _dg_a = 7
-                return x + 1
-
-            keys = list(globals())
-            self.assertLess(keys.index("_dg_a"), keys.index("_dg_order_marker"))
-
-            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-            self.assertEqual(opt_fn(x), x + 1)
-            self.assertEqual(_dg_a, 7)
-
-            keys = list(globals())
-            self.assertLess(keys.index("_dg_order_marker"), keys.index("_dg_a"))
-
-    def test_delete_global_crossfile_then_store_order(self):
-        with crossfile_globals(delete_then_store_value=1, order_marker=2) as mod:
+    def test_delete_global_crossfile_then_store(self):
+        # `del g; g = 7` in an inlined callee: the store overwrites the recorded
+        # delete, so the store alone is replayed and the value still lands.
+        with crossfile_globals(delete_then_store_value=1) as mod:
 
             def fn(x):
                 mod.delete_then_store_value_fn()
                 return x + 1
 
             x = torch.ones(2, 2)
-            keys = list(mod.__dict__)
-            self.assertLess(
-                keys.index("delete_then_store_value"), keys.index("order_marker")
-            )
-
             opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
             self.assertEqual(opt_fn(x), x + 1)
             self.assertEqual(mod.delete_then_store_value, 7)
 
-            keys = list(mod.__dict__)
-            self.assertLess(
-                keys.index("order_marker"), keys.index("delete_then_store_value")
-            )
-
-    def test_delete_global_crossfile_then_store_multi_order(self):
-        # `test_delete_global_crossfile_then_store_order` pins the re-store
-        # landing behind the pre-existing names. This pins the other half: a
-        # name the frame inserts while the re-stored name is still ahead of it
-        # in the module __dict__ has to keep that position. The replay runs the
-        # recorded mutations in insertion order, so a re-store that reused the
-        # slot its delete freed would replay ahead of the insert and put the two
-        # back to front.
+    def test_delete_global_crossfile_then_store_multi(self):
+        # The re-store follows an insert of a second name, so the two recorded
+        # mutations replay in insertion order and both values have to land.
         with crossfile_globals(delete_then_store_multi=1) as mod:
             mod.__dict__.pop("delete_then_store_multi_new", None)
 
@@ -682,28 +647,11 @@ fn = functools.partial(my_fn)
                 mod.delete_then_store_multi_fn()
                 return x + 1
 
-            def keys():
-                return [
-                    k for k in mod.__dict__ if k.startswith("delete_then_store_multi")
-                ]
-
-            self.assertEqual(
-                keys(), ["delete_then_store_multi", "delete_then_store_multi_fn"]
-            )
-
             x = torch.ones(2, 2)
             opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
             self.assertEqual(opt_fn(x), x + 1)
             self.assertEqual(mod.delete_then_store_multi, 3)
-
-            self.assertEqual(
-                keys(),
-                [
-                    "delete_then_store_multi_fn",
-                    "delete_then_store_multi_new",
-                    "delete_then_store_multi",
-                ],
-            )
+            self.assertEqual(mod.delete_then_store_multi_new, 2)
 
     def test_delete_global_crossfile_created_then_deleted_in_stdlib(self):
         # `test_delete_global_crossfile_created_then_deleted` covers the

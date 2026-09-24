@@ -2289,7 +2289,8 @@ class InstructionTranslatorBase(
         from .variables.streams import get_current_stream, new_event
 
         device = var.device
-        if device is None or device.type not in ("cuda", "mtia", "xpu"):
+        acc = torch.accelerator.current_accelerator()
+        if device is None or acc is None or device.type != acc.type:
             return
 
         node = var.proxy.node
@@ -2421,17 +2422,14 @@ class InstructionTranslatorBase(
 
     def DELETE_GLOBAL(self, inst: Instruction) -> None:
         name = inst.argval
-        source = GlobalSource(name)
         present = name in self.f_globals
         self._install_globals_membership_guard(name, present)
+        # STORE_GLOBAL and DELETE_GLOBAL of one name share the sentinel, and so
+        # the item they key the recorded mutation on.
         if name not in self.symbolic_globals:
-            if not present:
-                # Not in the real globals, and no earlier STORE_GLOBAL in this
-                # trace bound it.
-                self.raise_name_error(name)
             self.symbolic_globals[name] = object()  # type: ignore[assignment]  # sentinel object
         variable = self.output.side_effects.track_global_existing(
-            source, self.symbolic_globals[name]
+            GlobalSource(name), self.symbolic_globals[name]
         )
         if not self._check_global_delete(name, variable, present):
             return
@@ -2445,17 +2443,22 @@ class InstructionTranslatorBase(
         item: VariableTracker,
         present: bool,
     ) -> bool:
-        """Shared DELETE_GLOBAL prelude for the root and inlined handlers.
+        """Decide what `del name` does, given `item` keys this name's mutation.
 
-        Returns True when the caller must record a real delete, or False when it
-        was already handled (the name is unbound, or a store made earlier in
-        this trace was cancelled).
+        Shared by the root and inlined handlers. Returns True when the caller
+        must record the delete, False when there is nothing to replay, and
+        raises NameError when eager would.
         """
         side_effects = self.output.side_effects
         pending = side_effects.store_attr_mutations.get(item, {}).get(name)
         if isinstance(pending, variables.DeletedVariable):
             # An earlier `del` in this trace already removed the name.
-            self.raise_name_error(name)
+            raise_observed_exception(
+                NameError,
+                self,
+                args=[f"name '{name}' is not defined"],
+                kwargs={"name": ConstantVariable.create(name)},
+            )
         if isinstance(pending, TensorVariable):
             # Dropping `pending` destroys the last reference, the same as
             # DELETE_FAST dropping a local. It is a store made earlier in this
@@ -2466,49 +2469,40 @@ class InstructionTranslatorBase(
         if present:
             return True
         if pending is None:
-            # `symbolic_globals` is never pruned, so a sentinel for a name that
-            # is absent from the real globals only means a STORE_GLOBAL created
-            # it earlier in this trace. If the pending store is gone too, an
-            # earlier `del` already cancelled it and the name is unbound, as in
-            # `g = 1; del g; del g`.
-            self.raise_name_error(name)
-        # The delete cancels that pending store and there is nothing to replay.
+            # Unbound, and nothing in this trace bound it: either no
+            # STORE_GLOBAL ran, or one did and an earlier `del` already
+            # cancelled it, as in `g = 1; del g; del g`.
+            raise_observed_exception(
+                NameError,
+                self,
+                args=[f"name '{name}' is not defined"],
+                kwargs={"name": ConstantVariable.create(name)},
+            )
+        # A STORE_GLOBAL earlier in this trace created the name, so the delete
+        # cancels that pending store and there is nothing to replay. Recording a
+        # delete instead would raise NameError at runtime, where the name is
+        # absent, since the store it created the name with is gone.
         side_effects.discard_attr_mutation(item, name)
         return False
-
-    def raise_name_error(self, name: str) -> NoReturn:
-        # The NameError paths (missing name, double delete) are raised while
-        # tracing rather than recorded and replayed as a side effect, so the
-        # enclosing handler and statement ordering match eager. A successful
-        # delete of a bound name is a separate path: it is recorded and replayed.
-        raise_observed_exception(
-            NameError,
-            self,
-            args=[f"name '{name}' is not defined"],
-            kwargs={"name": ConstantVariable.create(name)},
-        )
 
     def _install_globals_membership_guard(self, name: str, present: bool) -> None:
         # DELETE_GLOBAL bakes the trace-time `name in f_globals` decision into
         # the generated code, so membership itself has to be guarded. Without
         # it a name that later appears or disappears reuses a stale artifact
         # and the replayed delete no longer matches the globals.
-        guard_builder = (
-            GuardBuilder.DICT_CONTAINS if present else GuardBuilder.DICT_NOT_CONTAINS
-        )
-        install_guard(
-            self._globals_dict_source().make_guard(
-                functools.partial(guard_builder, key=name)
-            )
-        )
-
-    def _globals_dict_source(self) -> Source:
+        #
         # GlobalSource(name) resolves to `G[name]`, which raises KeyError for an
         # absent name, so membership has to be guarded against the globals dict
         # itself. install_global_by_id is the mechanism
         # get_globals_source_and_value already uses for unnamed scopes.
-        return GlobalSource(
+        guard_builder = (
+            GuardBuilder.DICT_CONTAINS if present else GuardBuilder.DICT_NOT_CONTAINS
+        )
+        globals_source = GlobalSource(
             self.output.install_global_by_id("___unnamed_scope", self.f_globals)
+        )
+        install_guard(
+            globals_source.make_guard(functools.partial(guard_builder, key=name))
         )
 
     # Keyed by module_name alone, not the whole argument tuple as @cache_method
@@ -2661,7 +2655,12 @@ class InstructionTranslatorBase(
         if argval not in self.f_builtins:
             # Name is neither a global nor a builtin: matches CPython raising
             # NameError with `name` set to the missing identifier.
-            self.raise_name_error(argval)
+            raise_observed_exception(
+                NameError,
+                self,
+                args=[f"name '{argval}' is not defined"],
+                kwargs={"name": ConstantVariable.create(argval)},
+            )
         val = self.f_builtins[argval]
 
         if callable(val):
@@ -6631,7 +6630,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                     ),
                     hints=[*graph_break_hints.SUPPORTABLE],
                 )
-            self.output.side_effects.store_global_in_module(fglobals_vt, name, value)
+            self.output.side_effects.store_attr(fglobals_vt, name, value)
 
     def DELETE_GLOBAL(self, inst: Instruction) -> None:
         if self.output.global_scope is self.f_globals:

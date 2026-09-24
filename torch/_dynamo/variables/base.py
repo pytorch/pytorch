@@ -180,10 +180,6 @@ class AttrMutationKind(Enum):
     # Replay a module-global deletion by mutating module.__dict__ directly,
     # preserving DELETE_GLOBAL's NameError semantics.
     GLOBAL_DELETE = 2
-    # Replay a global store that a delete of the same name preceded in this
-    # trace: the name has to leave the module __dict__ first, so that the store
-    # re-adds it at the end the way eager `del g; g = 2` does.
-    GLOBAL_REINSERT = 3
 
 
 class ValueMutationNew(MutationType):
