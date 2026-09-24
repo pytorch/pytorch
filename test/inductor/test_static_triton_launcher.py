@@ -13,8 +13,11 @@ from torch._dynamo.device_interface import get_interface_for_device
 from torch._inductor.codecache import PyCodeCache
 from torch._inductor.runtime import triton_helpers
 from torch._inductor.runtime.static_triton_launcher import (
+    _STATIC_LAUNCHER_REGISTRY,
+    register_statically_launched_kernel,
     statically_launched_kernel_by_device,
     StaticallyLaunchedCudaKernel,
+    StaticallyLaunchedTritonKernel,
     StaticallyLaunchedXpuKernel,
 )
 from torch._inductor.runtime.triton_compat import (
@@ -231,6 +234,58 @@ class TestStaticTritonLauncherUnit(TestCase):
             NotImplementedError, "Global scratch not yet supported"
         ):
             self._global_scratch_kernel()
+
+    def test_register_statically_launched_kernel(self):
+        # A registered device type dispatches to its kernel class.
+        class FakeNpuKernel(StaticallyLaunchedTritonKernel):
+            def C_impl(self):
+                raise AssertionError("unused in this unit test")
+
+            def __init__(self, kernel):
+                # Avoid the heavy base-class init; the dispatch only needs
+                # to instantiate the registered class.
+                self._kernel = kernel
+
+        register_statically_launched_kernel("npu", FakeNpuKernel)
+        try:
+            kernel = SimpleNamespace(
+                src=SimpleNamespace(fn=SimpleNamespace(__name__="k", arg_names=[])),
+                metadata=SimpleNamespace(num_warps=4, shared=0, num_ctas=1),
+                _cubin_path=None,
+                hash="h",
+            )
+            launcher = statically_launched_kernel_by_device(kernel, "npu")
+            self.assertIsInstance(launcher, FakeNpuKernel)
+        finally:
+            # Un-register so the fixture does not leak into other tests.
+            _STATIC_LAUNCHER_REGISTRY.pop("npu", None)
+
+    def test_register_statically_launched_kernel_validation(self):
+        with self.assertRaisesRegex(
+            NotImplementedError, "is not registered for static launcher"
+        ):
+            statically_launched_kernel_by_device(object(), "nope")
+        with self.assertRaisesRegex(ValueError, "already registered"):
+            # cuda is registered by default.
+            register_statically_launched_kernel(
+                "cuda", StaticallyLaunchedCudaKernel
+            )
+        # Non-class inputs (the per-device launcher argument) must raise a clear
+        # TypeError before issubclass can produce its native "must be a class".
+        for bad in (None, object(), object):
+            with self.assertRaises(TypeError):
+                register_statically_launched_kernel("npu", bad)
+        registry = dict(_STATIC_LAUNCHER_REGISTRY)
+        try:
+            register_statically_launched_kernel(
+                "cuda", StaticallyLaunchedXpuKernel, override=True
+            )
+            self.assertIs(
+                _STATIC_LAUNCHER_REGISTRY["cuda"], StaticallyLaunchedXpuKernel
+            )
+        finally:
+            _STATIC_LAUNCHER_REGISTRY.clear()
+            _STATIC_LAUNCHER_REGISTRY.update(registry)
 
     @staticmethod
     def _autotuner_with_static_cubin(cubin_raw):

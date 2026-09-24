@@ -84,6 +84,7 @@ from .runtime_utils import (
     validate_triton_config,
 )
 from .static_triton_launcher import (
+    is_registered_static_launch_device,
     statically_launched_kernel_by_device,
     StaticallyLaunchedCudaKernel,
     StaticallyLaunchedXpuKernel,
@@ -3042,8 +3043,13 @@ class StaticTritonCompileResult(CompileResult[_T]):
             return None
 
         def check_can_launch() -> _KernelType:
-            if triton_meta.get("device_type") not in ("cuda", "xpu", "hip"):
-                raise CannotStaticallyLaunchKernel("Non-cuda/XPU/ROCm device")
+            if not is_registered_static_launch_device(
+                triton_meta.get("device_type", "")
+            ):
+                raise CannotStaticallyLaunchKernel(
+                    "No static Triton kernel launcher registered for device type "
+                    f"{triton_meta.get('device_type')}",
+                )
 
             if triton_meta.get("device_type") == "xpu" and XPU_KERNEL_FORMAT == "spv":
                 raise CannotStaticallyLaunchKernel(
