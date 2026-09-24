@@ -89,9 +89,7 @@ struct FactKB {
 
   Tri get(Fact f) const {
     uint32_t b = 1u << static_cast<unsigned>(f);
-    return (true_mask & b) ? Tri::True
-        : (false_mask & b) ? Tri::False
-                           : Tri::Unknown;
+    return (true_mask & b) ? Tri::True : (false_mask & b) ? Tri::False : Tri::Unknown;
   }
 };
 
@@ -149,6 +147,8 @@ struct SymbolInfo {
   std::string name;
   // The deduced assumptions (sympy's assumptions0).
   FactKB facts;
+  // sympy's Dummy.dummy_index; 0 for a Symbol.
+  uint64_t dummy_index = 0;
 };
 
 class ExprArena : public c10::intrusive_ptr_target {
@@ -164,6 +164,8 @@ class ExprArena : public c10::intrusive_ptr_target {
     return neg_int_oo_;
   }
   const Expr* symbol(const std::string& name, const Facts& facts);
+  // A fresh Dummy(name, **{fact: True}).
+  const Expr* dummy(const std::string& name, Fact fact);
   const SymbolInfo& symbol_info(const Expr* e) const {
     return symbols_.at(e->p);
   }
@@ -180,20 +182,29 @@ class ExprArena : public c10::intrusive_ptr_target {
   // Basic.compare.
   int compare(const Expr* a, const Expr* b) const;
 
+  // Ports of the sympy helpers behind the Add sign handlers (ExprTools.cpp).
+  std::pair<const Expr*, const Expr*> as_coeff_Add(const Expr* e);
+  c10::SmallVector<const Expr*, 4> free_symbols(const Expr* e) const;
+  bool is_polynomial(const Expr* e) const;
+  const Expr* diff(const Expr* e, const Expr* x);
+  const Expr* xreplace(const Expr* e, c10::ArrayRef<std::pair<const Expr*, const Expr*>> reps);
+  std::pair<const Expr*, const Expr*> as_numer_denom(const Expr* e);
+  // sympy.core.exprtools._monotonic_sign; nullptr for None.
+  const Expr* monotonic_sign(const Expr* e);
+
   size_t size() const {
     return storage_.size();
   }
 
  private:
   const Expr* number(Num n);
-  const Expr* intern(
-      Kind kind,
-      int64_t p,
-      int64_t q,
-      c10::ArrayRef<const Expr*> args);
+  const Expr* intern(Kind kind, int64_t p, int64_t q, c10::ArrayRef<const Expr*> args);
   // Assoc node from already-processed args, like AssocOp._from_args.
   const Expr* from_args(Kind kind, c10::SmallVectorImpl<const Expr*>& args);
   const Expr* number_pow(Num b, int64_t e);
+  const Expr* new_symbol(const std::string& name, const FactKB& kb);
+  const Expr* keep_coeff(const Expr* coeff, const Expr* factors);
+  c10::SmallVector<const Expr*, 2> real_roots(const Expr* p, const Expr* x);
   static Num as_num(const Expr* e);
   Tri eval_fact(const Expr* e, Fact f);
   static FactKB default_kb(const Expr* e);
@@ -216,6 +227,9 @@ class ExprArena : public c10::intrusive_ptr_target {
   const Expr* neg_one_;
   const Expr* int_oo_;
   const Expr* neg_int_oo_;
+  // sympy.core.exprtools._eps, a Dummy(positive=True).
+  const Expr* eps_;
+  uint64_t dummy_count_ = 0;
 };
 
 } // namespace torch::symbolic

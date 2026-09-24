@@ -260,7 +260,7 @@ class TestNativeExpr(TestCase):
             lambda: arena.from_sympy(sympy.Symbol("z", zero=True)),
             lambda: arena.from_sympy(sympy.Mul(2, s0 + 1, evaluate=False)),
             lambda: arena.rational(2**64, 3),
-            lambda: arena.ask(arena.from_sympy(s0 + 1), "positive"),
+            lambda: arena.as_numer_denom(arena.from_sympy(-(2**63) * s0 + s1)),
             lambda: arena.ask(arena.from_sympy(W**2), "extended_real"),
         ]
         for f in cases:
@@ -369,6 +369,15 @@ class TestNativeCompoundAssumptions(TestCase):
             (sympy.Symbol("t", irrational=True) + 1, "irrational", True),
             (zf**-2, "finite", True),
             (u0**-1, "zero", False),
+            (s0 + 1, "positive", True),
+            (s0 - 1, "nonnegative", True),
+            (1 - s0, "nonpositive", True),
+            (s0 - s1, "positive", None),
+            (s0**2 - s0, "nonnegative", None),
+            (s0**2 - s0, "extended_nonnegative", None),
+            (zf - 1, "extended_negative", None),
+            (s0 * s1 - 1, "nonnegative", True),
+            (1 / (s0 + 1) + 2, "positive", True),
         ]
         for v, f, expected in cases:
             arena = torch._C._symbolic._Arena()
@@ -378,8 +387,6 @@ class TestNativeCompoundAssumptions(TestCase):
     @parametrize("seed", range(8))
     def test_fuzz(self, seed):
         rng = random.Random(seed)
-        # Signs of Adds are not ported yet, so only Add-free trees are expected
-        # to be mostly answered natively.
         answered = unsupported = 0
         for _ in range(150):
             t = random_tree(rng, 3, FACT_LEAVES)
@@ -390,14 +397,87 @@ class TestNativeCompoundAssumptions(TestCase):
             if v.has(sympy.zoo, sympy.nan):
                 continue
             a, u = self.compare_facts(v, rng)
-            if not v.atoms(sympy.Add):
-                answered += a
-                unsupported += u
+            answered += a
+            unsupported += u
+        self.assertGreater(answered, 10 * unsupported)
+
+
+def undummy(e):
+    """Replaces each Dummy by a Symbol with its name and assumptions so results
+    built from fresh Dummies can be compared with ==."""
+    from sympy.core.exprtools import _eps
+
+    reps = {d: sympy.Symbol(d.name, **d.assumptions0) for d in e.atoms(sympy.Dummy)}
+    reps[_eps] = sympy.Symbol("_eps", positive=True)
+    return e.xreplace(reps)
+
+
+class TestNativeExprTools(TestCase):
+    SIGN_LEAVES = [
+        s0,
+        s1,
+        zf,
+        sympy.Symbol("n", integer=True, nonnegative=True),
+        sympy.Symbol("m", integer=True, negative=True),
+        sympy.Symbol("p", prime=True),
+        sympy.Symbol("e", even=True, positive=True),
+        *map(sympy.Integer, [-2, -1, 1, 2, 3]),
+        sympy.Rational(1, 2),
+    ]
+
+    def test_monotonic_sign_known(self):
+        from sympy.core.exprtools import _monotonic_sign
+
+        n = sympy.Symbol("n", integer=True, nonnegative=True)
+        cases = [n + 1, s0 - 1, n * s0 + 1, s0 * s1 + 1, n - 1, s0**2 - s0]
+        cases += [s0**2 + s0, 1 / (s0 + 1), -s0, zf, zf - 1, 2 * s0 + 3 * s1 - 4]
+        for v in cases:
+            arena = torch._C._symbolic._Arena()
+            got = arena.monotonic_sign(arena.from_sympy(v))
+            expected = _monotonic_sign(v)
+            got = None if got is None else undummy(arena.to_sympy(got))
+            self.assertEqual(
+                got, None if expected is None else undummy(expected), f"{v}"
+            )
+
+    @parametrize("seed", range(4))
+    def test_fuzz(self, seed):
+        from sympy.core.exprtools import _monotonic_sign
+
+        rng = random.Random(seed)
+        answered = unsupported = 0
+        for _ in range(200):
+            v = sympy.sympify(sympy_eval(random_tree(rng, 3, self.SIGN_LEAVES)))
+            if v.has(sympy.zoo, sympy.nan):
+                continue
+            arena = torch._C._symbolic._Arena()
+            n = arena.from_sympy(v)
+            self.assertEqual(arena.is_polynomial(n), v.is_polynomial(), f"{v}")
+            try:
+                nd = [arena.to_sympy(x) for x in arena.as_numer_denom(n)]
+                self.assertEqual(tuple(nd), v.as_numer_denom(), f"{v}")
+            except NativeUnsupported:
+                pass
+            for x in v.free_symbols:
+                d = arena.diff(n, arena.from_sympy(x))
+                self.assertEqual(arena.to_sympy(d), v.diff(x), f"d({v})/d{x}")
+            try:
+                got = arena.monotonic_sign(n)
+            except NativeUnsupported:
+                unsupported += 1
+                continue
+            answered += 1
+            expected = _monotonic_sign(v)
+            got = None if got is None else undummy(arena.to_sympy(got))
+            self.assertEqual(
+                got, None if expected is None else undummy(expected), f"{v}"
+            )
         self.assertGreater(answered, 10 * unsupported)
 
 
 instantiate_parametrized_tests(TestNativeExpr)
 instantiate_parametrized_tests(TestNativeCompoundAssumptions)
+instantiate_parametrized_tests(TestNativeExprTools)
 
 
 if __name__ == "__main__":

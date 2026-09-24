@@ -992,6 +992,109 @@ Tri pow_fact(ExprArena& A, const Expr* e, Fact f) {
   }
 }
 
+// Add._eval_is_extended_positive, or _eval_is_extended_negative with the signs
+// mirrored.
+Tri add_pos_neg(ExprArena& A, const Expr* e, bool positive) {
+  const Fact pos = positive ? F::extended_positive : F::extended_negative;
+  const Fact nonneg =
+      positive ? F::extended_nonnegative : F::extended_nonpositive;
+  const Fact nonpos =
+      positive ? F::extended_nonpositive : F::extended_nonnegative;
+  auto [c, a] = A.as_coeff_Add(e);
+  if (c->p != 0) {
+    const Expr* v = A.monotonic_sign(a);
+    if (v != nullptr) {
+      const Expr* s = A.add({v, c});
+      if (s != e && holds(A, s, pos) && holds(A, a, nonneg)) {
+        return Tri::True;
+      }
+      if (A.free_symbols(e).size() == 1) {
+        v = A.monotonic_sign(e);
+        if (v != nullptr && v != e && holds(A, v, pos)) {
+          return Tri::True;
+        }
+      }
+    }
+  }
+  bool saw_pos = false;
+  bool saw_nonneg = false;
+  bool saw_nonpos = false;
+  bool unknown_sign = false;
+  // The set saw_INF as a bitmask over Tri values.
+  unsigned saw_inf = 0;
+  c10::SmallVector<const Expr*, 8> args;
+  for (const Expr* t : e->args) {
+    if (!holds(A, t, F::zero)) {
+      args.push_back(t);
+    }
+  }
+  if (args.empty()) {
+    return Tri::False;
+  }
+  for (const Expr* t : args) {
+    Tri ispos = A.ask(t, pos);
+    Tri infinite = A.ask(t, F::infinite);
+    if (infinite == Tri::True) {
+      Tri isnonneg = A.ask(t, nonneg);
+      Tri any = ispos == Tri::True || isnonneg == Tri::True   ? Tri::True
+          : ispos == Tri::Unknown || isnonneg == Tri::Unknown ? Tri::Unknown
+                                                              : Tri::False;
+      saw_inf |= 1u << static_cast<unsigned>(any);
+      if ((saw_inf & 3) == 3) {
+        return Tri::Unknown;
+      }
+    }
+    if (ispos == Tri::True) {
+      saw_pos = true;
+      continue;
+    } else if (holds(A, t, nonneg)) {
+      saw_nonneg = true;
+      continue;
+    } else if (holds(A, t, nonpos)) {
+      saw_nonpos = true;
+      continue;
+    }
+    if (infinite == Tri::Unknown) {
+      return Tri::Unknown;
+    }
+    unknown_sign = true;
+  }
+  if (saw_inf != 0) {
+    if (std::popcount(saw_inf) > 1) {
+      return Tri::Unknown;
+    }
+    return static_cast<Tri>(std::countr_zero(saw_inf));
+  } else if (unknown_sign) {
+    return Tri::Unknown;
+  } else if (!saw_nonpos && saw_pos) {
+    return Tri::True;
+  } else if (!saw_pos && !saw_nonneg) {
+    return Tri::False;
+  }
+  return Tri::Unknown;
+}
+
+// Add._eval_is_extended_nonnegative, or _eval_is_extended_nonpositive.
+Tri add_nonneg_nonpos(ExprArena& A, const Expr* e, Fact f) {
+  auto [c, a] = A.as_coeff_Add(e);
+  if (c->p != 0 && holds(A, a, f)) {
+    const Expr* v = A.monotonic_sign(a);
+    if (v != nullptr) {
+      const Expr* s = A.add({v, c});
+      if (s != e && holds(A, s, f)) {
+        return Tri::True;
+      }
+      if (A.free_symbols(e).size() == 1) {
+        v = A.monotonic_sign(e);
+        if (v != nullptr && v != e && holds(A, v, f)) {
+          return Tri::True;
+        }
+      }
+    }
+  }
+  return Tri::Unknown;
+}
+
 Tri add_fact(ExprArena& A, const Expr* e, Fact f) {
   const auto& args = e->args;
   switch (f) {
@@ -1105,9 +1208,10 @@ Tri add_fact(ExprArena& A, const Expr* e, Fact f) {
       return Tri::False;
     case F::extended_positive:
     case F::extended_negative:
+      return add_pos_neg(A, e, f == F::extended_positive);
     case F::extended_nonnegative:
     case F::extended_nonpositive:
-      throw NativeUnsupported("sign of an Add is not ported yet");
+      return add_nonneg_nonpos(A, e, f);
     default:
       return Tri::Unknown;
   }

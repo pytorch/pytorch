@@ -150,6 +150,7 @@ ExprArena::ExprArena() {
   neg_one_ = integer(-1);
   int_oo_ = intern(Kind::IntInfinity, 0, 0, {});
   neg_int_oo_ = intern(Kind::NegativeIntInfinity, 0, 0, {});
+  eps_ = dummy("_eps", Fact::positive);
 }
 
 const Expr* ExprArena::intern(
@@ -213,13 +214,6 @@ const Expr* ExprArena::symbol(const std::string& name, const Facts& facts) {
   }
   FactKB kb;
   deduce_all_facts(kb, given);
-  // A zero symbol has an infinite reciprocal, which Mul.flatten turns into nan
-  // when multiplied by 0.
-  if (kb.get(Fact::commutative) != Tri::True ||
-      kb.get(Fact::finite) != Tri::True || kb.get(Fact::zero) == Tri::True) {
-    throw NativeUnsupported(
-        "only commutative finite nonzero symbols are supported: " + name);
-  }
   auto& same_name = symbols_by_name_[name];
   for (uint32_t idx : same_name) {
     const FactKB& other = symbols_[idx].facts;
@@ -227,9 +221,30 @@ const Expr* ExprArena::symbol(const std::string& name, const Facts& facts) {
       return intern(Kind::Symbol, idx, 0, {});
     }
   }
-  auto idx = static_cast<uint32_t>(symbols_.size());
+  const Expr* e = new_symbol(name, kb);
+  same_name.push_back(static_cast<uint32_t>(e->p));
+  return e;
+}
+
+const Expr* ExprArena::dummy(const std::string& name, Fact fact) {
+  FactKB kb;
+  std::pair<Fact, bool> given[] = {{Fact::commutative, true}, {fact, true}};
+  deduce_all_facts(kb, given);
+  const Expr* e = new_symbol(name, kb);
+  symbols_.back().dummy_index = ++dummy_count_;
+  return e;
+}
+
+const Expr* ExprArena::new_symbol(const std::string& name, const FactKB& kb) {
+  // A zero symbol has an infinite reciprocal, which Mul.flatten turns into nan
+  // when multiplied by 0.
+  if (kb.get(Fact::commutative) != Tri::True ||
+      kb.get(Fact::finite) != Tri::True || kb.get(Fact::zero) == Tri::True) {
+    throw NativeUnsupported(
+        "only commutative finite nonzero symbols are supported: " + name);
+  }
+  auto idx = static_cast<int64_t>(symbols_.size());
   symbols_.push_back({name, kb});
-  same_name.push_back(idx);
   return intern(Kind::Symbol, idx, 0, {});
 }
 
@@ -518,7 +533,13 @@ int ExprArena::compare(const Expr* a, const Expr* b) const {
   if (a == b) {
     return 0;
   }
-  int c = cmp3(class_rank(a), class_rank(b));
+  // Dummy is not in ordering_of_classes and sorts before IntInfinity by name.
+  auto rank = [this](const Expr* e) {
+    return e->kind == Kind::Symbol && symbol_info(e).dummy_index != 0
+        ? 99
+        : class_rank(e);
+  };
+  int c = cmp3(rank(a), rank(b));
   if (c != 0) {
     return c;
   }
@@ -560,7 +581,8 @@ int ExprArena::compare(const Expr* a, const Expr* b) const {
           return c;
         }
       }
-      return 0;
+      // Dummy._hashable_content appends dummy_index.
+      return cmp3(symbol_info(a).dummy_index, symbol_info(b).dummy_index);
     }
     case Kind::Pow:
     case Kind::Mul:

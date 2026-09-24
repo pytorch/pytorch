@@ -22,6 +22,7 @@ struct PyArena {
     Integer = sympy.attr("Integer");
     Rational = sympy.attr("Rational");
     Symbol = sympy.attr("Symbol");
+    Dummy = sympy.attr("Dummy");
     Add = sympy.attr("Add");
     Mul = sympy.attr("Mul");
     Pow = sympy.attr("Pow");
@@ -39,7 +40,7 @@ struct PyArena {
   std::vector<py::object> symbol_objects;
   std::unordered_map<uint32_t, py::object> sympy_cache;
 
-  py::object Integer, Rational, Symbol, Add, Mul, Pow, IntInfinity,
+  py::object Integer, Rational, Symbol, Dummy, Add, Mul, Pow, IntInfinity,
       NegativeIntInfinity, int_oo;
 };
 
@@ -153,9 +154,22 @@ py::object PyArena::to_sympy(const Expr* e) {
     case Kind::NegativeIntInfinity:
       r = int_oo.attr("__neg__")();
       break;
-    case Kind::Symbol:
-      r = symbol_objects.at(e->p);
+    case Kind::Symbol: {
+      const SymbolInfo& info = arena->symbol_info(e);
+      if (info.dummy_index == 0) {
+        r = symbol_objects.at(e->p);
+        break;
+      }
+      py::dict assumptions;
+      for (size_t i = 0; i < kNumFacts; ++i) {
+        auto f = static_cast<Fact>(i);
+        if (info.facts.get(f) != Tri::Unknown) {
+          assumptions[fact_name(f)] = info.facts.get(f) == Tri::True;
+        }
+      }
+      r = Dummy(info.name, **assumptions);
       break;
+    }
     case Kind::Add:
     case Kind::Mul:
     case Kind::Pow: {
@@ -250,9 +264,10 @@ py::tuple assume_rules_to_py() {
   }
   py::list beta;
   for (const BetaRule& r : rules.beta_rules) {
-    beta.append(py::make_tuple(
-        fact_set(r.cond_true, r.cond_false),
-        py::make_tuple(fact_name(r.fact), r.value)));
+    beta.append(
+        py::make_tuple(
+            fact_set(r.cond_true, r.cond_false),
+            py::make_tuple(fact_name(r.fact), r.value)));
   }
   return py::make_tuple(implications, beta, triggers, prereq);
 }
@@ -356,6 +371,33 @@ void initSymbolicBindings(PyObject* module) {
             auto f = fact_from_name(fact);
             TORCH_CHECK(f, "unknown assumption ", fact);
             return to_py(self->arena->ask(unwrap(self, e), *f));
+          })
+      .def(
+          "diff",
+          [wrap](const Self& self, const PyExpr& e, const PyExpr& x) {
+            const Expr* s = unwrap(self, x);
+            TORCH_CHECK(s->kind == Kind::Symbol, "diff needs a symbol");
+            return wrap(self, self->arena->diff(unwrap(self, e), s));
+          })
+      .def(
+          "as_numer_denom",
+          [wrap](const Self& self, const PyExpr& e) {
+            auto [n, d] = self->arena->as_numer_denom(unwrap(self, e));
+            return std::make_pair(wrap(self, n), wrap(self, d));
+          })
+      .def(
+          "is_polynomial",
+          [](const Self& self, const PyExpr& e) {
+            return self->arena->is_polynomial(unwrap(self, e));
+          })
+      .def(
+          "monotonic_sign",
+          [wrap](const Self& self, const PyExpr& e) -> std::optional<PyExpr> {
+            const Expr* r = self->arena->monotonic_sign(unwrap(self, e));
+            if (r == nullptr) {
+              return std::nullopt;
+            }
+            return wrap(self, r);
           });
 }
 
