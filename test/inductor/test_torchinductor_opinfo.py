@@ -1544,7 +1544,7 @@ class TestInductorOpInfo(TestCase):
                         if exact_stride and device_type == "cpu":
                             exact_stride = op_name not in inductor_skip_exact_stride_cpu
                         # XPU has additional layout optimizations that change strides differently from eager mode.
-                        if exact_stride and self.device_type == "xpu":
+                        if exact_stride and device_type == "xpu":
                             exact_stride = op_name not in inductor_skip_exact_stride_xpu
                         if device_type != "cpu":
                             self.check_model_gpu(
