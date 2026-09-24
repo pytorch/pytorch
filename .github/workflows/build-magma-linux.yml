@@ -28,7 +28,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  check-ci:
+    if: github.repository_owner == 'pytorch'
+    uses: ./.github/workflows/_check-ci.yml
+
   build-linux-magma:
+    needs: check-ci
     if: github.repository_owner == 'pytorch'
     runs-on: linux.2xlarge
     permissions:

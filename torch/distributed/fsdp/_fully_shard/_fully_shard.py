@@ -410,67 +410,67 @@ class FSDPModule:
         state = self._get_fsdp_state()
         state._state_ctx.is_last_backward = is_last_backward
 
-    @_dynamo_disable
-    def finalize_gradient_accumulation(self) -> None:
-        """Finalize an accumulation window on the calling thread.
+    def set_manual_backward_finalization(self, enabled: bool) -> None:
+        """
+        Set whether the caller must finalize backward.
 
-        Call this once after all backward passes in an accumulation window when
-        :meth:`set_is_last_backward` was set to ``False``. To defer gradient
-        reduction until this call, also set :meth:`set_requires_gradient_sync`
-        to ``False``. To retain unsharded parameters until this call, set
-        :meth:`set_reshard_after_backward` to ``False``.
-
-        This method is not needed when the final backward runs with
-        :meth:`set_is_last_backward` set to ``True`` because FSDP finalizes
-        automatically. It temporarily enables gradient synchronization,
-        resharding, and last-backward handling, then restores their original
+        This must be called on the root FSDP module. When enabled, manual
+        finalization supersedes :meth:`set_is_last_backward`. Call
+        :meth:`finalize_backward` after all backward passes in the logical
+        backward operation and before reading or clearing gradients. Otherwise,
+        gradients may remain unreduced and backward iteration state is retained.
+        Gradient synchronization and parameter resharding follow their current
         settings.
 
-        The autograd final callback runs on the autograd thread, where its
-        stream waits cannot be CUDA graph captured. This method runs the work
-        on the calling thread and is safe to call during CUDA graph capture.
-
-        HSDP accumulation that disables only all-reduce is not supported.
-        Enable all-reduce on the final backward pass instead.
+        Set this before backward. The mode cannot change after backward starts
+        until the backward iteration is finalized or reset.
         """
         state = self._get_fsdp_state()
-        if state._is_root is None:
-            raise RuntimeError("A forward pass must run on the root FSDP module first")
-        if not state._is_root:
+        if state._is_root is False:
             raise RuntimeError(
-                "finalize_gradient_accumulation must be called on the root FSDP module"
+                "set_manual_backward_finalization must be called on the root "
+                f"{state._state_name} module"
             )
-        param_groups = [
-            group
-            for fsdp_state in state._state_ctx.all_states
-            for group in fsdp_state._fsdp_param_groups
-        ]
-        settings = [
-            (group.reduce_grads, group.all_reduce_grads, group.reshard_after_backward)
-            for group in param_groups
-        ]
-        if any(group._partial_reduce_output is not None for group in param_groups):
+        if (
+            enabled != state._state_ctx.manual_backward_finalization
+            and torch._C._current_graph_task_id() != -1
+        ):
             raise RuntimeError(
-                "finalize_gradient_accumulation does not support HSDP accumulation "
-                "with all-reduce disabled. Enable all-reduce on the final backward pass"
+                "set_manual_backward_finalization cannot change mode during backward"
             )
-        is_last_backward = state._state_ctx.is_last_backward
-        try:
-            self.set_requires_gradient_sync(True)
-            self.set_reshard_after_backward(True)
-            self.set_is_last_backward(True)
-            state._root_post_backward_final_callback(
-                finalize_gradient_accumulation=True
+        active_mode = state._state_ctx.manual_backward_finalization_active
+        if active_mode is not None and enabled != active_mode:
+            raise RuntimeError(
+                "set_manual_backward_finalization cannot change mode after backward starts"
             )
-            state._join_comm_streams()
-        finally:
-            for group, group_settings in zip(param_groups, settings):
-                (
-                    group.reduce_grads,
-                    group.all_reduce_grads,
-                    group.reshard_after_backward,
-                ) = group_settings
-            self.set_is_last_backward(is_last_backward)
+        state._state_ctx.manual_backward_finalization = enabled
+
+    @_dynamo_disable
+    def finalize_backward(self) -> None:
+        """
+        Finalize backward on the calling thread.
+
+        Enable manual finalization before forward, then call this after all
+        backward passes in the logical backward operation. This completes
+        pending gradient reduction and resharding according to their current
+        settings. Calling this before the root module's first forward is a no-op.
+        It is also safe after a completed backward that did not reach any
+        FSDP-managed parameters. Do not call it between forward and backward.
+
+        If several backward passes precede one finalization, disable gradient
+        synchronization for those backward passes and re-enable it before
+        finalization.
+
+        Manual finalization lets callers choose a finalization point that is
+        separate from any backward call. This supports schedules that represent
+        gradient reduction as a separate action. CUDA graph capture does not
+        support CPU gradient offload or an outstanding asynchronous unshard.
+
+        Partial gradient reduction for ``replicate()`` and HSDP is not
+        supported. Enable all-reduce before finalization.
+        """
+        state = self._get_fsdp_state()
+        state.finalize_backward()
 
     def set_requires_gradient_sync(
         self, requires_gradient_sync: bool, *, recurse: bool = True
