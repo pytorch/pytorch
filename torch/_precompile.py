@@ -270,7 +270,7 @@ from collections.abc import (
     Sequence,  # noqa: TC003
 )
 from types import MappingProxyType
-from typing import Any, cast, NewType, TYPE_CHECKING
+from typing import Any, cast, Literal, NewType, TYPE_CHECKING
 
 import torch
 import torch.utils._pytree as pytree
@@ -464,20 +464,70 @@ class Capture:
     pair, so fix the path and capture again.
     """
 
+    def __init__(self) -> None:
+        self._state: Literal["new", "active", "spent"] = "new"
+        # A Dynamo capture's calls all feed one PrecompileSession: serialize
+        # the block's calls, saves and exit across threads.
+        self._lock = threading.RLock()
+
     def __enter__(self) -> Self:
-        raise NotImplementedError
+        with self._lock:
+            if self._state == "spent":
+                raise PrecompileError(_SPENT_CAPTURE)
+            if self._state == "active":
+                raise PrecompileError(
+                    "this capture has already been entered; capture() returns a "
+                    "fresh capture per call."
+                )
+            self._start()
+            self._state = "active"
+        return self
 
     def __exit__(self, *exc: object) -> None:
-        raise NotImplementedError
+        with self._lock:
+            # The block is over either way: a later call must not run a trace
+            # whose result nothing would write.
+            self._state = "spent"
+            self._finish(exc)
 
     def __call__(self, *args: object, **kwargs: object) -> object:
-        raise NotImplementedError
+        with self._lock:
+            self._check_active("calling it, or nothing is written when the block exits")
+            return self._run(*args, **kwargs)
 
     def save(self) -> None:
         """Write everything captured so far to the artifact files without ending the capture.
 
-        Raises ``PrecompileError`` outside the capture's ``with`` block.
+        Each call re-renders and rewrites both files, so a job that dies between
+        saves leaves the last checkpoint loadable. A refusal (such as a
+        :class:`DynamoTracer` ``require_*`` gate) or a failed write raises but
+        writes nothing partial, and the capture stays open. Raises
+        ``PrecompileError`` outside the capture's ``with`` block.
         """
+        with self._lock:
+            self._check_active("calling save()")
+            self._save()
+
+    def _check_active(self, before: str) -> None:
+        if self._state == "spent":
+            raise PrecompileError(_SPENT_CAPTURE)
+        if self._state == "new":
+            raise PrecompileError(
+                f"capture is not active: enter it with a `with` block before {before}."
+            )
+
+    # The tracer's half, each run under the lock: arm on entry, run one call,
+    # write what has been captured, and end the block with its exc_info.
+    def _start(self) -> None:
+        pass
+
+    def _run(self, *args: object, **kwargs: object) -> object:
+        raise NotImplementedError
+
+    def _save(self) -> None:
+        raise NotImplementedError
+
+    def _finish(self, exc: tuple[object, ...]) -> None:
         raise NotImplementedError
 
 
@@ -506,53 +556,28 @@ class _MakeFxCapture(Capture):
         backend: str,
         decompositions: dict | None,
     ) -> None:
+        super().__init__()
         self._module = PrecompiledModule(
             fn, backend=backend, tracer="make_fx", decompositions=decompositions
         )
         self._artifact_path = artifact_path
         self._cache_path = cache_path
-        self._entered = False
-        self._exited = False
         self._rendered: tuple[str, bytes] | None = None
         self._called = False
 
-    def __enter__(self) -> Self:
-        if self._exited:
-            raise PrecompileError(_SPENT_CAPTURE)
-        if self._entered:
-            raise PrecompileError(
-                "this capture has already been entered; capture() returns a "
-                "fresh capture per call."
-            )
-        self._entered = True
-        return self
+    def _finish(self, exc: tuple[object, ...]) -> None:
+        # Write only on a clean exit that captured a call; a block that raised,
+        # or one that never called the capture, leaves the files untouched. The
+        # pair is dropped either way, so the spent capture cannot write it again.
+        try:
+            if exc[0] is None:
+                self._save()
+        finally:
+            self._rendered = None
 
-    def __exit__(self, *exc: object) -> None:
-        # The block is over either way: a later call must not run a trace whose
-        # result nothing would write. Write only on a clean exit that captured a
-        # call; a block that raised, or one that never called the capture,
-        # leaves the files untouched.
-        self._entered = False
-        self._exited = True
-        if exc[0] is not None:
-            return
-        self._write()
-
-    def save(self) -> None:
-        r"""Write the captured artifact to disk. A make_fx capture records a single
-        call, so there is nothing further to fold in; save() and block exit
-        write the same files.
-        """
-        if self._exited:
-            raise PrecompileError(_SPENT_CAPTURE)
-        if not self._entered:
-            raise PrecompileError(
-                "capture is not active: enter it with a `with` block before "
-                "calling save()."
-            )
-        self._write()
-
-    def _write(self) -> None:
+    def _save(self) -> None:
+        # A make_fx capture records a single call, so there is nothing further to
+        # fold in; save() and block exit write the same files.
         if self._rendered is None and self._called:
             raise PrecompileError(
                 "nothing was captured: the capture's call raised, so there is no "
@@ -571,14 +596,7 @@ class _MakeFxCapture(Capture):
                 f"precompile could not write the artifact: {e}"
             ) from e
 
-    def __call__(self, *args: object, **kwargs: object) -> object:
-        if self._exited:
-            raise PrecompileError(_SPENT_CAPTURE)
-        if not self._entered:
-            raise PrecompileError(
-                "capture is not active: enter it with a `with` block before "
-                "calling it, or nothing is written when the block exits."
-            )
+    def _run(self, *args: object, **kwargs: object) -> object:
         if kwargs:
             raise ValueError(
                 "MakeFxTracer takes positional arguments only; pass "
@@ -674,6 +692,7 @@ class _DynamoCapture(Capture):
         require_complete: bool,
         require_no_risky_drops: bool,
     ) -> None:
+        super().__init__()
         self._session = session
         self._artifact_path = artifact_path
         self._cache_path = cache_path
@@ -683,14 +702,12 @@ class _DynamoCapture(Capture):
         }
         self._call: Callable[..., object] | None = None
         self._fresh_cache: AbstractContextManager[None] | None = None
-        self._exited = False
         self._in_call = False
         self._calls = 0
         # The call count the last save() wrote. -1, not 0, so a block that never
         # called the capture is still "dirty" at exit and raises the
         # nothing-captured error rather than writing an empty artifact.
         self._saved_calls = -1
-        self._lock = threading.RLock()
 
     def _map(self, method: Callable[..., Any], *args: object, **kwargs: object) -> Any:
         from torch._dynamo.exc import PackageError, RecompileError
@@ -700,51 +717,40 @@ class _DynamoCapture(Capture):
         except (PackageError, RecompileError) as e:
             raise PrecompileError(str(e)) from e
 
-    def __enter__(self) -> Self:
+    def _start(self) -> None:
         from torch.compiler._cache import CacheArtifactManager
 
-        with self._lock:
-            if self._call is not None or self._exited:
-                raise PrecompileError(
-                    "this capture has already been entered; capture() returns a "
-                    "fresh capture per call."
-                )
-            # The capture's compiles record into the process-global cache-artifact
-            # list, which the cache half of the artifact bundles to prime the
-            # kernel caches on load. A fresh one so the bundle holds only this
-            # capture's compiles; left in __exit__. The swap spans the whole
-            # block, so anything else compiled inside the block records here too.
-            self._fresh_cache = CacheArtifactManager.with_fresh_cache()
-            self._fresh_cache.__enter__()
-            try:
-                self._call = self._map(self._session.__enter__)
-            except BaseException:
-                self._fresh_cache.__exit__(None, None, None)
-                self._fresh_cache = None
-                raise
-        return self
+        # The capture's compiles record into the process-global cache-artifact
+        # list, which the cache half of the artifact bundles to prime the
+        # kernel caches on load. A fresh one so the bundle holds only this
+        # capture's compiles; left in _finish. The swap spans the whole
+        # block, so anything else compiled inside the block records here too.
+        self._fresh_cache = CacheArtifactManager.with_fresh_cache()
+        self._fresh_cache.__enter__()
+        try:
+            self._call = self._map(self._session.__enter__)
+        except BaseException:
+            self._fresh_cache.__exit__(None, None, None)
+            self._fresh_cache = None
+            raise
 
-    def __call__(self, *args: object, **kwargs: object) -> object:
-        with self._lock:
-            if self._call is None or self._exited:
-                raise PrecompileError(
-                    "capture is not active: enter it with a `with` block before "
-                    "calling it."
-                )
-            if self._in_call:
-                raise PrecompileError(
-                    "this capture is being re-entered recursively: fn called the "
-                    "capture it is being captured through. Call fn itself from "
-                    "inside fn."
-                )
-            self._in_call = True
-            # Counted before the call: a call that raised is for the session's
-            # require_complete gate to report, not "nothing was captured".
-            self._calls += 1
-            try:
-                return self._map(self._call, *args, **kwargs)
-            finally:
-                self._in_call = False
+    def _run(self, *args: object, **kwargs: object) -> object:
+        if self._call is None:
+            raise AssertionError("an active capture has no session call")
+        if self._in_call:
+            raise PrecompileError(
+                "this capture is being re-entered recursively: fn called the "
+                "capture it is being captured through. Call fn itself from "
+                "inside fn."
+            )
+        self._in_call = True
+        # Counted before the call: a call that raised is for the session's
+        # require_complete gate to report, not "nothing was captured".
+        self._calls += 1
+        try:
+            return self._map(self._call, *args, **kwargs)
+        finally:
+            self._in_call = False
 
     def _write(self) -> None:
         rendered = self._map(self._session.snapshot_artifact, **self._gates)
@@ -758,61 +764,47 @@ class _DynamoCapture(Capture):
             ) from e
         self._saved_calls = self._calls
 
-    def save(self) -> None:
-        r"""Checkpoint everything captured so far to the ``artifact_path`` /
-        ``cache_path`` files, without ending the capture. Each call re-renders
-        and rewrites both files, so a job that dies between saves leaves the
-        last checkpoint loadable. A gate refusal (``require_*``) or a write
-        failure raises but writes nothing partial, and the capture stays open.
-        """
-        with self._lock:
-            if self._call is None or self._exited:
-                raise PrecompileError(
-                    "capture is not active: enter it with a `with` block before "
-                    "calling save()."
-                )
-            if self._in_call:
-                raise PrecompileError(
-                    "save() was called from inside fn while the capture is "
-                    "running it; save after the call returns."
-                )
-            if self._calls == 0:
-                raise PrecompileError(
-                    "nothing was captured: call the capture with your example "
-                    "arguments before calling save()."
-                )
-            self._write()
+    def _save(self) -> None:
+        if self._in_call:
+            raise PrecompileError(
+                "save() was called from inside fn while the capture is "
+                "running it; save after the call returns."
+            )
+        if self._calls == 0:
+            raise PrecompileError(
+                "nothing was captured: call the capture with your example "
+                "arguments before calling save()."
+            )
+        self._write()
 
-    def __exit__(self, *exc: object) -> None:
-        with self._lock:
-            error: BaseException | None = None
-            try:
-                # A clean block with calls the last save() did not cover writes a
-                # final checkpoint while the compiles are still recorded; a block
-                # that raised, or whose last save() covered every call, writes
-                # nothing here. A gate refusal is held and re-raised after
-                # teardown so summary() stays readable.
-                if exc[0] is None and self._calls > self._saved_calls:
-                    try:
-                        if self._calls == 0:
-                            raise PrecompileError(
-                                "nothing was captured: call the capture with your "
-                                "example arguments inside the `with` block."
-                            )
-                        self._write()
-                    except BaseException as e:
-                        error = e
-                self._exited = True
+    def _finish(self, exc: tuple[object, ...]) -> None:
+        error: BaseException | None = None
+        try:
+            # A clean block with calls the last save() did not cover writes a
+            # final checkpoint while the compiles are still recorded; a block
+            # that raised, or whose last save() covered every call, writes
+            # nothing here. A gate refusal is held and re-raised after
+            # teardown so summary() stays readable.
+            if exc[0] is None and self._calls > self._saved_calls:
                 try:
-                    self._map(self._session.__exit__, *exc)
+                    if self._calls == 0:
+                        raise PrecompileError(
+                            "nothing was captured: call the capture with your "
+                            "example arguments inside the `with` block."
+                        )
+                    self._write()
                 except BaseException as e:
-                    if error is None:
-                        raise
-                    raise e from error
-            finally:
-                if self._fresh_cache is not None:
-                    self._fresh_cache.__exit__(None, None, None)
-                    self._fresh_cache = None
+                    error = e
+            try:
+                self._map(self._session.__exit__, *exc)
+            except BaseException as e:
+                if error is None:
+                    raise
+                raise e from error
+        finally:
+            if self._fresh_cache is not None:
+                self._fresh_cache.__exit__(None, None, None)
+                self._fresh_cache = None
         if exc[0] is None and error is not None:
             raise error
 
