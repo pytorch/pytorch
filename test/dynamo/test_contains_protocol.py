@@ -855,6 +855,27 @@ class TestSpecialMethodContainsRegressions(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
     @make_dynamo_test
+    def test_bound_contains_argument_errors(self):
+        with self.assertRaisesRegex(
+            TypeError,
+            r"^dict\.__contains__\(\) takes exactly one argument \(0 given\)$",
+        ):
+            {}.__contains__()
+        with self.assertRaisesRegex(
+            TypeError,
+            r"^dict\.__contains__\(\) takes exactly one argument \(2 given\)$",
+        ):
+            {}.__contains__(0, 1)
+        with self.assertRaisesRegex(
+            TypeError, r"^dict\.__contains__\(\) takes no keyword arguments$"
+        ):
+            {}.__contains__(x=2)
+        with self.assertRaisesRegex(
+            TypeError, r"^dict\.__contains__\(\) takes no keyword arguments$"
+        ):
+            {}.__contains__(x=2, y=2)
+
+    @make_dynamo_test
     def test_contains_none_is_not_a_container(self):
         raised = False
         try:

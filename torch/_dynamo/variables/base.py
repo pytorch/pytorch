@@ -803,9 +803,14 @@ def _wrap_objobjproc(
 ) -> VariableTracker:
     # sq_contains via __contains__: one arg, impl returns a bool.
     if kwargs:
-        raise_type_error(tx, "this method takes no keyword arguments")
+        raise_type_error(
+            tx, f"{self.python_type_name()}.__contains__() takes no keyword arguments"
+        )
     if len(args) != 1:
-        raise_type_error(tx, f"expected 1 argument, got {len(args)}")
+        raise_type_error(
+            tx,
+            f"{self.python_type_name()}.__contains__() takes exactly one argument ({len(args)} given)",
+        )
     [other] = args
     return func(self, tx, other)
 
