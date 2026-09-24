@@ -258,16 +258,6 @@ class profile:
             )
             experimental_config = copy.copy(experimental_config)
             experimental_config.trace_only = False
-        if (
-            experimental_config.profiler_metrics
-            or experimental_config.profiler_measure_per_kernel
-        ):
-            warn(
-                "profiler_metrics and profiler_measure_per_kernel are deprecated "
-                "and ignored. These options will be removed in a future release.",
-                FutureWarning,
-                stacklevel=2,
-            )
         if experimental_config.adjust_profiler_step:
             warn(
                 "adjust_profiler_step is deprecated and ignored. It will be "
@@ -757,7 +747,6 @@ class profile:
                 is_user_annotation=kineto_event.is_user_annotation(),
                 is_python_function=kineto_event.is_python_function(),
                 activity_type=kineto_event.activity_type(),
-                metadata_json=kineto_event.metadata_json(),
                 extra_meta=kineto_event.extra_meta() or None,
                 typed_metadata=kineto_event.typed_metadata() or None,
                 flow_id=kineto_event.flow_id(),
@@ -792,9 +781,10 @@ class profile:
                     device_corr_map[corr_id] = []
                 device_corr_map[corr_id].append(fe)
             elif corr_id == 0:
-                # Skip OVERHEAD events (profiler-internal host cost):
-                # they do no device work and would otherwise inflate reported device time.
-                if fe.activity_type != "overhead":
+                # Unlinked runtime/driver records and overhead have external_id=0.
+                # Their correlation ids can alias PyTorch operator ids, so do not
+                # use them to look up device work. See KinetoEvent::externalId().
+                if fe.external_id != 0:
                     frontend_function_events.append(fe)
             else:
                 raise RuntimeError(
