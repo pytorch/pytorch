@@ -777,12 +777,32 @@ def _build_installed_forward():
             f"precompile: this installed artifact serves {module_name}.{FN_NAME}, "
             f"which is not importable here ({_e})."
         ) from _e
-    package = CompilePackage(fn, dynamo)
-    compiled = torch._dynamo.optimize(BACKEND, package=package)(fn)
-    package.install(package_state["backends"])
+    try:
+        # CompilePackage refuses a module whose captured source has changed.
+        package = CompilePackage(fn, dynamo)
+        compiled = torch._dynamo.optimize(BACKEND, package=package)(fn)
+        package.install(package_state["backends"])
+    except Exception as _e:
+        raise _PrecompileError(
+            f"precompile: this installed artifact could not be installed onto "
+            f"{module_name}.{FN_NAME} ({type(_e).__name__}: {_e}). If that source "
+            f"changed since capture, regenerate the artifact against it."
+        ) from _e
 
     def forward(*args, **kwargs):
         with torch.compiler.set_stance("fail_on_recompile"):
-            return compiled(*args, **kwargs)
+            try:
+                return compiled(*args, **kwargs)
+            except RuntimeError as _e:
+                if "stance is 'fail_on_recompile'" not in str(_e):
+                    raise
+                raise _PrecompileError(
+                    f"precompile: no captured variant matches this call. Either a "
+                    f"guard on the call's arguments or on a module global the graph "
+                    f"baked in no longer holds (restore that environment), or this "
+                    f"call shape was never captured: the artifact serves only what "
+                    f"capture exercised, so add an example covering it and "
+                    f"recapture. Dynamo reported: {_e}"
+                ) from None
 
     return forward
