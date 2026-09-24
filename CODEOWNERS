@@ -489,6 +489,8 @@
 # /test/mkldnn_verbose.py
 # /test/pytest_shard_custom.py
 # /test/python_native/
+/test/python_native/test_lce_fused_grad_logits_kernel.py @slayton58 @pearu
+/test/python_native/test_linear_cross_entropy_override.py @slayton58 @pearu
 # /test/run_doctests.sh
 # /test/simulate_nccl_errors.py
 # /test/slow_tests.json
@@ -681,6 +683,7 @@
 # /torch/_lowrank.py
 # /torch/_meta_registrations.py
 /torch/_native/ @slayton58 @drisspg
+/torch/_native/ops/linear_cross_entropy/ @slayton58 @pearu
 # /torch/_numpy/
 # /torch/_opaque_base.py
 # /torch/_prims/
@@ -744,6 +747,7 @@
 #
 # [python_nn_api]
 /torch/nn/ @albanD @jbschlosser
+/torch/nn/modules/linear_cross_entropy*.py @slayton58 @pearu
 /torch/nn/utils/parametriz*.py @lezcano
 /torch/nn/attention/flex_attention.py @drisspg
 #
