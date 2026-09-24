@@ -53,7 +53,13 @@ from .cpp_utils import cexpr
 from .cpp_wrapper_cpu import CppWrapperCpu
 from .multi_kernel import MultiKernelCall
 from .triton_utils import should_unwrap_unspec_arg
-from .wrapper import PythonWrapperCodegen, SymbolicCallArg
+from .wrapper import (
+    EnterKernelProfileScopeLine,
+    ExitKernelProfileScopeLine,
+    kernel_profile_enabled,
+    PythonWrapperCodegen,
+    SymbolicCallArg,
+)
 
 
 _cpp_string_literal_escapes = {
@@ -1364,25 +1370,12 @@ class CppWrapperGpu(CppWrapperCpu):
         if V.graph.aot_mode and not V.graph.is_dual_wrapper_mode:
             return "stream"
 
-        name = f"stream{device_idx}"
-        # In dual-wrapper mode, the JIT stream is declared at the entry function
-        # prologue (see _codegen_entry_impl_prologue) so it stays in scope
-        # across all kernel call sites.
-        if V.graph.is_dual_wrapper_mode:
-            return name
-
-        if graph_name:
-            name = f"{graph_name}_{name}"
-
-        self.writeline(
-            maybe_hipify_code_wrapper(
-                f"{self.device_codegen.cpp_stream_type()} {name};"
-            )
-        )
-        self.writeline(
-            f"AOTI_TORCH_ERROR_CODE_CHECK({self.device_codegen.aoti_get_stream()}({device_idx}, (void**)&{name}));"
-        )
-        return name
+        # The JIT stream is declared once at the entry function prologue (see
+        # _codegen_entry_impl_prologue). Declaring it here would put it inside
+        # whichever profiling block contained the first call, and a subgraph is
+        # inlined into the same function, so one declaration serves every kernel
+        # call site in the main graph and its subgraphs alike.
+        return f"stream{device_idx}"
 
     def _ensure_aoti_stream_helpers_emitted(self) -> None:
         if self._aoti_stream_helpers_emitted:
@@ -1618,22 +1611,22 @@ class CppWrapperGpu(CppWrapperCpu):
                 self._lazy_kernel_names, "ensure_triton_kernel_compiles_started();"
             )
         )
-        # In dual-wrapper mode, hoist the JIT-side stream declaration to the entry
-        # function prologue. Kernel calls run inside KernelContextGuard
-        # scopes, so a per-call declaration would be scoped to the guard
-        # and unavailable to other kernel calls in the same function.
-        if V.graph.is_dual_wrapper_mode:
+        # Hoist the JIT-side stream declaration to the entry function prologue.
+        # Kernel calls run inside profiling scopes, so a per-call declaration
+        # would be scoped to the block that happened to contain the first call
+        # and unavailable to every call after it. writeline_jit is a no-op on
+        # the pure-AOTI buffer, which takes the stream as a parameter instead.
+        for device_idx in sorted(V.graph.device_idxs):
             stream_type = maybe_hipify_code_wrapper(
                 self.device_codegen.cpp_stream_type()
             )
             get_stream = self.device_codegen.aoti_get_stream()
-            for device_idx in sorted(V.graph.device_idxs):
-                name = f"stream{device_idx}"
-                self.prefix.writeline_jit(f"{stream_type} {name};")
-                self.prefix.writeline_jit(
-                    f"AOTI_TORCH_ERROR_CODE_CHECK("
-                    f"{get_stream}({device_idx}, (void**)&{name}));"
-                )
+            name = f"stream{device_idx}"
+            self.prefix.writeline_jit(f"{stream_type} {name};")
+            self.prefix.writeline_jit(
+                f"AOTI_TORCH_ERROR_CODE_CHECK("
+                f"{get_stream}({device_idx}, (void**)&{name}));"
+            )
 
     def finalize_prefix(self):
         """Define the triton kernels now that autotuning is finished"""
@@ -2032,7 +2025,19 @@ static inline void ensure_triton_kernel_compiles_started() {{
             # JIT: call the extern "C" symbol directly (resolved at link time
             # via extra_flags pointing at the compiled .so).
             kernel_prefix = "kernels." if V.graph.aot_mode else ""
+            enable_kernel_profile = kernel_profile_enabled()
+            # The CUTLASS and ROCm schedulers already open a scope around
+            # call_kernel, so this nests inside one. The record owns a block of
+            # its own rather than borrowing that one: the handle has to die
+            # with this call, and nothing here can see whether a caller wrapped
+            # it. Depth is left to the outer scope, which is already non-zero
+            # for anything emitted in here.
+            if enable_kernel_profile:
+                self.writeline(EnterKernelProfileScopeLine(self))
+                self.write_record_function_handle(kernel_name)
             self.writeline(f"{kernel_prefix}{kernel_name}({call_args_str}, {stream});")
+            if enable_kernel_profile:
+                self.writeline(ExitKernelProfileScopeLine(self))
 
     def prepare_triton_wrapper_args(
         self, call_args: list[Any], arg_types: list[Any]
