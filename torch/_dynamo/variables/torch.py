@@ -83,6 +83,7 @@ from ..source import (
 )
 from ..utils import (
     _is_tensorify_enabled,
+    check_positional,
     check_unspec_or_constant_args,
     guard_if_dyn,
     has_torch_function,
@@ -1226,6 +1227,30 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
             return result
 
+        @register(math.atan2, math.copysign, math.remainder)
+        def handle_math_2(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker | None:
+            # Mirrors CPython's shared math_2 argument conversion.
+            # https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Modules/mathmodule.c#L1035-L1068
+            from .object_protocol import pyfloat_as_double
+
+            # CPython uses the qualified name when rejecting keyword arguments,
+            # while FUNC2 passes the bare name to _PyArg_CheckPositional.
+            name = self.value.__name__
+            no_keywords(tx, f"math.{name}", kwargs)
+            check_positional(tx, name, len(args), 2, 2)
+            if not any(
+                isinstance(arg, variables.UserDefinedObjectVariable) for arg in args
+            ):
+                return None
+
+            converted = [pyfloat_as_double(tx, arg) for arg in args]
+            return self.call_function(tx, converted, {})
+
         @register(math.radians)
         def handle_radians(
             self,
@@ -2243,6 +2268,13 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 and condition.evaluate_expr()
             ):
                 return ConstantVariable.create(None)
+            if condition.is_tensor():
+                tx.output.create_proxy(
+                    "call_function",
+                    torch._assert_async,
+                    *proxy_args_kwargs((condition, message), {}),
+                )
+                return ConstantVariable.create(None)
             return None
 
         @register(SDPAParams)
@@ -2822,6 +2854,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         @register(
             torch.accelerator.current_stream,
             torch.cuda.current_stream,
+            torch.mtia.current_stream,
             torch.xpu.current_stream,
         )
         def handle_current_stream(
@@ -2872,6 +2905,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         _synchronize_fn_to_device_type = {
             torch.cuda.synchronize: "cuda",
+            torch.mtia.synchronize: "mtia",
             torch.xpu.synchronize: "xpu",
             torch.mps.synchronize: "mps",
             torch.cpu.synchronize: "cpu",
@@ -2880,6 +2914,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         @register(
             torch.accelerator.synchronize,
             torch.cuda.synchronize,
+            torch.mtia.synchronize,
             torch.xpu.synchronize,
             torch.mps.synchronize,
             torch.cpu.synchronize,
@@ -2912,10 +2947,19 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if device.type == "cpu":
                 return ConstantVariable.create(None)
 
+            device_index = device.index
+            if device_index is None:
+                from torch.fx.experimental.proxy_tensor import _coor_enabled
+
+                # Under compile-on-one-rank the index must stay None so the runtime
+                # resolves it per rank and one artifact serves them all.
+                if not _coor_enabled():
+                    device_index = 0
+
             tx.output.create_proxy(
                 "call_function",
                 torch.ops.streams.synchronize_device,
-                (device.type, device.index or 0),
+                (device.type, device_index),
                 {},
             )
             return ConstantVariable.create(None)

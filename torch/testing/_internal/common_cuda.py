@@ -6,7 +6,10 @@ import functools
 import threading
 import torch
 import torch.cuda
-from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM, TEST_CUDA, IS_WINDOWS, IS_MACOS, TEST_XPU
+from torch.testing._internal.common_utils import (
+    _get_legacy_float32_matmul_precision, _set_legacy_float32_matmul_precision, LazyVal, TEST_NUMBA, TEST_WITH_ROCM,
+    TEST_CUDA, IS_WINDOWS, IS_MACOS, TEST_XPU)
+from torch.testing._internal.common_xpu import PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU
 from torch.utils._import_utils import _check_module_exists
 import inspect
 import contextlib
@@ -195,7 +198,7 @@ def evaluate_platform_supports_flash_attention():
     if TEST_CUDA:
         return SM80OrLater
     if TEST_XPU:
-        return True
+        return PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU
     return False
 
 def evaluate_platform_supports_ck_sdpa():
@@ -405,6 +408,27 @@ _tf32_off_saved_precision = None
 _tf32_off_cudnn_ctx = None
 
 
+# The allow_tf32 setter writes both the legacy Float32MatmulPrecision enum and
+# the backend-specific fp32_precision values. Restoring only one of them leaves
+# the two disagreeing, and every later read of allow_tf32 in the process then
+# raises "mix of the legacy and new APIs".
+def _save_matmul_precision():
+    return (_get_legacy_float32_matmul_precision(),
+            torch.backends.cuda.matmul.fp32_precision,
+            torch.backends.mkldnn.matmul.fp32_precision)
+
+
+def _restore_matmul_precision(saved):
+    legacy, cuda_precision, mkldnn_precision = saved
+    # set_float32_matmul_precision overwrites both backend-specific values, so
+    # it goes first. Restoring those as fp32_precision strings rather than as
+    # allow_tf32 booleans also preserves the "none" default, which allow_tf32
+    # cannot express (it yields "ieee", which the leak detector flags on ROCm).
+    _set_legacy_float32_matmul_precision(legacy)
+    torch.backends.cuda.matmul.fp32_precision = cuda_precision
+    torch.backends.mkldnn.matmul.fp32_precision = mkldnn_precision
+
+
 @contextlib.contextmanager
 def tf32_off():
     # First-in saves state and disables tf32; last-out restores. Multithreaded
@@ -415,10 +439,7 @@ def tf32_off():
     global _tf32_off_depth, _tf32_off_saved_precision, _tf32_off_cudnn_ctx
     with _tf32_off_lock:
         if _tf32_off_depth == 0:
-            # Snapshot fp32_precision (a string), not allow_tf32 (a bool):
-            # writing allow_tf32 back can't reproduce the "none" default (it
-            # yields "ieee"), which the leak detector would flag on ROCm.
-            _tf32_off_saved_precision = torch.backends.cuda.matmul.fp32_precision
+            _tf32_off_saved_precision = _save_matmul_precision()
             torch.backends.cuda.matmul.allow_tf32 = False
             _tf32_off_cudnn_ctx = torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=False)
             _tf32_off_cudnn_ctx.__enter__()
@@ -431,13 +452,13 @@ def tf32_off():
             if _tf32_off_depth == 0:
                 _tf32_off_cudnn_ctx.__exit__(None, None, None)
                 _tf32_off_cudnn_ctx = None
-                torch.backends.cuda.matmul.fp32_precision = _tf32_off_saved_precision
+                _restore_matmul_precision(_tf32_off_saved_precision)
                 _tf32_off_saved_precision = None
 
 
 @contextlib.contextmanager
 def tf32_on(self, tf32_precision=1e-5):
-    old_fp32_precision = torch.backends.cuda.matmul.fp32_precision
+    old_matmul_precision = _save_matmul_precision()
     old_precision = self.precision
     try:
         torch.backends.cuda.matmul.allow_tf32 = True
@@ -445,7 +466,7 @@ def tf32_on(self, tf32_precision=1e-5):
         with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=True):
             yield
     finally:
-        torch.backends.cuda.matmul.fp32_precision = old_fp32_precision
+        _restore_matmul_precision(old_matmul_precision)
         self.precision = old_precision
 
 
@@ -455,7 +476,7 @@ def tf32_enabled():
     Context manager to temporarily enable TF32 for CUDA operations.
     Restores the previous TF32 state after exiting the context.
     """
-    old_fp32_precision = torch.backends.cuda.matmul.fp32_precision
+    old_matmul_precision = _save_matmul_precision()
     try:
         torch.backends.cuda.matmul.allow_tf32 = True
         with torch.backends.cudnn.flags(
@@ -463,7 +484,7 @@ def tf32_enabled():
         ):
             yield
     finally:
-        torch.backends.cuda.matmul.fp32_precision = old_fp32_precision
+        _restore_matmul_precision(old_matmul_precision)
 
 
 # This is a wrapper that wraps a test to run this test twice, one with

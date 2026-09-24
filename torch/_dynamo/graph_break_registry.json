@@ -2182,6 +2182,17 @@
       ]
     }
   ],
+  "GB5821": [
+    {
+      "Gb_type": "register_post_accumulate_grad_hook on an intermediate tensor",
+      "Context": "str(self)",
+      "Explanation": "Dynamo cannot preserve post-accumulate hook semantics for an intermediate tensor without compiled autograd.",
+      "Hints": [
+        "Move the hook registration outside the compiled region.",
+        "Use compiled autograd if the hook must be registered inside it."
+      ]
+    }
+  ],
   "GB0139": [
     {
       "Gb_type": "Unsupported autograd.Function context method",
@@ -3849,6 +3860,26 @@
       "Explanation": "Attempted to call `torch.from_numpy` with config `torch._dynamo.config.trace_numpy` set to `False`.",
       "Hints": [
         "Change `torch._dynamo.config.trace_numpy` to `True`."
+      ]
+    }
+  ],
+  "GB1350": [
+    {
+      "Gb_type": "length_hint with a non-constant result",
+      "Context": "length_hint {obj} returned {hint}",
+      "Explanation": "Dynamo cannot verify the type and range of a non-constant __length_hint__ result.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0507": [
+    {
+      "Gb_type": "length_hint with a non-constant default",
+      "Context": "length_hint default {args[1]}",
+      "Explanation": "Dynamo cannot convert a non-constant default to an integer index.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
