@@ -5,7 +5,7 @@ import torch.fx
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     raise_on_run_directly,
-    TestCase
+    TestCase,
 )
 
 
