@@ -5262,7 +5262,6 @@ def forward(self, x_1) -> torch.Tensor:
     view = torch.ops.aten.view.default(x_1, [4, 2])
     add = torch.ops.aten.add.Tensor(view, ones);  view = ones = None
     view_1 = torch.ops.aten.view.default(add, [4, 2]);  add = None
-    view_2 = torch.ops.aten.view.default(view_1, [4, 2]);  view_2 = None
     copy_ = torch.ops.aten.copy_.default(x_1, view_1);  x_1 = copy_ = None
     return view_1
     """,

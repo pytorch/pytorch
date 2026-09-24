@@ -6193,7 +6193,6 @@ class <lambda>(torch.nn.Module):
         getitem_3: "f32[3]" = _native_batch_norm_legit_functional[3]
         getitem_4: "f32[3]" = _native_batch_norm_legit_functional[4];  _native_batch_norm_legit_functional = None
         relu: "f32[1, 3, 3, 3]" = torch.ops.aten.relu.default(getitem);  getitem = None
-        alias: "f32[1, 3, 3, 3]" = torch.ops.aten.alias.default(relu);  alias = None
         alias_1: "f32[1, 3, 3, 3]" = torch.ops.aten.alias.default(relu)
         sum_1: "f32[]" = torch.ops.aten.sum.default(relu)
         alias_2: "f32[1, 3, 3, 3]" = torch.ops.aten.alias.default(relu);  relu = None
