@@ -68,6 +68,9 @@ Responsibilities of the maintainer includes:
 * Supporting public documentation related to the module
 * Running public developer meetings
 
+The day-to-day expectations for handling issues and pull requests are described in the
+[maintainer guide](maintainer_guide.md).
+
 ## Core Maintainers
 
 The core maintainers are expected to have a deep understanding
@@ -228,7 +231,11 @@ Primary work happens through issues and pull requests on
 GitHub. Maintainers should avoid pushing their changes directly to
 the PyTorch repository, instead relying on pull requests.
 
-Every pull request needs to be reviewed by either the [CODEOWNERS](https://github.com/pytorch/pytorch/blob/master/CODEOWNERS) or by an appropriate [core reviewer](https://github.com/pytorch/pytorch/blob/main/.github/merge_rules.yaml) who is able to review any changes in the repo. A core reviewer is an individual chosen by the core maintainers who has the authority to approve changes across the repository.
+Pull requests from contributors without write access to the repository need to be linked to an issue marked
+`actionable` by a maintainer, or pre-approved by a maintainer, as described in the
+[Issue and PR Workflow](https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md#issue-and-pr-workflow).
+
+Every pull request needs to be reviewed by either the [CODEOWNERS](https://github.com/pytorch/pytorch/blob/main/CODEOWNERS) or by an appropriate [core reviewer](https://github.com/pytorch/pytorch/blob/main/.github/merge_rules.yaml) who is able to review any changes in the repo. A core reviewer is an individual chosen by the core maintainers who has the authority to approve changes across the repository.
 
 ### Controversial Decision Process
 
@@ -287,12 +294,10 @@ community of independent developers around PyTorch. If you have
 suggestions or inputs, please reach out on the PyTorch forums to
 discuss.
 
-**Q: How do I contribute code to the project?** If the change is
-relatively minor, a pull request on GitHub can be opened up immediately
-for review and merge by the project committers. For larger changes,
-please open an issue to make a proposal to discuss prior. Please also
-see the [PyTorch Contributor
-Wiki](https://github.com/pytorch/pytorch/wiki/The-Ultimate-Guide-to-PyTorch-Contributions) for contribution
+**Q: How do I contribute code to the project?** Start by opening an
+issue, or finding an existing one. Once a maintainer marks it `actionable`,
+you can open a pull request for it. Please see the
+[Issue and PR Workflow](https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md#issue-and-pr-workflow)
 for a walkthrough.
 
 **Q: Can I become a committer on the project?** Unfortunately, the

@@ -1,7 +1,7 @@
 Thank you for your interest in contributing to PyTorch!
-If you're a new contributor, please first take a read through our
-[Contributing Guide](https://github.com/pytorch/pytorch/wiki/The-Ultimate-Guide-to-PyTorch-Contributions), specifically the [Submitting a Change](https://github.com/pytorch/pytorch/wiki/The-Ultimate-Guide-to-PyTorch-Contributions#submitting-a-change) section
-that walks through the process of contributing a change to PyTorch.
+If you're a new contributor, please first read the [Issue and PR Workflow](#issue-and-pr-workflow)
+section, which describes how issues and pull requests move from being opened to being closed or merged.
+This document is the source of truth for that process.
 
 The rest of this document (CONTRIBUTING.md) covers some of the more technical
 aspects of contributing to PyTorch.
@@ -10,6 +10,11 @@ aspects of contributing to PyTorch.
 
 <!-- toc -->
 
+- [Issue and PR Workflow](#issue-and-pr-workflow)
+  - [Current status](#current-status)
+  - [Issue lifecycle](#issue-lifecycle)
+  - [PR lifecycle](#pr-lifecycle)
+  - [Why was my issue or PR closed?](#why-was-my-issue-or-pr-closed)
 - [Developing PyTorch](#developing-pytorch)
   - [Tips and Debugging](#tips-and-debugging)
 - [Nightly Checkout & Pull](#nightly-checkout--pull)
@@ -70,6 +75,126 @@ aspects of contributing to PyTorch.
 - [Dev Infra Office Hours](#dev-infra-office-hours)
 
 <!-- tocstop -->
+
+## Issue and PR Workflow
+
+Issues are where we receive all feedback and decide what should be done about it: bug reports, feature requests and design discussions all happen there.
+PRs are only the place to discuss the implementation of a change and make sure it is correct.
+
+Labels track the state of every issue and PR, so that both contributors and maintainers can tell what the next step is and who is expected to take it.
+What we expect from maintainers is described in the [maintainer guide](docs/source/community/maintainer_guide.md).
+
+### Current status
+
+This workflow is being rolled out. The following parts are still in progress:
+
+| In progress | Until it lands |
+|---|---|
+| The `no automated triage` and `no automated review` labels | The labels exist, but the bots do not act on them yet. |
+| Requesting re-evaluation of an issue by removing its label | Comment on the issue with the new information and mention the maintainer who applied the label. |
+| PR triage: a bot assigns one reviewer per module and adds `triaged` | Reviewers are requested through [CODEOWNERS](CODEOWNERS) and the `module: *` labels. |
+| Pre-review: the assigned reviewers accept the PR, then a bot adds `in progress` | A maintainer with write access adds `in progress` once they agree with the direction of the PR. |
+| Automated review | It runs on PRs labeled `in progress` and replaces that label with `ready for review` when it passes, but it does not post its findings on the PR yet. Run the [pr-review skill](.claude/skills/pr-review/SKILL.md) locally to see what it checks. A "Request changes" review does not move the PR back to `in progress` automatically yet. |
+| [GreenLight](#greenlight) | It only approves PRs for a small set of authors. |
+| Bots closing issues and PRs with a comment giving the reason | Maintainers close issues and PRs that do not meet the pre-conditions manually, with a reason. The stale bot closes PRs without a comment. |
+
+### Issue lifecycle
+
+```mermaid
+flowchart LR
+    new[New issue] --> ai[AI triage]
+    ai -- success --> triaged["Triaged<br/>triaged + module: * / oncall: * labels"]
+    ai -- "fails, or 'no automated triage'" --> manual[Manual triage] --> triaged
+    triaged -- any module maintainer --> full["Fully triaged<br/>needs reproduction / needs research /<br/>needs design / actionable / won't fix"]
+    full -- "remove the label to request<br/>re-evaluation" --> triaged
+```
+
+1. **Triage**: a bot triages every new issue. A maintainer does it instead if the bot fails or the issue has the `no automated triage` label. A triaged issue has the `triaged` label and one or more `module: *` or `oncall: *` labels.
+2. **Module-level triage**: a maintainer of one of these modules closes the issue or adds one of the labels below, at which point the issue is fully triaged.
+
+| Label | Meaning | What you can do |
+|---|---|---|
+| `needs reproduction` | The problem has not been reproduced yet. | Provide a minimal, self-contained reproduction. A maintainer then validates it. |
+| `needs research` | We have not decided yet whether the bug is real or whether we want the feature. | Provide supporting evidence that the feature is useful or the bug is valid. A maintainer then decides whether it is worth pursuing. |
+| `needs design` | We want to fix the bug or add the feature, but how to do it is not settled. | Propose a design on the issue. A maintainer then validates it. |
+| `actionable` | The issue has enough detail for anyone to write a good PR, and the maintainer who applied the label is willing to review it. | Send a PR, see [PR lifecycle](#pr-lifecycle). |
+| `won't fix` | The report is valid, but the cost of fixing it is too high for its benefit at this time. PyTorch will not fix it or review a fix for it. | Nothing: this is a final state and further comments on the issue will not be considered. |
+
+An assigned issue is being moved forward by its assignee, who can be the maintainer themselves.
+An unassigned issue is one where we are looking for help from the community.
+
+Once you have provided what a label asks for, you can request the issue to be re-evaluated by removing the label and commenting with the reason.
+Abusing this leads to losing the ability to change labels, up to being banned.
+
+Two other labels are orthogonal to the states above:
+
+- `high priority`: regressions, hard crashes and silent correctness issues. Undocumented APIs and edge cases are not high priority by default. An issue is high priority if it is high priority for any of the modules it is labeled with.
+- `good first issue`: an `actionable` issue that is especially simple and well suited for new contributors.
+
+### PR lifecycle
+
+```mermaid
+flowchart TD
+    draft[Draft PR] -- author marks ready --> ready[Ready PR]
+    ready --> ai["AI triage<br/>CODEOWNERS, module: *, linked issue"]
+    ai -- fails pre-conditions --> closed[Closed]
+    ai -- success --> triaged["Triaged PR<br/>triaged, one reviewer per module"]
+    ai -- "fails, or 'no automated triage'" --> htriage[Manual triage] --> triaged
+    triaged --> pre[Pre-review]
+    pre -- any assigned reviewer rejects --> closed
+    pre -- needs clarification --> draft
+    pre -- every assigned reviewer accepts --> dev["In progress<br/>in progress"]
+    dev --> auto[Automated review] -- passes --> rfr["Ready for review<br/>ready for review"]
+    auto -- changes needed --> dev
+    dev -- "'no automated review'" --> rfr
+    rfr --> review[Human review]
+    review -- needs significant changes --> dev
+    review -- any reviewer accepts --> accepted[Accepted]
+    ready -- "GreenLight (merge_rules.yaml authors only)" --> accepted
+    accepted -- "@pytorchbot merge" --> merged[Merged]
+```
+
+| Stage | Label | Who acts next | How to move on |
+|---|---|---|---|
+| Draft | (GitHub draft) | Author | Mark the PR as ready for review once the description and tests are complete. |
+| Ready | | Triage bot, or a maintainer if the bot fails or the PR has `no automated triage` | PRs that do not meet the pre-conditions below are closed. Otherwise one reviewer per module or team is assigned and `triaged` is added. |
+| Pre-review | `triaged` | Assigned reviewers | Every assigned reviewer must accept the PR for it to move to `in progress`. If any rejects it, it is closed or moved back to draft. |
+| In progress | `in progress` | Author | Iterate until the automated review passes; `in progress` is then replaced by `ready for review`. With the `no automated review` label, this step is skipped. |
+| Ready for review | `ready for review` | Assigned reviewers | One of the assigned reviewers does the full review. If significant changes are needed, they request changes and the PR goes back to `in progress`. |
+| Accepted | (approved review) | Author | Fix all CI failures and comment `@pytorchbot merge`. |
+
+The `in progress` and `ready for review` labels are managed by bots: authors should not add them by hand.
+
+**Pre-conditions**: the PR is linked to an issue labeled `actionable`, unless the author has write access to the repo or names the maintainer who pre-approved the change (see the [pre-approved PR template](.github/PULL_REQUEST_TEMPLATE/preapproved.md)), and it follows the [AI policy](AI_POLICY.md).
+
+**Pre-review** is a quick check of the direction of the PR, to make sure it is worth the author's time to finish it.
+It is the author's responsibility to give the reviewers all the information they need to decide in under a minute, and it is always ok for a reviewer to reject a PR at this stage.
+Reviewers look at:
+
+- Is the PR description clear, concise and reflective of the change?
+- Is this PR solving a problem that is important?
+- Is the approach of the PR clear and agreeable?
+- Is this PR modular and simple enough to review, or does it need a design discussion first?
+
+If a design discussion is needed, the PR is closed and the discussion moves to the issue.
+If the description lacks the justification needed for a quick decision, the PR is closed or moved back to draft.
+If only a minor clarification is needed, the PR is moved back to draft.
+
+**GreenLight**: PRs from authors listed in [`.github/merge_rules.yaml`](.github/merge_rules.yaml) can also be approved directly by [GreenLight](#greenlight).
+
+**Stale PRs**: PRs without any update for 60 days get the `Stale` label and are closed 30 days later. PRs labeled `high priority` or `no-stale` are exempt.
+Remove the `Stale` label (or ask a maintainer to) if the PR is still active.
+
+### Why was my issue or PR closed?
+
+Issues and PRs should be closed with a comment giving the reason (see [Current status](#current-status)). The most common ones are:
+
+- The PR is not linked to an `actionable` issue, was not pre-approved by a maintainer, and its author does not have write access to the repo. Open an issue, or comment on the existing one, and wait for a maintainer to mark it `actionable`.
+- The PR needs a design discussion. Continue it on the linked issue with a summary of the status and of the proposed approach.
+- The issue or PR does not follow the [AI policy](AI_POLICY.md).
+- The issue was marked `won't fix`.
+- The issue is a usage question. Please ask it on the [forums](https://discuss.pytorch.org) instead.
+- The PR was [stale](#pr-lifecycle) for 30 days.
 
 ## Developing PyTorch
 
@@ -300,11 +425,11 @@ dependencies as well as the nightly binaries into the repo directory.
 
 Please see PyTorch's detailed [AI Policy here](AI_POLICY.md).
 
-All the details on how to contribute (with or without AI assistance) are in the [Ultimate Guide to PyTorch Contributions](https://github.com/pytorch/pytorch/wiki/The-Ultimate-Guide-to-PyTorch-Contributions).
+How to contribute (with or without AI assistance) is described in the [Issue and PR Workflow](#issue-and-pr-workflow) section.
 A couple reminders here though:
 
 - **You are personally responsible for what you send**: If the comments, issues or PRs you send are low quality or consistently overly verbose compared to what is expected, your contributions will not be accepted anymore. You are responsible for reviewing, ensuring the accuracy and the quality of everything you send.
-- **PRs must have an associated "actionable" Issue**: Generally, as a new contributor, you should never send a PR that doesn't have a corresponding issue with the "actionable" label. If you just opened the issue, you must wait for a maintainer to review it and mark it actionable before preparing and sending a PR for it.
+- **PRs must have an associated "actionable" Issue**: Unless you have write access to the repo, you should never send a PR that doesn't have a corresponding issue with the "actionable" label, unless a maintainer pre-approved it (see the [pre-approved PR template](.github/PULL_REQUEST_TEMPLATE/preapproved.md)). If you just opened the issue, you must wait for a maintainer to review it and mark it actionable before preparing and sending a PR for it. See the [PR lifecycle](#pr-lifecycle).
 - **New features, utility functions, or core extensions**: Create a short and to the point issue about the problem you're encountering. You should NEVER include AI-generated explanation of how to solve the problem (this will be discussed later once it's decided the feature should be implemented).
 
 ## Spin
@@ -529,19 +654,19 @@ there too if you use that option. This is separate from GitHub's `[no ci]`
 commit-message directive, which applies only to the commit that contains it.
 
 ## Merging your Change
+The labels described in the [PR lifecycle](#pr-lifecycle) and the pytorchbot comment on your PR show what the next step is and who is expected to take it.
+
 If you know the right people or team that should approve your PR (and you have the required permissions to do so), add them to the Reviewers list.
 
-If not, leave the Reviewers section empty. Our triage squad will review your PR, add a module label, and assign it to the appropriate reviewer in a couple business days.  The reviewer will then look at your PR and respond.
-
-Occasionally, things might fall through the cracks (sorry!). In case your PR either doesn't get assigned to a reviewer or doesn't get any response from the reviewer for 4 business days, please leave comment on the PR (mentioning the reviewer if one has been assigned). That'll get it nudged back onto people's radar.
+Occasionally, things might fall through the cracks (sorry!). In case your PR is waiting on its reviewers for more than a week, please leave a comment on the PR mentioning them. That'll get it nudged back onto people's radar.
 
 If that still doesn't help, come see us during [our office hours](https://github.com/pytorch/pytorch/wiki/Dev-Infra-Office-Hours)
 
-Once your PR is approved, you can merge it in by entering a comment with the content `@pytorchmergebot merge` ([what's this bot?](https://github.com/pytorch/pytorch/wiki/Bot-commands))
+Once your PR is approved and CI is green, you can merge it in by entering a comment with the content `@pytorchbot merge` ([what's this bot?](https://github.com/pytorch/pytorch/wiki/Bot-commands))
 
 ## GreenLight
 
-GreenLight is an automated reviewer for pull requests. **It is experimental and at an early stage**: we are still working out both the experience of using it and the policy it applies, so expect what is described here to be at risk of changing.
+GreenLight is an automated reviewer for pull requests. It is separate from the automated review in the [PR lifecycle](#pr-lifecycle): it only applies to authors listed in [`.github/merge_rules.yaml`](.github/merge_rules.yaml), and can approve their PRs without a human review. **It is experimental and at an early stage**: we are still working out both the experience of using it and the policy it applies, so expect what is described here to be at risk of changing.
 
 The rollout is phased. GreenLight will eventually review pull requests from every username listed in [`.github/merge_rules.yaml`](.github/merge_rules.yaml); for now it reviews a [smaller set](https://github.com/pytorch/test-infra/blob/main/greenlight/src/greenlight/review.py), which we widen as our confidence grows.
 
@@ -549,7 +674,7 @@ GreenLight reads the changes and decides whether they are safe to land as-is; wh
 
 The outcome appears as a `GREEN LIGHT` section in the Dr. CI comment on your PR (pytorchbot comment), with a short explanation and a link to the job that decided it. Once a review finishes it reads `PR approved to be merged without human review` or `PR requires human review`, and while one is running, `Green Light review in progress`. A verdict reached on an earlier commit is prefixed `OUTDATED (earlier commit)`; it does not authorize landing the current head. An approval is an ordinary GitHub approving review from `pytorchgreenlight` (shown on the PR as `pytorchgreenlight[bot]`) that satisfies the `Greenlight Review Bot` rule in [`.github/merge_rules.yaml`](.github/merge_rules.yaml). It adds no label and no CI check.
 
-You still land the change yourself with `@pytorchmergebot merge`. When GreenLight's approval is the only thing authorizing the merge, the merge waits until GreenLight has approved the exact commit being landed, retrying for up to 60 minutes and commenting once on the PR to say so; on a ghstack merge every PR in the stack is checked, so one PR without a current approval holds up the whole stack. Pushing during that window gets the new commit reviewed but ends the merge command, so re-issue it afterwards. A force merge does not wait: in that situation `@pytorchmergebot merge -f` is refused outright. Merges that a human approval already authorizes are unaffected by all of this.
+You still land the change yourself with `@pytorchbot merge`. When GreenLight's approval is the only thing authorizing the merge, the merge waits until GreenLight has approved the exact commit being landed, retrying for up to 60 minutes and commenting once on the PR to say so; on a ghstack merge every PR in the stack is checked, so one PR without a current approval holds up the whole stack. Pushing during that window gets the new commit reviewed but ends the merge command, so re-issue it afterwards. A force merge does not wait: in that situation `@pytorchbot merge -f` is refused outright. Merges that a human approval already authorizes are unaffected by all of this.
 
 `PR requires human review` is not a block, but merging while it stands is refused immediately rather than waiting. Either push a commit so GreenLight reviews the new content, or get an approval from a human reviewer with merge rights for the files you touched and merge as usual.
 
