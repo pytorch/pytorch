@@ -4707,8 +4707,15 @@ class TestPrecompileDynamoCapture(TestCase):
             # continuation, and the keyword argument is a second entry variant.
             y2 = cap(self.model, self.x2)
             y3 = cap(self.model, self.x3, scale=0.5)
+            summary = cap.summary()
         self.assertEqual(y2, step(self.model, self.x2))
         self.assertEqual(y3, step(self.model, self.x3, scale=0.5))
+        # The entry and its graph-break continuation, each with a variant per
+        # call the guards told apart.
+        self.assertTrue(summary.complete, str(summary))
+        self.assertEqual(summary.frames, 2)
+        self.assertEqual(summary.resume_functions, 1)
+        self.assertGreaterEqual(summary.guarded_codes, 3)
         with open(self.artifact) as f:
             python_code = f.read()
         self.assertIn('TRACER = "dynamo"', python_code)
@@ -4755,16 +4762,70 @@ class TestPrecompileDynamoCapture(TestCase):
         self.model.load_state_dict(state)
         self._serve_in_fresh_process([((self.x2,), {}, None)], grads)
 
+    def test_save_checkpoints_mid_block(self):
+        single = self.mod.single
+        writes = mock.patch("torch._precompile._write_artifact", wraps=_write_artifact)
+
+        class SavesFromFn(torch.nn.Module):
+            def forward(self, x):
+                return torch._dynamo.disable(cap.save)()
+
+        # The mock is entered first so it still counts the writes cap's exit makes.
+        with writes as write, self._capture(single, backend="eager") as cap:
+            with self.assertRaisesRegex(PrecompileError, "nothing was captured"):
+                cap.save()
+            cap(self.model, self.x2)
+            cap.save()
+            with open(self.artifact, "rb") as f:
+                checkpoint = f.read()
+            # The checkpoint is a loadable pair on its own.
+            self.assertEqual(
+                load(self.artifact, self.cache)(self.model, self.x2),
+                single(self.model, self.x2),
+            )
+            cap(self.model, self.x3)
+            cap.save()
+            self.assertEqual(write.call_count, 2)
+            with open(self.artifact, "rb") as f:
+                last = f.read()
+            self.assertNotEqual(last, checkpoint)
+        # The last save() covered every call, so exit writes nothing more.
+        self.assertEqual(write.call_count, 2)
+        with self.assertRaisesRegex(PrecompileError, "not active"):
+            cap.save()
+        self.assertTrue(cap.summary().complete)
+        # The refused save() is a raised call; raising out of the block writes
+        # nothing rather than an artifact that fails the gate.
+        with self.assertRaisesRegex(KeyError, "the block's own"):
+            with self._capture(single, backend="eager") as cap:
+                with self.assertRaisesRegex(PrecompileError, "from inside fn"):
+                    cap(SavesFromFn(), self.x2)
+                raise KeyError("the block's own")
+        with open(self.artifact, "rb") as f:
+            self.assertEqual(f.read(), last)
+
     def test_a_raised_call_is_refused_at_exit_and_writes_nothing(self):
         # A call that raised inside the block is a coverage gap: the default gate
-        # refuses at exit, after the block ran to completion, and writes nothing.
+        # refuses at exit, after the block ran to completion, and writes nothing;
+        # the summary stays readable and says why.
         with self.assertRaisesRegex(PrecompileError, "captured call raised"):
             with self._capture(self.mod.step, backend="eager") as cap:
                 cap(self.model, self.x2)
                 with self.assertRaises(RuntimeError):
                     cap(self.model, torch.randn(2, 5))
+                self.assertFalse(cap.summary().complete)
+        self.assertFalse(cap.summary().complete)
         self.assertFalse(os.path.exists(self.artifact))
         self.assertFalse(os.path.exists(self.cache))
+        # A call that raised after the last save() still reaches that gate.
+        with self.assertRaisesRegex(PrecompileError, "captured call raised"):
+            with self._capture(self.mod.step, backend="eager") as cap:
+                cap(self.model, self.x2)
+                cap.save()
+                with self.assertRaises(RuntimeError):
+                    cap(self.model, torch.randn(2, 5))
+        os.remove(self.artifact)
+        os.remove(self.cache)
         # A call that raised on every attempt still reaches that gate.
         with self.assertRaisesRegex(PrecompileError, "captured call raised"):
             with self._capture(self.mod.step, backend="eager") as cap:
@@ -4871,14 +4932,21 @@ class TestPrecompileDynamoCapture(TestCase):
         with self.assertRaisesRegex(PrecompileError, "no captured variant"):
             load(self.artifact, self.cache)(self.model, self.x3)
 
-    def test_dropped_guards_are_listed_in_the_artifact(self):
+    def test_dropped_guards_are_reported_in_the_summary_and_the_artifact(self):
         # The default filter drops the identity guards that cannot be
-        # serialized (the MODULE_MATCH on the model here); the artifact lists
-        # them.
+        # serialized (the MODULE_MATCH on the model here); the summary reports
+        # them and the artifact lists the same slots.
         with self._capture(self.mod.single, backend="eager") as cap:
             cap(self.model, self.x2)
+            summary = cap.summary()
+        self.assertTrue(summary.complete)
+        self.assertIn("MODULE_MATCH", summary.dropped_guard_types)
+        self.assertTrue(summary.kept_guards)
+        self.assertEqual(summary.risky_dropped_guards, ())
         with open(self.artifact) as f:
-            self.assertIn("['MODULE_MATCH', ", f.read())
+            python_code = f.read()
+        for guard_type, source in summary.dropped_guards:
+            self.assertIn(f"[{guard_type!r}, {source!r}]", python_code)
 
     def test_entries_a_standalone_artifact_cannot_rebuild_are_refused(self):
         # A bare nn.Module compiles Dynamo's wrapper frame, whose graphs close
