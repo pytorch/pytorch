@@ -108,6 +108,7 @@ from torch._guards import (
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import get_opaque_obj_info, is_opaque_constant_type
 from torch._logging import structured
+from torch._subclasses.fake_tensor import maybe_get_fake_dispatch_keys
 from torch._subclasses.meta_utils import safe_grad
 from torch._utils_internal import justknobs_check
 from torch.fx.experimental.symbolic_shapes import (
@@ -3782,14 +3783,14 @@ class GuardBuilder(GuardBuilderBase):
             value = value if value is not None else self.get(guard)
 
             pytype = type(value)
-            dispatch_keys = torch._C._dispatch_keys(value)
+            dispatch_keys = maybe_get_fake_dispatch_keys(value)
+            if dispatch_keys is None:
+                dispatch_keys = torch._C._dispatch_keys(value)
             if isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
                 value, torch._subclasses.FakeTensor
             ):
                 if value.pytype is not None:
                     pytype = value.pytype
-                if value.dispatch_keys is not None:
-                    dispatch_keys = value.dispatch_keys
             elif torch._subclasses.fake_tensor.is_fake_tensor(value):
                 pytype = type(self.get(guard))
 
@@ -4730,18 +4731,17 @@ class GuardsStatePickler(FunctionPicklerBase):
             # torch.Tensor. This is important for cross-compilation where
             # we compile with fake tensors but run with real tensors.
             pytype = type(obj)
-            dispatch_keys = torch._C._dispatch_keys(obj)
-            is_fake = isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
+            # _dispatch_keys() on a fake reports the Python and
+            # PythonTLSSnapshot keys of the fake itself; the converter may
+            # have recorded the real tensor's keys (from_meta_and_device
+            # always does, from_real_tensor only for an mkldnn source).
+            dispatch_keys = maybe_get_fake_dispatch_keys(obj)
+            if dispatch_keys is None:
+                dispatch_keys = torch._C._dispatch_keys(obj)
+            if isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
                 obj, torch._subclasses.FakeTensor
-            )
-            if is_fake:
+            ):
                 pytype = obj.pytype if obj.pytype is not None else torch.Tensor
-                # _dispatch_keys() on a fake reports the Python and
-                # PythonTLSSnapshot keys of the fake itself; the converter may
-                # have recorded the real tensor's keys (from_meta_and_device
-                # always does, from_real_tensor only for an mkldnn source).
-                if obj.dispatch_keys is not None:
-                    dispatch_keys = obj.dispatch_keys
             elif torch._subclasses.fake_tensor.is_fake_tensor(obj):
                 pytype = torch.Tensor
             # A fake answers empty_like with another fake through its own
