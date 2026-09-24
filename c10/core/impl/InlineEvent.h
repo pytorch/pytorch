@@ -19,8 +19,8 @@ namespace c10::impl {
  * rather than on `was_marked_for_recording_`, which only tracks whether
  * record() was called in the current process.
  *
- * `was_imported_` tracks whether the event was imported via
- * reconstructFromIPCHandle().
+ * `was_imported_from_ipc_` tracks whether the event was imported from other
+ * process via reconstructFromIPCHandle().
  */
 
 template <typename T>
@@ -43,7 +43,7 @@ struct InlineEvent final {
         device_index_(other.device_index_),
         flag_(other.flag_),
         was_marked_for_recording_(other.was_marked_for_recording_),
-        was_imported_(other.was_imported_) {
+        was_imported_from_ipc_(other.was_imported_from_ipc_) {
     other.event_ = nullptr;
   }
   InlineEvent& operator=(InlineEvent&& other) noexcept {
@@ -58,7 +58,7 @@ struct InlineEvent final {
     std::swap(device_index_, other.device_index_);
     std::swap(flag_, other.flag_);
     std::swap(was_marked_for_recording_, other.was_marked_for_recording_);
-    std::swap(was_imported_, other.was_imported_);
+    std::swap(was_imported_from_ipc_, other.was_imported_from_ipc_);
   }
 
   ~InlineEvent() noexcept {
@@ -76,7 +76,7 @@ struct InlineEvent final {
     return flag_;
   }
   bool was_marked_for_recording() const noexcept {
-    return was_marked_for_recording_ || was_imported_;
+    return was_marked_for_recording_ || was_imported_from_ipc_;
   }
 
   void recordOnce(const Stream& stream) {
@@ -157,7 +157,9 @@ struct InlineEvent final {
 
   std::string ipcHandle() {
     TORCH_CHECK(flag_ & EventFlag::INTERPROCESS, "Event is not an IPC event.");
-    TORCH_CHECK(!was_imported_, "Cannot get IPC handle for an imported event.");
+    TORCH_CHECK(
+        !was_imported_from_ipc_,
+        "Cannot get IPC handle for an imported event.");
     // See Note [Event Semantics]: event_ may be lazily initialized on the
     // current device if record() was never called.
     if (device_index_ == -1) {
@@ -179,7 +181,7 @@ struct InlineEvent final {
         device_index == -1 ? backend_.getDevice().index() : device_index;
     backend_.reconstructEventFromIPCHandle(
         &event_, device_index_, handle_string);
-    was_imported_ = true;
+    was_imported_from_ipc_ = true;
   }
 
  private:
@@ -189,7 +191,7 @@ struct InlineEvent final {
   DeviceIndex device_index_ = -1;
   EventFlag flag_ = EventFlag::PYTORCH_DEFAULT;
   bool was_marked_for_recording_ = false;
-  bool was_imported_ = false;
+  bool was_imported_from_ipc_ = false;
 };
 
 } // namespace c10::impl
