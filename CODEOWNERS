@@ -683,7 +683,7 @@
 # /torch/_lowrank.py
 # /torch/_meta_registrations.py
 /torch/_native/ @slayton58 @drisspg
-/torch/_native/ops/linear_cross_entropy/ @slayton58 @drisspg @pearu
+/torch/_native/ops/linear_cross_entropy/ @slayton58 @pearu
 # /torch/_numpy/
 # /torch/_opaque_base.py
 # /torch/_prims/
@@ -747,7 +747,7 @@
 #
 # [python_nn_api]
 /torch/nn/ @albanD @jbschlosser
-/torch/nn/modules/linear_cross_entropy*.py @albanD @jbschlosser @pearu
+/torch/nn/modules/linear_cross_entropy*.py @slayton58 @pearu
 /torch/nn/utils/parametriz*.py @lezcano
 /torch/nn/attention/flex_attention.py @drisspg
 #
