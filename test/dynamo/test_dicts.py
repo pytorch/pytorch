@@ -1261,6 +1261,38 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(["b", "c", "a"], list(opt_fn(x).keys()))
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_ordered_dict_keyword_defaults(self):
+        def fn():
+            d = OrderedDict()
+            first = d.setdefault(key="a", default=9)
+            second = d.setdefault("a", default=4)
+            popped = d.pop(key="missing", default=6)
+            return first, second, popped, list(d.items())
+
+        self.assertEqual(fn(), (9, 9, 6, [("a", 9)]))
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    def test_ordered_dict_setdefault_keyword_default(self):
+        def fn():
+            d = OrderedDict(a=1)
+            d.setdefault("c", default=3)
+            return list(d.items())
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    def test_ordered_dict_subclass_fromkeys(self):
+        def fn():
+            class OD(OrderedDict):
+                pass
+
+            d = OD.fromkeys("abc")
+            d.move_to_end("a")
+            return type(d).__name__, list(d)
+
+        with torch._dynamo.config.patch(enable_trace_load_build_class=True):
+            self.assertEqual(fn(), ("OD", ["b", "c", "a"]))
+            self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
     def test_mapping_proxy_ban_muation_on_dict_realization(self):
         def fn(x):
             class Foo:
