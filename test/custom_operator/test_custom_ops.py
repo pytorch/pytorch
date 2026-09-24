@@ -9,7 +9,12 @@ from model import get_custom_op_library_path, Model
 import torch
 import torch._library.utils as utils
 from torch import ops
-from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    expectedIfCppFakeTensor,
+    IS_WINDOWS,
+    run_tests,
+    TestCase,
+)
 
 
 torch.ops.import_module("pointwise")
@@ -58,9 +63,11 @@ class TestCustomOperators(TestCase):
         x = torch.randn(3, device="cpu")
         self.assertNotIn("my_custom_ops", sys.modules.keys())
 
-        with self.assertRaises(
-            torch._subclasses.fake_tensor.UnsupportedOperatorException
-        ):
+        unsupported_error = expectedIfCppFakeTensor(
+            RuntimeError,
+            torch._subclasses.fake_tensor.UnsupportedOperatorException,
+        )
+        with self.assertRaises(unsupported_error):
             gm = make_fx(torch.ops.custom.nonzero.default, tracing_mode="symbolic")(x)
 
         torch.ops.import_module("my_custom_ops")
