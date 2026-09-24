@@ -36,9 +36,8 @@ Usage during capture::
     annotations = get_kernel_annotations()
 
 When you need to drive this outside the context manager's automatic path,
-``resolve_and_remap(graph)`` is shorthand for ``resolve_pending_annotations()``
-followed by ``remap_to_exec_graph(graph)``; call those directly for finer
-control (e.g. resolving once before remapping several graphs).
+``resolve_and_remap(graph)`` resolves pending annotations and applies the graph's
+selected keying mode, as instantiation does.
 """
 
 from __future__ import annotations
@@ -257,7 +256,7 @@ def maybe_stamp_capture_root(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
         return
     _capture_root_graph_id = _graph_id(state[0])
     torch_cuda_graph._capture_graph_id = _capture_root_graph_id
-    torch_cuda_graph._owned_graph_ids.add(_capture_root_graph_id)
+    torch_cuda_graph._recorded_exec_ids.add(_capture_root_graph_id)
     # Fresh capture: annotations are keyed by this capture id until remapped.
     torch_cuda_graph._remapped_exec_id = None
 
@@ -1069,7 +1068,7 @@ def discard_capture_annotations(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
     """Discard entries if capture_end failed before creating an executable graph."""
     _pending_scopes.clear()
     if not torch_cuda_graph._has_graph_exec:
-        remove_kernel_annotations(torch_cuda_graph._owned_graph_ids)
+        remove_kernel_annotations(torch_cuda_graph._recorded_exec_ids)
 
 
 def remap_to_exec_graph(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
@@ -1164,13 +1163,12 @@ def alias_sourceless_to_exec_graph(
 
 
 def resolve_and_remap(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
-    """Resolve any pending scopes and remap one graph in a single call.
+    r"""Resolve pending scopes and apply the graph's selected annotation keying.
 
-    Shorthand for ``resolve_pending_annotations()`` followed by
-    ``remap_to_exec_graph(graph)``; the pair normally run after a capture.
+    Source keying retains capture IDs and adds exec aliases where needed.
     """
     resolve_pending_annotations()
-    remap_to_exec_graph(torch_cuda_graph)
+    torch_cuda_graph._maybe_remap_annotations()
 
 
 class _AnnotationsView(Mapping[int, "list[Any]"]):
