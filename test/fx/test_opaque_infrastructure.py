@@ -3,7 +3,11 @@
 import torch
 from torch._library.opaque_object import register_custom_class
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_utils import raise_on_run_directly, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    raise_on_run_directly,
+    TestCase,
+)
 
 
 # Define a simple opaque type for testing
@@ -38,6 +42,8 @@ class TestOpaqueInfrastructure(TestCase):
     This test validates infrastructure for tracking and passing opaque objects
     (like ProcessGroups) through AOTAutograd compilation without unwrapping/wrapping them.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_opaque_object_in_traced_graph(self):
         """Test that opaque objects can be traced into FX graphs."""

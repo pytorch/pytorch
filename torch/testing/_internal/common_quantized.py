@@ -592,6 +592,15 @@ def _bfloat16_to_float4_e2m1fn_x2(x):
     return x
 
 
+def data_to_nvfp4_scale(x, block_size=16):
+    """Compute per-block E4M3 scales for NVFP4 test inputs."""
+    orig_shape = x.shape
+    x = x.reshape(-1, block_size)
+    max_abs = torch.amax(torch.abs(x), 1) + 1e-12
+    scale = (max_abs / 6.0).clamp(max=torch.finfo(torch.float8_e4m3fn).max)
+    return scale.to(torch.float8_e4m3fn).reshape(orig_shape[0], -1)
+
+
 # This function is extracted from https://github.com/pytorch/ao/blob/v0.12.0/torchao/prototype/mx_formats/mx_tensor.py#L142
 def to_mxfp(
     data_hp: torch.Tensor,
