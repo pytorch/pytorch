@@ -28,12 +28,18 @@ class MutableMemoryView(MemoryView, Protocol):
 
 @runtime_checkable
 class RemoteBuffer(Protocol):
-    """A pickle-serializable descriptor for registered memory on a peer.
+    """A backend-defined wire descriptor, excluding tensor contents/native handles.
 
-    ``pickle.loads(pickle.dumps(buffer))`` must preserve addressing information
-    without serializing tensor contents or process-local native handles.
-    Exchange descriptors only with trusted peers; never unpickle untrusted data.
+    Exchange ``serialize()`` bytes and reconstruct them with the matching backend
+    descriptor class's ``deserialize()``. Decoders validate their schema and
+    version without executing code or importing classes named by the payload.
+    Descriptors grant memory access: exchange them only with authorized peers.
     """
+
+    def serialize(self) -> bytes: ...
+
+    @classmethod
+    def deserialize(cls, data: bytes) -> Self: ...
 
 
 @runtime_checkable
