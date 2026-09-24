@@ -3751,6 +3751,17 @@ class TestTorchDeviceType(TestCase):
             input.scatter_(0, index, src, reduce=operation)
             self.assertEqual(input, result, msg=lambda msg: f"{msg}\nresult: {result} input: {input} method: {str(operation)}")
 
+    @onlyAccelerator
+    @dtypes(*complex_types())
+    def test_scatter_reduce_multiply_unsupported_dtypes(self, device, dtype):
+        height = 2
+        width = 2
+        index = torch.zeros(height, width, dtype=torch.long, device=device)
+        input = torch.ones(height, width, device=device, dtype=dtype)
+        src = torch.ones(height, width, device=device, dtype=dtype)
+        with self.assertRaises(RuntimeError):
+            input.scatter_(0, index, src, reduce="multiply")
+
     # FIXME: port to test_scatter_gather_ops.py
     def test_scatter_to_large_input(self, device):
         input = torch.zeros(4, 4, device=device)
@@ -4965,6 +4976,58 @@ class TestTorchDeviceType(TestCase):
         for op in unary_ops:
             for x in xs:
                 _test_helper(x, op, unary=True)
+
+    @onlyAccelerator
+    @unittest.skipIf(PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property")
+    @skipIfTorchDynamo("NotImplementedError: PrimTorch does not support pinned memory")
+    def test_pin_memory_from_constructor(self, device):
+        def _get_like(t, **kwargs):
+            return [
+                torch.rand_like(t, **kwargs),
+                torch.randn_like(t, **kwargs),
+                torch.empty_like(t, **kwargs),
+                torch.full_like(t, 4, **kwargs),
+                torch.zeros_like(t, **kwargs),
+                torch.ones_like(t, **kwargs),
+            ]
+
+        def _get_tensors(**kwargs):
+            return [
+                torch.tensor([10, 11], **kwargs),
+                torch.randn(3, 5, **kwargs),
+                torch.rand(3, **kwargs),
+                # torch.randint(3, 5, **kwargs), // unsupported
+                torch.zeros(3, **kwargs),
+                torch.randperm(3, **kwargs),
+                torch.empty(6, **kwargs),
+                torch.ones(6, **kwargs),
+                torch.eye(6, **kwargs),
+                torch.arange(3, 5, **kwargs)]
+
+        pinned_tensors = _get_tensors(pin_memory=True) + _get_like(torch.empty(5, dtype=torch.float64), pin_memory=True)
+        for x in pinned_tensors:
+            self.assertTrue(x.is_pinned())
+
+        tensors = _get_tensors() + _get_like(torch.empty(5, dtype=torch.float64, pin_memory=True))
+        for x in tensors:
+            self.assertFalse(x.is_pinned())
+
+    @deviceCountAtLeast(1)
+    @onlyAccelerator
+    @parametrize("non_blocking", (True, False))
+    def test_storage_all_devices(self, devices, non_blocking):
+        for device in devices:
+            t = torch.randn(6, device=device)
+            self.assertEqual(t.dtype, t.storage().dtype)
+            s = t.untyped_storage()
+            s_cpu = s.to(device='cpu', non_blocking=non_blocking)
+            if non_blocking:
+                torch.accelerator.synchronize()
+                self.assertTrue(s_cpu.is_pinned())
+            else:
+                self.assertFalse(s_cpu.is_pinned())
+            t_cpu = torch.empty(()).set_(s_cpu)
+            self.assertEqual(t.cpu(), t_cpu)
 
     # Note [lazy_clone_ tests with inductor enabled]
     # These `lazy_clone_` tests are written in a way that makes them pass in
@@ -6827,16 +6890,6 @@ class TestTorchCUDA(TestCase):
         with self.assertRaisesRegex(RuntimeError, r'CPU Scalar support for self argument'):
             torch.addcmul(scalar, b, c, value=alpha)
 
-    @dtypes(*complex_types())
-    def test_scatter_reduce_multiply_unsupported_dtypes(self, device, dtype):
-        height = 2
-        width = 2
-        index = torch.zeros(height, width, dtype=torch.long, device=device)
-        input = torch.ones(height, width, device=device, dtype=dtype)
-        src = torch.ones(height, width, device=device, dtype=dtype)
-        with self.assertRaises(RuntimeError):
-            input.scatter_(0, index, src, reduce="multiply")
-
     # FIXME: move to test_serialization
     @deviceCountAtLeast(1)  # Note: Tests works with one but prefers more devices
     def test_serialization(self, devices):
@@ -6857,56 +6910,6 @@ class TestTorchCUDA(TestCase):
 
         _test_serialization(tempfile.NamedTemporaryFile)
         _test_serialization(BytesIOContext)
-
-    @unittest.skipIf(PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property")
-    @skipIfTorchDynamo("NotImplementedError: PrimTorch does not support pinned memory")
-    def test_pin_memory_from_constructor(self, device):
-        def _get_like(t, **kwargs):
-            return [
-                torch.rand_like(t, **kwargs),
-                torch.randn_like(t, **kwargs),
-                torch.empty_like(t, **kwargs),
-                torch.full_like(t, 4, **kwargs),
-                torch.zeros_like(t, **kwargs),
-                torch.ones_like(t, **kwargs),
-            ]
-
-        def _get_tensors(**kwargs):
-            return [
-                torch.tensor([10, 11], **kwargs),
-                torch.randn(3, 5, **kwargs),
-                torch.rand(3, **kwargs),
-                # torch.randint(3, 5, **kwargs), // unsupported
-                torch.zeros(3, **kwargs),
-                torch.randperm(3, **kwargs),
-                torch.empty(6, **kwargs),
-                torch.ones(6, **kwargs),
-                torch.eye(6, **kwargs),
-                torch.arange(3, 5, **kwargs)]
-
-        pinned_tensors = _get_tensors(pin_memory=True) + _get_like(torch.empty(5, dtype=torch.float64), pin_memory=True)
-        for x in pinned_tensors:
-            self.assertTrue(x.is_pinned())
-
-        tensors = _get_tensors() + _get_like(torch.empty(5, dtype=torch.float64, pin_memory=True))
-        for x in tensors:
-            self.assertFalse(x.is_pinned())
-
-    @deviceCountAtLeast(1)
-    @parametrize("non_blocking", (True, False))
-    def test_storage_all_devices(self, devices, non_blocking):
-        for device in devices:
-            t = torch.randn(6, device=device)
-            self.assertEqual(t.dtype, t.storage().dtype)
-            s = t.untyped_storage()
-            s_cpu = s.to(device='cpu', non_blocking=non_blocking)
-            if non_blocking:
-                torch.cuda.synchronize()
-                self.assertTrue(s_cpu.is_pinned())
-            else:
-                self.assertFalse(s_cpu.is_pinned())
-            t_cpu = torch.empty(()).set_(s_cpu)
-            self.assertEqual(t.cpu(), t_cpu)
 
 
 # Tests that compare a device's computation with the (gold-standard) CPU's.
