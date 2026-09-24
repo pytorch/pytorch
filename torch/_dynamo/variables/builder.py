@@ -5493,6 +5493,7 @@ class SourcelessBuilder:
                 torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode,
             ):
                 return StringFormatVariable.create(
+                    tx,
                     value.fmt_var.as_python_constant(),
                     [value.sym_node_var],
                     {},
