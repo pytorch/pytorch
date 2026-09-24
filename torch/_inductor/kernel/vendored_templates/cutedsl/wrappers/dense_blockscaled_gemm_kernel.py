@@ -29,7 +29,6 @@ from cutlass.operators.utils.common import tuple_to_string
 from cutlass.operators.utils.device import to_cuda_stream
 from cutlass.operators.utils.tensor import strides_to_layout_string
 
-from torch._inductor import config
 from torch._inductor.codegen.nv_universal_gemm.epilogue_capabilities import (
     BLOCK_SCALED_GEMM_REDUCTION_CAPABILITIES,
 )
