@@ -2233,9 +2233,14 @@ def _validate_device(query: Tensor, key: Tensor, value: Tensor) -> None:
             "FlexAttention does not support backward on MPS. Please set the input requires_grad to False or use another device."
         )
     supported_devices = {"cuda", "cpu", "xpu", "hpu", "mps"}
+    privateuse1 = torch._C._get_privateuse1_backend_name()
+    if privateuse1 != "privateuseone":
+        supported_devices.add(privateuse1)
+
     if query.device.type not in supported_devices:
         raise ValueError(
-            "FlexAttention is only supported on CUDA, CPU, HPU, or MPS devices. "
+            f"FlexAttention is only supported on "
+            f"{', '.join(sorted(supported_devices))} devices. "
             f"Found input tensors on {query.device.type} device."
         )
 
