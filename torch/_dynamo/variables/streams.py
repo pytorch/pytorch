@@ -331,7 +331,11 @@ class SymbolicStreamState:
 
 
 class StreamContextVariable(FxTracebackAnnotateVariable):
-    """This represents torch.cuda.StreamContext"""
+    """Represents a device StreamContext (e.g. torch.cuda.StreamContext)."""
+
+    # Subclasses set this to the device-specific StreamContext type.
+    # None means derive at runtime from the stream's device module.
+    _stream_context_type: type | None = None
 
     @staticmethod
     def create(
@@ -369,7 +373,9 @@ class StreamContextVariable(FxTracebackAnnotateVariable):
         return super().exit(tx, *args)
 
     def python_type(self) -> type:
-        return torch.cuda.StreamContext
+        if self._stream_context_type is not None:
+            return self._stream_context_type
+        return getattr(torch, self.get_stream().device.type).StreamContext
 
     def supports_graph_breaks(self) -> bool:
         return True
