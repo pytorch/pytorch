@@ -28,6 +28,28 @@ from .utils import convert_shape_to_inductor, pad_listlike, SUPPORTED_MKLDNN_DEV
 from .virtualized import V
 
 
+def _is_mkldnn_supported_device(device_type: str) -> bool:
+    """
+    Return True if `device_type` is allowed to lower oneDNN (mkldnn) fusion
+    kernels. In-tree mkldnn devices are listed in SUPPORTED_MKLDNN_DEVICES. A
+    registered DeviceInterface (torch._dynamo.device_interface) may declare
+    the capability through an optional `is_mkldnn_capable()` hook, so
+    out-of-tree backends can opt in without monkey-patching this module.
+    Devices that declare neither keep raising the same explicit
+    "unsupported mkldnn device" error at the call sites below.
+    """
+    if device_type in SUPPORTED_MKLDNN_DEVICES:
+        return True
+    try:
+        from torch._dynamo.device_interface import get_interface_for_device
+
+        interface = get_interface_for_device(device_type)
+    except NotImplementedError:
+        return False
+    hook = getattr(interface, "is_mkldnn_capable", None)
+    return bool(hook()) if callable(hook) else False
+
+
 def _prepare_convolution_fusion_create(
     cls,
     x: "TensorBox",
@@ -224,7 +246,7 @@ def _prepare_convolution_fusion_create(
             f"expected x and weight on same device, got "
             f"{get_device_type(x)} and {get_device_type(weight)}"
         )
-    if get_device_type(x) not in SUPPORTED_MKLDNN_DEVICES:
+    if not _is_mkldnn_supported_device(get_device_type(x)):
         raise AssertionError(f"unsupported mkldnn device {get_device_type(x)}")
     inputs = [x]
 
@@ -294,7 +316,7 @@ def _prepare_linear_fusion_create(
             f"expected x and weight on same device, got "
             f"{get_device_type(x)} and {get_device_type(weight)}"
         )
-    if get_device_type(x) not in SUPPORTED_MKLDNN_DEVICES:
+    if not _is_mkldnn_supported_device(get_device_type(x)):
         raise AssertionError(f"unsupported mkldnn device {get_device_type(x)}")
     inputs = [x]
 
