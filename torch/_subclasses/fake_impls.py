@@ -45,6 +45,7 @@ from torch._subclasses.fake_tensor import (
     is_fake_tensor,
     maybe_get_fake_device,
     maybe_get_item_memo,
+    maybe_set_fake_device,
     maybe_set_item_memo,
     run_fallback_kernel,
     UnsupportedOperatorException,
@@ -717,12 +718,18 @@ def _to_dense(
                 dtype=self.dtype,
                 device="meta",
             )
-        return FakeTensor(fake_mode, out, self.fake_device)
+        self_device = maybe_get_fake_device(self)
+        if self_device is None:
+            raise AssertionError("expected a fake tensor device")
+        return FakeTensor(fake_mode, out, self_device)
 
     with in_kernel_invocation_manager(fake_mode):
         out = func(self, dtype=dtype, masked_grad=masked_grad)
+    self_device = maybe_get_fake_device(self)
+    if self_device is None:
+        raise AssertionError("expected a fake tensor device")
     return fake_mode.fake_tensor_converter.from_meta_and_device(
-        fake_mode, out, self.fake_device
+        fake_mode, out, self_device
     )
 
 
@@ -1930,7 +1937,7 @@ def to_dense_python_tls_impl(
 ) -> torch.Tensor:
     from torch._subclasses.functional_tensor import FunctionalTensor
 
-    if isinstance(self, (FakeTensor, FunctionalTensor)):  # noqa: ISINSTANCE_FAKE_TENSOR
+    if is_fake_tensor(self) or isinstance(self, FunctionalTensor):
         return to_dense_composite_impl(self, dtype=dtype, masked_grad=masked_grad)
 
     with torch._C._ExcludeDispatchKeyGuard(_PYTHON_TLS_SNAPSHOT_KEYSET):
@@ -1961,8 +1968,11 @@ def to_mkldnn(
     if not isinstance(a, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return NotImplemented
 
+    fake_device = maybe_get_fake_device(a)
+    if fake_device is None:
+        raise AssertionError("expected a fake tensor device")
     out_dtype = dtype if dtype is not None else a.dtype
-    if a.fake_device.type != "cpu":
+    if fake_device.type != "cpu":
         raise RuntimeError("dense_to_mkldnn expects CPU tensor input")
     if a.layout != torch.strided:
         raise RuntimeError("dense_to_mkldnn expects strided tensor input")
@@ -1991,9 +2001,7 @@ def to_mkldnn(
             dtype=out_dtype,
             device="meta",
         )
-    return FakeTensor(
-        fake_mode, out, a.fake_device, dispatch_keys=_MKLDNN_DISPATCH_KEYS
-    )
+    return FakeTensor(fake_mode, out, fake_device, dispatch_keys=_MKLDNN_DISPATCH_KEYS)
 
 
 # These are for the `torch._foreach_...` ops like `torch._foreach_add`.
@@ -2113,7 +2121,7 @@ def _(
     source_device = new_kwargs["source"].device
     with in_kernel_invocation_manager(fake_mode):
         func(*args, **kwargs)
-    new_kwargs["input"].fake_device = source_device
+    maybe_set_fake_device(new_kwargs["input"], source_device)
     return new_kwargs["input"]
 
 
@@ -2142,9 +2150,10 @@ def index_put_impl(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
     values = new_kwargs["values"]
-    self_device = new_kwargs["input"].fake_device
+    self_device = maybe_get_fake_device(new_kwargs["input"])
     torch._check(
-        self_device == values.fake_device or (values.ndim == 0 and values.numel() == 1),
+        self_device == maybe_get_fake_device(values)
+        or (values.ndim == 0 and values.numel() == 1),
         lambda: f"Mismatching {func} device between self ({self_device}) and values ({values.device})",
     )
 
@@ -2200,8 +2209,8 @@ def conv(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
-    def expect_fake_tensor(name: str, value: object) -> FakeTensor:
-        if not isinstance(value, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
+    def expect_fake_tensor(name: str, value: object) -> torch.Tensor:
+        if not is_fake_tensor(value):
             raise AssertionError(
                 "Expected fake convolution tensor arguments to be FakeTensors, "
                 f"but {name} was {type(value).__name__}"
@@ -2210,7 +2219,9 @@ def conv(
 
     input_ = expect_fake_tensor("input", new_kwargs["input"])
     weight = expect_fake_tensor("weight", new_kwargs["weight"])
-    device = input_.fake_device
+    device = maybe_get_fake_device(input_)
+    if device is None:
+        raise AssertionError("expected a fake tensor device")
     # Internal passes such as Inductor freezing may run fake propagation over
     # folded convs that do not need to match eager's public input checks.
     if (
@@ -2231,10 +2242,13 @@ def conv(
     for name, value in new_kwargs.items():
         if isinstance(value, torch.Tensor):
             fake_value = expect_fake_tensor(name, value)
-            if not _same_device_or_unspecified_index(fake_value.fake_device, device):
+            fake_device = maybe_get_fake_device(fake_value)
+            if fake_device is None:
+                raise AssertionError("expected a fake tensor device")
+            if not _same_device_or_unspecified_index(fake_device, device):
                 raise RuntimeError(
                     "Expected all tensors to be on the same device, but got "
-                    f"{name} is on {fake_value.fake_device}, different from "
+                    f"{name} is on {fake_device}, different from "
                     f"other tensors on {device}"
                 )
     # need to re-enable mode so the tensors report fake device
