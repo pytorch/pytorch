@@ -1226,14 +1226,14 @@ class emit_nvtx:
 
 @deprecated(
     "`torch.autograd.profiler.load_nvprof` is deprecated and will be removed "
-    "in a future release.",
+    "in PyTorch 2.17.",
     category=FutureWarning,
 )
 def load_nvprof(path):
     """Open an nvprof trace file and parse autograd annotations.
 
     .. deprecated::
-        This function is deprecated and will be removed in a future release.
+        This function is deprecated and will be removed in PyTorch 2.17.
 
     Args:
         path (str): path to nvprof trace
@@ -1258,27 +1258,27 @@ class _EnforceUnique:
 
 @deprecated(
     "`torch.autograd.profiler.EnforceUnique` is deprecated and will be removed "
-    "in a future release.",
+    "in PyTorch 2.17.",
     category=FutureWarning,
 )
 class EnforceUnique(_EnforceUnique):
     """Raises an error if a key is seen more than once.
 
     .. deprecated::
-        This class is deprecated and will be removed in a future release.
+        This class is deprecated and will be removed in PyTorch 2.17.
     """
 
 
 @deprecated(
     "`torch.autograd.profiler.parse_nvprof_trace` is deprecated and will be "
-    "removed in a future release.",
+    "removed in PyTorch 2.17.",
     category=FutureWarning,
 )
 def parse_nvprof_trace(path):
     """Parse autograd annotations from an nvprof trace file.
 
     .. deprecated::
-        This function is deprecated and will be removed in a future release.
+        This function is deprecated and will be removed in PyTorch 2.17.
     """
     return _parse_nvprof_trace(path)
 
