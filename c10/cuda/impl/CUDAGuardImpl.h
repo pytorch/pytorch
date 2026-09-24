@@ -2,6 +2,7 @@
 
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/core/impl/GPUTrace.h>
+#include <c10/core/impl/InlineDeviceGuard.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/ScopeExit.h>
@@ -168,11 +169,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     // Moves to stream's device to record, restoring the original device on
     // scope exit (including the throwing path), mirroring CUDAEvent's
     // destructor which restores via CUDAGuard.
-    const auto orig_device = getDevice();
-    setDevice(stream.device());
-    const auto restore_device = c10::make_scope_exit([&]() {
-      C10_CUDA_CHECK_WARN(c10::cuda::MaybeSetDevice(orig_device.index()));
-    });
+    c10::impl::InlineDeviceGuard<CUDAGuardImpl> guard(stream.device());
 
     // Creates the event (lazily)
     if (!cuda_event)
@@ -194,11 +191,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       return;
     cudaEvent_t cuda_event = static_cast<cudaEvent_t>(event);
     CUDAStream cuda_stream{stream};
-    const auto orig_device = getDevice();
-    setDevice(stream.device());
-    const auto restore_device = c10::make_scope_exit([&]() {
-      C10_CUDA_CHECK_WARN(c10::cuda::MaybeSetDevice(orig_device.index()));
-    });
+    c10::impl::InlineDeviceGuard<CUDAGuardImpl> guard(stream.device());
     C10_CUDA_CHECK(cudaStreamWaitEvent(
         cuda_stream,
         cuda_event,
@@ -259,11 +252,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
 
   // Note: synchronizeDevice can be safely called from any device
   void synchronizeDevice(const c10::DeviceIndex device_index) const override {
-    DeviceIndex orig_device{-1};
-    C10_CUDA_CHECK(c10::cuda::GetDevice(&orig_device));
-    C10_CUDA_CHECK(c10::cuda::SetDevice(device_index));
-    const auto restore_device = c10::make_scope_exit(
-        [&]() { C10_CUDA_CHECK_WARN(c10::cuda::MaybeSetDevice(orig_device)); });
+    c10::impl::InlineDeviceGuard<CUDAGuardImpl> guard(device_index);
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {
       (*interp)->trace_gpu_device_synchronization(c10::kCUDA);
@@ -285,11 +274,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     // Even though cudaEventElapsedTime can be safely called from any device, if
     // the current device is not initialized, it will create a new cuda context,
     // which will consume a lot of memory.
-    DeviceIndex orig_device{-1};
-    C10_CUDA_CHECK(c10::cuda::GetDevice(&orig_device));
-    C10_CUDA_CHECK(c10::cuda::SetDevice(device_index));
-    const auto restore_device = c10::make_scope_exit(
-        [&]() { C10_CUDA_CHECK_WARN(c10::cuda::MaybeSetDevice(orig_device)); });
+    c10::impl::InlineDeviceGuard<CUDAGuardImpl> guard(device_index);
     cudaEvent_t cuda_event1 = static_cast<cudaEvent_t>(event1);
     cudaEvent_t cuda_event2 = static_cast<cudaEvent_t>(event2);
     float time_ms = 0;
@@ -302,11 +287,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       void** event,
       const DeviceIndex device_index,
       const EventFlag flag) const override {
-    DeviceIndex orig_device{-1};
-    C10_CUDA_CHECK(c10::cuda::GetDevice(&orig_device));
-    C10_CUDA_CHECK(c10::cuda::SetDevice(device_index));
-    const auto restore_device = c10::make_scope_exit(
-        [&]() { C10_CUDA_CHECK_WARN(c10::cuda::MaybeSetDevice(orig_device)); });
+    c10::impl::InlineDeviceGuard<CUDAGuardImpl> guard(device_index);
     if (!*event) {
       createEvent(reinterpret_cast<cudaEvent_t*>(event), flag);
     }
@@ -327,11 +308,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     cudaIpcEventHandle_t ipc_handle{};
     std::memcpy(&ipc_handle, handle_string.data(), handle_string.size());
 
-    DeviceIndex orig_device{-1};
-    C10_CUDA_CHECK(c10::cuda::GetDevice(&orig_device));
-    C10_CUDA_CHECK(c10::cuda::SetDevice(device_index));
-    const auto restore_device = c10::make_scope_exit(
-        [&]() { C10_CUDA_CHECK_WARN(c10::cuda::MaybeSetDevice(orig_device)); });
+    c10::impl::InlineDeviceGuard<CUDAGuardImpl> guard(device_index);
     C10_CUDA_CHECK(cudaIpcOpenEventHandle(
         reinterpret_cast<cudaEvent_t*>(event), ipc_handle));
   }
