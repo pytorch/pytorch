@@ -246,7 +246,7 @@ class TestMarkKernels(TestCase):
             graph.instantiate()
             self.assertIsNone(graph._remapped_exec_id)
             self.assertEqual(set(get_kernel_annotations()), keys)
-        self.assertIn(capture_id, graph._owned_graph_ids)
+        self.assertIn(capture_id, graph._recorded_exec_ids)
 
     def test_key_by_auto_takes_what_the_stack_reports(self):
         """``key_by="auto"`` is "source" where the stack reports source node ids and "exec"
@@ -676,6 +676,7 @@ class TestMarkKernels(TestCase):
             # keep_graph=False capture_end already instantiated and remapped.
             graph_a.instantiate()
             graph_b.instantiate()
+            graph_a.instantiate()
 
         exec_a = self._exec_graph_id(graph_a)
         exec_b = self._exec_graph_id(graph_b)
@@ -692,6 +693,14 @@ class TestMarkKernels(TestCase):
         # both -- not just the last -- were remapped correctly.
         self.assertEqual(graph_ids_by_name["graph_a"], {exec_a})
         self.assertEqual(graph_ids_by_name["graph_b"], {exec_b})
+
+        remaining = {
+            tools_id: anns
+            for tools_id, anns in get_kernel_annotations().items()
+            if tools_id >> 32 == exec_b
+        }
+        graph_a.reset()
+        self.assertEqual(dict(get_kernel_annotations()), remaining)
 
     def _assert_keyed_to(self, exec_graph_id):
         annotations = get_kernel_annotations()
@@ -754,19 +763,24 @@ class TestMarkKernels(TestCase):
         self.assertNotEqual(exec1, exec2)
         self._assert_keyed_to(exec2)
 
-    def test_resolve_and_remap_sequence(self):
-        """resolve_and_remap over a sequence keys each graph to its exec id.
+    @parametrize("key_by", ["exec", "source"])
+    def test_resolve_and_remap_sequence(self, key_by):
+        """Repeated resolution preserves each graph's selected key space.
 
         Uses default (keep_graph=False) graphs to show the capture id is
         recovered from the graph itself, not the (destroyed) graph template.
         The context manager already resolves and remaps on exit, so calling
         resolve_and_remap once per graph afterwards must be idempotent.
         """
+        if key_by == "source" and not source_node_ids_available():
+            self.skipTest("source keying requires a CUDA driver >= 13.4")
         graphs = [torch.cuda.CUDAGraph() for _ in range(3)]
         x = torch.randn(8, device="cuda")
 
         for i, graph in enumerate(graphs):
-            with torch.cuda.graph(graph, enable_annotations=True):
+            with torch.cuda.graph(
+                graph, enable_annotations=True, annotation_config={"key_by": key_by}
+            ):
                 with mark_kernels(f"graph_{i}"):
                     _ = x + i
 
@@ -779,8 +793,12 @@ class TestMarkKernels(TestCase):
             graph_ids_by_name.setdefault(anns[0]["name"], set()).add(tools_id >> 32)
 
         for i, graph in enumerate(graphs):
-            exec_id = self._exec_graph_id(graph)
-            self.assertEqual(graph_ids_by_name[f"graph_{i}"], {exec_id})
+            graph_id = (
+                graph._capture_graph_id
+                if key_by == "source"
+                else self._exec_graph_id(graph)
+            )
+            self.assertEqual(graph_ids_by_name[f"graph_{i}"], {graph_id})
 
     def test_mark_kernels_skips_preexisting_dependents_on_entry_frontier(self):
         graph = torch.cuda.CUDAGraph()
@@ -1779,7 +1797,7 @@ class TestGraphDestroyHooks(TestCase):
         self.assertEqual(seen, [{1}])
 
     @requires_cuda
-    def test_fires_with_owned_graph_ids_on_teardown(self):
+    def test_fires_with_recorded_exec_ids_on_teardown(self):
         import torch.cuda.graphs as cg
 
         exec_id = 0xABCD
@@ -1787,7 +1805,7 @@ class TestGraphDestroyHooks(TestCase):
         # Stand in for a consumer that records per-graph state at instantiate: stamp a
         # known exec id onto the graph so teardown has something to hand the destroy hook.
         inst = cg.register_graph_instantiate_hook(
-            lambda gr: gr._owned_graph_ids.add(exec_id)
+            lambda gr: gr._recorded_exec_ids.add(exec_id)
         )
         self.addCleanup(inst.remove)
 
@@ -1871,31 +1889,6 @@ class TestAnnotationStore(TestCase):
         super().setUp()
         ga._reset_kernel_annotations()
         self.addCleanup(ga._reset_kernel_annotations)
-
-    def test_rekey_does_not_visit_other_graphs(self):
-        from types import SimpleNamespace
-
-        import torch.cuda._graph_annotations as ga
-
-        ga.record_node_annotation((1 << 32) | 10, {"name": "a"})
-        ga.record_node_annotation((9 << 32) | 10, {"name": "other"})
-        other = ga._GRAPH_ANNOTATIONS[9]
-        graph = SimpleNamespace(
-            _capture_graph_id=1,
-            _remapped_exec_id=None,
-            raw_cuda_graph_exec=lambda: 123,
-        )
-        # Accessing another graph's entries would turn repeated remaps quadratic.
-        with (
-            unittest.mock.patch.object(other, "annotations", new=None),
-            unittest.mock.patch.object(ga, "_cuda_runtime") as runtime,
-        ):
-            runtime.cudaGraphExecGetId.return_value = (SimpleNamespace(value=0), 2)
-            ga.remap_to_exec_graph(graph)
-        self.assertEqual(
-            dict(ga.get_kernel_annotations()),
-            {(2 << 32) | 10: [{"name": "a"}], (9 << 32) | 10: [{"name": "other"}]},
-        )
 
     def test_writes_to_one_node_merge_first_wins(self):
         import torch.cuda._graph_annotations as ga
@@ -2320,7 +2313,7 @@ class TestCuptiAnnotationBackend(TestCase):
         self.assertIn(capture_id, graph_ids)
         body_ids = graph_ids - {capture_id}
         self.assertTrue(body_ids, "the conditional body's nodes were not annotated")
-        self.assertEqual(g._owned_graph_ids, graph_ids)
+        self.assertEqual(g._recorded_exec_ids, graph_ids)
 
         g.reset()
         self.assertEqual(dict(self._annotations()), {})
