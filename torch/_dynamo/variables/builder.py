@@ -240,6 +240,8 @@ from .functions import (
     MethodWrapperVariable,
     PropertyVariable,
     SysFunctionVariable,
+    TritonConstexprClassVariable,
+    TritonConstexprVariable,
     TritonKernelVariable,
     TritonSetAllocatorVariable,
     UserFunctionVariable,
@@ -1108,6 +1110,7 @@ class VariableBuilder:
         from torch.utils._triton import (
             has_triton,
             has_triton_experimental_host_tma,
+            has_triton_package,
             has_triton_tensor_descriptor_host_tma,
         )
 
@@ -1128,6 +1131,21 @@ class VariableBuilder:
 
             class Autotuner:
                 pass
+
+        if has_triton_package():
+            import triton.language as tl
+
+            if value is tl.constexpr:
+                self.install_guards(GuardBuilder.ID_MATCH)
+                return TritonConstexprClassVariable(value, source=self.source)
+            if isinstance(value, tl.constexpr):
+                self.install_guards(GuardBuilder.TYPE_MATCH)
+                value_source = AttrSource(self.get_source(), "value")
+                constexpr_value = VariableBuilder(self.tx, value_source)(value.value)
+                return TritonConstexprVariable(
+                    constexpr_value,
+                    source=self.source,
+                )
 
         # default implementations, in case we don't have triton (or the wrong triton version)
         def create_1d_tma_descriptor() -> None:
