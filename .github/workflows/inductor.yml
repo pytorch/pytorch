@@ -51,7 +51,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      build-environment: linux-jammy-cuda13.0-py3.10-gcc11-sm86
+      build-environment: linux-jammy-cuda13.0-py3.11-gcc11-sm86
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       cuda-arch-list: '8.6'
@@ -66,7 +66,7 @@ jobs:
           { config: "inductor_torchbench", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
         ]}
       build-additional-packages: "vision audio fbgemm torchao"
-      python-version: "3.10"
+      python-version: "3.11"
       compiler: gcc11
       cuda-version: "13.0"
     secrets: inherit
@@ -82,7 +82,7 @@ jobs:
       docker-image: ${{ needs.inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.inductor-build.outputs.test-matrix }}
       enable-torch-trace: "1"
-      python-version: "3.10"
+      python-version: "3.11"
       compiler: gcc11
       cuda-version: "13.0"
     secrets: inherit
@@ -92,7 +92,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      build-environment: linux-jammy-cuda13.2-py3.10-gcc11-sm86
+      build-environment: linux-jammy-cuda13.2-py3.11-gcc11-sm86
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11-inductor-benchmarks
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       cuda-arch-list: '8.6'
@@ -107,7 +107,7 @@ jobs:
           { config: "inductor_torchbench", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
         ]}
       build-additional-packages: "vision audio fbgemm torchao"
-      python-version: "3.10"
+      python-version: "3.11"
       compiler: gcc11
       cuda-version: "13.2"
     secrets: inherit
@@ -123,7 +123,7 @@ jobs:
       docker-image: ${{ needs.inductor-build-cuda132.outputs.docker-image }}
       test-matrix: ${{ needs.inductor-build-cuda132.outputs.test-matrix }}
       enable-torch-trace: "1"
-      python-version: "3.10"
+      python-version: "3.11"
       compiler: gcc11
       cuda-version: "13.2"
     secrets: inherit
@@ -133,7 +133,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      build-environment: linux-jammy-cuda13.4-py3.10-gcc11-sm86
+      build-environment: linux-jammy-cuda13.4-py3.11-gcc11-sm86
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.4-cudnn9-py3-gcc11-inductor-benchmarks
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       cuda-arch-list: '8.6'
@@ -148,7 +148,7 @@ jobs:
           { config: "inductor_torchbench", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
         ]}
       build-additional-packages: "vision audio fbgemm torchao"
-      python-version: "3.10"
+      python-version: "3.11"
       compiler: gcc11
       cuda-version: "13.4"
     secrets: inherit
@@ -164,7 +164,7 @@ jobs:
       docker-image: ${{ needs.inductor-build-cuda134.outputs.docker-image }}
       test-matrix: ${{ needs.inductor-build-cuda134.outputs.test-matrix }}
       enable-torch-trace: "1"
-      python-version: "3.10"
+      python-version: "3.11"
       compiler: gcc11
       cuda-version: "13.4"
     secrets: inherit
@@ -174,7 +174,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      build-environment: linux-jammy-py3.10-gcc11-build
+      build-environment: linux-jammy-py3.11-gcc11-build
       docker-image-name: ci-image:pytorch-linux-jammy-py3-gcc11-inductor-benchmarks
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -188,7 +188,7 @@ jobs:
           { config: "inductor_torchbench_cpu_smoketest_perf", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.24xl.spr-metal" },
         ]}
       build-additional-packages: "vision audio torchao"
-      python-version: "3.10"
+      python-version: "3.11"
       compiler: gcc11
       cuda-version: cpu
     secrets: inherit
@@ -203,7 +203,7 @@ jobs:
       build-environment: ${{ needs.inductor-cpu-build.outputs.build-environment }}
       docker-image: ${{ needs.inductor-cpu-build.outputs.docker-image }}
       test-matrix: ${{ needs.inductor-cpu-build.outputs.test-matrix }}
-      python-version: "3.10"
+      python-version: "3.11"
       compiler: gcc11
       cuda-version: cpu
     secrets: inherit
