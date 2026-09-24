@@ -276,11 +276,20 @@ def _is_in_optimized_module() -> bool:
     return _in_optimized_module
 
 
-def _fail_on_recompile_callback(callback: DynamoCallback) -> DynamoCallback:
-    """Wrap ``callback`` to serve cached entries but raise instead of compiling."""
+class _FailOnRecompileCallback:
+    """Serves cached entries but raises instead of compiling.
 
-    def fail_callback(
-        frame: DynamoFrameType, *args: Any, **kwargs: Any
+    Built per call under the "fail_on_recompile" stance, or bound once into a
+    context's callback (an installed precompile artifact), in which case
+    ``_callback_from_stance`` keeps it under every stance that would compile.
+    """
+
+    def __init__(self, callback: DynamoCallback) -> None:
+        # to prevent cache miss due to different backend
+        self._torchdynamo_orig_backend = callback
+
+    def __call__(
+        self, frame: DynamoFrameType, *args: Any, **kwargs: Any
     ) -> ConvertFrameReturn:
         if trace_rules.check(frame.f_code):
             return ConvertFrameReturn()
@@ -299,6 +308,7 @@ def _fail_on_recompile_callback(callback: DynamoCallback) -> DynamoCallback:
             + f"function name: '{frame.f_code.co_name}', "
             + f"line number: {frame.f_lineno}"
         )
+        callback = self._torchdynamo_orig_backend
         cache_entries = _debug_get_cache_entry_list(frame.f_code)
         if cache_entries:
             reasons = get_and_maybe_log_recompilation_reasons(
@@ -320,13 +330,15 @@ def _fail_on_recompile_callback(callback: DynamoCallback) -> DynamoCallback:
                 message += f"\n{entry.guard_manager}{entry.guard_manager.check_verbose(frame.f_locals)}"  # type: ignore[attr-defined]
         raise RuntimeError(message)
 
-    # to prevent cache miss due to different backend
-    fail_callback._torchdynamo_orig_backend = callback  # type: ignore[attr-defined]
-
-    return fail_callback
-
 
 def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
+    if isinstance(callback, _FailOnRecompileCallback):
+        # Read the stance once: a concurrent set_stance must not slip a
+        # compiling callback in between the check and the choice.
+        stance = _stance.stance
+        if stance == "force_eager":
+            return None
+        return False if stance == "eager_on_recompile" else callback
     if _stance.stance == "default":
         # force_backend
         if _stance.backend is not None and callback not in (False, None):
@@ -350,7 +362,7 @@ def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
     elif _stance.stance == "fail_on_recompile":
         if callback in (False, None):
             return callback
-        return _fail_on_recompile_callback(callback)
+        return _FailOnRecompileCallback(callback)
     else:
         raise RuntimeError(f"invalid torch.compile stance '{_stance}'")
 
