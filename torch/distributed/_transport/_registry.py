@@ -104,7 +104,9 @@ def new_transport(
             received = torch.empty_like(weights)
             source = trainer.register_memory(weights)
             target = replica.register_memory(received)
-            remote = target.to_remote_buffer()
+            descriptor = target.to_remote_buffer()
+            # Exchange these bytes through the application control plane.
+            remote = type(descriptor).deserialize(descriptor.serialize())
             work = trainer.write(source.to_view(), remote, async_op=True)
             work.wait()
             torch.testing.assert_close(received, weights)
