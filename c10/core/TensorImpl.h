@@ -235,9 +235,14 @@ struct C10_API BackendMeta : intrusive_ptr_target {
 struct C10_API FakeTensorMode {
   std::shared_ptr<c10::SafePyObject> shape_env_;
   std::shared_ptr<c10::SafePyObject> fake_tensor_converter_;
+  // Python wrapper used by callback dispatch.
+  std::shared_ptr<c10::SafePyObject> fake_mode_pyobj_;
 
   // when false, disallow a fake tensor from having a 'meta' device
   bool allow_meta_ = true;
+
+  // Input policy queried by the Python callback bridge.
+  bool allow_non_fake_inputs_ = false;
 
   FakeTensorMode(
       std::shared_ptr<c10::SafePyObject> shape_env,
