@@ -4,8 +4,8 @@
 #define MAX_THREADGROUP_SIZE static_cast<uint32_t>(1024)
 C10_METAL_CONSTEXPR uint32_t SUM_NCHAINS = 8;
 
-// Threadgroup size the host dispatches the inner / inner_chunk reduction
-// kernels with; both carve the threadgroup into whole simdgroups.
+// Threadgroup size the host dispatches the innermost / innermost_chunk
+// reduction kernels with; both carve the threadgroup into whole simdgroups.
 C10_METAL_CONSTEXPR uint32_t INNER_TG_SIZE = 256;
 static_assert(
     INNER_TG_SIZE % ::c10::metal::simdgroup_size == 0,

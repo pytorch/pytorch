@@ -484,32 +484,6 @@ kernel void reduction_generic(
   }
 }
 
-template <typename OP, typename TI, typename TO>
-kernel void reduction_strided(
-    constant TI* input [[buffer(0)]],
-    device TO* output [[buffer(1)]],
-    constant NormParams<>& params [[buffer(2)]],
-    uint tid [[thread_position_in_threadgroup]],
-    uint tptg [[threads_per_threadgroup]],
-    uint tgid [[threadgroup_position_in_grid]]) {
-  using TA = typename OP::acc_t;
-
-  const uint32_t E = params.reduction_size;
-  const uint32_t base_flat = tgid * E;
-
-  TA acc = OP::identity();
-  for (uint32_t k = tid; k < E; k += tptg) {
-    acc = OP::combine(
-        acc, OP::load(input[get_input_offset(base_flat + k, 0u, params)]));
-  }
-
-  threadgroup TA shared[MAX_THREADGROUP_SIZE / 32];
-  TA total = OP::threadgroup_reduce(shared, acc, tid, tptg);
-  if (tid == 0) {
-    output[tgid] = OP::finalize(total, 0);
-  }
-}
-
 // Specialized kernel for reducing a non-innermost dim. The input is viewed
 // as [outer_size, dim_size, inner_size] with dim_size reduced (the same
 // decomposition the CUDA spatial softmax / scan_outer_dim kernels use);
@@ -662,89 +636,12 @@ kernel void reduction_narrow(
   }
 }
 
-// Strided-input variant of reduction_narrow: identical thread-to-column
-// mapping, addressing through explicit dim/inner/outer strides.
-template <
-    typename OP,
-    typename TI,
-    typename TO,
-    uint TG_SIZE = NARROW_TG_SIZE,
-    uint NCHAINS = SUM_NCHAINS>
-[[max_total_threads_per_threadgroup(TG_SIZE)]]
-kernel void reduction_narrow_strided(
-    constant TI* input [[buffer(0)]],
-    device TO* output [[buffer(1)]],
-    // [dim_size, inner_size, unused, num_segs]
-    constant uint4& sizes [[buffer(2)]],
-    constant float& param [[buffer(3)]],
-    // [dim_stride, inner_stride, outer_stride]
-    constant uint3& strides [[buffer(4)]],
-    uint3 tid_tg [[thread_position_in_threadgroup]],
-    uint3 tg_pos [[threadgroup_position_in_grid]]) {
-  using TA = typename OP::acc_t;
-  const uint tid = tid_tg.x;
-  const uint dim_size = sizes.x;
-  const uint inner_size = sizes.y;
-  const uint num_segs = max(sizes.w, 1u);
-  const uint dim_stride = strides.x;
-  const uint inner_stride = strides.y;
-  const uint rstep = TG_SIZE / inner_size;
-  const uint active = rstep * inner_size;
-
-  const uint seg_rows = ceil_div(dim_size, num_segs);
-  const uint r0 = tg_pos.y * seg_rows;
-  const uint r1 = min(r0 + seg_rows, dim_size);
-  const uint base = tg_pos.z * strides.z + r0 * dim_stride;
-  const uint count = (r0 < dim_size) ? (r1 - r0) * inner_size : 0u;
-
-  const uint col_off = (tid % inner_size) * inner_stride;
-  uint row = tid / inner_size;
-
-  metal::array<TA, NCHAINS> acc;
-  for (uint j = 0; j < NCHAINS; j++) {
-    acc[j] = OP::identity();
-  }
-  const uint stride = active * NCHAINS;
-  uint k = tid;
-  for (; k + (NCHAINS - 1) * active < count; k += stride) {
-    for (uint j = 0; j < NCHAINS; j++) {
-      acc[j] = OP::combine(
-          acc[j],
-          OP::load(input[base + (row + j * rstep) * dim_stride + col_off]));
-    }
-    row += rstep * NCHAINS;
-  }
-  for (; k < count; k += active) {
-    acc[0] =
-        OP::combine(acc[0], OP::load(input[base + row * dim_stride + col_off]));
-    row += rstep;
-  }
-  TA val = acc[0];
-  for (uint j = 1; j < NCHAINS; j++) {
-    val = OP::combine(val, acc[j]);
-  }
-
-  threadgroup TA shmem[TG_SIZE];
-  shmem[tid] = val;
-  threadgroup_barrier(mem_flags::mem_threadgroup);
-
-  if (tid < inner_size) {
-    TA s = OP::identity();
-    for (uint t = tid; t < active; t += inner_size) {
-      s = OP::combine(s, shmem[t]);
-    }
-    const uint out_idx = (num_segs > 1) ? (tg_pos.y * inner_size + tid)
-                                        : (tg_pos.z * inner_size + tid);
-    output[out_idx] = OP::finalize(s, param);
-  }
-}
-
 // Specialized kernel for reducing the innermost dim of a contiguous tensor.
 // Input [M, N] -> output [M], each SIMD group reduces one row of N elements.
 // Multiple SIMD groups per TG handle different rows for occupancy.
 // No shared memory needed since simd_reduce suffices for intra-row collapse.
 template <typename OP, typename TI, typename TO, uint NCHAINS = SUM_NCHAINS>
-kernel void reduction_inner(
+kernel void reduction_innermost(
     constant TI* input [[buffer(0)]],
     device TO* output [[buffer(1)]],
     constant uint2& sizes [[buffer(2)]], // [M, N]
@@ -882,7 +779,7 @@ inline uint chunk_quads(
   return seg_begin + row_lane;
 }
 
-// Shared body of the *_inner_chunk kernels: each row of length row_len is
+// Shared body of the *_innermost_chunk kernels: each row of length row_len is
 // split across lanes_per_row lanes (simdgroup_size / lanes_per_row rows share
 // one simdgroup, a shuffle tree folds the per-lane partials) and, for split-K,
 // into segs_per_row segments per row producing [num_rows, segs_per_row]
@@ -890,7 +787,7 @@ inline uint chunk_quads(
 // interleaved, as vec4 quads when chunk_quads allows and as chained scalar
 // loads otherwise.
 template <typename OP, typename TI, typename TO>
-kernel void reduction_inner_chunk(
+kernel void reduction_innermost_chunk(
     constant TI* input [[buffer(0)]],
     device TO* output [[buffer(1)]],
     constant uint4& sizes [[buffer(2)]], // [rows, row_len, lanes, segs]
@@ -1049,53 +946,38 @@ kernel void reduction_flat(
       TI,                                              \
       TO);                                             \
   INSTANTIATE_KERNEL(                                  \
-      PREFIX "reduction_inner_" #TI "_" #TO,           \
-      reduction_inner,                                 \
+      PREFIX "reduction_innermost_" #TI "_" #TO,       \
+      reduction_innermost,                             \
       __VA_ARGS__,                                     \
       TI,                                              \
       TO);                                             \
   INSTANTIATE_KERNEL(                                  \
-      PREFIX "reduction_inner_chunk_" #TI "_" #TO,     \
-      reduction_inner_chunk,                           \
+      PREFIX "reduction_innermost_chunk_" #TI "_" #TO, \
+      reduction_innermost_chunk,                       \
       __VA_ARGS__,                                     \
       TI,                                              \
       TO)
 
-// Every (op, TI, TO) with a plain pass-1 kernel also gets the strided and
-// flat variants, so the host dispatcher can pick a variant without keeping
-// its own table of which instantiations exist.
-#define REGISTER_SUM_IMPL(TI, TO, PREFIX, MODE)        \
-  REGISTER_REDUCTION(PREFIX, TI, TO, SumOp<TO, MODE>); \
-  INSTANTIATE_KERNEL(                                  \
-      PREFIX "reduction_strided_" #TI "_" #TO,         \
-      reduction_strided,                               \
-      SumOp<TO, MODE>,                                 \
-      TI,                                              \
-      TO);                                             \
-  INSTANTIATE_KERNEL(                                  \
-      PREFIX "reduction_narrow_strided_" #TI "_" #TO,  \
-      reduction_narrow_strided,                        \
-      SumOp<TO, MODE>,                                 \
-      TI,                                              \
-      TO)
+#define REGISTER_SUM_IMPL(TI, TO, PREFIX, MODE) \
+  REGISTER_REDUCTION(PREFIX, TI, TO, SumOp<TO, MODE>)
 
 #define REGISTER_SUM(TI, TO) REGISTER_SUM_IMPL(TI, TO, "sum_", LOAD_IDENTITY)
 #define REGISTER_NANSUM(TI, TO) \
   REGISTER_SUM_IMPL(TI, TO, "nansum_", LOAD_NAN_TO_ZERO)
 #define REGISTER_COUNT_NONZERO(TI) \
   REGISTER_SUM_IMPL(TI, long, "count_nonzero_", LOAD_NONZERO)
-#define REGISTER_NORM_INNER(TI, TO)           \
-  INSTANTIATE_KERNEL(                         \
-      "norm_l1_reduction_inner_" #TI "_" #TO, \
-      reduction_inner,                        \
-      SumOp<TO, LOAD_ABS>,                    \
-      TI,                                     \
-      TO);                                    \
-  INSTANTIATE_KERNEL(                         \
-      "norm_l2_reduction_inner_" #TI "_" #TO, \
-      reduction_inner,                        \
-      SumOp<TO, LOAD_SQUARE, FINAL_SQRT>,     \
-      TI,                                     \
+#define REGISTER_NORM_INNERMOST(TI, TO)           \
+  INSTANTIATE_KERNEL(                             \
+      "norm_l1_reduction_innermost_" #TI "_" #TO, \
+      reduction_innermost,                        \
+      SumOp<TO, LOAD_ABS>,                        \
+      TI,                                         \
+      TO);                                        \
+  INSTANTIATE_KERNEL(                             \
+      "norm_l2_reduction_innermost_" #TI "_" #TO, \
+      reduction_innermost,                        \
+      SumOp<TO, LOAD_SQUARE, FINAL_SQRT>,         \
+      TI,                                         \
       TO)
 
 REGISTER_SUM(float, float);
@@ -1142,9 +1024,9 @@ REGISTER_COUNT_NONZERO(bool);
 REGISTER_COUNT_NONZERO(float2);
 REGISTER_COUNT_NONZERO(half2);
 
-REGISTER_NORM_INNER(float, float);
-REGISTER_NORM_INNER(half, half);
-REGISTER_NORM_INNER(bfloat, bfloat);
+REGISTER_NORM_INNERMOST(float, float);
+REGISTER_NORM_INNERMOST(half, half);
+REGISTER_NORM_INNERMOST(bfloat, bfloat);
 
 #define REGISTER_VALUE_REDUCTION_IMPL(TI, TO, NAME, OP, LOAD) \
   REGISTER_REDUCTION(NAME "_", TI, TO, ValueOp<OP, LOAD, TO>)
@@ -1371,7 +1253,7 @@ enum ArgMode : uint { ARG_PLAIN = 0, ARG_SPLIT_P1 = 1, ARG_COMBINE = 2 };
 // of its scanned positions matching the winning value). The cross-lane
 // collapse uses simd_arg_reduce which ties on lowest IDX, not lowest LANE.
 template <template <typename> class OpFn, typename TI, ArgMode MODE = ARG_PLAIN>
-kernel void arg_reduction_inner(
+kernel void arg_reduction_innermost(
     constant TI* input [[buffer(0)]],
     device long* output [[buffer(1)]],
     // ARG_SPLIT_P1: [num_partials, seg_len, num_segs, row_len]; else [M, N]
@@ -1592,16 +1474,19 @@ kernel void arg_reduction_narrow_p1(
 #define REGISTER_ARG_REDUCTION_IMPL(TI, NAME, OP)                            \
   INSTANTIATE_KERNEL(NAME "_reduction_" #TI "_long", arg_reduction, OP, TI); \
   INSTANTIATE_KERNEL(                                                        \
-      NAME "_reduction_inner_" #TI "_long", arg_reduction_inner, OP, TI);    \
+      NAME "_reduction_innermost_" #TI "_long",                              \
+      arg_reduction_innermost,                                               \
+      OP,                                                                    \
+      TI);                                                                   \
   INSTANTIATE_KERNEL(                                                        \
-      NAME "_reduction_inner_p1_" #TI,                                       \
-      arg_reduction_inner,                                                   \
+      NAME "_reduction_innermost_p1_" #TI,                                   \
+      arg_reduction_innermost,                                               \
       OP,                                                                    \
       TI,                                                                    \
       ARG_SPLIT_P1);                                                         \
   INSTANTIATE_KERNEL(                                                        \
       NAME "_reduction_combine_" #TI,                                        \
-      arg_reduction_inner,                                                   \
+      arg_reduction_innermost,                                               \
       OP,                                                                    \
       TI,                                                                    \
       ARG_COMBINE);                                                          \

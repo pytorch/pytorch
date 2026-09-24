@@ -285,7 +285,7 @@ static void norm_kernel_mps(TensorIterator& iter, const Scalar& p_scalar) {
   TORCH_INTERNAL_ASSERT(output.dim() == input.dim());
 
   // Fast path: L1/L2 norm over the innermost contiguous dim reuses the sum
-  // inner kernel (abs/square load + sqrt)
+  // innermost kernel (abs/square load + sqrt)
   if ((p == 1.0 || p == 2.0) && output.numel() > 1 && input.is_contiguous() && output.is_contiguous() &&
       input.scalar_type() == output.scalar_type() &&
       (input.scalar_type() == kFloat || input.scalar_type() == kHalf || input.scalar_type() == kBFloat16)) {
@@ -300,7 +300,7 @@ static void norm_kernel_mps(TensorIterator& iter, const Scalar& p_scalar) {
     if (num_reduced == 1 && reduced_dim == input.dim() - 1) {
       uint32_t N = input.size(input.dim() - 1);
       uint32_t M = input.numel() / N;
-      auto kernel_name = fmt::format("norm_{}_reduction_inner_{}_{}",
+      auto kernel_name = fmt::format("norm_{}_reduction_innermost_{}_{}",
                                      p == 2.0 ? "l2" : "l1",
                                      scalarToMetalTypeString(input),
                                      scalarToMetalTypeString(output));
@@ -311,7 +311,7 @@ static void norm_kernel_mps(TensorIterator& iter, const Scalar& p_scalar) {
         @autoreleasepool {
           id<MTLComputeCommandEncoder> ce = stream->commandEncoder();
           auto ps = lib.getPipelineStateForFunc(kernel_name);
-          getMPSProfiler().beginProfileKernel(ps, "norm_reduction_inner", {input}, stream);
+          getMPSProfiler().beginProfileKernel(ps, "norm_reduction_innermost", {input}, stream);
           [ce setComputePipelineState:ps];
           mtl_setArgs(ce, input, output, std::array<uint32_t, 2>{M, N}, 0.0f);
           [ce dispatchThreads:MTLSizeMake(num_tgs * INNER_TG_SIZE, 1, 1)
@@ -645,17 +645,17 @@ static std::tuple<Tensor, Tensor> min_max_mps_impl(const Tensor& input_t,
 
 enum class ReductionFamily { Sum, Value, Arg };
 
+// Kernels view the input as [outer, dim, inner] with the middle `dim` reduced:
+// e.g. reducing dim 1 of a [2, 3, 4, 5] tensor gives outer=2, dim=3, inner=20
 enum class ReductionKernel {
-  Generic,
-  Inner,
-  InnerChunk,
-  Outer,
-  OuterSmallDim,
-  Narrow,
-  NarrowStrided,
-  Flat,
-  Strided,
-  ArgCombine
+  Generic, // fallback for any layout, one threadgroup per output
+  Innermost, // inner == 1, contiguous: one simdgroup per outer (row)
+  InnermostChunk, // Innermost with dim <= 256, several rows per simdgroup
+  Outer, // inner > 1: threadgroups of 32 columns x 32 threads splitting `dim`
+  OuterSmallDim, // inner > 1 and short dim (<= 256): one thread reduces a whole column
+  Narrow, // contiguous Outer with inner < 32: one threadgroup reduces all inner columns at once
+  Flat, // large full reduction (single output): pass 1 over contiguous slices
+  ArgCombine // argmax/argmin pass 2: merges segments, first occurrence wins
 };
 
 struct ReductionLayout {
@@ -711,9 +711,6 @@ static ReductionPlan select_outer_reduction(const ReductionLayout& layout, Reduc
   // the small-dim layout (one thread walks the whole reduced dim) when
   // there are enough columns to fill the GPU with 32-wide threadgroups.
   const bool small_dim = !is_arg && dim_size <= OUTER_SMALL_DIM_MAX_SIZE && natural_tgs >= SPLIT_MIN_TGS;
-  // Only the sum family has narrow_strided kernels; value ops fall
-  // through to the strided outer / small-dim layout below.
-  const bool supports_narrow = is_contiguous || family == ReductionFamily::Sum;
   // inner_size narrower than a threadgroup row: the narrow layout is the
   // only one that keeps a full threadgroup busy. Tensors below
   // CHUNK_MIN_NUMEL are enqueue-bound and stay on the single-dispatch
@@ -726,9 +723,9 @@ static ReductionPlan select_outer_reduction(const ReductionLayout& layout, Reduc
       is_arg ? split : numel >= CHUNK_MIN_NUMEL && !(small_dim && dim_size < NARROW_BATCHED_MIN_DIM_SIZE);
   ReductionPlan plan{.kernel = ReductionKernel::Outer, .layout = layout};
 
-  if (supports_narrow && inner_size < OUTER_TG_WIDTH && use_narrow) {
-    plan.kernel = is_contiguous ? ReductionKernel::Narrow : ReductionKernel::NarrowStrided;
-    // Narrow routing, shared by contiguous and strided inputs:
+  if (is_contiguous && inner_size < OUTER_TG_WIDTH && use_narrow) {
+    plan.kernel = ReductionKernel::Narrow;
+    // Narrow routing:
     // batched or single-threadgroup single dispatch, or split-K two-pass. A
     // single narrow threadgroup saturates at ~NARROW_SPLIT_ELEMS_PER_TG
     // elements; past that, split the reduced dim into segments reduced in
@@ -750,13 +747,13 @@ static ReductionPlan select_inner_reduction(const ReductionLayout& layout, Reduc
   const auto num_rows = layout.outer_size;
   const auto row_len = layout.dim_size;
   const bool is_arg = family == ReductionFamily::Arg;
-  ReductionPlan plan{.kernel = ReductionKernel::Inner, .layout = layout};
+  ReductionPlan plan{.kernel = ReductionKernel::Innermost, .layout = layout};
 
   // Tensors too small to fill the GPU gain nothing from packing rows
-  // into simdgroups; keep them on the inner kernel below (the pre-chunk
+  // into simdgroups; keep them on the innermost kernel below (the pre-chunk
   // routing, whose enqueue floor measures ~10% lower there).
   if (!is_arg && row_len <= CHUNK_MAX_ROW_LEN && numel >= CHUNK_MIN_NUMEL) {
-    plan.kernel = ReductionKernel::InnerChunk;
+    plan.kernel = ReductionKernel::InnermostChunk;
     // Smallest power-of-two lane count keeping at most CHUNK_ELEMS_PER_LANE
     // elements per lane; the chunk kernel then packs simdgroup_size / lanes
     // rows into one simdgroup instead of letting a short row idle most lanes.
@@ -774,7 +771,7 @@ static ReductionPlan select_inner_reduction(const ReductionLayout& layout, Reduc
     if (is_arg) {
       segments = std::clamp(ARG_SPLIT_TARGET_PARTIALS / num_rows, 2u, std::max(row_len / ARG_SPLIT_MIN_SEG_LEN, 2u));
     } else {
-      plan.kernel = ReductionKernel::InnerChunk;
+      plan.kernel = ReductionKernel::InnermostChunk;
       // Segments per row for split-K: aim for ~SPLIT_TARGET_PARTIALS partials
       // (rows * segments) so pass 1 fills the GPU, cap so a segment keeps
       // >= SPLIT_MIN_SEG_LEN elements, then round so the segments come out
@@ -801,14 +798,12 @@ static ReductionPlan select_reduction_plan(const Tensor& input, const Tensor& ou
       num_groups--;
     }
     if (num_groups > 1) {
-      // sum has a `_strided_` pass-1 kernel; ops without it call .contiguous() first.
-      plan.kernel =
-          !input.is_contiguous() && family == ReductionFamily::Sum ? ReductionKernel::Strided : ReductionKernel::Flat;
+      plan.kernel = ReductionKernel::Flat;
       plan.num_segments = num_groups;
     }
     return plan;
   }
-  // The outer and inner kernels index in 32 bits.
+  // The outer and innermost kernels index in 32 bits.
   if (output.is_contiguous() && canUse32BitIndexMath(input)) {
     int num_reduced = 0;
     int64_t reduced_dim = -1;
@@ -839,11 +834,9 @@ static ReductionPlan reduction_combine_plan(const ReductionPlan& plan, Reduction
         .layout = ReductionLayout::contiguous(plan.layout.outer_size * plan.layout.inner_size, plan.num_segments, 1)};
   }
   auto kernel = plan.kernel;
-  if (kernel == ReductionKernel::InnerChunk) {
-    kernel = ReductionKernel::Inner;
-  } else if (kernel == ReductionKernel::NarrowStrided) {
-    kernel = ReductionKernel::Narrow;
-  } else if (kernel == ReductionKernel::Flat || kernel == ReductionKernel::Strided) {
+  if (kernel == ReductionKernel::InnermostChunk) {
+    kernel = ReductionKernel::Innermost;
+  } else if (kernel == ReductionKernel::Flat) {
     kernel = ReductionKernel::Generic;
   }
   return {.kernel = kernel,
@@ -854,22 +847,18 @@ static const char* reduction_kernel_suffix(ReductionKernel kernel) {
   switch (kernel) {
     case ReductionKernel::Generic:
       return "";
-    case ReductionKernel::Inner:
-      return "_inner";
-    case ReductionKernel::InnerChunk:
-      return "_inner_chunk";
+    case ReductionKernel::Innermost:
+      return "_innermost";
+    case ReductionKernel::InnermostChunk:
+      return "_innermost_chunk";
     case ReductionKernel::Outer:
       return "_outer";
     case ReductionKernel::OuterSmallDim:
       return "_outer_small_dim";
     case ReductionKernel::Narrow:
       return "_narrow";
-    case ReductionKernel::NarrowStrided:
-      return "_narrow_strided";
     case ReductionKernel::Flat:
       return "_flat";
-    case ReductionKernel::Strided:
-      return "_strided";
     case ReductionKernel::ArgCombine:
       return "_combine";
   }
@@ -928,15 +917,15 @@ static void encode_reduction(MPSStream* stream,
   MTLSize grid;
   MTLSize group;
   switch (plan.kernel) {
-    case ReductionKernel::Inner:
-    case ReductionKernel::InnerChunk:
+    case ReductionKernel::Innermost:
+    case ReductionKernel::InnermostChunk:
     case ReductionKernel::ArgCombine: {
       uint32_t num_simdgroups = layout.outer_size * plan.num_segments;
       if (is_arg) {
         const std::array<uint32_t, 4> sizes{
             num_simdgroups, at::ceil_div(layout.dim_size, plan.num_segments), plan.num_segments, layout.dim_size};
         mtl_setArgs(encoder, input, output, sizes);
-      } else if (plan.kernel == ReductionKernel::InnerChunk) {
+      } else if (plan.kernel == ReductionKernel::InnermostChunk) {
         const std::array<uint32_t, 4> sizes{layout.outer_size, layout.dim_size, plan.lanes, plan.num_segments};
         mtl_setArgs(encoder, input, output, sizes, op.param);
         num_simdgroups = at::ceil_div(num_simdgroups, c10::metal::simdgroup_size / plan.lanes);
@@ -951,9 +940,8 @@ static void encode_reduction(MPSStream* stream,
     }
     case ReductionKernel::Outer:
     case ReductionKernel::OuterSmallDim:
-    case ReductionKernel::Narrow:
-    case ReductionKernel::NarrowStrided: {
-      const bool narrow = plan.kernel == ReductionKernel::Narrow || plan.kernel == ReductionKernel::NarrowStrided;
+    case ReductionKernel::Narrow: {
+      const bool narrow = plan.kernel == ReductionKernel::Narrow;
       const std::array<uint32_t, 4> sizes{layout.dim_size, layout.inner_size, plan.num_segments, plan.num_segments};
       if (is_arg && narrow) {
         mtl_setArgs(encoder, input, partials.values, partials.indices, sizes);
@@ -961,7 +949,7 @@ static void encode_reduction(MPSStream* stream,
         mtl_setArgs(encoder, input, output, sizes, layout.strides);
       } else {
         mtl_setArgs(encoder, input, output, sizes, op.param);
-        if (plan.kernel != ReductionKernel::Narrow) {
+        if (!narrow) {
           mtl_setArgs<4>(encoder, layout.strides);
         }
       }
@@ -985,19 +973,16 @@ static void encode_reduction(MPSStream* stream,
       group = MTLSizeMake(TPG, 1, 1);
       break;
     }
-    case ReductionKernel::Strided:
     case ReductionKernel::Generic: {
       NormParams params{};
       params.ndim = input.dim();
       params.p = op.param;
-      params.reduction_size = layout.dim_size / plan.num_segments;
+      params.reduction_size = layout.dim_size;
       for (const auto d : c10::irange(input.dim())) {
         params.input_sizes[d] = input.size(d);
         params.input_strides[d] = input.stride(d);
-        if (plan.kernel == ReductionKernel::Generic) {
-          params.output_sizes[d] = output.size(d);
-          params.output_strides[d] = output.stride(d);
-        }
+        params.output_sizes[d] = output.size(d);
+        params.output_strides[d] = output.stride(d);
       }
       mtl_setArgs(encoder, input, output, params);
       // Round per-TG thread count up to a full simdgroup (32 lanes). With
@@ -1021,9 +1006,23 @@ static void reduction_dispatch_mps(Tensor input,
                                    const MetalType& partial_type,
                                    const std::string& combine_prefix,
                                    const std::string& profile_name = {}) {
+  // True for argmax/argmin, which reduce to indices rather than values.
   const bool is_arg = op.family == ReductionFamily::Arg;
   TORCH_INTERNAL_ASSERT(input.numel() > 0 && output.numel() > 0);
   TORCH_INTERNAL_ASSERT(output.dim() == input.dim());
+  TORCH_CHECK_NOT_IMPLEMENTED(canUse32BitIndexMath(input, 1LL << 32),
+                              is_arg ? profile_name : "MPS " + op.prefix + "reduction",
+                              ": tensors requiring 64-bit indexing are not supported (numel=",
+                              input.numel(),
+                              ")");
+  // most fast kernels need a contiguous input. Transposed or permuted inputs
+  // are contiguous in memory but have reordered dims. This restores the memory
+  // order by sorting dims by stride and permute the output to match. Example:
+  // `y = torch.randn(4, 8).t()` has sizes `[8, 4]` and strides `[1, 8]`,
+  // so it isn't contiguous.
+  // Sorting dims descendingly by stride gives `perm = [1, 0]`, and `y.permute(1, 0)` has sizes `[4, 8]`,
+  // strides `[8, 1]`: contiguous. So `y.sum(1)` runs as a dim-0 sum over that view.
+  // this is done so such cases do not fallback to slow(er) general kernel.
   if (!is_arg && !input.is_contiguous()) {
     c10::DimVector perm(input.dim());
     std::iota(perm.begin(), perm.end(), 0);
@@ -1034,14 +1033,10 @@ static void reduction_dispatch_mps(Tensor input,
       output = output.permute(perm);
     }
   }
-  TORCH_CHECK_NOT_IMPLEMENTED(canUse32BitIndexMath(input, 1LL << 32),
-                              is_arg ? profile_name : "MPS " + op.prefix + "reduction",
-                              ": tensors requiring 64-bit indexing are not supported (numel=",
-                              input.numel(),
-                              ")");
 
   const auto plan = select_reduction_plan(input, output, op.family);
   auto stream = getCurrentMPSStream();
+  // for 1 pass plans we need to just dispatch the reduction and return
   if (plan.num_segments == 1) {
     dispatch_sync_with_rethrow(stream->queue(), ^() {
       @autoreleasepool {
@@ -1050,10 +1045,9 @@ static void reduction_dispatch_mps(Tensor input,
     });
     return;
   }
-
+  // build pass 2 plan based on the pass 1 plan.
   const auto combine_plan = reduction_combine_plan(plan, op.family);
-  // For ops without a strided pass-1 kernel, .contiguous() the input
-  // (no-op when already contiguous).
+  // Flat needs a contiguous input.
   if (plan.kernel == ReductionKernel::Flat) {
     input = input.contiguous();
   }
