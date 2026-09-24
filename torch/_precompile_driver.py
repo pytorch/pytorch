@@ -746,7 +746,7 @@ def _build_installed_forward():
     import torch
     from torch._C._dynamo.eval_frame import _debug_get_cache_entry_list
     from torch._dynamo.eval_frame import _fail_on_recompile_callback, OptimizeContext
-    from torch._dynamo.package import CompilePackage
+    from torch._dynamo.package import _lookup_code, CompilePackage
     from torch._precompile import PrecompileError as _PrecompileError
 
     if tuple(_DYNAMO_PYTHON_VERSION) != _sys.version_info[:2]:
@@ -779,16 +779,21 @@ def _build_installed_forward():
             f"precompile: this installed artifact serves {module_name}.{FN_NAME}, "
             f"which is not importable here ({_e})."
         ) from _e
-    if _debug_get_cache_entry_list(fn.__code__):
-        raise _PrecompileError(
-            f"precompile: {module_name}.{FN_NAME} already has live Dynamo cache "
-            f"entries in this process (the capture that produced this artifact, "
-            f"or a torch.compile of it), which would still serve any call the "
-            f"installed entries miss: load this artifact in a fresh process."
-        )
     try:
         # CompilePackage refuses a module whose captured source has changed.
         package = CompilePackage(fn, dynamo)
+        # The codes install() puts entries on; the entry's is innermost_fn's.
+        entries = package._codes.items()
+        targets = [_lookup_code(e) if e.code_source else c for c, e in entries]
+        live = [c.co_name for c in targets if _debug_get_cache_entry_list(c)]
+        if live:
+            raise _PrecompileError(
+                f"precompile: frames this artifact installs onto ({', '.join(live)}) "
+                f"already have live Dynamo cache entries in this process (the capture "
+                f"that produced this artifact, or a torch.compile of them), which "
+                f"would still serve any call the installed entries miss: load this "
+                f"artifact in a fresh process."
+            )
         context = torch._dynamo.optimize(BACKEND, package=package)
         if not isinstance(context, OptimizeContext):
             raise _PrecompileError(
@@ -810,15 +815,31 @@ def _build_installed_forward():
         ) from _e
 
     def forward(*args, **kwargs):
+        # A compiling stance replaces this callable's callback on entry
+        # (_callback_from_stance), which would drop the refusal.
+        stance = torch._dynamo.eval_frame._stance
+        if stance.backend is not None or stance.stance in (
+            "eager_then_compile",
+            "aot_eager_then_compile",
+        ):
+            raise _PrecompileError(
+                f"precompile: an installed artifact cannot serve under the "
+                f"process-wide stance {stance.stance!r} (force_backend="
+                f"{stance.backend!r}), which would compile the calls the "
+                f"capture did not cover."
+            )
         try:
             return compiled(*args, **kwargs)
         except RuntimeError as _e:
             if "stance is 'fail_on_recompile'" not in str(_e):
                 raise
             raise _PrecompileError(
-                f"precompile: no captured variant matches this call: the "
-                f"artifact serves only what capture exercised, so add an "
-                f"example covering it and recapture. Dynamo reported: {_e}"
+                f"precompile: no captured variant matches this call. Either a "
+                f"guard on the call's arguments or on a module global the graph "
+                f"baked in no longer holds (restore that environment), or this "
+                f"call shape was never captured: the artifact serves only what "
+                f"capture exercised, so add an example covering it and "
+                f"recapture. Dynamo reported: {_e}"
             ) from None
 
     return forward
