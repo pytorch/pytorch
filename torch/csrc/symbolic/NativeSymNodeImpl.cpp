@@ -110,6 +110,59 @@ std::optional<bool> as_bool(const Expr* e) {
   }
 }
 
+// sym_node.sympy_is_contiguous_generic.
+const Expr* contiguous_generic(
+    ExprArena& a,
+    c10::ArrayRef<const Expr*> sizes,
+    c10::ArrayRef<const Expr*> strides,
+    c10::ArrayRef<size_t> dim_order) {
+  if (dim_order.size() != sizes.size()) {
+    return a.boolean(false);
+  }
+  const Expr* one = a.integer(1);
+  const Expr* r = a.boolean(true);
+  const Expr* z = one;
+  for (size_t d : dim_order) {
+    r = a.logical_and(
+        {r,
+         a.logical_or(
+             {a.rel(Kind::Eq, sizes[d], one),
+              a.rel(Kind::Eq, strides[d], z)})});
+    z = a.mul({z, sizes[d]});
+  }
+  for (const Expr* s : sizes) {
+    r = a.logical_or({r, a.rel(Kind::Eq, s, a.integer(0))});
+  }
+  return r;
+}
+
+// sym_node.sympy_is_channels_last_strides_generic.
+const Expr* channels_last_strides_generic(
+    ExprArena& a,
+    c10::ArrayRef<const Expr*> sizes,
+    c10::ArrayRef<const Expr*> strides,
+    c10::ArrayRef<size_t> dim_order) {
+  if (dim_order.size() != sizes.size()) {
+    return a.boolean(false);
+  }
+  const Expr* zero = a.integer(0);
+  const Expr* m = zero;
+  const Expr* r =
+      a.logical_and({a.boolean(true), a.rel(Kind::Ne, strides[1], zero)});
+  for (size_t d : dim_order) {
+    r = a.logical_and(
+        {r,
+         a.logical_and(
+             {a.rel(Kind::Ne, sizes[d], zero),
+              a.rel(Kind::Ge, strides[d], m)})});
+    if (d == 0) {
+      r = a.logical_and({r, a.rel(Kind::Ne, m, strides[1])});
+    }
+    m = a.mul({strides[d], a.function(Kind::Max, {sizes[d], a.integer(1)})});
+  }
+  return r;
+}
+
 } // namespace
 
 std::optional<int64_t> NativeSymNodeImpl::maybe_as_int() {
@@ -181,7 +234,8 @@ c10::SymNode NativeSymNodeImpl::binary(
       "_or_"};
   static_assert(std::size(proxy_methods) == static_cast<size_t>(Op::Or) + 1);
   if (proxy_mode()) {
-    return proxy_call(proxy_methods[static_cast<size_t>(op)], {clone(), other});
+    return python_impl(
+        proxy_methods[static_cast<size_t>(op)], {clone(), other});
   }
   auto* o = as_native(other);
   if (o != nullptr && o->env_ == env_) {
@@ -393,7 +447,7 @@ c10::SymNode NativeSymNodeImpl::try_binary(
 
 c10::SymNode NativeSymNodeImpl::unary(bool is_not, UnaryFn fallback) {
   if (proxy_mode()) {
-    return proxy_call(is_not ? "_sym_not" : "_neg", {clone()});
+    return python_impl(is_not ? "_sym_not" : "_neg", {clone()});
   }
   {
     auto lock = lock_env(*env_);
@@ -470,7 +524,7 @@ c10::SymNode NativeSymNodeImpl::sym_not() {
 #define PYTHON_BINARY(name, py_method)                              \
   c10::SymNode NativeSymNodeImpl::name(const c10::SymNode& other) { \
     if (proxy_mode()) {                                             \
-      return proxy_call(py_method, {clone(), other});               \
+      return python_impl(py_method, {clone(), other});              \
     }                                                               \
     return materialize(*this)->name(to_python(other));              \
   }
@@ -481,12 +535,12 @@ PYTHON_BINARY(pow, "_float_pow")
 PYTHON_BINARY(float_pow, "_float_pow")
 #undef PYTHON_BINARY
 
-#define PYTHON_UNARY(name, py_method)       \
-  c10::SymNode NativeSymNodeImpl::name() {  \
-    if (proxy_mode()) {                     \
-      return proxy_call(py_method, {clone()}); \
-    }                                       \
-    return materialize(*this)->name();      \
+#define PYTHON_UNARY(name, py_method)           \
+  c10::SymNode NativeSymNodeImpl::name() {      \
+    if (proxy_mode()) {                         \
+      return python_impl(py_method, {clone()}); \
+    }                                           \
+    return materialize(*this)->name();          \
   }
 PYTHON_UNARY(ceil, "_ceil")
 PYTHON_UNARY(floor, "_floor")
@@ -497,42 +551,181 @@ c10::SymNode NativeSymNodeImpl::sym_ite(
     const c10::SymNode& then_val,
     const c10::SymNode& else_val) {
   if (proxy_mode()) {
-    return proxy_call("_sym_ite", {clone(), then_val, else_val});
+    return python_impl("_sym_ite", {clone(), then_val, else_val});
   }
   return materialize(*this)->sym_ite(to_python(then_val), to_python(else_val));
 }
 
-#define PYTHON_SIZES_STRIDES(name, py_method)                              \
-  c10::SymNode NativeSymNodeImpl::name(                                    \
-      c10::ArrayRef<c10::SymNode> sizes,                                   \
-      c10::ArrayRef<c10::SymNode> strides) {                               \
-    if (proxy_mode()) {                                                    \
-      return proxy_call(py_method, clone(), sizes, strides);               \
-    }                                                                      \
-    return materialize(*this)->name(to_python(sizes), to_python(strides)); \
+c10::SymNode NativeSymNodeImpl::sizes_strides(
+    SizesStrides fn,
+    c10::ArrayRef<c10::SymNode> sizes,
+    c10::ArrayRef<c10::SymNode> strides) {
+  static constexpr const char* py_methods[] = {
+      "_is_contiguous",
+      "_is_channels_last_contiguous_2d",
+      "_is_channels_last_contiguous_3d",
+      "_is_channels_last_strides_2d",
+      "_is_channels_last_strides_3d",
+      "_is_non_overlapping_and_dense_indicator"};
+  static_assert(
+      std::size(py_methods) ==
+      static_cast<size_t>(SizesStrides::Indicator) + 1);
+  const char* py_method = py_methods[static_cast<size_t>(fn)];
+  if (proxy_mode()) {
+    return python_impl(py_method, clone(), sizes, strides);
   }
-PYTHON_SIZES_STRIDES(is_contiguous, "_is_contiguous")
-PYTHON_SIZES_STRIDES(
-    is_channels_last_contiguous_2d,
-    "_is_channels_last_contiguous_2d")
-PYTHON_SIZES_STRIDES(
-    is_channels_last_contiguous_3d,
-    "_is_channels_last_contiguous_3d")
-PYTHON_SIZES_STRIDES(is_channels_last_strides_2d, "_is_channels_last_strides_2d")
-PYTHON_SIZES_STRIDES(is_channels_last_strides_3d, "_is_channels_last_strides_3d")
-#undef PYTHON_SIZES_STRIDES
+  {
+    auto lock = lock_env(*env_);
+    try {
+      if (auto r = try_sizes_strides(fn, sizes, strides)) {
+        return r;
+      }
+    } catch (const NativeUnsupported&) {
+    }
+  }
+  return python_impl(
+      py_method, materialize(*this), to_python(sizes), to_python(strides));
+}
+
+c10::SymNode NativeSymNodeImpl::try_sizes_strides(
+    SizesStrides fn,
+    c10::ArrayRef<c10::SymNode> sizes,
+    c10::ArrayRef<c10::SymNode> strides) {
+  if (!env_->replacements_empty()) {
+    return {};
+  }
+  // A missing hint makes Python compute one, which can populate caches.
+  std::vector<const Expr*> exprs;
+  std::vector<const Expr*> hints;
+  ExprArena& arena = env_->arena();
+  for (auto nodes : {sizes, strides}) {
+    for (const auto& n : nodes) {
+      auto* o = as_native(n);
+      if (o == nullptr || o->env_ != env_ || o->pytype_ != PyType::Int ||
+          !o->has_hint() || is_int_oo(o->expr_)) {
+        return {};
+      }
+      exprs.push_back(o->expr_);
+      hints.push_back(arena.integer(std::get<int64_t>(o->hint_)));
+    }
+  }
+  const size_t dim = sizes.size();
+  auto build = [&](c10::ArrayRef<const Expr*> args) -> const Expr* {
+    auto size_args = args.slice(0, dim);
+    auto stride_args = args.slice(dim);
+    switch (fn) {
+      case SizesStrides::Contiguous: {
+        std::vector<size_t> order(dim);
+        for (size_t i = 0; i < dim; ++i) {
+          order[i] = dim - 1 - i;
+        }
+        return contiguous_generic(arena, size_args, stride_args, order);
+      }
+      case SizesStrides::ChannelsLastContiguous2d:
+        return contiguous_generic(arena, size_args, stride_args, {1, 3, 2, 0});
+      case SizesStrides::ChannelsLastContiguous3d:
+        return contiguous_generic(
+            arena, size_args, stride_args, {1, 4, 3, 2, 0});
+      case SizesStrides::ChannelsLastStrides2d:
+        return channels_last_strides_generic(
+            arena, size_args, stride_args, {1, 3, 2, 0});
+      case SizesStrides::ChannelsLastStrides3d:
+        return channels_last_strides_generic(
+            arena, size_args, stride_args, {1, 4, 3, 2, 0});
+      case SizesStrides::Indicator:
+        break;
+    }
+    return arena.function(Kind::IsNonOverlappingAndDenseIndicator, args);
+  };
+  if (strides.size() != dim) {
+    throw NativeUnsupported("sizes and strides differ in length");
+  }
+  const Expr* out = build(exprs);
+  // The hint is the same method applied to the int hints: bool(func(...)),
+  // or eval_is_non_overlapping_and_dense for the indicator.
+  const Expr* h = build(hints);
+  if (fn == SizesStrides::Indicator) {
+    if (h->kind != Kind::Integer) {
+      throw NativeUnsupported("indicator hint did not fold");
+    }
+    return c10::make_intrusive<NativeSymNodeImpl>(env_, out, PyType::Int, h->p);
+  }
+  auto b = as_bool(h);
+  if (!b || h->kind == Kind::Integer) {
+    throw NativeUnsupported("sizes/strides hint did not fold");
+  }
+  return c10::make_intrusive<NativeSymNodeImpl>(env_, out, PyType::Bool, *b);
+}
+
+#define NATIVE_SIZES_STRIDES(name, fn)                      \
+  c10::SymNode NativeSymNodeImpl::name(                     \
+      c10::ArrayRef<c10::SymNode> sizes,                    \
+      c10::ArrayRef<c10::SymNode> strides) {                \
+    return sizes_strides(SizesStrides::fn, sizes, strides); \
+  }
+NATIVE_SIZES_STRIDES(is_contiguous, Contiguous)
+NATIVE_SIZES_STRIDES(is_channels_last_contiguous_2d, ChannelsLastContiguous2d)
+NATIVE_SIZES_STRIDES(is_channels_last_contiguous_3d, ChannelsLastContiguous3d)
+NATIVE_SIZES_STRIDES(is_channels_last_strides_2d, ChannelsLastStrides2d)
+NATIVE_SIZES_STRIDES(is_channels_last_strides_3d, ChannelsLastStrides3d)
+NATIVE_SIZES_STRIDES(is_non_overlapping_and_dense_indicator, Indicator)
+#undef NATIVE_SIZES_STRIDES
 
 c10::SymNode NativeSymNodeImpl::is_non_overlapping_and_dense(
     c10::ArrayRef<c10::SymNode> sizes,
     c10::ArrayRef<c10::SymNode> strides) {
+  // SymNode.is_non_overlapping_and_dense; wrap_int on the indicator is
+  // wrap_int on self, and gives the eq a Python operand if the indicator is
+  // Python.
+  auto indicator = is_non_overlapping_and_dense_indicator(sizes, strides);
+  return indicator->eq(indicator->wrap_int(1));
+}
+
+c10::SymNode NativeSymNodeImpl::sym_sum(c10::ArrayRef<c10::SymNode> args) {
   if (proxy_mode()) {
-    // SymNode.is_non_overlapping_and_dense
-    auto indicator = proxy_call(
-        "_is_non_overlapping_and_dense_indicator", clone(), sizes, strides);
-    return indicator->eq(indicator->wrap_int(1));
+    return python_impl("sym_sum", clone(), args);
   }
-  return materialize(*this)->is_non_overlapping_and_dense(
-      to_python(sizes), to_python(strides));
+  {
+    auto lock = lock_env(*env_);
+    try {
+      if (auto r = try_sym_sum(args)) {
+        return r;
+      }
+    } catch (const NativeUnsupported&) {
+    }
+  }
+  return python_impl("sym_sum", materialize(*this), to_python(args));
+}
+
+c10::SymNode NativeSymNodeImpl::try_sym_sum(c10::ArrayRef<c10::SymNode> args) {
+  if (!env_->replacements_empty()) {
+    return {};
+  }
+  std::vector<const Expr*> exprs;
+  std::optional<int64_t> total = 0;
+  for (const auto& n : args) {
+    auto* o = as_native(n);
+    // int_oo is left to Python, as in try_binary.
+    if (o == nullptr || o->env_ != env_ || o->pytype_ != PyType::Int ||
+        is_int_oo(o->expr_)) {
+      return {};
+    }
+    exprs.push_back(o->expr_);
+    if (total) {
+      if (!o->has_hint()) {
+        total.reset();
+      } else if (__builtin_add_overflow(
+                     *total, std::get<int64_t>(o->hint_), &*total)) {
+        return {};
+      }
+    }
+  }
+  Hint hint;
+  if (total) {
+    hint = *total;
+  }
+  return c10::make_intrusive<NativeSymNodeImpl>(
+      env_, env_->arena().add(exprs), PyType::Int, hint);
 }
 
 const Expr* NativeSymNodeImpl::evaluate(std::optional<bool> fallback_value) {

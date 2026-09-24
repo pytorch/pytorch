@@ -29,15 +29,20 @@ bool native_config_is_default();
 // Whether get_proxy_mode() is set. Does not take the GIL.
 bool proxy_mode();
 
-// SymNode.<method>(*args) with args[0] native, for a proxy mode being active:
-// the Python impl then takes its proxy branch, which only touches the hints,
+// SymNode.<method>(*args), the Python impl. With a native args[0] and a proxy
+// mode active, it takes its proxy branch, which only touches the hints,
 // wrap_node and to_node of its arguments, so the native nodes themselves reach
-// handle_sym_dispatch and their proxy slots are found.
-c10::SymNode proxy_call(const char* method, c10::ArrayRef<c10::SymNode> args);
-c10::SymNode proxy_call(
+// handle_sym_dispatch and their proxy slots are found. With materialized
+// arguments it is the fallback for methods that are not SymNodeImpl virtuals.
+c10::SymNode python_impl(const char* method, c10::ArrayRef<c10::SymNode> args);
+c10::SymNode python_impl(
     const char* method,
     const c10::SymNode& self,
     c10::ArrayRef<c10::SymNode> sizes,
     c10::ArrayRef<c10::SymNode> strides);
+c10::SymNode python_impl(
+    const char* method,
+    const c10::SymNode& self,
+    c10::ArrayRef<c10::SymNode> args);
 
 } // namespace torch::symbolic

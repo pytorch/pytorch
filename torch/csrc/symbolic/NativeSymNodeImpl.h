@@ -126,6 +126,11 @@ class NativeSymNodeImpl final : public c10::SymNodeImpl {
   c10::SymNode is_non_overlapping_and_dense(
       c10::ArrayRef<c10::SymNode> sizes,
       c10::ArrayRef<c10::SymNode> strides) override;
+  // SymNode methods that are not SymNodeImpl virtuals.
+  c10::SymNode is_non_overlapping_and_dense_indicator(
+      c10::ArrayRef<c10::SymNode> sizes,
+      c10::ArrayRef<c10::SymNode> strides);
+  c10::SymNode sym_sum(c10::ArrayRef<c10::SymNode> args);
 
   int64_t guard_int(const char* file, int64_t line) override;
   bool guard_bool(const char* file, int64_t line) override;
@@ -157,6 +162,15 @@ class NativeSymNodeImpl final : public c10::SymNodeImpl {
     And,
     Or,
   };
+  // In sizes_strides_methods order.
+  enum class SizesStrides : uint8_t {
+    Contiguous,
+    ChannelsLastContiguous2d,
+    ChannelsLastContiguous3d,
+    ChannelsLastStrides2d,
+    ChannelsLastStrides3d,
+    Indicator,
+  };
   using BinaryFn = c10::SymNode (c10::SymNodeImpl::*)(const c10::SymNode&);
   using UnaryFn = c10::SymNode (c10::SymNodeImpl::*)();
 
@@ -167,6 +181,16 @@ class NativeSymNodeImpl final : public c10::SymNodeImpl {
   // The native result, or null. The caller holds the env lock.
   c10::SymNode try_binary(Op op, const NativeSymNodeImpl& other);
   c10::SymNode try_unary(bool is_not);
+  // sizes_strides_impl: natively when possible, else the Python impl.
+  c10::SymNode sizes_strides(
+      SizesStrides fn,
+      c10::ArrayRef<c10::SymNode> sizes,
+      c10::ArrayRef<c10::SymNode> strides);
+  c10::SymNode try_sizes_strides(
+      SizesStrides fn,
+      c10::ArrayRef<c10::SymNode> sizes,
+      c10::ArrayRef<c10::SymNode> strides);
+  c10::SymNode try_sym_sum(c10::ArrayRef<c10::SymNode> args);
   // ShapeEnv.evaluate_sym_node(self, fallback_value=fallback_value) where it
   // returns without guarding, else nullptr.
   const Expr* evaluate(std::optional<bool> fallback_value);

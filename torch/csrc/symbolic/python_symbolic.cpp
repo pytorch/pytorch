@@ -760,13 +760,13 @@ bool proxy_mode() {
           .has_value();
 }
 
-c10::SymNode proxy_call(const char* method, c10::ArrayRef<c10::SymNode> args) {
+c10::SymNode python_impl(const char* method, c10::ArrayRef<c10::SymNode> args) {
   py::gil_scoped_acquire gil;
   py::tuple py_args(nodes_to_py(args));
   return node_from_py(python_symnode_class().attr(method)(*py_args));
 }
 
-c10::SymNode proxy_call(
+c10::SymNode python_impl(
     const char* method,
     const c10::SymNode& self,
     c10::ArrayRef<c10::SymNode> sizes,
@@ -774,6 +774,15 @@ c10::SymNode proxy_call(
   py::gil_scoped_acquire gil;
   return node_from_py(python_symnode_class().attr(method)(
       node_to_py(self), nodes_to_py(sizes), nodes_to_py(strides)));
+}
+
+c10::SymNode python_impl(
+    const char* method,
+    const c10::SymNode& self,
+    c10::ArrayRef<c10::SymNode> args) {
+  py::gil_scoped_acquire gil;
+  return node_from_py(
+      python_symnode_class().attr(method)(node_to_py(self), nodes_to_py(args)));
 }
 
 void initSymbolicBindings(PyObject* module) {
@@ -1387,32 +1396,17 @@ void initSymbolicBindings(PyObject* module) {
               (self.*fn)(nodes_from_py(sizes), nodes_from_py(strides)));
         });
   }
-  // Not a SymNodeImpl virtual.
   node_cls.def(
       "is_non_overlapping_and_dense_indicator",
       [](NativeSymNodeImpl& self,
          const py::sequence& sizes,
          const py::sequence& strides) {
-        auto sizes_v = nodes_from_py(sizes);
-        auto strides_v = nodes_from_py(strides);
-        if (proxy_mode()) {
-          return node_to_py(proxy_call(
-              "_is_non_overlapping_and_dense_indicator",
-              self.clone(),
-              sizes_v,
-              strides_v));
-        }
-        auto as_python = [](const std::vector<c10::SymNode>& nodes) {
-          py::list r;
-          for (const auto& n : nodes) {
-            auto* native = dynamic_cast<NativeSymNodeImpl*>(n.get());
-            r.append(node_to_py(native ? materialize(*native) : n));
-          }
-          return r;
-        };
-        return node_to_py(materialize(self))
-            .attr("is_non_overlapping_and_dense_indicator")(
-                as_python(sizes_v), as_python(strides_v));
+        return node_to_py(self.is_non_overlapping_and_dense_indicator(
+            nodes_from_py(sizes), nodes_from_py(strides)));
+      });
+  node_cls.def(
+      "sym_sum", [](NativeSymNodeImpl& self, const py::sequence& args) {
+        return node_to_py(self.sym_sum(nodes_from_py(args)));
       });
   node_cls.def(
       "sym_ite",

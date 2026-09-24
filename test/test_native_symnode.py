@@ -3056,6 +3056,127 @@ class TestNativeSymNode(TestCase):
         t = self.call(*a, "lt", b)
         self.assertIs(type(self.call(*t, "sym_and", a)[0]), SymNode)
 
+    SIZES_STRIDES = [
+        "is_contiguous",
+        "is_channels_last_contiguous_2d",
+        "is_channels_last_contiguous_3d",
+        "is_channels_last_strides_2d",
+        "is_channels_last_strides_3d",
+        "is_non_overlapping_and_dense_indicator",
+        "is_non_overlapping_and_dense",
+    ]
+
+    def int_pairs(self, env, syms):
+        a, b, c, d = syms
+        exprs = [a, b, c, d, 2 * a, a + 1, a * b, b * c, a * b * c]
+        vals = env.backed_var_to_val
+        pairs = [self.pair(env, e, int, int(e.xreplace(vals))) for e in exprs]
+        n, p = pairs[0]
+        return pairs + [(n.wrap_int(k), p.wrap_int(k)) for k in (0, 1, 2, 3)]
+
+    @parametrize("seed", range(8))
+    def test_sizes_strides(self, seed):
+        rng = random.Random(seed)
+        env, syms = self.make_env()
+        pool = self.int_pairs(env, syms)
+        native = 0
+        for _ in range(60):
+            dim = rng.choice([1, 2, 3, 4, 4, 5, 5])
+            if rng.random() < 0.3:
+                # Contiguous strides make the relationals fold.
+                sizes = [rng.choice(pool) for _ in range(dim)]
+                strides = [pool[-3]]
+                for s in reversed(sizes[1:]):
+                    strides.insert(0, self.call(*strides[0], "mul", s))
+            else:
+                sizes = [rng.choice(pool) for _ in range(dim)]
+                strides = [rng.choice(pool) for _ in range(dim)]
+            base = rng.choice(sizes + strides)
+            method = rng.choice(self.SIZES_STRIDES)
+            r = self.call(
+                *base,
+                method,
+                ([x[0] for x in sizes], [x[1] for x in sizes]),
+                ([x[0] for x in strides], [x[1] for x in strides]),
+            )
+            if r is not None and type(r[0]) is _NativeSymNode:
+                native += 1
+        for method in self.SIZES_STRIDES:
+            self.call(*pool[0], method, ([], []), ([], []))
+        self.assertGreater(native, 50)
+        self.assertEqual(len(env.guards), 0)
+        self.assertTrue(env._native_env.pristine)
+
+    def test_sizes_strides_fallback(self):
+        env, syms = self.make_env()
+        a, b = (self.pair(env, s, int, int(env.backed_var_to_val[s])) for s in syms[:2])
+        one = (a[0].wrap_int(1), a[1].wrap_int(1))
+        no_hint = self.pair(env, syms[0], int, None)
+        py_b = (b[1], b[1])
+        for sizes, strides in [
+            ([a, py_b], [b, one]),  # Python operand
+            ([a, no_hint], [b, one]),  # Python computes a hint
+            ([a, b], [b]),  # unequal lengths
+        ]:
+            sizes = tuple(list(x) for x in zip(*sizes))
+            strides = tuple(list(x) for x in zip(*strides))
+            for method in self.SIZES_STRIDES:
+                r = self.call(*a, method, sizes, strides)
+                if r is not None:
+                    self.assertIs(type(r[0]), SymNode)
+
+    def test_sizes_strides_tensor(self):
+        # SymbolicShapeMeta calls the virtuals on the first symbolic node.
+        def run(native):
+            env, syms = self.make_env(native)
+            a, b = (
+                torch.SymInt(self.node(env, s, int, int(env.backed_var_to_val[s])))
+                for s in syms[:2]
+            )
+            t = torch.empty_strided((a, b, 3), (3 * b, 3, 1), device="meta")
+            u = torch.empty_strided(
+                (2, a, b, 3), (3 * a * b, 1, 3 * a, a), device="meta"
+            )
+            out = []
+            for x in (t, t.transpose(0, 2), u, u.transpose(1, 3)):
+                out += [
+                    x.is_contiguous(),
+                    x.is_contiguous(memory_format=torch.channels_last),
+                    # preserve_format asks is_non_overlapping_and_dense.
+                    str(torch.empty_like(x).stride()),
+                ]
+            return out, [str(g.expr) for g in env.guards]
+
+        self.assertEqual(run(True), run(False))
+
+    def test_sym_sum(self):
+        env, syms = self.make_env()
+        pool = self.int_pairs(env, syms)
+        no_hint = self.pair(env, syms[1], int, None)
+        for args in [
+            pool[:3],
+            pool[4:9],
+            [pool[0], pool[-1], pool[0]],
+            [no_hint, pool[0]],
+        ]:
+            r = self.call(
+                *args[0], "sym_sum", ([x[0] for x in args], [x[1] for x in args])
+            )
+            self.assertIs(type(r[0]), _NativeSymNode)
+        # A Python operand makes it Python.
+        r = self.call(
+            *pool[0], "sym_sum", ([pool[0][0], pool[1][1]], [pool[0][1], pool[1][1]])
+        )
+        self.assertIs(type(r[0]), SymNode)
+        # int64 overflow of the hint falls back to Python's bigint.
+        big = (pool[0][0].wrap_int(2**62), pool[0][1].wrap_int(2**62))
+        args = [big, big, pool[0]]
+        r = self.call(*pool[0], "sym_sum", ([x[0] for x in args], [x[1] for x in args]))
+        self.assertIs(type(r[0]), SymNode)
+        x, y = (torch.SymInt(n) for n, _ in pool[:2])
+        self.assertIs(type(torch.sym_sum([x, y, 3]).node), _NativeSymNode)
+        self.assertEqual(len(env.guards), 0)
+
     def test_wrap(self):
         env, syms = self.make_env()
         n, p = self.pair(env, syms[0], int, 5)
@@ -3259,7 +3380,19 @@ class TestNativeSymNode(TestCase):
             contig = torch.SymBool(a.node.is_contiguous(sizes, strides))
             dense = torch.SymBool(a.node.is_non_overlapping_and_dense(sizes, strides))
             ite = torch.sym_ite(a < b, a, b)
-            return (e, m, a**2, a / b, torch.sym_float(a), -a, ite, contig, dense)
+            total = torch.sym_sum([a, b, 3])
+            return (
+                e,
+                m,
+                a**2,
+                a / b,
+                torch.sym_float(a),
+                -a,
+                ite,
+                contig,
+                dense,
+                total,
+            )
 
         def g(a, b):
             lt = a < b
