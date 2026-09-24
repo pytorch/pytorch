@@ -1,7 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/DispatchStub.h>
 
-#include <c10/core/DeviceType.h>
 #include <array>
 #include <c10/util/Exception.h>
 #include <c10/util/env.h>
@@ -10,8 +9,6 @@
 #include <cpuinfo.h>
 #endif
 #include <algorithm>
-#include <cstdlib>
-#include <cstring>
 
 #ifdef HAVE_ZVECTOR_CPU_DEFINITION
 #include <sys/auxv.h>
@@ -191,7 +188,8 @@ DispatchResult DispatchStubImpl::try_get_call_ptr(
 #endif
         );
         if (!std::holds_alternative<ErrorType>(result)) {
-          cpu_dispatch_ptr.store(fptr, std::memory_order_relaxed);
+          cpu_dispatch_ptr.store(
+              std::get<void*>(result), std::memory_order_relaxed);
         }
       return result;
       }

@@ -283,6 +283,9 @@ CUDA_TYPE_NAME_MAP = collections.OrderedDict([
     ("cudaGraphExec_t", "hipGraphExec_t"),
     ("__nv_bfloat16", "__hip_bfloat16"),
     ("__nv_bfloat162", "__hip_bfloat162"),
+    ("CUfileHandle_t", "hipFileHandle_t"),
+    ("CUfileDescr_t", "hipFileDescr_t"),
+    ("CUfileError_t", "hipFileError_t"),
 ])
 
 CUDA_INCLUDE_MAP = collections.OrderedDict([
@@ -321,10 +324,12 @@ CUDA_INCLUDE_MAP = collections.OrderedDict([
     ("curand_poisson.h", "hiprand/hiprand_kernel.h"),
     ("curand_precalc.h", "hiprand/hiprand_kernel.h"),
     ("curand_uniform.h", "hiprand/hiprand_kernel.h"),
+    ("cusolverDn.h", "hipsolver/hipsolver.h"),
     ("cusparse.h", "hipsparse/hipsparse.h"),
     ("cusparseLt.h", "hipsparselt/hipsparselt.h"),
     ("cufft.h", "hipfft/hipfft.h"),
     ("cufftXt.h", "hipfft/hipfftXt.h"),
+    ("cufile.h", "hipfile.h"),
     ("<nccl.h>", _RCCL_HEADER),
     ("nvrtc.h", "hip/hiprtc.h"),
     ("thrust/system/cuda", "thrust/system/hip"),
@@ -2441,6 +2446,7 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict([
     ("CUBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F", "HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F"),
     ("CUBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0", "HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0"),
     ("CUBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3", "HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3"),
+    ("CUBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT", "HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT"),
     ("CUBLASLT_POINTER_MODE_DEVICE", "HIPBLASLT_POINTER_MODE_DEVICE"),
     ("CUBLASLT_POINTER_MODE_HOST", "HIPBLASLT_POINTER_MODE_HOST"),
     ("cublasLtMatrixLayout_t", "hipblasLtMatrixLayout_t"),
@@ -2732,6 +2738,18 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict([
     ("nvmlGpuP2PStatus_t", "bool"),
     ("nvmlProcessInfo_t", "amdsmi_proc_info_t"),
     ("nvmlGpuP2PCapsIndex_t", "uint32_t"),
+    ("cuFileRead", "hipFileRead"),
+    ("cuFileWrite", "hipFileWrite"),
+    ("cuFileBufRegister", "hipFileBufRegister"),
+    ("cuFileBufDeregister", "hipFileBufDeregister"),
+    ("cuFileHandleRegister", "hipFileHandleRegister"),
+    ("cuFileHandleDeregister", "hipFileHandleDeregister"),
+    ("CU_FILE_HANDLE_TYPE_OPAQUE_FD", "hipFileHandleTypeOpaqueFD"),
+    ("CU_FILE_SUCCESS", "hipFileSuccess"),
+    ("IS_CUFILE_ERR", "IS_HIPFILE_ERR"),
+    ("CUFILE_ERRSTR", "HIPFILE_ERRSTR"),
+    ("IS_CUDA_ERR", "IS_HIP_DRV_ERR"),
+    ("cu_err", "hip_drv_err"),
 ])
 
 CUDA_SPECIAL_MAP = collections.OrderedDict([
@@ -3426,6 +3444,7 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict([
     ("nvshmem_malloc", "rocshmem::rocshmem_malloc"),
     ("nvshmem_free", "rocshmem::rocshmem_free"),
     ("nvshmem_ptr", "rocshmem::rocshmem_ptr"),
+    ("nvshmem_barrier_all", "rocshmem::rocshmem_barrier_all"),
     ("nvshmem_team_t", "rocshmem::rocshmem_team_t"),
     ("nvshmem_team_split_strided", "rocshmem::rocshmem_team_split_strided"),
 
@@ -3447,6 +3466,7 @@ C10_MAPPINGS = collections.OrderedDict([
     ("c10/cuda/CUDADeviceAssertionHost.h", "c10/hip/HIPDeviceAssertionHost.h"),
     ("c10/cuda/CUDAException.h", "c10/hip/HIPException.h"),
     ("c10/cuda/CUDAFunctions.h", "c10/hip/HIPFunctions.h"),
+    ("c10/cuda/impl/CUDAGraphMemory.h", "c10/hip/impl/HIPGraphMemory.h"),
     ("c10/cuda/CUDAGraphsC10Utils.h", "c10/hip/HIPGraphsC10Utils.h"),
     ("c10/cuda/CUDAGuard.h", "c10/hip/HIPGuard.h"),
     ("c10/cuda/CUDAMacros.h", "c10/hip/HIPMacros.h"),

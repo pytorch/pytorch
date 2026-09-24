@@ -256,7 +256,7 @@ void CppPrinter::visit(const ExternalCallPtr& v) {
   // in external_functions.cpp.
 
   auto& func_registry = getNNCFunctionRegistry();
-  if (!func_registry.count(v->func_name())) {
+  if (!func_registry.contains(v->func_name())) {
     throw unimplemented_lowering(v);
   }
 

@@ -11,6 +11,7 @@
 #include <ATen/OpMathType.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/cuda/CUDABlas.h>
+#include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/ScaledBlasUtils.h>
 #include <ATen/cuda/tunable/Tunable.h>
 #include <ATen/cuda/tunable/TunableGemm.h>
@@ -18,10 +19,6 @@
 #include <c10/util/MaybeOwned.h>
 #include <ATen/native/GroupedMMUtils.h>
 #include <ATen/native/cuda/cuBlasCommonArgs.h>
-#include <ATen/native/cuda/RowwiseScaledMM.h>
-#include <ATen/native/cuda/ScaledGroupMM.h>
-#include <ATen/native/cuda/GroupMM.h>
-#include <ATen/ceil_div.h>
 
 #ifdef USE_MSLK
 #include <mslk/gemm/gemm_torch.h>
@@ -34,8 +31,6 @@
 #include <ATen/ops/_addmm_activation_native.h>
 #include <ATen/ops/_efficientzerotensor.h>
 #include <ATen/ops/_int_mm_native.h>
-#include <ATen/ops/_scaled_mm_native.h>
-#include <ATen/ops/_unsafe_view_native.h>
 #include <ATen/ops/abs.h>
 #include <ATen/ops/addmm_native.h>
 #include <ATen/ops/addmv_native.h>
@@ -229,11 +224,130 @@ static bool isInputCompliesAddmmCudaLt(
   );
 }
 
+#ifndef USE_ROCM
+// A 2D tensor can be handed to cuBLASLt as long as it is row-major, possibly
+// with padding between rows, which the leading dimension expresses.
+static bool isRowMajorWithValidLeadingDim(const Tensor& t) {
+  return t.dim() == 2 && t.stride(1) == 1 && t.stride(0) >= t.sizes()[1];
+}
+#endif
+
+static bool canUseAddmmCudaLtWithDistinctCAndD(
+    Tensor& result,
+    const Tensor& self,
+    const Tensor& mat1,
+    const Tensor& mat2,
+    bool disable_addmm_cuda_lt) {
+#ifdef USE_ROCM
+  // isInputCompliesAddmmCudaLt() deliberately keeps 2D `self` away from
+  // hipBLASLt, and this path has no ROCm coverage, so stay off it entirely.
+  return false;
+#else
+  if (disable_addmm_cuda_lt) {
+    return false;
+  }
+  // Taking this path would silently skip TunableOp for a shape that is tuned
+  // today through the non-Lt gemm.
+  if (at::cuda::tunable::getTuningContext()->IsTunableOpEnabled()) {
+    return false;
+  }
+  if (result.is_same(self) || self.dim() != 2 || result.dim() != 2) {
+    return false;
+  }
+  if (self.sizes()[0] != result.sizes()[0] || self.sizes()[1] != result.sizes()[1]) {
+    return false;
+  }
+  if (!isRowMajorWithValidLeadingDim(self) ||
+      !isRowMajorWithValidLeadingDim(result)) {
+    return false;
+  }
+  if (self.is_conj() || result.is_conj() || self.is_neg() || result.is_neg()) {
+    return false;
+  }
+  // Conservative: any shared storage between C and D falls back. Note that
+  // at::get_overlap_status() cannot be used here, as it reports TooHard for the
+  // padded (non-dense) layouts this path accepts.
+  if (self.is_alias_of(result)) {
+    return false;
+  }
+  if (self.scalar_type() != mat1.scalar_type() || result.scalar_type() != mat1.scalar_type()) {
+    return false;
+  }
+  const auto scalar_type = mat1.scalar_type();
+  // Reduced precision only. Handing cuBLASLt distinct C and D changes which
+  // algorithm its heuristic returns, so results shift by an ulp or two relative
+  // to copy-then-GEMM. That is still a legal GEMM result, and measured against an
+  // fp64 reference this form is no less accurate, but it is enough to break tests
+  // that require deterministic output. bf16 is the common case for this path and
+  // is where the avoided copy is worth that drift; fp32/fp64 have little to gain
+  // here, so they keep copy-then-GEMM.
+  if (scalar_type != at::ScalarType::Half &&
+      scalar_type != at::ScalarType::BFloat16) {
+    return false;
+  }
+  // Match the existing cuBLASLt shape guard (k > 1, n > 1), and additionally
+  // exclude m == 1: on a degenerate row cuBLASLt may pick a kernel that leaves
+  // D unwritten, which is only correct while C has already been copied into D
+  // and the two pointers alias.
+  return mat1.sizes()[0] > 1 && mat2.sizes()[0] > 1 && mat2.sizes()[1] > 1;
+#endif
+}
+
+// Direct call into at::cuda::blas::gemm_and_bias -- the same code path
+// taken when TunableOp is disabled. Extracted into a free function so both
+// the "TunableOp disabled" branch and the "TunableOp enabled but tunable
+// lookup missed" branch in launchGemmAndBiasCublasLt can call it without
+// having to flip the global TunableOp enable flag (which would be a data
+// race in multithreaded benchmark configs).
+template <typename scalar_t, typename res_scalar_t = scalar_t>
+bool launchGemmAndBiasNonTunable(
+    cublasCommonArgs& args,
+    const scalar_t* self_ptr,
+    const Scalar& alpha,
+    Activation activation) {
+  return at::cuda::blas::gemm_and_bias<scalar_t, res_scalar_t>(
+    args.transa == 't',
+    args.transb == 't',
+    args.m,
+    args.n,
+    args.k,
+    alpha.to<at::opmath_type<scalar_t>>(),
+    args.mata->const_data_ptr<scalar_t>(),
+    args.lda,
+    args.matb->const_data_ptr<scalar_t>(),
+    args.ldb,
+    self_ptr,
+    args.result->data_ptr<res_scalar_t>(),
+    args.result_ld,
+    activation_to_gemm_and_blas_arg(activation));
+}
+
+// Returns true iff the TunableOp dispatch succeeded. On a total miss
+// operator() resolves to ResultEntry::Default(), which is the same
+// at::cuda::blas::gemm_and_bias call launchGemmAndBiasNonTunable makes, so a
+// miss costs nothing extra. False means the selected kernel reported a non-OK
+// status and the caller must retry via launchGemmAndBiasNonTunable.
 template <typename scalar_t>
-void launchTunableGemmAndBias(cublasCommonArgs &args, const Scalar& alpha, const scalar_t* bias, cuda::blas::GEMMAndBiasActivationEpilogue activation) {
+bool launchTunableGemmAndBias(cublasCommonArgs &args, const Scalar& alpha, const scalar_t* bias, cuda::blas::GEMMAndBiasActivationEpilogue activation) {
   bool transa_ = ((args.transa != 'n') && (args.transa != 'N'));
   bool transb_ = ((args.transb != 'n') && (args.transb != 'N'));
   at::cuda::tunable::GemmAndBiasParams<scalar_t> params;
+  // Stamp the per-call dynamic-dims mask onto the params, remapping to BLAS
+  // frame when the dispatch swapped (M, N) -> (n, m). See
+  // GetCurrentDynamicDimsMask() in ATen/cuda/tunable/Tunable.h for the frame
+  // and remap rationale.
+  {
+    auto raw_mask = at::cuda::tunable::GetCurrentDynamicDimsMask();
+    if (args.swapped_mn) {
+      params.dynamic_dims_mask = at::cuda::tunable::DynamicDimsMask(
+          /*M=*/raw_mask.n(),
+          /*N=*/raw_mask.m(),
+          /*K=*/raw_mask.k(),
+          /*BATCH=*/raw_mask.batch());
+    } else {
+      params.dynamic_dims_mask = raw_mask;
+    }
+  }
   params.transa = args.transa;
   params.transb = args.transb;
   params.m = args.m;
@@ -248,21 +362,22 @@ void launchTunableGemmAndBias(cublasCommonArgs &args, const Scalar& alpha, const
   params.ldc = args.result_ld;
   params.bias = bias;
   params.activation = activation;
+
   if (transa_ && transb_) {
     static at::cuda::tunable::GemmAndBiasTunableOp<scalar_t, at::cuda::tunable::BlasOp::T, at::cuda::tunable::BlasOp::T> gemm{};
-    gemm(&params);
+    return gemm(&params) == at::cuda::tunable::OK;
   }
   else if (transa_ && !transb_) {
     static at::cuda::tunable::GemmAndBiasTunableOp<scalar_t, at::cuda::tunable::BlasOp::T, at::cuda::tunable::BlasOp::N> gemm{};
-    gemm(&params);
+    return gemm(&params) == at::cuda::tunable::OK;
   }
   else if (!transa_ && transb_) {
     static at::cuda::tunable::GemmAndBiasTunableOp<scalar_t, at::cuda::tunable::BlasOp::N, at::cuda::tunable::BlasOp::T> gemm{};
-    gemm(&params);
+    return gemm(&params) == at::cuda::tunable::OK;
   }
   else if (!transa_ && !transb_) {
     static at::cuda::tunable::GemmAndBiasTunableOp<scalar_t, at::cuda::tunable::BlasOp::N, at::cuda::tunable::BlasOp::N> gemm{};
-    gemm(&params);
+    return gemm(&params) == at::cuda::tunable::OK;
   }
   else {
     TORCH_CHECK(false, "unreachable");
@@ -286,29 +401,24 @@ bool launchGemmAndBiasCublasLt(
 
   const auto tuning_ctx = at::cuda::tunable::getTuningContext();
   if (tuning_ctx->IsTunableOpEnabled()) {
-    // TODO: maybe also return some success state?
-    launchTunableGemmAndBias<scalar_t>(
-      args, alpha, self_ptr, activation_to_gemm_and_blas_arg(activation)
-    );
-    return true;
+    if (launchTunableGemmAndBias<scalar_t>(
+            args, alpha, self_ptr, activation_to_gemm_and_blas_arg(activation))) {
+      return true;
+    }
+    // launchTunableGemmAndBias returned false: TunableOp is enabled but
+    // there is no tuned entry for this shape and tuning is disabled.
+    // Re-dispatch through launchGemmAndBiasNonTunable -- the exact same
+    // code path taken when TunableOp is disabled at the call site. We do
+    // NOT toggle the global TunableOp enable flag for this fallback,
+    // because that flag is non-atomic global state and would race with
+    // concurrent dispatches on other CPU threads (mts_gpu_benchmark uses
+    // num_threads > 1 in some configs).
+    return launchGemmAndBiasNonTunable<scalar_t, res_scalar_t>(
+        args, self_ptr, alpha, activation);
   }
 
-  return at::cuda::blas::gemm_and_bias<scalar_t, res_scalar_t>(
-    args.transa == 't',
-    args.transb == 't',
-    args.m,
-    args.n,
-    args.k,
-    alpha.to<at::opmath_type<scalar_t>>(),
-    args.mata->const_data_ptr<scalar_t>(),
-    args.lda,
-    args.matb->const_data_ptr<scalar_t>(),
-    args.ldb,
-    self_ptr,
-    args.result->data_ptr<res_scalar_t>(),
-    args.result_ld,
-    activation_to_gemm_and_blas_arg(activation)
-  );
+  return launchGemmAndBiasNonTunable<scalar_t, res_scalar_t>(
+      args, self_ptr, alpha, activation);
 }
 
 template <typename scalar_t, typename res_scalar_t = scalar_t>
@@ -318,6 +428,25 @@ bool launchGemmCublas(
     const Scalar& alpha,
     const Scalar& beta
 ) {
+  // Re-push the mask remapped to BLAS frame so gemm_tunable (CUDABlas.cpp)
+  // stamps it, since at::cuda::blas::gemm's ABI does not carry swapped_mn.
+  // The guard is only emplaced when a dynamic mask is active AND the dispatch
+  // swapped. The mask read itself is gated on IsTunableOpEnabled() because
+  // gemm_tunable -- the only consumer of the guard -- is gated on it too, so
+  // with TunableOp off this costs one bool read and never touches the
+  // thread-local mask stack. See GetCurrentDynamicDimsMask() in Tunable.h.
+  const auto raw_dyn_mask =
+      at::cuda::tunable::getTuningContext()->IsTunableOpEnabled()
+      ? at::cuda::tunable::GetCurrentDynamicDimsMask()
+      : at::cuda::tunable::DynamicDimsMask{};
+  std::optional<at::cuda::tunable::TunableDynamicDimsGuard> dyn_guard;
+  if (raw_dyn_mask.any() && args.swapped_mn) {
+    dyn_guard.emplace(at::cuda::tunable::DynamicDimsMask(
+        /*M=*/raw_dyn_mask.n(),
+        /*N=*/raw_dyn_mask.m(),
+        /*K=*/raw_dyn_mask.k(),
+        /*BATCH=*/raw_dyn_mask.batch()));
+  }
   at::cuda::blas::gemm<scalar_t, res_scalar_t>(
     args.transa,
     args.transb,
@@ -334,6 +463,37 @@ bool launchGemmCublas(
     args.result_ld
   );
   return true; // success!
+}
+
+template <typename scalar_t>
+bool launchGemmWithDistinctCAndDCublasLt(
+    cublasCommonArgs& args,
+    const Tensor& self,
+    const Scalar& alpha,
+    const Scalar& beta) {
+  // `self` is row-major (guarded), so its leading dimension is stride(0), which
+  // is the same convention cublasCommonArgs uses to derive result_ld for the
+  // row-major result this path requires.
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(self.stride(1) == 1);
+  return at::cuda::blas::gemm_and_bias<scalar_t>(
+    args.transa == 't',
+    args.transb == 't',
+    args.m,
+    args.n,
+    args.k,
+    alpha.to<at::opmath_type<scalar_t>>(),
+    args.mata->const_data_ptr<scalar_t>(),
+    args.lda,
+    args.matb->const_data_ptr<scalar_t>(),
+    args.ldb,
+    /*bias=*/nullptr,
+    args.result->data_ptr<scalar_t>(),
+    args.result_ld,
+    at::cuda::blas::GEMMAndBiasActivationEpilogue::None,
+    self.const_data_ptr<scalar_t>(),
+    self.stride(0),
+    beta.to<at::opmath_type<scalar_t>>()
+  );
 }
 
 Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, Activation activation=Activation::None, bool disable_addmm_cuda_lt_override=false) {
@@ -367,6 +527,9 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   // Conditioned on the device index, which is not persistent
   disable_addmm_cuda_lt = disable_addmm_cuda_lt || isGloballyDisabledAddmmCudaLt(self.device());
   #endif
+  // Everything above is a property of the build/device rather than the inputs.
+  // The distinct-C/D path applies its own input checks, so it keys off this.
+  const bool disable_addmm_cuda_lt_for_device = disable_addmm_cuda_lt;
   // Condition on the input
   disable_addmm_cuda_lt = disable_addmm_cuda_lt || !isInputCompliesAddmmCudaLt(result, self, mat1, mat2, beta, alpha, activation);
 
@@ -387,6 +550,43 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
 
       // We do not copy bias only when we need the bias ptr
     if (beta.toComplexDouble() != 0.0 && !use_bias_ptr_lt) {
+      // alpha == 0 must not take this path. When alpha is 0 and beta is 1 the
+      // operation reduces to D = C, and cuBLASLt then skips the write entirely:
+      // a valid shortcut while C had already been copied into D and the two
+      // pointers aliased, but it silently drops the term once they are
+      // distinct. cuBLASLt does write beta * C for every other beta, so only
+      // beta == 1 is actually affected; excluding all of alpha == 0 costs
+      // nothing (there is no matmul to overlap with the avoided copy) and does
+      // not rely on which algorithm the heuristic happens to return.
+      const bool distinct_c_and_d_candidate =
+          result.numel() != 0 && activation == Activation::None &&
+          alpha.toComplexDouble() != 0.0 &&
+          canUseAddmmCudaLtWithDistinctCAndD(
+              result, self, mat1, mat2, disable_addmm_cuda_lt_for_device);
+      if (distinct_c_and_d_candidate) {
+        cublasCommonArgs args(mat1, mat2, result);
+        // Returning early below skips the `result.copy_(*args.result)`
+        // writeback, which is only correct because the guard keeps `result`
+        // row-major and non-conj, so prepare_matrix_for_cublas() borrows it
+        // instead of handing back an owned copy.
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+            !args.result->is_conj() && args.result->is_same(result) &&
+            args.result_ld == result.stride(0));
+        bool distinct_c_and_d_lt_success = false;
+        AT_DISPATCH_FLOATING_TYPES_AND2(
+          at::ScalarType::Half,
+          at::ScalarType::BFloat16,
+          scalar_type,
+          "addmm_cuda_lt_distinct_c_and_d",
+          [&] {
+            distinct_c_and_d_lt_success = launchGemmWithDistinctCAndDCublasLt<scalar_t>(
+                args, self, alpha, beta);
+          }
+        );
+        if (distinct_c_and_d_lt_success) {
+          return result;
+        }
+      }
       // NOTE: self should broadcast over result
       at::native::copy_(result, *expand_size(self, result.sizes(), "addmm"));
     }
@@ -555,6 +755,27 @@ const Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, co
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!result_->is_conj());
   bool is_float_output_with_half_input = (batch1.scalar_type() == at::ScalarType::Half || batch1.scalar_type() == at::ScalarType::BFloat16) && result.scalar_type() == at::ScalarType::Float;
 
+  // Re-push the mask remapped to BLAS frame so (b)gemm_tunable stamps it; the
+  // batched dispatch transposes the result (M<->N) and carries no swapped_mn
+  // flag. The guard is only emplaced when a dynamic mask is active AND the
+  // result is transposed. The mask read itself is gated on
+  // IsTunableOpEnabled() because (b)gemm_tunable -- the only consumer of the
+  // guard -- is gated on it too, so with TunableOp off this costs one bool
+  // read and never touches the thread-local mask stack. See
+  // GetCurrentDynamicDimsMask() in Tunable.h.
+  const auto raw_dyn_mask =
+      at::cuda::tunable::getTuningContext()->IsTunableOpEnabled()
+      ? at::cuda::tunable::GetCurrentDynamicDimsMask()
+      : at::cuda::tunable::DynamicDimsMask{};
+  std::optional<at::cuda::tunable::TunableDynamicDimsGuard> baddbmm_dyn_guard;
+  if (raw_dyn_mask.any() && transpose_result) {
+    baddbmm_dyn_guard.emplace(at::cuda::tunable::DynamicDimsMask(
+        /*M=*/raw_dyn_mask.n(),
+        /*N=*/raw_dyn_mask.m(),
+        /*K=*/raw_dyn_mask.k(),
+        /*BATCH=*/raw_dyn_mask.batch()));
+  }
+
   if (is_float_output_with_half_input) {
     AT_DISPATCH_REDUCED_FLOATING_TYPES(batch1.scalar_type(), "baddbmm_cuda", [&] {
       using opmath_t = at::opmath_type<scalar_t>;
@@ -691,7 +912,7 @@ inline void dot_check(const Tensor& self, const Tensor& other) {
   TORCH_CHECK(
       (self.numel() <= INT_MAX) && (self.stride(0) <= INT_MAX) &&
           (other.stride(0) <= INT_MAX),
-      "dot only supports n, incx, incy with the bound [val] <= %d",
+      "dot only supports n, incx, incy with the bound [val] <= ",
       INT_MAX);
 }
 
@@ -730,7 +951,7 @@ Tensor dot_cuda(const Tensor& self, const Tensor& other) {
       [&] {
         Tensor result = at::empty({}, self.options());
 
-        auto handle = at::cuda::getCurrentCUDABlasHandle();
+        auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
         at::cuda::blas::PointerModeGuard pointerModeGuard(handle, CUBLAS_POINTER_MODE_DEVICE);
         at::cuda::blas::dot<scalar_t>(
             handle,
@@ -777,7 +998,7 @@ Tensor vdot_cuda(const Tensor& self, const Tensor& other) {
   return AT_DISPATCH_COMPLEX_TYPES(self.scalar_type(), "vdot", [&] {
     Tensor result = at::empty({}, self.options());
 
-    auto handle = at::cuda::getCurrentCUDABlasHandle();
+    auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
     at::cuda::blas::PointerModeGuard pointerModeGuard(
         handle, CUBLAS_POINTER_MODE_DEVICE);
     at::cuda::blas::vdot<scalar_t>(
@@ -850,11 +1071,9 @@ TORCH_IMPL_FUNC(addmv_out_cuda)(const Tensor &self, const Tensor &mat, const Ten
 
 Tensor& _int_mm_out_cuda(const Tensor& self, const Tensor& mat2, Tensor& result) {
   // NOTE: cuBLAS is currently broken for some combination of transposed inputs.
-  TORCH_CHECK(self.dim() == 2, "Expected self to be of dimension 2 but got ", self.dim());
-  TORCH_CHECK(mat2.dim() == 2, "Expected mat2 to be of dimension 2 but got ", mat2.dim());
+  check_mm_shapes(self, mat2, "_int_mm");
   TORCH_CHECK(self.size(0) > 16, "self.size(0) needs to be greater than 16, but got ", self.size(0));
   TORCH_CHECK(self.size(1) > 0 && self.size(1) % 8 == 0, "self.size(1) needs to be greater than 0 and a multiple of 8, but got ", self.size(1));
-  TORCH_CHECK(self.size(1) == mat2.size(0), "self.size(1) needs to match mat2.size(0) but got ", self.size(1), " and ", mat2.size(0));
   TORCH_CHECK(mat2.size(1) > 0 && mat2.size(1) % 8 == 0, "mat2.size(1) needs to be greater than 0 and a multiple of 8, but got ", mat2.size(1));
 
   TORCH_CHECK(result.dtype() == at::kInt, "Expected result dtype to be of type kInt but got ", result.dtype());
@@ -962,11 +1181,7 @@ Tensor _mm_dtype_cuda(const Tensor& self, const Tensor& mat2, const at::ScalarTy
 }
 
 Tensor& _mm_dtype_out_cuda(const Tensor& self, const Tensor& mat2, const at::ScalarType out_dtype, Tensor &out) {
-  TORCH_CHECK(self.dim() == 2,  "self must be a matrix, got ", self.dim(), "-D tensor");
-  TORCH_CHECK(mat2.dim() == 2,  "mat2 must be a matrix, got ", mat2.dim(), "-D tensor");
-  TORCH_CHECK(
-      self.sizes()[1] == mat2.sizes()[0], "mat1 and mat2 shapes cannot be multiplied (",
-      self.sizes()[0], "x", self.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
+  check_mm_shapes(self, mat2, "_mm_dtype");
 
   TORCH_CHECK(out_dtype == out.scalar_type(), "out_dtype must be the same as the dtype of the provided out tensor");
   TORCH_CHECK(self.scalar_type() == mat2.scalar_type(), "input dtypes must be the same");
@@ -982,19 +1197,13 @@ Tensor& _mm_dtype_out_cuda(const Tensor& self, const Tensor& mat2, const at::Sca
 }
 
 Tensor _addmm_dtype_cuda(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const at::ScalarType out_dtype, const Scalar& beta, const Scalar& alpha) {
-  TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix, got ", mat1.dim(), "-D tensor");
-  TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix, got ", mat2.dim(), "-D tensor");
+  check_mm_shapes(mat1, mat2, "_addmm_dtype");
   Tensor result = at::empty({mat1.size(0), mat2.size(1)}, self.options().dtype(out_dtype));
   return _addmm_dtype_out_cuda(self, mat1, mat2, out_dtype, beta, alpha, result);
 }
 
 Tensor& _addmm_dtype_out_cuda(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const at::ScalarType out_dtype, const Scalar& beta, const Scalar& alpha, Tensor &out) {
-// repeat dimensionality checks for direct calls to `out` overload
-  TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix, got ", mat1.dim(), "-D tensor");
-  TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix, got ", mat2.dim(), "-D tensor");
-  TORCH_CHECK(
-      mat1.sizes()[1] == mat2.sizes()[0], "mat1 and mat2 shapes cannot be multiplied (",
-      mat1.sizes()[0], "x", mat1.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
+  check_mm_shapes(mat1, mat2, "_addmm_dtype");
   TORCH_CHECK(mat1.scalar_type() == mat2.scalar_type(), "mat1 and mat2 must have the same dtype, but got ", mat1.scalar_type(), " and ", mat2.scalar_type());
   TORCH_CHECK(out_dtype == mat1.scalar_type() ||
   (out_dtype == at::ScalarType::Float && (mat1.scalar_type() == at::ScalarType::Half || mat1.scalar_type() == at::ScalarType::BFloat16)),

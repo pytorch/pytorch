@@ -33,8 +33,7 @@ inline bool THPStorage_Check(PyObject* obj) {
     return false;
 
   const auto result = PyObject_IsInstance(obj, (PyObject*)THPStorageClass);
-  if (result == -1)
-    throw python_error();
+  TORCH_CHECK_PYTHON(result != -1);
   return result;
 }
 

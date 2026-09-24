@@ -77,6 +77,7 @@ C10_DIAGNOSTIC_POP()
 #include <torch/csrc/jit/jit_log.h>
 
 #include <memory>
+#include <numeric>
 
 using namespace torch::jit::tensorexpr;
 
@@ -114,6 +115,16 @@ struct TypedPointer {
   llvm::Type* type = nullptr;
   llvm::Value* addr = nullptr;
 };
+#endif
+
+#if LLVM_VERSION_MAJOR > 23
+llvm::PointerType* llvm_pointer_to(llvm::Type* ty, unsigned addrspace = 0) {
+  return llvm::PointerType::get(ty->getContext(), addrspace);
+}
+#else
+llvm::PointerType* llvm_pointer_to(llvm::Type* ty, unsigned addrspace = 0) {
+  return ty->getPointerTo(addrspace);
+}
 #endif
 
 llvm::CmpInst::Predicate llvm_comparison_predicate(
@@ -279,12 +290,21 @@ class LLVMCodeGenImpl : public IRVisitor {
     Binary,
   };
 
-  using SimdCallee = std::tuple<llvm::FunctionType*, llvm::Value*, bool>;
+  // The callee, plus the number of lanes it consumes per call. A width of 1
+  // means no vector implementation was found and the scalar function has to be
+  // called once per lane.
+  using SimdCallee = std::tuple<llvm::FunctionType*, llvm::Value*, int>;
   SimdCallee getSimdFunction(
       const std::string& name,
       llvm::Type* type,
       Arity arity,
       int lanes);
+  llvm::Value* emitSimdCall(
+      llvm::FunctionType* callTy,
+      llvm::Value* callFn,
+      const std::vector<llvm::Value*>& params,
+      int lanes,
+      int simdLanes);
 
   llvm::Value* varToValue(VarPtr var);
   void replaceVarMapping(
@@ -615,7 +635,7 @@ llvm::Type* LLVMCodeGenImpl::dtypeToLLVM(Dtype dtype) {
 }
 
 llvm::Type* LLVMCodeGenImpl::dtypeToLLVMPtr(Dtype dtype) {
-  return dtypeToLLVM(dtype)->getPointerTo();
+  return llvm_pointer_to(dtypeToLLVM(dtype));
 }
 
 void LLVMCodeGenImpl::emitWrapper(const std::vector<llvm::Type*>& params) {
@@ -1297,10 +1317,10 @@ void LLVMCodeGenImpl::visit(const VarPtr& v) {
 llvm::Value* LLVMCodeGenImpl::varToValue(VarPtr v) {
   // It is possible for v to be in both varToVal_ and varToArgs.
   // In that case, varToVal_ takes precedence.
-  if (varToVal_.count(v)) {
-    return varToVal_.at(v);
-  } else if (varToArg_.count(v)) {
-    auto idx = varToArg_.at(v);
+  if (auto it = varToVal_.find(v); it != varToVal_.end()) {
+    return it->second;
+  } else if (auto it = varToArg_.find(v); it != varToArg_.end()) {
+    auto idx = it->second;
     auto arg = fn_->arg_begin() + idx;
     return arg;
   }
@@ -1474,8 +1494,7 @@ void LLVMCodeGenImpl::visit(const LoadPtr& v) {
           first_idx);
 #endif
 
-      auto vaddr = irb_.CreateBitOrPointerCast(
-          addr, llvm::PointerType::get(loadType, 0));
+      auto vaddr = irb_.CreateBitOrPointerCast(addr, llvm_pointer_to(loadType));
 #if LLVM_VERSION_MAJOR >= 12
       value_ = irb_.CreateAlignedLoad(loadType, vaddr, llvm::MaybeAlign(4));
 #else
@@ -1857,8 +1876,8 @@ void LLVMCodeGenImpl::visit(const StorePtr& v) {
           first_idx);
 #endif
 
-      auto vaddr = irb_.CreateBitOrPointerCast(
-          addr, llvm::PointerType::get(val->getType(), 0));
+      auto vaddr =
+          irb_.CreateBitOrPointerCast(addr, llvm_pointer_to(val->getType()));
 
 #if LLVM_VERSION_MAJOR >= 13
       irb_.CreateAlignedStore(val, vaddr, llvm::MaybeAlign(4));
@@ -1981,24 +2000,37 @@ LLVMCodeGenImpl::SimdCallee LLVMCodeGenImpl::getSimdFunction(
     llvm::Type* basetype,
     Arity arity,
     int lanes) {
-  std::string name;
-  llvm::Type* type;
-  bool useSimd;
+  std::string name = basename;
+  llvm::Type* type = basetype;
+  int simdLanes = 1;
 
-  // Determine whether to use vectorized intrinsic.
+  // Sleef's vector entry points are only callable if the target actually has
+  // the ISA they were built for. Advanced SIMD is mandatory on aarch64, so
+  // there is nothing to test for; on x86 the widest ones need AVX.
+  auto const& targetTriple = jit_->getTargetMachine().getTargetTriple();
   auto const& featureString = jit_->getTargetMachine().getTargetFeatureString();
-  bool hasAVX = featureString.find("+avx") != llvm::StringRef::npos;
-  std::string typeSuffix = basetype == DoubleTy_ ? "d" : "";
-  std::string sleefName =
-      "Sleef_" + basename + typeSuffix + std::to_string(lanes);
-  if (wantSleef(basename) && hasAVX && jit_->hasSymbol(sleefName)) {
-    name = std::move(sleefName);
-    type = llvm::VectorType::get(basetype, ElementCount(lanes));
-    useSimd = true;
-  } else {
-    name = basename;
-    type = basetype;
-    useSimd = false;
+  bool hasSimd = targetTriple.isAArch64() ||
+      featureString.find("+avx") != llvm::StringRef::npos;
+
+  if (wantSleef(basename) && hasSimd) {
+    std::string typeSuffix = basetype == DoubleTy_ ? "d" : "";
+    // Prefer an entry point as wide as the vectorized loop body, but accept a
+    // narrower one and call it repeatedly. Advanced SIMD tops out at 4 floats
+    // or 2 doubles, so without this a body vectorized at 8 lanes would fall
+    // all the way back to one scalar libm call per element.
+    for (int width = lanes; width > 1; width /= 2) {
+      if (lanes % width != 0) {
+        continue;
+      }
+      std::string sleefName =
+          "Sleef_" + basename + typeSuffix + std::to_string(width);
+      if (jit_->hasSymbol(sleefName)) {
+        name = std::move(sleefName);
+        type = llvm::VectorType::get(basetype, ElementCount(width));
+        simdLanes = width;
+        break;
+      }
+    }
   }
 
   // Get function to call from name and type.
@@ -2013,13 +2045,66 @@ LLVMCodeGenImpl::SimdCallee LLVMCodeGenImpl::getSimdFunction(
   }
   FunctionCallee callee = module_->getOrInsertFunction(name, fntype, {});
   applyMathFunctionAttributes(llvm::cast<llvm::Function>(callee.getCallee()));
-  return SimdCallee{callee.getFunctionType(), callee.getCallee(), useSimd};
+  return SimdCallee{callee.getFunctionType(), callee.getCallee(), simdLanes};
+}
+
+// Applies `callFn`, which consumes `simdLanes` at a time, across a
+// `lanes`-wide vector by slicing the operands and concatenating the results.
+llvm::Value* LLVMCodeGenImpl::emitSimdCall(
+    llvm::FunctionType* callTy,
+    llvm::Value* callFn,
+    const std::vector<llvm::Value*>& params,
+    int lanes,
+    int simdLanes) {
+  auto constantMask = [&](const std::vector<int>& indices) {
+    std::vector<llvm::Constant*> mask;
+    mask.reserve(indices.size());
+    for (int i : indices) {
+      mask.push_back(
+          i < 0 ? llvm::UndefValue::get(IntTy_)
+                : llvm::ConstantInt::get(IntTy_, i));
+    }
+    return llvm::ConstantVector::get(mask);
+  };
+
+  llvm::Value* result = nullptr;
+  int resultLanes = 0;
+  for (int base = 0; base < lanes; base += simdLanes) {
+    std::vector<int> sliceIndices(simdLanes);
+    std::iota(sliceIndices.begin(), sliceIndices.end(), base);
+    std::vector<llvm::Value*> slice;
+    slice.reserve(params.size());
+    for (llvm::Value* p : params) {
+      slice.push_back(irb_.CreateShuffleVector(
+          p, llvm::UndefValue::get(p->getType()), constantMask(sliceIndices)));
+    }
+    llvm::Value* part = irb_.CreateCall(callTy, callFn, slice);
+
+    if (!result) {
+      result = part;
+      resultLanes = simdLanes;
+      continue;
+    }
+    // shufflevector needs both operands to have the same type, so pad this
+    // part out to the accumulated width before appending it.
+    std::vector<int> padIndices(resultLanes, -1);
+    std::iota(padIndices.begin(), padIndices.begin() + simdLanes, 0);
+    llvm::Value* padded = irb_.CreateShuffleVector(
+        part, llvm::UndefValue::get(part->getType()), constantMask(padIndices));
+
+    std::vector<int> concatIndices(resultLanes + simdLanes);
+    std::iota(concatIndices.begin(), concatIndices.end(), 0);
+    result =
+        irb_.CreateShuffleVector(result, padded, constantMask(concatIndices));
+    resultLanes += simdLanes;
+  }
+  return result;
 }
 
 void LLVMCodeGenImpl::visit(const IntrinsicsPtr& v) {
   llvm::FunctionType* call_ty = nullptr;
   llvm::Value* call_fn = nullptr;
-  bool call_simd_sleef = false;
+  int call_simd_lanes = 1;
 
   if (v->op_type() == kIsNan) {
     return emitIsNan(v);
@@ -2038,7 +2123,7 @@ void LLVMCodeGenImpl::visit(const IntrinsicsPtr& v) {
 
 #define SIMD_UNARY_MATH_CASE(enum, name, type)                  \
   case enum: {                                                  \
-    std::tie(call_ty, call_fn, call_simd_sleef) =               \
+    std::tie(call_ty, call_fn, call_simd_lanes) =               \
         getSimdFunction(name, type, Unary, v->dtype().lanes()); \
   } break;
         SIMD_UNARY_MATH_CASE(kLog10, "log10f", FloatTy_)
@@ -2069,7 +2154,7 @@ void LLVMCodeGenImpl::visit(const IntrinsicsPtr& v) {
 
 #define SIMD_BINARY_MATH_CASE(enum, name, type)                  \
   case enum: {                                                   \
-    std::tie(call_ty, call_fn, call_simd_sleef) =                \
+    std::tie(call_ty, call_fn, call_simd_lanes) =                \
         getSimdFunction(name, type, Binary, v->dtype().lanes()); \
   } break;
         SIMD_BINARY_MATH_CASE(kAtan2, "atan2f", FloatTy_)
@@ -2096,7 +2181,7 @@ void LLVMCodeGenImpl::visit(const IntrinsicsPtr& v) {
     switch (v->op_type()) {
 #define SIMD_UNARY_MATH_CASE(enum, name, type)                  \
   case enum: {                                                  \
-    std::tie(call_ty, call_fn, call_simd_sleef) =               \
+    std::tie(call_ty, call_fn, call_simd_lanes) =               \
         getSimdFunction(name, type, Unary, v->dtype().lanes()); \
   } break;
       SIMD_UNARY_MATH_CASE(kLog10, "log10", DoubleTy_)
@@ -2138,7 +2223,7 @@ void LLVMCodeGenImpl::visit(const IntrinsicsPtr& v) {
 
 #define SIMD_BINARY_MATH_CASE(enum, name, type)                  \
   case enum: {                                                   \
-    std::tie(call_ty, call_fn, call_simd_sleef) =                \
+    std::tie(call_ty, call_fn, call_simd_lanes) =                \
         getSimdFunction(name, type, Binary, v->dtype().lanes()); \
   } break;
         SIMD_BINARY_MATH_CASE(kAtan2, "atan2", DoubleTy_)
@@ -2188,12 +2273,13 @@ void LLVMCodeGenImpl::visit(const IntrinsicsPtr& v) {
     params.push_back(value_);
   }
 
-  if (v->dtype().lanes() == 1 || call_simd_sleef == true) {
+  int lanes = v->dtype().lanes();
+  if (lanes == call_simd_lanes) {
     value_ = irb_.CreateCall(call_ty, call_fn, params);
-  } else {
+  } else if (call_simd_lanes == 1) {
     llvm::Type* vecType = params[0]->getType();
     value_ = llvm::UndefValue::get(vecType);
-    for (int i = 0; i < v->dtype().lanes(); ++i) {
+    for (int i = 0; i < lanes; ++i) {
       std::vector<llvm::Value*> call_operands;
       for (auto p : params) {
         call_operands.push_back(irb_.CreateExtractElement(p, i));
@@ -2202,6 +2288,8 @@ void LLVMCodeGenImpl::visit(const IntrinsicsPtr& v) {
       llvm::Value* val = irb_.CreateCall(call_ty, call_fn, call_operands);
       value_ = irb_.CreateInsertElement(value_, val, i);
     }
+  } else {
+    value_ = emitSimdCall(call_ty, call_fn, params, lanes, call_simd_lanes);
   }
 }
 

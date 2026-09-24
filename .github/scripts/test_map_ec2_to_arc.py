@@ -81,7 +81,7 @@ def test_matrix_without_prefix_when_none_present():
     result = run(matrix)
     check(result.returncode == 0, result.stderr)
     output = parse_output(result.stdout)
-    check(output["include"][0]["runner"] == "l-x86aavx2-29-113-a10g")
+    check(output["include"][0]["runner"] == "l-x86aavx2-11-41-a10g")
 
 
 def test_unknown_runner_fails():
@@ -144,7 +144,7 @@ def test_mixed_runners():
         runners
         == [
             "l-x86iavx512-16-128",
-            "l-x86aavx2-29-113-a10g",
+            "l-x86aavx2-11-41-a10g",
             "l-arm64g2-6-32",
         ]
     )
@@ -221,14 +221,20 @@ def test_h100_with_mt_prefix_idempotent():
     check(output["include"][0]["runner"] == "mt-l-x86iamx-22-225-h100")
 
 
-def test_b200_forces_mt_prefix_overriding_lf():
+def test_b200_passthrough_regardless_of_prefix():
+    """B200 stays on the EC2 runners until OSDC has capacity."""
     matrix = """{ include: [
       { config: "default", shard: 1, num_shards: 1, runner: "lf-linux.dgx.b200" },
+      { config: "default", shard: 1, num_shards: 1, runner: "lf-linux.dgx.b200.8" },
     ]}"""
     result = run(matrix, prefix="lf-")
     check(result.returncode == 0, result.stderr)
     output = parse_output(result.stdout)
-    check(output["include"][0]["runner"] == "mt-l-x86iamx-22-225-b200")
+    runners = [e["runner"] for e in output["include"]]
+    check(
+        runners == ["linux.dgx.b200", "linux.dgx.b200.8"],
+        f"b200 should pass through unprefixed, got {runners}",
+    )
 
 
 def test_non_h100_keeps_lf_prefix():

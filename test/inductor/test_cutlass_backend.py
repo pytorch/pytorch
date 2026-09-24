@@ -77,12 +77,12 @@ from torch.sparse import SparseSemiStructuredTensor, to_sparse_semi_structured
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FP8,
-    skipIfSM103,
     SM100OrLater,
     SM120OrLater,
     SM80OrLater,
     SM90OrLater,
     xfailIfSM120OrLater,
+    xfailIfSM12X,
 )
 from torch.testing._internal.common_device_type import skipCUDAIf, skipXPUIf
 from torch.testing._internal.common_utils import (
@@ -340,12 +340,13 @@ class TestCutlassBackend(TestCase):
         self.assertIsNotNone(cutlass_key())
 
     @skipXPUIf(True, "CUDA-specific CUTLASS arch feature set")
-    def test_sm103_cutlass_ops_skip_int8_umma(self):
+    @parametrize("arch", ("103", "107"))
+    def test_sm103_and_sm107_cutlass_ops_skip_int8_umma(self, arch):
         from torch.utils import _pytree as pytree
 
         self.assertTrue(try_import_cutlass())
 
-        ops = pytree.tree_flatten(_gen_ops_cached("103", "13.3", "cuda"))[0]
+        ops = pytree.tree_flatten(_gen_ops_cached(arch, "13.3", "cuda"))[0]
         cutlass_ops = [op for op in ops if hasattr(op, "configuration_name")]
         int8_ops = [op for op in cutlass_ops if "s8_s8_s32" in op.configuration_name()]
         self.assertGreater(len(cutlass_ops), 0)
@@ -1302,7 +1303,12 @@ class TestCutlassBackend(TestCase):
     @skipXPUIf(True, "int_mm not supported on xpu cutlass backend")
     # TODO: Enable dynamic test cases when dynamic support is added.
     @skipCUDAIf(not SM90OrLater, "need sm_90")
-    @skipIfSM103
+    @skipCUDAIf(
+        torch.version.hip is None
+        and HAS_CUDA
+        and torch.cuda.get_device_capability() in ((10, 3), (10, 7)),
+        "int_mm not supported on SM103 or SM107",
+    )
     @xfailIfSM120OrLater
     @parametrize("dynamic", (False,))
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
@@ -1506,6 +1512,7 @@ class TestCutlassBackend(TestCase):
 
     @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @xfailIfSM12X
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_cutlass_backend_op_denylist(
         self,
@@ -1560,6 +1567,7 @@ class TestCutlassBackend(TestCase):
 
     @skipXPUIf(True, "Intel cutlass doesn't have pingpong kernels yet")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @xfailIfSM12X
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_cutlass_backend_op_allowlist(
         self,
@@ -1615,6 +1623,7 @@ class TestCutlassBackend(TestCase):
 
     @skipXPUIf(True, "fp8 not supported on xpu cutlass backend yet")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @xfailIfSM12X
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_cutlass_backend_fp8_scaled_mm_fast_accum_filtering(
         self,
@@ -1707,6 +1716,7 @@ class TestCutlassBackend(TestCase):
 
     @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @xfailIfSM12X
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_cutlass_backend_shape_coverage_mm(
         self,
@@ -1939,6 +1949,7 @@ class TestCutlassBackend(TestCase):
 
     @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @xfailIfSM12X
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_cutlass_backend_integration(self):
         """

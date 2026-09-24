@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from ..common import (
+    DeviceIdx,
     DeviceOpOverrides,
     register_device_op_overrides,
     TritonScratchWorkspace,
@@ -8,17 +9,23 @@ from ..common import (
 
 
 class XPUDeviceOpOverrides(DeviceOpOverrides):
+    def uses_gpu_cpp_wrapper(self) -> bool:
+        return True
+
     def import_get_raw_stream_as(self, name: str) -> str:
         return f"from torch._C import _xpu_getCurrentRawStream as {name}"
 
-    def set_device(self, device_idx: int) -> str:
+    def set_device(self, device_idx: DeviceIdx) -> str:
         return f"torch.xpu.set_device({device_idx})"
 
     def synchronize(self) -> str:
         return "torch.xpu.synchronize()"
 
-    def device_guard(self, device_idx: int) -> str:
+    def device_guard(self, device_idx: DeviceIdx) -> str:
         return f"torch.xpu._DeviceGuard({device_idx})"
+
+    def current_device_idx_expr(self) -> str:
+        return "torch.xpu.current_device()"
 
     def current_stream(self) -> str:
         return "torch.xpu.current_stream()"
@@ -58,6 +65,9 @@ class XPUDeviceOpOverrides(DeviceOpOverrides):
 
     def cpp_device_ptr(self) -> str:
         return "void *"
+
+    def aten_device_type(self) -> str:
+        return "at::kXPU"
 
     def cpp_scratch(
         self, idx: int, workspace: TritonScratchWorkspace, prefix: str | None = None

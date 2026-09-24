@@ -239,6 +239,23 @@ class AbstractCollectivesTest(C10dBackendTest):
         self._init_pg()
         self._test_transport_matrix(self._test_all_gather)
 
+    def test_all_gather_uneven(self):
+        if not self.supports_uneven_all_gather:
+            self.skipTest(f"{self.backend_name} does not support uneven all-gather")
+        self._init_pg()
+        sizes = [rank + 1 for rank in range(self.world_size)]
+        for async_op in ASYNC_OPS:
+            with self.subTest(async_op=async_op):
+                input = self._tensor(sizes[self.rank], torch.float32)
+                outputs = [torch.empty(size, device=self.device) for size in sizes]
+                work = dist.all_gather(outputs, input, async_op=async_op)
+                self._wait(work, async_op)
+                for rank, output in enumerate(outputs):
+                    self.assertEqual(
+                        output,
+                        torch.full_like(output, self._value(rank, output.dtype)),
+                    )
+
     def test_all_gather_mixed_devices(self):
         if self.device_type != "cuda":
             self.skipTest(f"{self.backend_name} does not use CUDA")
@@ -287,7 +304,7 @@ class AbstractCollectivesTest(C10dBackendTest):
             with self.assertRaises((RuntimeError, ValueError)):
                 dist.gather_single(input, output, dst=0)
 
-    def test_gather_into_tensor_deprecated(self):
+    def test_gather_into_tensor(self):
         if not self.supports_gather_single:
             self.skipTest(f"{self.backend_name} does not support gather_single")
         self._init_pg()
@@ -297,8 +314,7 @@ class AbstractCollectivesTest(C10dBackendTest):
             if self.rank == 0
             else None
         )
-        with self.assertWarnsRegex(FutureWarning, "gather_into_tensor` is deprecated"):
-            dist.gather_into_tensor(tensor, output, dst=0)
+        dist.gather_into_tensor(tensor, output, dst=0)
         if self.rank == 0:
             expected = torch.cat(
                 [
@@ -533,6 +549,29 @@ class AbstractCollectivesTest(C10dBackendTest):
                                 output, self._expected_reduce(count, dtype, op)
                             )
 
+    def test_reduce_scatter_uneven(self):
+        self._init_pg()
+        sizes = [rank + 1 for rank in range(self.world_size)]
+        for async_op in ASYNC_OPS:
+            with self.subTest(async_op=async_op):
+                inputs = [self._tensor(size, torch.float32) for size in sizes]
+                output = torch.empty(
+                    sizes[self.rank], dtype=torch.float32, device=self.device
+                )
+                work = dist.reduce_scatter(
+                    output,
+                    inputs,
+                    op=dist.ReduceOp.SUM,
+                    async_op=async_op,
+                )
+                self._wait(work, async_op)
+                self.assertEqual(
+                    output,
+                    self._expected_reduce(
+                        sizes[self.rank], torch.float32, dist.ReduceOp.SUM
+                    ),
+                )
+
     def test_reduce_scatter_single(self):
         self._init_pg()
         for count in COUNTS:
@@ -556,6 +595,23 @@ class AbstractCollectivesTest(C10dBackendTest):
                             self.assertEqual(
                                 output, self._expected_reduce(count, dtype, op)
                             )
+
+    def test_premul_sum(self):
+        if not self.premul_sum_dtypes:
+            self.skipTest(f"{self.backend_name} does not support PREMUL_SUM")
+        self._init_pg()
+        expected = sum(range(1, self.world_size + 1)) * 0.5
+        for dtype in self.premul_sum_dtypes:
+            for factor in (
+                0.5,
+                torch.tensor(0.5, dtype=dtype, device=self.device),
+            ):
+                with self.subTest(dtype=dtype, factor_type=type(factor).__name__):
+                    tensor = torch.full(
+                        (4,), float(self.rank + 1), dtype=dtype, device=self.device
+                    )
+                    dist.all_reduce(tensor, op=dist.ReduceOp.PREMUL_SUM(factor))
+                    self.assertEqual(tensor, torch.full_like(tensor, expected))
 
     def test_barrier(self):
         self._init_pg()
@@ -589,19 +645,13 @@ class AbstractCollectivesTest(C10dBackendTest):
         )
 
     def test_split_group(self):
-        # split_group drives the backend's split() (ncclCommSplit under the
-        # NCCL backends). gloo's backend supports splitting too, but only
-        # reachable via a mixed cpu:gloo,cuda:nccl pg: dist.split_group requires
-        # the default pg to have a bound_device_id, and a pure-gloo (CPU) pg
-        # can't bind one (a CPU device has no index -> "setBoundDeviceId must
-        # have an index"), so it raises "No device associated with the default
-        # pg". Restrict this shared test to the CUDA backends.
-        if self.device_type != "cuda":
-            self.skipTest(f"{self.backend_name} split_group test requires CUDA")
         self._init_pg()
-        # split_group requires the default pg to have a bound device.
         default_pg = dist.distributed_c10d._get_default_group()
-        default_pg.bound_device_id = self.device
+        parent_backend = default_pg._get_backend(self.device)
+        if not parent_backend.supports_splitting:
+            self.skipTest(f"{self.backend_name} does not support split_group")
+        if self.device_type != "cpu":
+            default_pg.bound_device_id = self.device
         # Initialize the parent communicator before splitting.
         dist.all_reduce(torch.ones(4, device=self.device))
 
@@ -624,16 +674,15 @@ class AbstractCollectivesTest(C10dBackendTest):
         dist.barrier()
 
     def test_split_group_full_partition(self):
-        # Partition the whole parent group into two subgroups; every rank is a
-        # member of exactly one split and gets a live communicator. See
-        # test_split_group for why this is restricted to the CUDA backends.
-        if self.device_type != "cuda":
-            self.skipTest(f"{self.backend_name} split_group test requires CUDA")
         if self.world_size % 2 != 0:
             self.skipTest("full-partition split requires an even world size")
         self._init_pg()
         default_pg = dist.distributed_c10d._get_default_group()
-        default_pg.bound_device_id = self.device
+        parent_backend = default_pg._get_backend(self.device)
+        if not parent_backend.supports_splitting:
+            self.skipTest(f"{self.backend_name} does not support split_group")
+        if self.device_type != "cpu":
+            default_pg.bound_device_id = self.device
         dist.all_reduce(torch.ones(4, device=self.device))
 
         half = self.world_size // 2
