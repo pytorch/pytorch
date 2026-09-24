@@ -1708,7 +1708,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
 
         def f(x):
             if consumer == "synchronize":
-                torch.accelerator.synchronize(x.device)
+                torch.get_device_module(device_type).synchronize(x.device)
                 return x + 1
             if consumer == "current_stream":
                 return x + 1, torch.accelerator.current_stream(x.device)
@@ -1727,7 +1727,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
                     actual = compiled(x)
                 self.assertEqual(actual, x + 1)
                 self.assertEqual(
-                    synchronize.call_args.args, (torch.accelerator.current_device(),)
+                    synchronize.call_args.args, (torch.device(device_type),)
                 )
             else:
                 self.assertEqual(compiled(x), f(x))
