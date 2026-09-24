@@ -4543,14 +4543,6 @@
       "Hints": [
         "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
       ]
-    },
-    {
-      "Gb_type": "Attribute mutation on a sourced but untracked user-defined object",
-      "Context": "object={self}, name={name_str}, value={value}",
-      "Explanation": "Dynamo encountered a sourced user-defined object that supports mutation tracking but was not registered for it.",
-      "Hints": [
-        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
-      ]
     }
   ],
   "GB0265": [

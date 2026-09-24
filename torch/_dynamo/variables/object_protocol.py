@@ -42,6 +42,7 @@ from ..utils import specialize_symnode
 from .base import (
     AsPythonConstantNotImplementedError,
     AttrMutationKind,
+    graph_break_on_untracked_vt,
     maybe_get_python_type,
     NO_SUCH_SUBOBJ,
     VariableTracker,
@@ -2557,13 +2558,7 @@ def object_generic_setattr_str(
 
                 if SideEffects.cls_supports_mutation_side_effects(type(obj.value)):
                     if obj.source is not None:
-                        unimplemented(
-                            gb_type="Attribute mutation on a sourced but untracked user-defined object",
-                            context=f"object={obj}, name={name}, value={value}",
-                            explanation="Dynamo encountered a sourced user-defined object that supports mutation tracking but was not registered for it.",
-                            hints=[*graph_break_hints.DYNAMO_BUG],
-                            log_warning=True,
-                        )
+                        graph_break_on_untracked_vt(obj, name, value)
                     unimplemented(
                         gb_type="Attribute mutation on an untracked user-defined object",
                         context=f"object={obj}, name={name}, value={value}",
@@ -2586,10 +2581,7 @@ def object_generic_setattr_str(
                 attr = se.load_attr(obj, name, deleted_ok=True)
                 if isinstance(attr, variables.DeletedVariable):
                     raise_missing_attr()
-            elif (
-                isinstance(obj, variables.UserDefinedObjectVariable)
-                and obj.lookup_instance_dict(tx, name) is None
-            ):
+            elif not obj.get_dict_vt(tx).contains(name):
                 raise_missing_attr()
 
         se.store_attr(

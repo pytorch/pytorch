@@ -513,6 +513,18 @@ def getset_build(
     return lambda self, tx: VariableTracker.build(tx, accessor(self))
 
 
+def graph_break_on_untracked_vt(
+    obj: VariableTracker, name: str, value: VariableTracker | None
+) -> None:
+    unimplemented(
+        gb_type="Attribute mutation on a sourced but untracked user-defined object",
+        context=f"object={obj}, name={name}, value={value}",
+        explanation="Dynamo encountered a sourced user-defined object that supports mutation tracking but was not registered for it.",
+        hints=[*graph_break_hints.DYNAMO_BUG],
+        log_warning=True,
+    )
+
+
 def store_attr_mutation(
     tx: InstructionTranslatorBase,
     item: VariableTracker,
@@ -527,13 +539,8 @@ def store_attr_mutation(
         # Their sourced owners must already be tracked; unlike generic Python
         # setattr, this closed path has no valid sourced-untracked fallback.
         if item.source is not None:
-            raise AssertionError(
-                f"{item} has a source but was never registered via "
-                "track_object_existing (usually missing at its VariableBuilder "
-                "construction site) -- writes to its writable Member/GetSet "
-                "entries would otherwise be silently dropped instead of "
-                "raising here."
-            )
+            # ref: https://github.com/pytorch/pytorch/pull/196865/
+            graph_break_on_untracked_vt(item, name, value)
         se.track_attribute_mutation_new(item)
     value_to_store = variables.DeletedVariable() if value is None else value
     se.store_attr(item, name, value_to_store)
