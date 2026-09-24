@@ -1165,6 +1165,22 @@ class RangeVariable(BaseListVariable):
         return hash(self.as_python_constant()), False
 
 
+class ByteArrayVariable(BaseListVariable):
+    _cpython_type = bytearray
+
+    def python_type(self) -> type:
+        return bytearray
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}(length={len(self.items)})"
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.add_push_null(lambda: codegen.load_import_from("builtins", "bytearray"))
+        codegen.foreach(self.items)
+        codegen.append_output(create_instruction("BUILD_LIST", arg=len(self.items)))
+        codegen.extend_output(create_call_function(1, False))
+
+
 class ListVariable(BaseListVariable):
     # PyList_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L3776
     _cpython_type = list
