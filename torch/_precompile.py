@@ -241,8 +241,9 @@ it.
 # every frame Dynamo compiles while the caller's calls run -- the entry, the graph-break
 # continuations, the recompiled variants -- with one guard tree per variant, and the
 # artifact dispatches among them at call time. Its artifact is standalone (it installs
-# nothing) and is locked to the producing Python version and torch build, since it
-# inlines serialized bytecode and pickled guard state. Invariants 1, 2, 3 and 6 above
+# nothing) unless a frame is reachable only by an ordinary call, in which case it is
+# installed (see load()); either way it is locked to the producing Python version and
+# torch build, since it inlines serialized bytecode and pickled guard state. Invariants 1, 2, 3 and 6 above
 # are the make_fx contract; under Dynamo a call outside the captured variants is
 # REFUSED by the guards rather than silently served, and the guards that could not be
 # serialized are reported (PrecompileSummary.dropped_guards) rather than checked.
@@ -431,12 +432,16 @@ class PrecompiledRunnable:
     A callable with the captured ``fn``'s calling convention that can also be
     entered as a context manager and unloaded. A standalone artifact installs
     nothing, so for it ``__enter__``/``__exit__``/:meth:`unload` are no-ops.
+    Removing an installed artifact's entries is not implemented yet either, so
+    they stay installed until the process exits: serve an installed artifact
+    from a process you can throw away.
     Part of the prototype ``torch.compiler.precompile`` API, so it may change
     without a deprecation cycle.
 
     Attributes:
-        installed: Whether calling this handle installs onto the captured code
-            objects; ``False`` for a standalone artifact.
+        installed: Whether loading this artifact installed onto the captured
+            code objects (``SERVING_MODE = "installed"``); ``False`` for a
+            standalone artifact.
     """
 
     installed: bool = False
@@ -451,7 +456,7 @@ class PrecompiledRunnable:
         self.unload()
 
     def unload(self) -> None:
-        """Remove whatever this loaded artifact installed; a no-op when it installed nothing."""
+        """Remove whatever this loaded artifact installed; currently a no-op in every mode."""
 
 
 _P = ParamSpec("_P")
@@ -1761,11 +1766,11 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
 
     The required set follows TRACER: absent (artifacts predating the dynamo tracer) or
     anything but "dynamo" means the make_fx set the inlined driver reads. A dynamo
-    artifact instead carries the multi-graph driver's blobs (_FRAMES and _BACKENDS, or
-    _PACKAGE and UNREACHABLE_WITHOUT_INSTALL once SERVING_MODE is "installed"), the
-    readable frame report beside them and the two versions that lock them,
-    _DYNAMO_PYTHON_VERSION for the marshalled bytecode and TORCH_VERSION for the
-    pickled guard state.
+    artifact instead carries the multi-graph driver's blobs (_FRAMES, _BACKENDS and
+    _ENTRY_BINDING, or _PACKAGE and UNREACHABLE_WITHOUT_INSTALL once SERVING_MODE is
+    "installed"), the readable frame report beside them and the two versions that
+    lock them, _DYNAMO_PYTHON_VERSION for the marshalled bytecode and TORCH_VERSION
+    for the pickled guard state.
     """
     import ast
 
@@ -1813,7 +1818,7 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
         }
         mode = literal("SERVING_MODE") if "SERVING_MODE" in assigns else None
         if mode == "installed":
-            wanted -= {"_FRAMES", "_BACKENDS"}
+            wanted -= {"_FRAMES", "_BACKENDS", "_ENTRY_BINDING"}
             wanted |= {"_PACKAGE", "UNREACHABLE_WITHOUT_INSTALL"}
     else:
         wanted = {
@@ -2124,20 +2129,21 @@ def _reachable_frames(frames: list[dict[str, Any]]) -> set[int]:
     return reachable
 
 
-def _serving_mode(frames: list[dict[str, Any]]) -> str:
-    """``"standalone"`` when a source artifact serves every captured frame.
+def _unreachable_frames(frames: list[dict[str, Any]]) -> list[str]:
+    """The compiled frames the entry cannot reach through a continuation, by fqn.
 
-    A frame it cannot reach would run eager, silently giving up the compiled
-    variant; a frame it reaches but has no variant of (a bypassed continuation)
-    would raise on the very path capture exercised. Either way the capture is
-    served by installing instead, which has a compiler behind it. A trivial
-    continuation ran eager during capture and is served eager, so it counts as
-    covered when reached and costs nothing when not.
+    The standalone dispatcher would run such a frame eager, silently giving up
+    its compiled variant, so any of them makes the capture serve by installing.
+    A reachable frame with no variant keeps the capture standalone: the driver
+    runs a trivial one eager, as capture did, and refuses a bypassed one when a
+    call reaches it.
     """
     reachable = _reachable_frames(frames)
-    compiled = {i for i, frame in enumerate(frames) if frame["variants"]}
-    trivial = {i for i, f in enumerate(frames) if f["trivial"] and not f["is_entry"]}
-    return "standalone" if compiled <= reachable <= compiled | trivial else "installed"
+    return sorted(
+        f"{frame['python_module']}.{frame['code'].co_name}"
+        for i, frame in enumerate(frames)
+        if frame["variants"] and i not in reachable
+    )
 
 
 def _reject_uninstallable_entry(frames: list[dict[str, Any]], entry: Any) -> None:
@@ -2181,8 +2187,8 @@ def _reject_uninstallable_entry(frames: list[dict[str, Any]], entry: Any) -> Non
             f"nothing. This happens when the captured callable is a thin wrapper -- "
             f"an nn.Module, or a forward that immediately delegates -- where Dynamo "
             f"compiles the wrapper's inner frame instead. Capture the function that "
-            f"CALLS the model, e.g. "
-            f"precompile.capture(lambda m, x: m(x), ...) and calling cap(model, x)."
+            f"CALLS the model, e.g. a module-level def step(m, x): return m(x), "
+            f"with precompile.capture(step, ...) and calling cap(model, x)."
         )
     code = SerializedCode.to_code_object(entry_frame["code"])
     if code.co_freevars:
@@ -2221,24 +2227,23 @@ def _build_multigraph_python_source(
     summary: PrecompileSummary,
     backend: str,
     entry_binding: dict[str, Any],
+    mode: str,
     unreachable: list[str],
 ) -> str:
     """Render a multi-graph capture as ``python_code``.
 
-    Standalone unless ``unreachable`` names frames the entry cannot reach, in
-    which case the artifact carries the whole Dynamo package and serves by
-    installing it (see _build_installed_forward). The readable half -- what was
-    captured, which frames, how many variants, what guards were dropped -- is
-    emitted as literals so a reviewer can diff it. The guard trees, the
-    transformed bytecode and the compiled subgraphs have no source form here, so
-    they go into the clearly bannered opaque blobs the inlined driver rebuilds
-    from.
+    An ``"installed"`` artifact carries the whole Dynamo package and serves by
+    installing it (see _build_installed_forward); ``unreachable`` names the
+    frames that made it so. The readable half -- what was captured, which
+    frames, how many variants, what guards were dropped -- is emitted as literals
+    so a reviewer can diff it. The guard trees, the transformed bytecode and the
+    compiled subgraphs have no source form here, so they go into the clearly
+    bannered opaque blobs the inlined driver rebuilds from.
     """
     from torch._functorch._aot_autograd.codegen import PySourceBuilder
 
     buf = PySourceBuilder()
     buf.writeline(_MULTIGRAPH_GENERATED_HEADER)
-    mode = "installed" if unreachable else "standalone"
     buf.writeline(_SERVING_NOTES[mode])
     buf.writeline("")
     buf.writeline("# " + "=" * 70)
@@ -2282,20 +2287,7 @@ def _build_multigraph_python_source(
     )
     buf.writeline(f"WONT_GENERALIZE = {tuple(summary.wont_generalize)!r}")
     buf.writeline("")
-    buf.writeline(
-        "# The entry's default arguments: a code object carries none, and the"
-    )
-    buf.writeline("# driver rebuilds the entry from one.")
-    try:
-        binding_blob = _b64(entry_binding)
-    except Exception as e:
-        raise PrecompileError(
-            f"precompile cannot carry {entry.fn_name!r}'s default arguments in the "
-            f"artifact; defaults must be picklable ({type(e).__name__}: {e})."
-        ) from e
-    buf.writeline(f"_ENTRY_BINDING = {binding_blob!r}")
-    buf.writeline("")
-    if unreachable:
+    if mode == "installed":
         buf.writeline("# Frames entered by an ordinary call; served by installing.")
         buf.writeline(f"UNREACHABLE_WITHOUT_INSTALL = {unreachable!r}")
         buf.writeline("")
@@ -2315,6 +2307,19 @@ def _build_multigraph_python_source(
         buf.writeline("# " + "=" * 70)
         buf.writeline(_emit_multigraph_driver_source("_build_installed_forward"))
         return buf.getvalue()
+    buf.writeline(
+        "# The entry's default arguments: a code object carries none, and the"
+    )
+    buf.writeline("# driver rebuilds the entry from one.")
+    try:
+        binding_blob = _b64(entry_binding)
+    except Exception as e:
+        raise PrecompileError(
+            f"precompile cannot carry {entry.fn_name!r}'s default arguments in the "
+            f"artifact; defaults must be picklable ({type(e).__name__}: {e})."
+        ) from e
+    buf.writeline(f"_ENTRY_BINDING = {binding_blob!r}")
+    buf.writeline("")
     buf.writeline("# " + "=" * 70)
     buf.writeline("# 2. Guard trees and transformed bytecode -- OPAQUE")
     buf.writeline("#")
@@ -2364,7 +2369,8 @@ def _build_multigraph_artifact(
     """``(python_code, cache)`` for a multi-graph capture.
 
     python_code is self-contained -- it carries the frames, the guard trees and
-    the compiled subgraphs -- so cache is the same acceleration it is for the
+    the compiled subgraphs, or for an installed artifact the pickled
+    ``CompilePackage`` state in ``_PACKAGE`` -- so cache is the same acceleration it is for the
     make_fx form: the inductor bundle that primes the kernel caches, and the tag
     binding it to this python_code (invariant 7). The bundle is whatever
     ``CacheArtifactManager`` recorded, so the caller must have run the capture
@@ -2372,19 +2378,13 @@ def _build_multigraph_artifact(
     """
     frames = _multigraph_frames(entry)
     # First: an entry with no variant reaches nothing, which the unreachable
-    # check below would misreport as a graph break to move.
+    # check below would misread as frames that need installing.
     _reject_uninstallable_entry(frames, entry)
-    reachable = _reachable_frames(frames)
-    unreachable = sorted(
-        f"{frame['python_module']}.{frame['code'].co_name}"
-        for i, frame in enumerate(frames)
-        if frame["variants"] and i not in reachable
-    )
-    # A frame with variants the entry cannot reach would run eager under the
-    # standalone dispatcher, silently giving up the compiled variant, so such a
-    # capture is served by installing instead.
+    unreachable = _unreachable_frames(frames)
+    mode = "installed" if unreachable else "standalone"
+    binding = _entry_binding(entry_fn)
     python_code = _build_multigraph_python_source(
-        entry, frames, backends, summary, backend, _entry_binding(entry_fn), unreachable
+        entry, frames, backends, summary, backend, binding, mode, unreachable
     )
     inductor_bundle = None
     if backend != "eager":
@@ -2529,6 +2529,7 @@ class PrecompiledModule(PrecompiledRunnable):
         forward: Callable[..., object],
         *,
         backend: str,
+        installed: bool = False,
     ) -> PrecompiledModule:
         """Build a runnable from load()'s reconstructed forward.
 
@@ -2541,6 +2542,7 @@ class PrecompiledModule(PrecompiledRunnable):
         """
         obj = cls(None, backend=backend)  # type: ignore[arg-type]
         obj._loaded_forward = forward
+        obj.installed = installed
         return obj
 
     def _compile(self, args: tuple[object, ...]) -> None:
@@ -3125,7 +3127,8 @@ def _runnable_from_pair(
     # a separate runtime.
     forward = _make_inlined_forward(python_code, warn=not _trusted)
 
-    return PrecompiledModule._from_loaded(forward, backend=backend)
+    installed = meta["SERVING_MODE"] == "installed"
+    return PrecompiledModule._from_loaded(forward, backend=backend, installed=installed)
 
 
 def capture(
@@ -3186,9 +3189,11 @@ def capture(
 
     A Dynamo artifact is STANDALONE: it rebuilds the entry from its code object
     and installs nothing, so ``fn`` must be a module-level function of an
-    importable module (not a closure, not defined in ``__main__``), and a frame
-    the entry cannot reach through a graph-break continuation -- a graph break
-    inside a child module's forward -- is refused at write time. It is locked
+    importable module (not a closure, not defined in ``__main__``). The
+    exception is a capture that compiled a frame the entry cannot reach through
+    a graph-break continuation -- a graph break inside a child module's forward:
+    its artifact has ``SERVING_MODE = "installed"`` and serves by installing the
+    captured entries onto the live code objects when loaded. It is locked
     to the producing Python version and torch build. The guards that could not
     be serialized are reported in the capture's ``summary()`` rather than
     checked, and the :class:`DynamoTracer` ``require_*`` gates refuse the risky

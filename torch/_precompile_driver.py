@@ -46,7 +46,7 @@ if TYPE_CHECKING:
     _BACKENDS: str = ""
     _ENTRY_BINDING: str = ""
     # An installed artifact carries the pickled Dynamo package and its backend
-    # artifacts instead of _FRAMES/_BACKENDS.
+    # artifacts instead of _FRAMES/_BACKENDS/_ENTRY_BINDING.
     _PACKAGE: str = ""
     BACKEND: str = ""
     FN_NAME: str = ""
@@ -556,10 +556,8 @@ def _build_multigraph_forward():
         if not frame["variants"]:
             # Nothing to dispatch, for one of two reasons the coverage-gap
             # error below would misdiagnose: adding examples fixes neither.
-            # _serving_mode sends a capture that reaches such a frame to
-            # installed serving, so in a standalone artifact the record is dead
-            # unless it is the entry; a dead continuation must still bind its
-            # resume names, so its refusal is deferred to a call.
+            # A continuation must still bind its resume names, so its refusal
+            # is deferred to a call that reaches it.
             if frame["bypassed"]:
                 cause = (
                     "was BYPASSED during capture (its guards could not be "

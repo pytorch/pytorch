@@ -348,8 +348,8 @@ class TestPrecompile(TestCase):
             ),
             "installed": (
                 "TRACER = 'dynamo'\nSERVING_MODE = 'installed'\n",
-                ["_PACKAGE", "UNREACHABLE_WITHOUT_INSTALL", "_ENTRY_BINDING"],
-                ["OUT_SPEC", "_FRAMES", "_BACKENDS"],
+                ["_PACKAGE", "UNREACHABLE_WITHOUT_INSTALL", "TORCH_VERSION"],
+                ["OUT_SPEC", "_FRAMES", "_BACKENDS", "_ENTRY_BINDING"],
             ),
         }[mode]
         with self.assertRaises(PrecompileError) as cm:
@@ -542,7 +542,7 @@ class TestPrecompile(TestCase):
         # (nested code objects included), so carrying a resume name is not
         # enough: one named only by an unreachable helper is just as dead.
         from torch._dynamo.package import SerializedCode
-        from torch._precompile import _reachable_frames, _serving_mode
+        from torch._precompile import _reachable_frames, _unreachable_frames
 
         ns = {}
         exec(
@@ -575,13 +575,14 @@ class TestPrecompile(TestCase):
         stray = frame("cont_b", ["__resume_at_7_7"])
         frames = [entry, cont_a, cont_b, helper, orphan, stray]
         self.assertEqual(_reachable_frames(frames), {0, 1, 2})
-        self.assertEqual(_serving_mode(frames), "installed")
-        self.assertEqual(_serving_mode([entry, cont_a, cont_b]), "standalone")
-        # A reachable continuation with no variant (bypassed) would raise on the
-        # captured path in a standalone artifact, so that capture installs.
+        dead = ["m.cont_b", "m.cont_b", "m.helper"]
+        self.assertEqual(_unreachable_frames(frames), dead)
+        self.assertEqual(_unreachable_frames([entry, cont_a, cont_b]), [])
+        # A reachable continuation with no variant (bypassed) keeps the capture
+        # standalone: the driver refuses it when a call reaches it.
         bypassed = frame("cont_a", ["__resume_at_12_3"], nvariants=0)
         self.assertEqual(_reachable_frames([entry, bypassed, cont_b]), {0, 1})
-        self.assertEqual(_serving_mode([entry, bypassed, cont_b]), "installed")
+        self.assertEqual(_unreachable_frames([entry, bypassed]), [])
 
     def test_no_dispatchable_graph_names_the_cause(self):
         # An entry frame with no variants has two very different causes. If
@@ -667,7 +668,7 @@ class TestPrecompile(TestCase):
         )
         from torch._dynamo.precompile_context import EagerCacheArtifact
         from torch._dynamo.precompile_package import default_guard_filter_fn
-        from torch._precompile import _b64, _multigraph_frames, _serving_mode
+        from torch._precompile import _b64, _multigraph_frames, _unreachable_frames
 
         def step(model, x, *rest, scale=2.0):
             return model(x) * scale * _MULTIGRAPH_SCALE + len(rest)
@@ -684,7 +685,7 @@ class TestPrecompile(TestCase):
         expected_rest = compiled(model, x, torch.ones(1))
         self.assertNotEqual(expected, expected_rest)
         frames = _multigraph_frames(package.cache_entry())
-        self.assertEqual(_serving_mode(frames), "standalone")
+        self.assertEqual(_unreachable_frames(frames), [])
         self.assertEqual([len(f["variants"]) for f in frames], [2])
         backends = {
             backend_id: EagerCacheArtifact(key=backend_id, content=backend)
@@ -782,7 +783,7 @@ class TestPrecompile(TestCase):
         from torch._dynamo.package import CompilePackage
         from torch._dynamo.precompile_context import EagerCacheArtifact
         from torch._dynamo.precompile_package import default_guard_filter_fn
-        from torch._precompile import _b64, _multigraph_frames, _serving_mode
+        from torch._precompile import _b64, _multigraph_frames, _unreachable_frames
 
         def step(model, x, *rest, scale=2.0):
             y = model(x) * scale * _MULTIGRAPH_SCALE
@@ -811,7 +812,7 @@ class TestPrecompile(TestCase):
         self.assertNotEqual(expected, expected_rest)
         frames = _multigraph_frames(package.cache_entry())
         shape = [(f["bypassed"], len(f["variants"])) for f in frames]
-        self.assertEqual(_serving_mode(frames), "standalone", shape)
+        self.assertEqual(_unreachable_frames(frames), [], shape)
         self.assertGreater(len(frames[1]["variants"]), 1)
         backends = {
             backend_id: EagerCacheArtifact(key=backend_id, content=backend)
@@ -2913,7 +2914,7 @@ class TestPrecompile(TestCase):
         from torch._dynamo.package import CompilePackage
         from torch._dynamo.precompile_context import EagerCacheArtifact
         from torch._dynamo.precompile_package import default_guard_filter_fn
-        from torch._precompile import _b64, _multigraph_frames, _serving_mode
+        from torch._precompile import _b64, _multigraph_frames, _unreachable_frames
 
         def no_tensor(model, x):
             (model(x) * _MULTIGRAPH_SCALE).sum().backward()
@@ -2940,11 +2941,7 @@ class TestPrecompile(TestCase):
         self.assertEqual([f["trivial"] for f in frames[:2]], [False, True])
         self.assertTrue(all(f["trivial"] for f in frames[1:]))
         self.assertEqual([len(f["variants"]) for f in frames[:2]], [1, 0])
-        self.assertEqual(_serving_mode(frames), "standalone")
-        # A bypassed continuation still sends the capture to installing.
-        frames[1].update(trivial=False, bypassed=True)
-        self.assertEqual(_serving_mode(frames), "installed")
-        frames[1].update(trivial=True, bypassed=False)
+        self.assertEqual(_unreachable_frames(frames), [])
         backends = {
             backend_id: EagerCacheArtifact(key=backend_id, content=backend)
             for backend_id, backend in package.cached_backends.items()
@@ -4644,22 +4641,27 @@ _GOLDEN_LOADER = """
 import sys
 import torch
 
-tmp, module, artifact, cache, state = sys.argv[1:6]
+tmp, module, artifact, cache, state, mode = sys.argv[1:7]
 sys.path.insert(0, tmp)
 mod = __import__(module)
 saved = torch.load(state)
 model = mod.Model()
 model.load_state_dict(saved["state_dict"])
 f = torch.compiler.precompile.load(artifact, cache)
+assert f.installed == (mode == "installed"), (f.installed, mode)
 for args, kwargs, expected in saved["calls"]:
     torch.testing.assert_close(f(model, *args, **kwargs), expected)
 for name, grad in saved["grads"].items():
     torch.testing.assert_close(model.get_parameter(name).grad, grad)
+# An installed artifact serves under the fail_on_recompile stance.
+error, message = {
+    "standalone": (torch.compiler.PrecompileError, "no captured variant"),
+    "installed": (RuntimeError, "fail_on_recompile"),
+}[mode]
 try:
     f(model, saved["calls"][0][0][0].double())
-except (torch.compiler.PrecompileError, RuntimeError) as e:
-    # An installed artifact serves under the fail_on_recompile stance.
-    assert "no captured variant" in str(e) or "fail_on_recompile" in str(e), e
+except error as e:
+    assert message in str(e), e
 else:
     raise AssertionError("an uncovered call was served")
 print("served")
@@ -4694,7 +4696,7 @@ class TestPrecompileDynamoCapture(TestCase):
     def _capture(self, fn, **kwargs):
         return capture(fn, artifact_path=self.artifact, cache_path=self.cache, **kwargs)
 
-    def _serve_in_fresh_process(self, calls, grads=None):
+    def _serve_in_fresh_process(self, calls, grads=None, mode="standalone"):
         state = os.path.join(self.dir, "state.pt")
         saved = {
             "state_dict": self.model.state_dict(),
@@ -4702,7 +4704,7 @@ class TestPrecompileDynamoCapture(TestCase):
             "grads": grads or {},
         }
         torch.save(saved, state)
-        argv = [self.dir, self.module_name, self.artifact, self.cache, state]
+        argv = [self.dir, self.module_name, self.artifact, self.cache, state, mode]
         out = subprocess.run(
             [sys.executable, "-c", _GOLDEN_LOADER, *argv],
             capture_output=True,
@@ -4773,8 +4775,14 @@ class TestPrecompileDynamoCapture(TestCase):
         with open(self.artifact) as f:
             python_code = f.read()
         self.assertIn('SERVING_MODE = "installed"', python_code)
-        self.assertIn("breaking_helper", python_code)
-        self._serve_in_fresh_process([((self.x2,), {}, y2), ((self.x3,), {}, y3)])
+        # The helper and its own graph-break continuation, named at the break.
+        line = self.mod.breaking_helper.__code__.co_firstlineno + 2
+        helper = f"{self.module_name}.breaking_helper"
+        cont = f"{self.module_name}.torch_dynamo_resume_in_breaking_helper_at_{line}"
+        unreachable = f"\nUNREACHABLE_WITHOUT_INSTALL = {[helper, cont]!r}\n"
+        self.assertIn(unreachable, python_code)
+        calls = [((self.x2,), {}, y2), ((self.x3,), {}, y3)]
+        self._serve_in_fresh_process(calls, mode="installed")
 
     @parametrize("backend", ["inductor", "eager"])
     def test_a_single_graph_serves_in_process(self, backend):
