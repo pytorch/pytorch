@@ -12,7 +12,7 @@ from typing import Any, TYPE_CHECKING, TypeGuard
 import pytest
 from _pytest.config import Config, filename_arg
 from _pytest.config.argparsing import Parser
-from _pytest.junitxml import _NodeReporter, bin_xml_escape, LogXML
+from _pytest.junitxml import _NodeReporter, bin_xml_escape, LogXML, mangle_test_address
 from _pytest.python import Module
 from _pytest.reports import TestReport
 from _pytest.stash import StashKey
@@ -174,7 +174,27 @@ def pytest_unconfigure(config: Config) -> None:
         config.pluginmanager.unregister(xml)
 
 
+def _pytest_testcase_identity(report: TestReport) -> tuple[str, str]:
+    names = mangle_test_address(report.nodeid)
+    class_parts = names[1:-1]
+    filename = report.location[0].replace("\\", "/").removeprefix("test/")
+    classname = (
+        ".".join(class_parts)
+        if class_parts
+        else os.path.splitext(os.path.basename(filename))[0]
+    )
+    return classname, filename
+
+
 class _NodeReporterReruns(_NodeReporter):
+    def record_testreport(self, testreport: TestReport) -> None:
+        super().record_testreport(testreport)
+        classname, filename = _pytest_testcase_identity(testreport)
+        if self.xml.prefix:
+            classname = f"{self.xml.prefix}.{classname}"
+        self.attrs["classname"] = classname
+        self.attrs["file"] = filename
+
     def _prepare_content(self, content: str, header: str) -> str:
         return content
 
