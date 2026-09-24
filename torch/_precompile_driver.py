@@ -802,15 +802,31 @@ def _build_installed_forward():
         ) from _e
 
     def forward(*args, **kwargs):
+        # A compiling stance replaces this callable's callback on entry
+        # (_callback_from_stance), which would drop the refusal.
+        stance = torch._dynamo.eval_frame._stance
+        if stance.backend is not None or stance.stance in (
+            "eager_then_compile",
+            "aot_eager_then_compile",
+        ):
+            raise _PrecompileError(
+                f"precompile: an installed artifact cannot serve under the "
+                f"process-wide stance {stance.stance!r} (force_backend="
+                f"{stance.backend!r}), which would compile the calls the "
+                f"capture did not cover."
+            )
         try:
             return compiled(*args, **kwargs)
         except RuntimeError as _e:
             if "stance is 'fail_on_recompile'" not in str(_e):
                 raise
             raise _PrecompileError(
-                f"precompile: no captured variant matches this call: the "
-                f"artifact serves only what capture exercised, so add an "
-                f"example covering it and recapture. Dynamo reported: {_e}"
+                f"precompile: no captured variant matches this call. Either a "
+                f"guard on the call's arguments or on a module global the graph "
+                f"baked in no longer holds (restore that environment), or this "
+                f"call shape was never captured: the artifact serves only what "
+                f"capture exercised, so add an example covering it and "
+                f"recapture. Dynamo reported: {_e}"
             ) from None
 
     return forward

@@ -4637,11 +4637,28 @@ def calls_breaking_helper(model, x):
     return breaking_helper(model(x)) + 1
 
 
+RAISE = []
+
+
+@torch._dynamo.disable
+def maybe_raise():
+    if RAISE:
+        raise RuntimeError("raised by the served model")
+
+
+def raises_on_request(model, x):
+    y = breaking_helper(model(x))
+    maybe_raise()
+    return y + 1
+
+
 STANCES = []
 
 
 @torch._dynamo.disable
 def record_stance():
+    # A plain torch.compile mid-call, like another thread's, must still compile.
+    torch.compile(lambda t: t + 1, backend="eager")(torch.ones(1))
     STANCES.append(torch._dynamo.eval_frame._stance.stance)
 
 
@@ -4805,6 +4822,50 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertIn("served ['default']", stdout)
 
     @skipIfCrossRef
+    def test_an_installed_artifact_under_a_process_wide_stance(self):
+        fn = self.mod.calls_breaking_helper
+        with self._capture(fn, backend="eager") as cap:
+            cap(self.model, self.x2)
+        state = os.path.join(self.dir, "state.pt")
+        saved = {
+            "state_dict": self.model.state_dict(),
+            "x2": self.x2,
+            "x3": self.x3,
+            "y2": fn(self.model, self.x2),
+            "y3": fn(self.model, self.x3),
+        }
+        torch.save(saved, state)
+        script = (
+            "import sys, torch\n"
+            "sys.path.insert(0, sys.argv[1])\n"
+            "mod = __import__(sys.argv[4])\n"
+            "saved = torch.load(sys.argv[5])\n"
+            "model = mod.Model()\n"
+            "model.load_state_dict(saved['state_dict'])\n"
+            "f = torch.compiler.precompile.load(sys.argv[2], sys.argv[3])\n"
+            "compiling = [('default', {'force_backend': 'eager'}),\n"
+            "             ('eager_then_compile', {}), ('aot_eager_then_compile', {})]\n"
+            "for stance, kwargs in compiling:\n"
+            "    with torch.compiler.set_stance(stance, **kwargs):\n"
+            "        try:\n"
+            "            f(model, saved['x2'])\n"
+            "        except torch.compiler.PrecompileError as e:\n"
+            "            assert 'would compile' in str(e), e\n"
+            "        else:\n"
+            "            raise AssertionError(f'served under {stance}')\n"
+            "for stance in ('force_eager', 'eager_on_recompile'):\n"
+            "    with torch.compiler.set_stance(stance):\n"
+            "        torch.testing.assert_close(f(model, saved['x2']), saved['y2'])\n"
+            "        torch.testing.assert_close(f(model, saved['x3']), saved['y3'])\n"
+            "print('stances ok')\n"
+        )
+        argv = [self.dir, self.artifact, self.cache, self.module_name, state]
+        cmd = [sys.executable, "-c", script, *argv]
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("stances ok", out.stdout)
+
+    @skipIfCrossRef
     def test_an_installed_artifact_refuses_to_load_with_dynamo_disabled(self):
         fn = self.mod.calls_breaking_helper
         with self._capture(fn, backend="eager") as cap:
@@ -4821,12 +4882,8 @@ class TestPrecompileDynamoCapture(TestCase):
         )
         argv = [self.dir, self.artifact, self.cache]
         env = {**os.environ, "TORCHDYNAMO_DISABLE": "1"}
-        out = subprocess.run(
-            [sys.executable, "-c", script, *argv],
-            capture_output=True,
-            text=True,
-            env=env,
-        )
+        cmd = [sys.executable, "-c", script, *argv]
+        out = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=900)
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertIn("refused", out.stdout)
 
@@ -4849,10 +4906,45 @@ class TestPrecompileDynamoCapture(TestCase):
         )
         argv = [self.dir, self.artifact, self.cache]
         out = subprocess.run(
-            [sys.executable, "-c", script, *argv], capture_output=True, text=True
+            [sys.executable, "-c", script, *argv],
+            capture_output=True,
+            text=True,
+            timeout=900,
         )
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertIn("refused", out.stdout)
+
+    @skipIfCrossRef
+    def test_an_installed_artifact_passes_the_models_own_errors_through(self):
+        # Only Dynamo's fail_on_recompile refusal becomes a PrecompileError; a
+        # RuntimeError the served model raises on a covered call is its own.
+        fn = self.mod.raises_on_request
+        with self._capture(fn, backend="eager") as cap:
+            cap(self.model, self.x2)
+        script = (
+            "import sys, torch\n"
+            "sys.path.insert(0, sys.argv[1])\n"
+            "mod = __import__(sys.argv[4])\n"
+            "f = torch.compiler.precompile.load(sys.argv[2], sys.argv[3])\n"
+            "assert f.installed\n"
+            "mod.RAISE.append(True)\n"
+            "try:\n"
+            "    f(mod.Model(), torch.randn(2, 4))\n"
+            "except torch.compiler.PrecompileError as e:\n"
+            "    raise AssertionError(e) from None\n"
+            "except RuntimeError as e:\n"
+            "    assert str(e) == 'raised by the served model', e\n"
+            "    print('passed through')\n"
+        )
+        argv = [self.dir, self.artifact, self.cache, self.module_name]
+        out = subprocess.run(
+            [sys.executable, "-c", script, *argv],
+            capture_output=True,
+            text=True,
+            timeout=900,
+        )
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("passed through", out.stdout)
 
     @parametrize("backend", ["inductor", "eager"])
     def test_a_single_graph_serves_in_process(self, backend):
