@@ -319,6 +319,7 @@ void TensorImpl::release_resources() {
     storage_ = {};
   }
   if (extra_meta_) {
+    extra_meta_->real_tensor_.reset();
     extra_meta_->fake_tensor_mode_.reset();
   }
 }
