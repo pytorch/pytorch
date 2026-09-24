@@ -980,7 +980,6 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         if tuned:
             nvgemm_config.update(
                 nvgemm_max_profiling_configs=None,
-                nvgemm_nvfp4_max_profiling_configs=None,
                 nvgemm_supplement_configs=True,
                 nvgemm_swap_ab=True,
             )

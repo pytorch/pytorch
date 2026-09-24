@@ -22,13 +22,19 @@ from torch._inductor.custom_graph_pass import (
 )
 from torch._inductor.virtualized import ops  # noqa: F401
 from torch._logging import trace_structured
-from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
+from torch._prims_common import (
+    is_boolean_dtype,
+    is_expandable_to,
+    is_integer_dtype,
+    make_contiguous_strides_for,
+)
 from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config, ir, pattern_matcher  # noqa: F401
 from ..codegen.common import custom_backend_passes
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
+from ..kernel.symmetric_mm import quack_symmetric_mm
 from ..lowering import lowerings as L
 from ..pattern_matcher import (
     _return_true,
@@ -54,6 +60,7 @@ from ..pattern_matcher import (
 from ..utils import (
     _use_autotune_backend,
     decode_device,
+    ensure_cute_available,
     FOLDED_SCALED_MM_OUTPUT_SCALE,
     get_all_devices,
     get_gpu_type,
@@ -93,6 +100,52 @@ pass_patterns = [
     PatternMatcherPass(),
     PatternMatcherPass(),
 ]
+
+_QUACK_SYMMETRIC_ALIGNMENT = 8
+_QUACK_SYMMETRIC_MIN_M = 4096
+
+
+def _is_quack_symmetric_mm(match: Match) -> bool:
+    x = match.kwargs["x"].meta["val"]
+    if x.ndim not in (2, 3):
+        return False
+    dims = [1, 0] if x.ndim == 2 else [0, 2, 1]
+    # Contiguity and divisibility are TMA requirements. The dtype, architecture,
+    # minimum size, and aspect ratio limits are backed by BF16 GB200 benchmarks.
+    return (
+        match.kwargs["dims"] == dims
+        and x.device.type == "cuda"
+        and torch.version.hip is None
+        and not config.cpp_wrapper
+        and not config.fx_wrapper
+        and ensure_cute_available()
+        and x.dtype == torch.bfloat16
+        and statically_known_true(
+            sym_eq(x.stride(), make_contiguous_strides_for(x.shape))
+        )
+        and statically_known_true(x.shape[-2] >= _QUACK_SYMMETRIC_MIN_M)
+        and statically_known_true(x.shape[-1] >= x.shape[-2])
+        and statically_known_true(x.shape[-2] % _QUACK_SYMMETRIC_ALIGNMENT == 0)
+        and statically_known_true(x.shape[-1] % _QUACK_SYMMETRIC_ALIGNMENT == 0)
+        and torch.cuda.get_device_capability(x.device)[0] == 10
+    )
+
+
+@register_graph_pattern(
+    CallFunction(
+        [aten.mm.default, aten.bmm.default],
+        KeywordArg("x"),
+        CallFunction(
+            aten.permute.default,
+            KeywordArg("x"),
+            KeywordArg("dims"),
+        ),
+    ),
+    pass_dict=pass_patterns[0],  # pyrefly: ignore [bad-argument-type]
+    extra_check=_is_quack_symmetric_mm,
+)
+def _replace_quack_symmetric_mm(match: Match, x, dims):
+    match.replace_by_example(quack_symmetric_mm, [x])
 
 
 def _remove_profiler_ops(graph: torch.fx.Graph) -> None:
