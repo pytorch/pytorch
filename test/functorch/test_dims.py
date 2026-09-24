@@ -687,7 +687,8 @@ class TestMinDevice(_TestMinBase):
         super().tearDown()
 
     @unittest.skipIf(
-        not TEST_XPU and (IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW or IS_WINDOWS),
+        not (TEST_XPU and IS_LINUX)  # The test passes for XPU on Linux
+        and (IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW or IS_WINDOWS),
         "https://github.com/pytorch/pytorch/issues/86710",
     )
     def test_attn(self, device):
