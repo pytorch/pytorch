@@ -1308,6 +1308,28 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
             return self.call_function(tx, [pynumber_index(tx, arg) for arg in args], {})
 
+        @register(math.prod)
+        def handle_prod(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker | None:
+            if len(args) != 1 or kwargs.keys() - {"start"}:
+                return None
+
+            iterable = args[0]
+            if not isinstance(iterable, (ListVariable, TupleVariable)):
+                return None
+
+            start = kwargs.get("start")
+            if iterable.is_proxy() and (start is None or start.is_proxy()):
+                return None
+
+            return tx.inline_user_function_return(
+                VariableTracker.build(tx, polyfills.math_prod), list(args), kwargs
+            )
+
         @register(math.lcm)
         def handle_lcm(
             self,

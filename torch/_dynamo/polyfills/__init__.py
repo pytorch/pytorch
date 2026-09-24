@@ -409,6 +409,12 @@ def mapping_get(obj: Mapping[T, U], key: T, value: U | None = None, /) -> U | No
         return value
 
 
+def math_prod(iterable: Iterable[Any], /, *, start: Any = 1) -> Any:
+    for element in iterable:
+        start *= element
+    return start
+
+
 def instantiate_user_defined_class_object(
     cls: type[T], /, *args: Any, **kwargs: Any
 ) -> T:
