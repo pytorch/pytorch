@@ -1160,6 +1160,17 @@ with tempfile.TemporaryDirectory() as build_directory:
         pattern = r".*(\\n|\\r).*"
         self.assertNotRegex(str(e), pattern)
 
+    def test_cpp17_build_fails_with_clear_error(self):
+        # cpp_extension's own -std flag comes first, so a user flag wins.
+        std_flag = "/std:c++17" if IS_WINDOWS else "-std=c++17"
+        msg = r"C\+\+20 or later compatible compiler is required"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.utils.cpp_extension.load_inline(
+                name="test_cpp17_build_fails_with_clear_error",
+                cpp_sources="int f() { return 0; }",
+                extra_cflags=[std_flag],
+            )
+
     def test_warning(self):
         # Note: the module created from this source will include the py::key_error
         # symbol. But because of visibility and the fact that it lives in a
