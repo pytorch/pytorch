@@ -130,9 +130,14 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
                 if getattr(kernel.metadata.design, "tile_shape", (0, 64))[1] >= 64
             ]
 
+        def is_primary_variant(kernel) -> bool:
+            return not getattr(kernel.metadata.design, "use_prefetch", False)
+
+        primary_kernels = [kernel for kernel in kernels if is_primary_variant(kernel)]
+        fallback_kernels = primary_kernels or kernels
         fallback_count = count if fallback_count is None else fallback_count
         if not self.should_run(inputs):
-            return kernels[:fallback_count]
+            return fallback_kernels[:fallback_count]
 
         m, n, k = inputs.mnk_hinted()
         logical_m, logical_n = (n, m) if swap_ab else (m, n)
@@ -151,7 +156,7 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
                 "Could not extract kernel configs, using first %d kernels",
                 fallback_count,
             )
-            return kernels[:fallback_count]
+            return fallback_kernels[:fallback_count]
 
         heuristic_configs = self._get_heuristic_configs(
             m,
@@ -172,7 +177,7 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
             log.debug(
                 "No heuristic configs found, using first %d kernels", fallback_count
             )
-            return kernels[:fallback_count]
+            return fallback_kernels[:fallback_count]
 
         # Match kernels to each distinct heuristic config at its best estimate.
         config_runtimes: dict[ConfigKey, float] = {}
@@ -183,11 +188,6 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
             )
 
         matched: list[tuple] = []
-
-        def is_primary_variant(kernel) -> bool:
-            return config.nvgemm_prefetch == "1" or not getattr(
-                kernel.metadata.design, "use_prefetch", False
-            )
 
         for key, runtime in config_runtimes.items():
             kernels_for_key = config_to_kernels.get(key)
@@ -202,7 +202,7 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
                 "No kernels matched heuristic configs, using first %d kernels",
                 fallback_count,
             )
-            return kernels[:fallback_count]
+            return fallback_kernels[:fallback_count]
 
         matched.sort(key=lambda x: x[1])
         selected = matched[:count]

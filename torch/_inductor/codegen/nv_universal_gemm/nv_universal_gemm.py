@@ -50,6 +50,9 @@ from torch._logging import getArtifactLogger
 
 log = getArtifactLogger(__name__, "output_code")
 
+_NVFP4_MAX_PROFILING_CONFIGS = 3
+_NVFP4_AUTOTUNE_CUDAGRAPH_UNROLL = 16
+
 
 class GemmVariant(Enum):
     """
@@ -102,12 +105,33 @@ def _is_nvfp4_problem(
     )
 
 
+def _use_swap_ab_for_scaled_gemm(
+    input_dtype_a: torch.dtype,
+    input_dtype_b: torch.dtype,
+    scale_type_a: Any,
+    scale_type_b: Any,
+    logical_m: int,
+    logical_n: int,
+) -> bool:
+    return config.nvgemm_swap_ab or (
+        logical_m <= 256
+        and logical_n >= 1024
+        and _is_nvfp4_problem(
+            GemmVariant.SCALED_GEMM,
+            input_dtype_a,
+            input_dtype_b,
+            scale_type_a,
+            scale_type_b,
+        )
+    )
+
+
 def _nvgemm_max_configs(is_nvfp4: bool, available: int) -> int:
     general_limit = config.nvgemm_max_profiling_configs
     if not general_limit:
         return available
-    if is_nvfp4 and config.nvgemm_nvfp4_max_profiling_configs:
-        return min(general_limit, config.nvgemm_nvfp4_max_profiling_configs)
+    if is_nvfp4:
+        return min(general_limit, _NVFP4_MAX_PROFILING_CONFIGS)
     return general_limit
 
 
@@ -127,8 +151,8 @@ def _nvgemm_cudagraph_unroll(
     scoped value is intentionally limited to the decode-range NVFP4 cases
     measured in LLM inference. It is used when NVGEMM is the only backend or
     when the caller explicitly applies the same unroll to every mixed-backend
-    choice. Other mixed-backend problems, BF16, and larger GEMMs use one
-    invocation so every candidate has the same replay overhead.
+    choice. Other problems retain the global replay count so NVGEMM and
+    non-NVGEMM candidates in the same autotune decision stay comparable.
     """
     from torch._inductor.utils import _is_only_autotune_backend
 
@@ -144,16 +168,16 @@ def _nvgemm_cudagraph_unroll(
         and output_shape[0] <= 256
         and (_is_only_autotune_backend("NVGEMM") or allow_mixed_backend_unroll)
     ):
-        return config.nvgemm_autotune_cudagraph_unroll
-    return 1
+        return _NVFP4_AUTOTUNE_CUDAGRAPH_UNROLL
+    return max(1, config.autotune_cudagraph_benchmarking_iters)
 
 
 def _nvgemm_cold_cache_shape(
     output_shape: torch.Size | list[int] | tuple[int, ...],
 ) -> bool:
-    # Cold-weight benchmarking is opt-in.  Apply it uniformly to the small-M
-    # inference regime; the benchmarker derives the rotation-pool size from the
-    # actual operand footprint and device cache size.
+    # Apply cold-weight benchmarking uniformly to the small-M inference regime;
+    # the benchmarker derives the rotation-pool size from the actual operand
+    # footprint and device cache size.
     return len(output_shape) == 2 and 0 < output_shape[0] <= 256
 
 
@@ -206,8 +230,7 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
         from torch._inductor.utils import _is_only_autotune_backend
 
         self.cold_cache_benchmarking = (
-            config.nvgemm_autotune_cold_cache
-            and (_is_only_autotune_backend("NVGEMM") or has_output_scale)
+            (_is_only_autotune_backend("NVGEMM") or has_output_scale)
             and _is_nvfp4_problem(
                 variant,
                 self.input_tensor_meta[0].dtype,
@@ -687,6 +710,7 @@ class NVUniversalGemmCaller(ChoiceCaller):
                 "use_pdl",
                 getattr(self.kernel.metadata.design, "use_pdl", False),
             ),
+            "output_dtype": self.layout.dtype,
         }
         accumulator_type = self.accumulator_type
         workspace_size = self.workspace_size
@@ -1307,10 +1331,22 @@ def add_nv_universal_scaled_gemm_choices(
         output_scale_node=output_scale_node,
     )
 
-    # swap_ab: see add_nv_universal_gemm_choices for the rationale (swap A/B so
-    # the large N lands on the well-tiled M-axis for small-M shapes).
-    if not config.nvgemm_swap_ab:
-        return
+    # Automatically expose the transposed orientation for decode-shaped NVFP4
+    # problems. The existing config remains an opt-in for other scaled GEMMs.
+    if kernel_inputs is None:
+        if not config.nvgemm_swap_ab:
+            return
+    else:
+        m, n, _ = kernel_inputs.mnk_hinted()
+        if not _use_swap_ab_for_scaled_gemm(
+            kernel_inputs.dtype(kernel_inputs._mat1_idx),
+            kernel_inputs.dtype(kernel_inputs._mat2_idx),
+            scale_type_a,
+            scale_type_b,
+            m,
+            n,
+        ):
+            return
 
     # In the IR, mat_a=(M, K/2) row-major, mat_b=(K/2, N) column-major (already .t()).
     # swap_ab computes: un_transpose(mat_b) @ transpose(mat_a) = (N,K/2)@(K/2,M) = (N,M).
@@ -1338,7 +1374,7 @@ def add_nv_universal_scaled_gemm_choices(
     # Kernel output shape is (N, M) — the transpose of the original (M, N)
     swap_kernel_layout = _transposed_kernel_layout(layout)
 
-    # Rank against the transposed (N, M, K) problem.  Using the original
+    # Rank against the transposed (N, M, K) problem. Using the original
     # MMKernelInputs here hides the narrow-N tactics that make this transform
     # useful for decode-sized M.
     swap_inputs = MMKernelInputs(

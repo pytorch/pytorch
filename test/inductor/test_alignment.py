@@ -2,10 +2,16 @@
 import contextlib
 import sys
 import unittest
+from unittest.mock import patch
 
 import torch
 import torch._functorch.config as functorch_config
 from torch._inductor import config
+from torch._inductor.utils import (
+    _unstable_customized_partition_wrapper,
+    run_and_get_code,
+)
+from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     MACOS_VERSION,
@@ -159,6 +165,60 @@ class CommonTemplate:
 
         x = torch.randn(1025, device=self.device)
         self.common(f, (x,))
+
+    @config.patch(alignment_asserts_inputs=True)
+    @parametrize("misaligned", (False, True))
+    def test_input_alignment_asserts(self, misaligned):
+        if not torch._inductor.utils.is_gpu(self.device):
+            raise unittest.SkipTest("alignment asserts are GPU-only")
+
+        def fn(x, y):
+            return x * y
+
+        x = torch.randn(1025, device=self.device)[int(misaligned) :][:1024]
+        torch._dynamo.mark_static_address(x)
+        y = torch.randn(1024, device=self.device)
+        out, (code,) = run_and_get_code(torch.compile(fn), x, y)
+        self.assertEqual(out, fn(x, y))
+
+        FileCheck().check_count(
+            ", 16, 'input')", 1 if misaligned else 2, exactly=True
+        ).run(code)
+
+    @parametrize("wrapper", ("python", "fx", "custom_partition"))
+    def test_input_alignment_assert_fires_instead_of_clone(self, wrapper):
+        if not torch._inductor.utils.is_gpu(self.device):
+            raise unittest.SkipTest("alignment asserts are GPU-only")
+
+        def fn(x):
+            return x + 1
+
+        if wrapper == "custom_partition":
+            wrapper_patch = patch.object(
+                _unstable_customized_partition_wrapper, "wrapper", lambda fn, _: fn
+            )
+            wrapper_patch.start()
+            self.addCleanup(wrapper_patch.stop)
+
+        fn_c = torch.compile(
+            fn,
+            options={
+                "alignment_asserts_inputs": True,
+                "fx_wrapper": wrapper == "fx",
+                "triton.cudagraphs": False,
+                "graph_partition": wrapper.endswith("partition"),
+            },
+        )
+        # Compile with an aligned input. One element avoids a misaligned vector
+        # load if the assertion is missing.
+        x = torch.randn(1, device=self.device)
+        self.assertEqual(fn_c(x), fn(x))
+
+        # storage_offset is not guarded on, so a misaligned input hits the
+        # same graph; in strict mode it errors instead of being cloned
+        y = torch.randn(2, device=self.device)[1:]
+        with self.assertRaisesRegex(AssertionError, "bytes aligned"):
+            fn_c(y)
 
     def test_alias_of_misaligned_input(self):
         # chunk on a dynamic dim gives the aliased output a symbolic
