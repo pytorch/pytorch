@@ -92,6 +92,10 @@ class StrPrinter {
         return stringify(e->args, " | ", kBitwiseOr);
       case Kind::Mod:
       case Kind::PythonMod:
+      case Kind::PowByNatural:
+      case Kind::FloatPow:
+      case Kind::FloatTrueDiv:
+      case Kind::IntTrueDiv:
         // _print_Function.
         return std::string(function_name(e->kind)) + "(" +
             stringify(e->args, ", ", 0) + ")";
@@ -151,8 +155,14 @@ class StrPrinter {
       case Kind::PythonMod:
       case Kind::FloorDiv:
       case Kind::CleanDiv:
+      case Kind::FloatTrueDiv:
+      case Kind::IntTrueDiv:
         // The classes' precedence attribute.
         return 35;
+      case Kind::PowByNatural:
+        return kMul;
+      case Kind::FloatPow:
+        return kPow;
       default:
         return kAtom;
     }

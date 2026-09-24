@@ -20,7 +20,11 @@ constexpr Kind kFunctionKinds[] = {
     Kind::FloorDiv,
     Kind::CleanDiv,
     Kind::Max,
-    Kind::Min};
+    Kind::Min,
+    Kind::PowByNatural,
+    Kind::FloatPow,
+    Kind::FloatTrueDiv,
+    Kind::IntTrueDiv};
 
 // Python-side state for an ExprArena: the sympy Symbol objects that native
 // symbols came from and a conversion cache (conversion is pure per Expr).
@@ -310,7 +314,11 @@ py::object PyArena::to_sympy(const Expr* e) {
     case Kind::FloorDiv:
     case Kind::CleanDiv:
     case Kind::Max:
-    case Kind::Min: {
+    case Kind::Min:
+    case Kind::PowByNatural:
+    case Kind::FloatPow:
+    case Kind::FloatTrueDiv:
+    case Kind::IntTrueDiv: {
       py::tuple args(e->args.size());
       for (size_t i = 0; i < e->args.size(); ++i) {
         args[i] = to_sympy(e->args[i]);
@@ -372,6 +380,10 @@ const char* kind_name(Kind k) {
     case Kind::CleanDiv:
     case Kind::Max:
     case Kind::Min:
+    case Kind::PowByNatural:
+    case Kind::FloatPow:
+    case Kind::FloatTrueDiv:
+    case Kind::IntTrueDiv:
       return function_name(k);
   }
   return "?";
@@ -594,6 +606,12 @@ void initSymbolicBindings(PyObject* module) {
                 self,
                 self->arena->function(
                     function_kind(name), unwrap_all(self, args)));
+          })
+      .def(
+          "ceildiv",
+          [wrap](const Self& self, const PyExpr& a, const PyExpr& b) {
+            return wrap(
+                self, self->arena->ceildiv(unwrap(self, a), unwrap(self, b)));
           })
       .def(
           "logical_not",

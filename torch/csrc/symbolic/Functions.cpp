@@ -152,6 +152,14 @@ const char* function_name(Kind k) {
       return "Max";
     case Kind::Min:
       return "Min";
+    case Kind::PowByNatural:
+      return "PowByNatural";
+    case Kind::FloatPow:
+      return "FloatPow";
+    case Kind::FloatTrueDiv:
+      return "FloatTrueDiv";
+    case Kind::IntTrueDiv:
+      return "IntTrueDiv";
     default:
       throw NativeUnsupported("not a function kind");
   }
@@ -179,6 +187,22 @@ const Expr* ExprArena::function(Kind kind, c10::ArrayRef<const Expr*> args) {
     case Kind::FloorDiv:
     case Kind::CleanDiv:
       r = eval_floordiv(args[0], args[1]);
+      break;
+    case Kind::PowByNatural:
+      r = eval_pow_by_natural(args[0], args[1]);
+      break;
+    case Kind::FloatTrueDiv:
+    case Kind::IntTrueDiv:
+      if (ask(args[1], Fact::zero) == Tri::True) {
+        throw NativeUnsupported("division by zero");
+      }
+      [[fallthrough]];
+    case Kind::FloatPow:
+      // The folds of numbers return sympy.Floats. IntTrueDiv leaves finite
+      // non-Integer numbers unevaluated, which the port rejects as well.
+      if (args[0]->is_number() && args[1]->is_number()) {
+        throw NativeUnsupported("function of numbers gives a Float");
+      }
       break;
     default:
       throw NativeUnsupported("not a function kind");
@@ -326,6 +350,101 @@ const Expr* ExprArena::eval_floordiv(const Expr* base, const Expr* divisor) {
     return function(Kind::FloorDiv, {b, d});
   }
   return nullptr;
+}
+
+const Expr* ExprArena::eval_pow_by_natural(const Expr* base, const Expr* exp) {
+  if (base->kind == Kind::Integer && exp->kind == Kind::Integer) {
+    if (exp->p < 0) {
+      throw NativeUnsupported("Exponent must be non-negative.");
+    }
+    // safe_pow; std::nullopt is int_oo.
+    constexpr i128 kMaxSize = std::numeric_limits<int64_t>::max();
+    auto safe_pow = [&](auto& self, i128 b, int64_t e) -> std::optional<i128> {
+      if (e == 0) {
+        return 1;
+      }
+      std::optional<i128> half = self(self, b, e / 2);
+      if (!half || *half * *half > kMaxSize) {
+        return std::nullopt;
+      }
+      i128 r = *half * *half;
+      if (e % 2 == 1) {
+        r *= b;
+        if (r > kMaxSize) {
+          return std::nullopt;
+        }
+      }
+      return r;
+    };
+    bool negative = base->p < 0 && exp->p % 2 == 1;
+    std::optional<i128> r =
+        safe_pow(safe_pow, base->p < 0 ? -i128(base->p) : base->p, exp->p);
+    if (!r) {
+      return negative ? neg_int_oo_ : int_oo_;
+    }
+    return integer(static_cast<int64_t>(negative ? -*r : *r));
+  }
+  if (exp->kind == Kind::Integer) {
+    return pow(base, exp);
+  }
+  if (exp == int_oo_) {
+    if (ask(base, Fact::nonnegative) == Tri::True) {
+      return int_oo_;
+    }
+    if (ask(base, Fact::negative) == Tri::True) {
+      throw NativeUnsupported("PowByNatural gives zoo");
+    }
+  }
+  return nullptr;
+}
+
+const Expr* ExprArena::ceildiv(const Expr* base, const Expr* divisor) {
+  // CeilDiv.__new__. sympy.gcd(base, divisor) == divisor is decided for
+  // polynomials with Integer coefficients and a monomial divisor, where it
+  // holds iff the divisor's coefficient is positive (sympy.gcd normalizes the
+  // sign) and the divisor divides every term of base. The exception 0/0
+  // raises either way.
+  auto terms = make_args(Kind::Add, base);
+  if (!std::all_of(terms.begin(), terms.end(), is_monomial)) {
+    throw NativeUnsupported("CeilDiv needs sympy.gcd");
+  }
+  auto exponent = [](const Expr* term, const Expr* x) -> int64_t {
+    for (const Expr* f : make_args(Kind::Mul, term)) {
+      if (f == x) {
+        return 1;
+      }
+      if (f->kind == Kind::Pow && f->args[0] == x) {
+        return f->args[1]->p;
+      }
+    }
+    return 0;
+  };
+  bool is_gcd = false;
+  if (is_monomial(divisor)) {
+    int64_t c = as_coeff_Mul(divisor).first->p;
+    auto factors = make_args(Kind::Mul, divisor);
+    is_gcd = c > 0 &&
+        (base == zero_ ||
+         std::all_of(terms.begin(), terms.end(), [&](const Expr* t) {
+           return as_coeff_Mul(t).first->p % c == 0 &&
+               std::all_of(factors.begin(), factors.end(), [&](auto f) {
+                    const Expr* x = f->kind == Kind::Pow ? f->args[0] : f;
+                    return f->kind == Kind::Integer ||
+                        exponent(t, x) >= exponent(f, x);
+                  });
+         }));
+  } else if (
+      divisor->kind != Kind::Add ||
+      !std::all_of(divisor->args.begin(), divisor->args.end(), is_monomial) ||
+      base == zero_ || base->kind == Kind::Add) {
+    // A nonzero monomial has only monomial divisors.
+    throw NativeUnsupported("CeilDiv needs sympy.gcd");
+  }
+  if (is_gcd) {
+    return function(Kind::CleanDiv, {base, divisor});
+  }
+  return function(
+      Kind::FloorDiv, {add({base, add({divisor, neg_one_})}), divisor});
 }
 
 const Expr* ExprArena::minmax(

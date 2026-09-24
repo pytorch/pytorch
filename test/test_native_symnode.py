@@ -15,7 +15,19 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TestCase,
 )
-from torch.utils._sympy.functions import CleanDiv, FloorDiv, Max, Min, Mod, PythonMod
+from torch.utils._sympy.functions import (
+    CeilDiv,
+    CleanDiv,
+    FloatPow,
+    FloatTrueDiv,
+    FloorDiv,
+    IntTrueDiv,
+    Max,
+    Min,
+    Mod,
+    PowByNatural,
+    PythonMod,
+)
 from torch.utils._sympy.numbers import int_oo
 
 
@@ -938,25 +950,39 @@ class TestNativeFunctions(TestCase):
         "CleanDiv": CleanDiv,
         "Max": Max,
         "Min": Min,
+        "PowByNatural": PowByNatural,
+        "FloatPow": FloatPow,
+        "FloatTrueDiv": FloatTrueDiv,
+        "IntTrueDiv": IntTrueDiv,
     }
+    NODE_TYPES = (Mod, PythonMod, FloorDiv, Max, Min, PowByNatural, FloatPow)
+    NODE_TYPES += (FloatTrueDiv, IntTrueDiv)
+    PYTHON_ERRORS = (ZeroDivisionError, AssertionError, TypeError, ValueError)
+    PYTHON_ERRORS += (OverflowError,)
 
     def check_call(self, name, *xs):
         """Returns the sympy result, or None if native raised
-        NativeUnsupported."""
+        NativeUnsupported. CeilDiv is a constructor, not a function kind."""
         arena = torch._C._symbolic._Arena()
         call = f"{name}{xs}"
         try:
             args = [arena.from_sympy(x) for x in xs]
         except NativeUnsupported:
             return None
+
+        def native():
+            if name == "CeilDiv":
+                return arena.ceildiv(*args)
+            return arena.function(name, args)
+
         try:
-            expected = self.FUNCTIONS[name](*xs)
-        except (ZeroDivisionError, AssertionError, TypeError, ValueError):
+            expected = (CeilDiv if name == "CeilDiv" else self.FUNCTIONS[name])(*xs)
+        except self.PYTHON_ERRORS:
             with self.assertRaises(NativeUnsupported, msg=call):
-                arena.function(name, args)
+                native()
             return None
         try:
-            r = arena.function(name, args)
+            r = native()
         except NativeUnsupported:
             return None
         got = arena.to_sympy(r)
@@ -1055,6 +1081,54 @@ class TestNativeFunctions(TestCase):
             ("CleanDiv", s0 * s1, s1, s0),
             ("CleanDiv", s0, s1, CleanDiv(s0, s1)),
             ("CleanDiv", 2 * s0 + 2, 2, s0 + 1),
+            ("PowByNatural", 2, 62, 2**62),
+            ("PowByNatural", 2, 63, int_oo),
+            ("PowByNatural", -2, 63, -int_oo),
+            ("PowByNatural", -2, 64, int_oo),
+            ("PowByNatural", -(2**63), 1, -int_oo),
+            ("PowByNatural", 3037000499, 2, 3037000499**2),
+            ("PowByNatural", 3037000500, 2, int_oo),
+            ("PowByNatural", -3, 3, -27),
+            ("PowByNatural", 0, 0, 1),
+            ("PowByNatural", 0, 5, 0),
+            ("PowByNatural", 1, 2**62, 1),
+            ("PowByNatural", -1, 2**62 + 1, -1),
+            ("PowByNatural", s0, 2, s0**2),
+            ("PowByNatural", s0, 0, 1),
+            ("PowByNatural", s0, -1, 1 / s0),
+            ("PowByNatural", sympy.Rational(1, 2), 3, sympy.Rational(1, 8)),
+            ("PowByNatural", s0, int_oo, int_oo),
+            ("PowByNatural", sympy.Rational(1, 2), int_oo, int_oo),
+            ("PowByNatural", 0, int_oo, int_oo),
+            ("PowByNatural", u0, int_oo, PowByNatural(u0, int_oo)),
+            ("PowByNatural", s0, -int_oo, PowByNatural(s0, -int_oo)),
+            ("PowByNatural", 2, s0, PowByNatural(2, s0)),
+            ("PowByNatural", s0, s1, PowByNatural(s0, s1)),
+            ("PowByNatural", int_oo, s0, PowByNatural(int_oo, s0)),
+            ("FloatPow", s0, 2, FloatPow(s0, 2)),
+            ("FloatPow", zf, s0, FloatPow(zf, s0)),
+            ("FloatTrueDiv", s0, s1, FloatTrueDiv(s0, s1)),
+            ("FloatTrueDiv", s0, int_oo, FloatTrueDiv(s0, int_oo)),
+            ("FloatTrueDiv", 1, zf, FloatTrueDiv(1, zf)),
+            ("IntTrueDiv", s0, 2, IntTrueDiv(s0, 2)),
+            ("IntTrueDiv", s0 + 1, s1, IntTrueDiv(s0 + 1, s1)),
+            ("CeilDiv", 4 * s0, 2, 2 * s0),
+            ("CeilDiv", 4 * s0 + 2, 4, s0 + 1),
+            ("CeilDiv", 2 * s0, 4, FloorDiv(2 * s0 + 3, 4)),
+            ("CeilDiv", 0, -2, 1),
+            ("CeilDiv", 0, 2 * s0, 0),
+            ("CeilDiv", 0, -2 * s0, FloorDiv(-2 * s0 - 1, -2 * s0)),
+            ("CeilDiv", 7, 2, 4),
+            ("CeilDiv", -7, 2, -3),
+            ("CeilDiv", 6, 3, 2),
+            ("CeilDiv", 6, -3, -1),
+            ("CeilDiv", s0, 1, s0),
+            ("CeilDiv", s0, -1, 2 - s0),
+            ("CeilDiv", s0 * s1, s0, s1),
+            ("CeilDiv", 4 * s0**2, 2 * s0, FloorDiv(2 * s0**2, s0)),
+            ("CeilDiv", s0**2 * s1 + s0, s0, CleanDiv(s0**2 * s1 + s0, s0)),
+            ("CeilDiv", s0, s1, FloorDiv(s0 + s1 - 1, s1)),
+            ("CeilDiv", s0, s0 + 1, FloorDiv(2 * s0, s0 + 1)),
         ]
         for name, a, b, expected in cases:
             got = self.check_call(name, sympy.sympify(a), sympy.sympify(b))
@@ -1078,11 +1152,33 @@ class TestNativeFunctions(TestCase):
             ("FloorDiv", s0, s0 * s1 + s0),
             ("FloorDiv", s0 + 1, s1 + 1),
             ("FloorDiv", sympy.Rational(7, 2), 2),
+            ("PowByNatural", 2, -1),
+            ("PowByNatural", -1, int_oo),
+            ("PowByNatural", -int_oo, int_oo),
+            ("PowByNatural", 1, -int_oo),
+            ("FloatPow", 2, 3),
+            ("FloatPow", int_oo, 2),
+            ("FloatTrueDiv", 1, 3),
+            ("FloatTrueDiv", s0, 0),
+            ("IntTrueDiv", 6, 3),
+            ("IntTrueDiv", int_oo, 2),
+            ("IntTrueDiv", sympy.Rational(1, 2), sympy.Rational(1, 3)),
+            ("IntTrueDiv", s0, 0),
+            ("CeilDiv", 0, 0),
+            ("CeilDiv", s0, 0),
+            ("CeilDiv", s0 + 1, s1 + 1),
+            ("CeilDiv", 0, s0 + 1),
+            ("CeilDiv", s0 / 2, 2),
+            ("CeilDiv", FloorDiv(s0, 2), 2),
+            ("CeilDiv", s0, int_oo),
         ]
         for name, a, b in cases:
             args = [arena.from_sympy(sympy.sympify(x)) for x in (a, b)]
             with self.assertRaises(NativeUnsupported, msg=f"{name}({a}, {b})"):
-                arena.function(name, args)
+                if name == "CeilDiv":
+                    arena.ceildiv(*args)
+                else:
+                    arena.function(name, args)
         with self.assertRaises(NativeUnsupported):
             arena.function("Mod", [arena.from_sympy(s0)])
         with self.assertRaises(NativeUnsupported):
@@ -1106,6 +1202,12 @@ class TestNativeFunctions(TestCase):
         cases += [FloorDiv(s0 + 1, 2), FloorDiv(s0, s1 + 1), FloorDiv(2 * s0, s1)]
         cases += [FloorDiv(s0**2, s0), FloorDiv(s0 * f, 2), CleanDiv(s0, s1)]
         cases += [-f, s0 - f, f * Mod(s0, 3), 1 / f, CleanDiv(s0 + 1, s1) * s0]
+        p, fp = PowByNatural(s0, s1), FloatPow(zf, s0)
+        cases += [p, 2 * p, p**2, -p, s0 * p, 1 / p, p + 1, sympy.Lt(p, s0)]
+        cases += [fp, 2 * fp, fp**2, -fp, 1 / fp, fp + zf, PowByNatural(s0 + 1, 2 * s1)]
+        d, i = FloatTrueDiv(zf, s0), IntTrueDiv(s0, s1)
+        cases += [d, 2 * d, d**2, -d, 1 / d, d + i, s0 * i, sympy.Eq(i, zf)]
+        cases += [FloatTrueDiv(s0 + 1, zf), PowByNatural(u0, int_oo), p * fp * d]
         rng = random.Random(0)
         for v in cases:
             self.assertTrue(self.check_expr(v, rng), f"{v}")
@@ -1116,6 +1218,8 @@ class TestNativeFunctions(TestCase):
         items += [sympy.Eq(s0, 1, evaluate=False), sympy.Not(u0), sympy.true]
         items += [FloorDiv(s0, 2), CleanDiv(s0, 2), CleanDiv(s0, s1), FloorDiv(u0, 2)]
         items += [Max(2, s0), Min(2, u0), Max(s0, u0), Min(s0, u0), Max(s1, s0 + 1)]
+        items += [PowByNatural(s0, s1), PowByNatural(2, s0), FloatPow(zf, s0)]
+        items += [FloatTrueDiv(zf, s0), IntTrueDiv(s0, s1), IntTrueDiv(s0, 2)]
         arena = torch._C._symbolic._Arena()
         natives = [arena.from_sympy(x) for x in items]
         for a, na in zip(items, natives):
@@ -1139,7 +1243,7 @@ class TestNativeFunctions(TestCase):
                 r = self.check_call(name, a, b)
                 if r is not None:
                     supported += 1
-                    if isinstance(r, (Mod, PythonMod, FloorDiv, Max, Min)):
+                    if isinstance(r, self.NODE_TYPES):
                         nodes.append(r)
         self.assertGreater(supported, calls // 3)
         self.assertGreater(len(nodes), 10)
@@ -1202,6 +1306,27 @@ class TestNativeFunctions(TestCase):
                 else:
                     unsupported += 1
         self.assertGreater(answered, 5 * unsupported)
+
+    @parametrize("seed", range(4))
+    def test_ceildiv_fuzz(self, seed):
+        rng = random.Random(seed)
+        syms = [s0, s1, u0, zf, sympy.Symbol("n", integer=True, nonnegative=True)]
+
+        def monomial():
+            c = rng.choice([-4, -2, -1, 0, 1, 1, 2, 3, 4, 6, 8, 128])
+            return sympy.Mul(c, *(rng.choice(syms) for _ in range(rng.randint(0, 3))))
+
+        def poly():
+            return sympy.Add(*(monomial() for _ in range(rng.randint(1, 3))))
+
+        calls = supported = 0
+        for _ in range(300):
+            a = rng.choice([poly, monomial])()
+            b = rng.choice([monomial, monomial, poly])()
+            calls += 1
+            if self.check_call("CeilDiv", a, b) is not None:
+                supported += 1
+        self.assertGreater(supported, calls // 2)
 
     def test_minmax_known(self):
         u1 = sympy.Symbol("u1", integer=True)

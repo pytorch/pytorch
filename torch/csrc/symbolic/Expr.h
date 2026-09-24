@@ -43,6 +43,10 @@ enum class Kind : uint8_t {
   CleanDiv,
   Max,
   Min,
+  PowByNatural,
+  FloatPow,
+  FloatTrueDiv,
+  IntTrueDiv,
   // Boolean kinds: sympy Booleans that are not Exprs.
   BooleanTrue,
   BooleanFalse,
@@ -239,6 +243,8 @@ class ExprArena : public c10::intrusive_ptr_target {
   const Expr* function(Kind kind, c10::ArrayRef<const Expr*> args);
   // Max(*args, evaluate=evaluate) and Min(*args, evaluate=evaluate).
   const Expr* minmax(Kind kind, c10::ArrayRef<const Expr*> args, bool evaluate = true);
+  // CeilDiv(base, divisor), which is always a FloorDiv or a CleanDiv.
+  const Expr* ceildiv(const Expr* base, const Expr* divisor);
 
   // Eq/Ne/Lt/Le/Gt/Ge(lhs, rhs, evaluate=evaluate) (Relational.cpp). These are
   // the sympy constructors, not IntInfinity's __ge__ etc. operator overloads.
@@ -307,6 +313,8 @@ class ExprArena : public c10::intrusive_ptr_target {
   const Expr* eval_mod(Kind kind, const Expr* p, const Expr* q);
   // FloorDiv.eval, also for CleanDiv; nullptr for None.
   const Expr* eval_floordiv(const Expr* base, const Expr* divisor);
+  // PowByNatural.eval; nullptr for None.
+  const Expr* eval_pow_by_natural(const Expr* base, const Expr* exp);
   const Expr* new_symbol(const std::string& name, const FactKB& kb);
   const Expr* as_boolean(const Expr* e);
   // The tail of LatticeOp.__new__.

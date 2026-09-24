@@ -1280,7 +1280,7 @@ FactKB ExprArena::default_kb(const Expr* e) {
       deduce_all_facts(kb, extra);
       return kb;
     };
-    return std::array<FactKB, 9>{
+    return std::array<FactKB, 10>{
         // Integer, NegativeOne
         make(
             {{F::commutative, true},
@@ -1329,6 +1329,8 @@ FactKB ExprArena::default_kb(const Expr* e) {
         make({{F::integer, true}, {F::nonnegative, true}}),
         // LatticeOp.is_commutative
         make({{F::commutative, true}}),
+        // is_real = True
+        make({{F::real, true}}),
     };
   }();
   switch (e->kind) {
@@ -1343,12 +1345,17 @@ FactKB ExprArena::default_kb(const Expr* e) {
     case Kind::PythonMod:
     case Kind::FloorDiv:
     case Kind::CleanDiv:
+    case Kind::PowByNatural:
       return kbs[6];
     case Kind::Mod:
       return kbs[7];
     case Kind::Max:
     case Kind::Min:
       return kbs[8];
+    case Kind::FloatPow:
+    case Kind::FloatTrueDiv:
+    case Kind::IntTrueDiv:
+      return kbs[9];
     default:
       return {};
   }
@@ -1436,6 +1443,10 @@ Tri ExprArena::eval_fact(const Expr* e, Fact f) {
                                   : add_fact(*this, e, f);
     case Kind::Mod:
     case Kind::PythonMod:
+    case Kind::PowByNatural:
+    case Kind::FloatPow:
+    case Kind::FloatTrueDiv:
+    case Kind::IntTrueDiv:
       // Expr's extended_positive/negative handlers return None unless
       // is_number, and function nodes always have free symbols.
       // Function._eval_is_commutative is shadowed by the class facts.
