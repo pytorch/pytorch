@@ -116,6 +116,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     IS_LINUX,
     IS_MACOS,
+    IS_S390X,
     IS_X86,
     isRocmArchAnyOf,
     MACOS_VERSION,
@@ -2290,7 +2291,9 @@ class CommonTemplate:
             y = torch.log(x)
             return torch.sum(y, dtype=torch.int32).float()
 
-        self.common(fn, ())
+        # Non-finite float-to-int conversion is undefined in C++. On s390x,
+        # eager and Inductor consequently produce different numeric results.
+        self.common(fn, (), assert_equal=not IS_S390X)
 
     def test_index_propagation_floordiv(self):
         def repeat_interleave(x, n):
