@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
 import typing
 import unittest
 import uuid
@@ -4762,17 +4763,42 @@ class TestPrecompileDynamoCapture(TestCase):
         self._serve_in_fresh_process([((self.x2,), {}, None)], grads)
 
     def test_save_checkpoints_mid_block(self):
-        step = self.mod.step
-        with self._capture(step, backend="eager") as cap:
+        single = self.mod.single
+        writes = mock.patch("torch._precompile._write_artifact", wraps=_write_artifact)
+
+        class SavesFromFn(torch.nn.Module):
+            def forward(self, x):
+                return torch._dynamo.disable(cap.save)()
+
+        with self._capture(single, backend="eager") as cap, writes as write:
             with self.assertRaisesRegex(PrecompileError, "nothing was captured"):
                 cap.save()
             cap(self.model, self.x2)
             cap.save()
             with open(self.artifact, "rb") as f:
                 checkpoint = f.read()
+            # The checkpoint is a loadable pair on its own.
+            self.assertEqual(
+                load(self.artifact, self.cache)(self.model, self.x2),
+                single(self.model, self.x2),
+            )
             cap(self.model, self.x3)
+            cap.save()
+            self.assertEqual(write.call_count, 2)
+        # The last save() covered every call, so exit writes nothing more.
+        self.assertEqual(write.call_count, 2)
         with open(self.artifact, "rb") as f:
             self.assertNotEqual(f.read(), checkpoint)
+        with self.assertRaisesRegex(PrecompileError, "not active"):
+            cap.save()
+        self.assertTrue(cap.summary().complete)
+        # The refused save() is a raised call; raising out of the block writes
+        # nothing rather than an artifact that fails the gate.
+        with self.assertRaisesRegex(KeyError, "the block's own"):
+            with self._capture(single, backend="eager") as cap:
+                with self.assertRaisesRegex(PrecompileError, "from inside fn"):
+                    cap(SavesFromFn(), self.x2)
+                raise KeyError("the block's own")
 
     def test_a_raised_call_is_refused_at_exit_and_writes_nothing(self):
         # A call that raised inside the block is a coverage gap: the default gate
@@ -4784,8 +4810,18 @@ class TestPrecompileDynamoCapture(TestCase):
                 with self.assertRaises(RuntimeError):
                     cap(self.model, torch.randn(2, 5))
                 self.assertFalse(cap.summary().complete)
+        self.assertFalse(cap.summary().complete)
         self.assertFalse(os.path.exists(self.artifact))
         self.assertFalse(os.path.exists(self.cache))
+        # A call that raised after the last save() still reaches that gate.
+        with self.assertRaisesRegex(PrecompileError, "captured call raised"):
+            with self._capture(self.mod.step, backend="eager") as cap:
+                cap(self.model, self.x2)
+                cap.save()
+                with self.assertRaises(RuntimeError):
+                    cap(self.model, torch.randn(2, 5))
+        os.remove(self.artifact)
+        os.remove(self.cache)
         # A call that raised on every attempt still reaches that gate.
         with self.assertRaisesRegex(PrecompileError, "captured call raised"):
             with self._capture(self.mod.step, backend="eager") as cap:
@@ -4805,19 +4841,15 @@ class TestPrecompileDynamoCapture(TestCase):
         with self.assertRaisesRegex(TypeError, "tracer must be"):
             self._capture(self.mod.single, tracer=object())
         cap = self._capture(self.mod.single, backend="eager")
-        with self.assertRaisesRegex(PrecompileError, "before calling it"):
+        with self.assertRaisesRegex(PrecompileError, "not active"):
             cap(self.model, self.x2)
         with self.assertRaisesRegex(PrecompileError, "nothing was captured"):
             with cap:
-                with self.assertRaisesRegex(PrecompileError, "already been entered"):
-                    with cap:
-                        pass
-        # Once its block exits the capture is spent, with the same message as a
-        # MakeFxTracer capture's.
-        with self.assertRaisesRegex(PrecompileError, "already exited"):
+                pass
+        with self.assertRaisesRegex(PrecompileError, "already been entered"):
             with cap:
                 pass
-        with self.assertRaisesRegex(PrecompileError, "already exited"):
+        with self.assertRaisesRegex(PrecompileError, "not active"):
             cap(self.model, self.x2)
 
         class Reentrant(torch.nn.Module):
@@ -4838,6 +4870,30 @@ class TestPrecompileDynamoCapture(TestCase):
             with self.assertRaisesRegex(PrecompileError, "could not write"):
                 with self._capture(self.mod.single, backend="eager") as cap:
                     cap(self.model, self.x2)
+
+    def test_calls_from_several_threads_are_serialized(self):
+        # Unserialized, a call that finds another thread's call in flight is
+        # refused as a recursive re-entry.
+        errors = []
+
+        def call(x):
+            try:
+                self.assertEqual(cap(self.model, x), self.mod.step(self.model, x))
+            except Exception as e:
+                errors.append(e)
+
+        with self._capture(self.mod.step, backend="eager") as cap:
+            threads = [
+                threading.Thread(target=call, args=(x,))
+                for x in (self.x2, self.x3)
+                for _ in range(4)
+            ]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+        self.assertEqual(errors, [])
+        self.assertTrue(os.path.exists(self.artifact))
 
     def test_the_tracer_knobs_reach_the_session(self):
         from torch._dynamo.precompile_package import default_guard_filter_fn
