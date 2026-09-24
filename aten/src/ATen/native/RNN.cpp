@@ -1276,6 +1276,14 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backwar
 // PUBLIC FUNCTIONS
 ////////////////////////////////////////////////////////////////////////////////
 
+inline void check_rnn_batch_sizes(const Tensor& batch_sizes) {
+  TORCH_CHECK(batch_sizes.dim() == 1, "batch_sizes tensor should be 1D");
+  TORCH_CHECK(
+      batch_sizes.is_cpu(),
+      "batch_sizes tensor should be on CPU, but got ",
+      batch_sizes.device());
+}
+
 #define ONE_HIDDEN_RNN(NAME, CELL)                                          \
   DEFINE_DISPATCH(NAME##_cudnn_stub);                                       \
   DEFINE_DISPATCH(NAME##_miopen_stub);                                      \
@@ -1365,6 +1373,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backwar
       double dropout_p,                                                     \
       bool train,                                                           \
       bool bidirectional) {                                                 \
+    check_rnn_batch_sizes(batch_sizes);                                     \
     if (use_cudnn(data)) {                                                  \
       Tensor output, hy;                                                    \
       NAME##_packed_cudnn_stub(                                             \
@@ -1462,6 +1471,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backwar
       double dropout_p,                                                     \
       bool train,                                                           \
       bool bidirectional) {                                                 \
+    check_rnn_batch_sizes(batch_sizes);                                     \
     std::vector<QRNNCellParamsWrapper> params;                              \
     for (c10::intrusive_ptr<CellParamsBase> x : _params) {                  \
       params.emplace_back(std::move(x));                                    \
@@ -1611,6 +1621,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
       TensorList _params, bool has_biases,
       int64_t num_layers, double dropout_p, bool train, bool bidirectional) {
   TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
+  check_rnn_batch_sizes(batch_sizes);
   if (use_cudnn(data)) {
     Tensor output, hy, cy;
     lstm_packed_cudnn_stub(data.device().type(), output, hy, cy, data, batch_sizes, hx,
@@ -1916,6 +1927,7 @@ static std::tuple<Tensor, Tensor, Tensor> quantized_lstm_data(
   }
   TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
   TORCH_CHECK(hx[0].size(2) == hx[1].size(2), "quantized LSTM with projections is not supported");
+  check_rnn_batch_sizes(batch_sizes);
 
   PackedSequence input { data, batch_sizes };
   auto results = _lstm_impl<PackedLayer, PackedBidirectionalLayer>(
