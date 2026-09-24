@@ -183,6 +183,11 @@ The frontend API is `fully_shard` that can be called on a `module`:
 ```
 
 ```{eval-rst}
+.. autoclass:: GradientReductionHandle
+    :members:
+```
+
+```{eval-rst}
 .. autofunction:: register_fsdp_forward_method
 ```
 
