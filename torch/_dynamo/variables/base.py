@@ -516,6 +516,9 @@ def store_attr_mutation(
     se = tx.output.side_effects
     item = item.realize()
     if not se.is_attribute_mutation(item):
+        # This helper's callers model writable function and descriptor slots.
+        # Their sourced owners must already be tracked; unlike generic Python
+        # setattr, this closed path has no valid sourced-untracked fallback.
         if item.source is not None:
             raise AssertionError(
                 f"{item} has a source but was never registered via "

@@ -44,7 +44,7 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
-      check_experiments: lf
+      check_experiments: lf,amd-dpx
 
   linux-jammy-cuda13_0-py3_10-gcc11-sm86-build:
     name: linux-jammy-cuda13.0-py3.10-gcc11-sm86
@@ -225,4 +225,34 @@ jobs:
       sync-tag: asan-test
       python-version: "3.10"
       compiler: clang21
+    secrets: inherit
+
+  linux-noble-rocm-py3_11-mi350-build:
+    name: linux-noble-rocm-py3.11-mi350
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "mt-"
+      build-environment: linux-noble-rocm-py3.11-mi350
+      docker-image-name: ci-image:pytorch-linux-noble-rocm-n-py3.11
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+      test-matrix: |
+        { include: [
+          { config: "slow", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.amd-dpx-label-type }}linux.rocm.gpu.gfx950.1", owners: ["module:rocm"] },
+          { config: "slow", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.amd-dpx-label-type }}linux.rocm.gpu.gfx950.1", owners: ["module:rocm"] },
+          { config: "slow", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.amd-dpx-label-type }}linux.rocm.gpu.gfx950.1", owners: ["module:rocm"] },
+        ]}
+      python-version: "3.11"
+    secrets: inherit
+
+  linux-noble-rocm-py3_11-mi350-test:
+    name: linux-noble-rocm-py3.11-mi350
+    uses: ./.github/workflows/_rocm-test.yml
+    needs:
+      - linux-noble-rocm-py3_11-mi350-build
+      - target-determination
+    with:
+      build-environment: ${{ needs.linux-noble-rocm-py3_11-mi350-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-noble-rocm-py3_11-mi350-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-noble-rocm-py3_11-mi350-build.outputs.test-matrix }}
     secrets: inherit

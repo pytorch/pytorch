@@ -55,6 +55,7 @@ jobs:
           pytorch-linux-jammy-cuda13.2-cudnn9-py3.12-gcc11,
           pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11,
           pytorch-linux-jammy-cuda13.4-cudnn9-py3-gcc11,
+          pytorch-linux-jammy-cuda13.4-cudnn9-py3-gcc11-inductor-benchmarks,
           pytorch-linux-jammy-cuda13.4-cudnn9-py3.12-gcc11,
           pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11-vllm,
           pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks,
@@ -65,12 +66,13 @@ jobs:
           pytorch-linux-jammy-py3.13-clang21,
           pytorch-linux-jammy-py3.14-clang21,
           pytorch-linux-jammy-py3.14t-clang21,
+          pytorch-linux-jammy-py3.15-clang21,
           pytorch-linux-jammy-rocm-n-py3,
           pytorch-linux-noble-rocm-n-py3.11,
           pytorch-linux-noble-rocm-preview-py3.12,
           pytorch-linux-jammy-rocm-n-py3-benchmarks,
           pytorch-linux-jammy-cuda13.0-cudnn9-py3.10-clang20,
-          pytorch-linux-jammy-cuda13.2-cudnn9-py3.10-clang20,
+          pytorch-linux-jammy-cuda13.2-cudnn9-py3.11-clang20,
           pytorch-linux-jammy-cuda13.4-cudnn9-py3.10-clang20,
           pytorch-linux-jammy-py3-gcc11-inductor-benchmarks,
           pytorch-linux-jammy-py3.12-halide,
@@ -88,10 +90,19 @@ jobs:
           pytorch-linux-noble-riscv64-py3.12-gcc14-cross-build
         ]
         include:
-          - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc13
+          - docker-image-name: pytorch-linux-jammy-aarch64-cuda13.0-cudnn9-py3.11-gcc13
             buildkit_addr: "tcp://buildkitd-arm64.buildkit:1234"
             runner_label: mt-l-arm64g4-16-62
-          - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc13-inductor-benchmarks
+          - docker-image-name: pytorch-linux-jammy-aarch64-cuda13.2-cudnn9-py3.12-gcc13
+            buildkit_addr: "tcp://buildkitd-arm64.buildkit:1234"
+            runner_label: mt-l-arm64g4-16-62
+          - docker-image-name: pytorch-linux-jammy-aarch64-cuda13.4-cudnn9-py3.12-gcc13
+            buildkit_addr: "tcp://buildkitd-arm64.buildkit:1234"
+            runner_label: mt-l-arm64g4-16-62
+          - docker-image-name: pytorch-linux-jammy-aarch64-py3.11-gcc13
+            buildkit_addr: "tcp://buildkitd-arm64.buildkit:1234"
+            runner_label: mt-l-arm64g4-16-62
+          - docker-image-name: pytorch-linux-jammy-aarch64-py3.11-gcc13-inductor-benchmarks
             buildkit_addr: "tcp://buildkitd-arm64.buildkit:1234"
             timeout-minutes: 600
             runner_label: mt-l-arm64g4-16-62
