@@ -6332,6 +6332,32 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(result_a, torch.full((2,), 3.14, dtype=torch.float32))
         self.assertEqual(result_b, torch.full((2,), 2.71, dtype=torch.float32))
 
+    def test_full_with_invalid_tensor_fill_value_raises(self):
+        def func(fill_value):
+            return torch.full((2,), fill_value)
+
+        fill_values = {
+            "requires_grad": torch.tensor(2.5, requires_grad=True),
+            "non_scalar": torch.tensor([2.5]),
+        }
+        for name, fill_value in fill_values.items():
+            with self.subTest(name=name):
+                with self.assertRaises(TypeError):
+                    func(fill_value)
+
+                compiled_func = torch.compile(func, backend="eager", fullgraph=True)
+                with self.assertRaises(torch._dynamo.exc.Unsupported):
+                    compiled_func(fill_value)
+
+    def test_full_with_no_grad_parameter_fill_value(self):
+        def func(fill_value):
+            return torch.full((2,), fill_value)
+
+        fill_value = torch.nn.Parameter(torch.tensor(2.5), requires_grad=False)
+        expected = func(fill_value)
+        result = torch.compile(func, backend="eager", fullgraph=True)(fill_value)
+        self.assertEqual(result, expected)
+
     def test_full_with_parameter_fill_value_raises(self):
         class Mod(torch.nn.Module):
             def __init__(self) -> None:
