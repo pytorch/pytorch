@@ -1062,7 +1062,7 @@ class TestSparse(TestSparseBase):
     @dtypes(torch.double, torch.cdouble)
     def test_Sparse_to_Sparse_copy_multi_device(self, devices, dtype, coalesced):
         # This is for testing torch.copy_(SparseTensor, SparseTensor) across accelerator devices
-        device, secondary_device = devices
+        device, secondary_device = devices[:2]
         sparse_dims = 3
         nnz = 10
         sizes = [2, 3, 4, 5]  # hybrid sparse
