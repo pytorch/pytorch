@@ -553,7 +553,6 @@
   "test/python_native/test_traits.py",
   "test/quantization/core/experimental/test_floatx.py",
   "test/quantization/core/test_quantized_op.py",
-  "test/quantization/core/test_quantized_tensor.py",
   "test/quantization/core/test_workflow_module.py",
   "test/quantization/core/test_workflow_ops.py",
   "test/quantization/fx/test_numeric_suite_fx.py",
