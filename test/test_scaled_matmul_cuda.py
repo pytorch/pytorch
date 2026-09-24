@@ -23,6 +23,7 @@ from torch.nn.functional import (
 )
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.testing._internal.common_cuda import (
+    IS_SM12X,
     IS_SM90,
     _get_torch_cuda_version,
     rocm_mx_swizzle,
@@ -31,7 +32,6 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_MX_GEMM,
     PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM,
     SM100OrLater,
-    SM120OrLater,
     SM89OrLater,
     SM90OrLater,
     with_tf32_off,
@@ -895,7 +895,7 @@ class TestFP8Matmul(TestCase):
     @parametrize("M", [2048, 2049])
     @parametrize("N", [8192])
     @parametrize("K", [16640])
-    @parametrize("format", ["mxfp8"] + (["nvfp4", "mxfp4"] if torch.version.cuda else []))
+    @parametrize("format", ["mxfp8", "nvfp4", "mxfp4"])
     @parametrize("use_out", [False, True])
     def test_mxfp8_nvfp4_scaled_grouped_mm_2d_2d(self, G, M, N, K, format, use_out, device):
         torch.manual_seed(42)
@@ -974,7 +974,7 @@ class TestFP8Matmul(TestCase):
     @parametrize("M", [16640])
     @parametrize("N", [8192])
     @parametrize("K", [4096])
-    @parametrize("format", ["mxfp8"] + (["nvfp4", "mxfp4"] if torch.version.cuda else []))
+    @parametrize("format", ["mxfp8", "nvfp4", "mxfp4"])
     @parametrize("use_out", [False, True])
     def test_mxfp8_scaled_grouped_mm_2d_3d(self, G, M, N, K, format, use_out, device):
         torch.manual_seed(42)
@@ -2655,12 +2655,11 @@ class TestFP8Matmul(TestCase):
     ], name_fn=lambda mkn: f"{mkn[0]}_{mkn[1]}_{mkn[2]}")
     @parametrize("recipe", ["mxfp8", "mxfp4", "nvfp4"])
     def test_blockwise_mxfp8_nvfp4_mxfp4_numerics(self, test_case_name, fast_accum, mkn, recipe, device) -> None:
-        if torch.version.rocm and recipe == "nvfp4":
+        if torch.version.hip and recipe == "nvfp4":
             raise unittest.SkipTest("nvfp4 not supported on ROCm, skipping")
         if (recipe == "nvfp4" or recipe == "mxfp4") and fast_accum:
             raise unittest.SkipTest("fast_accum not supported in nvfp4/mxfp4 cublas gemm, skipping")
-        # TODO: the SM*OrLater checks are meaningless on ROCm; fix them in common_cuda.py
-        if recipe == "mxfp4" and not torch.version.rocm and SM120OrLater:
+        if recipe == "mxfp4" and IS_SM12X:
             raise unittest.SkipTest("MXFP4 on CUDA only supported on B200/B300")
         if "xpu" in device:
             if fast_accum:
@@ -3017,10 +3016,9 @@ class TestFP8Matmul(TestCase):
     def test_blockwise_mxfp8_nvfp4_mxfp4_error_messages(self, device, recipe) -> None:
         if "xpu" in device:
             raise unittest.SkipTest("Error messages test not supported on XPU, skipping")
-        if recipe == "nvfp4" and torch.version.rocm:
+        if recipe == "nvfp4" and torch.version.hip:
             raise unittest.SkipTest("nvfp4 not supported on ROCm, skipping")
-        # TODO: the SM*OrLater checks are meaningless on ROCm; fix them in common_cuda.py
-        if recipe == "mxfp4" and not torch.version.rocm and SM120OrLater:
+        if recipe == "mxfp4" and IS_SM12X:
             raise unittest.SkipTest("MXFP4 on CUDA only supported on B200/B300")
         M, K, N = (1024, 512, 2048)
         BLOCK_SIZE_K = 16 if recipe == "nvfp4" else 32
@@ -3318,10 +3316,9 @@ class TestFP8Matmul(TestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     @parametrize("recipe", ["nvfp4", "mxfp4"])
     def test_blockwise_nvfp4_mxfp4_compile(self, device, recipe) -> None:
-        if recipe == "nvfp4" and torch.version.rocm:
+        if recipe == "nvfp4" and torch.version.hip:
             raise unittest.SkipTest("nvfp4 not supported on ROCm, skipping")
-        # TODO: the SM*OrLater checks are meaningless on ROCm; fix them in common_cuda.py
-        if recipe == "mxfp4" and not torch.version.rocm and SM120OrLater:
+        if recipe == "mxfp4" and IS_SM12X:
             raise unittest.SkipTest("MXFP4 on CUDA only supported on B200/B300")
 
         M, K, N = 128, 128, 128
