@@ -4666,6 +4666,11 @@ def records_stance(model, x):
     y = breaking_helper(model(x))
     record_stance()
     return y + 1
+
+
+def tags_compiled(model, x):
+    # Adds 1 only in a compiled frame, so a result shows how the call was served.
+    return breaking_helper(model(x)) + int(torch.compiler.is_compiling())
 """
 
 _GOLDEN_LOADER = """
@@ -4857,7 +4862,8 @@ class TestPrecompileDynamoCapture(TestCase):
 
     @skipIfCrossRef
     def test_an_installed_artifact_under_a_process_wide_stance(self):
-        fn = self.mod.calls_breaking_helper
+        # Captured on x2 only; x3 is uncovered. A served call adds 1.
+        fn = self.mod.tags_compiled
         with self._capture(fn, backend="eager") as cap:
             cap(self.model, self.x2)
         state = os.path.join(self.dir, "state.pt")
@@ -4877,20 +4883,26 @@ class TestPrecompileDynamoCapture(TestCase):
             "model = mod.Model()\n"
             "model.load_state_dict(saved['state_dict'])\n"
             "f = torch.compiler.precompile.load(sys.argv[2], sys.argv[3])\n"
-            "compiling = [('default', {'force_backend': 'eager'}),\n"
-            "             ('eager_then_compile', {}), ('aot_eager_then_compile', {})]\n"
-            "for stance, kwargs in compiling:\n"
+            "x2, x3, y2, y3 = saved['x2'], saved['x3'], saved['y2'], saved['y3']\n"
+            "refusing = [('default', {'force_backend': 'eager'}),\n"
+            "            ('eager_then_compile', {}), ('aot_eager_then_compile', {}),\n"
+            "            ('fail_on_recompile', {})]\n"
+            "for stance, kwargs in refusing:\n"
             "    with torch.compiler.set_stance(stance, **kwargs):\n"
-            "        try:\n"
-            "            f(model, saved['x2'])\n"
-            "        except torch.compiler.PrecompileError as e:\n"
-            "            assert 'would compile' in str(e), e\n"
-            "        else:\n"
-            "            raise AssertionError(f'served under {stance}')\n"
-            "for stance in ('force_eager', 'eager_on_recompile'):\n"
-            "    with torch.compiler.set_stance(stance):\n"
-            "        torch.testing.assert_close(f(model, saved['x2']), saved['y2'])\n"
-            "        torch.testing.assert_close(f(model, saved['x3']), saved['y3'])\n"
+            "        for _ in range(2):\n"
+            "            torch.testing.assert_close(f(model, x2), y2 + 1)\n"
+            "            try:\n"
+            "                f(model, x3)\n"
+            "            except torch.compiler.PrecompileError as e:\n"
+            "                assert 'no captured variant' in str(e), e\n"
+            "            else:\n"
+            "                raise AssertionError(f'compiled under {stance}')\n"
+            "with torch.compiler.set_stance('force_eager'):\n"
+            "    torch.testing.assert_close(f(model, x2), y2)\n"
+            "    torch.testing.assert_close(f(model, x3), y3)\n"
+            "with torch.compiler.set_stance('eager_on_recompile'):\n"
+            "    torch.testing.assert_close(f(model, x2), y2 + 1)\n"
+            "    torch.testing.assert_close(f(model, x3), y3)\n"
             "print('stances ok')\n"
         )
         argv = [self.dir, self.artifact, self.cache, self.module_name, state]

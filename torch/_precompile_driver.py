@@ -745,7 +745,7 @@ def _build_installed_forward():
 
     import torch
     from torch._C._dynamo.eval_frame import _debug_get_cache_entry_list
-    from torch._dynamo.eval_frame import _fail_on_recompile_callback, OptimizeContext
+    from torch._dynamo.eval_frame import _FailOnRecompileCallback, OptimizeContext
     from torch._dynamo.package import _lookup_code, CompilePackage
     from torch._precompile import PrecompileError as _PrecompileError
 
@@ -798,11 +798,13 @@ def _build_installed_forward():
         if not isinstance(context, OptimizeContext):
             raise _PrecompileError(
                 "precompile: an installed artifact serves through Dynamo, which is "
-                "disabled in this process (TORCHDYNAMO_DISABLE=1)."
+                "disabled in this process (TORCHDYNAMO_DISABLE=1 or the "
+                "enable_dynamo killswitch)."
             )
         # The refusal is this callable's own callback, not the process-global
-        # stance, so other threads' compiles are unaffected.
-        context.callback = _fail_on_recompile_callback(context.callback)
+        # stance, so other threads' compiles are unaffected. It must be bound
+        # before context(fn), which captures the callback when it wraps.
+        context.callback = _FailOnRecompileCallback(context.callback)
         compiled = context(fn)
         package.install(package_state["backends"])
     except _PrecompileError:
@@ -815,19 +817,6 @@ def _build_installed_forward():
         ) from _e
 
     def forward(*args, **kwargs):
-        # A compiling stance replaces this callable's callback on entry
-        # (_callback_from_stance), which would drop the refusal.
-        stance = torch._dynamo.eval_frame._stance
-        if stance.backend is not None or stance.stance in (
-            "eager_then_compile",
-            "aot_eager_then_compile",
-        ):
-            raise _PrecompileError(
-                f"precompile: an installed artifact cannot serve under the "
-                f"process-wide stance {stance.stance!r} (force_backend="
-                f"{stance.backend!r}), which would compile the calls the "
-                f"capture did not cover."
-            )
         try:
             return compiled(*args, **kwargs)
         except RuntimeError as _e:
