@@ -134,7 +134,11 @@ def _force_pdl_nvgemm_choice():
         pdl_choices = [
             choice
             for choice in nvgemm_choices
-            if getattr(choice.kernel.metadata.design, "use_pdl", False)
+            if getattr(
+                getattr(choice.kernel, "impl", None),
+                "use_pdl",
+                getattr(choice.kernel.metadata.design, "use_pdl", False),
+            )
         ]
         if nvgemm_choices and not pdl_choices:
             raise AssertionError("expected a PDL-capable NVGEMM choice")
@@ -850,7 +854,7 @@ class TestNVUniversalGemm(TestCase):
         with (
             config.patch(
                 _nvgemm_config(
-                    nvgemm_max_profiling_configs=1,
+                    nvgemm_max_profiling_configs=3,
                     benchmark_epilogue_fusion=False,
                     compile_threads=2,
                     force_disable_caches=True,
