@@ -10,7 +10,7 @@ from concurrent.futures import TimeoutError as FutureTimeoutError
 from dataclasses import dataclass, field
 from importlib import import_module
 from threading import current_thread, Event, Thread
-from typing import Any, cast, TYPE_CHECKING, TypeVar
+from typing import Any, cast, Literal, TYPE_CHECKING, TypeVar
 
 import torch
 
@@ -72,6 +72,8 @@ class UCXXMemoryView:
 
 class UCXXMutableMemoryView(UCXXMemoryView):
     """A writable byte range in UCXX-registered memory."""
+
+    writable: Literal[True] = True
 
 
 class UCXXMemory:

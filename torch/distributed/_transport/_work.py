@@ -32,6 +32,8 @@ def _asyncio_future(work: Work) -> asyncio.Future[None]:
     def complete(future: torch.futures.Future[Any]) -> None:
         error: BaseException | None = None
         try:
+            # Completion callbacks run only after the future is done; this
+            # reads its result/error without waiting for unfinished host work.
             future.wait()
         except BaseException as failure:
             error = failure
@@ -40,11 +42,14 @@ def _asyncio_future(work: Work) -> asyncio.Future[None]:
         try:
             loop.call_soon_threadsafe(settle, error)
         except RuntimeError:
+            # A cancelled waiter may close its loop before this callback runs.
+            # Only suppress that race, not other event-loop failures.
             if not loop.is_closed():
                 raise
 
     future = work.get_future()
     if future.done():
+        # As in the completion callback, wait() only retrieves a finished result.
         try:
             future.wait()
         except BaseException as error:
@@ -63,6 +68,8 @@ async def wait_all(works: Iterable[Work], *, timeout: float | None = None) -> No
     wait again (or close the transport) before reusing them. Transfer errors and
     iterable errors are reported after draining submitted work, unless this wait
     is timed out or cancelled first. Each Work must support ``get_future``.
+    This adapter does not select CUDA streams or establish consumer-stream
+    ordering; callers must follow their backend's CUDA synchronization contract.
     """
     _validate_timeout(timeout)
     pending = []
