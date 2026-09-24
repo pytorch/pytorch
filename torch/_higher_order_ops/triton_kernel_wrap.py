@@ -1839,7 +1839,9 @@ def triton_kernel_wrapper_mutation_functionalize(
         if proxy_mode is not None:
             node = proxy_mode.tracer.tensor_tracker[output_arg].proxy.node
 
-            logical_input_base_val = tensor_bases[key]
+            logical_input_base_val = tensor_bases.get(key)
+            if logical_input_base_val is None:
+                continue
             logical_input_base = proxy_mode.tracer.tensor_tracker[
                 logical_input_base_val
             ].proxy.node
