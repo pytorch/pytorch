@@ -982,8 +982,8 @@ return {sig.name()}({", ".join(e.expr for e in translate(cpp_sig.arguments(), si
                         context, structured.impl_arguments(self.g), method=False
                     )
                 )
-                # Exact overload name wins over base name: "gt.Tensor" hooks only
-                # that overload, "topk" the unique structured group.
+                # An exact overload name wins over a base name, which represents
+                # the unique structured group.
                 aot_manifest = self.native_aot_manifests.get(
                     str(self.g.functional.func.name)
                 ) or self.native_aot_manifests.get(

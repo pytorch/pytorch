@@ -30,9 +30,8 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class NativeAotManifest:
-    # Base name ("topk") when the base resolves to exactly one structured
-    # group, or overload-qualified ("gt.Tensor") when overloads have
-    # separate structured groups.
+    # Base name when it resolves to exactly one structured group, or
+    # overload-qualified when overloads have separate structured groups.
     op: str
     dispatch_key: DispatchKey
     # Declared UNCONDITIONAL: these kernels are the implementation, so the

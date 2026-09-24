@@ -21,11 +21,11 @@ registration.
 
 Required exports (module or declaration object):
 
-  ATEN_OP: str                name of a STRUCTURED op: a base name
-                              ("topk") when the base resolves to exactly
-                              one structured group, or overload-qualified
-                              ("gt.Tensor", "all.dim") when overloads
-                              have separate structured groups. decl_id()
+  ATEN_OP: str                name of a STRUCTURED op: its base name when
+                              that resolves to exactly one structured
+                              group, or its overload-qualified name when
+                              overloads have separate structured groups.
+                              decl_id()
                               (dots -> underscores) names the stub, the
                               generated kernel, and the covers op.
   DISPATCH_KEY: str           e.g. "CUDA"
@@ -33,6 +33,14 @@ Required exports (module or declaration object):
                               export tool package-imports it with the
                               built torch available (two-stage build),
                               so it may share code with the JIT wrapper
+  ARCHS: tuple[str, ...]      candidate compile targets the op supports (sm
+                              strings). For each device architecture supported
+                              by the containing build, export chooses the widest
+                              compatible candidate; an ``f`` family target wins
+                              an equal-coverage tie. An ``a`` target is exact-only.
+                              Codegen derives runtime device gates from the
+                              targets actually shipped, so declarations never
+                              hand-write architecture checks.
   kernel_precompile_grid() -> list[dict]
                               the artifact grid; list-valued fields
                               cross-multiply; one precompiled kernel per
@@ -59,14 +67,6 @@ its per-op header added to FILE_TMPL in gen_aot_lib.py. The failure is a
 loud "'empty' is not a member of 'at'" at build time, not a silent one.
 
 Optional exports:
-
-  ARCHS: tuple[str, ...]      architectures the op's kernels are valid
-                              on (sm strings). Defaults to all sm90+.
-                              Export skips arches outside it; codegen
-                              emits a runtime device gate from
-                              ARCHS intersect shipped-arches, so
-                              declarations never hand-write arch
-                              checks.
   cpp_dispatch_prelude() -> str | None
                               shared front half of the dispatch chain:
                               cheap universal rejects and setup (locals,
@@ -88,10 +88,12 @@ Optional exports:
                               .covers_<op>; the runtime coverage layer
                               prefers it over the Python path when the
                               library is loaded. Must decide the SAME
-                              covered set as covered_axes + grid
-                              matching; like covered_axes it may be
-                              narrower than the stub's dispatch chain
-                              but never wider than intended coverage.
+                              declaration-level set as covered_axes +
+                              grid matching; codegen conjoins the
+                              shipped-target and ABI gates. Like
+                              covered_axes it may be narrower than the
+                              stub's dispatch chain but never wider than
+                              intended coverage.
 
 Emission cardinality: cpp_helpers once per file, cpp_dispatch_prelude
 once per op, cpp_dispatch/cpp_launch once per precompile point. The
