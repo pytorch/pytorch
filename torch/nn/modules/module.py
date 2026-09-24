@@ -438,6 +438,30 @@ class Module:
     :vartype training: bool
     """
 
+    __slots__ = (
+        "training",
+        "_parameters",
+        "_buffers",
+        "_non_persistent_buffers_set",
+        "_backward_pre_hooks",
+        "_backward_hooks",
+        "_is_full_backward_hook",
+        "_forward_hooks",
+        "_forward_hooks_with_kwargs",
+        "_forward_hooks_always_called",
+        "_forward_pre_hooks",
+        "_forward_pre_hooks_with_kwargs",
+        "_state_dict_hooks",
+        "_load_state_dict_pre_hooks",
+        "_state_dict_pre_hooks",
+        "_load_state_dict_post_hooks",
+        "_modules",
+        "_compiled_call_impl",
+        "_is_replica",
+        "__dict__",
+        "__weakref__",
+    )
+
     dump_patches: bool = False
 
     _version: int = 1
@@ -477,7 +501,7 @@ class Module:
     _load_state_dict_post_hooks: dict[int, Callable]
     _modules: dict[str, Optional["Module"]]
     call_super_init: bool = False
-    _compiled_call_impl: Callable | None = None
+    _compiled_call_impl: Callable | None
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         """Initialize internal Module state, shared by both nn.Module and ScriptModule."""
@@ -519,6 +543,7 @@ class Module:
         super().__setattr__("_load_state_dict_pre_hooks", OrderedDict())
         super().__setattr__("_load_state_dict_post_hooks", OrderedDict())
         super().__setattr__("_modules", {})
+        super().__setattr__("_compiled_call_impl", None)
 
         if self.call_super_init:
             super().__init__(*args, **kwargs)
@@ -559,7 +584,7 @@ class Module:
         if persistent is False and isinstance(self, torch.jit.ScriptModule):
             raise RuntimeError("ScriptModule does not support non-persistent buffers")
 
-        if "_buffers" not in self.__dict__:
+        if not hasattr(self, "_buffers"):
             raise AttributeError("cannot assign buffer before Module.__init__() call")
         elif not isinstance(name, str):
             raise TypeError(
@@ -602,7 +627,7 @@ class Module:
                 are ignored. If ``None``, the parameter is **not** included in the
                 module's :attr:`state_dict`.
         """
-        if "_parameters" not in self.__dict__:
+        if not hasattr(self, "_parameters"):
             raise AttributeError(
                 "cannot assign parameter before Module.__init__() call"
             )
@@ -649,7 +674,9 @@ class Module:
                 accessed from this module using the given name
             module (Module): child module to be added to the module.
         """
-        if not isinstance(module, Module) and module is not None:
+        if not hasattr(self, "_modules"):
+            raise AttributeError("cannot assign module before Module.__init__() call")
+        elif not isinstance(module, Module) and module is not None:
             raise TypeError(f"{torch.typename(module)} is not a Module subclass")
         elif not isinstance(name, str):
             raise TypeError(
@@ -1781,7 +1808,7 @@ class Module:
         return result
 
     def _wrapped_call_impl(self, *args, **kwargs):
-        if self._compiled_call_impl is not None:
+        if getattr(self, "_compiled_call_impl", None) is not None:
             return self._compiled_call_impl(*args, **kwargs)  # type: ignore[misc]
         else:
             return self._call_impl(*args, **kwargs)
@@ -1927,52 +1954,78 @@ class Module:
 
     def __getstate__(self):
         state = self.__dict__.copy()
+        for cls in type(self).__mro__:
+            slots = getattr(cls, "__slots__", ())
+            if isinstance(slots, str):
+                slots = (slots,)
+            for slot in slots:
+                if slot not in ("__dict__", "__weakref__") and hasattr(self, slot):
+                    state[slot] = getattr(self, slot)
         state.pop("_compiled_call_impl", None)
         return state
 
     def __setstate__(self, state):
-        self.__dict__.update(state)
+        slots_set = set()
+        for cls in type(self).__mro__:
+            slots = getattr(cls, "__slots__", ())
+            if isinstance(slots, str):
+                slots = (slots,)
+            slots_set.update(slots)
+
+        for key, value in state.items():
+            if key in slots_set and key not in ("__dict__", "__weakref__"):
+                object.__setattr__(self, key, value)
+            else:
+                self.__dict__[key] = value
 
         # Support loading old checkpoints that don't have the following attrs:
-        if "_forward_pre_hooks" not in self.__dict__:
+        if not hasattr(self, "_forward_pre_hooks"):
             self._forward_pre_hooks = OrderedDict()
-        if "_forward_pre_hooks_with_kwargs" not in self.__dict__:
+        if not hasattr(self, "_forward_pre_hooks_with_kwargs"):
             self._forward_pre_hooks_with_kwargs = OrderedDict()
-        if "_forward_hooks_with_kwargs" not in self.__dict__:
+        if not hasattr(self, "_forward_hooks_with_kwargs"):
             self._forward_hooks_with_kwargs = OrderedDict()
-        if "_forward_hooks_always_called" not in self.__dict__:
+        if not hasattr(self, "_forward_hooks_always_called"):
             self._forward_hooks_always_called = OrderedDict()
-        if "_state_dict_hooks" not in self.__dict__:
+        if not hasattr(self, "_state_dict_hooks"):
             self._state_dict_hooks = OrderedDict()
-        if "_state_dict_pre_hooks" not in self.__dict__:
+        if not hasattr(self, "_state_dict_pre_hooks"):
             self._state_dict_pre_hooks = OrderedDict()
-        if "_load_state_dict_pre_hooks" not in self.__dict__:
+        if not hasattr(self, "_load_state_dict_pre_hooks"):
             self._load_state_dict_pre_hooks = OrderedDict()
-        if "_load_state_dict_post_hooks" not in self.__dict__:
+        if not hasattr(self, "_load_state_dict_post_hooks"):
             self._load_state_dict_post_hooks = OrderedDict()
-        if "_non_persistent_buffers_set" not in self.__dict__:
+        if not hasattr(self, "_non_persistent_buffers_set"):
             self._non_persistent_buffers_set = set()
-        if "_is_full_backward_hook" not in self.__dict__:
+        if not hasattr(self, "_is_full_backward_hook"):
             self._is_full_backward_hook = None
-        if "_backward_pre_hooks" not in self.__dict__:
+        if not hasattr(self, "_backward_pre_hooks"):
             self._backward_pre_hooks = OrderedDict()
+        if not hasattr(self, "_compiled_call_impl"):
+            object.__setattr__(self, "_compiled_call_impl", None)
 
     # It is crucial that the return type is not annotated as `Any`, otherwise type checking
     # on `torch.nn.Module` and all its subclasses is largely disabled as a result. See:
     # https://github.com/pytorch/pytorch/pull/115074
     def __getattr__(self, name: str) -> Union[Tensor, "Module"]:
-        if "_parameters" in self.__dict__:
-            _parameters = self.__dict__["_parameters"]
+        try:
+            _parameters = object.__getattribute__(self, "_parameters")
             if name in _parameters:
                 return _parameters[name]
-        if "_buffers" in self.__dict__:
-            _buffers = self.__dict__["_buffers"]
+        except AttributeError:
+            pass
+        try:
+            _buffers = object.__getattribute__(self, "_buffers")
             if name in _buffers:
                 return _buffers[name]
-        if "_modules" in self.__dict__:
-            modules = self.__dict__["_modules"]
+        except AttributeError:
+            pass
+        try:
+            modules = object.__getattribute__(self, "_modules")
             if name in modules:
                 return modules[name]
+        except AttributeError:
+            pass
         raise AttributeError(
             f"'{type(self).__name__}' object has no attribute '{name}'"
         )
@@ -1986,7 +2039,7 @@ class Module:
                     else:
                         d.discard(name)
 
-        params = self.__dict__.get("_parameters")
+        params = getattr(self, "_parameters", None)
         if isinstance(value, Parameter):
             if params is None:
                 raise AttributeError(
@@ -2007,7 +2060,7 @@ class Module:
                 )
             self.register_parameter(name, value)
         else:
-            modules = self.__dict__.get("_modules")
+            modules = getattr(self, "_modules", None)
             if isinstance(value, Module):
                 if modules is None:
                     raise AttributeError(
@@ -2036,7 +2089,7 @@ class Module:
                         value = output
                 modules[name] = value
             else:
-                buffers = self.__dict__.get("_buffers")
+                buffers = getattr(self, "_buffers", None)
                 if isinstance(value, Buffer) or buffers is not None and name in buffers:
                     if value is not None and not (
                         isinstance(value, torch.Tensor)
@@ -3044,6 +3097,13 @@ class Module:
     def _replicate_for_data_parallel(self):
         replica = self.__new__(type(self))
         replica.__dict__ = self.__dict__.copy()
+        for cls in type(self).__mro__:
+            slots = getattr(cls, "__slots__", ())
+            if isinstance(slots, str):
+                slots = (slots,)
+            for slot in slots:
+                if slot not in ("__dict__", "__weakref__") and hasattr(self, slot):
+                    object.__setattr__(replica, slot, getattr(self, slot))
 
         # replicas do not have parameters themselves, the replicas reference the original
         # module.

@@ -216,6 +216,38 @@ class TestNN(NNTestCase):
         MyModuleWithMixinBefore.call_super_init = False
         MyModuleWithMixinAfter.call_super_init = False
 
+    def test_module_slots(self):
+        module = nn.Module()
+        module.custom_attribute = 1
+        module.parameter = nn.Parameter(torch.ones(1))
+        module.buffer = nn.Buffer(torch.ones(1))
+        module.child = nn.Module()
+
+        self.assertIn("_parameters", nn.Module.__slots__)
+        self.assertIn("__dict__", nn.Module.__slots__)
+        self.assertEqual(module.custom_attribute, 1)
+        self.assertNotIn("_parameters", module.__dict__)
+        self.assertNotIn("_buffers", module.__dict__)
+        self.assertNotIn("_modules", module.__dict__)
+
+        restored = pickle.loads(pickle.dumps(module))
+        self.assertEqual(restored.custom_attribute, 1)
+        self.assertEqual(restored.parameter, module.parameter)
+        self.assertEqual(restored.buffer, module.buffer)
+        self.assertIsInstance(restored.child, nn.Module)
+
+        class UninitModule(nn.Module):
+            def __init__(self):
+                pass
+
+        uninit = UninitModule()
+        with self.assertRaises(AttributeError):
+            uninit.parameter = nn.Parameter(torch.ones(1))
+        with self.assertRaises(AttributeError):
+            uninit.buffer = nn.Buffer(torch.ones(1))
+        with self.assertRaises(AttributeError):
+            uninit.child = nn.Module()
+
     def test_share_memory(self):
         class Net(nn.Module):
             def __init__(self) -> None:
