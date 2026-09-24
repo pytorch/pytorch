@@ -5759,7 +5759,8 @@ class ShapeEnv:
             # inconsistent with size oblivious tests.
             if free_unbacked_symbols(sym):
                 hint = None
-            out = SymInt(SymNode(sym, self, int, hint, fx_node=fx_node))
+            node = SymNode(sym, self, int, hint, fx_node=fx_node)
+            out = SymInt(self._maybe_native(node))
         return out
 
     @record_shapeenv_event()
@@ -5834,7 +5835,25 @@ class ShapeEnv:
         """Create a SymBool object from a sympy boolean expression"""
         # This function is only being used in serialization, so we do not track it
         # for validation.
-        return SymBool(SymNode(sym, self, bool, None))
+        return SymBool(self._maybe_native(SymNode(sym, self, bool, None)))
+
+    def _maybe_native(self, node: SymNode) -> SymNode | _NativeSymNode:
+        """
+        The native node for a new int or bool node when this env is native
+        and the node has a hint and a native expression, else the node.
+        """
+        native = self._native_env
+        if (
+            native is None
+            or type(node._hint) is not node.pytype
+            or not isinstance(node._expr, sympy.Basic)
+        ):
+            return node
+        try:
+            r = native.make_node(node._expr, node.pytype, node._hint)
+        except torch._C._symbolic.NativeUnsupported:
+            return node
+        return r if r._expr == node._expr else node
 
     def _log_create_unbacked_symbol(
         self,

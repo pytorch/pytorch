@@ -112,6 +112,8 @@ struct EnvBinding {
   std::shared_ptr<PyArena> arena;
   // A weakref to the ShapeEnv, or None. The ShapeEnv owns the native env.
   py::object shape_env;
+  // The ShapeEnv while the env has live nodes, else None.
+  py::object live_shape_env = py::none();
 };
 
 struct PyShapeEnv {
@@ -718,6 +720,23 @@ bool native_config_is_default() {
       config_entry_unset(aggressive, unset);
 }
 
+void live_nodes_changed(NativeShapeEnv& env) {
+  if (!Py_IsInitialized()) {
+    return;
+  }
+  py::gil_scoped_acquire gil;
+  auto* b = static_cast<EnvBinding*>(env.binding());
+  if (b == nullptr || b->shape_env.is_none()) {
+    return;
+  }
+  // Re-read under the GIL: concurrent transitions converge on the last one.
+  if (env.live_nodes() == 0) {
+    b->live_shape_env = py::none();
+  } else if (b->live_shape_env.is_none()) {
+    b->live_shape_env = b->shape_env();
+  }
+}
+
 std::unique_lock<std::mutex> lock_env(NativeShapeEnv& env) {
   std::unique_lock<std::mutex> lock(env.mutex(), std::try_to_lock);
   if (!lock.owns_lock()) {
@@ -1233,10 +1252,15 @@ void initSymbolicBindings(PyObject* module) {
             TORCH_CHECK(
                 is_bool || pytype.is(pytype_to_py(PyType::Int)),
                 "native nodes are int or bool");
-            auto h = hint_from_py(hint);
             TORCH_CHECK(
-                h && (hint.is_none() || PyBool_Check(hint.ptr()) == is_bool),
+                hint.is_none() ||
+                    (is_bool ? PyBool_Check(hint.ptr())
+                             : PyLong_CheckExact(hint.ptr())),
                 "hint must be None or of the pytype");
+            auto h = hint_from_py(hint);
+            if (!h) {
+              throw NativeUnsupported("hint overflows int64");
+            }
             auto lock = lock_env(*self.env);
             return c10::make_intrusive<NativeSymNodeImpl>(
                 self.env,
@@ -1373,6 +1397,9 @@ void initSymbolicBindings(PyObject* module) {
           return attr.attr("__get__")(self, cls);
         }
         return attr;
+      })
+      .def("__repr__", [](py::handle self) {
+        return python_symnode_class().attr("__repr__")(self);
       });
   for (auto [name, fn] :
        {std::pair{"add", &c10::SymNodeImpl::add},

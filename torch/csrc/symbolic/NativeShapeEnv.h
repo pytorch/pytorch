@@ -2,6 +2,7 @@
 
 #include <torch/csrc/symbolic/ValueRanges.h>
 
+#include <atomic>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -76,6 +77,11 @@ class NativeShapeEnv : public c10::intrusive_ptr_target {
   }
   void* binding() const {
     return binding_.get();
+  }
+  // Native nodes of this env that are alive. While there are any, the binding
+  // holds the Python ShapeEnv strongly, as a Python SymNode does.
+  std::atomic<int64_t>& live_nodes() {
+    return live_nodes_;
   }
 
   void add_symbol(
@@ -159,6 +165,7 @@ class NativeShapeEnv : public c10::intrusive_ptr_target {
   c10::intrusive_ptr<ExprArena> arena_;
   std::mutex mutex_;
   std::shared_ptr<void> binding_;
+  std::atomic<int64_t> live_nodes_{0};
   RangeMap var_to_range_;
   std::unordered_map<const Expr*, int64_t> backed_var_to_val_;
   std::unordered_set<const Expr*> size_like_;

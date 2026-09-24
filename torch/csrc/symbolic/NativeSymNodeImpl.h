@@ -21,13 +21,8 @@ class NativeSymNodeImpl final : public c10::SymNodeImpl {
       PyType pytype,
       Hint hint,
       Hint constant = {},
-      bool optimized_summation = false)
-      : env_(std::move(env)),
-        expr_(expr),
-        pytype_(pytype),
-        hint_(hint),
-        constant_(constant),
-        optimized_summation_(optimized_summation) {}
+      bool optimized_summation = false);
+  ~NativeSymNodeImpl() override;
 
   const c10::intrusive_ptr<NativeShapeEnv>& env() const {
     return env_;

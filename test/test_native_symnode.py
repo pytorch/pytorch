@@ -3476,18 +3476,65 @@ class TestNativeSymNode(TestCase):
         with self.assertRaises(NativeUnsupported):
             native.make_node(sympy.Float(1.5), int, None)
 
-    def test_env_gone(self):
+    def test_lifetime(self):
+        # A native node holds its ShapeEnv, as a Python SymNode does.
         import gc
+        import weakref
 
         env, syms = self.make_env()
+        ref = weakref.ref(env)
         n = env._native_env.make_node(syms[0], int, 5)
-        self.assertEqual(n.add(n).hint, 10)
+        del n
+        m = env._native_env.make_node(syms[1], int, 7)
+        n = m.add(m)
         del env
         gc.collect()
+        self.assertIsNotNone(ref())
+        self.assertIs(n.shape_env, ref())
+        self.assertEqual(n.truediv(m).hint, 2.0)
+        del m
+        gc.collect()
+        self.assertIsNotNone(ref())
+        del n
+        gc.collect()
+        self.assertIsNone(ref())
+        env, syms = self.make_env()
+        native = env._native_env
+        del env
+        gc.collect()
+        n = native.make_node(syms[0], int, 5)
+        self.assertIsNone(n.shape_env)
         with self.assertRaisesRegex(
             RuntimeError, "ShapeEnv of a native SymNode is gone"
         ):
             n.truediv(n)
+
+    def test_create_symintnode(self):
+        env, syms = self.make_env()
+        s = syms[0]
+        x = env.create_symintnode(s, hint=5)
+        n = x.node
+        self.assertIsInstance(n, _NativeSymNode)
+        self.assertEqual((n._expr, n.hint), (s, 5))
+        want = SymNode(s, env, int, 5)
+        self.assertEqual((str(n), repr(n)), (str(want), repr(want)))
+        # A backed node without a hint gets the computed one.
+        n = env.create_symintnode(s * syms[1], hint=None).node
+        self.assertIsInstance(n, _NativeSymNode)
+        self.assertEqual(n.hint, 35)
+        n = env.create_symboolnode(sympy.Eq(s, 5)).node
+        self.assertIsInstance(n, _NativeSymNode)
+        self.assertIs(n.hint, True)
+        self.assertEqual(env.create_symintnode(sympy.Integer(3), hint=3), 3)
+        big = env.create_symbol(2**70, ConstantSource("big"), DimDynamic.DYNAMIC)
+        u = env.create_unbacked_symint().node.expr
+        m2, mx = sympy.Mul(s, 2, evaluate=False), sympy.Max(s, syms[1])
+        for sym, hint in ((big, 2**70), (u, None), (s, x), (5, 5), (m2, 10), (mx, 7)):
+            self.assertIs(type(env.create_symintnode(sym, hint=hint).node), SymNode)
+        self.assertIs(type(env.create_symintnode(5, hint=5).node.expr), int)
+        flag_off, syms = self.make_env(native=False)
+        n = flag_off.create_symintnode(syms[0], hint=5).node
+        self.assertIs(type(n), SymNode)
 
     def test_attributes(self):
         env, syms = self.make_env()
@@ -3495,6 +3542,7 @@ class TestNativeSymNode(TestCase):
         self.assertIs(n.shape_env, env)
         self.assertIs(n.fx_node, p.fx_node)
         self.assertEqual(n._hint, p._hint)
+        self.assertEqual(repr(n), repr(p))
         self.assertIsNone(self.pair(env, syms[3], int, None)[0]._hint)
         self.assertTrue(n._value_eq(p))
         self.assertEqual(n._value_hash(), p._value_hash())
@@ -3669,6 +3717,107 @@ class TestNativeSymNode(TestCase):
         self.assertEqual(found, allowed)
 
 
+class TestNativeSymNodeCompile(TestCase):
+    """torch.compile with dynamic shapes, flag on vs off."""
+
+    class Mlp(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.fc1 = torch.nn.Linear(8, 16)
+            self.fc2 = torch.nn.Linear(16, 8)
+
+        def forward(self, x):
+            h = torch.nn.functional.gelu(self.fc1(x))
+            return torch.softmax(self.fc2(h), dim=-1).view(x.shape[0], -1)
+
+    @staticmethod
+    def attention(q, k):
+        b, t, d = q.shape
+        s = (q @ k.transpose(1, 2)) / d**0.5
+        mask = torch.ones(t, t, dtype=torch.bool).tril()
+        s = s.masked_fill(~mask, float("-inf")).softmax(-1)
+        return (s @ k).reshape(b, t * d)[:, : t * d // 2]
+
+    @staticmethod
+    def size_branch(x, y):
+        n = x.shape[0]
+        z = torch.cat([x, y[: n // 2]])
+        if n % 2 == 0 and z.shape[0] > 6:
+            return z.flatten()[n:] * n
+        return z.sum(0) - n
+
+    CASES = {
+        "mlp": (Mlp, lambda n: (torch.randn(n, 3, 8),), (4, 6, 9)),
+        "attention": (
+            lambda: TestNativeSymNodeCompile.attention,
+            lambda n: (torch.randn(2, n, 4), torch.randn(2, n, 4)),
+            (5, 8),
+        ),
+        "size_branch": (
+            lambda: TestNativeSymNodeCompile.size_branch,
+            lambda n: (torch.randn(n, 3), torch.randn(n + 2, 3)),
+            (4, 8, 7, 10),
+        ),
+    }
+
+    def run_compiled(self, case, native):
+        from torch._dynamo.backends.common import aot_autograd
+        from torch._guards import detect_fake_mode
+
+        make_fn, make_args, sizes = self.CASES[case]
+        torch.manual_seed(0)
+        fn = make_fn()
+        graphs, envs, vals = [], [], []
+
+        def fw_compiler(gm, example_inputs):
+            graphs.append(gm.code)
+            return gm.forward
+
+        def backend(gm, example_inputs):
+            graphs.append(gm.code)
+            envs.append(detect_fake_mode(example_inputs).shape_env)
+            vals.extend(
+                n.meta["example_value"]
+                for n in gm.graph.nodes
+                if isinstance(n.meta.get("example_value"), torch.SymInt)
+            )
+            return aot_autograd(fw_compiler=fw_compiler)(gm, example_inputs)
+
+        torch._dynamo.reset()
+        with torch._dynamo.config.patch(use_cpp_symnode=native):
+            compiled = torch.compile(fn, backend=backend, dynamic=True)
+            outs = []
+            for n in sizes:
+                args = make_args(n)
+                outs.append((compiled(*args), fn(*args)))
+        state = [
+            (
+                [str(g.expr) for g in env.guards],
+                sorted(map(str, env.replacements.items())),
+                sorted(map(str, env.var_to_range.items())),
+            )
+            for env in envs
+        ]
+        return graphs, state, outs, vals, envs
+
+    @parametrize("case", list(CASES))
+    def test_compile(self, case):
+        graphs, state, outs, vals, envs = self.run_compiled(case, native=True)
+        want_graphs, want_state, _, want_vals, _ = self.run_compiled(case, native=False)
+        self.assertEqual(graphs, want_graphs)
+        self.assertEqual(state, want_state)
+        for got, want in outs:
+            self.assertEqual(got, want)
+        self.assertTrue(all(env._native_env is not None for env in envs))
+        self.assertTrue(vals)
+        self.assertTrue(all(isinstance(v.node, _NativeSymNode) for v in vals))
+        self.assertEqual(
+            [(str(v), v.node.hint) for v in vals],
+            [(str(v), v.node.hint) for v in want_vals],
+        )
+        self.assertTrue(not any(isinstance(v.node, _NativeSymNode) for v in want_vals))
+
+
 instantiate_parametrized_tests(TestNativeExpr)
 instantiate_parametrized_tests(TestNativeCompoundAssumptions)
 instantiate_parametrized_tests(TestNativeExprTools)
@@ -3682,6 +3831,7 @@ instantiate_parametrized_tests(TestNativeStaticPasses)
 instantiate_parametrized_tests(TestNativeShapeEnv)
 instantiate_parametrized_tests(TestNativeShapeEnvSync)
 instantiate_parametrized_tests(TestNativeSymNode)
+instantiate_parametrized_tests(TestNativeSymNodeCompile)
 
 
 if __name__ == "__main__":

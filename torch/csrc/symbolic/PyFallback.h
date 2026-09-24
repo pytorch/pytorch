@@ -16,6 +16,10 @@ class NativeSymNodeImpl;
 // identity of its operands.
 c10::SymNode materialize(const NativeSymNodeImpl& node);
 
+// Called when env.live_nodes() changes between 0 and nonzero; holds or
+// releases the Python ShapeEnv to match. Takes the GIL.
+void live_nodes_changed(NativeShapeEnv& env);
+
 // Locks env.mutex(). A thread holding the GIL releases it while it blocks, so
 // no thread waits for the mutex while holding the GIL, and a thread holding
 // the mutex may take the GIL (to call Python) without deadlock.

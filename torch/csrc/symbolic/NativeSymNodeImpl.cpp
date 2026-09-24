@@ -165,6 +165,30 @@ const Expr* channels_last_strides_generic(
 
 } // namespace
 
+NativeSymNodeImpl::NativeSymNodeImpl(
+    c10::intrusive_ptr<NativeShapeEnv> env,
+    const Expr* expr,
+    PyType pytype,
+    Hint hint,
+    Hint constant,
+    bool optimized_summation)
+    : env_(std::move(env)),
+      expr_(expr),
+      pytype_(pytype),
+      hint_(hint),
+      constant_(constant),
+      optimized_summation_(optimized_summation) {
+  if (env_->live_nodes().fetch_add(1) == 0) {
+    live_nodes_changed(*env_);
+  }
+}
+
+NativeSymNodeImpl::~NativeSymNodeImpl() {
+  if (env_->live_nodes().fetch_sub(1) == 1) {
+    live_nodes_changed(*env_);
+  }
+}
+
 std::optional<int64_t> NativeSymNodeImpl::maybe_as_int() {
   {
     auto lock = lock_env(*env_);
