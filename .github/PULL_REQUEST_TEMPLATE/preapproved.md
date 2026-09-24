@@ -1,7 +1,9 @@
 # Pre-approved PR
 
+Use this template for PRs without a linked "actionable" issue, when the change was agreed on with a maintainer beforehand.
+
 Before submitting, please review:
-- [The Ultimate Guide to PyTorch Contributions](https://github.com/pytorch/pytorch/wiki/The-Ultimate-Guide-to-PyTorch-Contributions#getting-started-with-pull-requests)
+- [PR lifecycle](https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md#pr-lifecycle) in the contributing guide
 - [AI-Assisted Development](https://github.com/pytorch/pytorch/blob/main/AI_POLICY.md) policy
 
 ---
