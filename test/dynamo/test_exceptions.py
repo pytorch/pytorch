@@ -2082,7 +2082,9 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
             return e.__notes__
 
         self.assertEqual(fn(), ["fresh"])
-        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), ["fresh"])
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(), ["fresh"]
+        )
 
     @unittest.skipIf(
         sys.version_info < (3, 11),
