@@ -352,7 +352,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
             race_tensors.pop()
             work = pg.all_to_all_single(output, input, [], [], opts)
             # this triggers cudaFree
-            device_module.empty_cache()
+            torch.accelerator.empty_cache()
             work.wait()
         torch.accelerator.synchronize(local_device)
 
@@ -399,7 +399,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
         # test that the watchdog does not crash graphs with disallowed event query
         pg = self.pg
         rank = self.rank_to_GPU[self.rank][0]
-        with device_module.device(rank):
+        with torch.accelerator.device(rank):
             for _ in range(10):
                 xs = [torch.FloatTensor([1]).to(torch.device(device_type, rank))]
                 for _ in range(30):
@@ -431,7 +431,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
         # expandable_segments is a CUDA caching-allocator knob; other backends
         # have no equivalent, so only they set up the multisegment condition.
         if device_type == "cuda":
-            device_module.memory._set_allocator_settings("expandable_segments:True")
+            torch.accelerator.memory._set_allocator_settings("expandable_segments:True")
 
         b, t, d = 64, 1, 101024
         inp = torch.ones((b, t, d), device=device_type) * (self.rank + 1)
@@ -455,7 +455,9 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
 
         self.assertEqual(static_output.sum().item(), expected_sum)
         if device_type == "cuda":
-            device_module.memory._set_allocator_settings("expandable_segments:False")
+            torch.accelerator.memory._set_allocator_settings(
+                "expandable_segments:False"
+            )
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
