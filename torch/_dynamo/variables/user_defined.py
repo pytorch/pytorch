@@ -1470,15 +1470,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.WeakRefVariable(args[0], callback)
         elif self.value is functools.partial:
             if not args:
-                unimplemented(
-                    gb_type="missing args to functools.partial",
-                    context="",
-                    explanation="functools.partial requires at least one argument",
-                    hints=[
-                        "Fix the functools.partial call.",
-                        *graph_break_hints.USER_ERROR,
-                    ],
-                )
+                raise_type_error(tx, "type 'partial' takes at least one argument")
             # The first arg, a callable (the ctor below will assert on types)
             fn = args[0]
             rest_args = args[1:]
