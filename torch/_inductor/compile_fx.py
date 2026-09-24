@@ -2067,9 +2067,7 @@ class _InProcessFxCompile(FxCompile):
                         V.graph.disable_cudagraphs_reason = (
                             check_lowering_disable_cudagraph(
                                 # pyrefly: ignore [unbound-name]
-                                V.graph.device_node_mapping,
-                                # pyrefly: ignore [unbound-name]
-                                use_cudagraph_partition=V.graph.use_cudagraph_partition,
+                                V.graph.device_node_mapping
                             )
                         )
 
@@ -2196,7 +2194,12 @@ def get_input_idxs_to_check(
     This function runs at compile time, and generates a list of indices for which we
     might need to do a copy to preserve alignment requirements.
     """
-    ids_to_check = []
+    ids_to_check: list[int] = []
+
+    # Strict mode: the generated wrapper asserts that inputs assumed aligned
+    # actually are, instead of the runtime realigning them with a clone.
+    if config.alignment_asserts_inputs:
+        return ids_to_check
 
     for i, input in enumerate(inputs):
         if not isinstance(input, torch.Tensor):
@@ -2968,7 +2971,7 @@ def compile_fx_forward(
             not is_inference
             and isinstance(result, CompiledFxGraph)
             and result.partition_maps
-            and (len(result.partition_maps) > 1 or result.has_uncaptured_partition)
+            and result.has_uncaptured_partition
         ):
             compiler_config_extra.forward_is_cudagraph_partitioned.value = True
 
