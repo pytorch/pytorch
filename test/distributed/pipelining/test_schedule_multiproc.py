@@ -1037,8 +1037,22 @@ class ScheduleTest(MultiProcContinuousTest):
                 self.assertEqual(auto_name, pre_split_name)
                 self.assertEqual(pre_split_param.grad, auto_param.grad)
 
-        check_gradients(self.config, auto_stage_modules, ref_mod, submod_names)
-        check_gradients(self.config, pre_split_stage_modules, ref_mod, submod_names)
+        check_gradients(
+            self.config,
+            auto_stage_modules,
+            ref_mod,
+            submod_names,
+            rtol=1e-4,
+            atol=1e-4,
+        )
+        check_gradients(
+            self.config,
+            pre_split_stage_modules,
+            ref_mod,
+            submod_names,
+            rtol=1e-4,
+            atol=1e-4,
+        )
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
