@@ -154,6 +154,7 @@ from torch.testing._internal.opinfo.definitions.sparse import (
     sample_inputs_sparse_like_fns,
     error_inputs_sparse_mul,
     sample_inputs_sparse_mul,
+    sample_inputs_sparse_add_blocked,
     error_inputs_sparse_reduction_sum,
     sample_inputs_sparse_reduction_sum
 )
@@ -12185,6 +12186,8 @@ op_db: list[OpInfo] = [
                     dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32),
                     assert_autodiffed=True,
                     sample_inputs_func=sample_inputs_add_sub,
+                    sample_inputs_sparse_bsr_func=partial(sample_inputs_sparse_add_blocked, layout=torch.sparse_bsr),
+                    sample_inputs_sparse_bsc_func=partial(sample_inputs_sparse_add_blocked, layout=torch.sparse_bsc),
                     supports_fwgrad_bwgrad=True,
                     supports_forward_ad=True,
                     supports_two_python_scalars=True,
