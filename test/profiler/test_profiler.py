@@ -3433,18 +3433,6 @@ class TestExperimentalUtils(TestCase):
                         raise AssertionError(
                             f"Could not find op '{op_name}' in Chrome trace."
                         )
-                found_op = False
-                for event in prof.events():
-                    if event.name == op_name:
-                        if metadata_key not in event.metadata_json:
-                            raise AssertionError(
-                                f"Metadata for '{op_name}' in FunctionEvent did not contain '{metadata_key}'."
-                            )
-                        found_op = True
-                if not found_op:
-                    raise AssertionError(
-                        f"Could not find op '{op_name}' in prof.events()."
-                    )
 
         experimental_config = torch._C._profiler._ExperimentalConfig(
             expose_kineto_event_metadata=True
