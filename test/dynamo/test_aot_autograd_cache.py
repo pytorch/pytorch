@@ -3945,6 +3945,35 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
                 else:
                     self.assertNotIn("Subgraph:", message)
 
+    def test_nested_check_failure_names_subgraph(self):
+        # The original exception is re-raised with its type intact; only a
+        # message that str() renders verbatim gains the Subgraph line.
+        example = torch.ones(3)
+        root = torch.nn.Module()
+        root.body = self._make_wrapped_gm(_opaque_unsupported_function, None, example)
+        graph = torch.fx.Graph()
+        graph.output(graph.call_module("body", (graph.placeholder("x"),)))
+        gm = GraphModule(root, graph)
+
+        for exc, message in (
+            (AssertionError("bad"), "bad\nSubgraph: body"),
+            (OSError(2, "missing"), "[Errno 2] missing"),
+            (KeyError("k"), "'k'"),
+        ):
+
+            def fail(node, exc=exc):
+                if node.graph is gm.body.graph:
+                    raise exc
+
+            with self.subTest(type(exc).__name__):
+                with (
+                    patch.object(autograd_cache, "check_node_safe", side_effect=fail),
+                    self.assertRaises(type(exc)) as cm,
+                ):
+                    check_cacheable(gm)
+                self.assertIs(cm.exception, exc)
+                self.assertEqual(str(cm.exception), message)
+
     def test_wrapped_user_cache_hash_must_be_str(self):
         # Bypass non-string hashes rather than key them: tensors reduce to
         # metadata only, silently under-keying. The multi-element tensor also

@@ -417,10 +417,18 @@ def check_cacheable(gm: torch.fx.GraphModule) -> None:
         try:
             for node in module.graph.nodes:
                 check_node_safe(node)
-        except BypassAOTAutogradCache as e:
-            if not module_name:
-                raise
-            raise BypassAOTAutogradCache(f"{e}\nSubgraph: {module_name}") from e
+        except Exception as e:
+            # Keep the exception's type: record_bypass uses it to tell bypasses
+            # from hard errors. Only rewrite a message that str(e) renders
+            # verbatim; OSError, KeyError and multi-arg exceptions don't.
+            if (
+                module_name
+                and type(e).__str__ is BaseException.__str__
+                and len(e.args) <= 1
+                and all(isinstance(arg, str) for arg in e.args)
+            ):
+                e.args = (f"{e.args[0] if e.args else ''}\nSubgraph: {module_name}",)
+            raise
 
 
 def _get_context_fn_cache_hash(context_fn: Callable[..., Any]) -> str | None:
