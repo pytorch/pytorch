@@ -177,9 +177,7 @@ class TestContentStore(TestCase):
         # _GENERATOR_DEVICE_TYPES: it must take the SHA-1 fallback instead
         # of reaching the generator table.
         storage = torch.empty(4, device="meta").untyped_storage()
-        with mock.patch(
-            "torch._dynamo.utils.is_compile_supported", return_value=True
-        ):
+        with mock.patch("torch._dynamo.utils.is_compile_supported", return_value=True):
             # meta has no data to copy out, so the SHA-1 fallback itself
             # raises RuntimeError; reaching it (instead of the generator
             # table's AssertionError) is the behavior under test.
