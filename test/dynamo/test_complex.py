@@ -6,6 +6,7 @@ import torch._dynamo.test_case
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
+    parametrize,
 )
 
 
@@ -166,6 +167,24 @@ class ComplexTests(ComplexDynamoTestCase):
 
         mutate_c = torch.compile(mutate, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         self.assertEqual(mutate(), mutate_c())
+
+    @parametrize("dtype", [torch.complex64, torch.complex128])
+    def test_add(self, dtype):
+        # Inductor decomposes complex `aten.add` by viewing the interleaved
+        # storage as a real tensor with a trailing dimension of 2. That
+        # decomposition must not run when the complex wrapper is enabled,
+        # because `ComplexTensor` keeps the real and imaginary parts as two
+        # separate tensors.
+        def f(a, b):
+            return a + b, torch.add(a, b, alpha=2), a + 1.0
+
+        g = torch.Generator().manual_seed(0)
+        a = torch.randn(4, 8, dtype=dtype, generator=g)
+        b = torch.randn(4, 8, dtype=dtype, generator=g)
+
+        fn_c = torch.compile(f, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
+        self.assertEqual(fn_c(a, b), f(a, b))
+        self.assertEqual(fn_c(a, a), f(a, a))
 
     def test_view_as_real(self):
         def f():

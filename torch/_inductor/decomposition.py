@@ -686,6 +686,17 @@ def add(
     if not x_is_complex_tensor or not y_is_complex_tensor:
         return NotImplemented
 
+    # This decomposition reinterprets the interleaved (re, im) storage of a
+    # native complex tensor as a real tensor with a trailing dimension of 2.
+    # When the complex wrapper is enabled, AOTAutograd later retraces the graph
+    # with `ComplexTensor`, which keeps the real and imaginary parts as two
+    # separate real tensors. Under that subclass `x.view(x.real.dtype)` does
+    # not double the last dimension, so the reshape below fails with
+    # "shape '[N, 2]' is invalid for input of size N". Keep `aten.add` intact
+    # here and let `ComplexTensor` decompose it into two real additions.
+    if torch._functorch.config.enable_complex_wrapper:
+        return NotImplemented
+
     def _requires_fallback(tensor: torch.Tensor) -> bool:
         if tensor.ndim == 0:
             return False
