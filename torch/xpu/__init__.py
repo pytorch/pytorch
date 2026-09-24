@@ -65,6 +65,11 @@ class _ZesDeviceInfo:
 
 
 _cached_zes_device_infos: list[_ZesDeviceInfo] = []
+# PyTorch-visible device count, computed once at enumeration. The cache keeps
+# every enumerated device (for robust UUID lookups) and _get_zes_device_info
+# reorders it, so the mask-aware count can't be re-derived later and is stored
+# here instead.
+_cached_zes_visible_count = 0
 # Interval between two HW counter reads; must be >=100ms for fresh data.
 _zes_sample_interval_ms = 150
 
@@ -839,17 +844,40 @@ def _zes_check(rc: int, msg: str) -> None:
         raise RuntimeError(f"{msg} (rc={rc})")
 
 
-def _zes_ensure_device_infos(device: int):
-    """Ensure the ZES device info cache is populated and validate the device index."""
+def _get_zes_device_info(device: Device = None) -> _ZesDeviceInfo:
+    r"""Return the cached Level Zero Sysman device info for the specified device.
+
+    The result is cached in ``_cached_zes_device_infos`` so that repeated calls
+    skip device enumeration. ``_cached_zes_device_infos`` is lazily populated on
+    the first call.
+
+    Args:
+        device (torch.device, str or int, optional): target device. Uses the
+            current device, given by :func:`~torch.xpu.current_device`,
+            if ``None`` (default).
+    """
+    device = _get_device_index(device, optional=True)
     if not _cached_zes_device_infos:
         if _enum_zes_device_infos(_parse_visible_devices(strict=True)) < 0:
             raise RuntimeError("Failed to enumerate devices via Level Zero Sysman.")
 
-    total_devices = len(_cached_zes_device_infos)
-    if device >= total_devices:
-        raise RuntimeError(
-            f"The device {device} is out of range for Level Zero Sysman. It must be in the range [0, {total_devices})."
-        )
+    uuid = bytes(torch.xpu.get_device_properties(device).uuid.bytes)
+    # Fast path: the device already occupies its ordinal slot.
+    target = _cached_zes_device_infos[device]
+    if target.uuid == uuid:
+        return target
+
+    # Slow path: search for the device by UUID and swap it into the correct slot.
+    for index, info in enumerate(_cached_zes_device_infos):
+        if info.uuid == uuid:
+            _cached_zes_device_infos[device], _cached_zes_device_infos[index] = (
+                info,
+                target,
+            )
+            return info
+    raise RuntimeError(
+        f"No Level Zero Sysman device matches XPU device {device} (UUID {uuid.hex()})."
+    )
 
 
 def _get_zes_temperature_handle(device: Device = None) -> c_void_p:
@@ -866,10 +894,7 @@ def _get_zes_temperature_handle(device: Device = None) -> c_void_p:
     """
     pyzes = _import_pyzes()
 
-    device = _get_device_index(device, optional=True)
-    _zes_ensure_device_infos(device)
-
-    info = _cached_zes_device_infos[device]
+    info = _get_zes_device_info(device)
     if info.temperature_handle is not None:
         return info.temperature_handle
 
@@ -962,10 +987,7 @@ def _get_zes_frequency_handle(device: Device = None) -> c_void_p:
     """
     pyzes = _import_pyzes()
 
-    device = _get_device_index(device, optional=True)
-    _zes_ensure_device_infos(device)
-
-    info = _cached_zes_device_infos[device]
+    info = _get_zes_device_info(device)
     if info.frequency_handle is not None:
         return info.frequency_handle
 
@@ -1051,10 +1073,7 @@ def _get_zes_power_handle(device: Device = None) -> c_void_p:
     """
     pyzes = _import_pyzes()
 
-    device = _get_device_index(device, optional=True)
-    _zes_ensure_device_infos(device)
-
-    info = _cached_zes_device_infos[device]
+    info = _get_zes_device_info(device)
     if info.power_handle is not None:
         return info.power_handle
 
@@ -1176,10 +1195,7 @@ def _get_zes_engine_handle(device: Device = None) -> c_void_p:
     """
     pyzes = _import_pyzes()
 
-    device = _get_device_index(device, optional=True)
-    _zes_ensure_device_infos(device)
-
-    info = _cached_zes_device_infos[device]
+    info = _get_zes_device_info(device)
     if info.engine_handle is not None:
         return info.engine_handle
 
@@ -1291,10 +1307,7 @@ def _zes_get_memory_handle(device: Device = None) -> c_void_p:
     """
     pyzes = _import_pyzes()
 
-    device = _get_device_index(device, optional=True)
-    _zes_ensure_device_infos(device)
-
-    info = _cached_zes_device_infos[device]
+    info = _get_zes_device_info(device)
     if info.memory_handle is not None:
         return info.memory_handle
 
