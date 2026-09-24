@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from importlib import import_module
-from typing import Any, TYPE_CHECKING
+from typing import Any, Literal, TYPE_CHECKING
 
 from ._blocking import _BlockingTransport
 
@@ -31,7 +31,7 @@ class _View:
 
 
 class _MutableView(_View):
-    pass
+    writable: Literal[True] = True
 
 
 class _Memory:

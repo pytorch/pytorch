@@ -6,7 +6,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol, TYPE_CHECKING
+from typing import Any, Literal, Protocol, TYPE_CHECKING
 
 import torch
 
@@ -111,7 +111,7 @@ class IBVerbsMemoryView:
 
 
 class IBVerbsMutableMemoryView(IBVerbsMemoryView):
-    pass
+    writable: Literal[True] = True
 
 
 class IBVerbsMemory:
