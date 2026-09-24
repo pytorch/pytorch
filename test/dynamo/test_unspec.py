@@ -516,6 +516,72 @@ else:
         self.assertEqual(res, ref)
         self.assertEqual(cnt.frame_count, 1)
 
+    @parametrize("method", ["getstate", "shuffle", "sample"])
+    @parametrize("draw_before", [False, True])
+    def test_random_object_live_state_operations(self, method, draw_before):
+        def fn(x, rng):
+            a = rng.random() if draw_before else 0
+            if method == "getstate":
+                state = rng.getstate()
+                b = rng.random()
+                rng.setstate(state)
+                return x + a + b
+            items = list(range(10))
+            if method == "shuffle":
+                rng.shuffle(items)
+            else:
+                items = rng.sample(items, 4)
+            return x + a + rng.random(), items
+
+        def run(f):
+            rng = random.Random(123)
+            results = []
+            for shape in ([1], [1, 5], [2, 2], [2, 3], [2, 3], [2, 3]):
+                results.append((f(torch.zeros(shape), rng), rng.getstate()))
+            return results
+
+        ref = run(fn)
+        res = run(torch.compile(fn, backend="eager", dynamic=True))
+        self.assertEqual(res, ref)
+
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "random.Random operation requires runtime state",
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.zeros(2), random.Random(123)
+            )
+
+    def test_random_object_module_attribute(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.rng = random.Random(123)
+
+            def forward(self, x):
+                return x + self.rng.random() + self.rng.randint(1, 100)
+
+        for fullgraph in (False, True):
+            torch._dynamo.reset()
+            eager = Model()
+            model = Model()
+            cnt = CompileCounter()
+            compiled = torch.compile(
+                model, backend=cnt, dynamic=True, fullgraph=fullgraph
+            )
+            for shape in ([1], [1, 5], [2, 2], [2, 3]):
+                x = torch.zeros(shape)
+                self.assertEqual(compiled(x), eager(x))
+                self.assertEqual(model.rng.getstate(), eager.rng.getstate())
+            frame_count = cnt.frame_count
+            self.assertLess(frame_count, 4)
+            for _ in range(3):
+                x = torch.zeros(2, 3)
+                self.assertEqual(compiled(x), eager(x))
+                self.assertEqual(model.rng.getstate(), eager.rng.getstate())
+            self.assertEqual(cnt.frame_count, frame_count)
+
     def test_random_object_alternating_instances(self):
         def fn(x, rng):
             return x.sum() + rng.random()
@@ -580,12 +646,11 @@ else:
         self.assertEqual(cnt.frame_count, 2)
 
     def test_random_module_shuffle_sample(self):
-        # Module-level random.shuffle/random.sample must trace under fullgraph
-        # (exercised by the CPython dict/list tests). Like an explicit Random
-        # object, the global RNG state is snapshotted at compile time, so assert
-        # structural correctness rather than cross-run reproducibility.
+        # An explicit seed makes module-level shuffle/sample traceable under
+        # fullgraph; without it these operations depend on live runtime state.
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x):
+            random.seed(0)
             items = list(range(10))
             random.shuffle(items)
             picks = random.sample("abcdefghij", 4)
