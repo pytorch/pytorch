@@ -48,6 +48,41 @@ class TestOverrideDeclarations(TestCase):
                     f"not resolve after importing {mod._DEFINING_MODULE}",
                 )
 
+    def test_declared_variants_are_callable_and_defaults_exist(self):
+        """A module offering several implementations of an op declares them in
+        `_VARIANTS`; selecting one by name is a public surface, so the table
+        has to agree with `_OVERRIDES` and with its own defaults. DSL-free,
+        like the symbol check above."""
+        for name, mod in _declaring_modules():
+            table = getattr(mod, "_VARIANTS", None)
+            if table is None:
+                continue
+            defaults = mod._DEFAULT_VARIANTS
+            declared_ops = {op_symbol for op_symbol, *_ in mod._OVERRIDES}
+            self.assertEqual(
+                set(table),
+                declared_ops,
+                f"{name}: _VARIANTS covers {sorted(table)} but the module "
+                f"registers {sorted(declared_ops)}",
+            )
+            self.assertEqual(set(defaults), declared_ops, f"{name}: defaults")
+            for op_symbol, impls in table.items():
+                for variant_name, declared in impls.items():
+                    # Each variant declares the eligibility `cond` evaluates
+                    # for it and the implementation that then runs.
+                    for part in ("eligible", "impl"):
+                        self.assertTrue(
+                            callable(getattr(declared, part, None)),
+                            f"{name}: {op_symbol} variant {variant_name!r} has "
+                            f"no callable {part}",
+                        )
+                self.assertIn(
+                    defaults[op_symbol],
+                    impls,
+                    f"{name}: default variant {defaults[op_symbol]!r} for "
+                    f"{op_symbol} is not declared; declared {sorted(impls)}",
+                )
+
 
 if __name__ == "__main__":
     run_tests()
