@@ -2584,6 +2584,10 @@ IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED = (
     and torch.cuda.get_device_capability() >= (8, 0)
 )
 IS_FLEX_ATTENTION_MPS_PLATFORM_SUPPORTED = torch.mps.is_available()
+IS_FLEX_ATTENTION_NPU_PLATFORM_SUPPORTED = (
+    torch.npu.is_available() and torch.utils._triton.has_triton()
+)
+
 flex_attention_supported_platform = unittest.skipUnless(
     IS_FLEX_ATTENTION_XPU_PLATFORM_SUPPORTED
     or (
@@ -2592,8 +2596,9 @@ flex_attention_supported_platform = unittest.skipUnless(
         and not torch.cuda.is_available()
     )
     or IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED
-    or IS_FLEX_ATTENTION_MPS_PLATFORM_SUPPORTED,
-    "Requires CUDA and Triton, Intel GPU and triton, MPS, or CPU with avx2 and later",
+    or IS_FLEX_ATTENTION_MPS_PLATFORM_SUPPORTED
+    or IS_FLEX_ATTENTION_NPU_PLATFORM_SUPPORTED,
+    "Requires CUDA and Triton, Intel GPU and triton, MPS, NPU, or CPU with avx2 and later",
 )
 if (
     torch.version.hip
