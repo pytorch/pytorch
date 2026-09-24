@@ -1,6 +1,7 @@
 #ifdef USE_C10D_NCCL
 
 #include <nlohmann/json.hpp>
+#include <algorithm>
 #include <exception>
 #include <map>
 #include <memory>
@@ -1814,14 +1815,19 @@ ProcessGroupNCCL::HeartbeatMonitor::HeartbeatMonitor(ProcessGroupNCCL* pg) {
 }
 
 void ProcessGroupNCCL::HeartbeatMonitor::stop() {
-  terminateHeartbeatMonitorThread_.store(true);
+  {
+    std::lock_guard<std::mutex> lock(shutdownDumpSignalArmingMutex_);
+    terminateHeartbeatMonitorThread_.store(true);
+  }
   monitorWakeUpCV_.notify_one();
+  shutdownDumpSignalArmingCV_.notify_one();
 }
 
 bool ProcessGroupNCCL::HeartbeatMonitor::monitorDumpSignalsDuringShutdown(
     std::chrono::milliseconds timeout) {
   if (!ncclHeartbeatMonitorThread_.joinable() || !dumpOnTimeoutOrEx_ ||
-      pg_->getUid() != 0) {
+      pg_->getUid() != 0 || terminateHeartbeatMonitorThread_.load() ||
+      timeout <= std::chrono::milliseconds::zero()) {
     return false;
   }
   const auto deadline = std::chrono::steady_clock::now() + timeout;
@@ -1829,9 +1835,25 @@ bool ProcessGroupNCCL::HeartbeatMonitor::monitorDumpSignalsDuringShutdown(
       std::chrono::duration_cast<std::chrono::milliseconds>(
           deadline.time_since_epoch())
           .count());
+  {
+    std::lock_guard<std::mutex> lock(shutdownDumpSignalArmingMutex_);
+    shutdownDumpSignalArmed_ = false;
+  }
   shutdownDumpSignalMonitorEnabled_.store(true);
   monitorWakeUpCV_.notify_one();
-  return true;
+  // A joinable monitor may have left the polling loop for its post-dump wait
+  // or exited entirely. Only the monitor itself can confirm that it entered
+  // shutdown-only polling. Keep this wait independent of monitorMutex_, which
+  // the monitor holds while checking the store.
+  constexpr auto kArmingWaitLimit = std::chrono::milliseconds(5000);
+  std::unique_lock<std::mutex> lock(shutdownDumpSignalArmingMutex_);
+  const bool acknowledged = shutdownDumpSignalArmingCV_.wait_for(
+      lock, std::min(timeout, kArmingWaitLimit), [&] {
+        return shutdownDumpSignalArmed_ ||
+            terminateHeartbeatMonitorThread_.load();
+      });
+  return acknowledged && shutdownDumpSignalArmed_ &&
+      !terminateHeartbeatMonitorThread_.load();
 }
 
 void ProcessGroupNCCL::HeartbeatMonitor::start() {
@@ -1908,6 +1930,18 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
         LOG(INFO) << pg_->logPrefix()
                   << "Shutdown dump-signal responder reached its deadline.";
         return;
+      }
+
+      bool firstAcknowledgment = false;
+      {
+        std::lock_guard<std::mutex> armingLock(shutdownDumpSignalArmingMutex_);
+        if (!shutdownDumpSignalArmed_) {
+          shutdownDumpSignalArmed_ = true;
+          firstAcknowledgment = true;
+        }
+      }
+      if (firstAcknowledgment) {
+        shutdownDumpSignalArmingCV_.notify_one();
       }
 
       bool checkExceptionDump = false;

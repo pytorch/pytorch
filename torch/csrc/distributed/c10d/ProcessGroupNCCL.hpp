@@ -635,9 +635,12 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Set the terminal flag and notify the heartbeat monitor thread to stop.
     void stop();
 
-    // During shutdown, keep the default process group's monitor alive only to
-    // answer a peer's flight-recorder dump request. This mode is bounded and
-    // disables watchdog-heartbeat and communicator-dependent diagnostics.
+    // During shutdown, request that the default process group's monitor only
+    // answer a peer's flight-recorder dump request. Return true only after the
+    // monitor acknowledges entering this mode. This does not guarantee that a
+    // later dump succeeds if the deadline expires, stop is requested, or the
+    // store fails. False means readiness was not confirmed in time, not that
+    // a delayed worker can never briefly enter the mode before stop() wins.
     bool monitorDumpSignalsDuringShutdown(std::chrono::milliseconds timeout);
 
     // Set the last update time of watchdog thread.
@@ -694,6 +697,14 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Steady-clock deadline for the shutdown-only dump responder, represented
     // as milliseconds since the steady-clock epoch for atomic access.
     std::atomic<int64_t> shutdownDumpSignalDeadlineMillis_{0};
+
+    // Separate from monitorMutex_: the monitor may hold that mutex during a
+    // store check, but shutdown's wait for acknowledgment must remain bounded.
+    // Lock order is monitorMutex_ -> shutdownDumpSignalArmingMutex_ in the
+    // worker. No path may acquire monitorMutex_ while holding the arming mutex.
+    std::mutex shutdownDumpSignalArmingMutex_;
+    std::condition_variable shutdownDumpSignalArmingCV_;
+    bool shutdownDumpSignalArmed_{false};
 
     // Condition Variable for monitor thread to wake up early
     std::condition_variable monitorWakeUpCV_;
