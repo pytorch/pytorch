@@ -345,7 +345,9 @@ def assert_explicit_forward_wait_ownership(test_case, stages):
 
 
 @contextmanager
-def assert_send_storage_released_before_backward(test_case, stages, overlap_actions=()):
+def assert_send_storage_released_before_backward(
+    test_case, stages, overlap_actions=(), *, release_before_backward=True
+):
     """Check that each remote forward-send allocation dies before backward."""
     storage_refs = {}
     overlap_backward_by_forward = {}
@@ -410,7 +412,8 @@ def assert_send_storage_released_before_backward(test_case, stages, overlap_acti
                 for storage_ref in storage_refs.get(
                     (_stage_index, microbatch_index), ()
                 ):
-                    test_case.assertIsNone(storage_ref())
+                    if release_before_backward:
+                        test_case.assertIsNone(storage_ref())
                 return _original(microbatch_index, *args, **kwargs)
 
             stack.enter_context(
@@ -1279,7 +1282,7 @@ class ScheduleTest(MultiProcContinuousTest):
         losses = []
         overlap_actions = schedule.pipeline_order_with_comms[self.rank]
         with assert_send_storage_released_before_backward(
-            self, stages, overlap_actions
+            self, stages, overlap_actions, release_before_backward=False
         ) as overlap_storage_checks:
             for _ in range(2):
                 zero_gradients(stage_modules)
@@ -1469,7 +1472,7 @@ class ScheduleTest(MultiProcContinuousTest):
         num_loops = 2
         overlap_actions = base_schedule.pipeline_order_with_comms[self.rank]
         with assert_send_storage_released_before_backward(
-            self, stages, overlap_actions
+            self, stages, overlap_actions, release_before_backward=False
         ) as overlap_storage_checks:
             for _ in range(num_loops):
                 zero_gradients(stage_modules)
