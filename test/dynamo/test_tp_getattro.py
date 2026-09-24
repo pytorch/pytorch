@@ -530,6 +530,34 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
                 with self.assertRaises(torch._dynamo.exc.Unsupported):
                     torch.compile(fn, backend="eager", fullgraph=True)(x)
 
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
+    def test_user_descriptor_get_on_class_graph_break(self):
+        # A graph break inside __get__ must graph break the attribute load,
+        # not call __get__ at compile time and guard on its result.
+        calls = []
+
+        class Desc:
+            def __get__(self, obj, objtype=None):
+                calls.append(1)
+                torch._dynamo.graph_break()
+                return len(calls)
+
+        class C:
+            a = Desc()
+
+        def fn(x):
+            return x + C.a
+
+        x = torch.ones(3)
+        opt_fn = torch.compile(fn, backend="eager")
+        for _ in range(2):
+            calls.clear()
+            expected = fn(x)
+            expected_calls = list(calls)
+            calls.clear()
+            self.assertEqual(opt_fn(x), expected)
+            self.assertEqual(calls, expected_calls)
+
     def test_staticmethod_descriptor(self):
         class MyObj:
             @staticmethod
