@@ -103,23 +103,6 @@ def _make_gemm_param(
     )
 
 
-def is_gemm_config_worth_tuning(
-    m: int, n: int, k: int, gemm_config: dict[str, int | bool]
-) -> bool:
-    """Restrict large GEMMs to the largest M/N tile with eight-wave HTI."""
-    # Checked against AITER for BF16/FP16. MXFP uses logical K, so MXFP4
-    # prunes at storage K >= 2048. Smaller tiles and non-HTI 2x2 waves were
-    # slower; the 256x256 HTI 2x4-wave pair also won the MXFP 4096^3 runs.
-    if not config.flydsl_enable_autotuning or min(m, n, k) < 4096:
-        return True
-    return (
-        gemm_config["TILE_M"] == gemm_config["TILE_N"] == 256
-        and bool(gemm_config.get("USE_HALF_TILE_INTERLEAVED", False))
-        and gemm_config["M_WAVES"] == 2
-        and gemm_config["N_WAVES"] == 4
-    )
-
-
 def is_gemm_config_valid_for_shape(
     m: int,
     n: int,
@@ -200,7 +183,7 @@ def get_exhaustive_gemm_configs() -> list[FlyDSLGemmConfig]:
             candidate = FlyDSLGemmConfig(**cast(FlyDSLGemmConfigDict, gemm_config))
             _make_gemm_param(asdict(candidate))
             valid_configs.append(candidate)
-        except (AssertionError, ValueError) as e:
+        except ValueError as e:
             log.debug(
                 "Skipping invalid exhaustive FlyDSL config %s: %s", gemm_config, e
             )
@@ -261,41 +244,37 @@ def get_default_gemm_configs() -> list[FlyDSLGemmConfig]:
         try:
             _make_gemm_param(asdict(gemm_config))
             valid_configs.append(gemm_config)
-        except (AssertionError, ValueError) as e:
+        except ValueError as e:
             log.debug("Skipping invalid default FlyDSL config %s: %s", gemm_config, e)
     return valid_configs
 
 
 def get_gemm_configs(
-    mxfp_format: MXFPFormat | None = None,
+    m: int, n: int, k: int, mxfp_format: MXFPFormat | None = None
 ) -> list[dict[str, int | bool]]:
-    """
-    Returns the configuration set for the gfx950 FlyDSL GEMM kernel.
-
-    Shape compatibility is checked in the lowering before this function is called.
-    By default, autotuning is disabled and we return only a single baseline config.
-    """
-    exhaustive = (
-        config.flydsl_enable_autotuning
-        and config.max_autotune_gemm_search_space == "EXHAUSTIVE"
-    )
+    """Select candidates using logical M/N/K; lowering validates shape/layout."""
+    autotune = config.flydsl_enable_autotuning
+    exhaustive = autotune and config.max_autotune_gemm_search_space == "EXHAUSTIVE"
     if mxfp_format is not None:
         configs = _get_mxfp_candidates(mxfp_format, exhaustive)
-        if not config.flydsl_enable_autotuning:
-            configs = [c for c in configs if c == _BASELINE_CONFIG[mxfp_format]]
-        label = f"FlyDSL {mxfp_format} GEMM"
     elif exhaustive:
         configs = get_exhaustive_gemm_configs()
-        label = "FlyDSL GEMM"
     else:
         configs = get_default_gemm_configs()
-        if not config.flydsl_enable_autotuning:
-            configs = [c for c in configs if c == FlyDSLGemmConfig()]
-        label = "FlyDSL GEMM"
+    if not autotune:
+        baseline = _BASELINE_CONFIG[mxfp_format] if mxfp_format else FlyDSLGemmConfig()
+        configs = [c for c in configs if c == baseline]
+    elif min(m, n, k) >= 4096:
+        # Measured large-GEMM policy; k is logical (unpacked for MXFP4).
+        configs = [
+            c
+            for c in configs
+            if (c.TILE_M, c.TILE_N, c.M_WAVES, c.N_WAVES) == (256, 256, 2, 4)
+            and c.USE_HALF_TILE_INTERLEAVED
+        ]
     if not configs:
-        log.warning("No valid %s configuration is available", label)
-        return []
-    return [asdict(gemm_config) for gemm_config in configs]
+        log.warning("No valid FlyDSL GEMM configuration is available")
+    return [asdict(c) for c in configs]
 
 
 def _project_mxfp_gemm_configs(
@@ -347,7 +326,7 @@ def _get_mxfp_candidates(
         try:
             _make_gemm_param(asdict(candidate), dtype_id=dtype_id)
             valid_configs.append(candidate)
-        except (AssertionError, ValueError) as error:
+        except ValueError as error:
             log.debug(
                 "Skipping invalid %s config %s: %s", mxfp_format, candidate, error
             )
@@ -425,7 +404,7 @@ def _get_default_gfx950_grouped_gemm_configs() -> list[FlyDSLGemmConfig]:
         try:
             _make_gemm_param(asdict(gemm_config))
             valid_configs.append(gemm_config)
-        except (AssertionError, ValueError) as e:
+        except ValueError as e:
             log.debug(
                 "Skipping invalid default FlyDSL grouped config %s: %s",
                 gemm_config,

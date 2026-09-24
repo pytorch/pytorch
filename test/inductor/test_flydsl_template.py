@@ -446,7 +446,7 @@ class TestFlyDSLTemplate(TestCase):
             self.assertEqual(len(result), 1)
             self.assertEqual(result[0]["A_IS_TRANSPOSED"], a_is_transposed)
             self.assertEqual(result[0]["B_IS_TRANSPOSED"], b_is_transposed)
-            get_configs.assert_called_once_with()
+            get_configs.assert_called_once_with(m, n, k, None)
             validate.assert_called_once_with(
                 m,
                 n,
@@ -494,6 +494,73 @@ class TestFlyDSLTemplate(TestCase):
             ),
             expected,
         )
+
+    @unittest.skipUnless(flydsl_utils.runtime_available(), "FlyDSL unavailable")
+    def test_gemm_config_validation(self):
+        from torch._inductor.heuristics.template import flydsl as h
+        from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
+            gemm_gfx950 as gemm,
+        )
+
+        def check(tile, dtype, error=None):
+            cfg = asdict(h.FlyDSLGemmConfig(*tile))
+            kw = dict(dtype_id=dtype, **{k.lower(): v for k, v in cfg.items()})
+            with self.subTest(tile=tile, dtype=dtype):
+                if error:
+                    with self.assertRaisesRegex(ValueError, error):
+                        gemm.make_gemm_gfx950_param(**kw)
+                self.assertEqual(
+                    gemm.make_gemm_param_and_validate(1024, 256, 4096, kw) is None,
+                    error is not None,
+                )
+
+        cases = (
+            ((128, 128, 64, 3, 2, 2, 0, True), "stages=2"),
+            ((128, 128, 64, 2, 1, 2, 0, True), "m_waves=2"),
+            ((128, 128, 64, 2, 2, 1, 0, True), "n_waves>=2"),
+            ((129, 128, 64, 2, 2, 2, 0, True), "even"),
+            ((128, 129, 64, 2, 2, 2, 0, True), "even"),
+            ((96, 128, 64, 2, 2, 2, 0, True), "half tiles"),
+            ((128, 96, 64, 2, 2, 2, 0, True), "half tiles"),
+            ((128, 68, 64, 2, 2, 2, 0), "C-shuffle"),
+            ((64, 64, 64, 6, 1, 1, 0), "vmcnt"),
+        )
+        with mock.patch.object(gemm, "get_rocm_arch", return_value="gfx950"):
+            for fmt in (None, "mxfp4", "mxfp8"):
+                baseline = asdict(
+                    h._BASELINE_CONFIG[fmt] if fmt else h.FlyDSLGemmConfig()
+                )
+                for enabled in (False, True):
+                    with inductor_config.patch(flydsl_enable_autotuning=enabled):
+                        for k in (2048, 4096, 8192):
+                            configs = h.get_gemm_configs(8192, 8192, k, fmt)
+                            self.assertTrue(configs)
+                            self.assertEqual(
+                                baseline in configs, not enabled or k < 4096
+                            )
+                            if not enabled:
+                                self.assertEqual(configs, [baseline])
+            for tile, error in cases:
+                check(tile, gemm.GEMM_DTYPE_BF16, error)
+            for dtype in gemm.GEMM_DTYPE_MMA:
+                for n in (64, 256):
+                    check((128, n, 128, 2, 2, 2, 0, True), dtype, "half_block_n")
+            for dtype in (gemm.GEMM_DTYPE_MXFP8, gemm.GEMM_DTYPE_MXFP4):
+                check((128, 128, 65, 2, 2, 2, 0), dtype, "scale block")
+                for tile in (
+                    (256, 128, 128, 2, 1, 2, 0),
+                    (128, 256, 128, 2, 2, 1, 0),
+                    (384, 128, 128, 2, 2, 2, 0, True),
+                ):
+                    check(tile, dtype, "register budget")
+                for hti in (False, True):
+                    check((256, 128, 128, 2, 2, 2, 0, hti), dtype)
+        with mock.patch.object(gemm, "get_rocm_arch", return_value="gfx1100"):
+            check(
+                (128, 128, 64, 2, 2, 2, 0, True),
+                gemm.GEMM_DTYPE_BF16,
+                "unsupported ROCm architecture: gfx1100",
+            )
 
     def test_compiled_cache_keys_on_device_and_param(self):
         jit_func = SimpleNamespace()
@@ -696,7 +763,7 @@ class TestFlyDSLTemplate(TestCase):
                 b,
                 transpose_rhs=False,
             )
-        get_configs.assert_called_once_with()
+        get_configs.assert_called_once_with(m, n, k, None)
         self.assertIn(f"TILE_M: fx.Constexpr = {tile_size}", code)
         self.assertIn(f"TILE_N: fx.Constexpr = {tile_size}", code)
         self.assertIn(f"TILE_K: fx.Constexpr = {tile_k}", code)
@@ -1190,34 +1257,86 @@ class TestFlyDSLMXFPDevice(TestCase):
             self.skipTest("requires gfx950")
         torch.manual_seed(2026)
 
+    @parametrize(
+        "mxfp_format,tile_k",
+        (("mxfp8", 128), ("mxfp8", 256), ("mxfp4", 256), ("mxfp4", 512)),
+    )
+    @parametrize("out_dtype", (torch.bfloat16, torch.float16))
+    @parametrize("tile_m", (64, 128))
+    def test_hti_scale_chunks(self, device, mxfp_format, tile_k, out_dtype, tile_m):
+        from torch._inductor.heuristics.template import flydsl as h
+        from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
+            GEMM_DTYPE_MXFP4,
+            GEMM_DTYPE_MXFP8,
+        )
+
+        cfg = asdict(h.FlyDSLGemmConfig(tile_m, 128, tile_k, 2, 2, 2, 0, True))
+        param = h._make_gemm_param(
+            cfg,
+            dtype_id=GEMM_DTYPE_MXFP8 if mxfp_format == "mxfp8" else GEMM_DTYPE_MXFP4,
+        )
+        self.assertEqual(param.scale_chunk_tiles, max(2, 65536 // (tile_m * tile_k)))
+        self.assertEqual(param.scale_row_bytes, tile_k * param.scale_chunk_tiles // 32)
+        # Even/odd double tiles and a tail after repeatedly recycling both slots.
+        for k in (2 * tile_k, 3 * tile_k, 5 * tile_k * param.scale_chunk_tiles + 128):
+            with (
+                self.subTest(k=k),
+                inductor_config.patch(
+                    max_autotune_gemm=True,
+                    max_autotune_gemm_backends="FLYDSL",
+                    flydsl_enable_autotuning=True,
+                ),
+                mock.patch.object(h, "get_gemm_configs", return_value=[cfg]),
+            ):
+                inputs, reference = _mxfp_case(mxfp_format, (65, 104, k), device)
+                torch._dynamo.reset()
+                compiled = torch.compile(_scaled_mm_mxfp, fullgraph=True)
+                actual, code = run_and_get_code(compiled, *inputs, out_dtype)
+                self.assertIn("async_compile.flydsl", "\n".join(code))
+                self.assertEqual(actual.dtype, out_dtype)
+                self.assertEqual(actual, reference.to(out_dtype), atol=3e-2, rtol=2e-2)
+                graph = torch.cuda.CUDAGraph()
+                with torch.cuda.graph(graph):
+                    actual = compiled(*inputs, out_dtype)
+                for factor in (1, 2):
+                    if factor == 2:
+                        inputs[2].view(torch.uint8).add_(1)
+                    actual.fill_(float("nan"))
+                    graph.replay()
+                    self.assertEqual(
+                        actual, (reference * factor).to(out_dtype), atol=3e-2, rtol=2e-2
+                    )
+
     @parametrize("mxfp_format", ("mxfp4", "mxfp8", None))
-    def test_compiled_routes(self, device, mxfp_format):
+    @parametrize("out_dtype", (torch.bfloat16, torch.float16))
+    def test_compiled_routes(self, device, mxfp_format, out_dtype):
         if mxfp_format is None:
             a = torch.randn(64, 128, device=device).to(torch.float8_e4m3fn)
             b = torch.randn(64, 128, device=device).to(torch.float8_e4m3fn).t()
             scale = torch.ones((), device=device)
-            inputs = (a, b, scale, scale, torch.bfloat16, ScalingType.TensorWise)
+            inputs = (a, b, scale, scale, out_dtype, ScalingType.TensorWise)
             reference = _scaled_mm_mxfp(*inputs)
         else:
             inputs, reference = _mxfp_case(mxfp_format, (64, 96, 256), device)
-            eager = _scaled_mm_mxfp(*inputs)
-            self.assertEqual(eager, reference.bfloat16(), atol=3e-2, rtol=2e-2)
+            eager = _scaled_mm_mxfp(*inputs, out_dtype=out_dtype)
+            self.assertEqual(eager, reference.to(out_dtype), atol=3e-2, rtol=2e-2)
             inputs, reference = _mxfp_case(mxfp_format, (64, 4096, 4096), device)
-            bias = torch.randn(4096, device=device, dtype=torch.bfloat16)
-            inputs = (*inputs, torch.bfloat16, ScalingType.BlockWise1x32, bias)
+            bias = torch.randn(4096, device=device, dtype=out_dtype)
+            inputs = (*inputs, out_dtype, ScalingType.BlockWise1x32, bias)
             reference = reference + bias
         with inductor_config.patch(
             max_autotune=True,
             flydsl_enable_autotuning=False,
-            max_autotune_gemm_backends="ATEN,FLYDSL",
+            max_autotune_gemm_backends="FLYDSL" if mxfp_format else "ATEN,FLYDSL",
         ):
             torch._dynamo.reset()
             actual, code = run_and_get_code(
                 torch.compile(_scaled_mm_mxfp, fullgraph=True), *inputs
             )
+        self.assertEqual(actual.dtype, out_dtype)
         if mxfp_format is None:
             self.assertEqual(actual, reference)
-        self.assertEqual(actual, reference.bfloat16(), atol=3e-2, rtol=2e-2)
+        self.assertEqual(actual, reference.to(out_dtype), atol=3e-2, rtol=2e-2)
         self.assertEqual(
             "async_compile.flydsl" in "\n".join(code), mxfp_format is not None
         )

@@ -296,7 +296,6 @@ def get_flydsl_mm_template_kwargs(
     from ..heuristics.template.flydsl import (
         get_gemm_configs,
         is_gemm_config_valid_for_shape,
-        is_gemm_config_worth_tuning,
     )
 
     if not (static_shape and is_nonzero and use_flydsl_gemm_template(layout)):
@@ -424,11 +423,8 @@ def get_flydsl_mm_template_kwargs(
             "A_IS_TRANSPOSED": a_is_transposed,
             "B_IS_TRANSPOSED": b_is_transposed,
         }
-        for gemm_config in (
-            get_gemm_configs(mxfp_format) if mxfp_format else get_gemm_configs()
-        )
-        if is_gemm_config_worth_tuning(m_static, n_static, k_static, gemm_config)
-        and is_gemm_config_valid_for_shape(
+        for gemm_config in get_gemm_configs(m_static, n_static, k_static, mxfp_format)
+        if is_gemm_config_valid_for_shape(
             m_static,
             n_static,
             k_static,

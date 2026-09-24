@@ -40,6 +40,7 @@ GEMM_DTYPE_BITS = {
     GEMM_DTYPE_MXFP4: 4,
 }
 MXFP_SCALE_BLOCK_K = 32
+MXFP_MAX_MMA_REPEAT = 8
 
 
 @fx.struct
@@ -63,7 +64,6 @@ class GemmGfx950Param:
     mma_k: fx.Constexpr[int]
     cshuffle_dtype_id: fx.Constexpr[int]
     async_load_bytes: fx.Constexpr[int]
-    fence_before_load: fx.Constexpr[bool]
     in_data_bits: fx.Constexpr[int]
     out_data_bits: fx.Constexpr[int]
     cshuffle_r2g_vec_size: fx.Constexpr[int]
@@ -126,6 +126,8 @@ def make_gemm_gfx950_param(
     b_is_transposed: bool = True,
     has_bias: bool = False,
     has_k_tail: bool = False,
+    *,
+    out_dtype_id: int | None = None,
 ) -> GemmGfx950Param:
     # Keep the kernel implementation's internal block terminology unchanged.
     block_m, block_n, block_k = tile_m, tile_n, tile_k
@@ -149,40 +151,61 @@ def make_gemm_gfx950_param(
         raise ValueError("the workgroup cannot contain more than 16 waves")
     if group_m < 0:
         raise ValueError("group_m must be non-negative")
-    if is_mxfp:
-        out_dtype_id = GEMM_DTYPE_BF16
-    else:
-        out_dtype_id = dtype_id
+    if out_dtype_id is None:
+        out_dtype_id = GEMM_DTYPE_BF16 if is_mxfp else in_dtype_id
+    if out_dtype_id not in (
+        (GEMM_DTYPE_BF16, GEMM_DTYPE_FP16) if is_mxfp else (in_dtype_id,)
+    ):
+        raise ValueError(f"unsupported out_dtype_id={out_dtype_id}")
     in_data_bits = GEMM_DTYPE_BITS[in_dtype_id]
     out_data_bits = GEMM_DTYPE_BITS[out_dtype_id]
-    cshuffle_dtype_id = GEMM_DTYPE_BF16 if is_mxfp else in_dtype_id
+    cshuffle_dtype_id = out_dtype_id
     block_k_bytes = block_k * in_data_bits // 8
     block_threads = m_waves * n_waves * GFX950_WAVE_SIZE
     max_cshuffle_r2g_vec_size = GFX950_DMA_BYTES * 8 // out_data_bits
     if use_half_tile_interleaved:
         half_block_m = block_m // 2
         half_block_n = block_n // 2
-        assert stages == 2
-        assert m_waves == 2 and n_waves >= 2
-        assert half_block_m * 2 == block_m
-        assert half_block_n * 2 == block_n
+        if stages != 2:
+            raise ValueError("half-tile interleaved kernel requires stages=2")
+        if m_waves != 2 or n_waves < 2:
+            raise ValueError(
+                "half-tile interleaved kernel requires m_waves=2, n_waves>=2"
+            )
+        if half_block_m * 2 != block_m or half_block_n * 2 != block_n:
+            raise ValueError(
+                "half-tile interleaved kernel requires even block_m and block_n"
+            )
         mma_m_half_repeat = half_block_m // m_waves // mma_m
         mma_n_half_repeat = half_block_n // n_waves // mma_n
-        assert mma_m_half_repeat * m_waves * mma_m == half_block_m
-        assert mma_n_half_repeat * n_waves * mma_n == half_block_n
+        if (
+            mma_m_half_repeat * m_waves * mma_m != half_block_m
+            or mma_n_half_repeat * n_waves * mma_n != half_block_n
+        ):
+            raise ValueError("half tiles must be divisible by waves * MMA dimensions")
+        if mma_n_half_repeat != 2:
+            raise ValueError("HTI requires half_block_n / n_waves / mma_n == 2")
         stg_size_per_m_step = m_waves * mma_m * half_block_n
-        assert stg_size_per_m_step % block_threads == 0
+        if stg_size_per_m_step % block_threads != 0:
+            raise ValueError("C-shuffle M step must be divisible by block_threads")
         stg_work_size_per_m_step = stg_size_per_m_step // block_threads
         cshuffle_r2g_vec_size = min(max_cshuffle_r2g_vec_size, stg_work_size_per_m_step)
-        assert cshuffle_r2g_vec_size in (4, 8)
-        assert stg_work_size_per_m_step % cshuffle_r2g_vec_size == 0
-        assert half_block_n % cshuffle_r2g_vec_size == 0
+        if (
+            cshuffle_r2g_vec_size not in (4, 8)
+            or stg_work_size_per_m_step % cshuffle_r2g_vec_size != 0
+            or half_block_n % cshuffle_r2g_vec_size != 0
+        ):
+            raise ValueError(
+                "half-tile C-shuffle must be covered by 4- or 8-element vectors"
+            )
     else:
         cshuffle_r2g_vec_size = max_cshuffle_r2g_vec_size
-        assert block_n % cshuffle_r2g_vec_size == 0
+        if block_n % cshuffle_r2g_vec_size != 0:
+            raise ValueError("block_n must be divisible by the C-shuffle vector size")
 
     if is_mxfp:
-        assert block_k % MXFP_SCALE_BLOCK_K == 0
+        if block_k % MXFP_SCALE_BLOCK_K != 0:
+            raise ValueError("MXFP block_k must be divisible by the scale block size")
         scale_rows_a = block_m // 2 if use_half_tile_interleaved else block_m
         scale_rows_b = block_n // 2 if use_half_tile_interleaved else block_n
         workgroup_bytes = block_threads * GFX950_SCALE_DMA_BYTES
@@ -230,6 +253,8 @@ def make_gemm_gfx950_param(
         "gfx942": 65536,
         "gfx950": 163840,
     }
+    if arch not in SMEM_CAPACITY_MAP:
+        raise ValueError(f"unsupported ROCm architecture: {arch}")
     smem_capacity = SMEM_CAPACITY_MAP[arch]
     if smem_bytes > smem_capacity:
         raise ValueError(
@@ -258,71 +283,44 @@ def make_gemm_gfx950_param(
     ldg_a_iters = (block_m * block_k) // (block_threads * async_load_vec_size)
     ldg_b_iters = (block_n * block_k) // (block_threads * async_load_vec_size)
     if use_half_tile_interleaved:
-        half_ldg_a_iters = ((block_m // 2) * block_k) // (
-            block_threads * async_load_vec_size
-        )
-        half_ldg_b_iters = ((block_n // 2) * block_k) // (
-            block_threads * async_load_vec_size
-        )
-        if (
-            half_ldg_a_iters * block_threads * async_load_vec_size
-            != (block_m // 2) * block_k
-        ):
-            raise ValueError(
-                "Half-tile A async load tile must be exactly covered by whole-thread vector loads: "
-                f"half_block_m={block_m // 2}, block_k={block_k}, "
-                f"block_threads={block_threads}, async_load_vec_size={async_load_vec_size}, "
-                f"half_ldg_a_iters={half_ldg_a_iters}"
-            )
-        if (
-            half_ldg_b_iters * block_threads * async_load_vec_size
-            != (block_n // 2) * block_k
-        ):
-            raise ValueError(
-                "Half-tile B async load tile must be exactly covered by whole-thread vector loads: "
-                f"half_block_n={block_n // 2}, block_k={block_k}, "
-                f"block_threads={block_threads}, async_load_vec_size={async_load_vec_size}, "
-                f"half_ldg_b_iters={half_ldg_b_iters}"
-            )
+        for operand, rows in (("A", block_m // 2), ("B", block_n // 2)):
+            half_load_iters = rows * block_k // (block_threads * async_load_vec_size)
+            if half_load_iters * block_threads * async_load_vec_size != rows * block_k:
+                raise ValueError(
+                    f"Half-tile {operand} must be covered by whole-thread vector loads: "
+                    f"rows={rows}, block_k={block_k}, block_threads={block_threads}, "
+                    f"async_load_vec_size={async_load_vec_size}"
+                )
     if ldg_a_iters * block_threads * async_load_vec_size != block_m * block_k:
         raise ValueError(
             "A async load tile must be exactly covered by whole-thread vector loads: "
-            f"block_m={block_m}, block_k={block_k}, "
-            f"block_threads={block_threads}, async_load_vec_size={async_load_vec_size}, "
-            f"ldg_a_iters={ldg_a_iters}, "
-            f"covered={ldg_a_iters * block_threads * async_load_vec_size}, "
-            f"required={block_m * block_k}"
+            f"block_m={block_m}, block_k={block_k}, block_threads={block_threads}, "
+            f"async_load_vec_size={async_load_vec_size}"
         )
     if ldg_b_iters * block_threads * async_load_vec_size != block_n * block_k:
         raise ValueError(
             "B async load tile must be exactly covered by whole-thread vector loads: "
-            f"block_n={block_n}, block_k={block_k}, "
-            f"block_threads={block_threads}, async_load_vec_size={async_load_vec_size}, "
-            f"ldg_b_iters={ldg_b_iters}, "
-            f"covered={ldg_b_iters * block_threads * async_load_vec_size}, "
-            f"required={block_n * block_k}"
+            f"block_n={block_n}, block_k={block_k}, block_threads={block_threads}, "
+            f"async_load_vec_size={async_load_vec_size}"
         )
-    assert (stages - 2) * (ldg_a_iters + ldg_b_iters + ldg_sa_iters + ldg_sb_iters) < 63
-    # HTI partitions the workgroup tile into four independently computed
-    # half tiles. Its per-wave MMA repeat budget therefore applies to the
-    # half-tile dimensions, not to the full output tile.
-    mma_tile_m = block_m // 2 if use_half_tile_interleaved else block_m
-    mma_tile_n = block_n // 2 if use_half_tile_interleaved else block_n
-    mma_m_repeat = mma_tile_m // m_waves // mma_m
-    mma_n_repeat = mma_tile_n // n_waves // mma_n
+    if (stages - 2) * (ldg_a_iters + ldg_b_iters + ldg_sa_iters + ldg_sb_iters) >= 63:
+        raise ValueError("staged pipeline vmcnt budget must be less than 63")
+    # HTI keeps four half-tile accumulators live: budget the full output tile.
+    mma_m_repeat = block_m // m_waves // mma_m
+    mma_n_repeat = block_n // n_waves // mma_n
     mma_k_repeat = block_k // mma_k
-    if mma_m_repeat * m_waves * mma_m != mma_tile_m:
+    if mma_m_repeat * m_waves * mma_m != block_m:
         raise ValueError(
-            "M MMA tile must be divisible by m_waves * mma_m: "
-            f"mma_tile_m={mma_tile_m}, m_waves={m_waves}, mma_m={mma_m}, "
-            f"mma_m_repeat={mma_m_repeat}, covered_m={mma_m_repeat * m_waves * mma_m}"
+            "block_m must be divisible by m_waves * mma_m: "
+            f"block_m={block_m}, m_waves={m_waves}, mma_m={mma_m}"
         )
-    if mma_n_repeat * n_waves * mma_n != mma_tile_n:
+    if mma_n_repeat * n_waves * mma_n != block_n:
         raise ValueError(
-            "N MMA tile must be divisible by n_waves * mma_n: "
-            f"mma_tile_n={mma_tile_n}, n_waves={n_waves}, mma_n={mma_n}, "
-            f"mma_n_repeat={mma_n_repeat}, covered_n={mma_n_repeat * n_waves * mma_n}"
+            "block_n must be divisible by n_waves * mma_n: "
+            f"block_n={block_n}, n_waves={n_waves}, mma_n={mma_n}"
         )
+    if is_mxfp and max(mma_m_repeat, mma_n_repeat) > MXFP_MAX_MMA_REPEAT:
+        raise ValueError("accumulator repeats exceed the register budget")
     if mma_k_repeat * mma_k != block_k:
         raise ValueError(
             "block_k must be divisible by mma_k: "
@@ -330,18 +328,6 @@ def make_gemm_gfx950_param(
             f"mma_k_repeat={mma_k_repeat}, "
             f"covered_k={mma_k_repeat * mma_k}"
         )
-
-    # Native FP4 DMA's pre-load fence increases spills for this measured HTI
-    # policy. Keep the post-load fence and all completion/workgroup waits.
-    # Store the policy in the constexpr signature so cached kernels track it.
-    fence_before_load = not (
-        in_dtype_id == GEMM_DTYPE_MXFP4
-        and use_half_tile_interleaved
-        and (block_m, block_n, block_k) == (256, 256, 256)
-        and (m_waves, n_waves) == (2, 4)
-        and not a_is_transposed
-        and b_is_transposed
-    )
 
     return GemmGfx950Param(
         in_dtype_id=in_dtype_id,
@@ -363,7 +349,6 @@ def make_gemm_gfx950_param(
         mma_k=mma_k,
         cshuffle_dtype_id=cshuffle_dtype_id,
         async_load_bytes=GFX950_DMA_BYTES,
-        fence_before_load=fence_before_load,
         in_data_bits=in_data_bits,
         out_data_bits=out_data_bits,
         cshuffle_r2g_vec_size=cshuffle_r2g_vec_size,
@@ -606,6 +591,9 @@ def async_load_operand(
 ):
     context = operand.context
     param = context.param
+    # Pin the measured scaled-MMA load schedule across inline asm; this is
+    # a compiler scheduling constraint, not a memory fence or workgroup barrier.
+    pin_load_schedule = param.in_dtype_id in (GEMM_DTYPE_MXFP4, GEMM_DTYPE_MXFP8)
     tid = context.tid
     block_threads = param.block_threads
     in_data_bits = param.in_data_bits
@@ -658,7 +646,7 @@ def async_load_operand(
             global_offset = (
                 safe_global_outer_idx * operand.leading_stride + safe_global_k_idx
             )
-        if const_expr(param.fence_before_load):
+        if const_expr(pin_load_schedule):
             rocdl.sched_barrier(0)
         buffer_load_lds_inline(
             rsrc,
@@ -666,7 +654,8 @@ def async_load_operand(
             global_offset * (src_bits // 8),
             param.async_load_bytes,
         )
-        rocdl.sched_barrier(0)
+        if const_expr(pin_load_schedule):
+            rocdl.sched_barrier(0)
         if i < operand.load_iters - 1:
             lds_ptr = lds_ptr + block_threads * param.async_load_bytes
 
@@ -701,22 +690,16 @@ def make_gemm_tiled_mma(param: GemmGfx950Param):
         )
         op = rocdl.MFMA(param.mma_m, param.mma_n, param.mma_k, dtype)
 
-    k_shape, k_stride = {
-        rocdl.MFMA(16, 16, 32, fx.BFloat16): ((8, 4), (1, 8)),
-        rocdl.MFMA(16, 16, 32, fx.Float16): ((8, 4), (1, 8)),
-        rocdl.cdna4.MFMA_Scale(16, 16, 128, fx.Float8E4M3FN): (
-            (16, 2, 4),
-            (1, 64, 16),
-        ),
-        rocdl.MFMA(16, 16, 64, fx.Float8E4M3FN): ((16, 4), (1, 16)),
-    }[op]
+    permutation = None
+    if const_expr(param.in_dtype_id == GEMM_DTYPE_MXFP8):
+        permutation = fx.make_tile(None, None, fx.make_layout((16, 2, 4), (1, 64, 16)))
     return fx.make_tiled_mma(
         fx.make_mma_atom(op),
         fx.make_layout(
             (param.m_waves, param.n_waves, 1),
             (param.n_waves, 1, 0),
         ),
-        fx.make_tile(None, None, fx.make_layout(k_shape, k_stride)),
+        permutation,
     )
 
 
@@ -1800,18 +1783,9 @@ def infer_has_k_tail(
 
 
 def make_gemm_param_and_validate(m, n, k, kwargs):
-    # out_dtype_id is Inductor lowering metadata; the parameter factory derives
-    # the supported output dtype from the input format.
-    kwargs = dict(kwargs)
-    requested_out_dtype_id = kwargs.pop("out_dtype_id", None)
     try:
         result = make_gemm_gfx950_param(**kwargs)
-    except (AssertionError, ValueError):
-        return None
-    if (
-        requested_out_dtype_id is not None
-        and requested_out_dtype_id != result.out_dtype_id
-    ):
+    except ValueError:
         return None
     is_mxfp = result.in_dtype_id in (GEMM_DTYPE_MXFP4, GEMM_DTYPE_MXFP8)
     if is_mxfp and (
@@ -1832,13 +1806,6 @@ def make_gemm_param_and_validate(m, n, k, kwargs):
         k_tiles = (k + result.block_k - 1) // result.block_k
         if k_tiles < 2:
             return None
-        if is_mxfp:
-            # The scaled HTI B-fragment path requires at least two N repeats
-            # per wave. A single repeat does not provide the packed operand
-            # fragment layout consumed by the scaled MMA atom.
-            mma_n_half_repeat = result.block_n // 2 // result.n_waves // result.mma_n
-            if mma_n_half_repeat < 2:
-                return None
     return result
 
 
