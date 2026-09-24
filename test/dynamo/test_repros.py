@@ -5740,6 +5740,53 @@ def forward(self, L_x_ : torch.Tensor, s77 : torch.SymInt, s27 : torch.SymInt):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_super_classmethod_plain_function(self):
+        class Parent:
+            def greet(*args):
+                return len(args)
+
+        class Child(Parent):
+            @classmethod
+            def greet(cls, x):
+                return x + super().greet()
+
+        def fn(x):
+            return Child.greet(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(4)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_super_metaclass_method(self):
+        class MetaBase(type):
+            def plain(*args):
+                return len(args)
+
+            @staticmethod
+            def static(*args):
+                return len(args)
+
+        class Meta(MetaBase):
+            def plain(cls):
+                return super().plain()
+
+            def static(cls):
+                return super().static()
+
+        class A(metaclass=Meta):
+            pass
+
+        def fn(x):
+            return x + A.plain() * 10 + A.static()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(4)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
     def test_super_diamond(self):
         class A:
             def __init__(self):
