@@ -1,0 +1,472 @@
+#include <torch/csrc/symbolic/Expr.h>
+
+#include <c10/util/hash.h>
+
+#include <algorithm>
+#include <limits>
+
+namespace torch::symbolic {
+
+namespace {
+
+using i128 = __int128;
+
+bool canonical_less(const Expr* a, const Expr* b) {
+  bool an = a->is_number();
+  bool bn = b->is_number();
+  if (an != bn) {
+    return an;
+  }
+  return a->id < b->id;
+}
+
+i128 gcd128(i128 a, i128 b) {
+  if (a < 0) {
+    a = -a;
+  }
+  if (b < 0) {
+    b = -b;
+  }
+  while (b != 0) {
+    i128 t = a % b;
+    a = b;
+    b = t;
+  }
+  return a;
+}
+
+bool fits_int64(i128 v) {
+  return v >= std::numeric_limits<int64_t>::min() &&
+      v <= std::numeric_limits<int64_t>::max();
+}
+
+// Rational p/q in lowest terms with q > 0, like sympy's Rational(p, q).
+Num make_num(i128 p, i128 q) {
+  if (q < 0) {
+    p = -p;
+    q = -q;
+  }
+  i128 g = gcd128(p, q);
+  p /= g;
+  q /= g;
+  if (!fits_int64(p) || !fits_int64(q)) {
+    throw NativeUnsupported("integer overflow");
+  }
+  return {static_cast<int64_t>(p), static_cast<int64_t>(q)};
+}
+
+int64_t checked_mul(int64_t a, int64_t b) {
+  int64_t r = 0;
+  if (__builtin_mul_overflow(a, b, &r)) {
+    throw NativeUnsupported("integer overflow");
+  }
+  return r;
+}
+
+} // namespace
+
+const char* fact_name(Fact f) {
+  static constexpr std::array<const char*, kNumFacts> names = {
+      "commutative",
+      "integer",
+      "noninteger",
+      "rational",
+      "irrational",
+      "real",
+      "extended_real",
+      "finite",
+      "infinite",
+      "zero",
+      "nonzero",
+      "positive",
+      "negative",
+      "nonnegative",
+      "nonpositive",
+      "extended_positive",
+      "extended_negative",
+      "extended_nonnegative",
+      "extended_nonpositive",
+      "extended_nonzero",
+      "even",
+      "odd",
+      "prime",
+      "composite",
+      "algebraic",
+      "transcendental",
+      "complex",
+      "imaginary",
+      "hermitian",
+      "antihermitian",
+      "polar",
+  };
+  return names.at(static_cast<size_t>(f));
+}
+
+bool ExprArena::KeyEq::operator()(const Expr* a, const Expr* b) const {
+  return a->kind == b->kind && a->p == b->p && a->q == b->q &&
+      a->args.size() == b->args.size() &&
+      std::equal(a->args.begin(), a->args.end(), b->args.begin());
+}
+
+ExprArena::ExprArena() {
+  zero_ = integer(0);
+  one_ = integer(1);
+  neg_one_ = integer(-1);
+  int_oo_ = intern(Kind::IntInfinity, 0, 0, {});
+  neg_int_oo_ = intern(Kind::NegativeIntInfinity, 0, 0, {});
+}
+
+const Expr* ExprArena::intern(
+    Kind kind,
+    int64_t p,
+    int64_t q,
+    c10::ArrayRef<const Expr*> args) {
+  Expr key{kind, 0, 0, p, q, {}};
+  key.args.assign(args.begin(), args.end());
+  size_t h = c10::get_hash(static_cast<int>(kind), p, q);
+  for (const Expr* a : args) {
+    h = c10::hash_combine(h, a->id);
+  }
+  key.hash = h;
+  auto it = table_.find(&key);
+  if (it != table_.end()) {
+    return *it;
+  }
+  key.id = static_cast<uint32_t>(storage_.size());
+  const Expr* e = &storage_.emplace_back(std::move(key));
+  table_.insert(e);
+  return e;
+}
+
+const Expr* ExprArena::integer(int64_t v) {
+  return intern(Kind::Integer, v, 1, {});
+}
+
+const Expr* ExprArena::rational(int64_t p, int64_t q) {
+  if (q == 0) {
+    throw NativeUnsupported("Rational with zero denominator");
+  }
+  return number(make_num(p, q));
+}
+
+const Expr* ExprArena::number(Num n) {
+  if (n.q == 1) {
+    return integer(n.p);
+  }
+  return intern(Kind::Rational, n.p, n.q, {});
+}
+
+Num ExprArena::as_num(const Expr* e) {
+  if (!e->is_rational()) {
+    throw NativeUnsupported("expected a Rational");
+  }
+  return {e->p, e->q};
+}
+
+const Expr* ExprArena::symbol(const std::string& name, const Facts& facts) {
+  // A zero symbol has an infinite reciprocal, which Mul.flatten turns into nan
+  // when multiplied by 0.
+  if (facts[static_cast<size_t>(Fact::commutative)] != Tri::True ||
+      facts[static_cast<size_t>(Fact::finite)] != Tri::True ||
+      facts[static_cast<size_t>(Fact::zero)] == Tri::True) {
+    throw NativeUnsupported(
+        "only commutative finite nonzero symbols are supported: " + name);
+  }
+  auto& same_name = symbols_by_name_[name];
+  for (uint32_t idx : same_name) {
+    if (symbols_[idx].facts == facts) {
+      return intern(Kind::Symbol, idx, 0, {});
+    }
+  }
+  auto idx = static_cast<uint32_t>(symbols_.size());
+  symbols_.push_back({name, facts});
+  same_name.push_back(idx);
+  return intern(Kind::Symbol, idx, 0, {});
+}
+
+const Expr* ExprArena::from_args(
+    Kind kind,
+    c10::SmallVectorImpl<const Expr*>& args) {
+  if (args.empty()) {
+    return kind == Kind::Add ? zero_ : one_;
+  }
+  if (args.size() == 1) {
+    return args[0];
+  }
+  return intern(kind, 0, 0, args);
+}
+
+const Expr* ExprArena::number_pow(Num b, int64_t e) {
+  if (e == 0) {
+    return one_;
+  }
+  if (e < 0) {
+    if (b.p == 0) {
+      throw NativeUnsupported("zoo");
+    }
+    b = make_num(b.q, b.p);
+    if (e == std::numeric_limits<int64_t>::min()) {
+      if (b.q != 1 || (b.p != 1 && b.p != -1)) {
+        throw NativeUnsupported("integer overflow");
+      }
+      return one_;
+    }
+    e = -e;
+  }
+  if (b.q == 1 && (b.p == 0 || b.p == 1)) {
+    return integer(b.p);
+  }
+  if (b.q == 1 && b.p == -1) {
+    return integer(e % 2 == 0 ? 1 : -1);
+  }
+  int64_t p = 1;
+  int64_t q = 1;
+  for (int64_t i = 0; i < e; ++i) {
+    p = checked_mul(p, b.p);
+    q = checked_mul(q, b.q);
+  }
+  return number({p, q});
+}
+
+const Expr* ExprArena::add(c10::ArrayRef<const Expr*> in) {
+  // Add.flatten (sympy/core/add.py), restricted to finite commutative terms.
+  c10::SmallVector<const Expr*, 8> seq;
+  for (const Expr* a : in) {
+    if (a != zero_) {
+      seq.push_back(a);
+    }
+  }
+  if (seq.empty()) {
+    return zero_;
+  }
+  if (seq.size() == 1) {
+    return seq[0];
+  }
+  Num coeff{0, 1};
+  c10::SmallVector<std::pair<const Expr*, Num>, 8> terms;
+  std::unordered_map<const Expr*, size_t> term_index;
+  for (size_t i = 0; i < seq.size(); ++i) {
+    const Expr* o = seq[i];
+    const Expr* c = one_;
+    const Expr* s = o;
+    switch (o->kind) {
+      case Kind::Integer:
+      case Kind::Rational: {
+        coeff = make_num(
+            i128(coeff.p) * o->q + i128(o->p) * coeff.q, i128(coeff.q) * o->q);
+        continue;
+      }
+      case Kind::IntInfinity:
+      case Kind::NegativeIntInfinity:
+        throw NativeUnsupported("int_oo in Add");
+      case Kind::Add:
+        seq.append(o->args.begin(), o->args.end());
+        continue;
+      case Kind::Mul:
+        if (o->args[0]->is_number()) {
+          c = o->args[0];
+          if (o->args.size() == 2) {
+            s = o->args[1];
+          } else {
+            s = intern(
+                Kind::Mul, 0, 0, c10::ArrayRef<const Expr*>(o->args).slice(1));
+          }
+        }
+        break;
+      default:
+        break;
+    }
+    Num cn = as_num(c);
+    auto it = term_index.find(s);
+    if (it == term_index.end()) {
+      term_index.emplace(s, terms.size());
+      terms.emplace_back(s, cn);
+    } else {
+      Num& acc = terms[it->second].second;
+      acc =
+          make_num(i128(acc.p) * cn.q + i128(cn.p) * acc.q, i128(acc.q) * cn.q);
+    }
+  }
+  c10::SmallVector<const Expr*, 8> newseq;
+  for (const auto& [s, c] : terms) {
+    if (c.p == 0) {
+      continue;
+    }
+    if (c.p == 1 && c.q == 1) {
+      newseq.push_back(s);
+      continue;
+    }
+    const Expr* ce = number(c);
+    if (s->kind == Kind::Mul) {
+      c10::SmallVector<const Expr*, 4> margs{ce};
+      margs.append(s->args.begin(), s->args.end());
+      newseq.push_back(intern(Kind::Mul, 0, 0, margs));
+    } else if (s->kind == Kind::Add) {
+      throw NativeUnsupported("unevaluated Mul(c, Add)");
+    } else {
+      newseq.push_back(intern(Kind::Mul, 0, 0, {ce, s}));
+    }
+  }
+  std::sort(newseq.begin(), newseq.end(), canonical_less);
+  if (coeff.p != 0) {
+    newseq.insert(newseq.begin(), number(coeff));
+  }
+  return from_args(Kind::Add, newseq);
+}
+
+const Expr* ExprArena::mul(c10::ArrayRef<const Expr*> in) {
+  // Mul.flatten (sympy/core/mul.py), restricted to finite commutative factors
+  // with Integer exponents.
+  c10::SmallVector<const Expr*, 8> seq;
+  for (const Expr* a : in) {
+    if (a != one_) {
+      seq.push_back(a);
+    }
+  }
+  if (seq.empty()) {
+    return one_;
+  }
+  if (seq.size() == 1) {
+    return seq[0];
+  }
+  if (seq.size() == 2) {
+    const Expr* a = seq[0];
+    const Expr* b = seq[1];
+    if (b->is_rational()) {
+      std::swap(a, b);
+    }
+    if (a->is_rational() && a != zero_) {
+      const Expr* r = one_;
+      const Expr* rest = b;
+      if (b->kind == Kind::Mul && b->args[0]->is_number()) {
+        r = b->args[0];
+        rest = b->args.size() == 2
+            ? b->args[1]
+            : intern(
+                  Kind::Mul,
+                  0,
+                  0,
+                  c10::ArrayRef<const Expr*>(b->args).slice(1));
+      }
+      if (rest->kind == Kind::Add) {
+        if (r != one_) {
+          throw NativeUnsupported("unevaluated Mul(c, Add)");
+        }
+        c10::SmallVector<const Expr*, 8> terms;
+        for (const Expr* bi : rest->args) {
+          terms.push_back(mul({a, bi}));
+        }
+        return add(terms);
+      }
+    }
+  }
+
+  Num coeff{1, 1};
+  c10::SmallVector<std::pair<const Expr*, int64_t>, 8> powers;
+  std::unordered_map<const Expr*, size_t> power_index;
+  for (size_t i = 0; i < seq.size(); ++i) {
+    const Expr* o = seq[i];
+    const Expr* b = o;
+    int64_t e = 1;
+    switch (o->kind) {
+      case Kind::Mul:
+        seq.append(o->args.begin(), o->args.end());
+        continue;
+      case Kind::Integer:
+      case Kind::Rational: {
+        coeff = make_num(i128(coeff.p) * o->p, i128(coeff.q) * o->q);
+        continue;
+      }
+      case Kind::IntInfinity:
+      case Kind::NegativeIntInfinity:
+        throw NativeUnsupported("int_oo in Mul");
+      case Kind::Pow:
+        b = o->args[0];
+        e = o->args[1]->p;
+        break;
+      default:
+        break;
+    }
+    auto it = power_index.find(b);
+    if (it == power_index.end()) {
+      power_index.emplace(b, powers.size());
+      powers.emplace_back(b, e);
+    } else {
+      int64_t& acc = powers[it->second].second;
+      if (__builtin_add_overflow(acc, e, &acc)) {
+        throw NativeUnsupported("integer overflow");
+      }
+    }
+  }
+  if (coeff.p == 0) {
+    return zero_;
+  }
+  c10::SmallVector<const Expr*, 8> c_part;
+  for (const auto& [b, e] : powers) {
+    if (e == 0) {
+      continue;
+    }
+    const Expr* p = e == 1 ? b : pow(b, integer(e));
+    if (p->kind != Kind::Pow && p != b) {
+      throw NativeUnsupported("Pow in Mul did not stay a Pow");
+    }
+    c_part.push_back(p);
+  }
+  std::sort(c_part.begin(), c_part.end(), canonical_less);
+  if (!(coeff.p == 1 && coeff.q == 1)) {
+    const Expr* c = number(coeff);
+    if (c_part.size() == 1 && c_part[0]->kind == Kind::Add) {
+      c10::SmallVector<const Expr*, 8> terms;
+      for (const Expr* f : c_part[0]->args) {
+        terms.push_back(mul({c, f}));
+      }
+      return add(terms);
+    }
+    c_part.insert(c_part.begin(), c);
+  }
+  return from_args(Kind::Mul, c_part);
+}
+
+const Expr* ExprArena::pow(const Expr* b, const Expr* e) {
+  // Pow.__new__ (sympy/core/power.py) for an Integer exponent.
+  if (e->kind != Kind::Integer) {
+    throw NativeUnsupported("Pow with a non-Integer exponent");
+  }
+  if (e->p == 0) {
+    return one_;
+  }
+  if (e->p == 1) {
+    return b;
+  }
+  switch (b->kind) {
+    case Kind::Integer:
+    case Kind::Rational:
+      return number_pow(as_num(b), e->p);
+    case Kind::IntInfinity:
+    case Kind::NegativeIntInfinity:
+      throw NativeUnsupported("int_oo in Pow");
+    case Kind::Mul: {
+      // Mul._eval_power with an Integer exponent.
+      c10::SmallVector<const Expr*, 8> factors;
+      for (const Expr* f : b->args) {
+        factors.push_back(pow(f, e));
+      }
+      return mul(factors);
+    }
+    case Kind::Pow:
+      // Pow._eval_power with an integer exponent.
+      return pow(b->args[0], integer(checked_mul(b->args[1]->p, e->p)));
+    default:
+      return intern(Kind::Pow, 0, 0, {b, e});
+  }
+}
+
+const Expr* ExprArena::neg(const Expr* a) {
+  return mul({neg_one_, a});
+}
+
+const Expr* ExprArena::sub(const Expr* a, const Expr* b) {
+  return add({a, neg(b)});
+}
+
+} // namespace torch::symbolic

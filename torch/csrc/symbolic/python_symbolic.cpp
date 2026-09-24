@@ -1,0 +1,279 @@
+#include <torch/csrc/symbolic/python_symbolic.h>
+
+#include <torch/csrc/symbolic/Expr.h>
+#include <torch/csrc/utils/pybind.h>
+
+#include <unordered_map>
+#include <vector>
+
+namespace torch::symbolic {
+
+namespace py = pybind11;
+
+namespace {
+
+// Python-side state for an ExprArena: the sympy Symbol objects that native
+// symbols came from and a conversion cache (conversion is pure per Expr).
+struct PyArena {
+  PyArena() {
+    py::module_ sympy = py::module_::import("sympy");
+    py::module_ numbers = py::module_::import("torch.utils._sympy.numbers");
+    Integer = sympy.attr("Integer");
+    Rational = sympy.attr("Rational");
+    Symbol = sympy.attr("Symbol");
+    Add = sympy.attr("Add");
+    Mul = sympy.attr("Mul");
+    Pow = sympy.attr("Pow");
+    IntInfinity = numbers.attr("IntInfinity");
+    NegativeIntInfinity = numbers.attr("NegativeIntInfinity");
+    int_oo = numbers.attr("int_oo");
+  }
+
+  const Expr* from_sympy(py::handle obj);
+  py::object to_sympy(const Expr* e);
+
+  c10::intrusive_ptr<ExprArena> arena = c10::make_intrusive<ExprArena>();
+  py::dict symbol_index;
+  std::vector<const Expr*> symbol_exprs;
+  std::vector<py::object> symbol_objects;
+  std::unordered_map<uint32_t, py::object> sympy_cache;
+
+  py::object Integer, Rational, Symbol, Add, Mul, Pow, IntInfinity,
+      NegativeIntInfinity, int_oo;
+};
+
+struct PyExpr {
+  std::shared_ptr<PyArena> owner;
+  const Expr* expr;
+};
+
+int64_t to_int64(py::handle obj) {
+  int overflow = 0;
+  long long v = PyLong_AsLongLongAndOverflow(obj.ptr(), &overflow);
+  if (overflow != 0) {
+    throw NativeUnsupported("integer overflow");
+  }
+  if (v == -1 && PyErr_Occurred()) {
+    throw py::error_already_set();
+  }
+  return v;
+}
+
+const Expr* PyArena::from_sympy(py::handle obj) {
+  if (PyLong_CheckExact(obj.ptr()) || py::isinstance(obj, Integer)) {
+    py::int_ v(py::reinterpret_borrow<py::object>(obj));
+    return arena->integer(to_int64(v));
+  }
+  if (py::isinstance(obj, Rational)) {
+    return arena->rational(to_int64(obj.attr("p")), to_int64(obj.attr("q")));
+  }
+  if (py::isinstance(obj, IntInfinity)) {
+    return arena->int_oo();
+  }
+  if (py::isinstance(obj, NegativeIntInfinity)) {
+    return arena->neg_int_oo();
+  }
+  // Exact type: Dummy/Wild compare by more than name and assumptions.
+  if (Py_TYPE(obj.ptr()) == reinterpret_cast<PyTypeObject*>(Symbol.ptr())) {
+    if (symbol_index.contains(obj)) {
+      return symbol_exprs.at(symbol_index[obj].cast<size_t>());
+    }
+    // sympy Symbol equality covers every assumption, so any assumption we do
+    // not track could merge distinct symbols.
+    Facts facts;
+    facts.fill(Tri::Unknown);
+    py::dict assumptions = obj.attr("assumptions0");
+    for (auto [k, v] : assumptions) {
+      auto name = k.cast<std::string>();
+      size_t i = 0;
+      while (i < kNumFacts && name != fact_name(static_cast<Fact>(i))) {
+        ++i;
+      }
+      if (i == kNumFacts) {
+        throw NativeUnsupported("untracked assumption " + name);
+      }
+      facts[i] = v.cast<bool>() ? Tri::True : Tri::False;
+    }
+    const Expr* e = arena->symbol(obj.attr("name").cast<std::string>(), facts);
+    auto idx = static_cast<size_t>(e->p);
+    if (idx >= symbol_objects.size()) {
+      symbol_objects.resize(idx + 1);
+      symbol_exprs.resize(idx + 1);
+    }
+    symbol_objects[idx] = py::reinterpret_borrow<py::object>(obj);
+    symbol_exprs[idx] = e;
+    symbol_index[obj] = idx;
+    return e;
+  }
+  bool is_add = py::isinstance(obj, Add);
+  if (is_add || py::isinstance(obj, Mul)) {
+    std::vector<const Expr*> args;
+    for (py::handle a : obj.attr("args")) {
+      args.push_back(from_sympy(a));
+    }
+    // Only evaluate=False builds this; native construction would distribute.
+    if (!is_add && args.size() == 2 && args[0]->is_number() &&
+        args[1]->kind == Kind::Add) {
+      throw NativeUnsupported("unevaluated Mul(c, Add)");
+    }
+    return is_add ? arena->add(args) : arena->mul(args);
+  }
+  if (py::isinstance(obj, Pow)) {
+    py::tuple args = obj.attr("args");
+    return arena->pow(from_sympy(args[0]), from_sympy(args[1]));
+  }
+  throw NativeUnsupported(
+      "unsupported sympy type " +
+      py::str(py::type::handle_of(obj).attr("__name__")).cast<std::string>());
+}
+
+py::object PyArena::to_sympy(const Expr* e) {
+  auto it = sympy_cache.find(e->id);
+  if (it != sympy_cache.end()) {
+    return it->second;
+  }
+  py::object r;
+  switch (e->kind) {
+    case Kind::Integer:
+      r = Integer(e->p);
+      break;
+    case Kind::Rational:
+      r = Rational(e->p, e->q);
+      break;
+    case Kind::IntInfinity:
+      r = int_oo;
+      break;
+    case Kind::NegativeIntInfinity:
+      r = int_oo.attr("__neg__")();
+      break;
+    case Kind::Symbol:
+      r = symbol_objects.at(e->p);
+      break;
+    case Kind::Add:
+    case Kind::Mul:
+    case Kind::Pow: {
+      py::tuple args(e->args.size());
+      for (size_t i = 0; i < e->args.size(); ++i) {
+        args[i] = to_sympy(e->args[i]);
+      }
+      r =
+          (e->kind == Kind::Add       ? Add
+               : e->kind == Kind::Mul ? Mul
+                                      : Pow)(*args);
+      break;
+    }
+  }
+  sympy_cache.emplace(e->id, r);
+  return r;
+}
+
+const char* kind_name(Kind k) {
+  switch (k) {
+    case Kind::Integer:
+      return "Integer";
+    case Kind::Rational:
+      return "Rational";
+    case Kind::IntInfinity:
+      return "IntInfinity";
+    case Kind::NegativeIntInfinity:
+      return "NegativeIntInfinity";
+    case Kind::Symbol:
+      return "Symbol";
+    case Kind::Pow:
+      return "Pow";
+    case Kind::Mul:
+      return "Mul";
+    case Kind::Add:
+      return "Add";
+  }
+  return "?";
+}
+
+const Expr* unwrap(const std::shared_ptr<PyArena>& self, const PyExpr& e) {
+  TORCH_CHECK(e.owner == self, "expression belongs to a different arena");
+  return e.expr;
+}
+
+std::vector<const Expr*> unwrap_all(
+    const std::shared_ptr<PyArena>& self,
+    const std::vector<PyExpr>& es) {
+  std::vector<const Expr*> r;
+  r.reserve(es.size());
+  for (const auto& e : es) {
+    r.push_back(unwrap(self, e));
+  }
+  return r;
+}
+
+} // namespace
+
+void initSymbolicBindings(PyObject* module) {
+  auto m = py::handle(module).cast<py::module_>();
+  auto sm = m.def_submodule("_symbolic", "native symbolic expressions");
+  py::register_exception<NativeUnsupported>(sm, "NativeUnsupported");
+
+  py::class_<PyExpr>(sm, "_Expr")
+      .def(
+          "__eq__",
+          [](const PyExpr& a, const PyExpr& b) {
+            return a.owner == b.owner && a.expr == b.expr;
+          })
+      .def(
+          "__hash__",
+          [](const PyExpr& a) { return std::hash<const Expr*>()(a.expr); })
+      .def_property_readonly(
+          "kind", [](const PyExpr& a) { return kind_name(a.expr->kind); })
+      .def_property_readonly("id", [](const PyExpr& a) { return a.expr->id; });
+
+  using Self = std::shared_ptr<PyArena>;
+  auto wrap = [](const Self& self, const Expr* e) { return PyExpr{self, e}; };
+  py::class_<PyArena, Self>(sm, "_Arena")
+      .def(py::init<>())
+      .def("__len__", [](const Self& self) { return self->arena->size(); })
+      .def(
+          "from_sympy",
+          [wrap](const Self& self, py::handle obj) {
+            return wrap(self, self->from_sympy(obj));
+          })
+      .def(
+          "to_sympy",
+          [](const Self& self, const PyExpr& e) {
+            return self->to_sympy(unwrap(self, e));
+          })
+      .def(
+          "integer",
+          [wrap](const Self& self, py::handle v) {
+            return wrap(self, self->arena->integer(to_int64(v)));
+          })
+      .def(
+          "rational",
+          [wrap](const Self& self, py::handle p, py::handle q) {
+            return wrap(self, self->arena->rational(to_int64(p), to_int64(q)));
+          })
+      .def(
+          "add",
+          [wrap](const Self& self, const std::vector<PyExpr>& args) {
+            return wrap(self, self->arena->add(unwrap_all(self, args)));
+          })
+      .def(
+          "mul",
+          [wrap](const Self& self, const std::vector<PyExpr>& args) {
+            return wrap(self, self->arena->mul(unwrap_all(self, args)));
+          })
+      .def(
+          "pow",
+          [wrap](const Self& self, const PyExpr& b, const PyExpr& e) {
+            return wrap(
+                self, self->arena->pow(unwrap(self, b), unwrap(self, e)));
+          })
+      .def(
+          "neg",
+          [wrap](const Self& self, const PyExpr& a) {
+            return wrap(self, self->arena->neg(unwrap(self, a)));
+          })
+      .def("sub", [wrap](const Self& self, const PyExpr& a, const PyExpr& b) {
+        return wrap(self, self->arena->sub(unwrap(self, a), unwrap(self, b)));
+      });
+}
+
+} // namespace torch::symbolic
