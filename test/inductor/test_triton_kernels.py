@@ -534,11 +534,11 @@ class KernelTests(torch._inductor.test_case.TestCase):
         output = torch.zeros_like(raw_scale)
         gm = make_fx(copy_e8m0, tracing_mode="fake")(scale_e8m0, output)
         decompose_triton_kernel_wrapper_functional(gm.graph)
-        functional_nodes = gm.graph.find_nodes(
+        mutation_nodes = gm.graph.find_nodes(
             op="call_function",
-            target=torch.ops.higher_order.triton_kernel_wrapper_functional,
+            target=torch.ops.higher_order.triton_kernel_wrapper_mutation,
         )
-        self.assertEqual(len(functional_nodes), 0)
+        self.assertEqual(len(mutation_nodes), 1)
 
     @requires_gpu
     def test_triton_kernel_functionalize(self):
