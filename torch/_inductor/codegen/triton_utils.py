@@ -1,11 +1,13 @@
 # mypy: allow-untyped-defs
 import functools
+import itertools
 import warnings
 from typing import Any
 
 import sympy
 
 import torch
+from torch._higher_order_ops import triton_kernel_wrap
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._triton import has_triton_block_ptr
 
@@ -19,6 +21,7 @@ from ..utils import (
 )
 from ..virtualized import V
 from .common import (
+    AggregateArg,
     ArgName,
     ConstexprArg,
     KernelArgType,
@@ -125,10 +128,37 @@ def triton_meta_device_props(device: torch.device) -> DeviceProperties:
 def signature_of(
     arg: KernelArgType,
     *,
-    size_dtype: str | None,
+    size_dtype: Any,
     use_fp64_for_python_float: bool = True,
-) -> str:
-    """Return the Triton signature type for an Inductor kernel argument."""
+) -> Any:
+    """Return the Triton signature value for a kernel argument."""
+    if isinstance(arg, AggregateArg):
+
+        def enter(spec, values, path):
+            if spec[-1] or values[0] is None or isinstance(values[0], ConstexprArg):
+                return True, "constexpr"
+            return False, None
+
+        def leaf(spec, values, path):
+            return signature_of(arg=values[0], size_dtype=values[1])
+
+        def container(spec, values, children, path):
+            if spec[0] == "namedtuple":
+                return triton_kernel_wrap.namedtuple_type_from_spec(spec[1], spec[2])(
+                    *children
+                )
+            if spec[0] == "tuple":
+                return children
+            raise triton_kernel_wrap.unsupported_aggregate_type_error(spec, path)
+
+        return triton_kernel_wrap.fold_aggregate(
+            arg.spec,
+            arg.value,
+            size_dtype,
+            leaf_fn=leaf,
+            container_fn=container,
+            enter_fn=enter,
+        )
     if isinstance(arg, TensorArg):
         typ = _type_of(arg.dtype)
         if should_unwrap_unspec_arg(arg.buffer):
@@ -252,7 +282,7 @@ def signature_to_meta(
     indices: list[int] | None = None,
     is_template: bool = False,
     use_fp64_for_python_float: bool = True,
-) -> dict[str, str]:
+) -> dict[str, Any]:
     if indices is None:
         indices = list(range(len(signature)))
 
@@ -268,6 +298,20 @@ def signature_to_meta(
         #
         # assume_32bit_indexing already asserts (and guards) that every ks* symbol
         # fits in int32.
+        if isinstance(arg, AggregateArg):
+
+            def enter(spec, values, path):
+                if spec[-1] or values[0] is None or isinstance(values[0], ConstexprArg):
+                    return True, None
+                return False, None
+
+            return triton_kernel_wrap.fold_aggregate(
+                arg.spec,
+                arg.value,
+                leaf_fn=lambda spec, values, path: _decide_tl_dtype(values[0]),
+                container_fn=lambda spec, values, children, path: children,
+                enter_fn=enter,
+            )
         if (
             not is_template
             and not use_block_ptr_enabled()
@@ -434,16 +478,55 @@ def config_of(
             return True
         return input_idx not in (V.graph.inputs_to_check or ())
 
-    if config.triton.divisible_by_16:
-        divisible_by_16 = tuple(
-            i
-            for i, arg in zip(indices, args)
-            if is_aligned(
-                arg,
-                alignment=16,
-                include_tensor=include_tensor_alignment(arg),
+    def aligned_leaf_paths(
+        arg: KernelArgType, path: tuple[int, ...]
+    ) -> list[tuple[int, ...]]:
+        if isinstance(arg, AggregateArg):
+
+            def enter(spec, values, aggregate_path):
+                if spec[-1] or values[0] is None or isinstance(values[0], ConstexprArg):
+                    return True, []
+                return False, []
+
+            return triton_kernel_wrap.fold_aggregate(
+                arg.spec,
+                arg.value,
+                leaf_fn=lambda spec, values, aggregate_path: aligned_leaf_paths(
+                    values[0], (*path, *aggregate_path)
+                ),
+                container_fn=lambda spec, values, children, aggregate_path: list(
+                    itertools.chain.from_iterable(children)
+                ),
+                enter_fn=enter,
             )
-        )
+        if is_aligned(
+            arg,
+            alignment=16,
+            include_tensor=include_tensor_alignment(arg),
+        ):
+            return [path]
+        return []
+
+    if config.triton.divisible_by_16:
+        if triton_version_uses_attrs_dict():
+            divisible_by_16 = tuple(
+                path
+                for i, arg in zip(indices, args)
+                for path in aligned_leaf_paths(arg, (i,))
+            )
+        else:
+            divisible_by_16 = tuple(
+                i
+                for i, arg in zip(indices, args)
+                # Only possible to specify attrs for tuple types
+                # with attrs_dict
+                if not isinstance(arg, AggregateArg)
+                and is_aligned(
+                    arg,
+                    alignment=16,
+                    include_tensor=include_tensor_alignment(arg),
+                )
+            )
     else:
         divisible_by_16 = ()
 
