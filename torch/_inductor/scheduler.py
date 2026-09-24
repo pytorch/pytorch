@@ -49,7 +49,7 @@ from torch._inductor.ir import TritonTemplateCallerBase
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch._inductor.stream_utils import get_stream_name
 from torch.fx.experimental.symbolic_shapes import free_symbols
-from torch.utils._sympy.functions import FloorDiv, Identity
+from torch.utils._sympy.functions import FloorDiv, Identity, ModularIndexing
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from torch.utils._triton import has_triton
 
@@ -1372,9 +1372,21 @@ class NestedReduction:
                 symbol_subs = cls.try_get_sub_parent_extent_subs(symbol, factor)
                 if symbol_subs is not None:
                     extent_subs.update(symbol_subs)
-        return V.graph.sizevars.simplify(
-            sympy.Mod(sympy_subs(index, extent_subs), factor)
-        )
+        index = sympy_subs(index, extent_subs)
+        # A normalized buffer index may be wrapped as ModularIndexing(base, 1, N)
+        # == base % N (N is the full symbolic extent). The lane is base % factor.
+        # When N is a statically-known multiple of factor, Mod(base % N, factor)
+        # == Mod(base, factor), so unwrap for simplification. Without this, a
+        # symbolic (dynamic) N keeps the lane symbolic and the sub-parent pack2
+        # epilogue is rejected when M is dynamic (only the concrete-extent case
+        # simplified, so fusion only worked at static M).
+        if (
+            isinstance(index, ModularIndexing)
+            and index.args[1] == 1
+            and V.graph.sizevars.statically_known_multiple_of(index.args[2], factor)
+        ):
+            index = index.args[0]
+        return V.graph.sizevars.simplify(sympy.Mod(index, factor))
 
     @classmethod
     def _sub_parent_access_preserves_x_boundary(
@@ -1500,6 +1512,21 @@ class NestedReduction:
         )
 
         access_relations: OrderedSet[SubParentAccessRelation] = OrderedSet()
+
+        def _strip_unit_modular(expr: sympy.Expr) -> sympy.Expr:
+            """Map ModularIndexing(base, 1, N) to base for equality comparison.
+
+            These normalized indices are in their buffer's valid domain (base in
+            [0, N)) before the wrap, so the wrap is identity there. With a
+            concrete N sympy simplifies it, but a symbolic (dynamic) N blocks
+            the simplification and would reject the sub-parent pack2 epilogue
+            when M is dynamic.
+            """
+            return expr.replace(
+                lambda e: isinstance(e, ModularIndexing) and e.args[1] == 1,
+                lambda e: e.args[0],
+            )
+
         # Prove every child read is a lane projection of one parent read.
         for name in parent_source_names:
             source_child_accesses = child_accesses.get(name)
@@ -1536,7 +1563,10 @@ class NestedReduction:
                 expected = parent_index.subs(
                     parent_r, sub_parent_factor * child_r + lane_value
                 )
-                if not V.graph.sizevars.statically_known_equals(child_index, expected):
+                if not V.graph.sizevars.statically_known_equals(
+                    _strip_unit_modular(child_index),
+                    _strip_unit_modular(expected),
+                ):
                     return None
                 access_relations.add(
                     SubParentAccessRelation(
@@ -7032,7 +7062,24 @@ class Scheduler:
                 config.loop_ordering_after_fusion
                 or config.loop_index_inversion_in_fusion
             ):
+                before_reorder_len = len(nodes)
+                before_reduction_groups = {
+                    tuple(sorted(node.get_operation_names()))
+                    for node in nodes
+                    if isinstance(node, FusedSchedulerNode) and node.is_reduction()
+                }
                 nodes = self.fuse_nodes_once(nodes, is_reorder_round=True)
+                after_reduction_groups = {
+                    tuple(sorted(node.get_operation_names()))
+                    for node in nodes
+                    if isinstance(node, FusedSchedulerNode) and node.is_reduction()
+                }
+                formed_reduction_group = (
+                    len(nodes) < before_reorder_len
+                    and bool(after_reduction_groups - before_reduction_groups)
+                )
+                if config.triton.nested_reduction and formed_reduction_group:
+                    nodes = self.fuse_nodes_once(nodes, is_reorder_round=False)
             self._fusion_memory_state = None
             return nodes
 
