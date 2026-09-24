@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import atexit
+import contextlib
 import contextvars
 import ctypes
 import dataclasses
@@ -20,7 +21,7 @@ import warnings
 from collections.abc import Callable, Iterable, Sequence
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from ctypes import byref, c_size_t, c_void_p, CDLL
-from typing import Any, IO, TYPE_CHECKING
+from typing import Any, cast, IO, TYPE_CHECKING
 from typing_extensions import override
 
 import torch
@@ -442,6 +443,10 @@ class TuningProcessPool(TuningPoolBase):
             )
             # Set to INF so this choice will be ignored
             return float("inf")
+        except CUDAGraphBenchmarkError as e:
+            # Return the marker after all pool work completes so the parent can
+            # retry the entire candidate set with one consistent eager policy.
+            return e  # pyrefly: ignore[bad-return]
         except Exception as process_exception:
             warnings.warn(
                 f"Failed to benchmark choice '{choice}'. It will be ignored. "
@@ -586,6 +591,69 @@ class TensorMeta:
         )
 
 
+class CUDAGraphBenchmarkError(RuntimeError):
+    """Signal that an automatic CUDA-graph benchmark needs an eager retry."""
+
+
+class StickyCUDABenchmarkError(RuntimeError):
+    """Signal that an autotune worker's CUDA context cannot be reused."""
+
+
+class PoisonedAutotuneWorkerError(StickyCUDABenchmarkError):
+    """Signal that this task was skipped after another task poisoned the worker."""
+
+
+_autotune_worker_cuda_poisoned = False
+
+
+def _is_sticky_cuda_error(error: BaseException) -> bool:
+    """Whether a CUDA failure requires recreating the tuning process."""
+    error_msg = str(error)
+    error_msg_lower = error_msg.lower()
+    return any(
+        name in error_msg
+        for name in (
+            "cudaErrorIllegalAddress",
+            "cudaErrorLaunchTimeout",
+            "cudaErrorAssert",
+            "cudaErrorHardwareStackError",
+            "cudaErrorIllegalInstruction",
+            "cudaErrorMisalignedAddress",
+            "cudaErrorInvalidAddressSpace",
+            "cudaErrorInvalidPc",
+            "cudaErrorLaunchFailure",
+            "cudaErrorTensorMemoryLeak",
+            "cudaErrorMpsClientTerminated",
+            "cudaErrorECCUncorrectable",
+            "cudaErrorContained",
+            "cudaErrorContextIsDestroyed",
+            "cudaErrorExternalDevice",
+        )
+    ) or any(
+        marker in error_msg_lower
+        for marker in (
+            "illegal memory access",
+            "launch timed out",
+            "device-side assert",
+            "hardware stack error",
+            "illegal instruction",
+            "misaligned address",
+            "invalid address space",
+            "invalid program counter",
+            "unspecified launch failure",
+            "tensor memory leak",
+            "mps client terminated",
+            "mps client has been terminated",
+            "uncorrectable ecc error",
+            "contained by the gpu",
+            "context has been destroyed",
+            "context is destroyed",
+            "external device error",
+            "error in a device outside of cuda",
+        )
+    )
+
+
 @dataclasses.dataclass
 class BenchmarkRequest:
     """
@@ -602,6 +670,8 @@ class BenchmarkRequest:
         input_tensor_meta: TensorMeta | list[TensorMeta],
         output_tensor_meta: TensorMeta | list[TensorMeta],
         extra_args: Iterable[Any],
+        *,
+        benchmark_device_type: str | None = None,
     ) -> None:
         # the kernel name defined in the module
         self.kernel_name = kernel_name
@@ -630,6 +700,45 @@ class BenchmarkRequest:
 
         self.extra_args = extra_args
         self.benchmark_with_cudagraphs = False
+        # Benchmark requests may execute in a long-lived subprocess whose
+        # process-global Inductor config does not match the graph compiler.
+        # Snapshot the effective policy so every candidate uses the same mode.
+        self.config_max_autotune = config.max_autotune
+        if benchmark_device_type is None:
+            benchmark_device_type = next(
+                (
+                    tensor_meta.device.type
+                    for tensor_meta in [
+                        *(self.input_tensor_meta or []),
+                        self.output_tensor_meta,
+                    ]
+                    if isinstance(tensor_meta, TensorMeta)
+                    and is_gpu(tensor_meta.device.type)
+                ),
+                None,
+            )
+        self.config_cudagraph_benchmarking = (
+            benchmark_device_type == "cuda"
+            and config.autotune_cudagraph_benchmarking
+            and config.max_autotune
+        )
+        self.cudagraph_unroll = max(1, config.autotune_cudagraph_benchmarking_iters)
+        self.cudagraph_cold_cache_input_indices: tuple[int, ...] = ()
+        # The algorithm selector may retry an automatically graphed candidate
+        # set eagerly after one capture fails. This is a transient benchmark
+        # policy and is intentionally not part of serialized cache identity.
+        self.force_eager_benchmark = False
+
+    @contextlib.contextmanager
+    def apply_benchmark_config(self):
+        """Restore the parent process's benchmark policy around this request."""
+        with config.patch(
+            max_autotune=self.config_max_autotune,
+            autotune_cudagraph_benchmarking=(
+                self.config_cudagraph_benchmarking and not self.force_eager_benchmark
+            ),
+        ):
+            yield
 
     def make_run_fn(
         self, *input_tensors: torch.Tensor, out: torch.Tensor
@@ -646,6 +755,41 @@ class BenchmarkRequest:
         out: torch.Tensor | None = None,
     ) -> float:
         raise NotImplementedError
+
+    def do_bench_with_cudagraphs(
+        self,
+        fn,
+        *input_tensors: torch.Tensor,
+        out: torch.Tensor | None = None,
+    ) -> float:
+        raise NotImplementedError
+
+    def benchmark_run_fn(
+        self,
+        fn,
+        *input_tensors: torch.Tensor,
+        out: torch.Tensor | None = None,
+    ) -> float:
+        use_cudagraphs = not self.force_eager_benchmark and (
+            self.benchmark_with_cudagraphs or self.config_cudagraph_benchmarking
+        )
+        with self.apply_benchmark_config():
+            if use_cudagraphs:
+                try:
+                    return self.do_bench_with_cudagraphs(fn, *input_tensors, out=out)
+                except RuntimeError as e:
+                    if self.benchmark_with_cudagraphs or _is_sticky_cuda_error(e):
+                        raise
+                    # CUDA graph construction and the kernel invocation can both
+                    # raise RuntimeError.  Only request a coordinated eager retry
+                    # when the same callable succeeds eagerly; otherwise preserve
+                    # the per-choice kernel failure for the normal error handling.
+                    with config.patch(autotune_cudagraph_benchmarking=False):
+                        self.do_bench(fn, *input_tensors, out=out)
+                    raise CUDAGraphBenchmarkError(
+                        "CUDA graph capture failed during automatic autotuning"
+                    ) from e
+            return self.do_bench(fn, *input_tensors, out=out)
 
     def benchmark(
         self,
@@ -686,10 +830,7 @@ class BenchmarkRequest:
                 load_elapse = time.time() - start_ts  # type: ignore[possibly-undefined]
                 start_ts = time.time()
 
-            if self.benchmark_with_cudagraphs:
-                res = benchmarker.benchmark_gpu_with_cuda_graph(fn)
-            else:
-                res = self.do_bench(fn, *input_tensors, out)
+            res = self.benchmark_run_fn(fn, *input_tensors, out=out)
 
             if debug:
                 bench_elapse = time.time() - start_ts  # type: ignore[possibly-undefined]
@@ -785,12 +926,13 @@ class _TestCodeCacheBenchmarkRequest:
 
 
 class GPUDeviceBenchmarkMixin:
-    def do_bench(
+    """GPU timing helpers shared by benchmark-request implementations."""
+
+    def _get_benchmark_device(
         self,
-        fn,
         *input_tensors: torch.Tensor,
         out: torch.Tensor | None = None,
-    ) -> float:
+    ) -> tuple[Any, str, int]:
         device_idx_set = OrderedSet(
             tensor.device.index
             for tensor in [*input_tensors, out]
@@ -803,8 +945,8 @@ class GPUDeviceBenchmarkMixin:
         device_type = next(
             (
                 tensor.device.type
-                for tensor in input_tensors
-                if is_gpu(tensor.device.type)
+                for tensor in [*input_tensors, out]
+                if isinstance(tensor, torch.Tensor) and is_gpu(tensor.device.type)
             ),
             "cuda",
         )
@@ -813,8 +955,85 @@ class GPUDeviceBenchmarkMixin:
             device_idx = next(iter(device_idx_set))
         else:
             device_idx = device_interface.current_device()
+        return device_interface, device_type, device_idx
+
+    def do_bench(
+        self,
+        fn,
+        *input_tensors: torch.Tensor,
+        out: torch.Tensor | None = None,
+    ) -> float:
+        device_interface, device_type, device_idx = self._get_benchmark_device(
+            *input_tensors, out=out
+        )
         with device_interface.device(device_idx):  # type: ignore[attr-defined]
             res = benchmarker.benchmark(fn, device=device_type)
+            device_interface.synchronize()  # shake out any CUDA errors
+
+        return res
+
+    def do_bench_with_cudagraphs(
+        self,
+        fn,
+        *input_tensors: torch.Tensor,
+        out: torch.Tensor | None = None,
+    ) -> float:
+        device_interface, device_type, device_idx = self._get_benchmark_device(
+            *input_tensors, out=out
+        )
+        if out is None:
+            raise AssertionError("out must be provided for CUDA graph benchmarking")
+        request = cast(BenchmarkRequest, self)
+        with device_interface.device(device_idx):  # type: ignore[attr-defined]
+            run_fns = [fn]
+            outputs = [out]
+            indices = request.cudagraph_cold_cache_input_indices
+            if indices and request.cudagraph_unroll > 1:
+                weight_bytes = sum(input_tensors[index].nbytes for index in indices)
+                props = device_interface.get_device_properties(device_idx)
+                cache_size = next(
+                    (
+                        getattr(props, attr)
+                        for attr in ("L2_cache_size", "last_level_cache_size")
+                        if getattr(props, attr, None)
+                    ),
+                    256 * 1024 * 1024,
+                )
+                pool_size = request.cudagraph_unroll
+                for candidate_size in range(2, request.cudagraph_unroll + 1):
+                    if (
+                        request.cudagraph_unroll % candidate_size == 0
+                        and candidate_size * weight_bytes >= 2 * cache_size
+                    ):
+                        pool_size = candidate_size
+                        break
+
+                for _ in range(pool_size - 1):
+                    rotated = list(input_tensors)
+                    for index in indices:
+                        rotated[index] = input_tensors[index].clone(
+                            memory_format=torch.preserve_format
+                        )
+                    rotated_out = torch.empty_like(
+                        out, memory_format=torch.preserve_format
+                    )
+                    outputs.append(rotated_out)
+                    run_fns.append(request.make_run_fn(*rotated, out=rotated_out))
+
+                next_fn = 0
+
+                def run_rotating_inputs():
+                    nonlocal next_fn
+                    run_fns[next_fn]()
+                    next_fn = (next_fn + 1) % pool_size
+
+                fn = run_rotating_inputs
+
+            res = benchmarker.benchmark_gpu_with_cuda_graph(
+                fn,
+                device_type=device_type,
+                cudagraph_unroll=request.cudagraph_unroll,
+            )
             device_interface.synchronize()  # shake out any CUDA errors
 
         return res
@@ -1045,11 +1264,23 @@ class ExternKernelBenchmarkRequest(BenchmarkRequest):
         callable_path: str,  # Module path to the callable (e.g., "extern_kernels.mm")
         kwargs: dict[str, Any] | None = None,
         has_out_variant: bool = True,
+        benchmark_device_type: str | None = None,
+        cudagraph_unroll: int | None = None,
+        cudagraph_cold_cache_input_indices: tuple[int, ...] = (),
     ) -> None:
-        super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, extra_args)
+        super().__init__(
+            kernel_name,
+            input_tensor_meta,
+            output_tensor_meta,
+            extra_args,
+            benchmark_device_type=benchmark_device_type,
+        )
         self.callable_path = callable_path
         self.kwargs = kwargs or {}
         self.has_out_variant = has_out_variant
+        if cudagraph_unroll is not None:
+            self.cudagraph_unroll = cudagraph_unroll
+        self.cudagraph_cold_cache_input_indices = cudagraph_cold_cache_input_indices
 
     def make_run_fn(
         self, *input_tensors: torch.Tensor, out: torch.Tensor
@@ -1076,13 +1307,18 @@ class ExternKernelBenchmarkRequest(BenchmarkRequest):
                     out_new, tuple(out.size()), tuple(out.stride())
                 )
                 out.copy_(out_new)  # for correctness checking
-            if self.benchmark_with_cudagraphs:
-                return benchmarker.benchmark_gpu_with_cuda_graph(
-                    lambda: algo(*input_tensors)
-                )
-            if config.profile_bandwidth_with_do_bench_using_profiling:
+            use_cudagraphs = self.benchmark_with_cudagraphs or (
+                self.config_cudagraph_benchmarking and not self.force_eager_benchmark
+            )
+            if (
+                config.profile_bandwidth_with_do_bench_using_profiling
+                and not use_cudagraphs
+                and not self.config_cudagraph_benchmarking
+            ):
                 return do_bench_using_profiling(lambda: algo(*input_tensors))
-            return benchmarker.benchmark(algo, input_tensors, {})
+            return self.benchmark_run_fn(
+                lambda: algo(*input_tensors), *input_tensors, out=out
+            )
 
     def precompile(self) -> None:
         # Extern kernels don't need precompilation - they're already compiled
@@ -1229,9 +1465,6 @@ class CUTLASSBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
             args,
             self.extra_args,
         )
-        stream_ptr = c_void_p(
-            self.device_interface.get_raw_stream(self.device_interface.current_device())
-        )
         run_method = getattr(self.DLL, self.kernel_name)
         workspace_ptr = c_void_p(0)
         if self.workspace_size > 0:
@@ -1242,19 +1475,26 @@ class CUTLASSBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
             )
             workspace_ptr = c_void_p(self.workspace.data_ptr())
 
-        # Generate partial function.
-        ret = functools.partial(
-            run_method,
-            *args,
-            *self.extra_args,
-            None,  # null workspace size ptr
-            workspace_ptr,  # set workspace ptr,
-            stream_ptr,
-        )
+        # Resolve the stream at invocation time so CUDA graph capture can run
+        # the kernel on the capture stream rather than the stream that happened
+        # to be current while the benchmark closure was created.
+        def run_fn() -> None:
+            stream_ptr = c_void_p(
+                self.device_interface.get_raw_stream(
+                    self.device_interface.current_device()
+                )
+            )
+            run_method(
+                *args,
+                *self.extra_args,
+                None,  # null workspace size ptr
+                workspace_ptr,
+                stream_ptr,
+            )
 
         # sanity check to make sure we cleanup run fn properly
         try:
-            ret()
+            run_fn()
         except RuntimeError as e:
             err_msg = str(e)
 
@@ -1264,7 +1504,7 @@ class CUTLASSBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
             self.cleanup_run_fn()
             return raise_runtime_error
 
-        return ret
+        return run_fn
 
     def update_workspace_size(self) -> None:
         if self._workspace_size_updated:
@@ -1527,7 +1767,18 @@ def benchmark_in_sub_process(
 
     Uses subprocess pool in process mode, thread pool in thread mode.
     """
-    return get_tuning_pool().benchmark(choices)
+    results = get_tuning_pool().benchmark(choices)
+    failure = next(
+        (
+            result
+            for result in results.values()
+            if isinstance(result, CUDAGraphBenchmarkError)
+        ),
+        None,
+    )
+    if failure is not None:
+        raise failure
+    return results  # type: ignore[return-value]
 
 
 class AutotuneProcessPool:
