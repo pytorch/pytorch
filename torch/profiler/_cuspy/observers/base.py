@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import contextlib
 import functools
+import logging
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -22,6 +23,9 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from torch.utils.hooks import RemovableHandle
+
+
+logger = logging.getLogger(__name__)
 
 
 # graph_node_id -> annotation name (or None). The graph naming mechanism shared by
@@ -205,14 +209,14 @@ class CuspyObserver:
         # _ann_lock (push on the caller's thread; a drain may read/reset from another).
         self._ann_lock = threading.Lock()
         self._ext_names: dict[int, str] = {}
-        # Degrade gracefully (available == False) if Cuspy can't be reached or
-        # registration fails (CUPTI subscribe rejected, libcupti lacks v2)
+        # Failed initialization disables this observer without interrupting the application.
         try:
             from torch.profiler._cuspy.core import Cuspy
 
             self._cuspy = Cuspy()
             self._obs = self._cuspy.register(activities, self._on_activities)
-        except Exception:
+        except Exception as exc:
+            logger.warning("Cuspy observer unavailable: %s", exc)
             self._obs = None
         # Register a graph-destroy hook per installed graph-node resolver so a
         # destroyed CUDA graph purges that resolver's registry and invalidates

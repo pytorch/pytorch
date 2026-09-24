@@ -212,6 +212,8 @@ class MetalShaderLibrary {
   virtual MTLLibrary_t getLibrary();
   virtual MTLLibrary_t getLibrary(
       const std::initializer_list<std::string>& params);
+  // `library` and the caches below are guarded by a mutex private to
+  // OperationUtils.mm, where every accessor that touches them is defined.
   MTLLibrary_t library = nullptr;
 
  private:

@@ -324,6 +324,7 @@ CUDA_INCLUDE_MAP = collections.OrderedDict([
     ("curand_poisson.h", "hiprand/hiprand_kernel.h"),
     ("curand_precalc.h", "hiprand/hiprand_kernel.h"),
     ("curand_uniform.h", "hiprand/hiprand_kernel.h"),
+    ("cusolverDn.h", "hipsolver/hipsolver.h"),
     ("cusparse.h", "hipsparse/hipsparse.h"),
     ("cusparseLt.h", "hipsparselt/hipsparselt.h"),
     ("cufft.h", "hipfft/hipfft.h"),

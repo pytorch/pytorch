@@ -4726,13 +4726,6 @@ def delete_global_from_module(module: types.ModuleType, name: str) -> None:
         raise NameError(f"name '{name}' is not defined", name=name) from None
 
 
-def reinsert_global_in_module(module: types.ModuleType, name: str, value: Any) -> None:
-    # Eager `del g; g = 2` re-adds the name at the end of the module __dict__,
-    # which a plain setattr on a still-present name would not reproduce.
-    module.__dict__.pop(name, None)
-    module.__dict__[name] = value
-
-
 def class_has_getattribute(cls: type) -> bool:
     try:
         if isinstance(

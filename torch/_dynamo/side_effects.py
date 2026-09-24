@@ -714,59 +714,7 @@ class SideEffects:
         # the global, so store_attr's default AttrSource(item.source, name)
         # would name a nonexistent `G.G`. Record the source readers actually
         # use, so mutated_sources intersects with traced_sources.
-        self.store_attr(
-            gvar,
-            name,
-            value,
-            self.global_store_mutation_kind(gvar, name, value),
-            mutated_source=GlobalSource(name),
-        )
-
-    def store_global_in_module(
-        self, item: VariableTracker, name: str, value: VariableTracker
-    ) -> None:
-        """Record a store to a name in a module's globals dict.
-
-        `module.__dict__` ordering is observable (e.g. `list(vars(module))`), and
-        eager `del g; g = 1` appends the re-added name at the end. When the store
-        replays a delete recorded in this trace, drop that delete's entry first:
-        store_attr_mutations is insertion-ordered, so overwriting it in place
-        would replay the store in the slot the delete left behind, ahead of names
-        stored after the delete. Only STORE_GLOBAL comes through here: a
-        `module.g = 1` traced as a plain attribute store writes that same entry
-        directly, dropping the recorded delete and leaving the name in its old
-        slot.
-        """
-        mutation_kind = self.global_store_mutation_kind(item, name, value)
-        if mutation_kind is AttrMutationKind.GLOBAL_REINSERT:
-            del self.store_attr_mutations[item][name]
-            del self.attr_mutation_kinds[item][name]
-            # Absent for an item store_attr registered no source for.
-            self.mutated_sources_by_attr.pop((item, name), None)
-        self.store_attr(item, name, value, mutation_kind)
-
-    def global_store_mutation_kind(
-        self, item: VariableTracker, name: str, value: VariableTracker
-    ) -> AttrMutationKind:
-        """Replay kind for a store to a module-global name.
-
-        Once a delete of the name has been recorded in this trace, every later
-        store replays that delete first: eager removes the name from the module
-        __dict__ and re-adds it at the end, while a lone store would leave it in
-        the slot it had before the delete.
-        """
-        if isinstance(value, variables.DeletedVariable):
-            return AttrMutationKind.GLOBAL_DELETE
-        pending = self.store_attr_mutations.get(item, {}).get(name)
-        # A recorded GLOBAL_DELETE always pairs with a DeletedVariable value, so
-        # `pending` covers it; a recorded GLOBAL_REINSERT is sticky, since the
-        # delete it replays happened before this store.
-        recorded = self.attr_mutation_kinds.get(item, {}).get(name)
-        if isinstance(pending, variables.DeletedVariable) or (
-            recorded is AttrMutationKind.GLOBAL_REINSERT
-        ):
-            return AttrMutationKind.GLOBAL_REINSERT
-        return AttrMutationKind.GENERIC_SETATTR
+        self.store_attr(gvar, name, value, mutated_source=GlobalSource(name))
 
     def discard_attr_mutation(self, item: VariableTracker, name: str) -> None:
         """Drop a recorded mutation that replayed as a no-op.
@@ -2104,21 +2052,6 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
                 # the real globals, so this is always replayable; a name that was
                 # only created during tracing is discarded in the handler.
                 ctx.suffixes.append([create_instruction("DELETE_GLOBAL", argval=name)])
-            elif mutation_kind is AttrMutationKind.GLOBAL_REINSERT:
-                # The delete has to replay before the store, or the name would
-                # keep the slot it had before the delete instead of moving to
-                # the end of the module __dict__ as eager does. Each name gets
-                # its own var on this path, so this only fixes the position
-                # within one name: suffixes are emitted in reverse, so the
-                # re-stored name still lands ahead of names stored after it
-                # (e.g. `del a; a = 2; b = 1` replays b first, unlike eager).
-                cg(value)
-                ctx.suffixes.append(
-                    [
-                        create_instruction("DELETE_GLOBAL", argval=name),
-                        create_instruction("STORE_GLOBAL", argval=name),
-                    ]
-                )
             else:
                 cg(value)
                 ctx.suffixes.append([create_instruction("STORE_GLOBAL", argval=name)])
@@ -2185,20 +2118,6 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
                 cg(var.source)
                 ctx.suffixes.append([create_instruction("DELETE_ATTR", argval=name)])
                 side_effect_occurred = True
-        elif (
-            isinstance(var, variables.PythonModuleVariable)
-            and mutation_kind is AttrMutationKind.GLOBAL_REINSERT
-        ):
-            cg.add_push_null(
-                lambda: cg.load_import_from(utils.__name__, "reinsert_global_in_module")
-            )
-            cg(var.source)  # type: ignore[attr-defined]
-            cg(variables.ConstantVariable(name))
-            cg(value)
-            ctx.suffixes.append(
-                [*create_call_function(3, False), create_instruction("POP_TOP")]
-            )
-            side_effect_occurred = True
         elif (
             isinstance(var, variables.UserDefinedObjectVariable)
             and mutation_kind is AttrMutationKind.INSTANCE_DICT
