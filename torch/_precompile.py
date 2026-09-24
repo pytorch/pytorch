@@ -3310,7 +3310,9 @@ def load(
     stance, without setting that process-wide stance (a process-wide stance the
     caller sets, such as ``"force_eager"``, still takes precedence). A Dynamo artifact whose
     capture graph-broke cannot load beside the live compile that captured it
-    (the continuation names collide): load it in a fresh process.
+    (the continuation names collide), and an installed artifact is refused
+    wherever its entry already has live Dynamo cache entries: load it in a fresh
+    process.
 
     Raises ``PrecompileError`` if either file cannot be read, if ``python_code`` is
     not a ``torch.compiler.precompile`` artifact, or if the cache's ``backend``,

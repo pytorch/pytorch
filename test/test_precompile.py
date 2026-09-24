@@ -4791,6 +4791,10 @@ class TestPrecompileDynamoCapture(TestCase):
         cont = f"{self.module_name}.torch_dynamo_resume_in_breaking_helper_at_{line}"
         unreachable = f"\nUNREACHABLE_WITHOUT_INSTALL = {[helper, cont]!r}\n"
         self.assertIn(unreachable, python_code)
+        # The capture's live cache entries would serve any call the installed
+        # ones miss, so load refuses this process.
+        with self.assertRaisesRegex(PrecompileError, "fresh process"):
+            load(self.artifact, self.cache)
         calls = [((self.x2,), {}, y2), ((self.x3,), {}, y3)]
         self._serve_in_fresh_process(calls, mode="installed")
 

@@ -744,6 +744,7 @@ def _build_installed_forward():
     import sys as _sys
 
     import torch
+    from torch._C._dynamo.eval_frame import _debug_get_cache_entry_list
     from torch._dynamo.eval_frame import _fail_on_recompile_callback, OptimizeContext
     from torch._dynamo.package import CompilePackage
     from torch._precompile import PrecompileError as _PrecompileError
@@ -778,6 +779,13 @@ def _build_installed_forward():
             f"precompile: this installed artifact serves {module_name}.{FN_NAME}, "
             f"which is not importable here ({_e})."
         ) from _e
+    if _debug_get_cache_entry_list(fn.__code__):
+        raise _PrecompileError(
+            f"precompile: {module_name}.{FN_NAME} already has live Dynamo cache "
+            f"entries in this process (the capture that produced this artifact, "
+            f"or a torch.compile of it), which would still serve any call the "
+            f"installed entries miss: load this artifact in a fresh process."
+        )
     try:
         # CompilePackage refuses a module whose captured source has changed.
         package = CompilePackage(fn, dynamo)
