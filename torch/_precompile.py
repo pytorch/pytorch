@@ -1,22 +1,26 @@
-"""Ahead-of-time precompilation: the make_fx capture internals behind the public
+"""Ahead-of-time precompilation: the internals behind the public
 ``torch.compiler.precompile`` module.
 
 ``torch/compiler/precompile.py`` re-exports the public types defined here --
-``Capture``, ``MakeFxTracer``, ``PrecompiledRunnable`` -- beside
+``Capture``, ``DynamoTracer``, ``MakeFxTracer``, ``PrecompiledRunnable`` -- beside
 ``PrecompileSummary``, and the two caller-driven entry points defined here:
 ``capture``, which writes the pair from the calls the caller makes, and ``load``,
-which reconstructs a runnable from it.
-``PrecompiledModule`` drives a NON-STRICT make_fx trace of one execution of ``fn``
-and renders it as a self-contained, executable ``python_code`` string plus a
-companion integrity-tagged ``cache``: with ``backend="inductor"`` (the default) the
-captured graph is lowered through the AOT backend contract
+which reconstructs a runnable from it. Either front-end writes the same pair: a
+self-contained, executable ``python_code`` string plus a companion
+integrity-tagged ``cache``. ``_runnable_from_pair`` is the loader core that turns
+a pair back into a runnable.
+
+``DynamoTracer`` (the default) drives a ``PrecompileSession``
+(``torch/_dynamo/precompile_package.py``) across the caller's calls, and the
+multi-graph frame records and driver emitter at the end of this module render
+every frame Dynamo compiled: the entry, its graph-break continuations and its
+recompiled variants. ``MakeFxTracer`` drives ``PrecompiledModule``, a NON-STRICT
+make_fx trace of one execution of ``fn``: with ``backend="inductor"`` (the
+default) the captured graph is lowered through the AOT backend contract
 (``torch._functorch.aot_autograd.compile_to_python``, AOTAutograd + Inductor), and
 ``python_code`` JIT-compiles kernels on first call while the cache primes them so a
 warm reload skips JIT; with ``backend="eager"`` ``python_code`` inlines the captured
-graph and runs on its own. ``_runnable_from_pair`` is the loader core that turns a
-pair back into a runnable. The multi-graph (Dynamo) frame records and driver
-emitter at the end of the module serve the same artifact format for a capture that
-graph-breaks or recompiles.
+graph and runs on its own.
 
 The full contract, the calling convention, and the cache / code_hash design all live in
 Note [precompile programming model] below; every public entry point and guard references
@@ -264,16 +268,7 @@ from collections.abc import (
     Sequence,  # noqa: TC003
 )
 from types import MappingProxyType
-from typing import (
-    Any,
-    cast,
-    Generic,
-    Literal,
-    NewType,
-    ParamSpec,
-    TYPE_CHECKING,
-    TypeVar,
-)
+from typing import Any, cast, Literal, NewType, TYPE_CHECKING
 
 import torch
 import torch.utils._pytree as pytree
@@ -448,11 +443,7 @@ class PrecompiledRunnable:
         """Remove whatever this loaded artifact installed; a no-op when it installed nothing."""
 
 
-_P = ParamSpec("_P")
-_R = TypeVar("_R")
-
-
-class Capture(Generic[_P, _R]):
+class Capture:
     r"""The caller-driven capture ``torch.compiler.precompile.capture`` returns.
 
     Part of the prototype ``torch.compiler.precompile`` API, so it may change
@@ -497,7 +488,7 @@ class Capture(Generic[_P, _R]):
             self._state = "spent"
             self._finish(exc)
 
-    def __call__(self, *args: _P.args, **kwargs: _P.kwargs) -> _R:
+    def __call__(self, *args: object, **kwargs: object) -> object:
         with self._lock:
             self._check_active("calling it, or nothing is written when the block exits")
             return self._run(*args, **kwargs)
@@ -505,7 +496,11 @@ class Capture(Generic[_P, _R]):
     def save(self) -> None:
         """Write everything captured so far to the artifact files without ending the capture.
 
-        Raises ``PrecompileError`` outside the capture's ``with`` block.
+        Each call re-renders and rewrites both files, so a job that dies between
+        saves leaves the last checkpoint loadable. A refusal (such as a
+        :class:`DynamoTracer` ``require_*`` gate) or a failed write raises but
+        writes nothing partial, and the capture stays open. Raises
+        ``PrecompileError`` outside the capture's ``with`` block.
         """
         with self._lock:
             self._check_active("calling save()")
@@ -524,7 +519,7 @@ class Capture(Generic[_P, _R]):
     def _start(self) -> None:
         pass
 
-    def _run(self, *args: _P.args, **kwargs: _P.kwargs) -> _R:
+    def _run(self, *args: object, **kwargs: object) -> object:
         raise NotImplementedError
 
     def _save(self) -> None:
@@ -540,7 +535,7 @@ _SPENT_CAPTURE = (
 )
 
 
-class _MakeFxCapture(Capture[_P, _R]):
+class _MakeFxCapture(Capture):
     r"""Single-shot capture: the :class:`MakeFxTracer` front-end.
 
     A make_fx trace records the ATen ops of ONE execution of ``fn``, so this
@@ -552,7 +547,7 @@ class _MakeFxCapture(Capture[_P, _R]):
 
     def __init__(
         self,
-        fn: Callable[_P, _R],
+        fn: Callable[..., object],
         artifact_path: str | os.PathLike[str],
         cache_path: str | os.PathLike[str],
         *,
@@ -599,7 +594,7 @@ class _MakeFxCapture(Capture[_P, _R]):
                 f"precompile could not write the artifact: {e}"
             ) from e
 
-    def _run(self, *args: _P.args, **kwargs: _P.kwargs) -> _R:
+    def _run(self, *args: object, **kwargs: object) -> object:
         if kwargs:
             raise ValueError(
                 "MakeFxTracer takes positional arguments only; pass "
@@ -629,7 +624,7 @@ class _MakeFxCapture(Capture[_P, _R]):
         rendered = (python_code, self._module.to_cache_bytes(python_code))
         result = _runnable_from_pair(*rendered, _trusted=True)(*args)
         self._rendered = rendered
-        return cast(_R, result)
+        return result
 
     def _trace_without_side_effects(self, args: tuple[object, ...]) -> None:
         # A static trace runs fn on the real example tensors, so an in-place update in
@@ -646,10 +641,14 @@ class _MakeFxCapture(Capture[_P, _R]):
         mods = [a for a in args if isinstance(a, torch.nn.Module)]
         # A parameter also passed as a plain argument is traced as that user input,
         # so it is snapshotted with the inputs rather than left to the refusal below.
-        leaves = [t for t in pytree.tree_leaves(args) if isinstance(t, torch.Tensor)]
+        leaves = pytree.tree_leaves(args)
         params = {id(p) for m in mods for p in m.parameters()} - {id(t) for t in leaves}
         tensors = [*(b for m in mods for b in m.buffers()), *leaves]
-        saved = {id(t): (t, t.detach().clone()) for t in tensors if id(t) not in params}
+        saved = {
+            id(t): (t, t.detach().clone())
+            for t in tensors
+            if isinstance(t, torch.Tensor) and id(t) not in params
+        }
         try:
             self._module._compile(args)
         finally:
@@ -671,7 +670,7 @@ class _MakeFxCapture(Capture[_P, _R]):
             )
 
 
-class _DynamoCapture(Capture[_P, _R]):
+class _DynamoCapture(Capture):
     r"""Multi-call capture: the :class:`DynamoTracer` front-end.
 
     Enter the ``with`` block, call it as many times as you need to exercise the
@@ -733,7 +732,7 @@ class _DynamoCapture(Capture[_P, _R]):
             self._fresh_cache = None
             raise
 
-    def _run(self, *args: _P.args, **kwargs: _P.kwargs) -> _R:
+    def _run(self, *args: object, **kwargs: object) -> object:
         if self._call is None:
             raise AssertionError("an active capture has no session call")
         if self._in_call:
@@ -764,12 +763,6 @@ class _DynamoCapture(Capture[_P, _R]):
         self._saved_calls = self._calls
 
     def _save(self) -> None:
-        r"""Checkpoint everything captured so far to the ``artifact_path`` /
-        ``cache_path`` files, without ending the capture. Each call re-renders
-        and rewrites both files, so a job that dies between saves leaves the
-        last checkpoint loadable. A gate refusal (``require_*``) or a write
-        failure raises but writes nothing partial, and the capture stays open.
-        """
         if self._in_call:
             raise PrecompileError(
                 "save() was called from inside fn while the capture is "
@@ -3112,14 +3105,14 @@ def _runnable_from_pair(
 
 
 def capture(
-    fn: Callable[_P, _R],
+    fn: Callable[..., object],
     /,
     *,
     artifact_path: str | os.PathLike[str],
     cache_path: str | os.PathLike[str],
     tracer: MakeFxTracer | DynamoTracer = DynamoTracer(),
     backend: str = "inductor",
-) -> Capture[_P, _R]:
+) -> Capture:
     """Capture ``fn`` across the calls YOUR loop makes, writing the artifact on exit.
 
     .. warning::
@@ -3160,7 +3153,9 @@ def capture(
     ATen trace: the capture takes exactly ONE positional call, refuses a second,
     and specializes control flow and shapes to that call, with the contract of
     Note [precompile programming model] in ``torch/_precompile.py``. ``fn`` is
-    the whole computation, e.g. ``lambda model, x: model(x)``: the ``nn.Module``
+    the whole computation, e.g. a module-level ``def step(model, x): return
+    model(x)`` (only a :class:`MakeFxTracer` capture also takes a lambda): the
+    ``nn.Module``
     arguments have their params/buffers lifted to graph inputs (no weights are
     baked in) and the rest are the runtime inputs; the reloaded callable is
     invoked with the same argument structure, and the runtime model must match
