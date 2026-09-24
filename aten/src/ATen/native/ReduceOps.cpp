@@ -491,6 +491,13 @@ Tensor& _logcumsumexp_out_cpu(const Tensor& self, int64_t dim, Tensor& result) {
 }
 
 Tensor logcumsumexp(const Tensor& self, int64_t dim) {
+  // Checked here rather than in the backend kernels: _logcumsumexp_out_cuda
+  // short-circuits 0-d and empty inputs before any dtype dispatch, so without
+  // this the supported dtypes would differ between CPU and CUDA.
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
+      "logcumsumexp(): input dtype should be either floating point or complex. "
+      "Got ", self.scalar_type(), " instead.");
   auto result = [&]() {
     return at::_logcumsumexp(self, dim);
   }();
@@ -498,6 +505,10 @@ Tensor logcumsumexp(const Tensor& self, int64_t dim) {
 }
 
 Tensor& logcumsumexp_out(const Tensor& self, int64_t dim, Tensor& result) {
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      at::isFloatingType(result.scalar_type()) || at::isComplexType(result.scalar_type()),
+      "logcumsumexp(): input dtype should be either floating point or complex. "
+      "Got ", result.scalar_type(), " instead.");
   check_scalar_type_device_layout_equal(result, self);
   {
     at::_logcumsumexp_out(result, self.toType(result.scalar_type()), dim);

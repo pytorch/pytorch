@@ -3109,6 +3109,12 @@ def error_inputs_logcumsumexp(op_info, device, **kwargs):
                          error_type=IndexError,
                          error_regex='Dimension out of range')
 
+    # logcumsumexp is only implemented for floating point and complex dtypes
+    for shape in [(5, 2), (), (0, 2)]:
+        yield ErrorInput(SampleInput(torch.zeros(shape, device=device, dtype=torch.int64), args=(0,)),
+                         error_type=NotImplementedError,
+                         error_regex='input dtype should be either floating point or complex')
+
 def sample_inputs_take_along_dim(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad, low=None, high=None)
     yield SampleInput(
