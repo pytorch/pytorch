@@ -9,6 +9,8 @@
 
 namespace at::xpu {
 
+#if SYCL_COMPILER_VERSION >= 20260101
+
 using namespace sycl::ext::oneapi::experimental;
 
 #define XPU_GRAPH_IS_PVC_ARCHITECTURE(device_architecture) \
@@ -105,22 +107,13 @@ void XPUGraphImpl::capture_begin(
         return filter(XPUStream(XPUStream::UNCHECKED, stream));
       });
 
-  // Enable sycl graph native recording mode for sycl compiler version >=
-  // 2026.1.0, except on PVC.
   auto sycl_property = sycl::property_list{};
   const auto device_architecture =
       at::xpu::getCurrentDeviceProperties()->architecture;
-#if SYCL_COMPILER_VERSION >= 20260100
   if (!XPU_GRAPH_IS_PVC_ARCHITECTURE(device_architecture)) {
     sycl_property =
         sycl::property_list{property::graph::enable_native_recording{}};
   }
-#else
-  if (!XPU_GRAPH_IS_PVC_ARCHITECTURE(device_architecture)) {
-    TORCH_WARN_ONCE(
-        "XPUGraph: Please use a PyTorch build compiled with oneAPI 2026.1.0 or newer for latest runtime support.");
-  }
-#endif
 
   auto graph_impl = xpuGraph_t(capture_stream_.queue(), sycl_property);
   graph_ = std::make_unique<xpuGraph_t>(std::move(graph_impl));
@@ -162,11 +155,7 @@ void XPUGraphImpl::capture_end() {
     wholegraph_increments = generator_state->capture_epilogue(capture_id_);
   }
 
-#if SYCL_COMPILER_VERSION >= 20260100
   const bool graph_is_empty = graph_->empty();
-#else
-  const bool graph_is_empty = (graph_->get_nodes().size() == 0);
-#endif
   if (graph_is_empty) {
     TORCH_WARN(
         "The XPU Graph is empty. This usually means that the graph was ",
@@ -305,6 +294,82 @@ MempoolId_t XPUGraphImpl::pool() const {
 XPUGraphImpl::~XPUGraphImpl() {
   reset();
 }
+
+#else
+
+[[noreturn]] static void graph_compiler_version_error() {
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      false,
+      "XPUGraph requires PyTorch to be compiled with oneAPI 2026.1.1 or newer. ",
+      "Please rebuild PyTorch with a supported SYCL compiler.");
+}
+
+XPUGraphImpl* get_graph_from_capture_id(size_t) {
+  graph_compiler_version_error();
+}
+
+MempoolId_t graph_pool_handle() {
+  graph_compiler_version_error();
+}
+
+XPUGraphImpl::XPUGraphImpl(const GraphImplArgs& args)
+    : capture_stream_(at::xpu::getCurrentXPUStream()),
+      keep_graph_(args.keep_graph) {
+  graph_compiler_version_error();
+}
+
+XPUGraphImpl::~XPUGraphImpl() = default;
+
+void XPUGraphImpl::register_generator_state(
+    c10::intrusive_ptr<at::XPUGeneratorState>) {
+  graph_compiler_version_error();
+}
+
+void XPUGraphImpl::register_generator_state(const at::Generator&) {
+  graph_compiler_version_error();
+}
+
+void XPUGraphImpl::capture_begin(MempoolId_t, GraphCaptureMode) {
+  graph_compiler_version_error();
+}
+
+void XPUGraphImpl::capture_end() {
+  graph_compiler_version_error();
+}
+
+void XPUGraphImpl::instantiate() {
+  graph_compiler_version_error();
+}
+
+void XPUGraphImpl::replay() {
+  graph_compiler_version_error();
+}
+
+void XPUGraphImpl::reset() {
+  graph_compiler_version_error();
+}
+
+MempoolId_t XPUGraphImpl::pool() const {
+  graph_compiler_version_error();
+}
+
+void XPUGraphImpl::enable_debug_mode() {
+  graph_compiler_version_error();
+}
+
+void XPUGraphImpl::debug_dump(const std::string&) {
+  graph_compiler_version_error();
+}
+
+xpuGraph_t* XPUGraphImpl::raw_xpu_graph() {
+  graph_compiler_version_error();
+}
+
+xpuGraphExec_t* XPUGraphImpl::raw_xpu_graph_exec() {
+  graph_compiler_version_error();
+}
+
+#endif
 
 REGISTER_GRAPH_IMPL(XPU, XPUGraphImpl)
 
