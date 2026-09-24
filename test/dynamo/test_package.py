@@ -175,12 +175,13 @@ class TestPackage(torch._inductor.test_case.TestCase):
 
     def test_code_source_walk_skips_non_code_constants(self):
         # Python 3.10 has no co_qualname, so the walk visits every constant of the
-        # module's functions. b"" and 0 hash equal, and putting both in one set
-        # compares them: a BytesWarning, which CI's python -bb raises.
+        # module's functions. b"" and 2**61 - 1 both hash to 0, and putting both in
+        # one set compares them: a BytesWarning, which CI's python -bb raises. (0
+        # would too, but newer Pythons keep small ints out of co_consts.)
         source = """
 def f():
     a = b""
-    b = 0
+    b = 2305843009213693951
 
     class C:
         def g(self):
@@ -195,8 +196,10 @@ from unittest import mock
 import torch._dynamo.package as package
 import bbmod
 
+code = bbmod.f().g.__code__
 with mock.patch.object(package.sys, "version_info", (3, 10, 0)):
-    print(package._get_code_source(bbmod.f().g.__code__)[1])
+    name, path = package._get_code_source(code)
+print(eval(f"bbmod.{name}.{path}") is code)
 """
         with tempfile.TemporaryDirectory() as d:
             with open(os.path.join(d, "bbmod.py"), "w") as f:
@@ -208,7 +211,7 @@ with mock.patch.object(package.sys, "version_info", (3, 10, 0)):
                 text=True,
             )
         self.assertEqual(out.returncode, 0, out.stderr)
-        self.assertEqual(out.stdout.strip(), "__code__.co_consts[3].co_consts[1]")
+        self.assertEqual(out.stdout.strip(), "True")
 
     def test_package_records_the_devices_a_graph_names(self):
         # The recording side of the scan, which is what the artifact carries. A
