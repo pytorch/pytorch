@@ -249,21 +249,11 @@ import operator
 import os
 import pickle
 import stat
-import threading
 import types
 import uuid
 from collections.abc import Callable  # noqa: TC003
 from types import MappingProxyType
-from typing import (
-    Any,
-    cast,
-    Generic,
-    Literal,
-    NewType,
-    ParamSpec,
-    TYPE_CHECKING,
-    TypeVar,
-)
+from typing import Any, cast, NewType, TYPE_CHECKING
 
 import torch
 import torch.utils._pytree as pytree
@@ -402,11 +392,7 @@ class PrecompiledRunnable:
         """Remove whatever this loaded artifact installed; a no-op when it installed nothing."""
 
 
-_P = ParamSpec("_P")
-_R = TypeVar("_R")
-
-
-class Capture(Generic[_P, _R]):
+class Capture:
     r"""The caller-driven capture ``torch.compiler.precompile.capture`` returns.
 
     Part of the prototype ``torch.compiler.precompile`` API, so it may change
@@ -425,65 +411,20 @@ class Capture(Generic[_P, _R]):
     pair, so fix the path and capture again.
     """
 
-    def __init__(self) -> None:
-        self._state: Literal["new", "active", "spent"] = "new"
-        # Serializes the block's calls, saves and exit across threads.
-        self._lock = threading.RLock()
-
     def __enter__(self) -> Self:
-        with self._lock:
-            if self._state == "spent":
-                raise PrecompileError(_SPENT_CAPTURE)
-            if self._state == "active":
-                raise PrecompileError(
-                    "this capture has already been entered; capture() returns a "
-                    "fresh capture per call."
-                )
-            self._start()
-            self._state = "active"
-        return self
+        raise NotImplementedError
 
     def __exit__(self, *exc: object) -> None:
-        with self._lock:
-            # The block is over either way: a later call must not run a trace
-            # whose result nothing would write.
-            self._state = "spent"
-            self._finish(exc)
+        raise NotImplementedError
 
-    def __call__(self, *args: _P.args, **kwargs: _P.kwargs) -> _R:
-        with self._lock:
-            self._check_active("calling it, or nothing is written when the block exits")
-            return self._run(*args, **kwargs)
+    def __call__(self, *args: object, **kwargs: object) -> object:
+        raise NotImplementedError
 
     def save(self) -> None:
         """Write everything captured so far to the artifact files without ending the capture.
 
         Raises ``PrecompileError`` outside the capture's ``with`` block.
         """
-        with self._lock:
-            self._check_active("calling save()")
-            self._save()
-
-    def _check_active(self, before: str) -> None:
-        if self._state == "spent":
-            raise PrecompileError(_SPENT_CAPTURE)
-        if self._state == "new":
-            raise PrecompileError(
-                f"capture is not active: enter it with a `with` block before {before}."
-            )
-
-    # The tracer's half, each run under the lock: arm on entry, run one call,
-    # write what has been captured, and end the block with its exc_info.
-    def _start(self) -> None:
-        pass
-
-    def _run(self, *args: _P.args, **kwargs: _P.kwargs) -> _R:
-        raise NotImplementedError
-
-    def _save(self) -> None:
-        raise NotImplementedError
-
-    def _finish(self, exc: tuple[object, ...]) -> None:
         raise NotImplementedError
 
 
@@ -493,7 +434,7 @@ _SPENT_CAPTURE = (
 )
 
 
-class _MakeFxCapture(Capture[_P, _R]):
+class _MakeFxCapture(Capture):
     r"""Single-shot capture: the :class:`MakeFxTracer` front-end.
 
     A make_fx trace records the ATen ops of ONE execution of ``fn``, so this
@@ -504,35 +445,60 @@ class _MakeFxCapture(Capture[_P, _R]):
 
     def __init__(
         self,
-        fn: Callable[_P, _R],
+        fn: Callable[..., object],
         artifact_path: str | os.PathLike[str],
         cache_path: str | os.PathLike[str],
         *,
         backend: str,
         decompositions: dict | None,
     ) -> None:
-        super().__init__()
         self._module = PrecompiledModule(
             fn, backend=backend, tracer="make_fx", decompositions=decompositions
         )
         self._artifact_path = artifact_path
         self._cache_path = cache_path
+        self._entered = False
+        self._exited = False
         self._rendered: tuple[str, bytes] | None = None
         self._called = False
 
-    def _finish(self, exc: tuple[object, ...]) -> None:
-        # Write only on a clean exit that captured a call; a block that raised,
-        # or one that never called the capture, leaves the files untouched. The
-        # pair is dropped either way, so the spent capture cannot write it again.
-        try:
-            if exc[0] is None:
-                self._save()
-        finally:
-            self._rendered = None
+    def __enter__(self) -> Self:
+        if self._exited:
+            raise PrecompileError(_SPENT_CAPTURE)
+        if self._entered:
+            raise PrecompileError(
+                "this capture has already been entered; capture() returns a "
+                "fresh capture per call."
+            )
+        self._entered = True
+        return self
 
-    def _save(self) -> None:
-        # A make_fx capture records a single call, so there is nothing further to
-        # fold in; save() and block exit write the same files.
+    def __exit__(self, *exc: object) -> None:
+        # The block is over either way: a later call must not run a trace whose
+        # result nothing would write. Write only on a clean exit that captured a
+        # call; a block that raised, or one that never called the capture,
+        # leaves the files untouched.
+        self._entered = False
+        self._exited = True
+        if exc[0] is not None:
+            return
+        self._write()
+
+    def save(self) -> None:
+        r"""Write the captured artifact to disk. A make_fx capture records a single
+        call, so there is nothing further to fold in; save() and block exit
+        write the same files.
+        """
+        if self._exited:
+            raise PrecompileError(_SPENT_CAPTURE)
+        if not self._entered:
+            raise PrecompileError(
+                "capture is not active: enter it with a `with` block before "
+                "calling save()."
+            )
+        self._write()
+
+    def _write(self) -> None:
         if self._rendered is None and self._called:
             raise PrecompileError(
                 "nothing was captured: the capture's call raised, so there is no "
@@ -551,7 +517,14 @@ class _MakeFxCapture(Capture[_P, _R]):
                 f"precompile could not write the artifact: {e}"
             ) from e
 
-    def _run(self, *args: _P.args, **kwargs: _P.kwargs) -> _R:
+    def __call__(self, *args: object, **kwargs: object) -> object:
+        if self._exited:
+            raise PrecompileError(_SPENT_CAPTURE)
+        if not self._entered:
+            raise PrecompileError(
+                "capture is not active: enter it with a `with` block before "
+                "calling it, or nothing is written when the block exits."
+            )
         if kwargs:
             raise ValueError(
                 "MakeFxTracer takes positional arguments only; pass the model(s) "
@@ -581,7 +554,7 @@ class _MakeFxCapture(Capture[_P, _R]):
         rendered = (python_code, self._module.to_cache_bytes(python_code))
         result = _runnable_from_pair(*rendered, _trusted=True)(*args)
         self._rendered = rendered
-        return cast(_R, result)
+        return result
 
     def _trace_without_side_effects(self, args: tuple[object, ...]) -> None:
         # A static trace runs fn on the real example tensors, so an in-place update in
@@ -598,10 +571,14 @@ class _MakeFxCapture(Capture[_P, _R]):
         mods = [a for a in args if isinstance(a, torch.nn.Module)]
         # A parameter also passed as a plain argument is traced as that user input,
         # so it is snapshotted with the inputs rather than left to the refusal below.
-        leaves = [t for t in pytree.tree_leaves(args) if isinstance(t, torch.Tensor)]
+        leaves = pytree.tree_leaves(args)
         params = {id(p) for m in mods for p in m.parameters()} - {id(t) for t in leaves}
         tensors = [*(b for m in mods for b in m.buffers()), *leaves]
-        saved = {id(t): (t, t.detach().clone()) for t in tensors if id(t) not in params}
+        saved = {
+            id(t): (t, t.detach().clone())
+            for t in tensors
+            if isinstance(t, torch.Tensor) and id(t) not in params
+        }
         try:
             self._module._compile(args)
         finally:
@@ -2725,15 +2702,15 @@ def _runnable_from_pair(
 
 
 def capture(
-    fn: Callable[_P, _R],
+    fn: Callable[..., object],
     /,
     *,
     artifact_path: str | os.PathLike[str],
     cache_path: str | os.PathLike[str],
     tracer: MakeFxTracer = MakeFxTracer(),
     backend: str = "inductor",
-) -> Capture[_P, _R]:
-    """Capture ``fn`` from the caller's own call, writing the artifact on exit.
+) -> Capture:
+    """Capture ``fn`` across the calls YOUR loop makes, writing the artifact on exit.
 
     .. warning::
 
@@ -2741,11 +2718,11 @@ def capture(
         format may change between releases without a deprecation cycle.
 
     Capture is caller-driven: this returns a capture object rather than running
-    anything. Enter it as a context manager and call it exactly as you would
-    ``fn`` inside the block. A :class:`MakeFxTracer` capture takes exactly one
-    call, which runs for real, is traced into the capture, and returns that
-    run's result; the ``(python_code, cache)`` artifact is written to
-    ``artifact_path`` / ``cache_path`` when the block exits::
+    anything. Enter it as a context manager, call it exactly as you would ``fn``
+    inside the block (a :class:`MakeFxTracer` capture takes exactly one call) --
+    each call runs for real, folds what it exercised into the capture, and
+    returns that run's result -- and the ``(python_code, cache)`` artifact is
+    written to ``artifact_path`` / ``cache_path`` when the block exits::
 
         with torch.compiler.precompile.capture(
             fn, artifact_path="m.py", cache_path="m.cache"
@@ -2753,9 +2730,8 @@ def capture(
             y = cap(model, x)
         f = torch.compiler.precompile.load("m.py", "m.cache")
 
-    Because the caller makes the call, inputs flow through naturally and the
-    return value stays available, so the capture drops into an ordinary
-    pipeline step.
+    Because the caller makes the calls, inputs flow through naturally and return
+    values stay available, so the capture drops into an ordinary pipeline loop.
     To write the artifact before the block ends, call ``cap.save()`` inside it.
     A block that raises writes nothing it has not already saved, and a block
     that made no call raises ``PrecompileError`` on exit. A capture is single-use:
