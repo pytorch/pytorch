@@ -1535,6 +1535,23 @@ class Reduction(Loops):
         )
 
     @staticmethod
+    def _should_autotune_split_outer_plan(
+        reduction_numel_hint: int,
+        numel_hint: int,
+        split: int,
+        num_sm: int,
+    ) -> bool:
+        # Benchmark the one-pass plan when it has enough independent output
+        # tiles for two waves and its reduction can stay reasonably shallow.
+        one_pass_xblock = 16
+        return (
+            split > 1
+            and reduction_numel_hint <= 1024
+            and (numel_hint + one_pass_xblock - 1) // one_pass_xblock
+            >= num_sm * 2
+        )
+
+    @staticmethod
     def _is_experimental_large_output_outer_producer_profitable(
         num_ops: int,
         nontrivial_read_count: int,
@@ -2236,16 +2253,18 @@ class Reduction(Loops):
                     reduction_numel_hint = V.graph.sizevars.optimization_hint(
                         reduction_numel
                     )
-                    # OUTER also names pre-existing split reductions.  Only
-                    # preserve a one-pass alternative when num_splits selected
-                    # the experimental large-output path above.
+                    # OUTER also names pre-existing split reductions. Preserve
+                    # one-pass only for either bounded family we intend to benchmark.
+                    num_sm = DeviceProperties.create(device).multi_processor_count
                     split_reduction._whole_plan_outer_reduction = (
-                        numel_hint
-                        >= DeviceProperties.create(device).multi_processor_count
-                        * 2
-                        * 32
-                        and Reduction._should_use_experimental_large_output_outer_plan(
-                            reduction_numel_hint, numel_hint, int(split)
+                        (
+                            numel_hint >= num_sm * 2 * 32
+                            and Reduction._should_use_experimental_large_output_outer_plan(
+                                reduction_numel_hint, numel_hint, int(split)
+                            )
+                        )
+                        or Reduction._should_autotune_split_outer_plan(
+                            reduction_numel_hint, numel_hint, int(split), num_sm
                         )
                     )
             return out
