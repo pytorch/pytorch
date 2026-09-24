@@ -93,7 +93,7 @@ class TestCommonPass(TestCase):
     def test_correctness(self, common_pass, f, device):
         inp = torch.randn(10, device=device)
 
-        traced_m = make_fx(f)(inp)
+        traced_m = make_fx(f)(inp.clone())
         P = common_pass()
 
         res = P(traced_m)
@@ -103,9 +103,8 @@ class TestCommonPass(TestCase):
                 f"Expected modified_m to be GraphModule, got {type(modified_m)}"
             )
 
-        inp_copy = inp.clone()
-        expected = f(inp)
-        result = modified_m(inp_copy)
+        expected = f(inp.clone())
+        result = modified_m(inp.clone())
 
         self.assertEqual(result, expected)
 
