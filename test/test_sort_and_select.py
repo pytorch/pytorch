@@ -364,7 +364,11 @@ class TestSortAndSelectDevice(TestCase):
                 # binary strings
                 yield (torch.tensor([0, 1] * size, dtype=dtype, device=device), 0)
 
-            if self.device_type == "cuda":
+            # The samples below build the fill index with torch.randint on CPU,
+            # so they only run correctly when self is on CPU. Skip them on any
+            # accelerator, not just CUDA. A CPU index against an accelerator
+            # self is a cross-device operation the backend cannot do.
+            if self.device_type != "cpu":
                 return
 
             yield (torch.tensor([0, 1] * 100, dtype=dtype, device=device), 0)
