@@ -5587,17 +5587,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             opts_explicit._adjust(128, 4096, 50000, torch.bfloat16, cpu).acc_dtype,
             torch.bfloat16,
         )
-        if torch.cuda.is_available():
-            major = torch.cuda.get_device_capability()[0]
-            cuda = torch.device("cuda")
-            self.assertEqual(
-                opts._adjust(128, 4096, 50000, torch.bfloat16, cuda).acc_dtype,
-                torch.float32 if major >= 8 else torch.bfloat16,
-            )
-            self.assertEqual(
-                opts._adjust(128, 4096, 50000, torch.float16, cuda).acc_dtype,
-                torch.float32 if major >= 7 else torch.float16,
-            )
 
     def test_linear_cross_entropy_options_auto_memory_cap(self):
         """``auto`` + ``compact`` caps the chunk at a per-target ``B_ref`` so
@@ -5636,120 +5625,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             explicit._adjust(4096, 16384, 4096, torch.bfloat16, cuda).batch_chunk_size,
             4096,
         )
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    def test_convert_sync_batchnorm(self):
-        module = torch.nn.Sequential(
-            torch.nn.BatchNorm1d(100),
-            torch.nn.InstanceNorm1d(100)
-        ).cuda()
-
-        # necessary to have an anchor point for comparison, in case the
-        # convert_sync_batchnorm updates in place
-        comp_module = torch.nn.Sequential(
-            torch.nn.BatchNorm1d(100),
-            torch.nn.InstanceNorm1d(100)
-        ).cuda()
-        comp_module.load_state_dict(module.state_dict())
-
-        sync_bn_module = torch.nn.SyncBatchNorm.convert_sync_batchnorm(module)
-        children = list(sync_bn_module.children())
-        self.assertEqual(children[0].__class__, torch.nn.SyncBatchNorm)
-        self.assertEqual(children[1].__class__, torch.nn.InstanceNorm1d)
-
-        for layer, converted_layer in zip(comp_module.children(), sync_bn_module.children()):
-            for key in layer.state_dict():
-                self.assertEqual(layer.state_dict()[key].device, converted_layer.state_dict()[key].device)
-                self.assertEqual(layer.state_dict()[key], converted_layer.state_dict()[key])
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    def test_sync_batchnorm_backward_elemt(self):
-        device = 'cuda'
-        saved_input = torch.rand(2, 3, 2, 1, device=device)
-        grad_output = torch.rand(2, 3, 2, 1, device=device)
-        mean = torch.rand(3, device=device)
-        invstd = torch.rand(3, device=device)
-        weight = torch.rand(3, device=device)
-        sum_dy = torch.rand(3, device=device)
-        sum_dy_xmu = torch.rand(3, device=device)
-        count_tensor = torch.tensor([5, 5, 5], dtype=torch.int32, device=device)
-
-        gI_contiguous = torch.batch_norm_backward_elemt(
-            grad_output,
-            saved_input,
-            mean,
-            invstd,
-            weight,
-            sum_dy,
-            sum_dy_xmu,
-            count_tensor
-        )
-
-        # Test batch_norm_backward_element gives the same answer for all
-        # combinations of contiguous as channels_last input
-        for a, b in [
-                (torch.channels_last, torch.contiguous_format),
-                (torch.contiguous_format, torch.channels_last),
-                (torch.channels_last, torch.channels_last),
-        ]:
-            gI_actual = torch.batch_norm_backward_elemt(
-                grad_output.contiguous(memory_format=a),
-                saved_input.contiguous(memory_format=b),
-                mean,
-                invstd,
-                weight,
-                sum_dy,
-                sum_dy_xmu,
-                count_tensor
-            )
-            self.assertEqual(gI_actual, gI_contiguous)
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    def test_sync_batchnorm_accuracy_cuda(self):
-        # The target of this test is to test the functionality and accuracy of
-        #   those single-GPU cuda kernels used in SyncBatchNorm
-        # They are:
-        #   fwd: torch.batch_norm_stats, torch.batch_norm_gather_stats_with_counts, torch.batch_norm_elemt
-        #   bwd: torch.batch_norm_backward_reduce, torch.batch_norm_backward_elemt
-
-        def _batch_norm_stats(data, memory_format, mean_axes):
-            mean1, _ = torch.batch_norm_stats(data, 1e-5)
-            mean2, _ = torch.batch_norm_stats(data.to(memory_format=memory_format), 1e-5)
-            mean_ref = torch.mean(data, mean_axes, keepdim=False)
-
-            self.assertEqual(mean_ref, mean1)
-            self.assertEqual(mean_ref, mean2)
-
-        _batch_norm_stats(torch.randn(1, 96, 112, 112, dtype=torch.float, device='cuda'), torch.channels_last, (0, 2, 3))
-        _batch_norm_stats(torch.randn(1, 96, 112, 112, 112, dtype=torch.float, device='cuda'), torch.channels_last_3d, (0, 2, 3, 4))
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    def test_batch_norm_gather_stats_invalid_shapes_cuda(self):
-        # Regression test for https://github.com/pytorch/pytorch/issues/189828.
-        # batch_norm_reduce_statistics_kernel takes both of its loop bounds from mean, then
-        # indexes invstd and counts with them, so an invstd that disagrees with mean used to
-        # be read out of bounds. The op must validate the shapes instead.
-        input = torch.full((1, 3, 3, 0), 1.0, dtype=torch.float32, device='cuda')
-        mean = torch.full((2, 3), 1.15215e+25, dtype=torch.float32, device='cuda')
-        invstd = torch.full((2, 0), 1.0, dtype=torch.float32, device='cuda')
-        with self.assertRaisesRegex(RuntimeError, "invstd to have the same shape as mean"):
-            torch.batch_norm_gather_stats(input, mean, invstd, None, None, float('-inf'), float('-inf'),
-                                          -9223372036854775808)
-
-        # mean must be (world_size, num_features); a 1-D mean would index past its dims
-        with self.assertRaisesRegex(RuntimeError, "expected mean to be 2-dimensional"):
-            torch.batch_norm_gather_stats(input, torch.ones(3, device='cuda'), torch.ones(3, device='cuda'),
-                                          None, None, 0.1, 1e-5, 2)
-
-        # counts is indexed up to mean.size(0), so it must have at least that many elements
-        with self.assertRaisesRegex(RuntimeError, "counts to have at least one element"):
-            torch.batch_norm_gather_stats_with_counts(
-                torch.randn(1, 3, 3, 3, device='cuda'),
-                torch.ones(2, 3, device='cuda'),
-                torch.ones(2, 3, device='cuda'),
-                None, None, 0.1, 1e-5,
-                torch.ones(1, device='cuda'),
-            )
 
     def test_flatten(self):
         tensor_input = torch.randn(2, 1, 2, 3)
@@ -16412,6 +16287,95 @@ if __name__ == '__main__':
         else:
             _inference(memory_format, ref_backend, mixed, dtype)
 
+    @skipMPS
+    @onlyAccelerator
+    def test_convert_sync_batchnorm(self, device):
+        module = torch.nn.Sequential(
+            torch.nn.BatchNorm1d(100),
+            torch.nn.InstanceNorm1d(100)
+        ).to(device)
+
+        # necessary to have an anchor point for comparison, in case the
+        # convert_sync_batchnorm updates in place
+        comp_module = torch.nn.Sequential(
+            torch.nn.BatchNorm1d(100),
+            torch.nn.InstanceNorm1d(100)
+        ).to(device)
+        comp_module.load_state_dict(module.state_dict())
+
+        sync_bn_module = torch.nn.SyncBatchNorm.convert_sync_batchnorm(module)
+        children = list(sync_bn_module.children())
+        self.assertEqual(children[0].__class__, torch.nn.SyncBatchNorm)
+        self.assertEqual(children[1].__class__, torch.nn.InstanceNorm1d)
+
+        for layer, converted_layer in zip(comp_module.children(), sync_bn_module.children()):
+            for key in layer.state_dict():
+                self.assertEqual(layer.state_dict()[key].device, converted_layer.state_dict()[key].device)
+                self.assertEqual(layer.state_dict()[key], converted_layer.state_dict()[key])
+
+    @skipMPS
+    @onlyAccelerator
+    def test_sync_batchnorm_backward_elemt(self, device):
+        saved_input = torch.rand(2, 3, 2, 1, device=device)
+        grad_output = torch.rand(2, 3, 2, 1, device=device)
+        mean = torch.rand(3, device=device)
+        invstd = torch.rand(3, device=device)
+        weight = torch.rand(3, device=device)
+        sum_dy = torch.rand(3, device=device)
+        sum_dy_xmu = torch.rand(3, device=device)
+        count_tensor = torch.tensor([5, 5, 5], dtype=torch.int32, device=device)
+
+        gI_contiguous = torch.batch_norm_backward_elemt(
+            grad_output,
+            saved_input,
+            mean,
+            invstd,
+            weight,
+            sum_dy,
+            sum_dy_xmu,
+            count_tensor
+        )
+
+        # Test batch_norm_backward_element gives the same answer for all
+        # combinations of contiguous as channels_last input
+        for a, b in [
+                (torch.channels_last, torch.contiguous_format),
+                (torch.contiguous_format, torch.channels_last),
+                (torch.channels_last, torch.channels_last),
+        ]:
+            gI_actual = torch.batch_norm_backward_elemt(
+                grad_output.contiguous(memory_format=a),
+                saved_input.contiguous(memory_format=b),
+                mean,
+                invstd,
+                weight,
+                sum_dy,
+                sum_dy_xmu,
+                count_tensor
+            )
+            self.assertEqual(gI_actual, gI_contiguous)
+
+    @skipMPS
+    @onlyAccelerator
+    def test_sync_batchnorm_accuracy(self, device):
+        # The target of this test is to test the functionality and accuracy of
+        #   those single-device kernels used in SyncBatchNorm
+        # They are:
+        #   fwd: torch.batch_norm_stats, torch.batch_norm_gather_stats_with_counts, torch.batch_norm_elemt
+        #   bwd: torch.batch_norm_backward_reduce, torch.batch_norm_backward_elemt
+
+        def _batch_norm_stats(data, memory_format, mean_axes):
+            mean1, _ = torch.batch_norm_stats(data, 1e-5)
+            mean2, _ = torch.batch_norm_stats(data.to(memory_format=memory_format), 1e-5)
+            mean_ref = torch.mean(data, mean_axes, keepdim=False)
+
+            self.assertEqual(mean_ref, mean1)
+            self.assertEqual(mean_ref, mean2)
+
+        _batch_norm_stats(torch.randn(1, 96, 112, 112, dtype=torch.float, device=device), torch.channels_last, (0, 2, 3))
+        _batch_norm_stats(
+            torch.randn(1, 96, 112, 112, 112, dtype=torch.float, device=device), torch.channels_last_3d, (0, 2, 3, 4))
+
     def test_grid_sample_error_checking(self, device):
         input = torch.empty(1, 1, 2, 2, device=device)
         grid = torch.empty(1, 1, 1, 2, device=device)
@@ -16897,6 +16861,50 @@ class TestNNCUDA(NNTestCase):
     def test_RNN_cpu_vs_device_with_dropout(self, device):
         # Because of dropout randomness, can only compare dropout=0 and dropout=1
         self._test_RNN_cpu_vs_device(device, 1)
+
+    def test_linear_cross_entropy_options_auto_defaults_acc_dtype_cuda(self, device):
+        """acc_dtype auto resolution on real CUDA hardware: fp32 once the SM
+        generation supports it, the input dtype otherwise. Needs actual
+        hardware to query ``get_device_capability``, so this piece can't be
+        GENERIC like the rest of ``test_..._auto_defaults`` (see TestNN).
+        """
+        opts = nn.LinearCrossEntropyOptions()
+        major = torch.cuda.get_device_capability(device)[0]
+        self.assertEqual(
+            opts._adjust(128, 4096, 50000, torch.bfloat16, torch.device(device)).acc_dtype,
+            torch.float32 if major >= 8 else torch.bfloat16,
+        )
+        self.assertEqual(
+            opts._adjust(128, 4096, 50000, torch.float16, torch.device(device)).acc_dtype,
+            torch.float32 if major >= 7 else torch.float16,
+        )
+
+    def test_batch_norm_gather_stats_invalid_shapes(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/189828.
+        # batch_norm_reduce_statistics_kernel takes both of its loop bounds from mean, then
+        # indexes invstd and counts with them, so an invstd that disagrees with mean used to
+        # be read out of bounds. The op must validate the shapes instead.
+        input = torch.full((1, 3, 3, 0), 1.0, dtype=torch.float32, device=device)
+        mean = torch.full((2, 3), 1.15215e+25, dtype=torch.float32, device=device)
+        invstd = torch.full((2, 0), 1.0, dtype=torch.float32, device=device)
+        with self.assertRaisesRegex(RuntimeError, "invstd to have the same shape as mean"):
+            torch.batch_norm_gather_stats(input, mean, invstd, None, None, float('-inf'), float('-inf'),
+                                          -9223372036854775808)
+
+        # mean must be (world_size, num_features); a 1-D mean would index past its dims
+        with self.assertRaisesRegex(RuntimeError, "expected mean to be 2-dimensional"):
+            torch.batch_norm_gather_stats(input, torch.ones(3, device=device), torch.ones(3, device=device),
+                                          None, None, 0.1, 1e-5, 2)
+
+        # counts is indexed up to mean.size(0), so it must have at least that many elements
+        with self.assertRaisesRegex(RuntimeError, "counts to have at least one element"):
+            torch.batch_norm_gather_stats_with_counts(
+                torch.randn(1, 3, 3, 3, device=device),
+                torch.ones(2, 3, device=device),
+                torch.ones(2, 3, device=device),
+                None, None, 0.1, 1e-5,
+                torch.ones(1, device=device),
+            )
 
 
 class TestFunctionalPickle(TestCase):
