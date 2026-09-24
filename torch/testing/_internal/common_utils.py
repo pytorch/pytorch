@@ -2020,6 +2020,28 @@ requires_accelerator = lazy_skip_if(
 def skipIfCrossRef(fn):
     return lazy_skip_if(lambda: TEST_WITH_CROSSREF, "test doesn't currently with crossref")(fn)
 
+
+def _cuda_mps_enabled() -> bool:
+    if not TEST_CUDA or TEST_WITH_ROCM:
+        return False
+    from torch.cuda._utils import _check_cuda_bindings, _cuda_bindings_driver as drv
+    return bool(_check_cuda_bindings(drv.cuDeviceGetAttribute(
+        drv.CUdevice_attribute.CU_DEVICE_ATTRIBUTE_MPS_ENABLED,
+        torch.cuda.current_device(),
+    )))
+
+
+# This is NVIDIA's Multi-Process Service, not the Apple MPS backend.
+skipIfCudaMPS = lazy_skip_if(_cuda_mps_enabled, "Requires CUDA MPS to be disabled")
+
+
+def skipIfCudaSMCountLessThan(min_sms: int) -> Callable[[Callable], Callable]:
+    return lazy_skip_if(
+        lambda: torch.cuda.get_device_properties(torch.cuda.current_device()).multi_processor_count < min_sms,
+        f"Requires at least {min_sms} SMs",
+    )
+
+
 class CrossRefMode(torch.overrides.TorchFunctionMode):
     def __torch_function__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs or {}

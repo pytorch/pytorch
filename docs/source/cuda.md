@@ -440,6 +440,59 @@ custom stream.
 The `GreenContext.set_context()` and `GreenContext.pop_context()` methods are
 deprecated compatibility APIs.
 
+To create contexts with disjoint SM allocations (CUDA driver and bindings
+13.1+), specify all groups in one operation:
+
+```python
+from torch.cuda.green_contexts import GreenContext, SMPartition
+
+a, b = GreenContext.split(
+    num_sms=(24, 40), coscheduled_sm_count=(8, 4), device_id=0
+)
+print(a.sm_count, b.sm_count)
+```
+
+To retain the remainder, use `SMPartition.split`. To subdivide a returned
+partition or remainder, create a context from it and split the resource queried
+through its `sm_partition` property. CUDA drivers can reject raw split outputs
+as already partitioned resources, so the context creation is explicit:
+
+```python
+sms = SMPartition.from_device(device_id=0)
+(first,), rest = sms.split(num_sms=4, coscheduled_sm_count=2)
+rest_ctx = GreenContext(sm_partition=rest)
+(second,), rest = rest_ctx.sm_partition.split(num_sms=4, coscheduled_sm_count=2)
+ctx = GreenContext(sm_partition=second, workqueue_scope="balanced")
+```
+
+Each split partitions its input resource. Its children and remainder are
+mutually disjoint, but overlap the parent. Separate split operations may overlap.
+CUDA evaluates new constraints when subdividing a resource; the remainder does
+not inherit the earlier split's alignment.
+Partitioning does not reserve SMs against other contexts or guarantee concurrent
+execution. Every split option accepts a scalar or a sequence. All sequences
+must have the same nonzero length, and scalars are broadcast to that length.
+With scalars only, one group is created. The default `num_sms=0` enables
+discovery of all remaining SMs satisfying the group's constraints.
+Groups are evaluated in order; early discovery groups can exhaust the resources
+needed by later groups.
+CUDA validates hardware constraints without PyTorch rounding the requested sizes.
+CUDA permits kernels to use additional SMs in some configurations involving MPS
+or dynamic parallelism; see the
+[CUDA green-context documentation](https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__GREEN__CONTEXTS.html).
+
+`GreenContext.sm_count` reports the actual allocation, including for contexts
+created through the existing `num_sms` constructor. Independent constructor
+calls do not guarantee disjoint SMs. A context's `sm_partition` property returns
+a resource that can be subdivided and keeps its originating context alive.
+
+`backfill=True` permits CUDA to fill a group with SMs outside its co-scheduling
+constraints. It preserves the separation between sibling partitions.
+
+With `coscheduled_sm_count=0`, CUDA determines cluster capabilities from the
+selected resources. `preferred_coscheduled_sm_count` requests a preferred larger
+grouping without requiring that CUDA can satisfy it.
+
 ```{eval-rst}
 .. currentmodule:: torch.cuda.green_contexts
 ```
@@ -450,6 +503,9 @@ deprecated compatibility APIs.
     :nosignatures:
 
     GreenContext
+    SMPartition
+    execute_in_green_contexts
+    get_green_context_from_stream
 ```
 
 
