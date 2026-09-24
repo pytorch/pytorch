@@ -5,6 +5,7 @@ import subprocess
 import sys
 
 import sympy
+from sympy.core.assumptions import _assume_defined, _assume_rules
 
 import torch
 from torch.testing._internal.common_utils import (
@@ -24,6 +25,7 @@ u0 = sympy.Symbol("u0", integer=True)
 zf = sympy.Symbol("zf", real=True, positive=True)
 LEAVES = [s0, s1, u0, zf, *map(sympy.Integer, range(-3, 4))]
 LEAVES += [sympy.Rational(1, 2), sympy.Rational(-2, 3)]
+FACTS = sorted(_assume_defined)
 
 
 # Expression trees are nested tuples (op, *children); leaves are sympy atoms.
@@ -62,16 +64,16 @@ def subtrees(t):
             yield from subtrees(a)
 
 
-def random_tree(rng, depth):
+def random_tree(rng, depth, leaves=LEAVES):
     if depth == 0 or rng.random() < 0.25:
-        return rng.choice(LEAVES)
+        return rng.choice(leaves)
     op = rng.choice(["add", "mul", "sub", "neg", "pow"])
     if op == "pow":
-        return (op, random_tree(rng, depth - 1), rng.randint(-2, 3))
+        return (op, random_tree(rng, depth - 1, leaves), rng.randint(-2, 3))
     if op == "neg":
-        return (op, random_tree(rng, depth - 1))
+        return (op, random_tree(rng, depth - 1, leaves))
     n = rng.randint(2, 3) if op in ("add", "mul") else 2
-    return (op, *(random_tree(rng, depth - 1) for _ in range(n)))
+    return (op, *(random_tree(rng, depth - 1, leaves) for _ in range(n)))
 
 
 class TestNativeSymNodeFlag(TestCase):
@@ -106,6 +108,8 @@ class TestNativeExpr(TestCase):
         self.assertTrue(got == expected, f"{t}: native {got} != sympy {expected}")
         self.assertEqual(str(got), str(expected))
         self.assertEqual(arena.from_sympy(expected), n)
+        native_args = tuple(arena.to_sympy(a) for a in arena.args(n))
+        self.assertEqual(native_args, sympy.sympify(expected).args)
 
     def test_edge_cases(self):
         x1 = ("add", s0, 1)
@@ -163,6 +167,33 @@ class TestNativeExpr(TestCase):
             checked += 1
         self.assertGreater(checked, 250)
 
+    def test_args_order(self):
+        # Same-name symbols order by their assumptions, like Basic.compare.
+        leaves = [
+            s0,
+            u0,
+            zf,
+            sympy.Symbol("s0", integer=True),
+            sympy.Symbol("a", positive=True),
+            sympy.Symbol("a", real=True),
+            sympy.Symbol("B", integer=True),
+            sympy.Symbol("b", integer=True),
+            sympy.Symbol("s", integer=True),
+            sympy.Symbol("p", positive=True),
+            sympy.Symbol("p", negative=True),
+            sympy.Integer(2),
+            sympy.Integer(-1),
+            sympy.Rational(1, 2),
+        ]
+        rng = random.Random(0)
+        for _ in range(300):
+            t = random_tree(rng, 3, leaves)
+            try:
+                native_eval(torch._C._symbolic._Arena(), t)
+            except NativeUnsupported:
+                continue
+            self.check(t)
+
     def test_atoms(self):
         arena = torch._C._symbolic._Arena()
         for v in [
@@ -208,6 +239,7 @@ class TestNativeExpr(TestCase):
             lambda: arena.from_sympy(sympy.Symbol("z", zero=True)),
             lambda: arena.from_sympy(sympy.Mul(2, s0 + 1, evaluate=False)),
             lambda: arena.rational(2**64, 3),
+            lambda: arena.ask(arena.from_sympy(s0 + 1), "positive"),
         ]
         for f in cases:
             with self.assertRaises(NativeUnsupported):
@@ -215,6 +247,59 @@ class TestNativeExpr(TestCase):
         other = torch._C._symbolic._Arena()
         with self.assertRaisesRegex(RuntimeError, "different arena"):
             arena.add([big, other.integer(1)])
+
+
+class TestNativeAssumptions(TestCase):
+    def test_assume_rules(self):
+        imp, beta, triggers, prereq = torch._C._symbolic._assume_rules()
+
+        def nonempty(d):
+            return {k: set(v) for k, v in d.items() if v}
+
+        self.assertEqual(nonempty(imp), nonempty(_assume_rules.full_implications))
+        self.assertEqual(beta, [(set(c), i) for c, i in _assume_rules.beta_rules])
+        self.assertEqual(nonempty(triggers), nonempty(_assume_rules.beta_triggers))
+        self.assertEqual(nonempty(prereq), nonempty(_assume_rules.prereq))
+        self.assertTrue(all(b < len(beta) for t in triggers.values() for b in t))
+
+    def check_facts(self, v, rng):
+        arena = torch._C._symbolic._Arena()
+        n = arena.from_sympy(v)
+        facts = list(FACTS)
+        rng.shuffle(facts)
+        for f in facts:
+            self.assertIs(arena.ask(n, f), getattr(v, "is_" + f), f"{v}.is_{f}")
+
+    def test_atom_facts(self):
+        values = [sympy.Integer(i) for i in range(-10, 40)]
+        values += map(
+            sympy.Integer,
+            [
+                2**61 - 1,
+                2**63 - 25,
+                2**63 - 1,
+                -(2**63),
+                3**39,
+                (10**9 + 7) * 998244353,
+                3215031751,
+                3825123056546413051,
+            ],
+        )
+        values += [sympy.Rational(p, q) for p, q in [(1, 2), (-1, 2), (7, 3), (-2, 3)]]
+        values += [int_oo, -int_oo, s0, u0, zf]
+        values += [
+            sympy.Symbol("n", integer=True, nonnegative=True),
+            sympy.Symbol("e", even=True),
+            sympy.Symbol("p", prime=True),
+            sympy.Symbol("c", composite=True),
+            sympy.Symbol("r", real=True),
+            sympy.Symbol("x", finite=True),
+            sympy.Symbol("q", rational=True, nonzero=True),
+        ]
+        rng = random.Random(0)
+        for v in values:
+            for _ in range(3):
+                self.check_facts(v, rng)
 
 
 instantiate_parametrized_tests(TestNativeExpr)

@@ -3,6 +3,8 @@
 #include <c10/util/hash.h>
 
 #include <algorithm>
+#include <bit>
+#include <cstring>
 #include <limits>
 
 namespace torch::symbolic {
@@ -11,13 +13,47 @@ namespace {
 
 using i128 = __int128;
 
-bool canonical_less(const Expr* a, const Expr* b) {
-  bool an = a->is_number();
-  bool bn = b->is_number();
-  if (an != bn) {
-    return an;
+template <typename T>
+int cmp3(T a, T b) {
+  return (a > b) - (a < b);
+}
+
+// Index in sympy's ordering_of_classes; classes missing from it sort after all
+// listed ones, by class name.
+int class_rank(const Expr* e) {
+  switch (e->kind) {
+    case Kind::Integer:
+      return e->p == 0 ? 0 : e->p == 1 ? 1 : e->p == -1 ? 5 : 7;
+    case Kind::Rational:
+      return e->p == 1 && e->q == 2 ? 2 : 8;
+    case Kind::Symbol:
+      return 13;
+    case Kind::Pow:
+      return 15;
+    case Kind::Mul:
+      return 16;
+    case Kind::Add:
+      return 17;
+    case Kind::IntInfinity:
+      return 100;
+    case Kind::NegativeIntInfinity:
+      return 101;
   }
-  return a->id < b->id;
+  return -1;
+}
+
+const std::array<Fact, kNumFacts>& facts_by_name() {
+  static const auto order = [] {
+    std::array<Fact, kNumFacts> r{};
+    for (size_t i = 0; i < kNumFacts; ++i) {
+      r[i] = static_cast<Fact>(i);
+    }
+    std::sort(r.begin(), r.end(), [](Fact a, Fact b) {
+      return std::strcmp(fact_name(a), fact_name(b)) < 0;
+    });
+    return r;
+  }();
+  return order;
 }
 
 i128 gcd128(i128 a, i128 b) {
@@ -121,7 +157,7 @@ const Expr* ExprArena::intern(
     int64_t p,
     int64_t q,
     c10::ArrayRef<const Expr*> args) {
-  Expr key{kind, 0, 0, p, q, {}};
+  Expr key{kind, 0, 0, p, q, {}, {}};
   key.args.assign(args.begin(), args.end());
   size_t h = c10::get_hash(static_cast<int>(kind), p, q);
   for (const Expr* a : args) {
@@ -133,6 +169,7 @@ const Expr* ExprArena::intern(
     return *it;
   }
   key.id = static_cast<uint32_t>(storage_.size());
+  key.kb = kind == Kind::Symbol ? symbols_.at(p).facts : default_kb(&key);
   const Expr* e = &storage_.emplace_back(std::move(key));
   table_.insert(e);
   return e;
@@ -164,22 +201,34 @@ Num ExprArena::as_num(const Expr* e) {
 }
 
 const Expr* ExprArena::symbol(const std::string& name, const Facts& facts) {
+  // Symbol._canonical_assumptions: commutative defaults to True.
+  c10::SmallVector<std::pair<Fact, bool>, kNumFacts> given;
+  if (facts[static_cast<size_t>(Fact::commutative)] == Tri::Unknown) {
+    given.emplace_back(Fact::commutative, true);
+  }
+  for (size_t i = 0; i < kNumFacts; ++i) {
+    if (facts[i] != Tri::Unknown) {
+      given.emplace_back(static_cast<Fact>(i), facts[i] == Tri::True);
+    }
+  }
+  FactKB kb;
+  deduce_all_facts(kb, given);
   // A zero symbol has an infinite reciprocal, which Mul.flatten turns into nan
   // when multiplied by 0.
-  if (facts[static_cast<size_t>(Fact::commutative)] != Tri::True ||
-      facts[static_cast<size_t>(Fact::finite)] != Tri::True ||
-      facts[static_cast<size_t>(Fact::zero)] == Tri::True) {
+  if (kb.get(Fact::commutative) != Tri::True ||
+      kb.get(Fact::finite) != Tri::True || kb.get(Fact::zero) == Tri::True) {
     throw NativeUnsupported(
         "only commutative finite nonzero symbols are supported: " + name);
   }
   auto& same_name = symbols_by_name_[name];
   for (uint32_t idx : same_name) {
-    if (symbols_[idx].facts == facts) {
+    const FactKB& other = symbols_[idx].facts;
+    if (other.true_mask == kb.true_mask && other.false_mask == kb.false_mask) {
       return intern(Kind::Symbol, idx, 0, {});
     }
   }
   auto idx = static_cast<uint32_t>(symbols_.size());
-  symbols_.push_back({name, facts});
+  symbols_.push_back({name, kb});
   same_name.push_back(idx);
   return intern(Kind::Symbol, idx, 0, {});
 }
@@ -307,7 +356,9 @@ const Expr* ExprArena::add(c10::ArrayRef<const Expr*> in) {
       newseq.push_back(intern(Kind::Mul, 0, 0, {ce, s}));
     }
   }
-  std::sort(newseq.begin(), newseq.end(), canonical_less);
+  std::sort(newseq.begin(), newseq.end(), [this](auto a, auto b) {
+    return compare(a, b) < 0;
+  });
   if (coeff.p != 0) {
     newseq.insert(newseq.begin(), number(coeff));
   }
@@ -412,7 +463,9 @@ const Expr* ExprArena::mul(c10::ArrayRef<const Expr*> in) {
     }
     c_part.push_back(p);
   }
-  std::sort(c_part.begin(), c_part.end(), canonical_less);
+  std::sort(c_part.begin(), c_part.end(), [this](auto a, auto b) {
+    return compare(a, b) < 0;
+  });
   if (!(coeff.p == 1 && coeff.q == 1)) {
     const Expr* c = number(coeff);
     if (c_part.size() == 1 && c_part[0]->kind == Kind::Add) {
@@ -458,6 +511,67 @@ const Expr* ExprArena::pow(const Expr* b, const Expr* e) {
       return pow(b->args[0], integer(checked_mul(b->args[1]->p, e->p)));
     default:
       return intern(Kind::Pow, 0, 0, {b, e});
+  }
+}
+
+int ExprArena::compare(const Expr* a, const Expr* b) const {
+  if (a == b) {
+    return 0;
+  }
+  int c = cmp3(class_rank(a), class_rank(b));
+  if (c != 0) {
+    return c;
+  }
+  switch (a->kind) {
+    case Kind::Integer:
+    case Kind::Rational:
+      c = cmp3(a->p, b->p);
+      return c != 0 ? c : cmp3(a->q, b->q);
+    case Kind::Symbol: {
+      // _hashable_content is (name,) + tuple(sorted(assumptions0.items())).
+      const FactKB& fa = symbol_info(a).facts;
+      const FactKB& fb = symbol_info(b).facts;
+      int n = std::popcount(fa.known);
+      c = cmp3(n, std::popcount(fb.known));
+      if (c != 0) {
+        return c;
+      }
+      c = cmp3(symbol_info(a).name.compare(symbol_info(b).name), 0);
+      if (c != 0) {
+        return c;
+      }
+      const auto& order = facts_by_name();
+      auto next = [&order](const FactKB& kb, size_t& i) {
+        while (!(kb.known & (1u << static_cast<unsigned>(order[i])))) {
+          ++i;
+        }
+        return order[i++];
+      };
+      size_t i = 0;
+      size_t j = 0;
+      for (; n > 0; --n) {
+        Fact fact_a = next(fa, i);
+        Fact fact_b = next(fb, j);
+        if (fact_a != fact_b) {
+          return cmp3(std::strcmp(fact_name(fact_a), fact_name(fact_b)), 0);
+        }
+        c = cmp3(fa.get(fact_a) == Tri::True, fb.get(fact_b) == Tri::True);
+        if (c != 0) {
+          return c;
+        }
+      }
+      return 0;
+    }
+    case Kind::Pow:
+    case Kind::Mul:
+    case Kind::Add:
+      c = cmp3(a->args.size(), b->args.size());
+      for (size_t i = 0; c == 0 && i < a->args.size(); ++i) {
+        c = compare(a->args[i], b->args[i]);
+      }
+      return c;
+    default:
+      return 0;
   }
 }
 

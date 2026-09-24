@@ -1127,6 +1127,7 @@
 /torch/fx/experimental/sym_node.py @laithsakka
 /torch/fx/experimental/recording.py @laithsakka
 /torch/fx/experimental/proxy_tensor.py @aorenste
+# /torch/csrc/symbolic/
 #
 # [compiler_dynamo]
 # /test/distributed/test_dynamo_distributed.py

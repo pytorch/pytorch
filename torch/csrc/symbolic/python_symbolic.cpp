@@ -3,6 +3,7 @@
 #include <torch/csrc/symbolic/Expr.h>
 #include <torch/csrc/utils/pybind.h>
 
+#include <optional>
 #include <unordered_map>
 #include <vector>
 
@@ -47,6 +48,15 @@ struct PyExpr {
   const Expr* expr;
 };
 
+std::optional<Fact> fact_from_name(const std::string& name) {
+  for (size_t i = 0; i < kNumFacts; ++i) {
+    if (name == fact_name(static_cast<Fact>(i))) {
+      return static_cast<Fact>(i);
+    }
+  }
+  return std::nullopt;
+}
+
 int64_t to_int64(py::handle obj) {
   int overflow = 0;
   long long v = PyLong_AsLongLongAndOverflow(obj.ptr(), &overflow);
@@ -85,14 +95,11 @@ const Expr* PyArena::from_sympy(py::handle obj) {
     py::dict assumptions = obj.attr("assumptions0");
     for (auto [k, v] : assumptions) {
       auto name = k.cast<std::string>();
-      size_t i = 0;
-      while (i < kNumFacts && name != fact_name(static_cast<Fact>(i))) {
-        ++i;
-      }
-      if (i == kNumFacts) {
+      auto f = fact_from_name(name);
+      if (!f) {
         throw NativeUnsupported("untracked assumption " + name);
       }
-      facts[i] = v.cast<bool>() ? Tri::True : Tri::False;
+      facts[static_cast<size_t>(*f)] = v.cast<bool>() ? Tri::True : Tri::False;
     }
     const Expr* e = arena->symbol(obj.attr("name").cast<std::string>(), facts);
     auto idx = static_cast<size_t>(e->p);
@@ -194,6 +201,62 @@ const Expr* unwrap(const std::shared_ptr<PyArena>& self, const PyExpr& e) {
   return e.expr;
 }
 
+py::object to_py(Tri t) {
+  if (t == Tri::Unknown) {
+    return py::none();
+  }
+  return py::bool_(t == Tri::True);
+}
+
+py::set fact_set(uint32_t true_mask, uint32_t false_mask) {
+  py::set r;
+  for (size_t i = 0; i < kNumFacts; ++i) {
+    for (bool v : {false, true}) {
+      if (((v ? true_mask : false_mask) >> i) & 1) {
+        r.add(py::make_tuple(fact_name(static_cast<Fact>(i)), v));
+      }
+    }
+  }
+  return r;
+}
+
+// _assume_rules as the Python structures sympy uses, for testing the tables.
+py::tuple assume_rules_to_py() {
+  AssumeRules rules = assume_rules();
+  py::dict implications;
+  py::dict triggers;
+  py::dict prereq;
+  for (size_t i = 0; i < kNumFacts; ++i) {
+    const char* name = fact_name(static_cast<Fact>(i));
+    for (bool v : {false, true}) {
+      const Implication& imp = rules.full_implications[i][v];
+      implications[py::make_tuple(name, v)] =
+          fact_set(imp.true_mask, imp.false_mask);
+      py::set t;
+      for (size_t b = 0; b < rules.beta_rules.size(); ++b) {
+        if ((rules.beta_triggers[i][v] >> b) & 1) {
+          t.add(py::int_(b));
+        }
+      }
+      triggers[py::make_tuple(name, v)] = t;
+    }
+    py::set pre;
+    for (size_t j = 0; j < kNumFacts; ++j) {
+      if ((rules.prereq[i] >> j) & 1) {
+        pre.add(py::str(fact_name(static_cast<Fact>(j))));
+      }
+    }
+    prereq[py::str(name)] = pre;
+  }
+  py::list beta;
+  for (const BetaRule& r : rules.beta_rules) {
+    beta.append(py::make_tuple(
+        fact_set(r.cond_true, r.cond_false),
+        py::make_tuple(fact_name(r.fact), r.value)));
+  }
+  return py::make_tuple(implications, beta, triggers, prereq);
+}
+
 std::vector<const Expr*> unwrap_all(
     const std::shared_ptr<PyArena>& self,
     const std::vector<PyExpr>& es) {
@@ -211,6 +274,7 @@ void initSymbolicBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module_>();
   auto sm = m.def_submodule("_symbolic", "native symbolic expressions");
   py::register_exception<NativeUnsupported>(sm, "NativeUnsupported");
+  sm.def("_assume_rules", &assume_rules_to_py);
 
   py::class_<PyExpr>(sm, "_Expr")
       .def(
@@ -271,9 +335,28 @@ void initSymbolicBindings(PyObject* module) {
           [wrap](const Self& self, const PyExpr& a) {
             return wrap(self, self->arena->neg(unwrap(self, a)));
           })
-      .def("sub", [wrap](const Self& self, const PyExpr& a, const PyExpr& b) {
-        return wrap(self, self->arena->sub(unwrap(self, a), unwrap(self, b)));
-      });
+      .def(
+          "sub",
+          [wrap](const Self& self, const PyExpr& a, const PyExpr& b) {
+            return wrap(
+                self, self->arena->sub(unwrap(self, a), unwrap(self, b)));
+          })
+      .def(
+          "args",
+          [wrap](const Self& self, const PyExpr& e) {
+            std::vector<PyExpr> r;
+            for (const Expr* a : unwrap(self, e)->args) {
+              r.push_back(wrap(self, a));
+            }
+            return r;
+          })
+      .def(
+          "ask",
+          [](const Self& self, const PyExpr& e, const std::string& fact) {
+            auto f = fact_from_name(fact);
+            TORCH_CHECK(f, "unknown assumption ", fact);
+            return to_py(self->arena->ask(unwrap(self, e), *f));
+          });
 }
 
 } // namespace torch::symbolic

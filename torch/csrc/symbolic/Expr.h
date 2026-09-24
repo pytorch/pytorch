@@ -11,6 +11,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 // Native port of the subset of sympy used by torch's symbolic shapes. Every
@@ -25,7 +26,6 @@ struct NativeUnsupported : std::runtime_error {
   using std::runtime_error::runtime_error;
 };
 
-// Numbers sort first so that the coefficient of an Add/Mul is args[0].
 enum class Kind : uint8_t {
   Integer,
   Rational,
@@ -79,6 +79,45 @@ using Facts = std::array<Tri, kNumFacts>;
 
 const char* fact_name(Fact f);
 
+// A sympy FactKB (obj._assumptions) as bitmasks over Fact. A fact is in the KB
+// when its bit is in `known`; it may still be neither true nor false (sympy
+// stores None for a fact it asked about and could not decide).
+struct FactKB {
+  uint32_t true_mask = 0;
+  uint32_t false_mask = 0;
+  uint32_t known = 0;
+
+  Tri get(Fact f) const {
+    uint32_t b = 1u << static_cast<unsigned>(f);
+    return (true_mask & b) ? Tri::True
+        : (false_mask & b) ? Tri::False
+                           : Tri::Unknown;
+  }
+};
+
+// FactKB.deduce_all_facts.
+void deduce_all_facts(FactKB& kb, c10::ArrayRef<std::pair<Fact, bool>> facts);
+
+// sympy.core.assumptions._assume_rules as bitmasks over Fact.
+struct Implication {
+  uint32_t true_mask;
+  uint32_t false_mask;
+};
+struct BetaRule {
+  uint32_t cond_true;
+  uint32_t cond_false;
+  Fact fact;
+  bool value;
+};
+struct AssumeRules {
+  // Indexed by [fact][value].
+  c10::ArrayRef<std::array<Implication, 2>> full_implications;
+  c10::ArrayRef<BetaRule> beta_rules;
+  c10::ArrayRef<std::array<uint64_t, 2>> beta_triggers;
+  c10::ArrayRef<uint32_t> prereq;
+};
+AssumeRules assume_rules();
+
 struct Expr {
   Kind kind;
   uint32_t id;
@@ -87,9 +126,11 @@ struct Expr {
   // into ExprArena's symbol table in p.
   int64_t p;
   int64_t q;
-  // Add/Mul: canonical internal order (numbers first, then by id). Pow: base,
-  // exponent.
+  // Add/Mul: sympy's order (coefficient first, the rest by Basic.compare).
+  // Pow: base, exponent.
   c10::SmallVector<const Expr*, 3> args;
+  // Assumptions cache, like sympy's obj._assumptions.
+  mutable FactKB kb;
 
   bool is_number() const {
     return kind <= Kind::NegativeIntInfinity;
@@ -106,7 +147,8 @@ struct Num {
 
 struct SymbolInfo {
   std::string name;
-  Facts facts;
+  // The deduced assumptions (sympy's assumptions0).
+  FactKB facts;
 };
 
 class ExprArena : public c10::intrusive_ptr_target {
@@ -133,6 +175,11 @@ class ExprArena : public c10::intrusive_ptr_target {
   const Expr* neg(const Expr* a);
   const Expr* sub(const Expr* a, const Expr* b);
 
+  // expr.is_<fact>, ported from sympy's _ask and the _eval_is_* handlers.
+  Tri ask(const Expr* e, Fact f);
+  // Basic.compare.
+  int compare(const Expr* a, const Expr* b) const;
+
   size_t size() const {
     return storage_.size();
   }
@@ -148,6 +195,8 @@ class ExprArena : public c10::intrusive_ptr_target {
   const Expr* from_args(Kind kind, c10::SmallVectorImpl<const Expr*>& args);
   const Expr* number_pow(Num b, int64_t e);
   static Num as_num(const Expr* e);
+  Tri eval_fact(const Expr* e, Fact f);
+  static FactKB default_kb(const Expr* e);
 
   struct KeyHash {
     size_t operator()(const Expr* e) const {
