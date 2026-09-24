@@ -2,7 +2,7 @@ import asyncio
 import pickle
 
 import torch
-from torch.distributed._transport import wait_all, Work
+from torch.distributed._transport import MemoryView, MutableMemoryView, wait_all, Work
 
 
 class TransportTestMixin:
@@ -18,6 +18,12 @@ class TransportTestMixin:
             destination_memory = second.register_memory(destination)
             remote = pickle.loads(pickle.dumps(destination_memory.to_remote_buffer()))
 
+            self.assertIsInstance(source_memory.to_view(), MemoryView)
+            self.assertNotIsInstance(source_memory.to_view(), MutableMemoryView)
+            self.assertIsInstance(
+                destination_memory.to_mutable_view(), MutableMemoryView
+            )
+            self.assertTrue(destination_memory.to_mutable_view().writable)
             self.assertEqual(source_memory.to_view().size(), source.nbytes)
             self.assertEqual(destination_memory.to_mutable_view(16, 32).size(), 32)
             self.assertEqual(first.write(source_memory.to_view(), remote), 0)
