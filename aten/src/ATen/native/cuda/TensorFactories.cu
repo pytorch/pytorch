@@ -34,6 +34,7 @@
 namespace at::native {
 
 Tensor& zero_cuda_(Tensor& self) {
+#if !defined(USE_ROCM) || ROCM_VERSION < 70000 || ROCM_VERSION >= 70100
   void* const ptr = self.mutable_data_ptr();
   if (ptr != nullptr && self.is_non_overlapping_and_dense()) {
     AT_CUDA_CHECK(cudaMemsetAsync(
@@ -43,6 +44,7 @@ Tensor& zero_cuda_(Tensor& self) {
         at::cuda::getCurrentCUDAStream(self.device().index())));
     return self;
   }
+#endif
   return self.fill_(0);
 }
 

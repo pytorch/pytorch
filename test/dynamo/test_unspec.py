@@ -161,6 +161,29 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         res2 = opt_fn(x)
         self.assertTrue(same(res1, res2))
 
+    def test_random_seed_takes_effect_on_first_call(self):
+        # An in-function random.seed() must be visible to a scalar draw
+        # traced right after it, including on the very first (compiling)
+        # call - unlike test_feed_random_values_into_graph_only and
+        # test_random_values_with_graph_break above, this deliberately does
+        # NOT "shake out" the compile before comparing, since that's exactly
+        # the call this is testing.
+        def fn(x):
+            random.seed(0)
+            return x + random.random(), random.random(), random.randint(0, 100)
+
+        x = torch.zeros(1)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        for _ in range(3):
+            res1 = fn(x)
+            eager_state = random.getstate()
+            res2 = opt_fn(x)
+            compiled_state = random.getstate()
+            self.assertEqual(res1, res2)
+            self.assertEqual(eager_state, compiled_state)
+        self.assertEqual(cnts.frame_count, 1)
+
     # Really annoying intersection of specialization and RandomValueSource
     # If we get a RandomValueSource with a single element tensor, we should return a ConstantVariable like other
     # unspects... but if we do, we break the bytecode assumptions and guards will not work as we will be referring
@@ -1150,6 +1173,39 @@ else:
         t = torch.tensor([1])
         compl_fn = torch.compile(fn, dynamic=True, backend="eager")
         self.assertEqual(fn(t, 1.0), compl_fn(t, 1.0))
+
+    def test_symint_number_methods(self):
+        def fn(x):
+            n = x.size(0)
+            bit_length = n.bit_length()
+            conjugate = n.conjugate()
+            ratio = n.as_integer_ratio()[0]
+            return bit_length + conjugate + ratio + n.__int__()
+
+        x = torch.randn(8, 3)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x), fn(x))
+
+    def test_symint_bit_length_wrong_arity(self):
+        def fn(x):
+            return x.size(0).bit_length(1)
+
+        x = torch.randn(8, 3)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "takes no arguments"
+        ):
+            compiled(x)
+
+    @torch._dynamo.config.patch(specialize_float=False)
+    def test_symfloat_number_methods(self):
+        def fn(t, m):
+            return (2 * t if m.is_integer() else t) + m.conjugate()
+
+        t = torch.tensor([1.0])
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(t, 1.0), fn(t, 1.0))
+        self.assertEqual(compiled(t, 1.5), fn(t, 1.5))
 
     @torch._dynamo.config.patch(specialize_float=False)
     def test_unspec_roundtrip_float_input(self):

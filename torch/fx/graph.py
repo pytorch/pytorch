@@ -804,7 +804,9 @@ class CodeGen:
                 )
 
                 def _tensor_annotation(t: torch.Tensor) -> str:
-                    stride = stringify_shape(t.stride()) if include_stride else ""
+                    compressed = is_sparse_compressed_layout(t.layout)
+                    want_stride = include_stride and not compressed
+                    stride = stringify_shape(t.stride()) if want_stride else ""
                     device = _device_annotation(t.device) if include_device else ""
                     return (
                         f"{red(dtype_abbrs[t.dtype])}"
@@ -814,11 +816,7 @@ class CodeGen:
                     )
 
                 # use string as annotation, to make it valid python code
-                # Compressed sparse layouts have no strides, and asking for
-                # them raises; _tensor_annotation would do exactly that.
-                if isinstance(
-                    meta_val, torch.Tensor
-                ) and not is_sparse_compressed_layout(meta_val.layout):
+                if isinstance(meta_val, torch.Tensor):
                     # Fake tensors cause tests to wobble, so do not custom print them.
                     is_plain = type(meta_val) is torch.Tensor or isinstance(
                         meta_val, torch._subclasses.FakeTensor

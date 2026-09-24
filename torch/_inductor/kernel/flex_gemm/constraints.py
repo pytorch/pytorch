@@ -103,6 +103,11 @@ FLEX_GEMM_MAIN_OUTPUT_SHAPE_ERROR = (
     "unsupported FlexGEMM epilogue: main output shape must equal the physical "
     "GEMM output shape"
 )
+FLEX_GEMM_CAPTURE_SHAPE_ERROR = (
+    "FlexGEMM captured tensor epilogue args must match the GEMM output shape "
+    "[M, N] or broadcast as [1, N] / [M, 1] / [1, 1]; 1-D captures are read as "
+    "[1, N] when used directly or as w[None, :], and as [M, 1] as w[:, None]"
+)
 LOCAL_REDUCE_MATCH_NODE_ERROR = "local-reduce matches require tensor nodes"
 LOCAL_REDUCE_OUTPUT_PLAN_NODE_ERROR = "local-reduce output plans require tensor nodes"
 LOCAL_REDUCE_RUNTIME_OUT_ERROR = "compressed local reductions require local_reduce_out"
