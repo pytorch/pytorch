@@ -115,6 +115,7 @@ from .utils import (
     get_sympy_Expr_dtype,
     GraphPartitionMap,
     is_same_tensor,
+    is_using_cudagraph_partition,
     maybe_get_suppress_shape_guards_ctx,
     normalize_name,
     should_assume_input_aligned,
@@ -420,6 +421,7 @@ class GraphLowering(torch.fx.Interpreter):
         inputs_to_check: Sequence[int] | None = None,
         fx_wrapper: bool = False,
         get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] | None = None,
+        use_cudagraph_partition: bool | None = None,
     ) -> None:
         super().__init__(gm)
         self.get_decomp_fn = get_decomp_fn
@@ -589,6 +591,13 @@ class GraphLowering(torch.fx.Interpreter):
         # Used if lowering encounters cases where cudagraphs are not supported
         self.disable_cudagraphs_reason: str | None = None
         self.kernel_free_cudagraph: bool = False
+        # Partitioning decision this graph was lowered with. The ambient config
+        # can differ by the time post-compile inspects the result.
+        self.use_cudagraph_partition = (
+            is_using_cudagraph_partition()
+            if use_cudagraph_partition is None
+            else use_cudagraph_partition
+        )
 
         # only keeping one node per device for stack trace purposes
         self.device_node_mapping: dict[torch.device, torch.fx.Node] = {}
