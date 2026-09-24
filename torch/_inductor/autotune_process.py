@@ -19,7 +19,13 @@ import threading
 import time
 import warnings
 from collections.abc import Callable, Iterable, Sequence
-from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
+from concurrent.futures import (
+    CancelledError,
+    Future,
+    ProcessPoolExecutor,
+    ThreadPoolExecutor,
+)
+from concurrent.futures.process import BrokenProcessPool
 from ctypes import byref, c_size_t, c_void_p, CDLL
 from typing import Any, cast, IO, TYPE_CHECKING
 from typing_extensions import override
@@ -38,6 +44,7 @@ from torch._inductor.codecache import (
     write,
     XPUCodeCache,
 )
+from torch._inductor.compile_worker.subproc_pool import _terminate_process_pool
 from torch._inductor.compile_worker.timer import Timer
 from torch._inductor.utils import (
     apply_subprocess_env,
@@ -454,11 +461,7 @@ class TuningProcessPool(TuningPoolBase):
             )
             # Sticky CUDA errors corrupt the context, making it unrecoverable.
             # The process must be restarted to restore CUDA functionality.
-            error_msg = str(process_exception)
-            if (
-                "cudaErrorLaunchFailure" in error_msg
-                or "cudaErrorIllegalAddress" in error_msg
-            ):
+            if _is_sticky_cuda_error(process_exception):
                 process.restart()
             # Set to INF so this choice will be ignored
             return float("inf")
@@ -485,11 +488,20 @@ class TuningThreadPool(TuningPoolBase):
 
         # Create locks for thread-safe device access
         self.device_locks = {device: threading.Lock() for device in self.devices}
+        self._poison_lock = threading.Lock()
+        self._cuda_poisoned = False
 
         # Track which device each thread should use
         self.device_queue: queue.Queue[int | None] = queue.Queue()
         for device in self.devices:
             self.device_queue.put(device)
+
+    def _raise_if_cuda_poisoned(self) -> None:
+        with self._poison_lock:
+            if self._cuda_poisoned:
+                raise PoisonedAutotuneWorkerError(
+                    "autotune thread worker CUDA context is poisoned"
+                )
 
     def target(self, choice: TritonTemplateCaller) -> float:
         """
@@ -501,12 +513,19 @@ class TuningThreadPool(TuningPoolBase):
                 f"Expected choice.bmreq to be set, but got None for choice '{choice}'"
             )
 
+        # ThreadPoolExecutor.map() eagerly queues choices.  Once one benchmark
+        # reports a sticky CUDA failure, do not start later work in the same
+        # process-wide CUDA context.
+        self._raise_if_cuda_poisoned()
+
         # Get an available device
         device = self.device_queue.get()
         try:
             # Acquire lock for this device
             lock = self.device_locks[device]
             with lock:
+                self._raise_if_cuda_poisoned()
+
                 # Set device if specified
                 if device is not None:
                     gpu_type = get_gpu_type()
@@ -516,7 +535,13 @@ class TuningThreadPool(TuningPoolBase):
                 # Run benchmark directly (no subprocess, no pickling)
                 try:
                     return choice.bmreq.benchmark()
-                except Exception:
+                except CUDAGraphBenchmarkError as e:
+                    return e  # pyrefly: ignore[bad-return]
+                except Exception as e:
+                    if _is_sticky_cuda_error(e):
+                        with self._poison_lock:
+                            self._cuda_poisoned = True
+                        raise
                     warnings.warn(
                         f"Failed to benchmark choice '{choice}'. It will be ignored. "
                         "Please debug the root cause in case the choice can bring perf gains."
@@ -1871,6 +1896,8 @@ class AutotuneProcessPool:
             pool = ProcessPoolExecutor(
                 max_workers=1,
                 mp_context=ctx,
+                initializer=_init_autotune_subprocess,
+                initargs=(torch.backends.cuda.matmul.fp32_precision,),
             )
             autotuning_log.info("AutotuneProcessPool created (workers spawn lazily)")
 
@@ -1931,22 +1958,31 @@ class AutotuneProcessPool:
             future.add_done_callback(lambda _: self._record_activity())
         return future
 
-    def _shutdown(self):
+    @property
+    def supports_sticky_cuda_recovery(self) -> bool:
+        """Whether retiring this pool replaces the CUDA context."""
+        return isinstance(self.pool, ProcessPoolExecutor)
+
+    def _shutdown(self, *, terminate_workers: bool = False):
         """Shutdown the pool on exit."""
         if self._timer is not None:
             self._timer.quit()
             self._timer = None
         if self._pool is not None:
-            self._pool.shutdown(wait=False)
+            pool = self._pool
             self._pool = None
+            if terminate_workers and isinstance(pool, ProcessPoolExecutor):
+                _terminate_process_pool(pool)
+            else:
+                pool.shutdown(wait=False, cancel_futures=terminate_workers)
 
     @classmethod
-    def shutdown_instance(cls):
+    def shutdown_instance(cls, *, terminate_workers: bool = False):
         """Explicitly shutdown the singleton instance."""
         if cls._instance is not None:
             with cls._lock:
                 if cls._instance is not None:
-                    cls._instance._shutdown()
+                    cls._instance._shutdown(terminate_workers=terminate_workers)
                     cls._instance = None
 
 
@@ -1974,7 +2010,12 @@ def _init_autotune_subprocess(fp32_precision: str) -> bool:
 
 def run_autotune_in_subprocess(
     benchmark_request: BenchmarkRequest,
-) -> float:
+) -> (
+    float
+    | CUDAGraphBenchmarkError
+    | StickyCUDABenchmarkError
+    | PoisonedAutotuneWorkerError
+):
     """
     Run autotuning benchmarks in a subprocess.
 
@@ -1982,11 +2023,16 @@ def run_autotune_in_subprocess(
     to prevent GPU contention with the main compilation process.
 
     Args:
-        picklable_choices: List of picklable choice information
+        benchmark_request: Picklable request containing the kernel and benchmark policy.
 
     Returns:
-        timing
+        The timing, a CUDA-graph failure marker that requests a coordinated
+        eager retry, or a sticky CUDA failure marker that retires the worker pool.
     """
+
+    global _autotune_worker_cuda_poisoned
+    if _autotune_worker_cuda_poisoned:
+        return PoisonedAutotuneWorkerError("autotune worker CUDA context is poisoned")
 
     try:
         # Run the benchmark directly - bmreq is already a BenchmarkRequest
@@ -1994,7 +2040,14 @@ def run_autotune_in_subprocess(
 
         return timing
 
-    except Exception:
+    except CUDAGraphBenchmarkError as e:
+        # Preserve the marker so AsyncAutotuner can retry every candidate
+        # eagerly instead of mixing graph and eager measurements.
+        return e
+    except Exception as e:
+        if _is_sticky_cuda_error(e):
+            _autotune_worker_cuda_poisoned = True
+            return StickyCUDABenchmarkError(str(e))
         autotuning_log.warning(
             "Failed to benchmark choice %s",
             benchmark_request,
@@ -2061,7 +2114,12 @@ class AsyncAutotuner:
         timings = autotuner.get_results()  # Blocks until complete
     """
 
-    choice_hash_to_future = {}
+    choice_hash_to_future: dict[str, Future[Any]] = {}
+    invalidated_choice_hashes: OrderedSet[str] = OrderedSet()
+    # Submission recovery retires the pool while holding this lock so another
+    # GEMM group cannot enqueue work on the replacement pool first.  _retire_pool
+    # also updates the Future maps, so this must be reentrant.
+    _future_lock = threading.RLock()
 
     @staticmethod
     def get_choice_hash(choice: ChoiceCaller, inputs_key: str) -> str:
@@ -2081,6 +2139,143 @@ class AsyncAutotuner:
         return choice.hash_key() + inputs_key + module_path
 
     @classmethod
+    def _submit_choice(cls, choice: ChoiceCaller, inputs_key: str) -> Future[Any]:
+        choice_hash = cls.get_choice_hash(choice, inputs_key)
+        with cls._future_lock:
+            existing = cls.choice_hash_to_future.get(choice_hash)
+            if existing is not None:
+                return existing
+
+            request = getattr(choice, "bmreq", None)
+            if request is None:
+                raise AssertionError("bmreq is None for choice")
+            try:
+                future = AutotuneProcessPool.get_instance().submit(
+                    run_autotune_in_subprocess,
+                    request,
+                )
+            except BrokenProcessPool:
+                # This request was never accepted, so it cannot be the kernel
+                # that killed the old worker.  Retire the shared pool atomically
+                # and make this innocent request the first job on its replacement.
+                cls._retire_pool(
+                    OrderedSet(),
+                    inputs_key,
+                    allow_retry=True,
+                )
+                future = AutotuneProcessPool.get_instance().submit(
+                    run_autotune_in_subprocess,
+                    request,
+                )
+            cls.choice_hash_to_future[choice_hash] = future
+            cls.invalidated_choice_hashes.discard(choice_hash)
+            return future
+
+    @classmethod
+    def _future_for_choice(
+        cls, choice: ChoiceCaller, inputs_key: str
+    ) -> Future[Any] | None:
+        choice_hash = cls.get_choice_hash(choice, inputs_key)
+        with cls._future_lock:
+            future = cls.choice_hash_to_future.get(choice_hash)
+            should_resubmit = (
+                future is None and choice_hash in cls.invalidated_choice_hashes
+            )
+        if should_resubmit:
+            return cls._submit_choice(choice, inputs_key)
+        return future
+
+    @classmethod
+    def _retire_pool(
+        cls,
+        sticky_choices: OrderedSet[ChoiceCaller],
+        inputs_key: str,
+        *,
+        allow_retry: bool,
+    ) -> None:
+        failed_hashes = OrderedSet(
+            cls.get_choice_hash(choice, inputs_key) for choice in sticky_choices
+        )
+        with cls._future_lock:
+            if allow_retry:
+                cls.invalidated_choice_hashes.update(
+                    choice_hash
+                    for choice_hash in cls.choice_hash_to_future
+                    if choice_hash not in failed_hashes
+                )
+            else:
+                cls.invalidated_choice_hashes.clear()
+            cls.choice_hash_to_future.clear()
+            for choice_hash in failed_hashes:
+                cls.invalidated_choice_hashes.discard(choice_hash)
+                failed_future: Future[Any] = Future()
+                failed_future.set_result(float("inf"))
+                cls.choice_hash_to_future[choice_hash] = failed_future
+            AutotuneProcessPool.shutdown_instance(terminate_workers=True)
+
+    @classmethod
+    def _benchmark_choices_in_isolated_processes(
+        cls,
+        choices: list[ChoiceCaller],
+        inputs_key: str,
+    ) -> tuple[
+        dict[ChoiceCaller, float | CUDAGraphBenchmarkError],
+        OrderedSet[ChoiceCaller],
+    ]:
+        """Identify a process-killing choice without blaming queued work.
+
+        ``BrokenProcessPool`` does not identify which Future killed the worker:
+        every outstanding Future receives the same exception.  Once that happens,
+        benchmark each choice in its own replacement process.  A second hard
+        process failure can then be attributed to the only request in that process.
+
+        This path is intentionally expensive, but is used only after the shared
+        autotune worker has already terminated unexpectedly.
+        """
+        timings: dict[ChoiceCaller, float | CUDAGraphBenchmarkError] = {}
+        sticky_choices: OrderedSet[ChoiceCaller] = OrderedSet()
+
+        for choice in choices:
+            request = getattr(choice, "bmreq", None)
+            if request is None:
+                raise AssertionError("bmreq is None for choice")
+
+            isolated_pool = AutotuneProcessPool()
+            try:
+                try:
+                    timing = isolated_pool.submit(
+                        run_autotune_in_subprocess,
+                        request,
+                    ).result()
+                except BrokenProcessPool as error:
+                    timing = StickyCUDABenchmarkError(str(error))
+            finally:
+                isolated_pool._shutdown(terminate_workers=True)
+
+            timing = cast(
+                float | CUDAGraphBenchmarkError | StickyCUDABenchmarkError,
+                timing,
+            )
+
+            if isinstance(
+                timing, (StickyCUDABenchmarkError, PoisonedAutotuneWorkerError)
+            ):
+                sticky_choices.add(choice)
+                cached_timing: float | CUDAGraphBenchmarkError = float("inf")
+            else:
+                timings[choice] = timing
+                cached_timing = timing
+
+            choice_hash = cls.get_choice_hash(choice, inputs_key)
+            completed_future: Future[Any] = Future()
+            completed_future.set_result(cached_timing)
+            with cls._future_lock:
+                cls.choice_hash_to_future[choice_hash] = completed_future
+                cls.invalidated_choice_hashes.discard(choice_hash)
+
+        return timings, sticky_choices
+
+    @classmethod
     def start(cls, choices: list[ChoiceCaller], inputs_key: str):
         """
         Start asynchronous autotuning in a subprocess.
@@ -2092,20 +2287,7 @@ class AsyncAutotuner:
         """
 
         for choice in choices:
-            choice_hash = AsyncAutotuner.get_choice_hash(choice, inputs_key)
-
-            if choice_hash in AsyncAutotuner.choice_hash_to_future:
-                continue
-
-            if not getattr(choice, "bmreq", None) is not None:
-                raise AssertionError("bmreq is None for choice")
-
-            autotune_future = AutotuneProcessPool.get_instance().submit(
-                run_autotune_in_subprocess,
-                choice.bmreq,
-            )
-
-            AsyncAutotuner.choice_hash_to_future[choice_hash] = autotune_future
+            cls._submit_choice(choice, inputs_key)
 
     @classmethod
     def get_results(
@@ -2122,15 +2304,169 @@ class AsyncAutotuner:
             Dict mapping ChoiceCaller to benchmark timing
         """
 
-        timings = {}
-        for choice in choices:
-            choice_hash = AsyncAutotuner.get_choice_hash(choice, inputs_key)
-            future = AsyncAutotuner.choice_hash_to_future.get(choice_hash)
-            if future is None:
-                autotuning_log.debug(
-                    "Skipping choice without a scheduled autotuning Future: %s",
-                    choice_hash,
+        def collect_with_sticky_recovery(
+            active_choices: list[ChoiceCaller],
+            future_inputs_key: str = inputs_key,
+        ) -> tuple[
+            dict[ChoiceCaller, float | CUDAGraphBenchmarkError],
+            OrderedSet[ChoiceCaller],
+        ]:
+            """Retire a poisoned worker and retry choices that did not fail."""
+            sticky_choices: OrderedSet[ChoiceCaller] = OrderedSet()
+            while active_choices:
+                current_timings = {}
+                sticky_choice: ChoiceCaller | None = None
+                skipped_on_poisoned_worker = False
+                for choice in active_choices:
+                    choice_hash = AsyncAutotuner.get_choice_hash(
+                        choice, future_inputs_key
+                    )
+                    future = AsyncAutotuner._future_for_choice(
+                        choice, future_inputs_key
+                    )
+                    if future is None:
+                        autotuning_log.debug(
+                            "Skipping choice without a scheduled autotuning Future: %s",
+                            choice_hash,
+                        )
+                        continue
+                    while True:
+                        try:
+                            timing = future.result()
+                            break
+                        except (BrokenProcessPool, CancelledError) as error:
+                            isolated_choices: list[ChoiceCaller] | None = None
+                            with AsyncAutotuner._future_lock:
+                                invalidated = (
+                                    choice_hash
+                                    in AsyncAutotuner.invalidated_choice_hashes
+                                )
+                                if invalidated and (
+                                    AsyncAutotuner.choice_hash_to_future.get(
+                                        choice_hash
+                                    )
+                                    is future
+                                ):
+                                    AsyncAutotuner.choice_hash_to_future.pop(
+                                        choice_hash
+                                    )
+                                if not invalidated and isinstance(
+                                    error, BrokenProcessPool
+                                ):
+                                    pool = AutotuneProcessPool.get_instance()
+                                    if not pool.supports_sticky_cuda_recovery:
+                                        raise
+                                    isolated_choices = [
+                                        candidate
+                                        for candidate in active_choices
+                                        if AsyncAutotuner.get_choice_hash(
+                                            candidate, future_inputs_key
+                                        )
+                                        in AsyncAutotuner.choice_hash_to_future
+                                    ]
+                                    AsyncAutotuner._retire_pool(
+                                        OrderedSet(),
+                                        future_inputs_key,
+                                        allow_retry=True,
+                                    )
+                            if isolated_choices is not None:
+                                return AsyncAutotuner._benchmark_choices_in_isolated_processes(
+                                    isolated_choices,
+                                    future_inputs_key,
+                                )
+                            if not invalidated:
+                                raise
+                            future = AsyncAutotuner._future_for_choice(
+                                choice, future_inputs_key
+                            )
+                            if future is None:
+                                raise AssertionError(
+                                    f"failed to resubmit invalidated choice {choice_hash}"
+                                ) from error
+                    if isinstance(timing, PoisonedAutotuneWorkerError):
+                        pool = AutotuneProcessPool.get_instance()
+                        if not pool.supports_sticky_cuda_recovery:
+                            AsyncAutotuner._retire_pool(
+                                sticky_choices,
+                                future_inputs_key,
+                                allow_retry=False,
+                            )
+                            raise timing
+                        skipped_on_poisoned_worker = True
+                        break
+                    if isinstance(timing, StickyCUDABenchmarkError):
+                        pool = AutotuneProcessPool.get_instance()
+                        sticky_choices.add(choice)
+                        if not pool.supports_sticky_cuda_recovery:
+                            AsyncAutotuner._retire_pool(
+                                sticky_choices,
+                                future_inputs_key,
+                                allow_retry=False,
+                            )
+                            raise timing
+                        sticky_choice = choice
+                        break
+                    current_timings[choice] = timing
+
+                if sticky_choice is None and not skipped_on_poisoned_worker:
+                    return current_timings, sticky_choices  # type: ignore[return-value]
+
+                AsyncAutotuner._retire_pool(
+                    sticky_choices,
+                    future_inputs_key,
+                    allow_retry=True,
                 )
-                continue
-            timings[choice] = future.result()
-        return timings
+                if sticky_choice is not None:
+                    active_choices = [
+                        choice
+                        for choice in active_choices
+                        if choice is not sticky_choice
+                    ]
+                for choice in active_choices:
+                    AsyncAutotuner._submit_choice(choice, future_inputs_key)
+
+            return {}, sticky_choices
+
+        timings, sticky_choices = collect_with_sticky_recovery(list(choices))
+        failed_timings = {choice: float("inf") for choice in sticky_choices}
+
+        if not any(
+            isinstance(timing, CUDAGraphBenchmarkError) for timing in timings.values()
+        ):
+            return {**failed_timings, **timings}  # type: ignore[return-value]
+
+        autotuning_log.warning(
+            "CUDA graph capture failed during pipelined autotuning; "
+            "retrying every candidate eagerly"
+        )
+        retry_requests: list[BenchmarkRequest] = []
+        retry_choice_hashes: list[str] = []
+        retry_inputs_key = f"{inputs_key}:eager_retry:{id(retry_requests)}"
+        try:
+            for choice in timings:
+                request = getattr(choice, "bmreq", None)
+                if request is None:
+                    raise AssertionError(f"bmreq is None for choice {choice}")
+                request.force_eager_benchmark = True
+                retry_requests.append(request)
+                choice_hash = AsyncAutotuner.get_choice_hash(choice, retry_inputs_key)
+                retry_choice_hashes.append(choice_hash)
+                AsyncAutotuner._submit_choice(choice, retry_inputs_key)
+
+            retry_timings, retry_sticky_choices = collect_with_sticky_recovery(
+                list(timings), retry_inputs_key
+            )
+            failed_timings.update(
+                {choice: float("inf") for choice in retry_sticky_choices}
+            )
+            return {**failed_timings, **retry_timings}  # type: ignore[return-value]
+        finally:
+            # These futures contain eager fallback timings even though inputs_key
+            # identifies automatic CUDA-graph benchmarking. Do not let a later
+            # compile reuse them as graph measurements.
+            with AsyncAutotuner._future_lock:
+                for choice_hash in retry_choice_hashes:
+                    AsyncAutotuner.choice_hash_to_future.pop(choice_hash, None)
+                    AsyncAutotuner.invalidated_choice_hashes.discard(choice_hash)
+            for request in retry_requests:
+                request.force_eager_benchmark = False
