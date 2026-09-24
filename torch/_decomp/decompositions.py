@@ -1675,7 +1675,12 @@ def _addmm_activation(
 ):
     out = addmm(self, mat1, mat2, beta, alpha)
     if use_gelu:
-        if self.is_cuda:
+        # Feature decoupling: instead of hard-coding CUDA, check whether the
+        # device is the registered privateuse1 backend (e.g. Ascend NPU) so
+        # third-party backends follow the same fused-tanh path as CUDA.
+        private_backend = torch._C._get_privateuse1_backend_name()
+        is_accelerator = self.is_cuda or self.device.type == private_backend
+        if is_accelerator:
             return aten.gelu(out, approximate="tanh")
         else:
             return aten.gelu(out)
