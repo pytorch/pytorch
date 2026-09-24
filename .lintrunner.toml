@@ -266,7 +266,6 @@ exclude_patterns = [
     'c10/util/llvmMathExtras.h',
     'c10/util/NetworkFlow.cpp',
     'c10/util/order_preserving_flat_hash_map.h',
-    'c10/util/overflows.h',
     'c10/util/safe_numerics.h',
     'c10/util/signal_handler.cpp',
     'c10/util/StringUtil.cpp',
@@ -278,6 +277,7 @@ exclude_patterns = [
     'torch/headeronly/util/BFloat16-math.h',
     'torch/headeronly/util/irange.h',
     'torch/headeronly/util/MathConstants.h',
+    'torch/headeronly/util/overflows.h',
 ]
 init_command = [
     'python3',
@@ -329,6 +329,7 @@ include_patterns = [
     'torch/headeronly/util/complex.h',
     'torch/headeronly/util/floating_point_utils.h',
     'torch/headeronly/util/irange.h',
+    'torch/headeronly/util/overflows.h',
 ]
 exclude_patterns = [
     '**/fb/**',
@@ -592,6 +593,7 @@ exclude_patterns = [
     # Vendored: raw throws are upstream's call, not ours.
     'c10/util/flat_hash_map.h',  # skarupke/flat_hash_map
     'third_party/concurrentqueue/**',
+    'third_party/kineto/libkineto/third_party/**',  # Kineto's own third_party
     # Fork of flat_hash_map. Also: at()'s out_of_range becomes KeyError in
     # jit/python/python_dict.cpp, so converting it breaks TorchScript dicts.
     'c10/util/order_preserving_flat_hash_map.h',
@@ -913,6 +915,8 @@ include_patterns = [
 # therefore are permitted to use logging
 exclude_patterns = [
     'tools/**',
+    'third_party/kineto/tools/**',  # copies of tools/linter, excluded above
+    'third_party/kineto/libkineto/third_party/**',  # Kineto's own third_party
     'test/**',
     'benchmarks/**',
     'torch/distributed/run.py',
@@ -1598,6 +1602,25 @@ command = [
 ]
 include_patterns = [
     "**/pyproject.toml",
+]
+
+[[linter]]
+code = 'LICENSE_FILES'
+command = [
+    'uv',
+    'run',
+    '--python',
+    '3.10',
+    '--script',
+    'tools/linter/adapters/license_files_linter.py',
+    '--',
+    '@{{PATHSFILE}}'
+]
+include_patterns = [
+    'pyproject.toml',
+    'test/test_license.py',
+    'tools/linter/license_files_audit.py',
+    'tools/linter/license_audit_manifest.toml',
 ]
 
 [[linter]]

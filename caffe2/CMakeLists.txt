@@ -457,7 +457,9 @@ if(USE_SOURCE_DEBUG_ON_MOBILE)
   # so this condition specifically says we are building for source debug
   # on mobile.
   if(BUILD_LITE_INTERPRETER)
-    set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/serialization/pickle.cpp PROPERTIES COMPILE_FLAGS "-DC10_MOBILE -DFEATURE_TORCH_MOBILE")
+    set_source_files_properties(
+      ${TORCH_SRC_DIR}/csrc/jit/serialization/pickle.cpp
+      PROPERTIES COMPILE_DEFINITIONS "C10_MOBILE;FEATURE_TORCH_MOBILE")
   endif()
 endif()
 
@@ -634,12 +636,13 @@ if(USE_CUDA)
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryOps.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/GroupStreamGuard.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/nccl_extension.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/ops/nccl_reduce_scatter_offset.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/ops/nccl_all_to_all_nd.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/cuda_mem_pool.cpp
-        PROPERTIES COMPILE_FLAGS "-DPYTORCH_C10_DRIVER_API_SUPPORTED=1"
+        PROPERTIES COMPILE_DEFINITIONS "PYTORCH_C10_DRIVER_API_SUPPORTED=1"
       )
     endif()
 
@@ -656,8 +659,8 @@ if(USE_CUDA)
     ${TORCH_ROOT}/aten/src/ATen/cuda/detail/LazyNVRTC.cpp
     PROPERTIES COMPILE_DEFINITIONS "NVRTC_SHORTHASH=${CUDA_NVRTC_SHORTHASH}"
   )
-  set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/passes/frozen_conv_add_relu_fusion.cpp PROPERTIES COMPILE_FLAGS "-DUSE_CUDA=1")
-  set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/interface.cpp PROPERTIES COMPILE_FLAGS "-DUSE_CUDA=1")
+  set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/passes/frozen_conv_add_relu_fusion.cpp PROPERTIES COMPILE_DEFINITIONS "USE_CUDA=1")
+  set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/interface.cpp PROPERTIES COMPILE_DEFINITIONS "USE_CUDA=1")
 endif()
 
 if(BUILD_ONEDNN_GRAPH)
@@ -1189,7 +1192,7 @@ elseif(USE_CUDA)
       target_link_libraries(torch_cuda_linalg PRIVATE
           CUDA::culibos ${CMAKE_DL_LIBS})
     endif()
-    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/cuda/LinearAlgebraStubs.cpp PROPERTIES COMPILE_FLAGS "-DBUILD_LAZY_CUDA_LINALG")
+    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/cuda/LinearAlgebraStubs.cpp PROPERTIES COMPILE_DEFINITIONS "BUILD_LAZY_CUDA_LINALG")
     install(TARGETS torch_cuda_linalg DESTINATION "${TORCH_INSTALL_LIB_DIR}")
   endif()
 
@@ -1209,13 +1212,14 @@ elseif(USE_CUDA)
   endif()
   # Set driver api defined for PeerToPeerAccess
   if(NOT WIN32)
-    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/cuda/PeerToPeerAccess.cpp PROPERTIES COMPILE_FLAGS "-DPYTORCH_C10_DRIVER_API_SUPPORTED=1")
+    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/cuda/PeerToPeerAccess.cpp PROPERTIES COMPILE_DEFINITIONS "PYTORCH_C10_DRIVER_API_SUPPORTED=1")
   endif()
 
 endif()
 
 if(USE_XPU)
   list(APPEND Caffe2_XPU_SRCS ${GENERATED_CXX_TORCH_XPU})
+  list(APPEND Caffe2_XPU_SRCS ${TORCH_SRC_DIR}/csrc/xpu/XPUPluggableAllocator.cpp)
   list(APPEND Caffe2_XPU_SRCS ${TORCH_SRC_DIR}/csrc/inductor/aoti_torch/shim_xpu.cpp)
   list(APPEND Caffe2_XPU_SRCS ${TORCH_SRC_DIR}/csrc/inductor/aoti_runner/model_container_runner_xpu.cpp)
   add_library(torch_xpu ${Caffe2_XPU_SRCS})
@@ -1777,13 +1781,13 @@ endif()
 set(EXPERIMENTAL_SINGLE_THREAD_POOL "0" CACHE STRING
   "Experimental option to use a single thread pool for inter- and intra-op parallelism")
 if("${EXPERIMENTAL_SINGLE_THREAD_POOL}")
-  target_compile_definitions(torch_cpu PUBLIC "-DAT_EXPERIMENTAL_SINGLE_THREAD_POOL=1")
+  target_compile_definitions(torch_cpu PUBLIC AT_EXPERIMENTAL_SINGLE_THREAD_POOL=1)
 endif()
 
 if(MSVC AND BUILD_SHARED_LIBS)
   # ONNX is linked statically and needs to be exported from this library
   # to be used externally. Make sure that references match the export.
-  target_compile_options(torch_cpu PRIVATE "-DONNX_BUILD_MAIN_LIB")
+  target_compile_definitions(torch_cpu PRIVATE ONNX_BUILD_MAIN_LIB)
 endif()
 
 caffe2_interface_library(torch_cpu torch_cpu_library)
