@@ -1,22 +1,26 @@
-"""Ahead-of-time precompilation: the make_fx capture internals behind the public
+"""Ahead-of-time precompilation: the internals behind the public
 ``torch.compiler.precompile`` module.
 
 ``torch/compiler/precompile.py`` re-exports the public types defined here --
-``Capture``, ``MakeFxTracer``, ``PrecompiledRunnable`` -- beside
+``Capture``, ``DynamoTracer``, ``MakeFxTracer``, ``PrecompiledRunnable`` -- beside
 ``PrecompileSummary``, and the two caller-driven entry points defined here:
 ``capture``, which writes the pair from the calls the caller makes, and ``load``,
-which reconstructs a runnable from it.
-``PrecompiledModule`` drives a NON-STRICT make_fx trace of one execution of ``fn``
-and renders it as a self-contained, executable ``python_code`` string plus a
-companion integrity-tagged ``cache``: with ``backend="inductor"`` (the default) the
-captured graph is lowered through the AOT backend contract
+which reconstructs a runnable from it. Either front-end writes the same pair: a
+self-contained, executable ``python_code`` string plus a companion
+integrity-tagged ``cache``. ``_runnable_from_pair`` is the loader core that turns
+a pair back into a runnable.
+
+``DynamoTracer`` (the default) drives a ``PrecompileSession``
+(``torch/_dynamo/precompile_package.py``) across the caller's calls, and the
+multi-graph frame records and driver emitter at the end of this module render
+every frame Dynamo compiled: the entry, its graph-break continuations and its
+recompiled variants. ``MakeFxTracer`` drives ``PrecompiledModule``, a NON-STRICT
+make_fx trace of one execution of ``fn``: with ``backend="inductor"`` (the
+default) the captured graph is lowered through the AOT backend contract
 (``torch._functorch.aot_autograd.compile_to_python``, AOTAutograd + Inductor), and
 ``python_code`` JIT-compiles kernels on first call while the cache primes them so a
 warm reload skips JIT; with ``backend="eager"`` ``python_code`` inlines the captured
-graph and runs on its own. ``_runnable_from_pair`` is the loader core that turns a
-pair back into a runnable. The multi-graph (Dynamo) frame records and driver
-emitter at the end of the module serve the same artifact format for a capture that
-graph-breaks or recompiles.
+graph and runs on its own.
 
 The full contract, the calling convention, and the cache / code_hash design all live in
 Note [precompile programming model] below; every public entry point and guard references
@@ -25,8 +29,10 @@ it.
 
 # Note [precompile programming model]
 #
-# ``fn`` is the WHOLE computation, e.g. ``lambda model, x: model(x)`` for inference
-# or ``lambda model, x, t: loss_fn(model(x), t).backward()`` for a training step.
+# ``fn`` is the WHOLE computation, e.g. a module-level ``def step(model, x): return
+# model(x)`` for inference or ``def step(model, x, t): loss_fn(model(x),
+# t).backward()`` for a training step (only a MakeFxTracer capture also takes the
+# ``lambda`` forms).
 # Among the positional args, the nn.Module arguments have their parameters and
 # buffers lifted to explicit graph inputs (via functional reparametrization), so
 # nothing live is baked in; the remaining args are the runtime inputs. The artifact
@@ -229,18 +235,17 @@ it.
 # so concurrent backend="inductor" captures lower one at a time. The make_fx trace
 # and the backend="eager" path are NOT serialized.
 #
-# tracer: the capture front-end, orthogonal to backend. MakeFxTracer (the default) is
-# the non-strict trace everything above describes (the invariants, the contract).
-# DynamoTracer analyzes the Python instead of specializing to one traced path: it
-# records every frame Dynamo compiles while the caller's calls run -- the entry, the
-# graph-break continuations, the recompiled variants -- with one guard tree per
-# variant, and the artifact dispatches among them at call time. Its artifact is
-# standalone (it installs nothing) and is locked to the producing Python version and
-# torch build, since it inlines serialized bytecode and pickled guard state.
-# Invariants 1, 2, 3 and 6 above are the make_fx contract; under Dynamo a call outside
-# the captured variants is REFUSED by the guards rather than silently served, and the
-# guards that could not be serialized are listed in the artifact (DROPPED_GUARDS)
-# rather than checked.
+# tracer: the capture front-end, orthogonal to backend. MakeFxTracer is the non-strict
+# trace everything above describes (the invariants, the contract). DynamoTracer (the
+# default) analyzes the Python instead of specializing to one traced path: it records
+# every frame Dynamo compiles while the caller's calls run -- the entry, the graph-break
+# continuations, the recompiled variants -- with one guard tree per variant, and the
+# artifact dispatches among them at call time. Its artifact is standalone (it installs
+# nothing) and is locked to the producing Python version and torch build, since it
+# inlines serialized bytecode and pickled guard state. Invariants 1, 2, 3 and 6 above
+# are the make_fx contract; under Dynamo a call outside the captured variants is
+# REFUSED by the guards rather than silently served, and the guards that could not be
+# serialized are reported (PrecompileSummary.dropped_guards) rather than checked.
 
 from __future__ import annotations
 
@@ -380,7 +385,7 @@ class MakeFxTracer:
 
 @dataclasses.dataclass(frozen=True)
 class DynamoTracer:
-    """The ``dynamo`` capture front-end, passed as ``tracer=`` to
+    """The ``dynamo`` capture front-end (the default), passed as ``tracer=`` to
     :func:`torch.compiler.precompile.capture`.
 
     An execution-driven multi-graph capture that analyzes the Python (bytecode)
@@ -2176,8 +2181,8 @@ def _reject_uninstallable_entry(frames: list[dict[str, Any]], entry: Any) -> Non
             f"nothing. This happens when the captured callable is a thin wrapper -- "
             f"an nn.Module, or a forward that immediately delegates -- where Dynamo "
             f"compiles the wrapper's inner frame instead. Capture the function that "
-            f"CALLS the model, e.g. "
-            f"precompile.capture(lambda m, x: m(x), ...) and calling cap(model, x)."
+            f"CALLS the model, e.g. a module-level def step(m, x): return m(x), "
+            f"with precompile.capture(step, ...) and calling cap(model, x)."
         )
     code = SerializedCode.to_code_object(entry_frame["code"])
     if code.co_freevars:
@@ -2525,13 +2530,13 @@ class PrecompiledModule(PrecompiledRunnable):
         return obj
 
     def _compile(self, args: tuple[object, ...]) -> None:
-        # make_fx is the only implemented tracer; "dynamo" is a planned alternative
-        # capture front-end. Reject it here (the single capture-dispatch point) before
-        # running fn, so the failure is clear rather than a wrong default.
+        # This holder only runs make_fx; a DynamoTracer capture goes through
+        # _DynamoCapture. Reject "dynamo" here (the single capture-dispatch point)
+        # before running fn, so the failure is clear rather than a wrong fallback.
         if self._tracer != "make_fx":
             raise NotImplementedError(
-                f"precompile tracer={self._tracer!r} is not implemented yet; use "
-                "tracer='make_fx' (the default)."
+                f"precompile tracer={self._tracer!r} is not implemented here; use "
+                "tracer='make_fx', or capture(fn, tracer=DynamoTracer())."
             )
         if self._backend == "eager" and _has_unbacked_marks(args):
             raise NotImplementedError(
@@ -3115,7 +3120,7 @@ def capture(
     *,
     artifact_path: str | os.PathLike[str],
     cache_path: str | os.PathLike[str],
-    tracer: MakeFxTracer | DynamoTracer = MakeFxTracer(),
+    tracer: MakeFxTracer | DynamoTracer = DynamoTracer(),
     backend: str = "inductor",
 ) -> Capture:
     """Capture ``fn`` across the calls YOUR loop makes, writing the artifact on exit.
@@ -3148,21 +3153,22 @@ def capture(
     so compile nothing else there, and do not overlap two such captures.
 
     ``tracer`` picks the capture front-end and carries its tracer-specific
-    configuration. :class:`DynamoTracer` is an execution-driven
+    configuration. :class:`DynamoTracer` (the default) is an execution-driven
     multi-graph capture: it analyzes the Python rather than tracing one path,
     records every graph-break continuation and guarded recompilation the calls
     exercise, takes as many calls as you make (keyword arguments included), and
     the artifact dispatches among the captured variants by their guards -- a call
     no variant covers RAISES rather than silently serving, since there is no
     compiler behind a source artifact. :class:`MakeFxTracer` is one non-strict
-    ATen trace (the default): the capture takes exactly ONE positional call, refuses a second,
+    ATen trace: the capture takes exactly ONE positional call, refuses a second,
     and specializes control flow and shapes to that call, with the contract of
     Note [precompile programming model] in ``torch/_precompile.py``. ``fn`` is
-    the whole computation, e.g. ``lambda model, x: model(x)``: the ``nn.Module``
-    arguments have their params/buffers lifted to graph inputs (no weights are
-    baked in) and the rest are the runtime inputs; the reloaded callable is
-    invoked with the same argument structure, and the runtime model must match
-    the captured model's parameter/buffer structure.
+    the whole computation, e.g. a module-level ``def step(model, x): return
+    model(x)`` (only a :class:`MakeFxTracer` capture also takes a lambda): the
+    ``nn.Module`` arguments have their params/buffers lifted to graph inputs (no
+    weights are baked in) and the rest are the runtime inputs; the reloaded
+    callable is invoked with the same argument structure, and the runtime model
+    must match the captured model's parameter/buffer structure.
 
     A Dynamo artifact is STANDALONE: it rebuilds the entry from its code object
     and installs nothing, so ``fn`` must be a module-level function of an
