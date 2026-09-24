@@ -63,7 +63,13 @@ from ..exc import (
     Unsupported,
 )
 from ..source import AttrSource, DictGetItemSource
-from ..utils import proxy_args_kwargs, set_example_value, unpack_iterable
+from ..utils import (
+    get_fake_values_from_nodes,
+    get_storage_tensors,
+    proxy_args_kwargs,
+    set_example_value,
+    unpack_iterable,
+)
 from .base import VariableTracker
 from .dicts import ConstDictVariable
 from .lazy import LazyVariableTracker
@@ -488,37 +494,116 @@ def _assert_tensors_nonaliasing(inputs: Any, outputs: Any) -> None:
 
 
 def get_tensor_storages(tensor: torch.Tensor) -> set[StorageWeakRef]:
-    """
-    Get storage references from a tensor.
-
-    Handles regular tensors. Raises NotImplementedError for sparse tensors
-    and traceable wrapper subclasses.
-
-    Args:
-        tensor: The tensor to extract storages from
-
-    Returns:
-        Set of StorageWeakRef objects for the tensor's storage(s)
-    """
-    from torch.multiprocessing.reductions import StorageWeakRef
-    from torch.utils._python_dispatch import is_traceable_wrapper_subclass
-
-    storages: set[StorageWeakRef] = set()
-
+    """Get storage references, including sparse and wrapper tensor components."""
     if not isinstance(tensor, torch.Tensor):
-        return storages
+        return set()
+    return {
+        StorageWeakRef(plain._typed_storage()) for plain in get_storage_tensors(tensor)
+    }
 
-    if tensor.is_sparse or tensor.is_sparse_csr:
-        raise NotImplementedError("get_tensor_storages does not support sparse tensors")
 
-    if is_traceable_wrapper_subclass(tensor):
-        raise NotImplementedError(
-            "get_tensor_storages does not support traceable wrapper subclasses"
-        )
-    else:
-        storages.add(StorageWeakRef(tensor._typed_storage()))
+def collect_while_loop_writes(
+    tx: "InstructionTranslatorBase",
+    graph: torch.fx.Graph,
+    graph_module: GraphModule | None = None,
+) -> list[torch.Tensor]:
+    from torch._higher_order_ops.triton_kernel_wrap import (
+        get_mutated_tensors,
+        triton_kernel_wrapper_mutation,
+    )
+    from torch._higher_order_ops.utils import (
+        _has_gen_schema,
+        _maybe_reenter_make_fx,
+        check_input_alias_and_mutation_return_outputs,
+    )
 
-    return storages
+    def example_value(node):
+        if graph_module is None:
+            return get_fake_values_from_nodes(tx, node, True)
+        if node.op == "get_attr":
+            return getattr(graph_module, node.target)
+        return node.meta["val"]
+
+    writes = []
+    for node in graph.nodes:
+        is_hop = isinstance(node.target, HigherOrderOperator)
+        if not is_hop and not (
+            graph_module is not None and isinstance(node.target, torch._ops.OpOverload)
+        ):
+            continue
+        graph_args = [
+            arg
+            for arg in pytree.tree_leaves((node.args, node.kwargs))
+            if isinstance(arg, torch.fx.Node)
+            and arg.op == "get_attr"
+            and isinstance(example_value(arg), GraphModule)
+        ]
+        # These snapshots belong to this invocation, before module deduplication.
+        if (
+            node.target is not torch.ops.higher_order.invoke_subgraph
+            and graph_args
+            and all("dynamo_mutated_tensors" in arg.meta for arg in graph_args)
+        ):
+            continue
+        args, kwargs = torch.fx.node.map_arg((node.args, node.kwargs), example_value)
+        if node.target is torch.ops.higher_order.invoke_subgraph:
+            # Deduplicated and reused regions need this invocation's storages.
+            # Retain write views instead of gen_schema's whole-input approximation.
+            if tx.fake_mode is None:
+                raise AssertionError("fake_mode must not be None")
+            with tx.fake_mode:
+                module = _maybe_reenter_make_fx(args[0])(*args[2:])
+            region_writes = collect_while_loop_writes(tx, module.graph, module)
+            # Functionalization relies on the region's own mutation schema, which
+            # must cover every input storage written through nested HOPs too.
+            mutated_indices = check_input_alias_and_mutation_return_outputs(module)[3]
+            operand_storages = [get_tensor_storages(arg) for arg in args[2:]]
+            declared_storages = set().union(
+                *(operand_storages[idx] for idx in mutated_indices)
+            )
+            input_storages = set().union(*operand_storages)
+            if any(
+                get_tensor_storages(tensor) & input_storages - declared_storages
+                for tensor in region_writes
+            ):
+                raise TorchRuntimeError(
+                    "while_loop cannot safely represent nested invoke_subgraph mutation: "
+                    "the region's mutation schema does not cover its writes. "
+                    "Move the mutation outside the nested region."
+                )
+            writes.extend(region_writes)
+            continue
+        if node.target is triton_kernel_wrapper_mutation:
+            names = get_mutated_tensors(
+                kwargs["kernel_idx"],
+                kwargs["constant_args_idx"],
+                kwargs["kwargs"],
+                kwargs["tma_descriptor_metadata"],
+            )
+            targets = [kwargs["kwargs"][name] for name in names]
+        elif not is_hop or _has_gen_schema(node.target):
+            schema = (
+                node.target.gen_schema(*args, **kwargs)
+                if is_hop
+                else node.target._schema
+            )
+            if is_hop and schema.tree_spec is not None:
+                args = schema.tree_spec.flatten_up_to((args, kwargs))
+                kwargs = dict[str, Any]()
+            targets = [
+                args[idx] if idx < len(args) else kwargs[argument.name]
+                for idx, argument in enumerate(schema.arguments)
+                if argument.alias_info is not None and argument.alias_info.is_write
+            ]
+        else:
+            # HOPs without a mutation schema must be functional (except Triton).
+            continue
+        for tensor in pytree.tree_leaves(targets):
+            if isinstance(tensor, torch.Tensor):
+                writes.extend(plain.detach() for plain in get_storage_tensors(tensor))
+    for node in graph.nodes:
+        writes.extend(node.meta.pop("dynamo_mutated_tensors", ()))
+    return writes
 
 
 def subgraph_mutated_input_storages(
@@ -635,8 +720,6 @@ class StorageAliasingTracker:
             False if it aliases (should be filtered out).
         """
         from torch._higher_order_ops.utils import _collect_fake_inputs
-        from torch.multiprocessing.reductions import StorageWeakRef
-        from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
         example_value = _collect_fake_inputs([proxy_node])[0]
 
@@ -649,12 +732,7 @@ class StorageAliasingTracker:
         if tensor_storages & self.excluded_storages:
             return False
 
-        # Track this tensor's storage (for wrapper subclasses, inner storages were already checked)
-        if not is_traceable_wrapper_subclass(example_value):
-            if not (example_value.is_sparse or example_value.is_sparse_csr):
-                self.excluded_storages.add(
-                    StorageWeakRef(example_value._typed_storage())
-                )
+        self.excluded_storages.update(tensor_storages)
 
         return True
 
@@ -809,14 +887,14 @@ def _call_while_loop(
 
     def check_carried_input_mutation(
         fn_name: str, graph: torch.fx.Graph
-    ) -> set[StorageWeakRef]:
+    ) -> tuple[set[StorageWeakRef], list[torch.Tensor]]:
         from torch._prims_common import compute_required_storage_length
         from torch.fx.experimental.symbolic_shapes import guard_or_false
 
         mutated_inputs = set(getattr(graph, "_dynamo_mutated_input_indices", ()))
         mutated_storages = subgraph_mutated_input_storages(graph, mutated_inputs)
         if any(idx < num_carried_inputs for idx in mutated_inputs):
-            raise TorchRuntimeError(f"{fn_name} might be modifying a carried input!")
+            raise TorchRuntimeError(f"{fn_name} modifies a carried input!")
 
         def byte_range(tensor):
             start = tensor.storage_offset() * tensor.element_size()
@@ -825,46 +903,50 @@ def _call_while_loop(
             )
             return start, end * tensor.element_size()
 
-        graphs = [graph]
-        for node in graph.find_nodes(op="get_attr"):
-            subgraph = tx.output.nn_modules.get(node.target)
-            if isinstance(subgraph, GraphModule):
-                graphs.extend(
-                    module.graph
-                    for module in subgraph.modules()
-                    if isinstance(module, GraphModule)
-                )
-        writes = [
-            tensor
-            for subgraph in graphs
-            for node in subgraph.nodes
-            for tensor in node.meta.get("dynamo_mutated_tensors", ())
-        ]
+        writes = collect_while_loop_writes(tx, graph)
+        write_storages = set()
         for tensor in writes:
-            mutated_storages |= get_tensor_storages(tensor)
+            write_storages |= get_tensor_storages(tensor)
+        placeholders = list(graph.find_nodes(op="placeholder"))
+        if any(
+            get_tensor_storages(node.meta["example_value"]) & write_storages
+            for node in placeholders[:num_carried_inputs]
+        ):
+            raise TorchRuntimeError(f"{fn_name} modifies a carried input!")
+        mutated_storages |= write_storages
         aliased_carries = parent_mutated_input_indices(operands_seq, mutated_storages)
         for carry_idx in aliased_carries:
             carried = operands_seq[carry_idx].as_proxy().node.meta["example_value"]
-            if guard_or_false(carried.numel() == 0):
-                continue
-            carry_start, carry_end = byte_range(carried)
-            carried_storages = get_tensor_storages(carried)
-            for mutated in writes:
-                if not carried_storages & get_tensor_storages(mutated):
+            for carry in get_storage_tensors(carried):
+                if guard_or_false(carry.numel() == 0):
                     continue
-                if guard_or_false(mutated.numel() == 0):
+                carried_storages = get_tensor_storages(carry)
+                if not carried_storages & mutated_storages:
                     continue
-                start, end = byte_range(mutated)
-                # Bounding spans conservatively include gaps in strided views.
-                if guard_or_false(end <= carry_start) or guard_or_false(
-                    carry_end <= start
-                ):
-                    continue
-                raise TorchRuntimeError(
-                    f"{fn_name} mutates a tensor that aliases carried input {carry_idx}; "
-                    "clone it before mutating, or update the carry through the return value."
-                )
-        return mutated_storages
+                carry_start, carry_end = byte_range(carry)
+                matching_writes = [
+                    tensor
+                    for tensor in writes
+                    if carried_storages & get_tensor_storages(tensor)
+                ]
+                disjoint = bool(matching_writes)
+                for mutated in matching_writes:
+                    if guard_or_false(mutated.numel() == 0):
+                        continue
+                    start, end = byte_range(mutated)
+                    # Bounding spans conservatively include gaps in strided views.
+                    if guard_or_false(end <= carry_start) or guard_or_false(
+                        carry_end <= start
+                    ):
+                        continue
+                    disjoint = False
+                    break
+                if not disjoint:
+                    raise TorchRuntimeError(
+                        f"{fn_name} may mutate a tensor that aliases carried input {carry_idx}; "
+                        "clone it before mutating, or update the carry through the return value."
+                    )
+        return mutated_storages, writes
 
     with discard_graph_changes(tx):
         # Note: this must be run under discard graph changes.
@@ -961,7 +1043,9 @@ def _call_while_loop(
     )
     cond_nn_modules = dict(tx.output.nn_modules)
     validate_subgraph_output_types(cond_r)
-    cond_mutated_input_storages = check_carried_input_mutation("cond_fn", cond_graph)
+    cond_mutated_input_storages, cond_writes = check_carried_input_mutation(
+        "cond_fn", cond_graph
+    )
     if cond_r.is_tensor():
         cond_r_meta = _extract_tensor_metadata(
             # type: ignore[attr-defined]
@@ -1011,7 +1095,9 @@ def _call_while_loop(
         remove_consts_from_outputs=False,
     )
     validate_subgraph_output_types(body_r)
-    body_mutated_input_storages = check_carried_input_mutation("body_fn", body_graph)
+    body_mutated_input_storages, body_writes = check_carried_input_mutation(
+        "body_fn", body_graph
+    )
 
     mutated_input_storages = cond_mutated_input_storages | body_mutated_input_storages
 
@@ -1059,6 +1145,16 @@ def _call_while_loop(
 
     cond_node = make_attr(tx, cond_name)
     body_node = make_attr(tx, body_name)
+    if any(
+        target
+        in (
+            torch.ops.higher_order.while_loop,
+            torch.ops.higher_order.while_loop_stack_output,
+        )
+        for _, target in tx.output.current_tracer.source_fn_stack
+    ):
+        cond_node.node.meta["dynamo_mutated_tensors"] = cond_writes
+        body_node.node.meta["dynamo_mutated_tensors"] = body_writes
 
     operands_proxy = tuple(operand.as_proxy() for operand in operands_seq)
     additional_inputs_proxy = tuple(
@@ -2272,6 +2368,13 @@ def make_attr(tx: "InstructionTranslatorBase", name: str) -> Proxy:
         (),
         {},
     )
+    subgraph = tx.output.nn_modules.get(name)
+    if isinstance(subgraph, GraphModule) and any(
+        "dynamo_mutated_tensors" in inner.meta for inner in subgraph.graph.nodes
+    ):
+        node.node.meta["dynamo_mutated_tensors"] = collect_while_loop_writes(
+            tx, subgraph.graph
+        )
     return node
 
 

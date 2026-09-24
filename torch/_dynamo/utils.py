@@ -4148,14 +4148,32 @@ def _custom_op_fake_impl_pending(tx: InstructionTranslatorBase, target: Any) -> 
     return side_effects.has_pending_mutation_of_attr(vt, "_abstract_fn")
 
 
+def get_storage_tensors(tensor: torch.Tensor) -> list[torch.Tensor]:
+    from torch._subclasses.fake_tensor import get_plain_tensors
+
+    result = []
+    for plain in get_plain_tensors(tensor, out=[]):
+        if not isinstance(plain, torch.Tensor):
+            continue
+        if torch._C._functorch.is_batchedtensor(plain):
+            result.extend(get_storage_tensors(torch._C._functorch.get_unwrapped(plain)))
+        elif plain.layout == torch.sparse_coo:
+            result.extend((plain._indices(), plain._values()))
+        elif plain.layout in (torch.sparse_csr, torch.sparse_bsr):
+            result.extend((plain.crow_indices(), plain.col_indices(), plain.values()))
+        elif plain.layout in (torch.sparse_csc, torch.sparse_bsc):
+            result.extend((plain.ccol_indices(), plain.row_indices(), plain.values()))
+        else:
+            result.append(plain)
+    return result
+
+
 class _RecordWhileLoopWrites(TorchDispatchMode):
     def __init__(self, node: torch.fx.Node) -> None:
         super().__init__()
         self.writes = node.meta.setdefault("dynamo_mutated_tensors", [])
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-        from torch._subclasses.fake_tensor import get_plain_tensors
-
         kwargs = kwargs or {}
         targets = []
         for index, argument in enumerate(func._schema.arguments):
@@ -4164,11 +4182,7 @@ class _RecordWhileLoopWrites(TorchDispatchMode):
             value = args[index] if index < len(args) else kwargs.get(argument.name)
             for tensor in pytree.tree_leaves(value):
                 if isinstance(tensor, torch.Tensor):
-                    targets.extend(
-                        plain
-                        for plain in get_plain_tensors(tensor, out=[])
-                        if isinstance(plain, torch.Tensor)
-                    )
+                    targets.extend(get_storage_tensors(tensor))
         # Preserve geometry even if a later operation changes tensor metadata.
         self.writes.extend(tensor.detach() for tensor in targets)
         result = func(*args, **kwargs)
@@ -4273,7 +4287,7 @@ def _get_fake_value_impl(
         from torch._dynamo.eval_frame import _use_eager_on_nested_compile
 
         record_writes: AbstractContextManager[object] = contextlib.nullcontext(None)
-        # Nested HOPs have their own recorded subgraphs, not an ATen write schema.
+        # Nested HOP writes are recovered at their call sites, not through ATen schemas.
         if not isinstance(node.target, torch._ops.HigherOrderOperator) and any(
             target
             in (

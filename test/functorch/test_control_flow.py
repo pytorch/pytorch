@@ -542,6 +542,32 @@ class ReduceMod(torch.nn.Module):
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @skipIfNoDynamoSupport
 class TestControlFlow(TestCase):
+    @parametrize("layout", ["dense", "coo", "csr"])
+    def test_storage_aliasing_tracker_sparse_outputs(self, layout):
+        from torch._dynamo.variables.higher_order_ops import StorageAliasingTracker
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        tensor = torch.ones(2, 2)
+        if layout == "coo":
+            tensor = tensor.to_sparse()
+        elif layout == "csr":
+            tensor = tensor.to_sparse_csr()
+        mode = FakeTensorMode()
+        fake = mode.from_tensor(tensor)
+        with mode:
+            alias = fake.detach()
+            independent = fake.clone()
+        tracker = StorageAliasingTracker()
+        graph = torch.fx.Graph()
+        for name, value, accepted in (
+            ("first", fake, True),
+            ("alias", alias, False),
+            ("independent", independent, True),
+        ):
+            node = graph.placeholder(name)
+            node.meta["example_value"] = value
+            self.assertEqual(tracker.check_and_track(torch.fx.Proxy(node)), accepted)
+
     def setUp(self):
         torch._dynamo.reset()
         super().setUp()
@@ -13166,7 +13192,7 @@ class <lambda>(torch.nn.Module):
             torch.no_grad(),
             self.assertRaisesRegex(
                 torch._dynamo.exc.TorchRuntimeError,
-                f"{mutate_in}_fn might be modifying a carried input",
+                f"{mutate_in}_fn modifies a carried input",
             ),
         ):
             torch.compile(f, backend="inductor", fullgraph=True)(x)
@@ -13208,7 +13234,7 @@ class <lambda>(torch.nn.Module):
             torch.no_grad(),
             self.assertRaisesRegex(
                 torch._dynamo.exc.TorchRuntimeError,
-                f"{mutate_in}_fn might be modifying a carried input",
+                f"{mutate_in}_fn modifies a carried input",
             ),
         ):
             torch.compile(M(), backend="inductor", fullgraph=True, dynamic=dynamic)(
@@ -13318,7 +13344,7 @@ class <lambda>(torch.nn.Module):
             torch.no_grad(),
             self.assertRaisesRegex(
                 torch._dynamo.exc.TorchRuntimeError,
-                "body_fn mutates a tensor that aliases carried input 1; "
+                "body_fn may mutate a tensor that aliases carried input 1; "
                 "clone it before mutating, or update the carry through the return value",
             ),
         ):
@@ -13389,6 +13415,293 @@ class <lambda>(torch.nn.Module):
         )
         self.assertTrue(mutated)
         self.assertTrue(all(idx >= len(loop.args[2]) for idx in mutated))
+        for module in recorder.graphs[0].modules():
+            if isinstance(module, torch.fx.GraphModule):
+                for node in module.graph.nodes:
+                    self.assertNotIn("dynamo_mutated_tensors", node.meta)
+
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    def test_while_loop_sparse_local_write(self, device):
+        class M(torch.nn.Module):
+            def forward(self, dense, x):
+                def cond_fn(i, acc):
+                    return i < 2
+
+                def body_fn(i, acc):
+                    sparse = dense.to_sparse()
+                    sparse.mul_(2)
+                    return i + 1, acc + sparse.to_dense().sum()
+
+                return while_loop(
+                    cond_fn,
+                    body_fn,
+                    (torch.zeros((), dtype=torch.int64, device=x.device), x),
+                )
+
+        dense = torch.ones(3, 3, device=device)
+        x = torch.ones(4, device=device)
+        exported = torch.export.export(M(), (dense, x), strict=True)
+        self.assertEqual(exported.module()(dense, x)[1], x + 36)
+
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    def test_while_loop_nested_carry_false_cond(self, device):
+        def f(nt, state):
+            def cond_fn(i, acc):
+                state.add_(1)
+                return False
+
+            def body_fn(i, acc):
+                return i + 1, acc + 1
+
+            return while_loop(
+                cond_fn,
+                body_fn,
+                (torch.zeros((), dtype=torch.int64, device=state.device), nt),
+            )
+
+        nt = torch.nested.nested_tensor(
+            [torch.ones(2, device=device), torch.ones(3, device=device)],
+            layout=torch.jagged,
+        )
+        state = torch.zeros((), device=device)
+        with torch.no_grad():
+            result = torch.compile(f, backend="eager", fullgraph=True)(nt, state)
+        self.assertEqual(result[1].values(), nt.values())
+        self.assertEqual(result[1].offsets(), nt.offsets())
+        self.assertEqual(state, torch.zeros_like(state))
+
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @parametrize("compile_outer", [False, True])
+    def test_while_loop_batched_carry_false_cond(self, device, compile_outer):
+        def f(x):
+            def cond_fn(i, acc):
+                temporary = torch.ones(4, device=x.device)
+                temporary.add_(1)
+                return False
+
+            def body_fn(i, acc):
+                return i + 1, acc + 1
+
+            return while_loop(
+                cond_fn,
+                body_fn,
+                (torch.zeros((), dtype=torch.int64, device=x.device), x),
+            )[1]
+
+        if compile_outer:
+            fn = torch.compile(torch.vmap(f), backend="eager", fullgraph=True)
+        else:
+            fn = torch.vmap(torch.compile(f, backend="eager", fullgraph=True))
+        x = torch.ones(3, 4, device=device)
+        self.assertEqual(fn(x), x)
+
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @parametrize("reuse", [False, True])
+    @parametrize("reverse", [False, True])
+    @parametrize("overlap", [False, True])
+    @parametrize("dynamic", [False, True])
+    def test_while_loop_nested_region_writes(
+        self, device, reuse, reverse, overlap, dynamic
+    ):
+        @torch.compiler.nested_compile_region
+        def region(t):
+            t.add_(1)
+            if reuse:
+                return (t.sum(),)
+            return t.sum(), 1
+
+        def f(x, y):
+            captured = x[2:6] if overlap else x[4:]
+            other = y[2:6]
+
+            def cond_fn(i, acc):
+                return i < 2
+
+            def body_fn(i, acc):
+                first, second = (captured, other) if reverse else (other, captured)
+                a = region(first)[0]
+                b = region(second)[0]
+                return i + 1, acc + a + b
+
+            return while_loop(
+                cond_fn,
+                body_fn,
+                (torch.zeros((), dtype=torch.int64, device=x.device), x[:4]),
+            )
+
+        if overlap:
+            with (
+                torch.no_grad(),
+                self.assertRaisesRegex(
+                    torch._dynamo.exc.TorchRuntimeError,
+                    "body_fn may mutate a tensor that aliases carried input 1",
+                ),
+            ):
+                torch.compile(f, backend="eager", fullgraph=True, dynamic=dynamic)(
+                    torch.ones(8, device=device), torch.ones(8, device=device)
+                )
+            return
+
+        recorder = EagerAndRecordGraphs()
+        for backend in (recorder, "aot_eager"):
+            torch._dynamo.reset()
+            x = torch.ones(8, device=device)
+            y = torch.ones(8, device=device)
+            with torch.no_grad():
+                result = torch.compile(
+                    f, backend=backend, fullgraph=True, dynamic=dynamic
+                )(x, y)
+            self.assertEqual(result[1], torch.full((4,), 41.0, device=device))
+            self.assertEqual(x[:4], torch.ones(4, device=device))
+            self.assertEqual(x[4:], torch.full((4,), 3.0, device=device))
+            self.assertEqual(y[2:6], torch.full((4,), 3.0, device=device))
+        graph = recorder.graphs[0]
+        loop = next(
+            n
+            for n in graph.graph.nodes
+            if n.target is torch.ops.higher_order.while_loop
+        )
+        self.assertEqual(loop.kwargs["mutated_arg_indices"], "2,3")
+        for module in graph.modules():
+            if isinstance(module, torch.fx.GraphModule):
+                for node in module.graph.nodes:
+                    self.assertNotIn("dynamo_mutated_tensors", node.meta)
+
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @parametrize("warmup", [False, True])
+    @parametrize("nested", [False, True])
+    def test_while_loop_reused_region_local_slice(self, device, warmup, nested):
+        @torch.compiler.nested_compile_region
+        def inner(t):
+            t[4:].add_(1)
+            return t[4:].sum()
+
+        @torch.compiler.nested_compile_region
+        def region(t):
+            if nested:
+                return inner(t)
+            t[4:].add_(1)
+            return t[4:].sum()
+
+        def f(x, y):
+            if warmup:
+                region(y)
+
+            def cond_fn(i, acc):
+                return i < 2
+
+            def body_fn(i, acc):
+                return i + 1, acc + region(y) + region(x)
+
+            return while_loop(
+                cond_fn,
+                body_fn,
+                (torch.zeros((), dtype=torch.int64, device=x.device), x[:4]),
+            )
+
+        if nested:
+            with (
+                torch.no_grad(),
+                self.assertRaisesRegex(
+                    torch._dynamo.exc.TorchRuntimeError,
+                    "while_loop cannot safely represent nested invoke_subgraph mutation",
+                ),
+            ):
+                torch.compile(f, backend="eager", fullgraph=True)(
+                    torch.ones(8, device=device), torch.ones(8, device=device)
+                )
+            return
+
+        recorder = EagerAndRecordGraphs()
+        for backend in (recorder, "aot_eager"):
+            torch._dynamo.reset()
+            x = torch.ones(8, device=device)
+            y = torch.ones(8, device=device)
+            with torch.no_grad():
+                result = torch.compile(f, backend=backend, fullgraph=True)(x, y)
+            self.assertEqual(
+                result[1], torch.full((4,), 49.0 if warmup else 41.0, device=device)
+            )
+            self.assertEqual(x[:4], torch.ones(4, device=device))
+            self.assertEqual(x[4:], torch.full((4,), 3.0, device=device))
+            self.assertEqual(
+                y[4:], torch.full((4,), 4.0 if warmup else 3.0, device=device)
+            )
+        for module in recorder.graphs[0].modules():
+            if isinstance(module, torch.fx.GraphModule):
+                for node in module.graph.nodes:
+                    self.assertNotIn("dynamo_mutated_tensors", node.meta)
+
+    @onlyAccelerator
+    @skipCUDAIf(not SM70OrLater, "triton")
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @parametrize("mutate_in", ["cond", "body"])
+    @parametrize("target", ["disjoint", "overlap", "carry"])
+    def test_while_loop_triton_writes(self, device, mutate_in, target):
+        import triton
+        import triton.language as tl
+
+        @triton.jit
+        def increment(t, N: tl.constexpr):
+            offset = tl.arange(0, 16)
+            value = tl.load(t + offset, offset < N, 0)
+            tl.store(t + offset, value + 1, offset < N)
+
+        def f(x):
+            def mutate(acc):
+                captured = x[2:6] if target == "overlap" else x[4:]
+                if target == "overlap":
+                    x[6:].add_(1)
+                writer = acc if target == "carry" else captured
+                increment[(1,)](writer, writer.numel())
+
+            def cond_fn(i, acc):
+                if mutate_in == "cond":
+                    mutate(acc)
+                return i < 2
+
+            def body_fn(i, acc):
+                if mutate_in == "body":
+                    mutate(acc)
+                return i + 1, acc + x[4:].sum()
+
+            return while_loop(
+                cond_fn,
+                body_fn,
+                (torch.zeros((), dtype=torch.int64, device=x.device), x[:4]),
+            )
+
+        if target != "disjoint":
+            message = (
+                "modifies a carried input"
+                if target == "carry"
+                else "may mutate a tensor that aliases carried input 1"
+            )
+            with (
+                torch.no_grad(),
+                self.assertRaisesRegex(torch._dynamo.exc.TorchRuntimeError, message),
+            ):
+                torch.compile(f, backend="eager", fullgraph=True)(
+                    torch.ones(8, device=device)
+                )
+            return
+
+        recorder = EagerAndRecordGraphs()
+        for backend in (recorder, "aot_eager", "inductor"):
+            torch._dynamo.reset()
+            x = torch.ones(8, device=device)
+            with torch.no_grad():
+                result = torch.compile(f, backend=backend, fullgraph=True)(x)
+            self.assertEqual(result[1], torch.full((4,), 21.0, device=device))
+            expected = torch.ones(8, device=device)
+            expected[4:] = 4 if mutate_in == "cond" else 3
+            self.assertEqual(x, expected)
+        loop = next(
+            node
+            for node in recorder.graphs[0].graph.nodes
+            if node.target is torch.ops.higher_order.while_loop
+        )
+        self.assertEqual(loop.kwargs["mutated_arg_indices"], "2")
 
     @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
     @parametrize("mutate_in", ["cond", "body"])
@@ -13419,7 +13732,7 @@ class <lambda>(torch.nn.Module):
             torch.no_grad(),
             self.assertRaisesRegex(
                 torch._dynamo.exc.TorchRuntimeError,
-                f"{mutate_in}_fn mutates a tensor that aliases carried input 1",
+                f"{mutate_in}_fn may mutate a tensor that aliases carried input 1",
             ),
         ):
             torch.compile(f, backend="eager", fullgraph=True)(
@@ -13478,7 +13791,7 @@ class <lambda>(torch.nn.Module):
             torch.no_grad(),
             self.assertRaisesRegex(
                 torch._dynamo.exc.TorchRuntimeError,
-                f"{mutate_in}_fn mutates a tensor that aliases carried input 1",
+                f"{mutate_in}_fn may mutate a tensor that aliases carried input 1",
             ),
         ):
             torch.compile(f, backend="eager", fullgraph=True)(
@@ -13508,7 +13821,7 @@ class <lambda>(torch.nn.Module):
             torch.no_grad(),
             self.assertRaisesRegex(
                 torch._dynamo.exc.TorchRuntimeError,
-                "cond_fn mutates a tensor that aliases carried input 1",
+                "cond_fn may mutate a tensor that aliases carried input 1",
             ),
         ):
             torch.compile(f, backend="inductor", fullgraph=True)(
