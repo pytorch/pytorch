@@ -57,7 +57,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_profiler import (
     get_profiler_activities,
-    initialize_kineto_with_accelerator
+    initialize_kineto_with_accelerator,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
