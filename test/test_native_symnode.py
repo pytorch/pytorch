@@ -2804,9 +2804,19 @@ class TestNativeSymNode(TestCase):
         "le",
         "ge",
     ]
+    GUARDS = [
+        "guard_bool",
+        "guard_int",
+        "bool_",
+        "int_",
+        "guard_or_false",
+        "guard_or_true",
+        "statically_known_true",
+        "expect_true",
+    ]
 
-    def make_env(self):
-        env = ShapeEnv(_allow_native=True)
+    def make_env(self, native=True):
+        env = ShapeEnv(_allow_native=native)
         syms = [
             env.create_symbol(5, ConstantSource("a"), DimDynamic.DYNAMIC),
             env.create_symbol(7, ConstantSource("b"), DimDynamic.DYNAMIC),
@@ -2823,6 +2833,13 @@ class TestNativeSymNode(TestCase):
         py_hint = _NO_HINT if hint is None else hint
         native = env._native_env.make_node(expr, pytype, hint)
         return native, SymNode(expr, env, pytype, py_hint)
+
+    @staticmethod
+    def node(env, expr, pytype, hint):
+        """A native node on a native env, else a Python one."""
+        if env._native_env is not None:
+            return env._native_env.make_node(expr, pytype, hint)
+        return SymNode(expr, env, pytype, _NO_HINT if hint is None else hint)
 
     def check(self, n, p):
         self.assertEqual(sympy.srepr(n._expr), sympy.srepr(p._expr))
@@ -3012,13 +3029,164 @@ class TestNativeSymNode(TestCase):
 
     def test_guards(self):
         env, syms = self.make_env()
-        a = self.pair(env, syms[0], int, 5)
-        b = self.pair(env, syms[1], int, 7)
-        n, p = self.call(*a, "lt", b)
+        native = env._native_env
+        a, b = (native.make_node(s, int, h) for s, h in zip(syms, (5, 7)))
+        two = a.wrap_int(2)
+        # s0 >= 2 by range.
+        ge = a.ge(two)
+        self.assertTrue(ge.guard_bool("", 0))
+        self.assertTrue(ge.bool_())
+        self.assertTrue(ge.guard_or_false("", 0))
+        self.assertTrue(ge.guard_or_true("", 0))
+        self.assertTrue(ge.statically_known_true("", 0))
+        self.assertTrue(ge.expect_true("", 0))
+        # s0 + s1 >= 4 by static evaluation.
+        self.assertTrue(a.add(b).ge(a.wrap_int(4)).guard_bool("", 0))
+        self.assertEqual(a.wrap_int(3).int_(), 3)
+        self.assertFalse(a.wrap_int(0).bool_())
+        self.assertTrue(a.wrap_bool(True).guard_bool("", 0))
+        # The hint disproves it without a query.
+        self.assertFalse(a.lt(two).statically_known_true("", 0))
+        eq = a.eq(a.wrap_int(5))
+        self.assertFalse(eq.statically_known_true("", 0))
+        self.assertEqual(len(env.guards), 0)
+        self.assertTrue(native.pristine)
+        s0 = syms[0]
+        ge_e, eq_e = sympy.Ge(s0, 2), sympy.Eq(s0, 5)
+        self.assertEqual(
+            [q[1:] for q in native.take_queries()],
+            [
+                (ge_e, True, True, False, False, sympy.true),
+                (ge_e, True, True, True, False, sympy.true),
+                (ge_e, False, None, None, False, sympy.true),
+                (ge_e, True, True, None, False, sympy.true),
+                (sympy.Ge(s0 + syms[1], 4), True, True, None, False, sympy.true),
+                (sympy.Integer(3), True, 3, None, False, sympy.Integer(3)),
+                (sympy.Integer(0), True, 0, None, False, sympy.Integer(0)),
+                (sympy.true, True, True, None, False, sympy.true),
+                (eq_e, False, None, None, False, None),
+            ],
+        )
+
+        # Unknown statically: Python guards, and native answers stop.
+        self.assertTrue(eq.guard_or_false("", 0))
+        self.assertEqual([g.expr for g in env.guards], [eq_e])
+        self.assertTrue(ge.guard_bool("", 0))
+        self.assertEqual(native.take_queries(), [])
+        with self.assertRaisesRegex(AssertionError, "bool"):
+            a.guard_or_false("", 0)
+        with self.assertRaisesRegex(AssertionError, "bool"):
+            a.statically_known_true("", 0)
+        self.assertEqual(a.int_(), 5)
+
+    def test_guard_no_hint(self):
+        env, syms = self.make_env()
+        n, p = self.pair(env, sympy.Ge(syms[0], 2), bool, None)
+        # expect_true without a hint defers to Python.
+        self.assertTrue(n.expect_true("", 0))
+        self.assertEqual(env._native_env.take_queries(), [])
         self.assertTrue(n.guard_bool("", 0))
-        self.assertEqual(len(env.guards), 1)
-        self.assertEqual(a[0].guard_int("", 0), 5)
-        self.assertEqual(n.bool_(), True)
+        self.assertEqual(len(env._native_env.take_queries()), 1)
+
+    @parametrize(
+        "name,value",
+        [
+            ("backed_size_oblivious", True),
+            ("aggressive_guard_free_semantics", 1),
+            ("aggressive_guard_free_semantics", 2),
+        ],
+    )
+    def test_guard_live_config(self, name, value):
+        results = []
+        for native in (True, False):
+            env, syms = self.make_env(native)
+            ge, eq = (sympy.Ge(syms[0], 2), sympy.Eq(syms[0], 5))
+            nodes = [
+                self.node(env, ge, bool, True),
+                self.node(env, eq, bool, True),
+                # Level 2 returns the fallback value without range analysis.
+                self.node(env, ge, bool, None),
+            ]
+            with symbolic_shapes.config.patch(**{name: value}):
+                results.append(
+                    (
+                        [n.guard_or_false("", 0) for n in nodes],
+                        [n.guard_or_true("", 0) for n in nodes],
+                        [str(g.expr) for g in env.guards],
+                    )
+                )
+            if native:
+                self.assertEqual(env._native_env.take_queries(), [])
+        self.assertEqual(results[0], results[1])
+
+    def guard_program(self, native, seed):
+        """Short random programs of ops then guards, each on a fresh env."""
+        rng = random.Random(seed)
+        answers, envs = [], []
+        for _ in range(12):
+            env, syms = self.make_env(native)
+            envs.append(env)
+            ints = [self.node(env, s, int, int(env.backed_var_to_val[s])) for s in syms]
+            ints += [ints[0].wrap_int(c) for c in (0, 1, 2, 5, -3)]
+            bools = [ints[0].wrap_bool(True)]
+            for _ in range(rng.randrange(1, 8)):
+                a, b = rng.choice(ints), rng.choice(ints)
+                if type(a) is SymNode and type(b) is not SymNode:
+                    # A Python SymNode op does not take native operands yet.
+                    b = SymNode(b._expr, env, int, b.hint, constant=b.constant)
+                try:
+                    r = getattr(a, rng.choice(self.INT_OPS))(b)
+                except Exception as e:
+                    answers.append(type(e))
+                    continue
+                (ints if r.pytype is int else bools).append(r)
+            for _ in range(rng.randrange(1, 6)):
+                method = rng.choice(self.GUARDS)
+                n = rng.choice(bools if rng.random() < 0.8 else ints)
+                args = () if method in ("bool_", "int_") else ("", 0)
+                suppress = rng.random() < 0.2
+                with env.suppress_guards() if suppress else contextlib.nullcontext():
+                    try:
+                        answers.append((method, getattr(n, method)(*args)))
+                    except Exception as e:
+                        answers.append((method, type(e)))
+        return answers, envs
+
+    @parametrize("seed", range(8))
+    def test_guard_differential(self, seed):
+        python_calls = []
+
+        def counted(fn):
+            def wrapper(*args, **kwargs):
+                python_calls.append(fn.__name__)
+                return fn(*args, **kwargs)
+
+            return wrapper
+
+        with (
+            mock.patch.object(
+                ShapeEnv, "evaluate_sym_node", counted(ShapeEnv.evaluate_sym_node)
+            ),
+            mock.patch.object(
+                symbolic_shapes,
+                "_static_eval_sym_bool",
+                counted(symbolic_shapes._static_eval_sym_bool),
+            ),
+        ):
+            want, off = self.guard_program(False, seed)
+            off_calls = len(python_calls)
+            python_calls.clear()
+            with mock.patch.object(symbolic_shapes, "_NATIVE_SYMNODE_CHECK", True):
+                got, on = self.guard_program(True, seed)
+                symbolic_shapes._flush_native_queries()
+        self.assertEqual(got, want)
+        for on_env, off_env in zip(on, off):
+            self.assertEqual(
+                [str(g.expr) for g in on_env.guards],
+                [str(g.expr) for g in off_env.guards],
+            )
+            on_env.check_equal(off_env)
+        self.assertGreater(off_calls - len(python_calls), 10)
 
     def test_make_node(self):
         env, syms = self.make_env()

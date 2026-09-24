@@ -615,23 +615,6 @@ bool config_entry_unset(py::handle entry, py::handle unset) {
   return !py::bool_(v);
 }
 
-// The config that ShapeEnv reads on every evaluation and that a native env
-// requires unset: backed_size_oblivious and aggressive_guard_free_semantics.
-bool native_config_is_default() {
-  static const auto* entries = [] {
-    py::dict config =
-        py::module_::import("torch.fx.experimental._config").attr("_config");
-    return new std::array<py::object, 3>{
-        config["backed_size_oblivious"],
-        config["aggressive_guard_free_semantics"],
-        py::module_::import("torch.utils._config_module")
-            .attr("_UNSET_SENTINEL")};
-  }();
-  const auto& [backed, aggressive, unset] = *entries;
-  return config_entry_unset(backed, unset) &&
-      config_entry_unset(aggressive, unset);
-}
-
 EnvBinding& binding_of(NativeShapeEnv& env) {
   auto* b = static_cast<EnvBinding*>(env.binding());
   TORCH_CHECK(b != nullptr, "native env without a Python binding");
@@ -650,6 +633,22 @@ py::object node_expr(const NativeSymNodeImpl& node) {
 }
 
 } // namespace
+
+bool native_config_is_default() {
+  py::gil_scoped_acquire gil;
+  static const auto* entries = [] {
+    py::dict config =
+        py::module_::import("torch.fx.experimental._config").attr("_config");
+    return new std::array<py::object, 3>{
+        config["backed_size_oblivious"],
+        config["aggressive_guard_free_semantics"],
+        py::module_::import("torch.utils._config_module")
+            .attr("_UNSET_SENTINEL")};
+  }();
+  const auto& [backed, aggressive, unset] = *entries;
+  return config_entry_unset(backed, unset) &&
+      config_entry_unset(aggressive, unset);
+}
 
 std::unique_lock<std::mutex> lock_env(NativeShapeEnv& env) {
   std::unique_lock<std::mutex> lock(env.mutex(), std::try_to_lock);
@@ -1214,6 +1213,7 @@ void initSymbolicBindings(PyObject* module) {
           "_optimized_summation", &NativeSymNodeImpl::optimized_summation)
       .def("maybe_as_int", &NativeSymNodeImpl::maybe_as_int)
       .def("str", &NativeSymNodeImpl::str)
+      .def("statically_known_true", &NativeSymNodeImpl::statically_known_true)
       .def("wrap_float", [node_to_py](NativeSymNodeImpl& self, double v) {
         return node_to_py(self.wrap_float(v));
       });

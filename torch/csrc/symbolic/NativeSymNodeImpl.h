@@ -167,6 +167,9 @@ class NativeSymNodeImpl final : public c10::SymNodeImpl {
   // The native result, or null. The caller holds the env lock.
   c10::SymNode try_binary(Op op, const NativeSymNodeImpl& other);
   c10::SymNode try_unary(bool is_not);
+  // ShapeEnv.evaluate_sym_node(self, fallback_value=fallback_value) where it
+  // returns without guarding, else nullptr.
+  const Expr* evaluate(std::optional<bool> fallback_value);
 
   c10::intrusive_ptr<NativeShapeEnv> env_;
   const Expr* expr_;

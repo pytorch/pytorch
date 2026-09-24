@@ -93,6 +93,23 @@ std::optional<int64_t> int_pow(int64_t base, int64_t exp) {
   return r;
 }
 
+// bool() of an evaluate_expr result; nullopt for no result.
+std::optional<bool> as_bool(const Expr* e) {
+  if (e == nullptr) {
+    return std::nullopt;
+  }
+  switch (e->kind) {
+    case Kind::BooleanTrue:
+      return true;
+    case Kind::BooleanFalse:
+      return false;
+    case Kind::Integer:
+      return e->p != 0;
+    default:
+      return std::nullopt;
+  }
+}
+
 } // namespace
 
 std::optional<int64_t> NativeSymNodeImpl::maybe_as_int() {
@@ -457,26 +474,93 @@ PYTHON_SIZES_STRIDES(is_channels_last_strides_3d)
 PYTHON_SIZES_STRIDES(is_non_overlapping_and_dense)
 #undef PYTHON_SIZES_STRIDES
 
-#define PYTHON_GUARD(type, name)                                 \
-  type NativeSymNodeImpl::name(const char* file, int64_t line) { \
-    return materialize(*this)->name(file, line);                 \
+const Expr* NativeSymNodeImpl::evaluate(std::optional<bool> fallback_value) {
+  if (!native_config_is_default()) {
+    return nullptr;
   }
-PYTHON_GUARD(int64_t, guard_int)
-PYTHON_GUARD(bool, guard_bool)
-PYTHON_GUARD(double, guard_float)
-PYTHON_GUARD(bool, guard_size_oblivious)
-PYTHON_GUARD(bool, guard_or_false)
-PYTHON_GUARD(bool, statically_known_true)
-PYTHON_GUARD(bool, guard_or_true)
-PYTHON_GUARD(bool, expect_true)
-#undef PYTHON_GUARD
+  auto lock = lock_env(*env_);
+  return env_->evaluate_expr(expr_, hint_, fallback_value).value_or(nullptr);
+}
+
+int64_t NativeSymNodeImpl::guard_int(const char* file, int64_t line) {
+  const Expr* r = evaluate(std::nullopt);
+  if (r != nullptr && r->kind == Kind::Integer) {
+    return r->p;
+  }
+  return materialize(*this)->guard_int(file, line);
+}
+
+bool NativeSymNodeImpl::guard_bool(const char* file, int64_t line) {
+  if (auto r = as_bool(evaluate(std::nullopt))) {
+    return *r;
+  }
+  return materialize(*this)->guard_bool(file, line);
+}
+
+bool NativeSymNodeImpl::guard_or_false(const char* file, int64_t line) {
+  if (pytype_ == PyType::Bool) {
+    if (auto r = as_bool(evaluate(false))) {
+      return *r;
+    }
+  }
+  return materialize(*this)->guard_or_false(file, line);
+}
+
+bool NativeSymNodeImpl::guard_or_true(const char* file, int64_t line) {
+  if (pytype_ == PyType::Bool) {
+    if (auto r = as_bool(evaluate(true))) {
+      return *r;
+    }
+  }
+  return materialize(*this)->guard_or_true(file, line);
+}
+
+bool NativeSymNodeImpl::statically_known_true(const char* file, int64_t line) {
+  if (pytype_ == PyType::Bool) {
+    // _sym_node_hint_disproves
+    if (hint_ == Hint(false)) {
+      return false;
+    }
+    std::optional<const Expr*> r;
+    {
+      auto lock = lock_env(*env_);
+      r = env_->static_eval(expr_);
+    }
+    if (r && *r == nullptr) {
+      return false;
+    }
+    if (auto b = r ? as_bool(*r) : std::nullopt) {
+      return *b;
+    }
+  }
+  return materialize(*this)->statically_known_true(file, line);
+}
+
+bool NativeSymNodeImpl::expect_true(const char* file, int64_t line) {
+  // A native env has prefer_deferred_runtime_asserts_over_guards unset, and
+  // evaluate() answers only for mirrored (backed) symbols.
+  if (has_hint()) {
+    if (auto r = as_bool(evaluate(std::nullopt))) {
+      return *r;
+    }
+  }
+  return materialize(*this)->expect_true(file, line);
+}
+
+double NativeSymNodeImpl::guard_float(const char* file, int64_t line) {
+  return materialize(*this)->guard_float(file, line);
+}
+
+bool NativeSymNodeImpl::guard_size_oblivious(const char* file, int64_t line) {
+  return materialize(*this)->guard_size_oblivious(file, line);
+}
 
 int64_t NativeSymNodeImpl::int_() {
-  return materialize(*this)->int_();
+  return guard_int("", 0);
 }
 
 bool NativeSymNodeImpl::bool_() {
-  return materialize(*this)->bool_();
+  return guard_bool("", 0);
 }
 
 } // namespace torch::symbolic

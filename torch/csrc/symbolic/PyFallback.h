@@ -21,4 +21,9 @@ c10::SymNode materialize(const NativeSymNodeImpl& node);
 // the mutex may take the GIL (to call Python) without deadlock.
 std::unique_lock<std::mutex> lock_env(NativeShapeEnv& env);
 
+// Whether the config that ShapeEnv reads on every evaluation
+// (backed_size_oblivious, aggressive_guard_free_semantics) is at its default,
+// which a native env requires. Takes the GIL.
+bool native_config_is_default();
+
 } // namespace torch::symbolic
