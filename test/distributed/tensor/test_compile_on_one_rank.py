@@ -7,6 +7,7 @@ import subprocess
 import sys
 import textwrap
 import unittest
+from unittest.mock import patch
 
 import torch
 import torch.compiler.config as compiler_config
@@ -18,6 +19,9 @@ from torch.distributed.tensor.parallel import parallelize_module, RowwiseParalle
 from torch.fx._graph_pickler import GraphPickler, Options
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    requires_multigpu,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
@@ -299,7 +303,33 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
             lambda msg: f"{msg}\nno node should bake a concrete indexed cuda device; found: {baked}",
         )
 
-    @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_dynamo_output_graph_factory_device_not_baked(self):
+        # The same factory pattern as test_factory_device_replaced_with_current_device,
+        # but reached through Dynamo instead of calling make_fx directly.
+        #
+        # Dynamo constant-folds x.device to a concrete torch.device and bakes it into
+        # its output graph. The current_device() substitution runs later, during
+        # make_fx, so it cannot undo what Dynamo already froze. This is the graph
+        # tlparse records as dynamo_output_graph, and in a real CooR job it differs
+        # across ranks (index=0 vs index=7), which keeps it from being shareable.
+        from torch._dynamo.testing import EagerAndRecordGraphs
+
+        torch._dynamo.reset()
+        backend = EagerAndRecordGraphs()
+        torch.compile(_factory_from_input_device, backend=backend, fullgraph=True)(
+            torch.randn(2, 8, device="cuda:0")
+        )
+        self.assertEqual(len(backend.graphs), 1)
+        baked = _indexed_cuda_device_nodes(backend.graphs[0])
+        self.assertEqual(
+            baked,
+            [],
+            f"dynamo baked a rank-specific device into its output graph: {baked}",
+        )
+
+    @requires_multigpu
     @compiler_config.patch(compile_on_one_rank=True)
     def test_runtime_follows_current_device_not_input(self):
         # The runtime device follows the process's current device, not the input's.
@@ -447,7 +477,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
             ):
                 make_fx(f, tracing_mode="fake")(torch.randn(2, device="cuda:0"))
 
-    @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
+    @requires_multigpu
     @compiler_config.patch(compile_on_one_rank=True)
     def test_noncurrent_device_tensor_rejected(self):
         # CooR rejects a device *operand* that isn't the current accelerator (see
@@ -463,7 +493,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
             with self.assertRaisesRegex(RuntimeError, "device-agnostic"):
                 make_fx(f, tracing_mode="fake")(torch.randn(4, device="cuda:1"))
 
-    @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
+    @requires_multigpu
     @compiler_config.patch(compile_on_one_rank=True)
     def test_graph_code_identical_across_devices(self):
         # The functional FX graph text (.code) must be byte-identical across ranks: the
@@ -479,6 +509,321 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         code0, code1 = code_on(0), code_on(1)
         self.assertEqual(code0, code1)
         self.assertNotIn("cuda:", code0)
+
+    @requires_multigpu
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_dynamo_output_graph_identical_across_devices(self):
+        # The Dynamo counterpart of test_graph_code_identical_across_devices, and the
+        # form the divergence actually takes in a real job: the same factory traces to
+        # device(type='cuda', index=0) on one rank and index=N on another, so the two
+        # ranks' dynamo_output_graph artifacts are not the same text and the graph
+        # cannot be shared between them.
+        from torch._dynamo.testing import EagerAndRecordGraphs
+
+        def graph_on(dev):
+            with torch.cuda.device(dev):
+                torch._dynamo.reset()
+                backend = EagerAndRecordGraphs()
+                torch.compile(
+                    _factory_from_input_device, backend=backend, fullgraph=True
+                )(torch.randn(2, 8, device=f"cuda:{dev}"))
+                return backend.graphs[0].print_readable(print_output=False)
+
+        graph0, graph1 = graph_on(0), graph_on(1)
+        self.assertEqual(graph0, graph1)
+        self.assertNotIn("index=0", graph0)
+
+    # ---- tensor guards must be rank-invariant without losing their teeth ----
+    # A TENSOR_MATCH guard records the device as two independent pieces: the type
+    # rides in the DispatchKeySet, and the index is a separate scalar rendered as
+    # "device=N". Only the index is rank-specific, so only the index may be relaxed,
+    # and it must be relaxed into a check against the *current* device rather than
+    # dropped -- CooR's single-accelerator invariant (one accelerator device, with
+    # cpu free to coexist) is enforced when tracing, so at runtime the guard is the
+    # only thing left watching for a stray device.
+
+    @staticmethod
+    def _tensor_guard_parts(fn):
+        """The check_tensor(...) guard lines installed for fn."""
+        from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+
+        parts = []
+        for entry in _debug_get_cache_entry_list(fn):
+            parts += [
+                line.strip()
+                for line in str(entry.guard_manager).splitlines()
+                if "check_tensor(" in line
+            ]
+        return parts
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_guard_does_not_bake_device_index_under_coor(self):
+        import re
+
+        def f(x):
+            return x + 1
+
+        torch._dynamo.reset()
+        torch.compile(f, backend="eager")(torch.randn(4, device="cuda"))
+        parts = self._tensor_guard_parts(f)
+        self.assertTrue(parts, "expected a check_tensor guard to be installed")
+        baked = [p for p in parts if re.search(r"device=\d", p)]
+        self.assertEqual(
+            baked, [], f"guard baked a rank-specific device index: {baked}"
+        )
+        self.assertTrue(
+            all("device=current" in part for part in parts),
+            f"guard did not use the current device: {parts}",
+        )
+
+    @requires_multigpu
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_guard_still_rejects_noncurrent_device_index_under_coor(self):
+        # Relaxing the index must not mean ignoring it: a tensor on a device that is
+        # not the current one still has to fail the guard. Deleting the check outright
+        # would silently pass here.
+        #
+        # Retrying the call does not recompile -- tracing refuses a non-current
+        # accelerator input outright (test_noncurrent_device_input_refused_under_coor),
+        # which is what keeps the guard decision derivable rather than recorded.
+        from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+        from torch._dynamo.testing import CompileCounter
+
+        def f(x):
+            return x + 1
+
+        cnt = CompileCounter()
+        torch._dynamo.reset()
+        with torch.cuda.device(0):
+            compiled = torch.compile(f, backend=cnt)
+            compiled(torch.randn(4, device="cuda:0"))
+            other = torch.randn(4, device="cuda:1")
+            root = _debug_get_cache_entry_list(f)[0].guard_manager.root
+            debug_info = root.check_verbose({"x": other})
+            self.assertFalse(debug_info.result)
+            self.assertIn(
+                "current device (0), actual 1",
+                "\n".join(debug_info.verbose_code_parts),
+            )
+            with self.assertRaisesRegex(RuntimeError, "current accelerator"):
+                compiled(other)
+
+    @requires_multigpu
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_noncurrent_device_input_refused_under_coor(self) -> None:
+        # A graph whose input is on an accelerator other than the current one cannot be
+        # made rank-portable, so CooR refuses it while tracing. The make_fx backends
+        # already do (_coor_check_current_accelerator); Dynamo has to as well, or an
+        # eager-backend compile quietly produces a pinned, non-portable artifact --
+        # and it is the only thing that makes the relative-vs-exact guard decision
+        # derivable on any rank rather than something to record and replay.
+        def f(x):
+            return x + 1
+
+        torch._dynamo.reset()
+        with torch.cuda.device(0):
+            with self.assertRaisesRegex(RuntimeError, "current accelerator"):
+                torch.compile(f, backend="eager", fullgraph=True)(
+                    torch.randn(4, device="cuda:1")
+                )
+
+    @requires_multigpu
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_guard_hits_when_current_device_changes_under_coor(self):
+        # The whole point of the relaxation: one compiled artifact serves every rank.
+        # Move the current device to 1 and hand it a tensor that followed, and the
+        # guard should match the entry compiled on device 0 rather than recompile.
+        #
+        # This is the test that distinguishes a real fix from a cosmetic one: it fails
+        # unless the runtime check became device-relative. Rewording the guard string
+        # alone leaves it failing. Read together with
+        # test_guard_still_rejects_noncurrent_device_index_under_coor -- same cuda:1
+        # tensor, opposite expectation -- the pair pins the check to "the current
+        # device" rather than to any fixed index.
+        from torch._dynamo.testing import CompileCounter
+
+        def f(x):
+            return x + 1
+
+        cnt = CompileCounter()
+        torch._dynamo.reset()
+        with torch.cuda.device(0):
+            compiled = torch.compile(f, backend=cnt)
+            compiled(torch.randn(4, device="cuda:0"))
+            before = cnt.frame_count
+        with torch.cuda.device(1):
+            compiled(torch.randn(4, device="cuda:1"))
+        self.assertEqual(
+            cnt.frame_count,
+            before,
+            "a tensor on the new current device should reuse the existing compile",
+        )
+
+    @requires_multigpu
+    @compiler_config.patch(compile_on_one_rank=True)
+    @patch.object(torch._dynamo.config, "use_recursive_dict_tags_for_guards", True)
+    def test_dict_tag_fast_path_tracks_current_device_under_coor(self):
+        # The recursive-dict-tag fast path snapshots tensor metadata itself, and an
+        # unchanged tag lets it answer without running the TENSOR_MATCH leaf. That
+        # snapshot has to record the relative device the leaf uses; pinning the
+        # compiling rank's index there makes the fast path accept a parameter left
+        # behind on another device, which the leaf rejects. Busting the tag (without
+        # changing contents) forces the leaf to run, which is the control.
+        from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p = torch.nn.Parameter(torch.randn(4, device="cuda:0"))
+
+            def forward(self, x):
+                return x + self.p
+
+        mod = Mod()
+
+        def f(x):
+            return mod(x)
+
+        torch._dynamo.reset()
+        compiled = torch.compile(f, backend="eager", fullgraph=True)
+        with torch.cuda.device(0):
+            compiled(torch.randn(4, device="cuda:0"))
+
+        root = _debug_get_cache_entry_list(f)[0].guard_manager
+        with torch.cuda.device(0):
+            self.assertTrue(
+                root.check({"x": torch.randn(4, device="cuda:0"), "mod": mod})
+            )
+
+        with torch.cuda.device(1):
+            scope = {"x": torch.randn(4, device="cuda:1"), "mod": mod}
+            self.assertFalse(
+                root.check(scope),
+                "the dict-tag fast path accepted a parameter that is no longer on "
+                "the current device",
+            )
+            # Invalidate the tag without changing contents, so the leaf guards run.
+            mod._coor_tag_bust = 1
+            del mod._coor_tag_bust
+            self.assertFalse(root.check(scope))
+
+    @requires_multigpu
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_cloned_tensor_guard_tracks_current_device_under_coor(self):
+        from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+
+        def f(x):
+            return x + 1
+
+        torch._dynamo.reset()
+        with torch.cuda.device(0):
+            compiled = torch.compile(f, backend="eager")
+            compiled(torch.zeros(1, device="cuda:0"))
+            root = _debug_get_cache_entry_list(f)[0].guard_manager.root
+            cloned_root = root.clone_manager(lambda _: True)
+
+        with torch.cuda.device(1):
+            inputs = {"x": torch.zeros(1, device="cuda:1")}
+            self.assertTrue(cloned_root.check(inputs))
+
+    @requires_multigpu
+    @compiler_config.patch(compile_on_one_rank=True)
+    @parametrize("origin", ("input", "intermediate"))
+    def test_device_passthrough_still_reuses_compile_under_coor(self, origin):
+        # The payoff of the relaxed index guard, measured the only way it shows up:
+        # a recompile count. A tensor's device handed straight to a factory has to
+        # keep serving every rank from one artifact, whether it came off an input or
+        # off an intermediate.
+        #
+        # The inductor tests nearby check that the *generated code* is
+        # device-agnostic, which anything that merely re-pinned the guard would not
+        # change -- only counting frames catches that.
+        from torch._dynamo.testing import CompileCounterWithBackend
+
+        def f(x):
+            y = x + 1 if origin == "intermediate" else x
+            return torch.zeros(4, y.shape[1], device=y.device, dtype=y.dtype) + y.sum()
+
+        cnt = CompileCounterWithBackend("inductor")
+        torch._dynamo.reset()
+        with torch.cuda.device(0):
+            compiled = torch.compile(f, backend=cnt)
+            compiled(torch.randn(2, 8, device="cuda:0"))
+            before = cnt.frame_count
+        with torch.cuda.device(1):
+            out = compiled(torch.randn(2, 8, device="cuda:1"))
+        self.assertEqual(out.device, torch.device("cuda:1"))
+        self.assertEqual(
+            cnt.frame_count,
+            before,
+            "passing a device to a factory is not an observation and must not guard",
+        )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_guard_still_rejects_device_type_under_coor(self):
+        # cpu and cuda tensors coexist freely in one process, so the device *type*
+        # must stay guarded; only the index is redundant under CooR.
+        from torch._dynamo.testing import CompileCounter
+
+        def f(x):
+            return x + 1
+
+        cnt = CompileCounter()
+        torch._dynamo.reset()
+        compiled = torch.compile(f, backend=cnt)
+        compiled(torch.randn(4, device="cuda"))
+        before = cnt.frame_count
+        compiled(torch.randn(4))
+        self.assertEqual(
+            cnt.frame_count, before + 1, "device type must still be guarded"
+        )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_cpu_tensor_guard_unchanged_under_coor(self):
+        # The invariant is single-*accelerator*, not single-device: cpu tensors
+        # coexist with the accelerator freely under CooR (a cpu factory op is not
+        # even rewritten -- see test_cpu_device_left_alone), and a cpu device is
+        # portable across ranks already. So a cpu tensor's guard has to come out
+        # exactly as it would with the feature off, never relaxed to "current".
+        def f(x):
+            return x + 1
+
+        torch._dynamo.reset()
+        torch.compile(f, backend="eager")(torch.randn(4))
+        parts = self._tensor_guard_parts(f)
+        self.assertTrue(parts, "expected a check_tensor guard to be installed")
+        relaxed = [p for p in parts if "device=current" in p]
+        self.assertEqual(
+            relaxed, [], f"a cpu tensor's guard must not be relaxed: {relaxed}"
+        )
+
+    @requires_multigpu
+    def test_device_index_still_guarded_without_coor(self):
+        # Multi-GPU in one process is legal outside CooR (e.g. model parallel), so the
+        # relaxation must be gated: with the feature off, the index stays baked and a
+        # different index still recompiles.
+        import re
+
+        from torch._dynamo.testing import CompileCounter
+
+        def f(x):
+            return x + 1
+
+        cnt = CompileCounter()
+        torch._dynamo.reset()
+        with torch.cuda.device(0):
+            compiled = torch.compile(f, backend=cnt)
+            compiled(torch.randn(4, device="cuda:0"))
+            before = cnt.frame_count
+            self.assertTrue(
+                [p for p in self._tensor_guard_parts(f) if re.search(r"device=\d", p)],
+                "without compile_on_one_rank the index should stay baked",
+            )
+            compiled(torch.randn(4, device="cuda:1"))
+            self.assertEqual(cnt.frame_count, before + 1)
 
     # ---- inductor codegen and launcher must be device-agnostic across ranks ----
     # A device-derived factory + a reduction, so inductor emits a real kernel.
@@ -506,6 +851,108 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         FileCheck().check("torch.cuda.current_device()").run(code)
         self._assert_no_baked_device(code)
 
+    @staticmethod
+    def _coor_template_fn(a, b):
+        return (a @ b).relu()
+
+    @staticmethod
+    def _coor_combo_fn(a, b):
+        return a.sin(), b.cos()
+
+    @staticmethod
+    def _make_coor_user_defined_triton_fn():
+        import triton
+        import triton.language as tl
+
+        @triton.jit
+        def add_one_kernel(in_ptr, out_ptr, n, BLOCK: tl.constexpr):
+            offs = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+            mask = offs < n
+            tl.store(out_ptr + offs, tl.load(in_ptr + offs, mask=mask) + 1, mask=mask)
+
+        def fn(x):
+            out = torch.empty_like(x)
+            add_one_kernel[(1,)](x, out, x.numel(), BLOCK=128)
+            return out
+
+        return fn
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    @torch._inductor.config.patch(
+        max_autotune=True, max_autotune_gemm_backends="TRITON"
+    )
+    def test_inductor_template_no_baked_device(self):
+        # A Triton template must not bake the rank-specific device index either.
+        #
+        # Templates build triton_meta separately from TritonKernel, so this guards
+        # the select_algorithm.py construction path.
+        #
+        # test_inductor_compiles_under_coor does not catch this: _coor_inductor_fn
+        # is a factory plus a reduction, which only produces inductor-generated
+        # kernels and never reaches the template path.
+        from torch._inductor import utils as inductor_utils
+
+        torch._dynamo.reset()
+        compiled = torch.compile(
+            self._coor_template_fn, backend="inductor", fullgraph=True
+        )
+        # The metadata path is dtype-independent; float32 keeps it covered on pre-SM80.
+        a = torch.randn(256, 256, device="cuda")
+        b = torch.randn(256, 256, device="cuda")
+        with (
+            inductor_utils.fresh_cache(),
+            patch.object(inductor_utils, "is_big_gpu", return_value=True),
+        ):
+            _, codes = inductor_utils.run_and_get_code(compiled, a, b)
+        code = "\n".join(codes)
+        self.assertIn("triton_tem_fused", code)
+        self._assert_no_baked_device(code)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    @torch._inductor.config.patch(
+        combo_kernels=True,
+        benchmark_combo_kernel=False,
+        combo_kernel_peak_memory_increase_gb=None,
+        combo_kernel_peak_memory_pct_threshold=None,
+    )
+    def test_inductor_combo_kernel_no_baked_device(self):
+        # Combo kernels build triton_meta separately from ordinary pointwise kernels.
+        # Disable benchmarking and memory gating to isolate that codegen path.
+        from torch._inductor.utils import fresh_cache, run_and_get_code
+
+        torch._dynamo.reset()
+        compiled = torch.compile(
+            self._coor_combo_fn, backend="inductor", fullgraph=True
+        )
+        args = (
+            torch.randn(8192, device="cuda"),
+            torch.randn(4096, device="cuda"),
+        )
+        with fresh_cache():
+            _, codes = run_and_get_code(compiled, *args)
+        code = "\n".join(codes)
+        self.assertIn("combo_grid_meta", code)
+        self._assert_no_baked_device(code)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_user_defined_triton_kernel_no_baked_device(self):
+        # A user-defined @triton.jit kernel gets its triton_meta from a third site,
+        # define_user_defined_triton_kernel in codegen/wrapper.py, which is neither
+        # the TritonKernel path nor the template path.
+        from torch._inductor.utils import fresh_cache, run_and_get_code
+
+        torch._dynamo.reset()
+        fn = self._make_coor_user_defined_triton_fn()
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+        x = torch.randn(128, device="cuda")
+        with fresh_cache():
+            out, codes = run_and_get_code(compiled, x)
+        self.assertEqual(out, x + 1)
+        self._assert_no_baked_device("\n".join(codes))
+
     def _assert_no_baked_device(self, code):
         # A baked index reaches generated code in more forms than "cuda:N": repr() of a
         # torch.device gives device(type='cuda', index=0), and triton_meta renders
@@ -514,60 +961,121 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         self.assertNotRegex(code, r"device\(type=.cuda., index=\d")
         self.assertNotRegex(code, r"DeviceProperties\([^)]*index=\d")
 
-    def _inductor_code_on_device(self, dev):
+    def _inductor_code_on_device(self, dev, fn, input_shapes):
         from torch._inductor.utils import run_and_get_code
 
         torch._dynamo.reset()
         with torch.cuda.device(dev):
-            compiled = torch.compile(
-                self._coor_inductor_fn, backend="inductor", fullgraph=True
+            compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+            inputs = tuple(
+                torch.randn(shape, device=f"cuda:{dev}") for shape in input_shapes
             )
-            _, codes = run_and_get_code(
-                compiled, torch.randn(2, 8, device=f"cuda:{dev}")
-            )
+            _, codes = run_and_get_code(compiled, *inputs)
         return "\n".join(codes)
 
-    @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
+    @requires_multigpu
     @compiler_config.patch(compile_on_one_rank=True)
-    def test_inductor_code_identical_across_devices(self):
+    @parametrize(
+        "path",
+        (
+            "benchmark_kernel",
+            "compile_time_autotune",
+            "template",
+            "combo_kernel",
+            "user_defined_triton",
+        ),
+    )
+    def test_inductor_code_identical_across_devices(self, path):
         # The inductor-side rewrite is a dozen independent opt-in `if _coor_enabled():`
         # sites with no structural funnel, so pattern-matching one rank's output cannot
         # show that none was missed. Diffing the code generated on two different devices
-        # can. benchmark_kernel is enabled because that harness is emitted into the
-        # kernel's own source (hence its hash), so a baked index there breaks
-        # rank-identity too.
+        # can. Cover the ordinary kernel's benchmark and compile-time autotune harnesses,
+        # plus every independent triton_meta construction path.
         import re
+        from contextlib import nullcontext
 
-        # The AOT id is a per-process compile counter ("0_inference", "1_inference"), not
-        # a rank-specific value -- it differs only because both compiles run in this one
-        # process, so normalize it before diffing.
+        from torch._inductor import utils as inductor_utils
+
         def norm(s):
             return re.sub(r"AOT ID: \['\d+_", "AOT ID: ['N_", s)
 
-        # Each config emits device references through a different path: the kernel's own
-        # benchmark harness, and the compile-time autotune harness
-        # (generate_example_value). Both are part of generated text that must match.
-        for cfg in (
-            {"benchmark_kernel": True},
-            {"triton.autotune_at_compile_time": True},
-        ):
-            with self.subTest(cfg=cfg), torch._inductor.config.patch(**cfg):
-                code0 = self._inductor_code_on_device(0)
-                code1 = self._inductor_code_on_device(1)
-                if norm(code0) != norm(code1):
-                    diff = "".join(
-                        difflib.unified_diff(
-                            norm(code0).splitlines(keepends=True),
-                            norm(code1).splitlines(keepends=True),
-                            fromfile="cuda:0",
-                            tofile="cuda:1",
-                        )
-                    )
-                    self.fail(
-                        f"inductor code differs across devices under CooR "
-                        f"with {cfg}:\n{diff}"
-                    )
-                self._assert_no_baked_device(code0)
+        cases = {
+            "benchmark_kernel": (
+                self._coor_inductor_fn,
+                ((2, 8),),
+                {"benchmark_kernel": True},
+                False,
+            ),
+            "compile_time_autotune": (
+                self._coor_inductor_fn,
+                ((2, 8),),
+                {"triton.autotune_at_compile_time": True},
+                False,
+            ),
+            "template": (
+                self._coor_template_fn,
+                ((256, 256), (256, 256)),
+                {
+                    "deterministic": True,
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "TRITON",
+                },
+                True,
+            ),
+            "combo_kernel": (
+                self._coor_combo_fn,
+                ((8192,), (4096,)),
+                {
+                    "combo_kernels": True,
+                    "benchmark_combo_kernel": False,
+                    "combo_kernel_peak_memory_increase_gb": None,
+                    "combo_kernel_peak_memory_pct_threshold": None,
+                },
+                False,
+            ),
+            "user_defined_triton": (
+                self._make_coor_user_defined_triton_fn,
+                ((128,),),
+                {},
+                False,
+            ),
+        }
+        fn, input_shapes, cfg, force_big_gpu = cases[path]
+        if path == "user_defined_triton":
+            fn = fn()
+
+        def code_on(dev):
+            big_gpu = (
+                patch.object(inductor_utils, "is_big_gpu", return_value=True)
+                if force_big_gpu
+                else nullcontext()
+            )
+            with (
+                torch._inductor.config.patch(**cfg),
+                inductor_utils.fresh_cache(),
+                big_gpu,
+            ):
+                return self._inductor_code_on_device(dev, fn, input_shapes)
+
+        code0 = code_on(0)
+        code1 = code_on(1)
+        if norm(code0) != norm(code1):
+            diff = "".join(
+                difflib.unified_diff(
+                    norm(code0).splitlines(keepends=True),
+                    norm(code1).splitlines(keepends=True),
+                    fromfile="cuda:0",
+                    tofile="cuda:1",
+                )
+            )
+            self.fail(
+                f"inductor code differs across devices under CooR for {path}:\n{diff}"
+            )
+        if path == "template":
+            self.assertIn("triton_tem_fused", code0)
+        elif path == "combo_kernel":
+            self.assertIn("combo_grid_meta", code0)
+        self._assert_no_baked_device(code0)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @compiler_config.patch(compile_on_one_rank=True)
@@ -640,6 +1148,229 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @compiler_config.patch(compile_on_one_rank=True)
+    def test_device_constructor_passes_through_current_device_under_coor(self):
+        # torch.device(d) on a device is the identity, so it has to hand the
+        # rank-relative device back rather than fall through to device.__new__.
+        from torch._dynamo.testing import CompileCounter
+
+        def f(x):
+            return x + torch.zeros(1, device=torch.device(x.device))
+
+        cnt = CompileCounter()
+        torch._dynamo.reset()
+        compiled = torch.compile(f, backend=cnt, fullgraph=True)
+        x = torch.zeros(1, device="cuda")
+        self.assertEqual(compiled(x), f(x))
+        self.assertEqual(cnt.frame_count, 1)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_device_properties_graph_break_is_explicit_under_coor(self):
+        # The properties object mixes rank-invariant hardware facts with per-card
+        # identity (uuid, pci_bus_id), so folding the compiling rank's answer would
+        # be wrong for part of it. Break, and say why rather than reporting the
+        # generic "torch.* op returned non-Tensor".
+        from torch._dynamo.exc import Unsupported
+
+        def f(x):
+            return x + torch.cuda.get_device_properties(x.device).multi_processor_count
+
+        # Not "compile_on_one_rank": this file's own name appears in the traceback.
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(Unsupported, "rank-relative device"):
+            torch.compile(f, fullgraph=True)(torch.zeros(1, device="cuda"))
+
+        # Allowing the break, the eager fallback reads the running rank's properties.
+        torch._dynamo.reset()
+        x = torch.zeros(1, device="cuda")
+        self.assertEqual(torch.compile(f)(x), f(x))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_device_as_dict_key_under_coor(self):
+        # Equality reports the current device equal to an explicit cuda:N, so under
+        # CooR every device of one type hashes alike and equality decides the bucket.
+        from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
+
+        def sourceless():
+            x = torch.randn(4, device="cuda")
+            y = torch.randn(4, device="cuda")
+            return len({x.device: 1, y.device: 2})
+
+        def sourced(x, y):
+            return len({x.device: 1, y.device: 2})
+
+        def with_cpu(x):
+            return len({x.device: 1, torch.device("cpu"): 2})
+
+        def grouped(x, y):
+            return len(_group_tensors_by_device_and_dtype([[x, y]]))
+
+        def mixed(x):
+            return len({x.device: 1, torch.device("cuda:0"): 2})
+
+        x = torch.randn(4, device="cuda")
+        y = torch.randn(4, device="cuda")
+        cases = [
+            (sourceless, ()),
+            (sourced, (x, y)),
+            (with_cpu, (x,)),
+            (grouped, (x, y)),
+        ]
+        for fn, args in cases:
+            torch._dynamo.reset()
+            compiled = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(compiled(*args), fn(*args))
+
+        # Against an explicit index, key equality depends on the runtime index.
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError, "Could not guard on data-dependent expression"
+        ):
+            torch.compile(mixed, backend="eager", fullgraph=True)(x)
+        torch._dynamo.reset()
+        self.assertEqual(torch.compile(mixed, backend="eager")(x), mixed(x))
+
+        # Without compile_on_one_rank the device is an ordinary constant again.
+        with compiler_config.patch(compile_on_one_rank=False):
+            torch._dynamo.reset()
+            self.assertEqual(
+                torch.compile(mixed, backend="eager", fullgraph=True)(x), mixed(x)
+            )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_clip_grad_norm_under_coor(self):
+        m = torch.nn.Linear(4, 4, device="cuda")
+        inp = torch.randn(2, 4, device="cuda")
+
+        def step(inp):
+            m.zero_grad()
+            m(inp).sum().backward()
+            return torch.nn.utils.clip_grad_norm_(m.parameters(), 1.0)
+
+        expected = step(inp)
+        for backend in ("eager", "inductor"):
+            torch._dynamo.reset()
+            self.assertEqual(torch.compile(step, backend=backend)(inp), expected)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_device_index_observation_is_cached_per_graph(self):
+        # One node per graph, the way _current_device_edge already caches the device
+        # itself. A fresh node per read means a fresh unbacked symbol per read, so
+        # two reads are not comparable to each other, and N reads cost N fallback
+        # kernels and N cudagraph partition boundaries for a value that cannot
+        # change within a graph.
+        from torch._dynamo.testing import EagerAndRecordGraphs
+
+        backend = EagerAndRecordGraphs()
+
+        def f(x):
+            return x + x.device.index + x.get_device() + x.device.index
+
+        torch._dynamo.reset()
+        torch.compile(f, backend=backend, fullgraph=True)(torch.zeros(1, device="cuda"))
+        nodes = [
+            n
+            for g in backend.graphs
+            for n in g.graph.nodes
+            if "current_device_index" in str(n.target)
+        ]
+        self.assertEqual(len(nodes), 1, f"expected one cached node, got {len(nodes)}")
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_device_index_symbol_is_not_size_like(self):
+        # The index is unbacked, but it is not a *size*. Allocating it with
+        # new_dynamic_size() files it under ShapeEnv.size_like, which carries the
+        # size-oblivious assumption that a value is never 0 or 1 -- here, that this
+        # rank is never cuda:0 or cuda:1.
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        with FakeTensorMode(shape_env=shape_env):
+            index = torch.ops.coor.current_device_index.default()
+
+        self.assertEqual(shape_env.size_like, set())
+        # The >= 0 bound is the part worth keeping.
+        self.assertEqual(shape_env.var_to_range[index.node.expr].lower, 0)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_device_index_does_not_graph_break_by_default(self):
+        # new_dynamic_size() also trips the allow_dynamic_output_shape_ops gate,
+        # which Dynamo sets to "one_graph", so without fullgraph=True a device-index
+        # read breaks the graph and claims the op's "output shape depends on input
+        # Tensor data" -- which is not true of a nullary op returning a device index.
+        from torch._dynamo.testing import EagerAndRecordGraphs
+
+        backend = EagerAndRecordGraphs()
+        torch._dynamo.reset()
+        torch.compile(lambda x: x * 2 + x.device.index, backend=backend)(
+            torch.zeros(1, device="cuda")
+        )
+
+        self.assertEqual(len(backend.graphs), 1)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_device_index_predicate_is_data_dependent_under_coor(self):
+        def f(x):
+            return x + (1 if x.device.index == 0 else 2)
+
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError, "Could not guard on data-dependent expression"
+        ):
+            torch.compile(f, backend="eager", fullgraph=True)(
+                torch.zeros(1, device="cuda")
+            )
+
+        torch._dynamo.reset()
+        x = torch.zeros(1, device="cuda")
+        self.assertEqual(torch.compile(f, backend="eager")(x), f(x))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_get_device_predicate_is_data_dependent_under_coor(self):
+        # Branching on the index is the one thing that cannot be honoured. The value
+        # is unknown until the artifact runs, so under fullgraph=True there is no
+        # answer to fold and the data-dependent error is the correct outcome -- an
+        # error is what should happen, not something to be worked around. Pinned
+        # because the tempting "fix" is to specialize the branch, which silently
+        # hands every rank the tracing rank's answer.
+        def branch(x):
+            return x + (1 if x.get_device() == 0 else 2)
+
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError, "Could not guard on data-dependent expression"
+        ):
+            torch.compile(branch, backend="eager", fullgraph=True)(
+                torch.zeros(1, device="cuda")
+            )
+
+        # Without fullgraph the same predicate is a graph break, not an error, and
+        # the eager continuation answers it against the device actually in use.
+        torch._dynamo.reset()
+        x = torch.zeros(1, device="cuda")
+        self.assertEqual(torch.compile(branch, backend="eager")(x), branch(x))
+
+        # A predicate the index bound already settles must still fold. get_device()
+        # is emitted with a non-negative range, so this is provable for every rank
+        # and erroring on it would be over-eager.
+        def provable(x):
+            return x + (1 if x.get_device() >= 0 else 2)
+
+        torch._dynamo.reset()
+        self.assertEqual(
+            torch.compile(provable, backend="eager", fullgraph=True)(x), provable(x)
+        )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
     def test_inductor_code_identical_across_cache_dirs(self):
         # The artifact may be built on one machine and run on another (compatible) one,
         # so generated text must not embed machine-specific paths -- the inductor cache
@@ -652,7 +1383,9 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
 
         def code_with_fresh_cache():
             with fresh_cache():
-                return self._inductor_code_on_device(0)
+                return self._inductor_code_on_device(
+                    0, self._coor_inductor_fn, ((2, 8),)
+                )
 
         code_a, code_b = code_with_fresh_cache(), code_with_fresh_cache()
 
@@ -694,7 +1427,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         self._assert_no_baked_device(code)
         self.assertEqual(sorted(out.tolist()), list(range(8)))
 
-    @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
+    @requires_multigpu
     @compiler_config.patch(compile_on_one_rank=True)
     @torch._inductor.config.patch({"triton.cudagraphs": True})
     def test_cudagraphs_under_coor_runs_on_nonzero_device(self):
@@ -713,7 +1446,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         self.assertEqual(out.device, torch.device("cuda:1"))
         self.assertEqual(out, ref)
 
-    @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
+    @requires_multigpu
     @compiler_config.patch(compile_on_one_rank=True)
     def test_inductor_runs_on_nonzero_device(self):
         # Problem 2 (runtime): a graph compiled under CooR must run on a rank's own
@@ -727,7 +1460,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
             out = compiled(torch.randn(2, 8, device="cuda:1"))
         self.assertEqual(out.device, torch.device("cuda:1"))
 
-    @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
+    @requires_multigpu
     @compiler_config.patch(compile_on_one_rank=True)
     def test_inductor_compiled_on_one_device_runs_on_another(self):
         # Problem 3 (shareable artifact): a graph first compiled on cuda:0 must produce a
@@ -769,7 +1502,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         self.assertEqual(out.device, torch.device("cuda:1"))
         self.assertEqual(out, ref)
 
-    @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
+    @requires_multigpu
     @compiler_config.patch(compile_on_one_rank=True)
     def test_inductor_shared_kernel_reused_in_process_across_devices(self):
         # A rank only ever drives one device, but CooR's kernel cache key is
@@ -801,6 +1534,169 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         self.assertEqual(out1.device, torch.device("cuda:1"))
         self.assertEqual(out0, ref0)
         self.assertEqual(out1, ref1)
+
+    @requires_multigpu
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_user_defined_triton_kernel_reused_in_process_across_devices(self):
+        # Same cross-device reuse as the test above, for a user-defined triton.jit
+        # kernel. That one passes only because an inductor-generated kernel gets the
+        # static launcher, which keeps its handles per device. USER_AUTOTUNE is refused
+        # by check_can_launch unless static_launch_user_defined_triton_kernels is set,
+        # and that defaults off, so these kernels fall back to TritonCompileResult --
+        # which binds one CUfunction at _init_handles() time and reuses it for every
+        # later launch.
+        #
+        # Before the index was dropped here, the baked DeviceProperties(index=N) gave
+        # each device its own cache key and hence its own autotuner, so the single
+        # baked function was never reached. Dropping it is what makes one artifact
+        # serve both devices.
+        from torch._inductor.utils import clear_caches, fresh_cache
+
+        fn = self._make_coor_user_defined_triton_fn()
+        inp0 = torch.randn(128, device="cuda:0")
+        inp1 = torch.randn(128, device="cuda:1")
+        torch._dynamo.reset()
+        clear_caches()
+        with fresh_cache():
+            compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+            with torch.cuda.device(0):
+                out0 = compiled(inp0)
+            # The same in-process autotuner (loaded on cuda:0) now launches on cuda:1.
+            with torch.cuda.device(1):
+                out1 = compiled(inp1)
+        self.assertEqual(out0.device, torch.device("cuda:0"))
+        self.assertEqual(out1.device, torch.device("cuda:1"))
+        self.assertEqual(out0, inp0 + 1)
+        self.assertEqual(out1, inp1 + 1)
+
+    @requires_multigpu
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_device_passthrough_custom_backend_tracks_current_device_under_coor(self):
+        from torch._dynamo.testing import CompileCounter
+
+        def f(x):
+            return torch.zeros(x.shape[0], device=x.device)
+
+        cnt = CompileCounter()
+        torch._dynamo.reset()
+        compiled = torch.compile(f, backend=cnt, fullgraph=True)
+        with torch.cuda.device(0):
+            compiled(torch.ones(1, device="cuda:0"))
+        with torch.cuda.device(1):
+            x = torch.ones(1, device="cuda:1")
+            actual = compiled(x)
+            expected = f(x)
+
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(actual.device, expected.device)
+
+    @requires_multigpu
+    @compiler_config.patch(compile_on_one_rank=True)
+    @parametrize("origin", ("input", "factory"))
+    def test_device_observations_track_current_device_under_coor(self, origin):
+        from torch._dynamo.testing import CompileCounterWithBackend
+
+        def f(x):
+            y = torch.zeros(x.shape, device=x.device) if origin == "factory" else x
+            return (
+                y + y.device.index,
+                y.device == torch.device("cuda:1"),
+                torch.device("cuda:1") == y.device,
+                y.device != torch.device("cuda"),
+                y.device,
+            )
+
+        cnt = CompileCounterWithBackend("inductor")
+        torch._dynamo.reset()
+        compiled = torch.compile(f, backend=cnt, fullgraph=True)
+        with torch.cuda.device(0):
+            x = torch.zeros(1, device="cuda:0")
+            self.assertEqual(compiled(x), f(x))
+        with torch.cuda.device(1):
+            x = torch.zeros(1, device="cuda:1")
+            self.assertEqual(compiled(x), f(x))
+
+        self.assertEqual(cnt.frame_count, 1)
+
+    @requires_multigpu
+    @compiler_config.patch(compile_on_one_rank=True)
+    @parametrize("consumer", ("synchronize", "current_stream", "get_device_module"))
+    def test_current_device_consumers_under_coor(self, consumer):
+        from torch._dynamo.testing import CompileCounter
+
+        def f(x):
+            if consumer == "synchronize":
+                torch.cuda.synchronize(x.device)
+                return x + 1
+            if consumer == "current_stream":
+                return x + 1, torch.accelerator.current_stream(x.device)
+            module = torch.get_device_module(x.device)
+            return x + (1 if module is torch.cuda else 2)
+
+        cnt = CompileCounter()
+        torch._dynamo.reset()
+        compiled = torch.compile(f, backend=cnt, fullgraph=True)
+        with torch.cuda.device(0):
+            compiled(torch.zeros(1, device="cuda:0"))
+        with torch.cuda.device(1):
+            x = torch.zeros(1, device="cuda:1")
+            if consumer == "synchronize":
+                with patch.object(torch.accelerator, "synchronize") as synchronize:
+                    actual = compiled(x)
+                self.assertEqual(actual, x + 1)
+                self.assertEqual(synchronize.call_args.args, (torch.device("cuda"),))
+            else:
+                self.assertEqual(compiled(x), f(x))
+
+        self.assertEqual(cnt.frame_count, 1)
+
+    @requires_multigpu
+    @compiler_config.patch(compile_on_one_rank=True)
+    @parametrize("origin", ("input", "intermediate"))
+    def test_get_device_tracks_current_device_under_coor(self, origin):
+        # get_device() returns an int, and an int has no index-less form. Folding the
+        # tracing rank's index would make every rank sharing the artifact report
+        # cuda:0 -- no guard fails, nothing recompiles, and the answer is just wrong.
+        #
+        # Both assertions matter and neither prejudges the fix. Correctness rules
+        # out folding the index; the single cache entry rules out "fixing" it with
+        # an exact device guard, which would trade a wrong answer for a per-rank
+        # artifact and give up what CooR is for.
+        from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+        from torch._dynamo.testing import CompileCounter
+
+        def f(x):
+            y = x + 1 if origin == "intermediate" else x
+            return y + y.get_device()
+
+        torch._dynamo.reset()
+        # fullgraph, and count frames rather than only f's own cache entries: a
+        # graph-breaking implementation compiles resume functions under their own
+        # code objects, which _debug_get_cache_entry_list(f) does not see, so the
+        # cache-entry assertion alone passes for an implementation that breaks.
+        cnt = CompileCounter()
+        compiled = torch.compile(f, backend=cnt, fullgraph=True)
+        with torch.cuda.device(0):
+            compiled(torch.zeros(1, device="cuda:0"))
+
+        with torch.cuda.device(1):
+            x = torch.zeros(1, device="cuda:1")
+            self.assertEqual(
+                compiled(x),
+                f(x),
+                "get_device() folded the tracing rank's index, so rank 1 was told "
+                "it is on cuda:0",
+            )
+        self.assertEqual(
+            cnt.frame_count,
+            1,
+            "the traced frame must stay rank-portable; a second compile means a "
+            "device guard forced a per-rank recompile",
+        )
+        self.assertLessEqual(len(_debug_get_cache_entry_list(f)), 1)
+
+
+instantiate_parametrized_tests(TestCompileOnOneRankDeviceAsParameter)
 
 
 def _baked_pg_constants(gm):

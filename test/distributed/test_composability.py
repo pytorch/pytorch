@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
+from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy, share_comm_ctx
 from torch.distributed.fsdp._fully_shard._fsdp_param import ShardedState
 from torch.distributed.pipelining import PipelineStage
 from torch.distributed.pipelining.schedules import (
@@ -32,7 +32,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skip_but_pass_in_sandcastle_if,
-    TEST_WITH_ROCM,
+    skipIfRocm,
 )
 
 
@@ -297,9 +297,6 @@ class ComposabilityTest(MultiProcContinuousTest):
         ],
     )
     def test_pp_fsdp(self, dp_type, defer_reduce_grad_wait, ScheduleClass):
-        if TEST_WITH_ROCM:
-            return
-
         torch.get_device_module(device_type).set_device(self.device)
         mesh_shape = (self.world_size // 2, 2)
         mesh_dim_names = ("dp", "pp")
@@ -359,6 +356,14 @@ class ComposabilityTest(MultiProcContinuousTest):
             ),
         )
 
+        if defer_reduce_grad_wait:
+            if pp_group.rank() == 0:
+                pipeline_schedule.eval(input_local)
+            else:
+                pipeline_schedule.eval(target=target_local)
+            for stage in pipeline_schedule._stages:
+                self.assertIsNone(stage._gradient_reduction_handle)
+
         # Run the pipeline
         if pp_group.rank() == 0:
             pipeline_schedule.step(input_local)
@@ -400,11 +405,9 @@ class ComposabilityTest(MultiProcContinuousTest):
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "Test requires 4+ GPUs")
+    @skipIfRocm
     @parametrize("defer_reduce_grad_wait", [False, True])
     def test_pp_fsdp_outer_gradient_accumulation(self, defer_reduce_grad_wait):
-        if TEST_WITH_ROCM:
-            return
-
         torch.get_device_module(device_type).set_device(self.device)
         device_mesh = init_device_mesh(
             "cuda",
@@ -444,7 +447,7 @@ class ComposabilityTest(MultiProcContinuousTest):
                 for i in range(n_microbatches)
             )
             schedule._prepare_schedule_with_comms({0: actions})
-            return schedule
+            return schedule, stage
 
         def assert_unsharded(model, expected):
             states = [
@@ -459,7 +462,7 @@ class ComposabilityTest(MultiProcContinuousTest):
                 [expected] * len(states),
             )
 
-        schedule = make_schedule(model, microbatches_per_step)
+        schedule, stage = make_schedule(model, microbatches_per_step)
         for step in range(total_steps):
             start = step * microbatches_per_step
             end = start + microbatches_per_step
@@ -473,7 +476,7 @@ class ComposabilityTest(MultiProcContinuousTest):
             self.assertIsNone(schedule._stages[0]._gradient_reduction_handle)
 
         self.assertNotIn(0, schedule.unsharded_stages)
-        ref_schedule = make_schedule(ref_model, total_microbatches)
+        ref_schedule, _ = make_schedule(ref_model, total_microbatches)
         ref_schedule.step(inputs, target=targets)
 
         ref_parameters = dict(ref_model.named_parameters())
@@ -488,14 +491,55 @@ class ComposabilityTest(MultiProcContinuousTest):
                 rtol=1e-5,
             )
 
+        forward_only_schedule = ScheduleGPipe(
+            stage,
+            n_microbatches=1,
+            loss_fn=loss_fn,
+            scale_grads=False,
+        )
+        forward_only_schedule.eval(inputs[0], target=targets[0])
+
+        state = fully_shard.state(model)
+        self.assertFalse(state._state_ctx.manual_backward_finalization)
+        model.zero_grad(set_to_none=True)
+        model(inputs[0]).sum().backward()
+        self.assertEqual(state._comm_ctx.reduce_scatter_states, [])
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_pp_fsdp_deferred_reduction_rejects_shared_comm_ctx(self):
+        torch.get_device_module(device_type).set_device(self.device)
+        device_mesh = init_device_mesh(
+            "cuda",
+            mesh_shape=(self.world_size, 1),
+            mesh_dim_names=("dp", "pp"),
+        )
+        dp_mesh = device_mesh["dp"]
+        pp_group = device_mesh["pp"].get_group()
+        models = [
+            fully_shard(nn.Linear(8, 8).to(self.device), mesh=dp_mesh) for _ in range(2)
+        ]
+        share_comm_ctx(models)
+        stages = [
+            PipelineStage(model, stage_idx, 2, self.device, group=pp_group)
+            for stage_idx, model in enumerate(models)
+        ]
+        schedule = ScheduleLoopedBFS(
+            stages,
+            n_microbatches=2,
+            loss_fn=loss_fn,
+            defer_reduce_grad_wait=True,
+        )
+
+        with self.assertRaisesRegex(ValueError, "Do not call share_comm_ctx"):
+            schedule.step(torch.randn(4, 8, device=self.device))
+
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "Test requires 4+ GPUs")
     @parametrize("dp_type", ["FSDP", "FSDP_MP"])
     def test_pp_fsdp_unshard_reshard_runtime(self, dp_type):
         """Test FSDP UNSHARD/RESHARD functionality using _PipelineScheduleRuntime with custom schedules."""
-        if TEST_WITH_ROCM:
-            return
 
         torch.get_device_module(device_type).set_device(self.device)
         mesh_shape = (self.world_size, 1)
@@ -592,7 +636,8 @@ class ComposabilityTest(MultiProcContinuousTest):
                         stage_index=0,  # stage 0 (the only stage)
                         computation_type=comp_type,
                         microbatch_index=microbatch_index
-                        if comp_type == _ComputationType.FORWARD
+                        if comp_type
+                        in (_ComputationType.FORWARD, _ComputationType.FULL_BACKWARD)
                         else None,
                     )
                     for comp_type in computation_types
@@ -600,11 +645,12 @@ class ComposabilityTest(MultiProcContinuousTest):
             }
             return schedule
 
-        unshard_schedule = create_schedule(
+        finalize_schedule = create_schedule(
             [
                 _ComputationType.UNSHARD,
                 _ComputationType.FORWARD,
-                _ComputationType.REDUCE_GRAD,  # Contains final fsdp post_backward
+                _ComputationType.FULL_BACKWARD,
+                _ComputationType.REDUCE_GRAD,
             ],
             microbatch_index=0,
         )
@@ -628,16 +674,20 @@ class ComposabilityTest(MultiProcContinuousTest):
         # Verify parameters are now sharded again
         check_fsdp_unsharded_state(stage.submod, expected_unsharded=False)
 
-        # Test 2: Run UNSHARD only schedule
-        runtime.pipeline_order_with_comms = unshard_schedule
-        runtime.step(dummy_input)
+        # Test 2: Run a backward schedule with explicit FSDP finalization
+        runtime = _PipelineScheduleRuntime(
+            [stage], n_microbatches=1, loss_fn=loss_fn, scale_grads=False
+        )
+        runtime.pipeline_order_with_comms = finalize_schedule
+        target = torch.randn_like(dummy_input)
+        runtime.step(dummy_input, target=target)
 
         # Verify parameters are still sharded
         check_fsdp_unsharded_state(stage.submod, expected_unsharded=False)
         self.assertNotIn(0, runtime.unsharded_stages)
 
         # The bookkeeping must allow the next step to unshard again.
-        runtime.step(dummy_input)
+        runtime.step(dummy_input, target=target)
         check_fsdp_unsharded_state(stage.submod, expected_unsharded=False)
 
 
