@@ -123,13 +123,28 @@ class _GraphPartitionCompileRecord:
         self.bw_graph = None
         self.bw_static_input_idxs = None
         self.forward_is_cudagraph_partitioned = None
+        self.fw_captured_partitions = None
+        self.fw_has_uncaptured_partition = None
 
 
 @contextlib.contextmanager
 def record_graph_partition_compiles():
-    """Capture the state the backward's static-input classification depends on."""
+    """Capture the state the backward's static-input classification depends on.
+
+    partition_maps holds only captured partitions, so fw_captured_partitions with
+    fw_has_uncaptured_partition describes the shape the classification derives from.
+    """
     record = _GraphPartitionCompileRecord()
+    orig_fw = torch._inductor.compile_fx.compile_fx_forward
     orig_bw = torch._inductor.compile_fx.compile_fx_backward
+
+    def intercept_fw(*args, **kwargs):
+        result = orig_fw(*args, **kwargs)
+        partition_maps = getattr(result, "partition_maps", None)
+        if partition_maps is not None:
+            record.fw_captured_partitions = len(partition_maps)
+            record.fw_has_uncaptured_partition = result.has_uncaptured_partition
+        return result
 
     def intercept_bw(
         gm, example_inputs, compiler_config_extra, inner_compile, **kwargs
@@ -150,7 +165,10 @@ def record_graph_partition_compiles():
             **kwargs,
         )
 
-    with mock.patch("torch._inductor.compile_fx.compile_fx_backward", intercept_bw):
+    with (
+        mock.patch("torch._inductor.compile_fx.compile_fx_forward", intercept_fw),
+        mock.patch("torch._inductor.compile_fx.compile_fx_backward", intercept_bw),
+    ):
         yield record
 
 
@@ -5563,6 +5581,42 @@ if HAS_CUDA_AND_TRITON:
 
             # Run a few more iterations to confirm stability
             train_steps(compiled_model, input_data, steps=4)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_single_captured_partition_not_static(self):
+            from torch._inductor.utils import count_tangents
+
+            class Mod(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.linear = torch.nn.Linear(16, 16)
+
+                def forward(self, x):
+                    # Leading CPU round-trip: everything after it is one captured
+                    # partition, and the mul it feeds is saved for backward.
+                    b = x.cpu().cuda()
+                    c = b * b
+                    return self.linear(c)
+
+            model = Mod().cuda()
+            input_data = torch.randn(16, 16, device="cuda")
+
+            with record_graph_partition_compiles() as compiles:
+                compiled_model = torch.compile(model, mode="reduce-overhead")
+                train_steps(compiled_model, input_data, steps=5)
+
+            bw_graph = compiles.bw_graph
+            self.assertIsNotNone(bw_graph)
+            self.assertIsNotNone(compiles.bw_static_input_idxs)
+            self.assertEqual(compiles.fw_captured_partitions, 1)
+            self.assertTrue(compiles.fw_has_uncaptured_partition)
+            names = [n.name for n in bw_graph.graph.find_nodes(op="placeholder")]
+            static_names = {names[i] for i in compiles.bw_static_input_idxs}
+            self.assertFalse({n for n in static_names if n.startswith("tangents")})
+            self.assertNotIn("mul", static_names)
+            # Non-vacuous: "mul" is a static-input candidate that the fix excludes.
+            self.assertIn("mul", names[: count_tangents(bw_graph)])
+            self.assertTrue(compiles.forward_is_cudagraph_partitioned)
 
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_no_partition_keeps_static(self):
