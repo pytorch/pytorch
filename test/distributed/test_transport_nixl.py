@@ -13,7 +13,7 @@ from transport_test_utils import TransportTestMixin
 
 import torch
 from torch.distributed._transport import new_transport, wait_all
-from torch.distributed._transport._nixl import _transport as _nixl
+from torch.distributed._transport.nixl import _transport as _nixl
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -285,6 +285,59 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
             thread.join(5)
         self.assertFalse(thread.is_alive())
         first.unregister_memory(memory)
+
+    def test_raw_tensors_are_not_implicitly_registered(self):
+        first, second, source, remote = self.registered_pair()
+        registered = len(first._agent.registrations)
+        for operation in (first.write, first.read):
+            with self.assertRaisesRegex(TypeError, "not registered"):
+                operation(torch.ones(8), remote)
+        self.assertEqual(len(first._agent.registrations), registered)
+
+    def test_registrations_outlive_last_outgoing_work(self):
+        with patch.object(_nixl, "_load_backend", return_value=self.backend()):
+            first = new_transport("nixl", agent_name="retained")
+            second = new_transport("nixl", agent_name="peer")
+        ref = weakref.ref(first)
+        try:
+            first.connect(second.bind())
+            second.connect(first.bind())
+            source = first.register_memory(torch.ones(8))
+            target = second.register_memory(torch.zeros(8))
+            work = first.write(
+                source.to_view(), target.to_remote_buffer(), async_op=True
+            )
+            work.wait()
+            del work, source, first
+            gc.collect()
+            self.assertIsNotNone(ref())
+            self.assertIn(ref(), _nixl._live_transports)
+            ref().close()
+            gc.collect()
+            self.assertIsNone(ref())
+        finally:
+            if ref() is not None:
+                ref().close()
+            second.close()
+
+    def test_mismatched_peer_cleanup_failure_is_retryable(self):
+        first, second, source, remote = self.registered_pair()
+        wrong = replace(remote, metadata=pickle.dumps(("unexpected", [])))
+        with patch.object(
+            first._agent,
+            "remove_remote_agent",
+            side_effect=RuntimeError("cleanup failed"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "cleanup failed"):
+                first.write(source.to_view(), wrong)
+        self.assertIn("unexpected", first._remote_agents)
+        self.assertIn(first, _nixl._live_transports)
+        with self.assertRaisesRegex(RuntimeError, "closed"):
+            first.bind()
+        agent = first._agent
+        first.close()
+        self.assertFalse(agent.remote_metadata)
+        self.assertNotIn(first, _nixl._live_transports)
 
     def test_supported(self):
         with patch.object(_nixl, "_load_backend", return_value=self.backend()):
@@ -671,6 +724,8 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
                 source.to_view(), replace(remote, metadata=pickle.dumps(("other", [])))
             )
         self.assertEqual(first._transfers, {})
+
+        self.assertNotIn("other", first._agent.remote_metadata)
 
     @parametrize("failure", ["dispatch", "query"])
     def test_error_drains_before_releasing_transfer(self, failure):

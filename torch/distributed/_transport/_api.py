@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 from abc import ABC, abstractmethod
-from typing import Any, cast, Protocol, runtime_checkable
+from typing import Any, cast, Literal, Protocol, runtime_checkable
 from typing_extensions import Self
 
 import torch
@@ -19,12 +20,20 @@ class MemoryView(Protocol):
 
 @runtime_checkable
 class MutableMemoryView(MemoryView, Protocol):
-    """A writable view of registered memory."""
+    """A view explicitly permitting writes to its registered memory."""
+
+    @property
+    def writable(self) -> Literal[True]: ...
 
 
 @runtime_checkable
 class RemoteBuffer(Protocol):
-    """A serializable descriptor for registered memory on a peer."""
+    """A pickle-serializable descriptor for registered memory on a peer.
+
+    ``pickle.loads(pickle.dumps(buffer))`` must preserve addressing information
+    without serializing tensor contents or process-local native handles.
+    Exchange descriptors only with trusted peers; never unpickle untrusted data.
+    """
 
 
 @runtime_checkable
@@ -100,7 +109,11 @@ class Transport(ABC):
 
     @abstractmethod
     def connect(self, peer_url: bytes, *, timeout: float | None = None) -> int:
-        """Connect to a bound peer and return zero on success."""
+        """Connect to a bound peer and return zero on success.
+
+        Rank-to-endpoint lookup belongs in a separate application control-plane
+        adapter; this interface addresses peers using opaque connection bytes.
+        """
 
     @abstractmethod
     def connected(self) -> bool:
@@ -160,10 +173,18 @@ class Transport(ABC):
     ) -> None:
         """Write a local view, yielding to asyncio until the transfer finishes."""
         _validate_timeout(timeout)
-        work = cast(Work, self.write(local_buffer, remote_buffer, async_op=True))
-        await wait_all(
-            (work,), timeout=self._default_timeout if timeout is None else timeout
+        timeout = self._default_timeout if timeout is None else timeout
+        started = asyncio.get_running_loop().time()
+        work = cast(
+            Work,
+            self.write(local_buffer, remote_buffer, async_op=True, timeout=timeout),
         )
+        remaining = (
+            None
+            if timeout is None
+            else max(0.0, timeout - (asyncio.get_running_loop().time() - started))
+        )
+        await wait_all((work,), timeout=remaining)
 
     async def read_async(
         self,
@@ -174,10 +195,18 @@ class Transport(ABC):
     ) -> None:
         """Read into a local view, yielding to asyncio until the transfer finishes."""
         _validate_timeout(timeout)
-        work = cast(Work, self.read(local_buffer, remote_buffer, async_op=True))
-        await wait_all(
-            (work,), timeout=self._default_timeout if timeout is None else timeout
+        timeout = self._default_timeout if timeout is None else timeout
+        started = asyncio.get_running_loop().time()
+        work = cast(
+            Work,
+            self.read(local_buffer, remote_buffer, async_op=True, timeout=timeout),
         )
+        remaining = (
+            None
+            if timeout is None
+            else max(0.0, timeout - (asyncio.get_running_loop().time() - started))
+        )
+        await wait_all((work,), timeout=remaining)
 
     @abstractmethod
     def close(self, *, timeout: float | None = None) -> None:
