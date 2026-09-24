@@ -68,6 +68,31 @@ class FakeMapping:
 class DictTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    @parametrize("match", [False, True])
+    def test_setdefault_hashes_and_compares_once(self, match):
+        class Key:
+            def __init__(self, value):
+                self.value = value
+                self.hash_count = 0
+                self.eq_count = 0
+
+            def __hash__(self):
+                self.hash_count += 1
+                return 42
+
+            def __eq__(self, other):
+                self.eq_count += 1
+                return self.value == other.value
+
+        def fn():
+            a, b = Key(0), Key(0 if match else 1)
+            d = {a: 5}
+            result = d.setdefault(b, 7)
+            return result, len(d), a.hash_count, b.hash_count, a.eq_count + b.eq_count
+
+        expected = fn()
+        self.assertEqual(expected, torch.compile(fn, backend="eager", fullgraph=True)())
+
     def test_dict_subclass_instantiation(self):
         def fn(x):
             sd = SimpleDict(x=5)

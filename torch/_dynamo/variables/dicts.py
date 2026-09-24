@@ -689,17 +689,16 @@ class ConstDictVariable(VariableTracker):
             return None
         check_positional(tx, "setdefault", len(args), 1, 2)
         self.install_dict_keys_match_guard()
-        value = self.maybe_getitem_const(args[0])
-        if value is not None:
-            return value
+        key = HashableTracker(args[0])
+        if len(args) == 1:
+            default = ConstantVariable.create(None)
         else:
-            if len(args) == 1:
-                x = ConstantVariable.create(None)
-            else:
-                x = args[1]
+            default = args[1]
+        old_len = len(self.items)
+        value = self.items.setdefault(key, default)
+        if len(self.items) != old_len:
             tx.output.side_effects.mutation(self)
-            self.items[HashableTracker(args[0])] = x
-            return x
+        return value
 
     def dict_reversed(
         self,
