@@ -1396,6 +1396,10 @@ Tri ExprArena::eval_fact(const Expr* e, Fact f) {
     case Kind::Not:
       // sympy Booleans have no assumption handlers or class facts.
       return Tri::Unknown;
+    case Kind::And:
+    case Kind::Or:
+      // LatticeOp.is_commutative.
+      return f == F::commutative ? Tri::True : Tri::Unknown;
   }
   return Tri::Unknown;
 }

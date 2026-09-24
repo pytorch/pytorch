@@ -134,11 +134,10 @@ const Expr* ExprArena::xreplace(
   if (!changed) {
     return e;
   }
-  if (e->is_relational()) {
-    return rel(e->kind, args[0], args[1]);
-  }
-  if (e->kind == Kind::Not) {
-    return logical_not(args[0]);
+  if (e->is_boolean()) {
+    // sympy rebuilds whenever a rule matched, even with identical args, and
+    // rebuilding an unevaluated relational or an Or is not a no-op.
+    throw NativeUnsupported("xreplace of a Boolean");
   }
   return e->kind == Kind::Add ? add(args)
       : e->kind == Kind::Mul  ? mul(args)

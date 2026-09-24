@@ -84,6 +84,10 @@ const char* class_name(Kind k) {
       return "GreaterThan";
     case Kind::Not:
       return "Not";
+    case Kind::And:
+      return "And";
+    case Kind::Or:
+      return "Or";
     default:
       throw NativeUnsupported("class_key of an unported kind");
   }

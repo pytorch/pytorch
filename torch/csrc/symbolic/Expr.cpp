@@ -19,8 +19,8 @@ int cmp3(T a, T b) {
 }
 
 // Index in sympy's ordering_of_classes; classes missing from it sort after all
-// listed ones, by class name (BooleanFalse, BooleanTrue, Dummy, IntInfinity,
-// NegativeIntInfinity, Not).
+// listed ones, by class name (And, BooleanFalse, BooleanTrue, Dummy,
+// IntInfinity, NegativeIntInfinity, Not, Or).
 int class_rank(const Expr* e) {
   switch (e->kind) {
     case Kind::Integer:
@@ -47,6 +47,8 @@ int class_rank(const Expr* e) {
       return 66;
     case Kind::Le:
       return 67;
+    case Kind::And:
+      return 100;
     case Kind::BooleanFalse:
       return 101;
     case Kind::BooleanTrue:
@@ -57,6 +59,8 @@ int class_rank(const Expr* e) {
       return 105;
     case Kind::Not:
       return 106;
+    case Kind::Or:
+      return 107;
     default:
       return -1;
   }

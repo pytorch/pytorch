@@ -684,11 +684,138 @@ class TestNativeSorting(TestCase):
             )
 
 
+class TestNativeLattice(TestCase):
+    # as_Boolean turns nonzero symbols (s0, zf, a, b) into true; u0 stays.
+    a = sympy.Symbol("a", integer=True, nonzero=True)
+    b = sympy.Symbol("b", integer=True, nonzero=True)
+    v = sympy.Symbol("v", integer=True, nonzero=True)
+    vp = sympy.Symbol("v", integer=True, positive=True)
+    rels = [
+        sympy.Lt(a, b, evaluate=False),
+        sympy.Le(b, a, evaluate=False),
+        sympy.Gt(b, a, evaluate=False),
+        sympy.Ge(a, b, evaluate=False),
+        sympy.Eq(a, 1, evaluate=False),
+        sympy.Ne(1, a, evaluate=False),
+        sympy.Lt(-a, 2, evaluate=False),
+        sympy.Ge(a, -2, evaluate=False),
+        sympy.Eq(s0, b + 1, evaluate=False),
+        sympy.Ne(b, s0 - 1, evaluate=False),
+    ]
+    atoms = [
+        sympy.Not(s0 + 1),
+        sympy.Not(a * b),
+        sympy.Lt(v, 2, evaluate=False),
+        sympy.Lt(vp, 2, evaluate=False),
+        s0,
+        zf,
+        u0,
+        sympy.true,
+        sympy.false,
+        *map(sympy.Integer, [0, 1, 2]),
+        sympy.Rational(1, 2),
+        int_oo,
+        s0 + 1,
+    ]
+
+    def check(self, op, args):
+        """Returns False if native raised NativeUnsupported, else checks the
+        result against sympy."""
+        arena = torch._C._symbolic._Arena()
+        fn = getattr(arena, f"logical_{op.lower()}")
+        try:
+            expected = getattr(sympy, op)(*args)
+        except (TypeError, AttributeError):
+            with self.assertRaises(NativeUnsupported, msg=f"{op}{args}"):
+                fn([arena.from_sympy(a) for a in args])
+            return True
+        try:
+            r = fn([arena.from_sympy(a) for a in args])
+        except NativeUnsupported:
+            return False
+        got = arena.to_sympy(r)
+        self.assertEqual(got, expected, f"{op}{args}")
+        self.assertEqual(type(got), type(expected), f"{op}{args}")
+        self.assertEqual(got.args, expected.args, f"{op}{args}")
+        self.assertIs(arena.from_sympy(expected).id, r.id)
+        return True
+
+    def test_known(self):
+        lt, le, gt, ge, eq, ne = self.rels[:6]
+        y, x, lv, lvp, p = self.atoms[:5]
+        cases = [(), (y,), (y, y), (y, x), (y, p), (y, zf), (p,), (zf,), (lv, x)]
+        cases += [(lt, le), (lt, gt), (lt, ge), (eq, ne), (lt, gt, le), (y, lt)]
+        cases += [(sympy.true, y), (sympy.false, y), (y, sympy.Not(y)), (y, lv)]
+        cases += [(u0, lt), (u0, sympy.Not(u0)), (u0, u0), (u0, s0), (u0, sympy.false)]
+        cases += [(sympy.Integer(1), y), (sympy.Integer(0), y), (s0 + 1, y)]
+        cases += [(sympy.Integer(2), sympy.false), (int_oo, sympy.true)]
+        cases += [(sympy.And(lt, y), le), (sympy.Or(lt, y), le)]
+        cases += [(sympy.And(y, x), sympy.Or(y, x)), (sympy.And(lt, y), x)]
+        cases += [(sympy.Or(lt, eq), sympy.Or(y, ne)), (sympy.Eq(eq, sympy.true),)]
+        cases += [(sympy.Eq(sympy.Eq(1, u0, evaluate=False), eq, evaluate=False), lt)]
+        for args in cases:
+            for op in ["And", "Or"]:
+                self.assertTrue(self.check(op, args), f"{op}{args}")
+                self.assertTrue(self.check(op, args[::-1]), f"{op}{args[::-1]}")
+        # The args tie on sort_key, so sympy's order depends on hashes.
+        for op in ["And", "Or"]:
+            self.assertFalse(self.check(op, (lv, lvp)))
+
+    def test_or_checks_relationals_before_flattening(self):
+        lt, le = self.rels[:2]
+        y = self.atoms[0]
+        self.assertTrue(self.check("Or", (sympy.Or(lt, y), le)))
+        self.assertEqual(set(sympy.Or(sympy.Or(lt, y), le).args), {y, le, lt})
+        self.assertTrue(self.check("And", (sympy.And(lt, y), le)))
+        self.assertIs(sympy.And(sympy.And(lt, y), le), sympy.false)
+
+    def test_keys(self):
+        lt, le, gt, ge, eq, ne = self.rels[:6]
+        y, x = self.atoms[:2]
+        items = [sympy.And(lt, y), sympy.Or(lt, y), sympy.And(y, x), sympy.Or(y, x)]
+        items += [sympy.Or(sympy.Or(lt, y), le), sympy.Not(sympy.And(y, x)), lt]
+        items += [sympy.And(eq, sympy.Or(ne, y)), y, sympy.true, sympy.Not(y)]
+        arena = torch._C._symbolic._Arena()
+        natives = [arena.from_sympy(v) for v in items]
+        for a, na in zip(items, natives):
+            self.assertEqual(arena.to_sympy(na), a)
+            self.assertTrue(arena.sort_key(na) == a.sort_key(), f"sort_key({a})")
+            for f in FACTS:
+                self.assertEqual(arena.ask(na, f), getattr(a, f"is_{f}"), f"{a}: {f}")
+            for b, nb in zip(items, natives):
+                self.assertEqual(arena.compare(na, nb), a.compare(b), f"{a}, {b}")
+        got = arena.ordered(natives)
+        self.assertEqual([arena.to_sympy(v) for v in got], list(sympy.ordered(items)))
+        n = arena.logical_not(natives[0])
+        self.assertEqual(arena.to_sympy(n), sympy.Not(items[0]))
+
+    @parametrize("seed", range(6))
+    def test_fuzz(self, seed):
+        rng = random.Random(seed)
+        pool = self.rels + self.atoms
+        answered = unsupported = 0
+        for _ in range(300):
+            op = rng.choice(["And", "Or"])
+            args = rng.choices(pool, k=rng.randint(0, 5))
+            if not self.check(op, args):
+                unsupported += 1
+                continue
+            answered += 1
+            try:
+                v = getattr(sympy, op)(*args)
+            except (TypeError, AttributeError):
+                continue
+            if isinstance(v, (sympy.And, sympy.Or)) and len(pool) < 60:
+                pool.append(v)
+        self.assertGreater(answered, 10 * unsupported)
+
+
 instantiate_parametrized_tests(TestNativeExpr)
 instantiate_parametrized_tests(TestNativeCompoundAssumptions)
 instantiate_parametrized_tests(TestNativeExprTools)
 instantiate_parametrized_tests(TestNativeRelational)
 instantiate_parametrized_tests(TestNativeSorting)
+instantiate_parametrized_tests(TestNativeLattice)
 
 
 if __name__ == "__main__":

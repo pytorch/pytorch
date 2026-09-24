@@ -1,5 +1,7 @@
 #include <torch/csrc/symbolic/Expr.h>
 
+#include <algorithm>
+
 namespace torch::symbolic {
 
 namespace {
@@ -51,6 +53,10 @@ Kind reversed_kind(Kind k) {
     default:
       return k;
   }
+}
+
+bool contains(c10::ArrayRef<const Expr*> xs, const Expr* x) {
+  return std::find(xs.begin(), xs.end(), x) != xs.end();
 }
 
 void check_relational(const Expr* r) {
@@ -218,6 +224,131 @@ const Expr* ExprArena::logical_not(const Expr* a) {
     return negated(a);
   }
   return intern(Kind::Not, 0, 0, {a});
+}
+
+const Expr* ExprArena::as_boolean(const Expr* e) {
+  // Integer(1) == True and Integer(0) == False.
+  if (e->kind == Kind::Integer && (e->p == 0 || e->p == 1)) {
+    return boolean(e->p == 1);
+  }
+  if (e->kind == Kind::Symbol) {
+    Tri z = ask(e, F::zero);
+    return z == Tri::Unknown ? e : boolean(z == Tri::False);
+  }
+  if (!e->is_boolean()) {
+    throw NativeUnsupported("expecting bool or Boolean");
+  }
+  return e;
+}
+
+const Expr* ExprArena::lattice(Kind kind, c10::ArrayRef<const Expr*> args) {
+  std::vector<const Expr*> unique;
+  for (const Expr* a : args) {
+    if (!contains(unique, a)) {
+      unique.push_back(a);
+    }
+  }
+  if (unique.empty()) {
+    return boolean(kind == Kind::And);
+  }
+  if (unique.size() == 1) {
+    return unique[0];
+  }
+  std::vector<const Expr*> sorted = ordered(unique);
+  for (size_t i = 1; i < sorted.size(); ++i) {
+    // sympy orders a frozenset, so tied args come out in hash order.
+    if (compare_keys(*sort_key(sorted[i - 1]), *sort_key(sorted[i])) == 0) {
+      throw NativeUnsupported("And/Or args with equal sort keys");
+    }
+  }
+  return intern(kind, 0, 0, sorted);
+}
+
+const Expr* ExprArena::logical_and(c10::ArrayRef<const Expr*> args) {
+  // And._new_args_filter: binary_check_and_simplify, the LatticeOp filter
+  // (ordered() consumes all of it before any canonical), then relationals.
+  c10::SmallVector<const Expr*, 8> checked;
+  for (const Expr* a : args) {
+    checked.push_back(as_boolean(a));
+  }
+  std::vector<const Expr*> flat;
+  for (const Expr* a : checked) {
+    if (a == false_) {
+      return false_;
+    }
+    if (a == true_) {
+      continue;
+    }
+    if (a->kind == Kind::And) {
+      flat.insert(flat.end(), a->args.begin(), a->args.end());
+    } else {
+      flat.push_back(a);
+    }
+  }
+  std::vector<const Expr*> newargs;
+  std::vector<const Expr*> rels;
+  for (const Expr* x : ordered(flat)) {
+    if (x->is_relational()) {
+      const Expr* c = canonical(x);
+      if (contains(rels, c)) {
+        continue;
+      }
+      if (contains(rels, canonical(negated(c)))) {
+        return false_;
+      }
+      rels.push_back(c);
+    }
+    newargs.push_back(x);
+  }
+  return lattice(Kind::And, newargs);
+}
+
+const Expr* ExprArena::logical_or(c10::ArrayRef<const Expr*> args) {
+  // Or._new_args_filter: unlike And, relationals are checked in argument order
+  // before nested Ors are flattened.
+  c10::SmallVector<const Expr*, 8> checked;
+  for (const Expr* a : args) {
+    checked.push_back(as_boolean(a));
+  }
+  std::vector<const Expr*> newargs;
+  std::vector<const Expr*> rels;
+  for (const Expr* x : checked) {
+    if (x->is_relational()) {
+      const Expr* c = canonical(x);
+      if (contains(rels, c)) {
+        continue;
+      }
+      if (contains(rels, canonical(negated(c)))) {
+        return true_;
+      }
+      rels.push_back(c);
+    }
+    newargs.push_back(x);
+  }
+  std::vector<const Expr*> flat;
+  for (const Expr* a : newargs) {
+    if (a == true_) {
+      return true_;
+    }
+    if (a == false_) {
+      continue;
+    }
+    if (a->kind == Kind::Or) {
+      flat.insert(flat.end(), a->args.begin(), a->args.end());
+    } else {
+      flat.push_back(a);
+    }
+  }
+  return lattice(Kind::Or, flat);
+}
+
+const Expr* ExprArena::lattice_from_args(
+    Kind kind,
+    c10::ArrayRef<const Expr*> args) {
+  if ((kind != Kind::And && kind != Kind::Or) || args.size() < 2) {
+    throw NativeUnsupported("expected the args of an And/Or");
+  }
+  return intern(kind, 0, 0, args);
 }
 
 const Expr* ExprArena::reversed(const Expr* r) {

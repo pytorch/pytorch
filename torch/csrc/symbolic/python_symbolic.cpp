@@ -32,6 +32,14 @@ struct PyArena {
     true_ = sympy.attr("true");
     false_ = sympy.attr("false");
     Not = sympy.attr("Not");
+    And = sympy.attr("And");
+    Or = sympy.attr("Or");
+    lattice_new = py::module_::import("builtins")
+                      .attr("super")(
+                          py::module_::import("sympy.core.operations")
+                              .attr("AssocOp"),
+                          And)
+                      .attr("__new__");
     for (const char* name : {"Eq", "Ne", "Lt", "Le", "Gt", "Ge"}) {
       relationals.push_back(sympy.attr(name));
     }
@@ -47,7 +55,10 @@ struct PyArena {
   std::unordered_map<uint32_t, py::object> sympy_cache;
 
   py::object Integer, Rational, Symbol, Dummy, Add, Mul, Pow, IntInfinity,
-      NegativeIntInfinity, int_oo, true_, false_, Not;
+      NegativeIntInfinity, int_oo, true_, false_, Not, And, Or;
+  // super(AssocOp, cls).__new__, which LatticeOp.__new__ calls with the final
+  // ordered args.
+  py::object lattice_new;
   // Indexed by Kind - Kind::Eq.
   std::vector<py::object> relationals;
 };
@@ -158,6 +169,16 @@ const Expr* PyArena::from_sympy(py::handle obj) {
     }
     return r;
   }
+  for (auto kind : {Kind::And, Kind::Or}) {
+    py::handle cls = kind == Kind::And ? And : Or;
+    if (Py_TYPE(obj.ptr()) == reinterpret_cast<PyTypeObject*>(cls.ptr())) {
+      std::vector<const Expr*> args;
+      for (py::handle a : obj.attr("args")) {
+        args.push_back(from_sympy(a));
+      }
+      return arena->lattice_from_args(kind, args);
+    }
+  }
   throw NativeUnsupported(
       "unsupported sympy type " +
       py::str(py::type::handle_of(obj).attr("__name__")).cast<std::string>());
@@ -234,6 +255,19 @@ py::object PyArena::to_sympy(const Expr* e) {
     case Kind::Not:
       r = Not(to_sympy(e->args[0]));
       break;
+    case Kind::And:
+    case Kind::Or: {
+      py::tuple args(e->args.size());
+      for (size_t i = 0; i < e->args.size(); ++i) {
+        args[i] = to_sympy(e->args[i]);
+      }
+      // Rebuilding with Or(*args) could re-filter: Or's filter is not
+      // idempotent.
+      py::object cls = e->kind == Kind::And ? And : Or;
+      r = lattice_new(cls, *args);
+      r.attr("_argset") = py::frozenset(args);
+      break;
+    }
   }
   sympy_cache.emplace(e->id, r);
   return r;
@@ -275,6 +309,10 @@ const char* kind_name(Kind k) {
       return "Ge";
     case Kind::Not:
       return "Not";
+    case Kind::And:
+      return "And";
+    case Kind::Or:
+      return "Or";
   }
   return "?";
 }
@@ -481,6 +519,16 @@ void initSymbolicBindings(PyObject* module) {
           "logical_not",
           [wrap](const Self& self, const PyExpr& a) {
             return wrap(self, self->arena->logical_not(unwrap(self, a)));
+          })
+      .def(
+          "logical_and",
+          [wrap](const Self& self, const std::vector<PyExpr>& args) {
+            return wrap(self, self->arena->logical_and(unwrap_all(self, args)));
+          })
+      .def(
+          "logical_or",
+          [wrap](const Self& self, const std::vector<PyExpr>& args) {
+            return wrap(self, self->arena->logical_or(unwrap_all(self, args)));
           })
       .def(
           "is_eq",

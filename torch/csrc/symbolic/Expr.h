@@ -46,6 +46,8 @@ enum class Kind : uint8_t {
   Gt,
   Ge,
   Not,
+  And,
+  Or,
 };
 
 enum class Tri : int8_t { False = 0, True = 1, Unknown = 2 };
@@ -136,7 +138,7 @@ struct Expr {
   int64_t p;
   int64_t q;
   // Add/Mul: sympy's order (coefficient first, the rest by Basic.compare).
-  // Pow: base, exponent. Relationals: lhs, rhs.
+  // Pow: base, exponent. Relationals: lhs, rhs. And/Or: sympy's ordered().
   c10::SmallVector<const Expr*, 3> args;
   // Assumptions cache, like sympy's obj._assumptions.
   mutable FactKB kb;
@@ -219,8 +221,13 @@ class ExprArena : public c10::intrusive_ptr_target {
   // Eq/Ne/Lt/Le/Gt/Ge(lhs, rhs, evaluate=evaluate) (Relational.cpp). These are
   // the sympy constructors, not IntInfinity's __ge__ etc. operator overloads.
   const Expr* rel(Kind kind, const Expr* lhs, const Expr* rhs, bool evaluate = true);
-  // Not(a).
+  // Not(a), And(*args) and Or(*args).
   const Expr* logical_not(const Expr* a);
+  const Expr* logical_and(c10::ArrayRef<const Expr*> args);
+  const Expr* logical_or(c10::ArrayRef<const Expr*> args);
+  // The And/Or with exactly these args, which must be those of an And/Or that
+  // sympy built. Not a constructor: Or's filter is not idempotent.
+  const Expr* lattice_from_args(Kind kind, c10::ArrayRef<const Expr*> args);
   // The Relational properties of the same names.
   const Expr* reversed(const Expr* r);
   const Expr* reversedsign(const Expr* r);
@@ -267,6 +274,9 @@ class ExprArena : public c10::intrusive_ptr_target {
   const Expr* from_args(Kind kind, c10::SmallVectorImpl<const Expr*>& args);
   const Expr* number_pow(Num b, int64_t e);
   const Expr* new_symbol(const std::string& name, const FactKB& kb);
+  const Expr* as_boolean(const Expr* e);
+  // The tail of LatticeOp.__new__.
+  const Expr* lattice(Kind kind, c10::ArrayRef<const Expr*> args);
   const Expr* keep_coeff(const Expr* coeff, const Expr* factors);
   std::pair<const Expr*, const Expr*> as_coeff_Mul(const Expr* e);
   c10::SmallVector<const Expr*, 2> real_roots(const Expr* p, const Expr* x);
