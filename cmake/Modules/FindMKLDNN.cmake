@@ -56,7 +56,7 @@ IF(NOT MKLDNN_FOUND)
     endif()
     ExternalProject_Add(xpu_mkldnn_proj
       GIT_REPOSITORY https://github.com/uxlfoundation/oneDNN
-      GIT_TAG v3.12.3
+      GIT_TAG 1a38c2dc5c15efc7d4e77f2d1c05e17b93354a27
       PREFIX ${XPU_MKLDNN_DIR_PREFIX}
       BUILD_IN_SOURCE 0
       CMAKE_ARGS  -DCMAKE_C_COMPILER=${DNNL_C_COMPILER}
