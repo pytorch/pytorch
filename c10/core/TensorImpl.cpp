@@ -993,7 +993,6 @@ void TensorImpl::generic_set_sizes_contiguous(SymIntArrayRef sizes) {
   refresh_numel();
   empty_tensor_restride_symint(
       MemoryFormat::Contiguous); // calls refresh_contiguous()
-  symbolic_shape_meta().refresh_materialized();
 }
 
 void TensorImpl::empty_tensor_restride_symint(MemoryFormat memory_format) {
