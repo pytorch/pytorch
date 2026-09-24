@@ -299,6 +299,47 @@ class TestQuantizedTensorBase(TestCase):
 
             self.assertEqual(qx_ref, qx)
 
+    def _test_qtensor_index_put_non_accumulate_deterministic(self, device):
+        with DeterministicGuard(True):
+            scale = 0.5
+            zero_point = 10
+            types = [torch.qint8, torch.quint8, torch.qint32]
+            for qtype in types:
+                for _ in range(3):
+                    m = random.randint(10, 20)
+                    elems = random.randint(20000, 30000)
+                    values = torch.rand(elems, device=device)
+                    indices = torch.randint(m, (elems,), device=device)
+                    x_orig = torch.rand(m, device=device)
+
+                    x = x_orig.clone()
+                    qx = torch.quantize_per_tensor(x, scale=scale, zero_point=zero_point, dtype=qtype)
+                    output = qx.index_put((indices,), values, accumulate=False)
+
+
+                    x_ref = x_orig.clone()
+                    output_ref = x_ref.index_put((indices,), values, accumulate=False)
+                    qx_ref = torch.quantize_per_tensor(output_ref, scale=scale, zero_point=zero_point, dtype=qtype)
+
+                    self.assertEqual(output, qx_ref)
+
+    def _test_qtensor_index_select(self, device):
+        for quant_type in [torch.quint8, torch.qint8]:
+            dims = 3
+            index = torch.randint(dims, [1]).item()
+            selected = torch.randperm(dims)[:2].to(device)
+            scale = 1
+            zp = 0
+            x = torch.randn([3] * dims, device=device) * 10
+
+            x_selected = torch.index_select(x, index, selected)
+            x_selected_quantized = torch.quantize_per_tensor(x_selected, scale, zp, quant_type)
+
+            x_quantized = torch.quantize_per_tensor(x, scale, zp, quant_type)
+            x_quantized_selected = torch.index_select(x_quantized, index, selected)
+
+            self.assertEqual(x_quantized_selected, x_selected_quantized)
+
 
 class TestQuantizedTensor(TestQuantizedTensorBase):
     def test_quantized_tensor_creation_deprecation_warning(self):
@@ -1114,30 +1155,6 @@ class TestQuantizedTensor(TestQuantizedTensorBase):
         self._test_qtensor_index_put('cuda')
         self._test_qtensor_index_put_non_accumulate_deterministic('cuda')
 
-    def _test_qtensor_index_put_non_accumulate_deterministic(self, device):
-        with DeterministicGuard(True):
-            scale = 0.5
-            zero_point = 10
-            types = [torch.qint8, torch.quint8, torch.qint32]
-            for qtype in types:
-                for _ in range(3):
-                    m = random.randint(10, 20)
-                    elems = random.randint(20000, 30000)
-                    values = torch.rand(elems, device=device)
-                    indices = torch.randint(m, (elems,), device=device)
-                    x_orig = torch.rand(m, device=device)
-
-                    x = x_orig.clone()
-                    qx = torch.quantize_per_tensor(x, scale=scale, zero_point=zero_point, dtype=qtype)
-                    output = qx.index_put((indices,), values, accumulate=False)
-
-
-                    x_ref = x_orig.clone()
-                    output_ref = x_ref.index_put((indices,), values, accumulate=False)
-                    qx_ref = torch.quantize_per_tensor(output_ref, scale=scale, zero_point=zero_point, dtype=qtype)
-
-                    self.assertEqual(output, qx_ref)
-
     # adapted from test_qtensor_fill_per_channel and test_qtensor_fill_per_tensor_nhwc
     def test_qtensor_fill_per_channel_nhwc(self):
         dims = torch.randint(low=1, high=10, size=(4, )).tolist()
@@ -1175,23 +1192,6 @@ class TestQuantizedTensor(TestQuantizedTensorBase):
 
     def test_qtensor_index_select_cpu(self):
         self._test_qtensor_index_select('cpu')
-
-    def _test_qtensor_index_select(self, device):
-        for quant_type in [torch.quint8, torch.qint8]:
-            dims = 3
-            index = torch.randint(dims, [1]).item()
-            selected = torch.randperm(dims)[:2].to(device)
-            scale = 1
-            zp = 0
-            x = torch.randn([3] * dims, device=device) * 10
-
-            x_selected = torch.index_select(x, index, selected)
-            x_selected_quantized = torch.quantize_per_tensor(x_selected, scale, zp, quant_type)
-
-            x_quantized = torch.quantize_per_tensor(x, scale, zp, quant_type)
-            x_quantized_selected = torch.index_select(x_quantized, index, selected)
-
-            self.assertEqual(x_quantized_selected, x_selected_quantized)
 
     def test_qtensor_view(self):
         scale, zero_point, dtype = 1.0, 2, torch.uint8
