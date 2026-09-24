@@ -468,7 +468,6 @@ class TestSparse(TestSparseBase):
                 x = torch.sparse_coo_tensor(indices, values, shape)
 
     @dtypes(torch.float32)
-    @expectedFailureMPS
     @skipIfCrossRef
     def test_no_warn_when_check_invariants_is_explicit(self, device, dtype):
         # Regression test for https://github.com/pytorch/pytorch/issues/178274
