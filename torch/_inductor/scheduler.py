@@ -901,6 +901,7 @@ class NestedReduction:
             return parent_rnumel, {}
 
         full_numel = V.graph.sizevars.simplify(parent_numel * parent_rnumel)
+        requires_specialization = False
         for node in nodes:
             if node.is_reduction():
                 continue
@@ -914,17 +915,45 @@ class NestedReduction:
             if V.graph.sizevars.statically_known_equals(node_numel, full_numel):
                 continue
             if cls._sub_parent_epilogue_rate(node_numel, full_numel) is None:
-                # This is intentionally a guard, not an optimization hint. The
-                # concrete result is used to rebuild every width-dependent plan
-                # field before the candidate can commit fusion.
-                parent_width = V.graph.sizevars.guard_int(parent_rnumel)
-                specialized_parent_rnumel = sympy.Integer(parent_width)
-                if parent_rnumel == specialized_parent_rnumel:
-                    return specialized_parent_rnumel, {}
-                return specialized_parent_rnumel, {
-                    parent_rnumel: specialized_parent_rnumel
-                }
-        return parent_rnumel, {}
+                requires_specialization = True
+                break
+        if not requires_specialization:
+            return parent_rnumel, {}
+
+        sizevars = V.graph.sizevars
+        parent_width = sizevars.guarding_hint_or_throw(parent_rnumel)
+        specialized_parent_rnumel = sympy.Integer(parent_width)
+        width_subs = {parent_rnumel: specialized_parent_rnumel}
+        specialized_full_numel = sizevars.simplify(
+            parent_numel * specialized_parent_rnumel
+        )
+        for node in nodes:
+            if node.is_reduction():
+                continue
+            _, (node_numel, node_rnumel) = node.group
+            node_numel = sizevars.simplify(sympy_subs(node_numel, width_subs))
+            node_rnumel = sizevars.simplify(sympy_subs(node_rnumel, width_subs))
+            if not sizevars.statically_known_equals(node_rnumel, 1):
+                continue
+            if sizevars.statically_known_equals(node_numel, parent_numel):
+                continue
+            if sizevars.statically_known_equals(node_numel, specialized_full_numel):
+                continue
+            if (
+                cls._sub_parent_epilogue_rate(node_numel, specialized_full_numel)
+                is None
+            ):
+                return parent_rnumel, {}
+
+        # The concrete result is used to rebuild every width-dependent plan
+        # field before the candidate can commit fusion.
+        parent_width = sizevars.guard_int(parent_rnumel)
+        specialized_parent_rnumel = sympy.Integer(parent_width)
+        if parent_rnumel == specialized_parent_rnumel:
+            return specialized_parent_rnumel, {}
+        return specialized_parent_rnumel, {
+            parent_rnumel: specialized_parent_rnumel
+        }
 
     @classmethod
     def sub_parent_epilogue_plan(
