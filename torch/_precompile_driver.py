@@ -745,8 +745,8 @@ def _build_installed_forward():
 
     import torch
     from torch._dynamo.eval_frame import (
-        _FailOnRecompileCallback,
         _RecompileRefusedError,
+        _RefuseRecompileCallback,
         OptimizeContext,
     )
     from torch._dynamo.package import CompilePackage
@@ -803,7 +803,7 @@ def _build_installed_forward():
         # The refusal is this callable's own callback, not the process-global
         # stance, so other threads' compiles are unaffected. It must be bound
         # before context(fn), which captures the callback when it wraps.
-        context.callback = _FailOnRecompileCallback(context.callback, bound=True)
+        context.callback = _RefuseRecompileCallback(context.callback)
         compiled = context(fn)
         package.install(package_state["backends"])
     except _PrecompileError:
