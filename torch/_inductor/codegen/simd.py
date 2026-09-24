@@ -3560,12 +3560,10 @@ class SIMDScheduling(BaseScheduling):
             result = scheduler.NestedReduction.sub_parent_epilogue_result(
                 nodes, parent_numel, parent_rnumel
             )
-            plan = self._sub_parent_epilogue_plan(
-                nodes,
-                parent_numel,
-                parent_rnumel,
-            )
-            if plan is not None:
+            plan = result.plan
+            if plan is not None and self._sub_parent_plan_is_admitted(
+                nodes, parent_numel, plan
+            ):
                 return plan
             if result.is_candidate:
                 break
