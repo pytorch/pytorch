@@ -95,6 +95,16 @@ class StrPrinter {
         // _print_Function.
         return std::string(function_name(e->kind)) + "(" +
             stringify(e->args, ", ", 0) + ")";
+      case Kind::Max:
+      case Kind::Min: {
+        // _print_LatticeOp.
+        std::vector<const Expr*> args(e->args.begin(), e->args.end());
+        std::stable_sort(args.begin(), args.end(), [&](auto a, auto b) {
+          return compare_keys(*arena_.sort_key(a), *arena_.sort_key(b)) < 0;
+        });
+        return std::string(function_name(e->kind)) + "(" +
+            stringify(args, ", ", 0) + ")";
+      }
       case Kind::FloorDiv:
       case Kind::CleanDiv:
         // FloorDiv._sympystr: parenthesize(arg, PRECEDENCE["Atom"] - 0.5).

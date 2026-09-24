@@ -44,16 +44,6 @@ int infinity_rank(const Expr* e) {
                                              : 0;
 }
 
-// Number.__lt__ / __gt__, including int_oo's overloads.
-int compare_numbers(const Expr* a, const Expr* b) {
-  int ra = infinity_rank(a);
-  int rb = infinity_rank(b);
-  if (ra != 0 || rb != 0) {
-    return cmp3(ra, rb);
-  }
-  return cmp3(i128(a->p) * b->q, i128(b->p) * a->q);
-}
-
 bool is_negative_number(const Expr* e) {
   return e->kind == Kind::NegativeIntInfinity || (e->is_rational() && e->p < 0);
 }
@@ -102,6 +92,16 @@ size_t node_count(const Expr* e) {
 }
 
 } // namespace
+
+// Number.__lt__ / __gt__, including int_oo's overloads.
+int compare_numbers(const Expr* a, const Expr* b) {
+  int ra = infinity_rank(a);
+  int rb = infinity_rank(b);
+  if (ra != 0 || rb != 0) {
+    return cmp3(ra, rb);
+  }
+  return cmp3(i128(a->p) * b->q, i128(b->p) * a->q);
+}
 
 int compare_keys(const SortKey& a, const SortKey& b) {
   if (a.type != b.type) {
@@ -157,11 +157,14 @@ const SortKeyPtr& ExprArena::sort_key(const Expr* e) {
       return key_tuple({key_int(2), key_int(0), key_str("Symbol")});
     }
     // Function.class_key: nargs is a FiniteSet for every function kind.
-    int major = x->is_boolean() ? 5 : x->is_function() ? 4 : 3;
-    int minor = x->is_function() ? 10000
-        : x->kind == Kind::Add   ? 1
-        : x->kind == Kind::Pow   ? 2
-                                 : 0;
+    // Max and Min are not Functions and use Basic.class_key.
+    bool minmax = x->kind == Kind::Max || x->kind == Kind::Min;
+    bool function = x->is_function() && !minmax;
+    int major = x->is_boolean() || minmax ? 5 : function ? 4 : 3;
+    int minor = function       ? 10000
+        : x->kind == Kind::Add ? 1
+        : x->kind == Kind::Pow ? 2
+                               : 0;
     return key_tuple(
         {key_int(major), key_int(minor), key_str(class_name(x->kind))});
   };
@@ -262,6 +265,24 @@ std::vector<const Expr*> ExprArena::ordered(c10::ArrayRef<const Expr*> seq) {
     i = j;
   }
   return out;
+}
+
+std::vector<const Expr*> ExprArena::ordered_frozenset(
+    c10::ArrayRef<const Expr*> seq) {
+  std::vector<const Expr*> unique;
+  for (const Expr* e : seq) {
+    if (std::find(unique.begin(), unique.end(), e) == unique.end()) {
+      unique.push_back(e);
+    }
+  }
+  std::vector<const Expr*> sorted = ordered(unique);
+  for (size_t i = 1; i < sorted.size(); ++i) {
+    if (node_count(sorted[i - 1]) == node_count(sorted[i]) &&
+        compare_keys(*sort_key(sorted[i - 1]), *sort_key(sorted[i])) == 0) {
+      throw NativeUnsupported("frozenset elements with equal sort keys");
+    }
+  }
+  return sorted;
 }
 
 c10::SmallVector<const Expr*, 4> ExprArena::as_ordered_factors(const Expr* e) {

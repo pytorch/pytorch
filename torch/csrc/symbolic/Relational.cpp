@@ -242,24 +242,12 @@ const Expr* ExprArena::as_boolean(const Expr* e) {
 }
 
 const Expr* ExprArena::lattice(Kind kind, c10::ArrayRef<const Expr*> args) {
-  std::vector<const Expr*> unique;
-  for (const Expr* a : args) {
-    if (!contains(unique, a)) {
-      unique.push_back(a);
-    }
-  }
-  if (unique.empty()) {
+  std::vector<const Expr*> sorted = ordered_frozenset(args);
+  if (sorted.empty()) {
     return boolean(kind == Kind::And);
   }
-  if (unique.size() == 1) {
-    return unique[0];
-  }
-  std::vector<const Expr*> sorted = ordered(unique);
-  for (size_t i = 1; i < sorted.size(); ++i) {
-    // sympy orders a frozenset, so tied args come out in hash order.
-    if (compare_keys(*sort_key(sorted[i - 1]), *sort_key(sorted[i])) == 0) {
-      throw NativeUnsupported("And/Or args with equal sort keys");
-    }
+  if (sorted.size() == 1) {
+    return sorted[0];
   }
   return intern(kind, 0, 0, sorted);
 }

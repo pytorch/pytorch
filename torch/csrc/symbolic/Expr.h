@@ -41,6 +41,8 @@ enum class Kind : uint8_t {
   PythonMod,
   FloorDiv,
   CleanDiv,
+  Max,
+  Min,
   // Boolean kinds: sympy Booleans that are not Exprs.
   BooleanTrue,
   BooleanFalse,
@@ -187,6 +189,9 @@ struct SortKey {
 // Python's three-way tuple comparison; unorderable types throw.
 int compare_keys(const SortKey& a, const SortKey& b);
 
+// Three-way numeric comparison of two Numbers, int_oo-aware.
+int compare_numbers(const Expr* a, const Expr* b);
+
 struct Num {
   int64_t p;
   int64_t q;
@@ -232,6 +237,8 @@ class ExprArena : public c10::intrusive_ptr_target {
   // node. Nodes whose args are all numbers throw, so a node without free
   // symbols is always a Number.
   const Expr* function(Kind kind, c10::ArrayRef<const Expr*> args);
+  // Max(*args, evaluate=evaluate) and Min(*args, evaluate=evaluate).
+  const Expr* minmax(Kind kind, c10::ArrayRef<const Expr*> args, bool evaluate = true);
 
   // Eq/Ne/Lt/Le/Gt/Ge(lhs, rhs, evaluate=evaluate) (Relational.cpp). These are
   // the sympy constructors, not IntInfinity's __ge__ etc. operator overloads.
@@ -262,6 +269,9 @@ class ExprArena : public c10::intrusive_ptr_target {
   // (Sorting.cpp).
   const SortKeyPtr& sort_key(const Expr* e);
   std::vector<const Expr*> ordered(c10::ArrayRef<const Expr*> seq);
+  // ordered(frozenset(seq)); throws when the order would depend on the hash
+  // order sympy iterates the frozenset in.
+  std::vector<const Expr*> ordered_frozenset(c10::ArrayRef<const Expr*> seq);
   c10::SmallVector<const Expr*, 4> as_ordered_terms(const Expr* e);
   c10::SmallVector<const Expr*, 4> as_ordered_factors(const Expr* e);
   bool could_extract_minus_sign(const Expr* e);

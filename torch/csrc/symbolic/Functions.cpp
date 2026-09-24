@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <limits>
 #include <numeric>
+#include <optional>
 #include <string>
 
 // Ports of the classes in torch/utils/_sympy/functions.py.
@@ -13,6 +14,14 @@ namespace torch::symbolic {
 namespace {
 
 using i128 = __int128;
+
+bool is_minmax(const Expr* e) {
+  return e != nullptr && (e->kind == Kind::Max || e->kind == Kind::Min);
+}
+
+bool contains(c10::ArrayRef<const Expr*> xs, const Expr* x) {
+  return std::find(xs.begin(), xs.end(), x) != xs.end();
+}
 
 bool is_int_oo(const Expr* e) {
   return e->kind == Kind::IntInfinity || e->kind == Kind::NegativeIntInfinity;
@@ -139,12 +148,19 @@ const char* function_name(Kind k) {
       return "FloorDiv";
     case Kind::CleanDiv:
       return "CleanDiv";
+    case Kind::Max:
+      return "Max";
+    case Kind::Min:
+      return "Min";
     default:
       throw NativeUnsupported("not a function kind");
   }
 }
 
 const Expr* ExprArena::function(Kind kind, c10::ArrayRef<const Expr*> args) {
+  if (kind == Kind::Max || kind == Kind::Min) {
+    return minmax(kind, args);
+  }
   if (args.size() != 2) {
     throw NativeUnsupported(
         std::string(function_name(kind)) + " takes exactly 2 arguments");
@@ -310,6 +326,237 @@ const Expr* ExprArena::eval_floordiv(const Expr* base, const Expr* divisor) {
     return function(Kind::FloorDiv, {b, d});
   }
   return nullptr;
+}
+
+const Expr* ExprArena::minmax(
+    Kind kind,
+    c10::ArrayRef<const Expr*> args,
+    bool evaluate) {
+  // MinMaxBase.__new__. cls.zero and cls.identity are the float oo and -oo,
+  // which are not in the arena; nullptr stands for cls.identity where
+  // _collapse_arguments inserts it. The unique_summations_symbols fast path
+  // only skips _collapse_arguments and _find_localzeros where they return
+  // their input unchanged, so it is not ported.
+  const bool is_max = kind == Kind::Max;
+  const Kind other = is_max ? Kind::Min : Kind::Max;
+  auto build = [&](Kind k, c10::ArrayRef<const Expr*> xs) {
+    std::vector<const Expr*> sorted = ordered_frozenset(xs);
+    if (sorted.empty()) {
+      throw NativeUnsupported("Max/Min of no arguments");
+    }
+    if (sorted.size() == 1) {
+      return sorted[0];
+    }
+    if (std::all_of(sorted.begin(), sorted.end(), [](const Expr* a) {
+          return a->is_number();
+        })) {
+      throw NativeUnsupported("unevaluated function of numbers");
+    }
+    return intern(k, 0, 0, sorted);
+  };
+  for (const Expr* a : args) {
+    if (a->is_boolean()) {
+      throw NativeUnsupported("Boolean argument to Max/Min");
+    }
+  }
+  if (!evaluate) {
+    return build(kind, args);
+  }
+
+  // _new_args_filter.
+  std::vector<const Expr*> flat;
+  for (const Expr* a : args) {
+    if (ask(a, Fact::extended_real) == Tri::False) {
+      throw NativeUnsupported("Max/Min argument is not comparable");
+    }
+    if (a->kind == kind) {
+      flat.insert(flat.end(), a->args.begin(), a->args.end());
+    } else {
+      flat.push_back(a);
+    }
+  }
+
+  // _collapse_arguments.
+  std::vector<const Expr*> xs = ordered_frozenset(flat);
+  if (xs.empty()) {
+    throw NativeUnsupported("Max/Min of no arguments");
+  }
+  if (xs[0]->is_number()) {
+    // nullptr is Min.identity for small and Max.identity for big.
+    const Expr* small = nullptr;
+    const Expr* big = nullptr;
+    auto walk = [&](auto& self, const Expr* v) -> void {
+      if (!is_minmax(v)) {
+        return;
+      }
+      const Expr* v0 = v->args[0];
+      if (v0->is_number()) {
+        const Expr*& t = v->kind == Kind::Min ? small : big;
+        int sign = v->kind == Kind::Min ? -1 : 1;
+        if (t == nullptr || compare_numbers(v0, t) == sign) {
+          t = v0;
+        }
+      }
+      for (const Expr* a : v->args) {
+        self(self, a);
+      }
+    };
+    for (const Expr* x : xs) {
+      walk(walk, x);
+    }
+    const Expr*& t = is_max ? big : small;
+    for (const Expr* x : xs) {
+      if (!x->is_number()) {
+        break;
+      }
+      if (t == nullptr || compare_numbers(x, t) == (is_max ? 1 : -1)) {
+        t = x;
+      }
+    }
+    if (t != nullptr) {
+      for (const Expr*& x : xs) {
+        if (x->kind != other) {
+          continue;
+        }
+        // (a0 > T) == True or (a0 < T) == True; int_oo's operator overloads
+        // agree with the numeric order.
+        const Expr* a0 = x->args[0];
+        Kind op = other == Kind::Max ? Kind::Gt : Kind::Lt;
+        bool redundant = a0->is_number()
+            ? compare_numbers(a0, t) == (op == Kind::Gt ? 1 : -1)
+            : rel(op, a0, t) == true_;
+        if (redundant) {
+          x = nullptr;
+        }
+      }
+    }
+  }
+
+  auto do_ = [&](auto& self, const Expr* ai, const Expr* a) -> const Expr* {
+    if (!is_minmax(ai)) {
+      return ai;
+    }
+    std::vector<const Expr*> sub;
+    bool cond = contains(ai->args, a);
+    if (cond && ai->kind != kind) {
+      return a;
+    }
+    for (const Expr* i : ai->args) {
+      if (i != a) {
+        sub.push_back(self(self, i, a));
+      }
+    }
+    if (!cond && std::equal(sub.begin(), sub.end(), ai->args.begin())) {
+      return ai;
+    }
+    return build(ai->kind, sub);
+  };
+  for (size_t i = 0; i < xs.size(); ++i) {
+    // No Min/Max has cls.identity among its args.
+    if (xs[i] == nullptr) {
+      continue;
+    }
+    for (size_t j = i + 1; j < xs.size(); ++j) {
+      xs[j] = do_(do_, xs[j], xs[i]);
+    }
+  }
+
+  // factor_minmax.
+  if (xs.size() > 1) {
+    std::vector<const Expr*> others;
+    std::vector<const Expr*> remaining;
+    for (const Expr* x : xs) {
+      (x != nullptr && x->kind == other ? others : remaining).push_back(x);
+    }
+    std::vector<const Expr*> common;
+    if (!others.empty()) {
+      for (const Expr* a : others[0]->args) {
+        if (std::all_of(others.begin(), others.end(), [&](const Expr* o) {
+              return contains(o->args, a);
+            })) {
+          common.push_back(a);
+        }
+      }
+    }
+    if (!common.empty()) {
+      std::vector<std::vector<const Expr*>> diffs;
+      for (const Expr* o : others) {
+        auto& diff = diffs.emplace_back();
+        for (const Expr* a : o->args) {
+          if (!contains(common, a)) {
+            diff.push_back(a);
+          }
+        }
+      }
+      std::vector<const Expr*> new_other_args = common;
+      if (std::none_of(diffs.begin(), diffs.end(), [](const auto& d) {
+            return d.empty();
+          })) {
+        std::vector<const Expr*> other_args_diff;
+        for (const auto& d : diffs) {
+          other_args_diff.push_back(build(other, d));
+        }
+        new_other_args.push_back(build(kind, other_args_diff));
+      }
+      remaining.push_back(build(other, new_other_args));
+      xs = std::move(remaining);
+    }
+  }
+
+  // _find_localzeros. cls.identity loses every comparison with a Number, and
+  // there is always one when it was inserted.
+  const Expr* num = nullptr;
+  bool saw_identity = false;
+  std::vector<const Expr*> values;
+  for (const Expr* x : xs) {
+    if (x == nullptr) {
+      saw_identity = true;
+    } else if (x->is_number()) {
+      if (num == nullptr || compare_numbers(x, num) == (is_max ? 1 : -1)) {
+        num = x;
+      }
+    } else if (!contains(values, x)) {
+      values.push_back(x);
+    }
+  }
+  if (num == nullptr) {
+    if (saw_identity) {
+      throw NativeUnsupported("Max/Min of cls.identity");
+    }
+    if (values.size() == 2) {
+      // _collapse_known_multiplicative_terms; the result does not depend on
+      // which of the two set elements is a.
+      const Expr* a = values[0];
+      const Expr* b = values[1];
+      auto [ac, at] = as_coeff_Mul(a);
+      auto [bc, bt] = as_coeff_Mul(b);
+      if (at == bt) {
+        std::optional<bool> a_smaller;
+        if (ac == bc) {
+          return a;
+        } else if (ask(at, Fact::nonnegative) == Tri::True) {
+          a_smaller = compare_numbers(ac, bc) < 0;
+        } else if (ask(at, Fact::nonpositive) == Tri::True) {
+          a_smaller = compare_numbers(ac, bc) > 0;
+        }
+        if (a_smaller.has_value()) {
+          return *a_smaller != is_max ? a : b;
+        }
+      }
+    }
+  } else if (values.empty()) {
+    return num;
+  } else {
+    if (values.size() == 1) {
+      const Expr* o = values[0];
+      if ((num == zero_ && ask(o, Fact::nonnegative) == Tri::True) ||
+          (num == one_ && ask(o, Fact::positive) == Tri::True)) {
+        return is_max ? o : num;
+      }
+    }
+    values.push_back(num);
+  }
+  return build(kind, values);
 }
 
 } // namespace torch::symbolic

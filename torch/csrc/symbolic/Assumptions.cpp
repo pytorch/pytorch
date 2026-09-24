@@ -233,6 +233,39 @@ Tri fuzzy_not(Tri t) {
   return t == Tri::Unknown ? t : tri(t == Tri::False);
 }
 
+// torch.utils._sympy.functions._torf((a.is_<f> for a in args)).
+Tri torf(ExprArena& A, c10::ArrayRef<const Expr*> args, Fact f) {
+  bool saw_true = false;
+  bool saw_false = false;
+  for (const Expr* a : args) {
+    Tri v = A.ask(a, f);
+    if (v == Tri::Unknown || (v == Tri::True ? saw_false : saw_true)) {
+      return Tri::Unknown;
+    }
+    (v == Tri::True ? saw_true : saw_false) = true;
+  }
+  return tri(saw_true);
+}
+
+// fuzzy_and((a.is_<f> for a in args)), or fuzzy_or when `any` is set.
+Tri fuzzy_and_or(
+    ExprArena& A,
+    c10::ArrayRef<const Expr*> args,
+    Fact f,
+    bool any) {
+  Tri r = tri(!any);
+  for (const Expr* a : args) {
+    Tri v = A.ask(a, f);
+    if (v == tri(any)) {
+      return v;
+    }
+    if (v == Tri::Unknown) {
+      r = v;
+    }
+  }
+  return r;
+}
+
 // _fuzzy_group((a.is_<f> for a in args), quick_exit).
 Tri fuzzy_group(
     ExprArena& A,
@@ -1247,7 +1280,7 @@ FactKB ExprArena::default_kb(const Expr* e) {
       deduce_all_facts(kb, extra);
       return kb;
     };
-    return std::array<FactKB, 8>{
+    return std::array<FactKB, 9>{
         // Integer, NegativeOne
         make(
             {{F::commutative, true},
@@ -1294,6 +1327,8 @@ FactKB ExprArena::default_kb(const Expr* e) {
         make({{F::integer, true}}),
         // Mod
         make({{F::integer, true}, {F::nonnegative, true}}),
+        // LatticeOp.is_commutative
+        make({{F::commutative, true}}),
     };
   }();
   switch (e->kind) {
@@ -1311,6 +1346,9 @@ FactKB ExprArena::default_kb(const Expr* e) {
       return kbs[6];
     case Kind::Mod:
       return kbs[7];
+    case Kind::Max:
+    case Kind::Min:
+      return kbs[8];
     default:
       return {};
   }
@@ -1424,6 +1462,28 @@ Tri ExprArena::eval_fact(const Expr* e, Fact f) {
             : Tri::Unknown;
       }
       return Tri::Unknown;
+    case Kind::Max:
+    case Kind::Min: {
+      // MinMaxBase's _torf handlers for every fact but the extended signs,
+      // with Max/Min overriding positive, nonnegative and negative.
+      // is_commutative is a class fact.
+      bool is_max = e->kind == Kind::Max;
+      switch (f) {
+        case F::positive:
+        case F::nonnegative:
+          return fuzzy_and_or(*this, e->args, f, is_max);
+        case F::negative:
+          return fuzzy_and_or(*this, e->args, f, !is_max);
+        case F::extended_positive:
+        case F::extended_negative:
+        case F::extended_nonnegative:
+        case F::extended_nonpositive:
+        case F::extended_nonzero:
+          return Tri::Unknown;
+        default:
+          return torf(*this, e->args, f);
+      }
+    }
     case Kind::BooleanTrue:
     case Kind::BooleanFalse:
     case Kind::Eq:

@@ -18,7 +18,9 @@ constexpr Kind kFunctionKinds[] = {
     Kind::Mod,
     Kind::PythonMod,
     Kind::FloorDiv,
-    Kind::CleanDiv};
+    Kind::CleanDiv,
+    Kind::Max,
+    Kind::Min};
 
 // Python-side state for an ExprArena: the sympy Symbol objects that native
 // symbols came from and a conversion cache (conversion is pure per Expr).
@@ -190,9 +192,15 @@ const Expr* PyArena::from_sympy(py::handle obj) {
       for (py::handle a : obj.attr("args")) {
         args.push_back(from_sympy(a));
       }
-      const Expr* r = arena->function(kFunctionKinds[i], args);
-      if (r->kind != kFunctionKinds[i] ||
-          !std::equal(r->args.begin(), r->args.end(), args.begin(), args.end())) {
+      Kind kind = kFunctionKinds[i];
+      // A Max/Min is taken as is: _collapse_arguments leaves unevaluated
+      // ones in the args of evaluated ones.
+      const Expr* r = kind == Kind::Max || kind == Kind::Min
+          ? arena->minmax(kind, args, false)
+          : arena->function(kind, args);
+      if (r->kind != kind ||
+          !std::equal(
+              r->args.begin(), r->args.end(), args.begin(), args.end())) {
         throw NativeUnsupported("unevaluated function");
       }
       return r;
@@ -300,7 +308,9 @@ py::object PyArena::to_sympy(const Expr* e) {
     case Kind::Mod:
     case Kind::PythonMod:
     case Kind::FloorDiv:
-    case Kind::CleanDiv: {
+    case Kind::CleanDiv:
+    case Kind::Max:
+    case Kind::Min: {
       py::tuple args(e->args.size());
       for (size_t i = 0; i < e->args.size(); ++i) {
         args[i] = to_sympy(e->args[i]);
@@ -360,6 +370,8 @@ const char* kind_name(Kind k) {
     case Kind::PythonMod:
     case Kind::FloorDiv:
     case Kind::CleanDiv:
+    case Kind::Max:
+    case Kind::Min:
       return function_name(k);
   }
   return "?";

@@ -3,6 +3,7 @@ import os
 import random
 import subprocess
 import sys
+from unittest import mock
 
 import sympy
 from sympy.core.assumptions import _assume_defined, _assume_rules
@@ -14,7 +15,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TestCase,
 )
-from torch.utils._sympy.functions import CleanDiv, FloorDiv, Mod, PythonMod
+from torch.utils._sympy.functions import CleanDiv, FloorDiv, Max, Min, Mod, PythonMod
 from torch.utils._sympy.numbers import int_oo
 
 
@@ -27,6 +28,46 @@ zf = sympy.Symbol("zf", real=True, positive=True)
 LEAVES = [s0, s1, u0, zf, *map(sympy.Integer, range(-3, 4))]
 LEAVES += [sympy.Rational(1, 2), sympy.Rational(-2, 3)]
 FACTS = sorted(_assume_defined)
+# Order of the C++ Fact enum.
+NATIVE_FACT_ORDER = [
+    "commutative",
+    "integer",
+    "noninteger",
+    "rational",
+    "irrational",
+    "real",
+    "extended_real",
+    "finite",
+    "infinite",
+    "zero",
+    "nonzero",
+    "positive",
+    "negative",
+    "nonnegative",
+    "nonpositive",
+    "extended_positive",
+    "extended_negative",
+    "extended_nonnegative",
+    "extended_nonpositive",
+    "extended_nonzero",
+    "even",
+    "odd",
+    "prime",
+    "composite",
+    "algebraic",
+    "transcendental",
+    "complex",
+    "imaginary",
+    "hermitian",
+    "antihermitian",
+    "polar",
+]
+
+
+def sort_facts_natively(facts):
+    facts.sort(key=NATIVE_FACT_ORDER.index)
+
+
 W = sympy.Symbol("w", complex=True, real=False)
 FACT_LEAVES = [
     s0,
@@ -895,20 +936,23 @@ class TestNativeFunctions(TestCase):
         "PythonMod": PythonMod,
         "FloorDiv": FloorDiv,
         "CleanDiv": CleanDiv,
+        "Max": Max,
+        "Min": Min,
     }
 
-    def check_call(self, name, a, b):
+    def check_call(self, name, *xs):
         """Returns the sympy result, or None if native raised
         NativeUnsupported."""
         arena = torch._C._symbolic._Arena()
+        call = f"{name}{xs}"
         try:
-            args = [arena.from_sympy(a), arena.from_sympy(b)]
+            args = [arena.from_sympy(x) for x in xs]
         except NativeUnsupported:
             return None
         try:
-            expected = self.FUNCTIONS[name](a, b)
-        except (ZeroDivisionError, AssertionError, TypeError):
-            with self.assertRaises(NativeUnsupported, msg=f"{name}({a}, {b})"):
+            expected = self.FUNCTIONS[name](*xs)
+        except (ZeroDivisionError, AssertionError, TypeError, ValueError):
+            with self.assertRaises(NativeUnsupported, msg=call):
                 arena.function(name, args)
             return None
         try:
@@ -916,9 +960,9 @@ class TestNativeFunctions(TestCase):
         except NativeUnsupported:
             return None
         got = arena.to_sympy(r)
-        self.assertEqual(got, expected, f"{name}({a}, {b})")
-        self.assertEqual(type(got), type(expected), f"{name}({a}, {b})")
-        self.assertEqual(got.args, expected.args, f"{name}({a}, {b})")
+        self.assertEqual(got, expected, call)
+        self.assertEqual(type(got), type(expected), call)
+        self.assertEqual(got.args, expected.args, call)
         self.assertIs(arena.from_sympy(expected).id, r.id)
         return expected
 
@@ -934,14 +978,22 @@ class TestNativeFunctions(TestCase):
         self.assertEqual(got, str(v))
         self.assertTrue(arena.sort_key(n) == v.sort_key(), f"sort_key({v})")
         self.assertEqual(arena.to_sympy(n), v)
+        # Max/Min handlers are weaker than the rules, so sympy's answers depend
+        # on the query order and the order _ask visits prerequisites in. Make
+        # sympy visit them in the native Fact order, starting from empty KBs.
+        for x in sympy.preorder_traversal(v):
+            if not x.is_Atom:
+                x._assumptions = type(x).default_assumptions
         facts = list(FACTS)
         rng.shuffle(facts)
-        for f in facts:
-            try:
-                got = arena.ask(n, f)
-            except NativeUnsupported:
-                continue
-            self.assertIs(got, getattr(v, "is_" + f), f"({v}).is_{f}")
+        assumptions = sys.modules["sympy.core.assumptions"]
+        with mock.patch.object(assumptions, "shuffle", sort_facts_natively):
+            for f in facts:
+                try:
+                    got = arena.ask(n, f)
+                except NativeUnsupported:
+                    continue
+                self.assertIs(got, getattr(v, "is_" + f), f"({v}).is_{f}")
         return True
 
     def test_known(self):
@@ -1063,6 +1115,7 @@ class TestNativeFunctions(TestCase):
         items += [Mod(s0 + 1, s1), s0 + Mod(s0, 2), sympy.Integer(2), s0**2]
         items += [sympy.Eq(s0, 1, evaluate=False), sympy.Not(u0), sympy.true]
         items += [FloorDiv(s0, 2), CleanDiv(s0, 2), CleanDiv(s0, s1), FloorDiv(u0, 2)]
+        items += [Max(2, s0), Min(2, u0), Max(s0, u0), Min(s0, u0), Max(s1, s0 + 1)]
         arena = torch._C._symbolic._Arena()
         natives = [arena.from_sympy(x) for x in items]
         for a, na in zip(items, natives):
@@ -1086,7 +1139,7 @@ class TestNativeFunctions(TestCase):
                 r = self.check_call(name, a, b)
                 if r is not None:
                     supported += 1
-                    if isinstance(r, (Mod, PythonMod, FloorDiv)):
+                    if isinstance(r, (Mod, PythonMod, FloorDiv, Max, Min)):
                         nodes.append(r)
         self.assertGreater(supported, calls // 3)
         self.assertGreater(len(nodes), 10)
@@ -1138,6 +1191,138 @@ class TestNativeFunctions(TestCase):
                     ]
         self.assertGreater(supported, calls // 2)
         answered = unsupported = 0
+        for _ in range(40):
+            t = random_tree(rng, 3, LEAVES + nodes)
+            for sub in subtrees(t):
+                v = sympy.sympify(sympy_eval(sub))
+                if v.has(sympy.zoo, sympy.nan):
+                    continue
+                if self.check_expr(v, rng):
+                    answered += 1
+                else:
+                    unsupported += 1
+        self.assertGreater(answered, 5 * unsupported)
+
+    def test_minmax_known(self):
+        u1 = sympy.Symbol("u1", integer=True)
+        n = sympy.Symbol("n", integer=True, nonnegative=True)
+        oo = int_oo
+        # sympy leaves the redundant u0 in the nested Min.
+        redundant = Min(s0, u0, u1, evaluate=False)
+        cases = [
+            ("Max", (s0,), s0),
+            ("Max", (2, s0), Max(2, s0)),
+            ("Max", (0, s0), s0),
+            ("Min", (0, s0), 0),
+            ("Max", (1, s0), s0),
+            ("Min", (1, s0), 1),
+            ("Max", (0, n), n),
+            ("Max", (1, n), Max(1, n)),
+            ("Max", (1, u0), Max(1, u0)),
+            ("Max", (2, 3, s0), Max(3, s0)),
+            ("Min", (2, 3, s0), Min(2, s0)),
+            ("Max", (2, 3), 3),
+            ("Min", (sympy.Rational(1, 2), 2), sympy.Rational(1, 2)),
+            ("Max", (s0, s0 + 1), Max(s0, s0 + 1)),
+            ("Max", (s0, 2 * s0), 2 * s0),
+            ("Min", (s0, 2 * s0), s0),
+            ("Max", (s0, -s0), s0),
+            ("Min", (-s0, -2 * s0), -2 * s0),
+            ("Max", (u0, 2 * u0), Max(u0, 2 * u0)),
+            ("Max", (s0, Max(s1, 2)), Max(2, s0, s1)),
+            ("Max", (s0 + s1, s1), Max(s1, s0 + s1)),
+            ("Max", (s0, Min(s0, s1)), s0),
+            ("Min", (s0, Max(s0, s1)), s0),
+            ("Min", (2, Max(3, u0)), 2),
+            ("Max", (3, Min(2, u0)), 3),
+            ("Max", (2, Min(3, u0)), Max(2, Min(3, u0))),
+            ("Max", (Min(s0, u0), Min(s0, s1)), Min(s0, Max(s1, u0))),
+            ("Min", (Max(s0, u0), Max(s0, s1)), Max(s0, Min(s1, u0))),
+            ("Min", (Max(s0, u0), Max(s0, u0, s1)), Max(s0, u0)),
+            ("Min", (u0, Max(s1, Min(u0, s0, u1))), Min(u0, Max(s1, Min(s0, u1)))),
+            (
+                "Min",
+                (u0, Max(s1, Min(s0, u1, Max(u0, n)))),
+                Min(u0, Max(s1, redundant, evaluate=False), evaluate=False),
+            ),
+            ("Max", (oo, 3), oo),
+            ("Min", (oo, 3), 3),
+            ("Max", (-oo, s0), Max(-oo, s0)),
+            ("Min", (oo, s0), Min(oo, s0)),
+            ("Max", (oo, s0), Max(oo, s0)),
+            ("Max", (oo, Min(3, u0)), oo),
+            ("Min", (3, Max(oo, u0)), 3),
+            ("Min", (-oo, Max(-oo, u0)), -oo),
+            ("Max", (u0, Min(u0, s0)), u0),
+            ("Max", (s0 + s1, u0 + u1), Max(s0 + s1, u0 + u1)),
+            ("Max", (Max(s0 + s1, u0 + u1), n + zf), Max(n + zf, s0 + s1, u0 + u1)),
+            (
+                "Max",
+                (Min(s0 + s1, u0 + u1), n + zf),
+                Max(n + zf, Min(s0 + s1, u0 + u1)),
+            ),
+        ]
+        for name, xs, expected in cases:
+            got = self.check_call(name, *map(sympy.sympify, xs))
+            self.assertEqual(got, expected, f"{name}{xs}")
+
+    def test_minmax_unsupported(self):
+        arena = torch._C._symbolic._Arena()
+        u1 = sympy.Symbol("u1", integer=True)
+        x = arena.from_sympy(s0)
+        # Python leaves Max(2, 3) unevaluated inside the result.
+        cases = [("Max", (Min(2, u0), Min(3, u0))), ("Max", ())]
+        # Tied sort keys: sympy orders a frozenset in hash order.
+        cases += [("Max", (u1, sympy.Symbol("u1", integer=True, positive=True)))]
+        for name, xs in cases:
+            args = [arena.from_sympy(sympy.sympify(v)) for v in xs]
+            with self.assertRaises(NativeUnsupported, msg=f"{name}{xs}"):
+                arena.function(name, args)
+        with self.assertRaises(NativeUnsupported):
+            arena.function("Max", [arena.boolean(True), x])
+        with self.assertRaises(NativeUnsupported):
+            arena.function("Max", [arena.from_sympy(W), x])
+        with self.assertRaises(NativeUnsupported):
+            arena.from_sympy(Max(2, 3, evaluate=False))
+        with self.assertRaises(NativeUnsupported):
+            arena.diff(arena.from_sympy(Max(s0, u0)), x)
+        v = Max(s0, 2 * s0, evaluate=False)
+        self.assertEqual(arena.to_sympy(arena.from_sympy(v)).args, v.args)
+
+    def test_minmax_printing(self):
+        m = Max(s0 + s1, u0)
+        cases = [Max(2, s0), Max(s1, s0 + 1), Min(0, -s0), m, m + 1, 2 * m, -m]
+        cases += [m**2, 1 / m, m * s1, (m + 1) * s1, sympy.Lt(m, s0), Mod(m, 2)]
+        cases += [Max(2 * s1, s0 + s1, u0 + zf), Min(u0, Max(s1, FloorDiv(s0, 2)))]
+        cases += [Max(u0, int_oo), Min(-int_oo, u0), sympy.Eq(Min(s0, u0), 1)]
+        cases += [Max(s0, u0) + Min(s0, u0), Max(s0, u0) * Min(s0, u0)]
+        rng = random.Random(0)
+        for v in cases:
+            self.assertTrue(self.check_expr(v, rng), f"{v}")
+
+    @parametrize("seed", range(4))
+    def test_minmax_fuzz(self, seed):
+        rng = random.Random(seed)
+        u1 = sympy.Symbol("u1", integer=True)
+        n = sympy.Symbol("n", integer=True, nonnegative=True)
+        m = sympy.Symbol("m", integer=True, negative=True)
+        pool = [s0, s1, u0, u1, n, m, zf, *map(sympy.Integer, range(-2, 4))]
+        pool += [sympy.Rational(1, 2), int_oo, -int_oo, s0 + s1, u0 + u1, n + m]
+        pool += [2 * s0, -s0, s0 - 1, 3 * u0, -2 * n, s0 * s1, FloorDiv(s0, 2)]
+        calls = supported = 0
+        for _ in range(400):
+            name = rng.choice(["Max", "Min"])
+            xs = rng.sample(pool, rng.randint(1, 4))
+            calls += 1
+            r = self.check_call(name, *xs)
+            if r is None:
+                continue
+            supported += 1
+            if isinstance(r, (Max, Min)) and len(pool) < 200:
+                pool.append(r)
+        self.assertGreater(supported, calls * 3 // 4)
+        answered = unsupported = 0
+        nodes = [x for x in pool if isinstance(x, (Max, Min))]
         for _ in range(40):
             t = random_tree(rng, 3, LEAVES + nodes)
             for sub in subtrees(t):
