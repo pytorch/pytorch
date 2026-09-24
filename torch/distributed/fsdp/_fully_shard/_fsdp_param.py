@@ -90,6 +90,16 @@ these equivalences may no longer hold due to the pre/post-all-gather
 transforms, and some may have multiple all-gather inputs/outputs (e.g.
 quantized data and scales).
 
+With a single shard rank, frozen parameters without mixed-precision casting or
+CPU offload may use an unsharded view of persistent storage. Plain tensors
+without all-gather extensions support this directly. A tensor extension can
+opt in with ``fsdp_get_unsharded_view(mesh, module, mp_policy)``. It must return
+a compute tensor backed entirely by the persistent parameter's storage, or
+``None`` to keep the all-gather path. The view must have the original local
+shape, dtype, and device. FSDP never frees borrowed storage on reshard. Loading
+with ``assign=False`` updates both views in place; replacing parameter storage
+requires recreating the view and recapturing any CUDA graphs that use it.
+
 [Note: FSDP and autograd]
 FSDP dynamically frees and allocates the unsharded parameter. Since autograd
 can pack a reference to it or a view to save for backward, we use storage
@@ -209,6 +219,7 @@ class FSDPParam:
     _extensions_data: ExtensionsData
     _unsharded_inner_tensors: list[torch.Tensor]
     _release_all_gather_outputs_after_post_all_gather: bool
+    _unsharded_param_view_source: torch.Tensor | None
     _orig_param_uid: int
 
     def __init__(
@@ -236,6 +247,7 @@ class FSDPParam:
             self._init_sharded_post_forward_param_metadata(param)
         self._init_extensions()
         self.all_gather_outputs: list[torch.Tensor] = []
+        self._unsharded_param_view_source = None
         self.unsharded_accumulated_grad = None
         self._param_fqn: str | None = None  # prefixed from root module
         # TODO: Remove this padding logic once DTensor pads the local tensor:
@@ -877,7 +889,57 @@ class FSDPParam:
             for numel, dtype in zip(all_gather_input_numels, all_gather_input_dtypes)
         ]
 
+    def init_unsharded_param_from_sharded(self) -> bool:
+        """Try borrowing persistent compute storage on a single shard rank."""
+        if (
+            self.sharded_param.requires_grad
+            or self.param_dtype is not None
+            or self.offload_to_cpu
+        ):
+            if self._unsharded_param_is_view:
+                del self._unsharded_param
+                self._unsharded_param_view_source = None
+            return False
+        if self._unsharded_param_is_view:
+            return True
+        if hasattr(self, "_unsharded_param"):
+            return False  # Keep an existing independently owned compute allocation.
+        inner_tensor = self._sharded_local_tensor
+        get_view = getattr(inner_tensor, "fsdp_get_unsharded_view", None)
+        if get_view is not None:
+            unsharded_tensor = get_view(
+                self._shard_mesh, self._module_info.module, self.mp_policy
+            )
+            if unsharded_tensor is None:
+                return False
+            if (
+                not isinstance(unsharded_tensor, torch.Tensor)
+                or unsharded_tensor.size() != self._orig_size
+                or unsharded_tensor.dtype != self.orig_dtype
+                or unsharded_tensor.device != self.device
+                or not unsharded_tensor.is_contiguous()
+            ):
+                raise ValueError(
+                    "fsdp_get_unsharded_view must return a contiguous tensor with "
+                    "the parameter's local shape, dtype, and device"
+                )
+        elif type(inner_tensor) is torch.Tensor and not hasattr(
+            inner_tensor, "fsdp_pre_all_gather"
+        ):
+            unsharded_tensor = inner_tensor
+        else:
+            return False
+        self._init_unsharded_param(unsharded_tensor)
+        self._unsharded_param_view_source = inner_tensor
+        return True
+
+    @property
+    def _unsharded_param_is_view(self) -> bool:
+        return self._unsharded_param_view_source is not None
+
     def init_unsharded_param(self):
+        if self._unsharded_param_is_view:
+            return
         if hasattr(self, "_unsharded_param"):  # after the 1st all-gather
             inner_tensor = self._sharded_local_tensor
             if not hasattr(inner_tensor, "fsdp_post_all_gather"):
@@ -914,11 +976,15 @@ class FSDPParam:
                     f"Expected 1 all_gather_output, got {len(self.all_gather_outputs)}"
                 )
             unsharded_tensor = self.all_gather_outputs[0]
+        self._init_unsharded_param(unsharded_tensor)
+        self._release_all_gather_outputs_if_needed()
+
+    def _init_unsharded_param(self, unsharded_tensor: torch.Tensor) -> None:
         unsharded_param = torch.as_strided(
             unsharded_tensor,
             self._orig_size,
             self._contiguous_orig_stride,
-            storage_offset=0,
+            storage_offset=unsharded_tensor.storage_offset(),
         )
         if self.is_spmd_types:
             pass  # keep as plain tensor; spmd_types restored before module compute
@@ -930,7 +996,6 @@ class FSDPParam:
         self._unsharded_param = nn.Parameter(
             unsharded_param, requires_grad=self.sharded_param.requires_grad
         )
-        self._release_all_gather_outputs_if_needed()
 
     def _release_all_gather_outputs_if_needed(self) -> None:
         if self._release_all_gather_outputs_after_post_all_gather:
@@ -1093,6 +1158,8 @@ class FSDPParam:
             free_storage(tensor)
 
     def free_unsharded_param(self) -> None:
+        if self._unsharded_param_is_view:
+            return
         self.free_all_gather_outputs()
         for tensor in self._unsharded_inner_tensors:
             free_storage(tensor)
@@ -1291,6 +1358,12 @@ class FSDPParam:
             self.sharded_param = new_param
 
         local_tensor = new_param._local_tensor
+        if (
+            self._unsharded_param_is_view
+            and local_tensor is not self._unsharded_param_view_source
+        ):
+            del self._unsharded_param
+            self._unsharded_param_view_source = None
         if local_tensor.is_meta:
             return
         updated_local_tensor = False
