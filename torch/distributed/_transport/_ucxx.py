@@ -15,6 +15,7 @@ from typing import Any, cast, Literal, TYPE_CHECKING, TypeVar
 import torch
 
 from ._blocking import _BlockingTransport
+from ._serialization import _WireDescriptor
 
 
 if TYPE_CHECKING:
@@ -44,8 +45,11 @@ def _load_backend() -> Any:
 
 
 @dataclass(frozen=True)
-class UCXXRemoteBuffer:
+class UCXXRemoteBuffer(_WireDescriptor):
     """A serializable descriptor for memory registered by a UCXX peer."""
+
+    _backend = "ucxx"
+    _fields = {"buffer_id": int, "length": int, "access_key": int}
 
     buffer_id: int
     length: int

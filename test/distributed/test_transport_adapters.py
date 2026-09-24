@@ -2,7 +2,6 @@
 
 import asyncio
 import gc
-import pickle
 import queue
 import threading
 import time
@@ -26,6 +25,9 @@ from torch.testing._internal.common_utils import (
 @dataclass(frozen=True)
 class _NativeRemote:
     key: tuple[int, int]
+
+    def __getstate__(self):
+        return (*self.key, "test-key")
 
 
 class _NativeView:
@@ -110,7 +112,13 @@ class TestTorchCommsTransport(TransportTestMixin, TestCase):
         _NativeMemory.registrations.clear()
 
     def backend(self):
-        return SimpleNamespace(RdmaMemory=_NativeMemory, RdmaTransport=_NativeTransport)
+        return SimpleNamespace(
+            RdmaMemory=_NativeMemory,
+            RdmaTransport=_NativeTransport,
+            RdmaRemoteBuffer=lambda address, length, access_key: _NativeRemote(
+                (address, length)
+            ),
+        )
 
     def make_transport_pair(self):
         with patch.object(_torchcomms, "_load_backend", return_value=self.backend()):
@@ -139,7 +147,12 @@ class TestTorchCommsTransport(TransportTestMixin, TestCase):
         self.assertEqual(view.size(), 3)
         self.assertEqual(mutable_view.size(), 4)
         remote = memory.to_remote_buffer()
-        self.assertEqual(remote, _NativeRemote((tensor.data_ptr(), tensor.nbytes)))
+        self.assertEqual(
+            remote,
+            _torchcomms.TorchCommsRemoteBuffer(
+                tensor.data_ptr(), tensor.nbytes, "test-key"
+            ),
+        )
         self.assertFalse(memory.reused_registration())
         self.assertIs(view._memory, memory)
         self.assertEqual(transport.write(view, remote), 0)
@@ -324,7 +337,7 @@ class TestUCXXTransport(TransportTestMixin, TestCase):
             destination_memory = server.register_memory(destination)
             remote = destination_memory.to_remote_buffer()
 
-            self.assertEqual(pickle.loads(pickle.dumps(remote)), remote)
+            self.assertEqual(type(remote).deserialize(remote.serialize()), remote)
             self.assertEqual(client.write(source_memory.to_view(32, 32), remote), 0)
             self.assertEqual(destination, source[8:])
 
