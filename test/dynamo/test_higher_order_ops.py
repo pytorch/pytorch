@@ -6363,8 +6363,6 @@ class GraphModule(torch.nn.Module):
         cos_default: "f32[3, 3, 3]" = torch.ops.aten.cos.default(alias_default_1);  alias_default_1 = None
 
         sin_default: "f32[3, 3, 3]" = torch.ops.aten.sin.default(alias_default)
-
-        alias_default_2: "f32[3, 3, 3]" = torch.ops.aten.alias.default(sin_default);  alias_default_2 = None
         return (alias_default, cos_default, sin_default)
 """,
         )
