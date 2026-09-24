@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
+from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy, share_comm_ctx
 from torch.distributed.fsdp._fully_shard._fsdp_param import ShardedState
 from torch.distributed.pipelining import PipelineStage
 from torch.distributed.pipelining.schedules import (
@@ -151,7 +151,9 @@ class ComposabilityTest(MultiProcContinuousTest):
         apply_dp,
         loss_fn,
         scale_grads=True,
+        schedule_kwargs=None,
     ):
+        schedule_kwargs = schedule_kwargs or {}
         if issubclass(ScheduleClass, PipelineScheduleSingle):
             pipeline_stage, offset = self._build_pp_stage(
                 pp_group,
@@ -169,6 +171,7 @@ class ComposabilityTest(MultiProcContinuousTest):
                 n_microbatches=num_microbatches,
                 loss_fn=loss_fn,
                 scale_grads=scale_grads,
+                **schedule_kwargs,
             )
         else:
             n_virtual = 2
@@ -192,6 +195,7 @@ class ComposabilityTest(MultiProcContinuousTest):
                 n_microbatches=num_microbatches,
                 loss_fn=loss_fn,
                 scale_grads=scale_grads,
+                **schedule_kwargs,
             )
         return pipeline_schedule, partial_models, offsets
 
@@ -281,15 +285,18 @@ class ComposabilityTest(MultiProcContinuousTest):
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "Test requires 4+ GPUs")
     @parametrize("dp_type", ["FSDP", "FSDP_MP"])
     @parametrize(
-        "ScheduleClass",
+        "ScheduleClass,defer_reduce_grad_wait",
         [
-            Schedule1F1B,
-            ScheduleInterleaved1F1B,
-            ScheduleLoopedBFS,
-            ScheduleInterleavedZeroBubble,
+            (Schedule1F1B, False),
+            (ScheduleInterleaved1F1B, False),
+            (ScheduleInterleaved1F1B, True),
+            (ScheduleLoopedBFS, False),
+            (ScheduleLoopedBFS, True),
+            (ScheduleInterleavedZeroBubble, False),
+            (ScheduleInterleavedZeroBubble, True),
         ],
     )
-    def test_pp_fsdp(self, dp_type, ScheduleClass):
+    def test_pp_fsdp(self, dp_type, defer_reduce_grad_wait, ScheduleClass):
         torch.get_device_module(device_type).set_device(self.device)
         mesh_shape = (self.world_size // 2, 2)
         mesh_dim_names = ("dp", "pp")
@@ -344,7 +351,18 @@ class ComposabilityTest(MultiProcContinuousTest):
             total_layers,
             apply_dp,
             loss_fn,
+            schedule_kwargs=(
+                {"defer_reduce_grad_wait": True} if defer_reduce_grad_wait else {}
+            ),
         )
+
+        if defer_reduce_grad_wait:
+            if pp_group.rank() == 0:
+                pipeline_schedule.eval(input_local)
+            else:
+                pipeline_schedule.eval(target=target_local)
+            for stage in pipeline_schedule._stages:
+                self.assertIsNone(stage._gradient_reduction_handle)
 
         # Run the pipeline
         if pp_group.rank() == 0:
@@ -388,7 +406,8 @@ class ComposabilityTest(MultiProcContinuousTest):
     @skip_if_lt_x_gpu(4)
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "Test requires 4+ GPUs")
     @skipIfRocm
-    def test_pp_fsdp_outer_gradient_accumulation(self):
+    @parametrize("defer_reduce_grad_wait", [False, True])
+    def test_pp_fsdp_outer_gradient_accumulation(self, defer_reduce_grad_wait):
         torch.get_device_module(device_type).set_device(self.device)
         device_mesh = init_device_mesh(
             "cuda",
@@ -418,6 +437,7 @@ class ComposabilityTest(MultiProcContinuousTest):
                 n_microbatches=n_microbatches,
                 loss_fn=loss_fn,
                 scale_grads=False,
+                defer_reduce_grad_wait=defer_reduce_grad_wait,
             )
             actions = [
                 _Action(0, _ComputationType.FORWARD, i) for i in range(n_microbatches)
@@ -453,6 +473,7 @@ class ComposabilityTest(MultiProcContinuousTest):
                 finalize_gradients=finalize_gradients,
             )
             assert_unsharded(model, not finalize_gradients)
+            self.assertIsNone(schedule._stages[0]._gradient_reduction_handle)
 
         self.assertNotIn(0, schedule.unsharded_stages)
         ref_schedule, _ = make_schedule(ref_model, total_microbatches)
@@ -483,6 +504,35 @@ class ComposabilityTest(MultiProcContinuousTest):
         model.zero_grad(set_to_none=True)
         model(inputs[0]).sum().backward()
         self.assertEqual(state._comm_ctx.reduce_scatter_states, [])
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_pp_fsdp_deferred_reduction_rejects_shared_comm_ctx(self):
+        torch.get_device_module(device_type).set_device(self.device)
+        device_mesh = init_device_mesh(
+            "cuda",
+            mesh_shape=(self.world_size, 1),
+            mesh_dim_names=("dp", "pp"),
+        )
+        dp_mesh = device_mesh["dp"]
+        pp_group = device_mesh["pp"].get_group()
+        models = [
+            fully_shard(nn.Linear(8, 8).to(self.device), mesh=dp_mesh) for _ in range(2)
+        ]
+        share_comm_ctx(models)
+        stages = [
+            PipelineStage(model, stage_idx, 2, self.device, group=pp_group)
+            for stage_idx, model in enumerate(models)
+        ]
+        schedule = ScheduleLoopedBFS(
+            stages,
+            n_microbatches=2,
+            loss_fn=loss_fn,
+            defer_reduce_grad_wait=True,
+        )
+
+        with self.assertRaisesRegex(ValueError, "Do not call share_comm_ctx"):
+            schedule.step(torch.randn(4, 8, device=self.device))
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
