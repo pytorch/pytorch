@@ -1,5 +1,6 @@
 # Owner(s): ["module: functorch"]
 import math
+import random
 
 import networkx as nx
 
@@ -456,8 +457,9 @@ class TestMinimumCut(TestCase):
         graph = nx.DiGraph()
         graph.add_weighted_edges_from(edges, weight="capacity")
 
-        expected_value, _ = nx.minimum_cut(graph, "source", "sink")
-        actual_value, (reachable, non_reachable) = minimum_cut(graph, "source", "sink")
+        expected_value, expected_partition = nx.minimum_cut(graph, "source", "sink")
+        actual_value, actual_partition = minimum_cut(graph, "source", "sink")
+        reachable, non_reachable = actual_partition
         actual_capacity = sum(
             data["capacity"]
             for start, end, data in graph.edges(data=True)
@@ -465,7 +467,52 @@ class TestMinimumCut(TestCase):
         )
 
         self.assertEqual(actual_value, expected_value)
+        self.assertEqual(actual_partition, expected_partition)
         self.assertEqual(actual_capacity, expected_value)
+
+    def test_matches_networkx_on_seeded_random_graphs(self) -> None:
+        rng = random.Random(0)
+        node_count = 12
+        for case in range(100):
+            graph = nx.DiGraph()
+            graph.add_nodes_from(range(node_count))
+            for start in range(node_count):
+                for end in range(node_count):
+                    if rng.random() < 0.15:
+                        graph.add_edge(
+                            start,
+                            end,
+                            capacity=rng.choice((0, 1, 2, 5, math.inf)),
+                        )
+            graph.add_edge(0, 0, capacity=math.inf)
+            graph.add_edge(1, 2, capacity=0)
+            graph.add_edge(2, 3, capacity=math.inf)
+            graph.add_edge(3, 4, capacity=2)
+
+            with self.subTest(case=case):
+                try:
+                    expected = nx.minimum_cut(graph, 0, node_count - 1)
+                except nx.NetworkXUnbounded:
+                    with self.assertRaises(nx.NetworkXUnbounded):
+                        minimum_cut(graph, 0, node_count - 1)
+                else:
+                    self.assertEqual(minimum_cut(graph, 0, node_count - 1), expected)
+
+    def test_rejects_invalid_inputs(self) -> None:
+        graph = nx.DiGraph()
+        graph.add_edge("source", "sink", capacity=1)
+
+        invalid_inputs = [
+            (graph, "source", "source"),
+            (graph, "missing", "sink"),
+            (graph, "source", "missing"),
+            (nx.Graph(graph), "source", "sink"),
+            (nx.MultiDiGraph(graph), "source", "sink"),
+        ]
+        for invalid_graph, source, sink in invalid_inputs:
+            with self.subTest(graph_type=type(invalid_graph), source=source, sink=sink):
+                with self.assertRaises(nx.NetworkXError):
+                    minimum_cut(invalid_graph, source, sink)
 
     def test_long_path_does_not_recurse(self) -> None:
         graph = nx.DiGraph()

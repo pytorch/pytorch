@@ -37,8 +37,10 @@ Dinic's algorithm repeatedly performs two operations:
    first search starts the next phase.
 
 When the sink is no longer reachable, the flow is maximal.  By the max-flow
-min-cut theorem, vertices still reachable from the source in the final
-residual network form the source side of a minimum cut.
+min-cut theorem, residual reachability then identifies a minimum cut.  To
+match ``networkx.minimum_cut`` when several cuts tie, this implementation
+finds the vertices that can still reach the sink and uses them as the sink
+side of the partition.
 
 The general complexity is ``O(V^2 E)``, but the partitioner's graphs are
 sparse and highly structured.  The implementation is iterative so long FX
@@ -53,6 +55,8 @@ import math
 from collections import deque
 from typing import Any
 
+import networkx as nx
+
 
 def minimum_cut(
     graph: Any,
@@ -66,16 +70,28 @@ def minimum_cut(
     finite cut and raises ``NetworkXUnbounded``, matching NetworkX.  Missing
     capacities are infinite under the NetworkX graph contract.
 
-    Different maximum-flow algorithms may return different partitions when
-    several cuts have the same minimum capacity.  The returned partition is
-    deterministic for a fixed graph iteration order.
+    The returned partition matches ``networkx.minimum_cut``, including its
+    choice of the cut closest to the sink when several minimum cuts tie.
     """
+    if not graph.is_directed():
+        raise nx.NetworkXError("minimum_cut only supports directed graphs")
+    if graph.is_multigraph():
+        raise nx.NetworkXError("MultiGraph and MultiDiGraph not supported")
+    if source not in graph:
+        raise nx.NetworkXError(f"node {source} not in graph")
+    if sink not in graph:
+        raise nx.NetworkXError(f"node {sink} not in graph")
+    if source == sink:
+        raise nx.NetworkXError("source and sink are the same node")
+
     nodes = list(graph)
     node_index = {node: index for index, node in enumerate(nodes)}
     node_count = len(nodes)
     source_index = node_index[source]
     sink_index = node_index[sink]
 
+    # Match ``build_residual_network``: omit self-loops and nonpositive edges,
+    # and replace infinity with three times the sum of finite capacities.
     finite_capacity = sum(
         capacity
         for start, end, capacity in graph.edges(data="capacity", default=math.inf)
@@ -115,9 +131,7 @@ def minimum_cut(
             end = destinations[edge]
             if infinite[edge] and end not in reachable:
                 if end == sink_index:
-                    from networkx import NetworkXUnbounded
-
-                    raise NetworkXUnbounded(
+                    raise nx.NetworkXUnbounded(
                         "Infinite capacity path, flow unbounded above."
                     )
                 reachable.add(end)
@@ -175,15 +189,16 @@ def minimum_cut(
         while amount := send_one():
             flow += amount
 
-    # The source-reachable residual vertices define the source side of the cut.
-    reachable_indices = {source_index}
-    queue = deque([source_index])
+    # Match ``minimum_cut``: the sink side contains every vertex that can reach
+    # the sink through a residual edge.  Traverse those edges backwards.
+    sink_side_indices = {sink_index}
+    queue = deque([sink_index])
     while queue:
         node = queue.popleft()
         for edge in adjacency[node]:
-            end = destinations[edge]
-            if residual[edge] > 0 and end not in reachable_indices:
-                reachable_indices.add(end)
-                queue.append(end)
-    source_side = {nodes[index] for index in reachable_indices}
-    return flow, (source_side, set(nodes) - source_side)
+            predecessor = destinations[edge]
+            if residual[edge ^ 1] > 0 and predecessor not in sink_side_indices:
+                sink_side_indices.add(predecessor)
+                queue.append(predecessor)
+    sink_side = {nodes[index] for index in sink_side_indices}
+    return flow, (set(nodes) - sink_side, sink_side)
