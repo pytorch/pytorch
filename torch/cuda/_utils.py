@@ -334,7 +334,8 @@ def _nvrtc_compile(
         libnvrtc.nvrtcCreateProgram(
             ctypes.byref(prog),
             source_bytes,
-            f"{kernel_name}.cu".encode(),
+            # Template expressions in kernel_name are not valid filenames on Windows.
+            b"kernel.cu",
             0,
             None,
             None,
