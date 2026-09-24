@@ -464,6 +464,7 @@ class _ShapeEnvPickleData:
         self.data = env.__dict__.copy()
         del self.data["tracked_fakes"]
         del self.data["fake_tensor_cache"]
+        del self.data["_native_env"]
 
     def unpickle(self, unpickle_state: _UnpickleState) -> ShapeEnv:
         # Fill in the existing ShapeEnv rather than creating a new one
@@ -472,6 +473,10 @@ class _ShapeEnvPickleData:
         if not unpickle_state.fake_mode.shape_env:
             raise AssertionError("unpickle_state.fake_mode.shape_env is not set")
 
+        native_env = unpickle_state.fake_mode.shape_env._native_env
+        if native_env is not None:
+            # The plain containers set below do not notify it.
+            native_env.mark_replacements()
         for k, v in self.data.items():
             setattr(unpickle_state.fake_mode.shape_env, k, v)
 

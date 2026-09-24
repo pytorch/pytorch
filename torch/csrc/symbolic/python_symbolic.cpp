@@ -836,6 +836,52 @@ void initSymbolicBindings(PyObject* module) {
                 size_like);
           })
       .def(
+          "mirror_symbol",
+          [](PyShapeEnv& self,
+             py::handle sym,
+             py::handle hint,
+             py::handle lower,
+             py::handle upper) {
+            // Takes sympy objects. A symbol that is not representable stays
+            // unmirrored, so every query mentioning it delegates.
+            PyArena& a = *self.owner;
+            try {
+              self.env->add_symbol(
+                  a.from_sympy(sym),
+                  to_int64(hint),
+                  ValueRanges(a.from_sympy(lower), a.from_sympy(upper)),
+                  /*size_like=*/false);
+            } catch (const NativeUnsupported&) {
+            }
+          })
+      .def(
+          "mirrored",
+          [](PyShapeEnv& self, py::handle sym) -> py::object {
+            auto m = self.env->mirrored(self.owner->from_sympy(sym));
+            if (!m) {
+              return py::none();
+            }
+            auto& [hint, range, size_like] = *m;
+            return py::make_tuple(
+                hint,
+                self.owner->to_sympy(range.lower),
+                self.owner->to_sympy(range.upper),
+                size_like);
+          })
+      .def_property_readonly(
+          "replacements_empty",
+          [](const PyShapeEnv& self) { return self.env->replacements_empty(); })
+      // A copied or unpickled ShapeEnv gets no native env.
+      .def(
+          "__deepcopy__",
+          [](const PyShapeEnv&, const py::dict&) { return py::none(); })
+      .def(
+          "__reduce__",
+          [](const PyShapeEnv&) {
+            return py::make_tuple(
+                py::type::of(py::none()), py::tuple());
+          })
+      .def(
           "update_range",
           [](PyShapeEnv& self,
              const PyExpr& sym,

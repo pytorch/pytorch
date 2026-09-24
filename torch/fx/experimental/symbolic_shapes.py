@@ -110,6 +110,7 @@ if TYPE_CHECKING:
     import types
 
     from torch import Tensor
+    from torch._C._symbolic import NativeShapeEnv
     from torch._dynamo.source import TensorPropertySource
     from torch._subclasses.fake_tensor import FakeTensor
     from torch.fx.experimental.dynamic_spec import IntVar, ShapesSpec, TensorSpec
@@ -3954,6 +3955,96 @@ class _FrameLocalResult:
     symbols: dict[str, str] = field(default_factory=dict)
 
 
+def _notifying(base: type[Any], mutators: tuple[str, ...]) -> type:
+    """
+    A subclass of base whose mutators call self._on_mutate() before mutating.
+    Used for the ShapeEnv state mirrored by a native env. Copies and pickles
+    produce a plain base.
+    """
+
+    def notify_before(name: str) -> Callable[..., Any]:
+        method = getattr(base, name)
+
+        def wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
+            self._on_mutate()
+            return method(self, *args, **kwargs)
+
+        return wrapper
+
+    def __init__(self: Any, data: Any, on_mutate: Callable[[], None]) -> None:
+        # pyrefly: ignore [no-matching-overload]
+        base.__init__(self, data)
+        self._on_mutate = on_mutate
+
+    def __reduce__(self: Any) -> tuple[type, tuple[Any]]:
+        return (base, (base(self),))
+
+    namespace: dict[str, Any] = {n: notify_before(n) for n in mutators}
+    namespace.update(
+        __slots__=("_on_mutate",), __init__=__init__, __reduce__=__reduce__
+    )
+    return type(f"_Notifying{base.__name__.title()}", (base,), namespace)
+
+
+_NotifyingList = _notifying(
+    list,
+    (
+        "__setitem__",
+        "__delitem__",
+        "__iadd__",
+        "__imul__",
+        "append",
+        "extend",
+        "insert",
+        "pop",
+        "remove",
+        "clear",
+        "sort",
+        "reverse",
+    ),
+)
+_NotifyingDict = _notifying(
+    dict,
+    (
+        "__setitem__",
+        "__delitem__",
+        "__ior__",
+        "update",
+        # Also when the key exists: callers mutate the returned value in place.
+        "setdefault",
+        "pop",
+        "popitem",
+        "clear",
+    ),
+)
+_NotifyingSet = _notifying(
+    set,
+    (
+        "__ior__",
+        "__iand__",
+        "__isub__",
+        "__ixor__",
+        "add",
+        "update",
+        "intersection_update",
+        "difference_update",
+        "symmetric_difference_update",
+        "discard",
+        "remove",
+        "pop",
+        "clear",
+    ),
+)
+
+
+class _NotifyingRangeDict(_NotifyingDict):  # type: ignore[valid-type, misc]
+    # Assigning a new key (symbol creation) is not a range update.
+    def __setitem__(self, key: sympy.Symbol, value: ValueRanges[sympy.Expr]) -> None:
+        if key in self:
+            self._on_mutate()
+        dict.__setitem__(self, key, value)
+
+
 class ShapeEnv:
     # This is a wrapper over the actual __init__ function.
     #
@@ -3970,6 +4061,9 @@ class ShapeEnv:
         *,
         should_record_events: bool | None = None,
         tracked_fakes: list[Any] | None = None,
+        # None: follow torch._dynamo.config.use_cpp_symnode. Config that the
+        # native env does not model disables it either way.
+        _allow_native: bool | None = None,
         **kwargs: Any,
     ) -> None:
         self._init(**kwargs)
@@ -4022,6 +4116,37 @@ class ShapeEnv:
             torch._subclasses.fake_tensor._DispatchCacheKey,
             torch._subclasses.fake_tensor._DispatchCacheEntry,
         ] = {}
+
+        # C++ mirror of the state that native SymNodes evaluate against. The
+        # mirrored containers notify it before every mutation.
+        self._native_env: NativeShapeEnv | None = None
+        if _allow_native is None:
+            _allow_native = torch._dynamo.config.use_cpp_symnode
+        if (
+            _allow_native
+            and not self.should_record_events
+            and not self._translation_validation_enabled
+            and not config.backed_size_oblivious
+            and config.aggressive_guard_free_semantics == 0
+            and config.symbol_guard_limit_before_specialize is None
+            and not self.settings.prefer_deferred_runtime_asserts_over_guards
+            and not self.settings.trace_asserts
+            and not torch._logging._internal.GET_DTRACE_STRUCTURED
+        ):
+            symbolic = torch._C._symbolic
+            native = self._native_env = symbolic.NativeShapeEnv(symbolic._Arena())
+            not_pristine = native.mark_not_pristine
+            self.guards = _NotifyingList(self.guards, not_pristine)
+            self.axioms = _NotifyingDict(self.axioms, not_pristine)
+            self.replacements = _NotifyingDict(
+                self.replacements, native.mark_replacements
+            )
+            self.var_to_range = _NotifyingRangeDict(self.var_to_range, not_pristine)
+            self.divisible = _NotifyingSet(self.divisible, not_pristine)
+            self.size_like = _NotifyingSet(self.size_like, not_pristine)
+            self.deferred_runtime_asserts = _NotifyingDict(
+                self.deferred_runtime_asserts, not_pristine
+            )
 
     # Pro-tip: if you add new field to ShapeEnv, this affects some accept
     # tests.  Accept their output with:
@@ -4454,6 +4579,7 @@ class ShapeEnv:
             # Foreign ShapeEnv transfer cache; replay reconstructs equivalent
             # transferred symbols through recorded registration events.
             "foreign_unbacked_symbol_cache",
+            "_native_env",
         )
 
         # Mapping of the value of each to-be-compared field into the values that
@@ -6031,6 +6157,8 @@ class ShapeEnv:
                     raise ConstraintViolationError(
                         f"{val} not in range [{vr.lower}, {vr.upper}]"
                     )
+                if self._native_env is not None:
+                    self._native_env.mirror_symbol(sympy_expr, val, vr.lower, vr.upper)
 
                 range_str = f"[{vr.lower}, {vr.upper}]"
             elif isinstance(val, float):
@@ -6119,6 +6247,8 @@ class ShapeEnv:
         log.debug("add_backed_var_to_val %s %s", expr, val, stack_info=True)
         if expr in self.backed_var_to_val:
             raise AssertionError(f"{expr} already exists")
+        if self._native_env is not None:
+            self._native_env.mark_not_pristine()
         self.backed_var_to_val[expr] = sympy.Integer(val)
         self.name_to_symbol[expr.name] = expr
 
@@ -7480,7 +7610,8 @@ class ShapeEnv:
                 # expressions only depend on the expression itself.
                 if k.has(FloorDiv):
                     new_items.update({self.simplify(k): v})
-            axioms.update(new_items)
+            if new_items:
+                axioms.update(new_items)
 
         # Pattern matching
         if axioms is None:
@@ -7558,6 +7689,10 @@ class ShapeEnv:
             if not res.is_number:
                 new_divisible.add(k)
 
+        if self._native_env is not None:
+            new_divisible = _NotifyingSet(
+                new_divisible, self._native_env.mark_not_pristine
+            )
         self.divisible = new_divisible
         self._update_version_counter()
 

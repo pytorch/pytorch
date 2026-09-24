@@ -63,6 +63,20 @@ void NativeShapeEnv::update_range(const Expr* sym, const ValueRanges& range) {
   var_to_range_.insert_or_assign(sym, range);
 }
 
+std::optional<std::tuple<std::optional<int64_t>, ValueRanges, bool>>
+NativeShapeEnv::mirrored(const Expr* sym) const {
+  auto it = var_to_range_.find(sym);
+  if (it == var_to_range_.end()) {
+    return std::nullopt;
+  }
+  auto hint = backed_var_to_val_.find(sym);
+  return std::make_tuple(
+      hint == backed_var_to_val_.end() ? std::nullopt
+                                       : std::optional<int64_t>(hint->second),
+      it->second,
+      size_like_.count(sym) != 0);
+}
+
 bool NativeShapeEnv::all_symbols_mirrored(const Expr* e) const {
   for (const Expr* s : arena_->free_symbols(e)) {
     if (var_to_range_.count(s) == 0) {
@@ -380,16 +394,18 @@ std::optional<const Expr*> NativeShapeEnv::evaluate_expr(
     }
     return std::nullopt;
   }
+  // The range mirror is not updated once the env stops being pristine.
+  if (!pristine_) {
+    return std::nullopt;
+  }
   try {
     if (const Expr* r = maybe_fast_eval_comparison(e)) {
       return r;
     }
-    if (pristine_) {
-      const Expr* r = maybe_evaluate_static(e);
-      // With config.backed_size_oblivious Python asserts r == hint.
-      if (r && (!hint || (r->kind == Kind::Integer && r->p == *hint))) {
-        return r;
-      }
+    const Expr* r = maybe_evaluate_static(e);
+    // With config.backed_size_oblivious Python asserts r == hint.
+    if (r && (!hint || (r->kind == Kind::Integer && r->p == *hint))) {
+      return r;
     }
   } catch (const NativeUnsupported&) {
   }

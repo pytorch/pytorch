@@ -45,6 +45,9 @@ class NativeShapeEnv : public c10::intrusive_ptr_target {
   bool replacements_empty() const {
     return replacements_empty_;
   }
+  // (hint, range, size_like) of a mirrored symbol.
+  std::optional<std::tuple<std::optional<int64_t>, ValueRanges, bool>> mirrored(
+      const Expr* sym) const;
 
   // ShapeEnv.simplify(e), ShapeEnv._maybe_evaluate_static(e) (nullptr for
   // None) and ShapeEnv._maybe_fast_eval_comparison(e) (nullptr for None), with

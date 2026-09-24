@@ -2292,9 +2292,8 @@ class TestNativeShapeEnv(TestCase):
         )
         self.assertFalse(native.pristine)
         self.assertEqual(native.static_eval(ge), (False, None))
-        # The fast comparison path reads only the ranges.
-        self.assertEqual(native.evaluate_expr(ge), arena.boolean(True))
-        self.assertIsNone(native.evaluate_expr(arena.from_sympy(a > 2)))
+        # Delegates even where the fast comparison would answer.
+        self.assertIsNone(native.evaluate_expr(ge))
         native.mark_replacements()
         self.assertIsNone(native.evaluate_expr(ge))
         self.assertEqual(native.evaluate_expr(arena.boolean(True)), arena.boolean(True))
@@ -2372,6 +2371,200 @@ class TestNativeShapeEnv(TestCase):
         self.assertGreater(answered, calls // 3)
 
 
+class TestNativeShapeEnvSync(TestCase):
+    # (name, mutation of a ShapeEnv with symbols s, t, clears replacements_empty)
+    MUTATIONS = [
+        ("guard", lambda env, s, t: env.evaluate_expr(sympy.Eq(s, 5)), True),
+        (
+            "guard_lt",
+            lambda env, s, t: env.evaluate_expr(sympy.Lt(s, t), hint=True),
+            False,
+        ),
+        ("guards_append", lambda env, s, t: env.guards.append(None), False),
+        ("axioms", lambda env, s, t: env.axioms.update({s > 1: sympy.true}), False),
+        ("replacement", lambda env, s, t: env._set_replacement(s, t, "test"), True),
+        ("replacements_pop", lambda env, s, t: env.replacements.pop(s, None), True),
+        (
+            "range",
+            lambda env, s, t: env._update_var_to_range(s, ValueRanges(3, 8)),
+            False,
+        ),
+        (
+            "range_setitem",
+            lambda env, s, t: env.var_to_range.__setitem__(s, ValueRanges(2, 9)),
+            False,
+        ),
+        ("range_del", lambda env, s, t: env.var_to_range.pop(t), False),
+        ("divisible", lambda env, s, t: env._add_divisible(Mod(s, 2)), False),
+        ("size_like", lambda env, s, t: env._constrain_range_for_size(s), False),
+        (
+            "runtime_assert_setdefault",
+            lambda env, s, t: env.deferred_runtime_asserts.setdefault(None, []),
+            False,
+        ),
+        (
+            "backed_var_to_val",
+            lambda env, s, t: env.add_backed_var_to_val(
+                sympy.Symbol("x", integer=True), 4
+            ),
+            False,
+        ),
+    ]
+    DISABLING_CONFIGS = [
+        ("backed_size_oblivious", True),
+        ("aggressive_guard_free_semantics", 1),
+        ("symbol_guard_limit_before_specialize", 3),
+        ("translation_validation", True),
+    ]
+
+    def make_env(self, **kwargs):
+        env = ShapeEnv(_allow_native=True, **kwargs)
+        s = env.create_symbol(5, ConstantSource("a"), DimDynamic.DYNAMIC)
+        t = env.create_symbol(7, ConstantSource("b"), DimDynamic.DYNAMIC)
+        return env, s, t
+
+    def test_flag(self):
+        self.assertIsNone(ShapeEnv(_allow_native=False)._native_env)
+        for on in (False, True):
+            with torch._dynamo.config.patch(use_cpp_symnode=on):
+                env = ShapeEnv()
+            self.assertEqual(env._native_env is not None, on)
+
+    def test_flag_off_state(self):
+        env = ShapeEnv(_allow_native=False)
+        for name in (
+            "guards",
+            "axioms",
+            "replacements",
+            "var_to_range",
+            "divisible",
+            "size_like",
+            "deferred_runtime_asserts",
+        ):
+            self.assertIn(type(getattr(env, name)), (list, dict, set), name)
+
+    @parametrize("name,value", DISABLING_CONFIGS)
+    def test_disabling_config(self, name, value):
+        with symbolic_shapes.config.patch(**{name: value}):
+            self.assertIsNone(ShapeEnv(_allow_native=True)._native_env)
+
+    def test_disabling_settings(self):
+        for kwargs in (
+            {"prefer_deferred_runtime_asserts_over_guards": True},
+            {"trace_asserts": True},
+        ):
+            self.assertIsNone(ShapeEnv(_allow_native=True, **kwargs)._native_env)
+        self.assertIsNone(
+            ShapeEnv(_allow_native=True, should_record_events=True)._native_env
+        )
+
+    def test_mirror(self):
+        env, s, t = self.make_env()
+        native = env._native_env
+        # Duck sizing reuses d; positive=None gives an unbounded range.
+        d = env.create_symbol(11, ConstantSource("c"))
+        self.assertEqual(env.create_symbol(11, ConstantSource("c2")), d)
+        u = env.create_symbol(9, ConstantSource("d"), DimDynamic.DYNAMIC, positive=None)
+        f = env.create_symbol(2.5, ConstantSource("e"), DimDynamic.DYNAMIC)
+        big = env.create_symbol(2**70, ConstantSource("g"), DimDynamic.DYNAMIC)
+        self.assertEqual(native.mirrored(s), (5, 2, int_oo, False))
+        self.assertEqual(native.mirrored(t), (7, 2, int_oo, False))
+        self.assertEqual(native.mirrored(u), (9, -int_oo, int_oo, False))
+        self.assertIsNone(native.mirrored(f))
+        self.assertIsNone(native.mirrored(big))
+        self.assertEqual(native.mirrored(d), (11, 2, int_oo, False))
+        for sym in (s, t, u, d):
+            vr = env.var_to_range[sym]
+            self.assertEqual(
+                native.mirrored(sym),
+                (
+                    int(env.backed_var_to_val[sym]),
+                    vr.lower,
+                    vr.upper,
+                    sym in env.size_like,
+                ),
+            )
+        # Unbacked symbols are never mirrored and creating them keeps the env pristine.
+        i0 = env.create_unbacked_symint().node.expr
+        self.assertIsNone(native.mirrored(i0))
+        self.assertTrue(native.pristine)
+        # Static answers do not guard.
+        self.assertEqual(env.evaluate_expr(sympy.Gt(s, 1)), sympy.true)
+        self.assertTrue(native.pristine)
+
+    def test_constraint_range(self):
+        env = ShapeEnv(_allow_native=True)
+        vr = ValueRanges(3, 10)
+        constraint = symbolic_shapes.StrictMinMaxConstraint(vr=vr, warn_only=False)
+        s = env.create_symbol(
+            5, ConstantSource("a"), DimDynamic.DYNAMIC, constraint_dim=constraint
+        )
+        self.assertEqual(env._native_env.mirrored(s), (5, 3, 10, False))
+        self.assertFalse(env._native_env.pristine)
+
+    @parametrize(
+        "name,mutate,clears_replacements", MUTATIONS, name_fn=lambda name, *_: name
+    )
+    def test_mutation(self, name, mutate, clears_replacements):
+        env, s, t = self.make_env()
+        native = env._native_env
+        self.assertTrue(native.pristine)
+        mutate(env, s, t)
+        self.assertFalse(native.pristine)
+        self.assertEqual(native.replacements_empty, not clears_replacements)
+
+    def test_notify_before(self):
+        env, s, t = self.make_env()
+        seen = []
+        env.guards._on_mutate = lambda: seen.append(list(env.guards))
+        env.guards.append(1)
+        env.guards += [2]
+        self.assertEqual(seen, [[], [1]])
+        self.assertEqual(env.guards, [1, 2])
+
+    def test_update_divisible(self):
+        env, s, t = self.make_env()
+        env._update_divisible()
+        self.assertTrue(env._native_env.pristine)
+        env.divisible.add(Mod(s, 2))
+        self.assertFalse(env._native_env.pristine)
+
+    def test_copy_and_pickle(self):
+        import copy
+        import pickle
+
+        env, s, t = self.make_env()
+        env.evaluate_expr(sympy.Eq(s, 5))
+        env2 = copy.deepcopy(env)
+        self.assertIsNone(env2._native_env)
+        self.assertIs(type(env2.guards), list)
+        self.assertIs(type(env2.replacements), dict)
+        self.assertEqual(env2.replacements, env.replacements)
+        self.assertIsNone(pickle.loads(pickle.dumps(env._native_env)))
+        for name in ("axioms", "replacements", "var_to_range", "size_like"):
+            value = getattr(env, name)
+            self.assertIs(
+                type(pickle.loads(pickle.dumps(value))), type(value).__mro__[-2]
+            )
+        from torch.fx._graph_pickler import _ShapeEnvPickleData
+
+        self.assertNotIn("_native_env", _ShapeEnvPickleData(env).data)
+
+    def test_check_equal(self):
+        def run(allow_native):
+            env = ShapeEnv(_allow_native=allow_native)
+            s = env.create_symbol(5, ConstantSource("a"), DimDynamic.DYNAMIC)
+            t = env.create_symbol(7, ConstantSource("b"), DimDynamic.DYNAMIC)
+            env.evaluate_expr(sympy.Lt(s, t))
+            env.evaluate_expr(sympy.Eq(s * 2, 10))
+            env._constrain_range_for_size(t)
+            return env
+
+        on, off = run(True), run(False)
+        self.assertIsNotNone(on._native_env)
+        on.check_equal(off)
+
+
 instantiate_parametrized_tests(TestNativeExpr)
 instantiate_parametrized_tests(TestNativeCompoundAssumptions)
 instantiate_parametrized_tests(TestNativeExprTools)
@@ -2383,6 +2576,7 @@ instantiate_parametrized_tests(TestNativeFunctions)
 instantiate_parametrized_tests(TestNativeValueRanges)
 instantiate_parametrized_tests(TestNativeStaticPasses)
 instantiate_parametrized_tests(TestNativeShapeEnv)
+instantiate_parametrized_tests(TestNativeShapeEnvSync)
 
 
 if __name__ == "__main__":
