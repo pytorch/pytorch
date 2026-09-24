@@ -884,17 +884,18 @@ class OrderedDictVariable(ConstDictVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         self.install_dict_keys_match_guard()
-        tx.output.side_effects.mutation(self)
         if args[0] not in self:
             raise_observed_exception(KeyError, tx)
 
         last = True
-        if len(args) == 2 and args[0].is_python_constant():
+        if len(args) == 2 and args[1].is_python_constant():
             last = args[1].as_python_constant()
         if "last" in kwargs and kwargs["last"].is_python_constant():
             last = kwargs["last"].as_python_constant()
 
         self.items.move_to_end(HashableTracker(args[0]), last=last)
+        self.should_reconstruct_all = True
+        tx.output.side_effects.mutation(self)
         return ConstantVariable.create(None)
 
     def popitem(

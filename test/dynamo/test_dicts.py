@@ -1261,6 +1261,71 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(["b", "c", "a"], list(opt_fn(x).keys()))
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_ordered_dict_move_to_end_mutation_replay(self):
+        def fn(d, x):
+            d.move_to_end("a")
+            return x + 1
+
+        d = OrderedDict([("a", 1), ("b", 2), ("c", 3)])
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        opt_fn(d, x)
+        self.assertEqual(list(d.keys()), ["b", "c", "a"])
+
+    def test_ordered_dict_move_to_end_last_false_mutation_replay(self):
+        def fn_kwarg(d, x):
+            d.move_to_end("c", last=False)
+            return x + 1
+
+        def fn_pos(d, x):
+            d.move_to_end("c", False)
+            return x + 1
+
+        d1 = OrderedDict([("a", 1), ("b", 2), ("c", 3)])
+        opt_fn_kwarg = torch.compile(fn_kwarg, backend="eager", fullgraph=True)
+        opt_fn_kwarg(d1, torch.randn(4))
+        self.assertEqual(list(d1.keys()), ["c", "a", "b"])
+
+        d2 = OrderedDict([("a", 1), ("b", 2), ("c", 3)])
+        opt_fn_pos = torch.compile(fn_pos, backend="eager", fullgraph=True)
+        opt_fn_pos(d2, torch.randn(4))
+        self.assertEqual(list(d2.keys()), ["c", "a", "b"])
+
+    def test_ordered_dict_move_to_end_lru_cache(self):
+        class LRU:
+            def __init__(self, cap):
+                self.cap = cap
+                self.d = OrderedDict()
+
+            def get(self, k):
+                self.d.move_to_end(k)
+                return self.d[k]
+
+            def put(self, k, v):
+                self.d[k] = v
+                if len(self.d) > self.cap:
+                    self.d.popitem(last=False)
+
+        def step(cache, x):
+            cache.get("a")
+            return x + 1
+
+        eager_cache = LRU(2)
+        eager_cache.put("a", 1)
+        eager_cache.put("b", 2)
+        step(eager_cache, torch.ones(2))
+        eager_cache.put("c", 3)
+
+        compiled_cache = LRU(2)
+        compiled_cache.put("a", 1)
+        compiled_cache.put("b", 2)
+        opt_step = torch.compile(step, backend="eager", fullgraph=True)
+        opt_step(compiled_cache, torch.ones(2))
+        compiled_cache.put("c", 3)
+
+        self.assertEqual(list(compiled_cache.d.keys()), list(eager_cache.d.keys()))
+        self.assertEqual(list(compiled_cache.d.keys()), ["a", "c"])
+
     def test_mapping_proxy_ban_muation_on_dict_realization(self):
         def fn(x):
             class Foo:
