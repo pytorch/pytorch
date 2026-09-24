@@ -18166,6 +18166,31 @@ fn
 
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
 
+    def test_builtin_maketrans_constant_fold(self):
+        def fn():
+            return (
+                str.maketrans({"a": None, "b": "<i>"}),
+                str.maketrans("abc", "xyz", "d"),
+                bytes.maketrans(b"abc", b"xyz"),
+            )
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    @parametrize("kind", ["str", "bytes"])
+    def test_builtin_maketrans_errors(self, kind):
+        def fn():
+            try:
+                if kind == "str":
+                    str.maketrans("abc", "xy")
+                else:
+                    bytes.maketrans(b"abc", b"xy")
+            except ValueError as e:
+                return str(e)
+            return "no error"
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(), fn())
+
     def test_builtin_constant_fold_str_conversions(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x):
