@@ -812,14 +812,22 @@ if(NOT EXISTS "${CUDAToolkit_INCLUDE_DIR}/cublas_v2.h")
   endif()
 endif()
 
+# CUDA 13.4 Windows installs ship both lib/x64 and lib/arm64, and find_library
+# stops at the first hit. Derive the directory from the processor so the
+# target arch is searched before the other one. AMD64/x86_64 are the Windows
+# and Linux names for the directory CUDA calls x64.
+string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _cuda_lib_arch)
+string(REGEX REPLACE "^(amd64|x86_64)$" "x64" _cuda_lib_arch "${_cuda_lib_arch}")
+string(REGEX REPLACE "^aarch64$" "arm64" _cuda_lib_arch "${_cuda_lib_arch}")
+
 # Find the CUDA Runtime Library libcudart
 find_library(CUDA_CUDART
   NAMES cudart
-  PATH_SUFFIXES lib64 lib/x64
+  PATH_SUFFIXES lib/${_cuda_lib_arch} lib64 lib/x64 lib/arm64
 )
 find_library(CUDA_CUDART
   NAMES cudart
-  PATH_SUFFIXES lib64/stubs lib/x64/stubs
+  PATH_SUFFIXES lib/${_cuda_lib_arch}/stubs lib64/stubs lib/x64/stubs lib/arm64/stubs
 )
 
 if(NOT CUDA_CUDART AND NOT CUDAToolkit_FIND_QUIETLY)
@@ -871,7 +879,7 @@ if(CUDAToolkit_FOUND)
       HINTS ${CUDAToolkit_LIBRARY_DIR}
             ENV CUDA_PATH
             ${arg_EXTRA_HINTS}
-      PATH_SUFFIXES nvidia/current lib64 lib/x64 lib
+      PATH_SUFFIXES nvidia/current lib/${_cuda_lib_arch} lib64 lib/x64 lib/arm64 lib
                     ${arg_EXTRA_PATH_SUFFIXES}
     )
     # Don't try any stub directories until we have exhausted all other
@@ -881,7 +889,7 @@ if(CUDAToolkit_FOUND)
       HINTS ${CUDAToolkit_LIBRARY_DIR}
             ENV CUDA_PATH
             ${arg_EXTRA_HINTS}
-      PATH_SUFFIXES lib64/stubs lib/x64/stubs lib/stubs stubs
+      PATH_SUFFIXES lib/${_cuda_lib_arch}/stubs lib64/stubs lib/x64/stubs lib/arm64/stubs lib/stubs stubs
                     # Support NVHPC splayed math library layout
                     ../../math_libs/${CUDAToolkit_VERSION_MAJOR}.${CUDAToolkit_VERSION_MINOR}/lib64
                     ../../math_libs/lib64
