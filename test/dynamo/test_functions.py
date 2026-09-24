@@ -6332,6 +6332,41 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(result_a, torch.full((2,), 3.14, dtype=torch.float32))
         self.assertEqual(result_b, torch.full((2,), 2.71, dtype=torch.float32))
 
+    def test_full_with_tensor_fill_value_infers_dtype(self):
+        cases = (
+            (torch.bool, True),
+            (torch.int32, 5),
+            (torch.int64, 5),
+            (torch.float16, 2.5),
+            (torch.float64, 2.5),
+        )
+
+        for fill_dtype, value in cases:
+            with self.subTest(fill_dtype=fill_dtype):
+
+                def func(fill_value):
+                    return torch.full((2,), fill_value)
+
+                fill_value = torch.tensor(value, dtype=fill_dtype)
+                expected = func(fill_value)
+                result = torch.compile(func, backend="eager", fullgraph=True)(fill_value)
+                self.assertEqual(result, expected)
+                self.assertEqual(result.dtype, expected.dtype)
+
+    def test_full_with_tensor_fill_value_explicit_dtype(self):
+        def func(fill_value, dtype):
+            return torch.full((2,), fill_value, dtype=dtype)
+
+        fill_value = torch.tensor(5, dtype=torch.int32)
+        for dtype in (None, torch.float64):
+            with self.subTest(dtype=dtype):
+                expected = func(fill_value, dtype)
+                result = torch.compile(func, backend="eager", fullgraph=True)(
+                    fill_value, dtype
+                )
+                self.assertEqual(result, expected)
+                self.assertEqual(result.dtype, expected.dtype)
+
     def test_full_with_parameter_fill_value_raises(self):
         class Mod(torch.nn.Module):
             def __init__(self) -> None:

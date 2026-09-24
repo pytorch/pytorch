@@ -37,6 +37,7 @@ from typing import Any, cast, NoReturn, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import TypeIs
 
 import torch._C
+import torch._prims_common
 import torch._refs
 import torch.fx
 import torch.nn
@@ -1851,9 +1852,19 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             fill_value: VariableTracker,
             **kwargs: VariableTracker,
         ) -> VariableTracker | None:
-            if fill_value.is_tensor() and not issubclass(
+            if isinstance(fill_value, variables.TensorVariable) and not issubclass(
                 fill_value.python_type(), torch.nn.Parameter
             ):
+                dtype = kwargs.get("dtype")
+                if dtype is None or (
+                    isinstance(dtype, ConstantVariable) and dtype.value is None
+                ):
+                    kwargs["dtype"] = ConstantVariable.create(
+                        torch._prims_common.type_to_dtype(
+                            torch._prims_common.dtype_to_type(fill_value.dtype)
+                        )
+                    )
+
                 # Decompose: create empty tensor and fill it
                 # This avoids the scalar extraction at compile time
                 empty_result = TorchInGraphFunctionVariable(torch.empty).call_function(
