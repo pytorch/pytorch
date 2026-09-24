@@ -966,18 +966,10 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
         idx0 = torch.tensor([0, 2], device=self.device_type)
         idx1 = torch.tensor([1, 3], device=self.device_type)
 
-        input_dt = distribute_tensor(
-            global_input, device_mesh, [Replicate()]
-        )
-        value_dt = distribute_tensor(
-            global_value, device_mesh, [Replicate()]
-        )
-        idx0_dt = distribute_tensor(
-            idx0, device_mesh, [Replicate()]
-        )
-        idx1_dt = distribute_tensor(
-            idx1, device_mesh, [Replicate()]
-        )
+        input_dt = distribute_tensor(global_input, device_mesh, [Replicate()])
+        value_dt = distribute_tensor(global_value, device_mesh, [Replicate()])
+        idx0_dt = distribute_tensor(idx0, device_mesh, [Replicate()])
+        idx1_dt = distribute_tensor(idx1, device_mesh, [Replicate()])
 
         input_dt.requires_grad_()
         value_dt.requires_grad_()
