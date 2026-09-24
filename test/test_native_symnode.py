@@ -594,6 +594,31 @@ class TestNativeRelational(TestCase):
                 for b in nums:
                     self.assertTrue(self.check_rel(op, a, b), f"{op}({a}, {b})")
 
+    def test_float_numbers(self):
+        nums = [int_oo, -int_oo, *map(sympy.Integer, [-3, 0, 1, 2**60 + 1])]
+        nums += [sympy.Rational(1, 2), sympy.Rational(1, 10), sympy.Rational(-7, 3)]
+        nums += [sympy.Float(v) for v in [0.5, 0.1, -2.0, 0.0, 1.0, 2.0**60, -1e-300]]
+        for op in RELATIONS:
+            for a in nums:
+                for b in nums:
+                    answered = self.check_rel(op, a, b)
+                    if not (a.is_infinite or b.is_infinite):
+                        self.assertTrue(answered, f"{op}({a}, {b})")
+
+    def test_float_known(self):
+        f = sympy.Float
+        cases = [(s0, f(0.5)), (s0, f(1.0)), (u0, f(0.5)), (u0, f(2.0)), (zf, f(-1.5))]
+        cases += [(s0 + f(0.5), 1), (f(0.5) * s0, 1), (f(2.0) * u0, 3)]
+        cases += [(u0 + f(0.5), u0), (zf + f(0.5), zf), (f(0.5) * s0, s0 / 2)]
+        cases += [(s0 + f(0.0), s0), (s0, f(0.0))]
+        cases += [(u0 + f(2.0), u0 + 2), (f(0.5) * zf, zf / 2), (s0 * f(-1.0), -s0)]
+        answered = 0
+        for op in RELATIONS:
+            for a, b in cases:
+                for l, r in ((a, b), (b, a)):
+                    answered += self.check_rel(op, sympy.sympify(l), sympy.sympify(r))
+        self.assertGreater(answered, 150)
+
     def test_known(self):
         u = sympy.Symbol("u", integer=True)
         x = sympy.Symbol("x")
@@ -677,6 +702,23 @@ class TestNativeRelational(TestCase):
                     unsupported += 1
         self.assertGreater(answered, 10 * unsupported)
 
+    @parametrize("seed", range(4))
+    def test_float_fuzz(self, seed):
+        rng = random.Random(seed)
+        answered = unsupported = 0
+        for _ in range(100):
+            leaves = FACT_LEAVES + FLOAT_LEAVES
+            a, b = (sympy_eval(random_tree(rng, 2, leaves)) for _ in range(2))
+            a, b = sympy.sympify(a), sympy.sympify(b)
+            if a.has(sympy.zoo, sympy.nan) or b.has(sympy.zoo, sympy.nan):
+                continue
+            for op in RELATIONS:
+                if self.check_rel(op, a, b):
+                    answered += 1
+                else:
+                    unsupported += 1
+        self.assertGreater(answered, 3 * unsupported)
+
 
 class TestNativeSorting(TestCase):
     def check_expr(self, v):
@@ -751,6 +793,17 @@ class TestNativeSorting(TestCase):
         inner = sympy.Eq(1, s0, evaluate=False)
         self.check_canonical(sympy.Eq(inner, eq, evaluate=False))
         self.check_canonical(sympy.Ne(inner, sympy.true, evaluate=False))
+
+    def test_float_canonical(self):
+        f, h = sympy.Float, sympy.Rational(1, 2)
+        pairs = [(s0, f(0.5)), (f(0.5), s0), (-s0, f(0.5)), (f(0.5), h), (h, f(0.5))]
+        pairs += [(f(0.1), sympy.Rational(1, 10)), (sympy.Rational(1, 10), f(0.1))]
+        pairs += [(f(2.0), 1), (f(0.5) * s0, s1), (s0 + f(0.5), -s1)]
+        pairs += [(f(-0.5) * s0, s1)]
+        pairs += [(s1, f(2.0) * s0), (-s0 - f(1.5), s1), (f(0.5) * s0, -f(0.5) * s1)]
+        for op in RELATIONS:
+            for a, b in pairs:
+                self.check_canonical(getattr(sympy, op)(a, b, evaluate=False))
 
     @parametrize("seed", range(6))
     def test_fuzz(self, seed):
@@ -1074,13 +1127,8 @@ class TestNativeFloat(TestCase):
         big = arena.from_sympy(sympy.Float(1e300))
         tiny = arena.from_sympy(sympy.Float(1e-300))
         cases = [
-            lambda: arena.rel("Lt", f, x),
-            lambda: arena.rel("Eq", x, arena.add([x, f])),
             lambda: arena.function("Max", [f, x]),
             lambda: arena.function("FloorDiv", [arena.mul([f, x]), x]),
-            lambda: arena.is_ge(f, x),
-            lambda: arena.is_eq(f, x),
-            lambda: arena.ordered([f, x]),
             lambda: arena.safe_expand(arena.pow(arena.add([x, f]), arena.integer(2))),
             lambda: arena.mul([big, big]),
             lambda: arena.mul([tiny, tiny]),
@@ -2214,6 +2262,13 @@ class TestNativeStaticPasses(TestCase):
             sympy.true,
             s0 + 1,
         ]
+        for e in cases:
+            self.assertTrue(self.check("canonicalize_bool_expr", e), str(e))
+        f = sympy.Float
+        cases = [sympy.Gt(s0, f(0.5)), sympy.Ge(2 * u0, f(0.5) * u1 + 3)]
+        cases += [sympy.Eq(f(0.5) * u0, 2), sympy.Lt(u0, f(-1.5))]
+        cases += [sympy.Le(u0 - f(2.5), s0)]
+        cases += [sympy.And(sympy.Gt(u0, f(0.5)), b), sympy.Lt(f(-2.0) * u0, 4 * u1)]
         for e in cases:
             self.assertTrue(self.check("canonicalize_bool_expr", e), str(e))
         # Or(a, b) stays an Or but Or(b, a) is true, so to_nnf's Or(*set) depends

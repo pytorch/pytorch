@@ -113,8 +113,12 @@ const char* class_name(Kind k) {
   }
 }
 
+// sympy's _node_count doubled: a Float counts as half a node.
 size_t node_count(const Expr* e) {
-  size_t n = 1;
+  if (e->kind == Kind::Float) {
+    return 1;
+  }
+  size_t n = 2;
   for (const Expr* a : e->args) {
     n += node_count(a);
   }
@@ -281,12 +285,6 @@ const SortKeyPtr& ExprArena::sort_key(const Expr* e) {
 }
 
 std::vector<const Expr*> ExprArena::ordered(c10::ArrayRef<const Expr*> seq) {
-  // sympy groups by key equality, and a Float key can compare equal to a
-  // Rational one without being ==.
-  if (std::any_of(
-          seq.begin(), seq.end(), [](auto e) { return e->has_float; })) {
-    throw NativeUnsupported("ordered with a Float");
-  }
   // Group by node count, then break ties with default_sort_key; keys are only
   // computed for groups of more than one element, as sympy does.
   std::vector<std::pair<size_t, const Expr*>> by_nodes;

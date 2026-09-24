@@ -1,6 +1,7 @@
 #include <torch/csrc/symbolic/Expr.h>
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <numeric>
 
@@ -120,9 +121,6 @@ int64_t integer_coefficient(const Expr* x) {
 } // namespace
 
 Tri ExprArena::is_ge(const Expr* lhs, const Expr* rhs) {
-  if (lhs->has_float || rhs->has_float) {
-    throw NativeUnsupported("is_ge of a Float");
-  }
   if (lhs->is_boolean() || rhs->is_boolean()) {
     // TypeError("Can only compare inequalities with Expr").
     throw NativeUnsupported("inequality of a Boolean");
@@ -132,11 +130,15 @@ Tri ExprArena::is_ge(const Expr* lhs, const Expr* rhs) {
     return tri(i128(lhs->p) * rhs->q >= i128(rhs->p) * lhs->q);
   }
   if (lhs->is_number() && rhs->is_number()) {
-    // int_oo - int_oo is nan, so neither _n2 nor the difference decides.
-    if (lhs == rhs) {
-      return Tri::Unknown;
+    if (is_int_oo(lhs) || is_int_oo(rhs)) {
+      // int_oo - int_oo is nan, so neither _n2 nor the difference decides.
+      if (lhs == rhs) {
+        return Tri::Unknown;
+      }
+      return tri(infinity_rank(lhs) >= infinity_rank(rhs));
     }
-    return tri(infinity_rank(lhs) >= infinity_rank(rhs));
+    // _n2: the sign of the difference, rounded to a double.
+    return tri(compare_numbers(sub(lhs, rhs), zero_) >= 0);
   }
   if (ask(lhs, F::extended_real) == Tri::True &&
       ask(rhs, F::extended_real) == Tri::True) {
@@ -155,9 +157,6 @@ Tri ExprArena::is_ge(const Expr* lhs, const Expr* rhs) {
 }
 
 Tri ExprArena::is_eq(const Expr* lhs, const Expr* rhs) {
-  if (lhs->has_float || rhs->has_float) {
-    throw NativeUnsupported("is_eq of a Float");
-  }
   // No _eval_Eq or _eval_is_eq handler applies to these kinds.
   if (lhs == rhs) {
     return Tri::True;
@@ -190,6 +189,11 @@ Tri ExprArena::is_eq(const Expr* lhs, const Expr* rhs) {
     return Tri::Unknown;
   }
   if (lhs->is_number() && rhs->is_number()) {
+    // A difference with a Float is rounded to a double.
+    bool with_float = lhs->kind == Kind::Float || rhs->kind == Kind::Float;
+    if (with_float && !is_int_oo(lhs) && !is_int_oo(rhs)) {
+      return tri(sub(lhs, rhs) == zero_);
+    }
     // Distinct numbers: int_oo minus any other number is +-int_oo.
     return Tri::False;
   }
@@ -204,8 +208,14 @@ Tri ExprArena::is_eq(const Expr* lhs, const Expr* rhs) {
   if (z == Tri::True) {
     return Tri::True;
   }
-  // Without Floats the Float coefficient check cannot apply, and _n2 needs
-  // both sides to be numbers, whose difference is_zero already decided.
+  // is_zero cannot decide an integer or rational term against a Float.
+  if (auto [c, t] = as_coeff_Add(dif); c->kind == Kind::Float) {
+    double v = c->float_value();
+    if (ask(t, std::trunc(v) == v ? F::integer : F::rational) == Tri::False) {
+      return Tri::False;
+    }
+  }
+  // _n2 needs both sides to be numbers, whose difference is_zero decided.
   auto [n, d] = as_numer_denom(dif);
   if (ask(n, F::zero) == Tri::True) {
     return ask(d, F::nonzero);
@@ -239,9 +249,6 @@ const Expr* ExprArena::rel(
     const Expr* lhs,
     const Expr* rhs,
     bool evaluate) {
-  if (lhs->has_float || rhs->has_float) {
-    throw NativeUnsupported("Relational of a Float");
-  }
   if (kind < Kind::Eq || kind > Kind::Ge) {
     throw NativeUnsupported("expected a Relational kind");
   }
@@ -458,11 +465,7 @@ const Expr* ExprArena::canonical(const Expr* r) {
   const Expr* lhs = r->args[0];
   const Expr* rhs = r->args[1];
   if (rhs->is_number()) {
-    int il = infinity_rank(lhs);
-    int ir = infinity_rank(rhs);
-    if (lhs->is_number() &&
-        (il != 0 || ir != 0 ? il > ir
-                            : i128(lhs->p) * rhs->q > i128(rhs->p) * lhs->q)) {
+    if (lhs->is_number() && compare_numbers(lhs, rhs) > 0) {
       r = reversed(r);
     }
   } else if (lhs->is_number()) {
