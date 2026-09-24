@@ -189,9 +189,9 @@ def aot_load(so_path: str, device: str) -> Callable:
         runner_cls = _AOTI_RUNNER_REGISTER.get(device_type)
         if runner_cls is None:
             raise RuntimeError(
-                f"AOTI runner not registered for device type '{device_type}'."
-                f"Registered devices: {list(_AOTI_RUNNER_REGISTER.keys())}."
-                f"Use register_aoti_runner to register a custom runner."
+                f"AOTI runner not registered for device type '{device_type}'. "
+                f"Registered devices: {list(_AOTI_RUNNER_REGISTER.keys())}. "
+                f"Use register_aoti_runner to register a custom runner. "
             )
         return runner_cls(*args)
 
