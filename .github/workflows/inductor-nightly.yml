@@ -43,6 +43,7 @@ jobs:
       docker-image-name: ci-image:pytorch-linux-jammy-py3-gcc11-inductor-benchmarks
       ci-docker-hash: ${{ needs.get-default-label-prefix.outputs.ci-docker-hash }}
       runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
+      lf_runners: "${{ needs.get-default-label-prefix.outputs.lf-runners }}"
       test-matrix: |
         { include: [
           { config: "dynamic_cpu_max_autotune_inductor_amp_freezing_huggingface", shard: 1, num_shards: 1, runner: "linux.8xlarge.amx" },

@@ -79,6 +79,7 @@ jobs:
       - job-filter
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      lf_runners: "${{ needs.get-label-type.outputs.lf-runners }}"
       build-environment: linux-jammy-py3.10-gcc11
       docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang21
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
@@ -145,6 +146,7 @@ jobs:
       - job-filter
     with:
       runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
+      lf_runners: ${{ needs.get-label-type.outputs.lf-runners }}
       build-environment: linux-jammy-aarch64-py3.10
       docker-image-name: ci-image:pytorch-linux-jammy-aarch64-py3.10-gcc13
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
@@ -191,6 +193,7 @@ jobs:
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      lf_runners: "${{ needs.get-label-type.outputs.lf-runners }}"
       build-environment: linux-jammy-py3.14t-clang21
       docker-image-name: ci-image:pytorch-linux-jammy-py3.14t-clang21
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
@@ -257,6 +260,7 @@ jobs:
       - job-filter
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      lf_runners: "${{ needs.get-label-type.outputs.lf-runners }}"
       build-environment: linux-jammy-py3.10-gcc11-no-ops
       docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang21
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
@@ -282,6 +286,7 @@ jobs:
     with:
       runner: linux.c7i.4xlarge
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      lf_runners: "${{ needs.get-label-type.outputs.lf-runners }}"
       build-environment: linux-jammy-py3.10-clang21-asan
       docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang21
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
@@ -347,6 +352,7 @@ jobs:
       - job-filter
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      lf_runners: "${{ needs.get-label-type.outputs.lf-runners }}"
       build-environment: linux-jammy-py3.10-clang21
       docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang21
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
@@ -413,6 +419,7 @@ jobs:
       - job-filter
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      lf_runners: "${{ needs.get-label-type.outputs.lf-runners }}"
       build-environment: linux-jammy-py3.14-clang21
       docker-image-name: ci-image:pytorch-linux-jammy-py3.14-clang21
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
@@ -473,6 +480,7 @@ jobs:
       - job-filter
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      lf_runners: "${{ needs.get-label-type.outputs.lf-runners }}"
       build-environment: linux-jammy-cuda13.2-cudnn9-py3.10-clang20
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.2-cudnn9-py3.10-clang20
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
@@ -499,6 +507,7 @@ jobs:
       - job-filter
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      lf_runners: "${{ needs.get-label-type.outputs.lf-runners }}"
       build-environment: linux-jammy-py3.10-gcc11-mobile-lightweight-dispatch-build
       docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang21
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
@@ -525,6 +534,7 @@ jobs:
       - job-filter
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      lf_runners: "${{ needs.get-label-type.outputs.lf-runners }}"
       build-environment: linux-jammy-rocm-py3.10
       docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
@@ -546,6 +556,7 @@ jobs:
       - job-filter
     with:
       runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
+      lf_runners: ${{ needs.get-label-type.outputs.lf-runners }}
       runner: linux.c7i.8xlarge
       build-environment: linux-noble-xpu-n-py3.10
       docker-image-name: ci-image:pytorch-linux-noble-xpu-n-py3
@@ -570,6 +581,7 @@ jobs:
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      lf_runners: "${{ needs.get-label-type.outputs.lf-runners }}"
       build-environment: linux-jammy-py3.13-clang21
       docker-image-name: ci-image:pytorch-linux-jammy-py3.13-clang21
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}

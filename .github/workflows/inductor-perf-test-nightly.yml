@@ -85,6 +85,7 @@ jobs:
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      lf_runners: "${{ needs.get-label-type.outputs.lf-runners }}"
       # Every bit to make perf run faster helps
       runner: linux.12xlarge.memory
       build-environment: linux-jammy-cuda13.0-py3.10-gcc11-sm80

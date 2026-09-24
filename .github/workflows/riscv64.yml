@@ -35,6 +35,7 @@ jobs:
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      lf_runners: "${{ needs.get-label-type.outputs.lf-runners }}"
       build-environment: linux-noble-riscv64-py3.12-gcc14
       docker-image-name: ci-image:pytorch-linux-noble-riscv64-py3.12-gcc14-cross-build
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}

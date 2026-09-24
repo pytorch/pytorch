@@ -40,6 +40,7 @@ jobs:
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       cuda-arch-list: '9.0'
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      lf_runners: "${{ needs.get-label-type.outputs.lf-runners }}"
       test-matrix: |
         { include: [
           { config: "inductor-pallas-gpu", shard: 1, num_shards: 1, runner: "linux.aws.h100" },
@@ -70,6 +71,7 @@ jobs:
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      lf_runners: "${{ needs.get-label-type.outputs.lf-runners }}"
       build-environment: linux-jammy-py3.12-gcc11-pallas-tpu
       docker-image-name: ci-image:pytorch-linux-jammy-tpu-py3.12-pallas
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}

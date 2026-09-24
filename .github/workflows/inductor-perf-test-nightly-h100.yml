@@ -100,6 +100,7 @@ jobs:
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      lf_runners: "${{ needs.get-label-type.outputs.lf-runners }}"
       # Use a bigger runner here because CUDA_ARCH 9.0 is only built for H100
       # or newer GPUs, so it doesn't benefit much from existing compiler cache
       # from trunk. Also use a memory-intensive runner here because memory is
