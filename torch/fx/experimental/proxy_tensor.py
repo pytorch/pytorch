@@ -95,7 +95,7 @@ from torch.utils._thunk import Thunk
 from torch.utils.weak import _WeakHashRef, WeakIdKeyDictionary, WeakTensorKeyDictionary
 
 from ._backward_state import BackwardState
-from .sym_node import SymNode
+from .sym_node import SymNodeTypes
 
 
 if TYPE_CHECKING:
@@ -368,7 +368,7 @@ def set_proxy_slot(
 
 
 def has_proxy_slot(obj: Tensor, tracer: _ProxyTracer) -> bool:
-    if not isinstance(obj, (Tensor, SymNode)):
+    if not isinstance(obj, (Tensor, *SymNodeTypes)):
         raise AssertionError(f"Expected Tensor or SymNode, got {type(obj)}")
 
     return bool(get_proxy_slot(obj, tracer, False, lambda _: True))

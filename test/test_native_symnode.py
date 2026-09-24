@@ -3572,6 +3572,102 @@ class TestNativeSymNode(TestCase):
         self.assertIs(copy.copy(n).shape_env, env)
         self.check(pickle.loads(pickle.dumps(n)), pickle.loads(pickle.dumps(p)))
 
+    def test_module_helpers(self):
+        from torch.fx.experimental.symbolic_shapes import (
+            _iterate_nodes,
+            free_symbols,
+            guard_or_false,
+            guard_or_true,
+            guarding_hint_or_throw,
+            has_free_symbols,
+            statically_known_false,
+            statically_known_true,
+        )
+
+        def run(native):
+            env, syms = self.make_env(native)
+            a, b = (self.node(env, s, int, h) for s, h in zip(syms, (5, 7)))
+            no_hint = self.node(env, syms[0] + syms[1], int, None)
+            out = [
+                guarding_hint_or_throw(a),
+                guarding_hint_or_throw(no_hint),
+                list(_iterate_nodes([a, torch.SymInt(b)])) == [a, b],
+                str(free_symbols([torch.SymInt(a), b])),
+                has_free_symbols(a),
+            ]
+            # Native nodes do not cache a computed hint.
+            self.assertEqual(no_hint._hint, None if native else 12)
+            bools = [
+                a.ge(a.wrap_int(2)),
+                a.lt(a.wrap_int(2)),
+                a.add(b).ge(a.wrap_int(4)),
+                a.eq(a.wrap_int(5)),
+                a.lt(b),
+                a.gt(b),
+            ]
+            out += [statically_known_true(torch.SymBool(t)) for t in bools]
+            # Answered natively: queries wait in the replay log.
+            pending = torch._C._symbolic._native_queries_pending()
+            self.assertEqual(pending, native)
+            out += [statically_known_false(torch.SymBool(t)) for t in bools]
+            out.append([g.expr for g in env.guards])
+            out.append(guard_or_false(torch.SymBool(bools[0])))
+            pending = torch._C._symbolic._native_queries_pending()
+            self.assertEqual(pending, native)
+            for fn in (guard_or_false, guard_or_true, statically_known_true):
+                out += [fn(torch.SymBool(t)) for t in bools]
+            out.append([g.expr for g in env.guards])
+            with torch.fx.experimental._config.patch(backed_size_oblivious=True):
+                out += [guard_or_true(torch.SymBool(t)) for t in bools]
+            return out
+
+        self.assertEqual(run(True), run(False))
+
+    def test_no_plain_symnode_isinstance(self):
+        # A native node is not a Python SymNode: type checks must use SymNodeTypes.
+        import ast
+
+        # Native nodes are never unbacked, so these checks are False for them.
+        allowed = {
+            ("torch/fx/experimental/symbolic_shapes.py", "_advise_is_size"),
+            ("torch/fx/experimental/symbolic_shapes.py", "_advise_is_bounded"),
+        }
+        root = os.path.dirname(os.path.dirname(torch.__file__))
+        found = set()
+
+        class Visitor(ast.NodeVisitor):
+            def __init__(self, path):
+                self.path = path
+                self.func = None
+
+            def visit_FunctionDef(self, node):
+                outer, self.func = self.func, node.name
+                self.generic_visit(node)
+                self.func = outer
+
+            def visit_Call(self, node):
+                if (
+                    isinstance(node.func, ast.Name)
+                    and node.func.id in ("isinstance", "issubclass")
+                    and len(node.args) == 2
+                ):
+                    for n in ast.walk(node.args[1]):
+                        name = getattr(n, "id", None) or getattr(n, "attr", None)
+                        if name == "SymNode":
+                            found.add((self.path, self.func))
+                self.generic_visit(node)
+
+        for dirpath, _, files in os.walk(os.path.join(root, "torch")):
+            for f in files:
+                if not f.endswith(".py"):
+                    continue
+                path = os.path.join(dirpath, f)
+                with open(path, encoding="utf-8") as fh:
+                    src = fh.read()
+                if "SymNode" in src:
+                    Visitor(os.path.relpath(path, root)).visit(ast.parse(src))
+        self.assertEqual(found, allowed)
+
 
 instantiate_parametrized_tests(TestNativeExpr)
 instantiate_parametrized_tests(TestNativeCompoundAssumptions)

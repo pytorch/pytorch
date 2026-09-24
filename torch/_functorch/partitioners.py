@@ -48,7 +48,11 @@ from torch._subclasses.fake_tensor import extract_tensor_metadata
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
-from torch.fx.experimental.sym_node import magic_methods, method_to_operator, SymNode
+from torch.fx.experimental.sym_node import (
+    magic_methods,
+    method_to_operator,
+    SymNodeTypes,
+)
 from torch.fx.experimental.symbolic_shapes import (
     _get_placeholder_expr,
     find_symbol_binding_fx_nodes,
@@ -762,7 +766,7 @@ def _iter_input_exprs_without_replacements(val: Any) -> Iterator[sympy.Basic]:
     if isinstance(val, py_sym_types):
         if is_symbolic(val):
             yield _get_placeholder_expr(val.node)
-    elif isinstance(val, SymNode):
+    elif isinstance(val, SymNodeTypes):
         yield _get_placeholder_expr(val)
     elif isinstance(val, sympy.Basic):
         yield val

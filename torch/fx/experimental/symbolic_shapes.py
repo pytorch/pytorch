@@ -59,6 +59,7 @@ import torch.utils._pytree as pytree
 # NB: The sym_* functions are used via getattr() and must be imported here.
 from torch import SymBool, SymFloat, SymInt
 from torch._C._functorch import get_unwrapped, is_batchedtensor, is_gradtrackingtensor
+from torch._C._symbolic import _NativeSymNode
 from torch._custom_class_base import CustomClassBase
 from torch._guards import ShapeGuard, SLoc, Source, TracingContext
 from torch._library.fake_class_registry import FakeScriptObject
@@ -75,7 +76,7 @@ from torch.fx.experimental.recording import (
     shape_env_check_state_equal,
     ShapeEnvEvent,
 )
-from torch.fx.experimental.sym_node import _NO_HINT, SymNode, SymTypes
+from torch.fx.experimental.sym_node import _NO_HINT, SymNode, SymNodeTypes, SymTypes
 from torch.types import py_sym_types
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -139,13 +140,15 @@ def guarding_hint_or_throw(
     Returns Python bool (True/False) for boolean inputs (SymBool, bool),
     and Python int for integer inputs (SymInt, int).
     """
-    if isinstance(a, SymNode):
+    if isinstance(a, SymNodeTypes):
         if a._hint is not None:
             return a._hint  # pyrefly: ignore[bad-return]
         if a.shape_env is None:
             raise AssertionError("shape_env is required for guarding_hint_or_throw")
         hint = a.shape_env.guarding_hint_or_throw(a.expr)
-        a._hint = hint
+        # Native nodes are immutable, so their hint is not cached.
+        if not isinstance(a, _NativeSymNode):
+            a._hint = hint
         return hint
     if isinstance(a, (torch.SymInt, torch.SymBool)):
         return guarding_hint_or_throw(a.node)
@@ -994,7 +997,7 @@ def _iterate_exprs(val: IterateExprs) -> Iterator[sympy.Basic]:
         # nested ints are not symbolic
         if is_symbolic(val):
             yield val.node.expr
-    elif isinstance(val, SymNode):
+    elif isinstance(val, SymNodeTypes):
         yield val.expr
     elif isinstance(val, sympy.Basic):
         yield val
@@ -1023,12 +1026,12 @@ def _iterate_exprs(val: IterateExprs) -> Iterator[sympy.Basic]:
         raise AssertionError(f"cannot extract sympy expressions from {val} {type(val)}")
 
 
-def _iterate_nodes(val: Any) -> Iterator[SymNode]:
+def _iterate_nodes(val: Any) -> Iterator[SymNode | _NativeSymNode]:
     """
     Recursively iterate through a value and yield all SymNodes contained
     within it.
     """
-    if isinstance(val, SymNode):
+    if isinstance(val, SymNodeTypes):
         yield val
     elif isinstance(val, py_sym_types):
         # This allow applies to the jagged layout NestedTensor case as
@@ -1576,6 +1579,10 @@ def _guard_or(a: BoolLikeType, default: bool) -> bool:
         return guard_bool(a)
 
     sym_node = a.node
+    if isinstance(sym_node, _NativeSymNode):
+        if default:
+            return sym_node.guard_or_true("", 0)
+        return sym_node.guard_or_false("", 0)
     if sym_node.shape_env is None:
         raise AssertionError("shape_env should not be None")
     r = sym_node.shape_env.evaluate_sym_node(
@@ -1674,6 +1681,8 @@ def statically_known_true(x: BoolLikeType) -> bool:
         if not isinstance(x, bool):
             raise AssertionError(f"Expected bool, got {type(x)}")
         return x
+    if isinstance(x.node, _NativeSymNode):
+        return x.node.statically_known_true("", 0)
     if _sym_node_hint_disproves(x.node, target=True):
         return False
     result = _static_eval_sym_bool(x)
@@ -9736,7 +9745,7 @@ def _remove_effect_token_unbacked_bindings(
 # When accessing expressions representing input placeholders, we do not apply replacements
 # since those inputs should be seen by assertions that use them to be inserted. The only replacement
 # that we apply is unbacked renaming.
-def _get_placeholder_expr(sym_node: SymNode) -> sympy.Expr:
+def _get_placeholder_expr(sym_node: SymNode | _NativeSymNode) -> sympy.Expr:
     shape_env = sym_node.shape_env
     if shape_env is None:
         raise AssertionError("shape_env is required for _get_placeholder_expr")
