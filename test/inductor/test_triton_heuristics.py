@@ -293,6 +293,13 @@ class TestTritonHeuristics(TestCase):
         self.assertTrue(should_use(5247, 32896, 16))
         self.assertTrue(should_use(5246, 12288, 40))
 
+        should_autotune = Reduction._should_autotune_split_outer_plan
+        self.assertTrue(should_autotune(1024, 5247, 8, 148))
+        self.assertTrue(should_autotune(256, 4736, 4, 148))
+        self.assertFalse(should_autotune(1024, 4735, 8, 148))
+        self.assertFalse(should_autotune(2048, 5247, 8, 148))
+        self.assertFalse(should_autotune(1024, 5247, 1, 148))
+
         producer_profitable = (
             Reduction._is_experimental_large_output_outer_producer_profitable
         )

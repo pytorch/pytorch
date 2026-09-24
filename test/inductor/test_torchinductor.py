@@ -19584,6 +19584,24 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertIn("ReductionHint.OUTER", ordinary_code)
         self.assertNotIn("async_compile.multi_kernel_plan(", ordinary_code)
 
+        moderate_x = torch.randn(
+            2 * 5247, 32, 16, device=self.device, dtype=torch.bfloat16
+        )
+
+        def moderate_outer(x):
+            logical = x.reshape(5247, 2, 32, 16).permute(0, 2, 3, 1)
+            return logical.contiguous().reshape(5247, 1024).float().square().sum(1)
+
+        moderate_expected = moderate_outer(moderate_x)
+        with unittest.mock.patch.object(
+            MultiKernelPlanCall, "benchmark_plans", return_value=[1.0, 2.0]
+        ):
+            moderate_actual, moderate_source_codes = run_and_get_code(
+                torch.compile(moderate_outer, fullgraph=True), moderate_x
+            )
+        self.assertEqual(moderate_expected, moderate_actual, atol=1e-2, rtol=1e-3)
+        self.assertIn("async_compile.multi_kernel_plan(", moderate_source_codes[0])
+
         trailing_x = torch.randn(12288, 5247, device=self.device, dtype=torch.bfloat16)
 
         def trailing_reduction(x):
