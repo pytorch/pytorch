@@ -913,7 +913,10 @@ def temperature(device: Device = None) -> float:
 
     temp = c_double(0.0)
     rc = pyzes.zesTemperatureGetState(temperature_handle, byref(temp))
-    if rc == pyzes.ZE_RESULT_ERROR_NOT_AVAILABLE:
+    if (
+        rc == pyzes.ZE_RESULT_ERROR_NOT_AVAILABLE
+        or rc == pyzes.ZE_RESULT_ERROR_INSUFFICIENT_PERMISSIONS
+    ):
         raise RuntimeError(
             "GPU temperature querying is not available. Try running with elevated privileges (e.g. sudo)."
         )
