@@ -276,17 +276,23 @@ def _is_in_optimized_module() -> bool:
     return _in_optimized_module
 
 
+class _RecompileRefusedError(RuntimeError):
+    """Raised by a bound ``_FailOnRecompileCallback`` instead of compiling."""
+
+
 class _FailOnRecompileCallback:
     """Serves cached entries but raises instead of compiling.
 
     Built per call under the "fail_on_recompile" stance, or bound once into a
-    context's callback (an installed precompile artifact), in which case
-    ``_callback_from_stance`` keeps it under every stance that would compile.
+    context's callback (``bound=True``, an installed precompile artifact), in
+    which case ``_callback_from_stance`` keeps it under every stance that would
+    compile.
     """
 
-    def __init__(self, callback: DynamoCallback) -> None:
+    def __init__(self, callback: DynamoCallback, bound: bool = False) -> None:
         # to prevent cache miss due to different backend
         self._torchdynamo_orig_backend = callback
+        self.bound = bound
 
     def __call__(
         self, frame: DynamoFrameType, *args: Any, **kwargs: Any
@@ -303,8 +309,11 @@ class _FailOnRecompileCallback:
         from torch._dynamo.guards import get_and_maybe_log_recompilation_reasons
 
         message = (
-            "Detected recompile when torch.compile stance is 'fail_on_recompile'. "
-            + f"filename: '{frame.f_code.co_filename}', "
+            "Detected recompile of a frame whose callable refuses to recompile. "
+            if self.bound
+            else "Detected recompile when torch.compile stance is 'fail_on_recompile'. "
+        ) + (
+            f"filename: '{frame.f_code.co_filename}', "
             + f"function name: '{frame.f_code.co_name}', "
             + f"line number: {frame.f_lineno}"
         )
@@ -328,11 +337,11 @@ class _FailOnRecompileCallback:
             message += "\nFailed on the following precompiled guards: "
             for entry in precompile_entries:
                 message += f"\n{entry.guard_manager}{entry.guard_manager.check_verbose(frame.f_locals)}"  # type: ignore[attr-defined]
-        raise RuntimeError(message)
+        raise (_RecompileRefusedError if self.bound else RuntimeError)(message)
 
 
 def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
-    if isinstance(callback, _FailOnRecompileCallback):
+    if isinstance(callback, _FailOnRecompileCallback) and callback.bound:
         # Read the stance once: a concurrent set_stance must not slip a
         # compiling callback in between the check and the choice.
         stance = _stance.stance

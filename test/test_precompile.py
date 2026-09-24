@@ -4861,6 +4861,7 @@ class TestPrecompileDynamoCapture(TestCase):
             "                f(model, x3)\n"
             "            except torch.compiler.PrecompileError as e:\n"
             "                assert 'no captured variant' in str(e), e\n"
+            "                assert 'stance' not in str(e), e\n"
             "            else:\n"
             "                raise AssertionError(f'compiled under {stance}')\n"
             "with torch.compiler.set_stance('force_eager'):\n"
@@ -4896,6 +4897,26 @@ class TestPrecompileDynamoCapture(TestCase):
         env = {**os.environ, "TORCHDYNAMO_DISABLE": "1"}
         cmd = [sys.executable, "-c", script, *argv]
         out = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=900)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("refused", out.stdout)
+
+    @skipIfCrossRef
+    def test_an_installed_artifact_refuses_to_load_with_compiled_autograd(self):
+        fn = self.mod.calls_breaking_helper
+        with self._capture(fn, backend="eager") as cap:
+            cap(self.model, self.x2)
+        script = (
+            "import sys, torch\n"
+            "sys.path.insert(0, sys.argv[1])\n"
+            "torch._dynamo.config.compiled_autograd = True\n"
+            "try:\n"
+            "    torch.compiler.precompile.load(sys.argv[2], sys.argv[3])\n"
+            "except torch.compiler.PrecompileError as e:\n"
+            "    assert 'compiled_autograd enabled' in str(e), e\n"
+            "    print('refused')\n"
+        )
+        cmd = [sys.executable, "-c", script, self.dir, self.artifact, self.cache]
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertIn("refused", out.stdout)
 
