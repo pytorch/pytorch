@@ -26,6 +26,7 @@ from torch.utils._ordered_set import OrderedSet
 log = logging.getLogger(__name__)
 
 DENSE_EFC_TILE_NS = (64, 128, 160, 192, 224, 256)
+_SCALED_PREFETCH_MODE = "autotune"
 
 
 @functools.cache
@@ -445,9 +446,9 @@ def _scaled_candidates(
     )
 
     if prefetch_mode is None:
-        prefetch_mode = config.nvgemm_prefetch
+        prefetch_mode = _SCALED_PREFETCH_MODE
     if use_pdl is None:
-        use_pdl = getattr(config, "nvgemm_pdl", False)
+        use_pdl = config.nvgemm_pdl == "1"
     manifest = _blockscaled_manifest(
         cc,
         _scaled_operand_type_signature(args),
@@ -505,7 +506,7 @@ def partition_compatible_kernels(
     """
     sig = _partition_sig(args)
     generation_policy = (
-        (config.nvgemm_prefetch, getattr(config, "nvgemm_pdl", False))
+        (_SCALED_PREFETCH_MODE, config.nvgemm_pdl == "1")
         if candidate_source == "scaled"
         else None
     )
@@ -530,7 +531,12 @@ def partition_compatible_kernels(
     if candidate_source == "args":
         candidates = _args_query_candidates(args, cc, efc_only)
     elif candidate_source == "scaled":
-        candidates = _scaled_candidates(args, cc, efc_only)
+        candidates = _scaled_candidates(
+            args,
+            cc,
+            efc_only,
+            prefetch_mode=_SCALED_PREFETCH_MODE,
+        )
     elif candidate_source == "manifest":
         candidates = _manifest_candidates(args, cc, efc_only)
     else:
@@ -588,6 +594,7 @@ def get_kernel_by_name_via_args(
     *,
     prefetch_mode: str | None = None,
     use_pdl: bool | None = None,
+    kernel_output_dtype: torch.dtype | str | None = None,
 ) -> Any:
     """Fast single-kernel lookup via an args-filtered get_operators query.
 
@@ -602,13 +609,32 @@ def get_kernel_by_name_via_args(
     _ops_by_name, so the ~50ms cost is paid once per distinct operator (not once
     per lookup) and is amortized across all configs and shapes a persistent
     worker handles. Returns None if no operator matches the name (caller then
-    falls back to the full manifest).
+    falls back to the full manifest). ``kernel_output_dtype`` preserves the
+    base GEMM output type when a scheduler-fused epilogue changes the final
+    output tensor's dtype.
     """
     import cutlass.operators
 
     cached = _ops_by_name.get(kernel_name)
     if cached is not None:
         return cached
+
+    query_out = args.out
+    if isinstance(kernel_output_dtype, str):
+        kernel_output_dtype = getattr(torch, kernel_output_dtype)
+    if kernel_output_dtype is not None and query_out.dtype != kernel_output_dtype:
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        # A scheduler-fused epilogue may change D's dtype. Candidate generation
+        # selected the base GEMM using its original output dtype, so recover
+        # that metadata without allocating device memory.
+        with FakeTensorMode():
+            query_out = torch.empty_strided(
+                tuple(query_out.shape),
+                tuple(query_out.stride),
+                dtype=kernel_output_dtype,
+                device="cuda",
+            )
 
     query_args = args
     if "VendoredDenseGemmEFCOperator" in kernel_name:
@@ -617,7 +643,7 @@ def get_kernel_by_name_via_args(
         query_args = GemmArguments(
             args.A,
             args.B,
-            args.out,
+            query_out,
             accumulator_type=args.accumulator_type,
         )
     ops = _replace_dense_efc_with_vendored(
@@ -636,7 +662,7 @@ def get_kernel_by_name_via_args(
         base_args = GemmArguments(
             args.A,
             args.B,
-            args.out,
+            query_out,
             accumulator_type=args.accumulator_type,
         )
         scaled_ops = _scaled_candidates(
