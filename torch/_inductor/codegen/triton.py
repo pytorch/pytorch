@@ -33,6 +33,7 @@ from torch.utils._sympy.functions import (
     FloorDiv,
     Min,
     ModularIndexing,
+    PythonMod,
     TruncToFloat,
     TruncToInt,
 )
@@ -971,6 +972,13 @@ class TritonPrinter(PythonPrinter):  # noqa: docstring_linter
         s = self.parenthesize(expr.args[0], PRECEDENCE["Atom"] - 0.5)
         float_type = self._get_scalar_float_type()
         return f"{s}.to({float_type})"
+
+    def _print_ModularIndexing(self, expr: sympy.Expr) -> str:
+        base, divisor, modulus = expr.args
+        if base.is_nonnegative and divisor.is_nonnegative:
+            return super()._print_ModularIndexing(expr)
+        quotient = base if divisor == 1 else FloorDiv(base, divisor, evaluate=False)
+        return self._print_PythonMod(PythonMod(quotient, modulus, evaluate=False))
 
     def _print_PythonMod(self, expr: sympy.Expr) -> str:
         quot, div = expr.args
