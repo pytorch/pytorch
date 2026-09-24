@@ -5087,11 +5087,7 @@ class FlexibleLayout(Layout):
 
 
 class NonOwningLayout(Layout):
-    """Layout for a named buffer that aliases another tensor or view.
-
-    This layout does not add a view transformation. ``view`` is the logical
-    tensor being aliased and carries any view-specific layout metadata.
-    """
+    """Is a view into the storage of another tensor"""
 
     def __init__(self, view: BaseView | TensorBox) -> None:
         layout = view.get_layout()
@@ -5192,14 +5188,6 @@ class NoneLayout(OutputSpec):
 
 
 class MutationLayoutSHOULDREMOVE(Layout):
-    """Layout for an operation that writes into an existing tensor or view.
-
-    A buffer with this layout does not own a new allocation or add a view
-    transformation. ``target`` is the logical mutation destination and carries
-    any view-specific layout metadata. ``get_buffer()`` unwraps it to the buffer
-    whose storage is mutated.
-    """
-
     def __init__(self, target: IRNode) -> None:
         super().__init__(
             target.get_device_or_error(),

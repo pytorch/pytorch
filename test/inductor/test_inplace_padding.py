@@ -136,16 +136,8 @@ class InplacePaddingTest(TestCase):
             compile_time_autotune_called = True
             out = orig_generate_and_run_autotune_block(wrapper)
             call_code = wrapper.kernel_autotune_calls.getvalue()
-            # buf0 is inplace-padded: its autotune example input is over-allocated
-            # to the padded storage size (2048 * 2048 = 4194304 elements) and then
-            # strided to the logical (2048, 2047) shape with the padded row stride
-            # of 2048.
-            FileCheck().check_regex(
-                r"_autotune_storage_\d+ = generate_example_value\(\(4194304,\), "
-                rf"\(1,\), '{GPU_TYPE}:0', torch\.float32, 0, \(4194304,\)\)"
-            ).check_regex(
-                r"buf0 = torch\.as_strided\(_autotune_storage_\d+, \(2048, 2047\), "
-                r"\(2048, 1\), 0\)"
+            FileCheck().check(
+                f"buf0 = generate_example_value((2048, 2047), (2048, 1), '{GPU_TYPE}:0', torch.float32, 0, (2048, 2048))"
             ).run(call_code)
             return out
 
