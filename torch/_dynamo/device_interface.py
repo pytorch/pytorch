@@ -19,7 +19,7 @@ import inspect
 import time
 from collections import namedtuple
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal
 
 import torch
@@ -35,6 +35,27 @@ else:
 # Recording the device properties in the main process but used in worker process.
 caching_worker_device_properties: dict[str, Any] = {}
 caching_worker_current_devices: dict[str, int] = {}
+
+
+@dataclass
+class AOTIStandaloneBuildConfig:
+    """Build configuration for AOTI standalone packages.
+
+    Returned by ``DeviceInterface.get_aoti_standalone_build_config()``.
+    All fields default to empty lists; a backend only populates the
+    fields relevant to its device.
+    """
+
+    # C++ #include directives for main.cpp, e.g. '#include <cuda.h>'
+    cpp_includes: list[str] = field(default_factory=list)
+    # CMAKE_PREFIX_PATH entries for locating backend CMake config files
+    cmake_prefix_paths: list[str] = field(default_factory=list)
+    # CMake find_package target names, e.g. 'CUDA'
+    cmake_find_packages: list[str] = field(default_factory=list)
+    # CMake target_compile_definitions names, e.g. 'USE_CUDA'
+    cmake_compile_definitions: list[str] = field(default_factory=list)
+    # CMake target_link_libraries specs, e.g. 'cuda' or '${CUDA_LIBRARIES}'
+    cmake_link_libraries: list[str] = field(default_factory=list)
 
 
 class DeviceInterface:
@@ -255,6 +276,24 @@ class DeviceInterface:
                 "This device is not capable of supporting Triton"
             )
 
+    @staticmethod
+    def get_aoti_standalone_build_config() -> "AOTIStandaloneBuildConfig | None":
+        """Return build configuration for AOTI standalone packages, or None.
+
+        When non-None, the returned config drives generation of device-specific
+        ``#include`` directives, ``find_package``, ``target_compile_definitions``,
+        and ``target_link_libraries`` in the standalone ``CMakeLists.txt``.
+
+        This is distinct from ``get_cpp_device_options()``, which provides raw
+        compiler/linker flags for Inductor C++ compilation. This method provides
+        CMake-specific directives for the AOTI standalone build system.
+
+        Returning None (the default) means no device-specific build configuration
+        is generated, preserving existing behavior for devices that do not
+        override this method.
+        """
+        return None
+
 
 class DeviceGuard:
     """
@@ -385,6 +424,22 @@ class CudaInterface(DeviceInterface):
                 raise TritonUnavailableError("triton not built with the 'amd' backend")
         elif "nvidia" not in triton.backends.backends:
             raise TritonUnavailableError("triton not built with the 'nvidia' backend")
+
+    @staticmethod
+    def get_aoti_standalone_build_config() -> AOTIStandaloneBuildConfig | None:
+        if torch.version.hip:
+            return AOTIStandaloneBuildConfig(
+                cpp_includes=["#include <hip/hip_runtime.h>"],
+                cmake_find_packages=["hip"],
+                cmake_compile_definitions=["USE_HIP"],
+                cmake_link_libraries=["hip::host"],
+            )
+        return AOTIStandaloneBuildConfig(
+            cpp_includes=["#include <cuda.h>", "#include <cuda_runtime_api.h>"],
+            cmake_find_packages=["CUDA"],
+            cmake_compile_definitions=["USE_CUDA"],
+            cmake_link_libraries=["cuda", "${CUDA_LIBRARIES}"],
+        )
 
 
 get_mtia_stream: Callable[[int], int] | None
@@ -594,6 +649,13 @@ class XpuInterface(DeviceInterface):
 
         if "intel" not in triton.backends.backends:
             raise TritonUnavailableError("triton not built with the 'intel' backend")
+
+    @staticmethod
+    def get_aoti_standalone_build_config() -> AOTIStandaloneBuildConfig | None:
+        return AOTIStandaloneBuildConfig(
+            cmake_compile_definitions=["USE_XPU"],
+            cmake_link_libraries=["sycl", "ze_loader"],
+        )
 
 
 @dataclass
