@@ -528,6 +528,61 @@ class ReductionHeuristic(CodegenConfigHeuristics):
             )
         ]
 
+        # On huge grids, offer one body-specific alternative to avoid expensive
+        # cross-warp reductions or to pack several simple rows per CTA. Keep
+        # this max-autotune-only because similarly sized bodies can disagree.
+        blackwell_huge_x_inner = (
+            max_autotune_enabled
+            and reduction_hint == ReductionHint.INNER
+            and triton_meta["device"].type == "cuda"
+            and torch.version.hip is None
+            and triton_meta["device"].major is not None
+            and triton_meta["device"].major >= 10
+            and xnumel >= 262144
+            and rnumel == 128
+        )
+        if blackwell_huge_x_inner:
+            num_load = inductor_meta.get("num_load", 0)
+            num_store = inductor_meta.get("num_store", 0)
+            num_reduction = inductor_meta.get("num_reduction", 0)
+            if num_reduction >= 8 and num_store >= 12:
+                configs.append(
+                    triton_config_reduction(
+                        size_hints,
+                        1,
+                        rnumel,
+                        register_intensive=True,
+                        num_warps=1,
+                        min_num_warps=1,
+                        reduction_hint=reduction_hint,
+                        warp_size=warp_size,
+                    )
+                )
+            elif num_reduction == 1 and num_store <= 2 and num_load >= 13:
+                configs.append(
+                    triton_config_reduction(
+                        size_hints,
+                        4,
+                        rnumel,
+                        register_intensive=True,
+                        num_warps=8,
+                        reduction_hint=reduction_hint,
+                        warp_size=warp_size,
+                    )
+                )
+            elif num_reduction == 2 and num_store <= 2 and num_load <= 2:
+                configs.append(
+                    triton_config_reduction(
+                        size_hints,
+                        8,
+                        rnumel,
+                        register_intensive=True,
+                        num_warps=4,
+                        reduction_hint=reduction_hint,
+                        warp_size=warp_size,
+                    )
+                )
+
         # Defer to more autotuning for 3d tiling
         if "y" in size_hints:
             pass
