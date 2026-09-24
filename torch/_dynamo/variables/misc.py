@@ -2560,6 +2560,13 @@ class ObjectVariable(VariableTracker):
     def python_type(self) -> type[object]:
         return object
 
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> ConstantVariable:
+        if type(self.value) is object:
+            return ConstantVariable.create(hasattr(self.value, name))
+        return super().call_obj_hasattr(tx, name)
+
     def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
     ) -> "VariableTracker":

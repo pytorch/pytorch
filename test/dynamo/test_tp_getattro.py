@@ -99,6 +99,31 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)()
         self.assertEqual(result, (True, False, True, False))
 
+    def test_hasattr_keyword_error(self):
+        def fn():
+            try:
+                hasattr(x=2)
+            except TypeError as exc:
+                return str(exc)
+
+        self.assertEqual(fn(), "hasattr() takes no keyword arguments")
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    def test_hasattr_exact_object(self):
+        def fn():
+            obj = object()
+            call_name = "__call__"
+            return (
+                hasattr(obj, "foo"),
+                hasattr(obj, call_name),
+                hasattr(obj, "__dict__"),
+                hasattr(obj, "__class__"),
+                hasattr(obj, "__str__"),
+            )
+
+        self.assertEqual(fn(), (False, False, False, True, True))
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
     def test_hasattr_false_in_except(self):
         """hasattr inside an except block must preserve the active exception."""
         import sys
