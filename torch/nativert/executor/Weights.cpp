@@ -104,8 +104,8 @@ Weights::Weights(
     // /extra/xl_weights/<model_name>_model_param_config.json
     // Currently, we only use the metadata from model definition.
     std::optional<TensorMeta> tensorMeta;
-    if (weightsMeta_.find(tensorName) != weightsMeta_.end()) {
-      tensorMeta = weightsMeta_.at(tensorName);
+    if (auto it = weightsMeta_.find(tensorName); it != weightsMeta_.end()) {
+      tensorMeta = it->second;
     } else {
       TORCH_CHECK(
           false,
@@ -115,13 +115,15 @@ Weights::Weights(
     }
     std::optional<TensorMeta> newTensorMeta;
     if (maybeNewWeightsMeta) {
-      if (stateDictPaths.find(tensorName) == stateDictPaths.end()) {
+      auto it = stateDictPaths.find(tensorName);
+      if (it == stateDictPaths.end()) {
         TORCH_CHECK(false, "Tensor name not found in state dict paths");
       }
 
-      std::string paramName = stateDictPaths.at(tensorName);
-      if (maybeNewWeightsMeta->find(paramName) != maybeNewWeightsMeta->end()) {
-        newTensorMeta = *maybeNewWeightsMeta->at(paramName);
+      std::string paramName = it->second;
+      if (auto metaIt = maybeNewWeightsMeta->find(paramName);
+          metaIt != maybeNewWeightsMeta->end()) {
+        newTensorMeta = *metaIt->second;
       } else {
         TORCH_CHECK(
             false,
@@ -327,7 +329,7 @@ at::Tensor& Weights::at(const std::string& name) {
 }
 
 bool Weights::contains(const std::string& name) const {
-  return allValues_.find(name) != allValues_.end();
+  return allValues_.contains(name);
 }
 
 c10::IValue Weights::getCustomObj(const std::string& name) const {
@@ -439,13 +441,14 @@ void Weights::setValue(
     const std::string& name,
     const at::Tensor& newValue,
     bool skipDeviceCheck) {
-  if (allValues_.find(name) != allValues_.end()) {
+  auto it = allValues_.find(name);
+  if (it != allValues_.end()) {
     validateValue(name, newValue, skipDeviceCheck);
+    it->second = newValue;
   } else {
     LOG(WARNING) << name << " is not found in the registered weights";
+    allValues_.emplace(name, newValue);
   }
-
-  allValues_[name] = newValue;
 }
 
 void Weights::updateValue(const std::string& name, const at::Tensor& newValue) {
@@ -482,7 +485,7 @@ std::string Weights::toString() const {
 void Weights::validateAllWeightsLoaded() {
   auto checkNames = [&](const auto& names) {
     for (const auto& name : names) {
-      if (unusedWeights_.find(std::string(name)) != unusedWeights_.end()) {
+      if (unusedWeights_.contains(std::string(name))) {
         continue;
       }
       auto it = allValues_.find(std::string(name));

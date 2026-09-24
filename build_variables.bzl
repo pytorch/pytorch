@@ -113,7 +113,8 @@ libtorch_profiler_sources = [
     "torch/csrc/autograd/profiler_legacy.cpp",
     "torch/csrc/autograd/profiler_kineto.cpp",
     "torch/csrc/profiler/collection.cpp",
-    "torch/csrc/profiler/cupti/monitor_native.cpp",
+    "torch/csrc/profiler/cuspy/cuspy_native.cpp",
+    "torch/csrc/profiler/cuspy/cuspy_pftrace.cpp",
     "torch/csrc/profiler/data_flow.cpp",
     "torch/csrc/profiler/kineto_metadata.cpp",
     "torch/csrc/profiler/kineto_shim.cpp",
@@ -790,6 +791,7 @@ libtorch_cuda_distributed_extra_sources = [
     "torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.cpp",
     "torch/csrc/distributed/c10d/nccl2/NCCLCachingAllocatorHook.cpp",
     "torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCLLazy.cpp",
+    "torch/csrc/distributed/c10d/nccl2/ShrinkNCCL.cpp",
     "torch/csrc/distributed/c10d/nccl2/ReconfigureNCCL.cpp",
     "torch/csrc/distributed/c10d/nccl2/WindowNCCL.cpp",
     "torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCLUtils.cpp",
@@ -805,10 +807,12 @@ libtorch_cuda_distributed_extra_sources = [
     "torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory.cu",
     "torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryOps.cu",
     "torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp",
+    "torch/csrc/distributed/c10d/symm_mem/GroupStreamGuard.cpp",
     "torch/csrc/distributed/c10d/symm_mem/CudaDMAConnectivity.cpp",
     "torch/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.cu",
     "torch/csrc/distributed/c10d/symm_mem/nccl_extension.cu",
     "torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_bridge.cpp",
+    "torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.cpp",
     "torch/csrc/distributed/c10d/symm_mem/ops/nccl_reduce_scatter_offset.cu",
     "torch/csrc/distributed/c10d/symm_mem/ops/nccl_all_to_all_nd.cu",
     "torch/csrc/distributed/c10d/symm_mem/intra_node_comm.cpp",
@@ -822,6 +826,7 @@ libtorch_nvshmem_sources = [
     "torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp",
     "torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.cu",
     "torch/csrc/distributed/c10d/symm_mem/NVSHMEMSymmetricMemory.cpp",
+    "torch/csrc/distributed/c10d/symm_mem/NVSHMEMSymmetricMemoryKernels.cu",
 ]
 
 libtorch_cuda_distributed_sources = libtorch_cuda_distributed_base_sources + libtorch_cuda_distributed_extra_sources
@@ -920,7 +925,6 @@ libtorch_python_xpu_sources = [
     "torch/csrc/xpu/Event.cpp",
     "torch/csrc/xpu/Module.cpp",
     "torch/csrc/xpu/Stream.cpp",
-    "torch/csrc/xpu/XPUPluggableAllocator.cpp",
     "torch/csrc/xpu/memory_snapshot.cpp",
     "torch/csrc/xpu/MemPool.cpp",
     "torch/csrc/xpu/Graph.cpp",
@@ -928,7 +932,9 @@ libtorch_python_xpu_sources = [
     "torch/csrc/inductor/aoti_torch/shim_xpu.cpp",
 ]
 
-libtorch_xpu_sources = libtorch_python_xpu_sources
+libtorch_xpu_sources = libtorch_python_xpu_sources + [
+    "torch/csrc/xpu/XPUPluggableAllocator.cpp",
+]
 
 libtorch_python_core_sources = [
     "torch/csrc/DataLoader.cpp",
@@ -1043,7 +1049,7 @@ libtorch_python_core_sources = [
     "torch/csrc/monitor/python_init.cpp",
     "torch/csrc/multiprocessing/init.cpp",
     "torch/csrc/onnx/init.cpp",
-    "torch/csrc/profiler/cupti/monitor_python.cpp",
+    "torch/csrc/profiler/cuspy/cuspy_python.cpp",
     "torch/csrc/profiler/python/init.cpp",
     "torch/csrc/profiler/python/combined_traceback.cpp",
     "torch/csrc/serialization.cpp",
@@ -1493,6 +1499,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/Normalization.cpp",
     "aten/src/ATen/native/Onehot.cpp",
     "aten/src/ATen/native/PackedSequence.cpp",
+    "aten/src/ATen/native/PhiloxStatelessRNG.cpp",
     "aten/src/ATen/native/PixelShuffle.cpp",
     "aten/src/ATen/native/PointwiseOps.cpp",
     "aten/src/ATen/native/Pooling.cpp",
@@ -1579,6 +1586,18 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/transformers/attention.cpp",
     "aten/src/ATen/native/transformers/sdp_utils_cpp.cpp",
     "aten/src/ATen/native/transformers/transformer.cpp",
+    "aten/src/ATen/native/FusedAdam.cpp",
+    "aten/src/ATen/native/FusedSGD.cpp",
+    "aten/src/ATen/native/FusedAdagrad.cpp",
+    # Files not in native, but depends on native symbols
+    # "aten/src/ATen/TensorIndexing.cpp",
+    "aten/src/ATen/TensorIterator.cpp",
+]
+
+# These sources are the only ones that require linking against XNNPACK itself, so
+# they live in a dedicated list/target. That lets full PyTorch and PyTorch mobile
+# each pick their own XNNPACK dep without the choice leaking into aten_native_cpu.
+aten_native_xnnpack_source_list = [
     "aten/src/ATen/native/xnnpack/Activation.cpp",
     "aten/src/ATen/native/xnnpack/ChannelShuffle.cpp",
     "aten/src/ATen/native/xnnpack/Convolution.cpp",
@@ -1589,12 +1608,6 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/xnnpack/OpContext.cpp",
     "aten/src/ATen/native/xnnpack/RegisterOpContextClass.cpp",
     "aten/src/ATen/native/xnnpack/Shim.cpp",
-    "aten/src/ATen/native/FusedAdam.cpp",
-    "aten/src/ATen/native/FusedSGD.cpp",
-    "aten/src/ATen/native/FusedAdagrad.cpp",
-    # Files not in native, but depends on native symbols
-    # "aten/src/ATen/TensorIndexing.cpp",
-    "aten/src/ATen/TensorIterator.cpp",
 ]
 
 # 1. Files in ATen/native with a few exceptions

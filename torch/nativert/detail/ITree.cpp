@@ -6,6 +6,7 @@
 
 #include <ATen/core/ivalue.h>
 #include <c10/util/Synchronized.h>
+#include <c10/util/string_view.h>
 #include <nlohmann/json.hpp>
 
 namespace torch::nativert::detail {
@@ -316,27 +317,36 @@ class PytreeNodeRegistry {
             }});
   }
   bool hasNodeDef(std::string_view typeName) const {
-    return registry_.find(std::string{typeName}) != registry_.end();
+    return registry_.contains(typeName);
   }
   const NodeDef& getNodeDef(std::string_view typeName) const {
-    return registry_.at(std::string{typeName});
+    auto it = registry_.find(typeName);
+    TORCH_CHECK_INDEX(
+        it != registry_.end(), "Unknown pytree node type: ", typeName);
+    return it->second;
   }
   void registerNode(std::string_view typeName, NodeDef nodeDef) {
-    TORCH_CHECK(!hasNodeDef(typeName));
-    registry_.emplace(typeName, nodeDef);
+    auto [_, inserted] =
+        registry_.try_emplace(std::string(typeName), std::move(nodeDef));
+    TORCH_CHECK(inserted);
   }
 
   void registerOrReplaceNode(std::string_view typeName, NodeDef nodeDef) {
-    auto it = registry_.find(std::string{typeName});
+    auto it = registry_.find(typeName);
     if (it != registry_.end()) {
-      it->second = nodeDef;
+      it->second = std::move(nodeDef);
     } else {
-      registry_.emplace(typeName, nodeDef);
+      registry_.emplace(typeName, std::move(nodeDef));
     }
   }
 
  private:
-  std::unordered_map<std::string, NodeDef> registry_;
+  std::unordered_map<
+      std::string,
+      NodeDef,
+      c10::TransparentStringHash,
+      std::equal_to<>>
+      registry_;
 };
 
 c10::Synchronized<PytreeNodeRegistry>& getPytreeNodeRegistry() {
@@ -379,7 +389,8 @@ ITreeSpec makeITreeSpec(
     offset += children.back().numIValues();
   }
 
-  return ITreeSpec(name, context, std::move(children), nodeDefCache);
+  return ITreeSpec(
+      name, std::move(context), std::move(children), std::move(nodeDefCache));
 }
 
 } // namespace
@@ -417,7 +428,7 @@ c10::IValue itreeUnflatten(
   if (spec.isIValue()) {
     return std::move(ivalues[0]);
   }
-  auto unflattenFn = spec.nodeDefCache().unflattenFn;
+  const auto& unflattenFn = spec.nodeDefCache().unflattenFn;
   if (spec.allIValues()) {
     return unflattenFn(std::move(ivalues), spec.context());
   }
@@ -589,7 +600,7 @@ ITreeSpec::ITreeSpec(
     : uniformName_(uniformName),
       context_(std::move(context)),
       children_(std::move(children)),
-      nodeDefCache_(nodeDefCache),
+      nodeDefCache_(std::move(nodeDefCache)),
       numIValues_(0),
       value_(nullptr),
       isUsed_(false) {

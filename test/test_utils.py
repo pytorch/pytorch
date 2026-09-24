@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 # Owner(s): ["module: unknown"]
 
+import importlib.util
 import multiprocessing
 import os
 import random
@@ -13,7 +14,9 @@ import traceback
 import types
 import unittest
 import warnings
+from pathlib import Path
 from typing import Any, cast
+from unittest import mock
 
 import torch
 import torch.nn as nn
@@ -672,6 +675,9 @@ class TestCollectEnv(TestCase):
     def test_smoke(self):
         info_output = get_pretty_env_info()
         self.assertTrue(info_output.count("\n") >= 17)
+        self.assertIn("ROCm SDK used to build PyTorch:", info_output)
+        self.assertIn("HIP used to build PyTorch:", info_output)
+        self.assertNotIn("ROCM used to build PyTorch:", info_output)
 
 
 class TestHipify(TestCase):
@@ -960,15 +966,307 @@ class TestDeviceUtils(TestCase):
 instantiate_device_type_tests(TestDeviceUtils, globals())
 
 
+class TestTorchPathResolution(TestCase):
+    @unittest.skipIf(IS_FBCODE, "fbcode lays torch out differently")
+    def test_torch_parent_follows_the_extension_module(self):
+        spec = importlib.util.find_spec("torch._C")
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.origin)
+        expected = os.path.dirname(os.path.dirname(spec.origin))
+        self.assertEqual(torch._utils_internal.torch_parent, expected)
+
+    @unittest.skipIf(IS_FBCODE, "fbcode lays torch out differently")
+    def test_installed_torch_dir_prefers_the_editable_loader_paths(self):
+        installed_torch_dir = torch._utils_internal._installed_torch_dir
+        spec = importlib.util.find_spec("torch._C")
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.origin)
+        spec_dir = os.path.dirname(spec.origin)
+        with tempfile.TemporaryDirectory() as root:
+            checkout = os.path.join(root, "src", "torch")
+            installed = os.path.join(root, "site-packages", "torch")
+            # A checkout has a tracked torch/lib too, so lib/ alone cannot
+            # tell the trees apart; the checkout is excluded by identity.
+            os.makedirs(os.path.join(checkout, "lib"))
+            os.makedirs(os.path.join(installed, "lib"))
+            loader = types.SimpleNamespace(paths=[checkout, installed])
+            with mock.patch.object(torch, "__loader__", loader):
+                self.assertEqual(installed_torch_dir(checkout), installed)
+            if not IS_WINDOWS:
+                os.symlink(os.path.join(root, "src"), os.path.join(root, "alias"))
+                aliased = os.path.join(root, "alias", "torch")
+                loader = types.SimpleNamespace(paths=[aliased, installed])
+                with mock.patch.object(torch, "__loader__", loader):
+                    self.assertEqual(installed_torch_dir(checkout), installed)
+            # Only an entry holding lib/ is an install tree; otherwise the
+            # extension module's spec decides, as it does without any paths.
+            loader = types.SimpleNamespace(paths=[checkout, os.path.join(root, "x")])
+            with mock.patch.object(torch, "__loader__", loader):
+                self.assertEqual(installed_torch_dir(checkout), spec_dir)
+            with mock.patch.object(torch, "__loader__", types.SimpleNamespace()):
+                self.assertEqual(installed_torch_dir(checkout), spec_dir)
+            # A raising finder must not take `import torch` down with it.
+            err = mock.patch("importlib.util.find_spec", side_effect=ImportError)
+            with mock.patch.object(torch, "__loader__", types.SimpleNamespace()), err:
+                self.assertIsNone(installed_torch_dir(checkout))
+
+    def test_stale_checkout_artifacts(self):
+        with tempfile.TemporaryDirectory() as root:
+            checkout = os.path.join(root, "torch")
+            for d in ("csrc", "lib/libshm", "bin", "include"):
+                os.makedirs(os.path.join(checkout, d))
+            os.makedirs(os.path.join(root, "torch.egg-info"))
+            ext = "_C.cpython-310-x86_64-linux-gnu.so"
+            deps = os.path.join("lib", "libtorch_global_deps.so")
+            c10 = os.path.join("lib", "libc10.so.1")
+            for f in (ext, deps, c10):
+                open(os.path.join(checkout, f), "w").close()
+            found = torch._utils_internal._stale_checkout_artifacts(checkout)
+            names = [ext, "bin", "include", c10, deps]
+            expected = [os.path.join(checkout, f) for f in names]
+            self.assertEqual(found, expected + [os.path.join(root, "torch.egg-info")])
+            clean = os.path.join(root, "clean", "torch")
+            os.makedirs(os.path.join(clean, "lib", "libshm"))
+            self.assertEqual(torch._utils_internal._stale_checkout_artifacts(clean), [])
+
+    @unittest.skipIf(IS_WINDOWS, "_load_global_deps is a no-op on Windows")
+    def test_load_global_deps_reports_missing_library(self):
+        real_exists = os.path.exists
+
+        def exists(path):
+            return "libtorch_global_deps" not in path and real_exists(path)
+
+        with unittest.mock.patch("os.path.exists", side_effect=exists):
+            with self.assertRaisesRegex(OSError, "libtorch_global_deps"):
+                torch._load_global_deps()
+
+
 class TestCppExtensionUtils(TestCase):
+    @unittest.skipIf(IS_FBCODE, "CMake package files are not shipped in fbcode")
+    def test_cmake_prefix_path(self):
+        # TorchConfig.cmake ships only with libtorch; a BUILD_LIBTORCHLESS build
+        # (no CI job runs one) has no share/cmake and would fail here.
+        prefix = torch.utils.cmake_prefix_path
+        config = os.path.join(prefix, "Torch", "TorchConfig.cmake")
+        self.assertTrue(os.path.isfile(config), f"{config} does not exist")
+
     def test_cpp_compiler_is_ok(self):
         self.assertTrue(torch.utils.cpp_extension.check_compiler_ok_for_platform("c++"))
 
     def test_cc_compiler_is_ok(self):
         self.assertTrue(torch.utils.cpp_extension.check_compiler_ok_for_platform("cc"))
 
+    @staticmethod
+    def _fake_version_module(**attrs):
+        module = types.ModuleType("fake_torch_version")
+        for name, value in attrs.items():
+            setattr(module, name, value)
+        return module
+
+    def test_derive_rocm_version_prefers_rocm(self):
+        version = self._fake_version_module(hip="7.0.51831", rocm="6.4.2")
+        derived = torch.utils.cpp_extension._derive_rocm_version(version)
+        self.assertEqual(derived, (6, 4))
+
+    def test_derive_rocm_version_falls_back_when_attribute_absent(self):
+        version = self._fake_version_module(hip="7.0.51831")
+        with self.assertLogs("torch.utils.cpp_extension", level="WARNING") as logs:
+            derived = torch.utils.cpp_extension._derive_rocm_version(version)
+        self.assertEqual(derived, (7, 0))
+        self.assertIn("torch.version.rocm", logs.output[0])
+
+    def test_derive_rocm_version_falls_back_when_rocm_is_none(self):
+        version = self._fake_version_module(hip="7.0.51831", rocm=None)
+        with self.assertLogs("torch.utils.cpp_extension", level="WARNING"):
+            derived = torch.utils.cpp_extension._derive_rocm_version(version)
+        self.assertEqual(derived, (7, 0))
+
+    def test_derive_rocm_version_is_none_off_rocm(self):
+        version = self._fake_version_module(hip=None, rocm=None)
+        self.assertIsNone(torch.utils.cpp_extension._derive_rocm_version(version))
+
+
+def _load_verify_dynamo():
+    path = Path(__file__).resolve().parents[1] / "tools" / "dynamo" / "verify_dynamo.py"
+    spec = importlib.util.spec_from_file_location("verify_dynamo_under_test", path)
+    loader = spec.loader if spec is not None else None
+    if spec is None or loader is None:
+        raise AssertionError(f"Could not load verify_dynamo from {path}")
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+
+class TestVerifyDynamoRocm(TestCase):
+    def setUp(self):
+        super().setUp()
+        self.verify_dynamo = _load_verify_dynamo()
+
+    def _write_rocm_version_h(self, tmpdir, major, minor, patch):
+        header = Path(tmpdir) / "include" / "rocm-core" / "rocm_version.h"
+        header.parent.mkdir(parents=True)
+        header.write_text(
+            f"#define ROCM_VERSION_MAJOR {major}\n"
+            f"#define ROCM_VERSION_MINOR {minor}\n"
+            f"#define ROCM_VERSION_PATCH {patch}\n"
+        )
+
+    def test_parse_version_truncates_to_major_minor(self):
+        parsed = self.verify_dynamo._parse_version("7.14.1-githash", components=2)
+        self.assertEqual(str(parsed), "7.14")
+
+    def test_reads_full_rocm_sdk_version(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._write_rocm_version_h(tmpdir, 10, 1, 2)
+            with mock.patch.object(
+                self.verify_dynamo, "_find_rocm_home", return_value=tmpdir
+            ):
+                self.assertEqual(
+                    str(self.verify_dynamo.get_rocm_sdk_version()), "10.1.2"
+                )
+
+    def test_missing_rocm_sdk_header_falls_back(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with mock.patch.object(
+                self.verify_dynamo, "_find_rocm_home", return_value=tmpdir
+            ):
+                self.assertIsNone(self.verify_dynamo.get_rocm_sdk_version())
+
+    def test_malformed_rocm_sdk_header_falls_back(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            header = Path(tmpdir) / "include" / "rocm-core" / "rocm_version.h"
+            header.parent.mkdir(parents=True)
+            header.write_text("#define ROCM_VERSION_MAJOR 7\n")
+            with mock.patch.object(
+                self.verify_dynamo, "_find_rocm_home", return_value=tmpdir
+            ):
+                self.assertIsNone(self.verify_dynamo.get_rocm_sdk_version())
+
+    def test_check_rocm_sdk_ignores_patch_mismatch(self):
+        from torch.torch_version import TorchVersion
+
+        with (
+            mock.patch.object(torch.cuda, "is_available", return_value=True),
+            mock.patch.object(torch.version, "hip", "7.14.26306"),
+            mock.patch.object(torch.version, "rocm", "7.14.0"),
+            mock.patch.object(
+                self.verify_dynamo,
+                "get_rocm_sdk_version",
+                return_value=TorchVersion("7.14.1"),
+            ),
+            warnings.catch_warnings(record=True) as caught,
+        ):
+            warnings.simplefilter("always")
+            result = self.verify_dynamo.check_rocm()
+        self.assertEqual(str(result), "7.14")
+        self.assertFalse(any("mismatch" in str(w.message) for w in caught))
+
+    def test_check_rocm_sdk_warns_on_minor_mismatch(self):
+        from torch.torch_version import TorchVersion
+
+        with (
+            mock.patch.object(torch.cuda, "is_available", return_value=True),
+            mock.patch.object(torch.version, "hip", "7.15.26306"),
+            mock.patch.object(torch.version, "rocm", "7.14.0"),
+            mock.patch.object(
+                self.verify_dynamo,
+                "get_rocm_sdk_version",
+                return_value=TorchVersion("7.15.0"),
+            ),
+            warnings.catch_warnings(record=True) as caught,
+        ):
+            warnings.simplefilter("always")
+            self.verify_dynamo.check_rocm()
+        self.assertTrue(any("mismatch" in str(w.message) for w in caught))
+
+    def test_check_rocm_falls_back_to_hip_for_old_wheel(self):
+        from torch.torch_version import TorchVersion
+
+        with (
+            mock.patch.object(torch.cuda, "is_available", return_value=True),
+            mock.patch.object(torch.version, "hip", "7.15.26306"),
+            mock.patch.object(torch.version, "rocm", None),
+            mock.patch.object(
+                self.verify_dynamo, "get_rocm_sdk_version", return_value=None
+            ),
+            mock.patch.object(
+                self.verify_dynamo,
+                "get_hip_version",
+                return_value=TorchVersion("7.15"),
+            ),
+            warnings.catch_warnings(record=True) as caught,
+        ):
+            warnings.simplefilter("always")
+            result = self.verify_dynamo.check_rocm()
+        self.assertEqual(str(result), "7.15")
+        self.assertFalse(any("mismatch" in str(w.message) for w in caught))
+
 
 class TestTraceback(TestCase):
+    def test_symbolize_mode(self):
+        script = "import torch; print(torch._C._get_symbolize_mode())"
+        for disable_addr2line, expected in [
+            (None, "dladdr"),
+            ("0", "addr2line"),
+            ("1", "dladdr"),
+        ]:
+            with self.subTest(disable_addr2line=disable_addr2line):
+                env = os.environ.copy()
+                env.pop("TORCH_SYMBOLIZE_MODE", None)
+                if disable_addr2line is None:
+                    env.pop("TORCH_DISABLE_ADDR2LINE", None)
+                else:
+                    env["TORCH_DISABLE_ADDR2LINE"] = disable_addr2line
+                result = subprocess.run(
+                    [sys.executable, "-c", script],
+                    capture_output=True,
+                    text=True,
+                    env=env,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout.strip(), expected)
+
+    @staticmethod
+    @torch._dynamo.disable
+    def _context_decorator_traceback_frame_names():
+        @torch.no_grad()
+        def decorated():
+            raise RuntimeError("test")
+
+        try:
+            decorated()
+        except RuntimeError as e:
+            return [frame.name for frame in traceback.extract_tb(e.__traceback__)]
+        else:
+            raise AssertionError("Expected RuntimeError")
+
+    def test_context_decorator_traceback_frame_name(self):
+        frame_names = self._context_decorator_traceback_frame_names()
+        self.assertIn("no_grad", frame_names)
+        self.assertNotIn("decorate_context", frame_names)
+
+    @staticmethod
+    @torch._dynamo.disable
+    def _context_decorator_generator_traceback_frame_names():
+        @torch.no_grad()
+        def decorated_generator():
+            yield None
+            raise RuntimeError("test")
+
+        gen = decorated_generator()
+        next(gen)
+        try:
+            next(gen)
+        except RuntimeError as e:
+            return [frame.name for frame in traceback.extract_tb(e.__traceback__)]
+        else:
+            raise AssertionError("Expected RuntimeError")
+
+    def test_context_decorator_generator_traceback_frame_name(self):
+        frame_names = self._context_decorator_generator_traceback_frame_names()
+        self.assertIn("no_grad", frame_names)
+        self.assertNotIn("generator_context", frame_names)
+
     def test_basic(self):
         source = """\
 def f(x):
@@ -1037,6 +1335,42 @@ class TestTryImport(TestCase):
 
 
 class TestUtilsInternal(TestCase):
+    def test_max_clock_rate_uses_requested_device(self):
+        properties = types.SimpleNamespace(clock_rate=1_980_000)
+        torch._utils_internal.max_clock_rate.cache_clear()
+        try:
+            with (
+                unittest.mock.patch.object(torch.version, "hip", None),
+                unittest.mock.patch.object(
+                    torch.cuda, "get_device_properties", return_value=properties
+                ) as get_device_properties,
+            ):
+                self.assertEqual(torch._utils_internal.max_clock_rate(1), 1980)
+
+            get_device_properties.assert_called_once_with(1)
+        finally:
+            torch._utils_internal.max_clock_rate.cache_clear()
+
+    def test_max_clock_rate_uses_current_rocm_device(self):
+        properties = types.SimpleNamespace(gcnArchName="gfx90a:sramecc+")
+        torch._utils_internal.max_clock_rate.cache_clear()
+        try:
+            with (
+                unittest.mock.patch.object(torch.version, "hip", "6.0"),
+                unittest.mock.patch.object(
+                    torch.cuda, "current_device", return_value=1
+                ) as current_device,
+                unittest.mock.patch.object(
+                    torch.cuda, "get_device_properties", return_value=properties
+                ) as get_device_properties,
+            ):
+                self.assertEqual(torch._utils_internal.max_clock_rate(), 1700)
+
+            current_device.assert_called_once_with()
+            get_device_properties.assert_called_once_with(1)
+        finally:
+            torch._utils_internal.max_clock_rate.cache_clear()
+
     def test_max_clock_rate_falls_back_to_pynvml_when_nvidia_smi_missing(self):
         def nvsmi(_query):
             raise FileNotFoundError("nvidia-smi")

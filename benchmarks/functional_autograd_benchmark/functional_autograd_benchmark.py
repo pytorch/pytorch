@@ -2,6 +2,7 @@ import time
 from argparse import ArgumentParser
 from collections import defaultdict
 from collections.abc import Callable
+from functools import partial
 from typing import Any, NamedTuple
 
 import torch
@@ -237,8 +238,8 @@ def run_model(
 
         do_sync = noop
     else:
-        device = torch.device(f"cuda:{args.gpu}")
-        do_sync = torch.cuda.synchronize
+        device = torch.device(torch.accelerator.current_accelerator().type, args.gpu)
+        do_sync = partial(torch.accelerator.synchronize, device)
 
     model, inp = model_getter(device)
 
@@ -301,7 +302,7 @@ def main():
     torch.manual_seed(args.seed)
 
     if args.gpu == -2:
-        args.gpu = 0 if torch.cuda.is_available() else -1
+        args.gpu = 0 if torch.accelerator.is_available() else -1
 
     for name, model_getter, recommended_tasks, unsupported_tasks in MODELS:
         if args.model_filter and name not in args.model_filter:

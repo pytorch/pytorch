@@ -22,6 +22,7 @@ from itertools import product
 from unittest.mock import patch
 
 import torch
+import torch.multiprocessing as mp
 import torch.xpu._gpu_trace as gpu_trace
 from torch.testing import make_tensor
 from torch.testing._internal.autocast_test_lists import AutocastTestLists, TestAutocast
@@ -48,6 +49,7 @@ from torch.testing._internal.common_utils import (
     serialTest,
     subtest,
     suppress_warnings,
+    TEST_WITH_TSAN,
     TEST_XPU,
     TestCase,
 )
@@ -718,6 +720,87 @@ print(torch.xpu.is_initialized())
         ):
             e2.wait(e2)
 
+    @unittest.skipIf(not Xe2_Or_Later, "XPU IPC not available")
+    def test_event_ipc_handle(self):
+        if int(torch.version.xpu) < 20260200:
+            with self.assertRaisesRegex(
+                RuntimeError, "XPU IPC events require SYCL compiler 2026.2 or later"
+            ):
+                e0 = torch.xpu.Event(enable_timing=False, interprocess=True)
+                e0.record()
+
+            with self.assertRaisesRegex(
+                RuntimeError, "XPU IPC events require SYCL compiler 2026.2 or later"
+            ):
+                e1 = torch.xpu.Event(enable_timing=False, interprocess=True)
+                e1.ipc_handle()
+            return
+
+        if IS_WINDOWS:
+            with self.assertRaisesRegex(
+                RuntimeError, "XPU IPC events are not supported on Windows"
+            ):
+                e2 = torch.xpu.Event(enable_timing=False, interprocess=True)
+                e2.record()
+
+            with self.assertRaisesRegex(
+                RuntimeError, "XPU IPC events are not supported on Windows"
+            ):
+                e3 = torch.xpu.Event(enable_timing=False, interprocess=True)
+                e3.ipc_handle()
+            return
+
+        # IPC and timing cannot both be enabled; error fires at record() time.
+        with self.assertRaisesRegex(
+            RuntimeError, "XPUEvent cannot have both IPC and timing enabled"
+        ):
+            e4 = torch.xpu.Event(enable_timing=True, interprocess=True)
+            e4.record()
+
+        # Same constraint enforced when ipc_handle() triggers lazy initialization.
+        with self.assertRaisesRegex(
+            RuntimeError, "XPUEvent cannot have both IPC and timing enabled"
+        ):
+            e5 = torch.xpu.Event(enable_timing=True, interprocess=True)
+            e5.ipc_handle()
+
+        # ipc_handle() requires interprocess=True.
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "XPUEvent ipc_handle\\(\\) requires the event to be constructed with enable_ipc=True",
+        ):
+            e6 = torch.xpu.Event(enable_timing=False, interprocess=False)
+            e6.ipc_handle()
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "XPUEvent ipc_handle\\(\\) requires the event to be constructed with enable_ipc=True",
+        ):
+            e7 = torch.xpu.Event(enable_timing=False, interprocess=False)
+            e7.record()
+            e7.ipc_handle()
+
+        # Roundtrip: serialize an in-flight event to a handle and reconstruct it.
+        e8 = torch.xpu.Event(enable_timing=False, interprocess=True)
+        stream = torch.xpu.Stream()
+        with stream:
+            torch.xpu._sleep(200_000_000)  # spin for about 200 ms at 1 GHz
+        e8.record(stream)
+        handle = e8.ipc_handle()
+        e9 = torch.xpu.Event.from_ipc_handle(torch.xpu.current_device(), handle)
+        e8.synchronize()
+        self.assertTrue(e9.query())
+        event_ptr = e9.sycl_event
+        e9.record()
+        self.assertEqual(event_ptr, e9.sycl_event)
+
+        # ipc_handle() cannot be called on the reconstructed event;
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "XPUEvent ipc_handle\\(\\) requires the event to be constructed with enable_ipc=True",
+        ):
+            handle = e9.ipc_handle()
+
     def test_device_context_manager(self):
         prev_device = torch.xpu.current_device()
         with torch.accelerator.device_index(None):
@@ -1025,6 +1108,35 @@ print(torch.xpu.is_initialized())
 
         self.assertGreaterEqual(before_free_bytes, after_free_bytes)
         self.assertEqual(before_total_bytes, after_total_bytes)
+
+    @unittest.skipIf(not HAS_PYZES, "requires pyzes")
+    @unittest.skipIf(not Xe2_Or_Later, "not available")
+    @unittest.skip("See https://github.com/intel/torch-xpu-ops/issues/5015")
+    @serialTest()
+    def test_mem_get_info_with_pyzes(self):
+        torch.xpu.synchronize()
+        torch.xpu.empty_cache()
+        free_bytes, total_bytes = torch.xpu.mem_get_info()
+        memory_handle = torch.xpu._zes_get_memory_handle()
+
+        from ctypes import byref
+
+        import pyzes
+
+        mem_state = pyzes.zes_mem_state_t()
+        rc = pyzes.zesMemoryGetState(memory_handle, byref(mem_state))
+        if rc != pyzes.ZE_RESULT_SUCCESS:
+            self.fail("Failed to get memory state from Level Zero Sysman")
+
+        mem_props = pyzes.zes_mem_properties_t()
+        mem_props.stype = pyzes.ZES_STRUCTURE_TYPE_MEM_PROPERTIES
+
+        rc = pyzes.zesMemoryGetProperties(memory_handle, byref(mem_props))
+        if rc != pyzes.ZE_RESULT_SUCCESS:
+            self.fail("Failed to get memory properties from Level Zero Sysman")
+
+        self.assertEqual(free_bytes, mem_state.free)
+        self.assertEqual(total_bytes, mem_props.physicalSize)
 
     def test_get_arch_list(self):
         arch_list = torch.xpu.get_arch_list()
@@ -1541,6 +1653,9 @@ if __name__ == "__main__":
     allocator_lib = ctypes.CDLL(dummy_allocator)
     called_dummy_alloc = ctypes.c_int.in_dll(allocator_lib, "called_dummy_alloc")
     called_dummy_free = ctypes.c_int.in_dll(allocator_lib, "called_dummy_free")
+    # mem_get_info() must still work while the pluggable allocator is active.
+    _, _ = torch.xpu.mem_get_info()
+    _, _ = torch.accelerator.get_memory_info()
     print(called_dummy_alloc.value, called_dummy_free.value)
 """
         rc = check_output(test_script).splitlines()[-1]
@@ -2943,6 +3058,209 @@ if __name__ == "__main__":
         self.assertTrue(torch.all(x == 6.0))
 
 
+def xpugraphify(fn, pool=None):
+    torch.xpu.synchronize()
+    stream = torch.xpu.Stream()
+
+    stream.wait_stream(torch.xpu.current_stream())
+    with torch.xpu.stream(stream):
+        fn()
+    stream.synchronize()
+    torch.xpu.current_stream().wait_stream(stream)
+    torch.xpu.synchronize()
+
+    graph = torch.xpu.XPUGraph()
+    with torch.xpu.graph(graph, stream=stream, pool=pool):
+        static_outputs = fn()
+
+    return graph, static_outputs
+
+
+def get_xpugraph_segments(pool_id):
+    segments = torch.xpu.memory_snapshot()
+    return [segment for segment in segments if segment["segment_pool_id"] == pool_id]
+
+
+def live_blocks(pool_id):
+    blocks = 0
+    for segment in get_xpugraph_segments(pool_id):
+        for block in segment["blocks"]:
+            if block["state"] == "active_allocated":
+                blocks += 1
+    return blocks
+
+
+@unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
+@torch.testing._internal.common_utils.markDynamoStrictTest
+class TestBlockStateAbsorption(TestCase):
+    @staticmethod
+    def setCheckpointPoolState(
+        device, state, stale_storages_ptr, storages_deleters=None
+    ):
+        stale_storages_ptr = [t.untyped_storage()._cdata for t in stale_storages_ptr]
+        storages_deleters = (
+            []
+            if not storages_deleters
+            else [t.untyped_storage()._cdata for t in storages_deleters]
+        )
+        torch._C._xpu_setCheckpointPoolState(
+            device, state, stale_storages_ptr, storages_deleters
+        )
+
+    def tearDown(self):
+        torch.xpu.synchronize()
+        gc.collect()
+        torch.xpu.empty_cache()
+        super().tearDown()
+
+    def test_tensor_dies_after_checkpoint(self):
+        def foo():
+            return (
+                torch.ones(512, device="xpu", dtype=torch.uint8),
+                torch.ones(512, device="xpu", dtype=torch.uint8),
+            )
+
+        graph, outputs = xpugraphify(foo)
+        pool_id = graph.pool()
+        device = outputs[0].device.index
+        state = torch._C._xpu_getCheckpointState(device, pool_id)
+
+        output_data_ptrs = [output.data_ptr() for output in outputs]
+
+        del outputs
+
+        self.setCheckpointPoolState(device, state, [], [])
+
+        self.assertEqual(live_blocks(pool_id), 2)
+        torch._C._xpu_xpuCachingAllocator_raw_delete(output_data_ptrs[0])
+        self.assertEqual(live_blocks(pool_id), 1)
+        torch._C._xpu_xpuCachingAllocator_raw_delete(output_data_ptrs[1])
+        self.assertEqual(live_blocks(pool_id), 0)
+
+    def test_check_pool_live_allocations(self):
+        def foo():
+            return torch.ones([4], device="xpu")
+
+        pool = torch.xpu.graph_pool_handle()
+        graph, outputs = xpugraphify(foo, pool=pool)
+        device = outputs[0].device.index
+
+        def check(live_data_ptrs):
+            return torch._C._xpu_checkPoolLiveAllocations(device, pool, live_data_ptrs)
+
+        self.assertTrue(check({outputs[0].data_ptr()}))
+        self.assertFalse(check({outputs[0].data_ptr(), 0}))
+        self.assertFalse(check(set()))
+
+        del outputs
+        self.assertTrue(check(set()))
+
+
+@unittest.skipIf(not Xe2_Or_Later, "XPU IPC not available")
+@unittest.skipIf(IS_WINDOWS, "XPU IPC not available on non-Linux platforms")
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "TSAN is not fork-safe since we're forking in a multi-threaded environment",
+)
+@unittest.skipIf(
+    torch.version.xpu is None or int(torch.version.xpu) < 20260200,
+    "XPU IPC events require SYCL compiler 2026.2 or later",
+)
+class TestXPUMultiprocessing(TestCase):
+    @staticmethod
+    def _event_handle_importer_consumer(handle, p2c, c2p):
+        e1 = torch.xpu.Event.from_ipc_handle(torch.xpu.current_device(), handle)
+        c2p.put(0)  # notify parent child is ready
+        p2c.get()  # wait for record in parent
+        e1.synchronize()
+        c2p.put(1)  # notify synchronization is done in child
+        p2c.get()  # wait for parent to finish
+
+    @staticmethod
+    def _event_handle_exporter_consumer(handle, p2c, c2p):
+        stream = torch.xpu.Stream()
+        with stream:
+            e1 = torch.xpu.Event.from_ipc_handle(torch.xpu.current_device(), handle)
+            torch.xpu._sleep(200_000_000)  # spin for about 200 ms
+            e1.record()
+            c2p.put(0)
+            p2c.get()  # wait for parent to finish
+
+    @staticmethod
+    def _event_multiprocess_child(event, p2c, c2p):
+        c2p.put(0)  # notify parent child is ready
+        p2c.get()  # wait for record in parent
+        event.synchronize()
+        c2p.put(1)  # notify parent synchronization is done
+
+    def test_event_handle_importer(self):
+        e0 = torch.xpu.Event(enable_timing=False, interprocess=True)
+        self.assertTrue(e0.query())
+
+        ctx = mp.get_context("spawn")
+        p2c = ctx.SimpleQueue()
+        c2p = ctx.SimpleQueue()
+        p = ctx.Process(
+            target=TestXPUMultiprocessing._event_handle_importer_consumer,
+            args=(e0.ipc_handle(), p2c, c2p),
+        )
+        p.start()
+
+        c2p.get()  # wait for child to become ready
+        torch.xpu._sleep(200_000_000)  # spin for about 200 ms
+        e0.record()
+        p2c.put(0)  # notify child event is recorded
+
+        self.assertFalse(e0.query())
+        c2p.get()  # wait for synchronization in child
+        self.assertTrue(e0.query())
+        p2c.put(1)  # notify child to finish
+        p.join()
+
+    def test_event_handle_exporter(self):
+        e0 = torch.xpu.Event(enable_timing=False, interprocess=True)
+
+        ctx = mp.get_context("spawn")
+        p2c = ctx.SimpleQueue()
+        c2p = ctx.SimpleQueue()
+        p = ctx.Process(
+            target=TestXPUMultiprocessing._event_handle_exporter_consumer,
+            args=(e0.ipc_handle(), p2c, c2p),
+        )
+        p.start()
+
+        c2p.get()  # wait for event in child process is recorded
+
+        self.assertFalse(e0.query())
+        e0.synchronize()
+        self.assertTrue(e0.query())
+        p2c.put(0)  # notify child to finish
+        p.join()
+
+    def test_event_multiprocess(self):
+        event = torch.xpu.Event(enable_timing=False, interprocess=True)
+        self.assertTrue(event.query())
+
+        ctx = mp.get_context("spawn")
+        p2c = ctx.SimpleQueue()
+        c2p = ctx.SimpleQueue()
+        p = ctx.Process(
+            target=TestXPUMultiprocessing._event_multiprocess_child,
+            args=(event, p2c, c2p),
+        )
+        p.start()
+
+        c2p.get()  # wait for until child process is ready
+        torch.xpu._sleep(200_000_000)  # spin for about 200 ms
+        event.record()
+        p2c.put(0)  # notify child event is recorded
+
+        self.assertFalse(event.query())
+        c2p.get()  # wait for synchronization in child
+        self.assertTrue(event.query())
+        p.join()
+
+
 @contextlib.contextmanager
 def caching_host_allocator_use_host_register(use_xpu_host_register: bool):
     if use_xpu_host_register:
@@ -3274,13 +3592,12 @@ class TestXpuOptims(TestCase):
         [
             optim
             for optim in optim_db
-            if "foreach" in optim.supported_impls and "cuda" in optim.supports_fused_on
+            if "foreach" in optim.supported_impls and "xpu" in optim.supports_fused_on
         ],
         dtypes=[torch.float32],
     )
     def test_graph_grad_scaling(self, dtype, optim_info, foreach, fused):
-        device = "xpu"
-        torch.cuda.empty_cache()
+        torch.xpu.empty_cache()
 
         scaler = torch.amp.GradScaler(device="xpu", init_scale=4.0)
         g = torch.xpu.XPUGraph()
@@ -3288,7 +3605,6 @@ class TestXpuOptims(TestCase):
         weight = torch.ones((100,), device="xpu", requires_grad=True)
         opt = optim_info.optim_cls([weight], lr=0.1, foreach=foreach, fused=fused)
         static_input = torch.ones_like(weight)
-        static_grad = torch.ones_like(weight)
 
         # warmup
         s = torch.xpu.Stream()
@@ -3530,6 +3846,33 @@ class TestXpuAutocast(TestAutocast):
             result = torch.mm(mat0_fp32, mat1_fp32)
             self.assertEqual(result.dtype, torch.float16)
 
+    def test_autocast_is_enabled(self):
+        is_enabled = torch.is_autocast_enabled("xpu")
+        self.assertEqual(is_enabled, torch.is_autocast_enabled())
+        torch.set_autocast_enabled(not is_enabled)
+        self.assertEqual(torch.is_autocast_enabled("xpu"), torch.is_autocast_enabled())
+        self.assertEqual(not is_enabled, torch.is_autocast_enabled())
+        torch.set_autocast_enabled(is_enabled)
+        self.assertEqual(torch.is_autocast_enabled("xpu"), torch.is_autocast_enabled())
+        self.assertEqual(is_enabled, torch.is_autocast_enabled())
+
+    def test_fft_fp16_promotion(self):
+        shapes = [tuple(range(5, 5 + ndim)) for ndim in range(1, 6)]
+        for shape in shapes:
+            # r2c: rfftn with float16 input should produce complex32
+            x_r = torch.randn(shape, device="xpu", dtype=torch.float16)
+            result_r2c = torch.fft.rfftn(x_r)
+            self.assertEqual(result_r2c.dtype, torch.complex32)
+            expected_r2c = torch.fft.rfftn(x_r.to(torch.float32)).to(torch.complex32)
+            self.assertEqual(result_r2c, expected_r2c, atol=1e-6, rtol=1e-3)
+
+            # c2r: irfftn with complex32 input should produce float16
+            freq = torch.fft.rfftn(x_r)
+            result_c2r = torch.fft.irfftn(freq)
+            self.assertEqual(result_c2r.dtype, torch.float16)
+            expected_c2r = torch.fft.irfftn(freq.to(torch.complex64)).to(torch.float16)
+            self.assertEqual(result_c2r, expected_c2r, atol=1e-6, rtol=1e-3)
+
 
 @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
 class TestXpuTrace(TestCase):
@@ -3762,6 +4105,133 @@ class TestMemPool(TestCase):
                     lambda msg: f"{msg}\n[{label}] Block not reused after multi-stream free "
                     "-- free was likely deferred as if under graph capture",
                 )
+
+    @serialTest()
+    def test_mempool_no_split(self):
+        torch.xpu.synchronize()
+        gc.collect()
+        torch.xpu.empty_cache()
+
+        pool_split = torch.xpu.MemPool()
+        pool_no_split = torch.xpu.MemPool(no_split=True)
+
+        # 4 MB allocation: get_allocation_size(4 MB) returns a 20 MB segment
+        # because 4 MB < kMinLargeAlloc (10 MB).
+        #
+        # split pool : 20 MB segment is split → 4 MB allocated + 16 MB inactive.
+        # no_split pool: 20 MB segment kept intact → single 20 MB allocated block.
+        _4mb = 1 * 1024 * 1024  # for int data type
+        with torch.xpu.use_mem_pool(pool_split):
+            a_split = torch.randn(_4mb, device="xpu")
+        with torch.xpu.use_mem_pool(pool_no_split):
+            a_no_split = torch.randn(_4mb, device="xpu")
+
+        # Second 4 MB allocation:
+        # split pool:   reuses the 16 MB inactive block, splits → 4 MB + 12 MB.
+        #               Final state: 1 segment, 3 blocks
+        #               [4 MB active, 4 MB active, 12 MB inactive]
+        # no_split pool: existing 20 MB block is still active; a new 20 MB segment
+        #               is allocated (no split allowed).
+        #               Final state: 2 segments, 1 block each
+        #               [20 MB active], [20 MB active]
+        with torch.xpu.use_mem_pool(pool_split):
+            b_split = torch.randn(_4mb, device="xpu")
+        with torch.xpu.use_mem_pool(pool_no_split):
+            b_no_split = torch.randn(_4mb, device="xpu")
+
+        snap_split = pool_split.snapshot()
+        snap_no_split = pool_no_split.snapshot()
+
+        # no_split pool needs a new segment per allocation → more segments
+        self.assertGreater(
+            len(snap_no_split),
+            len(snap_split),
+            f"Expected no_split pool to have more segments, "
+            f"but got {len(snap_no_split)} vs {len(snap_split)}",
+        )
+
+        # no_split pool: each segment must have exactly 1 block (no splitting occurred)
+        for seg in snap_no_split:
+            self.assertEqual(
+                len(seg["blocks"]),
+                1,
+                f"Expected 1 block per no_split segment, got {len(seg['blocks'])}",
+            )
+
+        # no_split pool: 2 total blocks (2 active, no inactive remainder)
+        # split pool: 3 total blocks (2 active + 1 inactive 12 MB remainder)
+        blocks_split = sum(len(seg["blocks"]) for seg in snap_split)
+        blocks_no_split = sum(len(seg["blocks"]) for seg in snap_no_split)
+        self.assertLess(
+            blocks_no_split,
+            blocks_split,
+            f"Expected no_split pool to have fewer total blocks, "
+            f"but got {blocks_no_split} vs {blocks_split}",
+        )
+
+    @serialTest()
+    def test_oom_mempool_with_limited_memory(self):
+        torch.xpu.synchronize()
+        gc.collect()
+        torch.xpu.empty_cache()
+        pool_do_not_use = torch.xpu.MemPool()
+        pool_use = torch.xpu.MemPool(use_on_oom=True)
+
+        _1mb = 1 * 1024 * 1024 // 4  # for int data type
+        orig_fraction = torch.xpu.get_per_process_memory_fraction()
+
+        # pool_use [a] 40 mb
+        # pool_do_not_use [b] 40 mb
+        with torch.xpu.use_mem_pool(pool_do_not_use):
+            a = torch.randn(40 * _1mb, device="xpu")
+        with torch.xpu.use_mem_pool(pool_use):
+            b = torch.randn(40 * _1mb, device="xpu")
+        a_dataptr = a.data_ptr()
+        b_dataptr = b.data_ptr()
+
+        torch.xpu.memory.set_per_process_memory_fraction(1e-9)
+        with self.assertRaises(torch.OutOfMemoryError):
+            # out of memory
+            c = torch.randn(40 * _1mb, device="xpu")
+
+        # pool_do_not_use [] 40 mb
+        # pool_use [] 40 mb
+        del a, b
+
+        # pool_do_not_use [] 40 mb
+        # pool_use [c] 40 mb
+        # c should not oom and instead can use pool_use as fallback
+        c = torch.randn(30 * _1mb, device="xpu")
+        c_dataptr = c.data_ptr()
+
+        with self.assertRaises(torch.OutOfMemoryError):
+            # out of memory since can't use pool_do_not_use
+            d = torch.randn(30 * _1mb, device="xpu")
+
+        # pool_do_not_use [] 40 mb
+        # pool_use [] 40 mb
+        del c
+
+        # expect that we used same memory address for both a and c
+        self.assertEqual(b_dataptr, c_dataptr)
+
+        # pool_do_not_use [] 40 mb
+        # pool_use [e] 40 mb
+        with torch.xpu.use_mem_pool(pool_use):
+            # make sure we can still use pool_use as intended after c is deleted
+            e = torch.randn(20 * _1mb, device="xpu")
+
+        e_dataptr = e.data_ptr()
+        self.assertEqual(e_dataptr, c_dataptr)
+
+        # pool_do_not_use [] 40 mb
+        # pool_use [] 40 mb
+        del e
+
+        # pool's destructor calls emptyCache()
+        del pool_use, pool_do_not_use
+
+        torch.xpu.memory.set_per_process_memory_fraction(orig_fraction)
 
 
 instantiate_parametrized_tests(TestXpu)

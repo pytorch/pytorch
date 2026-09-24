@@ -1191,6 +1191,34 @@ TORCH_LIBRARY(_test_pyobject_dispatch_cpp_fallback_torch_function, m) {
             infer_schema(d, mutates_args=()), """(Tensor x) -> (Tensor[], Tensor)"""
         )
 
+        def d2(
+            x: list[Tensor],
+            y: Optional[list[Tensor]],
+            z: List[Tensor],
+            w: Optional[List[Tensor]],
+            q: Optional[Sequence[Tensor]],
+            r: list[Optional[Tensor]],
+            s: Optional[list[Optional[Tensor]]],
+        ) -> Tensor:
+            return torch.empty([])
+
+        self.assertExpectedInline(
+            infer_schema(d2, mutates_args=()),
+            """(Tensor[] x, Tensor[]? y, Tensor[] z, Tensor[]? w, Tensor[]? q, Tensor?[] r, Tensor?[]? s) -> Tensor""",
+        )
+
+        self.assertExpectedInline(
+            infer_schema(d2, mutates_args={"y", "w", "s"}),
+            """(Tensor[] x, Tensor(a1!)[]? y, Tensor[] z, Tensor(a3!)[]? w, Tensor[]? q, Tensor?[] r, Tensor(a6!)?[]? s) -> Tensor""",
+        )
+
+        def d3(x: Optional[list[Tensor]] = None) -> Tensor:
+            return torch.empty([])
+
+        self.assertExpectedInline(
+            infer_schema(d3, mutates_args=()), """(Tensor[]? x=None) -> Tensor"""
+        )
+
         def e() -> Tensor:
             return torch.empty([])
 
@@ -2870,6 +2898,47 @@ TORCH_LIBRARY(test_autograd_function_backed_op, m) {
         loss.backward()
         self.assertEqual(x.grad, temp)
 
+    def test_torch_ops_warning_propagation(self):
+        x = torch.ones(2)
+        y = torch.ones(2)
+        out = torch.empty(2, 2)
+        with self.assertWarnsRegex(UserWarning, "torch.ger is deprecated"):
+            torch.ops.aten.ger.out(x, y, out=out)
+
+    def test_dispatch_call_boxed_warning_propagation(self):
+        op = torch._C._dispatch_find_schema_or_throw("aten::ger", "out")
+        x = torch.ones(2)
+        y = torch.ones(2)
+        out = torch.empty(2, 2)
+        with self.assertWarnsRegex(UserWarning, "torch.ger is deprecated"):
+            torch._C._dispatch_call_boxed(op, x, y, out=out)
+
+    @scoped_load_inline
+    def test_torch_ops_out_of_range_raises_index_error(self, load_inline):
+        load_inline(
+            name="test_out_of_range_index_error",
+            cpp_sources="""
+#include <torch/extension.h>
+
+#include <stdexcept>
+
+torch::Tensor out_of_range_op(const torch::Tensor& x) {
+  throw std::out_of_range("index 5 is out of bounds");
+}
+
+TORCH_LIBRARY(_test_out_of_range_index_error, m) {
+  m.def("foo(Tensor x) -> Tensor");
+  m.impl("foo", c10::DispatchKey::CPU, TORCH_FN(out_of_range_op));
+}
+""",
+            is_python_module=False,
+            verbose=True,
+        )
+
+        x = torch.ones(2)
+        with self.assertRaisesRegex(IndexError, "index 5 is out of bounds"):
+            torch.ops._test_out_of_range_index_error.foo.default(x)
+
     # Using a non-existent DSO is a quick way to trigger an OSError,
     # which can be used to not break BC.
     def test_load_library(self):
@@ -4505,6 +4574,39 @@ class TestCustomOpAPI(TestCase):
             if prev is None and after is None:
                 continue
             self.assertGreater(after, prev)
+
+    @skipIfTorchDynamo("recursive dynamo")
+    @requires_compile
+    def test_mutated_optional_list(self):
+        @torch.library.custom_op(
+            "_torch_testing::mutated_optional_list", mutates_args={"y"}
+        )
+        def g(x: Tensor, y: Optional[List[Tensor]]) -> None:
+            if y is not None:
+                y[1].copy_(x + 1)
+            return None
+
+        x = torch.randn(3)
+        y = [torch.randn(3), torch.randn(3)]
+        initial_versions = pytree.tree_map_only(
+            torch.Tensor, lambda x: x._version, (x, y)
+        )
+        g(x, y)
+        new_versions = pytree.tree_map_only(torch.Tensor, lambda x: x._version, (x, y))
+        self.assertEqual(initial_versions[0], new_versions[0])
+        for prev, after in zip(initial_versions[1], new_versions[1]):
+            self.assertGreater(after, prev)
+        self.assertEqual(y[1], x + 1)
+
+        g(x, None)
+        new_versions = pytree.tree_map_only(torch.Tensor, lambda x: x._version, (x, y))
+        self.assertEqual(initial_versions[0], new_versions[0])
+
+        compiled_g = torch.compile(g, backend="aot_eager", fullgraph=True)
+        x = torch.randn(3)
+        y = [torch.randn(3), torch.randn(3)]
+        compiled_g(x, y)
+        self.assertEqual(y[1], x + 1)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_mutated_optional_arg_default_none(self):
@@ -6223,7 +6325,7 @@ from torch.testing._internal.optests import opcheck
 op = torch.ops.aten.sin.default
 
 # If you rerun your test with PYTORCH_OPCHECK_PRINT_BETTER_REPRO=1
-# we will fill them in same (args, kwargs) as in your test
+# we will fill in the same (args, kwargs) as in your test
 args = ()  # args to the operator
 kwargs = {}  # kwargs to the operator
 opcheck(op, args, kwargs, test_utils="test_schema")
