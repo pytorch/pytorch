@@ -914,9 +914,7 @@ class TestGetLfRunnersOutput(TestCase):
 
     def test_lf_disabled_returns_empty(self) -> None:
         # arc.yaml is never opened when lf is disabled.
-        self.assertEqual(
-            "", rd.get_lf_runners_output("/nonexistent", lf_enabled=False)
-        )
+        self.assertEqual("", rd.get_lf_runners_output("/nonexistent", lf_enabled=False))
 
     def test_restrict_runners_false_is_kill_switch(self) -> None:
         # The kill-switch short-circuits before arc.yaml is opened.
