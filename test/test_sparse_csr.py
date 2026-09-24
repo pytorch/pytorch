@@ -248,7 +248,7 @@ class TestSparseCompressed(TestCase):
     # workers share one memory limit, so a sibling's allocation can swallow the
     # headroom this test was just told it had.
     @serialTest()
-    @largeTensorTest("30GB", "cpu")
+    @largeTensorTest("32GB", "cpu")
     def test_invalid_input_csr_large(self):
         rows = 2 ** 31
         with self.assertRaisesRegex(RuntimeError, '32-bit integer overflow in row dimension'):
