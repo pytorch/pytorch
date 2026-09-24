@@ -1515,7 +1515,7 @@ def _make_node_magic(method: str, func: Callable[..., sympy.Basic]) -> None:
             return to_node(
                 self, handle_sym_dispatch(op, (wrap_node(self), wrap_node(other)), {})
             )
-        if not isinstance(other, SymNode):
+        if not isinstance(other, SymNodeTypes):
             raise AssertionError(f"Expected SymNode, got {type(other)}")
 
         # See Note [symbolic op memo] in symbolic_shapes.py. The cache holds the

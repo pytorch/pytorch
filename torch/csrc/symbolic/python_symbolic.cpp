@@ -795,6 +795,8 @@ void initSymbolicBindings(PyObject* module) {
   sm.def("_set_suppress_guards", [](bool v) { suppress_guards_tls() = v; });
   sm.def("_suppress_guards", [] { return suppress_guards_tls(); });
   sm.def("_set_pre_dispatch_proxy", [](bool v) { pre_dispatch_proxy_set = v; });
+  sm.def("_roundtrip_symbool", [](const c10::SymBool& v) { return v; });
+  sm.def("_roundtrip_symfloat", [](const c10::SymFloat& v) { return v; });
 
   py::class_<PyExpr>(sm, "_Expr")
       .def(
@@ -1314,6 +1316,18 @@ void initSymbolicBindings(PyObject* module) {
           "hint",
           [](const NativeSymNodeImpl& n) { return hint_to_py(n.hint()); })
       .def_property_readonly(
+          "_hint",
+          [](const NativeSymNodeImpl& n) { return hint_to_py(n.hint()); })
+      .def_property_readonly(
+          "shape_env",
+          [](const NativeSymNodeImpl& n) -> py::object {
+            const py::object& ref = binding_of(*n.env()).shape_env;
+            return ref.is_none() ? py::none() : ref();
+          })
+      // Native envs exist only without translation validation.
+      .def_property_readonly(
+          "fx_node", [](const NativeSymNodeImpl& /*n*/) { return false; })
+      .def_property_readonly(
           "constant",
           [](const NativeSymNodeImpl& n) { return hint_to_py(n.constant()); })
       .def_property_readonly(
@@ -1324,8 +1338,41 @@ void initSymbolicBindings(PyObject* module) {
       .def("maybe_as_int", &NativeSymNodeImpl::maybe_as_int)
       .def("str", &NativeSymNodeImpl::str)
       .def("statically_known_true", &NativeSymNodeImpl::statically_known_true)
-      .def("wrap_float", [](NativeSymNodeImpl& self, double v) {
-        return node_to_py(self.wrap_float(v));
+      .def(
+          "wrap_float",
+          [](NativeSymNodeImpl& self, double v) {
+            return node_to_py(self.wrap_float(v));
+          })
+      // Copies and pickles are Python SymNodes. _SymNode.__deepcopy__ clones.
+      .def(
+          "__deepcopy__",
+          [](const NativeSymNodeImpl& self, py::handle memo) {
+            return py::module_::import("copy").attr("deepcopy")(
+                node_to_py(materialize(self)), memo);
+          })
+      .def(
+          "__reduce_ex__",
+          [](const NativeSymNodeImpl& self, py::handle /*protocol*/) {
+            return py::make_tuple(
+                py::module_::import("copy").attr("copy"),
+                py::make_tuple(node_to_py(materialize(self))));
+          })
+      // Every other SymNode method runs its Python impl with the native node
+      // as self; those read only the attributes bound here.
+      .def("__getattr__", [](py::handle self, const std::string& name) {
+        py::handle cls = python_symnode_class();
+        py::object attr = cls.attr("__dict__").attr("get")(name);
+        bool dunder = name.size() > 4 && name.rfind("__", 0) == 0 &&
+            name.compare(name.size() - 2, 2, "__") == 0;
+        if (attr.is_none() || dunder) {
+          // @allow-raw-throw: getattr and hasattr need an AttributeError
+          throw py::attribute_error(
+              "'_NativeSymNode' object has no attribute '" + name + "'");
+        }
+        if (py::hasattr(attr, "__get__")) {
+          return attr.attr("__get__")(self, cls);
+        }
+        return attr;
       });
   for (auto [name, fn] :
        {std::pair{"add", &c10::SymNodeImpl::add},

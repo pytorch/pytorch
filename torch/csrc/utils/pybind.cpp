@@ -4,6 +4,20 @@
 
 namespace pybind11::detail {
 
+namespace {
+
+// A SymFloat or SymBool node is a Python object or a native
+// (torch._C._symbolic) node.
+c10::SymNode load_symnode(py::handle node) {
+  if (py::isinstance(node, torch::get_native_symnode_class())) {
+    return py::cast<c10::SymNode>(node);
+  }
+  return c10::make_intrusive<torch::impl::PythonSymNodeImpl>(
+      py::reinterpret_borrow<py::object>(node));
+}
+
+} // namespace
+
 bool type_caster<c10::SymInt>::load(py::handle src, bool /*unused*/) {
   if (torch::is_symint(src)) {
     auto node = src.attr("node");
@@ -62,8 +76,7 @@ py::handle type_caster<c10::SymInt>::cast(
 
 bool type_caster<c10::SymFloat>::load(py::handle src, bool /*unused*/) {
   if (torch::is_symfloat(src)) {
-    value = c10::SymFloat(static_cast<c10::SymNode>(
-        c10::make_intrusive<torch::impl::PythonSymNodeImpl>(src.attr("node"))));
+    value = c10::SymFloat(load_symnode(src.attr("node")));
     return true;
   }
 
@@ -80,11 +93,9 @@ py::handle type_caster<c10::SymFloat>::cast(
     return_value_policy /* policy */,
     handle /* parent */) {
   if (si.is_symbolic()) {
-    // TODO: generalize this to work with C++ backed class
-    auto* py_node =
-        dynamic_cast<torch::impl::PythonSymNodeImpl*>(si.toSymNodeImpl().get());
-    TORCH_INTERNAL_ASSERT(py_node);
-    return torch::get_symfloat_class()(py_node->getPyObj()).release();
+    return torch::get_symfloat_class()(
+               torch::impl::PythonSymNodeImpl::as_py_node(si.toSymNodeImpl()))
+        .release();
   } else {
     return py::cast(si.as_float_unchecked()).release();
   }
@@ -92,8 +103,7 @@ py::handle type_caster<c10::SymFloat>::cast(
 
 bool type_caster<c10::SymBool>::load(py::handle src, bool /*unused*/) {
   if (torch::is_symbool(src)) {
-    value = c10::SymBool(static_cast<c10::SymNode>(
-        c10::make_intrusive<torch::impl::PythonSymNodeImpl>(src.attr("node"))));
+    value = c10::SymBool(load_symnode(src.attr("node")));
     return true;
   }
 
@@ -112,11 +122,9 @@ py::handle type_caster<c10::SymBool>::cast(
   if (auto m = si.maybe_as_bool()) {
     return py::cast(*m).release();
   } else {
-    // TODO: generalize this to work with C++ backed class
-    auto* py_node =
-        dynamic_cast<torch::impl::PythonSymNodeImpl*>(si.toSymNodeImpl().get());
-    TORCH_INTERNAL_ASSERT(py_node);
-    return torch::get_symbool_class()(py_node->getPyObj()).release();
+    return torch::get_symbool_class()(
+               torch::impl::PythonSymNodeImpl::as_py_node(si.toSymNodeImpl()))
+        .release();
   }
 }
 

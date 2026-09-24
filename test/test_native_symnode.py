@@ -1,6 +1,8 @@
 # Owner(s): ["module: dynamic shapes"]
 import contextlib
+import copy
 import os
+import pickle
 import random
 import subprocess
 import sys
@@ -3486,6 +3488,89 @@ class TestNativeSymNode(TestCase):
             RuntimeError, "ShapeEnv of a native SymNode is gone"
         ):
             n.truediv(n)
+
+    def test_attributes(self):
+        env, syms = self.make_env()
+        n, p = self.pair(env, syms[0], int, 5)
+        self.assertIs(n.shape_env, env)
+        self.assertIs(n.fx_node, p.fx_node)
+        self.assertEqual(n._hint, p._hint)
+        self.assertIsNone(self.pair(env, syms[3], int, None)[0]._hint)
+        self.assertTrue(n._value_eq(p))
+        self.assertEqual(n._value_hash(), p._value_hash())
+        w = n.with_shape_env(env)
+        self.assertIs(type(w), SymNode)
+        self.check(w, p)
+        with self.assertRaises(AttributeError):
+            n.nonexistent
+        with self.assertRaises(AttributeError):
+            n.__add__
+
+    def test_python_methods(self):
+        # Methods without a native binding run the Python impl on the native node.
+        env, syms = self.make_env()
+        a, d = self.pair(env, syms[0], int, 5), self.pair(env, syms[3], int, -4)
+        t = self.call(*a, "lt", d)
+        binary = ("lshift", "rshift", "bitwise_and", "bitwise_or", "bitwise_xor")
+        for x in (a, d):
+            for method in ("abs", "pos", "trunc", "round", "is_integer", "sym_sqrt"):
+                self.call(*x, method)
+            for method in binary:
+                self.call(*x, method, a)
+            self.assertIsNone(x[0].maybe_as_float())
+        self.assertIsNone(t[0].maybe_as_bool())
+        self.assertIs(t[0].wrap_bool(True).maybe_as_bool(), True)
+        self.call(*t, "xor", t)
+        self.assertEqual(len(env.guards), 0)
+        self.assertEqual(a[0].evaluate(), a[1].evaluate())
+        self.assertEqual(len(env.guards), 1)
+
+    def test_python_lhs(self):
+        env, syms = self.make_env()
+        a, b = (self.pair(env, s, int, int(env.backed_var_to_val[s])) for s in syms[:2])
+        for method in self.INT_OPS + ["truediv", "pow"]:
+            self.check(getattr(a[1], method)(b[0]), getattr(a[1], method)(b[1]))
+        t = self.call(*a, "lt", b)
+        self.check(t[1].sym_ite(a[0], b[0]), t[1].sym_ite(a[1], b[1]))
+        ab = torch.SymInt(a[1]) * torch.SymInt(b[0])
+        self.assertEqual(str(ab), str(syms[0] * syms[1]))
+
+        # C++ PythonSymNodeImpl ops with a native operand.
+        def run(native):
+            env, syms = self.make_env(native)
+            x = torch.SymInt(SymNode(syms[0], env, int, 5))
+            y = torch.SymInt(self.node(env, syms[1], int, 7))
+            t = torch.empty((x, y), device="meta")
+            return str(t.numel()), str(t.stride()), str(torch.sym_ite(x < y, x, y))
+
+        self.assertEqual(run(True), run(False))
+
+    def test_casters(self):
+        env, syms = self.make_env()
+        n = env._native_env.make_node(syms[0], int, 5)
+        t = n.lt(n.wrap_int(9))
+        self.assertIs(type(t), _NativeSymNode)
+        b = torch._C._symbolic._roundtrip_symbool(torch.SymBool(t))
+        self.assertIs(b.node, t)
+        f = torch._C._symbolic._roundtrip_symfloat(torch.SymFloat(n.sym_float()))
+        self.assertEqual(str(f), f"ToFloat({syms[0]})")
+        x = torch.SymInt(n)
+        self.assertIs(x.node, x.node)
+        t = torch.empty((x, 2), device="meta")
+        self.assertIs(t.size(0).node, n)
+        self.assertIs(t.size(0).node, t.size(0).node)
+
+    def test_copy(self):
+        env, syms = self.make_env()
+        n, p = self.pair(env, syms[0], int, 5)
+        memo = {id(env): env}
+        c = copy.deepcopy(n, memo)
+        self.assertIs(type(c), SymNode)
+        self.assertIs(c.shape_env, env)
+        self.check(c, copy.deepcopy(p, memo))
+        self.assertIs(type(copy.deepcopy(n).shape_env), ShapeEnv)
+        self.assertIs(copy.copy(n).shape_env, env)
+        self.check(pickle.loads(pickle.dumps(n)), pickle.loads(pickle.dumps(p)))
 
 
 instantiate_parametrized_tests(TestNativeExpr)
