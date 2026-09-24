@@ -469,13 +469,14 @@ class TestStandaloneInductor(TestCase):
         self.assertIn("arch=compute_86,code=sm_86", cmd)
         self.assertNotIn("arch=compute_100a,code=sm_100a", cmd)
 
+    @mock.patch.dict(os.environ, {"PYTORCH_ROCM_ARCH": "gfx900,gfx90a,gfx942"})
+    @mock.patch("torch.cuda.is_available", return_value=False)
     @mock.patch.dict(os.environ, {"TORCH_CUDA_ARCH_LIST": "7.0;8.0;8.6;9.0"})
     @mock.patch(
         "torch._inductor.codegen.cuda.compile_utils._nvcc_arch_as_compile_option",
         return_value="100a",
     )
-    @unittest.skipIf(torch.version.hip is not None, "CUDA-only")
-    def test_aoti_cuda_cmake_uses_multi_arch_gencode_flags(self, _):
+    def test_aoti_cuda_cmake_uses_multi_arch_gencode_flags(self, _nvcc_arch, _cuda_available):
         build_option = BuildOptionsBase(compiler="c++")
         with tempfile.TemporaryDirectory() as tmp_dir:
             cmake_path = os.path.join(tmp_dir, "CMakeLists.txt")
@@ -485,16 +486,26 @@ class TestStandaloneInductor(TestCase):
                 output_dir=tmp_dir,
                 BuildOption=build_option,
             )
-            with config.patch({"cuda.arch": "80"}):
+            cuda_arch_patch = (
+                {"cuda.arch": "80"} if torch.version.hip is None else {}
+            )
+            with config.patch(cuda_arch_patch):
                 cpp_builder.save_compile_cmd_to_cmake(cmake_path, "cuda")
             with open(cmake_path) as f:
                 cmake_contents = f.read()
 
-        self.assertNotIn("compute_70", cmake_contents)
-        self.assertNotIn("compute_100a", cmake_contents)
-        self.assertIn("-gencode arch=compute_80,code=sm_80", cmake_contents)
-        self.assertIn("-gencode arch=compute_86,code=sm_86", cmake_contents)
-        self.assertIn("-gencode arch=compute_90,code=sm_90", cmake_contents)
+        if torch.version.hip is not None:
+            self.assertNotIn("-gencode", cmake_contents)
+            self.assertNotIn("enable_language(CUDA)", cmake_contents)
+            self.assertIn("--offload-arch=gfx900", cmake_contents)
+            self.assertIn("--offload-arch=gfx90a", cmake_contents)
+            self.assertIn("--offload-arch=gfx942", cmake_contents)
+        else:
+            self.assertNotIn("compute_70", cmake_contents)
+            self.assertNotIn("compute_100a", cmake_contents)
+            self.assertIn("-gencode arch=compute_80,code=sm_80", cmake_contents)
+            self.assertIn("-gencode arch=compute_86,code=sm_86", cmake_contents)
+            self.assertIn("-gencode arch=compute_90,code=sm_90", cmake_contents)
 
     def test_aoti_cuda_save_kernel_recompiles_for_target_arch(self):
         from torch._inductor.runtime.triton_heuristics import (
