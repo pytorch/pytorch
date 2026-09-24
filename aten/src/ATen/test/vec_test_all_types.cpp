@@ -610,6 +610,41 @@ namespace {
           AssertVectorized<vec>(NAME_INFO(isnan), expected, actual).check();
         }
     }
+#if !defined(CPU_CAPABILITY_SVE256) && !defined(CPU_CAPABILITY_SVE128) && \
+    !defined(CPU_CAPABILITY_VSX) && !defined(CPU_CAPABILITY_ZVECTOR)
+    TYPED_TEST(Nan, ReduceMax) {
+        using vec = TypeParam;
+        using VT = ValueType<TypeParam>;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+        CACHE_ALIGN VT test_vals[vec::size()];
+        // Every NaN placement, with the finite maximum rotated across lanes: an
+        // x86 max instruction returns its second operand for NaN, which can
+        // displace the true maximum rather than merely drop the NaN. All lanes
+        // are negative so that a zero-seeded reduction is caught too.
+        auto vals = 1 << (vec::size());
+        for (const auto val : c10::irange(vals)) {
+          VT expected = -std::numeric_limits<VT>::infinity();
+          bool has_nan = false;
+          for (int i = 0; i < vec::size(); ++i) {
+            if (val & (1 << i)) {
+              test_vals[i] = std::numeric_limits<VT>::quiet_NaN();
+              has_nan = true;
+            } else {
+              test_vals[i] = -(VT)((i + val) % vec::size() + 1);
+              expected = std::max(expected, test_vals[i]);
+            }
+          }
+          VT actual = vec::loadu(test_vals).reduce_max();
+          if (has_nan) {
+            ASSERT_TRUE(std::isnan(actual))
+                << "reduce_max dropped a NaN, NaN mask: " << val
+                << ", got: " << actual;
+          } else {
+            ASSERT_EQ(expected, actual) << "reduce_max, NaN mask: " << val;
+          }
+        }
+    }
+#endif
     TEST(NanFloat16, IsNan) {
       for (unsigned int ii = 0; ii < 0xFFFF; ++ii) {
         c10::Half val(ii, c10::Half::from_bits());
