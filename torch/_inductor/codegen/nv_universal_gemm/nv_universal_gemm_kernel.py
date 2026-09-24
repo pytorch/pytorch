@@ -19,6 +19,10 @@ import threading
 from collections import OrderedDict
 from typing import Any, cast, TYPE_CHECKING
 
+
+if TYPE_CHECKING:
+    import torch
+
 from torch._inductor.codegen.common import (
     IndentedBuffer,
     Kernel,
@@ -240,6 +244,7 @@ def _compile_nvgemm(
     base_kernel=None,
     prefetch_mode: str | None = None,
     use_pdl: bool | None = None,
+    kernel_output_dtype: torch.dtype | str | None = None,
 ):
     """Compile an NVGEMM artifact, trying a fallback (disk cache) first.
 
@@ -280,6 +285,7 @@ def _compile_nvgemm(
             base_kernel=base_kernel,
             prefetch_mode=prefetch_mode,
             use_pdl=use_pdl,
+            kernel_output_dtype=kernel_output_dtype,
             epilogue_specialization=_local_reduce_specialization(args_kwargs),
         )
 
@@ -671,6 +677,7 @@ def _lookup_gemm_kernel(
     base_kernel: Any | None = None,
     prefetch_mode: str | None = None,
     use_pdl: bool | None = None,
+    kernel_output_dtype: torch.dtype | str | None = None,
     epilogue_specialization: tuple = (),
 ):
     from torch._inductor.codegen.nv_universal_gemm.kernel_cache import (
@@ -699,6 +706,7 @@ def _lookup_gemm_kernel(
                 cc,
                 prefetch_mode=prefetch_mode,
                 use_pdl=use_pdl,
+                kernel_output_dtype=kernel_output_dtype,
             )
         if kernel is None:
             kernel = get_kernel_by_name(kernel_name)
@@ -713,6 +721,7 @@ def _lookup_gemm_kernel(
             cc,
             prefetch_mode=prefetch_mode,
             use_pdl=use_pdl,
+            kernel_output_dtype=kernel_output_dtype,
         )
     epilogue_args = getattr(args, "epilogue", None) or epilogue_args
     kernel = get_efc_kernel_with_epilogue(
@@ -981,6 +990,7 @@ def _nvgemm_run(
     output_scale=None,
     prefetch_mode: str | None = None,
     use_pdl: bool | None = None,
+    kernel_output_dtype: torch.dtype | str | None = None,
 ):
     variant_kwargs = dict(variant_kwargs or {})
     variant_kwargs["logical_m"] = out.shape[-2]
@@ -1122,6 +1132,7 @@ def _nvgemm_run(
             cc=_current_target_sm(dev_idx).cc,
             prefetch_mode=prefetch_mode,
             use_pdl=use_pdl,
+            kernel_output_dtype=kernel_output_dtype,
         )
 
         if was_compiled:
@@ -1210,6 +1221,7 @@ def _nvgemm_precompile(
     output_scale_param_name: str | None = None,
     prefetch_mode: str | None = None,
     use_pdl: bool | None = None,
+    kernel_output_dtype: torch.dtype | str | None = None,
 ):
     """Precompile an NVGEMM kernel in a subprocess for parallel compilation.
 
@@ -1290,6 +1302,7 @@ def _nvgemm_precompile(
                 cc=cc,
                 prefetch_mode=prefetch_mode,
                 use_pdl=use_pdl,
+                kernel_output_dtype=kernel_output_dtype,
             )
             disk_cache_set(
                 disk_fn_cache,
@@ -1454,6 +1467,10 @@ class NVUniversalGemmKernel(Kernel):
         kernel_name_str = self.kernel_metadata["kernel_name"]
         prefetch_mode = "1" if self.kernel_metadata.get("use_prefetch", False) else "0"
         use_pdl = bool(self.kernel_metadata.get("use_pdl", False))
+        kernel_output_dtype = self.kernel_metadata.get(
+            "output_dtype", self.output_node.get_dtype()
+        )
+        kernel_output_dtype_name = str(kernel_output_dtype).removeprefix("torch.")
         acc_dtype_str = CuteDSLOpOverrides.TORCH_TO_CUTE_DTYPE.get(
             self.accumulator_type, "cutlass.Float32"
         )
@@ -1713,6 +1730,7 @@ class NVUniversalGemmKernel(Kernel):
                     code.writeline(f"output_scale={direct_output_scale},")
                 code.writeline(f"prefetch_mode={prefetch_mode!r},")
                 code.writeline(f"use_pdl={use_pdl!r},")
+                code.writeline(f"kernel_output_dtype={kernel_output_dtype_name!r},")
             code.writeline(")")
 
         # -- Precompile hook --
@@ -1747,6 +1765,7 @@ class NVUniversalGemmKernel(Kernel):
                     code.writeline(f"output_scale_param_name={direct_output_scale!r},")
                 code.writeline(f"prefetch_mode={prefetch_mode!r},")
                 code.writeline(f"use_pdl={use_pdl!r},")
+                code.writeline(f"kernel_output_dtype={kernel_output_dtype_name!r},")
             code.writeline(")")
 
         return code.getvalue()

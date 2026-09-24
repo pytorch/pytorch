@@ -791,7 +791,7 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
             return []
 
         if prefetch_mode is None:
-            prefetch_mode = config.nvgemm_prefetch
+            prefetch_mode = "0"
         if use_pdl is None:
             use_pdl = config.nvgemm_pdl == "1"
         prefetch_options = {

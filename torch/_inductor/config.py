@@ -265,6 +265,13 @@ alignment_asserts = (
     == "1"
 )
 
+# Strict mode for input alignment: assert alignment of graph inputs which
+# were codegenned under the assumption that they are aligned, instead of the
+# runtime silently realigning misaligned inputs with a clone.
+alignment_asserts_inputs = (
+    os.environ.get("TORCHINDUCTOR_ALIGNMENT_ASSERTS_INPUTS") == "1"
+)
+
 # enable loop reordering based on input orders
 pick_loop_orders = True
 
@@ -712,15 +719,6 @@ nvgemm_max_profiling_configs: int | None = _nvgemm_max_profiling_configs_default
     "TORCHINDUCTOR_NVGEMM_MAX_PROFILING_CONFIGS", "10"
 )
 
-# NVFP4 needs a smaller pool than BF16. This additional ceiling composes with
-# a finite general NVGEMM cap; disabling the general cap still tunes all
-# configs. Representative inference shapes across M=1..5120 retained their
-# selected-kernel performance with three ranked configs per family while
-# reducing candidate benchmarking time.
-nvgemm_nvfp4_max_profiling_configs: int | None = _nvgemm_max_profiling_configs_default(
-    "TORCHINDUCTOR_NVGEMM_NVFP4_MAX_PROFILING_CONFIGS", "3"
-)
-
 # When enabled, adds supplement kernel configs that nvMatmulHeuristics
 # doesn't explore (certain tile/cluster combos that empirically beat
 # cuBLAS on decode shapes). These are added on top of the heuristic
@@ -729,35 +727,10 @@ nvgemm_supplement_configs: bool = (
     os.environ.get("TORCHINDUCTOR_NVGEMM_SUPPLEMENT_CONFIGS", "0") == "1"
 )
 
-# When enabled, adds swap_ab NVGEMM choices that swap A/B operands so the
-# large N dimension goes on the M-axis. Improves tile utilization for
-# small-M decode shapes typical in LLM inference (M << N).
+# Force swap_ab NVGEMM choices outside the automatically selected NVFP4
+# decode regime. Swapping A/B puts the large N dimension on the well-tiled
+# M-axis; NVFP4 shapes with M <= 256 and N >= 1024 enable it automatically.
 nvgemm_swap_ab: bool = os.environ.get("TORCHINDUCTOR_NVGEMM_SWAP_AB", "0") == "1"
-
-# CUDA-graph replay overhead is large enough to distort autotuning for the
-# short, decode-range NVFP4 GEMMs used during LLM inference.  Use a modest
-# scoped unroll for M <= 256 NVGEMM-only requests and native output-scale
-# choices, where the same unroll is propagated to every backend. Other
-# mixed-backend autotuning uses one replay per candidate. Set to 1 to disable.
-nvgemm_autotune_cudagraph_unroll = int(
-    os.environ.get("TORCHINDUCTOR_NVGEMM_AUTOTUNE_CUDAGRAPH_UNROLL", "16")
-)
-
-# Benchmark medium-M NVFP4 GEMMs against a rotating pool of weight tensors large
-# enough to exceed L2. Replaying one weight makes it artificially hot and can
-# select a slower kernel for transformer inference, where each layer uses a
-# different weight matrix. The benchmark request applies this only to small-M
-# NVFP4 inference shapes; the rotation pool is sized from the actual operand
-# footprint and device cache capacity.
-nvgemm_autotune_cold_cache: bool = (
-    os.environ.get("TORCHINDUCTOR_NVGEMM_AUTOTUNE_COLD_CACHE", "0") == "1"
-)
-
-# Controls weight-prefetch variants for the vendored SM100 block-scaled GEMM.
-# "autotune" generates both variants, while the NVGEMM heuristic admits
-# prefetched candidates only for measured shape-scoped configurations so it
-# does not double compile cost for every selected tile.
-nvgemm_prefetch: str = os.environ.get("TORCHINDUCTOR_NVGEMM_PREFETCH", "0")
 
 # Control programmatic dependent launch for the vendored SM100 block-scaled
 # NVGEMM kernel: "0" disables it, "auto" applies the measured NVFP4 shape
@@ -768,7 +741,7 @@ nvgemm_prefetch: str = os.environ.get("TORCHINDUCTOR_NVGEMM_PREFETCH", "0")
 # Eligible scheduler-adjacent same-stream Triton consumers also continue the
 # PDL chain. Workspace-backed and composite launches are excluded; deferred
 # alignment copies remain ordered on the same stream before the consumer.
-nvgemm_pdl: str = os.environ.get("TORCHINDUCTOR_NVGEMM_PDL", "0")
+nvgemm_pdl: str = os.environ.get("TORCHINDUCTOR_NVGEMM_PDL", "auto")
 
 # Triton conv templates show wins on ROCm; on CUDA, profiling shows no gains on H100.
 _conv_default_backends = "ATEN,TRITON" if torch.version.hip else "ATEN"
@@ -1085,6 +1058,17 @@ loop_index_inversion_in_fusion: bool = True
 #
 # For the cases loop ordering after fusion does not help, we don't lose much.
 score_fusion_memory_threshold = 10
+
+# Memory-timeline fusion gating.
+#   None: disable that threshold dimension
+#   0: allow no graph-peak increase
+#   value: allow total graph-peak delta up to that limit
+# The absolute threshold is in GiB: 1 means 1024**3 bytes.
+# The percentage threshold is fractional: 0.1 means 10%.
+# The accepted delta is measured against the original graph peak before fusion.
+# When both thresholds are set, the tighter limit wins.
+fusion_memory_timeline_peak_memory_increase_gb: float | None = None
+fusion_memory_timeline_peak_memory_pct_threshold: float | None = None
 
 # For Triton Templates, select fastest of best template + epilogue vs best template + separate epilogue kernel
 benchmark_epilogue_fusion = (
@@ -2569,6 +2553,19 @@ class aot_inductor:
     # autotuning. When False (default), tensors are shared across kernels
     # and del'd at their last consumer (faster but higher peak memory).
     autotune_per_kernel_alloc: bool = False
+
+    # Offload graph constants to disk across the autotune block once they occupy
+    # this share of the device. AOT only.
+    #
+    # Defaults to 1.0, which never fires: constants are resident on the card, so
+    # they cannot reach 100% of its capacity. The offload is opt-in until it has
+    # more production mileage; set it to e.g. 0.10 to enable.
+    #
+    # A fraction rather than an absolute size so a chosen threshold scales with
+    # the card: 0.10 is ~9.5 GiB on a 95 GiB H100 but ~29 GiB on a 288 GiB
+    # MI350X, which should not pay the spill for a working set that only
+    # threatens the smaller card.
+    autotune_offload_constants_min_device_fraction: float = 1.0
 
     # AOTInductor output path
     # If an absolute path is specified, the generated lib files will be stored under the directory;

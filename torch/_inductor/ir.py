@@ -6739,6 +6739,7 @@ class NVUniversalGemmBuffer(TemplateBuffer):
                 "use_pdl",
                 getattr(kernel.metadata.design, "use_pdl", False),
             ),
+            "output_dtype": layout.dtype,
         }
         # Override the instance attribute set by parent with our method
         # This is necessary because TemplateBuffer stores make_kernel_render as instance attr
@@ -9037,7 +9038,8 @@ class InplaceCopyFallback(ExternKernel):
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         (dst, src, non_blocking) = self.codegen_args()
-        wrapper.codegen_device_copy(src, dst, non_blocking)
+        with wrapper.profiled_kernel_scope("aoti_torch_copy_", self):
+            wrapper.codegen_device_copy(src, dst, non_blocking)
 
     def should_allocate(self) -> bool:
         return False
@@ -9335,12 +9337,21 @@ class DeviceCopy(ExternKernelOut):
         args = self.codegen_args()
         if len(args) != 2:
             raise AssertionError("Expected len(args) == 2")
-        if self.output_view:
-            wrapper.codegen_device_copy(
-                args[0], self.output_view.codegen_reference(), args[1]
-            )
-        else:
-            wrapper.codegen_device_copy(args[0], self.codegen_reference(), args[1])
+        # copy_(Tensor(a!) self, Tensor src, bool non_blocking): the
+        # destination is this node's own output, not one of its inputs, so
+        # deriving the metadata from inputs would record src in self's place
+        # and drop the destination entirely.
+        destination = self.output_view or self
+        profiling_args = wrapper.make_profiling_args(
+            [destination, self.inputs[0], None]
+        )
+        with wrapper.profiled_kernel_scope("aoti_torch_copy_", self, profiling_args):
+            if self.output_view:
+                wrapper.codegen_device_copy(
+                    args[0], self.output_view.codegen_reference(), args[1]
+                )
+            else:
+                wrapper.codegen_device_copy(args[0], self.codegen_reference(), args[1])
         if isinstance(self.layout, Layout) and self.layout.is_pinned:
             wrapper.sync_d2h_copy(self.get_name())
 
@@ -9785,6 +9796,10 @@ class FallbackKernel(ExternKernelAlloc):
             example_output, (torch._C.ScriptObject, FakeScriptObject)
         ) or is_custom_class_obj(example_output):
             return torch.device("cpu")
+        if isinstance(example_output, dict):
+            # generate_output builds a MultiOutput per value, so the values carry
+            # the devices; the keys never do.
+            example_output = list(example_output.values())
         if isinstance(example_output, (list, tuple)):
             device_set = OrderedSet(
                 # pyrefly: ignore [bad-argument-type]
@@ -10388,8 +10403,6 @@ class FallbackKernel(ExternKernelAlloc):
             device = torch.device("cpu")
 
         def create_direct_output(output: torch.Tensor) -> FallbackKernel:
-            if not device:
-                raise AssertionError("Not sure where to find device info")
             packed = cls(
                 cls.tensor_to_layout(output),
                 kernel,
@@ -10443,8 +10456,12 @@ class FallbackKernel(ExternKernelAlloc):
             return create_direct_output(example_output)
 
         else:
+            # No tensor in or out, so there is no device to inherit and nothing to
+            # run on but the host. An op that produces no output keeps None above --
+            # its placement is decided by the scheduler, and forcing a device there
+            # moves stream and event HOPs out of the stream block they belong to.
             if not device:
-                raise AssertionError("Not sure where to find device info")
+                device = torch.device("cpu")
             packed = cls(
                 MultiOutputLayout(device=device),
                 kernel,
@@ -10503,7 +10520,7 @@ class FallbackKernel(ExternKernelAlloc):
         if isinstance(outputs, (list, tuple)):
             packed.outputs = outputs
         elif isinstance(outputs, dict):
-            packed.outputs = tuple(outputs)
+            packed.outputs = tuple(outputs.values())
         else:
             packed.outputs = [outputs]
 
