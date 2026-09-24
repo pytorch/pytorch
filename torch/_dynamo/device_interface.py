@@ -325,6 +325,7 @@ class CudaInterface(DeviceInterface):
                 raise TritonUnavailableError("triton not built with the 'amd' backend")
         elif "nvidia" not in triton.backends.backends:
             raise TritonUnavailableError("triton not built with the 'nvidia' backend")
+        
     @staticmethod
     def get_config() -> Any:
         from ...config import cutlass as inductor_cutlass_config
