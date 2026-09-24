@@ -357,6 +357,15 @@ def _lazy_init() -> None:
             )
         if not _is_compiled():
             raise AssertionError("Torch not compiled with XPU enabled")
+        # On Intel Xe architecture (Arc A-Series and older), Level Zero Sysman
+        # must be initialized BEFORE the XPU runtime; otherwise a later
+        # zesInit() fails with ZE_RESULT_ERROR_UNINITIALIZED and the telemetry
+        # APIs (utilization/clock_rate/power_draw) become unusable. Enumerate
+        # Sysman devices here so telemetry works on every XPU code path,
+        # not only when device_count() happens to be called first.
+        # See https://github.com/pytorch/pytorch/issues/185198
+        if not _cached_zes_device_infos:
+            _enum_zes_device_infos(_parse_visible_devices(strict=True))
         # This function inits XPU backend and detects bad fork processing.
         torch._C._xpu_init()
         # Some of the queued calls may reentrantly call _lazy_init(); We need to
@@ -551,7 +560,7 @@ def can_device_access_peer(device: Device, peer: Device) -> bool:
 
     Args:
         device (torch.device or int or str): selected device.
-        peer (torch.device or int or str): peer device to query access to.
+        peer (torch.device or str or int): peer device to query access to.
 
     Returns:
         bool: ``True`` if ``device`` can access ``peer``, ``False`` otherwise.
