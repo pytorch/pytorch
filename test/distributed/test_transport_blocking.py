@@ -47,7 +47,7 @@ class _TestTransport(Transport):
     def register_memory(self, tensor):
         return tensor
 
-    def write(self, local_buffer, remote_buffer, *, async_op=False):
+    def write(self, local_buffer, remote_buffer, *, async_op=False, timeout=None):
         device = (
             local_buffer.device
             if isinstance(local_buffer, torch.Tensor)
@@ -57,10 +57,13 @@ class _TestTransport(Transport):
             lambda: self.operation(local_buffer, remote_buffer),
             device,
             async_op=async_op,
+            timeout=timeout,
         )
 
-    def read(self, local_buffer, remote_buffer, *, async_op=False):
-        return self.write(local_buffer, remote_buffer, async_op=async_op)
+    def read(self, local_buffer, remote_buffer, *, async_op=False, timeout=None):
+        return self.write(
+            local_buffer, remote_buffer, async_op=async_op, timeout=timeout
+        )
 
     def close(self) -> None:
         self._close_work()
