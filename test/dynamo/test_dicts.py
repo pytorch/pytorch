@@ -1105,6 +1105,21 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref, res)
         self.assertTrue(type(res) is types.MappingProxyType)
 
+    def test_mapping_proxy_union(self):
+        def fn():
+            mapping = {"a": 0, "b": 1}
+            view = types.MappingProxyType(mapping)
+            other = {"b": 2, "c": 3}
+            other_view = types.MappingProxyType(other)
+            error = "no exception"
+            try:
+                view |= other
+            except TypeError as exc:
+                error = str(exc)
+            return view | other, other | view, view | other_view, mapping, other, error
+
+        self.assertEqual(fn(), torch.compile(fn, backend="eager", fullgraph=True)())
+
     def test_mapping_proxy_for_nonlocal(self):
         d = {"a": 2, "b": 3, "c": 5}
 

@@ -68,6 +68,7 @@ from .constant import ConstantVariable
 from .hashable import HashableTracker, is_hashable, raise_unhashable
 from .object_protocol import (
     _is_method_type,
+    binary_op,
     generic_getitem,
     generic_richcompare_bool,
     mro_lookup,
@@ -1096,6 +1097,24 @@ class MappingProxyVariable(VariableTracker):
         # TODO(follow-up): add tests for invalid key type, missing key
         self._check_mutation_guard(tx)
         return self.dv_dict.mp_subscript_impl(tx, key)
+
+    def nb_or_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        self._check_mutation_guard(tx)
+        left, right = (other, self.dv_dict) if reverse else (self.dv_dict, other)
+        return binary_op(tx, left, right, "nb_or", "|")
+
+    def nb_inplace_or_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+    ) -> VariableTracker:
+        # mappingproxy_ior rejects |= rather than falling back to nb_or
+        raise_type_error(tx, "'|=' is not supported by mappingproxy; use '|' instead")
 
     def call_method(
         self,
