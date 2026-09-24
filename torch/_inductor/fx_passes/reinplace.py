@@ -525,6 +525,15 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
     mutated_inputs = OrderedSet[Any]()
     storage_to_nodes = defaultdict(list)
     node_order: dict[Any, int] = {}
+    output = next(iter(graph.find_nodes(op="output")))
+    visible_output_idxs = output.meta.get("user_visible_output_idxs", ())
+    output_args = pytree.arg_tree_leaves(*output.args)
+    visible_output_storages = OrderedSet(
+        storage
+        for idx in visible_output_idxs
+        if isinstance(output_args[idx], torch.fx.Node)
+        and (storage := get_node_storage(output_args[idx])) is not None
+    )
     for i, node in enumerate(reversed(graph.nodes)):
         node_order[node] = len(graph.nodes) - i - 1
         storage_to_nodes[get_node_storage(node)].append(node)
@@ -626,7 +635,17 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 return False
             return all(can_inplace(node, arg) for arg in mutated_arg)
 
-        if get_node_storage(mutated_arg) is None:
+        mutated_arg_storage = get_node_storage(mutated_arg)
+        if mutated_arg_storage is None:
+            return False
+
+        node_storage = get_node_storage(node)
+        # A user-visible result cannot move onto different storage.
+        if (
+            node_storage is not None
+            and node_storage in visible_output_storages
+            and node_storage != mutated_arg_storage
+        ):
             return False
 
         if torch._debug_has_internal_overlap(mutated_arg.meta["val"]) == 1:
