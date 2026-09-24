@@ -277,10 +277,7 @@ def _mark_dynamic_batch_sequence(
                 or (input_index in (1, 2) and dim == 0)
             )
             if is_feature_width:
-                # The translated path may intentionally specialize this
-                # dimension through SizeVarAllocator.guard_int.  A weak
-                # dynamic mark keeps it symbolic during tracing without
-                # rejecting that guarded specialization.
+                # Keep this dimension symbolic while testing dynamic-width fallback.
                 torch._dynamo.maybe_mark_dynamic(tensor, dim)
             elif tensor.dim() >= 2 and dim < 2:
                 torch._dynamo.mark_dynamic(tensor, dim)
@@ -468,7 +465,7 @@ class PolyhedralMLAFusionTest(TestCase):
             )
         self.assert_translated_plan(enabled)
 
-    def test_dynamic_feature_width_specializes_translated_plan(self):
+    def test_dynamic_feature_width_falls_back(self):
         inputs_by_shape = tuple(
             _make_mla_inputs(
                 batch_size=batch_size,
@@ -507,11 +504,9 @@ class PolyhedralMLAFusionTest(TestCase):
             )
 
         self.assertEqual(disabled.staged_fusion_count, 0)
-        self.assert_translated_plan(enabled)
-        self.assertEqual(
-            set(zip(enabled.parent_widths, enabled.logical_factors)),
-            {(256, 4)},
-        )
+        self.assertEqual(enabled.staged_fusion_count, 0)
+        self.assertEqual(disabled.translations, ())
+        self.assertEqual(enabled.translations, ())
 
     def test_dynamic_unsupported_width_reuses_fallback_graph(self):
         inputs_by_shape = tuple(
@@ -532,6 +527,48 @@ class PolyhedralMLAFusionTest(TestCase):
             self.assertEqual(result, expected, atol=6e-2, rtol=2e-2)
         self.assertEqual(observation.staged_fusion_count, 0)
         self.assertEqual(counter.frame_count, 1)
+
+    def test_dynamic_rejected_power_of_two_width_reuses_fallback_graph(self):
+        inputs_by_shape = tuple(
+            _make_mla_inputs(batch_size=2, seq_len=8, head_dim=head_dim)
+            for head_dim in (256, 512)
+        )
+        eager = [
+            tuple(strided_shifted_mla_indexer(*inputs))
+            for inputs in inputs_by_shape
+        ]
+        disabled_counter = CompileCounterWithBackend("inductor")
+        disabled_outputs, disabled = _observe_dynamic(
+            strided_shifted_mla_indexer,
+            inputs_by_shape,
+            polyhedral_fusion=False,
+            dynamic_feature_width=True,
+            backend=disabled_counter,
+        )
+        enabled_counter = CompileCounterWithBackend("inductor")
+        enabled_outputs, enabled = _observe_dynamic(
+            strided_shifted_mla_indexer,
+            inputs_by_shape,
+            polyhedral_fusion=True,
+            dynamic_feature_width=True,
+            backend=enabled_counter,
+        )
+
+        for expected, disabled_result, enabled_result in zip(
+            eager, disabled_outputs, enabled_outputs
+        ):
+            self.assertEqual(
+                disabled_result, expected, atol=6e-2, rtol=2e-2
+            )
+            self.assertEqual(
+                enabled_result, expected, atol=6e-2, rtol=2e-2
+            )
+        self.assertEqual(disabled.staged_fusion_count, 0)
+        self.assertEqual(enabled.staged_fusion_count, 0)
+        self.assertEqual(disabled.translations, ())
+        self.assertEqual(enabled.translations, ())
+        self.assertEqual(disabled_counter.frame_count, 1)
+        self.assertEqual(enabled_counter.frame_count, disabled_counter.frame_count)
 
     def test_wider_logical_factor_falls_back(self):
         inputs = _make_mla_inputs(batch_size=2, seq_len=8, head_dim=384)
