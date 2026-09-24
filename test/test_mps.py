@@ -27,7 +27,8 @@ from torch.export import Dim, export
 from torch.testing._internal import opinfo
 from torch.testing._internal.common_utils import \
     (gradcheck, gradgradcheck, parametrize, run_tests, TestCase, download_file, MACOS_VERSION, IS_CI,
-     NoTest, skipIfSlowGradcheckEnv, suppress_warnings, serialTest, instantiate_parametrized_tests, xfailIf)
+     NoTest, skipIfSlowGradcheckEnv, suppress_warnings, serialTest, instantiate_parametrized_tests, xfailIf,
+     HardwareClassification)
 from torch.testing._internal.common_mps import mps_ops_modifier, mps_ops_grad_modifier
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import get_all_dtypes, integral_types
@@ -171,6 +172,7 @@ class MpsMemoryLeakCheck:
             raise RuntimeError(msg)
 
 class TestAutocastMPS(TestCase):
+    hw_classification = HardwareClassification.MPS
 
     def test_matmul_autocast(self):
         autocast_tensor_A = torch.rand((8, 8), device="mps")
@@ -377,6 +379,7 @@ class TestAutocastMPS(TestCase):
 
 # Expand TestCase class with Memory Leak Detection on MPS device
 class TestCaseMPS(TestCase):
+    hw_classification = HardwareClassification.MPS
     _do_mps_memory_leak_check = True
 
     def __init__(self, method_name='runTest'):
@@ -401,6 +404,8 @@ class TestCaseMPS(TestCase):
         return super().wrap_method_with_policy(method, self.assertLeaksNoMpsTensors)
 
 class TestMemoryLeak(TestCaseMPS):
+    hw_classification = HardwareClassification.MPS
+
     @unittest.skipIf(IS_MACOS, "https://github.com/pytorch/pytorch/issues/160550")
     def test_mps_memory_leak_detection(self):
         l = []
@@ -440,6 +445,8 @@ class TestMemoryLeak(TestCaseMPS):
 
 
 class TestPixelShuffle(TestCaseMPS):
+    hw_classification = HardwareClassification.MPS
+
     def test_pixel_shuffle_unshuffle(self):
         def _test_pixel_shuffle_unshuffle_helper(num_input_dims, valid_channels_dim=True,
                                                  upscale_factor=None, is_contiguous=True):
@@ -575,6 +582,8 @@ class TestPixelShuffle(TestCaseMPS):
         test_pixel_shuffle_unshuffle_5D()
 
 class MPSReluTest(TestCaseMPS):
+    hw_classification = HardwareClassification.MPS
+
     def _npRelu(self, np_features):
         return np.maximum(np_features, np.zeros(np_features.shape)).astype(np_features.dtype)
 
@@ -629,6 +638,8 @@ class MPSReluTest(TestCaseMPS):
             self._testReluInPlace(np.array([]).astype(t), device="mps")
 
 class MatmulTest(TestCaseMPS):
+    hw_classification = HardwareClassification.MPS
+
     def _helper(self, shape_tensor_1, shape_tensor_2, expand_tensor_1_shape=None, expand_tensor_2_shape=None):
         if expand_tensor_1_shape:
             tensor1_mps = torch.randn(shape_tensor_1, device="mps").expand(expand_tensor_1_shape)
@@ -722,6 +733,8 @@ class MatmulTest(TestCaseMPS):
         self.assertEqual(x_cpu.grad, x_mps.grad.cpu(), atol=1e-3, rtol=1e-4)
 
 class MPSLeakyReluTest(TestCaseMPS):
+    hw_classification = HardwareClassification.MPS
+
     def _npLeakyRelu(self, np_features, negative_slope=0.1):
         return np.maximum(np_features, negative_slope * np_features).astype(np_features.dtype)
 
@@ -776,6 +789,8 @@ class MPSLeakyReluTest(TestCaseMPS):
                                         contiguous=contiguous)
 
 class TestAvgPool(TestCaseMPS):
+    hw_classification = HardwareClassification.MPS
+
     def _sum_pool2d(self, x, kernel_size):
         windows = torch.nn.functional.unfold(x, kernel_size=kernel_size, stride=kernel_size)
         return torch.sum(windows, dim=1)
@@ -877,6 +892,8 @@ class TestAvgPool(TestCaseMPS):
 
 
 class TestMPS(TestCaseMPS):
+    hw_classification = HardwareClassification.MPS
+
     def ulpAssertAllClose(self, output, reference, n_ulps):
         """
         Wrapper for element-wise tolerances with known
@@ -10563,10 +10580,12 @@ _CONFORMANCE_SHAPES = [(), (8,), (3, 5)]
 
 
 class TestBinaryIteratorConformance(TestCaseMPS):
+    hw_classification = HardwareClassification.MPS
     # simple_add only registers `(float, float)` -- it relies on the existing
     # `<DTYPEO>_<DTYPEI>` cast kernel matrix, so `out=` must match the common
     # dtype. Real-op divergent-out narrowing is covered by test_binary_kernels.
     # Divergent-out via the castout path is exercised by simple_ge below.
+
     @parametrize("a_dtype,b_dtype", _CONFORMANCE_ARITH_DTYPE_PAIRS)
     @parametrize("out_dtype", [None, torch.float32])
     @parametrize("shape", _CONFORMANCE_SHAPES)
@@ -10625,6 +10644,8 @@ class TestBinaryIteratorConformance(TestCaseMPS):
 # kernel string to keep the relationship between routing condition and kernel
 # name visible in one place.
 class TestBinaryDispatchRouting(TestCaseMPS):
+    hw_classification = HardwareClassification.MPS
+
     def _probe(self, a, b, *, out=None, natural=None, alpha=None,
                ilp_threshold=None):
         ext = _conformance_ext_handle()
@@ -10769,6 +10790,7 @@ class TestBinaryDispatchRouting(TestCaseMPS):
 # shape()[0] >= 16. Locks in the two paths op tests miss: castout (out dtype !=
 # compute dtype) and the byte-erased same-dtype copy (tail + alignment ladder).
 class TestInnerContiguous(TestCaseMPS):
+    hw_classification = HardwareClassification.MPS
     _SHAPES = [(48, 64), (8, 6, 40), (3, 4, 5, 24)]
 
     @parametrize("in_dtype,out_dtype", [
@@ -10830,6 +10852,8 @@ class TestInnerContiguous(TestCaseMPS):
 
 
 class TestLargeTensors(TestCaseMPS):
+    hw_classification = HardwareClassification.MPS
+
     @serialTest()
     def test_64bit_binops(self):
         if torch.mps.recommended_max_memory() < 16_000_000_000:
@@ -10977,6 +11001,8 @@ class TestLargeTensors(TestCaseMPS):
 
 
 class TestLogical(TestCaseMPS):
+    hw_classification = HardwareClassification.MPS
+
     def test_bitwise_unaligned_storage_offset(self):
         # https://github.com/pytorch/pytorch/issues/182822
         # Metal `setBuffer:offset:` requires the offset to be 4-byte aligned;
@@ -11103,6 +11129,8 @@ class TestLogical(TestCaseMPS):
 
 
 class TestSmoothL1Loss(TestCaseMPS):
+    hw_classification = HardwareClassification.MPS
+
     @parametrize("reduction", ["none", "mean", "sum"])
     @parametrize("requires_grad", [False, True])
     def test_smooth_l1_loss(self, reduction, requires_grad):
@@ -11138,6 +11166,8 @@ class TestSmoothL1Loss(TestCaseMPS):
         helper((3, 3, 0))
 
 class TestNLLLoss(TestCaseMPS):
+    hw_classification = HardwareClassification.MPS
+
     def test_nll_loss_mismatched_batch(self, device='mps'):
         x = torch.randn((10, 3), requires_grad=True, device=device)
         # t should have size (10,)
@@ -11311,6 +11341,8 @@ class TestNLLLoss(TestCaseMPS):
 
 
 class TestTopK(TestCase):
+    hw_classification = HardwareClassification.MPS
+
     def _test_topk(self, shape, largest):
         cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
         x = cpu_x.detach().clone().to('mps')
@@ -11362,6 +11394,7 @@ class TestTopK(TestCase):
                 self.assertEqual(ci, mi.cpu())
 
 class TestNNMPS(NNTestCase):
+    hw_classification = HardwareClassification.MPS
 
     def _create_basic_net(self):
         class Layer(nn.Module):
@@ -11785,6 +11818,8 @@ class TestNNMPS(NNTestCase):
 
 
 class TestPad(TestCaseMPS):
+    hw_classification = HardwareClassification.MPS
+
     def test_constant_pad(self):
         m = torch.nn.ConstantPad2d((-2, -2, -2, -2), 3.5)
         input_cpu = torch.randn(1, 16, 16, 16)
@@ -11917,6 +11952,8 @@ class TestPad(TestCaseMPS):
         self.assertEqual(gi.cpu(), gi_ref)
 
 class TestConv3dChannelsLast3dMPS(NNTestCase):
+    hw_classification = HardwareClassification.MPS
+
     def _run_conv3d_cl3d(self, *, input_shape, Cin, Cout, k, pad, with_bias, dtype, groups=1):
         torch.manual_seed(0)
         m_cpu = nn.Conv3d(Cin, Cout, k, stride=1, padding=pad, bias=with_bias,
@@ -12012,6 +12049,8 @@ class TestConv3dChannelsLast3dMPS(NNTestCase):
 
 
 class TestLinalgMPS(TestCaseMPS):
+    hw_classification = HardwareClassification.MPS
+
     def test__int_mm(self):
         torch.manual_seed(0)
 
@@ -12485,6 +12524,8 @@ class TestLinalgMPS(TestCaseMPS):
         torch.testing.assert_close(result_mps, result_cpu, rtol=1e-3, atol=1e-3)
 
 class TestSDPA(TestCaseMPS):
+    hw_classification = HardwareClassification.MPS
+
     def _compare_tensors(self, y, ref, tol=0.01):
         # Floor the denominator at 1e-3: below that, |ref| is at the level of
         # bfloat16/float16 ULP noise of zero, and dividing a 1-ULP absolute
@@ -13372,6 +13413,8 @@ TestSDPAMeta = create_sdpa_meta_test()
 instantiate_parametrized_tests(TestSDPAMeta)
 
 class TestGatherScatter(TestCaseMPS):
+    hw_classification = HardwareClassification.MPS
+
     def test_slicing_with_step(self):
         # Slicing with step
         # https://github.com/pytorch/pytorch/issues/78886
@@ -13437,6 +13480,7 @@ class TestGatherScatter(TestCaseMPS):
 # This whole `class` will be removed when we add generic device testing. There
 # are no additional tests added apart from what is part of test_view_ops.py
 class TestViewOpsMPS(TestCaseMPS):
+    hw_classification = HardwareClassification.MPS
     exact_dtype = True
 
     def test_permute_slicing(self):
@@ -14290,6 +14334,8 @@ class TestViewOpsMPS(TestCaseMPS):
         self.assertEqual(res["cpu"], res["mps"])
 
 class TestConvolutionMPS(TestCaseMPS):
+    hw_classification = HardwareClassification.MPS
+
     def test_conv1d_all_strides_paddings(self):
         # https://github.com/pytorch/pytorch/issues/82921
         def helper(stride, padding):
@@ -14822,6 +14868,7 @@ class TestConvolutionMPS(TestCaseMPS):
 
 
 class TestAdvancedIndexing(TestCaseMPS):
+    hw_classification = HardwareClassification.MPS
     supported_dtypes = [torch.float32, torch.float16, torch.int64, torch.int32, torch.int16, torch.uint8]
     supported_np_dtypes = [np.float32, np.float16, np.int64, np.int32, np.int16, np.uint8]
 
@@ -15744,6 +15791,8 @@ class TestAdvancedIndexing(TestCaseMPS):
 
 
 class TestNondeterministic(TestCaseMPS):
+    hw_classification = HardwareClassification.MPS
+
     def _case_embedding_dense_backward(self, device):
         weight = torch.randn(10, 3, device=device, requires_grad=True)
         idx = torch.tensor([1, 2, 3, 1], device=device)
@@ -15920,6 +15969,8 @@ class TestNondeterministic(TestCaseMPS):
 
 
 class TestRNNMPS(TestCaseMPS):
+    hw_classification = HardwareClassification.MPS
+
     def _lstm_helper(self, num_layers, dtype, device, bidirectional=False, bias=True, batch_first=False,
                      seq_len=3, batch_size=5, hidden_size=7, input_size=11, backward=False):
         rnn = nn.LSTM(
@@ -16150,6 +16201,8 @@ class TestRNNMPS(TestCaseMPS):
 
 
 class TestFallbackWarning(TestCase):
+    hw_classification = HardwareClassification.MPS
+
     # TODO: Remove once test_testing.py is running on MPS devices
     def test_no_warning_on_import(self):
         out = subprocess.check_output(
@@ -16215,6 +16268,8 @@ if len(w) != 1:
                                        e.output.decode("utf-8"))
 
 class TestNoRegression(TestCase):
+    hw_classification = HardwareClassification.MPS
+
     def test_assert_close(self):
         a = torch.ones(1, device="mps")
         b = torch.zeros(1, device="mps")
@@ -16315,6 +16370,7 @@ def transform_opinfo_sample_to_cpu(sample, dtype=None):
     return cpu_sample
 
 class TestConsistency(TestCaseMPS):
+    hw_classification = HardwareClassification.MPS
     # TODO: This is only used while some ops are being added.
     # This list should contain all ops and dtypes eventually
     # This can be generated automatically in the `new_mps_allowlist.txt` file
@@ -17055,6 +17111,7 @@ class TestConsistency(TestCaseMPS):
 
 
 class TestErrorInputs(TestCase):
+    hw_classification = HardwareClassification.MPS
     _ignore_not_implemented_error = True
 
     def test_index_put_out_of_bounds(self, device):
@@ -17143,6 +17200,8 @@ class TestErrorInputs(TestCase):
 
 
 class TestComplex(TestCase):
+    hw_classification = HardwareClassification.MPS
+
     def test_conj_imag(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/184379
         # MPS copy ignored the neg bit, so `.imag` on a conjugate view returned
@@ -17209,6 +17268,7 @@ class TestComplex(TestCase):
 # Copied from `TestCommon` in `test_ops.py`, just enough to duplicate the `test_numpy_ref` for MPS
 @skipIfSlowGradcheckEnv
 class TestCommon(TestCase):
+    hw_classification = HardwareClassification.MPS
     exact_dtype = True
 
     # Verifies, on teardown, that no OpInfo is still using dynamic dtypes in CI
@@ -17259,6 +17319,8 @@ class TestCommon(TestCase):
             self.assertEqual(mps_tensor.cpu(), cpu_tensor)
 
 class TestMetalLibrary(TestCaseMPS):
+    hw_classification = HardwareClassification.MPS
+
     def test_metal_arange(self):
         x = torch.zeros(12, device="mps", dtype=torch.half)
         lib = torch.mps.compile_shader("""
