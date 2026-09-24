@@ -29,8 +29,10 @@ it.
 
 # Note [precompile programming model]
 #
-# ``fn`` is the WHOLE computation, e.g. ``lambda model, x: model(x)`` for inference
-# or ``lambda model, x, t: loss_fn(model(x), t).backward()`` for a training step.
+# ``fn`` is the WHOLE computation, e.g. a module-level ``def step(model, x): return
+# model(x)`` for inference or ``def step(model, x, t): loss_fn(model(x),
+# t).backward()`` for a training step (only a MakeFxTracer capture also takes the
+# ``lambda`` forms).
 # Among the positional args, the nn.Module arguments have their parameters and
 # buffers lifted to explicit graph inputs (via functional reparametrization), so
 # nothing live is baked in; the remaining args are the runtime inputs. The artifact
@@ -2528,13 +2530,13 @@ class PrecompiledModule(PrecompiledRunnable):
         return obj
 
     def _compile(self, args: tuple[object, ...]) -> None:
-        # make_fx is the only implemented tracer; "dynamo" is a planned alternative
-        # capture front-end. Reject it here (the single capture-dispatch point) before
-        # running fn, so the failure is clear rather than a wrong default.
+        # This holder only runs make_fx; a DynamoTracer capture goes through
+        # _DynamoCapture. Reject "dynamo" here (the single capture-dispatch point)
+        # before running fn, so the failure is clear rather than a wrong fallback.
         if self._tracer != "make_fx":
             raise NotImplementedError(
-                f"precompile tracer={self._tracer!r} is not implemented yet; use "
-                "tracer='make_fx' (the default)."
+                f"precompile tracer={self._tracer!r} is not implemented here; use "
+                "tracer='make_fx', or capture(fn, tracer=DynamoTracer())."
             )
         if self._backend == "eager" and _has_unbacked_marks(args):
             raise NotImplementedError(
