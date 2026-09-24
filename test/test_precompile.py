@@ -949,7 +949,7 @@ class TestPrecompile(TestCase):
 
         from torch._precompile import _DRIVER_MAIN, _emit_multigraph_driver_source
 
-        source = _emit_multigraph_driver_source()
+        source = _emit_multigraph_driver_source("_build_multigraph_forward")
         self.assertTrue(source.endswith(_DRIVER_MAIN))
         body = ast.parse(source).body
         kinds = [type(node).__name__ for node in body]
@@ -3076,10 +3076,10 @@ class TestPrecompile(TestCase):
         with self.assertRaisesRegex(PrecompileError, "entry frame was BYPASSED"):
             _build_multigraph_artifact(entry, backends, summary, "eager", step)
 
-    def test_multigraph_artifact_refuses_a_frame_the_entry_cannot_reach(self):
+    def test_multigraph_artifact_installs_a_frame_the_entry_cannot_reach(self):
         # A graph break inside a child module's forward compiles that forward as
-        # its own frame, entered by an ordinary call the source artifact cannot
-        # intercept, so the capture is refused rather than served part eager.
+        # its own frame, entered by an ordinary call the standalone dispatcher
+        # cannot intercept, so the capture is served by installing instead.
         from torch._dynamo.package import CompilePackage
         from torch._dynamo.precompile_package import default_guard_filter_fn
         from torch._precompile import _build_multigraph_artifact
@@ -3099,8 +3099,11 @@ class TestPrecompile(TestCase):
             guarded_codes=0,
             backend_graphs=0,
         )
-        with self.assertRaisesRegex(PrecompileError, "cannot reach from the entry"):
-            _build_multigraph_artifact(entry, {}, summary, "eager", step)
+        python_code, _ = _build_multigraph_artifact(entry, {}, summary, "eager", step)
+        self.assertIn('SERVING_MODE = "installed"', python_code)
+        self.assertIn("UNREACHABLE_WITHOUT_INSTALL = [", python_code)
+        self.assertIn("forward = _build_installed_forward()", python_code)
+        self.assertNotIn("_FRAMES = ", python_code)
 
     def test_nested_input_refused(self):
         # A nested example input is refused up front with a named PrecompileError rather
@@ -4626,6 +4629,16 @@ def single(model, x):
 
 def train_step(model, x):
     model(x).sum().backward()
+
+
+def breaking_helper(y):
+    y = y.sin()
+    torch._dynamo.graph_break()
+    return y.cos()
+
+
+def calls_breaking_helper(model, x):
+    return breaking_helper(model(x)) + 1
 """
 
 _GOLDEN_LOADER = """
@@ -4645,8 +4658,9 @@ for name, grad in saved["grads"].items():
     torch.testing.assert_close(model.get_parameter(name).grad, grad)
 try:
     f(model, saved["calls"][0][0][0].double())
-except torch.compiler.PrecompileError as e:
-    assert "no captured variant" in str(e), e
+except (torch.compiler.PrecompileError, RuntimeError) as e:
+    # An installed artifact serves under the fail_on_recompile stance.
+    assert "no captured variant" in str(e) or "fail_on_recompile" in str(e), e
 else:
     raise AssertionError("an uncovered call was served")
 print("served")
@@ -4732,6 +4746,22 @@ class TestPrecompileDynamoCapture(TestCase):
         self._serve_in_fresh_process(
             [((self.x2,), {}, y2), ((self.x3,), {"scale": 0.5}, y3)]
         )
+
+    @skipIfCrossRef
+    @parametrize("backend", ["inductor", "eager"])
+    def test_a_frame_the_entry_cannot_reach_is_served_installed(self, backend):
+        # The graph break inside breaking_helper compiles it as a frame of its
+        # own, entered by an ordinary call rather than by a continuation name.
+        fn = self.mod.calls_breaking_helper
+        with self._capture(fn, backend=backend) as cap:
+            y2 = cap(self.model, self.x2)
+            y3 = cap(self.model, self.x3)
+        self.assertEqual(y2, fn(self.model, self.x2))
+        with open(self.artifact) as f:
+            python_code = f.read()
+        self.assertIn('SERVING_MODE = "installed"', python_code)
+        self.assertIn("breaking_helper", python_code)
+        self._serve_in_fresh_process([((self.x2,), {}, y2), ((self.x3,), {}, y3)])
 
     @parametrize("backend", ["inductor", "eager"])
     def test_a_single_graph_serves_in_process(self, backend):

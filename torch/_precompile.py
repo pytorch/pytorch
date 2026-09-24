@@ -2024,13 +2024,12 @@ _SERVING_NOTES = {
 # new one.
 """,
     "installed": """\
-# This artifact SERVES BY INSTALLING onto the live code objects, so loading and then
-# entering it mutates global state, which unload() and __exit__ take back out. And
-# there IS a compiler behind it: a call no captured variant covers is compiled fresh
-# at serve time rather than refused. That is what makes a graph-breaking model
-# servable at all, but it means the artifact can quietly serve less and less of
-# itself -- watch for the "serving compiled a NEW graph" warning, or read
-# serve_time_compiles() on the loaded object.
+# This artifact SERVES BY INSTALLING the captured guarded entries onto the live code
+# objects of the captured modules, so loading it mutates global state: a frame the
+# entry reaches by an ordinary call (a graph break inside a child module's forward)
+# can only be served through Dynamo's frame evaluator. Calls run under the
+# fail_on_recompile stance, so a call no captured variant covers raises rather than
+# compiling a new graph.
 """,
 }
 
@@ -2218,27 +2217,32 @@ def _build_multigraph_python_source(
     summary: PrecompileSummary,
     backend: str,
     entry_binding: dict[str, Any],
+    unreachable: list[str],
 ) -> str:
-    """Render a standalone multi-graph capture as ``python_code``.
+    """Render a multi-graph capture as ``python_code``.
 
-    The readable half -- what was captured, which frames, how many variants, what
-    guards were dropped -- is emitted as literals so a reviewer can diff it. The
-    guard trees, the transformed bytecode and the compiled subgraphs have no
-    source form here, so they go into the clearly bannered opaque blobs the
-    inlined driver rebuilds from.
+    Standalone unless ``unreachable`` names frames the entry cannot reach, in
+    which case the artifact carries the whole Dynamo package and serves by
+    installing it (see _build_installed_forward). The readable half -- what was
+    captured, which frames, how many variants, what guards were dropped -- is
+    emitted as literals so a reviewer can diff it. The guard trees, the
+    transformed bytecode and the compiled subgraphs have no source form here, so
+    they go into the clearly bannered opaque blobs the inlined driver rebuilds
+    from.
     """
     from torch._functorch._aot_autograd.codegen import PySourceBuilder
 
     buf = PySourceBuilder()
     buf.writeline(_MULTIGRAPH_GENERATED_HEADER)
-    buf.writeline(_SERVING_NOTES["standalone"])
+    mode = "installed" if unreachable else "standalone"
+    buf.writeline(_SERVING_NOTES[mode])
     buf.writeline("")
     buf.writeline("# " + "=" * 70)
     buf.writeline("# 1. What was captured (readable)")
     buf.writeline("# " + "=" * 70)
     buf.writeline(f"BACKEND = {backend!r}")
     buf.writeline('TRACER = "dynamo"')
-    buf.writeline('SERVING_MODE = "standalone"')
+    buf.writeline(f'SERVING_MODE = "{mode}"')
     buf.writeline(f"FN_NAME = {entry.fn_name!r}")
     buf.writeline(f"_DYNAMO_PYTHON_VERSION = {tuple(sys.version_info[:2])!r}")
     buf.writeline(f"TORCH_VERSION = {torch.__version__!r}")
@@ -2287,6 +2291,26 @@ def _build_multigraph_python_source(
         ) from e
     buf.writeline(f"_ENTRY_BINDING = {binding_blob!r}")
     buf.writeline("")
+    if unreachable:
+        buf.writeline("# Frames entered by an ordinary call; served by installing.")
+        buf.writeline(f"UNREACHABLE_WITHOUT_INSTALL = {unreachable!r}")
+        buf.writeline("")
+        buf.writeline("# " + "=" * 70)
+        buf.writeline("# 2. Dynamo package and compiled subgraphs -- OPAQUE")
+        buf.writeline("#")
+        buf.writeline(
+            "# base64(pickle) of the Dynamo cache entry (guards, transformed bytecode)"
+        )
+        buf.writeline("# and the backend artifacts it calls by id.")
+        buf.writeline("# " + "=" * 70)
+        package = {"dynamo": entry, "backends": dict(backends)}
+        buf.writeline(f"_PACKAGE = {_b64(package)!r}")
+        buf.writeline("")
+        buf.writeline("# " + "=" * 70)
+        buf.writeline("# 3. Driver: install the package and serve (readable)")
+        buf.writeline("# " + "=" * 70)
+        buf.writeline(_emit_multigraph_driver_source("_build_installed_forward"))
+        return buf.getvalue()
     buf.writeline("# " + "=" * 70)
     buf.writeline("# 2. Guard trees and transformed bytecode -- OPAQUE")
     buf.writeline("#")
@@ -2322,7 +2346,7 @@ def _build_multigraph_python_source(
         "# 4. Driver: rebuild the guards, wire the names, dispatch (readable)"
     )
     buf.writeline("# " + "=" * 70)
-    buf.writeline(_emit_multigraph_driver_source())
+    buf.writeline(_emit_multigraph_driver_source("_build_multigraph_forward"))
     return buf.getvalue()
 
 
@@ -2352,22 +2376,11 @@ def _build_multigraph_artifact(
         for i, frame in enumerate(frames)
         if frame["variants"] and i not in reachable
     )
-    if unreachable:
-        # A reachable frame WITHOUT a variant is served by the driver too: it
-        # raises, naming the gap, if a call reaches it. A frame with variants the
-        # entry cannot reach would instead run eager, silently giving up the
-        # compiled variant, so that capture is refused.
-        raise PrecompileError(
-            f"precompile captured frame(s) a standalone artifact cannot reach from "
-            f"the entry {entry.fn_name!r}: {unreachable}. A source artifact "
-            f"dispatches only the entry frame and the graph-break continuations its "
-            f"bytecode names; a frame entered by an ordinary call -- a graph break "
-            f"inside a child module's forward, say -- would run eager. Move the "
-            f"graph break into the entry, or make the child module compile in one "
-            f"piece."
-        )
+    # A frame with variants the entry cannot reach would run eager under the
+    # standalone dispatcher, silently giving up the compiled variant, so such a
+    # capture is served by installing instead.
     python_code = _build_multigraph_python_source(
-        entry, frames, backends, summary, backend, _entry_binding(entry_fn)
+        entry, frames, backends, summary, backend, _entry_binding(entry_fn), unreachable
     )
     inductor_bundle = None
     if backend != "eager":
@@ -2390,16 +2403,16 @@ def _build_multigraph_artifact(
     return python_code, buf.getvalue()
 
 
-def _emit_multigraph_driver_source() -> str:
-    """Emit the multi-graph driver as text, the same getsource path the others use.
+def _emit_multigraph_driver_source(builder: str) -> str:
+    """Emit a multi-graph driver as text, the same getsource path the others use.
 
     The driver is a builder, so the section binds ``forward`` itself and then ends
     in the same ``__main__`` hint as the single-graph drivers."""
 
     from torch import _precompile_driver as driver
 
-    body = inspect.getsource(driver._build_multigraph_forward).rstrip()
-    forward = "forward = _build_multigraph_forward()"
+    body = inspect.getsource(getattr(driver, builder)).rstrip()
+    forward = f"forward = {builder}()"
     return "\n" + body + "\n\n\n" + forward + "\n\n\n" + _DRIVER_MAIN
 
 
@@ -3278,7 +3291,11 @@ def load(
     captured model's parameter/buffer structure. The result is a
     :class:`torch.compiler.precompile.PrecompiledRunnable`; a Dynamo artifact
     is standalone, so entering and unloading it are no-ops, and it re-seeds the
-    names Dynamo minted into the captured module. A Dynamo artifact whose
+    names Dynamo minted into the captured module. The exception is a capture that
+    compiled a frame the entry reaches only by an ordinary call (a graph break
+    inside a child module's forward): its artifact has ``SERVING_MODE =
+    "installed"`` and serves by installing the captured entries onto the live
+    code objects, under the ``fail_on_recompile`` stance. A Dynamo artifact whose
     capture graph-broke cannot load beside the live compile that captured it
     (the continuation names collide): load it in a fresh process.
 

@@ -45,6 +45,11 @@ if TYPE_CHECKING:
     _FRAMES: str = ""
     _BACKENDS: str = ""
     _ENTRY_BINDING: str = ""
+    # An installed artifact carries the pickled Dynamo package and its backend
+    # artifacts instead of _FRAMES/_BACKENDS.
+    _PACKAGE: str = ""
+    BACKEND: str = ""
+    FN_NAME: str = ""
     _DYNAMO_PYTHON_VERSION: tuple[int, int] = (0, 0)
     TORCH_VERSION: str = ""
     NUM_POSITIONAL_ARGS: int = 0
@@ -720,3 +725,66 @@ def _build_multigraph_forward():
             for _name in _frame["resume_names"]:
                 _seed(scope, _name, dispatcher)
     return entry
+
+
+def _build_installed_forward():
+    """Install a multi-graph artifact onto the live code objects; return ``forward``.
+
+    A graph break inside a function the entry calls (a child module's forward,
+    say) compiles that function as its own frame, entered by an ordinary call
+    the standalone dispatcher never sees. Serving those frames takes Dynamo's
+    own frame evaluator: this installs the captured package's guarded entries
+    onto the live code objects of the captured modules, the way a warm
+    torch.compile cache load does, and calls the entry through it. Every call
+    runs under the fail_on_recompile stance, so, as for a standalone artifact, a
+    call no captured variant covers raises instead of compiling.
+    """
+    import base64
+    import importlib
+    import operator
+    import pickle
+    import sys as _sys
+
+    import torch
+    from torch._dynamo.package import CompilePackage
+    from torch._precompile import PrecompileError as _PrecompileError
+
+    if tuple(_DYNAMO_PYTHON_VERSION) != _sys.version_info[:2]:
+        raise _PrecompileError(
+            f"precompile: this artifact was produced on Python "
+            f"{_DYNAMO_PYTHON_VERSION[0]}.{_DYNAMO_PYTHON_VERSION[1]} and cannot "
+            f"load on {_sys.version_info[0]}.{_sys.version_info[1]}: it carries "
+            f"serialized code objects. Regenerate the artifact under the serving "
+            f"Python."
+        )
+    if TORCH_VERSION != torch.__version__:
+        raise _PrecompileError(
+            f"precompile: this artifact was produced by torch {TORCH_VERSION} and "
+            f"cannot load on torch {torch.__version__}: it carries pickled Dynamo "
+            f"state. Regenerate the artifact under the serving torch."
+        )
+    package_state = pickle.loads(base64.b64decode(_PACKAGE))
+    dynamo = package_state["dynamo"]
+    module_name = dynamo.codes[0].python_module
+    if module_name == "__main__":
+        raise _PrecompileError(
+            "precompile: this artifact was captured from a function defined in the "
+            "capturing script's __main__ module, which no other process can import. "
+            "Regenerate the artifact from a function defined in an importable module."
+        )
+    try:
+        fn = operator.attrgetter(FN_NAME)(importlib.import_module(module_name))
+    except (ImportError, AttributeError) as _e:
+        raise _PrecompileError(
+            f"precompile: this installed artifact serves {module_name}.{FN_NAME}, "
+            f"which is not importable here ({_e})."
+        ) from _e
+    package = CompilePackage(fn, dynamo)
+    compiled = torch._dynamo.optimize(BACKEND, package=package)(fn)
+    package.install(package_state["backends"])
+
+    def forward(*args, **kwargs):
+        with torch.compiler.set_stance("fail_on_recompile"):
+            return compiled(*args, **kwargs)
+
+    return forward
