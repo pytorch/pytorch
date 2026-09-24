@@ -38,8 +38,9 @@ int class_rank(const Expr* e) {
       return 100;
     case Kind::NegativeIntInfinity:
       return 101;
+    default:
+      return -1;
   }
-  return -1;
 }
 
 const std::array<Fact, kNumFacts>& facts_by_name() {
@@ -150,6 +151,8 @@ ExprArena::ExprArena() {
   neg_one_ = integer(-1);
   int_oo_ = intern(Kind::IntInfinity, 0, 0, {});
   neg_int_oo_ = intern(Kind::NegativeIntInfinity, 0, 0, {});
+  true_ = intern(Kind::BooleanTrue, 0, 0, {});
+  false_ = intern(Kind::BooleanFalse, 0, 0, {});
   eps_ = dummy("_eps", Fact::positive);
 }
 
@@ -296,6 +299,9 @@ const Expr* ExprArena::add(c10::ArrayRef<const Expr*> in) {
   // Add.flatten (sympy/core/add.py), restricted to finite commutative terms.
   c10::SmallVector<const Expr*, 8> seq;
   for (const Expr* a : in) {
+    if (a->is_boolean()) {
+      throw NativeUnsupported("Boolean in Add");
+    }
     if (a != zero_) {
       seq.push_back(a);
     }
@@ -385,6 +391,9 @@ const Expr* ExprArena::mul(c10::ArrayRef<const Expr*> in) {
   // with Integer exponents.
   c10::SmallVector<const Expr*, 8> seq;
   for (const Expr* a : in) {
+    if (a->is_boolean()) {
+      throw NativeUnsupported("Boolean in Mul");
+    }
     if (a != one_) {
       seq.push_back(a);
     }
@@ -497,6 +506,9 @@ const Expr* ExprArena::mul(c10::ArrayRef<const Expr*> in) {
 
 const Expr* ExprArena::pow(const Expr* b, const Expr* e) {
   // Pow.__new__ (sympy/core/power.py) for an Integer exponent.
+  if (b->is_boolean()) {
+    throw NativeUnsupported("Boolean in Pow");
+  }
   if (e->kind != Kind::Integer) {
     throw NativeUnsupported("Pow with a non-Integer exponent");
   }
@@ -532,6 +544,9 @@ const Expr* ExprArena::pow(const Expr* b, const Expr* e) {
 int ExprArena::compare(const Expr* a, const Expr* b) const {
   if (a == b) {
     return 0;
+  }
+  if (a->is_boolean() || b->is_boolean()) {
+    throw NativeUnsupported("Basic.compare of Booleans is not ported yet");
   }
   // Dummy is not in ordering_of_classes and sorts before IntInfinity by name.
   auto rank = [this](const Expr* e) {

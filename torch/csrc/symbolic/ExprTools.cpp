@@ -134,6 +134,12 @@ const Expr* ExprArena::xreplace(
   if (!changed) {
     return e;
   }
+  if (e->is_relational()) {
+    return rel(e->kind, args[0], args[1]);
+  }
+  if (e->kind == Kind::Not) {
+    return logical_not(args[0]);
+  }
   return e->kind == Kind::Add ? add(args)
       : e->kind == Kind::Mul  ? mul(args)
                               : pow(args[0], args[1]);
@@ -162,14 +168,14 @@ std::pair<const Expr*, const Expr*> ExprArena::as_numer_denom(const Expr* e) {
     case Kind::Rational:
       return {integer(e->p), integer(e->q)};
     case Kind::Mul: {
-      c10::SmallVector<const Expr*, 8> numers;
+      c10::SmallVector<const Expr*, 8> nums;
       c10::SmallVector<const Expr*, 8> denoms;
       for (const Expr* f : e->args) {
         auto [n, d] = as_numer_denom(f);
-        numers.push_back(n);
+        nums.push_back(n);
         denoms.push_back(d);
       }
-      return {mul(numers), mul(denoms)};
+      return {mul(nums), mul(denoms)};
     }
     case Kind::Pow: {
       // Pow.as_numer_denom with an Integer exponent.
@@ -244,15 +250,15 @@ std::pair<const Expr*, const Expr*> ExprArena::as_numer_denom(const Expr* e) {
         return {add(ns), keep_coeff(dcon, nd[0].first)};
       }
       c10::SmallVector<const Expr*, 4> denoms;
-      c10::SmallVector<const Expr*, 4> numers;
+      c10::SmallVector<const Expr*, 4> nums;
       for (const auto& [d, ns] : nd) {
         denoms.push_back(d);
-        numers.push_back(ns.size() > 1 ? add(ns) : ns[0]);
+        nums.push_back(ns.size() > 1 ? add(ns) : ns[0]);
       }
       c10::SmallVector<const Expr*, 4> ns;
-      for (size_t i = 0; i < numers.size(); ++i) {
+      for (size_t i = 0; i < nums.size(); ++i) {
         c10::SmallVector<const Expr*, 4> factors(denoms.begin(), denoms.end());
-        factors[i] = numers[i];
+        factors[i] = nums[i];
         ns.push_back(mul(factors));
       }
       return {keep_coeff(ncon, add(ns)), keep_coeff(dcon, mul(denoms))};

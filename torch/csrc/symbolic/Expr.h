@@ -35,6 +35,16 @@ enum class Kind : uint8_t {
   Pow,
   Mul,
   Add,
+  // Boolean kinds: sympy Booleans that are not Exprs.
+  BooleanTrue,
+  BooleanFalse,
+  Eq,
+  Ne,
+  Lt,
+  Le,
+  Gt,
+  Ge,
+  Not,
 };
 
 enum class Tri : int8_t { False = 0, True = 1, Unknown = 2 };
@@ -125,7 +135,7 @@ struct Expr {
   int64_t p;
   int64_t q;
   // Add/Mul: sympy's order (coefficient first, the rest by Basic.compare).
-  // Pow: base, exponent.
+  // Pow: base, exponent. Relationals: lhs, rhs.
   c10::SmallVector<const Expr*, 3> args;
   // Assumptions cache, like sympy's obj._assumptions.
   mutable FactKB kb;
@@ -135,6 +145,14 @@ struct Expr {
   }
   bool is_rational() const {
     return kind == Kind::Integer || kind == Kind::Rational;
+  }
+  // isinstance(e, Boolean) for everything but Symbol, which is both an Expr
+  // and a Boolean in sympy.
+  bool is_boolean() const {
+    return kind >= Kind::BooleanTrue;
+  }
+  bool is_relational() const {
+    return kind >= Kind::Eq && kind <= Kind::Ge;
   }
 };
 
@@ -163,6 +181,9 @@ class ExprArena : public c10::intrusive_ptr_target {
   const Expr* neg_int_oo() const {
     return neg_int_oo_;
   }
+  const Expr* boolean(bool v) const {
+    return v ? true_ : false_;
+  }
   const Expr* symbol(const std::string& name, const Facts& facts);
   // A fresh Dummy(name, **{fact: True}).
   const Expr* dummy(const std::string& name, Fact fact);
@@ -176,6 +197,21 @@ class ExprArena : public c10::intrusive_ptr_target {
   const Expr* pow(const Expr* b, const Expr* e);
   const Expr* neg(const Expr* a);
   const Expr* sub(const Expr* a, const Expr* b);
+
+  // Eq/Ne/Lt/Le/Gt/Ge(lhs, rhs, evaluate=evaluate) (Relational.cpp). These are
+  // the sympy constructors, not IntInfinity's __ge__ etc. operator overloads.
+  const Expr* rel(Kind kind, const Expr* lhs, const Expr* rhs, bool evaluate = true);
+  // Not(a).
+  const Expr* logical_not(const Expr* a);
+  // The Relational properties of the same names.
+  const Expr* reversed(const Expr* r);
+  const Expr* reversedsign(const Expr* r);
+  const Expr* negated(const Expr* r);
+  const Expr* weak(const Expr* r);
+  const Expr* strict(const Expr* r);
+  // sympy.core.relational.is_eq and is_ge.
+  Tri is_eq(const Expr* lhs, const Expr* rhs);
+  Tri is_ge(const Expr* lhs, const Expr* rhs);
 
   // expr.is_<fact>, ported from sympy's _ask and the _eval_is_* handlers.
   Tri ask(const Expr* e, Fact f);
@@ -227,6 +263,8 @@ class ExprArena : public c10::intrusive_ptr_target {
   const Expr* neg_one_;
   const Expr* int_oo_;
   const Expr* neg_int_oo_;
+  const Expr* true_;
+  const Expr* false_;
   // sympy.core.exprtools._eps, a Dummy(positive=True).
   const Expr* eps_;
   uint64_t dummy_count_ = 0;

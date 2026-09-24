@@ -322,26 +322,6 @@ std::pair<const Expr*, const Expr*> fraction(ExprArena& A, const Expr* e) {
   return {A.mul(numer), A.mul(denom)};
 }
 
-// sympy.core.relational.is_ge.
-Tri is_ge(ExprArena& A, const Expr* lhs, const Expr* rhs) {
-  if (lhs->is_rational() && rhs->is_rational()) {
-    return tri(i128(lhs->p) * rhs->q >= i128(rhs->p) * lhs->q);
-  }
-  for (const Expr* side : {lhs, rhs}) {
-    if (side->is_number() && !side->is_rational()) {
-      throw NativeUnsupported("is_ge with int_oo");
-    }
-  }
-  if (holds(A, lhs, F::extended_real) && holds(A, rhs, F::extended_real)) {
-    if ((holds(A, lhs, F::infinite) && holds(A, lhs, F::extended_positive)) ||
-        (holds(A, rhs, F::infinite) && holds(A, rhs, F::extended_negative))) {
-      return Tri::True;
-    }
-    return A.ask(A.sub(lhs, rhs), F::extended_nonnegative);
-  }
-  return Tri::Unknown;
-}
-
 // Mul._eval_is_zero_infinite_helper: (seen_zero, seen_infinite).
 std::pair<Tri, Tri> mul_zero_infinite(ExprArena& A, const Expr* e) {
   constexpr std::pair<Tri, Tri> unknown{Tri::Unknown, Tri::Unknown};
@@ -436,7 +416,7 @@ Tri mul_is_integer(ExprArena& A, const Expr* e) {
   }
   if (numerators.empty() && !denominators.empty() &&
       std::all_of(denominators.begin(), denominators.end(), [&](auto d) {
-        return fuzzy_not(is_ge(A, A.integer(1), d)) == Tri::True;
+        return fuzzy_not(A.is_ge(A.integer(1), d)) == Tri::True;
       })) {
     return Tri::False;
   }
@@ -1405,6 +1385,17 @@ Tri ExprArena::eval_fact(const Expr* e, Fact f) {
       return e->kind == Kind::Pow ? pow_fact(*this, e, f)
           : e->kind == Kind::Mul  ? mul_fact(*this, e, f)
                                   : add_fact(*this, e, f);
+    case Kind::BooleanTrue:
+    case Kind::BooleanFalse:
+    case Kind::Eq:
+    case Kind::Ne:
+    case Kind::Lt:
+    case Kind::Le:
+    case Kind::Gt:
+    case Kind::Ge:
+    case Kind::Not:
+      // sympy Booleans have no assumption handlers or class facts.
+      return Tri::Unknown;
   }
   return Tri::Unknown;
 }

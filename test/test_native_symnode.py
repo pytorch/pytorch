@@ -475,9 +475,126 @@ class TestNativeExprTools(TestCase):
         self.assertGreater(answered, 10 * unsupported)
 
 
+RELATIONS = ["Eq", "Ne", "Lt", "Le", "Gt", "Ge"]
+
+
+class TestNativeRelational(TestCase):
+    def check_rel(self, op, a, b):
+        """Returns False if native raised NativeUnsupported, else checks the
+        result against sympy."""
+        arena = torch._C._symbolic._Arena()
+        try:
+            expected = getattr(sympy, op)(a, b)
+        except TypeError:
+            with self.assertRaises(NativeUnsupported, msg=f"{op}({a}, {b})"):
+                arena.rel(op, arena.from_sympy(a), arena.from_sympy(b))
+            return True
+        try:
+            r = arena.rel(op, arena.from_sympy(a), arena.from_sympy(b))
+        except NativeUnsupported:
+            return False
+        got = arena.to_sympy(r)
+        self.assertEqual(got, expected, f"{op}({a}, {b})")
+        self.assertEqual(type(got), type(expected), f"{op}({a}, {b})")
+        self.assertIs(arena.from_sympy(expected).id, r.id)
+        return True
+
+    def test_numbers(self):
+        nums = [int_oo, -int_oo, *map(sympy.Integer, [-3, -1, 0, 1, 5])]
+        nums += [sympy.Rational(1, 2), sympy.Rational(-7, 3)]
+        for op in RELATIONS:
+            for a in nums:
+                for b in nums:
+                    self.assertTrue(self.check_rel(op, a, b), f"{op}({a}, {b})")
+
+    def test_known(self):
+        u = sympy.Symbol("u", integer=True)
+        x = sympy.Symbol("x")
+        eq = sympy.Eq(s0, 1, evaluate=False)
+        cases = [(s0, 0), (s0, 1), (s0 + 1, 1), (u, 0), (s0, s1), (s0, s0)]
+        cases += [(zf, -1), (u * u, -1), (s0 - 1, -1), (1 / s0, 0), (x, 1)]
+        cases += [(s0, sympy.I), (W, 1), (2 * s0, 1), (u, sympy.Rational(1, 2))]
+        cases += [(int_oo, s0), (-int_oo, u), (eq, 3), (eq, s0), (eq, s0 + 1)]
+        cases += [(sympy.true, s0), (sympy.true, 3), (sympy.true, sympy.false)]
+        cases += [(sympy.true, sympy.true), (eq, eq), (eq, sympy.true)]
+        for op in RELATIONS:
+            for a, b in cases:
+                for l, r in ((a, b), (b, a)):
+                    self.check_rel(op, sympy.sympify(l), sympy.sympify(r))
+
+    def test_unevaluated(self):
+        arena = torch._C._symbolic._Arena()
+        one, n = arena.integer(1), arena.from_sympy(s0)
+        for op in RELATIONS:
+            r = arena.rel(op, one, n, evaluate=False)
+            self.assertEqual(r.kind, op)
+            self.assertEqual(
+                arena.to_sympy(r), getattr(sympy, op)(1, s0, evaluate=False)
+            )
+            self.assertIs(arena.from_sympy(arena.to_sympy(r)).id, r.id)
+
+    def test_derived(self):
+        u = sympy.Symbol("u", integer=True)
+        exprs = [(s0, 1), (u, s0 + 1), (2, u), (u, sympy.true), (int_oo, u)]
+        for op in RELATIONS:
+            for a, b in exprs:
+                r = getattr(sympy, op)(a, b, evaluate=False)
+                arena = torch._C._symbolic._Arena()
+                n = arena.from_sympy(r)
+                for name in ["reversed", "reversedsign", "negated", "weak", "strict"]:
+                    try:
+                        expected = getattr(r, name)
+                    except TypeError:
+                        with self.assertRaises(NativeUnsupported):
+                            getattr(arena, name)(n)
+                        continue
+                    try:
+                        got = arena.to_sympy(getattr(arena, name)(n))
+                    except NativeUnsupported:
+                        continue
+                    self.assertEqual(got, expected, f"({r}).{name}")
+
+    def test_not(self):
+        u = sympy.Symbol("u", integer=True)
+        vals = [sympy.true, sympy.false, sympy.Integer(0), sympy.Integer(2)]
+        vals += [sympy.Rational(1, 2), int_oo, -int_oo, s0 + 1, u]
+        vals += [sympy.Eq(s0, 1, evaluate=False), sympy.Lt(u, 2, evaluate=False)]
+        vals += [sympy.Not(s0 + 1)]
+        for v in vals:
+            arena = torch._C._symbolic._Arena()
+            got = arena.to_sympy(arena.logical_not(arena.from_sympy(v)))
+            self.assertEqual(got, sympy.Not(v), f"Not({v})")
+
+    def test_booleans_have_no_facts(self):
+        arena = torch._C._symbolic._Arena()
+        eq = arena.from_sympy(sympy.Eq(s0, 1, evaluate=False))
+        for e in [arena.boolean(True), eq, arena.logical_not(arena.from_sympy(s0))]:
+            for f in FACTS:
+                self.assertIsNone(arena.ask(e, f), f)
+            with self.assertRaises(NativeUnsupported):
+                arena.add([e, arena.integer(1)])
+
+    @parametrize("seed", range(6))
+    def test_fuzz(self, seed):
+        rng = random.Random(seed)
+        answered = unsupported = 0
+        for _ in range(100):
+            a, b = (sympy_eval(random_tree(rng, 2, FACT_LEAVES)) for _ in range(2))
+            a, b = sympy.sympify(a), sympy.sympify(b)
+            if a.has(sympy.zoo, sympy.nan) or b.has(sympy.zoo, sympy.nan):
+                continue
+            for op in RELATIONS:
+                if self.check_rel(op, a, b):
+                    answered += 1
+                else:
+                    unsupported += 1
+        self.assertGreater(answered, 10 * unsupported)
+
+
 instantiate_parametrized_tests(TestNativeExpr)
 instantiate_parametrized_tests(TestNativeCompoundAssumptions)
 instantiate_parametrized_tests(TestNativeExprTools)
+instantiate_parametrized_tests(TestNativeRelational)
 
 
 if __name__ == "__main__":

@@ -29,6 +29,12 @@ struct PyArena {
     IntInfinity = numbers.attr("IntInfinity");
     NegativeIntInfinity = numbers.attr("NegativeIntInfinity");
     int_oo = numbers.attr("int_oo");
+    true_ = sympy.attr("true");
+    false_ = sympy.attr("false");
+    Not = sympy.attr("Not");
+    for (const char* name : {"Eq", "Ne", "Lt", "Le", "Gt", "Ge"}) {
+      relationals.push_back(sympy.attr(name));
+    }
   }
 
   const Expr* from_sympy(py::handle obj);
@@ -41,7 +47,9 @@ struct PyArena {
   std::unordered_map<uint32_t, py::object> sympy_cache;
 
   py::object Integer, Rational, Symbol, Dummy, Add, Mul, Pow, IntInfinity,
-      NegativeIntInfinity, int_oo;
+      NegativeIntInfinity, int_oo, true_, false_, Not;
+  // Indexed by Kind - Kind::Eq.
+  std::vector<py::object> relationals;
 };
 
 struct PyExpr {
@@ -130,6 +138,26 @@ const Expr* PyArena::from_sympy(py::handle obj) {
     py::tuple args = obj.attr("args");
     return arena->pow(from_sympy(args[0]), from_sympy(args[1]));
   }
+  if (obj.is(true_) || obj.is(false_)) {
+    return arena->boolean(obj.is(true_));
+  }
+  for (size_t i = 0; i < relationals.size(); ++i) {
+    if (Py_TYPE(obj.ptr()) ==
+        reinterpret_cast<PyTypeObject*>(relationals[i].ptr())) {
+      py::tuple args = obj.attr("args");
+      auto kind = static_cast<Kind>(static_cast<size_t>(Kind::Eq) + i);
+      return arena->rel(
+          kind, from_sympy(args[0]), from_sympy(args[1]), /*evaluate=*/false);
+    }
+  }
+  if (py::isinstance(obj, Not)) {
+    const Expr* a = from_sympy(py::tuple(obj.attr("args"))[0]);
+    const Expr* r = arena->logical_not(a);
+    if (r->kind != Kind::Not || r->args[0] != a) {
+      throw NativeUnsupported("unevaluated Not");
+    }
+    return r;
+  }
   throw NativeUnsupported(
       "unsupported sympy type " +
       py::str(py::type::handle_of(obj).attr("__name__")).cast<std::string>());
@@ -183,6 +211,29 @@ py::object PyArena::to_sympy(const Expr* e) {
                                       : Pow)(*args);
       break;
     }
+    case Kind::BooleanTrue:
+      r = true_;
+      break;
+    case Kind::BooleanFalse:
+      r = false_;
+      break;
+    case Kind::Eq:
+    case Kind::Ne:
+    case Kind::Lt:
+    case Kind::Le:
+    case Kind::Gt:
+    case Kind::Ge: {
+      py::object cls = relationals.at(
+          static_cast<size_t>(e->kind) - static_cast<size_t>(Kind::Eq));
+      r =
+          cls(to_sympy(e->args[0]),
+              to_sympy(e->args[1]),
+              py::arg("evaluate") = false);
+      break;
+    }
+    case Kind::Not:
+      r = Not(to_sympy(e->args[0]));
+      break;
   }
   sympy_cache.emplace(e->id, r);
   return r;
@@ -206,8 +257,35 @@ const char* kind_name(Kind k) {
       return "Mul";
     case Kind::Add:
       return "Add";
+    case Kind::BooleanTrue:
+      return "BooleanTrue";
+    case Kind::BooleanFalse:
+      return "BooleanFalse";
+    case Kind::Eq:
+      return "Eq";
+    case Kind::Ne:
+      return "Ne";
+    case Kind::Lt:
+      return "Lt";
+    case Kind::Le:
+      return "Le";
+    case Kind::Gt:
+      return "Gt";
+    case Kind::Ge:
+      return "Ge";
+    case Kind::Not:
+      return "Not";
   }
   return "?";
+}
+
+Kind relational_kind(const std::string& op) {
+  for (auto k : {Kind::Eq, Kind::Ne, Kind::Lt, Kind::Le, Kind::Gt, Kind::Ge}) {
+    if (op == kind_name(k)) {
+      return k;
+    }
+  }
+  TORCH_CHECK(false, "unknown relational ", op);
 }
 
 const Expr* unwrap(const std::shared_ptr<PyArena>& self, const PyExpr& e) {
@@ -306,8 +384,8 @@ void initSymbolicBindings(PyObject* module) {
 
   using Self = std::shared_ptr<PyArena>;
   auto wrap = [](const Self& self, const Expr* e) { return PyExpr{self, e}; };
-  py::class_<PyArena, Self>(sm, "_Arena")
-      .def(py::init<>())
+  py::class_<PyArena, Self> arena_cls(sm, "_Arena");
+  arena_cls.def(py::init<>())
       .def("__len__", [](const Self& self) { return self->arena->size(); })
       .def(
           "from_sympy",
@@ -357,6 +435,46 @@ void initSymbolicBindings(PyObject* module) {
                 self, self->arena->sub(unwrap(self, a), unwrap(self, b)));
           })
       .def(
+          "boolean",
+          [wrap](const Self& self, bool v) {
+            return wrap(self, self->arena->boolean(v));
+          })
+      .def(
+          "rel",
+          [wrap](
+              const Self& self,
+              const std::string& op,
+              const PyExpr& lhs,
+              const PyExpr& rhs,
+              bool evaluate) {
+            return wrap(
+                self,
+                self->arena->rel(
+                    relational_kind(op),
+                    unwrap(self, lhs),
+                    unwrap(self, rhs),
+                    evaluate));
+          },
+          py::arg("op"),
+          py::arg("lhs"),
+          py::arg("rhs"),
+          py::arg("evaluate") = true)
+      .def(
+          "logical_not",
+          [wrap](const Self& self, const PyExpr& a) {
+            return wrap(self, self->arena->logical_not(unwrap(self, a)));
+          })
+      .def(
+          "is_eq",
+          [](const Self& self, const PyExpr& a, const PyExpr& b) {
+            return to_py(self->arena->is_eq(unwrap(self, a), unwrap(self, b)));
+          })
+      .def(
+          "is_ge",
+          [](const Self& self, const PyExpr& a, const PyExpr& b) {
+            return to_py(self->arena->is_ge(unwrap(self, a), unwrap(self, b)));
+          })
+      .def(
           "args",
           [wrap](const Self& self, const PyExpr& e) {
             std::vector<PyExpr> r;
@@ -399,6 +517,16 @@ void initSymbolicBindings(PyObject* module) {
             }
             return wrap(self, r);
           });
+  for (auto [name, fn] :
+       {std::pair{"reversed", &ExprArena::reversed},
+        std::pair{"reversedsign", &ExprArena::reversedsign},
+        std::pair{"negated", &ExprArena::negated},
+        std::pair{"weak", &ExprArena::weak},
+        std::pair{"strict", &ExprArena::strict}}) {
+    arena_cls.def(name, [wrap, fn](const Self& self, const PyExpr& r) {
+      return wrap(self, (self->arena.get()->*fn)(unwrap(self, r)));
+    });
+  }
 }
 
 } // namespace torch::symbolic
