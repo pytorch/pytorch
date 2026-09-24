@@ -1,6 +1,7 @@
 #include <torch/csrc/symbolic/python_symbolic.h>
 
 #include <torch/csrc/symbolic/Expr.h>
+#include <torch/csrc/symbolic/ValueRanges.h>
 #include <torch/csrc/utils/pybind.h>
 
 #include <algorithm>
@@ -682,6 +683,21 @@ void initSymbolicBindings(PyObject* module) {
               r.push_back(wrap(self, a));
             }
             return r;
+          })
+      .def(
+          "value_range",
+          [wrap](
+              const Self& self,
+              const PyExpr& e,
+              const std::vector<std::tuple<PyExpr, PyExpr, PyExpr>>& ranges) {
+            RangeMap m;
+            for (const auto& [sym, lower, upper] : ranges) {
+              m.insert_or_assign(
+                  unwrap(self, sym),
+                  ValueRanges(unwrap(self, lower), unwrap(self, upper)));
+            }
+            ValueRanges r = value_range_interp(*self->arena, unwrap(self, e), m);
+            return std::make_pair(wrap(self, r.lower), wrap(self, r.upper));
           })
       .def(
           "compare",

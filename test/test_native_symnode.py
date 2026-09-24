@@ -38,7 +38,14 @@ from torch.utils._sympy.functions import (
     TruncToFloat,
     TruncToInt,
 )
+from torch.utils._sympy.interp import sympy_interp
 from torch.utils._sympy.numbers import int_oo
+from torch.utils._sympy.value_ranges import (
+    _default_symbol_range,
+    SymPyValueRangeAnalysis,
+    ValueRangeError,
+    ValueRanges,
+)
 
 
 NativeUnsupported = torch._C._symbolic.NativeUnsupported
@@ -1689,6 +1696,173 @@ class TestNativeFunctions(TestCase):
         self.assertGreater(answered, 5 * unsupported)
 
 
+class TestNativeValueRanges(TestCase):
+    PYTHON_ERRORS = (AssertionError, TypeError, ValueError, ValueRangeError)
+    PYTHON_ERRORS += (RecursionError, ZeroDivisionError, OverflowError)
+    u1 = sympy.Symbol("u1", integer=True)
+    n = sympy.Symbol("n", integer=True, nonnegative=True)
+    INT_LEAVES = [s0, s1, u0, u1, n, *map(sympy.Integer, range(-3, 5))]
+    RELATIONALS = [sympy.Eq, sympy.Ne, sympy.Lt, sympy.Le, sympy.Gt, sympy.Ge]
+    BOUNDS = [-int_oo, int_oo, *map(sympy.Integer, [-7, -3, -2, -1, 0, 1, 2, 3, 5, 9])]
+
+    def check(self, e, ranges):
+        """Returns the Python range, or None if either side raised."""
+        arena = torch._C._symbolic._Arena()
+        msg = f"{e} {ranges}"
+        try:
+            n = arena.from_sympy(e)
+            native_ranges = [
+                (arena.from_sympy(s), arena.from_sympy(lo), arena.from_sympy(hi))
+                for s, (lo, hi) in ranges.items()
+            ]
+        except NativeUnsupported:
+            return None
+        env = {s: ValueRanges(lo, hi) for s, (lo, hi) in ranges.items()}
+        try:
+            expected = sympy_interp(
+                SymPyValueRangeAnalysis, env, e, missing_handler=_default_symbol_range
+            )
+        except self.PYTHON_ERRORS:
+            expected = None
+        if expected is None or not (expected.is_int or expected.is_bool):
+            with self.assertRaises(NativeUnsupported, msg=msg):
+                arena.value_range(n, native_ranges)
+            return None
+        try:
+            lo, hi = arena.value_range(n, native_ranges)
+        except NativeUnsupported:
+            return None
+        got = (arena.to_sympy(lo), arena.to_sympy(hi))
+        self.assertEqual(got, (expected.lower, expected.upper), msg)
+        want_types = (type(expected.lower), type(expected.upper))
+        self.assertEqual(tuple(map(type, got)), want_types, msg)
+        return expected
+
+    def test_known(self):
+        u1, n = self.u1, self.n
+        oo = int_oo
+        cases = [
+            (s0, {}, (1, oo)),
+            (n, {}, (0, oo)),
+            (u0, {}, (-oo, oo)),
+            (zf, {}, None),
+            (u0, {u0: (2, 5)}, (2, 5)),
+            (s0 + u0, {u0: (-3, 5)}, (-2, oo)),
+            (s0 * u0, {u0: (-3, 5)}, (-oo, oo)),
+            (2 * u0 - 1, {u0: (-3, 5)}, (-7, 9)),
+            (u0 + u1, {u0: (oo, oo), u1: (-oo, 0)}, None),
+            (u0 * u1, {u0: (0, oo), u1: (-oo, 0)}, (-oo, 0)),
+            (Mod(u0, 3), {u0: (0, oo)}, (0, 2)),
+            (Mod(u0, 3), {u0: (oo, oo)}, None),
+            (Mod(u0, -3), {u0: (-oo, 5)}, (-2, 2)),
+            (Mod(u0, 3), {u0: (-7, -7)}, (-1, -1)),
+            (Mod(u0, 3), {u0: (-2, 2)}, (-2, 2)),
+            (Mod(u0, 3), {u0: (-2, 7)}, (-2, 2)),
+            (Mod(u0, u1), {u1: (2, 5)}, (-4, 4)),
+            (FloorDiv(u0, u1), {u1: (1, oo)}, (-oo, oo)),
+            (FloorDiv(u0, u1), {u0: (0, 9), u1: (0, 3)}, (0, oo)),
+            (FloorDiv(u0, 2), {u0: (-7, 9)}, (-4, 4)),
+            (FloorDiv(u0, u1), {u0: (oo, oo), u1: (oo, oo)}, (oo, oo)),
+            (PowByNatural(u0, n), {u0: (-3, 5)}, None),
+            (PowByNatural(u0, u1), {u0: (1, 5), u1: (-2, 3)}, (1, 125)),
+            (PowByNatural(u0, n), {u0: (1, oo)}, (1, oo)),
+            (PowByNatural(u0, u1), {u0: (2, 2), u1: (oo, oo)}, None),
+            (u0**2, {u0: (-oo, 2)}, (0, oo)),
+            (u0**2, {u0: (-3, -2)}, (4, 9)),
+            (u0**3, {u0: (-oo, -oo)}, (-oo, -oo)),
+            (u0**3, {u0: (-3, 2)}, (-27, 8)),
+            (u0**-1, {u0: (1, 2)}, None),
+            (Max(u0, u1, 3), {u0: (-oo, 0), u1: (1, 5)}, (3, 5)),
+            (Min(u0, 3), {u0: (-oo, oo)}, (-oo, 3)),
+            (TruncToInt(u0), {u0: (-3, oo)}, (-3, oo)),
+            (RoundToInt(u0), {u0: (-3, 4)}, (-3, 4)),
+            (RoundToInt(u0), {u0: (-3, oo)}, None),
+            (FloorToInt(u0), {u0: (-3, oo)}, (-3, oo)),
+            (ToFloat(u0), {}, None),
+            (sympy.Eq(u0, 3), {u0: (4, 6)}, (False, False)),
+            (sympy.Eq(u0, u1), {u0: (4, 4), u1: (4, 4)}, (True, True)),
+            (sympy.Ne(u0, 3), {u0: (0, 6)}, (False, True)),
+            (sympy.Lt(u0, u1), {u0: (0, 3), u1: (4, 6)}, (True, True)),
+            (sympy.Le(u0, u1), {u0: (4, 6), u1: (0, 4)}, (False, True)),
+            (sympy.Gt(u0, u1), {u0: (4, 6), u1: (0, 4)}, (False, True)),
+            (sympy.Ge(u0, u1), {u0: (4, 6), u1: (0, 4)}, (True, True)),
+            (sympy.And(u0 < 3, u0 >= 0), {u0: (0, 2)}, (True, True)),
+            (sympy.Or(u0 < 3, u1 > 0), {u0: (5, 6)}, (False, True)),
+            (sympy.Not(sympy.Eq(u0, 0)), {u0: (1, 6)}, (True, True)),
+        ]
+        for e, ranges, want in cases:
+            ranges = {s: tuple(map(sympy.sympify, r)) for s, r in ranges.items()}
+            got = self.check(e, ranges)
+            msg = f"{e} {ranges}"
+            if want is None:
+                self.assertIsNone(got, msg)
+            else:
+                self.assertIsNotNone(got, msg)
+                want = tuple(map(sympy.sympify, want))
+                self.assertEqual((got.lower, got.upper), want, msg)
+
+    def test_invalid_ranges(self):
+        arena = torch._C._symbolic._Arena()
+        x = arena.from_sympy(u0)
+        for lo, hi in [(3, 2), (int_oo, 0), (0, sympy.Rational(1, 2)), (0, sympy.true)]:
+            bounds = [arena.from_sympy(sympy.sympify(b)) for b in (lo, hi)]
+            with self.assertRaises(NativeUnsupported):
+                arena.value_range(x, [(x, *bounds)])
+
+    def int_expr(self, rng, depth):
+        if depth == 0 or rng.random() < 0.25:
+            return rng.choice(self.INT_LEAVES)
+        a = self.int_expr(rng, depth - 1)
+        b = self.int_expr(rng, depth - 1)
+        op = rng.choice(
+            ["add", "mul", "sub", "pow", "FloorDiv", "Mod", "PythonMod", "Max"]
+            + ["Min", "PowByNatural", "CeilToInt", "TruncToInt", "RoundToInt"]
+        )
+        if op == "add":
+            return a + b
+        if op == "mul":
+            return a * b
+        if op == "sub":
+            return a - b
+        if op == "pow":
+            return a ** rng.randint(0, 3)
+        if op in ("CeilToInt", "TruncToInt", "RoundToInt"):
+            return TestNativeFunctions.UNARY_FUNCTIONS[op](a)
+        return TestNativeFunctions.FUNCTIONS[op](a, b)
+
+    def bool_expr(self, rng, depth):
+        if depth == 0 or rng.random() < 0.3:
+            op = rng.choice(self.RELATIONALS)
+            return op(self.int_expr(rng, 2), self.int_expr(rng, 2))
+        op = rng.choice([sympy.And, sympy.Or, sympy.Not])
+        if op is sympy.Not:
+            return op(self.bool_expr(rng, depth - 1))
+        return op(*(self.bool_expr(rng, depth - 1) for _ in range(rng.randint(2, 3))))
+
+    @parametrize("seed", range(4))
+    def test_fuzz(self, seed):
+        rng = random.Random(seed)
+        symbols = [s0, s1, u0, self.u1, self.n]
+        calls = answered = 0
+        for _ in range(600):
+            try:
+                if rng.random() < 0.7:
+                    e = self.int_expr(rng, 3)
+                else:
+                    e = self.bool_expr(rng, 2)
+            except (ZeroDivisionError, ValueError, TypeError, AssertionError):
+                continue
+            if e.has(sympy.zoo, sympy.nan):
+                continue
+            ranges = {}
+            for s in rng.sample(symbols, rng.randint(0, len(symbols))):
+                ranges[s] = tuple(sorted(rng.sample(self.BOUNDS, 2), key=float))
+            calls += 1
+            if self.check(e, ranges) is not None:
+                answered += 1
+        self.assertGreater(answered, calls // 3)
+
+
 instantiate_parametrized_tests(TestNativeExpr)
 instantiate_parametrized_tests(TestNativeCompoundAssumptions)
 instantiate_parametrized_tests(TestNativeExprTools)
@@ -1697,6 +1871,7 @@ instantiate_parametrized_tests(TestNativeSorting)
 instantiate_parametrized_tests(TestNativeLattice)
 instantiate_parametrized_tests(TestNativePrinter)
 instantiate_parametrized_tests(TestNativeFunctions)
+instantiate_parametrized_tests(TestNativeValueRanges)
 
 
 if __name__ == "__main__":
