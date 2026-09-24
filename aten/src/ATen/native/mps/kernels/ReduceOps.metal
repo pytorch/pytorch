@@ -375,6 +375,68 @@ struct ValueOp {
   }
 };
 
+template <typename TO, bool TAKE_SQRT>
+struct WelfordOp {
+  using acc_t = float3;
+  static inline acc_t identity() {
+    return acc_t(0);
+  }
+  template <typename TI>
+  static inline acc_t load(TI v) {
+    return acc_t(static_cast<float>(v), 0, 1);
+  }
+  static inline acc_t load(float3 partial) {
+    return partial;
+  }
+  static inline acc_t combine(acc_t a, acc_t b) {
+    if (a.z == 0) {
+      return b;
+    }
+    if (b.z == 0) {
+      return a;
+    }
+    const float n = a.z + b.z;
+    const float delta = b.x - a.x;
+    const float w = b.z / n;
+    return acc_t(a.x + delta * w, a.y + b.y + delta * delta * a.z * w, n);
+  }
+  static inline acc_t simd_reduce(acc_t v) {
+    for (ushort off = simdgroup_size / 2; off > 0; off >>= 1) {
+      v = combine(v, ::metal::simd_shuffle_down(v, off));
+    }
+    return v;
+  }
+  static inline acc_t threadgroup_reduce(
+      threadgroup acc_t* shared,
+      acc_t v,
+      uint tid,
+      uint tptg) {
+    v = simd_reduce(v);
+    if (tid % simdgroup_size == 0) {
+      shared[tid / simdgroup_size] = v;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    if (tid < simdgroup_size) {
+      v = simd_reduce(tid < tptg / simdgroup_size ? shared[tid] : identity());
+    }
+    return v;
+  }
+  template <
+      typename T = TO,
+      ::metal::enable_if_t<::metal::is_same_v<T, float3>, bool> = true>
+  static inline T finalize(acc_t v, float) {
+    return v;
+  }
+  template <
+      typename T = TO,
+      ::metal::enable_if_t<!::metal::is_same_v<T, float3>, bool> = true>
+  static inline T finalize(acc_t v, float correction) {
+    const float divisor = v.z > correction ? v.z - correction : 0.0f;
+    const float var = v.y / divisor;
+    return static_cast<T>(TAKE_SQRT ? ::precise::sqrt(var) : var);
+  }
+};
+
 // Reduction kernel with multiple independent accumulation chains (ILP).
 // Each thread maintains NCHAINS independent accumulators to hide ALU latency
 // and keep the memory pipeline saturated.
@@ -704,7 +766,9 @@ template <typename T, ::metal::enable_if_t<sizeof(T) == 8, bool> = true>
 inline T chunk_shuffle_down(T val, ushort delta) {
   return as_type<T>(::metal::simd_shuffle_down(as_type<int2>(val), delta));
 }
-template <typename T, ::metal::enable_if_t<sizeof(T) == 4, bool> = true>
+template <
+    typename T,
+    ::metal::enable_if_t<sizeof(T) == 4 || sizeof(T) == 16, bool> = true>
 inline T chunk_shuffle_down(T val, ushort delta) {
   return ::metal::simd_shuffle_down(val, delta);
 }
@@ -1065,6 +1129,19 @@ REGISTER_REDUCTIONS_OPS_FOR_TYPE(uchar);
 REGISTER_PRED_REDUCTIONS_FOR_TYPE(bool);
 REGISTER_PRED_REDUCTIONS_FOR_TYPE(float2);
 REGISTER_PRED_REDUCTIONS_FOR_TYPE(half2);
+
+#define REGISTER_WELFORD(PREFIX, SQRT, T)                         \
+  REGISTER_REDUCTION(PREFIX, T, T, WelfordOp<T, SQRT>);           \
+  REGISTER_REDUCTION(PREFIX, T, float3, WelfordOp<float3, SQRT>); \
+  REGISTER_REDUCTION(PREFIX, float3, T, WelfordOp<T, SQRT>)
+
+#define REGISTER_STD_VAR(T)           \
+  REGISTER_WELFORD("var_", false, T); \
+  REGISTER_WELFORD("std_", true, T)
+
+REGISTER_STD_VAR(float);
+REGISTER_STD_VAR(half);
+REGISTER_STD_VAR(bfloat);
 
 // =============================================================================
 // argmax/argmin: per output element find the (linear) index of the max/min

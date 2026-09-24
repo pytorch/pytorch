@@ -28,11 +28,13 @@
 #include <ATen/ops/argmax_native.h>
 #include <ATen/ops/argmin_native.h>
 #include <ATen/ops/count_nonzero_native.h>
+#include <ATen/ops/imag.h>
 #include <ATen/ops/max_native.h>
 #include <ATen/ops/mean_native.h>
 #include <ATen/ops/min_native.h>
 #include <ATen/ops/nansum_native.h>
 #include <ATen/ops/prod_native.h>
+#include <ATen/ops/real.h>
 #include <ATen/ops/std_mean_native.h>
 #include <ATen/ops/std_native.h>
 #include <ATen/ops/sum.h>
@@ -50,8 +52,6 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #else
 #include <ATen/native/mps/ReduceOps_metallib.h>
 #endif
-
-enum StdVarType { STANDARD_VARIANCE, STANDARD_DEVIATION };
 
 enum MPSReductionType {
   MAX,
@@ -355,194 +355,6 @@ static void norm_kernel_mps(TensorIterator& iter, const Scalar& p_scalar) {
       getMPSProfiler().endProfileKernel(pipeline_state, stream);
     }
   });
-}
-
-static Tensor std_var_common_impl_mps(const Tensor& input_t,
-                                      at::OptionalIntArrayRef dim,
-                                      const std::optional<Scalar>& correction,
-                                      bool keepdim,
-                                      StdVarType stdVarType) {
-  TORCH_CHECK_TYPE(input_t.is_floating_point() || input_t.is_complex(),
-                   "std and var only support floating point and complex dtypes");
-
-  // Variance of a complex tensor is real: var(z) = var(Re z) + var(Im z).
-  // MPSGraph's varianceOfTensor computes E[(z - mu)^2] (no conjugation), so for
-  // complex input split into real/imaginary parts inside the graph and sum the
-  // two variances. The real dtype is used for the output and Bessel constant.
-  const bool is_complex = input_t.is_complex();
-  const auto out_dtype = c10::toRealValueType(input_t.scalar_type());
-
-  using CachedGraph = MPSUnaryCachedGraph;
-
-  IntArrayRef input_shape = input_t.sizes();
-  int64_t num_input_dims = input_shape.size();
-
-  bool use_dim = dim.has_value();
-  IntArrayRef dim_value = use_dim ? dim.value() : NULL;
-
-  if (use_dim) {
-    std::string errMessage = (stdVarType == STANDARD_DEVIATION) ? "std_mps" : "var_mps";
-    errMessage += ": reduction dim must be in the range of input shape";
-    for (const auto dim : dim_value) {
-      auto wrap_dim = maybe_wrap_dim(dim, num_input_dims);
-      TORCH_CHECK(wrap_dim < (num_input_dims ? num_input_dims : 1), errMessage.c_str())
-    }
-  }
-
-  bool use_correction = !(correction.has_value() && correction.value().toDouble() == 0);
-  const auto correction_value = correction.value_or(1.0).toDouble();
-  int64_t correction_n = 1;
-
-  NSArray<NSNumber*>* wrappedAxes = getTensorAxes(input_t.sizes(), dim);
-
-  int64_t num_output_dims = 0;
-  NSMutableArray<NSNumber*>* axes = nil;
-  NSMutableArray<NSNumber*>* apparent_output_shape = nil;
-  NSMutableArray<NSNumber*>* apparent_input_shape = nil;
-  std::vector<int64_t> output_shape;
-
-  if ((!keepdim && !use_dim) || (!keepdim && use_dim && dim_value.size() <= 0)) {
-    // Flatten the input tensor to reduce it to one value
-    apparent_input_shape = [NSMutableArray<NSNumber*> arrayWithCapacity:1];
-    int64_t num_in_elements = c10::multiply_integers(input_shape);
-    apparent_input_shape[0] = [NSNumber numberWithInt:num_in_elements];
-
-    // Output is a single value
-    apparent_output_shape = [NSMutableArray<NSNumber*> arrayWithCapacity:1];
-    apparent_output_shape[0] = @1;
-
-    num_output_dims = 0;
-
-    correction_n = num_in_elements;
-
-    // Reduction axes
-    axes = [NSMutableArray<NSNumber*> arrayWithCapacity:1];
-    axes[0] = @0;
-  } else if (!keepdim && use_dim && !dim_value.empty()) {
-    int64_t num_reduce_dims = dim_value.size();
-    num_output_dims = num_input_dims;
-
-    set_axes(axes, num_reduce_dims, dim_value, num_input_dims);
-    set_apparent_shapes(
-        apparent_output_shape, apparent_input_shape, num_reduce_dims, num_output_dims, input_shape, axes);
-
-    num_output_dims = (num_input_dims >= num_reduce_dims) ? (num_input_dims - num_reduce_dims) : 0; // num_input_dims;
-
-    unsigned int curr_i = 0;
-    for (const auto i : c10::irange(num_input_dims)) {
-      bool found = false;
-      for (const auto j : c10::irange(num_reduce_dims)) {
-        if (i == maybe_wrap_dim(dim_value[j], num_input_dims)) {
-          found = true;
-          break;
-        }
-      }
-      if (found) {
-        continue;
-      }
-      output_shape.push_back(input_shape[i]);
-      curr_i += 1;
-      // End loop when output shape is filled
-      if (curr_i == num_output_dims) {
-        break;
-      }
-    }
-
-    for (const auto dim : dim_value) {
-      auto wrap_dim = maybe_wrap_dim(dim, input_shape.size());
-      correction_n *= input_shape[wrap_dim];
-    }
-    // (3, 4, 5) --> (3, 5)
-  } else if ((keepdim && !use_dim) || (keepdim && use_dim && dim_value.empty())) {
-    num_output_dims = 0;
-    int64_t num_reduce_dims = 0;
-    set_axes(axes, num_reduce_dims, dim_value, input_shape.size());
-    set_apparent_shapes(
-        apparent_output_shape, apparent_input_shape, num_reduce_dims, num_output_dims, input_shape, axes);
-    num_output_dims = num_input_dims;
-    for (const auto i : c10::irange(num_input_dims)) {
-      output_shape.push_back((int64_t)1);
-      correction_n *= input_shape[i];
-    }
-    // scalar --> vector case [[1.0034567]]
-  } else if (keepdim && use_dim && !dim_value.empty()) {
-    int64_t num_reduce_dims = dim_value.size();
-    num_output_dims = num_input_dims;
-
-    set_axes(axes, num_reduce_dims, dim_value, num_input_dims);
-    set_apparent_shapes(
-        apparent_output_shape, apparent_input_shape, num_reduce_dims, num_output_dims, input_shape, axes);
-
-    num_output_dims = num_input_dims; //(num_input_dims >= num_reduce_dims) ? (num_input_dims - num_reduce_dims) : 0;
-
-    for (const int i : c10::irange(num_reduce_dims)) {
-      auto wrap_dim = maybe_wrap_dim(dim_value[i], input_shape.size());
-      correction_n *= input_shape[wrap_dim];
-    }
-
-    for (const int i : c10::irange(num_input_dims)) {
-      output_shape.push_back([apparent_output_shape[i] longValue]);
-    }
-  }
-
-  Tensor output_t = at::empty(IntArrayRef(output_shape.data(), num_output_dims), input_t.options().dtype(out_dtype));
-
-  if (output_t.numel() == 0 || input_t.numel() == 0) {
-    output_t.fill_(std::numeric_limits<float>::quiet_NaN());
-    return output_t;
-  }
-
-  double dof = std::max(0.0, correction_n - correction_value);
-  double bessel_correction = correction_n / dof;
-  auto stream = getCurrentMPSStream();
-
-  @autoreleasepool {
-    std::string op_key = (stdVarType == STANDARD_DEVIATION) ? "std_mps" : "var_mps";
-    NSString* ns_key = [[wrappedAxes valueForKey:@"description"] componentsJoinedByString:@","];
-    std::string bessel_corrected = (use_correction && correction_value) ? "unbiased " : "biased ";
-    std::string use_dim_info = (use_dim) ? "use_dim=1:" + std::to_string(dim_value.size()) : "use_dim=0";
-    std::string keepdim_info = (keepdim) ? "keepdim=1" : "keepdim=0";
-    std::string key = op_key + ":" + getTensorsStringKey(input_t) + ":" + use_dim_info + ":" + keepdim_info + ":" +
-        std::string([ns_key UTF8String]) + ":" + bessel_corrected + ":" + std::to_string(correction_value);
-
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_t);
-      MPSGraphTensor* outputVarTensor;
-      if (is_complex) {
-        MPSGraphTensor* reTensor = [mpsGraph realPartOfTensor:inputTensor name:nil];
-        MPSGraphTensor* imTensor = [mpsGraph imaginaryPartOfTensor:inputTensor name:nil];
-        MPSGraphTensor* varRe = [mpsGraph varianceOfTensor:reTensor axes:wrappedAxes name:nil];
-        MPSGraphTensor* varIm = [mpsGraph varianceOfTensor:imTensor axes:wrappedAxes name:nil];
-        outputVarTensor = [mpsGraph additionWithPrimaryTensor:varRe secondaryTensor:varIm name:nil];
-      } else {
-        outputVarTensor = [mpsGraph varianceOfTensor:inputTensor axes:wrappedAxes name:nil];
-      }
-      MPSGraphTensor* outputTensor = nil;
-
-      if (use_correction && correction_value) {
-        MPSGraphTensor* besselTensor = [mpsGraph constantWithScalar:bessel_correction
-                                                           dataType:getMPSDataType(out_dtype)];
-        MPSGraphTensor* correctedTensor = [mpsGraph multiplicationWithPrimaryTensor:outputVarTensor
-                                                                    secondaryTensor:besselTensor
-                                                                               name:nil];
-        outputTensor = (stdVarType == STANDARD_DEVIATION) ? [mpsGraph squareRootWithTensor:correctedTensor name:nil]
-                                                          : correctedTensor;
-      } else {
-        outputTensor = (stdVarType == STANDARD_DEVIATION) ? [mpsGraph squareRootWithTensor:outputVarTensor name:nil]
-                                                          : outputVarTensor;
-      }
-      newCachedGraph->inputTensor_ = inputTensor;
-      newCachedGraph->outputTensor_ = outputTensor;
-    });
-
-    auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input_t);
-    auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output_t, apparent_output_shape);
-
-    auto feeds = dictionaryFromPlaceholders(inputPlaceholder);
-    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
-  }
-
-  return output_t;
 }
 
 static void argmax_argmin_out_mps(const Tensor& input_t,
@@ -861,12 +673,19 @@ static const char* reduction_kernel_suffix(ReductionKernel kernel) {
   TORCH_INTERNAL_ASSERT(false, "Unknown reduction kernel");
 }
 
+struct MetalType {
+  MetalType(ScalarType dtype) : name(scalarToMetalTypeString(dtype)), size(c10::elementSize(dtype)) {}
+  MetalType(std::string name, size_t size) : name(std::move(name)), size(size) {}
+  std::string name;
+  size_t size;
+};
+
 struct ReductionOp {
   // True for argmax/argmin, which reduce to indices rather than values.
   bool is_arg;
   std::string prefix;
-  ScalarType input_type;
-  ScalarType output_type;
+  MetalType input_type;
+  MetalType output_type;
   float param = 0;
 };
 
@@ -885,14 +704,13 @@ static void encode_reduction(MPSStream* stream,
   const auto& layout = plan.layout;
   const bool split_arg = op.is_arg && plan.num_segments > 1;
   const auto name = op.prefix + "reduction" + reduction_kernel_suffix(plan.kernel);
-  const auto in_type = scalarToMetalTypeString(op.input_type);
   std::string kernel_name;
   if (split_arg) {
-    kernel_name = fmt::format("{}_p1_{}", name, in_type);
+    kernel_name = fmt::format("{}_p1_{}", name, op.input_type.name);
   } else if (plan.kernel == ReductionKernel::ArgCombine) {
-    kernel_name = fmt::format("{}_{}", name, in_type);
+    kernel_name = fmt::format("{}_{}", name, op.input_type.name);
   } else {
-    kernel_name = fmt::format("{}_{}_{}", name, in_type, scalarToMetalTypeString(op.output_type));
+    kernel_name = fmt::format("{}_{}_{}", name, op.input_type.name, op.output_type.name);
   }
   auto encoder = stream->commandEncoder();
   auto pipeline = lib.getPipelineStateForFunc(kernel_name);
@@ -993,7 +811,7 @@ static void encode_reduction(MPSStream* stream,
 static void reduction_dispatch_mps(Tensor input,
                                    Tensor output,
                                    const ReductionOp& op,
-                                   ScalarType partial_type,
+                                   const MetalType& partial_type,
                                    const std::string& combine_prefix,
                                    const std::string& profile_name = {}) {
   TORCH_INTERNAL_ASSERT(input.numel() > 0 && output.numel() > 0);
@@ -1044,7 +862,7 @@ static void reduction_dispatch_mps(Tensor input,
   // (fp16/bf16/chalf partials would round once per segment),
   // output.scalar_type() for min/max, uchar for all/any.
   const auto num_partials = output.numel() * plan.num_segments;
-  partials.values = at::empty({num_partials}, output.options().dtype(partial_type));
+  partials.values = at::empty({num_partials * static_cast<int64_t>(partial_type.size)}, output.options().dtype(kByte));
   if (op.is_arg) {
     partials.indices = at::empty({num_partials}, output.options().dtype(kInt));
   }
@@ -1282,18 +1100,47 @@ Tensor count_nonzero_mps(const Tensor& self, IntArrayRef dims) {
   return result;
 }
 
+static Tensor std_var_mps(const Tensor& self,
+                          at::OptionalIntArrayRef dim,
+                          const std::optional<Scalar>& correction,
+                          bool keepdim,
+                          bool take_sqrt) {
+  TORCH_CHECK_TYPE(self.is_floating_point() || self.is_complex(),
+                   "std and var only support floating point and complex dtypes");
+  // Variance of a complex tensor is real: var(z) = var(Re z) + var(Im z).
+  if (self.is_complex()) {
+    auto var = std_var_mps(at::real(self), dim, correction, keepdim, /*take_sqrt=*/false);
+    var.add_(std_var_mps(at::imag(self), dim, correction, keepdim, /*take_sqrt=*/false));
+    return take_sqrt ? var.sqrt_() : var;
+  }
+  const auto dims = dim.value_or(IntArrayRef{});
+  Tensor result = create_reduction_result(self, dims, keepdim, self.scalar_type());
+  auto iter = make_reduction("std_var_mps", result, self, dims, keepdim, self.scalar_type(), self.scalar_type());
+  if (self.numel() == 0) {
+    return result.fill_(std::numeric_limits<float>::quiet_NaN());
+  }
+  if (result.numel() == 0) {
+    return result;
+  }
+  const auto prefix = take_sqrt ? "std_" : "var_";
+  const auto correction_value = static_cast<float>(correction.value_or(1).toDouble());
+  const ReductionOp op{/*is_arg=*/false, prefix, self.scalar_type(), self.scalar_type(), correction_value};
+  reduction_dispatch_mps(iter.input(0), iter.output(0), op, MetalType("float3", 16), prefix);
+  return result;
+}
+
 Tensor var_mps(const Tensor& input_t,
                at::OptionalIntArrayRef dim,
                const std::optional<Scalar>& correction,
                bool keepdim) {
-  return std_var_common_impl_mps(input_t, dim, correction, keepdim, STANDARD_VARIANCE);
+  return std_var_mps(input_t, dim, correction, keepdim, /*take_sqrt=*/false);
 }
 
 Tensor std_mps(const Tensor& input_t,
                at::OptionalIntArrayRef dim,
                const std::optional<Scalar>& correction,
                bool keepdim) {
-  return std_var_common_impl_mps(input_t, dim, correction, keepdim, STANDARD_DEVIATION);
+  return std_var_mps(input_t, dim, correction, keepdim, /*take_sqrt=*/true);
 }
 
 //-----------------------------------------------------------------------
