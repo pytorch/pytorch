@@ -3,6 +3,7 @@
 #include <torch/csrc/symbolic/Expr.h>
 #include <torch/csrc/utils/pybind.h>
 
+#include <algorithm>
 #include <optional>
 #include <unordered_map>
 #include <vector>
@@ -12,6 +13,8 @@ namespace torch::symbolic {
 namespace py = pybind11;
 
 namespace {
+
+constexpr Kind kFunctionKinds[] = {Kind::Mod, Kind::PythonMod};
 
 // Python-side state for an ExprArena: the sympy Symbol objects that native
 // symbols came from and a conversion cache (conversion is pure per Expr).
@@ -43,6 +46,10 @@ struct PyArena {
     for (const char* name : {"Eq", "Ne", "Lt", "Le", "Gt", "Ge"}) {
       relationals.push_back(sympy.attr(name));
     }
+    py::module_ functions = py::module_::import("torch.utils._sympy.functions");
+    for (auto k : kFunctionKinds) {
+      function_classes.push_back(functions.attr(function_name(k)));
+    }
   }
 
   const Expr* from_sympy(py::handle obj);
@@ -61,6 +68,8 @@ struct PyArena {
   py::object lattice_new;
   // Indexed by Kind - Kind::Eq.
   std::vector<py::object> relationals;
+  // Parallel to kFunctionKinds.
+  std::vector<py::object> function_classes;
 };
 
 struct PyExpr {
@@ -169,6 +178,22 @@ const Expr* PyArena::from_sympy(py::handle obj) {
     }
     return r;
   }
+  for (size_t i = 0; i < function_classes.size(); ++i) {
+    // Exact type: CleanDiv subclasses FloorDiv.
+    if (Py_TYPE(obj.ptr()) ==
+        reinterpret_cast<PyTypeObject*>(function_classes[i].ptr())) {
+      std::vector<const Expr*> args;
+      for (py::handle a : obj.attr("args")) {
+        args.push_back(from_sympy(a));
+      }
+      const Expr* r = arena->function(kFunctionKinds[i], args);
+      if (r->kind != kFunctionKinds[i] ||
+          !std::equal(r->args.begin(), r->args.end(), args.begin(), args.end())) {
+        throw NativeUnsupported("unevaluated function");
+      }
+      return r;
+    }
+  }
   for (auto kind : {Kind::And, Kind::Or}) {
     py::handle cls = kind == Kind::And ? And : Or;
     if (Py_TYPE(obj.ptr()) == reinterpret_cast<PyTypeObject*>(cls.ptr())) {
@@ -268,6 +293,18 @@ py::object PyArena::to_sympy(const Expr* e) {
       r.attr("_argset") = py::frozenset(args);
       break;
     }
+    case Kind::Mod:
+    case Kind::PythonMod: {
+      py::tuple args(e->args.size());
+      for (size_t i = 0; i < e->args.size(); ++i) {
+        args[i] = to_sympy(e->args[i]);
+      }
+      auto* it = std::find(
+          std::begin(kFunctionKinds), std::end(kFunctionKinds), e->kind);
+      r = function_classes.at(it - std::begin(kFunctionKinds))(
+          *args, py::arg("evaluate") = false);
+      break;
+    }
   }
   sympy_cache.emplace(e->id, r);
   return r;
@@ -313,6 +350,9 @@ const char* kind_name(Kind k) {
       return "And";
     case Kind::Or:
       return "Or";
+    case Kind::Mod:
+    case Kind::PythonMod:
+      return function_name(k);
   }
   return "?";
 }
@@ -324,6 +364,15 @@ Kind relational_kind(const std::string& op) {
     }
   }
   TORCH_CHECK(false, "unknown relational ", op);
+}
+
+Kind function_kind(const std::string& name) {
+  for (auto k : kFunctionKinds) {
+    if (name == function_name(k)) {
+      return k;
+    }
+  }
+  TORCH_CHECK(false, "unknown function ", name);
 }
 
 const Expr* unwrap(const std::shared_ptr<PyArena>& self, const PyExpr& e) {
@@ -515,6 +564,17 @@ void initSymbolicBindings(PyObject* module) {
           py::arg("lhs"),
           py::arg("rhs"),
           py::arg("evaluate") = true)
+      .def(
+          "function",
+          [wrap](
+              const Self& self,
+              const std::string& name,
+              const std::vector<PyExpr>& args) {
+            return wrap(
+                self,
+                self->arena->function(
+                    function_kind(name), unwrap_all(self, args)));
+          })
       .def(
           "logical_not",
           [wrap](const Self& self, const PyExpr& a) {

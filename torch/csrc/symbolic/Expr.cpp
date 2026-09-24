@@ -18,9 +18,10 @@ int cmp3(T a, T b) {
   return (a > b) - (a < b);
 }
 
+constexpr int kUnlisted = 1000;
+
 // Index in sympy's ordering_of_classes; classes missing from it sort after all
-// listed ones, by class name (And, BooleanFalse, BooleanTrue, Dummy,
-// IntInfinity, NegativeIntInfinity, Not, Or).
+// listed ones, by class name.
 int class_rank(const Expr* e) {
   switch (e->kind) {
     case Kind::Integer:
@@ -47,22 +48,31 @@ int class_rank(const Expr* e) {
       return 66;
     case Kind::Le:
       return 67;
-    case Kind::And:
-      return 100;
-    case Kind::BooleanFalse:
-      return 101;
-    case Kind::BooleanTrue:
-      return 102;
-    case Kind::IntInfinity:
-      return 104;
-    case Kind::NegativeIntInfinity:
-      return 105;
-    case Kind::Not:
-      return 106;
-    case Kind::Or:
-      return 107;
     default:
-      return -1;
+      return kUnlisted;
+  }
+}
+
+const char* unlisted_class_name(const Expr* e) {
+  switch (e->kind) {
+    case Kind::Symbol:
+      return "Dummy";
+    case Kind::IntInfinity:
+      return "IntInfinity";
+    case Kind::NegativeIntInfinity:
+      return "NegativeIntInfinity";
+    case Kind::BooleanTrue:
+      return "BooleanTrue";
+    case Kind::BooleanFalse:
+      return "BooleanFalse";
+    case Kind::Not:
+      return "Not";
+    case Kind::And:
+      return "And";
+    case Kind::Or:
+      return "Or";
+    default:
+      return function_name(e->kind);
   }
 }
 
@@ -570,10 +580,14 @@ int ExprArena::compare(const Expr* a, const Expr* b) const {
   }
   auto rank = [this](const Expr* e) {
     return e->kind == Kind::Symbol && symbol_info(e).dummy_index != 0
-        ? 103
+        ? kUnlisted
         : class_rank(e);
   };
-  int c = cmp3(rank(a), rank(b));
+  int ra = rank(a);
+  int c = cmp3(ra, rank(b));
+  if (c == 0 && ra == kUnlisted) {
+    c = cmp3(std::strcmp(unlisted_class_name(a), unlisted_class_name(b)), 0);
+  }
   if (c != 0) {
     return c;
   }

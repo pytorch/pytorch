@@ -89,7 +89,7 @@ const char* class_name(Kind k) {
     case Kind::Or:
       return "Or";
     default:
-      throw NativeUnsupported("class_key of an unported kind");
+      return function_name(k);
   }
 }
 
@@ -156,8 +156,12 @@ const SortKeyPtr& ExprArena::sort_key(const Expr* e) {
     if (x->kind == Kind::Symbol) {
       return key_tuple({key_int(2), key_int(0), key_str("Symbol")});
     }
-    int major = x->is_boolean() ? 5 : 3;
-    int minor = x->kind == Kind::Add ? 1 : x->kind == Kind::Pow ? 2 : 0;
+    // Function.class_key: nargs is a FiniteSet for every function kind.
+    int major = x->is_boolean() ? 5 : x->is_function() ? 4 : 3;
+    int minor = x->is_function() ? 10000
+        : x->kind == Kind::Add   ? 1
+        : x->kind == Kind::Pow   ? 2
+                                 : 0;
     return key_tuple(
         {key_int(major), key_int(minor), key_str(class_name(x->kind))});
   };
@@ -195,7 +199,7 @@ const SortKeyPtr& ExprArena::sort_key(const Expr* e) {
          sort_key(one_),
          key_num(one_)});
   } else {
-    // Expr.sort_key; Pow bases are Symbols or Adds, so expr is not a Number.
+    // Expr.sort_key; Pow bases are never Numbers.
     auto [coeff, expr] = as_coeff_Mul(e);
     const Expr* exp = one_;
     if (expr->kind == Kind::Pow) {
@@ -207,8 +211,12 @@ const SortKeyPtr& ExprArena::sort_key(const Expr* e) {
     if (expr->kind == Kind::Symbol) {
       items.push_back(key_str(symbol_info(expr).name));
     } else {
-      auto args = expr->kind == Kind::Add ? as_ordered_terms(expr)
-                                          : as_ordered_factors(expr);
+      c10::SmallVector<const Expr*, 4> args(expr->args.begin(), expr->args.end());
+      if (expr->kind == Kind::Add) {
+        args = as_ordered_terms(expr);
+      } else if (expr->kind == Kind::Mul) {
+        args = as_ordered_factors(expr);
+      }
       for (const Expr* a : args) {
         items.push_back(sort_key(a));
       }

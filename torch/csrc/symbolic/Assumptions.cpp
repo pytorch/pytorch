@@ -1238,7 +1238,8 @@ void deduce_all_facts(FactKB& kb, c10::ArrayRef<std::pair<Fact, bool>> in) {
 }
 
 FactKB ExprArena::default_kb(const Expr* e) {
-  // StdFactKB(cls._explicit_class_assumptions) of each number class.
+  // StdFactKB(cls._explicit_class_assumptions) of each number and function
+  // class.
   static const auto kbs = [] {
     using F = Fact;
     auto make = [](std::initializer_list<std::pair<Fact, bool>> extra) {
@@ -1246,7 +1247,7 @@ FactKB ExprArena::default_kb(const Expr* e) {
       deduce_all_facts(kb, extra);
       return kb;
     };
-    return std::array<FactKB, 6>{
+    return std::array<FactKB, 8>{
         // Integer, NegativeOne
         make(
             {{F::commutative, true},
@@ -1289,6 +1290,10 @@ FactKB ExprArena::default_kb(const Expr* e) {
              {F::extended_negative, true},
              {F::extended_real, true},
              {F::prime, false}}),
+        // is_integer = True
+        make({{F::integer, true}}),
+        // Mod
+        make({{F::integer, true}, {F::nonnegative, true}}),
     };
   }();
   switch (e->kind) {
@@ -1300,6 +1305,10 @@ FactKB ExprArena::default_kb(const Expr* e) {
       return kbs[4];
     case Kind::NegativeIntInfinity:
       return kbs[5];
+    case Kind::PythonMod:
+      return kbs[6];
+    case Kind::Mod:
+      return kbs[7];
     default:
       return {};
   }
@@ -1385,6 +1394,17 @@ Tri ExprArena::eval_fact(const Expr* e, Fact f) {
       return e->kind == Kind::Pow ? pow_fact(*this, e, f)
           : e->kind == Kind::Mul  ? mul_fact(*this, e, f)
                                   : add_fact(*this, e, f);
+    case Kind::Mod:
+    case Kind::PythonMod:
+      // Expr's extended_positive/negative handlers return None unless
+      // is_number, and function nodes always have free symbols.
+      // Function._eval_is_commutative is shadowed by the class facts.
+      if (e->kind == Kind::PythonMod &&
+          (f == F::nonnegative || f == F::nonpositive)) {
+        Fact sign = f == F::nonnegative ? F::positive : F::negative;
+        return ask(e->args[1], sign) == Tri::True ? Tri::True : Tri::Unknown;
+      }
+      return Tri::Unknown;
     case Kind::BooleanTrue:
     case Kind::BooleanFalse:
     case Kind::Eq:

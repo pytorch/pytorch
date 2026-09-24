@@ -36,6 +36,9 @@ enum class Kind : uint8_t {
   Pow,
   Mul,
   Add,
+  // Custom functions from torch/utils/_sympy/functions.py (Functions.cpp).
+  Mod,
+  PythonMod,
   // Boolean kinds: sympy Booleans that are not Exprs.
   BooleanTrue,
   BooleanFalse,
@@ -157,7 +160,13 @@ struct Expr {
   bool is_relational() const {
     return kind >= Kind::Eq && kind <= Kind::Ge;
   }
+  bool is_function() const {
+    return kind > Kind::Add && kind < Kind::BooleanTrue;
+  }
 };
+
+// The class name of a function kind.
+const char* function_name(Kind k);
 
 // A sympy sort key (Basic.sort_key, default_sort_key): nested tuples of ints,
 // strings and Numbers, compared like Python tuples. Subkeys are shared, as the
@@ -217,6 +226,10 @@ class ExprArena : public c10::intrusive_ptr_target {
   const Expr* pow(const Expr* b, const Expr* e);
   const Expr* neg(const Expr* a);
   const Expr* sub(const Expr* a, const Expr* b);
+  // cls(*args) for a function kind: cls.eval's result, or the unevaluated
+  // node. Nodes whose args are all numbers throw, so a node without free
+  // symbols is always a Number.
+  const Expr* function(Kind kind, c10::ArrayRef<const Expr*> args);
 
   // Eq/Ne/Lt/Le/Gt/Ge(lhs, rhs, evaluate=evaluate) (Relational.cpp). These are
   // the sympy constructors, not IntInfinity's __ge__ etc. operator overloads.
@@ -278,6 +291,8 @@ class ExprArena : public c10::intrusive_ptr_target {
   // Assoc node from already-processed args, like AssocOp._from_args.
   const Expr* from_args(Kind kind, c10::SmallVectorImpl<const Expr*>& args);
   const Expr* number_pow(Num b, int64_t e);
+  // Mod.eval and PythonMod.eval; nullptr for None.
+  const Expr* eval_mod(Kind kind, const Expr* p, const Expr* q);
   const Expr* new_symbol(const std::string& name, const FactKB& kb);
   const Expr* as_boolean(const Expr* e);
   // The tail of LatticeOp.__new__.

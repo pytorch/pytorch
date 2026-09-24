@@ -14,6 +14,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TestCase,
 )
+from torch.utils._sympy.functions import Mod, PythonMod
 from torch.utils._sympy.numbers import int_oo
 
 
@@ -888,6 +889,155 @@ class TestNativePrinter(TestCase):
         self.assertGreater(answered, 20 * unsupported)
 
 
+class TestNativeFunctions(TestCase):
+    FUNCTIONS = {"Mod": Mod, "PythonMod": PythonMod}
+
+    def check_call(self, name, a, b):
+        """Returns the sympy result, or None if native raised
+        NativeUnsupported."""
+        arena = torch._C._symbolic._Arena()
+        args = [arena.from_sympy(a), arena.from_sympy(b)]
+        try:
+            expected = self.FUNCTIONS[name](a, b)
+        except (ZeroDivisionError, AssertionError, TypeError):
+            with self.assertRaises(NativeUnsupported, msg=f"{name}({a}, {b})"):
+                arena.function(name, args)
+            return None
+        try:
+            r = arena.function(name, args)
+        except NativeUnsupported:
+            return None
+        got = arena.to_sympy(r)
+        self.assertEqual(got, expected, f"{name}({a}, {b})")
+        self.assertEqual(type(got), type(expected), f"{name}({a}, {b})")
+        self.assertEqual(got.args, expected.args, f"{name}({a}, {b})")
+        self.assertIs(arena.from_sympy(expected).id, r.id)
+        return expected
+
+    def check_expr(self, v, rng):
+        """Returns False if native raised NativeUnsupported, else checks facts,
+        str and sort_key against sympy."""
+        arena = torch._C._symbolic._Arena()
+        try:
+            n = arena.from_sympy(v)
+            got = arena.sstr(n)
+        except NativeUnsupported:
+            return False
+        self.assertEqual(got, str(v))
+        self.assertTrue(arena.sort_key(n) == v.sort_key(), f"sort_key({v})")
+        self.assertEqual(arena.to_sympy(n), v)
+        facts = list(FACTS)
+        rng.shuffle(facts)
+        for f in facts:
+            try:
+                got = arena.ask(n, f)
+            except NativeUnsupported:
+                continue
+            self.assertIs(got, getattr(v, "is_" + f), f"({v}).is_{f}")
+        return True
+
+    def test_known(self):
+        cases = [
+            ("Mod", 2 * s0, 2, 0),
+            ("Mod", 2 * s0 + 1, 2, 1),
+            ("Mod", s0 * s1, s1, 0),
+            ("Mod", s0, s0 + 1, s0),
+            ("Mod", s0, 2 * s0, s0),
+            ("Mod", s0 + 1, s0, Mod(s0 + 1, s0)),
+            ("Mod", 4 * s0 + 2, 4, Mod(4 * s0 + 2, 4)),
+            ("Mod", u0, -u0, 0),
+            ("Mod", 7, 3, 1),
+            ("Mod", sympy.Rational(7, 2), 2, sympy.Rational(3, 2)),
+            ("PythonMod", 7, -2, -1),
+            ("PythonMod", -7, 2, 1),
+            ("PythonMod", 2 * u0 + 1, 2, 1),
+            ("PythonMod", s0, s0 + s1, s0),
+        ]
+        for name, a, b, expected in cases:
+            got = self.check_call(name, sympy.sympify(a), sympy.sympify(b))
+            self.assertEqual(got, expected, f"{name}({a}, {b})")
+
+    def test_unsupported(self):
+        arena = torch._C._symbolic._Arena()
+        cases = [
+            ("Mod", -7, 3),
+            ("Mod", 7, 0),
+            ("Mod", s0, 0),
+            ("Mod", int_oo, 2),
+            ("Mod", s0, int_oo),
+            ("PythonMod", u0, 2),
+            ("PythonMod", s0 + 1, s1),
+        ]
+        for name, a, b in cases:
+            args = [arena.from_sympy(sympy.sympify(x)) for x in (a, b)]
+            with self.assertRaises(NativeUnsupported, msg=f"{name}({a}, {b})"):
+                arena.function(name, args)
+        with self.assertRaises(NativeUnsupported):
+            arena.function("Mod", [arena.from_sympy(s0)])
+        with self.assertRaises(NativeUnsupported):
+            arena.function("Mod", [arena.boolean(True), arena.from_sympy(s0)])
+        with self.assertRaises(NativeUnsupported):
+            arena.from_sympy(Mod(4, 2, evaluate=False))
+        v = Mod(s0, 3, evaluate=False)
+        self.assertEqual(arena.to_sympy(arena.from_sympy(v)), v)
+        x = arena.from_sympy(s0)
+        with self.assertRaises(NativeUnsupported):
+            arena.diff(arena.from_sympy(Mod(s0, 3)), x)
+
+    def test_printing(self):
+        m = Mod(s0, 2)
+        cases = [s0 - m, -2 * m, m**2, 1 / m, s0 / m, m * s1, -m * s1, m + 1]
+        cases += [sympy.Lt(m, s0), sympy.Eq(m, 1), Mod(s0 + 1, s1 + 2), -m]
+        cases += [Mod(m + s1, 3), Mod(u0, 2) * u0, s0 * m / (s1 + 1)]
+        rng = random.Random(0)
+        for v in cases:
+            self.assertTrue(self.check_expr(v, rng), f"{v}")
+
+    def test_sorting(self):
+        items = [Mod(s0, 2), Mod(s0, 3), Mod(s1, 2), Mod(u0, 2), s0, u0]
+        items += [Mod(s0 + 1, s1), s0 + Mod(s0, 2), sympy.Integer(2), s0**2]
+        items += [sympy.Eq(s0, 1, evaluate=False), sympy.Not(u0), sympy.true]
+        arena = torch._C._symbolic._Arena()
+        natives = [arena.from_sympy(x) for x in items]
+        for a, na in zip(items, natives):
+            for b, nb in zip(items, natives):
+                self.assertEqual(arena.compare(na, nb), a.compare(b), f"{a}, {b}")
+        got = arena.ordered(natives)
+        self.assertEqual([arena.to_sympy(x) for x in got], list(sympy.ordered(items)))
+
+    @parametrize("seed", range(4))
+    def test_fuzz(self, seed):
+        rng = random.Random(seed)
+        calls = supported = 0
+        nodes = []
+        for _ in range(150):
+            a = sympy.sympify(sympy_eval(random_tree(rng, 2, FACT_LEAVES)))
+            b = sympy.sympify(sympy_eval(random_tree(rng, 2, FACT_LEAVES)))
+            if a.has(sympy.zoo, sympy.nan) or b.has(sympy.zoo, sympy.nan):
+                continue
+            for name in self.FUNCTIONS:
+                calls += 1
+                r = self.check_call(name, a, b)
+                if r is not None:
+                    supported += 1
+                    if isinstance(r, (Mod, PythonMod)):
+                        nodes.append(r)
+        self.assertGreater(supported, calls // 3)
+        self.assertGreater(len(nodes), 10)
+        answered = unsupported = 0
+        for _ in range(60):
+            t = random_tree(rng, 3, LEAVES + nodes)
+            for sub in subtrees(t):
+                v = sympy.sympify(sympy_eval(sub))
+                if v.has(sympy.zoo, sympy.nan):
+                    continue
+                if self.check_expr(v, rng):
+                    answered += 1
+                else:
+                    unsupported += 1
+        self.assertGreater(answered, 5 * unsupported)
+
+
 instantiate_parametrized_tests(TestNativeExpr)
 instantiate_parametrized_tests(TestNativeCompoundAssumptions)
 instantiate_parametrized_tests(TestNativeExprTools)
@@ -895,6 +1045,7 @@ instantiate_parametrized_tests(TestNativeRelational)
 instantiate_parametrized_tests(TestNativeSorting)
 instantiate_parametrized_tests(TestNativeLattice)
 instantiate_parametrized_tests(TestNativePrinter)
+instantiate_parametrized_tests(TestNativeFunctions)
 
 
 if __name__ == "__main__":

@@ -72,6 +72,11 @@ bool ExprArena::is_polynomial(const Expr* e) const {
   if (e->kind == Kind::Pow) {
     return is_polynomial(e->args[0]) && e->args[1]->p >= 0;
   }
+  if (e->is_function()) {
+    // Expr._eval_is_polynomial is None when a symbol is free in e, which it
+    // always is for a function.
+    return false;
+  }
   return std::all_of(e->args.begin(), e->args.end(), [this](const Expr* a) {
     return is_polynomial(a);
   });
@@ -110,7 +115,7 @@ const Expr* ExprArena::diff(const Expr* e, const Expr* x) {
       return mul({e, mul({t, pow(b, neg_one_)})});
     }
     default:
-      return zero_;
+      throw NativeUnsupported("unevaluated Derivative");
   }
 }
 
@@ -138,6 +143,9 @@ const Expr* ExprArena::xreplace(
     // sympy rebuilds whenever a rule matched, even with identical args, and
     // rebuilding an unevaluated relational or an Or is not a no-op.
     throw NativeUnsupported("xreplace of a Boolean");
+  }
+  if (e->is_function()) {
+    return function(e->kind, args);
   }
   return e->kind == Kind::Add ? add(args)
       : e->kind == Kind::Mul  ? mul(args)

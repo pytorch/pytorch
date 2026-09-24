@@ -90,6 +90,11 @@ class StrPrinter {
         return stringify(e->args, " & ", kBitwiseAnd);
       case Kind::Or:
         return stringify(e->args, " | ", kBitwiseOr);
+      case Kind::Mod:
+      case Kind::PythonMod:
+        // _print_Function.
+        return std::string(function_name(e->kind)) + "(" +
+            stringify(e->args, ", ", 0) + ")";
     }
     throw NativeUnsupported("str of an unknown kind");
   }
@@ -103,6 +108,11 @@ class StrPrinter {
       case Kind::Rational:
         return e->p < 0 ? kAdd : kMul;
       case Kind::Mul:
+        for (const Expr* a : e->args) {
+          if (a->is_function() && precedence(a) < kMul) {
+            return kMul;
+          }
+        }
         return arena_.could_extract_minus_sign(e) ? kAdd : kMul;
       case Kind::Add:
         return kAdd;
@@ -122,6 +132,10 @@ class StrPrinter {
         return kAnd;
       case Kind::Or:
         return kOr;
+      case Kind::Mod:
+      case Kind::PythonMod:
+        // The classes' precedence attribute.
+        return 35;
       default:
         return kAtom;
     }
