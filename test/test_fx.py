@@ -735,6 +735,30 @@ class TestFX(JitTestCase):
         self.assertIn("wrapped_decorated_fn", m.code)
         self.assertEqual(m(1), 1)
 
+    def test_wrap_does_not_keep_caller_frames_alive(self):
+        # A module can be imported lazily from deep inside a running op; wrap()
+        # must not form a frame cycle that pins that stack until the next gc.
+        class Sentinel:
+            pass
+
+        module_globals = {"wrap": wrap}
+
+        def import_module_from_caller():
+            sentinel = Sentinel()
+            exec("wrap('_wrap_frame_leak_target')", module_globals)
+            return weakref.ref(sentinel)
+
+        gc.collect()
+        gc.disable()
+        try:
+            sentinel_ref = import_module_from_caller()
+            self.assertIsNone(sentinel_ref())
+        finally:
+            gc.enable()
+            torch.fx._symbolic_trace._wrapped_fns_to_patch.pop(
+                (id(module_globals), "_wrap_frame_leak_target"), None
+            )
+
     def test_graph_edit_with_proxy(self):
         class M(torch.nn.Module):
             def forward(self, a, b):
