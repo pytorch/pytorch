@@ -814,6 +814,37 @@ class FakeTensorTest(TestCase):
                     )
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_fill_tensor_mixed_device(self):
+        device_pairs = [("cpu", "cuda"), ("cuda", "cpu")]
+        if torch.cuda.device_count() >= 2:
+            device_pairs.append(("cuda:0", "cuda:1"))
+
+        for op in (aten.fill.Tensor, aten.fill_.Tensor):
+            for destination_device, value_device in device_pairs:
+                with self.subTest(
+                    op=op,
+                    destination_device=destination_device,
+                    value_device=value_device,
+                ), FakeTensorMode():
+                    destination = torch.empty(2, device=destination_device)
+                    value = torch.tensor(1.0, device=value_device)
+                    result = op(destination, value)
+                    self.assertEqual(result.device, destination.device)
+                    self.assertTrue(is_fake_tensor(result))
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_fill_tensor_mixed_device_rejects_non_scalar(self):
+        for op in (aten.fill.Tensor, aten.fill_.Tensor):
+            with self.subTest(op=op), FakeTensorMode():
+                destination = torch.empty(2)
+                value = torch.ones(1, device="cuda")
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "fill_ only supports 0-dimension value tensor",
+                ):
+                    op(destination, value)
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_zero_dim(self):
         with FakeTensorMode() as mode:
             x = torch.tensor(0.0)

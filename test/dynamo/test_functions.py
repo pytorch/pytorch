@@ -6332,6 +6332,28 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(result_a, torch.full((2,), 3.14, dtype=torch.float32))
         self.assertEqual(result_b, torch.full((2,), 2.71, dtype=torch.float32))
 
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_full_with_cross_device_tensor_fill_value(self):
+        device_pairs = [("cpu", "cuda"), ("cuda", "cpu")]
+        if torch.cuda.device_count() >= 2:
+            device_pairs.append(("cuda:0", "cuda:1"))
+
+        for output_device, fill_device in device_pairs:
+            with self.subTest(
+                output_device=output_device,
+                fill_device=fill_device,
+            ):
+
+                def func(fill_value):
+                    return torch.full(
+                        (2,), fill_value, dtype=torch.float64, device=output_device
+                    )
+
+                fill_value = torch.tensor(5.0, dtype=torch.float64, device=fill_device)
+                expected = func(fill_value)
+                result = torch.compile(func, backend="eager", fullgraph=True)(fill_value)
+                self.assertEqual(result, expected)
+
     def test_full_with_parameter_fill_value_raises(self):
         class Mod(torch.nn.Module):
             def __init__(self) -> None:

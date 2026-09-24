@@ -1200,6 +1200,12 @@ class FakeTensor(Tensor):
             aten._foreach_copy.default,
         )
 
+        # These ops keep the destination device when the value is a scalar tensor.
+        scalar_value_mixed_device_fns = ordered_set(
+            aten.fill.Tensor,
+            aten.fill_.Tensor,
+        )
+
         # These in-place ops keep the destination tensor's device even if the
         # rhs was explicitly constructed on meta.
         meta_rhs_mixed_device_fns = ordered_set(
@@ -1240,6 +1246,9 @@ class FakeTensor(Tensor):
             is_bypass_zero_dim_cpu_tensor_check_op = (
                 func in bypass_zero_dim_cpu_tensor_check_ops
             )
+
+            if func in scalar_value_mixed_device_fns and t.dim() == 0:
+                return
 
             # mismatching devices !
             # if current tensor is cpu 0 dim, defer to existing device
