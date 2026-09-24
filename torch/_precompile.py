@@ -3312,7 +3312,8 @@ def load(
     Raises ``PrecompileError`` if either file cannot be read, if ``python_code`` is
     not a ``torch.compiler.precompile`` artifact, or if the cache's ``backend``,
     ``tracer`` or ``code_hash`` does not match ``python_code`` -- the pair came from different
-    captures. A cache whose ``format``/``version`` does not match (a foreign or
+    captures -- or if an installed artifact cannot install onto the serving source (it
+    changed since capture). A cache whose ``format``/``version`` does not match (a foreign or
     different-build envelope) is NOT fatal: the cache is acceleration only, so
     ``load`` degrades to JIT'ing from ``python_code`` rather than crashing.
     """
