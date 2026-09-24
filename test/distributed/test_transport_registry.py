@@ -1,7 +1,9 @@
 # Owner(s): ["oncall: distributed"]
 
 import asyncio
+import json
 import threading
+from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import patch
@@ -17,12 +19,23 @@ from torch.distributed._transport import (
     Transport,
     wait_all,
 )
+from torch.distributed._transport._serialization import _WireDescriptor
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
     TestCase,
 )
+
+
+@dataclass(frozen=True)
+class _Descriptor(_WireDescriptor):
+    _backend = "test"
+    _fields = {"address": int, "name": str, "metadata": bytes}
+
+    address: int
+    name: str
+    metadata: bytes
 
 
 class _TestTransport(Transport):
@@ -98,6 +111,53 @@ class TestTransportRegistry(TestCase):
         self.assertIsInstance(readonly, MemoryView)
         self.assertNotIsInstance(readonly, MutableMemoryView)
         self.assertIsInstance(mutable, MutableMemoryView)
+
+    def test_descriptor_roundtrip(self):
+        descriptor = _Descriptor(2**64 - 1, "peer\u2603", b"\x00\xffdata")
+        encoded = descriptor.serialize()
+        self.assertIsInstance(encoded, bytes)
+        self.assertEqual(_Descriptor.deserialize(encoded), descriptor)
+        self.assertEqual(json.loads(encoded)["backend"], "test")
+
+    def test_descriptor_rejects_invalid_wire_data(self):
+        valid = json.loads(_Descriptor(1, "peer", b"data").serialize())
+        cases = [
+            b"not json",
+            b"\xff",
+            b"[]",
+            b"null",
+            b'{"version":1,"version":1,"backend":"test","fields":{}}',
+        ]
+        for key, value in [
+            ("version", 2),
+            ("version", True),
+            ("backend", "nixl"),
+            ("fields", []),
+            ("unexpected", 0),
+        ]:
+            cases.append(json.dumps({**valid, key: value}).encode())
+        for key, value in [
+            ("address", -1),
+            ("address", True),
+            ("address", 1.5),
+            ("name", 1),
+            ("metadata", "%%%"),
+            ("metadata", []),
+            ("extra", 0),
+        ]:
+            cases.append(
+                json.dumps(
+                    {**valid, "fields": {**valid["fields"], key: value}}
+                ).encode()
+            )
+        cases.append(json.dumps({**valid, "fields": {}}).encode())
+        for data in cases:
+            with self.subTest(data=data), self.assertRaises(ValueError):
+                _Descriptor.deserialize(data)
+        with self.assertRaises(TypeError):
+            _Descriptor.deserialize("not bytes")
+        with self.assertRaises(ValueError):
+            _Descriptor(-1, "peer", b"").serialize()
 
     def test_factory_without_device(self):
         register_transport("test", lambda *, value: _TestTransport(value=value))
