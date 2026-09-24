@@ -27,7 +27,7 @@ from torch.export import Dim, export
 from torch.testing._internal import opinfo
 from torch.testing._internal.common_utils import \
     (gradcheck, gradgradcheck, parametrize, run_tests, TestCase, download_file, MACOS_VERSION, IS_CI,
-     NoTest, skipIfSlowGradcheckEnv, suppress_warnings, serialTest, instantiate_parametrized_tests, xfailIf)
+     NoTest, skipIfSlowGradcheckEnv, suppress_warnings, serialTest, instantiate_parametrized_tests, xfailIf, subtest)
 from torch.testing._internal.common_mps import mps_ops_modifier, mps_ops_grad_modifier
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import get_all_dtypes, integral_types
@@ -874,6 +874,35 @@ class TestAvgPool(TestCaseMPS):
         bn_mps = torch.nn.BatchNorm2d(64).eval().to("mps")(x)
         bn_cpu = torch.nn.BatchNorm2d(64).eval()(x.cpu())
         self.assertEqual(bn_mps.cpu(), bn_cpu)
+
+
+def _max_spectrum_distance(expected, actual):
+    # Eigenvalues are a set, and sorting them is not stable enough to compare:
+    # a conjugate pair shares a real part, so a tiny difference there can
+    # reorder it against a neighbouring eigenvalue. Match greedily by distance
+    # instead and report the worst pairing.
+    expected = expected.cpu().reshape(-1, expected.shape[-1])
+    actual = actual.cpu().reshape(-1, actual.shape[-1])
+    worst = 0.0
+    for row in range(expected.shape[0]):
+        dist = (expected[row].unsqueeze(-1) - actual[row].unsqueeze(-2)).abs()
+        taken = set()
+        for i in range(expected.shape[1]):
+            for j in torch.argsort(dist[i]).tolist():
+                if j not in taken:
+                    taken.add(j)
+                    worst = max(worst, dist[i, j].item())
+                    break
+    return worst
+
+
+def _with_repeated_eigenvalues(dtype):
+    # Eigenvalues 0, 1 and 2, each repeated eight times, behind a
+    # well-conditioned non-normal basis. On clusters like these a Wilkinson
+    # shift formed as tr^2 - det cancels and the QR iteration stalls.
+    P = torch.eye(24, dtype=dtype) + 0.5 * torch.randn(128, 24, 24, dtype=dtype) / 24 ** 0.5
+    D = torch.diag_embed(torch.arange(24).remainder(3).to(dtype).expand(128, 24))
+    return P @ D @ torch.linalg.inv(P)
 
 
 class TestMPS(TestCaseMPS):
@@ -12245,6 +12274,41 @@ class TestLinalgMPS(TestCaseMPS):
             torch._compute_linear_combination(xm, cm, out=actual)
         self.assertEqual(actual.cpu(), expected, atol=tol[0], rtol=tol[1])
 
+    @parametrize("make_input", [
+        subtest(lambda dtype: torch.randn(1, 1, dtype=dtype), name="1x1"),
+        subtest(lambda dtype: torch.randn(2, 2, dtype=dtype), name="2x2"),
+        subtest(lambda dtype: torch.randn(5, 5, dtype=dtype), name="5x5"),
+        subtest(lambda dtype: torch.randn(12, 12, dtype=dtype), name="12x12"),
+        subtest(lambda dtype: torch.randn(32, 32, dtype=dtype), name="32x32"),
+        # Past the threadgroup-memory limit, so this takes the CPU fallback.
+        subtest(lambda dtype: torch.randn(40, 40, dtype=dtype), name="40x40_cpu_fallback"),
+        subtest(lambda dtype: torch.randn(3, 5, 5, dtype=dtype), name="batched"),
+        subtest(lambda dtype: torch.randn(2, 3, 4, 4, dtype=dtype), name="batched_2d"),
+        subtest(lambda dtype: torch.eye(7, dtype=dtype), name="identity"),
+        subtest(lambda dtype: torch.zeros(4, 4, dtype=dtype), name="zero"),
+        subtest(lambda dtype: torch.randn(6, 6, dtype=dtype).triu(), name="upper_triangular"),
+        subtest(lambda dtype: torch.tensor([[0.0, -1.0], [1.0, 0.0]]).to(dtype), name="rotation"),
+        # A defective matrix has fewer eigenvectors than its dimension, so the
+        # back substitution has to survive the repeated eigenvalue.
+        subtest(lambda dtype: torch.tensor([[2.0, 1.0, 0.0], [0.0, 2.0, 1.0], [0.0, 0.0, 2.0]]).to(dtype),
+                name="jordan_block"),
+        subtest(_with_repeated_eigenvalues, name="repeated_eigenvalues"),
+    ])
+    @dtypes(torch.float32, torch.complex64)
+    def test_eig_invariants(self, device, dtype, make_input):
+        # Neither the order the eigenvalues come out in nor the phase of each
+        # eigenvector is fixed by the math, so check the spectrum against CPU
+        # plus the relation that defines the decomposition.
+        A = make_input(dtype)
+        values, vectors = torch.linalg.eig(A.to(device))
+
+        self.assertLessEqual(_max_spectrum_distance(torch.linalg.eigvals(A), values), 1e-4)
+        self.assertLessEqual(_max_spectrum_distance(values, torch.linalg.eigvals(A.to(device))), 1e-4)
+        Am = A.to(device).to(values.dtype)
+        self.assertEqual(Am @ vectors, vectors @ torch.diag_embed(values), atol=1e-4, rtol=1e-4)
+        norms = vectors.norm(dim=-2)
+        self.assertEqual(norms, torch.ones_like(norms), atol=1e-5, rtol=1e-5)
+
     @unittest.skipIf(MACOS_VERSION < 15.0, "matrix_exp on MPS requires macOS 15+")
     @dtypes(torch.float32, torch.complex64)
     def test_matrix_exp_invariants(self, device, dtype):
@@ -16587,6 +16651,27 @@ class TestConsistency(TestCaseMPS):
                 keep_dim = mps_sample.args[2] if len(mps_sample.args) > 2 else False
                 values = torch.gather(mps_sample.input, dim, mps_out[1] if keep_dim else mps_out[1].unsqueeze(dim))
                 self.assertEqual(values if keep_dim else values.squeeze(dim), mps_out[0])
+                continue
+
+            if op.name in ("linalg.eig", "linalg.eigvals"):
+                # For a non-symmetric matrix both the order the eigenvalues come
+                # out in and the phase of each eigenvector are algorithm
+                # dependent, so compare the sorted spectrum and check the
+                # relation that actually defines the decomposition.
+                mps_vals = mps_out[0] if op.name == "linalg.eig" else mps_out
+                cpu_vals = cpu_out[0] if op.name == "linalg.eig" else cpu_out
+                if cpu_vals.numel() == 0:
+                    self.assertEqual(cpu_vals.shape, mps_vals.shape)
+                    continue
+                scale = max(cpu_vals.abs().max().item(), 1.0)
+                self.assertLessEqual(_max_spectrum_distance(cpu_vals, mps_vals), 1e-4 * scale)
+                if op.name == "linalg.eig":
+                    V = mps_out[1]
+                    A = mps_sample.input.to(V.dtype)
+                    self.assertEqual(A @ V, V @ torch.diag_embed(mps_vals),
+                                     atol=1e-4 * scale, rtol=1e-4)
+                    norms = V.norm(dim=-2)
+                    self.assertEqual(norms, torch.ones_like(norms), atol=1e-5, rtol=1e-5)
                 continue
 
             if op.name == "topk":
