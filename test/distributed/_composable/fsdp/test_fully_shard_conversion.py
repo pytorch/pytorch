@@ -265,6 +265,24 @@ class TestFullyShardConversion(TestCase):
             module(inp).sum().backward()
         self._assert_parity(model, reference, check_override=True)
 
+    @parametrize("grad_dtype", [torch.float32, None])
+    def test_dtype_conversion_preserves_explicit_grad_dtype(self, device, grad_dtype):
+        # An explicit grad_dtype matching the parameter dtype must not follow a
+        # parameter dtype conversion or be cast by Module._apply.
+        model = nn.Linear(4, 4, bias=False, device=device)
+        model.weight.grad_dtype = grad_dtype
+        fully_shard(model, mesh=self.mesh)
+        value = 1 + 2**-10  # Not representable in bfloat16
+        model.weight.grad = torch.full_like(model.weight, value)
+        model.bfloat16()
+        self.assertEqual(model.weight.dtype, torch.bfloat16)
+        self.assertEqual(model.weight.grad_dtype, grad_dtype)
+        self.assertEqual(model.weight.grad.dtype, torch.float32)
+        self.assertEqual(
+            model.weight.grad.full_tensor(),
+            torch.full((4, 4), value, device=device),
+        )
+
     @parametrize(
         "orig_dtype,param_dtype",
         [(torch.float32, torch.bfloat16), (torch.bfloat16, torch.float32)],

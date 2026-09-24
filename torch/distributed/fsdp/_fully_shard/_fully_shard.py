@@ -919,9 +919,10 @@ class FSDPModule:
         for fsdp_param in fsdp_params:
             param = fsdp_param.sharded_param
             grad = param.grad
-            if grad is not None and grad.dtype != param.dtype:
-                # Module._apply attaches gradients before FSDP can restore
-                # grad_dtype on the converted parameter.
+            if grad is not None and fsdp_param._has_sharded_grad_dtype_override:
+                # Explicit grad_dtype, not the parameter dtype, owns this
+                # gradient's dtype. Module._apply would convert it with the
+                # parameter and attach it before FSDP restores grad_dtype.
                 saved_grads[fsdp_param] = grad
                 param.grad = None
         ret = super()._apply(fn, recurse=recurse)  # type: ignore[misc]
