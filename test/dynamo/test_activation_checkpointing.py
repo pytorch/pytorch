@@ -1083,6 +1083,65 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         result = opt_fn(a, b)
         self.assertEqual(result, expected)
 
+    @parametrize(
+        "policy,expected_calls",
+        [
+            (CheckpointPolicy.PREFER_RECOMPUTE, 1),
+            (CheckpointPolicy.MUST_CPU_OFFLOAD, 1),
+            (CheckpointPolicy.MUST_RECOMPUTE, None),
+        ],
+    )
+    def test_selective_checkpoint_preserves_registered_effect(
+        self, device, policy, expected_calls
+    ):
+        call_count = 0
+        with torch.library._scoped_library("test_compile_sac_effect", "FRAGMENT"):
+
+            @torch.library.custom_op(
+                "test_compile_sac_effect::identity", mutates_args=()
+            )
+            def effectful_identity(x: torch.Tensor) -> torch.Tensor:
+                nonlocal call_count
+                call_count += 1
+                return x.clone()
+
+            @effectful_identity.register_fake
+            def _(x):
+                return torch.empty_like(x)
+
+            def backward(_ctx, grad_output):
+                return grad_output
+
+            effectful_identity.register_autograd(backward)
+            effectful_identity.register_effect(torch.library.EffectType.ORDERED)
+
+            def context_fn():
+                return create_selective_checkpoint_contexts(
+                    lambda _ctx, _op, *args, **kwargs: policy
+                )
+
+            def fn(x):
+                return checkpoint(
+                    lambda value: effectful_identity(value).sin(),
+                    x,
+                    use_reentrant=False,
+                    context_fn=context_fn,
+                )
+
+            x = torch.randn(3, device=device, requires_grad=True)
+            run_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+            if expected_calls is None:
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "does not support MUST_RECOMPUTE for effectful operations",
+                ):
+                    run_fn(x).sum().backward()
+                return
+            run_fn(x).sum().backward()
+
+            self.assertEqual(call_count, expected_calls)
+            self.assertEqual(x.grad, x.cos())
+
     @requires_gpu_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(
@@ -2523,6 +2582,23 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
 
         self.assertEqual(budgets, [0.0, 0.0, 0.7, 0.7])
 
+    @torch._functorch.config.patch(activation_memory_budget_require_full_coverage=False)
+    def test_region_activation_memory_budget_partial_coverage_survives_graph_break(
+        self,
+    ):
+        def fn(x):
+            with torch.autograd.graph.region_activation_memory_budget(0.2):
+                x = x.sin()
+                torch._dynamo.graph_break()
+                x = x.cos()
+            return x + 1
+
+        compiled = torch.compile(fn, backend="aot_eager")
+        x = torch.randn(4, requires_grad=True)
+        out = compiled(x)
+        self.assertEqual(out, x.sin().cos() + 1)
+        out.sum().backward()
+
     def test_region_activation_memory_budget_nested_graph_breaks(self):
         graphs = []
 
@@ -2661,8 +2737,7 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
             cfn(x, y).sum().backward()
 
     def test_region_activation_memory_budget_partial_annotation_raises(self):
-        """Annotating only part of a graph is rejected: the budget is applied
-        graph-wide, so it must cover the entire forward."""
+        """The default rejects a context that annotates only part of a graph."""
 
         def fn(x, y):
             with torch.autograd.graph.region_activation_memory_budget(0.3):
@@ -2675,6 +2750,79 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
         y = torch.randn(8, 8, requires_grad=True)
         with self.assertRaisesRegex(RuntimeError, "must cover the entire forward"):
             cfn(x, y).sum().backward()
+
+    @torch._functorch.config.patch(activation_memory_budget_require_full_coverage=False)
+    def test_region_activation_memory_budget_partial_coverage_allowed(self):
+        from unittest.mock import patch
+
+        import torch._functorch.partitioners as partitioners
+
+        budgets = []
+        choose_saved_values_set = partitioners.choose_saved_values_set
+
+        def record_budget(joint_graph, node_info, memory_budget=1):
+            budgets.append(memory_budget)
+            return choose_saved_values_set(
+                joint_graph, node_info, memory_budget=memory_budget
+            )
+
+        def fn(x, y):
+            with torch.autograd.graph.region_activation_memory_budget(0.3):
+                a = (torch.mm(x, y) + 1).relu()
+            return (a * 2).relu()
+
+        backend = aot_autograd(
+            fw_compiler=lambda gm, _: gm.forward,
+            bw_compiler=lambda gm, _: gm.forward,
+            partition_fn=min_cut_rematerialization_partition,
+        )
+        with patch.object(partitioners, "choose_saved_values_set", record_budget):
+            cfn = torch.compile(fn, backend=backend, fullgraph=True)
+            x = torch.randn(8, 8, requires_grad=True)
+            y = torch.randn(8, 8, requires_grad=True)
+            cfn(x, y).sum().backward()
+
+        self.assertEqual(budgets, [0.3])
+
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    @torch._functorch.config.patch(activation_memory_budget_require_full_coverage=False)
+    def test_region_activation_memory_budget_partial_coverage_invoke_subgraph(self):
+        from unittest.mock import patch
+
+        import torch._functorch.partitioners as partitioners
+        from torch.compiler import nested_compile_region
+
+        budgets = []
+        choose_saved_values_set = partitioners.choose_saved_values_set
+
+        def record_budget(joint_graph, node_info, memory_budget=1):
+            budgets.append(memory_budget)
+            return choose_saved_values_set(
+                joint_graph, node_info, memory_budget=memory_budget
+            )
+
+        weight = torch.randn(8, 8, requires_grad=True)
+
+        @nested_compile_region
+        def region(x):
+            with torch.autograd.graph.region_activation_memory_budget(0.3):
+                return (x @ weight).relu()
+
+        def fn(x):
+            return (region(x) + 1).sum()
+
+        backend = aot_autograd(
+            fw_compiler=lambda gm, _: gm.forward,
+            bw_compiler=lambda gm, _: gm.forward,
+            partition_fn=min_cut_rematerialization_partition,
+        )
+        with patch.object(partitioners, "choose_saved_values_set", record_budget):
+            cfn = torch.compile(fn, backend=backend, fullgraph=True)
+            x = torch.randn(8, 8, requires_grad=True)
+            cfn(x).backward()
+
+        self.assertIsNotNone(x.grad)
+        self.assertEqual(budgets, [0.3, 0.3])
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
@@ -2761,6 +2909,73 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
 class ActivationCheckpointingSharedModuleTests(torch._dynamo.test_case.TestCase):
     """Checkpointing the same module at two sibling call sites. See
     https://github.com/pytorch/pytorch/issues/193194."""
+
+    def test_sac_with_bound_method_context_fn(self):
+        # A bound method is a valid context_fn; extracting the underlying
+        # function instead would call it with the receiver missing.
+        class Ctxs:
+            def make(self):
+                return create_selective_checkpoint_contexts([torch.ops.aten.mm.default])
+
+        ctxs = Ctxs()
+
+        def f(x, y):
+            return torch.sigmoid(torch.matmul(torch.matmul(x, y), y)) * y
+
+        def fn(x, y):
+            return torch.utils.checkpoint.checkpoint(
+                f, x, y, use_reentrant=False, context_fn=ctxs.make
+            )
+
+        opt_fn = torch.compile(fn, backend="aot_eager_decomp_partition", fullgraph=True)
+        a = torch.randn(4, 4, requires_grad=True, device="cpu")
+        b = torch.randn(4, 4, requires_grad=True, device="cpu")
+        self.assertEqual(opt_fn(a, b), fn(a, b))
+
+    def test_sac_partial_context_fn_with_tensor_arg_graph_breaks(self):
+        # A partial bound to a tensor cannot be resolved to a Python callable at
+        # trace time. That is a graph break, not an internal error.
+        def make(t):
+            return create_selective_checkpoint_contexts([torch.ops.aten.mm.default])
+
+        def f(x):
+            return torch.sin(x) @ torch.eye(3)
+
+        def fn(x):
+            return checkpoint(
+                f, x, use_reentrant=False, context_fn=functools.partial(make, x)
+            )
+
+        x = torch.ones(3, 3, requires_grad=True)
+        cnt = CompileCounterWithBackend("aot_eager")
+        self.assertEqual(torch.compile(fn, backend=cnt)(x), fn(x))
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Not a Python constant"
+        ):
+            torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+
+    def test_sac_bound_method_context_fn_nonconstant_receiver_graph_breaks(self):
+        # The receiver is built inside the region, so the method cannot be bound
+        # to a real object; that is a graph break naming context_fn.
+        class Ctxs:
+            def make(self):
+                return create_selective_checkpoint_contexts([torch.ops.aten.mm.default])
+
+        def f(x):
+            return torch.sin(x) @ torch.eye(3)
+
+        def fn(x):
+            return checkpoint(f, x, use_reentrant=False, context_fn=Ctxs().make)
+
+        x = torch.ones(3, 3, requires_grad=True)
+        cnt = CompileCounterWithBackend("aot_eager")
+        self.assertEqual(torch.compile(fn, backend=cnt)(x), fn(x))
+        # The break precedes any op, so the frame is skipped; start clean.
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "bound to a non-constant receiver"
+        ):
+            torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
 
     def test_dynamic_shape_checkpoint_shared_module_two_call_sites(self):
         # An unspecialized plain-float module attribute (self.eps), read
