@@ -281,6 +281,8 @@ struct C10_API ExtraMeta {
   std::optional<std::string> custom_storage_error_msg_ = std::nullopt;
   std::optional<c10::Device> fake_device_ = std::nullopt;
   std::shared_ptr<FakeTensorMode> fake_tensor_mode_ = nullptr;
+  // The real tensor this fake shadows, when propagate_real_tensors is on.
+  c10::intrusive_ptr<c10::TensorImpl> real_tensor_ = nullptr;
   // The real constant this fake was created from (via
   // FakeTensorMode::set_constant), or null.
   c10::intrusive_ptr<c10::TensorImpl> fake_constant_ = nullptr;
@@ -299,6 +301,7 @@ struct C10_API ExtraMeta {
     custom_storage_error_msg_ = other.custom_storage_error_msg_;
     fake_device_ = other.fake_device_;
     fake_tensor_mode_ = other.fake_tensor_mode_;
+    real_tensor_ = other.real_tensor_;
   }
   ExtraMeta& operator=(const ExtraMeta& other) = delete;
   ExtraMeta(ExtraMeta&& other) = delete;
@@ -1506,6 +1509,18 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       return nullptr;
     }
     return extra_meta_->fake_tensor_mode_;
+  }
+
+  // The real tensor this fake shadows under propagate_real_tensors, or nullptr.
+  void set_real_tensor(c10::intrusive_ptr<c10::TensorImpl> real) {
+    get_extra_meta().real_tensor_ = std::move(real);
+  }
+
+  c10::intrusive_ptr<c10::TensorImpl> real_tensor() const {
+    if (!extra_meta_) {
+      return nullptr;
+    }
+    return extra_meta_->real_tensor_;
   }
 
   // the ExtraMeta backing this tensor, or nullptr if none; does not allocate.
