@@ -785,6 +785,47 @@ c10::SymNode python_impl(const char* method, c10::ArrayRef<c10::SymNode> args) {
   return node_from_py(python_symnode_class().attr(method)(*py_args));
 }
 
+c10::SymNode proxy_dispatch(
+    const char* method,
+    const char* op_name,
+    c10::ArrayRef<c10::SymNode> args) {
+  py::gil_scoped_acquire gil;
+  static const auto* modules = new std::array<py::object, 3>{
+      py::module_::import("torch._logging._internal"),
+      py::module_::import("torch.fx.experimental.sym_node"),
+      py::module_::import("torch.fx.experimental.proxy_tensor")};
+  const auto& [logging, sym_node, proxy_tensor] = *modules;
+  if (logging.attr("GET_DTRACE_STRUCTURED").cast<bool>()) {
+    return python_impl(method, args);
+  }
+  py::tuple wrapped(args.size());
+  for (size_t i = 0; i < args.size(); ++i) {
+    auto* n = static_cast<NativeSymNodeImpl*>(args[i].get());
+    if (!std::holds_alternative<std::monostate>(n->constant())) {
+      wrapped[i] = hint_to_py(n->constant());
+    } else if (n->is_int()) {
+      wrapped[i] = get_symint_class()(node_to_py(args[i]));
+    } else {
+      wrapped[i] = get_symbool_class()(node_to_py(args[i]));
+    }
+  }
+  py::object op = sym_node.attr("METHOD_TO_OPERATOR")[op_name];
+  py::object r =
+      proxy_tensor.attr("handle_sym_dispatch")(op, wrapped, py::dict());
+  if (is_symint(r) || is_symfloat(r) || is_symbool(r)) {
+    return node_from_py(r.attr("node"));
+  }
+  PyObject* t = reinterpret_cast<PyObject*>(Py_TYPE(r.ptr()));
+  const char* wrap = t == reinterpret_cast<PyObject*>(&PyBool_Type) ? "wrap_bool"
+      : t == reinterpret_cast<PyObject*>(&PyLong_Type)             ? "wrap_int"
+      : t == reinterpret_cast<PyObject*>(&PyFloat_Type)            ? "wrap_float"
+                                                                   : nullptr;
+  if (wrap == nullptr) {
+    return node_from_py(py::handle(Py_NotImplemented));
+  }
+  return node_from_py(node_to_py(args[0]).attr(wrap)(r));
+}
+
 c10::SymNode python_impl(
     const char* method,
     const c10::SymNode& self,

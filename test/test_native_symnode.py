@@ -3464,6 +3464,32 @@ class TestNativeSymNode(TestCase):
         with self.assertRaises(ZeroDivisionError):
             make_fx(lambda x, y: x // y, tracing_mode="real")(a, zero)
 
+    def test_proxy_direct(self):
+        # Native operands skip the Python impl unless its hint computation may
+        # raise, or capture_provenance logs.
+        sym_node = torch.fx.experimental.sym_node
+        spy = mock.patch.object(
+            sym_node, "method_to_operator", wraps=sym_node.method_to_operator
+        )
+        fn = lambda a, b: (a * b + 1, -a, a < b, torch.sym_not(a < b), a % b, a**b)  # noqa: E731
+        with spy as m:
+            _, gm = self.trace(True, fn, False)
+        self.assertEqual([c.args for c in m.call_args_list], [("pow_by_natural",)])
+        self.assertEqual(gm.code, self.trace(False, fn, False)[1].code)
+
+        env, syms = self.make_env()
+        a = torch.SymInt(env._native_env.make_node(syms[0], int, 5))
+        zero = torch.SymInt(env._native_env.make_node(syms[0] - 5, int, 0))
+        with (
+            spy as m,
+            mock.patch.object(torch._logging._internal, "GET_DTRACE_STRUCTURED", True),
+            mock.patch.object(sym_node, "dtrace_structured"),
+        ):
+            make_fx(lambda x: -(x + x), tracing_mode="real")(a)
+        self.assertEqual([c.args for c in m.call_args_list], [("add",), ("neg",)])
+        with self.assertRaises(ZeroDivisionError):
+            make_fx(lambda x, y: x % y, tracing_mode="real")(a, zero)
+
     def test_make_node(self):
         env, syms = self.make_env()
         native = env._native_env

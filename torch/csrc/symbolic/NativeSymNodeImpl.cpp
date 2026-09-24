@@ -256,12 +256,47 @@ c10::SymNode NativeSymNodeImpl::binary(
       "_ge",
       "_and_",
       "_or_"};
+  static constexpr const char* op_names[] = {
+      "add",
+      "sub",
+      "mul",
+      "int_floordiv",
+      "mod",
+      "pow_by_natural",
+      "sym_min",
+      "sym_max",
+      "eq",
+      "ne",
+      "gt",
+      "lt",
+      "le",
+      "ge",
+      "and",
+      "or"};
   static_assert(std::size(proxy_methods) == static_cast<size_t>(Op::Or) + 1);
-  if (proxy_mode()) {
-    return python_impl(
-        proxy_methods[static_cast<size_t>(op)], {clone(), other});
-  }
+  static_assert(std::size(op_names) == std::size(proxy_methods));
   auto* o = as_native(other);
+  if (proxy_mode()) {
+    auto i = static_cast<size_t>(op);
+    // The Python impl first computes op(self.hint, other.hint), which raises
+    // on a zero divisor and may not terminate for pow.
+    bool python_hint = op == Op::PowByNatural ||
+        ((op == Op::FloorDiv || op == Op::Mod) && has_hint() &&
+         o != nullptr && o->has_hint() &&
+         std::visit(
+             [](auto v) {
+               if constexpr (std::is_same_v<decltype(v), std::monostate>) {
+                 return false;
+               } else {
+                 return v == 0;
+               }
+             },
+             o->hint()));
+    if (o == nullptr || python_hint) {
+      return python_impl(proxy_methods[i], {clone(), other});
+    }
+    return proxy_dispatch(proxy_methods[i], op_names[i], {clone(), other});
+  }
   if (o != nullptr && o->env_ == env_) {
     auto lock = lock_env(*env_);
     try {
@@ -471,7 +506,8 @@ c10::SymNode NativeSymNodeImpl::try_binary(
 
 c10::SymNode NativeSymNodeImpl::unary(bool is_not, UnaryFn fallback) {
   if (proxy_mode()) {
-    return python_impl(is_not ? "_sym_not" : "_neg", {clone()});
+    return is_not ? proxy_dispatch("_sym_not", "sym_not", {clone()})
+                  : proxy_dispatch("_neg", "neg", {clone()});
   }
   {
     auto lock = lock_env(*env_);

@@ -39,6 +39,16 @@ bool proxy_mode();
 // handle_sym_dispatch and their proxy slots are found. With materialized
 // arguments it is the fallback for methods that are not SymNodeImpl virtuals.
 c10::SymNode python_impl(const char* method, c10::ArrayRef<c10::SymNode> args);
+
+// The proxy branch of SymNode.<method>(*args) for native args whose hints the
+// branch can combine without raising:
+//   to_node(args[0], handle_sym_dispatch(op, tuple(map(wrap_node, args)), {}))
+// with op = METHOD_TO_OPERATOR[op_name], minus the Python frames around it.
+// Calls python_impl when capture_provenance would log.
+c10::SymNode proxy_dispatch(
+    const char* method,
+    const char* op_name,
+    c10::ArrayRef<c10::SymNode> args);
 c10::SymNode python_impl(
     const char* method,
     const c10::SymNode& self,
