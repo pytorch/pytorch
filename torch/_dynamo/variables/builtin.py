@@ -2313,6 +2313,14 @@ class BuiltinVariable(BaseBuiltinVariable):
     ) -> VariableTracker:
         from .builder import SourcelessBuilder
 
+        if isinstance(arg, UserDefinedObjectVariable):
+            round_method = arg._maybe_lookup_method(tx, "__round__")
+            if round_method is None:
+                raise_type_error(
+                    tx, f"type {arg.python_type_name()} doesn't define __round__ method"
+                )
+            return round_method.call_function(tx, list(args), kwargs)
+
         # Call arg.__round__()
         round_method = SourcelessBuilder.create(tx, getattr).call_function(
             tx, [arg, VariableTracker.build(tx, "__round__")], {}

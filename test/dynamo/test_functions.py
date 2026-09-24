@@ -5284,6 +5284,36 @@ class GraphModule(torch.nn.Module):
         g = torch.compile(fn, backend="eager", fullgraph=True)(t)
         self.assertEqual(e, g)
 
+    def test_round_uses_type_method(self):
+        class NoRound:
+            pass
+
+        class ClassRound:
+            def __round__(self):
+                return 31
+
+        def missing_method():
+            obj = NoRound()
+            obj.__round__ = lambda: 23
+            try:
+                return round(obj)
+            except TypeError:
+                return 7
+
+        def type_method():
+            obj = ClassRound()
+            obj.__round__ = lambda: 23
+            return round(obj)
+
+        self.assertEqual(missing_method(), 7)
+        self.assertEqual(
+            torch.compile(missing_method, backend="eager", fullgraph=True)(), 7
+        )
+        self.assertEqual(type_method(), 31)
+        self.assertEqual(
+            torch.compile(type_method, backend="eager", fullgraph=True)(), 31
+        )
+
     @unittest.skipIf(sys.platform == "darwin", "No mkldnn on MacOS")
     def test_quantize_per_tensor(self):
         def fn(t, scale, zero_point):
