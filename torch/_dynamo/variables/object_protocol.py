@@ -1927,7 +1927,7 @@ def generic_richcompare(
         v_type is not None
         and w_type is not None
         and v_type is not w_type
-        and issubclass(w_type, v_type)
+        and v_type in type.__getattribute__(w_type, "__mro__")
     ):
         checked_reverse = True
         result = w.tp_richcompare_impl(tx, v, reflected)
