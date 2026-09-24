@@ -3681,6 +3681,7 @@ class TestNativeSymNode(TestCase):
                 torch.sym_max(3, a),
                 torch.sym_min(3, a),
                 torch.sym_max(a, 3),
+                torch.sym_max(a, a),
                 True & lt,
                 False | lt,
                 lt & True,
@@ -3696,10 +3697,15 @@ class TestNativeSymNode(TestCase):
             "handle_sym_dispatch",
             wraps=proxy_tensor.handle_sym_dispatch,
         )
-        with sym_dispatch as m:
+        sym_register = mock.patch.object(
+            proxy_tensor, "_sym_register", wraps=proxy_tensor._sym_register
+        )
+        with sym_dispatch as m, sym_register as r:
             on_env, on = self.trace(True, f, False)
         # Only the two-constant ops, which are Python arithmetic.
         self.assertEqual(m.call_count, 2)
+        # Those two, and sym_max(a, a), whose Symbol result set_proxy_slot tracks.
+        self.assertEqual(r.call_count, 3)
         off_env, off = self.trace(False, f, False)
         self.assertEqual(on.code, off.code)
         self.assertEqual(
@@ -3707,6 +3713,7 @@ class TestNativeSymNode(TestCase):
             [str(x.expr) for x in off_env.guards],
         )
         for x, y in zip(on.graph.nodes, off.graph.nodes, strict=True):
+            self.assertEqual(list(x.meta), list(y.meta))
             self.assertEqual(str(x.meta.get("val")), str(y.meta.get("val")))
 
         # MAGIC logging keeps the Python dispatch.

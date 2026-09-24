@@ -828,6 +828,69 @@ c10::SymNode python_impl(const char* method, c10::ArrayRef<c10::SymNode> args) {
   return node_from_py(python_symnode_class().attr(method)(*py_args));
 }
 
+namespace {
+
+// proxy_tensor._sym_register with thunkify off: _compute_proxy, then
+// set_proxy_slot. Calls _sym_register for a lazy thunk, a Symbol result,
+// set_proxy_slot debug logging, or an operand not in symnode_tracker.
+void sym_register(
+    const py::object& proxy_tensor,
+    py::handle tracer,
+    const py::object& op,
+    const py::tuple& wrapped,
+    const py::object& sym,
+    const NativeSymNodeImpl& out) {
+  static const auto* statics = new std::array<py::object, 5>{
+      proxy_tensor.attr("log"),
+      py::module_::import("logging").attr("DEBUG"),
+      proxy_tensor.attr("py_sym_types"),
+      proxy_tensor.attr("fx").attr("Proxy"),
+      proxy_tensor.attr("Thunk")};
+  const auto& [log, debug, sym_types, proxy_type, thunk_type] = *statics;
+  auto python = [&] {
+    proxy_tensor.attr("_sym_register")(tracer, op, wrapped, sym);
+  };
+  if (out.expr()->kind == Kind::Symbol ||
+      tracer.attr("enable_thunkify").cast<bool>() ||
+      log.attr("isEnabledFor")(debug).cast<bool>()) {
+    return python();
+  }
+  py::dict nodes = tracer.attr("symnode_tracker").attr("sym_node_dict");
+  py::tuple n_args(wrapped.size());
+  for (size_t i = 0; i < wrapped.size(); ++i) {
+    py::handle a = wrapped[i];
+    int is_sym = PyObject_IsInstance(a.ptr(), sym_types.ptr());
+    if (is_sym < 0) {
+      throw py::error_already_set();
+    }
+    if (is_sym == 0) {
+      n_args[i] = a;
+      continue;
+    }
+    PyObject* thunk =
+        PyDict_GetItemWithError(nodes.ptr(), a.attr("node").ptr());
+    if (thunk == nullptr) {
+      if (PyErr_Occurred()) {
+        throw py::error_already_set();
+      }
+      return python();
+    }
+    n_args[i] = py::handle(thunk).attr("force")().attr("node");
+  }
+  py::object n_out =
+      tracer.attr("create_node")("call_function", op, n_args, py::dict());
+  py::object p_out = proxy_type(n_out, tracer);
+  n_out.attr("meta")["val"] = sym;
+  py::object thunk = thunk_type(py::none());
+  thunk.attr("r") = p_out;
+  py::object key = sym.attr("node");
+  if (!nodes.contains(key)) {
+    nodes[key] = thunk;
+  }
+}
+
+} // namespace
+
 c10::SymNode proxy_dispatch(
     const char* method,
     const char* op_name,
@@ -858,8 +921,6 @@ c10::SymNode proxy_dispatch(
   py::object r;
   static const auto* proxy_mode_type =
       new py::object(proxy_tensor.attr("ProxyTorchDispatchMode"));
-  static PyObject* const sym_register_str =
-      PyUnicode_InternFromString("_sym_register");
   static PyObject* const tracer_str = PyUnicode_InternFromString("tracer");
   auto mode = pre_dispatch_proxy_set.load(std::memory_order_relaxed)
       ? std::nullopt
@@ -885,8 +946,13 @@ c10::SymNode proxy_dispatch(
       py::object sym = make_sym_object(
           out->is_int() ? get_symint_class() : get_symbool_class(),
           node_to_py(out));
-      proxy_tensor.attr(sym_register_str)(
-          py::handle(mode_obj).attr(tracer_str), op, wrapped, sym);
+      sym_register(
+          proxy_tensor,
+          py::handle(mode_obj).attr(tracer_str),
+          op,
+          wrapped,
+          sym,
+          *static_cast<NativeSymNodeImpl*>(out.get()));
       return out;
     }
   }
