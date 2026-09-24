@@ -155,6 +155,67 @@ def inline_script_if_tracing_fn_with_default_args(x, y, c=1.2):
     return torch.cos(x * y) + c
 
 
+class WithLengthHint:
+    def __init__(self, value):
+        self.value = value
+
+    def __length_hint__(self):
+        if type(self.value) is type:
+            raise self.value
+        return self.value
+
+
+class NoHint:
+    pass
+
+
+class LenRaisesTypeError:
+    def __len__(self):
+        raise TypeError
+
+    def __length_hint__(self):
+        return 7
+
+
+class LenRaisesTypeErrorNoHint:
+    def __len__(self):
+        raise TypeError
+
+
+class WithIndex:
+    def __index__(self):
+        return 5
+
+
+class BadIndex:
+    def __index__(self):
+        raise RuntimeError("index failed")
+
+
+def unbound_length_hint(obj):
+    return type(obj).__length_hint__(obj)
+
+
+def deque_length_hints():
+    # (clean, unbound, after-mutation) hints for iter(deque) and
+    # reversed(deque): a deque iterator reports 0 once it raised for a mutated
+    # deque, and `type(it).__length_hint__(it)` must resolve for both types.
+    hints = []
+    for make_iter in (iter, reversed):
+        d = collections.deque([1, 2, 3])
+        it = make_iter(d)
+        hints.append(operator.length_hint(it))
+        hints.append(unbound_length_hint(it))
+        next(it)
+        d.append(4)
+        try:
+            next(it)
+        except RuntimeError:
+            pass
+        hints.append(operator.length_hint(it))
+    return tuple(hints)
+
+
 class FunctionTests(torch._dynamo.test_case.TestCase):
     @make_test
     def test_inline_jit_annotations(x):
@@ -3346,6 +3407,118 @@ partial_fn = functools.partial(fn, scale=2)
         self.assertEqual(symbolic(torch.ones(7)).shape[0], 4)
         self.assertEqual(symbolic(torch.ones(9)).shape[0], 5)
 
+    @parametrize("name", ("atan2", "copysign", "remainder"))
+    def test_math_two_doubles_custom_object(self, name):
+        class FloatLike:
+            def __float__(self):
+                return 2.5
+
+        class IndexLike:
+            def __index__(self):
+                return 3
+
+        class FloatSubclass(float):
+            pass
+
+        fn = getattr(math, name)
+        sub_arg = FloatSubclass(1.5)
+
+        def func(x):
+            sub = fn(sub_arg, 2.0)
+            return x + 1, fn(FloatLike(), 1.0), fn(1.0, IndexLike()), sub
+
+        x = torch.rand(10)
+        opt = torch.compile(func, backend="eager", fullgraph=True)
+        self.assertEqual(opt(x), func(x))
+
+    @parametrize("name", ("atan2", "copysign", "remainder"))
+    def test_math_two_doubles_conversion_order(self, name):
+        class FloatLike:
+            def __float__(self):
+                self.converted = True
+                return 2.5
+
+        fn = getattr(math, name)
+
+        def func(x, obj):
+            try:
+                fn("not a number", obj)
+            except TypeError as exc:
+                return x + 1, str(exc)
+            return x - 1, "no exception"
+
+        x = torch.rand(10)
+        eager_obj, opt_obj = FloatLike(), FloatLike()
+        opt = torch.compile(func, backend="eager", fullgraph=True)
+        self.assertEqual(opt(x, opt_obj), func(x, eager_obj))
+        self.assertFalse(hasattr(eager_obj, "converted"))
+        self.assertFalse(hasattr(opt_obj, "converted"))
+
+    @parametrize("name", ("atan2", "copysign", "remainder"))
+    @parametrize("call", ("non_numeric", "one_arg", "three_args", "keyword"))
+    def test_math_two_doubles_invalid_arguments(self, name, call):
+        class Bad:
+            pass
+
+        class C:
+            def __float__(self):
+                raise AssertionError("__float__ must not be called")
+
+        fn = getattr(math, name)
+
+        def func(x):
+            try:
+                if call == "non_numeric":
+                    fn(Bad(), C())
+                elif call == "one_arg":
+                    fn(C())
+                elif call == "three_args":
+                    fn(C(), 1.0, 2.0)
+                else:
+                    fn(C(), y=1.0)
+            except TypeError as exc:
+                return x + 1, str(exc)
+            return x - 1, "no exception"
+
+        x = torch.rand(10)
+        opt = torch.compile(func, backend="eager", fullgraph=True)
+        self.assertEqual(opt(x), func(x))
+
+    @parametrize("name", ("atan2", "copysign", "remainder"))
+    def test_math_two_doubles_symbolic(self, name):
+        class FloatLike:
+            def __init__(self, value):
+                self.value = value
+
+            def __float__(self):
+                return self.value / 2
+
+        fn = getattr(math, name)
+
+        def func(x):
+            return x + 1, fn(FloatLike(x.shape[0]), 2.0)
+
+        opt = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
+        for size in (7, 9, 11):
+            x = torch.rand(size)
+            self.assertEqual(opt(x), func(x))
+
+    def test_math_remainder_domain_error(self):
+        class FloatLike:
+            def __float__(self):
+                return 1.0
+
+        def func(x):
+            try:
+                math.remainder(FloatLike(), 0.0)
+            except ValueError as exc:
+                return x + 1, str(exc)
+            return x - 1, "no exception"
+
+        x = torch.rand(10)
+        opt = torch.compile(func, backend="eager", fullgraph=True)
+        self.assertEqual(opt(x), func(x))
+
     def test_math_radians(self):
         def func(x, a):
             return x + math.radians(a)
@@ -4577,6 +4750,144 @@ class GraphModule(torch.nn.Module):
 
                 opt_fn = torch.compile(fn, fullgraph=True, backend="eager")
                 self.assertEqual(opt_fn(), fn())
+
+    @parametrize(
+        "name,call",
+        (
+            ("len", lambda: operator.length_hint([], 2)),
+            ("iterator", lambda: operator.length_hint(iter([1, 2, 3]))),
+            ("hint", lambda: operator.length_hint(WithLengthHint(2))),
+            (
+                "not_implemented_falls_back_to_default",
+                lambda: operator.length_hint(WithLengthHint(NotImplemented), 4),
+            ),
+            (
+                "type_error_falls_back_to_default",
+                lambda: operator.length_hint(WithLengthHint(TypeError), 12),
+            ),
+            ("non_int_hint", lambda: operator.length_hint(WithLengthHint("abc"))),
+            ("negative_hint", lambda: operator.length_hint(WithLengthHint(-2))),
+            (
+                "other_hint_error_propagates",
+                lambda: operator.length_hint(WithLengthHint(LookupError)),
+            ),
+            ("bad_default", lambda: operator.length_hint(WithLengthHint(2), "abc")),
+            (
+                "overflowing_default",
+                lambda: operator.length_hint(WithLengthHint(2), 2**200),
+            ),
+            (
+                "index_default",
+                lambda: operator.length_hint(WithLengthHint(2), WithIndex()),
+            ),
+            ("bad_index_default", lambda: operator.length_hint(NoHint(), BadIndex())),
+            ("overflowing_hint", lambda: operator.length_hint(WithLengthHint(2**200))),
+            ("no_hint", lambda: operator.length_hint(NoHint(), 10)),
+            (
+                "len_type_error_falls_back",
+                lambda: operator.length_hint(LenRaisesTypeError()),
+            ),
+            (
+                "len_type_error_no_hint_uses_default",
+                lambda: operator.length_hint(LenRaisesTypeErrorNoHint(), 10),
+            ),
+            ("iterator_bound_hint", lambda: iter([1, 2, 3]).__length_hint__()),
+            ("iterator_unbound_hint", lambda: unbound_length_hint(iter([1, 2, 3]))),
+            (
+                "range_iterator_unbound_hint",
+                lambda: unbound_length_hint(iter(range(5))),
+            ),
+            ("deque_iterator_hints", deque_length_hints),
+            ("too_many_args", lambda: operator.length_hint([], 1, 2)),
+            ("keyword_default", lambda: operator.length_hint([], default=3)),
+        ),
+        name_fn=lambda name, call: name,
+    )
+    def test_operator_length_hint(self, name, call):
+        def fn(x):
+            try:
+                return ("ok", call()), x + 1
+            except Exception as e:
+                return ("raise", type(e).__name__, str(e)), x + 1
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(torch.ones(2)), fn(torch.ones(2)), msg=name)
+
+    def test_operator_length_hint_type_error_subclass(self):
+        # CPython's PyErr_ExceptionMatches catches TypeError subclasses when
+        # deciding whether to fall back to the default, but Dynamo only tracks
+        # ObservedTypeError for TypeError itself. Subclasses therefore propagate
+        # instead of selecting the default; revisit if this shows up in practice.
+        class MyTypeError(TypeError):
+            pass
+
+        class HintRaisesSubclass:
+            def __length_hint__(self):
+                raise MyTypeError("boom")
+
+        def fn(x):
+            try:
+                return ("ok", operator.length_hint(HintRaisesSubclass(), 42)), x + 1
+            except MyTypeError as e:
+                return ("raise", type(e).__name__, str(e)), x + 1
+
+        self.assertEqual(operator.length_hint(HintRaisesSubclass(), 42), 42)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(torch.ones(2))[0], ("raise", "MyTypeError", "boom"))
+
+    def test_operator_length_hint_bool(self):
+        # _operator.length_hint is declared -> Py_ssize_t and ends in
+        # PyLong_FromSsize_t, so a bool from __length_hint__ arrives as an int.
+        # assertEqual cannot show this: RelaxedBooleanPair treats 1 and True as
+        # equal, so the type of the compiled result is what has to be checked.
+        def fn(x):
+            hint = operator.length_hint
+            hints = tuple(hint(WithLengthHint(b)) for b in (True, False))
+            return hints, x + 1
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        hints = opt_fn(torch.ones(2))[0]
+        self.assertIs(type(hints), tuple)
+        self.assertEqual(hints, fn(torch.ones(2))[0])
+        for hint in hints:
+            self.assertIs(type(hint), int)
+
+    @parametrize("offset", (1, -5))
+    def test_operator_length_hint_symbolic(self, offset):
+        # A symbolic hint and a symbolic default are both specialized, so the
+        # type and range checks run at trace time instead of at runtime.
+        def fn(x):
+            try:
+                hint = operator.length_hint(WithLengthHint(x.shape[0] + offset))
+                default = operator.length_hint(NoHint(), x.shape[0] + offset)
+                return ("ok", hint, default), x + 1
+            except Exception as e:
+                return ("raise", type(e).__name__, str(e)), x + 1
+
+        opt_fn = torch.compile(fn, backend="eager", dynamic=True, fullgraph=True)
+        self.assertEqual(opt_fn(torch.ones(3)), fn(torch.ones(3)))
+
+    def test_operator_length_hint_non_constant(self):
+        # id() of an object created while tracing is a compile-time-only int
+        # that is not a python constant, so neither the hint nor the default
+        # (which PyObject_LengthHint converts to an ssize_t up front) can be
+        # validated here; the default is converted even when it is unused.
+        def hint_fn(x):
+            return operator.length_hint(WithLengthHint(id([1, 2]))), x + 1
+
+        def default_fn(x):
+            return operator.length_hint(NoHint(), id([1, 2])), x + 1
+
+        for fn, gb_type in (
+            (hint_fn, "length_hint with a non-constant result"),
+            (default_fn, "length_hint with a non-constant default"),
+        ):
+            with self.subTest(gb_type=gb_type):
+                opt_fn = torch.compile(
+                    fn, backend="eager", dynamic=True, fullgraph=True
+                )
+                with self.assertRaisesRegex(Unsupported, gb_type):
+                    opt_fn(torch.ones(3))
 
     def test_operator_concat(self):
         for seq_type in (list, tuple):

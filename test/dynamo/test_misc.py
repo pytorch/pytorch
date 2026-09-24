@@ -194,6 +194,20 @@ def closure_adder(val):
     return inner
 
 
+def compare_deleted_cell(x):
+    # `del` empties the cell a while keeping the cell objects themselves alive,
+    # so comparing the two cells must treat the emptied one as empty.
+    a = 1
+    b = 2
+
+    def inner():
+        return a, b
+
+    ca, cb = inner.__closure__
+    del a
+    return x + (1 if ca < cb else 0)
+
+
 class UserDefineSetAttr:
     setup = False
 
@@ -211,6 +225,29 @@ class UserDefineSetAttr:
 
 
 class MiscTests(torch._inductor.test_case.TestCase):
+    def test_storage_offset_scalar_output(self):
+        def fn(x):
+            return x.storage_offset()
+
+        base = torch.arange(30)
+        inputs = (
+            base[:10],
+            base[5:15],
+            base[7:17],
+            base[:10],
+        )
+
+        compiled_fn = torch.compile(
+            fn,
+            backend="eager",
+            fullgraph=True,
+        )
+
+        for x in inputs:
+            result = compiled_fn(x)
+            self.assertIsInstance(result, int)
+            self.assertEqual(result, fn(x))
+
     def test_get_cache_entry(self):
         def f(x):
             return x + 1
@@ -2853,6 +2890,19 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertIsNone(opt_fn(v, v))
         self.assertEqual(out[0], 1200)
         self.assertEqual(cnts.op_count, 3)
+
+    # Asserting on the graph break counters rather than on the compiled result:
+    # with PYTORCH_TEST_WITH_DYNAMO=1 the harness compiles the whole test method
+    # and turns a failure to trace the comparison into a silent fall back to
+    # eager, so the result alone would look correct either way.
+    def test_cell_comparison_deleted_cell(self):
+        x = torch.ones(2)
+        expected = torch.ones(2) + 1
+        self.assertEqual(compare_deleted_cell(x), expected)
+        counters.clear()
+        got = torch.compile(compare_deleted_cell, backend="eager")(x)
+        self.assertEqual(got, expected)
+        self.assertEqual(dict(counters["graph_break"]), {})
 
     def test_return_nested_function(self):
         out = None
@@ -8745,6 +8795,33 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             return C().fn(torch.ones(2, 3))
 
         self.assertTrue(torch.allclose(f(), torch.tensor([2.0])))
+
+    def test_opaque_value_instance_staticmethod(self):
+        from torch._library.opaque_object import register_opaque_type
+
+        class Quantizer:
+            def __eq__(self, other):
+                return type(self) is type(other)
+
+            def __hash__(self):
+                return hash(type(self))
+
+            def __fx_repr__(self):
+                name = type(self).__name__
+                return f"{name}()", {name: type(self)}
+
+            @staticmethod
+            def get_shape(shape):
+                return shape
+
+        register_opaque_type(Quantizer, typ="value")
+        q = Quantizer()
+
+        def fn(x):
+            return x + q.get_shape((3,))[0]
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(torch.zeros(3)), torch.full((3,), 3.0))
 
     def test_user_function_variable_supports_type_abcmeta_argument(self):
         class Foo(metaclass=abc.ABCMeta):
@@ -17678,6 +17755,29 @@ fn
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.randn(4)
         self.assertEqual(fn(x), opt_fn(x))
+
+    def test_guard_filter_entry_snapshots_the_guard_code(self):
+        # entry.code_parts is populated from orig_guard.code_list at inspection
+        # time and owned by the entry: a later build_guards rebinds that
+        # attribute (to None, then to a fresh list), so an entry that read it
+        # through orig_guard would see the later build, not the one inspected.
+        from torch._dynamo.guards import make_guard_filter_entry
+        from torch._dynamo.source import LocalSource
+        from torch._guards import Guard
+
+        guard = Guard(LocalSource("x"), lambda *a: None)
+        guard.code_list = ["___check_type_id(L['x'], 1)"]
+        builder = types.SimpleNamespace(get=lambda g: 1)
+        entry = make_guard_filter_entry(guard, builder)
+        self.assertEqual(entry.code_parts, ("___check_type_id(L['x'], 1)",))
+        # Stricter than production, which never mutates the list in place:
+        # keeps the tuple() copy from being replaced by the list reference.
+        guard.code_list.clear()
+        guard.code_list.append("something else")
+        self.assertEqual(entry.code_parts, ("___check_type_id(L['x'], 1)",))
+        guard.code_list = None
+        self.assertEqual(entry.code_parts, ("___check_type_id(L['x'], 1)",))
+        self.assertEqual(make_guard_filter_entry(guard, builder).code_parts, ())
 
     def test_guard_filter_fn_by_id(self):
         def guard_filter_fn(entries):

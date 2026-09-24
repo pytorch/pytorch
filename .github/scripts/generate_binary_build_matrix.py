@@ -46,9 +46,6 @@ CUDA_ARCHES_CUDNN_VERSION = {
     "13.4": "9",
 }
 
-# CUDA versions without a Windows installer on the ossci-windows bucket yet.
-CUDA_ARCHES_NO_WINDOWS = ["13.4"]
-
 ROCM_ARCHES = ["7.14", "10.0"]
 
 XPU_ARCHES = ["xpu"]
@@ -83,6 +80,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
     "13.4": (
         "cuda-toolkit[nvrtc,cudart,cupti,cufft,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.4.1; platform_system == 'Linux' | "
         "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | "
+        "cupti-python==13.4.0; platform_system == 'Linux' and python_version < '3.15' | "
         "nvidia-cudnn-cu13==9.26.0.51; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | "
         "nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | "
@@ -318,7 +316,6 @@ RELEASE = "release"
 DEBUG = "debug"
 
 FULL_PYTHON_VERSIONS = [
-    "3.10",
     "3.11",
     "3.12",
     "3.13",
@@ -354,7 +351,7 @@ def generate_libtorch_matrix(
     if arches is None:
         arches = ["cpu"]
         if os == "windows":
-            arches += list_without(CUDA_ARCHES, CUDA_ARCHES_NO_WINDOWS)
+            arches += CUDA_ARCHES
     if libtorch_variants is None:
         libtorch_variants = [
             "shared-with-deps",
@@ -407,7 +404,7 @@ def generate_wheels_matrix(
         if os == "linux":
             arches += CUDA_ARCHES + ROCM_ARCHES + XPU_ARCHES
         elif os == "windows":
-            arches += list_without(CUDA_ARCHES, CUDA_ARCHES_NO_WINDOWS) + XPU_ARCHES
+            arches += CUDA_ARCHES + XPU_ARCHES
         elif os == "linux-aarch64":
             # Separate new if as the CPU type is different and
             # uses different build/test scripts
@@ -525,11 +522,15 @@ def generate_libtorch_extraction_configs(
 ) -> list[dict[str, str]]:
     """Generate libtorch extraction configs from existing wheel build configs.
 
-    For each unique arch variant in wheel_configs, find the py3.10 config
-    (py3.11 for windows-arm64) and produce a config that the CI template
-    uses to add an extraction job that depends on that wheel's build job.
+    For each unique arch variant in wheel_configs, find the py3.11 config and
+    produce a config that the CI template uses to add an extraction job that
+    depends on that wheel's build job.
+
+    NB: this must name a version that is actually in FULL_PYTHON_VERSIONS. If
+    it names one that isn't built, no wheel config matches and libtorch stops
+    being produced entirely, silently.
     """
-    preferred_python = "3.11" if os == "windows-arm64" else "3.10"
+    preferred_python = FULL_PYTHON_VERSIONS[0]
     arch = "arm64" if os == "windows-arm64" else "x86_64"
 
     # Group wheel configs by (gpu_arch_type, gpu_arch_version)
