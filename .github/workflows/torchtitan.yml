@@ -61,6 +61,7 @@ jobs:
       - get-cuda-version
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      lf_runners: "${{ needs.get-label-type.outputs.lf-runners }}"
       build-environment: linux-jammy-cuda${{ needs.get-cuda-version.outputs.stable-cuda }}-py3.12-gcc11-torchtitan
       docker-image-name: ci-image:pytorch-linux-jammy-cuda${{ needs.get-cuda-version.outputs.stable-cuda }}-cudnn9-py3.12-gcc11
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
