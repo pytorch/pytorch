@@ -157,7 +157,13 @@ from .utils import (
     PySendResult,
     unpack_iterable,
 )
-from .variables.base import SourceLocation, typestr, ValueMutationNew, VariableTracker
+from .variables.base import (
+    AttrMutationKind,
+    SourceLocation,
+    typestr,
+    ValueMutationNew,
+    VariableTracker,
+)
 from .variables.builder import FrameStateSizeEntry, VariableBuilder, wrap_fx_proxy
 from .variables.builtin import BuiltinVariable, DictBuiltinVariable
 from .variables.constant import ConstantVariable
@@ -2413,6 +2419,91 @@ class InstructionTranslatorBase(
                 hints=[],
             )
         self.output.side_effects.store_global(variable, name, value)
+
+    def DELETE_GLOBAL(self, inst: Instruction) -> None:
+        name = inst.argval
+        present = name in self.f_globals
+        self._install_globals_membership_guard(name, present)
+        # STORE_GLOBAL and DELETE_GLOBAL of one name share the sentinel, and so
+        # the item they key the recorded mutation on.
+        if name not in self.symbolic_globals:
+            self.symbolic_globals[name] = object()  # type: ignore[assignment]  # sentinel object
+        variable = self.output.side_effects.track_global_existing(
+            GlobalSource(name), self.symbolic_globals[name]
+        )
+        if not self._check_global_delete(name, variable, present):
+            return
+        self.output.side_effects.store_global(
+            variable, name, variables.DeletedVariable()
+        )
+
+    def _check_global_delete(
+        self,
+        name: str,
+        item: VariableTracker,
+        present: bool,
+    ) -> bool:
+        """Decide what `del name` does, given `item` keys this name's mutation.
+
+        Shared by the root and inlined handlers. Returns True when the caller
+        must record the delete, False when there is nothing to replay, and
+        raises NameError when eager would.
+        """
+        side_effects = self.output.side_effects
+        pending = side_effects.store_attr_mutations.get(item, {}).get(name)
+        if isinstance(pending, variables.DeletedVariable):
+            # An earlier `del` in this trace already removed the name.
+            raise_observed_exception(
+                NameError,
+                self,
+                args=[f"name '{name}' is not defined"],
+                kwargs={"name": ConstantVariable.create(name)},
+            )
+        if isinstance(pending, TensorVariable):
+            # Dropping `pending` destroys the last reference, the same as
+            # DELETE_FAST dropping a local. It is a store made earlier in this
+            # trace, so it is already materialised and this needs no guard.
+            # A value read out of f_globals would need one (see _load_global),
+            # so pre-existing globals are not covered.
+            self._maybe_emit_sync_dealloc(pending)
+        if present:
+            return True
+        if pending is None:
+            # Unbound, and nothing in this trace bound it: either no
+            # STORE_GLOBAL ran, or one did and an earlier `del` already
+            # cancelled it, as in `g = 1; del g; del g`.
+            raise_observed_exception(
+                NameError,
+                self,
+                args=[f"name '{name}' is not defined"],
+                kwargs={"name": ConstantVariable.create(name)},
+            )
+        # A STORE_GLOBAL earlier in this trace created the name, so the delete
+        # cancels that pending store and there is nothing to replay. Recording a
+        # delete instead would raise NameError at runtime, where the name is
+        # absent, since the store it created the name with is gone.
+        side_effects.discard_attr_mutation(item, name)
+        return False
+
+    def _install_globals_membership_guard(self, name: str, present: bool) -> None:
+        # DELETE_GLOBAL bakes the trace-time `name in f_globals` decision into
+        # the generated code, so membership itself has to be guarded. Without
+        # it a name that later appears or disappears reuses a stale artifact
+        # and the replayed delete no longer matches the globals.
+        #
+        # GlobalSource(name) resolves to `G[name]`, which raises KeyError for an
+        # absent name, so membership has to be guarded against the globals dict
+        # itself. install_global_by_id is the mechanism
+        # get_globals_source_and_value already uses for unnamed scopes.
+        guard_builder = (
+            GuardBuilder.DICT_CONTAINS if present else GuardBuilder.DICT_NOT_CONTAINS
+        )
+        globals_source = GlobalSource(
+            self.output.install_global_by_id("___unnamed_scope", self.f_globals)
+        )
+        install_guard(
+            globals_source.make_guard(functools.partial(guard_builder, key=name))
+        )
 
     # Keyed by module_name alone, not the whole argument tuple as @cache_method
     # would key it, so a later argument cannot silently split the memo. Per
@@ -6540,6 +6631,34 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                     hints=[*graph_break_hints.SUPPORTABLE],
                 )
             self.output.side_effects.store_attr(fglobals_vt, name, value)
+
+    def DELETE_GLOBAL(self, inst: Instruction) -> None:
+        if self.output.global_scope is self.f_globals:
+            super().DELETE_GLOBAL(inst)
+            return
+        name = inst.argval
+        _, fglobals_vt, global_source = self.get_globals_source_and_value(name)
+        if isinstance(global_source, DictGetItemSource):
+            unimplemented(
+                gb_type="DELETE_GLOBAL in non-module globals",
+                context=name,
+                explanation=(
+                    "Dynamo cannot safely replay global deletes for an inlined "
+                    "function whose globals dict is not the registered module "
+                    "__dict__."
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        present = name in self.f_globals
+        self._install_globals_membership_guard(name, present)
+        if not self._check_global_delete(name, fglobals_vt, present):
+            return
+        self.output.side_effects.store_attr(
+            fglobals_vt,
+            name,
+            variables.DeletedVariable(),
+            mutation_kind=AttrMutationKind.GLOBAL_DELETE,
+        )
 
 
 class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
