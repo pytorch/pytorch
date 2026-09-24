@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from importlib import import_module
 from typing import Any, Literal, TYPE_CHECKING
 
 from ._blocking import _BlockingTransport
+from ._serialization import _WireDescriptor
 
 
 if TYPE_CHECKING:
@@ -19,6 +21,16 @@ def _load_backend() -> Any:
         raise RuntimeError(
             "torchcomms transport requires a torchcomms build with RDMA support"
         ) from error
+
+
+@dataclass(frozen=True)
+class TorchCommsRemoteBuffer(_WireDescriptor):
+    _backend = "torchcomms"
+    _fields = {"address": int, "length": int, "access_key": str}
+
+    address: int
+    length: int
+    access_key: str
 
 
 class _View:
@@ -54,7 +66,13 @@ class _Memory:
             raise NotImplementedError(
                 "per-call timeout is not supported by this prototype"
             )
-        return self.native.to_remote_buffer()
+        # Native bindings expose exactly (ptr, len, access_key); copy those
+        # explicit fields, without invoking pickle or decoding native objects.
+        descriptor = TorchCommsRemoteBuffer(
+            *self.native.to_remote_buffer().__getstate__()
+        )
+        descriptor.serialize()  # Validate the native field types.
+        return descriptor
 
     def reused_registration(self) -> bool:
         return self.native.reused_registration()
@@ -68,6 +86,7 @@ class TorchCommsTransport(_BlockingTransport):
         if self.device is None:
             raise ValueError("torchcomms transport requires an explicit CUDA device")
         backend = _load_backend()
+        self._remote_type = backend.RdmaRemoteBuffer
         self._memory_type = backend.RdmaMemory
         self._transport_type = backend.RdmaTransport
         self._transport: Any = None
@@ -129,8 +148,13 @@ class TorchCommsTransport(_BlockingTransport):
             )
         if not isinstance(local_buffer, _View):
             raise TypeError("local_buffer was not registered by this transport")
+        if not isinstance(remote_buffer, TorchCommsRemoteBuffer):
+            raise TypeError("remote_buffer must be TorchCommsRemoteBuffer")
+        native_remote = self._remote_type(
+            remote_buffer.address, remote_buffer.length, remote_buffer.access_key
+        )
         return self._run_transfer(
-            lambda: self._native().write(local_buffer.native, remote_buffer),
+            lambda: self._native().write(local_buffer.native, native_remote),
             local_buffer._memory._tensor.device,
             async_op=async_op,
         )
@@ -149,8 +173,13 @@ class TorchCommsTransport(_BlockingTransport):
             )
         if not isinstance(local_buffer, _MutableView):
             raise TypeError("local_buffer was not registered by this transport")
+        if not isinstance(remote_buffer, TorchCommsRemoteBuffer):
+            raise TypeError("remote_buffer must be TorchCommsRemoteBuffer")
+        native_remote = self._remote_type(
+            remote_buffer.address, remote_buffer.length, remote_buffer.access_key
+        )
         return self._run_transfer(
-            lambda: self._native().read(local_buffer.native, remote_buffer),
+            lambda: self._native().read(local_buffer.native, native_remote),
             local_buffer._memory._tensor.device,
             async_op=async_op,
         )

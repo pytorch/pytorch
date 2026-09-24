@@ -11,6 +11,7 @@ from typing import Any, Literal, Protocol, TYPE_CHECKING
 import torch
 
 from ._blocking import _BlockingTransport
+from ._serialization import _WireDescriptor
 
 
 if TYPE_CHECKING:
@@ -74,7 +75,10 @@ def _select_rdma_device(
 
 
 @dataclass(frozen=True)
-class IBVerbsRemoteBuffer:
+class IBVerbsRemoteBuffer(_WireDescriptor):
+    _backend = "ibverbs"
+    _fields = {"address": int, "length": int, "rkey": int}
+
     address: int
     length: int
     rkey: int
