@@ -797,9 +797,12 @@ def _build_installed_forward():
                 if "stance is 'fail_on_recompile'" not in str(_e):
                     raise
                 raise _PrecompileError(
-                    f"precompile: no captured variant matches this call: the "
-                    f"artifact serves only what capture exercised, so add an "
-                    f"example covering it and recapture. Dynamo reported: {_e}"
+                    f"precompile: no captured variant matches this call. Either a "
+                    f"guard on the call's arguments or on a module global the graph "
+                    f"baked in no longer holds (restore that environment), or this "
+                    f"call shape was never captured: the artifact serves only what "
+                    f"capture exercised, so add an example covering it and "
+                    f"recapture. Dynamo reported: {_e}"
                 ) from None
 
     return forward
