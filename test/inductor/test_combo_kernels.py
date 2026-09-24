@@ -337,6 +337,22 @@ class ComboKernelTests(TestCase):
         torch._inductor.metrics.reset()
         super().tearDown()
 
+    @requires_cuda_and_triton
+    @parametrize("inplace", [False, True])
+    def test_foreach_pow_int32_extern_kernel(self, inplace):
+        def fn(tensors, exponents):
+            if inplace:
+                torch._foreach_pow_(tensors, exponents)
+                return tensors[0]
+            return torch._foreach_pow(tensors, exponents)[0]
+
+        tensor = torch.tensor([2], device="cuda", dtype=torch.int32)
+        exponents = [torch.tensor(3, device="cuda", dtype=torch.int32)]
+        expected = fn([tensor.clone()], exponents)
+        actual = torch.compile(fn, fullgraph=True)([tensor.clone()], exponents)
+
+        self.assertEqual(actual, expected)
+
     @requires_gpu_and_triton
     def test_activation_functions(self):
         def test_activations(a, b, c):

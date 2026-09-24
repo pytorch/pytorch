@@ -142,6 +142,36 @@ class TestScheduler(TestCase):
         snode.node = node
         return snode
 
+    def test_foreach_node_accepts_extern_kernel_without_group(self):
+        scheduler = Mock(available_buffer_names=OrderedSet())
+        extern_ir = Mock()
+        extern_ir.get_device.return_value = torch.device("cuda")
+        extern_ir.get_operation_name.return_value = "extern"
+
+        extern = object.__new__(ExternKernelSchedulerNode)
+        extern.scheduler = scheduler
+        extern.node = extern_ir
+        extern.ancestors = OrderedSet()
+        extern.read_writes = ReadWrites(OrderedSet(), OrderedSet(), OrderedSet())
+        extern.unmet_dependencies = OrderedSet()
+        extern.min_order = extern.max_order = 0
+        extern.min_input_distance = extern.max_input_distance = 0
+        extern.outputs = []
+        extern.outputs_by_name = {}
+
+        self.assertFalse(hasattr(extern, "group"))
+        foreach = ForeachKernelSchedulerNode(
+            scheduler,
+            [extern],
+            use_custom_partition_algo=False,
+        )
+
+        self.assertEqual(
+            foreach.group,
+            (torch.device("cuda"), ((sympy.Expr("combo_kernel"),),)),
+        )
+        self.assertEqual(foreach.snodes, [extern])
+
     def test_stable_topological_sort_schedule(self):
         consumer = self._mock_base_snode("consumer")
         independent = self._mock_base_snode("independent")

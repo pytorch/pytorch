@@ -4346,10 +4346,15 @@ class FusedSchedulerNode(BaseSchedulerNode):
         refresh_group_node_dependencies(self)
         return True
 
-    def __init__(self, scheduler: Scheduler, snodes: list[BaseSchedulerNode]) -> None:
+    def _init_from_snodes(
+        self, scheduler: Scheduler, snodes: list[BaseSchedulerNode]
+    ) -> None:
         super().__init__(scheduler)
         init_group_node(self, scheduler, snodes)
         self.users: list[NodeUser] = []
+
+    def __init__(self, scheduler: Scheduler, snodes: list[BaseSchedulerNode]) -> None:
+        self._init_from_snodes(scheduler, snodes)
         self.group = max(snodes, key=lambda x: int(x.is_reduction())).group
 
     @cache_on_self
@@ -4953,7 +4958,9 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         self.name_to_node = {}
 
         if prev_node_1 is None or prev_node_2 is None:
-            super().__init__(scheduler, snodes)
+            # Foreach nodes assign their own synthetic group below.  Their
+            # subnodes can be extern kernels, which do not have loop groups.
+            self._init_from_snodes(scheduler, snodes)
 
             for node in snodes:
                 for read in node.read_writes.reads:
