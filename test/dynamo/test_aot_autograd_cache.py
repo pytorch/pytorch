@@ -3933,11 +3933,17 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
                 self.assertNotEqual(key_a, different_key)
 
                 gm, inputs = make_graph(None, nested)
-                with self.assertRaisesRegex(
-                    BypassAOTAutogradCache,
-                    r"Unsupported call_function target .*_opaque_unsupported_function",
-                ):
+                with self.assertRaises(BypassAOTAutogradCache) as cm:
                     self._gen_cache_key_from_gm(gm, inputs, config)
+                message = str(cm.exception)
+                self.assertRegex(
+                    message,
+                    r"Unsupported call_function target .*_opaque_unsupported_function",
+                )
+                if nested:
+                    self.assertRegex(message, r"\nSubgraph: body\Z")
+                else:
+                    self.assertNotIn("Subgraph:", message)
 
     def test_wrapped_user_cache_hash_must_be_str(self):
         # Bypass non-string hashes rather than key them: tensors reduce to
@@ -5044,8 +5050,8 @@ class HOPCacheTests(CacheKeyEquivalenceMixin, torch._dynamo.test_case.TestCase):
         Dynamo leaves _opaque_scaled opaque, while AOT traces through it. The
         cache key records its stable import path, not its body or referenced
         state; changing _OPAQUE_SCALE models a deployment changing behavior at
-        that path. Assert the gradient, not the counters: any outcome that avoids
-        the stale result is acceptable.
+        that path. Assert the gradient and cache participation, not a particular
+        outcome: any way of avoiding the stale result is acceptable.
         """
 
         def grad_of_compiled():
@@ -5065,6 +5071,13 @@ class HOPCacheTests(CacheKeyEquivalenceMixin, torch._dynamo.test_case.TestCase):
                 self.assertEqual(grad_of_compiled(), torch.full((4,), 2.0))
                 _OPAQUE_SCALE[0] = 3.0
                 self.assertEqual(grad_of_compiled(), torch.full((4,), 3.0))
+                stats = counters["aot_autograd"]
+                self.assertEqual(
+                    stats["autograd_cache_hit"]
+                    + stats["autograd_cache_miss"]
+                    + stats["autograd_cache_bypass"],
+                    2,
+                )
         finally:
             _OPAQUE_SCALE[0] = original_scale
 
