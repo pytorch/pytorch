@@ -93,7 +93,6 @@ def repurpose_ops(op_db, base_test_name, derived_test_name):
 dtensor_fails = {
     # view/reshape ops: rejects flatten/split of sharded dims without redistribution
     xfail("repeat_interleave"),
-    xfail("unbind"),
     xfail("unflatten"),
     # factory/creation ops: test harness can't convert non-tensor args to DTensor
     xfail("arange"),
