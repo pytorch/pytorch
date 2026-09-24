@@ -75,15 +75,15 @@ jobs:
       opt_out_experiments: lf
       runner_config: ${{ github.event.inputs.runner_config || 'm8g' }}
 
-  linux-jammy-aarch64-py3_10-inductor-build:
-    name: linux-jammy-aarch64-py3.10-inductor
+  linux-jammy-aarch64-py3_11-inductor-build:
+    name: linux-jammy-aarch64-py3.11-inductor
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "mt-"
       runner: linux.arm64.${{ needs.get-label-type.outputs.runner-config }}.4xlarge
-      build-environment: linux-jammy-aarch64-py3.10
-      docker-image-name: ci-image:pytorch-linux-jammy-aarch64-py3.10-gcc13-inductor-benchmarks
+      build-environment: linux-jammy-aarch64-py3.11
+      docker-image-name: ci-image:pytorch-linux-jammy-aarch64-py3.11-gcc13-inductor-benchmarks
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
@@ -132,16 +132,16 @@ jobs:
     secrets: inherit
 
 
-  linux-jammy-aarch64-py3_10-inductor-test-nightly:
-    name: linux-jammy-aarch64-py3.10-inductor
+  linux-jammy-aarch64-py3_11-inductor-test-nightly:
+    name: linux-jammy-aarch64-py3.11-inductor
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-jammy-aarch64-py3_10-inductor-build
+    needs: linux-jammy-aarch64-py3_11-inductor-build
     if: github.event.schedule == '0 7 * * *'
     with:
-      build-environment: ${{ needs.linux-jammy-aarch64-py3_10-inductor-build.outputs.build-environment }}
+      build-environment: ${{ needs.linux-jammy-aarch64-py3_11-inductor-build.outputs.build-environment }}
       dashboard-tag: training-false-inference-true-default-true-dynamic-true-cppwrapper-true-aotinductor-true
-      docker-image: ${{ needs.linux-jammy-aarch64-py3_10-inductor-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-aarch64-py3_10-inductor-build.outputs.test-matrix }}
+      docker-image: ${{ needs.linux-jammy-aarch64-py3_11-inductor-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-aarch64-py3_11-inductor-build.outputs.test-matrix }}
       timeout-minutes: 720
       # disable monitor in perf tests for more investigation
       disable-monitor: false
@@ -150,15 +150,15 @@ jobs:
     secrets: inherit
 
 
-  linux-jammy-aarch64-py3_10-inductor-test:
-    name: linux-jammy-aarch64-py3.10-inductor
+  linux-jammy-aarch64-py3_11-inductor-test:
+    name: linux-jammy-aarch64-py3.11-inductor
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-jammy-aarch64-py3_10-inductor-build
+    needs: linux-jammy-aarch64-py3_11-inductor-build
     if: github.event_name == 'workflow_dispatch'
     with:
-      build-environment: ${{ needs.linux-jammy-aarch64-py3_10-inductor-build.outputs.build-environment }}
+      build-environment: ${{ needs.linux-jammy-aarch64-py3_11-inductor-build.outputs.build-environment }}
       dashboard-tag: training-${{ inputs.training }}-inference-${{ inputs.inference }}-default-${{ inputs.default }}-dynamic-${{ inputs.dynamic }}-cppwrapper-${{ inputs.cppwrapper }}-aotinductor-${{ inputs.aotinductor }}
-      docker-image: ${{ needs.linux-jammy-aarch64-py3_10-inductor-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-aarch64-py3_10-inductor-build.outputs.test-matrix }}
+      docker-image: ${{ needs.linux-jammy-aarch64-py3_11-inductor-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-aarch64-py3_11-inductor-build.outputs.test-matrix }}
       timeout-minutes: 720
     secrets: inherit
