@@ -3,6 +3,7 @@
 
 
 import contextlib
+import logging
 import copy
 import dataclasses
 import gc
@@ -2340,7 +2341,9 @@ def forward(self, x_1):
 
             self.assertTrue(
                 fake_out.is_contiguous(),
-                lambda msg: f"{msg}\nFakeTensor upsample output should be contiguous, got strides {fake_out.stride()}",
+                lambda msg: (
+                    f"{msg}\nFakeTensor upsample output should be contiguous, got strides {fake_out.stride()}"
+                ),
             )
 
     def test_export_numpy(self):
@@ -2638,10 +2641,7 @@ assert not torch.cuda.is_initialized()
             with self.assertRaisesRegex(IndexError, "index .* out of range"):
                 torch.select(x, dim=1, index=-10)
 
-
     def test_meta_kernel_failure_does_not_log_error(self):
-        import logging
-
         fake_logger = logging.getLogger("torch._subclasses.fake_tensor")
         records = []
 
@@ -2668,7 +2668,11 @@ assert not torch.cuda.is_initialized()
         error_logs = [r for r in records if r.levelno >= logging.ERROR]
         self.assertEqual(len(error_logs), 0)
         if not torch._functorch.config.fake_tensor_propagate_real_tensors:
-            debug_logs = [r for r in records if "failed while attempting to run meta" in r.getMessage()]
+            debug_logs = [
+                r
+                for r in records
+                if "failed while attempting to run meta" in r.getMessage()
+            ]
             self.assertGreater(len(debug_logs), 0)
 
 
@@ -3093,7 +3097,7 @@ make_propagate_real_tensors_cls(FakeTensorConverterTest)
 class FakeTensorOperatorInvariants(TestCase):
     def get_aten_op(self, schema):
         namespace, name = schema.name.split("::")
-        overload = schema.overload_name if schema.overload_name else "default"
+        overload = schema.overload_name or "default"
         if namespace != "aten":
             raise AssertionError(f"expected namespace 'aten', got {namespace!r}")
         return getattr(getattr(torch.ops.aten, name), overload)
