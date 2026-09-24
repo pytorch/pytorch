@@ -634,6 +634,7 @@ void set_output_{name}(
             DispatchKey.MPS,
             DispatchKey.XPU,
             DispatchKey.CompositeExplicitAutogradNonFunctional,
+            DispatchKey.PrivateUse1,
         ]:
             maybe_set_guard = """
 auto current_device = guard_.current_device();
@@ -667,6 +668,7 @@ if (C10_UNLIKELY(maybe_proxy.has_value())) {
                 DispatchKey.XPU,
                 DispatchKey.MTIA,
                 DispatchKey.CompositeExplicitAutogradNonFunctional,
+                DispatchKey.PrivateUse1,
             ):
                 raise AssertionError(
                     f"Unexpected dispatch key {self.backend_index.dispatch_key} "
@@ -743,6 +745,11 @@ resize_out(out, sizes, strides, options);
         elif self.backend_index.dispatch_key == DispatchKey.XPU:
             guard_field = "c10::OptionalDeviceGuard guard_;"
         elif self.backend_index.dispatch_key == DispatchKey.MTIA:
+            guard_field = "c10::OptionalDeviceGuard guard_;"
+        elif self.backend_index.dispatch_key == DispatchKey.PrivateUse1:
+            # PrivateUse1 (the out-of-tree vendor backend) falls back to the
+            # generic virtual-dispatch OptionalDeviceGuard, which routes to the
+            # backend's registered DeviceGuardImpl via C10_REGISTER_GUARD_IMPL.
             guard_field = "c10::OptionalDeviceGuard guard_;"
         else:
             guard_field = ""
