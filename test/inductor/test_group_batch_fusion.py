@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 import collections
+import copy
 import operator
 import unittest
 
@@ -18,7 +19,11 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_cuda import BF16X9_SUPPORTED
-from torch.testing._internal.common_utils import recover_orig_fp32_precision
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    recover_orig_fp32_precision,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, requires_gpu
 
 
@@ -41,6 +46,26 @@ def _require_contiguous(x: torch.Tensor) -> torch.Tensor:
 @_require_contiguous.register_fake
 def _(x: torch.Tensor) -> torch.Tensor:
     return torch.empty_like(x)
+
+
+@torch.library.custom_op("_batch_linear_lhs_test::is_set_to", mutates_args=())
+def _is_set_to(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    return a.new_tensor(int(a.is_set_to(b)), dtype=torch.int64)
+
+
+@_is_set_to.register_fake
+def _(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    return a.new_empty((), dtype=torch.int64)
+
+
+@torch.library.custom_op("_batch_linear_lhs_test::stride_zero", mutates_args=())
+def _stride_zero(x: torch.Tensor) -> torch.Tensor:
+    return x.new_tensor(x.stride(0), dtype=torch.int64)
+
+
+@_stride_zero.register_fake
+def _(x: torch.Tensor) -> torch.Tensor:
+    return x.new_empty((), dtype=torch.int64)
 
 
 class _TestHighwaySelfGating(torch.nn.Module):
@@ -357,6 +382,7 @@ class _TestDropout(torch.nn.Module):
         return (dropout, dropout_1, dropout_2, dropout_3, dropout_4)
 
 
+@instantiate_parametrized_tests
 class TestGroupBatchFusion(TestCase):
     def compare_dict_tensors(self, ref_dict, res_dict, rtol=1e-3, atol=1e-3):
         if len(set(ref_dict.keys())) != len(set(res_dict.keys())):
@@ -526,6 +552,7 @@ class TestGroupBatchFusion(TestCase):
         post_grad_fusion_options={},
     )
     def test_batch_linear_lhs_skips_layout_sensitive_users(self):
+        # Model the Qwen/vLLM projection-to-contiguous-custom-kernel boundary.
         # Only one of three linears feeds the layout-sensitive custom op; the
         # other two must still fuse (counter == 1) while the offending linear
         # is skipped. _require_contiguous raises on a non-contiguous input, so
@@ -571,6 +598,292 @@ class TestGroupBatchFusion(TestCase):
                 large = torch.sin(self.proj_large(x))
                 small = torch.cos(self.proj_small(x))
                 return torch.cat((large, small), dim=1)
+
+        counters.clear()
+        module = M().eval().to("xpu")
+        x = torch.randn(32, 64, device="xpu")
+        with torch.no_grad():
+            expected = module(x)
+            actual = torch.compile(module, fullgraph=True)(x)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
+
+    @unittest.skipUnless(torch.xpu.is_available(), "batch_linear_lhs is XPU-only")
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "batch_linear_lhs": {"devices": ("xpu",), "min_fuse_set_size": 2},
+        },
+        post_grad_fusion_options={},
+    )
+    @parametrize("alias", ["unsqueeze", "float", "type_as", "dropout"])
+    def test_batch_linear_lhs_skips_view_through_alias(self, alias):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.proj_large = torch.nn.Linear(64, 192, bias=False)
+                self.proj_a = torch.nn.Linear(64, 16, bias=False)
+                self.proj_b = torch.nn.Linear(64, 16, bias=False)
+
+            def forward(self, x):
+                large = self.proj_large(x)
+                if alias == "unsqueeze":
+                    large = torch.unsqueeze(large, 0)
+                elif alias == "float":
+                    large = large.float()
+                elif alias == "type_as":
+                    large = torch.ops.aten.type_as.default(large, x)
+                else:
+                    large = torch.ops.aten.dropout.default(large, 0.5, False)
+                return (
+                    torch.sin(large.view(-1)),
+                    torch.sin(self.proj_a(x)),
+                    torch.cos(self.proj_b(x)),
+                )
+
+        counters.clear()
+        module = M().eval().to("xpu")
+        x = torch.randn(32, 64, device="xpu")
+        with torch.no_grad():
+            expected = module(x)
+            actual = torch.compile(module, fullgraph=True)(x)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
+
+    @unittest.skipUnless(torch.xpu.is_available(), "batch_linear_lhs is XPU-only")
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "batch_linear_lhs": {"devices": ("xpu",), "min_fuse_set_size": 2},
+        },
+        post_grad_fusion_options={},
+    )
+    def test_batch_linear_lhs_contiguous_alias_mutation(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.proj_large = torch.nn.Linear(64, 192, bias=False)
+                self.proj_a = torch.nn.Linear(64, 16, bias=False)
+                self.proj_b = torch.nn.Linear(64, 16, bias=False)
+
+            def forward(self, x):
+                large = self.proj_large(x)
+                alias = large.contiguous()
+                alias.add_(1)
+                return (
+                    torch.sin(large),
+                    torch.sin(self.proj_a(x)),
+                    torch.cos(self.proj_b(x)),
+                )
+
+        counters.clear()
+        module = M().eval().to("xpu")
+        x = torch.randn(32, 64, device="xpu")
+        with torch.no_grad():
+            expected = module(x)
+            self.assertEqual(expected[0], torch.sin(module.proj_large(x) + 1))
+            actual = torch.compile(module, fullgraph=True)(x)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
+
+    @unittest.skipUnless(torch.xpu.is_available(), "batch_linear_lhs is XPU-only")
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "batch_linear_lhs": {"devices": ("xpu",), "min_fuse_set_size": 2},
+        },
+        post_grad_fusion_options={},
+    )
+    @parametrize("consumer", ["clone", "sin"])
+    def test_batch_linear_lhs_skips_reshape_copy_stride_order(self, consumer):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.proj = torch.nn.Linear(1, 6, bias=False)
+                self.proj_a = torch.nn.Linear(1, 2, bias=False)
+                self.proj_b = torch.nn.Linear(1, 2, bias=False)
+
+            def forward(self, x):
+                value = self.proj(x).reshape(4, 2, 3).permute(2, 0, 1).reshape(3, 8)
+                value = value.clone() if consumer == "clone" else torch.sin(value)
+                return (
+                    value.t().view(-1),
+                    torch.sin(self.proj_a(x)),
+                    torch.cos(self.proj_b(x)),
+                )
+
+        counters.clear()
+        module = M().eval().to("xpu")
+        x = torch.randn(4, 1, device="xpu")
+        with torch.no_grad():
+            expected = module(x)
+            actual = torch.compile(module, fullgraph=True)(x)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
+
+    @unittest.skipUnless(torch.xpu.is_available(), "batch_linear_lhs is XPU-only")
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "batch_linear_lhs": {"devices": ("xpu",), "min_fuse_set_size": 2},
+        },
+        post_grad_fusion_options={},
+    )
+    def test_batch_linear_lhs_skips_contiguous_alias_comparison(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.proj_large = torch.nn.Linear(64, 192, bias=False)
+                self.proj_a = torch.nn.Linear(64, 16, bias=False)
+                self.proj_b = torch.nn.Linear(64, 16, bias=False)
+
+            def forward(self, x):
+                large = self.proj_large(x)
+                a = large.contiguous()
+                b = large.contiguous(memory_format=torch.contiguous_format)
+                return (
+                    _is_set_to(a, b),
+                    torch.sin(self.proj_a(x)),
+                    torch.cos(self.proj_b(x)),
+                )
+
+        counters.clear()
+        module = M().eval().to("xpu")
+        x = torch.randn(32, 64, device="xpu")
+        with torch.no_grad():
+            expected = module(x)
+            actual = torch.compile(module, fullgraph=True)(x)
+
+        self.assertEqual(expected[0], torch.ones((), device="xpu", dtype=torch.int64))
+        self.assertEqual(actual, expected)
+        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
+
+    @unittest.skipUnless(torch.xpu.is_available(), "batch_linear_lhs is XPU-only")
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "batch_linear_lhs": {"devices": ("xpu",), "min_fuse_set_size": 2},
+        },
+        post_grad_fusion_options={},
+    )
+    def test_batch_linear_lhs_skips_as_strided_copy(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.proj_large = torch.nn.Linear(64, 192, bias=False)
+                self.proj_a = torch.nn.Linear(64, 16, bias=False)
+                self.proj_b = torch.nn.Linear(64, 16, bias=False)
+
+            def forward(self, x):
+                large = torch.ops.aten.as_strided_copy.default(
+                    self.proj_large(x), (6144,), (1,)
+                )
+                return (
+                    torch.sin(large),
+                    torch.sin(self.proj_a(x)),
+                    torch.cos(self.proj_b(x)),
+                )
+
+        counters.clear()
+        module = M().eval().to("xpu")
+        x = torch.randn(32, 64, device="xpu")
+        with torch.no_grad():
+            expected = module(x)
+            actual = torch.compile(module, fullgraph=True)(x)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
+
+    @unittest.skipUnless(torch.xpu.is_available(), "batch_linear_lhs is XPU-only")
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "batch_linear_lhs": {"devices": ("xpu",), "min_fuse_set_size": 2},
+        },
+        post_grad_fusion_options={},
+    )
+    def test_batch_linear_lhs_skips_length_one_bias(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.proj_large = torch.nn.Linear(64, 192, bias=False)
+                self.bias = torch.nn.Parameter(torch.randn(1))
+                self.proj_a = torch.nn.Linear(64, 16)
+                self.proj_b = torch.nn.Linear(64, 16)
+
+            def forward(self, x):
+                large = torch.nn.functional.linear(x, self.proj_large.weight, self.bias)
+                return (
+                    torch.sin(large),
+                    torch.sin(self.proj_a(x)),
+                    torch.cos(self.proj_b(x)),
+                )
+
+        counters.clear()
+        module = M().eval().to("xpu")
+        x = torch.randn(32, 64, device="xpu")
+        with torch.no_grad():
+            expected = module(x)
+            actual = torch.compile(module, fullgraph=True)(x)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
+
+    @unittest.skipUnless(torch.xpu.is_available(), "batch_linear_lhs is XPU-only")
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "batch_linear_lhs": {"devices": ("xpu",), "min_fuse_set_size": 2},
+        },
+        post_grad_fusion_options={},
+    )
+    def test_batch_linear_lhs_skips_inplace_relu_backward(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.proj_large = torch.nn.Linear(64, 192, bias=False)
+                self.proj_small = torch.nn.Linear(64, 16, bias=False)
+
+            def forward(self, x):
+                return (
+                    torch.nn.functional.relu(self.proj_large(x), inplace=True),
+                    torch.nn.functional.relu(self.proj_small(x), inplace=True),
+                )
+
+        counters.clear()
+        module = M().to("xpu")
+        compiled_module = copy.deepcopy(module)
+        x = torch.randn(32, 64, device="xpu", requires_grad=True)
+        compiled_x = x.detach().clone().requires_grad_(True)
+        expected = module(x)
+        actual = torch.compile(compiled_module, fullgraph=True)(compiled_x)
+        self.assertEqual(actual, expected)
+        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 0)
+        sum(t.sum() for t in expected).backward()
+        sum(t.sum() for t in actual).backward()
+        self.assertEqual(compiled_x.grad, x.grad)
+        for ref, res in zip(module.parameters(), compiled_module.parameters()):
+            self.assertIsNotNone(ref.grad)
+            self.assertIsNotNone(res.grad)
+            self.assertEqual(res.grad, ref.grad)
+        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 0)
+
+    @unittest.skipUnless(torch.xpu.is_available(), "batch_linear_lhs is XPU-only")
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "batch_linear_lhs": {"devices": ("xpu",), "min_fuse_set_size": 2},
+        },
+        post_grad_fusion_options={},
+    )
+    def test_batch_linear_lhs_keeps_aten_sin_packet_fusion(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.proj_large = torch.nn.Linear(64, 192, bias=False)
+                self.proj_small = torch.nn.Linear(64, 16, bias=False)
+
+            def forward(self, x):
+                return (
+                    torch.ops.aten.sin(self.proj_large(x)),
+                    torch.ops.aten.sin(self.proj_small(x)),
+                )
 
         counters.clear()
         module = M().eval().to("xpu")
@@ -781,11 +1094,9 @@ class TestGroupBatchFusion(TestCase):
         post_grad_fusion_options={},
     )
     def test_batch_linear_lhs_keeps_contiguous_fusion(self):
-        # contiguous() is alias-annotated but layout-breaking: its output is
-        # contiguous for any input, so the fused layout does not propagate
-        # through it. Feeding each linear through .contiguous() before the
-        # layout-sensitive custom op must not block the fusion; without the
-        # layout-breaking handling all three would be skipped (counter 0).
+        # These direct multirow projections must materialize after fusion.
+        # Their contiguous outputs feed pure single-input custom ops, so the
+        # layout and alias checks should retain fusion (counter 1, not 0).
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -887,6 +1198,75 @@ class TestGroupBatchFusion(TestCase):
         )
         self.assertTrue(_has_layout_sensitive_user(linear))
 
+    @unittest.skipUnless(torch.xpu.is_available(), "batch_linear_lhs is XPU-only")
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "batch_linear_lhs": {"devices": ("xpu",), "min_fuse_set_size": 2},
+        },
+        post_grad_fusion_options={},
+    )
+    @parametrize("rows", [0, 1, 2])
+    def test_batch_linear_lhs_clone_preserves_observable_stride(self, rows):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.proj = torch.nn.Linear(8, 6, bias=False)
+                self.proj_a = torch.nn.Linear(8, 2, bias=False)
+                self.proj_b = torch.nn.Linear(8, 2, bias=False)
+
+            def forward(self, x):
+                return (
+                    _stride_zero(self.proj(x).clone()),
+                    torch.sin(self.proj_a(x)),
+                    torch.cos(self.proj_b(x)),
+                )
+
+        counters.clear()
+        module = M().eval().to("xpu")
+        x = torch.randn(rows, 8, device="xpu")
+        with torch.no_grad():
+            expected = module(x)
+            actual = torch.compile(module, fullgraph=True)(x)
+
+        self.assertEqual(expected[0], torch.tensor(6, device="xpu"))
+        self.assertEqual(actual, expected)
+        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
+
+    @parametrize("rows", [0, 1, 2])
+    def test_batch_linear_lhs_clone_custom_op_is_sensitive(self, rows):
+        from torch._inductor.fx_passes.group_batch_fusion import (
+            _has_layout_sensitive_user,
+        )
+
+        graph = torch.fx.Graph()
+        linear = graph.placeholder("linear")
+        linear.meta["example_value"] = torch.randn(rows, 6)
+        clone = graph.call_method("clone", args=(linear,))
+        result = graph.call_function(
+            torch.ops._batch_linear_lhs_test.stride_zero.default, args=(clone,)
+        )
+        graph.output(result)
+        graph.lint()
+        self.assertTrue(_has_layout_sensitive_user(linear))
+
+    @parametrize("observer", ["stride", "storage_offset"])
+    def test_batch_linear_lhs_singleton_contiguous_observer_is_sensitive(
+        self, observer
+    ):
+        from torch._inductor.fx_passes.group_batch_fusion import (
+            _has_layout_sensitive_user,
+        )
+
+        graph = torch.fx.Graph()
+        linear = graph.placeholder("linear")
+        linear.meta["example_value"] = torch.randn(1, 6)
+        contiguous = graph.call_method("contiguous", args=(linear,))
+        graph.call_method(observer, args=(contiguous,))
+        # No observed value is returned: rejection must come from the observer.
+        graph.output(())
+        graph.lint()
+        self.assertTrue(_has_layout_sensitive_user(linear))
+
     def test_batch_linear_lhs_mutation_through_view_is_sensitive(self):
         from torch._inductor.fx_passes.group_batch_fusion import (
             _has_layout_sensitive_user,
@@ -913,7 +1293,79 @@ class TestGroupBatchFusion(TestCase):
         )
         self.assertTrue(_has_layout_sensitive_user(linear))
 
-    def test_batch_linear_lhs_rejects_broadcast_bias(self):
+    @parametrize("call", ["packet", "default", "packet_out", "out", "mutating_packet"])
+    def test_batch_linear_lhs_packet_overload_safety(self, call):
+        from torch._inductor.fx_passes.group_batch_fusion import (
+            _has_layout_sensitive_user,
+        )
+
+        graph = torch.fx.Graph()
+        linear = graph.placeholder("linear")
+        out = graph.placeholder("out")
+        target = {
+            "packet": torch.ops.aten.sin,
+            "default": torch.ops.aten.sin.default,
+            "packet_out": torch.ops.aten.sin,
+            "out": torch.ops.aten.sin.out,
+            "mutating_packet": torch.ops.aten.sin_,
+        }[call]
+        kwargs = {"out": out} if call in ("packet_out", "out") else {}
+        result = graph.call_function(target, args=(linear,), kwargs=kwargs)
+        graph.output(result)
+        graph.lint()
+
+        self.assertEqual(
+            _has_layout_sensitive_user(linear),
+            call in ("packet_out", "out", "mutating_packet"),
+        )
+
+    def test_batch_linear_lhs_layout_constraint_tag_is_sensitive(self):
+        from unittest import mock
+
+        from torch._inductor.fx_passes import group_batch_fusion as gbf
+
+        graph = torch.fx.Graph()
+        linear = graph.placeholder("linear")
+        mat2 = graph.placeholder("mat2")
+        scale_a = graph.placeholder("scale_a")
+        scale_b = graph.placeholder("scale_b")
+        target = torch.ops.aten._scaled_mm.default
+        result = graph.call_function(target, args=(linear, mat2, scale_a, scale_b))
+        graph.output(graph.call_function(torch.sin, args=(result,)))
+        graph.lint()
+        self.assertEqual(
+            gbf.get_layout_constraint_tag(target, with_default=False),
+            torch.Tag.needs_exact_strides,
+        )
+
+        # Isolate the tag check from the fallback rejection of unknown ATen ops.
+        with mock.patch.object(
+            gbf,
+            "_LAYOUT_INDEPENDENT_OPS",
+            gbf._LAYOUT_INDEPENDENT_OPS | {"_scaled_mm"},
+        ):
+            self.assertTrue(gbf._has_layout_sensitive_user(linear))
+            with mock.patch.object(gbf, "get_layout_constraint_tag", return_value=None):
+                self.assertFalse(gbf._has_layout_sensitive_user(linear))
+
+    @parametrize("name", ["sin", "clone", "contiguous"])
+    def test_batch_linear_lhs_unknown_callable_name_collision(self, name):
+        from torch._inductor.fx_passes.group_batch_fusion import (
+            _has_layout_sensitive_user,
+        )
+
+        def unknown(x):
+            return x.view(-1)
+
+        unknown.__name__ = name
+        graph = torch.fx.Graph()
+        linear = graph.placeholder("linear")
+        result = graph.call_function(unknown, args=(linear,))
+        graph.output(graph.call_function(torch.sin, args=(result,)))
+        self.assertTrue(_has_layout_sensitive_user(linear))
+
+    @parametrize("bias_shape", [(1, 6), (1,), (6,)])
+    def test_batch_linear_lhs_rejects_broadcast_bias(self, bias_shape):
         from torch._inductor.fx_passes.group_batch_fusion import BatchLinearLHSFusion
 
         graph = torch.fx.Graph()
@@ -922,13 +1374,50 @@ class TestGroupBatchFusion(TestCase):
         bias = graph.placeholder("bias")
         input.meta["example_value"] = torch.randn(4, 8)
         weight.meta["example_value"] = torch.randn(6, 8)
-        bias.meta["example_value"] = torch.randn(1, 6)
+        bias.meta["example_value"] = torch.randn(bias_shape)
         linear = graph.call_function(torch._C._nn.linear, args=(input, weight, bias))
         linear.meta["example_value"] = torch.randn(4, 6)
+        graph.output(graph.call_function(torch.sin, args=(linear,)))
         rule = BatchLinearLHSFusion(
             graph_search_options={"min_fuse_set_size": 2, "max_fuse_set_size": 300}
         )
-        self.assertIsNone(rule.match(linear))
+        if bias_shape == (6,):
+            self.assertIsNotNone(rule.match(linear))
+        else:
+            self.assertIsNone(rule.match(linear))
+
+    @parametrize("width", [0, 6])
+    def test_batch_linear_lhs_rejects_zero_width(self, width):
+        from torch._inductor.fx_passes.group_batch_fusion import BatchLinearLHSFusion
+
+        graph = torch.fx.Graph()
+        input = graph.placeholder("input")
+        weight = graph.placeholder("weight")
+        input.meta["example_value"] = torch.randn(4, 8)
+        weight.meta["example_value"] = torch.randn(width, 8)
+        linear = graph.call_function(torch.nn.functional.linear, args=(input, weight))
+        linear.meta["example_value"] = torch.randn(4, width)
+        graph.output(graph.call_function(torch.sin, args=(linear,)))
+        rule = BatchLinearLHSFusion()
+        if width == 0:
+            self.assertIsNone(rule.match(linear))
+        else:
+            self.assertIsNotNone(rule.match(linear))
+
+    def test_batch_linear_accepts_safe_sin_packet(self):
+        from torch._inductor.fx_passes.group_batch_fusion import (
+            PreGradBatchLinearFusion,
+        )
+
+        graph = torch.fx.Graph()
+        input = graph.placeholder("input")
+        weight = graph.placeholder("weight")
+        input.meta["example_value"] = torch.randn(4, 8)
+        weight.meta["example_value"] = torch.randn(6, 8)
+        linear = graph.call_function(torch.nn.functional.linear, args=(input, weight))
+        linear.meta["example_value"] = torch.randn(4, 6)
+        graph.output(graph.call_function(torch.ops.aten.sin, args=(linear,)))
+        self.assertIsNotNone(PreGradBatchLinearFusion().match(linear))
 
     @requires_gpu()
     def test_as_strided_storage_offset_after_mm_fusion(self):
@@ -1466,16 +1955,15 @@ class TestGroupBatchFusion(TestCase):
         from torch._inductor.fx_passes.group_batch_fusion import BatchLinearLHSFusion
 
         class _SubclassWeight(torch.Tensor):
-            """Minimal subclass that raises on aten.cat to detect the bug."""
+            """Minimal subclass that does not support torch.cat."""
 
             @classmethod
-            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-                if func == torch.ops.aten.cat.default:
-                    raise AssertionError(
-                        "aten.cat called on _SubclassWeight — "
-                        "batch_linear_lhs should have been skipped"
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if func is torch.cat:
+                    raise NotImplementedError(
+                        "cat is not supported for _SubclassWeight"
                     )
-                return func(*args, **(kwargs or {}))
+                return super().__torch_function__(func, types, args, kwargs)
 
         fusion = BatchLinearLHSFusion()
         z = 4
@@ -1490,7 +1978,7 @@ class TestGroupBatchFusion(TestCase):
             torch.nn.functional.linear, args=(x_node, w_node)
         )
         linear_node.meta["example_value"] = torch.randn(2, z)
-        graph.output(linear_node)
+        graph.output(graph.call_function(torch.sin, args=(linear_node,)))
 
         # match() must return None (skip) for a subclass weight.
         result = fusion.match(linear_node)
@@ -1498,6 +1986,8 @@ class TestGroupBatchFusion(TestCase):
             result,
             "batch_linear_lhs should skip (return None) when weight is a tensor subclass",
         )
+        w_node.meta["example_value"] = torch.randn(z, z)
+        self.assertIsNotNone(fusion.match(linear_node))
 
 
 class _TestBMMFusionModule(torch.nn.Module):
