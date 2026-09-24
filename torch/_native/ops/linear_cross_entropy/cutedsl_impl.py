@@ -209,7 +209,10 @@ def _batch_chunked_kernel(
 
     loss = _make_zeros((), acc_dtype, device)
     grad_input = _make_empty(input.shape, dtype, device, when=compute_input_grad)
-    grad_linear_weight = _make_zeros(
+    # Uninitialized, since the first chunk writes all of it (beta=0 below); the
+    # empty-batch early return has no first chunk, so it gets zeros.
+    _make_accumulator = _make_empty if num_batches > 0 else _make_zeros
+    grad_linear_weight = _make_accumulator(
         linear_weight.shape, dtype, device, when=compute_linear_weight_grad
     )
     # Uninitialized, since the post-loop `copy_` writes all of it; the
@@ -245,10 +248,9 @@ def _batch_chunked_kernel(
     row_max_buf = _make_empty(
         (chunk_rows, 1), logits_dtype, device, when=not compute_grads
     )
-    # The fused kernel's two (Bc,) statistics outputs, both shifted by the row
-    # max so their difference is formed from O(1) terms.
-    log_row_sum_buf = torch.empty(chunk_rows, dtype=acc_dtype, device=device)
-    shifted_target_buf = torch.empty(chunk_rows, dtype=acc_dtype, device=device)
+    # One slot per row of the call, filled by the kernel and summed once after
+    # the loop; the forward-only path never reads it.
+    term_buf = _make_empty((num_batches,), acc_dtype, device, when=compute_grads)
     weight_t = linear_weight.t()
     # `addmm` takes `self` only in `out_dtype` or `mat1`'s dtype, so an fp32
     # bias with fp16 inputs (fp16 buffer) matches neither and is cast; the
@@ -275,17 +277,16 @@ def _batch_chunked_kernel(
 
         g = g_alias.narrow(0, 0, rows) if compute_grads else None
         if g is not None:
-            log_row_sum = log_row_sum_buf.narrow(0, 0, rows)
-            shifted_target = shifted_target_buf.narrow(0, 0, rows)
             # This consumes `logits`: on return those bytes hold `g`. Nothing
             # below reads them again, and the next chunk's matmul overwrites
             # the buffer.
             fused_grad_logits_into(
-                g, log_row_sum, shifted_target, logits, scale_chunk, target_chunk
+                g,
+                term_buf.narrow(0, start, rows),
+                logits,
+                scale_chunk,
+                target_chunk,
             )
-            # The same shifted difference the branch below forms, from the
-            # kernel's statistics rather than from a second pass.
-            loss.add_((scale_chunk * (log_row_sum - shifted_target)).sum())
         else:
             # Shift in place -- so this pass allocates no (Bc, V) temporary --
             # then read the target logit BEFORE exponentiating, since `exp_`
@@ -308,8 +309,14 @@ def _batch_chunked_kernel(
         if compute_input_grad:
             torch.mm(g, linear_weight, out=grad_input.narrow(0, start, rows))
         if compute_linear_weight_grad:
-            grad_linear_weight.addmm_(g.t(), input_chunk)
+            # The first chunk writes the accumulator (beta=0) rather than adding to it.
+            if start == 0:
+                torch.mm(g.t(), input_chunk, out=grad_linear_weight)
+            else:
+                grad_linear_weight.addmm_(g.t(), input_chunk)
 
+    if compute_grads:
+        torch.sum(term_buf, dim=0, out=loss)
     if compute_linear_bias_grad:
         grad_linear_bias.copy_(bias_grad_acc)
 
