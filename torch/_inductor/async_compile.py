@@ -9,6 +9,7 @@ import multiprocessing
 import os
 import re
 import sys
+from collections.abc import Callable
 from concurrent.futures import (
     Future,
     ThreadPoolExecutor,
@@ -179,8 +180,12 @@ _IS_WINDOWS = sys.platform == "win32"
 
 log = logging.getLogger(__name__)
 
-# Used to keep track of all process pools invoked so far.
+# Used to keep track of all pools invoked so far, so they can be shut down at exit.
 _pool_set = OrderedSet[AnyPool]()
+# Cap on consecutive pool rebuilds: a pool that keeps dying before it is ever
+# observed alive (e.g. the sidecar crashes on startup every time) must not turn
+# into an endless "spawn a sidecar per compile" loop.
+_MAX_POOL_REBUILDS = 3
 
 
 def shutdown_compile_workers() -> None:
@@ -195,8 +200,58 @@ def after_fork():
     """Reset pools to initial state without shutting them down"""
     _pool_set.clear()
     AsyncCompile._ready_future = None
+    AsyncCompile.pool.cache_clear()
     AsyncCompile.process_pool.cache_clear()
     AsyncCompile.thread_pool.cache_clear()
+
+
+def _pool_is_alive(pool: AnyPool) -> bool:
+    """Whether a previously created pool can still accept work.
+
+    SubprocPool flips ``running`` to False both on an explicit shutdown() and when
+    its sidecar dies unexpectedly; the executor classes keep the equivalent state
+    in their private ``_shutdown`` flag.
+    """
+    if getattr(pool, "running", True) is False:
+        return False
+    return not getattr(pool, "_shutdown", False)
+
+
+class _CachedPool:
+    """Memoize a process-wide pool factory, rebuilding a pool that died.
+
+    functools.lru_cache keeps handing out the same pool after it has been shut
+    down, which turns a transient failure (e.g. an Inductor compile-worker
+    sidecar crash) into a permanent "Attempting to use a closed pool" error.
+
+    The rebuild is bounded: once a pool has been replaced ``_MAX_POOL_REBUILDS``
+    times in a row without ever being seen alive, the dead pool is returned as-is
+    and callers fail fast, exactly as they did before.
+    """
+
+    def __init__(self, fn: Callable[[], AnyPool]) -> None:
+        functools.update_wrapper(self, fn)
+        self._fn = fn
+        self._cache: list[AnyPool] = []
+        self._rebuilds = 0
+
+    def __call__(self) -> AnyPool:
+        if self._cache and _pool_is_alive(self._cache[0]):
+            self._rebuilds = 0
+            return self._cache[0]
+        if self._cache and self._rebuilds >= _MAX_POOL_REBUILDS:
+            return self._cache[0]
+        if self._cache:
+            self._rebuilds += 1
+            _pool_set.discard(self._cache[0])
+        pool = self._fn()
+        self._cache[:] = [pool]
+        _pool_set.add(pool)
+        return pool
+
+    def cache_clear(self) -> None:
+        self._cache.clear()
+        self._rebuilds = 0
 
 
 try:
@@ -292,7 +347,7 @@ class AsyncCompile:
         pass
 
     @staticmethod
-    @functools.lru_cache(1)
+    @_CachedPool
     def pool() -> ThreadPoolExecutor:
         if get_compile_threads() <= 1:
             raise AssertionError(
@@ -306,7 +361,7 @@ class AsyncCompile:
         return "ready"
 
     @staticmethod
-    @functools.lru_cache(1)
+    @_CachedPool
     def process_pool() -> AnyPool:
         if get_compile_threads() <= 1:
             raise AssertionError(
@@ -352,11 +407,10 @@ class AsyncCompile:
         # kill the worker thread that sends the shutdown message to the workers.
         multiprocessing.util.Finalize(None, pool.shutdown, exitpriority=sys.maxsize)
 
-        _pool_set.add(pool)
         return pool
 
     @staticmethod
-    @functools.lru_cache(1)
+    @_CachedPool
     def thread_pool() -> ThreadPoolExecutor:
         """
         Thread pool for Triton compilation in nogil mode.
@@ -376,7 +430,6 @@ class AsyncCompile:
             get_compile_threads(),
             thread_name_prefix="triton_compile_",
         )
-        _pool_set.add(pool)
         return pool
 
     @classmethod
