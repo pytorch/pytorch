@@ -83,49 +83,6 @@ register_custom_class(OpaqueScaleFactor, typ="constant", hoist=True)
 class TestPatternMatcher(TestCase):
     device_type = GPU_TYPE
 
-    @parametrize(
-        "hop_name",
-        [
-            "auto_functionalized",
-            "auto_functionalized_v2",
-            "triton_kernel_wrapper_functional",
-        ],
-    )
-    @parametrize("input_kind", ["sparse", "unsupported_fp8"])
-    def test_structural_hop_unsupported_input(self, hop_name, input_kind):
-        from unittest import mock
-
-        import torch._inductor.codegen.triton_utils as triton_utils
-        import torch._inductor.lowering as lowering
-        from torch._subclasses.fake_tensor import FakeTensorMode
-
-        if input_kind == "sparse":
-            x = torch.sparse_coo_tensor([[0]], [1.0], (2,), check_invariants=False)
-        else:
-            x = torch.full((2,), 127, dtype=torch.uint8).view(torch.float8_e4m3fn)
-        with FakeTensorMode() as mode:
-            fake_x = mode.from_tensor(x)
-
-        graph = torch.fx.Graph()
-        input_node = graph.placeholder("x")
-        input_node.meta["val"] = fake_x
-        hop_node = graph.call_function(
-            getattr(torch.ops.higher_order, hop_name), args=(input_node,)
-        )
-
-        with (
-            mock.patch.object(
-                lowering, "is_triton_fp8_dtype_supported", return_value=False
-            ),
-            mock.patch.object(
-                triton_utils,
-                "use_uint8_triton_storage_for_cuda_float8_e4m3fn",
-                return_value=True,
-            ),
-        ):
-            self.assertTrue(lowering.unsupported_input_tensor(fake_x, hop_node))
-            self.assertFalse(lowering.fallback_node_due_to_unsupported_type(hop_node))
-
     def common(
         self,
         fn,

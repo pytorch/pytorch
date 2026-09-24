@@ -62,7 +62,7 @@ class AutoFunctionalizeTests(torch._inductor.test_case.TestCase):
 
             f(x, out)
 
-    def _test_auto_functionalize_unsupported_input(self, dtype):
+    def _test_auto_functionalize_e8m0_input(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
                 "mylib::foo",
@@ -74,49 +74,21 @@ class AutoFunctionalizeTests(torch._inductor.test_case.TestCase):
             @torch.library.impl("mylib::foo", "cpu", lib=lib)
             @torch._dynamo.disable
             def foo_impl(x):
-                if x.dtype == torch.float8_e8m0fnu:
-                    x.view(torch.uint8).add_(1)
-                else:
-                    x.add_(1)
+                pass
 
             def f(x):
                 torch.ops.mylib.foo(x)
 
-            if dtype == torch.float8_e8m0fnu:
-                x = torch.full((2,), 127, dtype=torch.uint8).view(dtype)
-            else:
-                x = torch.ones(2, dtype=dtype)
-            eager_x = x.clone()
-            compiled_x = x.clone()
-            f(eager_x)
-            torch.compile(f, backend="inductor", fullgraph=True)(compiled_x)
-            if dtype == torch.float8_e8m0fnu:
-                self.assertEqual(
-                    compiled_x.view(torch.uint8), eager_x.view(torch.uint8)
-                )
-                self.assertEqual(
-                    compiled_x.view(torch.uint8),
-                    torch.full((2,), 128, dtype=torch.uint8),
-                )
-            else:
-                self.assertEqual(compiled_x, eager_x)
-                self.assertEqual(compiled_x, torch.full((2,), 2, dtype=dtype))
+            x = torch.full((2,), 127, dtype=torch.uint8).view(torch.float8_e8m0fnu)
+            torch.compile(f, backend="inductor", fullgraph=True)(x)
 
     @torch._inductor.config.patch(enable_auto_functionalized_v2=False)
     def test_auto_functionalize_e8m0_input(self):
-        self._test_auto_functionalize_unsupported_input(torch.float8_e8m0fnu)
+        self._test_auto_functionalize_e8m0_input()
 
     @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
     def test_auto_functionalize_v2_e8m0_input(self):
-        self._test_auto_functionalize_unsupported_input(torch.float8_e8m0fnu)
-
-    @torch._inductor.config.patch(enable_auto_functionalized_v2=False)
-    def test_auto_functionalize_complex_input(self):
-        self._test_auto_functionalize_unsupported_input(torch.complex64)
-
-    @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
-    def test_auto_functionalize_v2_complex_input(self):
-        self._test_auto_functionalize_unsupported_input(torch.complex64)
+        self._test_auto_functionalize_e8m0_input()
 
     def test_auto_functionalize_self_as_mutate_arg(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:

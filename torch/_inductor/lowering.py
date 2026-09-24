@@ -2875,6 +2875,17 @@ def unsupported_input_tensor(t: torch.Tensor, node=None):
         if not node:
             return True
 
+        # These HOPs are structural wrappers that must be decomposed before
+        # lowering. Allowing their decomposition does not imply arithmetic
+        # support for float8_e8m0fnu; the decomposed operations are checked
+        # independently.
+        if node.target in (
+            torch.ops.higher_order.auto_functionalized,
+            torch.ops.higher_order.auto_functionalized_v2,
+            torch.ops.higher_order.triton_kernel_wrapper_functional,
+        ):
+            return False
+
         # Allow bitcasts, views, memory movement, and supported conversions,
         # but not arithmetic.
         # TODO: delete once triton adds native support
@@ -2913,15 +2924,6 @@ def unsupported_output_tensor(t: torch.Tensor, node=None):
 
 
 def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=True):
-    # These wrappers must be decomposed before lowering. Skipping their pattern
-    # passes leaves them in the graph and triggers post-pass assertions.
-    if node.target in (
-        torch.ops.higher_order.auto_functionalized,
-        torch.ops.higher_order.auto_functionalized_v2,
-        torch.ops.higher_order.triton_kernel_wrapper_functional,
-    ):
-        return False
-
     # Custom fallback lowering
     if node.target is aten.view_as_complex.default:
         return False
