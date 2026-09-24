@@ -4848,7 +4848,8 @@ class TestPrecompileDynamoCapture(TestCase):
         out = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertIn("refused", out.stdout)
-        self.assertIn("breaking_helper", out.stdout)
+        # \b keeps "breaking_helper" from matching inside "calls_breaking_helper".
+        self.assertRegex(out.stdout, rf"onto \([^)]*\b{compiled}\b")
 
     @skipIfCrossRef
     def test_an_installed_artifact_leaves_the_global_stance_alone(self):
