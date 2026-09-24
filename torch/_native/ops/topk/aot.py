@@ -14,8 +14,8 @@ torch is imported lazily inside covered_axes.
 ATEN_OP = "topk"
 DISPATCH_KEY = "CUDA"
 KERNEL_MODULE = "cutedsl_kernels.py"
-# The declared ranges and work rungs are measured against aten on Hopper and
-# Blackwell.
+# The declared ranges and kernel configurations are measured against aten on
+# Hopper and Blackwell.
 ARCHS = ("sm_90", "sm_100f")
 
 _DTYPES = {"float32": "at::kFloat", "bfloat16": "at::kBFloat16"}
