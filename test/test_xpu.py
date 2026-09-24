@@ -3158,6 +3158,7 @@ class TestBlockStateAbsorption(TestCase):
         del outputs
         self.assertTrue(check(set()))
 
+
 class TestXpuGraphRng(TestCase):
     @parametrize("use_default_generator", [False, True])
     def test_graph_rng_overlapping_captures(self, device, use_default_generator):
@@ -3268,9 +3269,7 @@ class TestXpuGraphRng(TestCase):
     ):
         output = torch.empty(128, device=device)
         output.uniform_()
-        generators = [
-            torch.Generator(device=device) for _ in range(num_generators)
-        ]
+        generators = [torch.Generator(device=device) for _ in range(num_generators)]
         unused_generator = torch.Generator(device=device)
         unused_state = unused_generator.get_state()
         graphs = [torch.xpu.XPUGraph() for _ in range(num_graphs)]
@@ -3317,7 +3316,8 @@ class TestXpuGraphRng(TestCase):
                 remaining_blocks,
             )
             self.assertEqual(
-                stats["active_bytes.all.current"] - baseline["active_bytes.all.current"],
+                stats["active_bytes.all.current"]
+                - baseline["active_bytes.all.current"],
                 512 * remaining_blocks,
             )
 
