@@ -4650,6 +4650,27 @@ def raises_on_request(model, x):
     y = breaking_helper(model(x))
     maybe_raise()
     return y + 1
+
+
+STANCES = []
+
+
+@torch._dynamo.disable
+def record_stance():
+    # A plain torch.compile mid-call, like another thread's, must still compile.
+    torch.compile(lambda t: t + 1, backend="eager")(torch.ones(1))
+    STANCES.append(torch._dynamo.eval_frame._stance.stance)
+
+
+def records_stance(model, x):
+    y = breaking_helper(model(x))
+    record_stance()
+    return y + 1
+
+
+def tags_compiled(model, x):
+    # Adds 1 only in a compiled frame, so a result shows how the call was served.
+    return breaking_helper(model(x)) + int(torch.compiler.is_compiling())
 """
 
 _GOLDEN_LOADER = """
@@ -4674,7 +4695,7 @@ except torch.compiler.PrecompileError as e:
     assert "no captured variant" in str(e), e
 else:
     raise AssertionError("an uncovered call was served")
-print("served")
+print("served", mod.STANCES)
 """
 
 
@@ -4723,6 +4744,7 @@ class TestPrecompileDynamoCapture(TestCase):
         )
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertIn("served", out.stdout)
+        return out.stdout
 
     def test_capture_takes_pathlike_paths(self):
         import pathlib
@@ -4793,6 +4815,110 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertIn(unreachable, python_code)
         calls = [((self.x2,), {}, y2), ((self.x3,), {}, y3)]
         self._serve_in_fresh_process(calls, mode="installed")
+
+    @skipIfCrossRef
+    def test_an_installed_artifact_leaves_the_global_stance_alone(self):
+        # Another thread's torch.compile reads the process-global stance, so a
+        # served call must refuse recompiles without setting it.
+        fn = self.mod.records_stance
+        with self._capture(fn, backend="eager") as cap:
+            y = cap(self.model, self.x2)
+        stdout = self._serve_in_fresh_process([((self.x2,), {}, y)], mode="installed")
+        self.assertIn("served ['default']", stdout)
+
+    @skipIfCrossRef
+    def test_an_installed_artifact_under_a_process_wide_stance(self):
+        # Captured on x2 only; x3 is uncovered. A served call adds 1.
+        fn = self.mod.tags_compiled
+        with self._capture(fn, backend="eager") as cap:
+            cap(self.model, self.x2)
+        state = os.path.join(self.dir, "state.pt")
+        saved = {
+            "state_dict": self.model.state_dict(),
+            "x2": self.x2,
+            "x3": self.x3,
+            "y2": fn(self.model, self.x2),
+            "y3": fn(self.model, self.x3),
+        }
+        torch.save(saved, state)
+        script = (
+            "import sys, torch\n"
+            "sys.path.insert(0, sys.argv[1])\n"
+            "mod = __import__(sys.argv[4])\n"
+            "saved = torch.load(sys.argv[5])\n"
+            "model = mod.Model()\n"
+            "model.load_state_dict(saved['state_dict'])\n"
+            "f = torch.compiler.precompile.load(sys.argv[2], sys.argv[3])\n"
+            "x2, x3, y2, y3 = saved['x2'], saved['x3'], saved['y2'], saved['y3']\n"
+            "refusing = [('default', {'force_backend': 'eager'}),\n"
+            "            ('eager_then_compile', {}), ('aot_eager_then_compile', {}),\n"
+            "            ('fail_on_recompile', {})]\n"
+            "for stance, kwargs in refusing:\n"
+            "    with torch.compiler.set_stance(stance, **kwargs):\n"
+            "        for _ in range(2):\n"
+            "            torch.testing.assert_close(f(model, x2), y2 + 1)\n"
+            "            try:\n"
+            "                f(model, x3)\n"
+            "            except torch.compiler.PrecompileError as e:\n"
+            "                assert 'no captured variant' in str(e), e\n"
+            "                assert 'stance' not in str(e), e\n"
+            "            else:\n"
+            "                raise AssertionError(f'compiled under {stance}')\n"
+            "with torch.compiler.set_stance('force_eager'):\n"
+            "    torch.testing.assert_close(f(model, x2), y2)\n"
+            "    torch.testing.assert_close(f(model, x3), y3)\n"
+            "with torch.compiler.set_stance('eager_on_recompile'):\n"
+            "    torch.testing.assert_close(f(model, x2), y2 + 1)\n"
+            "    torch.testing.assert_close(f(model, x3), y3)\n"
+            "print('stances ok')\n"
+        )
+        argv = [self.dir, self.artifact, self.cache, self.module_name, state]
+        cmd = [sys.executable, "-c", script, *argv]
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("stances ok", out.stdout)
+
+    @skipIfCrossRef
+    def test_an_installed_artifact_refuses_to_load_with_dynamo_disabled(self):
+        fn = self.mod.calls_breaking_helper
+        with self._capture(fn, backend="eager") as cap:
+            cap(self.model, self.x2)
+        script = (
+            "import sys, torch\n"
+            "sys.path.insert(0, sys.argv[1])\n"
+            "try:\n"
+            "    torch.compiler.precompile.load(sys.argv[2], sys.argv[3])\n"
+            "except torch.compiler.PrecompileError as e:\n"
+            "    assert 'disabled in this process' in str(e), e\n"
+            "    assert 'source' not in str(e), e\n"
+            "    print('refused')\n"
+        )
+        argv = [self.dir, self.artifact, self.cache]
+        env = {**os.environ, "TORCHDYNAMO_DISABLE": "1"}
+        cmd = [sys.executable, "-c", script, *argv]
+        out = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=900)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("refused", out.stdout)
+
+    @skipIfCrossRef
+    def test_an_installed_artifact_refuses_to_load_with_compiled_autograd(self):
+        fn = self.mod.calls_breaking_helper
+        with self._capture(fn, backend="eager") as cap:
+            cap(self.model, self.x2)
+        script = (
+            "import sys, torch\n"
+            "sys.path.insert(0, sys.argv[1])\n"
+            "torch._dynamo.config.compiled_autograd = True\n"
+            "try:\n"
+            "    torch.compiler.precompile.load(sys.argv[2], sys.argv[3])\n"
+            "except torch.compiler.PrecompileError as e:\n"
+            "    assert 'compiled_autograd enabled' in str(e), e\n"
+            "    print('refused')\n"
+        )
+        cmd = [sys.executable, "-c", script, self.dir, self.artifact, self.cache]
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("refused", out.stdout)
 
     @skipIfCrossRef
     def test_an_installed_artifact_refuses_changed_source_at_load(self):
