@@ -83,6 +83,22 @@ struct EighParams {
   bool upper; // UPLO: true read upper triangle, false read lower
 };
 
+// Per-thread small-matrix inverse kernel: up to this size one thread inverts a
+// whole matrix from registers. LinearAlgebra.metal instantiates exact sizes
+// 1..16 and static_asserts the list against this constant. Strides are in
+// elements.
+C10_METAL_CONSTEXPR int64_t kLUSmallInvMax = 16;
+
+template <typename index_t = int64_t>
+struct LUSmallInvParams {
+  index_t A_bstride;
+  index_t A_rstride;
+  index_t A_cstride;
+  index_t X_bstride;
+  index_t X_rstride;
+  index_t X_cstride;
+};
+
 // for LU streaming-panel kernels
 C10_METAL_CONSTEXPR unsigned kLUStreamNT = 256;
 C10_METAL_CONSTEXPR unsigned kLUStreamWarpsPerTG =
