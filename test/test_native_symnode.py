@@ -12,6 +12,7 @@ from sympy.core.assumptions import _assume_defined, _assume_rules
 import torch
 from torch._dynamo.source import ConstantSource
 from torch.fx.experimental import symbolic_shapes
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.sym_node import _NO_HINT, SymNode
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 from torch.testing._internal.common_utils import (
@@ -56,6 +57,7 @@ from torch.utils._sympy.value_ranges import (
 
 
 NativeUnsupported = torch._C._symbolic.NativeUnsupported
+_NativeSymNode = torch._C._symbolic._NativeSymNode
 
 s0 = sympy.Symbol("s0", integer=True, positive=True)
 s1 = sympy.Symbol("s1", integer=True, positive=True)
@@ -3187,6 +3189,97 @@ class TestNativeSymNode(TestCase):
             )
             on_env.check_equal(off_env)
         self.assertGreater(off_calls - len(python_calls), 10)
+
+    def trace(self, native, fn, pre_dispatch):
+        env, syms = self.make_env(native)
+        a, b = (
+            torch.SymInt(self.node(env, s, int, int(env.backed_var_to_val[s])))
+            for s in syms[:2]
+        )
+        gm = make_fx(fn, tracing_mode="real", pre_dispatch=pre_dispatch)(a, b)
+        return env, gm
+
+    @parametrize("pre_dispatch", [False, True])
+    def test_proxy_make_fx(self, pre_dispatch):
+        def f(a, b):
+            c = a + b
+            d = c * 2 - a // b
+            e = (d % 3 + 1) * 1
+            m = torch.sym_max(a, b) + torch.sym_min(a, 3)
+            one = a.node.wrap_int(1)
+            sizes, strides = [a.node, b.node], [b.node, one]
+            contig = torch.SymBool(a.node.is_contiguous(sizes, strides))
+            dense = torch.SymBool(a.node.is_non_overlapping_and_dense(sizes, strides))
+            ite = torch.sym_ite(a < b, a, b)
+            return (e, m, a**2, a / b, torch.sym_float(a), -a, ite, contig, dense)
+
+        def g(a, b):
+            lt = a < b
+            return (
+                lt & (b > 2),
+                lt | (a == b),
+                torch.sym_not(lt),
+                a != b,
+                a <= b,
+                a >= b,
+            )
+
+        for fn in (f, g):
+            on_env, on = self.trace(True, fn, pre_dispatch)
+            off_env, off = self.trace(False, fn, pre_dispatch)
+            self.assertEqual(on.code, off.code)
+            self.assertEqual(
+                [str(x.expr) for x in on_env.guards],
+                [str(x.expr) for x in off_env.guards],
+            )
+            on_vals = [n.meta.get("val") for n in on.graph.nodes]
+            off_vals = [n.meta.get("val") for n in off.graph.nodes]
+            for x, y in zip(on_vals, off_vals, strict=True):
+                if isinstance(y, torch.SymInt | torch.SymBool | torch.SymFloat):
+                    self.assertEqual(str(x), str(y))
+            ops = [n for n in on.graph.nodes if n.op == "call_function"]
+            self.assertIsInstance(ops[0].meta["val"].node, _NativeSymNode)
+
+        # The inner op of the dispatch runs natively.
+        _, gm = self.trace(True, lambda a, b: a * b + 1, pre_dispatch)
+        vals = [n.meta["val"] for n in gm.graph.nodes if n.op == "call_function"]
+        self.assertTrue(all(isinstance(v.node, _NativeSymNode) for v in vals))
+
+    def test_proxy_pre_dispatch_excluded(self):
+        # get_proxy_mode() reads the global pre-dispatch slot even with
+        # PreDispatch removed from the include set (torch._export.wrappers).
+        def f(a, b):
+            PreDispatch = torch._C.DispatchKey.PreDispatch
+            include = torch._C._dispatch_tls_local_include_set().remove(PreDispatch)
+            exclude = (
+                torch._C._dispatch_tls_local_exclude_set()
+                | torch._C.DispatchKeySet(PreDispatch)
+            )
+            with torch._C._ForceDispatchKeyGuard(include, exclude):
+                return a * b + 1
+
+        _, on = self.trace(True, f, True)
+        _, off = self.trace(False, f, True)
+        self.assertIn("mul", off.code)
+        self.assertEqual(on.code, off.code)
+
+    def test_expr(self):
+        env, syms = self.make_env()
+        n = env._native_env.make_node(syms[0], int, 5)
+        self.assertEqual(n.add(n).expr, 2 * syms[0])
+
+    def test_proxy_mul_by_one(self):
+        # __sym_dispatch__ returns the operand itself.
+        _, gm = self.trace(True, lambda a, b: (a * 1, 1 * b), False)
+        self.assertNotIn("mul", gm.code)
+
+    def test_proxy_hint_raises(self):
+        # binary_magic_impl computes the hint before dispatching.
+        env, syms = self.make_env()
+        a = torch.SymInt(env._native_env.make_node(syms[0], int, 5))
+        zero = torch.SymInt(env._native_env.make_node(syms[0] - 5, int, 0))
+        with self.assertRaises(ZeroDivisionError):
+            make_fx(lambda x, y: x // y, tracing_mode="real")(a, zero)
 
     def test_make_node(self):
         env, syms = self.make_env()

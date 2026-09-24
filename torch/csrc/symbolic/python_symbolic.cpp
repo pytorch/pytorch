@@ -8,8 +8,11 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_symnode.h>
 
+#include <c10/core/impl/TorchDispatchModeTLS.h>
+
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <optional>
 #include <unordered_map>
 #include <vector>
@@ -19,6 +22,9 @@ namespace torch::symbolic {
 namespace py = pybind11;
 
 namespace {
+
+// Mirrors whether torch._ops' process-global pre-dispatch PROXY slot is set.
+std::atomic<bool> pre_dispatch_proxy_set{false};
 
 constexpr Kind kFunctionKinds[] = {
     Kind::Mod,
@@ -632,6 +638,46 @@ py::object node_expr(const NativeSymNodeImpl& node) {
   return binding_of(env).arena->to_sympy(node.expr());
 }
 
+c10::SymNode node_from_py(py::handle obj) {
+  if (py::isinstance<c10::SymNodeImpl>(obj)) {
+    return py::cast<c10::SymNode>(obj);
+  }
+  return c10::make_intrusive<impl::PythonSymNodeImpl>(
+      py::reinterpret_borrow<py::object>(obj));
+}
+
+py::object node_to_py(const c10::SymNode& n) {
+  if (auto* p = dynamic_cast<impl::PythonSymNodeImpl*>(n.get())) {
+    return py::reinterpret_borrow<py::object>(p->getPyObj());
+  }
+  return py::cast(n);
+}
+
+std::vector<c10::SymNode> nodes_from_py(const py::sequence& nodes) {
+  std::vector<c10::SymNode> r;
+  r.reserve(nodes.size());
+  for (py::handle n : nodes) {
+    r.push_back(node_from_py(n));
+  }
+  return r;
+}
+
+py::list nodes_to_py(c10::ArrayRef<c10::SymNode> nodes) {
+  py::list r(nodes.size());
+  for (size_t i = 0; i < nodes.size(); ++i) {
+    r[i] = node_to_py(nodes[i]);
+  }
+  return r;
+}
+
+py::handle python_symnode_class() {
+  static py::handle cls =
+      py::object(
+          py::module_::import("torch.fx.experimental.sym_node").attr("SymNode"))
+          .release();
+  return cls;
+}
+
 } // namespace
 
 bool native_config_is_default() {
@@ -685,6 +731,29 @@ c10::SymNode materialize(const NativeSymNodeImpl& node) {
   return c10::make_intrusive<impl::PythonSymNodeImpl>(std::move(r));
 }
 
+bool proxy_mode() {
+  return pre_dispatch_proxy_set.load(std::memory_order_relaxed) ||
+      c10::impl::TorchDispatchModeTLS::get_mode(
+          c10::impl::TorchDispatchModeKey::PROXY)
+          .has_value();
+}
+
+c10::SymNode proxy_call(const char* method, c10::ArrayRef<c10::SymNode> args) {
+  py::gil_scoped_acquire gil;
+  py::tuple py_args(nodes_to_py(args));
+  return node_from_py(python_symnode_class().attr(method)(*py_args));
+}
+
+c10::SymNode proxy_call(
+    const char* method,
+    const c10::SymNode& self,
+    c10::ArrayRef<c10::SymNode> sizes,
+    c10::ArrayRef<c10::SymNode> strides) {
+  py::gil_scoped_acquire gil;
+  return node_from_py(python_symnode_class().attr(method)(
+      node_to_py(self), nodes_to_py(sizes), nodes_to_py(strides)));
+}
+
 void initSymbolicBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module_>();
   auto sm = m.def_submodule("_symbolic", "native symbolic expressions");
@@ -694,6 +763,7 @@ void initSymbolicBindings(PyObject* module) {
   sm.def("_native_queries_pending", &NativeShapeEnv::queries_pending);
   sm.def("_set_suppress_guards", [](bool v) { suppress_guards_tls() = v; });
   sm.def("_suppress_guards", [] { return suppress_guards_tls(); });
+  sm.def("_set_pre_dispatch_proxy", [](bool v) { pre_dispatch_proxy_set = v; });
 
   py::class_<PyExpr>(sm, "_Expr")
       .def(
@@ -1179,19 +1249,6 @@ void initSymbolicBindings(PyObject* module) {
 
   // Unlike the _SymNode methods it overrides, these take and return Python
   // SymNodes as well.
-  auto node_from_py = [](py::handle obj) -> c10::SymNode {
-    if (py::isinstance<c10::SymNodeImpl>(obj)) {
-      return py::cast<c10::SymNode>(obj);
-    }
-    return c10::make_intrusive<impl::PythonSymNodeImpl>(
-        py::reinterpret_borrow<py::object>(obj));
-  };
-  auto node_to_py = [](const c10::SymNode& n) -> py::object {
-    if (auto* p = dynamic_cast<impl::PythonSymNodeImpl*>(n.get())) {
-      return py::reinterpret_borrow<py::object>(p->getPyObj());
-    }
-    return py::cast(n);
-  };
   py::class_<
       NativeSymNodeImpl,
       c10::SymNodeImpl,
@@ -1200,6 +1257,19 @@ void initSymbolicBindings(PyObject* module) {
   node_cls
       .def_property_readonly(
           "_expr", [](const NativeSymNodeImpl& n) { return node_expr(n); })
+      .def_property_readonly(
+          "expr",
+          [](const NativeSymNodeImpl& n) -> py::object {
+            bool replaced = false;
+            {
+              auto lock = lock_env(*n.env());
+              replaced = !n.env()->replacements_empty();
+            }
+            if (!replaced) {
+              return node_expr(n);
+            }
+            return node_to_py(materialize(n)).attr("expr");
+          })
       .def_property_readonly(
           "hint",
           [](const NativeSymNodeImpl& n) { return hint_to_py(n.hint()); })
@@ -1214,7 +1284,7 @@ void initSymbolicBindings(PyObject* module) {
       .def("maybe_as_int", &NativeSymNodeImpl::maybe_as_int)
       .def("str", &NativeSymNodeImpl::str)
       .def("statically_known_true", &NativeSymNodeImpl::statically_known_true)
-      .def("wrap_float", [node_to_py](NativeSymNodeImpl& self, double v) {
+      .def("wrap_float", [](NativeSymNodeImpl& self, double v) {
         return node_to_py(self.wrap_float(v));
       });
   for (auto [name, fn] :
@@ -1244,7 +1314,7 @@ void initSymbolicBindings(PyObject* module) {
         std::pair{"or_", &c10::SymNodeImpl::sym_or}}) {
     node_cls.def(
         name,
-        [fn, node_from_py, node_to_py](
+        [fn](
             NativeSymNodeImpl& self, py::handle other) {
           return node_to_py((self.*fn)(node_from_py(other)));
         });
@@ -1255,10 +1325,70 @@ void initSymbolicBindings(PyObject* module) {
         std::pair{"ceil", &c10::SymNodeImpl::ceil},
         std::pair{"floor", &c10::SymNodeImpl::floor},
         std::pair{"sym_float", &c10::SymNodeImpl::sym_float}}) {
-    node_cls.def(name, [fn, node_to_py](NativeSymNodeImpl& self) {
+    node_cls.def(name, [fn](NativeSymNodeImpl& self) {
       return node_to_py((self.*fn)());
     });
   }
+  for (auto [name, fn] :
+       {std::pair{"is_contiguous", &c10::SymNodeImpl::is_contiguous},
+        std::pair{
+            "is_channels_last_contiguous_2d",
+            &c10::SymNodeImpl::is_channels_last_contiguous_2d},
+        std::pair{
+            "is_channels_last_contiguous_3d",
+            &c10::SymNodeImpl::is_channels_last_contiguous_3d},
+        std::pair{
+            "is_channels_last_strides_2d",
+            &c10::SymNodeImpl::is_channels_last_strides_2d},
+        std::pair{
+            "is_channels_last_strides_3d",
+            &c10::SymNodeImpl::is_channels_last_strides_3d},
+        std::pair{
+            "is_non_overlapping_and_dense",
+            &c10::SymNodeImpl::is_non_overlapping_and_dense}}) {
+    node_cls.def(
+        name,
+        [fn](
+            NativeSymNodeImpl& self,
+            const py::sequence& sizes,
+            const py::sequence& strides) {
+          return node_to_py(
+              (self.*fn)(nodes_from_py(sizes), nodes_from_py(strides)));
+        });
+  }
+  // Not a SymNodeImpl virtual.
+  node_cls.def(
+      "is_non_overlapping_and_dense_indicator",
+      [](NativeSymNodeImpl& self,
+         const py::sequence& sizes,
+         const py::sequence& strides) {
+        auto sizes_v = nodes_from_py(sizes);
+        auto strides_v = nodes_from_py(strides);
+        if (proxy_mode()) {
+          return node_to_py(proxy_call(
+              "_is_non_overlapping_and_dense_indicator",
+              self.clone(),
+              sizes_v,
+              strides_v));
+        }
+        auto as_python = [](const std::vector<c10::SymNode>& nodes) {
+          py::list r;
+          for (const auto& n : nodes) {
+            auto* native = dynamic_cast<NativeSymNodeImpl*>(n.get());
+            r.append(node_to_py(native ? materialize(*native) : n));
+          }
+          return r;
+        };
+        return node_to_py(materialize(self))
+            .attr("is_non_overlapping_and_dense_indicator")(
+                as_python(sizes_v), as_python(strides_v));
+      });
+  node_cls.def(
+      "sym_ite",
+      [](NativeSymNodeImpl& self, py::handle then_val, py::handle else_val) {
+        return node_to_py(
+            self.sym_ite(node_from_py(then_val), node_from_py(else_val)));
+      });
 }
 
 } // namespace torch::symbolic

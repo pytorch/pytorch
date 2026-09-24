@@ -729,6 +729,11 @@ class DynamicInt(_DynamicScalar, int):
         return result
 
 
+# Native C++ nodes (torch._dynamo.config.use_cpp_symnode) are not SymNodes
+# but carry the same attributes.
+SymNodeTypes = (SymNode, torch._C._symbolic._NativeSymNode)
+
+
 # TODO: this probably needs the sizes-strides eval functions
 METHOD_TO_OPERATOR = {
     "pos": operator.pos,
@@ -1394,7 +1399,7 @@ def to_node(self: SymNode, num: object) -> SymNode:
 
 def wrap_node(x: SymNode) -> SymInt | SymFloat | SymBool | int | float | bool:
     # TODO: let C++ also take advantage of this
-    if isinstance(x, SymNode) and x.constant is not None:
+    if isinstance(x, SymNodeTypes) and x.constant is not None:
         return x.constant
     if x.is_int():
         return SymInt(x)
@@ -2087,8 +2092,8 @@ def _make_user_magic(method: str, user_type: type) -> None:
             if then_node is NotImplemented or else_node is NotImplemented:
                 return NotImplemented
             if not (
-                isinstance(then_node, SymNode)
-                and isinstance(else_node, SymNode)
+                isinstance(then_node, SymNodeTypes)
+                and isinstance(else_node, SymNodeTypes)
                 and then_node.pytype == else_node.pytype
             ):
                 raise AssertionError(

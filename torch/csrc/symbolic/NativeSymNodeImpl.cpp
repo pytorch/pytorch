@@ -162,6 +162,27 @@ c10::SymNode NativeSymNodeImpl::binary(
     Op op,
     BinaryFn fallback,
     const c10::SymNode& other) {
+  static constexpr const char* proxy_methods[] = {
+      "_add",
+      "_sub",
+      "_mul",
+      "_int_floordiv",
+      "_mod",
+      "_pow_by_natural",
+      "_sym_min",
+      "_sym_max",
+      "_eq",
+      "_ne",
+      "_gt",
+      "_lt",
+      "_le",
+      "_ge",
+      "_and_",
+      "_or_"};
+  static_assert(std::size(proxy_methods) == static_cast<size_t>(Op::Or) + 1);
+  if (proxy_mode()) {
+    return proxy_call(proxy_methods[static_cast<size_t>(op)], {clone(), other});
+  }
   auto* o = as_native(other);
   if (o != nullptr && o->env_ == env_) {
     auto lock = lock_env(*env_);
@@ -362,6 +383,9 @@ c10::SymNode NativeSymNodeImpl::try_binary(
 }
 
 c10::SymNode NativeSymNodeImpl::unary(bool is_not, UnaryFn fallback) {
+  if (proxy_mode()) {
+    return proxy_call(is_not ? "_sym_not" : "_neg", {clone()});
+  }
   {
     auto lock = lock_env(*env_);
     try {
@@ -434,45 +458,73 @@ c10::SymNode NativeSymNodeImpl::sym_not() {
   return unary(true, &c10::SymNodeImpl::sym_not);
 }
 
-#define PYTHON_BINARY(name)                                         \
+#define PYTHON_BINARY(name, py_method)                              \
   c10::SymNode NativeSymNodeImpl::name(const c10::SymNode& other) { \
+    if (proxy_mode()) {                                             \
+      return proxy_call(py_method, {clone(), other});               \
+    }                                                               \
     return materialize(*this)->name(to_python(other));              \
   }
-PYTHON_BINARY(truediv)
-PYTHON_BINARY(float_truediv)
-PYTHON_BINARY(int_truediv)
-PYTHON_BINARY(pow)
-PYTHON_BINARY(float_pow)
+PYTHON_BINARY(truediv, "_float_truediv")
+PYTHON_BINARY(float_truediv, "_float_truediv")
+PYTHON_BINARY(int_truediv, "_int_truediv")
+PYTHON_BINARY(pow, "_float_pow")
+PYTHON_BINARY(float_pow, "_float_pow")
 #undef PYTHON_BINARY
 
-#define PYTHON_UNARY(name)                 \
-  c10::SymNode NativeSymNodeImpl::name() { \
-    return materialize(*this)->name();     \
+#define PYTHON_UNARY(name, py_method)       \
+  c10::SymNode NativeSymNodeImpl::name() {  \
+    if (proxy_mode()) {                     \
+      return proxy_call(py_method, {clone()}); \
+    }                                       \
+    return materialize(*this)->name();      \
   }
-PYTHON_UNARY(ceil)
-PYTHON_UNARY(floor)
-PYTHON_UNARY(sym_float)
+PYTHON_UNARY(ceil, "_ceil")
+PYTHON_UNARY(floor, "_floor")
+PYTHON_UNARY(sym_float, "_sym_float")
 #undef PYTHON_UNARY
 
 c10::SymNode NativeSymNodeImpl::sym_ite(
     const c10::SymNode& then_val,
     const c10::SymNode& else_val) {
+  if (proxy_mode()) {
+    return proxy_call("_sym_ite", {clone(), then_val, else_val});
+  }
   return materialize(*this)->sym_ite(to_python(then_val), to_python(else_val));
 }
 
-#define PYTHON_SIZES_STRIDES(name)                                         \
+#define PYTHON_SIZES_STRIDES(name, py_method)                              \
   c10::SymNode NativeSymNodeImpl::name(                                    \
       c10::ArrayRef<c10::SymNode> sizes,                                   \
       c10::ArrayRef<c10::SymNode> strides) {                               \
+    if (proxy_mode()) {                                                    \
+      return proxy_call(py_method, clone(), sizes, strides);               \
+    }                                                                      \
     return materialize(*this)->name(to_python(sizes), to_python(strides)); \
   }
-PYTHON_SIZES_STRIDES(is_contiguous)
-PYTHON_SIZES_STRIDES(is_channels_last_contiguous_2d)
-PYTHON_SIZES_STRIDES(is_channels_last_contiguous_3d)
-PYTHON_SIZES_STRIDES(is_channels_last_strides_2d)
-PYTHON_SIZES_STRIDES(is_channels_last_strides_3d)
-PYTHON_SIZES_STRIDES(is_non_overlapping_and_dense)
+PYTHON_SIZES_STRIDES(is_contiguous, "_is_contiguous")
+PYTHON_SIZES_STRIDES(
+    is_channels_last_contiguous_2d,
+    "_is_channels_last_contiguous_2d")
+PYTHON_SIZES_STRIDES(
+    is_channels_last_contiguous_3d,
+    "_is_channels_last_contiguous_3d")
+PYTHON_SIZES_STRIDES(is_channels_last_strides_2d, "_is_channels_last_strides_2d")
+PYTHON_SIZES_STRIDES(is_channels_last_strides_3d, "_is_channels_last_strides_3d")
 #undef PYTHON_SIZES_STRIDES
+
+c10::SymNode NativeSymNodeImpl::is_non_overlapping_and_dense(
+    c10::ArrayRef<c10::SymNode> sizes,
+    c10::ArrayRef<c10::SymNode> strides) {
+  if (proxy_mode()) {
+    // SymNode.is_non_overlapping_and_dense
+    auto indicator = proxy_call(
+        "_is_non_overlapping_and_dense_indicator", clone(), sizes, strides);
+    return indicator->eq(indicator->wrap_int(1));
+  }
+  return materialize(*this)->is_non_overlapping_and_dense(
+      to_python(sizes), to_python(strides));
+}
 
 const Expr* NativeSymNodeImpl::evaluate(std::optional<bool> fallback_value) {
   if (!native_config_is_default()) {

@@ -26,4 +26,18 @@ std::unique_lock<std::mutex> lock_env(NativeShapeEnv& env);
 // which a native env requires. Takes the GIL.
 bool native_config_is_default();
 
+// Whether get_proxy_mode() is set. Does not take the GIL.
+bool proxy_mode();
+
+// SymNode.<method>(*args) with args[0] native, for a proxy mode being active:
+// the Python impl then takes its proxy branch, which only touches the hints,
+// wrap_node and to_node of its arguments, so the native nodes themselves reach
+// handle_sym_dispatch and their proxy slots are found.
+c10::SymNode proxy_call(const char* method, c10::ArrayRef<c10::SymNode> args);
+c10::SymNode proxy_call(
+    const char* method,
+    const c10::SymNode& self,
+    c10::ArrayRef<c10::SymNode> sizes,
+    c10::ArrayRef<c10::SymNode> strides);
+
 } // namespace torch::symbolic
