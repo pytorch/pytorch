@@ -1387,15 +1387,12 @@ class CppWrapperGpu(CppWrapperCpu):
     def _ensure_aoti_stream_helpers_emitted(self) -> None:
         if self._aoti_stream_helpers_emitted:
             return
-        # The stream/event helpers in streams.h are CUDA-specific (cudaEvent_t,
-        # cudaStream_t, cudaEventRecord, ...). Guarding here on the device type
-        # prevents the CUDA-only symbols from being emitted into XPU generated
-        # code, where SYCL in-order queues handle event ordering implicitly.
-        if self.device == "xpu":
-            return
         self._aoti_stream_helpers_emitted = True
+        # streams.h is CUDA-specific (cudaEvent_t/cudaStream_t/...); XPU gets a
+        # SYCL-backed header exposing the same AOTIPerThread{Stream,Event}Cache API.
+        helper_file = "streams_xpu.h" if self.device == "xpu" else "streams.h"
         with open(
-            os.path.join(os.path.dirname(__file__), "aoti_runtime", "streams.h")
+            os.path.join(os.path.dirname(__file__), "aoti_runtime", helper_file)
         ) as f:
             self.header.splice(maybe_hipify_code_wrapper(f.read()))
         self.header.splice(
@@ -1468,8 +1465,6 @@ class CppWrapperGpu(CppWrapperCpu):
     def _emit_stream_op_inline(self, kernel_name: str | None, args: list[str]) -> bool:
         if kernel_name is None or not V.graph.aot_mode:
             return False
-        if self.device == "xpu":
-            return False
         if kernel_name in AOTI_UNSUPPORTED_STREAM_OP_REASONS:
             raise NotImplementedError(
                 f"{kernel_name} is not supported in AOTI cpp_wrapper. "
@@ -1484,33 +1479,53 @@ class CppWrapperGpu(CppWrapperCpu):
 
         self._ensure_aoti_stream_helpers_emitted()
         event_idx = _parse_idx(args[0])
+        is_xpu = self.device == "xpu"
         if op == "record_event":
             stream_idx = _parse_idx(args[1])
-            self.writeline(
-                maybe_hipify_code_wrapper(
-                    "AOTI_RUNTIME_CUDA_CHECK(cudaEventRecord("
-                    f"_aoti_event_cache.get({event_idx}, this->device_idx_), "
-                    f"{self._stream_expr_for_idx(stream_idx)}));"
+            if is_xpu:
+                # Cache decides internally whether to re-signal a reusable
+                # event or replace the slot with a fresh barrier event.
+                self.writeline(
+                    f"_aoti_event_cache.record({event_idx}, this->device_idx_, "
+                    f"{self._stream_expr_for_idx(stream_idx)});"
                 )
-            )
+            else:
+                self.writeline(
+                    maybe_hipify_code_wrapper(
+                        "AOTI_RUNTIME_CUDA_CHECK(cudaEventRecord("
+                        f"_aoti_event_cache.get({event_idx}, this->device_idx_), "
+                        f"{self._stream_expr_for_idx(stream_idx)}));"
+                    )
+                )
             return True
         if op == "wait_event":
             stream_idx = _parse_idx(args[1])
-            self.writeline(
-                maybe_hipify_code_wrapper(
-                    "AOTI_RUNTIME_CUDA_CHECK(cudaStreamWaitEvent("
-                    f"{self._stream_expr_for_idx(stream_idx)}, "
-                    f"_aoti_event_cache.get({event_idx}, this->device_idx_), 0));"
+            if is_xpu:
+                self.writeline(
+                    f"_aoti_event_cache.wait({event_idx}, this->device_idx_, "
+                    f"{self._stream_expr_for_idx(stream_idx)});"
                 )
-            )
+            else:
+                self.writeline(
+                    maybe_hipify_code_wrapper(
+                        "AOTI_RUNTIME_CUDA_CHECK(cudaStreamWaitEvent("
+                        f"{self._stream_expr_for_idx(stream_idx)}, "
+                        f"_aoti_event_cache.get({event_idx}, this->device_idx_), 0));"
+                    )
+                )
             return True
         if op == "synchronize_event":
-            self.writeline(
-                maybe_hipify_code_wrapper(
-                    "AOTI_RUNTIME_CUDA_CHECK(cudaEventSynchronize("
-                    f"_aoti_event_cache.get({event_idx}, this->device_idx_)));"
+            if is_xpu:
+                self.writeline(
+                    f"_aoti_event_cache.synchronize({event_idx}, this->device_idx_);"
                 )
-            )
+            else:
+                self.writeline(
+                    maybe_hipify_code_wrapper(
+                        "AOTI_RUNTIME_CUDA_CHECK(cudaEventSynchronize("
+                        f"_aoti_event_cache.get({event_idx}, this->device_idx_)));"
+                    )
+                )
             return True
         return False
 
