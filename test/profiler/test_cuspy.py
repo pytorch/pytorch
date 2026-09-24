@@ -513,7 +513,7 @@ class TestCuspyRecords(TestCase):
         class FakeGraph:
             def __init__(self, nodes):
                 self._nodes = nodes
-                self._owned_graph_ids: set[int] = set()
+                self._recorded_exec_ids: set[int] = set()
 
             def get_graph_data(self):
                 return {"nodes": self._nodes, "exec_graph_id": 7}

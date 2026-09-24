@@ -328,9 +328,9 @@ class CUDAGraph(_CUDAGraph):
     # graph, "source" leaves them on the capture graph for consumers reading CUPTI's
     # sourceGraphNodeId. Stamped from annotation_config at capture_begin.
     _annotation_key_by: str
-    # Capture, body, and executable graph ids whose registry entries and consumer
+    # Executable, capture, and body graph ids whose registry entries and consumer
     # state must be removed when this capture is reset or destroyed.
-    _owned_graph_ids: set[int]
+    _recorded_exec_ids: set[int]
     _keep_graph: bool
     # User hooks fired by capture_begin / capture_end / instantiate (see register_*_hook).
     _capture_start_hooks: dict[int, Callable[[CUDAGraph], None]]
@@ -359,7 +359,7 @@ class CUDAGraph(_CUDAGraph):
         instance._capture_graph_id = None
         instance._remapped_exec_id = None
         instance._annotation_key_by = "exec"
-        instance._owned_graph_ids = set()
+        instance._recorded_exec_ids = set()
         instance._keep_graph = keep_graph
         # OrderedDict (not dict): RemovableHandle weak-references the mapping.
         instance._capture_start_hooks = OrderedDict()
@@ -383,7 +383,7 @@ class CUDAGraph(_CUDAGraph):
         self._retained_finalizer = weakref.finalize(self, self._retained.fire)
         # Capture the mutable id set, never self: the finalizer must not retain the
         # graph. Arm even before any consumers register, including for deferred graphs.
-        graph_ids = self._owned_graph_ids
+        graph_ids = self._recorded_exec_ids
 
         def cleanup() -> None:
             if graph_ids:
@@ -565,14 +565,14 @@ class CUDAGraph(_CUDAGraph):
 
             aliased_exec_id = alias_sourceless_to_exec_graph(self)
             if aliased_exec_id is not None:
-                self._owned_graph_ids.add(aliased_exec_id)
+                self._recorded_exec_ids.add(aliased_exec_id)
             return
         from torch.cuda._graph_annotations import remap_to_exec_graph
 
         remap_to_exec_graph(self)
         # Consumers may still have state under earlier executable graph ids.
         if self._remapped_exec_id is not None:
-            self._owned_graph_ids.add(self._remapped_exec_id)
+            self._recorded_exec_ids.add(self._remapped_exec_id)
 
     def _release_python_resources(self) -> None:
         # Single source of truth for GC-critical Python resources released by
@@ -743,7 +743,7 @@ class CUDAGraph(_CUDAGraph):
             self._retained_finalizer.detach()
         # Start a fresh id set BEFORE re-arming: _arm_retained captures it into the
         # next cycle's destroy callback. The just-fired holder dropped the old one.
-        self._owned_graph_ids = set()
+        self._recorded_exec_ids = set()
         self._arm_retained()
         # Reset-only state: scrubbed here because the object is reused after
         # reset(); on death it dies with the object.
@@ -1471,7 +1471,7 @@ class graph:
             _graph_node_callbacks.disarm()
             if self._enable_annotations:
                 resolve_pending_annotations()
-                self.cuda_graph._owned_graph_ids |= take_body_graph_ids()
+                self.cuda_graph._recorded_exec_ids |= take_body_graph_ids()
 
             # For keep_graph=False capture_end instantiates, which remaps annotations
             # from the capture id (stamped back at capture_begin) to the exec id. For
