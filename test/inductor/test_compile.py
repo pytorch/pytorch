@@ -496,21 +496,33 @@ class TestStandaloneInductor(TestCase):
         self.assertIn("-gencode arch=compute_86,code=sm_86", cmake_contents)
         self.assertIn("-gencode arch=compute_90,code=sm_90", cmake_contents)
 
-    @unittest.skipIf(torch.version.hip is not None, "CUDA-only")
     def test_aoti_cuda_save_kernel_recompiles_for_target_arch(self):
         from torch._inductor.runtime.triton_heuristics import (
             CachingAutotuner,
             TritonCompileResult,
         )
 
+        is_rocm = torch.version.hip is not None
         autotuner = object.__new__(CachingAutotuner)
         autotuner.inductor_meta = {"kernel_name": "triton_kernel"}
         autotuner.triton_meta = {}
-        autotuner.device_props = types.SimpleNamespace(type="cuda", cc=100)
+        autotuner.device_props = types.SimpleNamespace(
+            type="hip" if is_rocm else "cuda",
+            cc="gfx90a" if is_rocm else 100,
+        )
 
+        current_asm = (
+            {
+                "hsaco": b"current hsaco",
+                "amdgcn": "current amdgcn",
+                "llir": "current llvm ir",
+            }
+            if is_rocm
+            else {"cubin": b"current cubin", "ptx": "current ptx"}
+        )
         current_binary = types.SimpleNamespace(
             metadata=types.SimpleNamespace(name="kernel", num_warps=1, shared=0),
-            asm={"cubin": b"current cubin", "ptx": "current ptx"},
+            asm=current_asm,
         )
         target_binary = types.SimpleNamespace(
             metadata=types.SimpleNamespace(name="kernel", num_warps=1, shared=0),
@@ -527,6 +539,47 @@ class TestStandaloneInductor(TestCase):
             global_scratch=None,
             profile_scratch=None,
         )
+
+        if is_rocm:
+            with (
+                config.patch({"aot_inductor.emit_multi_arch_kernel": True}),
+                mock.patch.object(
+                    CachingAutotuner,
+                    "_precompile_config",
+                ) as precompile_config,
+                mock.patch(
+                    "torch._inductor.codecache.CudaKernelParamCache.set"
+                ) as cache_set,
+            ):
+                autotuner.save_gpu_kernel("stream", launcher)
+
+            precompile_config.assert_not_called()
+            _, params, binary, bin_type, asm, asm_type = cache_set.call_args.args
+            self.assertIsNone(params["cuda_arch"])
+            self.assertEqual(binary, b"current hsaco")
+            self.assertEqual(bin_type, "hsaco")
+            self.assertEqual(asm, "current llvm ir")
+            self.assertEqual(asm_type, "ll")
+
+            with (
+                config.patch({"aot_inductor.emit_multi_arch_kernel": False}),
+                mock.patch.object(
+                    CachingAutotuner,
+                    "_precompile_config",
+                ) as precompile_config,
+                mock.patch(
+                    "torch._inductor.codecache.CudaKernelParamCache.set"
+                ) as cache_set,
+            ):
+                autotuner.save_gpu_kernel("stream", launcher)
+
+            precompile_config.assert_not_called()
+            _, params, binary, bin_type, asm, asm_type = cache_set.call_args.args
+            self.assertEqual(binary, b"current hsaco")
+            self.assertEqual(bin_type, "hsaco")
+            self.assertEqual(asm, "current amdgcn")
+            self.assertEqual(asm_type, "amdgcn")
+            return
 
         with (
             config.patch(
