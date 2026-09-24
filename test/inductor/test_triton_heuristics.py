@@ -316,6 +316,71 @@ class TestTritonHeuristics(TestCase):
         self.assertEqual(scalar_tiled_products[0], 4096)
         self.assertIn(baseline_rblock, scalar_tiled_products)
 
+    def test_blackwell_inner_reduction_candidates(self):
+        device = self._fake_cuda_device_properties()._replace(major=10, cc=100)
+        triton_meta = {"device": device}
+
+        def config_values(
+            rnumel,
+            num_load,
+            num_reduction,
+            *,
+            xnumel=8192,
+            max_autotune=True,
+            autotune_hints=(),
+        ):
+            configs = _reduction_configs(
+                size_hints={"x": xnumel, "r0_": rnumel},
+                inductor_meta={
+                    "autotune_hints": set(autotune_hints),
+                    "max_autotune": max_autotune,
+                    "reduction_hint": ReductionHint.INNER,
+                    "num_load": num_load,
+                    "num_reduction": num_reduction,
+                },
+                triton_meta=triton_meta,
+            )
+            return {
+                (
+                    config.kwargs["XBLOCK"],
+                    config.kwargs["R0_BLOCK"],
+                    config.num_warps,
+                )
+                for config in configs
+            }
+
+        self.assertIn((1, 512, 4), config_values(2048, 13, 4))
+        self.assertIn((1, 2048, 8), config_values(32768, 7, 2))
+        self.assertIn((1, 2048, 8), config_values(32768, 3, 1))
+
+        self.assertEqual(
+            config_values(2048, 13, 4, max_autotune=False),
+            {(1, 512, 4)},
+        )
+        self.assertEqual(
+            config_values(32768, 7, 2, max_autotune=False),
+            {(1, 2048, 8)},
+        )
+        # The bounded addition does not apply to smaller output grids or to
+        # complex deeper reductions where the measured alternative regresses.
+        self.assertNotIn(
+            (1, 512, 4),
+            config_values(2048, 13, 4, xnumel=1024),
+        )
+        self.assertNotIn((1, 512, 4), config_values(4096, 13, 2))
+        self.assertNotIn((1, 2048, 8), config_values(4096, 23, 6))
+        self.assertNotIn((1, 2048, 8), config_values(16384, 3, 1))
+        self.assertNotIn(
+            (1, 2048, 8),
+            config_values(
+                32768,
+                3,
+                1,
+                max_autotune=False,
+                autotune_hints={AutotuneHint.SCALAR_ACCUMULATORS},
+            ),
+        )
+
     def test_cached_autotune_enforces_reduction_min_block(self):
         def triton_fn(XBLOCK: tl.constexpr, R0_BLOCK: tl.constexpr):
             pass
