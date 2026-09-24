@@ -221,6 +221,110 @@ class TensorSpecializedProps(TypedDict):
     is_contiguous: NotRequired[tuple[torch.memory_format, ...] | None]
 
 
+def _current_device_index_variable(
+    tx: "InstructionTranslatorBase",
+) -> VariableTracker:
+    """The current device index for this graph, observed once and reused.
+
+    Cached the way _current_device_edge caches the device itself: the value cannot
+    change within a graph, so a fresh node per read would allocate a fresh unbacked
+    symbol each time -- leaving two reads incomparable to each other, and costing a
+    fallback kernel and a cudagraph partition boundary apiece.
+
+    Cached on the tracer, not the graph. A higher-order op traces each subgraph with
+    its own tracer, and a proxy created under a sibling cannot be reused here.
+    """
+    from .builder import wrap_fx_proxy
+
+    tracer = tx.output.current_tracer
+    cached = tracer.coor_current_device_index_var
+    if cached is not None:
+        return cached
+    var = wrap_fx_proxy(
+        tx,
+        tx.output.create_proxy(
+            "call_function",
+            torch.ops.coor.current_device_index.default,
+            (),
+            {},
+        ),
+    )
+    tracer.coor_current_device_index_var = var
+    return var
+
+
+class CurrentDeviceVariable(VariableTracker):
+    """A CooR device with a static accelerator type and runtime-relative index."""
+
+    def __init__(self, value: torch.device, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.value = value
+
+    def as_proxy(self) -> torch.device:
+        return self.value
+
+    def python_type(self) -> type:
+        return torch.device
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(
+                "torch.fx.experimental.proxy_tensor", "_coor_current_device"
+            )
+        )
+        codegen.call_function(0, False)
+
+    def reconstruct_pycode(self, codegen: "PyCodegen") -> str:
+        return "torch.fx.experimental.proxy_tensor._coor_current_device()"
+
+    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+        # tp_richcompare_impl reports this device equal to an explicit cuda:N
+        # whenever N is the running rank's index, so a hash has to agree with every
+        # cuda:N. Under CooR ConstantVariable.hash_impl drops the index from device
+        # hashes too, so all devices of one type share a bucket and equality decides:
+        # two rank-relative devices are equal, and against an explicit cuda:N the
+        # comparison is on the runtime index rather than silently unequal.
+        return hash(self.value), False
+
+    def tp_getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        if name == "type":
+            return ConstantVariable.create(self.value.type)
+        if name == "index":
+            return _current_device_index_variable(tx)
+        return super().tp_getattro_impl(tx, name)
+
+    def tp_richcompare_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        op: str,
+    ) -> VariableTracker:
+        if op not in ("__eq__", "__ne__"):
+            return ConstantVariable.create(NotImplemented)
+        if isinstance(other, CurrentDeviceVariable):
+            equal = self.value.type == other.value.type
+            return ConstantVariable.create(equal if op == "__eq__" else not equal)
+        try:
+            other_device = other.as_python_constant()
+        except NotImplementedError:
+            return ConstantVariable.create(NotImplemented)
+        if not isinstance(other_device, torch.device):
+            return ConstantVariable.create(NotImplemented)
+        if other_device.type != self.value.type or other_device.index is None:
+            return ConstantVariable.create(op == "__ne__")
+        compare = operator.eq if op == "__eq__" else operator.ne
+        return variables.BuiltinVariable(compare).call_function(
+            tx,
+            [
+                _current_device_index_variable(tx),
+                ConstantVariable.create(other_device.index),
+            ],
+            {},
+        )
+
+
 class TensorVariable(VariableTracker):
     """A torch.Tensor input or an intermediate value in the FX graph"""
 
@@ -593,9 +697,24 @@ class TensorVariable(VariableTracker):
     def method_attr_device(
         self, tx: "InstructionTranslatorBase"
     ) -> VariableTracker | None:
-        if self.device is not None:
-            return VariableTracker.build(tx, self.device)
-        return None
+        if self.device is None:
+            return None
+        from torch.fx.experimental.proxy_tensor import _coor_device_index_is_current
+
+        device = self.device
+        if _coor_device_index_is_current(device):
+            # compile-on-one-rank: hand back a bare "cuda" rather than "cuda:N".
+            # x.device is constant-folded here, so an indexed device gets frozen into
+            # the Dynamo graph and every rank produces different text -- and Dynamo
+            # runs before make_fx, which is where the current_device() substitution
+            # happens, so nothing downstream can undo it. An index-less accelerator
+            # device is the form make_fx already rewrites into that node.
+            #
+            # Keep the device type static so type predicates and device-consuming
+            # operations remain traceable, while index-dependent observations are
+            # represented by CurrentDeviceVariable at runtime.
+            return CurrentDeviceVariable(torch.device(device.type))
+        return VariableTracker.build(tx, device)
 
     def method_attr_layout(
         self, tx: "InstructionTranslatorBase"
@@ -1364,6 +1483,12 @@ class TensorVariable(VariableTracker):
         self, tx: "InstructionTranslatorBase"
     ) -> VariableTracker | None:
         if isinstance(self.device, torch.device):
+            from torch.fx.experimental.proxy_tensor import _coor_device_index_is_current
+
+            if _coor_device_index_is_current(self.device):
+                # An int has no index-less form meaning "this rank's device". Read
+                # the index at runtime, as x.device.index does under CooR.
+                return _current_device_index_variable(tx)
             index = self.device.index if self.device.type != "cpu" else -1
             return VariableTracker.build(tx, index)
         return None
@@ -2180,6 +2305,19 @@ class TensorVariable(VariableTracker):
                         {},
                     ),
                 )
+
+            if name == "register_post_accumulate_grad_hook":
+                unimplemented(
+                    gb_type="register_post_accumulate_grad_hook on an intermediate tensor",
+                    context=str(self),
+                    explanation="Dynamo cannot preserve post-accumulate hook semantics "
+                    "for an intermediate tensor without compiled autograd.",
+                    hints=[
+                        "Move the hook registration outside the compiled region.",
+                        "Use compiled autograd if the hook must be registered inside it.",
+                    ],
+                )
+
             # Register the hook via a trampoline in the graph where the
             # tensor's proxy lives. During AOTAutograd's make_fx, the
             # trampoline calls tensor.register_hook(hook_fn). The hook
@@ -2187,6 +2325,8 @@ class TensorVariable(VariableTracker):
             # tracing, matching eager semantics. When inside a subgraph
             # (e.g. checkpoint), the node is created in the parent
             # graph so the hook is not confined to the HOP scope.
+            from torch._higher_order_ops.register_hook import register_hook_op
+
             from .higher_order_ops import speculate_subgraph
 
             tensor_proxy = self.as_proxy()
@@ -2203,10 +2343,14 @@ class TensorVariable(VariableTracker):
                         [self],
                         {},
                         "register_hook",
-                        source_target=None,
+                        source_target=register_hook_op,
                         enable_grad=None,
                         set_subgraph_inputs="automatic_with_forced_inputs",
                         restore_side_effects=True,
+                        # register_hook may return the incoming gradient unchanged,
+                        # but its contract forbids modifying that gradient in place.
+                        supports_input_mutation=False,
+                        supports_aliasing=True,
                     )
             except torch._dynamo.exc.UnknownPropertiesDuringBackwardTrace:
                 unimplemented(
@@ -2224,8 +2368,6 @@ class TensorVariable(VariableTracker):
                 torch.fx.GraphModule(hook_nn_modules.nn_modules, hook_graph),
             )
             hook_node = target_tracer.create_proxy("get_attr", hook_name, (), {})
-
-            from torch._higher_order_ops.register_hook import register_hook_op
 
             p_args = (tensor_proxy, hook_node, *list(hook_freevars.keys()))
             hooked_proxy = target_tracer.create_proxy(
