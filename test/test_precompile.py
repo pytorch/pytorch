@@ -22,6 +22,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    expectedIfCppFakeTensor,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -2959,7 +2960,8 @@ class TestPrecompile(TestCase):
             qlib.define("mlprecompile_unbacked_no_meta(Tensor x) -> Tensor")
             qlib.impl("mlprecompile_unbacked_no_meta", lambda t: t * 2, "CPU")
             op = torch.ops.quantized.mlprecompile_unbacked_no_meta
-            with self.assertRaises(UnsupportedOperatorException):
+            exc = expectedIfCppFakeTensor(RuntimeError, UnsupportedOperatorException)
+            with self.assertRaisesRegex(exc, "mlprecompile_unbacked_no_meta"):
                 _precompile_pair(lambda mm, t, u: mm(t) + op(u).sum(), m, x, y)
 
 

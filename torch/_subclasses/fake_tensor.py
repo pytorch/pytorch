@@ -438,6 +438,13 @@ def maybe_clear_fake_constant(x: object) -> None:
         torch._C._set_fake_constant(x, None)
 
 
+def maybe_get_fake_dispatch_keys(x: object) -> torch.DispatchKeySet | None:
+    # The real tensor's dispatch keys recorded on a fake.
+    if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
+        return x.dispatch_keys
+    return None
+
+
 def maybe_to_real_tensor(t: T, shape_env: Any) -> T | Tensor | None:
     # Recover the real value shadowing a fake tensor / symbolic value under
     # propagate_real_tensors. Shared by FakeTensorMode._dispatch_impl and the
@@ -1480,22 +1487,25 @@ class FakeTensor(Tensor):
         def is_device_meta(device: torch.device) -> bool:
             return device.type == "meta"
 
-        def cpu_zero_dim(t: Tensor) -> bool:
-            return is_device_cpu(t.device) and t.dim() == 0
+        def cpu_zero_dim(t: Tensor, device: torch.device) -> bool:
+            return is_device_cpu(device) and t.dim() == 0
 
         def merge_devices(t: object) -> None:
             nonlocal common_device
             nonlocal is_cpu_zero_dim
-            if not isinstance(t, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
+            if not is_fake_tensor(t):
                 return
+            device = maybe_get_fake_device(t)
+            if device is None:
+                raise AssertionError("expected a fake device")
 
             if common_device is None:
-                common_device = t.device
-                is_cpu_zero_dim = cpu_zero_dim(t)
+                common_device = device
+                is_cpu_zero_dim = cpu_zero_dim(t, device)
                 return
 
-            t_is_cpu_zero_dim = cpu_zero_dim(t)
-            if t.device == common_device:
+            t_is_cpu_zero_dim = cpu_zero_dim(t, device)
+            if device == common_device:
                 if is_cpu_zero_dim:
                     is_cpu_zero_dim = t_is_cpu_zero_dim
                 return
@@ -1511,7 +1521,7 @@ class FakeTensor(Tensor):
 
             # current device is from cpu 0 dim tensor, overwrite
             if is_cpu_zero_dim and not is_bypass_zero_dim_cpu_tensor_check_op:
-                common_device = t.device
+                common_device = device
                 is_cpu_zero_dim = t_is_cpu_zero_dim
                 return
 
@@ -1520,22 +1530,22 @@ class FakeTensor(Tensor):
             # device must be cpu in this case we will return from here without
             # throwing an error
             if func in mixed_device_fns:
-                if any(map(is_device_cpu, (common_device, t.device))):
+                if any(map(is_device_cpu, (common_device, device))):
                     return
 
             if func in meta_rhs_mixed_device_fns:
-                if any(map(is_device_meta, (common_device, t.device))):
+                if any(map(is_device_meta, (common_device, device))):
                     return
 
             # if prefer_device_type is set, prefer that device type over others
             prefer_device_type = torch._functorch.config.fake_tensor_prefer_device_type
             if prefer_device_type is not None:
                 common_has_preferred = prefer_device_type in common_device.type
-                t_has_preferred = prefer_device_type in t.device.type
+                t_has_preferred = prefer_device_type in device.type
 
                 if not common_has_preferred and t_has_preferred:
                     # Switch to the preferred device type
-                    common_device = t.device
+                    common_device = device
                     is_cpu_zero_dim = t_is_cpu_zero_dim
                     return
                 elif common_has_preferred and not t_has_preferred:
@@ -1544,7 +1554,7 @@ class FakeTensor(Tensor):
 
             # mismatching devices of non-zero dim tensors, throw
             # This might be valid behavior and need to be explicitly modeled, e.g. reshape_as
-            raise FakeTensorDeviceMismatchError(func, common_device, t.device)
+            raise FakeTensorDeviceMismatchError(func, common_device, device)
 
         for arg in flat_args:
             merge_devices(arg)

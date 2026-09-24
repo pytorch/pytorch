@@ -129,6 +129,10 @@ if CPP_FAKETENSOR:
         mode.allow_non_fake_inputs = allow_non_fake_inputs
         return mode
 
+    FakeTensorModeCls = CppFakeTensorMode
+else:
+    FakeTensorModeCls = FakeTensorMode
+
 
 def expectedFailurePropagateRealTensors(fn):
     fn._expected_failure_propagate_real_tensors = True
@@ -1333,10 +1337,10 @@ class FakeTensorTest(TestCase):
             scalar = torch.tensor(3.0)
             values = torch.tensor([1.0, 2.0, 3.0])
 
-        self.assertIsInstance(scalar, FakeTensor)
+        self.assertTrue(is_fake_tensor(scalar))
         self.assertEqual(scalar.device, torch.device("meta"))
         self.assertEqual(scalar.shape, ())
-        self.assertIsInstance(values, FakeTensor)
+        self.assertTrue(is_fake_tensor(values))
         self.assertEqual(values.device, torch.device("meta"))
         self.assertEqual(values.shape, (3,))
 
@@ -1344,10 +1348,10 @@ class FakeTensorTest(TestCase):
             explicit = torch.tensor(3.0, device="meta")
             explicit_indexed = torch.tensor(3.0, device="meta:0")
 
-        self.assertIsInstance(explicit, FakeTensor)
+        self.assertTrue(is_fake_tensor(explicit))
         self.assertEqual(explicit.device, torch.device("meta"))
         self.assertEqual(explicit.shape, ())
-        self.assertIsInstance(explicit_indexed, FakeTensor)
+        self.assertTrue(is_fake_tensor(explicit_indexed))
         self.assertEqual(explicit_indexed.device, torch.device("meta"))
         self.assertEqual(explicit_indexed.shape, ())
 
@@ -1355,11 +1359,11 @@ class FakeTensorTest(TestCase):
     def test_tensor_constructor_meta_device_from_storage(self, device):
         storage = torch.tensor([1.0, 2.0]).storage()
 
-        with patch.object(FakeTensorMode, "avoid_device_init", True):
+        with patch.object(FakeTensorModeCls, "avoid_device_init", True):
             with FakeTensorMode():
                 tensor = torch.tensor(storage, device=device)
 
-        self.assertIsInstance(tensor, FakeTensor)
+        self.assertTrue(is_fake_tensor(tensor))
         self.assertEqual(tensor.device, torch.device("meta"))
         self.assertEqual(tensor.shape, (2,))
 
@@ -1371,20 +1375,19 @@ class FakeTensorTest(TestCase):
     def test_tensor_constructor_meta_storage_device(self, device, expected_device):
         storage = torch.empty(2, device="meta").storage()
 
-        with patch.object(FakeTensorMode, "avoid_device_init", True):
+        with patch.object(FakeTensorModeCls, "avoid_device_init", True):
             with FakeTensorMode():
                 tensor = torch.tensor(storage, dtype=torch.float32, device=device)
 
-        self.assertIsInstance(tensor, FakeTensor)
+        self.assertTrue(is_fake_tensor(tensor))
         self.assertEqual(tensor.device, torch.device(expected_device))
         self.assertEqual(tensor.shape, (2,))
 
     def test_tensor_constructor_meta_device_disallowed(self):
         with patch.object(torch._functorch.config, "fake_tensor_allow_meta", False):
-            with self.assertRaisesRegex(
-                AssertionError,
-                "device.type must not be 'meta' when allow_meta is False",
-            ):
+            exc = expectedIfCppFakeTensor(RuntimeError, AssertionError)
+            msg = "device.type must not be 'meta' when allow_meta is False"
+            with self.assertRaisesRegex(exc, msg):
                 with FakeTensorMode():
                     torch.tensor(3.0, device="meta")
 
