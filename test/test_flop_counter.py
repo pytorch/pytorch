@@ -1593,13 +1593,19 @@ class TestFlexAttentionEstimation(TestCase):
 class TestFlexAttentionEstimationDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    # estimate_roofline_runtime_ms queries real device tflops/DRAM bandwidth.
     @xfailIfNoAcceleratorTriton
-    def test_flex_attention_roofline_estimate(self):
+    def test_flex_attention_roofline_estimate(self, device):
         """estimate_roofline_runtime_ms works for flex_attention with mixed-dtype output."""
         from torch._inductor.fx_passes.overlap_scheduling import (
             estimate_roofline_runtime_ms,
         )
+
+        # estimate_roofline_runtime_ms takes no device argument - it queries real
+        # tflops/DRAM bandwidth for torch.accelerator.current_accelerator(), so only
+        # that device is actually measured.
+        accelerator = torch.accelerator.current_accelerator()
+        if accelerator is None or accelerator.type != torch.device(device).type:
+            self.skipTest(f"roofline estimate measures {accelerator}, not {device}")
 
         q_shape = (2, 16, 1024, 64)
         k_shape = (2, 4, 1024, 64)
