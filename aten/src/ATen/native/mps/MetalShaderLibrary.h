@@ -21,7 +21,6 @@ typedef void* MTLBuffer_t;
 #include <c10/core/Scalar.h>
 #include <c10/util/OptionalArrayRef.h>
 #include <functional>
-#include <mutex>
 #include <optional>
 #include <type_traits>
 #include <unordered_map>
@@ -213,11 +212,8 @@ class MetalShaderLibrary {
   virtual MTLLibrary_t getLibrary();
   virtual MTLLibrary_t getLibrary(
       const std::initializer_list<std::string>& params);
-  // Guards `library` and every cache below. MPS ops run on whatever thread
-  // called into ATen, so lazy compilation and cache population race. Recursive
-  // because the accessors call each other (hasFunction -> getFunctionNames ->
-  // getLibrary).
-  std::recursive_mutex cache_mutex;
+  // `library` and the caches below are guarded by a mutex private to
+  // OperationUtils.mm, where every accessor that touches them is defined.
   MTLLibrary_t library = nullptr;
 
  private:
