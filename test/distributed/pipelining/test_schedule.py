@@ -48,6 +48,7 @@ from torch.distributed.pipelining.schedules import (
     _defer_recv_ops,
     _format_pipeline_order,
     _merge_bw,
+    _PendingSendTracker,
     _PipelineSchedule,
     _PipelineScheduleRuntime,
     _resolve_unshard_lookahead,
@@ -69,6 +70,8 @@ from torch.distributed.pipelining.schedules import (
     UNSHARD,
     W,
     WAIT_REDUCE_GRAD,
+    WAIT_SEND_B,
+    WAIT_SEND_F,
 )
 from torch.distributed.pipelining.stage import _PipelineStageBase, PipelineStage
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -1867,6 +1870,171 @@ class TestSchedulePlan(TestCase):
         action = _Action(3, WAIT_REDUCE_GRAD, None)
         self.assertEqual(str(action), "3WAIT_REDUCE_GRAD")
         self.assertEqual(_Action.from_str(str(action)), action)
+
+    def test_wait_send_round_trip(self):
+        for action, text in (
+            (_Action(1, WAIT_SEND_F, 2), "1WAIT_SEND_F2"),
+            (_Action(3, WAIT_SEND_B, 4), "3WAIT_SEND_B4"),
+        ):
+            self.assertEqual(str(action), text)
+            self.assertEqual(_Action.from_str(str(action)), action)
+
+    def test_pending_send_tracker_owns_and_retires_send(self):
+        tracker = _PendingSendTracker()
+        key = (SEND_F, 1, 2)
+        op = MagicMock()
+        work = MagicMock()
+        retire = MagicMock()
+
+        tracker.register(key, [op], [work], retire)
+
+        self.assertIs(tracker._pending[key].ops[0], op)
+        tracker.wait(key)
+        work.wait.assert_called_once_with()
+        retire.assert_called_once_with()
+        self.assertNotIn(key, tracker._pending)
+
+    def test_wait_send_simulation(self):
+        actions = {
+            0: [
+                _Action(0, F, 0),
+                _Action(0, SEND_F, 0),
+                _Action(0, WAIT_SEND_F, 0),
+                _Action(0, RECV_B, 0),
+                _Action(0, B, 0),
+            ],
+            1: [
+                # This order delays RECV_F to exercise the peer dependency.
+                _Action(1, B, 0),
+                _Action(1, SEND_B, 0),
+                _Action(1, RECV_F, 0),
+                _Action(1, WAIT_SEND_B, 0),
+                _Action(1, F, 0),
+            ],
+        }
+        _simulate_comms_compute(actions, lambda stage: stage, num_stages=2)
+
+        actions[0][1:3] = reversed(actions[0][1:3])
+        with self.assertRaisesRegex(ValueError, "Schedule is not progressing"):
+            _simulate_comms_compute(actions, lambda stage: stage, num_stages=2)
+
+        cyclic_waits = {
+            0: [
+                _Action(0, F, 0),
+                _Action(0, SEND_F, 0),
+                _Action(0, WAIT_SEND_F, 0),
+                _Action(0, RECV_B, 0),
+                _Action(0, B, 0),
+            ],
+            1: [
+                _Action(1, B, 0),
+                _Action(1, SEND_B, 0),
+                _Action(1, WAIT_SEND_B, 0),
+                _Action(1, RECV_F, 0),
+                _Action(1, F, 0),
+            ],
+        }
+        with self.assertRaisesRegex(ValueError, "Schedule is not progressing"):
+            _simulate_comms_compute(cyclic_waits, lambda stage: stage, num_stages=2)
+
+    @parametrize(
+        "actions,error",
+        [
+            ([_Action(0, WAIT_SEND_F, 0)], "No pending pipeline send"),
+            ([_Action(0, WAIT_SEND_B, 0)], "No pending pipeline send"),
+            (
+                [_Action(0, SEND_F, 0), _Action(0, SEND_F, 0)],
+                "Duplicate pipeline send",
+            ),
+            (
+                [_Action(0, SEND_B, 0), _Action(0, SEND_B, 0)],
+                "Duplicate pipeline send",
+            ),
+        ],
+    )
+    def test_wait_send_runtime_errors(self, actions, error):
+        stage = MockPipelineStage(num_stages=1)
+        stage.stage_index = 0
+        stage.get_fwd_send_ops = MagicMock(return_value=[])
+        stage.get_bwd_send_ops = MagicMock(return_value=[])
+        schedule = _PipelineScheduleRuntime(
+            [stage], n_microbatches=1, loss_fn=MagicMock()
+        )
+        schedule.pipeline_order_with_comms = {0: actions}
+
+        with (
+            patch.object(schedule, "_initialize_stages"),
+            patch(
+                "torch.distributed.pipelining.schedules._batch_p2p",
+                return_value=[],
+            ) as batch_p2p,
+            self.assertRaisesRegex(AssertionError, error),
+        ):
+            schedule._step_microbatches()
+
+        if "Duplicate" in error:
+            batch_p2p.assert_called_once()
+
+    def test_duplicate_forward_send_precedes_forward_only_fallback(self):
+        stage = MockPipelineStage(num_stages=1)
+        stage.stage_index = 0
+        stage.get_fwd_send_ops = MagicMock(return_value=[])
+        schedule = _PipelineScheduleRuntime([stage], n_microbatches=1)
+        schedule.pipeline_order_with_comms = {
+            0: [_Action(0, SEND_F, 0), _Action(0, SEND_F, 0)]
+        }
+
+        with (
+            patch.object(schedule, "_initialize_stages"),
+            patch(
+                "torch.distributed.pipelining.schedules._batch_p2p",
+                return_value=[],
+            ) as batch_p2p,
+            self.assertRaisesRegex(AssertionError, "Duplicate pipeline send"),
+        ):
+            schedule._step_microbatches()
+
+        batch_p2p.assert_called_once()
+
+    def test_explicit_wait_owns_send_across_custom_overlap(self):
+        stage = MockPipelineStage(num_stages=1)
+        stage.stage_index = 0
+        stage.get_fwd_send_ops = MagicMock(return_value=[])
+        stage.release_fwd_output_leases = MagicMock()
+        work = MagicMock()
+        overlap = _Action(
+            -1,
+            OVERLAP_F_B,
+            None,
+            (_Action(0, F, 0), _Action(0, B, 0)),
+        )
+        schedule = _PipelineScheduleRuntime(
+            [stage], n_microbatches=1, loss_fn=MagicMock()
+        )
+        schedule.pipeline_order_with_comms = {
+            0: [
+                _Action(0, SEND_F, 0),
+                overlap,
+                _Action(0, WAIT_SEND_F, 0),
+            ]
+        }
+
+        def overlap_callback(action, ctx):
+            ctx.wait_fwd_send_if_implicit(0, 0)
+            work.wait.assert_not_called()
+
+        schedule.register_custom_function(OVERLAP_F_B, overlap_callback)
+        with (
+            patch.object(schedule, "_initialize_stages"),
+            patch(
+                "torch.distributed.pipelining.schedules._batch_p2p",
+                return_value=[work],
+            ),
+        ):
+            schedule._step_microbatches()
+
+        work.wait.assert_called_once_with()
+        stage.release_fwd_output_leases.assert_called_once_with(0)
 
     def test_defer_reduce_grad_wait_lowering(self):
         actions = [
