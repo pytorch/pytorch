@@ -7,6 +7,7 @@
 #include <optional>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 // The torch.SymInt / torch.SymBool magic methods of
 // torch.fx.experimental.sym_node._make_user_magic and of their class bodies in
@@ -533,6 +534,36 @@ std::optional<py::object> body_fast(
       args[0], args[1], m.entry == Entry::Pow ? names.pow : names.rpow);
 }
 
+// wrap_node(found.sym_sum([to_node(found, a) for a in items])) of
+// torch.sym_sum, whose checks made every item a SymInt or an int and `found`
+// the node of the last SymInt.
+std::optional<py::object> sym_sum_fast(PyObject* found_obj, PyObject* items) {
+  // A list/tuple subclass would run a second __iter__ on the Python path.
+  if (!intact() || Py_TYPE(found_obj) != glue.native_node ||
+      (!PyList_CheckExact(items) && !PyTuple_CheckExact(items))) {
+    return std::nullopt;
+  }
+  Py_ssize_t n = PySequence_Fast_GET_SIZE(items);
+  PyObject** xs = PySequence_Fast_ITEMS(items);
+  std::vector<Operand> ops(n);
+  for (Py_ssize_t i = 0; i < n; i++) {
+    if (parse(xs[i], ops[i]) != nullptr || ops[i].symbool) {
+      return std::nullopt;
+    }
+  }
+  auto* found = py::cast<NativeSymNodeImpl*>(found_obj);
+  std::vector<c10::SymNode> nodes;
+  nodes.reserve(n);
+  for (auto& op : ops) {
+    if (!op.node) {
+      op.node = op.is_bool ? found->wrap_bool(op.value != 0)
+                           : found->wrap_int(op.value);
+    }
+    nodes.push_back(std::move(op.node));
+  }
+  return wrap_result(found->sym_sum(nodes), false);
+}
+
 PyObject* glue_vectorcall(
     PyObject* callable,
     PyObject* const* args,
@@ -775,6 +806,12 @@ void initGlueBindings(py::module_& sm) {
     glue.construct = construct;
     glue.symint_tag = version_tag(glue.symint);
     glue.symbool_tag = version_tag(glue.symbool);
+  });
+  sm.def("_sym_sum", [](py::handle found, py::handle items) -> py::object {
+    if (auto r = sym_sum_fast(found.ptr(), items.ptr())) {
+      return std::move(*r);
+    }
+    return py::reinterpret_borrow<py::object>(Py_NotImplemented);
   });
   sm.def("_glue_fallback_reason", []() -> py::object {
     if (fallback_reason == nullptr) {

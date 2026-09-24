@@ -7,6 +7,7 @@ import operator
 import os
 import pickle
 import random
+import re
 import subprocess
 import sys
 import types
@@ -4125,6 +4126,82 @@ class TestNativeSymIntGlue(TestCase):
         self.assertGreater(len(calls), 20)
         self.assertEqual(got, want)
 
+    def sum_program(self, seed):
+        rng = random.Random(seed)
+        env, ints, bools = self.make_env()
+        ints += [ints[0] + ints[1], ints[2] * 2, ints[3] - 1]
+        py_int = torch.SymInt(SymNode(ints[0].node.expr + 1, env, int, 6))
+
+        class Small(enum.IntEnum):
+            ONE = 1
+
+        class Items(list):
+            pass
+
+        class Sub(torch.SymInt):
+            pass
+
+        odd = [py_int, Small.ONE, 2**70, 1.5, bools[0], Sub(ints[1].node)]
+        out = []
+        for _ in range(80):
+            items = [rng.choice(ints + self.PLAIN) for _ in range(rng.randrange(4))]
+            if rng.random() < 0.15:
+                items.insert(rng.randrange(len(items) + 1), rng.choice(odd))
+            style = rng.randrange(3)
+            try:
+                if style == 0:
+                    r = torch.sym_sum(items if rng.random() < 0.8 else Items(items))
+                elif style == 1:
+                    r = torch.sym_sum(tuple(items))
+                else:
+                    r = torch.sym_sum(*items)
+                # A bool item reaches SymNode.sym_sum as sympy.true, which sympy.Add rejects.
+                out.append(self.describe(r))
+            except Exception as e:
+                out.append(("raise", type(e), re.sub("0x[0-9a-f]+", "", str(e))))
+                continue
+            if isinstance(r, torch.SymInt) and type(r.node) is _NativeSymNode:
+                ints[rng.randrange(5, len(ints))] = r
+        out.append([q[1:] for q in env._native_env.take_queries()])
+        out.append([str(g.expr) for g in env.guards])
+        return out
+
+    @parametrize("seed", range(4))
+    def test_sym_sum_differential(self, seed):
+        got = self.sum_program(seed)
+        with python_glue():
+            want = self.sum_program(seed)
+        self.assertEqual(got, want)
+        native = [r for r in got[:-2] if len(r) == 6 and r[1] is _NativeSymNode]
+        self.assertGreater(len(native), 20)
+
+    def test_sym_sum_native_path(self):
+        codes = {sym_node.to_node.__code__, sym_node.wrap_node.__code__}
+
+        def run():
+            _, (a, b, c, *_), _ = self.make_env()
+            calls = []
+
+            def profile(frame, event, arg):
+                if event == "call" and frame.f_code in codes:
+                    calls.append(frame.f_code.co_name)
+
+            prev = sys.getprofile()
+            sys.setprofile(profile)
+            try:
+                out = [torch.sym_sum([a, b, 3]), torch.sym_sum(a, 2, c)]
+                out += [torch.sym_sum((4, a)), torch.sym_sum([a, -a])]
+            finally:
+                sys.setprofile(prev)
+            return [self.describe(r) for r in out], calls
+
+        got, calls = run()
+        self.assertEqual(calls, [])
+        with python_glue():
+            want, calls = run()
+        self.assertGreater(len(calls), 10)
+        self.assertEqual(got, want)
+
     def test_body_fallbacks(self):
         reasons = []
         sym_float = torch.sym_float
@@ -4301,7 +4378,7 @@ class TestNativeSymIntGlue(TestCase):
             m = torch.sym_max(a, b) + 3 * torch.sym_min(a, 3)
             r = e, m, -a, 2 - a, a < b, (p & (a == b)) | (b > 2), p + 1, True * p
             r += a**2, a**b, 2**a, a // 2, 7 // b, a / b, torch.sym_ite(p, a, b)
-            return *r, a**d, 2**d
+            return *r, a**d, 2**d, torch.sym_sum([a, b, 3]), torch.sym_sum(4, a)
 
         def trace():
             env, (a, b, _, d, _), (p, _) = self.make_env()
