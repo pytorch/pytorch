@@ -26,12 +26,14 @@ from torch._inductor.codegen.simd_kernel_features import (
 from torch._inductor.dependencies import Dep, MemoryDep, ReadWrites, StarDep, WeakDep
 from torch._inductor.ir import GraphPartitionSignature
 from torch._inductor.loop_body import MemoryEntry, MemoryUsageType
+from torch._inductor.runtime.hints import ReductionHint
 from torch._inductor.scheduler import (
     _get_benchmarkable_extern_fn,
     BaseSchedulerNode,
     ExternKernelSchedulerNode,
     ForeachKernelSchedulerNode,
     FusedNestedReductions,
+    FusedOuterReductionPlans,
     MemoryDepMatch,
     NestedReduction,
     OrderedParentNodes,
@@ -119,6 +121,84 @@ def _test_cases(device, dtype):
 
 
 class TestScheduler(TestCase):
+    def test_with_original_inner_fn_restores_cached_state(self):
+        def original_inner_fn(_index, _reduction_index):
+            return None
+
+        def split_inner_fn(_index, _reduction_index):
+            return None
+
+        reduction = ir.Reduction(
+            device=torch.device("cpu"),
+            dtype=torch.float32,
+            inner_fn=split_inner_fn,
+            ranges=[2],
+            reduction_ranges=[4],
+            reduction_type="sum",
+            src_dtype=torch.float32,
+            reduction_hint=ReductionHint.OUTER,
+        )
+        layout = ir.FixedLayout(torch.device("cpu"), torch.float32, [2])
+        buffer = ir.ComputedBuffer(
+            name="buf0",
+            layout=layout,
+            data=reduction,
+            _split_size=2,
+            _original_inner_fn=original_inner_fn,
+            _original_ranges=[2],
+            _original_reduction_ranges=[4],
+        )
+
+        object.__setattr__(buffer, "__get_default_sizes_body_cache", object())
+        with buffer.with_original_inner_fn():
+            self.assertFalse(hasattr(buffer, "__get_default_sizes_body_cache"))
+            object.__setattr__(buffer, "__get_default_sizes_body_cache", object())
+
+        self.assertIs(buffer.data, reduction)
+        self.assertIs(buffer.layout, layout)
+        self.assertFalse(hasattr(buffer, "__get_default_sizes_body_cache"))
+
+    def test_combo_kernel_filters_outer_reduction_plans(self):
+        plan = object.__new__(FusedOuterReductionPlans)
+        self.assertEqual(ForeachKernelSchedulerNode.combinable_nodes([plan]), [])
+
+    def test_outer_reduction_plan_aggregate_workspace_limit(self, device):
+        node1 = Mock()
+        node2 = Mock()
+        max_bytes = ir.Reduction.EXPERIMENTAL_LARGE_OUTPUT_OUTER_MAX_WORKSPACE_BYTES
+
+        with (
+            patch.object(
+                Scheduler,
+                "_outer_reduction_plan_roles",
+                return_value=OrderedSet(["partial"]),
+            ),
+            patch.object(
+                Scheduler,
+                "_outer_reduction_plan_workspace_bytes",
+                return_value=max_bytes,
+            ),
+        ):
+            self.assertFalse(
+                Scheduler._fusion_would_break_outer_reduction_plan(node1, node2)
+            )
+
+        with (
+            patch.object(
+                Scheduler,
+                "_outer_reduction_plan_roles",
+                return_value=OrderedSet(["partial"]),
+            ),
+            patch.object(
+                Scheduler,
+                "_outer_reduction_plan_workspace_bytes",
+                return_value=max_bytes + 1,
+            ),
+        ):
+            self.assertTrue(
+                Scheduler._fusion_would_break_outer_reduction_plan(node1, node2)
+            )
+
     def _mock_base_snode(self, name, device=None):
         node = Mock()
         node.get_name.return_value = name

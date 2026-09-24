@@ -2,7 +2,9 @@
 
 import contextlib
 import os
+import pathlib
 import re
+import tempfile
 import unittest
 from types import SimpleNamespace
 
@@ -10,10 +12,16 @@ import torch
 from torch import nn
 from torch._dynamo.testing import reset_rng_state
 from torch._inductor import config, test_operators
-from torch._inductor.codegen.multi_kernel import MultiKernelCall
+from torch._inductor.codegen.common import TensorArg
+from torch._inductor.codegen.multi_kernel import (
+    MultiKernelCall,
+    MultiKernelPlan,
+    MultiKernelPlanCall,
+)
 from torch._inductor.runtime.benchmarking import set_gpu_benchmark_lock_context
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
+from torch._inductor.virtualized import V
 from torch.nn import functional as F
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
@@ -179,6 +187,225 @@ class MultiKernelTest(TestCase):
             set_gpu_benchmark_lock_context(previous)
 
         self.assertEqual(events, ["lock_enter", "lock_exit"])
+
+    def test_multi_kernel_plan_call(self):
+        class FakeKernel:
+            def __init__(self, name, arg_names, fn):
+                self.fn = unittest.mock.Mock(arg_names=arg_names, cache_key=name)
+                self.size_hints = []
+                self.triton_meta = {}
+                self.inductor_meta = {"kernel_name": name}
+                self.mutated_arg_names = set()
+                self.device_props = unittest.mock.Mock(type="cuda")
+                self._fn = fn
+
+            def run(self, *args, **kwargs):
+                self._fn(*args)
+
+        calls = []
+        one_pass = FakeKernel(
+            "one_pass",
+            ["input", "output"],
+            lambda x, out: calls.append(("one", x, out)),
+        )
+        partial = FakeKernel(
+            "partial",
+            ["input", "scratch"],
+            lambda x, scratch: calls.append(("partial", x, scratch)),
+        )
+        final = FakeKernel(
+            "final",
+            ["scratch", "output"],
+            lambda scratch, out: calls.append(("final", scratch, out)),
+        )
+        with (
+            unittest.mock.patch.dict(
+                os.environ, {"TORCHINDUCTOR_DISABLE_MULTI_KERNEL_CACHE": "1"}
+            ),
+            unittest.mock.patch.object(
+                MultiKernelPlanCall, "benchmark_plans", return_value=[2.0, 1.0]
+            ),
+        ):
+            plan = MultiKernelPlanCall(
+                "multi_kernel_plan_0",
+                [[one_pass], [partial, final]],
+                [[[0, 2]], [[0, 1], [1, 2]]],
+            )
+            plan.run("input", "scratch", "output")
+        self.assertEqual(plan.picked_plan, 1)
+        self.assertEqual(
+            calls,
+            [
+                ("partial", "input", "scratch"),
+                ("final", "scratch", "output"),
+            ],
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_path = pathlib.Path(tmpdir) / "picked_plan"
+            with (
+                unittest.mock.patch.dict(
+                    os.environ, {"TORCHINDUCTOR_DISABLE_MULTI_KERNEL_CACHE": "0"}
+                ),
+                unittest.mock.patch.object(
+                    MultiKernelPlanCall,
+                    "cache_file_path",
+                    return_value=cache_path,
+                ),
+            ):
+                first = MultiKernelPlanCall(
+                    "multi_kernel_plan_0",
+                    [[one_pass], [partial, final]],
+                    [[[0, 2]], [[0, 1], [1, 2]]],
+                )
+                first.picked_plan = 1
+                first.store_cache()
+                reloaded = MultiKernelPlanCall(
+                    "multi_kernel_plan_0",
+                    [[one_pass], [partial, final]],
+                    [[[0, 2]], [[0, 1], [1, 2]]],
+                )
+                self.assertEqual(reloaded.picked_plan, 1)
+
+    def test_multi_kernel_plan_benchmark_holds_gpu_lock_across_plans(self):
+        events = []
+
+        class FakeKernel:
+            fn = unittest.mock.Mock(arg_names=["arg"])
+            mutated_arg_names = set()
+            device_props = unittest.mock.Mock(type="cuda")
+
+            def __init__(self, index):
+                self.index = index
+
+            def run(self, arg):
+                events.append(f"run_{self.index}")
+
+        plan = object.__new__(MultiKernelPlanCall)
+        plan._plans = [[FakeKernel(0)], [FakeKernel(1)]]
+        plan.arg_index = [[[0]], [[0]]]
+
+        @contextlib.contextmanager
+        def benchmark_lock():
+            events.append("lock_enter")
+            try:
+                yield
+            finally:
+                events.append("lock_exit")
+
+        def benchmark(fn, **kwargs):
+            index = len([event for event in events if event.startswith("benchmark_")])
+            events.append(f"benchmark_{index}")
+            fn()
+            return float(index)
+
+        previous = set_gpu_benchmark_lock_context(benchmark_lock)
+        try:
+            with unittest.mock.patch(
+                "torch._inductor.codegen.multi_kernel.benchmarker.benchmark",
+                side_effect=benchmark,
+            ):
+                timings = plan.benchmark_plans("arg")
+        finally:
+            set_gpu_benchmark_lock_context(previous)
+
+        self.assertEqual(timings, [0.0, 1.0])
+        self.assertEqual(
+            events,
+            [
+                "lock_enter",
+                "benchmark_0",
+                "run_0",
+                "benchmark_1",
+                "run_1",
+                "lock_exit",
+            ],
+        )
+
+    def test_multi_kernel_plan_clones_before_timing(self):
+        events = []
+        arg = torch.ones(1)
+
+        class FakeKernel:
+            fn = unittest.mock.Mock(arg_names=["arg"])
+            mutated_arg_names = {"arg"}
+            device_props = unittest.mock.Mock(type="cuda")
+
+            def run(self, value):
+                events.append("run")
+
+        plan = object.__new__(MultiKernelPlanCall)
+        plan._plans = [[FakeKernel()], [FakeKernel()]]
+        plan.arg_index = [[[0]], [[0]]]
+
+        def clone(value):
+            events.append("clone")
+            return value.clone()
+
+        def benchmark(fn, **kwargs):
+            events.append("benchmark")
+            fn()
+            return 1.0
+
+        with (
+            unittest.mock.patch(
+                "torch._inductor.compile_fx.clone_preserve_strides", side_effect=clone
+            ),
+            unittest.mock.patch(
+                "torch._inductor.codegen.multi_kernel.benchmarker.benchmark",
+                side_effect=benchmark,
+            ),
+        ):
+            plan.benchmark_plans(arg)
+
+        self.assertEqual(
+            events,
+            ["clone", "benchmark", "run", "clone", "benchmark", "run"],
+        )
+
+    def test_multi_kernel_plan_ignores_single_kernel_force_setting(self):
+        kernel = unittest.mock.Mock()
+        kernel.fn.cache_key = "kernel"
+        kernel.size_hints = []
+        kernel.triton_meta = {}
+        with (
+            config.patch("triton.multi_kernel", 3),
+            unittest.mock.patch.dict(
+                os.environ, {"TORCHINDUCTOR_DISABLE_MULTI_KERNEL_CACHE": "1"}
+            ),
+        ):
+            plan = MultiKernelPlanCall(
+                "multi_kernel_plan_0", [[kernel], [kernel]], [[[0]], [[0]]]
+            )
+        self.assertIsNone(plan.picked_plan)
+
+    def test_multi_kernel_plan_codegen_nan_check(self):
+        class FakeArgs:
+            def __init__(self, names):
+                self.names = names
+
+            def python_argdefs(self):
+                return (
+                    [],
+                    self.names,
+                    [TensorArg(name, name, torch.float32) for name in self.names],
+                    [],
+                )
+
+        first = unittest.mock.Mock(args=FakeArgs(["input", "output"]))
+        second = unittest.mock.Mock(args=FakeArgs(["input", "scratch"]))
+        third = unittest.mock.Mock(args=FakeArgs(["scratch", "output"]))
+        plan = object.__new__(MultiKernelPlan)
+        plan.plans = [[first], [second, third]]
+        lines = []
+        graph = SimpleNamespace(wrapper_code=SimpleNamespace(writeline=lines.append))
+        with V.set_graph_handler(graph):
+            plan.codegen_nan_check()
+
+        self.assertEqual(len(lines), 4)
+        self.assertEqual(sum("input.isnan" in line for line in lines), 1)
+        self.assertEqual(sum("output.isnan" in line for line in lines), 1)
+        self.assertFalse(any("scratch" in line for line in lines))
 
     def test_softmax(self, expect_multi_kernel=True):
         x = torch.rand(2, 1024).to(GPU_TYPE)
