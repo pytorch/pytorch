@@ -790,6 +790,10 @@ class TestMatmulCuda(InductorTestCase):
 
     @onlyCUDA
     @skipIfRocm
+    @decorateIf(
+        unittest.expectedFailure,
+        lambda params: SM120OrLater and not params["batched"],
+    )
     @dtypes(torch.half, torch.bfloat16)
     @parametrize("batched", [False, True])
     @unittest.skipIf(not SM100OrLater, "cuBLAS integration for batch invariance is only on Blackwell")
