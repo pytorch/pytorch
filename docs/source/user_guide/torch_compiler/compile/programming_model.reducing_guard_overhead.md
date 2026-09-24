@@ -99,21 +99,29 @@ Other filters available in `torch.compiler` (all `_unsafe`, same caveats):
 - `skip_all_guards_unsafe` — drop **all** guards; removes every safety guarantee,
   use with extreme caution.
 
-## 3. Try `use_recursive_dict_tags_for_guards` first
+## 3. Recursive dict tags for `nn.Module` guards
 
 ```python
 import torch._dynamo
 
-torch._dynamo.config.use_recursive_dict_tags_for_guards = True
+with torch._dynamo.config.patch(use_recursive_dict_tags_for_guards=False):
+    # Disable the optimization while investigating a guard issue.
+    ...
 ```
 
 This speeds up guard execution for nested `nn.Module`s by recursively checking
-dict tags to avoid running the full guard set. It relies on a fairly complicated
-mechanism using low-level CPython features. A few concerns have been raised in
-OSS issues, so it is off by default and may be revisited. It is worth trying
-**before** options (1) and (2): if it works for your model, you will not need to
-skip `nn.Module` guards (2), though you would still benefit from
-`install_free_tensors` (1).
+dict tags to avoid running the full guard set. On CPython 3.12 and later
+non-free-threaded builds, it is enabled by default and uses CPython dictionary
+watchers to invalidate the fast path. It remains disabled by default on older
+Python and free-threaded Python builds.
+
+This optimization preserves the retained guards, unlike the unsafe filters in
+section (2). It does inherit Dynamo's default assumption that function dunder
+attributes such as `__code__`, `__defaults__`, and `__kwdefaults__` are not
+rebound between calls. Set
+`torch._dynamo.config.assume_dunder_attributes_remain_unchanged=False` if an
+application rebinds those attributes; doing so may reduce fast-path coverage.
+`install_free_tensors` can still reduce the separate pre-graph bytecode cost.
 
 ## 4. Skip guard evaluation after warmup with `skip_guard_eval_unsafe`
 
@@ -141,7 +149,8 @@ arrives), there is a risk of silently producing incorrect results, hence the
 
 - Start by measuring where the per-call time goes (guards vs. pre-graph bytecode)
   with tlparse / `TORCH_LOGS=guards`.
-- Optionally try `use_recursive_dict_tags_for_guards=True` first.
+- On CPython 3.12+ GIL builds, keep recursive dict tags enabled unless
+  diagnosing a guard problem.
 - Otherwise, apply `install_free_tensors=True` **and** a `guard_filter_fn` such
   as `skip_guard_on_all_nn_modules_unsafe` together — one reduces guard overhead,
   the other keeps that saving from reappearing as pre-graph bytecode overhead.

@@ -1556,10 +1556,10 @@ class AOTCompiledModel:
         # One exit of check() refuses without running the tree: a tag-safe root's
         # no-tensor-aliasing fast check (GuardManager::check_nopybind). It
         # disarms that root, so a second check() runs the tree it skipped. With
-        # use_recursive_dict_tags_for_guards off (the default) no root is tag
-        # safe and this pass re-runs trees that genuinely failed, lambda guards
-        # included, bumping the failing node's _fail_count a second time; about
-        # 1us per result, accepted.
+        # use_recursive_dict_tags_for_guards off, no root is tag safe and this
+        # pass re-runs trees that genuinely failed, lambda guards included,
+        # bumping the failing node's _fail_count a second time; about 1us per
+        # result, accepted.
         for result, f_locals in zip(results, bound):
             if result._live_guard_manager().check(f_locals):
                 return result.fn(self.model, *args, **kwargs)
