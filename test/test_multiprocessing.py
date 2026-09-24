@@ -266,8 +266,8 @@ def _event_multiprocess_child(event, p2c, c2p):
     c2p.put(1)  # notify parent synchronization is done
 
 
-def _event_handle_importer_consumer(handle, p2c, c2p):
-    e1 = torch.cuda.Event.from_ipc_handle(0, handle)
+def _event_handle_importer_consumer(event_cls, handle, p2c, c2p):
+    e1 = event_cls.from_ipc_handle(0, handle)
     c2p.put(0)  # notify parent child is ready
     p2c.get()  # wait for record in parent
     e1.synchronize()
@@ -275,11 +275,11 @@ def _event_handle_importer_consumer(handle, p2c, c2p):
     p2c.get()  # wait for parent to finish before destructing child event
 
 
-def _event_handle_exporter_consumer(handle, p2c, c2p):
+def _event_handle_exporter_consumer(event_cls, handle, p2c, c2p):
     stream = torch.cuda.Stream()
-    with torch.cuda.stream(stream):
-        e1 = torch.cuda.Event.from_ipc_handle(torch.cuda.current_device(), handle)
-        torch.cuda._sleep(50000000)  # spin for about 50 ms
+    with stream:
+        e1 = event_cls.from_ipc_handle(torch.cuda.current_device(), handle)
+        torch.cuda._sleep(200000000)  # spin for about 200 ms
         e1.record()
         c2p.put(0)
         # wait for parent process finished synchronization before
@@ -1035,48 +1035,50 @@ class TestMultiprocessingCUDA(_MultiprocessingTestMixin, TestCase):
             e1.ipc_handle()
 
     def test_event_handle_importer(self):
-        e0 = torch.cuda.Event(enable_timing=False, interprocess=True)
-        self.assertTrue(e0.query())
+        for event_cls in [torch.cuda.Event, torch.Event]:
+            e0 = event_cls(enable_timing=False, interprocess=True)
+            self.assertTrue(e0.query())
 
-        ctx = mp.get_context("spawn")
-        p2c = ctx.SimpleQueue()
-        c2p = ctx.SimpleQueue()
-        p = ctx.Process(
-            target=_event_handle_importer_consumer,
-            args=(e0.ipc_handle(), p2c, c2p),
-        )
-        p.start()
+            ctx = mp.get_context("spawn")
+            p2c = ctx.SimpleQueue()
+            c2p = ctx.SimpleQueue()
+            p = ctx.Process(
+                target=_event_handle_importer_consumer,
+                args=(event_cls, e0.ipc_handle(), p2c, c2p),
+            )
+            p.start()
 
-        c2p.get()  # wait for child to become ready
-        torch.cuda._sleep(50000000)  # spin for about 50 ms
-        e0.record()
-        p2c.put(0)  # notify child event is recorded
+            c2p.get()  # wait for child to become ready
+            torch.cuda._sleep(200000000)  # spin for about 200 ms
+            e0.record()
+            p2c.put(0)  # notify child event is recorded
 
-        self.assertFalse(e0.query())
-        c2p.get()  # wait for synchronization in child
-        self.assertTrue(e0.query())
-        p2c.put(1)  # notify child that parent is done
-        p.join()
+            self.assertFalse(e0.query())
+            c2p.get()  # wait for synchronization in child
+            self.assertTrue(e0.query())
+            p2c.put(1)  # notify child that parent is done
+            p.join()
 
     def test_event_handle_exporter(self):
-        e0 = torch.cuda.Event(enable_timing=False, interprocess=True)
+        for event_cls in [torch.cuda.Event, torch.Event]:
+            e0 = event_cls(enable_timing=False, interprocess=True)
 
-        ctx = mp.get_context("spawn")
-        p2c = ctx.SimpleQueue()
-        c2p = ctx.SimpleQueue()
-        p = ctx.Process(
-            target=_event_handle_exporter_consumer,
-            args=(e0.ipc_handle(), p2c, c2p),
-        )
-        p.start()
-        # wait for event in child process is recorded
-        c2p.get()
+            ctx = mp.get_context("spawn")
+            p2c = ctx.SimpleQueue()
+            c2p = ctx.SimpleQueue()
+            p = ctx.Process(
+                target=_event_handle_exporter_consumer,
+                args=(event_cls, e0.ipc_handle(), p2c, c2p),
+            )
+            p.start()
+            # wait for event in child process is recorded
+            c2p.get()
 
-        self.assertFalse(e0.query())
-        e0.synchronize()
-        self.assertTrue(e0.query())
-        p2c.put(0)
-        p.join()
+            self.assertFalse(e0.query())
+            e0.synchronize()
+            self.assertTrue(e0.query())
+            p2c.put(0)
+            p.join()
 
     # Check sharing a cudaMalloc allocation with different types of storage.
     # (Issue #11422)
