@@ -726,7 +726,11 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
             if obj is code:
                 return ""
 
+            # Only a code constant can hold `code`. Adding the others to `seen`
+            # compares b"" with 0 (equal hashes), an error under python -bb.
             for i, const in enumerate(obj.co_consts):
+                if not inspect.iscode(const):
+                    continue
                 if (res := _find_code_source(const)) is not None:
                     return f".co_consts[{i}]{res}"
 
@@ -1196,6 +1200,11 @@ class CompilePackage:
             function_name=_FunctionId(function_name),
             code_source=code_source,
         )
+
+    @property
+    def current_entry(self) -> _DynamoCodeCacheEntry | None:
+        """The entry of the code object being compiled inside ``code_context``."""
+        return self._current_entry
 
     @contextlib.contextmanager
     def code_context(self, code: types.CodeType) -> Generator[None, None, None]:
