@@ -18680,7 +18680,7 @@ class TestInputGradBuffers(TestCase):
     @onlyAccelerator
     def test_user_stream_switch_does_not_change_execution_stream(self, device):
         observed_buffers = []
-        other_stream = torch.Stream(torch.accelerator.current_accelerator())
+        other_stream = torch.Stream(device)
 
         class Producer(Function):
             @staticmethod
@@ -18714,7 +18714,7 @@ class TestInputGradBuffers(TestCase):
     @onlyAccelerator
     def test_different_stream_errors(self, device):
         x = torch.randn(4, device=device, requires_grad=True)
-        stream = torch.Stream(torch.accelerator.current_accelerator())
+        stream = torch.Stream(device)
         stream.wait_stream(torch.accelerator.current_stream())
         with torch.Stream(stream.stream_id, stream.device_index, stream.device_type):
             direct = _InputGradBufferProducer.apply(x, 1, True, None)
@@ -18730,7 +18730,7 @@ class TestInputGradBuffers(TestCase):
     def test_later_producer_on_different_stream_errors(self, device):
         x = torch.randn(4, device=device, requires_grad=True)
         accumulate_grad = torch.autograd.graph.get_gradient_edge(x).node
-        stream = torch.Stream(torch.accelerator.current_accelerator())
+        stream = torch.Stream(device)
         stream.wait_stream(torch.accelerator.current_stream())
         with torch.Stream(stream.stream_id, stream.device_index, stream.device_type):
             last = _InputGradBufferProducer.apply(x, 1, False, None)
