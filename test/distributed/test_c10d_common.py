@@ -39,6 +39,8 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
+    _restore_fp32_precision,
+    _snapshot_fp32_precision,
     instantiate_parametrized_tests,
     IS_FBCODE,
     IS_SANDCASTLE,
@@ -67,21 +69,21 @@ else:
     LOOPBACK = "lo"
 
 
-_PRIOR_FP32_PRECISION: str | None = None
+_PRIOR_FP32_PRECISION: tuple[str, ...] | None = None
 
 
 def setUpModule():
     global _PRIOR_FP32_PRECISION
-    # Snapshot fp32_precision (not allow_tf32) so tearDownModule restores the
-    # exact original; writing allow_tf32 back can't reproduce the "none" default.
-    _PRIOR_FP32_PRECISION = torch.backends.cuda.matmul.fp32_precision
+    # allow_tf32 writes both the legacy Float32MatmulPrecision enum and the
+    # backend-specific fp32_precision, so snapshot and restore all of it.
+    _PRIOR_FP32_PRECISION = _snapshot_fp32_precision()
     torch.backends.cuda.matmul.allow_tf32 = False
 
 
 def tearDownModule():
     global _PRIOR_FP32_PRECISION
     if _PRIOR_FP32_PRECISION is not None:
-        torch.backends.cuda.matmul.fp32_precision = _PRIOR_FP32_PRECISION
+        _restore_fp32_precision(_PRIOR_FP32_PRECISION)
         _PRIOR_FP32_PRECISION = None
 
 
@@ -2923,6 +2925,22 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
 instantiate_parametrized_tests(CommonDistributedDataParallelTest)
 
 
+class _CloneTrackingStore(dist.Store):
+    def __init__(self):
+        super().__init__()
+        self._values = {}
+        self.clone_count = 0
+
+    def add(self, key, value):
+        result = int(self._values.get(key, b"0")) + value
+        self._values[key] = str(result).encode()
+        return result
+
+    def clone(self):
+        self.clone_count += 1
+        return self
+
+
 class SplitGroupOptionsTest(TestCase):
     class _SplittingBackend(C10DBackend):
         def __init__(self, rank, size, name):
@@ -2930,6 +2948,7 @@ class SplitGroupOptionsTest(TestCase):
             self._name = name
             self._options = C10DBackend.Options(name, timeout=timedelta(seconds=111))
             self.split_opts = None
+            self.split_store = None
 
         @property
         def supports_splitting(self):
@@ -2943,18 +2962,21 @@ class SplitGroupOptionsTest(TestCase):
             return self._name
 
         def split(self, store, ranks, opts):
+            self.split_store = store
             self.split_opts = opts
             return SplitGroupOptionsTest._SplittingBackend(
                 ranks.index(self.rank()), len(ranks), f"{self._name}-child"
             )
 
-    def _make_group(self):
+    def _make_group(self, store=None):
         # Shaped like a "cpu:gloo,cuda:nccl" group: two distinct backends, the
         # accelerator one being the group's default. The backend type tags are
         # just map keys here, the backends themselves are Python ones.
         cpu_backend = self._SplittingBackend(0, 1, "cpu-backend")
         default_backend = self._SplittingBackend(0, 1, "default-backend")
-        pg = dist.ProcessGroup(dist.HashStore(), 0, 1)
+        if store is None:
+            store = dist.HashStore()
+        pg = dist.ProcessGroup(store, 0, 1)
         pg._register_backend(
             torch.device("cpu"), dist.ProcessGroup.BackendType.GLOO, cpu_backend
         )
@@ -2964,6 +2986,18 @@ class SplitGroupOptionsTest(TestCase):
         pg._set_default_backend(dist.ProcessGroup.BackendType.NCCL)
         pg._set_group_name("split-options-test")
         return pg, cpu_backend, default_backend
+
+    def test_split_group_passes_prefixed_parent_store_to_backend(self):
+        store = _CloneTrackingStore()
+        pg, cpu_backend, default_backend = self._make_group(store)
+        child = pg.split_group([0], group_name="child")
+
+        self.assertEqual(store.clone_count, 0)
+        self.assertIs(cpu_backend.split_store, default_backend.split_store)
+        self.assertIs(cpu_backend.split_store.underlying_store, store)
+        self.assertIs(child.get_group_store(), cpu_backend.split_store)
+        child.get_group_store().add("probe", 1)
+        self.assertTrue(any(key.startswith("child/") for key in store._values))
 
     def test_split_group_clones_parent_options(self):
         # getBackendOptions() returns the backend's live options_, and split()

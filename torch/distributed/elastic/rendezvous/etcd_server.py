@@ -62,7 +62,7 @@ def find_free_port():
         except OSError as e:
             if s is not None:
                 s.close()
-            print(f"Socket creation attempt failed: {e}")
+            logger.warning("Socket creation attempt failed: %s", e)
     raise RuntimeError("Failed to create a socket")
 
 
@@ -174,7 +174,9 @@ class EtcdServer:
             try:
                 data_dir = os.path.join(self._base_data_dir, str(curr_retries))
                 os.makedirs(data_dir, exist_ok=True)
-                return self._start(data_dir, timeout, stderr)
+                self._start(data_dir, timeout, stderr)
+                atexit.register(stop_etcd, self._etcd_proc, self._base_data_dir)
+                return
             except Exception as e:
                 curr_retries += 1
                 stop_etcd(self._etcd_proc)
@@ -184,7 +186,6 @@ class EtcdServer:
                 if curr_retries >= num_retries:
                     shutil.rmtree(self._base_data_dir, ignore_errors=True)
                     raise
-        atexit.register(stop_etcd, self._etcd_proc, self._base_data_dir)
 
     def _start(
         self, data_dir: str, timeout: int = 60, stderr: int | TextIO | None = None

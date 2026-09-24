@@ -273,6 +273,8 @@ void test_aoti_constants_update(
       data_loader.attr(weights_attr.c_str()).toTensor();
   const auto& add_tensors = data_loader.attr(add_attr.c_str()).toTensor();
 
+  // The random constants stay on CPU; update_constant_buffer_from_cpu
+  // auto-copies them to the container's device.
   torch::inductor::TensorConstantMap missing_map, rand_map, real_map;
   missing_map.emplace("L__self___w_pre", new at::Tensor(at::randn({4, 4})));
   rand_map.emplace("L__self___w_pre", new at::Tensor(at::randn({10})));
@@ -300,13 +302,13 @@ void test_aoti_constants_update(
   // Somehow EXPECT_THROW doesn't work here when running tests in a row, but
   // works when running AotInductorTest.RuntimeUpdateConstantsCuda individually.
   try {
-    runner->update_constant_buffer(missing_map, false, true);
+    runner->update_constant_buffer_from_cpu(missing_map, false, true);
   } catch (const std::runtime_error& e) {
     EXPECT_THAT(e.what(), ::testing::HasSubstr("API call failed at"));
   }
 
   // Update random weight to buffer #1.
-  runner->update_constant_buffer(missing_map, false, false);
+  runner->update_constant_buffer_from_cpu(missing_map, false, false);
   actual_output_tensors = runner->run(input_tensors);
   ASSERT_FALSE(
       torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
@@ -321,7 +323,7 @@ void test_aoti_constants_update(
   ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
 
   // Update with full random map.
-  runner->update_constant_buffer(rand_map, false, false);
+  runner->update_constant_buffer_from_cpu(rand_map, false, false);
   if (use_runtime_constant_folding) {
     runner->run_const_fold(/* use_inactive = */ false);
   }
@@ -452,6 +454,8 @@ void test_aoti_double_buffering(
       data_loader.attr(weights_attr.c_str()).toTensor();
   const auto& add_tensors = data_loader.attr(add_attr.c_str()).toTensor();
 
+  // The random constants stay on CPU; update_constant_buffer_from_cpu
+  // auto-copies them to the container's device.
   torch::inductor::TensorConstantMap rand_map, real_map;
   rand_map.emplace("L__self___w_pre", new at::Tensor(at::randn({4, 4})));
   rand_map.emplace("L__self___w_add", new at::Tensor(at::randn({4, 4})));
@@ -485,7 +489,8 @@ void test_aoti_double_buffering(
   ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
 
   // We update random weights to buffer #1. But do not swap in the weight yet.
-  runner->update_inactive_constant_buffer(rand_map);
+  runner->update_constant_buffer_from_cpu(
+      rand_map, /* use_inactive = */ true, /* check_full_update = */ true);
   if (use_runtime_constant_folding) {
     runner->run_const_fold(/* use_inactive = */ true);
   }
@@ -765,8 +770,10 @@ void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   const auto& add_tensors = data_loader.attr(add_attr.c_str()).toTensor();
 
   torch::inductor::TensorConstantMap rand_map, real_map;
-  rand_map.emplace("L__self___w_pre", new at::Tensor(at::randn({4096, 4096})));
-  rand_map.emplace("L__self___w_add", new at::Tensor(at::randn({4096, 4096})));
+  rand_map.emplace(
+      "L__self___w_pre", new at::Tensor(at::randn({4096, 4096}).to(at::kCUDA)));
+  rand_map.emplace(
+      "L__self___w_add", new at::Tensor(at::randn({4096, 4096}).to(at::kCUDA)));
   real_map.emplace("L__self___w_pre", new at::Tensor(weight_tensors));
   real_map.emplace("L__self___w_add", new at::Tensor(add_tensors));
 
