@@ -25,7 +25,6 @@ from enum import Enum
 from functools import partial, reduce, wraps
 from io import StringIO
 from typing import Any, NamedTuple
-from unittest.mock import patch
 
 import torch
 import torch._dynamo.test_case
@@ -328,7 +327,11 @@ def requires_world_size(n: int):
     """
     Decorator to request a specific world size for a test. The test harness can
     read this attribute to set the number of ranks to spawn. If there are fewer
-    than `n` CUDA devices available, the test should be skipped by the harness.
+    than ``n`` accelerators available, the test is skipped.
+
+    NOTE: The skip logic is hardware-agnostic and works for any accelerator
+    supported by ``torch.accelerator`` (e.g. CUDA, XPU, HPU, and
+    PrivateUse1-based backends).
 
     Usage:
         @require_world_size(3)
@@ -338,9 +341,9 @@ def requires_world_size(n: int):
 
     def decorator(func):
         func._required_world_size = n
-        available = torch.cuda.device_count()
+        available = torch.accelerator.device_count()
         return unittest.skipUnless(
-            available >= n, f"requires {n} GPUs, found {available}"
+            available >= n, f"requires {n} accelerators, found {available}"
         )(func)
 
     return decorator
@@ -612,15 +615,25 @@ def skip_if_rocm_arch_multiprocess(arch: tuple[str, ...]):
     return decorator
 
 
+def _rocm_version_tuple():
+    """ROCm release version as an int tuple.
+
+    torch.version.hip is the HIP runtime version, which tracks the ROCm release
+    version on shipped ROCm but not on preview builds, so it is only a fallback
+    for builds whose torch/version.py never recorded torch.version.rocm.
+    """
+    rocm_version = str(getattr(torch.version, "rocm", None) or torch.version.hip)
+    rocm_version = rocm_version.split("-", maxsplit=1)[0]  # ignore git sha
+    return tuple(int(x) for x in rocm_version.split("."))
+
+
 def skip_if_rocm_ver_lessthan_multiprocess(version=None):
     """Skips a test for ROCm based on ROCm ver - multiprocess UTs"""
 
     def decorator(func):
         reason = None
         if TEST_WITH_ROCM:
-            rocm_version = str(torch.version.hip)
-            rocm_version = rocm_version.split("-", maxsplit=1)[0]  # ignore git sha
-            rocm_version_tuple = tuple(int(x) for x in rocm_version.split("."))
+            rocm_version_tuple = _rocm_version_tuple()
             if (
                 rocm_version_tuple is None
                 or version is None
@@ -639,9 +652,7 @@ def skip_if_rocm_ver_atleast_multiprocess(version=None):
     def decorator(func):
         reason = None
         if TEST_WITH_ROCM:
-            rocm_version = str(torch.version.hip)
-            rocm_version = rocm_version.split("-", maxsplit=1)[0]  # ignore git sha
-            rocm_version_tuple = tuple(int(x) for x in rocm_version.split("."))
+            rocm_version_tuple = _rocm_version_tuple()
             if version is not None and rocm_version_tuple >= tuple(version):
                 reason = f"skip_if_rocm_ver_atleast_multiprocess: known failure on ROCm {rocm_version_tuple} (>= {version})"
 
@@ -1297,18 +1308,13 @@ class DistributedTestBase(MultiProcessTestCase):
         else:
             return "gloo"
 
-    def create_pg(self, device, world_size=None):
+    def create_pg(self, device, world_size=None, backend=None):
         if world_size is None:
             world_size = self.world_size
+        backend = backend or self.backend(device)
         num_visible_devices = torch.get_device_module(device).device_count()
         store = torch.distributed.FileStore(self.file_name, num_visible_devices)
-        torch.distributed.init_process_group(
-            backend=self.backend(device),
-            world_size=world_size,
-            rank=self.rank,
-            store=store,
-        )
-        if "nccl" in self.backend(device) or "xccl" in self.backend(device):
+        if "nccl" in backend or "xccl" in backend:
             accelerator = torch.accelerator.current_accelerator()
             if accelerator:
                 device_type = accelerator.type
@@ -1317,9 +1323,15 @@ class DistributedTestBase(MultiProcessTestCase):
                 torch.accelerator.set_device_index(device)
             else:
                 raise RuntimeError(
-                    f"Expected to find an accelerator when initializing process group"
-                    f" with {self.backend(device)} backend, but got None"
+                    "Expected to find an accelerator when initializing process group"
+                    f" with {backend} backend, but got None"
                 )
+        torch.distributed.init_process_group(
+            backend=backend,
+            world_size=world_size,
+            rank=self.rank,
+            store=store,
+        )
         return torch.distributed.distributed_c10d._get_default_group()
 
     def rank_to_device(self, device):
@@ -1722,7 +1734,7 @@ class SaveForwardInputsModel(nn.Module):
 
 @contextmanager
 def _dynamo_dist_per_rank_init(
-    rank, world_size, backend=None, init_pg=True, fake_pg=False
+    rank, world_size, backend=None, init_pg=True, fake_pg=False, *, rdvz_file=None
 ):
     # To avoid multiple inheritance from _dynamo.test_case.TestCase and MultiProcessTestCase,
     # Just manually implement the most important part of the dynamo behavior to reset/clear.
@@ -1735,8 +1747,6 @@ def _dynamo_dist_per_rank_init(
     if backend is None:
         backend = c10d.get_default_backend_for_device(device_type)
 
-    os.environ["MASTER_ADDR"] = "localhost"
-    os.environ["MASTER_PORT"] = "6789"
     if init_pg:
         if fake_pg:
             store = torch.testing._internal.distributed.fake_pg.FakeStore()
@@ -1747,7 +1757,21 @@ def _dynamo_dist_per_rank_init(
                 store=store,
             )
         else:
-            c10d.init_process_group(backend=backend, rank=rank, world_size=world_size)
+            if rdvz_file is None:
+                # Legacy env:// rendezvous. Every rank must derive the same
+                # port here, so it cannot be allocated dynamically; pass
+                # rdvz_file instead to avoid colliding with concurrent runs.
+                os.environ["MASTER_ADDR"] = "localhost"
+                os.environ["MASTER_PORT"] = "6789"
+                store = None
+            else:
+                store = c10d.FileStore(rdvz_file, world_size)
+            c10d.init_process_group(
+                backend=backend,
+                store=store,
+                rank=rank,
+                world_size=world_size,
+            )
     torch._dynamo.reset()
     torch._dynamo.utils.counters.clear()
     try:
@@ -1770,27 +1794,26 @@ class DynamoDistributedSingleProcTestCase(torch._dynamo.test_case.TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        # _exit_stack is set up in TestCase
-        cls._exit_stack.enter_context(
-            patch.dict(
-                os.environ,
-                {
-                    "MASTER_ADDR": "localhost",
-                    "MASTER_PORT": "12355",
-                },
-            )
-        )
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            cls.rdvz_file = f.name
         cls.rank = 0
         device = torch.accelerator.current_accelerator().type
         cls.device = f"{device}:{cls.rank}"
         cls.device_ids = None if device in cls.device else [cls.rank]
         c10d.init_process_group(
-            c10d.get_default_backend_for_device(device), rank=cls.rank, world_size=1
+            c10d.get_default_backend_for_device(device),
+            store=c10d.FileStore(cls.rdvz_file, 1),
+            rank=cls.rank,
+            world_size=1,
         )
 
     @classmethod
     def tearDownClass(cls):
         c10d.destroy_process_group()
+        try:
+            os.remove(cls.rdvz_file)
+        except OSError:
+            pass
         super().tearDownClass()
 
 
@@ -1913,6 +1936,11 @@ class MultiProcContinuousTest(TestCase):
         cls.world_size = world_size
 
         # Initialize the process group
+        # Some tests override _init_pg and oversubscribe before per-test skips run.
+        backend = cls.backend_str()
+        is_nccl = backend in ("nccl", "nccl2", "nccl-lazy")
+        if is_nccl and world_size > torch.accelerator.device_count():
+            os.environ["NCCL_MULTI_RANK_GPU_ENABLE"] = "1"
         init_skip_reason = None
         try:
             cls._init_pg(rank, world_size, rdvz_file)

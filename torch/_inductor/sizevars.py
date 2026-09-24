@@ -54,6 +54,29 @@ log = logging.getLogger(__name__)
 Width = int | IntInfinity
 
 
+_RANGE_BOUND_OPS = (
+    sympy.StrictLessThan,
+    sympy.LessThan,
+    sympy.StrictGreaterThan,
+    sympy.GreaterThan,
+)
+
+
+def is_range_bound(expr: sympy.Basic) -> bool:
+    """Whether expr bounds a quantity against a constant, e.g. "u0 >= 4".
+
+    Eq/Ne and relations with symbols on both sides are shape contracts, not
+    sampled ranges. Compound And/Or are not inspected.
+
+    Sound only because canonicalize_bool_expr sign-splits, leaving "u0 <= u1"
+    two-sided. Its docstring claims it moves every non-constant term to the
+    rhs, which would make this match contracts too; it does not do that.
+    """
+    return isinstance(expr, _RANGE_BOUND_OPS) and (
+        not expr.lhs.free_symbols or not expr.rhs.free_symbols
+    )
+
+
 @dataclasses.dataclass(frozen=True)
 class LaneContiguity:
     """How an index expression varies across lanes.
@@ -194,8 +217,10 @@ def simplify_index_in_vec_range(index: sympy.Expr, var: sympy.Expr, vec_length: 
     if index.has(ModularIndexing):
         index = index.replace(ModularIndexing(var, div, mod), visit_modular_indexing)
 
-    if not index.has(sympy.Rel):
-        index = sympy.simplify(index)
+    # Avoid full-expression sympy.simplify here.  This helper only needs to
+    # expose lane-uniform FloorDiv/ModularIndexing terms for later stride
+    # analysis, and sympy's general simplifier can be superlinear on the large
+    # dynamic-shape index expressions produced by real models.
     if index != original_index:
         return simplify_index_in_vec_range(index, var, vec_length)
 

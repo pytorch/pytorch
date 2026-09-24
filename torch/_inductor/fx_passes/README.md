@@ -7,9 +7,12 @@ The current way we do this is through FakeTensorUpdater (in _inductor/fx_utils.p
 ## Mutations throughout the stack
 The invariant about mutation we have is:
 
-**After AOTDispatch tracing and before Inductor, we have no mutation in our graph, except for a copy_ epilogue at the end of the graph.**
+**After AOTDispatch tracing, we have no mutation in our graph, except for a
+copy_ epilogue at the end of the graph, until the final post-grad passes
+described below.**
 
-For example, passes operating on the joint_graph and post_grad graph do not need to worry about mutation at all.
+For example, most passes operating on the joint_graph and post_grad graph do
+not need to worry about mutation.
 
 However, we do still have aliasing in the graph. This does not matter most of the time, but it does mean that **our passes are not allowed to cause any additional inputs/outputs to alias if they did not alias in the original graph**.
 
@@ -35,4 +38,8 @@ inputs and outputs have any aliasing, it suffices to check whether the
 storages of the input and the storages of the output have any overlap. See
 `remove_noop_ops` for an example of how to do this.
 
-Additionally, we do have one pass that *does* introduce mutation - `reinplace_inplaceable_ops`. This pass must run *just before Inductor lowering*, as otherwise this breaks our invariant.
+The final post-grad passes are exceptions: `slice_scatter_chunking_pass` may
+replace a fully overwriting functional chain with writes into a fresh base,
+then `reinplace_inplaceable_ops` may introduce further mutation. These passes
+must run in that order *just before Inductor lowering*, as otherwise this breaks
+our invariant.

@@ -112,6 +112,11 @@ static std::vector<std::string> TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC = {
 static std::vector<std::string> TORCH_NCCL_RETHROW_CUDA_ERRORS = {
     "TORCH_NCCL_RETHROW_CUDA_ERRORS"};
 
+// Whether a NCCL timeout tears the process down even when
+// TORCH_NCCL_RETHROW_CUDA_ERRORS is off (default false)
+static std::vector<std::string> TORCH_NCCL_TEARDOWN_ON_TIMEOUT = {
+    "TORCH_NCCL_TEARDOWN_ON_TIMEOUT"};
+
 // The maximum number of events we store in the flight recorder's ring buffer.
 // (One event could be the start or end of a collective, for example).
 static std::vector<std::string> TORCH_NCCL_TRACE_BUFFER_SIZE = {
@@ -180,15 +185,6 @@ enum ErrorHandlingMode {
 #define PRINT_COLLECTIVE_HASH_SIGNATURE(phase, opType, numel, hashValue)      \
   LOG(WARNING) << logPrefix() << "Hash of " << phase << " to NCCL " << opType \
                << " with size " << numel << " is " << hashValue;
-
-// If set, ProcessGroupNCCL doesn't use recordStream calls to ensure
-// caching allocator safety for tensors used on both user-facing and
-// internal comm streams.
-// Instead, it stashes live references to those tensors until after
-// user-facing streams are synced with comm streams.
-// See stashed_for_allocator_safety_ below.
-static std::vector<std::string> TORCH_NCCL_AVOID_RECORD_STREAMS = {
-    "TORCH_NCCL_AVOID_RECORD_STREAMS"};
 
 // If set, ProcessGroupNCCL registers postAlloc and preFree hooks to cuda cache
 // allocator so that whenever a tensor is allocated or freed, ProcessGroupNCCL
@@ -488,7 +484,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // give a more descriptive message when representing the Work as a string.
     std::shared_ptr<std::vector<at::Tensor>> outputs_;
 
-    // TORCH_NCCL_AVOID_RECORD_STREAMS implementation helper.
+    // Stashing implementation helper.
     // Stores references to participating non-output tensors (ie inputs,
     // flattened intermediates).
     // We'll clear this list in synchronizeStream, just after user-facing
@@ -756,6 +752,14 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Whether the NCCL watchdog should rethrow CUDA errors.
     bool rethrowCUDAErrors_ = false;
 
+    // Opt-in for the timeout teardown below. Read once at construction.
+    bool tearDownOnTimeout_ = false;
+
+    // Whether a NCCL timeout exception should be rethrown in Watchdog::run()
+    // to terminate the process. Written in runLoop() and read in run()'s catch,
+    // which runs it, so both touch it from the single watchdog thread.
+    bool rethrowTimeoutException_ = false;
+
     std::exception_ptr watchDogException_ = nullptr;
 
     // Condition Variable for watchdog thread sleep
@@ -1019,7 +1023,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   void performNocolorSplit(at::Device device);
 
   // If all comms on this PG are fully initialized, return true.
-  bool isInitialized();
+  bool isInitialized() override;
 
   ErrorType getError() override;
 
@@ -1475,9 +1479,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Flag to enable the print of hash value of input/output of collectives for
   // verification.
   std::atomic<bool> enableCollectiveHashDebug_;
-
-  // Whether or not TORCH_NCCL_AVOID_RECORD_STREAMS was set
-  bool avoidRecordStreams_ = false;
 
   // The number of active ncclGroupStart() calls. This counter will be increased
   // by 1 when ncclGroupStart() is called and decreased by 1 when ncclGroupEnd()

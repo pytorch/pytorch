@@ -10,6 +10,7 @@ etc.) live in their respective VT files.
 import abc
 import collections
 import enum
+import operator
 import sys
 import types
 import typing
@@ -36,6 +37,7 @@ from ..exc import (
     unimplemented,
 )
 from ..source import AttrSource, Source
+from ..utils import specialize_symnode
 from .base import (
     AsPythonConstantNotImplementedError,
     AttrMutationKind,
@@ -82,10 +84,18 @@ def vt_identity_compare(
     # Objects created during tracing: VT identity = Python identity. Exception
     # instances are mutable objects built during tracing, so two distinct VTs
     # (already known not to be `left is right`) are distinct Python objects.
+    # A bound method is materialized afresh by every attribute access, so it
+    # behaves the same way: `obj.m is obj.m` is False in CPython.
     from .dicts import ConstDictVariable
+    from .functions import UserMethodVariable
     from .lists import ListVariable
     from .misc import ExceptionVariable, TracebackVariable
-    from .sets import FrozensetVariable, SetVariable
+    from .sets import (
+        DictKeySetVariable,
+        FrozensetVariable,
+        OrderedSetVariable,
+        SetVariable,
+    )
 
     if isinstance(
         left,
@@ -94,8 +104,11 @@ def vt_identity_compare(
             ListVariable,
             SetVariable,
             FrozensetVariable,
+            DictKeySetVariable,
+            OrderedSetVariable,
             TracebackVariable,
             ExceptionVariable,
+            UserMethodVariable,
         ),
     ):
         return ConstantVariable.create(False)
@@ -324,6 +337,12 @@ def pysequence_check(obj_type: type) -> bool:
     return type_implements_sq_item(obj_type)
 
 
+def pylong_check(obj_type: type) -> bool:
+    """Implements PyLong_Check semantics for VariableTracker objects."""
+    # ref: https://github.com/python/cpython/blob/v3.13.0/Include/longobject.h#L12-L13
+    return issubclass(obj_type, int)
+
+
 def pyindex_check(obj_type: type) -> bool:
     """Implements _PyIndex_Check semantics for VariableTracker objects."""
     # ref: https://github.com/python/cpython/blob/3.13/Include/internal/pycore_abstract.h#L11-L17
@@ -440,7 +459,9 @@ def generic_repr(
         obj_id = id(obj)
         if obj_id in _repr_running:
             sentinel = {list: "[...]", dict: "{...}", collections.deque: "[...]"}
-            return ConstantVariable.create(sentinel.get(obj_type, "..."))
+            if obj_type in sentinel:
+                return ConstantVariable.create(sentinel[obj_type])
+            return ConstantVariable.create(obj.repr_recursive_sentinel())
         _repr_running.add(obj_id)
         try:
             result = obj.tp_repr_impl(tx)
@@ -795,6 +816,49 @@ def pynumber_float(
     )
 
 
+def pyfloat_as_double_macro(obj: VariableTracker) -> float:
+    """Mirrors PyFloat_AS_DOUBLE without redispatching __float__.
+
+    https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Include/cpython/floatobject.h#L15-L18
+    """
+    return float.__float__(obj.as_python_constant())
+
+
+def pyfloat_as_double(
+    tx: "InstructionTranslatorBase", obj: VariableTracker
+) -> VariableTracker:
+    """Mirrors PyFloat_AsDouble.
+
+    https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Objects/floatobject.c#L282-L339
+
+    CPython warns when __float__ returns a strict float subclass; Dynamo
+    currently accepts the value without modeling that warning.
+    """
+    if issubclass(obj.python_type(), float):
+        result = obj
+    elif obj.tp_as_number.nb_float is not None:
+        result = obj.nb_float_impl(tx)
+        if result.python_type() is not float:
+            # Outer gate mirrors PyFloat_CheckExact; strict subclasses still fall through.
+            if not issubclass(result.python_type(), float):
+                if sys.version_info >= (3, 15):
+                    err_msg = f"{obj.python_qualified_name()}.__float__() must return a float, not {result.python_qualified_name()}"
+                else:
+                    err_msg = f"{obj.python_type_name()}.__float__ returned non-float (type {result.python_type_name()})"
+                raise_type_error(tx, err_msg)
+    elif obj.tp_as_number.nb_index is not None:
+        index = pynumber_index(tx, obj)
+        if index.is_python_constant():
+            return ConstantVariable.create(pylong_as_double(tx, index))
+        return index.nb_float_impl(tx)
+    else:
+        raise_type_error(tx, f"must be real number, not {obj.python_type_name()}")
+
+    if result.is_python_constant():
+        return ConstantVariable.create(pyfloat_as_double_macro(result))
+    return result
+
+
 def getindex(
     tx: "InstructionTranslatorBase",
     obj: VariableTracker,
@@ -811,6 +875,20 @@ def getindex(
     return i
 
 
+def pylong_as_double(tx: "InstructionTranslatorBase", obj: VariableTracker) -> float:
+    """Mirrors PyLong_AsDouble.
+
+    https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Objects/longobject.c#L3512-L3543
+    """
+    if not issubclass(obj.python_type(), int):
+        raise_type_error(tx, "an integer is required")
+    try:
+        # Read the int payload without dispatching subclass overrides.
+        return int.__float__(obj.as_python_constant())
+    except OverflowError as exc:
+        raise_observed_exception(OverflowError, tx, args=list(exc.args))
+
+
 def pylong_as_ssize_t(tx: "InstructionTranslatorBase", obj: VariableTracker) -> int:
     """Mirrors PyLong_AsSsize_t: requires an int (or subclass).
     values outside the Py_ssize_t range raise OverflowError.
@@ -819,16 +897,18 @@ def pylong_as_ssize_t(tx: "InstructionTranslatorBase", obj: VariableTracker) -> 
     """
     # Starting on Python 3.16, this will explicitly require an integer instance
     # https://docs.python.org/3/deprecations/index.html#pending-removal-in-python-3-16
-    if not issubclass(obj.python_type(), int):
+    if not pylong_check(obj.python_type()):
         raise_type_error(tx, "an integer is required")
-    val = obj.as_python_constant()
+    # A Py_ssize_t holds no symbol, so a backed SymInt has to specialize here.
+    val = specialize_symnode(obj).as_python_constant()
     if not -sys.maxsize - 1 <= val <= sys.maxsize:
         raise_observed_exception(
             OverflowError,
             tx,
             args=["Python int too large to convert to C ssize_t"],
         )
-    return val
+    # A C ssize_t, so a bool or an int subclass comes back as a plain int.
+    return int(val)
 
 
 def pynumber_as_ssize_t(
@@ -874,6 +954,13 @@ def pynumber_index(
 ) -> "VariableTracker":
     """Mirrors PyNumber_Index (index(x) dispatch)."""
 
+    # An int or subclass never sees its own __index__, then normalizes to an
+    # exact int. A SymInt is not constant: nb_index is where it specializes.
+    # https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1417-L1419
+    # https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1456-L1464
+    if obj.is_python_constant() and pylong_check(obj.python_type()):
+        return ConstantVariable.create(operator.index(obj.as_python_constant()))
+
     if obj.tp_as_number.nb_index is None:
         raise_type_error(
             tx,
@@ -882,11 +969,12 @@ def pynumber_index(
 
     result = obj.nb_index_impl(tx)
 
-    if not issubclass(result.python_type(), int):
-        raise_type_error(
-            tx,
-            f"__index__ returned non-int (type {result.python_type_name()})",
-        )
+    if not pylong_check(result.python_type()):
+        if sys.version_info >= (3, 15):
+            err_msg = f"{obj.python_qualified_name()}.__index__() must return an int, not {result.python_qualified_name()}"
+        else:
+            err_msg = f"__index__ returned non-int (type {result.python_type_name()})"
+        raise_type_error(tx, err_msg)
 
     return result
 
@@ -2147,7 +2235,13 @@ def _resolve_descriptor_get(
         )
         return md_vt.tp_descr_get_impl(tx, obj, class_vt)
     if isinstance(type_attr, _types.FunctionType):
-        return variables.UserMethodVariable(type_attr, obj, source=source)
+        return variables.UserMethodVariable(
+            variables.UserFunctionVariable(
+                type_attr, source=source and AttrSource(source, "__func__")
+            ),
+            obj,
+            source=source,
+        )
 
     return None
 

@@ -120,6 +120,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     gradcheck,
     load_tests,
+    parametrize,
     run_tests,
     set_default_dtype,
     set_default_dtype_if_supported,
@@ -1353,7 +1354,17 @@ class TestDistributions(DistributionsTestCase):
         distribution = dist_ctor(*ctor_params)
         s = distribution.sample()
         if not distribution.support.is_discrete:
-            s = s.detach().requires_grad_()
+            s = s.detach()
+            # For simplex-constrained distributions (e.g. RelaxedOneHotCategorical),
+            # samples near the boundary cause numerical Jacobian to produce nan
+            # because log_prob inverts ExpTransform via log(), and finite
+            # differencing (eps=1e-6) near zero yields log(<=0) = -inf/nan.
+            # Clamp to the simplex interior (1e-4 gives ~100x margin above
+            # gradcheck eps) and renormalize.
+            if isinstance(distribution.support, constraints._Simplex):
+                s = s.clamp(min=1e-4)
+                s = s / s.sum(-1, keepdim=True)
+            s.requires_grad_()
 
         expected_shape = distribution.batch_shape + distribution.event_shape
         self.assertEqual(s.size(), expected_shape)
@@ -1523,6 +1534,12 @@ class TestDistributions(DistributionsTestCase):
                         self.assertEqual(
                             expanded.variance,
                             d.variance.expand(expanded_shape + d.event_shape),
+                        )
+                    except NotImplementedError:
+                        pass
+                    try:
+                        self.assertEqual(
+                            expanded.entropy(), d.entropy().expand(expanded_shape)
                         )
                     except NotImplementedError:
                         pass
@@ -1932,6 +1949,22 @@ class TestDistributions(DistributionsTestCase):
         self.assertEqual(dist.entropy(), expected, atol=1e-3, rtol=0)
 
     @expectedFailureMPS
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_multinomial_entropy_double(self):
+        # lgamma(total_count + 1) used to be evaluated in the default dtype, so a double
+        # distribution carried a float32 error that grows with total_count
+        total_count = 1000
+        p = torch.tensor([0.1, 0.2, 0.7], dtype=torch.double)
+        dist = Multinomial(total_count, probs=p)
+        entropy = dist.entropy()
+        self.assertEqual(entropy.dtype, torch.double)
+        expected = torch.tensor(
+            scipy.stats.multinomial.entropy(total_count, p.numpy()), dtype=torch.double
+        )
+        self.assertEqual(entropy, expected)
+        self.assertEqual(dist.expand((2,)).entropy(), expected.expand(2))
+
+    @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
     def test_multinomial_2d(self):
         total_count = 10
@@ -2271,6 +2304,24 @@ class TestDistributions(DistributionsTestCase):
             dist = RelaxedOneHotCategorical(1e10, probs)
             s = dist.rsample()
             self.assertEqual(equal_probs, s)
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    def test_rand_excludes_upper_bound(self, device, dtype):
+        values = torch.rand(65537, device=device, dtype=dtype)
+        self.assertTrue((values >= 0).all().item())
+        self.assertTrue((values < 1).all().item())
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    @parametrize("bounds", [(0, 4), (-4, -2), (-2, 3), (2, 2)])
+    def test_uniform_excludes_upper_bound(self, device, dtype, bounds):
+        low, high = bounds
+        values = torch.empty(65537, device=device, dtype=dtype)
+        values.uniform_(low, high)
+        if low == high:
+            self.assertEqual(values, torch.full_like(values, low))
+        else:
+            self.assertTrue((values >= low).all().item())
+            self.assertTrue((values < high).all().item())
 
     @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
@@ -6031,6 +6082,29 @@ class TestKL(DistributionsTestCase):
         )
         self.assertEqual(expected_kl, actual_kl)
 
+    @skipIfTorchDynamo("This test explicitly invokes torch.compile")
+    def test_compile_kl_multivariate_normal(self):
+        def fn(p_mu, p_log_var, q_mu, q_log_var):
+            q_var = torch.diag_embed(torch.exp(q_log_var))
+            p_var = torch.diag_embed(torch.exp(p_log_var))
+            p = MultivariateNormal(p_mu, p_var)
+            q = MultivariateNormal(q_mu, q_var)
+            return kl_divergence(p, q).mean()
+
+        set_rng_seed(0)
+        p_mu = torch.randn(4, 3)
+        p_log_var = torch.randn(4, 3)
+        q_mu = torch.randn(4, 3)
+        q_log_var = torch.randn(4, 3)
+
+        expected = fn(p_mu, p_log_var, q_mu, q_log_var)
+        for dynamic in (False, True):
+            with self.subTest(dynamic=dynamic):
+                actual = torch.compile(
+                    fn, backend="eager", fullgraph=True, dynamic=dynamic
+                )(p_mu, p_log_var, q_mu, q_log_var)
+                self.assertEqual(actual, expected)
+
     def test_kl_lowrank_multivariate_normal(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         n = 5  # Number of tests for lowrank_multivariate_normal
@@ -6990,6 +7064,28 @@ class TestFunctors(DistributionsTestCase):
 
 
 class TestValidation(DistributionsTestCase):
+    def test_valid_does_not_format_error(self):
+        class UnformattableConstraint(Constraint):
+            def check(self, value):
+                return torch.ones_like(value, dtype=torch.bool)
+
+            def __repr__(self):
+                raise AssertionError("valid constraints should not be formatted")
+
+        constraint = UnformattableConstraint()
+
+        class UnformattableDistribution(Distribution):
+            arg_constraints = {"value": constraint}
+            support = constraint
+
+            def __init__(self, value, validate_args):
+                self.value = value
+                super().__init__(validate_args=validate_args)
+
+        value = torch.tensor(0.0)
+        UnformattableDistribution(value, validate_args=False)._validate_sample(value)
+        UnformattableDistribution(value, validate_args=True)
+
     def test_valid(self):
         for Dist, params in _get_examples():
             for param in params:

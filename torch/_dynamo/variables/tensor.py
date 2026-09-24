@@ -65,7 +65,7 @@ from ..exc import (
 )
 from ..external_utils import call_hook_from_backward_state
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource
+from ..source import AttrSource, TensorProperty, TensorPropertySource
 from ..utils import (
     cmp_name_to_op_mapping,
     fqn,
@@ -85,6 +85,8 @@ from .base import (
     AttributeMutationNew,
     GetSet,
     Method,
+    readonly_setter,
+    unmodeled_setter,
     ValueMutationNew,
     VariableTracker,
 )
@@ -316,8 +318,11 @@ class TensorVariable(VariableTracker):
         for k in ("_size", "stride", "is_contiguous"):
             if k not in specialized_props:
                 setattr(self, k, None)
+        # class_type is not resynced: a non-traceable tensor subclass lives only on
+        # the VariableTracker, so the fake tensor would resolve it to torch.Tensor.
         for k, v in specialized_props.items():
-            setattr(self, k, v)
+            if k != "class_type":
+                setattr(self, k, v)
 
     def _get_fake_version(self) -> int | None:
         """Get the current version of self's fake tensor, or None if unavailable."""
@@ -394,7 +399,9 @@ class TensorVariable(VariableTracker):
         proxy = tx.output.create_proxy(
             "call_function", op_fn, (self.as_proxy(), other.as_proxy()), {}
         )
-        return wrap_fx_proxy_cls(type(self), tx, proxy)
+        # Getting here means no __torch_function__ intercepted the comparison, so the
+        # result is a plain tensor even when self models a subclass.
+        return wrap_fx_proxy_cls(TensorVariable, tx, proxy)
 
     @staticmethod
     def specialize(value: torch.Tensor) -> TensorSpecializedProps:
@@ -769,7 +776,17 @@ class TensorVariable(VariableTracker):
             )
         ):
             install_guard(self.make_guard(GuardBuilder.TYPE_MATCH))
-            result.source = AttrSource(self.source, name)
+            if result.is_python_constant():
+                # ConstantVariable.create(None) is a process-wide singleton, and
+                # method_attr_grad hands it back for a pending `p.grad = None`; a
+                # source written onto it leaks into every later compile. Non-constants
+                # keep the in-place write: .data's tracker is AttributeMutationNew,
+                # which __init__ rejects a source for.
+                result = result.clone(
+                    source=AttrSource(self.source, name), source_location=None
+                )
+            else:
+                result.source = AttrSource(self.source, name)
 
         # It's hard to get inplace view (metadata mutation) on graph input work properly across
         # dynamo/aot/inductor, just fall back.
@@ -1117,6 +1134,24 @@ class TensorVariable(VariableTracker):
         self, tx: "InstructionTranslatorBase", *args: Any, **kwargs: Any
     ) -> VariableTracker | None:
         return self._method_size_stride("stride", *args, **kwargs)
+
+    def method_storage_offset(
+        self, tx: "InstructionTranslatorBase"
+    ) -> VariableTracker | None:
+        if self.source is None or not self.source.subguards_allowed():
+            return None
+
+        fake = self.proxy.node.meta.get("example_value")
+        if fake is None:
+            return None
+
+        storage_offset = fake.storage_offset()
+        if not isinstance(storage_offset, int):
+            return None
+
+        source = TensorPropertySource(self.source, TensorProperty.STORAGE_OFFSET)
+        install_guard(source.make_guard(GuardBuilder.EQUALS_MATCH))
+        return ConstantVariable.create(storage_offset, source=source)
 
     def _method_size_stride(
         self, name: str, dim: Any | None = None
@@ -1679,12 +1714,8 @@ class TensorVariable(VariableTracker):
                     {},
                 ),
             )
-        raise_observed_exception(
-            TypeError,
-            tx,
-            args=[
-                "only integer tensors of a single element can be converted to an index"
-            ],
+        raise_type_error(
+            tx, "only integer tensors of a single element can be converted to an index"
         )
 
     def nb_int_impl(
@@ -2149,6 +2180,19 @@ class TensorVariable(VariableTracker):
                         {},
                     ),
                 )
+
+            if name == "register_post_accumulate_grad_hook":
+                unimplemented(
+                    gb_type="register_post_accumulate_grad_hook on an intermediate tensor",
+                    context=str(self),
+                    explanation="Dynamo cannot preserve post-accumulate hook semantics "
+                    "for an intermediate tensor without compiled autograd.",
+                    hints=[
+                        "Move the hook registration outside the compiled region.",
+                        "Use compiled autograd if the hook must be registered inside it.",
+                    ],
+                )
+
             # Register the hook via a trampoline in the graph where the
             # tensor's proxy lives. During AOTAutograd's make_fx, the
             # trampoline calls tensor.register_hook(hook_fn). The hook
@@ -2156,6 +2200,8 @@ class TensorVariable(VariableTracker):
             # tracing, matching eager semantics. When inside a subgraph
             # (e.g. checkpoint), the node is created in the parent
             # graph so the hook is not confined to the HOP scope.
+            from torch._higher_order_ops.register_hook import register_hook_op
+
             from .higher_order_ops import speculate_subgraph
 
             tensor_proxy = self.as_proxy()
@@ -2172,10 +2218,14 @@ class TensorVariable(VariableTracker):
                         [self],
                         {},
                         "register_hook",
-                        source_target=None,
+                        source_target=register_hook_op,
                         enable_grad=None,
                         set_subgraph_inputs="automatic_with_forced_inputs",
                         restore_side_effects=True,
+                        # register_hook may return the incoming gradient unchanged,
+                        # but its contract forbids modifying that gradient in place.
+                        supports_input_mutation=False,
+                        supports_aliasing=True,
                     )
             except torch._dynamo.exc.UnknownPropertiesDuringBackwardTrace:
                 unimplemented(
@@ -2193,8 +2243,6 @@ class TensorVariable(VariableTracker):
                 torch.fx.GraphModule(hook_nn_modules.nn_modules, hook_graph),
             )
             hook_node = target_tracer.create_proxy("get_attr", hook_name, (), {})
-
-            from torch._higher_order_ops.register_hook import register_hook_op
 
             p_args = (tensor_proxy, hook_node, *list(hook_freevars.keys()))
             hooked_proxy = target_tracer.create_proxy(
@@ -2448,6 +2496,7 @@ class TensorVariable(VariableTracker):
     tp_methods = {
         "size": Method(method_size),
         "stride": Method(method_stride),
+        "storage_offset": Method(method_storage_offset),
         "numel": Method(method_numel),
         "nelement": Method(method_nelement),
         "dim": Method(method_dim),
@@ -2765,6 +2814,18 @@ class TensorVariable(VariableTracker):
         )
 
 
+def _symnode_proxy(name: str) -> Method:
+    def handler(
+        self: "SymNodeVariable",
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return self._proxy_method(tx, name, args, kwargs)
+
+    return Method(handler)
+
+
 class SymNodeVariable(VariableTracker):
     """
     Represents a symbolic scalar, either int, float or bool.  This is most commonly used to
@@ -2881,7 +2942,7 @@ class SymNodeVariable(VariableTracker):
                 case_name="constrain_as_size_example",
             )
 
-    def call_method(
+    def _proxy_method(
         self,
         tx: "InstructionTranslatorBase",
         name: str,
@@ -2898,6 +2959,42 @@ class SymNodeVariable(VariableTracker):
                 *proxy_args_kwargs([self, *args], kwargs),
             ),
         )
+
+    def int_(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return self.nb_int_impl(tx)
+
+    # Named instance methods on SymInt / SymFloat. Arithmetic dunders are
+    # number slots. Named int_ so this does not shadow Python's __int__.
+    tp_methods = {
+        "as_integer_ratio": _symnode_proxy("as_integer_ratio"),
+        "bit_length": _symnode_proxy("bit_length"),
+        "conjugate": _symnode_proxy("conjugate"),
+        "has_hint": _symnode_proxy("has_hint"),
+        "hex": _symnode_proxy("hex"),
+        "is_integer": _symnode_proxy("is_integer"),
+        "__int__": Method(int_),
+    }
+
+    def call_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # Unlisted names keep the generic FX-proxy path so getattr still
+        # dispatches through call_method (_has_custom_call_method).
+        method = self.lookup_tp_method(name)
+        if method is not None:
+            result = method(self, tx, name, args, kwargs)
+            if result is not None:
+                return result
+        return self._proxy_method(tx, name, args, kwargs)
 
     def nb_index_impl(
         self,
@@ -2931,11 +3028,6 @@ class SymNodeVariable(VariableTracker):
                 {},
             ),
         )
-
-    def method___int__(
-        self, tx: "InstructionTranslatorBase", *args: Any, **kwargs: Any
-    ) -> VariableTracker:
-        return self.nb_int_impl(tx)
 
     def nb_add_impl(
         self,
@@ -3290,13 +3382,15 @@ class NumpyNdarrayVariable(TensorVariable):
         )
         return NumpyNdarrayVariable.create(tx, proxy)
 
+    # numpy's array_getsetlist leaves T read-only; real/imag/flat do have setters,
+    # but they write the array in place and the VT is a functional graph proxy.
     tp_getset = {
-        "ndim": GetSet(_get_ndim, None),
-        "itemsize": GetSet(_get_itemsize, None),
-        "T": GetSet(lambda s, tx: s._get_numpy_attr(tx, "T")),
-        "real": GetSet(lambda s, tx: s._get_numpy_attr(tx, "real")),
-        "imag": GetSet(lambda s, tx: s._get_numpy_attr(tx, "imag")),
-        "flat": GetSet(lambda s, tx: s._get_numpy_attr(tx, "flat")),
+        "ndim": GetSet(_get_ndim, readonly_setter),
+        "itemsize": GetSet(_get_itemsize, readonly_setter),
+        "T": GetSet(lambda s, tx: s._get_numpy_attr(tx, "T"), readonly_setter),
+        "real": GetSet(lambda s, tx: s._get_numpy_attr(tx, "real"), unmodeled_setter),
+        "imag": GetSet(lambda s, tx: s._get_numpy_attr(tx, "imag"), unmodeled_setter),
+        "flat": GetSet(lambda s, tx: s._get_numpy_attr(tx, "flat"), unmodeled_setter),
     }
 
     def tp_getattro_impl(
