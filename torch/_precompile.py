@@ -3155,11 +3155,10 @@ def capture(
     Note [precompile programming model] in ``torch/_precompile.py``. ``fn`` is
     the whole computation, e.g. a module-level ``def step(model, x): return
     model(x)`` (only a :class:`MakeFxTracer` capture also takes a lambda): the
-    ``nn.Module``
-    arguments have their params/buffers lifted to graph inputs (no weights are
-    baked in) and the rest are the runtime inputs; the reloaded callable is
-    invoked with the same argument structure, and the runtime model must match
-    the captured model's parameter/buffer structure.
+    ``nn.Module`` arguments have their params/buffers lifted to graph inputs (no
+    weights are baked in) and the rest are the runtime inputs; the reloaded
+    callable is invoked with the same argument structure, and the runtime model
+    must match the captured model's parameter/buffer structure.
 
     A Dynamo artifact is STANDALONE: it rebuilds the entry from its code object
     and installs nothing, so ``fn`` must be a module-level function of an
