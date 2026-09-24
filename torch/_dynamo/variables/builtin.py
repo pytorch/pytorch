@@ -2091,6 +2091,19 @@ class BuiltinVariable(BaseBuiltinVariable):
     ) -> VariableTracker | None:
         return generic_repr(tx, arg)
 
+    def call_ascii(
+        self, tx: "InstructionTranslatorBase", arg: VariableTracker
+    ) -> VariableTracker | None:
+        result = generic_repr(tx, arg)
+        if not result.is_python_constant():
+            return None
+        value = result.as_python_constant()
+        if str.isascii(value):
+            return result
+        return variables.ConstantVariable.create(
+            bytes.decode(str.encode(value, "ascii", "backslashreplace"), "ascii")
+        )
+
     def call_str(
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
     ) -> VariableTracker | None:

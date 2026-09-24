@@ -85,6 +85,51 @@ class TpReprTests(TestCase):
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x, obj), compiled(x, obj))
 
+    def test_ascii_escapes_user_defined_repr(self):
+        class MyObj:
+            def __repr__(self):
+                return "\u00e9\u2603\U0001f40d"
+
+        def fn(obj):
+            return ascii(obj)
+
+        obj = MyObj()
+        self.assertEqual(fn(obj), r"\xe9\u2603\U0001f40d")
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(obj), compiled(obj))
+
+    def test_ascii_preserves_ascii_str_subclass(self):
+        class MyStr(str):
+            __slots__ = ()
+
+        class MyObj:
+            def __repr__(self):
+                return MyStr("<abc>")
+
+        def fn(obj):
+            return ascii(obj)
+
+        obj = MyObj()
+        expected = fn(obj)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(obj)
+        self.assertEqual(result, expected)
+        self.assertIs(type(result), type(expected))
+
+    def test_ascii_rejects_non_string_repr(self):
+        class MyObj:
+            def __repr__(self):
+                return 3
+
+        def fn(obj):
+            try:
+                return ascii(obj)
+            except TypeError as e:
+                return str(e)
+
+        obj = MyObj()
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(obj), compiled(obj))
+
     def test_user_defined_dunder_repr(self):
         class MyObj:
             def __init__(self, value):
