@@ -1337,26 +1337,58 @@ class BatchMathOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
     Batch simple math related ops such as nan_to_num in pre grad pass.
     """
 
-    def __init__(self, op, **kwargs):
+    def __init__(
+        self,
+        op,
+        positional_arg_defaults: tuple[tuple[str, Any], ...] = (),
+        **kwargs,
+    ):
         super().__init__(op, **kwargs)
         self.op = op
+        self.positional_arg_defaults = positional_arg_defaults
+
+    def _get_non_input_kwargs(self, node: torch.fx.Node) -> dict[str, Any] | None:
+        """Canonicalize arguments after `input` for grouping and replay.
+
+        When present, `node.args[0]` is the input replaced by the stacked
+        tensor. Remaining positional arguments map to
+        `positional_arg_defaults`; omitted values receive their defaults, and
+        keyword `input` is excluded to avoid passing it twice.
+        """
+        positional_args = node.args[1:] if node.args else ()
+        if len(positional_args) > len(self.positional_arg_defaults):
+            return None
+
+        kwargs = {}
+        for index, (name, default) in enumerate(self.positional_arg_defaults, start=1):
+            if len(node.args) > index:
+                kwargs[name] = node.args[index]
+            else:
+                kwargs[name] = node.kwargs.get(name, default)
+
+        for name in sorted(node.kwargs):
+            if name != "input" and name not in kwargs:
+                kwargs[name] = node.kwargs[name]
+        return kwargs
 
     def match(self, node: torch.fx.Node):
+        if not self._match_op(node) or not is_node_meta_valid(node):
+            return None
+
+        kwargs = self._get_non_input_kwargs(node)
+        if kwargs is None:
+            return None
+
         input = get_arg_value(node, 0, "input")
-        if self._match_op(node) and is_node_meta_valid(node):
-            # check the input has the same shape and its users have the same target
-            # check all clamp operators have the same min and max values, and
-            # nan_to_num operators use the same default value.
-            child = next(iter(node.users.keys()))
-            group_key = (
-                str(input.meta["example_value"].shape)
-                + str(node.args[1:])
-                + str(node.kwargs)
-                + str(child.target)
-            )
-        else:
-            group_key = None
-        return group_key
+        # check the input has the same shape and its users have the same target
+        # check all clamp operators have the same min and max values, and
+        # nan_to_num operators use the same default value.
+        child = next(iter(node.users.keys()))
+        return (
+            str(input.meta["example_value"].shape),
+            str(kwargs),
+            str(child.target),
+        )
 
     def _match_op(self, node: torch.fx.Node) -> MatchResult:
         return CallFunctionVarArgs(self.op).match(node)
@@ -1365,8 +1397,9 @@ class BatchMathOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
         batch_nodes = []
         batch_inputs = []
         batch_inputs_metadata = []
-        args = subset[0].args[1:]
-        kwargs = subset[0].kwargs
+        kwargs = self._get_non_input_kwargs(subset[0])
+        if kwargs is None:
+            raise AssertionError("matched node has unsupported positional arguments")
 
         for node in subset:
             batch_nodes.append(node)
@@ -1381,11 +1414,11 @@ class BatchMathOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
             update_stack_example_value(stack_inputs, batch_inputs_metadata)
             batch_op = graph.call_function(  # type: ignore[operator]
                 self.op,
-                args=(stack_inputs, *args),
+                args=(stack_inputs,),
                 kwargs=kwargs,
             )
             batch_op.meta["example_value"] = self.op(
-                stack_inputs.meta["example_value"], *args, **kwargs
+                stack_inputs.meta["example_value"], **kwargs
             )
             unbind_op = graph.call_function(  # type: ignore[operator]
                 torch.unbind, args=(batch_op,), kwargs={"dim": 0}
@@ -1434,19 +1467,27 @@ class BatchDetachPreGradFusion(BatchMathOpsPreGradFusion):
 @register_fusion("batch_nan_to_num")
 class BatchNanToNumPreGradFusion(BatchMathOpsPreGradFusion):
     def __init__(self, **kwargs):
-        super().__init__(torch.nan_to_num, **kwargs)
+        super().__init__(
+            torch.nan_to_num,
+            (("nan", 0.0), ("posinf", None), ("neginf", None)),
+            **kwargs,
+        )
 
 
 @register_fusion("batch_clamp")
 class BatchClampPreGradFusion(BatchMathOpsPreGradFusion):
     def __init__(self, **kwargs):
-        super().__init__(torch.clamp, **kwargs)
+        super().__init__(torch.clamp, (("min", None), ("max", None)), **kwargs)
 
 
 @register_fusion("batch_dropout")
 class BatchDropoutPreGradFusion(BatchMathOpsPreGradFusion):
     def __init__(self, **kwargs):
-        super().__init__(torch.nn.functional.dropout, **kwargs)
+        super().__init__(
+            torch.nn.functional.dropout,
+            (("p", 0.5), ("training", True), ("inplace", False)),
+            **kwargs,
+        )
 
 
 @register_fusion("batch_aten_tanh", pre_grad=False)

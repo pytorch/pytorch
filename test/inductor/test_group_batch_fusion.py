@@ -318,9 +318,7 @@ class _TestDropout(torch.nn.Module):
         super().__init__()
         self.device = device
 
-    def forward(
-        self, x: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, ...]:
         split = x.split([20, 20, 20, 20, 20], 1)
         getitem_1 = split[0]
         getitem_2 = split[1]
@@ -342,6 +340,21 @@ class _TestDropout(torch.nn.Module):
         dropout_4 = torch.nn.functional.dropout(
             getitem_5, p=0.05, training=True, inplace=False
         )
+        return (dropout, dropout_1, dropout_2, dropout_3, dropout_4)
+
+
+class _TestDropoutPositionalArgs(torch.nn.Module):
+    def __init__(self, device):
+        super().__init__()
+        self.device = device
+
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, ...]:
+        split = x.split([20, 20, 20, 20, 20], 1)
+        dropout = torch.nn.functional.dropout(split[0], 0.05, True, False)
+        dropout_1 = torch.nn.functional.dropout(split[1], 0.05, True, False)
+        dropout_2 = torch.nn.functional.dropout(split[2], 0.05, True, False)
+        dropout_3 = torch.nn.functional.dropout(split[3], 0.05, True, False)
+        dropout_4 = torch.nn.functional.dropout(split[4], 0.05, True, False)
         return (dropout, dropout_1, dropout_2, dropout_3, dropout_4)
 
 
@@ -918,6 +931,41 @@ class TestGroupBatchFusion(TestCase):
         self.assertEqual(counters["inductor"]["batch_clamp"], 2)
         counters.clear()
 
+    @config.patch(
+        is_predispatch=True,
+        pre_grad_fusion_options={"batch_clamp": {}},
+    )
+    def test_math_op_fusion_predispatch_keyword_input(self):
+        counters.clear()
+
+        def fn(x):
+            return torch.stack(
+                [torch.clamp(input=x, min=-1.0, max=1.0) for _ in range(5)]
+            )
+
+        x = torch.randn(8)
+        self.assertEqual(fn(x), torch.compile(fn, fullgraph=True)(x))
+        self.assertEqual(counters["inductor"]["batch_clamp"], 1)
+        counters.clear()
+
+    @config.patch(
+        is_predispatch=True,
+        pre_grad_fusion_options={"batch_clamp": {}},
+    )
+    def test_math_op_fusion_predispatch_normalizes_args(self):
+        counters.clear()
+
+        def fn(x):
+            return torch.stack(
+                [torch.clamp(x + i, -1.0) for i in range(3)]
+                + [torch.clamp(input=x + i, min=-1.0, max=None) for i in range(3, 6)]
+            )
+
+        x = torch.randn(8)
+        self.assertEqual(fn(x), torch.compile(fn, fullgraph=True)(x))
+        self.assertEqual(counters["inductor"]["batch_clamp"], 1)
+        counters.clear()
+
     @requires_gpu()
     @torch._inductor.config.patch(
         pre_grad_fusion_options={
@@ -928,6 +976,24 @@ class TestGroupBatchFusion(TestCase):
     def test_batch_dropout_pre_grad_fusion(self):
         counters.clear()
         module = _TestDropout(GPU_TYPE)
+        input = [torch.randn(10, 100, requires_grad=True, device=GPU_TYPE)]
+        traced = torch.compile(module)
+        module(*input)
+        traced(*input)
+        self.assertEqual(counters["inductor"]["normalization_pass"], 1)
+        self.assertEqual(counters["inductor"]["batch_dropout"], 1)
+        counters.clear()
+
+    @requires_gpu()
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "normalization_pass": {},
+            "batch_dropout": {},
+        }
+    )
+    def test_batch_dropout_pre_grad_fusion_positional_args(self):
+        counters.clear()
+        module = _TestDropoutPositionalArgs(GPU_TYPE)
         input = [torch.randn(10, 100, requires_grad=True, device=GPU_TYPE)]
         traced = torch.compile(module)
         module(*input)
