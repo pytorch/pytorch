@@ -7,6 +7,7 @@ import unittest
 
 import torch
 from torch.distributed._transport import new_transport, wait_all
+from torch.distributed._transport.nixl import NIXLRemoteBuffer
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -18,14 +19,14 @@ from torch.testing._internal.common_utils import (
 def _receive(connection):
     if not connection.poll(10):
         raise TimeoutError("peer did not send control-plane metadata")
-    return connection.recv()
+    return connection.recv_bytes()
 
 
 def _native_worker(rank, connection, progress_thread):
     with new_transport(
         "nixl", "cpu", timeout=5, enable_prog_thread=progress_thread
     ) as transport:
-        connection.send(transport.bind())
+        connection.send_bytes(transport.bind())
         transport.connect(_receive(connection))
         source = torch.arange(1024, dtype=torch.float32) + rank
         target = torch.zeros_like(source)
@@ -33,21 +34,18 @@ def _native_worker(rank, connection, progress_thread):
         source_memory = transport.register_memory(source)
         target_memory = transport.register_memory(target)
         other_memory = transport.register_memory(other_target)
-        connection.send(
-            (
-                source_memory.to_remote_buffer(),
-                target_memory.to_remote_buffer(),
-                other_memory.to_remote_buffer(),
-            )
+        for memory in (source_memory, target_memory, other_memory):
+            connection.send_bytes(memory.to_remote_buffer().serialize())
+        remote_source, remote_target, remote_other = (
+            NIXLRemoteBuffer.deserialize(_receive(connection)) for _ in range(3)
         )
-        remote_source, remote_target, remote_other = _receive(connection)
         work = transport.write(source_memory.to_view(), remote_target, async_op=True)
         other_work = transport.write(
             source_memory.to_view(), remote_other, async_op=True
         )
         asyncio.run(wait_all([work, other_work], timeout=5))
-        connection.send("written")
-        if _receive(connection) != "written":
+        connection.send_bytes(b"written")
+        if _receive(connection) != b"written":
             raise AssertionError("unexpected control-plane message")
         torch.testing.assert_close(
             target, torch.arange(1024, dtype=torch.float32) + 1 - rank
@@ -61,8 +59,8 @@ def _native_worker(rank, connection, progress_thread):
         torch.testing.assert_close(
             target, torch.arange(1024, dtype=torch.float32) + 1 - rank
         )
-        connection.send("finished")
-        if _receive(connection) != "finished":
+        connection.send_bytes(b"finished")
+        if _receive(connection) != b"finished":
             raise AssertionError("unexpected control-plane message")
         for memory in (source_memory, target_memory, other_memory):
             transport.unregister_memory(memory)
@@ -72,11 +70,11 @@ def _native_worker(rank, connection, progress_thread):
         target_memory = transport.register_memory(target)
         if source_memory.reused_registration() or target_memory.reused_registration():
             raise AssertionError("unregistered allocation was reused")
-        connection.send(target_memory.to_remote_buffer())
-        remote_target = _receive(connection)
+        connection.send_bytes(target_memory.to_remote_buffer().serialize())
+        remote_target = NIXLRemoteBuffer.deserialize(_receive(connection))
         transport.write(source_memory.to_view(), remote_target)
-        connection.send("rewritten")
-        if _receive(connection) != "rewritten":
+        connection.send_bytes(b"rewritten")
+        if _receive(connection) != b"rewritten":
             raise AssertionError("unexpected control-plane message")
         torch.testing.assert_close(
             target, torch.arange(1024, dtype=torch.float32) + 11 - rank
