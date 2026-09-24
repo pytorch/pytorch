@@ -11,6 +11,7 @@
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_dispatch.h>
 
+#include <algorithm>
 #include <string>
 
 using namespace torch;
@@ -1198,19 +1199,20 @@ bool ConcretePyInterpreterVTable::fake_try_decomp(
         }
       };
       auto args = torch::jit::last(*stack, op.schema().arguments().size());
+      auto is_sparse_arg = [&](const c10::IValue& v) {
+        return v.isTensor() && v.toTensor().defined() &&
+            is_sparse(v.toTensor());
+      };
+      // isList() covers both Tensor[] and Tensor?[].
       for (const auto& arg : args) {
-        if (arg.isTensor()) {
-          if (arg.toTensor().defined() && is_sparse(arg.toTensor())) {
-            use_decomp = false;
-            break;
-          }
-        } else if (arg.isTensorList()) {
-          for (const at::Tensor& t : arg.toTensorList()) {
-            if (t.defined() && is_sparse(t)) {
-              use_decomp = false;
-              break;
-            }
-          }
+        if (is_sparse_arg(arg) ||
+            (arg.isList() &&
+             std::any_of(
+                 arg.toListRef().begin(),
+                 arg.toListRef().end(),
+                 is_sparse_arg))) {
+          use_decomp = false;
+          break;
         }
       }
     }
@@ -1544,7 +1546,6 @@ py::object getCppFakeTensorModePyObj(
   // The wrapper is gone (or was never made). Mint one around this same C++
   // mode: all mode state lives in C++, so the new wrapper is equivalent. Cache
   // a weakref to it so every later lookup returns the same object.
-  py::gil_scoped_acquire gil;
   auto converter = mode->fake_tensor_converter_
       ? py::reinterpret_borrow<py::object>(
             mode->fake_tensor_converter_->ptr(getPyInterpreter()))
