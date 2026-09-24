@@ -164,7 +164,9 @@ class TestGpuWrapper(InductorTestCase):
 
         wrapper.prefix = IndentedBuffer()
         wrapper._lazy_kernel_names = []
-        graph = SimpleNamespace(is_dual_wrapper_mode=False)
+        # The prologue hoists a stream declaration per device, so it reads the
+        # devices the graph lowered for.
+        graph = SimpleNamespace(is_dual_wrapper_mode=False, device_idxs=())
         with (
             config.patch({"triton.debug_sync_graph": True}),
             V.set_graph_handler(graph),
