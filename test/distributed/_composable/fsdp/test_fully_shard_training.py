@@ -7,7 +7,7 @@ import gc
 import itertools
 import unittest
 from collections import defaultdict
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from typing import Any
 
 import torch
@@ -23,11 +23,13 @@ from torch.distributed.fsdp import (
     CPUOffloadPolicy,
     FSDPModule,
     fully_shard,
+    GradientReductionHandle,
     MixedPrecisionPolicy,
     OffloadPolicy,
     register_fsdp_forward_method,
     share_comm_ctx,
 )
+from torch.distributed.fsdp._fully_shard._fsdp_api import ReduceScatter
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _default_reduce_scatter_input_fn,
     foreach_all_gather,
@@ -37,6 +39,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_common import (
     FSDPMeshInfo,
     HSDPMeshInfo,
     ShardPlacementResult,
+    TrainingState,
 )
 from torch.distributed.tensor import DTensor, init_device_mesh, Shard
 from torch.distributed.tensor.debug import CommDebugMode
@@ -85,6 +88,50 @@ from torch.testing._internal.common_fsdp import get_devtype
 
 
 device_type = torch.device(get_devtype())
+
+
+class _PersistentInputReduceScatter(ReduceScatter):
+    def __init__(self):
+        self.input_buffer = None
+        self.next_allocation_is_input = True
+        self.observed_caps = []
+        self.get_cap = lambda: -1
+
+    def allocate(
+        self,
+        size: Sequence[int | torch.SymInt],
+        *,
+        dtype: torch.dtype,
+        device: torch.device,
+    ) -> torch.Tensor:
+        if self.next_allocation_is_input:
+            self.next_allocation_is_input = False
+            self.observed_caps.append(self.get_cap())
+            if self.input_buffer is None:
+                self.input_buffer = torch.empty(*size, dtype=dtype, device=device)
+            return self.input_buffer
+        self.next_allocation_is_input = True
+        return torch.empty(*size, dtype=dtype, device=device)
+
+    def __call__(
+        self,
+        output_tensor: torch.Tensor,
+        input_tensor: torch.Tensor,
+        group: dist.ProcessGroup,
+        op,
+        async_op: bool = False,
+    ):
+        device_sleep(
+            device_type.type,
+            int(50 * get_cycles_per_ms(device_type.type)),
+        )
+        return dist.reduce_scatter_tensor(
+            output_tensor,
+            input_tensor,
+            group=group,
+            op=op,
+            async_op=async_op,
+        )
 
 
 def _get_device_ids(rank: int) -> list[int] | None:
@@ -1866,6 +1913,39 @@ class TestFullyShardGradientAccumulation(FSDPTestContinuous):
         model.finalize_backward()
 
     @skip_if_lt_x_gpu(2, allow_cpu=True)
+    def test_manual_backward_finalization_async_validation_recovery(self):
+        model = fully_shard(
+            nn.Linear(8, 8, bias=False).to(device_type),
+            reshard_after_forward=False,
+        )
+        input_tensor = torch.randn(4, 8, device=device_type.type)
+        model(input_tensor).sum().backward()
+
+        with self.assertRaisesRegex(RuntimeError, "requires manual"):
+            model.finalize_backward(async_op=True)
+        state = model._get_fsdp_state()
+        self.assertIsNone(state._comm_ctx.active_gradient_reduction)
+
+        model.zero_grad(set_to_none=True)
+        model.set_manual_backward_finalization(True)
+        errors = []
+
+        def finalize_in_backward(grad):
+            try:
+                model.finalize_backward(async_op=True)
+            except RuntimeError as error:
+                errors.append(str(error))
+            return grad
+
+        output = model(input_tensor)
+        output.register_hook(finalize_in_backward)
+        output.sum().backward()
+        self.assertEqual(len(errors), 1)
+        self.assertIn("must be called after backward completes", errors[0])
+        self.assertIsNone(state._comm_ctx.active_gradient_reduction)
+        model.finalize_backward(async_op=True).wait()
+
+    @skip_if_lt_x_gpu(2, allow_cpu=True)
     @parametrize("initial_mode", [False, True])
     def test_manual_backward_finalization_mode_is_fixed(self, initial_mode):
         model = nn.Linear(8, 8, bias=False).to(device_type)
@@ -2017,6 +2097,250 @@ class TestFullyShardGradientAccumulation(FSDPTestContinuous):
             self.assertIsNotNone(ref_param.grad)
             self.assertIsNotNone(param.grad)
             self.assertEqual(ref_param.grad, param.grad)
+
+    @skip_if_lt_x_gpu(2, allow_cpu=True)
+    def test_manual_backward_finalization_async_before_first_forward(self):
+        model = fully_shard(nn.Linear(8, 8, bias=False).to(device_type))
+
+        with self.assertRaisesRegex(RuntimeError, "after the first forward"):
+            model.finalize_backward(async_op=True)
+
+    @skip_if_lt_x_gpu(2, allow_cpu=True)
+    def test_manual_backward_finalization_async(self):
+        torch.manual_seed(42)
+        model = nn.Sequential(
+            nn.Linear(8, 8, bias=False),
+            nn.Linear(8, 8, bias=False),
+        ).to(device_type)
+        ref_model = copy.deepcopy(model)
+        fully_shard(model[0], reshard_after_forward=False)
+        fully_shard(model[1], reshard_after_forward=False)
+        fully_shard(model, reshard_after_forward=False)
+
+        torch.manual_seed(42 + self.rank)
+        inputs = [torch.randn(4, 8, device=device_type.type) for _ in range(3)]
+        model.set_manual_backward_finalization(True)
+        model.set_reshard_after_backward(False)
+        model.set_requires_gradient_sync(False)
+        for input_tensor in inputs:
+            model(input_tensor).sum().backward()
+
+        model.set_requires_gradient_sync(True)
+        model.set_reshard_after_backward(True)
+        handle = model.finalize_backward(async_op=True)
+        self.assertIsInstance(handle, GradientReductionHandle)
+        state = model._get_fsdp_state()
+        self.assertTrue(state._state_ctx.gradient_reduction_pending)
+        self.assertEqual(len(state._comm_ctx.reduce_scatter_states), 2)
+        with self.assertRaisesRegex(RuntimeError, "before finalizing"):
+            model.finalize_backward(async_op=True)
+        with self.assertRaisesRegex(RuntimeError, "before forward"):
+            model(inputs[0])
+        self.assertEqual(state._training_state, TrainingState.IDLE)
+        self.assertIsNone(state._state_ctx.iter_forward_root)
+
+        handle.wait()
+        handle.wait()
+        self.assertFalse(state._state_ctx.gradient_reduction_pending)
+        self.assertEqual(len(state._comm_ctx.reduce_scatter_states), 0)
+
+        for input_tensor in inputs:
+            ref_model(input_tensor).sum().backward()
+        for ref_param, param in zip(ref_model.parameters(), model.parameters()):
+            dist.all_reduce(ref_param.grad, op=dist.ReduceOp.AVG)
+            self.assertIsInstance(param, DTensor)
+            self.assertIsNotNone(param.grad)
+            self.assertEqual(ref_param.grad, param.grad.full_tensor())
+
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(device_type.type != "cuda", "CUDA stream test requires CUDA")
+    def test_manual_backward_finalization_async_cross_stream(self):
+        model = nn.Sequential(
+            nn.Linear(8, 8, bias=False),
+            nn.Linear(8, 8, bias=False),
+        ).to(device_type)
+        fully_shard(model[0], reshard_after_forward=False)
+        fully_shard(model[1], reshard_after_forward=False)
+        fully_shard(model, reshard_after_forward=False)
+
+        model.set_manual_backward_finalization(True)
+        device_module = torch.get_device_module(device_type)
+        current_stream = device_module.current_stream()
+        backward_stream = device_module.Stream()
+        backward_stream.wait_stream(current_stream)
+        with device_module.stream(backward_stream):
+            model(torch.randn(4, 8, device=device_type.type)).sum().backward()
+
+        state = model._get_fsdp_state()
+        self.assertGreater(len(state._comm_ctx.reduce_scatter_states), 0)
+        self.assertTrue(
+            all(
+                reduction.allocation_stream == backward_stream
+                for reduction in state._comm_ctx.reduce_scatter_states
+            )
+        )
+        finalize_stream = device_module.Stream()
+        finalize_stream.wait_stream(backward_stream)
+        with device_module.stream(finalize_stream):
+            handle = model.finalize_backward(async_op=True)
+
+        wait_stream = device_module.Stream()
+        with device_module.stream(wait_stream):
+            handle.wait()
+            grad_norm = torch.linalg.vector_norm(
+                torch.stack(
+                    [param.grad.to_local().norm() for param in model.parameters()]
+                )
+            )
+        wait_stream.synchronize()
+        self.assertTrue(torch.isfinite(grad_norm))
+
+    @skip_if_lt_x_gpu(2, allow_cpu=True)
+    def test_manual_backward_finalization_invalidates_handle_on_reset(self):
+        model = fully_shard(
+            nn.Linear(8, 8, bias=False).to(device_type),
+            reshard_after_forward=False,
+        )
+        model.set_manual_backward_finalization(True)
+
+        def start_reduction():
+            model.set_requires_gradient_sync(False)
+            model(torch.randn(4, 8, device=device_type.type)).sum().backward()
+            model.set_requires_gradient_sync(True)
+            return model.finalize_backward(async_op=True)
+
+        stale_handle = start_reduction()
+        model.reset_iter_state()
+        model.zero_grad(set_to_none=True)
+        active_handle = start_reduction()
+
+        with self.assertRaisesRegex(RuntimeError, "handle was invalidated"):
+            stale_handle.wait()
+        state = model._get_fsdp_state()
+        self.assertTrue(state._state_ctx.gradient_reduction_pending)
+        active_handle.wait()
+        self.assertFalse(state._state_ctx.gradient_reduction_pending)
+
+    @skip_if_lt_x_gpu(2, allow_cpu=True)
+    def test_manual_backward_finalization_rejects_shared_context_overlap(self):
+        models = [
+            fully_shard(
+                nn.Linear(8, 8, bias=False).to(device_type),
+                reshard_after_forward=False,
+            )
+            for _ in range(2)
+        ]
+        for model in models:
+            model._get_fsdp_state()._lazy_init()
+            model.set_manual_backward_finalization(True)
+        share_comm_ctx(models)
+
+        models[0].set_requires_gradient_sync(False)
+        models[0](torch.randn(4, 8, device=device_type.type)).sum().backward()
+        models[0].set_requires_gradient_sync(True)
+        handle = models[0].finalize_backward(async_op=True)
+
+        with self.assertRaisesRegex(RuntimeError, "sharing this communication context"):
+            models[1].finalize_backward(async_op=True)
+        with self.assertRaisesRegex(RuntimeError, "owned by another FSDP root"):
+            models[1].reset_iter_state()
+        owner_state = models[0]._get_fsdp_state()
+        self.assertTrue(owner_state._state_ctx.gradient_reduction_pending)
+        handle.wait()
+
+    @skip_if_lt_x_gpu(2)
+    def test_manual_backward_finalization_persistent_reduce_scatter_input(self):
+        self.run_subtests(
+            {"async_op": [False, True]},
+            self._test_manual_backward_finalization_persistent_reduce_scatter_input,
+        )
+
+    def _test_manual_backward_finalization_persistent_reduce_scatter_input(
+        self, async_op: bool
+    ) -> None:
+        torch.manual_seed(42)
+        model = nn.Sequential(
+            nn.Linear(8, 8, bias=False),
+            nn.Linear(8, 8, bias=False),
+        ).to(device_type)
+        ref_model = copy.deepcopy(model)
+        fully_shard(model[0], reshard_after_forward=False)
+        fully_shard(model[1], reshard_after_forward=False)
+        fully_shard(model, reshard_after_forward=False)
+        comm = _PersistentInputReduceScatter()
+        model[0].set_custom_reduce_scatter(comm)
+        model[1].set_custom_reduce_scatter(comm)
+
+        model.set_manual_backward_finalization(True)
+        model.set_requires_gradient_sync(False)
+        torch.manual_seed(42 + self.rank)
+        inputs = [torch.randn(4, 8, device=device_type.type) for _ in range(2)]
+        for input_tensor in inputs:
+            model(input_tensor).sum().backward()
+        model.set_requires_gradient_sync(True)
+        state = model._get_fsdp_state()
+        comm.get_cap = lambda: state._comm_ctx.reduce_scatter_max_input_buffers
+
+        handle = model.finalize_backward(async_op=async_op)
+        if handle is not None:
+            handle.wait()
+
+        self.assertEqual(comm.observed_caps, [1, 1])
+        for input_tensor in inputs:
+            ref_model(input_tensor).sum().backward()
+        for ref_param, param in zip(ref_model.parameters(), model.parameters()):
+            dist.all_reduce(ref_param.grad, op=dist.ReduceOp.AVG)
+            self.assertIsInstance(param, DTensor)
+            self.assertEqual(ref_param.grad, param.grad.full_tensor())
+
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(device_type.type != "cuda", "CUDA stream test requires CUDA")
+    def test_manual_backward_finalization_recycles_across_streams(self):
+        torch.manual_seed(42)
+        model = nn.Sequential(
+            nn.Linear(8, 8, bias=False),
+            nn.Linear(8, 8, bias=False),
+        ).to(device_type)
+        ref_model = copy.deepcopy(model)
+        fully_shard(model[0], reshard_after_forward=False)
+        fully_shard(model[1], reshard_after_forward=False)
+        fully_shard(model, reshard_after_forward=False)
+        comm = _PersistentInputReduceScatter()
+        model[0].set_custom_reduce_scatter(comm)
+        model[1].set_custom_reduce_scatter(comm)
+        model.set_manual_backward_finalization(True)
+        model.set_reshard_after_backward(False)
+        model[0].set_requires_gradient_sync(False)
+
+        input_tensor = torch.randn(4, 8, device=device_type.type)
+        device_module = torch.get_device_module(device_type)
+        backward_stream = device_module.Stream()
+        backward_stream.wait_stream(device_module.current_stream())
+        with device_module.stream(backward_stream):
+            model(input_tensor).sum().backward()
+
+        state = model._get_fsdp_state()
+        self.assertEqual(len(state._comm_ctx.reduce_scatter_states), 1)
+        self.assertEqual(
+            state._comm_ctx.reduce_scatter_states[0].allocation_stream,
+            backward_stream,
+        )
+        model[0].set_requires_gradient_sync(True)
+        model.set_reshard_after_backward(True)
+        finalize_stream = device_module.Stream()
+        finalize_stream.wait_stream(backward_stream)
+        with device_module.stream(finalize_stream):
+            handle = model.finalize_backward(async_op=True)
+
+        with device_module.stream(device_module.Stream()):
+            handle.wait()
+        device_module.synchronize()
+
+        ref_model(input_tensor).sum().backward()
+        for ref_param, param in zip(ref_model.parameters(), model.parameters()):
+            dist.all_reduce(ref_param.grad, op=dist.ReduceOp.AVG)
+            self.assertIsInstance(param, DTensor)
+            self.assertEqual(ref_param.grad, param.grad.full_tensor())
 
     @skip_if_lt_x_gpu(4, allow_cpu=True)
     def test_manual_backward_finalization_rejects_partial_all_reduce(self):
@@ -3099,6 +3423,12 @@ class TestFullyShardCudaGraph(FSDPTest):
     )
     @unittest.skipIf(device_type.type != "cuda", "CUDA graph test requires CUDA")
     def test_manual_backward_finalization_cudagraph(self):
+        self.run_subtests(
+            {"async_op": [False, True]},
+            self._test_manual_backward_finalization_cudagraph,
+        )
+
+    def _test_manual_backward_finalization_cudagraph(self, async_op: bool) -> None:
         torch.cuda.set_device(self.rank)
         device = torch.device("cuda", self.rank)
         torch.manual_seed(42)
@@ -3125,7 +3455,9 @@ class TestFullyShardCudaGraph(FSDPTest):
                 model(input_tensor).sum().backward()
             model.set_requires_gradient_sync(True)
             model.set_reshard_after_backward(True)
-            model.finalize_backward()
+            handle = model.finalize_backward(async_op=async_op)
+            if handle is not None:
+                handle.wait()
             return tuple(param.grad.detach().clone() for param in model.parameters())
 
         model.set_manual_backward_finalization(True)
