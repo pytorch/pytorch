@@ -243,6 +243,7 @@ recompiles_verbose_log = torch._logging.getArtifactLogger(
     __name__, "recompiles_verbose"
 )
 verbose_guards_log = torch._logging.getArtifactLogger(__name__, "verbose_guards")
+filtered_guards_log = torch._logging.getArtifactLogger(__name__, "filtered_guards")
 
 
 def _sequence_length(value: object) -> int:
@@ -329,6 +330,9 @@ class GuardManagerWrapper:
             self.root.set_local_state(local_state)
 
         self.diff_guard_root: RootGuardManager | None = None
+        self.filtered_guard_root: RootGuardManager | None = None
+        self.filtered_guard_code: types.CodeType | None = None
+        self.filtered_guard_failures_seen: set[str] = set()
         self.closure_vars: dict[str, Any] | None = None
         self.args: list[str] | None = None
         self.code_parts: list[str] = []
@@ -405,12 +409,13 @@ class GuardManagerWrapper:
 
         return self.diff_guard_sources
 
-    def finalize(self) -> None:
+    def finalize(self, *, prepare_diff_guard_manager: bool = True) -> None:
         if config.use_recursive_dict_tags_for_guards and justknobs_check(
             "pytorch/compiler:use_recursive_dict_tags_for_guards"
         ):
             self.find_tag_safe_roots()
-        self.prepare_diff_guard_manager()
+        if prepare_diff_guard_manager:
+            self.prepare_diff_guard_manager()
 
     def prepare_diff_guard_manager(self) -> None:
         self.collect_diff_guard_sources()
@@ -798,6 +803,38 @@ class GuardManagerWrapper:
         except BaseException:
             torch._C._set_torch_function_state(torch_function_state)
             raise
+
+    def report_filtered_guard_failure(
+        self, f_locals: dict[str, object], compile_id: object
+    ) -> None:
+        if self.filtered_guard_root is None:
+            return
+        guard_debug_info = self.filtered_guard_root.check_verbose(f_locals)
+        if guard_debug_info.result:
+            return
+        reason = "\n".join(guard_debug_info.verbose_code_parts) or "unknown reason"
+        if guard_debug_info.user_stack:
+            reason += "\nUser stack trace:\n" + format_user_stack_trace(
+                guard_debug_info.user_stack
+            )
+        if reason in self.filtered_guard_failures_seen:
+            return
+        self.filtered_guard_failures_seen.add(reason)
+        if self.filtered_guard_code is None:
+            context = ""
+        else:
+            context = (
+                f" for {compile_id}: {self.filtered_guard_code.co_name} in "
+                f"{self.filtered_guard_code.co_filename}:"
+                f"{self.filtered_guard_code.co_firstlineno}"
+            )
+        filtered_guards_log.debug(
+            "Filtered guard failed%s:\n%s\n"
+            "The active guards passed and the compiled entry was still used. "
+            "Changes to filtered state may affect correctness.",
+            context,
+            strip_local_scope(reason),
+        )
 
     def populate_code_parts_for_debugging(self) -> None:
         # This should be called when the guard manager is fully populated
@@ -5085,6 +5122,7 @@ def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterE
             value = MISSING
             has_value = False
     is_global = get_global_source_name(guard.originating_source) is not None
+    is_input = is_from_local_source(guard.originating_source, only_allow_input=True)
     return GuardFilterEntry(
         name=name,
         has_value=has_value,
@@ -5092,6 +5130,7 @@ def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterE
         guard_type=guard.create_fn_name(),
         derived_guard_types=(tuple(guard.guard_types) if guard.guard_types else ()),
         is_global=is_global,
+        is_input=is_input,
         orig_guard=guard,
         code_parts=tuple(guard.code_list or ()),
     )
@@ -5256,6 +5295,7 @@ class CheckFunctionManager:
         # before the guard sanity check so GlobalStateGuard.check() sees
         # the true runtime state.
         with torch._C.DisableTorchFunction():
+            filtered_guards: list[Guard] = []
             if guard_filter_fn:
                 # If we're filtering guards, we need to build it an extra time first
                 # because filtering depends on the builder/guard_manager results
@@ -5265,6 +5305,7 @@ class CheckFunctionManager:
                     f_code,
                     output_graph,
                     False,
+                    install_weakref_invalidation=False,
                 )
 
                 filter_results = guard_filter_fn(
@@ -5277,9 +5318,32 @@ class CheckFunctionManager:
                     )
                 if not all(type(x) is bool for x in filter_results):
                     raise AssertionError("All filter_results entries must be bool")
+                filtered_guards = [
+                    guard
+                    for i, guard in enumerate(sorted_guards)
+                    if not filter_results[i]
+                ]
                 sorted_guards = [
                     guard for i, guard in enumerate(sorted_guards) if filter_results[i]
                 ]
+
+            filtered_guard_manager = None
+            if filtered_guards and filtered_guards_log.isEnabledFor(logging.DEBUG):
+                filtered_builder, filtered_guard_manager = self.build_guards(
+                    filtered_guards,
+                    existing_diff_guard_sources,
+                    f_code,
+                    output_graph,
+                    False,
+                    install_weakref_invalidation=False,
+                )
+                self.compile_check_fn(
+                    filtered_builder,
+                    filtered_guards,
+                    None,
+                    filtered_guard_manager,
+                    diagnostic=True,
+                )
 
             # Redo the guards because filtering relies on the results from the last guard builder.
             builder, guard_manager = self.build_guards(
@@ -5292,7 +5356,10 @@ class CheckFunctionManager:
             )
 
             self.guard_manager = guard_manager
-            self.compile_check_fn(builder, sorted_guards, guard_fail_fn)
+            self.compile_check_fn(builder, sorted_guards, guard_fail_fn, guard_manager)
+            if filtered_guard_manager is not None:
+                guard_manager.filtered_guard_root = filtered_guard_manager.root
+                guard_manager.filtered_guard_code = f_code
 
         # Keep track of weak references of objects with ID_MATCH guard. This
         # info is stored alongside optimized_code and guard_manager and is used to
@@ -5543,6 +5610,7 @@ class CheckFunctionManager:
         save_guards: bool,
         guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]
         | None = None,
+        install_weakref_invalidation: bool = True,
     ) -> tuple[GuardBuilder, GuardManagerWrapper]:
         guard_manager = GuardManagerWrapper(local_state=self.guard_build_local_state)
         guard_manager.diff_guard_sources = existing_diff_guard_sources
@@ -5565,11 +5633,18 @@ class CheckFunctionManager:
                 raise AssertionError("GuardBuilder has been garbage collected")
             return r_builder.arg_ref(source.name)
 
+        if install_weakref_invalidation:
+            id_ref = self.id_ref
+            lookup_weakrefs = self.lookup_weakrefs
+        else:
+            id_ref = lambda obj, obj_str: id(obj)
+            lookup_weakrefs = lambda obj: None
+
         builder = GuardBuilder(
             f_code,
-            self.id_ref,
+            id_ref,
             source_ref,
-            self.lookup_weakrefs,
+            lookup_weakrefs,
             output_graph.local_scope,
             output_graph.global_scope,
             guard_manager,
@@ -5622,12 +5697,16 @@ class CheckFunctionManager:
         builder: GuardBuilder,
         guards_out: list[Guard],
         guard_fail_fn: Callable[[GuardFail], None] | None,
+        guard_manager: GuardManagerWrapper,
+        *,
+        diagnostic: bool = False,
     ) -> None:
         # see parallel handling of ".0" / "___implicit0" in _eval_frame.c
         largs = builder.argnames
         largs += ["**___kwargs_ignored"]
 
-        guards_log.debug("GUARDS:")
+        if not diagnostic:
+            guards_log.debug("GUARDS:")
 
         # pyrefly: ignore [implicit-any]
         code_parts = []
@@ -5635,18 +5714,18 @@ class CheckFunctionManager:
         structured_guard_fns: list[Callable[[], dict[str, Any]]] = []
 
         # Add compile id info in the guard manager for debugging purpose
-        self.guard_manager.root.attach_compile_id(
-            str(CompileContext.current_compile_id())
-        )
+        guard_manager.root.attach_compile_id(str(CompileContext.current_compile_id()))
 
         # Clear references to torch_function modes held in the list
-        self.torch_function_mode_stack = None
+        if not diagnostic:
+            self.torch_function_mode_stack = None
 
         def add_code_part(
             code_part: str, guard: Guard | None, log_only: bool = False
         ) -> None:
             verbose_code_part = get_verbose_code_part(code_part, guard)
-            guards_log.debug("%s", verbose_code_part)
+            if not diagnostic:
+                guards_log.debug("%s", verbose_code_part)
 
             structured_guard_fns.append(
                 lambda: {
@@ -5664,7 +5743,7 @@ class CheckFunctionManager:
                 }
             )
 
-            if verbose_guards_log.isEnabledFor(logging.DEBUG):
+            if not diagnostic and verbose_guards_log.isEnabledFor(logging.DEBUG):
                 maybe_stack = ""
                 maybe_user_stack = ""
                 if guard is not None:
@@ -5729,7 +5808,9 @@ class CheckFunctionManager:
             )
 
         aotautograd_guards: list[GuardEnvExpr] = (
-            self.output_graph.aotautograd_guards if self.output_graph else []
+            self.output_graph.aotautograd_guards
+            if self.output_graph and not diagnostic
+            else []
         )
 
         # TODO(anijain2305) - There is a duplicate logic in Dynamo to find
@@ -5780,7 +5861,7 @@ class CheckFunctionManager:
                 add_code_part(code, gcl.guard, True)
 
         # OK, all done generating guards
-        if structured_guard_fns:
+        if structured_guard_fns and not diagnostic:
             torch._logging.trace_structured(
                 "dynamo_guards", payload_fn=lambda: [f() for f in structured_guard_fns]
             )
@@ -5799,7 +5880,7 @@ class CheckFunctionManager:
             **_get_closure_vars(),
         }
 
-        self.guard_manager.finalize()
+        guard_manager.finalize(prepare_diff_guard_manager=not diagnostic)
 
         # The dict the guards are rooted at, so a fail reason evaluated here reads
         # what the guards read; on the eager path this is the frame's globals.
@@ -5811,13 +5892,13 @@ class CheckFunctionManager:
                 f"Expected all code_parts to be consumed, but {len(code_parts)} remain"
             )
 
-        self.guard_manager.closure_vars = closure_vars
-        self.guard_manager.args = largs
-        self.guard_manager.populate_code_parts_for_debugging()
-        self.guard_manager.verbose_code_parts = verbose_code_parts
+        guard_manager.closure_vars = closure_vars
+        guard_manager.args = largs
+        guard_manager.populate_code_parts_for_debugging()
+        guard_manager.verbose_code_parts = verbose_code_parts
         # Grab only G, but preserve "G" because guards access it as "G"
-        self.guard_manager.global_scope = globals_for_guard_fn
-        self.guard_manager.guard_fail_fn = guard_fail_fn
+        guard_manager.global_scope = globals_for_guard_fn
+        guard_manager.guard_fail_fn = guard_fail_fn
         # will be populated by a non-owning reference to CacheEntry/ExtraState
         # when the CacheEntry is constructed
         self.guard_manager.cache_entry = None

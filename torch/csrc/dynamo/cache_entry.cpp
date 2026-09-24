@@ -13,6 +13,8 @@ CacheEntry::CacheEntry(const py::handle& guarded_code, PyObject* backend)
           guard_manager.attr("root"))},
       diff_guard_root_mgr{torch::dynamo::convert_to_root_guard_manager(
           guard_manager.attr("diff_guard_root"))},
+      filtered_guard_root_mgr{torch::dynamo::convert_to_root_guard_manager(
+          guard_manager.attr("filtered_guard_root"))},
       backend{py::cast<py::object>(get_backend(backend))} {
   if (py::object trace_annotation_obj{guarded_code.attr("trace_annotation")}) {
     trace_annotation = std::move(trace_annotation_obj).cast<std::string>();
@@ -41,6 +43,7 @@ void CacheEntry::invalidate(py::object deleted_guard_manager) {
   this->guard_manager = std::move(deleted_guard_manager);
   this->root_mgr = nullptr;
   this->diff_guard_root_mgr = nullptr;
+  this->filtered_guard_root_mgr = nullptr;
   this->trace_annotation = "Invalidated";
   this->backend = py::none();
 }

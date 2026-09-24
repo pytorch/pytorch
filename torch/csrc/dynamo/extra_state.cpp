@@ -203,6 +203,25 @@ static bool cache_entry_has_no_guards(
   return torch::dynamo::root_guard_manager_has_no_guards(cache_entry.root_mgr);
 }
 
+static void run_filtered_guard_diagnostics(
+    CacheEntry& cache_entry,
+    FrameLocalsMapping* f_locals) {
+  if (cache_entry.filtered_guard_root_mgr == nullptr) {
+    return;
+  }
+  try {
+    if (!torch::dynamo::run_root_guard_manager(
+            cache_entry.filtered_guard_root_mgr, f_locals)) {
+      py::handle f_locals_dict = (PyObject*)f_locals->to_dict();
+      cache_entry.guard_manager.attr("report_filtered_guard_failure")(
+          f_locals_dict, cache_entry.compile_id);
+    }
+  } catch (py::error_already_set& e) {
+    e.restore();
+    PyErr_Clear();
+  }
+}
+
 // Search a region's cache list for a matching entry.
 // Returns the matching CacheEntry, or nullptr if no match.
 // Sets *guard_error = true if a guard evaluation exception occurred.
@@ -247,6 +266,9 @@ static CacheEntry* lookup_in_list(
       }
     }
     if (valid) {
+      if (!is_skip_guard_eval_unsafe) {
+        run_filtered_guard_diagnostics(cache_entry, f_locals);
+      }
       return &cache_entry;
     }
     ++index;
@@ -266,6 +288,10 @@ static bool try_lookup_without_guard_eval_in_list(
     if (valid) {
       if (!PyCode_Check(cache_entry.code.ptr())) {
         continue;
+      }
+      if (!is_skip_guard_eval_unsafe &&
+          cache_entry.filtered_guard_root_mgr != nullptr) {
+        return false;
       }
       if (cache_entry_has_no_guards(cache_entry, is_skip_guard_eval_unsafe)) {
         *found = &cache_entry;

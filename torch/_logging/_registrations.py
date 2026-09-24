@@ -75,6 +75,11 @@ register_artifact(
 )
 register_artifact("verbose_guards", "", off_by_default=True)
 register_artifact(
+    "filtered_guards",
+    "Logs filtered guards that fail after a compiled entry is selected.",
+    off_by_default=True,
+)
+register_artifact(
     "bytecode",
     "Prints the original and modified bytecode from Dynamo. Mostly useful if you're debugging our bytecode generation in Dynamo.",
     off_by_default=True,
