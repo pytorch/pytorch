@@ -2272,7 +2272,10 @@ can use ``read_async``, ``write_async``, or ``wait_all``. Registration remains v
 until unregistration or close, and tensors must not be resized or have their storage replaced.
 
 CUDA stream semantics, graph capture, tracing, batching, remote slicing, and
-rank-based bootstrap helpers are outside this initial API.
+rank-based bootstrap helpers are outside this initial API. Rank-to-endpoint
+lookup belongs in a separate control-plane adapter. Descriptor exchange uses
+Python pickle between trusted peers; tensor contents and native handles are not
+serialized.
 
 .. autofunction:: torch.distributed._transport.new_transport
 .. autoclass:: torch.distributed._transport.Transport

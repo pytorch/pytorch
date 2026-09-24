@@ -37,6 +37,7 @@ from collections.abc import Callable, Iterable, Sequence
 from typing import Any, NoReturn, TYPE_CHECKING
 
 import torch
+from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 from torch.overrides import BaseTorchFunctionMode
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
@@ -282,11 +283,21 @@ BUILTIN_TO_TENSOR_RFN_MAP: dict[Callable[..., Any], Callable[..., Any]] = {}
 # opt-out).
 _MISSING_SENTINEL = object()
 
+# Runtime-raising ops (e.g. truediv) excluded: recompute escapes traced handlers
 _COMPUTED_LAZY_CONSTANT_OPS: frozenset[Callable[..., Any]] = frozenset(
     [
         operator.add,
         operator.sub,
         operator.mul,
+        operator.and_,
+        operator.or_,
+        operator.xor,
+        operator.eq,
+        operator.ne,
+        operator.lt,
+        operator.le,
+        operator.gt,
+        operator.ge,
     ]
 )
 
@@ -1259,17 +1270,6 @@ class BuiltinVariable(BaseBuiltinVariable):
                 args: list[VariableTracker],
                 kwargs: dict[str, VariableTracker],
             ) -> VariableTracker:
-                if fn is AssertionError and not all(
-                    x.is_python_constant() and isinstance(x.as_python_constant(), str)
-                    for x in args
-                ):
-                    unimplemented(
-                        gb_type="assert with non-string message",
-                        context=str(args),
-                        explanation="Dynamo only supports asserts with string messages",
-                        hints=[*graph_break_hints.SUPPORTABLE],
-                    )
-
                 if fn is StopIteration:
                     return variables.StopIterationVariable(fn, args, kwargs)
                 elif fn is AttributeError:
@@ -3578,6 +3578,8 @@ class GetAttrBuiltinVariable(BaseBuiltinVariable):
             args = [
                 a.realize() if isinstance(a, LazyVariableTracker) else a for a in args
             ]
+        no_keywords(tx, "getattr", kwargs)
+        check_positional(tx, "getattr", len(args), 2, 3)
         try:
             return self._call_getattr(tx, args, kwargs)
         except Unsupported:
@@ -3617,6 +3619,9 @@ class GetAttrBuiltinVariable(BaseBuiltinVariable):
             )
 
         name = name_var.as_python_constant()
+        if not isinstance(name, str):
+            type_name = name_var.python_type_name()
+            raise_type_error(tx, f"attribute name must be string, not '{type_name}'")
         return generic_getattr(tx, obj, name, default)
 
 
@@ -3773,6 +3778,24 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
                     )
                 elif name == "data":
                     # [Note: set_data_on_scoped_tensor]
+                    tensor_obj = typing.cast(TensorVariable, obj)
+                    if isinstance(val, TensorVariable) and tensor_obj.requires_grad:
+                        obj_fake = get_fake_value(tensor_obj.as_proxy().node, tx)
+                        val_fake = get_fake_value(val.as_proxy().node, tx)
+                        # Do not guard on symbolic equality: an unproven match
+                        # could become a shape change when the graph is reused.
+                        if not statically_known_true(
+                            sym_eq(obj_fake.shape, val_fake.shape)
+                        ):
+                            unimplemented(
+                                gb_type="setattr() on Tensor.data with different shape",
+                                context=f"setattr({obj}, {name}, {val})",
+                                explanation="Dynamo does not trace shape-changing "
+                                "`.data` mutations on differentiable tensors. "
+                                "AOTAutograd assumes graph input metadata is stable "
+                                "while building the backward graph.",
+                                hints=[*graph_break_hints.SUPPORTABLE],
+                            )
                     if obj.source is None:
                         unimplemented(
                             gb_type="Failed to mutate tensor data attribute",
