@@ -986,7 +986,7 @@ KinetoEvent::KinetoEvent(
   }
 
   result->visit_if_base<ExtraFields<EventType::TorchOp>>([&](const auto& op) {
-    auto arg_data = parseArgData(op.inputs_, op.concrete_inputs_);
+    auto arg_data = parseArgData(op.inputs_);
     shapes_ = std::move(arg_data.shapesForKinetoEvent);
     structured_input_shapes_ = std::move(arg_data.shapes);
     structured_input_strides_ = std::move(arg_data.strides);
