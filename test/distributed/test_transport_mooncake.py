@@ -2,7 +2,6 @@
 
 import ctypes
 import os
-import pickle
 from dataclasses import replace
 from types import SimpleNamespace
 from unittest import skipIf
@@ -238,7 +237,8 @@ class TestMooncakeTransportDevice(TestCase):
             self.assertTrue(first.register_memory(source).reused_registration())
             destination = torch.zeros(16, dtype=torch.uint8, device=device)
             target = second.register_memory(destination)
-            remote = pickle.loads(pickle.dumps(target.to_remote_buffer()))
+            descriptor = target.to_remote_buffer()
+            remote = type(descriptor).deserialize(descriptor.serialize())
             first.write(source_memory.to_view(), remote)
             self.assertEqual(destination, source[8:24])
 

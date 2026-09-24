@@ -279,8 +279,14 @@ def run(args: argparse.Namespace) -> tuple[list[dict[str, Any]], str | None]:
             destination_memory = transport.register_memory(destination)
             read_memory = transport.register_memory(read_target)
             _sync(tensor_device)
-            peer_source = _exchange(source_memory.to_remote_buffer())
-            peer_destination = _exchange(destination_memory.to_remote_buffer())
+            source_descriptor = source_memory.to_remote_buffer()
+            peer_source = type(source_descriptor).deserialize(
+                _exchange(source_descriptor.serialize())
+            )
+            target_descriptor = destination_memory.to_remote_buffer()
+            peer_destination = type(target_descriptor).deserialize(
+                _exchange(target_descriptor.serialize())
+            )
             source_view = source_memory.to_view()
             read_view = read_memory.to_mutable_view()
 

@@ -9,6 +9,7 @@ from typing import Any, Literal, TYPE_CHECKING
 import torch
 
 from ._blocking import _BlockingTransport
+from ._serialization import _WireDescriptor
 
 
 if TYPE_CHECKING:
@@ -30,8 +31,11 @@ def _check_status(status: int, operation: str) -> None:
 
 
 @dataclass(frozen=True)
-class MooncakeRemoteBuffer:
+class MooncakeRemoteBuffer(_WireDescriptor):
     """A serializable descriptor for memory registered by a Mooncake peer."""
+
+    _backend = "mooncake"
+    _fields = {"endpoint": str, "address": int, "length": int}
 
     endpoint: str
     address: int
