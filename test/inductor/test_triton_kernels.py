@@ -310,8 +310,8 @@ class KernelTests(torch._inductor.test_case.TestCase):
                 )
 
     @unittest.skipUnless(
-        HAS_CPU and TRITON_HAS_CPU,
-        "requires triton cpu",
+        HAS_GPU,
+        "requires gpu",
     )
     def test_triton_kernel_namedtuple_arg_eager_backend(self):
         import triton
@@ -333,13 +333,13 @@ class KernelTests(torch._inductor.test_case.TestCase):
             )
             return out
 
-        x = torch.arange(32, dtype=torch.float32, device="cpu")
+        x = torch.arange(32, dtype=torch.float32, device=GPU_TYPE)
         actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
         self.assertEqual(actual, x * 3)
 
     @unittest.skipUnless(
-        HAS_CPU and TRITON_HAS_CPU,
-        "requires triton cpu",
+        HAS_GPU,
+        "requires gpu",
     )
     def test_triton_kernel_same_named_structural_types_do_not_collide(self):
         import triton
@@ -378,8 +378,8 @@ class KernelTests(torch._inductor.test_case.TestCase):
             )
             return out
 
-        left = torch.arange(32, dtype=torch.float32, device="cpu")
-        right = torch.arange(32, dtype=torch.float32, device="cpu") + 1
+        left = torch.arange(32, dtype=torch.float32, device=GPU_TYPE)
+        right = torch.arange(32, dtype=torch.float32, device=GPU_TYPE) + 1
         with fresh_cache():
             actual, (code,) = run_and_get_code(
                 torch.compile(fn, fullgraph=True), left, right
@@ -405,8 +405,8 @@ class KernelTests(torch._inductor.test_case.TestCase):
         self.assertIn(f"{bias_name} = collections.namedtuple", code)
 
     @unittest.skipUnless(
-        HAS_CPU and TRITON_HAS_CPU,
-        "requires triton cpu",
+        HAS_GPU,
+        "requires gpu",
     )
     def test_triton_kernel_aggregate_rejected_before_v4(self):
         import triton
@@ -432,7 +432,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
             aggregate_kernel[(1,)](Config(x, 2), out, BLOCK_SIZE=16)
             return out
 
-        x = torch.arange(16, dtype=torch.float32, device="cpu")
+        x = torch.arange(16, dtype=torch.float32, device=GPU_TYPE)
         legacy_versions = (
             TritonAttrsDescriptorVersion.V1_COMPILER,
             TritonAttrsDescriptorVersion.V2_BACKENDS,
@@ -454,8 +454,8 @@ class KernelTests(torch._inductor.test_case.TestCase):
                     torch.compile(fn, backend="eager", fullgraph=True)(x)
 
     @unittest.skipUnless(
-        HAS_CPU and TRITON_HAS_CPU,
-        "requires triton cpu",
+        HAS_GPU,
+        "requires gpu",
     )
     @inductor_config.patch("cpp_wrapper", True)
     def test_triton_kernel_aggregate_cpp_wrapper_unsupported(self):
@@ -480,7 +480,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
             aggregate_kernel[(1,)](Config(x, 2.0), out, BLOCK_SIZE=16)
             return out
 
-        x = torch.arange(16, dtype=torch.float32, device="cpu")
+        x = torch.arange(16, dtype=torch.float32, device=GPU_TYPE)
         for fn in (tuple_fn, namedtuple_fn):
             with (
                 self.subTest(aggregate=fn.__name__),
@@ -492,11 +492,12 @@ class KernelTests(torch._inductor.test_case.TestCase):
             ):
                 torch.compile(fn, fullgraph=True)(x)
 
+    @requires_cuda_tma
     @unittest.skipUnless(
-        HAS_CPU and TRITON_HAS_CPU and has_triton_tensor_descriptor_host_tma(),
-        "requires triton cpu and TensorDescriptor support",
+        HAS_GPU and has_triton_tensor_descriptor_host_tma(),
+        "requires gpu and TensorDescriptor support",
     )
-    def test_triton_kernel_nested_tensor_descriptor_unsupported_on_cpu(self):
+    def test_triton_kernel_namedtuple_with_tensor_descriptor(self):
         import triton
         import triton.language as tl
         from triton.tools.tensor_descriptor import TensorDescriptor
@@ -515,16 +516,14 @@ class KernelTests(torch._inductor.test_case.TestCase):
             descriptor_kernel[(1,)](Config(descriptor, 2.0), out, BLOCK_SIZE=16)
             return out
 
-        x = torch.arange(16, dtype=torch.float32, device="cpu")
-        with self.assertRaisesRegex(
-            torch._inductor.exc.InductorError,
-            "tensordesc<fp32\\[16\\]>",
-        ):
-            torch.compile(fn, fullgraph=True)(x)
+        x = torch.arange(16, dtype=torch.float32, device=GPU_TYPE)
+        actual = torch.compile(fn, fullgraph=True)(x)
+        self.assertEqual(actual, x * 2)
 
+    @requires_cuda_tma
     @unittest.skipUnless(
-        HAS_CPU and TRITON_HAS_CPU and has_triton_tensor_descriptor_host_tma(),
-        "requires triton cpu and TensorDescriptor support",
+        HAS_GPU and has_triton_tensor_descriptor_host_tma(),
+        "requires gpu and TensorDescriptor support",
     )
     def test_triton_kernel_nested_input_and_aggregate_output(self):
         import triton
@@ -567,7 +566,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
             )
             return output
 
-        source = torch.arange(32, dtype=torch.float32, device="cpu")
+        source = torch.arange(32, dtype=torch.float32, device=GPU_TYPE)
         plain_source = source + 1
         nested_source = source + 2
         destination = torch.zeros_like(source)
@@ -601,8 +600,8 @@ class KernelTests(torch._inductor.test_case.TestCase):
         ).run(code)
 
     @unittest.skipUnless(
-        HAS_CPU and TRITON_HAS_CPU,
-        "requires triton cpu",
+        HAS_GPU,
+        "requires gpu",
     )
     def test_triton_kernel_namedtuple_nested_constexpr_eager_backend(self):
         import triton
@@ -629,7 +628,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
             )
             return out
 
-        x = torch.arange(16, dtype=torch.float32, device="cpu")
+        x = torch.arange(16, dtype=torch.float32, device=GPU_TYPE)
         actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
         self.assertEqual(actual, x * 2)
 
@@ -663,8 +662,8 @@ class KernelTests(torch._inductor.test_case.TestCase):
         self.assertEqual(actual, x * 2)
 
     @unittest.skipUnless(
-        HAS_CPU and TRITON_HAS_CPU,
-        "requires triton cpu",
+        HAS_GPU,
+        "requires gpu",
     )
     def test_triton_kernel_aggregate_constexpr_leaf_types(self):
         import triton
@@ -700,13 +699,13 @@ class KernelTests(torch._inductor.test_case.TestCase):
             constexpr_leaf_kernel[(1,)](Config(x, metadata), out, BLOCK_SIZE=16)
             return out
 
-        x = torch.arange(16, dtype=torch.float32, device="cpu")
+        x = torch.arange(16, dtype=torch.float32, device=GPU_TYPE)
         actual = torch.compile(fn, fullgraph=True)(x)
         self.assertEqual(actual, ((x + 1) * 2 + 3) * 0.5 + 1)
 
     @unittest.skipUnless(
-        HAS_CPU and TRITON_HAS_CPU,
-        "requires triton cpu",
+        HAS_GPU,
+        "requires gpu",
     )
     def test_triton_kernel_externally_supplied_plain_tuple(self):
         import triton
@@ -723,14 +722,14 @@ class KernelTests(torch._inductor.test_case.TestCase):
             tuple_kernel[(1,)](config, out, BLOCK_SIZE=16)
             return out
 
-        x = torch.arange(16, dtype=torch.float32, device="cpu")
+        x = torch.arange(16, dtype=torch.float32, device=GPU_TYPE)
         compiled = torch.compile(fn, fullgraph=True)
         self.assertEqual(compiled((x, (3,))), x * 3)
         self.assertEqual(compiled((x + 1, (4,))), (x + 1) * 4)
 
     @unittest.skipUnless(
-        HAS_CPU and TRITON_HAS_CPU,
-        "requires triton cpu",
+        HAS_GPU,
+        "requires gpu",
     )
     def test_triton_kernel_recursive_mixed_aggregates(self):
         import triton
@@ -776,7 +775,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
         compiled = torch.compile(fn, backend=counter, fullgraph=True, dynamic=True)
         with fresh_cache():
             sources = tuple(
-                torch.arange(17, dtype=torch.float32, device="cpu") + offset
+                torch.arange(17, dtype=torch.float32, device=GPU_TYPE) + offset
                 for offset in range(3)
             )
             actual, (code,) = run_and_get_code(compiled, *sources)
@@ -787,7 +786,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
             frame_count = counter.frame_count
 
             sources = tuple(
-                torch.arange(33, dtype=torch.float32, device="cpu") + offset
+                torch.arange(33, dtype=torch.float32, device=GPU_TYPE) + offset
                 for offset in range(3)
             )
             self.assertEqual(
@@ -803,8 +802,8 @@ class KernelTests(torch._inductor.test_case.TestCase):
         self.assertGreaterEqual(code.count(f"{config_name}("), 3)
 
     @unittest.skipUnless(
-        HAS_CPU and TRITON_HAS_CPU,
-        "requires triton cpu",
+        HAS_GPU,
+        "requires gpu",
     )
     def test_triton_kernel_aggregate_direct_mutation(self):
         import triton
@@ -829,7 +828,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
             kernel[(triton.cdiv(n_elements, 16),)](args, n_elements, BLOCK_SIZE=16)
             return args.mutated, args.nested.source
 
-        read_only = torch.arange(35, dtype=torch.float32, device="cpu")
+        read_only = torch.arange(35, dtype=torch.float32, device=GPU_TYPE)
         read_only_before = read_only.clone()
         mutated = torch.zeros_like(read_only)
         args = Args(mutated, ReadOnly(read_only, 2.0))
@@ -847,8 +846,8 @@ class KernelTests(torch._inductor.test_case.TestCase):
         self.assertEqual(read_only, read_only_before)
 
     @unittest.skipUnless(
-        HAS_CPU and TRITON_HAS_CPU,
-        "requires triton cpu",
+        HAS_GPU,
+        "requires gpu",
     )
     def test_triton_kernel_aggregate_view_mutation(self):
         import triton
@@ -875,9 +874,9 @@ class KernelTests(torch._inductor.test_case.TestCase):
             kernel[(triton.cdiv(n_elements, 16),)](args, n_elements, BLOCK_SIZE=16)
             return base, mutated_view
 
-        read_only = torch.arange(35, dtype=torch.float32, device="cpu")
+        read_only = torch.arange(35, dtype=torch.float32, device=GPU_TYPE)
         read_only_before = read_only.clone()
-        base = torch.full((40,), 11.0, device="cpu")
+        base = torch.full((40,), 11.0, device=GPU_TYPE)
         expected_base = base.clone()
         expected_base[2:-3] = read_only_before * -1.5
 
@@ -889,8 +888,8 @@ class KernelTests(torch._inductor.test_case.TestCase):
         self.assertEqual(read_only, read_only_before)
 
     @unittest.skipUnless(
-        HAS_CPU and TRITON_HAS_CPU,
-        "requires triton cpu",
+        HAS_GPU,
+        "requires gpu",
     )
     def test_triton_kernel_aggregate_multiple_mutations(self):
         import triton
@@ -912,7 +911,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
             kernel[(triton.cdiv(n_elements, 16),)](args, n_elements, BLOCK_SIZE=16)
             return args.first, args.nested.second, args.nested.read_only
 
-        read_only = torch.arange(35, dtype=torch.float32, device="cpu")
+        read_only = torch.arange(35, dtype=torch.float32, device=GPU_TYPE)
         read_only_before = read_only.clone()
         first = torch.zeros_like(read_only)
         second = torch.zeros_like(read_only)
@@ -935,8 +934,8 @@ class KernelTests(torch._inductor.test_case.TestCase):
         self.assertEqual(read_only, read_only_before)
 
     @unittest.skipUnless(
-        HAS_CPU and TRITON_HAS_CPU,
-        "requires triton cpu",
+        HAS_GPU,
+        "requires gpu",
     )
     def test_triton_kernel_aggregate_aliased_leaves(self):
         import triton
@@ -956,7 +955,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
             kernel[(triton.cdiv(n_elements, 16),)](args, n_elements, BLOCK_SIZE=16)
             return args.mutated, args.alias
 
-        aliased = torch.arange(35, dtype=torch.float32, device="cpu")
+        aliased = torch.arange(35, dtype=torch.float32, device=GPU_TYPE)
         aliased_before = aliased.clone()
         args = Args(aliased, aliased)
 
@@ -967,8 +966,8 @@ class KernelTests(torch._inductor.test_case.TestCase):
         self.assertEqual(aliased, aliased_before + 5.0)
 
     @unittest.skipUnless(
-        HAS_CPU and TRITON_HAS_CPU,
-        "requires triton cpu",
+        HAS_GPU,
+        "requires gpu",
     )
     def test_triton_kernel_namedtuple_nested_specialized_one(self):
         import triton
@@ -987,13 +986,13 @@ class KernelTests(torch._inductor.test_case.TestCase):
             specialized_one_kernel[(1,)](Config(source=x, scale=1), out, BLOCK_SIZE=16)
             return out
 
-        x = torch.arange(16, dtype=torch.float32, device="cpu")
+        x = torch.arange(16, dtype=torch.float32, device=GPU_TYPE)
         actual = torch.compile(fn, fullgraph=True)(x)
         self.assertEqual(actual, x)
 
     @unittest.skipUnless(
-        HAS_CPU and TRITON_HAS_CPU,
-        "requires triton cpu",
+        HAS_GPU,
+        "requires gpu",
     )
     def test_triton_kernel_nested_namedtuple_whole_constexpr(self):
         import triton
@@ -1022,13 +1021,13 @@ class KernelTests(torch._inductor.test_case.TestCase):
             return out
 
         compiled = torch.compile(fn, fullgraph=True)
-        x = torch.arange(16, dtype=torch.float32, device="cpu")
+        x = torch.arange(16, dtype=torch.float32, device=GPU_TYPE)
         self.assertEqual(compiled(x), x * 2 + 1)
         self.assertEqual(compiled(x + 1), (x + 1) * 2 + 1)
 
     @unittest.skipUnless(
-        HAS_CPU and TRITON_HAS_CPU,
-        "requires triton cpu",
+        HAS_GPU,
+        "requires gpu",
     )
     def test_triton_kernel_explicit_whole_constexpr_namedtuple(self):
         import triton
@@ -1054,7 +1053,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
             )
             return out
 
-        x = torch.arange(16, dtype=torch.float32, device="cpu")
+        x = torch.arange(16, dtype=torch.float32, device=GPU_TYPE)
         actual, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True), x)
         self.assertEqual(actual, x * 2 + 1)
         config_name = triton_kernel_wrap.create_structural_named_tuple_name(
@@ -1063,8 +1062,8 @@ class KernelTests(torch._inductor.test_case.TestCase):
         FileCheck().check(f"tl.constexpr({config_name}(scale=2.0, bias=1.0))").run(code)
 
     @unittest.skipUnless(
-        HAS_CPU and TRITON_HAS_CPU,
-        "requires triton cpu",
+        HAS_GPU,
+        "requires gpu",
     )
     def test_triton_kernel_nested_explicit_constexpr_namedtuple(self):
         import triton
@@ -1096,7 +1095,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
             )
             return out
 
-        x = torch.arange(16, dtype=torch.float32, device="cpu")
+        x = torch.arange(16, dtype=torch.float32, device=GPU_TYPE)
         actual, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True), x)
         self.assertEqual(actual, x * 2 + 1)
         transform_name = triton_kernel_wrap.create_structural_named_tuple_name(
@@ -1107,8 +1106,8 @@ class KernelTests(torch._inductor.test_case.TestCase):
         ).run(code)
 
     @unittest.skipUnless(
-        HAS_CPU and TRITON_HAS_CPU,
-        "requires triton cpu",
+        HAS_GPU,
+        "requires gpu",
     )
     def test_triton_kernel_signature_constexpr_aggregate_symbolic_guard(self):
         import triton
@@ -1131,11 +1130,11 @@ class KernelTests(torch._inductor.test_case.TestCase):
         counter = torch._dynamo.testing.CompileCounterWithBackend("inductor")
         compiled = torch.compile(fn, backend=counter, fullgraph=True, dynamic=True)
 
-        source = torch.arange(17, dtype=torch.float32, device="cpu")
+        source = torch.arange(17, dtype=torch.float32, device=GPU_TYPE)
         self.assertEqual(compiled(source), source + 17)
         first_frame_count = counter.frame_count
 
-        source = torch.arange(33, dtype=torch.float32, device="cpu")
+        source = torch.arange(33, dtype=torch.float32, device=GPU_TYPE)
         self.assertEqual(compiled(source), source + 33)
         self.assertGreater(counter.frame_count, first_frame_count)
         second_frame_count = counter.frame_count
@@ -1145,8 +1144,8 @@ class KernelTests(torch._inductor.test_case.TestCase):
         self.assertEqual(counter.frame_count, second_frame_count)
 
     @unittest.skipUnless(
-        HAS_CPU and TRITON_HAS_CPU,
-        "requires triton cpu",
+        HAS_GPU,
+        "requires gpu",
     )
     def test_triton_kernel_nested_constexpr_aggregate_symbolic_guard(self):
         import triton
@@ -1174,11 +1173,11 @@ class KernelTests(torch._inductor.test_case.TestCase):
         counter = torch._dynamo.testing.CompileCounterWithBackend("inductor")
         compiled = torch.compile(fn, backend=counter, fullgraph=True, dynamic=True)
 
-        source = torch.arange(17, dtype=torch.float32, device="cpu")
+        source = torch.arange(17, dtype=torch.float32, device=GPU_TYPE)
         self.assertEqual(compiled(source), source + 17)
         first_frame_count = counter.frame_count
 
-        source = torch.arange(33, dtype=torch.float32, device="cpu")
+        source = torch.arange(33, dtype=torch.float32, device=GPU_TYPE)
         self.assertEqual(compiled(source), source + 33)
         self.assertGreater(counter.frame_count, first_frame_count)
         second_frame_count = counter.frame_count
@@ -1188,8 +1187,8 @@ class KernelTests(torch._inductor.test_case.TestCase):
         self.assertEqual(counter.frame_count, second_frame_count)
 
     @unittest.skipUnless(
-        HAS_CPU and TRITON_HAS_CPU,
-        "requires triton cpu",
+        HAS_GPU,
+        "requires gpu",
     )
     def test_triton_kernel_constexpr_aggregate_rejects_tensor_leaf(self):
         import triton
@@ -1207,7 +1206,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
             kernel[(1,)](Config(source), out, BLOCK_SIZE=16)
             return out
 
-        source = torch.arange(16, dtype=torch.float32, device="cpu")
+        source = torch.arange(16, dtype=torch.float32, device=GPU_TYPE)
         with self.assertRaisesRegex(
             torch._dynamo.exc.Unsupported,
             "must be Python constants",
@@ -1215,8 +1214,8 @@ class KernelTests(torch._inductor.test_case.TestCase):
             torch.compile(fn, backend="eager", fullgraph=True)(source)
 
     @unittest.skipUnless(
-        HAS_CPU and TRITON_HAS_CPU,
-        "requires triton cpu",
+        HAS_GPU,
+        "requires gpu",
     )
     def test_triton_kernel_explicit_constexpr_tuple_containing_namedtuple(self):
         import triton
@@ -1243,7 +1242,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
             )
             return out
 
-        x = torch.arange(16, dtype=torch.float32, device="cpu")
+        x = torch.arange(16, dtype=torch.float32, device=GPU_TYPE)
         actual, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True), x)
         self.assertEqual(actual, x * 2 + 1)
         transform_name = triton_kernel_wrap.create_structural_named_tuple_name(
@@ -1254,8 +1253,8 @@ class KernelTests(torch._inductor.test_case.TestCase):
         ).run(code)
 
     @unittest.skipUnless(
-        HAS_CPU and TRITON_HAS_CPU,
-        "requires triton cpu",
+        HAS_GPU,
+        "requires gpu",
     )
     def test_triton_kernel_autotune_compile_time_mixed_aggregate(self):
         import triton
@@ -1297,7 +1296,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
             )
             return out
 
-        source = torch.arange(35, dtype=torch.float32, device="cpu")
+        source = torch.arange(35, dtype=torch.float32, device=GPU_TYPE)
         config = Config(
             source=source,
             runtime=(2.0,),
@@ -1309,8 +1308,8 @@ class KernelTests(torch._inductor.test_case.TestCase):
         self.assertEqual(actual, source * 2.0 + 1.0)
 
     @unittest.skipUnless(
-        HAS_CPU and TRITON_HAS_CPU,
-        "requires triton cpu",
+        HAS_GPU,
+        "requires gpu",
     )
     def test_triton_kernel_autotune_compile_time_whole_constexpr_aggregates(self):
         import triton
@@ -1381,7 +1380,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
             ](tl.constexpr(config), source, out, n_elements)
             return out
 
-        source = torch.arange(35, dtype=torch.float32, device="cpu")
+        source = torch.arange(35, dtype=torch.float32, device=GPU_TYPE)
         with inductor_config.patch("triton.autotune_at_compile_time", True):
             declared = torch.compile(declared_fn, fullgraph=True)(source)
             explicit = torch.compile(explicit_fn, fullgraph=True)(source)
@@ -1390,8 +1389,8 @@ class KernelTests(torch._inductor.test_case.TestCase):
         self.assertEqual(explicit, expected)
 
     @unittest.skipUnless(
-        HAS_CPU and TRITON_HAS_CPU,
-        "requires triton cpu",
+        HAS_GPU,
+        "requires gpu",
     )
     def test_triton_kernel_autotune_aggregate_cache_key(self):
         import triton
@@ -1424,7 +1423,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
         counter = torch._dynamo.testing.CompileCounterWithBackend("inductor")
         compiled = torch.compile(fn, backend=counter, fullgraph=True)
         with fresh_cache():
-            source = torch.arange(35, dtype=torch.float32, device="cpu")
+            source = torch.arange(35, dtype=torch.float32, device=GPU_TYPE)
             actual = compiled(Config(source, 2.0, tl.constexpr(tl.float32)))
             self.assertEqual(actual, source * 2.0)
             frame_count = counter.frame_count
@@ -1439,8 +1438,8 @@ class KernelTests(torch._inductor.test_case.TestCase):
             self.assertGreater(counter.frame_count, frame_count)
 
     @unittest.skipUnless(
-        HAS_CPU and TRITON_HAS_CPU,
-        "requires triton cpu",
+        HAS_GPU,
+        "requires gpu",
     )
     def test_triton_kernel_autotune_aggregate_key_recompilation(self):
         import triton
@@ -1470,7 +1469,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
             )
             return out
 
-        source = torch.arange(35, dtype=torch.float32, device="cpu")
+        source = torch.arange(35, dtype=torch.float32, device=GPU_TYPE)
         counter = torch._dynamo.testing.CompileCounterWithBackend("inductor")
         compiled = torch.compile(fn, backend=counter, fullgraph=True)
 
@@ -1483,8 +1482,8 @@ class KernelTests(torch._inductor.test_case.TestCase):
         self.assertEqual(counter.frame_count, second_frame_count)
 
     @unittest.skipUnless(
-        HAS_CPU and TRITON_HAS_CPU,
-        "requires triton cpu",
+        HAS_GPU,
+        "requires gpu",
     )
     def test_triton_kernel_autotune_aggregate_callbacks_and_decorators(self):
         import triton
@@ -1599,7 +1598,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
             ](source, out, config, n_elements)
             return out
 
-        source = torch.arange(35, dtype=torch.float32, device="cpu")
+        source = torch.arange(35, dtype=torch.float32, device=GPU_TYPE)
         config = Config(source.numel(), 2.0, 2)
         expected = source * 2.0
         self.assertEqual(
@@ -1613,8 +1612,8 @@ class KernelTests(torch._inductor.test_case.TestCase):
         )
 
     @unittest.skipUnless(
-        HAS_CPU and TRITON_HAS_CPU,
-        "requires triton cpu",
+        HAS_GPU,
+        "requires gpu",
     )
     def test_triton_kernel_autotune_aggregate_hooks_unsupported(self):
         import triton
@@ -1679,7 +1678,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
 
             return fn
 
-        source = torch.arange(35, dtype=torch.float32, device="cpu")
+        source = torch.arange(35, dtype=torch.float32, device=GPU_TYPE)
         config = Config(source.numel())
         message = (
             "pre_hook and post_hook are not supported in "
@@ -1698,8 +1697,8 @@ class KernelTests(torch._inductor.test_case.TestCase):
                 torch.compile(make_fn(kernel), fullgraph=True)(source, config)
 
     @unittest.skipUnless(
-        HAS_CPU and TRITON_HAS_CPU,
-        "requires triton cpu",
+        HAS_GPU,
+        "requires gpu",
     )
     def test_generate_ttir_namedtuple_nested_constexpr(self):
         import triton
@@ -1719,8 +1718,12 @@ class KernelTests(torch._inductor.test_case.TestCase):
             tl.store(out + offsets, values)
 
         fake_mode = FakeTensorMode()
-        source = fake_mode.from_tensor(torch.empty(16, dtype=torch.float32))
-        out = fake_mode.from_tensor(torch.empty(16, dtype=torch.float32))
+        source = fake_mode.from_tensor(
+            torch.empty(16, dtype=torch.float32, device=GPU_TYPE)
+        )
+        out = fake_mode.from_tensor(
+            torch.empty(16, dtype=torch.float32, device=GPU_TYPE)
+        )
         spec = triton_kernel_wrap.create_named_tuple_spec(
             "Config",
             ("source", "parameters"),
@@ -1762,9 +1765,10 @@ class KernelTests(torch._inductor.test_case.TestCase):
         self.assertNotIn("config.parameters.1:", ttir_text)
         self.assertIn("config.parameters.2", ttir_text)
 
+    @requires_cuda_tma
     @unittest.skipUnless(
-        HAS_CPU and TRITON_HAS_CPU and has_triton_tensor_descriptor_host_tma(),
-        "requires triton cpu and TensorDescriptor support",
+        HAS_GPU and has_triton_tensor_descriptor_host_tma(),
+        "requires gpu and TensorDescriptor support",
     )
     def test_generate_ttir_namedtuple_with_tma_fake_tensor_leaves(self):
         import triton
@@ -1780,8 +1784,12 @@ class KernelTests(torch._inductor.test_case.TestCase):
             tl.store_tensor_descriptor(config.destination, [offset], value)
 
         fake_mode = FakeTensorMode()
-        source = fake_mode.from_tensor(torch.empty(16, dtype=torch.float32))
-        destination = fake_mode.from_tensor(torch.empty(16, dtype=torch.float32))
+        source = fake_mode.from_tensor(
+            torch.empty(16, dtype=torch.float32, device=GPU_TYPE)
+        )
+        destination = fake_mode.from_tensor(
+            torch.empty(16, dtype=torch.float32, device=GPU_TYPE)
+        )
         spec = triton_kernel_wrap.create_named_tuple_spec(
             "Config",
             ("source", "destination"),
@@ -8654,11 +8662,8 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
                 "del", num_deallocs, exactly=True
             ).run(code_str)
 
-    @unittest.skipUnless(
-        HAS_CPU and TRITON_HAS_CPU,
-        "requires triton cpu",
-    )
-    def test_fusion_relu_epilogue_tuple_aggregate_cpu(self):
+    @unittest.skipUnless(HAS_GPU, "requires gpu")
+    def test_fusion_relu_epilogue_tuple_aggregate_gpu(self):
         @triton.jit
         def kernel(source, destination, n_elements, BLOCK_SIZE: tl.constexpr):
             offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
@@ -8677,7 +8682,7 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
             )
             return destination.relu()
 
-        source = torch.linspace(-2.0, 2.0, 1024, device="cpu")
+        source = torch.linspace(-2.0, 2.0, 1024, device=GPU_TYPE)
         metrics.reset()
         with fresh_cache():
             actual, (code,) = run_and_get_code(
@@ -8688,11 +8693,8 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
         self.assertEqual(metrics.generated_kernel_count, 1)
         self.check_code(code, num_kernels=1, num_allocs=1, num_deallocs=1)
 
-    @unittest.skipUnless(
-        HAS_CPU and TRITON_HAS_CPU,
-        "requires triton cpu",
-    )
-    def test_fusion_relu_epilogue_nested_namedtuple_aggregate_cpu(self):
+    @unittest.skipUnless(HAS_GPU, "requires gpu")
+    def test_fusion_relu_epilogue_nested_namedtuple_aggregate_gpu(self):
         from torch._higher_order_ops import triton_kernel_wrap
 
         Nested = collections.namedtuple("Nested", ("destination",))
@@ -8720,7 +8722,7 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
             )
             return destination.relu()
 
-        source = torch.linspace(-2.0, 2.0, 1024, device="cpu")
+        source = torch.linspace(-2.0, 2.0, 1024, device=GPU_TYPE)
         metrics.reset()
         with fresh_cache():
             actual, (code,) = run_and_get_code(
