@@ -4434,13 +4434,12 @@ class TestPrecompileCapture(TestCase):
 
         artifact = pathlib.Path(self.dir) / "sub" / "m.py"
         cache = pathlib.Path(self.dir) / "sub" / "m.cache"
-        tracer = MakeFxTracer()
         with capture(
             _files_fn,
             artifact_path=artifact,
             cache_path=cache,
             backend="eager",
-            tracer=tracer,
+            tracer=MakeFxTracer(),
         ) as cap:
             cap(self.model, self.x)
         self.assertEqual(load(artifact, cache)(self.model, self.x), self.model(self.x))
@@ -4699,6 +4698,20 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertIn("served", out.stdout)
 
+    def test_capture_takes_pathlike_paths(self):
+        import pathlib
+
+        artifact = pathlib.Path(self.dir) / "sub" / "m.py"
+        cache = pathlib.Path(self.dir) / "sub" / "m.cache"
+        single = self.mod.single
+        with capture(
+            single, artifact_path=artifact, cache_path=cache, backend="eager"
+        ) as cap:
+            cap(self.model, self.x2)
+        self.assertEqual(
+            load(artifact, cache)(self.model, self.x2), single(self.model, self.x2)
+        )
+
     # The crossref harness keeps a dispatch mode active while the capture runs,
     # and Dynamo guards on that state; a fresh process has no such mode, so
     # every variant would miss there.
@@ -4774,7 +4787,8 @@ class TestPrecompileDynamoCapture(TestCase):
             def forward(self, x):
                 return torch._dynamo.disable(cap.save)()
 
-        with self._capture(single, backend="eager") as cap, writes as write:
+        # The mock is entered first so it still counts the writes cap's exit makes.
+        with writes as write, self._capture(single, backend="eager") as cap:
             with self.assertRaisesRegex(PrecompileError, "nothing was captured"):
                 cap.save()
             cap(self.model, self.x2)
@@ -4789,10 +4803,11 @@ class TestPrecompileDynamoCapture(TestCase):
             cap(self.model, self.x3)
             cap.save()
             self.assertEqual(write.call_count, 2)
+            with open(self.artifact, "rb") as f:
+                last = f.read()
+            self.assertNotEqual(last, checkpoint)
         # The last save() covered every call, so exit writes nothing more.
         self.assertEqual(write.call_count, 2)
-        with open(self.artifact, "rb") as f:
-            self.assertNotEqual(f.read(), checkpoint)
         with self.assertRaisesRegex(PrecompileError, "not active"):
             cap.save()
         self.assertTrue(cap.summary().complete)
@@ -4803,6 +4818,8 @@ class TestPrecompileDynamoCapture(TestCase):
                 with self.assertRaisesRegex(PrecompileError, "from inside fn"):
                     cap(SavesFromFn(), self.x2)
                 raise KeyError("the block's own")
+        with open(self.artifact, "rb") as f:
+            self.assertEqual(f.read(), last)
 
     def test_a_raised_call_is_refused_at_exit_and_writes_nothing(self):
         # A call that raised inside the block is a coverage gap: the default gate
