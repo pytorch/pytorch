@@ -700,6 +700,33 @@ void initSymbolicBindings(PyObject* module) {
             return std::make_pair(wrap(self, r.lower), wrap(self, r.upper));
           })
       .def(
+          "bound_sympy",
+          [wrap](
+              const Self& self,
+              const PyExpr& e,
+              const std::vector<std::tuple<PyExpr, PyExpr, PyExpr>>& ranges,
+              const std::vector<std::tuple<PyExpr, PyExpr, PyExpr>>&
+                  context_ranges) {
+            auto to_map = [&](const auto& rs) {
+              RangeMap m;
+              for (const auto& [sym, lower, upper] : rs) {
+                m.insert_or_assign(
+                    unwrap(self, sym),
+                    ValueRanges(unwrap(self, lower), unwrap(self, upper)));
+              }
+              return m;
+            };
+            RangeMap m = to_map(ranges);
+            RangeMap context = to_map(context_ranges);
+            ValueRanges r =
+                bound_sympy(*self->arena, unwrap(self, e), m, &context);
+            return std::make_pair(wrap(self, r.lower), wrap(self, r.upper));
+          },
+          py::arg("e"),
+          py::arg("ranges"),
+          py::arg("context_ranges") =
+              std::vector<std::tuple<PyExpr, PyExpr, PyExpr>>{})
+      .def(
           "compare",
           [](const Self& self, const PyExpr& a, const PyExpr& b) {
             return self->arena->compare(unwrap(self, a), unwrap(self, b));

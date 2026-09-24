@@ -35,4 +35,12 @@ ValueRanges value_range_interp(
     const Expr* e,
     const RangeMap& ranges);
 
+// bound_sympy(e, {**context_ranges, **ranges}), where context_ranges is the
+// TracingContext's shape_env.var_to_range.
+ValueRanges bound_sympy(
+    ExprArena& arena,
+    const Expr* e,
+    const RangeMap& ranges,
+    const RangeMap* context_ranges = nullptr);
+
 } // namespace torch::symbolic

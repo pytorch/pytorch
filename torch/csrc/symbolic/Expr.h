@@ -300,6 +300,7 @@ class ExprArena : public c10::intrusive_ptr_target {
 
   // Ports of the sympy helpers behind the Add sign handlers (ExprTools.cpp).
   std::pair<const Expr*, const Expr*> as_coeff_Add(const Expr* e);
+  std::pair<const Expr*, const Expr*> as_coeff_Mul(const Expr* e);
   c10::SmallVector<const Expr*, 4> free_symbols(const Expr* e) const;
   bool is_polynomial(const Expr* e) const;
   const Expr* diff(const Expr* e, const Expr* x);
@@ -335,7 +336,6 @@ class ExprArena : public c10::intrusive_ptr_target {
   // The tail of LatticeOp.__new__.
   const Expr* lattice(Kind kind, c10::ArrayRef<const Expr*> args);
   const Expr* keep_coeff(const Expr* coeff, const Expr* factors);
-  std::pair<const Expr*, const Expr*> as_coeff_Mul(const Expr* e);
   c10::SmallVector<const Expr*, 2> real_roots(const Expr* p, const Expr* x);
   static Num as_num(const Expr* e);
   Tri eval_fact(const Expr* e, Fact f);

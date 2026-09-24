@@ -2,6 +2,7 @@
 
 #include <c10/util/SmallVector.h>
 
+#include <algorithm>
 #include <limits>
 
 // SymPyValueRangeAnalysis and sympy_interp (torch/utils/_sympy/interp.py).
@@ -56,12 +57,19 @@ void require_bool(const ValueRanges& r) {
 
 class Analysis {
  public:
-  Analysis(ExprArena& arena, const RangeMap& ranges)
-      : a_(arena), ranges_(ranges) {}
+  Analysis(
+      ExprArena& arena,
+      const RangeMap& ranges,
+      const RangeMap* context_ranges = nullptr)
+      : a_(arena), ranges_(ranges), context_ranges_(context_ranges) {}
 
   ValueRanges interp(const Expr* e);
+  // _rewrite_for_value_range_analysis.
+  const Expr* rewrite(const Expr* e);
 
  private:
+  using Terms = c10::SmallVector<std::pair<const Expr*, const Expr*>, 8>;
+
   const Expr* zero() {
     return a_.integer(0);
   }
@@ -106,8 +114,14 @@ class Analysis {
   ValueRanges min_or_max(Kind kind, const ValueRanges& x, const ValueRanges& y);
   ValueRanges increasing_map(Kind kind, const ValueRanges& x);
 
+  const ValueRanges* find_range(const Expr* s) const;
+  bool definitely_ge(const Expr* e, int64_t lower);
+  Terms terms_of_add(const Expr* e);
+  const Expr* rewrite_mod_subtractions_in_add(const Expr* e);
+
   ExprArena& a_;
   const RangeMap& ranges_;
+  const RangeMap* context_ranges_;
 };
 
 const Expr* Analysis::num_add(const Expr* x, const Expr* y) {
@@ -406,8 +420,8 @@ ValueRanges Analysis::interp(const Expr* e) {
     case Kind::Rational:
       throw NativeUnsupported("float value range");
     case Kind::Symbol: {
-      auto it = ranges_.find(e);
-      return it != ranges_.end() ? it->second : default_symbol_range(e);
+      const ValueRanges* r = find_range(e);
+      return r != nullptr ? *r : default_symbol_range(e);
     }
     default:
       break;
@@ -497,6 +511,191 @@ ValueRanges Analysis::interp(const Expr* e) {
   }
 }
 
+const ValueRanges* Analysis::find_range(const Expr* s) const {
+  if (auto it = ranges_.find(s); it != ranges_.end()) {
+    return &it->second;
+  }
+  if (context_ranges_ != nullptr) {
+    if (auto it = context_ranges_->find(s); it != context_ranges_->end()) {
+      return &it->second;
+    }
+  }
+  return nullptr;
+}
+
+// _definitely_ge. _bound_sympy_for_rewrite_guard's None cases throw here, so
+// the caller falls back to Python.
+bool Analysis::definitely_ge(const Expr* e, int64_t lower) {
+  if (lower == 0 && a_.ask(e, Fact::nonnegative) == Tri::True) {
+    return true;
+  }
+  if (lower == 1 && a_.ask(e, Fact::positive) == Tri::True) {
+    return true;
+  }
+  if (e->kind == Kind::Symbol) {
+    if (const ValueRanges* r = find_range(e)) {
+      require_int(*r);
+      return !lt(r->lower, a_.integer(lower));
+    }
+  }
+  ValueRanges r = interp(e);
+  // _definitely_ge_value: a Boolean bound >= lower is a TypeError.
+  return !r.is_bool() && !lt(r.lower, a_.integer(lower));
+}
+
+Analysis::Terms Analysis::terms_of_add(const Expr* e) {
+  Terms terms;
+  auto add_term = [&](const Expr* t) {
+    auto [coeff, factor] = a_.as_coeff_Mul(t);
+    auto it = std::find_if(terms.begin(), terms.end(), [&](const auto& kv) {
+      return kv.first == factor;
+    });
+    if (it == terms.end()) {
+      terms.emplace_back(factor, coeff);
+    } else {
+      it->second = a_.add({it->second, coeff});
+    }
+  };
+  if (e->kind == Kind::Add) {
+    for (const Expr* t : e->args) {
+      add_term(t);
+    }
+  } else {
+    add_term(e);
+  }
+  return terms;
+}
+
+const Expr* Analysis::rewrite_mod_subtractions_in_add(const Expr* e) {
+  Terms terms = terms_of_add(e);
+  auto coeff_of = [&](const Expr* factor) -> const Expr** {
+    for (auto& [f, c] : terms) {
+      if (f == factor) {
+        return &c;
+      }
+    }
+    return nullptr;
+  };
+  c10::SmallVector<const Expr*, 4> replacements;
+  const Terms snapshot = terms;
+  for (const auto& [factor, mod_coeff] : snapshot) {
+    if (mod_coeff->kind != Kind::Integer || mod_coeff->p == 0) {
+      continue;
+    }
+    if (factor->kind != Kind::Mod && factor->kind != Kind::PythonMod) {
+      continue;
+    }
+    const Expr* base = factor->args[0];
+    const Expr* divisor = factor->args[1];
+    // _mod_rewrite_is_valid
+    if (!definitely_ge(divisor, 1) ||
+        (factor->kind == Kind::Mod && !definitely_ge(base, 0))) {
+      continue;
+    }
+    Terms matched;
+    bool all_matched = true;
+    for (const auto& [base_factor, base_coeff] : terms_of_add(base)) {
+      if (base_coeff->kind != Kind::Integer) {
+        all_matched = false;
+        break;
+      }
+      const Expr** term = coeff_of(base_factor);
+      const Expr* term_coeff = term != nullptr ? *term : zero();
+      const Expr* needed = a_.mul({a_.neg(mod_coeff), base_coeff});
+      int needed_sign = sign(needed);
+      if (needed_sign == 0) {
+        continue;
+      }
+      if (sign(term_coeff) * needed_sign <= 0 ||
+          (needed_sign > 0 && lt(term_coeff, needed)) ||
+          (needed_sign < 0 && lt(needed, term_coeff))) {
+        all_matched = false;
+        break;
+      }
+      matched.emplace_back(base_factor, needed);
+    }
+    if (!all_matched) {
+      continue;
+    }
+    for (const auto& [base_factor, needed] : matched) {
+      const Expr** term = coeff_of(base_factor);
+      *term = a_.sub(*term, needed);
+    }
+    *coeff_of(factor) = zero();
+    // _rewrite_mod_subtraction
+    const Expr* floordiv = a_.function(Kind::FloorDiv, {base, divisor});
+    replacements.push_back(
+        a_.mul({a_.mul({a_.neg(mod_coeff), floordiv}), divisor}));
+  }
+  if (replacements.empty()) {
+    return e;
+  }
+  c10::SmallVector<const Expr*, 8> new_terms;
+  for (const auto& [factor, coeff] : terms) {
+    if (coeff == zero()) {
+      continue;
+    }
+    if (factor == one()) {
+      new_terms.push_back(coeff);
+    } else if (coeff == one()) {
+      new_terms.push_back(factor);
+    } else {
+      new_terms.push_back(a_.mul({coeff, factor}));
+    }
+  }
+  new_terms.append(replacements.begin(), replacements.end());
+  return a_.add(new_terms);
+}
+
+const Expr* Analysis::rewrite(const Expr* e) {
+  if (e->args.empty()) {
+    return e;
+  }
+  c10::SmallVector<const Expr*, 8> args;
+  bool changed = false;
+  for (const Expr* arg : e->args) {
+    args.push_back(rewrite(arg));
+    changed |= args.back() != arg;
+  }
+  if (changed) {
+    // expr.func(*args)
+    if (e->is_relational()) {
+      e = a_.rel(e->kind, args[0], args[1]);
+    } else {
+      switch (e->kind) {
+        case Kind::Add:
+          e = a_.add(args);
+          break;
+        case Kind::Mul:
+          e = a_.mul(args);
+          break;
+        case Kind::Pow:
+          e = a_.pow(args[0], args[1]);
+          break;
+        case Kind::Not:
+          e = a_.logical_not(args[0]);
+          break;
+        case Kind::And:
+          e = a_.logical_and(args);
+          break;
+        case Kind::Or:
+          e = a_.logical_or(args);
+          break;
+        default:
+          e = a_.function(e->kind, args);
+      }
+    }
+  }
+  return e->kind == Kind::Add ? rewrite_mod_subtractions_in_add(e) : e;
+}
+
+bool has_mod(const Expr* e) {
+  if (e->kind == Kind::Mod || e->kind == Kind::PythonMod) {
+    return true;
+  }
+  return std::any_of(e->args.begin(), e->args.end(), has_mod);
+}
+
 } // namespace
 
 ValueRanges::ValueRanges(const Expr* lower, const Expr* upper)
@@ -529,6 +728,21 @@ ValueRanges value_range_interp(
     const Expr* e,
     const RangeMap& ranges) {
   return Analysis(arena, ranges).interp(e);
+}
+
+ValueRanges bound_sympy(
+    ExprArena& arena,
+    const Expr* e,
+    const RangeMap& ranges,
+    const RangeMap* context_ranges) {
+  if (e->is_number()) {
+    return {e, e};
+  }
+  Analysis analysis(arena, ranges, context_ranges);
+  if (has_mod(e)) {
+    e = analysis.rewrite(e);
+  }
+  return analysis.interp(e);
 }
 
 } // namespace torch::symbolic

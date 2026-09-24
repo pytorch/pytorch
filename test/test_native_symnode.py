@@ -42,6 +42,8 @@ from torch.utils._sympy.interp import sympy_interp
 from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.value_ranges import (
     _default_symbol_range,
+    _rewrite_for_value_range_analysis,
+    bound_sympy,
     SymPyValueRangeAnalysis,
     ValueRangeError,
     ValueRanges,
@@ -1861,6 +1863,129 @@ class TestNativeValueRanges(TestCase):
             if self.check(e, ranges) is not None:
                 answered += 1
         self.assertGreater(answered, calls // 3)
+
+    def check_bound(self, e, ranges, context_ranges=None):
+        """Differential bound_sympy; returns the Python range, or None if either side raised."""
+        context_ranges = context_ranges or {}
+        arena = torch._C._symbolic._Arena()
+        msg = f"{e} {ranges} {context_ranges}"
+
+        def to_native(rs):
+            return [
+                (arena.from_sympy(s), arena.from_sympy(lo), arena.from_sympy(hi))
+                for s, (lo, hi) in rs.items()
+            ]
+
+        try:
+            n = arena.from_sympy(e)
+            native_ranges = to_native(ranges)
+            native_context = to_native(context_ranges)
+        except NativeUnsupported:
+            return None
+        merged = {**context_ranges, **ranges}
+        env = {s: ValueRanges(lo, hi) for s, (lo, hi) in merged.items()}
+        try:
+            expected = bound_sympy(e, env)
+        except self.PYTHON_ERRORS:
+            expected = None
+        if expected is None or not (expected.is_int or expected.is_bool):
+            with self.assertRaises(NativeUnsupported, msg=msg):
+                arena.bound_sympy(n, native_ranges, native_context)
+            return None
+        try:
+            lo, hi = arena.bound_sympy(n, native_ranges, native_context)
+        except NativeUnsupported:
+            return None
+        got = (arena.to_sympy(lo), arena.to_sympy(hi))
+        self.assertEqual(got, (expected.lower, expected.upper), msg)
+        want_types = (type(expected.lower), type(expected.upper))
+        self.assertEqual(tuple(map(type, got)), want_types, msg)
+        return expected
+
+    def test_bound_sympy_known(self):
+        u1, n = self.u1, self.n
+        oo = int_oo
+        r = {u0: (2, oo), u1: (1, oo)}
+        cases = [
+            (sympy.Integer(3), {}, {}, (3, 3)),
+            (int_oo, {}, {}, (oo, oo)),
+            (sympy.Rational(1, 2), {}, {}, None),
+            (u0, {}, {u0: (2, 5)}, (2, 5)),
+            (u0, {u0: (3, 4)}, {u0: (2, 5)}, (3, 4)),
+            (u0 + u1, {u0: (3, 4)}, {u1: (2, 5)}, (5, 9)),
+            (u0 - Mod(u0, 8), r, {}, (0, oo)),
+            (u0 - Mod(u0, 8), {}, r, (0, oo)),
+            (1 + u0 - Mod(u0, 8), r, {}, (1, oo)),
+            (2 * u0 - 2 * Mod(u0, 8), r, {}, (0, oo)),
+            (u0 - Mod(u0, u1), r, {}, (0, oo)),
+            ((2 * u0 + 1) - Mod(2 * u0 + 1, 8), r, {}, (0, oo)),
+            (Mod(u0, 8) - u0, r, {}, (-oo, 0)),
+            (u0 - Mod(u0, 8), {u0: (0, 20)}, {}, (0, 16)),
+            (u0 - Mod(u0, 8), {u0: (-2, oo)}, {}, (-9, oo)),
+            (u0 - Mod(u0, u1), {u1: (0, 5)}, {u0: (0, 9)}, (-oo, oo)),
+            (u0 - Mod(u0, n), {u0: (0, 9)}, {}, (-oo, oo)),
+            (s0 - Mod(s0, 8), {}, {}, (0, oo)),
+            (3 * u0 - Mod(u0, 8), r, {}, (4, oo)),
+            (u0 - 2 * Mod(u0, 8), r, {}, (-12, oo)),
+            (u0 + u1 - Mod(u0 + u1, 4), r, {}, (0, oo)),
+            (u0 - Mod(u0 + u1, 4), r, {}, (-1, oo)),
+            (Max(u0 - Mod(u0, 8), 1), r, {}, (1, oo)),
+            (sympy.Ge(u0 - Mod(u0, 8), 0), r, {}, (True, True)),
+            (u0 - Mod(u0, 8) - Mod(u1, 3) + u1, r, {}, (0, oo)),
+            (FloorDiv(u0 - Mod(u0, 8), 8), r, {}, (0, oo)),
+        ]
+        for e, ranges, context, want in cases:
+            ranges = {s: tuple(map(sympy.sympify, b)) for s, b in ranges.items()}
+            context = {s: tuple(map(sympy.sympify, b)) for s, b in context.items()}
+            got = self.check_bound(e, ranges, context)
+            msg = f"{e} {ranges} {context}"
+            if want is None:
+                self.assertIsNone(got, msg)
+            else:
+                self.assertIsNotNone(got, msg)
+                want = tuple(map(sympy.sympify, want))
+                self.assertEqual((got.lower, got.upper), want, msg)
+
+    @parametrize("seed", range(4))
+    def test_bound_sympy_fuzz(self, seed):
+        rng = random.Random(seed)
+        u1, n = self.u1, self.n
+        symbols = [s0, s1, u0, u1, n]
+        terms = [*symbols, s0 * u0, n**2, sympy.Integer(1)]
+        divisors = [*map(sympy.Integer, [-3, 1, 2, 3, 8]), s0, s1, u1, n, s1 + 1]
+
+        def linear(k):
+            return sympy.Add(*(rng.randint(-2, 3) * t for t in rng.sample(terms, k)))
+
+        calls = answered = rewritten = 0
+        for _ in range(500):
+            e = linear(rng.randint(0, 2))
+            for _ in range(rng.randint(1, 2)):
+                base = linear(rng.randint(1, 3))
+                j = rng.choice([-2, -1, 1, 1, 2, 3])
+                k = j if rng.random() < 0.7 else rng.choice([-2, -1, 1, 2])
+                try:
+                    e = e + j * base - k * Mod(base, rng.choice(divisors))
+                except (ZeroDivisionError, TypeError, AssertionError):
+                    continue
+            if rng.random() < 0.2:
+                e = rng.choice([Max(e, 0), sympy.Ge(e, 1), FloorDiv(e, 2)])
+            ranges, context = {}, {}
+            for s in symbols:
+                roll = rng.random()
+                target = ranges if roll < 0.4 else context if roll < 0.6 else None
+                if target is not None:
+                    target[s] = tuple(sorted(rng.sample(self.BOUNDS, 2), key=float))
+            env = {s: ValueRanges(*b) for s, b in {**context, **ranges}.items()}
+            try:
+                rewritten += _rewrite_for_value_range_analysis(e, env) != e
+            except self.PYTHON_ERRORS:
+                pass
+            calls += 1
+            if self.check_bound(e, ranges, context) is not None:
+                answered += 1
+        self.assertGreater(answered, calls // 3)
+        self.assertGreater(rewritten, calls // 10)
 
 
 instantiate_parametrized_tests(TestNativeExpr)
