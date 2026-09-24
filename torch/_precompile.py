@@ -2186,8 +2186,8 @@ def _reject_uninstallable_entry(frames: list[dict[str, Any]], entry: Any) -> Non
             f"nothing. This happens when the captured callable is a thin wrapper -- "
             f"an nn.Module, or a forward that immediately delegates -- where Dynamo "
             f"compiles the wrapper's inner frame instead. Capture the function that "
-            f"CALLS the model, e.g. "
-            f"precompile.capture(lambda m, x: m(x), ...) and calling cap(model, x)."
+            f"CALLS the model, e.g. a module-level def step(m, x): return m(x), "
+            f"with precompile.capture(step, ...) and calling cap(model, x)."
         )
     code = SerializedCode.to_code_object(entry_frame["code"])
     if code.co_freevars:
