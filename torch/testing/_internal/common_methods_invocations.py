@@ -17521,10 +17521,8 @@ op_db: list[OpInfo] = [
         check_batched_forward_grad=False,
         # TODO: Skip because it produces a CUDA illegal memory access for some reason
         skip_cow_input_backward=True,
-        # FIXME: mask_type == 2 (LowerRight)
         decorators=[
             skipCUDAIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "This platform doesn't support efficient attention"),
-            skipCUDAIf(TEST_WITH_ROCM, "Efficient attention on ROCM doesn't support custom_mask_type==2"),
             skipXPU],
         skips=(
             # Checking the scaler value of the philox seed and offset
