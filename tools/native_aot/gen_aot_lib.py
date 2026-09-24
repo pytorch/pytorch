@@ -6,17 +6,19 @@ cpp_dispatch(spec) for one boolean per precompile point, cpp_launch(spec, launch
 for the invocation, and cpp_helpers() for family-shared C++. The Python-side coverage
 check, covered_axes, lives in the same module and is kept in sync by hand.
 
-Kernels are exported to ``<artifacts-dir>/<arch>/<op>/``, one tree per arch. For each
-op found there this emits ``<artifacts-dir>/<op>/aot_<op>_<key>.cpp``, one file
-covering every arch the op shipped for, containing:
+Kernels are exported to ``<artifacts-dir>/<target>/<op>/``, one tree per compile
+target. For each op found there this emits
+``<artifacts-dir>/<op>/aot_<op>_<key>.cpp``, one file covering every target the op
+shipped for, containing:
 
   * a launch_<prefix>() marshalling helper per exported kernel, emitted by the
     sidecar kind's Toolchain. Every toolchain produces the same launcher signature,
     so cpp_launch and the guard chain are toolchain-blind.
-  * the stub kernel: an early-out over the shipped compute capabilities, then helpers
-    and prelude, then one cond chain per capability -- an
+  * the stub kernel: an early-out over devices covered by the shipped targets, then
+    helpers and prelude, then one condition chain per compile target -- an
     `if (cpp_dispatch(spec)) { cpp_launch; return true; }` per precompile point, and
-    `return false` at the end. A device runs only kernels built for its capability.
+    `return false` at the end. Narrower targets run before broader compatible
+    fallbacks.
   * registration on the generated at::native DispatchStub (<op>_aot_stub) at
     static-init time.
 
@@ -195,10 +197,24 @@ def _first_tensor_name(params: str) -> str | None:
     return None
 
 
-def _device_match(major: int, minor: int) -> str:
-    """The device predicate for one compute capability, read through the local
-    _gate_for assigns the properties expression to."""
-    return f"{_PROPS_LOCAL}->major == {major} && {_PROPS_LOCAL}->minor == {minor}"
+def _device_match(arch: str) -> str:
+    """The device predicate for one compile target.
+
+    The Python family registry is the source of truth; emitting its finite members
+    keeps generated C++ from independently guessing that a major number is a family.
+    """
+    by_major: dict[int, list[int]] = {}
+    for major, minor in decl.target_devices(arch):
+        by_major.setdefault(major, []).append(minor)
+    clauses = []
+    for major, minors in by_major.items():
+        minor_match = " || ".join(
+            f"{_PROPS_LOCAL}->minor == {minor}" for minor in minors
+        )
+        if len(minors) > 1:
+            minor_match = f"({minor_match})"
+        clauses.append(f"{_PROPS_LOCAL}->major == {major} && {minor_match}")
+    return " || ".join(f"({clause})" for clause in clauses)
 
 
 def _spec_from_json(spec):
@@ -216,17 +232,14 @@ def _spec_from_json(spec):
     return spec
 
 
-def _by_arch(sidecars: list[dict]) -> dict[tuple[int, int], list[dict]]:
-    """Group sidecars by the compute capability they were compiled for, in ascending
-    order, dropping the loser of the arch-conditional tie-break.
+def _by_arch(sidecars: list[dict]) -> dict[str, list[dict]]:
+    """Group sidecars by compile target in runtime dispatch order.
 
-    Grouped rather than one gate over the union, because each device must run kernels
-    built for exactly its capability; a union gate would accept a device nothing was
-    compiled for. Within one capability both "sm_100a" and "sm_100" run on the
-    hardware and the conditional wins, being what the kernels were written against. A
-    sidecar with no recorded arch is rejected: there is no hardware to match it to."""
-    groups: dict[tuple[int, int], list[dict]] = {}
-    conditional: dict[tuple[int, int], bool] = {}
+    Narrower target coverage runs before broader coverage. Targets with identical
+    device coverage are redundant, so only the strongest is linked.
+    """
+    groups: dict[str, list[dict]] = {}
+    coverage: dict[str, tuple[tuple[int, int], ...]] = {}
     for sc in sidecars:
         arch = sc.get("arch")
         if not isinstance(arch, str):
@@ -235,16 +248,20 @@ def _by_arch(sidecars: list[dict]) -> dict[tuple[int, int], list[dict]]:
                 f"records no arch. Re-export: the runtime gate is built from "
                 f"the arch each artifact was compiled for."
             )
-        cc = decl.cc_of(arch)
-        is_cond = arch.endswith("a")
-        if cc in groups and conditional.get(cc, False) != is_cond:
-            # A conditional build for this cc wins outright; a plain one loses.
-            if not is_cond:
-                continue
-            groups[cc] = []
-        groups.setdefault(cc, []).append(sc)
-        conditional[cc] = conditional.get(cc, False) or is_cond
-    return {cc: groups[cc] for cc in sorted(groups)}
+        coverage[arch] = decl.target_devices(arch)
+        groups.setdefault(arch, []).append(sc)
+
+    by_coverage: dict[tuple[tuple[int, int], ...], list[str]] = {}
+    for arch in groups:
+        by_coverage.setdefault(coverage[arch], []).append(arch)
+    for candidates in by_coverage.values():
+        keep = min(candidates, key=decl.target_order_key)
+        for arch in candidates:
+            if arch != keep:
+                del groups[arch]
+
+    ordered = sorted(groups, key=decl.target_order_key)
+    return {arch: groups[arch] for arch in ordered}
 
 
 # Tensor-shaped C++ types the gate must recognize or refuse: torchgen renders
@@ -337,28 +354,29 @@ def gen_op(
             f"{pad}  return true;\n{pad}}}"
         )
 
-    # One cond chain per compute capability (see _by_arch).
+    # One cond chain per compile target (see _by_arch).
     groups = _by_arch(sidecars)
-    # Shipping an arch the declaration disowns is a packaging bug: error rather
+    # Shipping a target the declaration disowns is a packaging bug: error rather
     # than gate on kernels the op does not claim to support. Over EVERY exported
-    # tree, ahead of the tie-break below: a disowned tree of the same capability as
+    # tree, ahead of the tie-break below: a disowned tree with the same coverage as
     # a claimed one loses that tie-break, and would pass unnoticed.
-    if unclaimed := {sc["arch"] for sc in sidecars} - set(decl.archs_of(d)):
-        # Name the directories and say DELETE: export skips arches outside ARCHS,
-        # so it never prunes these trees and every later build fails identically.
+    declared_archs = decl.archs_of(d)
+    if unclaimed := {sc["arch"] for sc in sidecars if sc["arch"] not in declared_archs}:
+        # Name the directories and say DELETE: export skips targets the declaration
+        # does not permit, so it never prunes these trees and every later build fails
+        # identically.
         # .get because gen_op is also called directly, with no generation-time _dir.
         trees = sorted(
             {sc.get("_dir", "?") for sc in sidecars if sc["arch"] in unclaimed}
         )
         raise RuntimeError(
             f"{op}: artifacts exported for {sorted(unclaimed)} but the "
-            f"declaration supports only {decl.archs_of(d)}. Delete "
-            f"{', '.join(trees) or 'those arch trees'} -- export.py skips "
-            f"unsupported arches, so it will not remove them -- then re-export. "
+            f"declaration supports only {declared_archs}. Delete "
+            f"{', '.join(trees) or 'those target trees'} -- export.py skips "
+            f"unsupported targets, so it will not remove them -- then re-export. "
             f"A bare re-export will NOT clear this; only deleting the tree does. "
-            f"(A backstop: export resolves an on-device arch to the spelling the "
-            f"declaration claims, so reaching this means the tree predates that or "
-            f"ARCHS was narrowed since.)"
+            f"(A backstop: export only emits targets named by the declaration, so "
+            f"reaching this means the tree predates that or ARCHS was narrowed since.)"
         )
 
     # Only the tie-break survivors get launchers: one for a dropped candidate is
@@ -368,10 +386,10 @@ def gen_op(
     sidecars = surviving_sidecars(op, sidecars)
 
     def _gate_for(props: str) -> str:
-        accept = " || ".join(f"({_device_match(*cc)})" for cc in groups)
+        accept = " || ".join(f"({_device_match(arch)})" for arch in groups)
         return (
-            f"  // Device gate: one branch per shipped capability "
-            f"({', '.join(f'{maj}.{min_}' for maj, min_ in groups)})\n"
+            f"  // Device gate: one branch per shipped target "
+            f"({', '.join(groups)})\n"
             f"  // Read once into a local: this gate and every branch below ask\n"
             f"  // the same question, and the accessor is a call per read.\n"
             f"  const auto* {_PROPS_LOCAL} = {props};\n"
@@ -380,10 +398,10 @@ def gen_op(
 
     arch_gate = _gate_for(_CURRENT_PROPS)
     branches = [
-        f"  if ({_device_match(*cc)}) {{\n"
+        f"  if ({_device_match(arch)}) {{\n"
         + "\n".join(_branch(s, "    ") for s in scs)
         + "\n  }"
-        for cc, scs in groups.items()
+        for arch, scs in groups.items()
     ]
     # Defaulted to a callable so the use sites need no condition. `or (lambda)`
     # rather than a getattr default: the contract's other spelling of "no hook" is
@@ -403,7 +421,7 @@ def gen_op(
     if covers is not None:
         covers_params, covers_schema, covers_body = covers
         # Coverage must be no wider than the stub's acceptance, or gated calls
-        # lose their JIT route -- hence the same arch gate here. It reads the
+        # lose their JIT route -- hence the same target gate here. It reads the
         # TENSOR's device, not the current one: covers runs before any device
         # guard, so on a mixed-capability host they can differ.
         _cov_t = _first_tensor_name(covers_params)
@@ -593,8 +611,8 @@ def surviving_sidecars(op: str, sidecars: list[dict]) -> list[dict]:
     kept = [sc for scs in _by_arch(sidecars).values() for sc in scs]
     if dropped := {sc["arch"] for sc in sidecars} - {sc["arch"] for sc in kept}:
         print(
-            f"{op}: ignoring artifacts for {sorted(dropped)} -- an "
-            f"arch-conditional build for the same capability wins. They are not "
+            f"{op}: ignoring artifacts for {sorted(dropped)} -- a stronger target "
+            f"with the same device coverage wins. They are not "
             f"linked; delete those trees to reclaim the disk."
         )
     return kept
@@ -679,8 +697,8 @@ def _delete_generated(artifacts_dir: str, decl_id: str, why: str) -> None:
     """Drop a declaration's generated source. Regenerating is free; the artifacts
     it describes are never touched.
 
-    Called from both places a declaration can stop contributing: its arch trees gone,
-    or present but holding no sidecar. Skipping either leaves a source that compiles
+    Called from both places a declaration can stop contributing: its target trees
+    gone, or present but holding no sidecar. Skipping either leaves a source that compiles
     and references entry points whose object is not in the link set -- a green link
     and a symbol error at first use."""
     src_dir = os.path.join(artifacts_dir, decl_id)
@@ -915,8 +933,8 @@ def main(argv: list[str] | None = None) -> None:
         # -- silently passed everything. Refused here rather than relying on the
         # caller having checked.
         nargs="+",
-        help="restrict generation to these arch trees (sm strings). Stage 2 "
-        "passes the arches this build targets, so a tree left by a build with "
+        help="restrict generation to these compile-target trees (sm strings). "
+        "Stage 2 passes the targets selected for this build, so a tree left by a "
         "a different TORCH_CUDA_ARCH_LIST is ignored rather than shipped",
     )
     parser.add_argument(
@@ -981,36 +999,36 @@ def main(argv: list[str] | None = None) -> None:
             original = (f.read(), st.st_atime_ns, st.st_mtime_ns)
         write_nothing_to_embed(args.artifacts_dir)
 
-    # decl_id -> its arch dirs, so one declaration generates once however many
-    # arches it shipped for: per-arch would emit one .cpp each, all registering
+    # decl_id -> its target dirs, so one declaration generates once however many
+    # targets it shipped for: per-target would emit one .cpp each, all registering
     # the same DispatchStub.
     dirs_by_id: dict[str, list[str]] = {}
     for entry in sorted(os.listdir(args.artifacts_dir)):
         art_dir = os.path.join(args.artifacts_dir, entry)
         if not os.path.isdir(art_dir):
             continue
-        # One layout: <root>/<arch>/<decl_id>/ holds artifacts, <root>/<decl_id>/
+        # One layout: <root>/<target>/<decl_id>/ holds artifacts, <root>/<decl_id>/
         # holds only the generated .cpp. So a top-level dir with subdirectories is
-        # an arch, and one without is a generated-source dir with nothing to find.
+        # a target, and one without is a generated-source dir with nothing to find.
         children = [
             c
             for c in sorted(os.listdir(art_dir))
             if os.path.isdir(os.path.join(art_dir, c))
         ]
-        # An arch tree this build did not ask for is left alone: nothing prunes trees,
+        # A target tree this build did not ask for is left alone: nothing prunes trees,
         # so an incremental build whose TORCH_CUDA_ARCH_LIST changed still holds the
-        # tree for the dropped arch. Generating from it would ship an unrequested
-        # capability, and judging its staleness would demand re-exporting that arch.
+        # tree for the dropped target. Generating from it would ship an unrequested
+        # target, and judging its staleness would demand rebuilding that target.
         if children and args.archs and entry not in args.archs:
-            print(f"{entry}: not in this build's arch list, ignoring its artifacts")
+            print(f"{entry}: not in this build's target list, ignoring its artifacts")
             continue
         for child in children:
             dirs_by_id.setdefault(child, []).append(os.path.join(art_dir, child))
 
-    # A generated source whose artifacts are all gone -- an arch tree deleted by
+    # A generated source whose artifacts are all gone -- a target tree deleted by
     # hand, or every tree it had skipped by --archs -- is deleted here. It is not
     # reached by the loop below (which walks decl_ids that still HAVE artifacts).
-    # Left behind, its #include "../<arch>/<id>/..." no longer resolves: a compile
+    # Left behind, its #include "../<target>/<id>/..." no longer resolves: a compile
     # error naming a generated file, pointing at nothing. Regenerating a source is
     # free; artifacts never are.
     for entry in sorted(os.listdir(args.artifacts_dir)):
@@ -1036,7 +1054,7 @@ def main(argv: list[str] | None = None) -> None:
                 os.path.join(one, fn) for one in art_dirs for fn in os.listdir(one)
             ]
             # The stale .cpp sits with the generated sources at <root>/<decl_id>/,
-            # not in the arch tree. Deleted before the skips below, which protect
+            # not in the target tree. Deleted before the skips below, which protect
             # ARTIFACTS: left on disk it makes stage 2 read "kernels were generated"
             # while this run's include says nothing was embedded, and stage 2 then
             # fails the build blaming the CMake cache. Regenerating a source is free.
@@ -1056,7 +1074,7 @@ def main(argv: list[str] | None = None) -> None:
             # unnamed artifact cannot be linked, and the .cpp that could have
             # referenced one was just deleted. What remains is inert.
             #
-            # Reported per arch dir, since `entries` spans all of them, so the
+            # Reported per target dir, since `entries` spans all of them, so the
             # message names the tree the files are actually in.
             leftover_exts = toolchains.all_artifact_exts()
             for one in art_dirs:
@@ -1074,7 +1092,7 @@ def main(argv: list[str] | None = None) -> None:
                     )
             continue
         sidecars = []
-        # Across every arch dir this declaration exported into.
+        # Across every target dir this declaration exported into.
         for one_dir in art_dirs:
             for fn in sorted(os.listdir(one_dir)):
                 if fn.endswith(".json"):
@@ -1088,10 +1106,9 @@ def main(argv: list[str] | None = None) -> None:
                         raise RuntimeError(
                             f"{path}: sidecar schema version {sc.get('version')!r}, "
                             f"but this generator reads version "
-                            f"{export_mod.SIDECAR_VERSION}. Re-export this arch "
-                            f"({sc.get('arch') or 'unknown arch'}) or delete the "
-                            f"tree; generation cannot be forced past a schema "
-                            f"change."
+                            f"{export_mod.SIDECAR_VERSION}. Delete this target tree "
+                            f"({one_dir}) and re-run export; generation cannot be "
+                            f"forced past a schema change."
                         )
                     # kind beside version, because the stale check below reads it
                     # before anything else here does. Without it, this artifact would
@@ -1099,9 +1116,8 @@ def main(argv: list[str] | None = None) -> None:
                     if "kind" not in sc:
                         raise RuntimeError(
                             f"{path}: sidecar names no kind, so nothing can say "
-                            f"which toolchain built the artifacts beside it. "
-                            f"Re-export this arch ({sc.get('arch') or 'unknown'}) "
-                            f"or delete the tree."
+                            f"which toolchain built the artifacts beside it. Delete "
+                            f"this target tree ({one_dir}) and re-run export."
                         )
                     # The prefix names the extern "C" entry points and the
                     # launcher, so a non-identifier reaches the compiler as a
@@ -1128,7 +1144,7 @@ def main(argv: list[str] | None = None) -> None:
                         sc["_include_dir"] = rel.replace(os.sep, "/")
                     sidecars.append(sc)
         # One prefix must come from one artifact, or the generated file defines
-        # launch_<prefix> twice. Prefixes carry their arch, so export cannot
+        # launch_<prefix> twice. Prefixes carry their target, so export cannot
         # produce this; a copied or renamed tree can. Never deleted automatically.
         seen: dict[str, str] = {}
         for sc in sidecars:
@@ -1136,13 +1152,13 @@ def main(argv: list[str] | None = None) -> None:
             if p in seen:
                 raise RuntimeError(
                     f"{entry}: {p} is present in both {seen[p]} and "
-                    f"{sc['_dir']}. Each arch directory must hold its own "
+                    f"{sc['_dir']}. Each target directory must hold its own "
                     f"artifacts once; a copied or renamed tree duplicates them. "
                     f"Delete whichever is stale and re-run generation."
                 )
             seen[p] = sc["_dir"]
         # Filter BEFORE judging staleness: a dropped candidate can never reach the
-        # library, so a stale `sm_100` beside a fresh `sm_100a` failed the run and
+        # library, so a stale `sm_100` beside a fresh `sm_100f` failed the run and
         # advised re-exporting kernels generation drops again.
         sidecars = surviving_sidecars(entry, sidecars)
         # Both halves: the source closure catches an edited kernel, the recorded
@@ -1154,16 +1170,14 @@ def main(argv: list[str] | None = None) -> None:
             if not (export_mod.sources_current(sc) and export_mod.runtimes_current(sc))
         ]
         if stale and not args.allow_stale:
-            # Name the arches and re-export THEM: a bare export.py run maintains
-            # only the one arch it resolves for, leaving the others stale, so
-            # "just re-run export" is advice that does not work here.
-            archs = sorted({sc.get("arch") or "?" for sc in stale})
+            trees = sorted({sc.get("_dir", "?") for sc in stale})
             raise RuntimeError(
                 f"{entry}: {len(stale)} artifact(s) were exported from "
                 f"different kernel sources than the current tree (e.g. "
-                f"{stale[0].get('prefix')} in {stale[0]['_dir']}). Re-export "
-                f"those arches -- `python tools/native_aot/export.py --arch "
-                f"{' '.join(archs)}` -- or delete their trees. Pass "
+                f"{stale[0].get('prefix')} in {stale[0]['_dir']}). Delete the "
+                f"stale target trees ({', '.join(trees)}) and re-run export for "
+                f"this build; target selection comes from each declaration's "
+                f"current ARCHS. Pass "
                 f"--allow-stale to generate anyway."
             )
         if not sidecars:
@@ -1179,8 +1193,8 @@ def main(argv: list[str] | None = None) -> None:
         covers_fn = getattr(d, "cpp_covers", None)
         covers_body = (covers_fn() or "") if covers_fn else ""
         if covers_body:
-            params, schema = covers_signature(d.ATEN_OP)
-            covers = (params, schema, covers_body)
+            covers_params, covers_schema = covers_signature(d.ATEN_OP)
+            covers = (covers_params, covers_schema, covers_body)
         # Every refusal runs before anything is written, and sources are buffered to
         # the end of the loop: a refusal partway through must not leave earlier
         # declarations' fresh sources paired with the previous run's link set, which
@@ -1198,8 +1212,8 @@ def main(argv: list[str] | None = None) -> None:
                     raise RuntimeError(
                         f"{art}: sidecar describes an artifact that is not on "
                         f"disk. The launcher would be emitted and the artifact "
-                        f"missing at compile or link time; re-export this arch "
-                        f"({sc.get('arch')}) or delete {sc['_dir']}."
+                        f"missing at compile or link time; delete {sc['_dir']} "
+                        f"and re-run export."
                     )
                 # `or ()`: link_exts is Optional so that a kind which never
                 # DECLARED one is refused at import (toolchains
@@ -1217,8 +1231,8 @@ def main(argv: list[str] | None = None) -> None:
             precomputed_args(d.ATEN_OP),
             decl_path,
         )
-        # The source covers every arch this declaration shipped, so it belongs to
-        # no single arch tree: always <root>/<decl_id>/.
+        # The source covers every target this declaration shipped, so it belongs to
+        # no single target tree: always <root>/<decl_id>/.
         out_dir = os.path.join(args.artifacts_dir, entry)
         out = os.path.join(out_dir, f"aot_{did}_{key.lower()}.cpp")
         pending.append((out_dir, out, src, len(sidecars)))

@@ -8,10 +8,10 @@ keeps its JIT override eligibility.
 
 A call is covered iff some point of the declaration's ``kernel_precompile_grid()``
 matches every field ``covered_axes()`` returns; dtypes match by canonical torch
-dtype, grid-only fields like block sizes are ignored, and an exception degrades to
-uncovered. The C++ dispatch chain in the AOT library is the authority on what
-actually launches, and drift is benign: a call both sides decline lands on stock
-aten.
+dtype and grid-only fields like block sizes are ignored. When available, a generated
+C++ coverage predicate gates this answer on the artifact targets actually embedded,
+including CUDA family compatibility. An exception degrades to uncovered. The C++
+dispatch chain is the authority on what actually launches.
 """
 
 import functools
@@ -41,9 +41,10 @@ class _Coverage:
         self._covered_axes = covered_axes
         self._grid = grid
         # Declarations with cpp_covers() get a C++ predicate in the AOT library,
-        # registered as torch.ops._native_aot.covers_<op>: the same answer as the
-        # Python matching below for ~1.5us instead of ~7-10us. Resolved lazily,
-        # because the library loads after coverage is built.
+        # registered as torch.ops._native_aot.covers_<op>. Its declaration body
+        # mirrors the Python matching below, and codegen adds the artifact-target
+        # and ABI gates. Resolved lazily because the library loads after coverage
+        # is built.
         self._cpp_covers: Callable[..., bool] | None = None
         self._cpp_probed = False
 
@@ -117,8 +118,8 @@ def _load_coverage() -> dict[tuple[str, str], _Coverage]:
 
 
 def _base_name(op_symbol: str) -> str:
-    # Overload-qualified ("topk.values") and in-place ("scatter_add_") symbols
-    # share the base op's declaration: one structured wrapper serves all variants.
+    # Overload-qualified and in-place symbols share the base op's declaration:
+    # one structured wrapper serves all variants.
     base = op_symbol.split(".")[0]
     return base.removesuffix("_") if not base.endswith("__") else base
 
