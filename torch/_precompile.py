@@ -270,7 +270,16 @@ from collections.abc import (
     Sequence,  # noqa: TC003
 )
 from types import MappingProxyType
-from typing import Any, cast, Literal, NewType, TYPE_CHECKING
+from typing import (
+    Any,
+    cast,
+    Generic,
+    Literal,
+    NewType,
+    ParamSpec,
+    TYPE_CHECKING,
+    TypeVar,
+)
 
 import torch
 import torch.utils._pytree as pytree
@@ -445,7 +454,11 @@ class PrecompiledRunnable:
         """Remove whatever this loaded artifact installed; a no-op when it installed nothing."""
 
 
-class Capture:
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
+
+class Capture(Generic[_P, _R]):
     r"""The caller-driven capture ``torch.compiler.precompile.capture`` returns.
 
     Part of the prototype ``torch.compiler.precompile`` API, so it may change
@@ -490,7 +503,7 @@ class Capture:
             self._state = "spent"
             self._finish(exc)
 
-    def __call__(self, *args: object, **kwargs: object) -> object:
+    def __call__(self, *args: _P.args, **kwargs: _P.kwargs) -> _R:
         with self._lock:
             self._check_active("calling it, or nothing is written when the block exits")
             return self._run(*args, **kwargs)
@@ -521,7 +534,7 @@ class Capture:
     def _start(self) -> None:
         pass
 
-    def _run(self, *args: object, **kwargs: object) -> object:
+    def _run(self, *args: _P.args, **kwargs: _P.kwargs) -> _R:
         raise NotImplementedError
 
     def _save(self) -> None:
@@ -537,7 +550,7 @@ _SPENT_CAPTURE = (
 )
 
 
-class _MakeFxCapture(Capture):
+class _MakeFxCapture(Capture[_P, _R]):
     r"""Single-shot capture: the :class:`MakeFxTracer` front-end.
 
     A make_fx trace records the ATen ops of ONE execution of ``fn``, so this
@@ -549,7 +562,7 @@ class _MakeFxCapture(Capture):
 
     def __init__(
         self,
-        fn: Callable[..., object],
+        fn: Callable[_P, _R],
         artifact_path: str | os.PathLike[str],
         cache_path: str | os.PathLike[str],
         *,
@@ -596,7 +609,7 @@ class _MakeFxCapture(Capture):
                 f"precompile could not write the artifact: {e}"
             ) from e
 
-    def _run(self, *args: object, **kwargs: object) -> object:
+    def _run(self, *args: _P.args, **kwargs: _P.kwargs) -> _R:
         if kwargs:
             raise ValueError(
                 "MakeFxTracer takes positional arguments only; pass "
@@ -626,7 +639,7 @@ class _MakeFxCapture(Capture):
         rendered = (python_code, self._module.to_cache_bytes(python_code))
         result = _runnable_from_pair(*rendered, _trusted=True)(*args)
         self._rendered = rendered
-        return result
+        return cast(_R, result)
 
     def _trace_without_side_effects(self, args: tuple[object, ...]) -> None:
         # A static trace runs fn on the real example tensors, so an in-place update in
@@ -672,7 +685,7 @@ class _MakeFxCapture(Capture):
             )
 
 
-class _DynamoCapture(Capture):
+class _DynamoCapture(Capture[_P, _R]):
     r"""Multi-call capture: the :class:`DynamoTracer` front-end.
 
     Enter the ``with`` block, call it as many times as you need to exercise the
@@ -734,7 +747,7 @@ class _DynamoCapture(Capture):
             self._fresh_cache = None
             raise
 
-    def _run(self, *args: object, **kwargs: object) -> object:
+    def _run(self, *args: _P.args, **kwargs: _P.kwargs) -> _R:
         if self._call is None:
             raise AssertionError("an active capture has no session call")
         if self._in_call:
@@ -3107,14 +3120,14 @@ def _runnable_from_pair(
 
 
 def capture(
-    fn: Callable[..., object],
+    fn: Callable[_P, _R],
     /,
     *,
     artifact_path: str | os.PathLike[str],
     cache_path: str | os.PathLike[str],
     tracer: MakeFxTracer | DynamoTracer = DynamoTracer(),
     backend: str = "inductor",
-) -> Capture:
+) -> Capture[_P, _R]:
     """Capture ``fn`` across the calls YOUR loop makes, writing the artifact on exit.
 
     .. warning::
