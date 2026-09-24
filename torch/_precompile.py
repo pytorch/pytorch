@@ -3315,7 +3315,9 @@ def load(
     every process-wide stance that would compile (``force_backend``,
     ``"eager_then_compile"``, ...). Under ``"force_eager"`` every call runs
     eagerly, bypassing the installed entries; under ``"eager_on_recompile"`` the
-    captured variants are served and any other call runs eagerly. A Dynamo artifact whose
+    captured variants are served and any other call runs eagerly. An installed
+    artifact refuses to load with ``torch._dynamo.config.compiled_autograd``
+    enabled, which would compile backward graphs outside it. A Dynamo artifact whose
     capture graph-broke cannot load beside the live compile that captured it
     (the continuation names collide), and an installed artifact is refused
     wherever any frame it installs onto already has live Dynamo cache entries:
