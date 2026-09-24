@@ -1587,32 +1587,210 @@ def _linear_cross_entropy_batch_chunked_no_reduction_backward(ctx, grad_output):
     # backward path), recomputing the chunked grads as the VJP. The loss
     # (result[0]) it also returns is the meaningless scalar and dropped.
     _, grad_input, grad_linear_weight, grad_linear_bias = (
-        _linear_cross_entropy_batch_chunked_accumulator(
-            input,
-            linear_weight,
-            target,
-            linear_bias,
-            weight,
-            "none",
-            ctx._ignore_index,
-            0.0,  # label_smoothing
-            ctx._batch_chunk_size,
-            ctx._acc_policy,
-            ctx._acc_dtype,
-            compute_input_grad,
-            compute_linear_weight_grad,
-            compute_linear_bias_grad,
-            loss_grad_output=grad_output,
-        )
-    )
-    if compute_input_grad:
-        result[0] = grad_input
-    if compute_linear_weight_grad:
-        result[1] = grad_linear_weight
-    if compute_linear_bias_grad:
-        result[3] = grad_linear_bias
-    return tuple(result)
+       def _linear_cross_entropy_batch_chunked_accumulator(
+    input: torch.Tensor,
+    linear_weight: torch.Tensor,
+    target: torch.Tensor,
+    linear_bias: torch.Tensor | None,
+    weight: torch.Tensor | None,
+    reduction: str,
+    ignore_index: int,
+    label_smoothing: float,
+    batch_chunk_size: int,
+    acc_policy: str,
+    acc_dtype: torch.dtype,
+    compute_input_grad: bool,
+    compute_linear_weight_grad: bool,
+    compute_linear_bias_grad: bool,
+    loss_grad_output: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Chunked loop shared by all three custom-op entry points; returns
+    ``(loss, grad_input, grad_linear_weight, grad_linear_bias)``.
 
+    Caller -> branch:
+      scalar-op forward (reduction in {mean,sum})  -> main grad loop
+      scalar-op forward, probability target        -> prob loop
+      no_reduction forward (none, loss_grad_output is None) -> loss-only loop
+    """
+    ctx = _ChunkContext.build(
+        input=input,
+        linear_weight=linear_weight,
+        target=target,
+        linear_bias=linear_bias,
+        weight=weight,
+        reduction=reduction,
+        ignore_index=ignore_index,
+        label_smoothing=label_smoothing,
+        batch_chunk_size=batch_chunk_size,
+        acc_policy=acc_policy,
+        acc_dtype=acc_dtype,
+        compute_input_grad=compute_input_grad,
+        compute_linear_weight_grad=compute_linear_weight_grad,
+        compute_linear_bias_grad=compute_linear_bias_grad,
+        loss_grad_output=loss_grad_output,
+    )
+
+    # =========================================================================
+    # BRANCH 1: reduction="none" (Per-sample loss output)
+    # =========================================================================
+    if reduction == "none" and loss_grad_output is None:
+        loss_out = torch.empty(
+            (ctx.num_batches,), dtype=ctx.dtype, device=input.device
+        )
+        for chunk in ctx.chunks():
+            logits = ctx.shifted_logits(chunk)
+            sum_exp = ctx.sumexp_(logits, dim=1)
+            log_sum_exp = sum_exp.log_()
+
+            if ctx.weight is None:
+                gathered_logits = logits.gather(
+                    1, chunk.target_chunk.unsqueeze(1)
+                ).squeeze(1)
+                chunk_loss = log_sum_exp.sub_(gathered_logits)
+            else:
+                gathered_logits = logits.gather(
+                    1, chunk.target_chunk.unsqueeze(1)
+                ).squeeze(1)
+                w_target = ctx.weight.index_select(0, chunk.target_chunk)
+                chunk_loss = log_sum_exp.sub_(gathered_logits).mul_(w_target)
+
+            mask = chunk.target_chunk == ctx.ignore_index
+            chunk_loss.masked_fill_(mask, 0.0)
+            loss_out.narrow(0, chunk.bchunk_start, chunk.bchunk_size).copy_(
+                chunk_loss
+            )
+
+        return (
+            loss_out,
+            ctx.grad_input,
+            ctx.grad_linear_weight,
+            ctx.grad_linear_bias,
+        )
+
+    # =========================================================================
+    # BRANCH 2: Probability Targets
+    # =========================================================================
+    if ctx.is_prob_target:
+        for chunk in ctx.chunks():
+            logits = ctx.shifted_logits(chunk)
+            sum_exp = ctx.sumexp_(logits, dim=1)
+            log_sum_exp = sum_exp.log_()
+
+            # Softmax & Cross Entropy Loss
+            softmax_probs = logits.exp_().div_(sum_exp.unsqueeze(1))
+            prob_target = chunk.prob_wt
+
+            # Loss accumulation: - sum(P * log_softmax)
+            log_softmax = logits.sub_(log_sum_exp.unsqueeze(1))
+            loss_chunk = torch.sum(prob_target * log_softmax)
+            ctx.output.sub_(loss_chunk * ctx.loss_scale)
+
+            # Gradient computation
+            if (
+                compute_input_grad
+                or compute_linear_weight_grad
+                or compute_linear_bias_grad
+            ):
+                # dL/dz = loss_scale * (softmax_probs - prob_target)
+                dlogits = softmax_probs.sub_(prob_target).mul_(ctx.loss_scale)
+
+                if compute_input_grad:
+                    ctx.mm(
+                        dlogits,
+                        chunk.input_grad_linear_weight,
+                        out=chunk.grad_input_chunk,
+                    )
+
+                if compute_linear_bias_grad:
+                    bias_grad = ctx.sum(dlogits, dim=0)
+                    chunk.bias_grad_acc.add_(bias_grad)
+
+                if compute_linear_weight_grad:
+                    if ctx.alloc_weight_grad_chunk:
+                        chunk.weight_grad_chunk.addmm_(
+                            dlogits.T, chunk.weight_grad_input
+                        )
+                    else:
+                        ctx.grad_linear_weight.addmm_(
+                            chunk.logits_downcast.T, chunk.weight_grad_input
+                        )
+
+        loss_result = ctx.output.to(ctx.dtype)
+        if ctx.alloc_weight_grad_chunk:
+            ctx.grad_linear_weight.copy_(
+                ctx.weight_grad_chunk.to(ctx.dtype)
+            )
+
+        return (
+            loss_result,
+            ctx.grad_input,
+            ctx.grad_linear_weight,
+            ctx.grad_linear_bias,
+        )
+
+    # =========================================================================
+    # BRANCH 3: Index Targets (Main Loop)
+    # =========================================================================
+    for chunk in ctx.chunks():
+        logits = ctx.shifted_logits(chunk)
+        sum_exp = ctx.sumexp_(logits, dim=1)
+        log_sum_exp = sum_exp.log_()
+
+        # Loss calculation
+        gathered_logits = logits.gather(
+            1, chunk.target_chunk.unsqueeze(1)
+        ).squeeze(1)
+        loss_val = (log_sum_exp - gathered_logits) * chunk.weight_chunk.neg()
+        ctx.output.add_(loss_val.sum().to(ctx.output.dtype))
+
+        # Backward gradients computation
+        if (
+            compute_input_grad
+            or compute_linear_weight_grad
+            or compute_linear_bias_grad
+        ):
+            # dL/dz = softmax - weight_target (in-place on logits_buf)
+            softmax_probs = logits.exp_().div_(sum_exp.unsqueeze(1))
+            softmax_probs.scatter_add_(
+                1,
+                chunk.target_chunk.unsqueeze(1),
+                chunk.weight_chunk.unsqueeze(1),
+            )
+
+            # Softmax now holds the dL/dz dlogits term
+            if compute_input_grad:
+                ctx.mm(
+                    chunk.input_grad_logits,
+                    chunk.input_grad_linear_weight,
+                    out=chunk.grad_input_chunk,
+                )
+
+            if compute_linear_bias_grad:
+                bias_grad = ctx.sum(chunk.logits, dim=0)
+                chunk.bias_grad_acc.add_(bias_grad)
+
+            if compute_linear_weight_grad:
+                if ctx.alloc_weight_grad_chunk:
+                    chunk.weight_grad_chunk.addmm_(
+                        chunk.logits_upcast.T, chunk.weight_grad_input
+                    )
+                else:
+                    ctx.grad_linear_weight.addmm_(
+                        chunk.logits_downcast.T, chunk.weight_grad_input
+                    )
+
+    loss_result = ctx.output.to(ctx.dtype)
+    if ctx.alloc_weight_grad_chunk:
+        ctx.grad_linear_weight.copy_(
+            ctx.weight_grad_chunk.to(ctx.dtype)
+        )
+
+    return (
+        loss_result,
+        ctx.grad_input,
+        ctx.grad_linear_weight,
+        ctx.grad_linear_bias,
+    )
 
 _linear_cross_entropy_batch_chunked_no_reduction.register_autograd(
     _linear_cross_entropy_batch_chunked_no_reduction_backward,

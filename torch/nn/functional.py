@@ -3778,8 +3778,11 @@ def linear_cross_entropy(
 
     is equivalent to the following reference implementation of linear_cross_entropy::
 
-      logits = linear(input, linear_weight)
-      loss = cross_entropy(logits, target, **kwargs)
+   logits = linear(input, linear_weight)
+      if logits.ndim > 2:
+        # F.cross_entropy expects the class channel at dim=1
+        logits = logits.movedim(-1, 1)
+    loss = cross_entropy(logits, target, **kwargs)
 
     provided that :attr:`ignore_index` is not explicitly set to `None`
     in `kwargs` (since :func:`cross_entropy` does not accept `None`
