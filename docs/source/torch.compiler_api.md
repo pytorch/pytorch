@@ -62,17 +62,22 @@ a self-contained Python source artifact plus an acceleration cache that a fresh 
 reloads. No weights are baked in, so the model is passed again at runtime:
 
 ```python
+# step is a module-level function: def step(model, x): return model(x)
 with torch.compiler.precompile.capture(
-    lambda model, x: model(x), artifact_path="m.py", cache_path="m.cache"
+    step, artifact_path="m.py", cache_path="m.cache"
 ) as cap:
-    y = cap(model, x)
+    y1 = cap(model, x1)
+    y2 = cap(model, x2)  # a recompile or graph break becomes another variant
 
-f = torch.compiler.precompile.load("m.py", "m.cache")
-y = f(model, x)
+f = torch.compiler.precompile.load("m.py", "m.cache")  # in a fresh process
+y = f(model, x1)
 ```
 
-The contract is Note [precompile programming model] in `torch/_precompile.py`. It is
-distinct from `torch._dynamo.config.caching_precompile` (a `torch.compile` caching mode).
+The default `DynamoTracer` records every frame Dynamo compiles while your calls run and
+the artifact dispatches among them by their guards; `MakeFxTracer` is a single non-strict
+trace under the contract of Note [precompile programming model] in `torch/_precompile.py`.
+`torch.compiler.precompile` is distinct from `torch._dynamo.config.caching_precompile`
+(a `torch.compile` caching mode).
 
 % Rendered from the docstrings, so this reference cannot drift from the source.
 
@@ -82,6 +87,8 @@ distinct from `torch._dynamo.config.caching_precompile` (a `torch.compile` cachi
 .. autofunction:: torch.compiler.precompile.load
 
 .. autoexception:: torch.compiler.PrecompileError
+
+.. autoclass:: torch.compiler.precompile.DynamoTracer
 
 .. autoclass:: torch.compiler.precompile.MakeFxTracer
 
