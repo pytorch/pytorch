@@ -1083,7 +1083,7 @@ class TracingContext:
     """
 
     @property
-    def backend_fw_metadata(self) -> BackendFwMetadata | None:
+    def backend_fw_metadata(self) -> "BackendFwMetadata | None":
         """
         A live view of fw_metadata exposing only the subset that compiler
         backends (in-tree Inductor and out-of-tree) may depend on. Derived
