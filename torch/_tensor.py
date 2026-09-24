@@ -1618,6 +1618,8 @@ class Tensor(torch._C.TensorBase):
                 "Can't export tensors with layout other than torch.strided"
             )
 
+        # CUDA stream synchronization below uses the current CUDA device,
+        # rather than the device of the tensor being exported.
         if (
             self.device.type == "cuda"
             and self.device.index != torch.cuda.current_device()
