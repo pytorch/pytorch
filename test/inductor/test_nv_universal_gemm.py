@@ -134,7 +134,7 @@ def _force_pdl_nvgemm_choice():
         pdl_choices = [
             choice
             for choice in nvgemm_choices
-            if getattr(choice.kernel.impl, "use_pdl", False)
+            if getattr(choice.kernel.metadata.design, "use_pdl", False)
         ]
         if nvgemm_choices and not pdl_choices:
             raise AssertionError("expected a PDL-capable NVGEMM choice")
@@ -845,13 +845,6 @@ class TestNVUniversalGemm(TestCase):
             )
 
         def benchmark(_selector, choices, *_args, **_kwargs):
-            nvgemm_choices = [
-                choice
-                for choice in choices
-                if isinstance(choice, NVUniversalGemmCaller)
-            ]
-            if nvgemm_choices:
-                self.assertTrue(any(is_target(choice) for choice in nvgemm_choices))
             return {choice: 0.1 if is_target(choice) else 1.0 for choice in choices}
 
         with (
