@@ -504,7 +504,7 @@ template <
 kernel void reduction_outer(
     constant TI* input [[buffer(0)]],
     device TO* output [[buffer(1)]],
-    // [dim_size, inner_size, unused, num_segs]
+    // [dim_size, inner_size, num_segs, unused]
     constant uint4& sizes [[buffer(2)]],
     constant float& param [[buffer(3)]], // >0 divides accumulator before cast
     // [dim_stride, inner_stride, outer_stride, unused]
@@ -514,7 +514,7 @@ kernel void reduction_outer(
   using TA = typename OP::acc_t;
   const uint dim_size = sizes.x;
   const uint inner_size = sizes.y;
-  const uint num_segs = max(sizes.w, 1u);
+  const uint num_segs = max(sizes.z, 1u);
   const uint dim_stride = strides.x;
   const uint inner_stride = strides.y;
   const uint outer_offset = tg_pos.z * strides.z;
@@ -584,7 +584,7 @@ template <
 kernel void reduction_narrow(
     constant TI* input [[buffer(0)]],
     device TO* output [[buffer(1)]],
-    // [dim_size, inner_size, unused, num_segs]
+    // [dim_size, inner_size, num_segs, unused]
     constant uint4& sizes [[buffer(2)]],
     constant float& param [[buffer(3)]],
     uint3 tid_tg [[thread_position_in_threadgroup]],
@@ -593,7 +593,7 @@ kernel void reduction_narrow(
   const uint tid = tid_tg.x;
   const uint dim_size = sizes.x;
   const uint inner_size = sizes.y;
-  const uint num_segs = max(sizes.w, 1u);
+  const uint num_segs = max(sizes.z, 1u);
   const uint active = (TG_SIZE / inner_size) * inner_size;
 
   const uint seg_rows = ceil_div(dim_size, num_segs);

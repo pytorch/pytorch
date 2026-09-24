@@ -643,8 +643,6 @@ static std::tuple<Tensor, Tensor> min_max_mps_impl(const Tensor& input_t,
   return std::tuple<Tensor, Tensor>{output_t, indices_t};
 }
 
-enum class ReductionFamily { Sum, Value, Arg };
-
 // Kernels view the input as [outer, dim, inner] with the middle `dim` reduced:
 // e.g. reducing dim 1 of a [2, 3, 4, 5] tensor gives outer=2, dim=3, inner=20
 enum class ReductionKernel {
@@ -699,9 +697,8 @@ static std::optional<ReductionLayout> outer_reduction_layout(const Tensor& input
                          input.is_contiguous()};
 }
 
-static ReductionPlan select_outer_reduction(const ReductionLayout& layout, ReductionFamily family, int64_t numel) {
+static ReductionPlan select_outer_reduction(const ReductionLayout& layout, bool is_arg, int64_t numel) {
   const auto [outer_size, dim_size, inner_size, strides, is_contiguous] = layout;
-  const bool is_arg = family == ReductionFamily::Arg;
   const auto natural_tgs = outer_size * at::ceil_div(inner_size, OUTER_TG_WIDTH);
   // Tall skinny case (few columns, long reduced dim): too few
   // threadgroups to fill the GPU, so split the reduced dim into segments
@@ -743,10 +740,9 @@ static ReductionPlan select_outer_reduction(const ReductionLayout& layout, Reduc
   return plan;
 }
 
-static ReductionPlan select_inner_reduction(const ReductionLayout& layout, ReductionFamily family, int64_t numel) {
+static ReductionPlan select_inner_reduction(const ReductionLayout& layout, bool is_arg, int64_t numel) {
   const auto num_rows = layout.outer_size;
   const auto row_len = layout.dim_size;
-  const bool is_arg = family == ReductionFamily::Arg;
   ReductionPlan plan{.kernel = ReductionKernel::Innermost, .layout = layout};
 
   // Tensors too small to fill the GPU gain nothing from packing rows
@@ -784,7 +780,7 @@ static ReductionPlan select_inner_reduction(const ReductionLayout& layout, Reduc
   return plan;
 }
 
-static ReductionPlan select_reduction_plan(const Tensor& input, const Tensor& output, ReductionFamily family) {
+static ReductionPlan select_reduction_plan(const Tensor& input, const Tensor& output, bool is_arg) {
   const auto reduction_size = safe_downcast<uint32_t, int64_t>(input.numel() / output.numel());
   const auto num_outputs = safe_downcast<uint32_t, int64_t>(output.numel());
   ReductionPlan plan{.layout = ReductionLayout::contiguous(num_outputs, reduction_size, 1)};
@@ -792,7 +788,7 @@ static ReductionPlan select_reduction_plan(const Tensor& input, const Tensor& ou
   // Two-pass for large full reductions: pass 1 splits input into <=512
   // contiguous slices, each TG reduces one slice to a partial; pass 2
   // collapses the num_groups partials into the final scalar.
-  if (num_outputs == 1 && family != ReductionFamily::Arg) {
+  if (num_outputs == 1 && !is_arg) {
     auto num_groups = std::min(512u, at::ceil_div(reduction_size, MAX_THREADGROUP_SIZE * SUM_NCHAINS));
     while (num_groups > 1 && reduction_size % num_groups != 0) {
       num_groups--;
@@ -815,20 +811,20 @@ static ReductionPlan select_reduction_plan(const Tensor& input, const Tensor& ou
     }
     if (num_reduced == 1 && reduced_dim < input.dim() - 1) {
       if (auto layout = outer_reduction_layout(input, reduced_dim)) {
-        return select_outer_reduction(*layout, family, input.numel());
+        return select_outer_reduction(*layout, is_arg, input.numel());
       }
     } else if (num_reduced <= 1 && input.is_contiguous()) {
       // Innermost dim, which also covers the flattened dim=None argmax/argmin
       // view. Strided innermost reductions stay on the generic kernel below.
-      return select_inner_reduction(plan.layout, family, input.numel());
+      return select_inner_reduction(plan.layout, is_arg, input.numel());
     }
   }
   // Generic single-pass fallback.
   return plan;
 }
 
-static ReductionPlan reduction_combine_plan(const ReductionPlan& plan, ReductionFamily family) {
-  if (family == ReductionFamily::Arg) {
+static ReductionPlan reduction_combine_plan(const ReductionPlan& plan, bool is_arg) {
+  if (is_arg) {
     return {
         .kernel = ReductionKernel::ArgCombine,
         .layout = ReductionLayout::contiguous(plan.layout.outer_size * plan.layout.inner_size, plan.num_segments, 1)};
@@ -865,18 +861,12 @@ static const char* reduction_kernel_suffix(ReductionKernel kernel) {
   TORCH_INTERNAL_ASSERT(false, "Unknown reduction kernel");
 }
 
-struct MetalType {
-  MetalType(ScalarType dtype) : name(scalarToMetalTypeString(dtype)), size(c10::elementSize(dtype)) {}
-  MetalType(std::string name, size_t size) : name(std::move(name)), size(size) {}
-  std::string name;
-  size_t size;
-};
-
 struct ReductionOp {
-  ReductionFamily family;
+  // True for argmax/argmin, which reduce to indices rather than values.
+  bool is_arg;
   std::string prefix;
-  MetalType input_type;
-  MetalType output_type;
+  ScalarType input_type;
+  ScalarType output_type;
   float param = 0;
 };
 
@@ -893,16 +883,16 @@ static void encode_reduction(MPSStream* stream,
                              const std::string& profile_name,
                              const ReductionPartials& partials = {}) {
   const auto& layout = plan.layout;
-  const bool is_arg = op.family == ReductionFamily::Arg;
-  const bool split_arg = is_arg && plan.num_segments > 1;
+  const bool split_arg = op.is_arg && plan.num_segments > 1;
   const auto name = op.prefix + "reduction" + reduction_kernel_suffix(plan.kernel);
+  const auto in_type = scalarToMetalTypeString(op.input_type);
   std::string kernel_name;
   if (split_arg) {
-    kernel_name = fmt::format("{}_p1_{}", name, op.input_type.name);
+    kernel_name = fmt::format("{}_p1_{}", name, in_type);
   } else if (plan.kernel == ReductionKernel::ArgCombine) {
-    kernel_name = fmt::format("{}_{}", name, op.input_type.name);
+    kernel_name = fmt::format("{}_{}", name, in_type);
   } else {
-    kernel_name = fmt::format("{}_{}_{}", name, op.input_type.name, op.output_type.name);
+    kernel_name = fmt::format("{}_{}_{}", name, in_type, scalarToMetalTypeString(op.output_type));
   }
   auto encoder = stream->commandEncoder();
   auto pipeline = lib.getPipelineStateForFunc(kernel_name);
@@ -921,7 +911,7 @@ static void encode_reduction(MPSStream* stream,
     case ReductionKernel::InnermostChunk:
     case ReductionKernel::ArgCombine: {
       uint32_t num_simdgroups = layout.outer_size * plan.num_segments;
-      if (is_arg) {
+      if (op.is_arg) {
         const std::array<uint32_t, 4> sizes{
             num_simdgroups, at::ceil_div(layout.dim_size, plan.num_segments), plan.num_segments, layout.dim_size};
         mtl_setArgs(encoder, input, output, sizes);
@@ -942,10 +932,10 @@ static void encode_reduction(MPSStream* stream,
     case ReductionKernel::OuterSmallDim:
     case ReductionKernel::Narrow: {
       const bool narrow = plan.kernel == ReductionKernel::Narrow;
-      const std::array<uint32_t, 4> sizes{layout.dim_size, layout.inner_size, plan.num_segments, plan.num_segments};
-      if (is_arg && narrow) {
+      const std::array<uint32_t, 4> sizes{layout.dim_size, layout.inner_size, plan.num_segments, 0};
+      if (op.is_arg && narrow) {
         mtl_setArgs(encoder, input, partials.values, partials.indices, sizes);
-      } else if (is_arg) {
+      } else if (op.is_arg) {
         mtl_setArgs(encoder, input, output, sizes, layout.strides);
       } else {
         mtl_setArgs(encoder, input, output, sizes, op.param);
@@ -1003,15 +993,13 @@ static void encode_reduction(MPSStream* stream,
 static void reduction_dispatch_mps(Tensor input,
                                    Tensor output,
                                    const ReductionOp& op,
-                                   const MetalType& partial_type,
+                                   ScalarType partial_type,
                                    const std::string& combine_prefix,
                                    const std::string& profile_name = {}) {
-  // True for argmax/argmin, which reduce to indices rather than values.
-  const bool is_arg = op.family == ReductionFamily::Arg;
   TORCH_INTERNAL_ASSERT(input.numel() > 0 && output.numel() > 0);
   TORCH_INTERNAL_ASSERT(output.dim() == input.dim());
   TORCH_CHECK_NOT_IMPLEMENTED(canUse32BitIndexMath(input, 1LL << 32),
-                              is_arg ? profile_name : "MPS " + op.prefix + "reduction",
+                              op.is_arg ? profile_name : "MPS " + op.prefix + "reduction",
                               ": tensors requiring 64-bit indexing are not supported (numel=",
                               input.numel(),
                               ")");
@@ -1023,7 +1011,7 @@ static void reduction_dispatch_mps(Tensor input,
   // Sorting dims descendingly by stride gives `perm = [1, 0]`, and `y.permute(1, 0)` has sizes `[4, 8]`,
   // strides `[8, 1]`: contiguous. So `y.sum(1)` runs as a dim-0 sum over that view.
   // this is done so such cases do not fallback to slow(er) general kernel.
-  if (!is_arg && !input.is_contiguous()) {
+  if (!op.is_arg && !input.is_contiguous()) {
     c10::DimVector perm(input.dim());
     std::iota(perm.begin(), perm.end(), 0);
     std::ranges::stable_sort(perm, std::greater{}, [&](int64_t d) { return input.stride(d); });
@@ -1034,7 +1022,7 @@ static void reduction_dispatch_mps(Tensor input,
     }
   }
 
-  const auto plan = select_reduction_plan(input, output, op.family);
+  const auto plan = select_reduction_plan(input, output, op.is_arg);
   auto stream = getCurrentMPSStream();
   // for 1 pass plans we need to just dispatch the reduction and return
   if (plan.num_segments == 1) {
@@ -1046,7 +1034,7 @@ static void reduction_dispatch_mps(Tensor input,
     return;
   }
   // build pass 2 plan based on the pass 1 plan.
-  const auto combine_plan = reduction_combine_plan(plan, op.family);
+  const auto combine_plan = reduction_combine_plan(plan, op.is_arg);
   // Flat needs a contiguous input.
   if (plan.kernel == ReductionKernel::Flat) {
     input = input.contiguous();
@@ -1056,19 +1044,19 @@ static void reduction_dispatch_mps(Tensor input,
   // (fp16/bf16/chalf partials would round once per segment),
   // output.scalar_type() for min/max, uchar for all/any.
   const auto num_partials = output.numel() * plan.num_segments;
-  partials.values = at::empty({num_partials * static_cast<int64_t>(partial_type.size)}, output.options().dtype(kByte));
-  if (is_arg) {
+  partials.values = at::empty({num_partials}, output.options().dtype(partial_type));
+  if (op.is_arg) {
     partials.indices = at::empty({num_partials}, output.options().dtype(kInt));
   }
 
   // Two-pass paths divide on the final pass only, while the accumulator is
   // still in opmath_t; sum and value kernels always take the param buffer, so
   // pass 1 binds a no-op 0 (arg kernels take none).
-  const ReductionOp first_op{op.family, op.prefix, op.input_type, partial_type};
-  const ReductionOp combine_op{op.family, combine_prefix, partial_type, op.output_type, op.param};
+  const ReductionOp first_op{op.is_arg, op.prefix, op.input_type, partial_type};
+  const ReductionOp combine_op{op.is_arg, combine_prefix, partial_type, op.output_type, op.param};
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
-      encode_reduction(stream, input, is_arg ? output : partials.values, plan, first_op, profile_name, partials);
+      encode_reduction(stream, input, op.is_arg ? output : partials.values, plan, first_op, profile_name, partials);
       encode_reduction(stream, partials.values, output, combine_plan, combine_op, profile_name, partials);
     }
   });
@@ -1146,7 +1134,7 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
     return;
   }
 
-  const ReductionOp op{ReductionFamily::Arg, is_argmax ? "argmax_" : "argmin_", in_kdtype, kLong};
+  const ReductionOp op{/*is_arg=*/true, is_argmax ? "argmax_" : "argmin_", in_kdtype, kLong};
   // Winning values are input elements, so the value partials keep the input
   // dtype (no upcast needed) and the index partials are int32.
   reduction_dispatch_mps(input, output_view, op, in_kdtype, op.prefix, func_name);
@@ -1167,7 +1155,7 @@ static void sum_nansum_kernel_mps(TensorIterator& iter, const std::string& kerne
   }
   // Pass 2 always sums partials (count_nonzero's partials are per-block
   // counts -- counting again would be wrong, so always use sum_).
-  const ReductionOp op{ReductionFamily::Sum, kernel_prefix, input.scalar_type(), output.scalar_type(), divisor};
+  const ReductionOp op{/*is_arg=*/false, kernel_prefix, input.scalar_type(), output.scalar_type(), divisor};
   reduction_dispatch_mps(input, output, op, at::toOpMathType(output.scalar_type()), "sum_");
 }
 
@@ -1228,7 +1216,7 @@ static void value_reduction_kernel_mps(TensorIterator& iter, const std::string& 
   } else if (op_prefix == "any_") {
     pass2_prefix = "max_";
   }
-  const ReductionOp op{ReductionFamily::Value, op_prefix, in_kdtype, out_kdtype};
+  const ReductionOp op{/*is_arg=*/false, op_prefix, in_kdtype, out_kdtype};
   reduction_dispatch_mps(input, output, op, partial_dtype, pass2_prefix);
 }
 
