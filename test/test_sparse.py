@@ -2966,8 +2966,8 @@ class TestSparse(TestSparseBase):
 
     @onlyAccelerator
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    def test_new_device_multi_device(self, device):
-        secondary_device = f"{torch.device(device).type}:1"
+    def test_new_device_multi_device(self, devices):
+        secondary_device = devices[1]
         self._test_new_device((), secondary_device)
         self._test_new_device((30, 20), secondary_device)
         self._test_new_device((30, 20, 10), secondary_device)
