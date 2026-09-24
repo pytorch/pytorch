@@ -1,6 +1,9 @@
 #include <torch/csrc/symbolic/NativeShapeEnv.h>
 
+#include <c10/util/hash.h>
+
 #include <algorithm>
+#include <atomic>
 #include <string>
 
 namespace torch::symbolic {
@@ -33,7 +36,64 @@ bool is_nonnegative_value(const Expr* value) {
       (value->kind != Kind::NegativeIntInfinity && value->p >= 0);
 }
 
+std::atomic<uint64_t> query_seq{0};
+std::atomic<int64_t> pending_queries{0};
+
 } // namespace
+
+bool& suppress_guards_tls() {
+  thread_local bool value = false;
+  return value;
+}
+
+NativeShapeEnv::~NativeShapeEnv() {
+  pending_queries -= static_cast<int64_t>(queries_.size());
+}
+
+size_t NativeShapeEnv::QueryHash::operator()(const NativeQuery& q) const {
+  return c10::get_hash(
+      q.expr,
+      q.evaluate,
+      q.hint.index(),
+      std::visit(
+          [](auto v) -> int64_t {
+            if constexpr (std::is_same_v<decltype(v), std::monostate>) {
+              return 0;
+            } else {
+              return static_cast<int64_t>(v);
+            }
+          },
+          q.hint),
+      q.fallback_value.has_value(),
+      q.fallback_value.value_or(false),
+      q.suppress_guards);
+}
+
+void NativeShapeEnv::log_query(const NativeQuery& q, const Expr* result) {
+  auto [it, inserted] = queries_.try_emplace(q);
+  if (inserted) {
+    ++pending_queries;
+  }
+  it->second = {++query_seq, result};
+}
+
+std::vector<LoggedQuery> NativeShapeEnv::take_queries() {
+  std::vector<LoggedQuery> out;
+  out.reserve(queries_.size());
+  for (const auto& [q, v] : queries_) {
+    out.push_back({v.first, q, v.second});
+  }
+  pending_queries -= static_cast<int64_t>(queries_.size());
+  queries_.clear();
+  std::sort(out.begin(), out.end(), [](const auto& a, const auto& b) {
+    return a.seq < b.seq;
+  });
+  return out;
+}
+
+bool NativeShapeEnv::queries_pending() {
+  return pending_queries > 0;
+}
 
 void NativeShapeEnv::add_symbol(
     const Expr* sym,
@@ -368,16 +428,30 @@ std::optional<const Expr*> NativeShapeEnv::static_eval(const Expr* e) {
   if (!pristine_ || !all_symbols_mirrored(e)) {
     return std::nullopt;
   }
+  const Expr* r = nullptr;
   try {
-    return maybe_evaluate_static(e);
+    r = maybe_evaluate_static(e);
   } catch (const NativeUnsupported&) {
     return std::nullopt;
   }
+  log_query({e, false, std::monostate{}, std::nullopt, false}, r);
+  return r;
 }
 
 std::optional<const Expr*> NativeShapeEnv::evaluate_expr(
     const Expr* e,
-    std::optional<int64_t> hint) {
+    const Hint& hint,
+    std::optional<bool> fallback_value) {
+  auto r = evaluate_expr_impl(e, hint);
+  if (r) {
+    log_query({e, true, hint, fallback_value, suppress_guards_tls()}, *r);
+  }
+  return r;
+}
+
+std::optional<const Expr*> NativeShapeEnv::evaluate_expr_impl(
+    const Expr* e,
+    const Hint& hint) {
   // _evaluate_expr up to the static evaluation; the rest adds a guard or
   // raises.
   if (e->kind == Kind::BooleanTrue || e->kind == Kind::BooleanFalse) {
@@ -388,8 +462,13 @@ std::optional<const Expr*> NativeShapeEnv::evaluate_expr(
     return std::nullopt;
   }
   if (e->is_number()) {
-    // Python asserts Eq(e, hint).
-    if (!hint || (e->kind == Kind::Integer && e->p == *hint)) {
+    // Python asserts that e equals the hint (Integer(1) == True).
+    if (std::holds_alternative<std::monostate>(hint)) {
+      return e;
+    }
+    const auto* i = std::get_if<int64_t>(&hint);
+    if (e->kind == Kind::Integer &&
+        e->p == (i ? *i : int64_t(std::get<bool>(hint)))) {
       return e;
     }
     return std::nullopt;
@@ -402,9 +481,7 @@ std::optional<const Expr*> NativeShapeEnv::evaluate_expr(
     if (const Expr* r = maybe_fast_eval_comparison(e)) {
       return r;
     }
-    const Expr* r = maybe_evaluate_static(e);
-    // With config.backed_size_oblivious Python asserts r == hint.
-    if (r && (!hint || (r->kind == Kind::Integer && r->p == *hint))) {
+    if (const Expr* r = maybe_evaluate_static(e)) {
       return r;
     }
   } catch (const NativeUnsupported&) {

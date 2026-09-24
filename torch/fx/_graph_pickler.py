@@ -34,7 +34,7 @@ from torch._subclasses.meta_utils import (
     MetaTensorDescriber,
 )
 from torch.fx.experimental.sym_node import SymNode
-from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.fx.experimental.symbolic_shapes import _native_pre_mutation, ShapeEnv
 from torch.utils._mode_utils import no_dispatch
 
 
@@ -476,7 +476,7 @@ class _ShapeEnvPickleData:
         native_env = unpickle_state.fake_mode.shape_env._native_env
         if native_env is not None:
             # The plain containers set below do not notify it.
-            native_env.mark_replacements()
+            _native_pre_mutation(native_env.mark_replacements)
         for k, v in self.data.items():
             setattr(unpickle_state.fake_mode.shape_env, k, v)
 

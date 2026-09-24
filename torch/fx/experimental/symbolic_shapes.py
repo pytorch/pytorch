@@ -32,6 +32,7 @@ import re
 import sys
 import threading
 import traceback
+import weakref
 from collections import Counter, defaultdict
 from collections.abc import Callable, Generator, Iterator, Mapping, Sequence
 from contextlib import _GeneratorContextManager, contextmanager
@@ -2769,6 +2770,8 @@ def _lru_cache(
         @functools.wraps(fn)
         def wrapper(self: ShapeEnv, *args: Any, **kwargs: Any) -> _T:
             nonlocal prior_version, prior_key
+            if _native_envs_created:
+                _flush_native_queries()
             if prior_key is None:
                 prior_key = self._get_key()
 
@@ -2789,6 +2792,8 @@ def _lru_cache(
         @functools.wraps(fn)
         def wrapper(self: ShapeEnv, *args: Any, **kwargs: Any) -> _T:  # type: ignore[misc]
             nonlocal prior_version
+            if _native_envs_created:
+                _flush_native_queries()
             if prior_version != self._version_counter:
                 fn_cache.cache_clear()
                 prior_version = self._version_counter
@@ -4045,6 +4050,65 @@ class _NotifyingRangeDict(_NotifyingDict):  # type: ignore[valid-type, misc]
         dict.__setitem__(self, key, value)
 
 
+# ShapeEnvs with a native env. _native_envs_created gates the flush points.
+_native_shape_envs: weakref.WeakSet[ShapeEnv] = weakref.WeakSet()
+_native_envs_created = False
+_NATIVE_SYMNODE_CHECK = os.environ.get("TORCH_NATIVE_SYMNODE_CHECK", "0") == "1"
+
+
+def _set_suppress_guards_tls(value: bool) -> None:
+    TLS.suppress_guards = value
+    torch._C._symbolic._set_suppress_guards(value)
+
+
+def _flush_native_queries() -> None:
+    """
+    Replays, oldest first, the queries that native envs answered since the
+    last flush. Python's evaluation caches do not key on guards, axioms or
+    ranges and are shared by all ShapeEnvs, so this runs before Python
+    evaluates or mutates any ShapeEnv. With TORCH_NATIVE_SYMNODE_CHECK=1 it
+    also checks the native mirrors and answers against Python.
+    """
+    if not torch._C._symbolic._native_queries_pending():
+        return
+    pending: list[tuple[int, ShapeEnv, tuple[Any, ...]]] = []
+    for env in list(_native_shape_envs):
+        native = env._native_env
+        if native is None:
+            continue
+        queries = native.take_queries()
+        if queries and _NATIVE_SYMNODE_CHECK:
+            env._check_native_mirror()
+        pending += [(q[0], env, q[1:]) for q in queries]
+    pending.sort(key=operator.itemgetter(0))
+    for _, env, query in pending:
+        expr, evaluate, hint, fallback_value, suppress_guards, native_result = query
+        if evaluate:
+            prior = ShapeEnv._suppress_guards_tls()
+            _set_suppress_guards_tls(suppress_guards)
+            try:
+                # fx_node=False: the key evaluate_sym_node passes without translation validation.
+                # pyrefly: ignore [bad-argument-type]
+                result = env.evaluate_expr(expr, hint, False, False, fallback_value)
+            finally:
+                _set_suppress_guards_tls(prior)
+        else:
+            # As _static_eval_sym_bool calls it.
+            try:
+                result = env._maybe_evaluate_static(expr)
+            except Exception:
+                result = None
+        if _NATIVE_SYMNODE_CHECK and result != native_result:
+            raise AssertionError(
+                f"native answered {native_result} for {query}, Python {result}"
+            )
+
+
+def _native_pre_mutation(mark: Callable[[], None]) -> None:
+    _flush_native_queries()
+    mark()
+
+
 class ShapeEnv:
     # This is a wrapper over the actual __init__ function.
     #
@@ -4133,13 +4197,19 @@ class ShapeEnv:
             and not self.settings.trace_asserts
             and not torch._logging._internal.GET_DTRACE_STRUCTURED
         ):
+            global _native_envs_created
+            _native_envs_created = True
+            _native_shape_envs.add(self)
             symbolic = torch._C._symbolic
             native = self._native_env = symbolic.NativeShapeEnv(symbolic._Arena())
-            not_pristine = native.mark_not_pristine
+            not_pristine = functools.partial(
+                _native_pre_mutation, native.mark_not_pristine
+            )
             self.guards = _NotifyingList(self.guards, not_pristine)
             self.axioms = _NotifyingDict(self.axioms, not_pristine)
             self.replacements = _NotifyingDict(
-                self.replacements, native.mark_replacements
+                self.replacements,
+                functools.partial(_native_pre_mutation, native.mark_replacements),
             )
             self.var_to_range = _NotifyingRangeDict(self.var_to_range, not_pristine)
             self.divisible = _NotifyingSet(self.divisible, not_pristine)
@@ -4539,6 +4609,26 @@ class ShapeEnv:
             for k in added_replacements:
                 self.replacements.pop(k, None)
             self.frozen = False
+
+    def _check_native_mirror(self) -> None:
+        native = self._native_env
+        if native is None or not native.pristine:
+            return
+        state = (
+            self.guards,
+            self.axioms,
+            self.replacements,
+            self.divisible,
+            self.size_like,
+            self.deferred_runtime_asserts,
+        )
+        if any(state):
+            raise AssertionError(f"pristine native env, but Python has {state}")
+        for s, vr in self.var_to_range.items():
+            mirrored = native.mirrored(s)
+            want = (self.backed_var_to_val.get(s), vr.lower, vr.upper, False)
+            if mirrored is not None and mirrored != want:
+                raise AssertionError(f"native mirror of {s} is {mirrored}, not {want}")
 
     def check_equal(self, other: ShapeEnv) -> None:
         """Compare another ShapeEnv for equivalence"""
@@ -4963,7 +5053,7 @@ class ShapeEnv:
             TLS.suppress_guards_stack = []
         old = self._suppress_guards_tls()
         TLS.suppress_guards_stack.append(old)
-        TLS.suppress_guards = True
+        _set_suppress_guards_tls(True)
 
     @record_shapeenv_event()
     def _suppress_guards_exit(self) -> None:
@@ -4972,7 +5062,7 @@ class ShapeEnv:
             if len(TLS.suppress_guards_stack) > 0
             else False
         )
-        TLS.suppress_guards = old
+        _set_suppress_guards_tls(old)
 
     def suppress_guards(self) -> _GeneratorContextManager[None]:
         """Context manager to ignore all guards generated inside."""
@@ -6248,7 +6338,7 @@ class ShapeEnv:
         if expr in self.backed_var_to_val:
             raise AssertionError(f"{expr} already exists")
         if self._native_env is not None:
-            self._native_env.mark_not_pristine()
+            _native_pre_mutation(self._native_env.mark_not_pristine)
         self.backed_var_to_val[expr] = sympy.Integer(val)
         self.name_to_symbol[expr.name] = expr
 
@@ -7691,7 +7781,10 @@ class ShapeEnv:
 
         if self._native_env is not None:
             new_divisible = _NotifyingSet(
-                new_divisible, self._native_env.mark_not_pristine
+                new_divisible,
+                functools.partial(
+                    _native_pre_mutation, self._native_env.mark_not_pristine
+                ),
             )
         self.divisible = new_divisible
         self._update_version_counter()
@@ -8850,6 +8943,8 @@ class ShapeEnv:
         When fallback_value is not None the function return fallback_value instead of failing with data dependent error.
         """
 
+        if _native_envs_created:
+            _flush_native_queries()
         # Add extra state that evaluate_expr() depends on.
         suppress_guards_tls = ShapeEnv._suppress_guards_tls()
         return self._inner_evaluate_expr(
@@ -9251,6 +9346,8 @@ class ShapeEnv:
             fx_node (Optional, torch.fx.Node): node in ``self.graph`` corresponding
                 to the expression, if applicable
         """
+        if _native_envs_created:
+            _flush_native_queries()
         expr = orig_expr
 
         # TODO: split conjunctions and evaluate them separately

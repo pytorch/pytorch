@@ -6,6 +6,7 @@
 #include <torch/csrc/utils/pybind.h>
 
 #include <algorithm>
+#include <array>
 #include <optional>
 #include <unordered_map>
 #include <vector>
@@ -533,6 +534,49 @@ py::object sort_key_to_py(PyArena& arena, const SortKey& k) {
   return t;
 }
 
+// Whether a torch.fx.experimental._config entry is falsy, read the way
+// ConfigModule.__getattr__ resolves an entry without alias or justknob, but
+// without running Python code. Other entries count as set.
+bool config_entry_unset(py::handle entry, py::handle unset) {
+  if (!entry.attr("alias").is_none() || !entry.attr("justknob").is_none() ||
+      py::bool_(entry.attr("hide"))) {
+    return false;
+  }
+  py::object v = entry.attr("env_value_force");
+  if (v.is(unset)) {
+    PyObject* override_value = nullptr;
+    if (PyContextVar_Get(
+            entry.attr("user_override").ptr(), nullptr, &override_value) != 0) {
+      throw py::error_already_set();
+    }
+    v = py::reinterpret_steal<py::object>(override_value);
+  }
+  if (v.is(unset)) {
+    v = entry.attr("env_value_default");
+  }
+  if (v.is(unset)) {
+    v = entry.attr("default");
+  }
+  return !py::bool_(v);
+}
+
+// The config that ShapeEnv reads on every evaluation and that a native env
+// requires unset: backed_size_oblivious and aggressive_guard_free_semantics.
+bool native_config_is_default() {
+  static const auto* entries = [] {
+    py::dict config =
+        py::module_::import("torch.fx.experimental._config").attr("_config");
+    return new std::array<py::object, 3>{
+        config["backed_size_oblivious"],
+        config["aggressive_guard_free_semantics"],
+        py::module_::import("torch.utils._config_module")
+            .attr("_UNSET_SENTINEL")};
+  }();
+  const auto& [backed, aggressive, unset] = *entries;
+  return config_entry_unset(backed, unset) &&
+      config_entry_unset(aggressive, unset);
+}
+
 } // namespace
 
 void initSymbolicBindings(PyObject* module) {
@@ -540,6 +584,10 @@ void initSymbolicBindings(PyObject* module) {
   auto sm = m.def_submodule("_symbolic", "native symbolic expressions");
   py::register_exception<NativeUnsupported>(sm, "NativeUnsupported");
   sm.def("_assume_rules", &assume_rules_to_py);
+  sm.def("_native_config_is_default", &native_config_is_default);
+  sm.def("_native_queries_pending", &NativeShapeEnv::queries_pending);
+  sm.def("_set_suppress_guards", [](bool v) { suppress_guards_tls() = v; });
+  sm.def("_suppress_guards", [] { return suppress_guards_tls(); });
 
   py::class_<PyExpr>(sm, "_Expr")
       .def(
@@ -857,7 +905,12 @@ void initSymbolicBindings(PyObject* module) {
       .def(
           "mirrored",
           [](PyShapeEnv& self, py::handle sym) -> py::object {
-            auto m = self.env->mirrored(self.owner->from_sympy(sym));
+            std::optional<std::tuple<std::optional<int64_t>, ValueRanges, bool>>
+                m;
+            try {
+              m = self.env->mirrored(self.owner->from_sympy(sym));
+            } catch (const NativeUnsupported&) {
+            }
             if (!m) {
               return py::none();
             }
@@ -918,24 +971,62 @@ void initSymbolicBindings(PyObject* module) {
           })
       .def(
           "evaluate_expr",
-          [wrap_opt](PyShapeEnv& self, const PyExpr& e, py::handle hint) {
-            // Only None and int hints are ported.
-            std::optional<int64_t> h;
-            if (!hint.is_none()) {
-              if (!PyLong_CheckExact(hint.ptr())) {
-                return std::optional<PyExpr>();
-              }
+          [wrap_opt](
+              PyShapeEnv& self,
+              const PyExpr& e,
+              py::handle hint,
+              std::optional<bool> fallback_value) {
+            // Only None, int and bool hints are ported.
+            Hint h;
+            if (PyBool_Check(hint.ptr())) {
+              h = hint.ptr() == Py_True;
+            } else if (PyLong_CheckExact(hint.ptr())) {
               int overflow = 0;
               h = PyLong_AsLongLongAndOverflow(hint.ptr(), &overflow);
               if (overflow != 0) {
                 return std::optional<PyExpr>();
               }
+            } else if (!hint.is_none()) {
+              return std::optional<PyExpr>();
             }
-            auto r = self.env->evaluate_expr(unwrap(self.owner, e), h);
+            if (!native_config_is_default()) {
+              return std::optional<PyExpr>();
+            }
+            auto r =
+                self.env->evaluate_expr(unwrap(self.owner, e), h, fallback_value);
             return wrap_opt(self.owner, r.value_or(nullptr));
           },
           py::arg("e"),
-          py::arg("hint") = py::none());
+          py::arg("hint") = py::none(),
+          py::arg("fallback_value") = py::none())
+      .def(
+          "take_queries",
+          [](PyShapeEnv& self) {
+            // (seq, expr, evaluate, hint, fallback_value, suppress_guards,
+            // result) with sympy exprs.
+            PyArena& a = *self.owner;
+            py::list out;
+            for (const auto& [seq, q, result] : self.env->take_queries()) {
+              py::object hint = std::visit(
+                  [](auto v) -> py::object {
+                    if constexpr (std::is_same_v<decltype(v), std::monostate>) {
+                      return py::none();
+                    } else {
+                      return py::cast(v);
+                    }
+                  },
+                  q.hint);
+              out.append(py::make_tuple(
+                  seq,
+                  a.to_sympy(q.expr),
+                  q.evaluate,
+                  hint,
+                  q.fallback_value,
+                  q.suppress_guards,
+                  result ? a.to_sympy(result) : py::object(py::none())));
+            }
+            return out;
+          });
   for (auto [name, fn] :
        {std::pair{"as_ordered_terms", &ExprArena::as_ordered_terms},
         std::pair{"as_ordered_factors", &ExprArena::as_ordered_factors}}) {

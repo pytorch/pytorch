@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamic shapes"]
+import contextlib
 import os
 import random
 import subprocess
@@ -2417,11 +2418,62 @@ class TestNativeShapeEnvSync(TestCase):
         ("translation_validation", True),
     ]
 
-    def make_env(self, **kwargs):
-        env = ShapeEnv(_allow_native=True, **kwargs)
+    # Queries over the symbols s = 5, t = 7 of make_env.
+    QUERY_POOL = [
+        lambda s, t: sympy.Gt(s, 1),
+        lambda s, t: sympy.Lt(s, t),
+        lambda s, t: sympy.Eq(s, 5),
+        lambda s, t: sympy.Ge(s + t, 4),
+        lambda s, t: sympy.Ne(s * t, 0),
+        lambda s, t: sympy.Le(s, 2 * t),
+        lambda s, t: sympy.Gt(t, 3),
+        lambda s, t: sympy.Eq(Mod(s, 2), 1),
+        lambda s, t: sympy.Lt(FloorDiv(t, 2), s),
+        lambda s, t: sympy.Eq(t - s, 2),
+        lambda s, t: sympy.Le(Max(s, t), s + t),
+    ]
+
+    def make_env(self, allow_native=True, **kwargs):
+        env = ShapeEnv(_allow_native=allow_native, **kwargs)
         s = env.create_symbol(5, ConstantSource("a"), DimDynamic.DYNAMIC)
         t = env.create_symbol(7, ConstantSource("b"), DimDynamic.DYNAMIC)
         return env, s, t
+
+    @staticmethod
+    def answer(env, evaluate, e, hint=None, fallback_value=None):
+        """A query as a native SymNode would issue it: native first, then Python."""
+        native = env._native_env
+        n = None
+        if native is not None:
+            try:
+                n = native.arena.from_sympy(e)
+            except NativeUnsupported:
+                pass
+        if evaluate:
+            if n is not None:
+                r = native.evaluate_expr(n, hint, fallback_value)
+                if r is not None:
+                    return native.arena.to_sympy(r)
+            # fx_node=False, as SymNode passes it.
+            return env.evaluate_expr(e, hint, False, False, fallback_value)
+        if n is not None:
+            answered, r = native.static_eval(n)
+            if answered:
+                return None if r is None else native.arena.to_sympy(r)
+        try:
+            return env._maybe_evaluate_static(e)
+        except Exception:
+            return None
+
+    def run_steps(self, allow_native, steps):
+        env, s, t = self.make_env(allow_native)
+        answers = []
+        for evaluate, i, use_hint, suppress in steps:
+            e = self.QUERY_POOL[i](s, t)
+            hint = bool(e.xreplace({s: 5, t: 7})) if use_hint else None
+            with env.suppress_guards() if suppress else contextlib.nullcontext():
+                answers.append(self.answer(env, evaluate, e, hint))
+        return env, answers
 
     def test_flag(self):
         self.assertIsNone(ShapeEnv(_allow_native=False)._native_env)
@@ -2562,6 +2614,175 @@ class TestNativeShapeEnvSync(TestCase):
 
         on, off = run(True), run(False)
         self.assertIsNotNone(on._native_env)
+        on.check_equal(off)
+
+    def test_take_queries(self):
+        env, s, t = self.make_env()
+        native = env._native_env
+        a = native.arena
+        gt, ge = a.from_sympy(sympy.Gt(s, 1)), a.from_sympy(sympy.Ge(s + t, 4))
+        lt = a.from_sympy(sympy.Lt(s, t))
+        self.assertEqual(native.static_eval(gt)[0], True)
+        self.assertEqual(native.static_eval(lt), (True, None))
+        self.assertIsNotNone(native.evaluate_expr(ge, True, False))
+        with env.suppress_guards():
+            self.assertIsNotNone(native.evaluate_expr(ge, True, False))
+        self.assertIsNotNone(native.evaluate_expr(ge, 1))
+        self.assertEqual(native.static_eval(gt)[0], True)
+        # Unanswered queries are not logged.
+        self.assertIsNone(native.evaluate_expr(lt))
+        self.assertTrue(torch._C._symbolic._native_queries_pending())
+        queries = native.take_queries()
+        self.assertEqual([q[0] for q in queries], sorted(q[0] for q in queries))
+        self.assertEqual(
+            [q[1:] for q in queries],
+            [
+                (sympy.Lt(s, t), False, None, None, False, None),
+                (sympy.Ge(s + t, 4), True, True, False, False, sympy.true),
+                (sympy.Ge(s + t, 4), True, True, False, True, sympy.true),
+                (sympy.Ge(s + t, 4), True, 1, None, False, sympy.true),
+                (sympy.Gt(s, 1), False, None, None, False, sympy.true),
+            ],
+        )
+        self.assertEqual(native.take_queries(), [])
+
+    def test_flush_populates_python_caches(self):
+        env, s, t = self.make_env()
+        native = env._native_env
+        a = native.arena
+        static_cache = ShapeEnv._maybe_evaluate_static
+        evaluate_cache = ShapeEnv._inner_evaluate_expr
+        lt, ge = sympy.Lt(s, t), sympy.Ge(s + t, 4)
+        self.assertEqual(native.static_eval(a.from_sympy(lt)), (True, None))
+        with env.suppress_guards():
+            self.assertIsNotNone(native.evaluate_expr(a.from_sympy(ge), None, True))
+        self.assertTrue(torch._C._symbolic._native_queries_pending())
+        # Any Python evaluation flushes first.
+        env.evaluate_expr(sympy.Gt(s, 1))
+        self.assertEqual(native.take_queries(), [])
+        self.assertFalse(ShapeEnv._suppress_guards_tls())
+        self.assertFalse(torch._C._symbolic._suppress_guards())
+        hits = static_cache.cache_info().hits
+        self.assertIsNone(env._maybe_evaluate_static(lt))
+        self.assertEqual(static_cache.cache_info().hits, hits + 1)
+        hits = evaluate_cache.cache_info().hits
+        with env.suppress_guards():
+            env.evaluate_expr(ge, None, False, fallback_value=True)
+        self.assertEqual(evaluate_cache.cache_info().hits, hits + 1)
+        self.assertTrue(native.pristine)
+
+    def test_flush_on_mutation(self):
+        env, s, t = self.make_env()
+        native = env._native_env
+        order = []
+        native.static_eval(native.arena.from_sympy(sympy.Gt(s, 1)))
+        with mock.patch.object(
+            env,
+            "_maybe_evaluate_static",
+            side_effect=lambda e: order.append(("replay", len(env.guards))),
+        ):
+            env.guards.append(None)
+        self.assertEqual(order, [("replay", 0)])
+        self.assertFalse(native.pristine)
+
+    def test_flush_on_cache_hit(self):
+        env, s, t = self.make_env()
+        native = env._native_env
+        env._maybe_evaluate_static(sympy.Gt(s, 1))
+        native.static_eval(native.arena.from_sympy(sympy.Lt(s, t)))
+        hits = ShapeEnv._maybe_evaluate_static.cache_info().hits
+        env._maybe_evaluate_static(sympy.Gt(s, 1))
+        self.assertEqual(native.take_queries(), [])
+        # The replayed Lt clears nothing; Gt stays a hit.
+        self.assertEqual(ShapeEnv._maybe_evaluate_static.cache_info().hits, hits + 1)
+
+    def test_flush_order_across_envs(self):
+        env1, s1_, _ = self.make_env()
+        env2, s2_, _ = self.make_env()
+        order = []
+
+        def replay(env, name):
+            return lambda e: order.append((name, e))
+
+        for env, s, name in ((env1, s1_, "a"), (env2, s2_, "b"), (env1, s1_, "c")):
+            e = sympy.Gt(s, 1) if name != "c" else sympy.Gt(s, 0)
+            env._native_env.static_eval(env._native_env.arena.from_sympy(e))
+        with (
+            mock.patch.object(
+                env1, "_maybe_evaluate_static", side_effect=replay(env1, 1)
+            ),
+            mock.patch.object(
+                env2, "_maybe_evaluate_static", side_effect=replay(env2, 2)
+            ),
+        ):
+            symbolic_shapes._flush_native_queries()
+        self.assertEqual(
+            order, [(1, sympy.Gt(s1_, 1)), (2, sympy.Gt(s2_, 1)), (1, sympy.Gt(s1_, 0))]
+        )
+
+    def test_suppress_guards_mirror(self):
+        env, _, _ = self.make_env(allow_native=False)
+        self.assertFalse(torch._C._symbolic._suppress_guards())
+        with env.suppress_guards():
+            self.assertTrue(torch._C._symbolic._suppress_guards())
+            with env.suppress_guards():
+                self.assertTrue(torch._C._symbolic._suppress_guards())
+            self.assertTrue(torch._C._symbolic._suppress_guards())
+        self.assertFalse(torch._C._symbolic._suppress_guards())
+
+    @parametrize(
+        "name,value",
+        [("backed_size_oblivious", True), ("aggressive_guard_free_semantics", 1)],
+    )
+    def test_live_config(self, name, value):
+        env, s, t = self.make_env()
+        native = env._native_env
+        n = native.arena.from_sympy(sympy.Gt(s, 1))
+        self.assertTrue(torch._C._symbolic._native_config_is_default())
+        with symbolic_shapes.config.patch(**{name: value}):
+            self.assertFalse(torch._C._symbolic._native_config_is_default())
+            self.assertIsNone(native.evaluate_expr(n))
+            self.assertEqual(native.static_eval(n)[0], True)
+        self.assertTrue(torch._C._symbolic._native_config_is_default())
+        self.assertIsNotNone(native.evaluate_expr(n))
+
+    @mock.patch.object(symbolic_shapes, "_NATIVE_SYMNODE_CHECK", True)
+    def test_check_mode(self):
+        env, s, t = self.make_env()
+        native = env._native_env
+        n = native.arena.from_sympy(sympy.Gt(s, 1))
+        native.static_eval(n)
+        symbolic_shapes._flush_native_queries()
+        # A write that bypasses the notifying container.
+        dict.__setitem__(env.var_to_range, s, ValueRanges(3, 9))
+        native.static_eval(n)
+        with self.assertRaisesRegex(AssertionError, "native mirror"):
+            symbolic_shapes._flush_native_queries()
+        list.append(env.guards, None)
+        native.static_eval(n)
+        with self.assertRaisesRegex(AssertionError, "pristine native env"):
+            symbolic_shapes._flush_native_queries()
+
+    @parametrize("seed", range(8))
+    def test_replay_matches_python(self, seed):
+        rng = random.Random(seed)
+        steps = [
+            (
+                rng.random() < 0.5,
+                rng.randrange(len(self.QUERY_POOL)),
+                rng.random() < 0.3,
+                rng.random() < 0.2,
+            )
+            for _ in range(30)
+        ]
+        off, want = self.run_steps(False, steps)
+        with mock.patch.object(symbolic_shapes, "_NATIVE_SYMNODE_CHECK", True):
+            on, got = self.run_steps(True, steps)
+            symbolic_shapes._flush_native_queries()
+        self.assertEqual(got, want)
+        self.assertEqual(
+            [str(g.expr) for g in on.guards], [str(g.expr) for g in off.guards]
+        )
         on.check_equal(off)
 
 
