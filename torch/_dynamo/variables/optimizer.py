@@ -186,11 +186,14 @@ class OptimizerVariable(UserDefinedObjectVariable):
         # We only set capturable if params are on cuda
         # and the state is not initialized
         def safe_to_set_capturable(group: dict[str, Any]) -> bool:
+            # Any non-CPU, non-meta device may be capturable; enumerate the
+            # closed side (cpu/meta) so all accelerators, incl. PrivateUse1
+            # backends and future device types, are covered without hardcoding.
             all_uninitialized = True
             all_gpu = True
 
             for p in group.get("params", []):
-                all_gpu &= p.is_cuda or p.is_xpu
+                all_gpu &= p.device.type not in ("cpu", "meta")
                 all_uninitialized &= p not in self.value.state
 
             return "capturable" in group and all_uninitialized and all_gpu
