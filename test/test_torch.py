@@ -4249,6 +4249,23 @@ class TestTorchDeviceType(TestCase):
         actual = torch.cdist(x1.to(device), x2.to(device), p=3).cpu()
         self.assertEqual(actual, torch.cdist(x1, x2, p=3), atol=1e-4, rtol=1e-4)
 
+    # The cdist backward kernel indexed in int32: (2, 1024, 2048) pushes the per-batch
+    # buffer offset r1 * r2 * m to 2^31, and (32, 8192, 1) pushes dist.numel() to 2^31.
+    # The last batch is checked against the same batch computed on its own, which stays
+    # within int32. With p=1 and integer grads the reductions are exact, so both agree
+    # bitwise regardless of summation order. See #128791.
+    @onlyCUDA
+    @largeTensorTest('32GB', device='cuda')
+    @parametrize("b, r, m", [(2, 1024, 2048), (32, 8192, 1)])
+    def test_cdist_backward_large_index(self, device, b, r, m):
+        x1 = torch.randn(b, r, m, device=device, requires_grad=True)
+        x2 = torch.randn(b, r, m, device=device)
+        grad = torch.randint(-4, 5, (b, r, r), device=device, dtype=torch.float)
+        (actual,) = torch.autograd.grad(torch.cdist(x1, x2, p=1), x1, grad)
+        x1_last = x1[-1:].detach().requires_grad_()
+        (expected,) = torch.autograd.grad(torch.cdist(x1_last, x2[-1:], p=1), x1_last, grad[-1:])
+        self.assertEqual(actual[-1:], expected)
+
     # FIXME: move to elementwise ternary test suite
     @onlyNativeDeviceTypes
     @dtypesIfCUDA(*set(get_all_math_dtypes('cuda')))
