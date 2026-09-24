@@ -36,6 +36,7 @@ from torch.testing._internal.common_device_type import (
     IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED as TEST_ON_CPU,
     IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED as TEST_ON_CUDA,
     IS_FLEX_ATTENTION_XPU_PLATFORM_SUPPORTED as TEST_ON_XPU,
+    IS_FLEX_ATTENTION_NPU_PLATFORM_SUPPORTED as TEST_ON_NPU,
     largeTensorTest,
     skipCPUIf,
     skipCUDAIf,
@@ -44,6 +45,8 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_quantized import _snr
 from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS
 from torch.utils._triton import has_triton_tma_device
+
+from torch._inductor.kernel.flex.flex_decoding import get_split_k
 
 
 if IS_WINDOWS and IS_CI:
@@ -102,7 +105,20 @@ device_configs = {
         ),
         dtypes_fast=[torch.float32],
     ),
+    "privateuse1": DeviceConfig(
+        dtypes=[torch.float32, torch.bfloat16, torch.float16],
+        dtypes_fast=[torch.float16],
+    ),
 }
+
+# setUpClass rewrites device_type to the actual PrivateUse1 backend name
+# (e.g. "npu"), so register the dtype config under that name as well.
+privateuse1_name = torch._C._get_privateuse1_backend_name()
+if privateuse1_name != "privateuseone":
+    device_configs[privateuse1_name] = DeviceConfig(
+        dtypes=[torch.float32, torch.bfloat16, torch.float16],
+        dtypes_fast=[torch.float16],
+    )
 
 test_device = ("cpu",)
 if TEST_ON_CUDA:
@@ -110,6 +126,8 @@ if TEST_ON_CUDA:
 elif TEST_ON_XPU:
     torch._C._set_onednn_allow_tf32(True)
     test_device = ("xpu",)
+elif TEST_ON_NPU:
+    test_device = ("privateuse1",)
 
 torch_config_string = torch.__config__.show()
 LONG_COMPILATION_ON_CPU = False
@@ -2408,6 +2426,77 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 instantiate_device_type_tests(
     TestFlexDecoding, globals(), only_for=test_device, allow_xpu=True
 )
+
+
+def _num_sm_probeable() -> bool:
+    """Return True iff get_split_k can probe num_SM on the current device.
+
+    The accelerator-aware implementation supports CUDA/XPU/PrivateUse1; the
+    fallback (no accelerator, or a device whose properties lack a compute-unit
+    count) returns a default instead of raising, so this probes by invoking
+    get_split_k directly.
+    """
+    try:
+        get_split_k(1, 1, 1)
+        return True
+    except Exception:
+        return False
+
+
+class TestGetSplitK(common_utils.TestCase):
+    """Unit tests for flex_decoding.get_split_k.
+
+    get_split_k derives ``num_SM`` from the active accelerator and returns
+    ``max(num_SM // max(B * H, 1) * 2, 1)``. These tests verify the function
+    returns a sane positive int and obeys its formula / edge cases on the
+    current device, including PrivateUse1 (NPU) backends.
+    """
+
+    def setUp(self):
+        if not _num_sm_probeable():
+            self.skipTest(
+                "get_split_k cannot probe num_SM on this device "
+                "(no accelerator or unsupported device properties)"
+            )
+
+    def _num_sm(self) -> int:
+        # With B*H == 1, split_k == max(num_SM * 2, 1); recover num_SM from it
+        # so the formula checks below are self-consistent without duplicating
+        # the device-property probing logic in get_split_k itself.
+        return get_split_k(1, 1, 1) // 2
+
+    def test_runs_on_current_device(self):
+        sk = get_split_k(4, 8, 2048)
+        self.assertIsInstance(sk, int)
+        self.assertGreaterEqual(sk, 1)
+
+    def test_returns_positive_int(self):
+        for B, H, Mk in [(1, 1, 1), (4, 8, 2048), (2, 4, 512), (1, 1, 1024)]:
+            with self.subTest(B=B, H=H, Mk=Mk):
+                sk = get_split_k(B, H, Mk)
+                self.assertIsInstance(sk, int)
+                self.assertGreaterEqual(sk, 1)
+
+    def test_formula(self):
+        num_sm = self._num_sm()
+        for B, H in [(1, 1), (4, 8), (2, 4), (1, 8), (8, 1)]:
+            with self.subTest(B=B, H=H):
+                bh = max(B * H, 1)
+                expected = max(num_sm // bh * 2, 1)
+                self.assertEqual(get_split_k(B, H, 1024), expected)
+
+    def test_large_bh_floors_to_one(self):
+        num_sm = self._num_sm()
+        B = num_sm + 10
+        self.assertEqual(get_split_k(B, 1, 1024), 1)
+
+    def test_zero_bh(self):
+        sk = get_split_k(0, 0, 1024)
+        self.assertGreaterEqual(sk, 1)
+
+    def test_non_integer_bh_raises(self):
+        with self.assertRaises(AssertionError):
+            get_split_k(1.0, 1, 1024)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
