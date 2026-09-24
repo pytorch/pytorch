@@ -53,6 +53,7 @@ from torch._dynamo.utils import (
     set_feature_use,
 )
 from torch._functorch import aot_autograd, config as functorch_config
+from torch._functorch._aot_autograd.schemas import OutputType
 from torch._functorch._aot_autograd.subclass_parametrization import (
     unwrap_tensor_subclass_parameters,
 )
@@ -131,7 +132,6 @@ from .fx_passes.post_grad import (
     view_to_reshape,
 )
 from .fx_passes.pre_grad import pre_grad_passes
-from .fx_utils import get_node_storage
 from .graph import GraphLowering
 from .ir import get_device_type, IRNode
 from .triton_bundler import TritonBundler
@@ -433,56 +433,6 @@ def record_original_output_strides(gm: GraphModule) -> None:
             # pyrefly: ignore [bad-argument-type]
             output_strides.append(None)
     output_node.meta["original_output_strides"] = output_strides
-
-
-def record_original_output_aliases(gm: GraphModule) -> None:
-    output = output_node(gm)
-    if "original_output_aliases" in output.meta:
-        return
-
-    inputs = list(gm.graph.find_nodes(op="placeholder"))
-    outputs = pytree.arg_tree_leaves(*output.args)
-
-    input_storages = [get_node_storage(node) for node in inputs]
-    output_storages = [
-        get_node_storage(node) if isinstance(node, torch.fx.Node) else None
-        for node in outputs
-    ]
-
-    input_output_aliases: list[tuple[int, int]] = []
-    output_output_aliases: list[tuple[int, int]] = []
-
-    for output_idx, storage in enumerate(output_storages):
-        if storage is None:
-            continue
-
-        input_output_aliases.extend(
-            (input_idx, output_idx)
-            for input_idx, input_storage in enumerate(input_storages)
-            if input_storage == storage
-        )
-        output_output_aliases.extend(
-            (other_output_idx, output_idx)
-            for other_output_idx in range(output_idx)
-            if output_storages[other_output_idx] == storage
-        )
-
-    # For example, input_output=((0, 1),) records that input 0 aliases output 1,
-    # while output_output=((1, 2),) records that outputs 1 and 2 alias.
-    output.meta["original_output_aliases"] = {
-        "input_output": tuple(input_output_aliases),
-        "output_output": tuple(output_output_aliases),
-    }
-
-
-def _recursive_record_original_output_aliases(gm: GraphModule) -> None:
-    for node in gm.graph.find_nodes(
-        op="call_function", target=torch.ops.higher_order.invoke_subgraph
-    ):
-        subgraph = getattr(gm, node.args[0].target)
-        _recursive_record_original_output_aliases(subgraph)
-
-    record_original_output_aliases(gm)
 
 
 def _recursive_record_original_output_strides(gm: GraphModule) -> None:
@@ -1732,9 +1682,6 @@ class _InProcessFxCompile(FxCompile):
                     fake_mode = fake_tensor_prop(gm, example_inputs)
 
             _recursive_record_original_output_strides(gm)
-            if config.keep_output_aliasing and not is_backward:
-                # Capture aliases before post-grad passes when an earlier stage did not.
-                _recursive_record_original_output_aliases(gm)
 
             # pattern matcher passes might not preserve striding information
             # on node.meta["val"]. if in the future we rely on these being
@@ -2736,13 +2683,6 @@ def partition_fn(
     partitioner_fn_override: Callable[..., Any] | None = None,
     **kwargs: object,
 ) -> tuple[GraphModule, GraphModule]:
-    original_output_aliases = None
-    if config.keep_output_aliasing:
-        # In training, capture aliases before joint passes; partitioning later
-        # selects the forward outputs.
-        _recursive_record_original_output_aliases(gm)
-        original_output_aliases = output_node(gm).meta["original_output_aliases"]
-
     cuda_context = get_cuda_device_context(gm)
     with cuda_context:
         # We can skip the invoke_subgraph because the
@@ -2796,12 +2736,7 @@ def partition_fn(
                 **kwargs,
             )
 
-    fw_module, bw_module = partition_result
-    if original_output_aliases is not None:
-        # Partitioning creates a new forward output node. Preserve the pre-joint
-        # contract so the later recorder does not capture already-rewritten aliases.
-        output_node(fw_module).meta["original_output_aliases"] = original_output_aliases
-    return fw_module, bw_module
+    return partition_result
 
 
 def get_num_model_outputs(model: GraphModule) -> int:
@@ -2945,9 +2880,6 @@ def compile_fx_forward(
         # pad_mm (run as part of joint_graph_passes) can introduce views with
         # padded strides that would be incorrectly captured as "original".
         _recursive_record_original_output_strides(gm)
-        if config.keep_output_aliasing:
-            # Inference skips partition_fn, so capture aliases here before joint passes.
-            _recursive_record_original_output_aliases(gm)
 
         inputs_devices = get_inputs_devices(example_inputs, gm)
         gm = _recursive_joint_graph_passes(gm, input_device=next(iter(inputs_devices)))
@@ -3021,6 +2953,34 @@ def compile_fx_forward(
             for idx in range(original_output_start_index, orig_output_end_idx)
             if isinstance(model_outputs[idx], torch.fx.Node)
         ]
+
+        if config.keep_output_aliasing and context is not None and context.fw_metadata:
+            output_info = context.fw_metadata.output_info
+            if len(output_info) != num_orig_model_outputs:
+                raise AssertionError(
+                    f"Expected {num_orig_model_outputs} output alias entries, "
+                    f"got {len(output_info)}"
+                )
+            input_alias_types = (
+                OutputType.alias_of_input,
+                OutputType.is_input,
+                OutputType.custom_function_view,
+            )
+            visible_set = frozenset(user_visible_output_idxs)
+            model_outputs_node.meta["original_input_aliasing_output_idxs"] = [
+                original_output_start_index + idx
+                for idx, info in enumerate(output_info)
+                if original_output_start_index + idx in visible_set
+                and (
+                    info.output_type in input_alias_types
+                    # AOTAutograd hides differentiable multi-output views from
+                    # autograd, but base_idx still identifies their input base.
+                    or (
+                        info.output_type is OutputType.non_alias
+                        and info.base_idx is not None
+                    )
+                )
+            ]
 
     if (
         config.keep_output_stride
