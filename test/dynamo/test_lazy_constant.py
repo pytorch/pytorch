@@ -643,19 +643,21 @@ class ComputedLazyConstantTests(TestCase):
         for name, fn in cases:
             with self.subTest(name=name):
                 torch._dynamo.reset()
-                opt_fn = torch.compile(fn, backend="eager")
-                for a in (5, 7):
-                    self.assertTrue(same(fn(t, a), opt_fn(t, a)))
+                self._check(fn, [(t, 5), (t, 7)], expected_frames=1)
 
     def test_unary_type_error_surfaces(self):
         t = torch.ones(2)
+        cases = [("neg", lambda a: -a), ("pos", lambda a: +a), ("abs", abs)]
+        for name, unary in cases:
+            with self.subTest(name=name):
+                torch._dynamo.reset()
 
-        def fn(t, a):
-            return t.sin(), ~a
+                def fn(t, a):
+                    return t.sin(), unary(a)
 
-        opt_fn = torch.compile(fn, backend="eager")
-        with self.assertRaises(TypeError):
-            opt_fn(t, 1.5)
+                opt_fn = torch.compile(fn, backend="eager")
+                with self.assertRaisesRegex(TypeError, "bad operand type"):
+                    opt_fn(t, "x")
 
     def test_unary_op_in_branch_recompiles(self):
         t = torch.ones(2)
