@@ -366,6 +366,12 @@ def check_multiple_devices_or_any_cpu_nodes(
 
         return format_default_skip_message(msg)
 
+    if not device_node_mapping:
+        # Everything left was tolerated above (cpu under partitioning, meta), so
+        # there is no GPU work to capture. Refuse, but name the real reason
+        # rather than falling through to an empty "multiple devices" list.
+        return format_default_skip_message("no GPU ops")
+
     if (
         len(device_node_mapping) == 1
         and next(iter(device_node_mapping)).type in _CUDAGRAPH_SUPPORTED_DEVICE_TYPES

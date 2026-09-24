@@ -4,10 +4,12 @@ import contextlib
 import copy
 import functools
 import threading
+import weakref
 from collections import defaultdict
 from collections.abc import Callable
 from contextlib import nullcontext
 from dataclasses import dataclass, field, replace
+from operator import attrgetter
 from typing import Any
 
 import torch
@@ -52,6 +54,7 @@ _SUPPORTED_NESTED_REGION_INDUCTOR_CONFIG_KEYS = frozenset(
     {
         "fallback_by_default",
         "max_autotune",
+        "triton.cudagraphs",
     }
 )
 
@@ -94,6 +97,35 @@ class OutputMetadata:
     num_fw_outs: int | None = None
     indexes_with_symint: set[int] = field(default_factory=set)
     indexes_with_no_grad: set[int] = field(default_factory=set)
+
+
+@dataclass
+class _InvokeSubgraphCudagraphState:
+    forward_cudagraphs: Any = None
+    forward_device_index: Any = None
+    forward_requested: bool = False
+
+
+_invoke_subgraph_cudagraph_states: weakref.WeakValueDictionary[
+    Any, _InvokeSubgraphCudagraphState
+] = weakref.WeakValueDictionary()
+_invoke_subgraph_cudagraph_states_lock = threading.Lock()
+
+
+def _get_invoke_subgraph_cudagraph_state(
+    key: Any,
+) -> _InvokeSubgraphCudagraphState:
+    if key is None:
+        # Nothing identifies the compile this region belongs to, so it cannot be
+        # paired with its other direction; keep the state private rather than
+        # sharing a key with unrelated live models.
+        return _InvokeSubgraphCudagraphState()
+    with _invoke_subgraph_cudagraph_states_lock:
+        state = _invoke_subgraph_cudagraph_states.get(key)
+        if state is None:
+            state = _InvokeSubgraphCudagraphState()
+            _invoke_subgraph_cudagraph_states[key] = state
+        return state
 
 
 # This config will be stored in invoke_subgraph HOP node.meta["custom"]["nested_region_config"]
@@ -198,6 +230,54 @@ def get_backward_nested_region_config(
             bw_inductor_config_patches=None,
         )
     return fw_config
+
+
+def _specialize_nested_region_configs_for_backward(
+    gm: torch.fx.GraphModule,
+) -> None:
+    visited: set[int] = set()
+
+    def visit(current_gm: torch.fx.GraphModule) -> None:
+        if id(current_gm) in visited:
+            return
+        visited.add(id(current_gm))
+        for node in current_gm.graph.find_nodes(
+            op="call_function", target=torch.ops.higher_order.invoke_subgraph
+        ):
+            custom = node.meta.get("custom", {})
+            backward_config = get_backward_nested_region_config(
+                custom.get("nested_region_config")
+            )
+            if backward_config is not None:
+                node.meta["custom"] = {
+                    **custom,
+                    "nested_region_config": backward_config,
+                }
+            subgraph_node = node.args[0]
+            if (
+                isinstance(subgraph_node, torch.fx.Node)
+                and subgraph_node.op == "get_attr"
+                and isinstance(subgraph_node.target, str)
+            ):
+                try:
+                    subgraph = attrgetter(subgraph_node.target)(current_gm)
+                except AttributeError:
+                    continue
+                if isinstance(subgraph, torch.fx.GraphModule):
+                    if backward_config is not None:
+                        # setdefault, not assignment: the partitioner can hand the
+                        # forward and the backward the same nested module object,
+                        # and this mirror is what the forward compiles under. The
+                        # node meta above stays the source of truth.
+                        subgraph.meta.setdefault(
+                            "nested_region_config", backward_config
+                        )
+                    visit(subgraph)
+        for child in current_gm.modules():
+            if child is not current_gm and isinstance(child, torch.fx.GraphModule):
+                visit(child)
+
+    visit(gm)
 
 
 # Per-call id used by downstream graph passes to pair fw and bw
@@ -1414,7 +1494,15 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
 
 
 def invoke_subgraph_inductor_compile(
-    gm, example_inputs, inductor_config_patches=None, **kwargs
+    gm,
+    example_inputs,
+    inductor_config_patches=None,
+    *,
+    is_backward=False,
+    is_inference=False,
+    cudagraph_state_key=None,
+    regional_cudagraph_state=None,
+    **kwargs,
 ):
     _validate_nested_region_inductor_config_patches(inductor_config_patches)
     if inductor_config_patches is None:
@@ -1426,7 +1514,9 @@ def invoke_subgraph_inductor_compile(
     from torch._functorch._aot_autograd.utils import simple_wraps
     from torch._inductor import config
     from torch._inductor.compile_fx import compile_fx_inner
+    from torch._inductor.cudagraph_utils import BoxedDeviceIndex
     from torch._inductor.standalone_compile import AOTCompiledArtifact
+    from torch._inductor.utils import BoxedBool
 
     # Used for testing only, should only be changed via _testing_capture_invoke_subgraph_inductor_compile_gms()
     if (
@@ -1452,8 +1542,57 @@ def invoke_subgraph_inductor_compile(
     ]
     _recursive_record_user_visible_output_idxs(gm)
 
-    compile_fn = config.patch(inductor_config_patches)(compile_fx_inner)
-    compiled_fn_inner = compile_fn(gm, example_inputs)
+    cudagraph_state = _get_invoke_subgraph_cudagraph_state(cudagraph_state_key)
+
+    with config.patch(inductor_config_patches):
+        requested_cudagraphs = bool(config.triton.cudagraphs)
+        if is_inference:
+            cudagraphs = BoxedBool(requested_cudagraphs)
+            forward_device_index = BoxedDeviceIndex(None)
+            forward_cudagraphs_enabled = False
+        elif is_backward:
+            if cudagraph_state.forward_device_index is None:
+                cudagraph_state.forward_device_index = BoxedDeviceIndex(None)
+            if (
+                cudagraph_state.forward_requested
+                and cudagraph_state.forward_cudagraphs is not None
+                and not cudagraph_state.forward_cudagraphs
+            ):
+                requested_cudagraphs = False
+            cudagraphs = BoxedBool(requested_cudagraphs)
+            forward_device_index = cudagraph_state.forward_device_index
+            forward_cudagraphs_enabled = forward_device_index.value is not None
+        else:
+            cudagraph_state.forward_requested = requested_cudagraphs
+            cudagraph_state.forward_cudagraphs = BoxedBool(requested_cudagraphs)
+            cudagraph_state.forward_device_index = BoxedDeviceIndex(None)
+            cudagraphs = cudagraph_state.forward_cudagraphs
+            forward_device_index = cudagraph_state.forward_device_index
+            forward_cudagraphs_enabled = False
+
+        compiled_fn_inner: Any = compile_fx_inner(
+            gm,
+            example_inputs,
+            cudagraphs=cudagraphs,
+            is_backward=is_backward,
+            is_inference=is_inference,
+            boxed_forward_device_index=forward_device_index,
+            cudagraphs_forward_enabled=forward_cudagraphs_enabled,
+        )
+        if (
+            regional_cudagraph_state is not None
+            and not is_inference
+            and forward_device_index.value is not None
+        ):
+            if is_backward:
+                # The backward drives its own CUDA Graph Trees transition on this
+                # device, so the enclosing eager backward must not do it too.
+                if cudagraphs:
+                    regional_cudagraph_state.backward_device_indices.add(
+                        forward_device_index.value
+                    )
+            else:
+                regional_cudagraph_state.device_indices.add(forward_device_index.value)
     if not compiled_fn_inner._boxed_call:
         raise AssertionError(
             "compiled_fn_inner must have _boxed_call attribute set to True"
@@ -1474,6 +1613,9 @@ def invoke_subgraph_inductor_compile(
     # TODO: Do we need the post compile passes in _aot_stage2b_compile_forward_or_inference?
     # TODO: add a real serialize function for SerializableCompiledFunction like _cache_inference_info
     forward.serialize = SerializableCompiledFunction(forward, lambda: None)  # type: ignore[attr-defined]
+    # Strong reference that keeps this region's entry in the weak registry alive
+    # until the matching backward region compiles.
+    forward._cudagraph_state = cudagraph_state  # type: ignore[attr-defined]
     return AOTCompiledArtifact(forward)
 
 
@@ -1500,10 +1642,12 @@ def get_invoke_subgraph_compile_options(
     fw_compiler = functools.partial(
         invoke_subgraph_inductor_compile,
         inductor_config_patches=fw_patches,
+        is_backward=False,
     )
     bw_compiler = functools.partial(
         invoke_subgraph_inductor_compile,
         inductor_config_patches=effective_bw_patches,
+        is_backward=True,
     )
 
     return NestedCompileRegionOptions(
