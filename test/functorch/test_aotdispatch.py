@@ -95,6 +95,7 @@ from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
     compare_equal_outs_and_grads,
+    expectedIfCppFakeTensor,
     instantiate_parametrized_tests,
     IS_ARM64,
     IS_MACOS,
@@ -11231,9 +11232,14 @@ class TestAOTModuleSimplified(AOTTestCase):
 
         self.assertExpectedInline(
             shape_env.format_guards(),
-            """\
+            expectedIfCppFakeTensor(
+                """\
+ - Eq(s49, 20)
+ - Eq(30, s70)""",
+                """\
  - Eq(s49, 20)
  - Eq(s70, 30)""",
+            ),
         )
 
         if not torch.allclose(ref[0], res[0]):
