@@ -7,6 +7,7 @@
 #include <array>
 #include <cstdint>
 #include <deque>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -156,6 +157,23 @@ struct Expr {
   }
 };
 
+// A sympy sort key (Basic.sort_key, default_sort_key): nested tuples of ints,
+// strings and Numbers, compared like Python tuples. Subkeys are shared, as the
+// tuples of sympy's cached sort_key are.
+struct SortKey;
+using SortKeyPtr = std::shared_ptr<const SortKey>;
+struct SortKey {
+  enum class Type : uint8_t { Int, Str, Num, Tuple };
+  Type type;
+  int64_t i = 0;
+  std::string s;
+  const Expr* num = nullptr;
+  std::vector<SortKeyPtr> items;
+};
+
+// Python's three-way tuple comparison; unorderable types throw.
+int compare_keys(const SortKey& a, const SortKey& b);
+
 struct Num {
   int64_t p;
   int64_t q;
@@ -218,6 +236,16 @@ class ExprArena : public c10::intrusive_ptr_target {
   // Basic.compare.
   int compare(const Expr* a, const Expr* b) const;
 
+  // e.sort_key() and sympy.core.sorting.ordered(seq) with the default keys
+  // (Sorting.cpp).
+  const SortKeyPtr& sort_key(const Expr* e);
+  std::vector<const Expr*> ordered(c10::ArrayRef<const Expr*> seq);
+  c10::SmallVector<const Expr*, 4> as_ordered_terms(const Expr* e);
+  c10::SmallVector<const Expr*, 4> as_ordered_factors(const Expr* e);
+  bool could_extract_minus_sign(const Expr* e);
+  // Relational.canonical.
+  const Expr* canonical(const Expr* r);
+
   // Ports of the sympy helpers behind the Add sign handlers (ExprTools.cpp).
   std::pair<const Expr*, const Expr*> as_coeff_Add(const Expr* e);
   c10::SmallVector<const Expr*, 4> free_symbols(const Expr* e) const;
@@ -240,6 +268,7 @@ class ExprArena : public c10::intrusive_ptr_target {
   const Expr* number_pow(Num b, int64_t e);
   const Expr* new_symbol(const std::string& name, const FactKB& kb);
   const Expr* keep_coeff(const Expr* coeff, const Expr* factors);
+  std::pair<const Expr*, const Expr*> as_coeff_Mul(const Expr* e);
   c10::SmallVector<const Expr*, 2> real_roots(const Expr* p, const Expr* x);
   static Num as_num(const Expr* e);
   Tri eval_fact(const Expr* e, Fact f);
@@ -268,6 +297,7 @@ class ExprArena : public c10::intrusive_ptr_target {
   // sympy.core.exprtools._eps, a Dummy(positive=True).
   const Expr* eps_;
   uint64_t dummy_count_ = 0;
+  std::unordered_map<const Expr*, SortKeyPtr> sort_keys_;
 };
 
 } // namespace torch::symbolic

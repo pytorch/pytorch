@@ -361,6 +361,24 @@ std::vector<const Expr*> unwrap_all(
   return r;
 }
 
+py::object sort_key_to_py(PyArena& arena, const SortKey& k) {
+  switch (k.type) {
+    case SortKey::Type::Int:
+      return py::int_(k.i);
+    case SortKey::Type::Str:
+      return py::str(k.s);
+    case SortKey::Type::Num:
+      return arena.to_sympy(k.num);
+    case SortKey::Type::Tuple:
+      break;
+  }
+  py::tuple t(k.items.size());
+  for (size_t i = 0; i < k.items.size(); ++i) {
+    t[i] = sort_key_to_py(arena, *k.items[i]);
+  }
+  return t;
+}
+
 } // namespace
 
 void initSymbolicBindings(PyObject* module) {
@@ -484,6 +502,31 @@ void initSymbolicBindings(PyObject* module) {
             return r;
           })
       .def(
+          "compare",
+          [](const Self& self, const PyExpr& a, const PyExpr& b) {
+            return self->arena->compare(unwrap(self, a), unwrap(self, b));
+          })
+      .def(
+          "sort_key",
+          [](const Self& self, const PyExpr& e) {
+            return sort_key_to_py(
+                *self, *self->arena->sort_key(unwrap(self, e)));
+          })
+      .def(
+          "ordered",
+          [wrap](const Self& self, const std::vector<PyExpr>& seq) {
+            std::vector<PyExpr> r;
+            for (const Expr* e : self->arena->ordered(unwrap_all(self, seq))) {
+              r.push_back(wrap(self, e));
+            }
+            return r;
+          })
+      .def(
+          "could_extract_minus_sign",
+          [](const Self& self, const PyExpr& e) {
+            return self->arena->could_extract_minus_sign(unwrap(self, e));
+          })
+      .def(
           "ask",
           [](const Self& self, const PyExpr& e, const std::string& fact) {
             auto f = fact_from_name(fact);
@@ -518,7 +561,19 @@ void initSymbolicBindings(PyObject* module) {
             return wrap(self, r);
           });
   for (auto [name, fn] :
-       {std::pair{"reversed", &ExprArena::reversed},
+       {std::pair{"as_ordered_terms", &ExprArena::as_ordered_terms},
+        std::pair{"as_ordered_factors", &ExprArena::as_ordered_factors}}) {
+    arena_cls.def(name, [wrap, fn](const Self& self, const PyExpr& e) {
+      std::vector<PyExpr> r;
+      for (const Expr* a : (self->arena.get()->*fn)(unwrap(self, e))) {
+        r.push_back(wrap(self, a));
+      }
+      return r;
+    });
+  }
+  for (auto [name, fn] :
+       {std::pair{"canonical", &ExprArena::canonical},
+        std::pair{"reversed", &ExprArena::reversed},
         std::pair{"reversedsign", &ExprArena::reversedsign},
         std::pair{"negated", &ExprArena::negated},
         std::pair{"weak", &ExprArena::weak},

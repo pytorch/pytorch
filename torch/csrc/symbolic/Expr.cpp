@@ -19,7 +19,8 @@ int cmp3(T a, T b) {
 }
 
 // Index in sympy's ordering_of_classes; classes missing from it sort after all
-// listed ones, by class name.
+// listed ones, by class name (BooleanFalse, BooleanTrue, Dummy, IntInfinity,
+// NegativeIntInfinity, Not).
 int class_rank(const Expr* e) {
   switch (e->kind) {
     case Kind::Integer:
@@ -34,10 +35,28 @@ int class_rank(const Expr* e) {
       return 16;
     case Kind::Add:
       return 17;
-    case Kind::IntInfinity:
-      return 100;
-    case Kind::NegativeIntInfinity:
+    case Kind::Eq:
+      return 62;
+    case Kind::Ne:
+      return 63;
+    case Kind::Gt:
+      return 64;
+    case Kind::Lt:
+      return 65;
+    case Kind::Ge:
+      return 66;
+    case Kind::Le:
+      return 67;
+    case Kind::BooleanFalse:
       return 101;
+    case Kind::BooleanTrue:
+      return 102;
+    case Kind::IntInfinity:
+      return 104;
+    case Kind::NegativeIntInfinity:
+      return 105;
+    case Kind::Not:
+      return 106;
     default:
       return -1;
   }
@@ -545,13 +564,9 @@ int ExprArena::compare(const Expr* a, const Expr* b) const {
   if (a == b) {
     return 0;
   }
-  if (a->is_boolean() || b->is_boolean()) {
-    throw NativeUnsupported("Basic.compare of Booleans is not ported yet");
-  }
-  // Dummy is not in ordering_of_classes and sorts before IntInfinity by name.
   auto rank = [this](const Expr* e) {
     return e->kind == Kind::Symbol && symbol_info(e).dummy_index != 0
-        ? 99
+        ? 103
         : class_rank(e);
   };
   int c = cmp3(rank(a), rank(b));
@@ -599,20 +614,21 @@ int ExprArena::compare(const Expr* a, const Expr* b) const {
       // Dummy._hashable_content appends dummy_index.
       return cmp3(symbol_info(a).dummy_index, symbol_info(b).dummy_index);
     }
-    case Kind::Pow:
-    case Kind::Mul:
-    case Kind::Add:
+    default:
+      // _hashable_content is args.
       c = cmp3(a->args.size(), b->args.size());
       for (size_t i = 0; c == 0 && i < a->args.size(); ++i) {
         c = compare(a->args[i], b->args[i]);
       }
       return c;
-    default:
-      return 0;
   }
 }
 
 const Expr* ExprArena::neg(const Expr* a) {
+  // IntInfinity.__neg__ and NegativeIntInfinity.__neg__.
+  if (a == int_oo_ || a == neg_int_oo_) {
+    return a == int_oo_ ? neg_int_oo_ : int_oo_;
+  }
   return mul({neg_one_, a});
 }
 

@@ -591,10 +591,104 @@ class TestNativeRelational(TestCase):
         self.assertGreater(answered, 10 * unsupported)
 
 
+class TestNativeSorting(TestCase):
+    def check_expr(self, v):
+        arena = torch._C._symbolic._Arena()
+        n = arena.from_sympy(v)
+        self.assertTrue(arena.sort_key(n) == v.sort_key(), f"sort_key({v})")
+        for name in ["as_ordered_terms", "as_ordered_factors"]:
+            got = [arena.to_sympy(x) for x in getattr(arena, name)(n)]
+            self.assertEqual(got, getattr(v, name)(), f"({v}).{name}")
+        got = arena.could_extract_minus_sign(n)
+        self.assertEqual(got, v.could_extract_minus_sign(), f"{v}")
+
+    def check_ordered(self, xs):
+        arena = torch._C._symbolic._Arena()
+        got = arena.ordered([arena.from_sympy(x) for x in xs])
+        self.assertEqual([arena.to_sympy(x) for x in got], list(sympy.ordered(xs)))
+
+    def check_canonical(self, r):
+        arena = torch._C._symbolic._Arena()
+        n = arena.from_sympy(r)
+        got = arena.to_sympy(arena.canonical(n))
+        self.assertEqual(got, r.canonical, f"({r}).canonical")
+        self.assertEqual(type(got), type(r.canonical), f"({r}).canonical")
+
+    def test_known(self):
+        u = sympy.Symbol("u", integer=True)
+        cases = [1 - s0, s0 - 1, 2 - 3 * s0, s0**2 * s1 - s0 * s1**3 + 2 + s0]
+        cases += [1 / s0 + 1 + s0, -2 * s0 * s1, s0 / 2, -s0 * s1, (s0 + 1) ** 2]
+        cases += [(s0 + 1) ** -2 * s1, -((s0 + 1) ** 3), u - s0, s0 - u, -u - s0]
+        cases += [2 * s0 * (s1 + 1), s0**2 + s0 * s1 + s1**2, 1 / s0 - s1]
+        cases += [int_oo, -int_oo, sympy.Integer(-3), sympy.Rational(-1, 2)]
+        for v in cases:
+            self.check_expr(v)
+
+    def test_shared_subexpressions(self):
+        v = s0
+        for _ in range(11):
+            v = (v + 1) ** 2 * s1 + v
+        self.check_expr(v)
+
+    def test_boolean_keys(self):
+        eq = sympy.Eq(s0, 1, evaluate=False)
+        lt = sympy.Lt(u0, s1, evaluate=False)
+        items = [sympy.true, sympy.false, eq, lt, sympy.Not(s0), s0, u0, int_oo]
+        items += [-int_oo, sympy.Integer(0), sympy.Integer(-1), sympy.Integer(7)]
+        items += [sympy.Rational(1, 2), sympy.Rational(3, 2), s0 + 1, 2 * s0]
+        items += [sympy.Eq(eq, sympy.true, evaluate=False), sympy.Ge(s1, s0)]
+        items += [sympy.Ne(s0, s1), sympy.Gt(s0, 2), sympy.Le(u0, 3), s0**2]
+        arena = torch._C._symbolic._Arena()
+        natives = [arena.from_sympy(x) for x in items]
+        for a, na in zip(items, natives):
+            self.assertTrue(arena.sort_key(na) == a.sort_key(), f"sort_key({a})")
+            for b, nb in zip(items, natives):
+                self.assertEqual(arena.compare(na, nb), a.compare(b), f"{a}, {b}")
+        self.check_ordered(items)
+        self.check_ordered(items[::-1])
+
+    def test_canonical_known(self):
+        u = sympy.Symbol("u", integer=True)
+        pairs = [(s0, 1), (1, s0), (-s0, 3), (s0, -s1), (-s0, -s1), (s1, s0)]
+        pairs += [(s0 - s1, 0), (1 - s0, s1), (-2 * u, s0), (3, 2), (int_oo, s0)]
+        pairs += [(s0, int_oo), (-int_oo, int_oo), (int_oo, int_oo), (u, -u)]
+        pairs += [(s0, -s1 + 1), (s1 - s0, s0 - s1), (-s0 - s1, 2)]
+        eq = sympy.Eq(s0, 1, evaluate=False)
+        for op in RELATIONS:
+            for a, b in pairs:
+                self.check_canonical(getattr(sympy, op)(a, b, evaluate=False))
+        for b in [sympy.true, sympy.false, eq, sympy.Eq(-s0, 1, evaluate=False)]:
+            for op in ["Eq", "Ne"]:
+                self.check_canonical(getattr(sympy, op)(eq, b, evaluate=False))
+                self.check_canonical(getattr(sympy, op)(b, eq, evaluate=False))
+        inner = sympy.Eq(1, s0, evaluate=False)
+        self.check_canonical(sympy.Eq(inner, eq, evaluate=False))
+        self.check_canonical(sympy.Ne(inner, sympy.true, evaluate=False))
+
+    @parametrize("seed", range(6))
+    def test_fuzz(self, seed):
+        rng = random.Random(seed)
+        pool = []
+        for _ in range(120):
+            v = sympy.sympify(sympy_eval(random_tree(rng, 3, FACT_LEAVES)))
+            if v.has(sympy.zoo, sympy.nan):
+                continue
+            self.check_expr(v)
+            pool.append(v)
+        for _ in range(40):
+            self.check_ordered(rng.sample(pool, rng.randint(2, 8)))
+        for _ in range(120):
+            a, b = rng.sample(pool, 2)
+            self.check_canonical(
+                getattr(sympy, rng.choice(RELATIONS))(a, b, evaluate=False)
+            )
+
+
 instantiate_parametrized_tests(TestNativeExpr)
 instantiate_parametrized_tests(TestNativeCompoundAssumptions)
 instantiate_parametrized_tests(TestNativeExprTools)
 instantiate_parametrized_tests(TestNativeRelational)
+instantiate_parametrized_tests(TestNativeSorting)
 
 
 if __name__ == "__main__":

@@ -263,4 +263,46 @@ const Expr* ExprArena::strict(const Expr* r) {
   return r;
 }
 
+const Expr* ExprArena::canonical(const Expr* r) {
+  check_relational(r);
+  const Expr* a0 =
+      r->args[0]->is_relational() ? canonical(r->args[0]) : r->args[0];
+  const Expr* a1 =
+      r->args[1]->is_relational() ? canonical(r->args[1]) : r->args[1];
+  if (a0 != r->args[0] || a1 != r->args[1]) {
+    r = rel(r->kind, a0, a1);
+    if (!r->is_relational()) {
+      return r;
+    }
+  }
+  const Expr* lhs = r->args[0];
+  const Expr* rhs = r->args[1];
+  if (rhs->is_number()) {
+    int il = infinity_rank(lhs);
+    int ir = infinity_rank(rhs);
+    if (lhs->is_number() &&
+        (il != 0 || ir != 0 ? il > ir
+                            : i128(lhs->p) * rhs->q > i128(rhs->p) * lhs->q)) {
+      r = reversed(r);
+    }
+  } else if (lhs->is_number()) {
+    r = reversed(r);
+  } else if (ordered({lhs, rhs})[0] != lhs) {
+    r = reversed(r);
+  }
+  lhs = r->args[0];
+  rhs = r->args[1];
+  if (is_boolean_atom(lhs) || is_boolean_atom(rhs)) {
+    return r;
+  }
+  if (could_extract_minus_sign(lhs)) {
+    return reversedsign(r);
+  }
+  if (!rhs->is_number() && could_extract_minus_sign(rhs) &&
+      ordered({lhs, neg(rhs)})[0] != lhs) {
+    return reversedsign(reversed(r));
+  }
+  return r;
+}
+
 } // namespace torch::symbolic
