@@ -13,7 +13,9 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_fused_sdp_choice_native.h>
 #include <ATen/ops/_scaled_dot_product_attention_math_for_mps_native.h>
+#include <ATen/ops/_scaled_dot_product_flash_attention_for_mps_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like.h>
 #endif
@@ -862,5 +864,163 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
         q_contig, k_contig, v_contig, mask_, dropout_p, is_causal, dropout_mask, scale, query, unsqueezed);
   }
 }
+
+// ----------------------------------------------------------------------------
+// SDPBackend selection for MPS
+//
+// Returns SDPBackend::flash_attention when the prefill kernel supports the
+// input (qL > 8, head_dim in {32,64,72,80,96,128,256}, dtype float/half/bf16,
+// no dropout, no nested tensors). Falls back to SDPBackend::math otherwise so
+// _scaled_dot_product_attention_math_for_mps picks the best available path.
+// ----------------------------------------------------------------------------
+int64_t _fused_sdp_choice_mps(
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    const std::optional<Tensor>& attn_mask,
+    double dropout_p,
+    bool is_causal,
+    std::optional<double> scale,
+    bool enable_gqa) {
+  using sdp::SDPBackend;
+
+  // Respect the global kill-switch used for benchmarking / debugging.
+  static const bool prefill_disabled = []() {
+    auto val = c10::utils::get_env("PYTORCH_MPS_DISABLE_PREFILL_ATTENTION");
+    return val.has_value() && val != "0";
+  }();
+  if (prefill_disabled) {
+    return static_cast<int64_t>(SDPBackend::math);
+  }
+
+  if (query.is_nested() || key.is_nested() || value.is_nested()) {
+    return static_cast<int64_t>(SDPBackend::math);
+  }
+  if (dropout_p != 0.0) {
+    return static_cast<int64_t>(SDPBackend::math);
+  }
+
+  const int64_t head_dim = query.size(-1);
+  if (query.size(-1) != value.size(-1) || !prefill_attention_supports_head_dim(head_dim)) {
+    return static_cast<int64_t>(SDPBackend::math);
+  }
+
+  const auto dtype = query.scalar_type();
+  if (dtype != at::kFloat && dtype != at::kHalf && dtype != at::kBFloat16) {
+    return static_cast<int64_t>(SDPBackend::math);
+  }
+
+  // Prefill tile is BQ=16 or BQ=32; for very short Q the vector kernel wins.
+  const int64_t qL = query.size(-2);
+  if (qL <= 8) {
+    return static_cast<int64_t>(SDPBackend::math);
+  }
+
+  // GQA sanity: q_heads must divide evenly.
+  const int64_t q_heads = query.size(-3);
+  const int64_t k_heads = key.size(-3);
+  if (q_heads % k_heads != 0) {
+    return static_cast<int64_t>(SDPBackend::math);
+  }
+
+  // Mask dtype must be bool or match query dtype.
+  if (attn_mask.has_value()) {
+    const auto mask_dtype = attn_mask->scalar_type();
+    if (mask_dtype != at::kBool && mask_dtype != dtype) {
+      return static_cast<int64_t>(SDPBackend::math);
+    }
+  }
+
+  return static_cast<int64_t>(SDPBackend::flash_attention);
+}
+
+REGISTER_MPS_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_mps)
+
+// ----------------------------------------------------------------------------
+// _scaled_dot_product_flash_attention_for_mps
+//
+// Thin validated wrapper that calls sdpa_prefill_mps directly, exposing the
+// existing fused Metal prefill kernel as a first-class ATen op so that:
+//   with torch.backends.cuda.sdp_kernel(enable_flash=True):   # works on MPS too
+//       F.scaled_dot_product_attention(q, k, v)
+// routes through SDPBackend::flash_attention on Apple Silicon.
+//
+// Signature mirrors _scaled_dot_product_flash_attention_for_cpu so
+// attention.cpp can call it symmetrically in the flash_attention switch arm.
+// Returns (output, logsumexp); logsumexp is a placeholder (prefill is
+// forward-only — no autograd backward through this op on MPS).
+// ----------------------------------------------------------------------------
+std::tuple<Tensor, Tensor> _scaled_dot_product_flash_attention_mps(
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    double dropout_p,
+    bool is_causal,
+    const std::optional<Tensor>& attn_mask,
+    std::optional<double> scale) {
+  TORCH_CHECK(
+      !query.is_nested() && !key.is_nested() && !value.is_nested(),
+      "_scaled_dot_product_flash_attention_for_mps: nested tensors are not supported");
+  TORCH_CHECK(
+      dropout_p == 0.0,
+      "_scaled_dot_product_flash_attention_for_mps: dropout is not supported, got dropout_p=",
+      dropout_p);
+  const int64_t head_dim = query.size(-1);
+  TORCH_CHECK(
+      prefill_attention_supports_head_dim(head_dim),
+      "_scaled_dot_product_flash_attention_for_mps: unsupported head_dim=",
+      head_dim,
+      "; supported values are {32, 64, 72, 80, 96, 128, 256}");
+  const auto dtype = query.scalar_type();
+  TORCH_CHECK(
+      dtype == at::kFloat || dtype == at::kHalf || dtype == at::kBFloat16,
+      "_scaled_dot_product_flash_attention_for_mps: unsupported dtype ",
+      dtype);
+  const int64_t qL = query.size(-2);
+  TORCH_CHECK(
+      qL > 8,
+      "_scaled_dot_product_flash_attention_for_mps: sequence length ",
+      qL,
+      " is too short (must be > 8); "
+      "use scaled_dot_product_attention without sdp_kernel for short sequences");
+
+  auto query_tuple = ensure_4d(query);
+  Tensor q_ = std::get<0>(query_tuple);
+  bool unsqueezed_q = std::get<1>(query_tuple);
+
+  Tensor k_ = std::get<0>(ensure_4d(key));
+  Tensor v_ = std::get<0>(ensure_4d(value));
+
+  std::optional<Tensor> mask_;
+  if (attn_mask.has_value()) {
+    auto dims = query.sizes().vec();
+    dims.back() = k_.size(2);
+    mask_ = attn_mask->expand(dims);
+    std::tie(*mask_, std::ignore) = ensure_4d(*mask_);
+  }
+
+  // Prefill kernel requires last-dim stride == 1.
+  Tensor q_c = q_.stride(-1) == 1 ? q_ : q_.contiguous();
+  Tensor k_c = k_.stride(-1) == 1 ? k_ : k_.contiguous();
+  Tensor v_c = v_.stride(-1) == 1 ? v_ : v_.contiguous();
+
+  Tensor out, _attn_w;
+  std::tie(out, _attn_w) =
+      sdpa_prefill_mps(q_c, k_c, v_c, mask_, is_causal, scale, query, unsqueezed_q);
+
+  // logsumexp placeholder — prefill kernel does not expose log-sum-exp.
+  // Shape: [B, num_heads, max_seqlen_q] for 4D input, [num_heads, max_seqlen_q]
+  // for unbatched 3D input. Use out.sizes() slice rather than query.size(0)
+  // which is wrong for 3D (gives num_heads, not batch).
+  const int64_t H = query.size(-3);
+  auto logsumexp = out.dim() == 4
+      ? at::empty({out.size(0), H, qL},
+            at::TensorOptions().dtype(at::kFloat).device(query.device()))
+      : at::empty({H, qL},
+            at::TensorOptions().dtype(at::kFloat).device(query.device()));
+
+  return {std::move(out), std::move(logsumexp)};
+}
+
 } // namespace native
 } // namespace at
