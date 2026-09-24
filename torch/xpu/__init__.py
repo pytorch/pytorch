@@ -65,11 +65,6 @@ class _ZesDeviceInfo:
 
 
 _cached_zes_device_infos: list[_ZesDeviceInfo] = []
-# PyTorch-visible device count, computed once at enumeration. The cache keeps
-# every enumerated device (for robust UUID lookups) and _get_zes_device_info
-# reorders it, so the mask-aware count can't be re-derived later and is stored
-# here instead.
-_cached_zes_visible_count = 0
 # Interval between two HW counter reads; must be >=100ms for fresh data.
 _zes_sample_interval_ms = 150
 
@@ -856,11 +851,11 @@ def _get_zes_device_info(device: Device = None) -> _ZesDeviceInfo:
             current device, given by :func:`~torch.xpu.current_device`,
             if ``None`` (default).
     """
-    device = _get_device_index(device, optional=True)
     if not _cached_zes_device_infos:
         if _enum_zes_device_infos(_parse_visible_devices(strict=True)) < 0:
             raise RuntimeError("Failed to enumerate devices via Level Zero Sysman.")
 
+    device = _get_device_index(device, optional=True)
     uuid = bytes(torch.xpu.get_device_properties(device).uuid.bytes)
     # Fast path: the device already occupies its ordinal slot.
     target = _cached_zes_device_infos[device]
