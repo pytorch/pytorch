@@ -408,11 +408,15 @@ def _collect_importable_constexpr_types(
     value_type = type(value)
     type_module = getattr(value_type, "__module__", None)
     type_qualname = getattr(value_type, "__qualname__", None)
+    ignore_type_import = getattr(
+        value_type, "__torch_inductor_ignore_constexpr_import__", False
+    )
     repr_prefix = (
         _constexpr_type_repr_prefix(value) if type_module != "builtins" else None
     )
     if (
-        type_module is not None
+        not ignore_type_import
+        and type_module is not None
         and type_qualname is not None
         and type_module != "builtins"
         and repr_prefix is not None

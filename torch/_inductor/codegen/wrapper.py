@@ -1781,7 +1781,7 @@ class PythonWrapperCodegen(CodeGen):
         self.allocated_workspaces: dict[str, Any] = {}
 
         # User defined triton kernel aggregate types
-        self._udtk_aggregate_types: dict[tuple[str, tuple[str, ...]], str] = {}
+        self.udtk_aggregate_var_names: dict[tuple[str, tuple[str, ...]], str] = {}
         # intermediate tensor value printing utility
         self.debug_printer = DebugPrinterManager(
             debug_printer_level=config.aot_inductor.debug_intermediate_value_printer,
@@ -2013,36 +2013,55 @@ class PythonWrapperCodegen(CodeGen):
         # pyrefly: ignore [bad-index, index-error]
         return self._metas[meta]
 
-    def maybe_add_udtk_aggregate_type_def(
-        self, spec: triton_kernel_wrap.TupleSpec | triton_kernel_wrap.NamedTupleSpec
+    def maybe_register_udtk_aggregate_type_def(
+        self,
+        spec: triton_kernel_wrap.TupleSpec | triton_kernel_wrap.NamedTupleSpec,
+        compile_wrapper: IndentedBuffer | None = None,
     ) -> str:
         if spec[0] == "tuple":
             return "tuple"
+        if spec[0] != "namedtuple":
+            raise triton_kernel_wrap.unsupported_aggregate_type_error(spec)
+
         type_name = spec[1]
         fields = spec[2]
         key = (type_name, fields)
+        type_def = f"{type_name} = collections.namedtuple({type_name!r}, {fields!r})"
+        ignore_constexpr_import = (
+            f"{type_name}.__torch_inductor_ignore_constexpr_import__ = True"
+        )
+        definition_lines = [type_def, ignore_constexpr_import]
 
-        if var_name := self._udtk_aggregate_types.get(key):
-            return var_name
-        for registered_name, registered_fields in self._udtk_aggregate_types:
-            if registered_name == type_name:
-                raise ValueError(
-                    f"NamedTuple {type_name!r} was already registered with fields "
-                    f"{registered_fields!r}, not {fields!r}"
-                )
-        var_name = type_name
-        self._udtk_aggregate_types[key] = var_name
-        definition = f"{var_name} = collections.namedtuple({var_name!r}, {fields!r})"
+        # Each embedded compilation scope needs its own local definition, even
+        # when the same structural type was already defined in another scope.
+        if compile_wrapper is not None:
+            if not compile_wrapper.contains("import collections"):
+                compile_wrapper.writeline("import collections")
+            compile_wrapper.writelines(definition_lines)
+            # Allow aggregate constants captured by the autotuner to be pickled
+            # without importing this dynamically generated class.
+            compile_wrapper.writeline(
+                f"{type_name}.__reduce__ = "
+                "triton_heuristics.CachingAutotuner.reduce_udtk_aggregate"
+            )
+
+        if key in self.udtk_aggregate_var_names:
+            return type_name
+
+        self.udtk_aggregate_var_names[key] = type_name
 
         if not V.graph.cpp_wrapper:
             self.add_import_once("import collections")
-            self.header.writeline(definition)
+            self.header.writelines(definition_lines)
 
         if config.triton.autotune_at_compile_time:
-            if not self.kernel_autotune_calls.contains("import collections"):
-                self.kernel_autotune_calls.writeline("import collections")
-            self.kernel_autotune_calls.writeline(definition)
-        return var_name
+            # C++ wrappers do not emit the ordinary Python module header.
+            if V.graph.cpp_wrapper:
+                if not self.kernel_autotune_calls.contains("import collections"):
+                    self.kernel_autotune_calls.writeline("import collections")
+            self.kernel_autotune_calls.writelines(definition_lines)
+
+        return type_name
 
     @cache_on_self
     def get_output_refs(self) -> list[str]:
@@ -3809,8 +3828,8 @@ class PythonWrapperCodegen(CodeGen):
         ):
             if is_constexpr:
                 if uses_attrs_dict:
-                    # Attrs-dict Triton represents constexpr arguments explicitly
-                    # in the signature.  Legacy Triton omits declared constexprs.
+                    # tl.constexpr args appear in the signature in new versions of triton,
+                    # but not in old versions of triton.
                     add_to_signature(idx, arg)
 
                 if key in kwargs:
@@ -3826,16 +3845,18 @@ class PythonWrapperCodegen(CodeGen):
 
                 if equals_1:
                     if uses_attrs_dict:
-                        # Attrs-dict Triton labels specialized-one arguments as
-                        # constexpr.  Legacy Triton retains their scalar type.
+                        # new versions of triton: add the equal-to-1 arg in the signature (labeled as "constexpr"),
+                        #                         and add the arg as a constant.
+                        # new versions of triton: add the equal-to-1 arg in the signature (labeled as, e.g., "i32"),
+                        #                         and add the arg as a constant.
                         add_to_signature(idx, ConstexprArg(name=key))
                     else:
                         add_to_signature(idx, arg)
                     constants[key] = 1
                 elif equals_none:
                     if uses_attrs_dict:
-                        # Attrs-dict Triton includes None as a constexpr signature
-                        # entry.  Legacy Triton omits the top-level argument.
+                        # new versions of triton: add the none arg in the signature (as a constexpr arg) and as a constant
+                        # old versions of triton: include the none arg as a constant (but not in the signature)
                         add_to_signature(idx, ConstexprArg(name=key))
                     constants[key] = None
                 else:
@@ -3843,25 +3864,6 @@ class PythonWrapperCodegen(CodeGen):
 
         arg_names = [p.name for p in kernel.params]
         constexprs = [p.num for p in kernel.params if p.is_constexpr]
-
-        # Register every structural NamedTuple, including types below a subtree
-        # that signature folding may skip because it is constexpr or None.
-        for aggregate_arg in aggregate_args.values():
-            aggregate_spec = aggregate_arg.spec
-            value = triton_kernel_wrap.unflatten_aggregate(
-                aggregate_spec,
-                dict.fromkeys(
-                    triton_kernel_wrap.get_aggregate_leaf_keys(aggregate_spec)
-                ),
-            )
-            triton_kernel_wrap.fold_aggregate(
-                aggregate_spec,
-                value,
-                leaf_fn=lambda spec, values, path: None,
-                container_fn=lambda spec, *_: self.maybe_add_udtk_aggregate_type_def(
-                    spec
-                ),
-            )
 
         def get_leaf_arg_type(key, arg, constant_path=None):
             if isinstance(arg, ir.TMADescriptor):
@@ -3930,6 +3932,8 @@ class PythonWrapperCodegen(CodeGen):
                 return False, None
 
             def leaf(leaf_spec, values, path):
+                # If the aggregate this leaf is contained in is marked constexpr
+                # then do not add this leaf to constant_paths.
                 is_nested_constant = any(
                     path[: len(constant_path)] == constant_path
                     for constant_path in constant_paths
@@ -4173,19 +4177,21 @@ class PythonWrapperCodegen(CodeGen):
                 f"from {type_spec.module} import "
                 f"{type_spec.root_name} as {type_spec.root_name}"
             )
-        # TODO(mwizak): this is specialised to namedtuples only, we need to refactor some
-        # code to allow imports, definitions and pickle helpers to share similar
-        # code via add_udtk_aggregate_type
-        if self._udtk_aggregate_types:
-            compile_wrapper.writeline("import collections")
-            for (_, fields), type_name in self._udtk_aggregate_types.items():
-                compile_wrapper.writeline(
-                    f"{type_name} = collections.namedtuple({type_name!r}, {fields!r})"
-                )
-                compile_wrapper.writeline(
-                    f"{type_name}.__reduce__ = "
-                    "triton_heuristics.CachingAutotuner.reduce_udtk_aggregate"
-                )
+
+        # Register every structural NamedTuple, including types below a subtree
+        # that signature folding may skip because it is constexpr or None.
+        for aggregate_arg in aggregate_args.values():
+            triton_kernel_wrap.fold_aggregate(
+                aggregate_arg.spec,
+                aggregate_arg.value,
+                leaf_fn=lambda spec, values, path: None,
+                container_fn=lambda spec, *_: (
+                    self.maybe_register_udtk_aggregate_type_def(
+                        spec, compile_wrapper=compile_wrapper
+                    )
+                ),
+            )
+
         if config.triton.proton_profiling:
             compile_wrapper.writeline('pl.enable_semantic("triton")')
 
@@ -4396,15 +4402,20 @@ class PythonWrapperCodegen(CodeGen):
                 return triton_kernel_wrap.maybe_wrap_constexpr(
                     container_spec, result, str_form=True
                 )
-
-            type_definition = self.maybe_add_udtk_aggregate_type_def(container_spec)
-            field_values = ", ".join(
-                f"{field}={value}"
-                for field, value in zip(container_spec[2], children, strict=True)
-            )
-            result = f"{type_definition}({field_values})"
-            return triton_kernel_wrap.maybe_wrap_constexpr(
-                container_spec, result, str_form=True
+            elif container_spec[0] == "namedtuple":
+                type_definition = self.maybe_register_udtk_aggregate_type_def(
+                    container_spec
+                )
+                field_values = ", ".join(
+                    f"{field}={value}"
+                    for field, value in zip(container_spec[2], children, strict=True)
+                )
+                result = f"{type_definition}({field_values})"
+                return triton_kernel_wrap.maybe_wrap_constexpr(
+                    container_spec, result, str_form=True
+                )
+            raise triton_kernel_wrap.unsupported_aggregate_type_error(
+                container_spec, path
             )
 
         return triton_kernel_wrap.fold_aggregate(

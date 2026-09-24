@@ -145,8 +145,12 @@ def signature_of(
 
         def container(spec, values, children, path):
             if spec[0] == "namedtuple":
-                return collections.namedtuple(spec[1], spec[2])(*children)
-            return children
+                return triton_kernel_wrap.namedtuple_type_from_spec(
+                    spec[1], spec[2]
+                )(*children)
+            if spec[0] == "tuple":
+                return children
+            raise triton_kernel_wrap.unsupported_aggregate_type_error(spec, path)
 
         return triton_kernel_wrap.fold_aggregate(
             arg.spec,
@@ -527,10 +531,8 @@ def config_of(
     else:
         divisible_by_16 = ()
 
-    # TODO(mwizak): is it possible to specify which tuple args equal to 1?
     equal_to_1 = equal_1_arg_indices(args, indices=indices)
 
-    # TODO: handle pointer range for aggregate type args
     # On AMD/HIP, tag tensor args whose storage fits in 2GB so Triton
     # can use 32-bit pointer offsets and emit buffer load/store ops.
     if pointer_range_override is not None:

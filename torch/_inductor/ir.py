@@ -8646,8 +8646,6 @@ class UserDefinedTritonKernel(ExternKernel):
         configs = []
         restore_value_args: list[str] = []
         reset_to_zero_args: list[str] = []
-        # TODO(mwizak): handle autotuner path?
-        # Need to see if there is an aggregate in a restore idx / value and remove it
         if isinstance(kernel, Autotuner):
             # https://github.com/triton-lang/triton/pull/5083
             # changes kernel.restore_idx to kernel.restore_value
@@ -8999,6 +8997,8 @@ class UserDefinedTritonKernel(ExternKernel):
 
         if V.graph.cpp_wrapper and self.aggregate_type_metadata:
             from .exc import CppWrapperCodegenError
+            # TODO(mwizak): Add tuple and NamedTuple argument support to
+            # CppWrapperCodegen
 
             # The Python wrapper reconstructs tuple and NamedTuple arguments at
             # the Triton launch boundary. The C++ wrapper has no equivalent

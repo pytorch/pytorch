@@ -565,7 +565,6 @@ class GraphLowering(torch.fx.Interpreter):
 
         # record intermediate results for input of UsedDefinedTritonKernels
         # This will be used if autotuning is done in one pass.
-        # TODO(mwizak): do we need to do anything here for aggregate types?
         self.autotuning_inputs: list[torch.Tensor] | None = None
         self.autotuning_mapping: dict[str, dict[str, int]] | None = None
         self.autotuning_grids: dict[str, Any] | None = None

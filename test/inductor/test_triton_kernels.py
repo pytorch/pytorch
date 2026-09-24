@@ -341,6 +341,71 @@ class KernelTests(torch._inductor.test_case.TestCase):
         HAS_CPU and TRITON_HAS_CPU,
         "requires triton cpu",
     )
+    def test_triton_kernel_same_named_structural_types_do_not_collide(self):
+        import triton
+        import triton.language as tl
+
+        from torch._higher_order_ops import triton_kernel_wrap
+
+        ScaleConfig = collections.namedtuple("Config", ("source", "scale"))
+        BiasConfig = collections.namedtuple("Config", ("source", "bias"))
+
+        @triton.jit
+        def kernel(
+            scale_config,
+            bias_config,
+            out,
+            n_elements,
+            BLOCK_SIZE: tl.constexpr,
+        ):
+            offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            scaled = tl.load(scale_config.source + offsets, mask=mask) * scale_config.scale
+            biased = tl.load(bias_config.source + offsets, mask=mask) + bias_config.bias
+            tl.store(out + offsets, scaled + biased, mask=mask)
+
+        def fn(left, right):
+            out = torch.empty_like(left)
+            n_elements = left.numel()
+            kernel[(triton.cdiv(n_elements, 16),)](
+                ScaleConfig(left, 2.0),
+                BiasConfig(right, 3.0),
+                out,
+                n_elements,
+                BLOCK_SIZE=16,
+            )
+            return out
+
+        left = torch.arange(32, dtype=torch.float32, device="cpu")
+        right = torch.arange(32, dtype=torch.float32, device="cpu") + 1
+        with fresh_cache():
+            actual, (code,) = run_and_get_code(
+                torch.compile(fn, fullgraph=True), left, right
+            )
+
+        self.assertEqual(actual, left * 2.0 + right + 3.0)
+        scale_name = triton_kernel_wrap.create_structural_named_tuple_name(
+            "Config", ScaleConfig._fields
+        )
+        bias_name = triton_kernel_wrap.create_structural_named_tuple_name(
+            "Config", BiasConfig._fields
+        )
+        self.assertNotEqual(scale_name, bias_name)
+        self.assertRegex(scale_name, r"^_udtk_[0-9a-f]{8}_Config$")
+        self.assertRegex(bias_name, r"^_udtk_[0-9a-f]{8}_Config$")
+        self.assertEqual(
+            scale_name,
+            triton_kernel_wrap.create_structural_named_tuple_name(
+                "Config", ScaleConfig._fields
+            ),
+        )
+        self.assertIn(f"{scale_name} = collections.namedtuple", code)
+        self.assertIn(f"{bias_name} = collections.namedtuple", code)
+
+    @unittest.skipUnless(
+        HAS_CPU and TRITON_HAS_CPU,
+        "requires triton cpu",
+    )
     def test_triton_kernel_aggregate_rejected_before_v4(self):
         import triton
         import triton.language as tl
@@ -429,7 +494,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
         HAS_CPU and TRITON_HAS_CPU and has_triton_tensor_descriptor_host_tma(),
         "requires triton cpu and TensorDescriptor support",
     )
-    def test_triton_kernel_namedtuple_with_tensor_descriptor(self):
+    def test_triton_kernel_nested_tensor_descriptor_unsupported_on_cpu(self):
         import triton
         import triton.language as tl
         from triton.tools.tensor_descriptor import TensorDescriptor
@@ -449,8 +514,91 @@ class KernelTests(torch._inductor.test_case.TestCase):
             return out
 
         x = torch.arange(16, dtype=torch.float32, device="cpu")
-        actual = torch.compile(fn, fullgraph=True)(x)
-        self.assertEqual(actual, x * 2)
+        with self.assertRaisesRegex(
+            torch._inductor.exc.InductorError,
+            "tensordesc<fp32\\[16\\]>",
+        ):
+            torch.compile(fn, fullgraph=True)(x)
+
+    @unittest.skipUnless(
+        HAS_CPU and TRITON_HAS_CPU and has_triton_tensor_descriptor_host_tma(),
+        "requires triton cpu and TensorDescriptor support",
+    )
+    def test_triton_kernel_nested_input_and_aggregate_output(self):
+        import triton
+        import triton.language as tl
+        from triton.tools.tensor_descriptor import TensorDescriptor
+
+        from torch._higher_order_ops import triton_kernel_wrap
+
+        Nested = collections.namedtuple("Nested", ("source", "scale"))
+        Config = collections.namedtuple("Config", ("scale", "nested"))
+        Output = collections.namedtuple("Output", ("destination", "metadata"))
+
+        @triton.jit
+        def kernel(
+            source_descriptor,
+            plain_source,
+            output,
+            config,
+            BLOCK_SIZE: tl.constexpr,
+        ):
+            block_start = tl.program_id(0) * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            source = tl.load_tensor_descriptor(source_descriptor, [block_start])
+            plain = tl.load(plain_source + offsets)
+            nested = tl.load(config.nested.source + offsets)
+            tl.store(
+                output.destination + offsets,
+                source * config.scale + plain + nested * config.nested.scale,
+            )
+
+        def fn(source, plain_source, nested_source, output):
+            source_descriptor = TensorDescriptor.from_tensor(
+                source, block_shape=[16]
+            )
+            config = Config(3.0, Nested(nested_source, 5.0))
+            kernel[(2,)](
+                source_descriptor,
+                plain_source,
+                output,
+                config,
+                BLOCK_SIZE=16,
+            )
+            return output
+
+        source = torch.arange(32, dtype=torch.float32, device="cpu")
+        plain_source = source + 1
+        nested_source = source + 2
+        destination = torch.zeros_like(source)
+        output = Output(destination, 7.0)
+        with fresh_cache():
+            actual, (code,) = run_and_get_code(
+                torch.compile(fn, fullgraph=True),
+                source,
+                plain_source,
+                nested_source,
+                output,
+            )
+
+        self.assertEqual(
+            actual.destination,
+            source * 3.0 + plain_source + nested_source * 5.0,
+        )
+        self.assertEqual(actual.metadata, 7.0)
+        self.assertEqual(destination, actual.destination)
+        config_name = triton_kernel_wrap.create_structural_named_tuple_name(
+            "Config", Config._fields
+        )
+        nested_name = triton_kernel_wrap.create_structural_named_tuple_name(
+            "Nested", Nested._fields
+        )
+        output_name = triton_kernel_wrap.create_structural_named_tuple_name(
+            "Output", Output._fields
+        )
+        FileCheck().check(f"{output_name}(destination=").check(
+            f"{config_name}(scale=3.0, nested={nested_name}("
+        ).run(code)
 
     @unittest.skipUnless(
         HAS_CPU and TRITON_HAS_CPU,
@@ -584,6 +732,80 @@ class KernelTests(torch._inductor.test_case.TestCase):
         HAS_CPU and TRITON_HAS_CPU,
         "requires triton cpu",
     )
+    def test_triton_kernel_recursive_mixed_aggregates(self):
+        import triton
+        import triton.language as tl
+
+        from torch._higher_order_ops import triton_kernel_wrap
+
+        Config = collections.namedtuple("Config", ("source", "scale"))
+
+        @triton.jit
+        def kernel(
+            empty,
+            left,
+            right,
+            mixed,
+            out,
+            BLOCK_SIZE: tl.constexpr,
+        ):
+            tl.static_assert(len(empty) == 0)
+            offsets = tl.arange(0, BLOCK_SIZE)
+            n_elements = mixed[1][0]
+            mask = offsets < n_elements
+            nested = mixed[0][0]
+            values = tl.load(left.source + offsets, mask=mask) * left.scale
+            values += tl.load(right.source + offsets, mask=mask) * right.scale
+            values += tl.load(nested.source + offsets, mask=mask) * nested.scale
+            tl.store(out + offsets, values, mask=mask)
+
+        def fn(left_source, right_source, nested_source):
+            out = torch.empty_like(left_source)
+            n_elements = left_source.shape[0]
+            kernel[(1,)](
+                (),
+                Config(left_source, 2.0),
+                Config(right_source, 3.0),
+                ((Config(nested_source, 4.0),), (n_elements,)),
+                out,
+                BLOCK_SIZE=64,
+            )
+            return out
+
+        counter = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+        compiled = torch.compile(fn, backend=counter, fullgraph=True, dynamic=True)
+        with fresh_cache():
+            sources = tuple(
+                torch.arange(17, dtype=torch.float32, device="cpu") + offset
+                for offset in range(3)
+            )
+            actual, (code,) = run_and_get_code(compiled, *sources)
+            self.assertEqual(
+                actual,
+                sources[0] * 2.0 + sources[1] * 3.0 + sources[2] * 4.0,
+            )
+            frame_count = counter.frame_count
+
+            sources = tuple(
+                torch.arange(33, dtype=torch.float32, device="cpu") + offset
+                for offset in range(3)
+            )
+            self.assertEqual(
+                compiled(*sources),
+                sources[0] * 2.0 + sources[1] * 3.0 + sources[2] * 4.0,
+            )
+            self.assertEqual(counter.frame_count, frame_count)
+
+        config_name = triton_kernel_wrap.create_structural_named_tuple_name(
+            "Config", Config._fields
+        )
+        self.assertIn(f"{config_name} = collections.namedtuple", code)
+        self.assertGreaterEqual(code.count(f"{config_name}("), 3)
+
+    @unittest.skipUnless(
+        HAS_CPU and TRITON_HAS_CPU,
+        "requires triton cpu",
+    )
     def test_triton_kernel_aggregate_direct_mutation(self):
         import triton
         import triton.language as tl
@@ -605,7 +827,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
         def fn(args):
             n_elements = args.mutated.numel()
             kernel[(triton.cdiv(n_elements, 16),)](args, n_elements, BLOCK_SIZE=16)
-            return args.mutated + args.nested.source
+            return args.mutated, args.nested.source
 
         read_only = torch.arange(35, dtype=torch.float32, device="cpu")
         read_only_before = read_only.clone()
@@ -614,12 +836,13 @@ class KernelTests(torch._inductor.test_case.TestCase):
         graph_pass, clone_records = self._record_functional_clone_keys()
 
         with inductor_config.patch(post_grad_custom_post_pass=graph_pass):
-            result = torch.compile(fn, fullgraph=True)(args)
+            mutated_result, read_only_result = torch.compile(fn, fullgraph=True)(args)
 
         # Path (0,) is args.mutated. Exact equality also guards against
         # conservatively cloning the nested read-only tensor at path (1, 0).
         self._assert_exact_functional_clone_keys(clone_records, (0,))
-        self.assertEqual(result, read_only_before * 3.0)
+        self.assertEqual(mutated_result, read_only_before * 2.0)
+        self.assertEqual(read_only_result, read_only_before)
         self.assertEqual(mutated, read_only_before * 2.0)
         self.assertEqual(read_only, read_only_before)
 
@@ -650,7 +873,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
             args = Args(mutated_view, ReadOnly(read_only, -1.5))
             n_elements = mutated_view.numel()
             kernel[(triton.cdiv(n_elements, 16),)](args, n_elements, BLOCK_SIZE=16)
-            return base + 1.0, mutated_view * 2.0
+            return base, mutated_view
 
         read_only = torch.arange(35, dtype=torch.float32, device="cpu")
         read_only_before = read_only.clone()
@@ -660,8 +883,8 @@ class KernelTests(torch._inductor.test_case.TestCase):
 
         base_result, view_result = torch.compile(fn, fullgraph=True)(base, read_only)
 
-        self.assertEqual(base_result, expected_base + 1.0)
-        self.assertEqual(view_result, read_only_before * -3.0)
+        self.assertEqual(base_result, expected_base)
+        self.assertEqual(view_result, read_only_before * -1.5)
         self.assertEqual(base, expected_base)
         self.assertEqual(read_only, read_only_before)
 
@@ -687,7 +910,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
         def fn(args):
             n_elements = args.first.numel()
             kernel[(triton.cdiv(n_elements, 16),)](args, n_elements, BLOCK_SIZE=16)
-            return args.first - args.nested.second + args.nested.read_only
+            return args.first, args.nested.second, args.nested.read_only
 
         read_only = torch.arange(35, dtype=torch.float32, device="cpu")
         read_only_before = read_only.clone()
@@ -697,12 +920,16 @@ class KernelTests(torch._inductor.test_case.TestCase):
         graph_pass, clone_records = self._record_functional_clone_keys()
 
         with inductor_config.patch(post_grad_custom_post_pass=graph_pass):
-            result = torch.compile(fn, fullgraph=True)(args)
+            first_result, second_result, read_only_result = torch.compile(
+                fn, fullgraph=True
+            )(args)
 
         # Paths (0,) and (1, 0) are the two written leaves. The exact set
         # excludes the nested read-only leaf at path (1, 1).
         self._assert_exact_functional_clone_keys(clone_records, (0,), (1, 0))
-        self.assertEqual(result, read_only_before + 11.0)
+        self.assertEqual(first_result, read_only_before + 4.0)
+        self.assertEqual(second_result, read_only_before - 7.0)
+        self.assertEqual(read_only_result, read_only_before)
         self.assertEqual(first, read_only_before + 4.0)
         self.assertEqual(second, read_only_before - 7.0)
         self.assertEqual(read_only, read_only_before)
@@ -727,7 +954,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
         def fn(args):
             n_elements = args.mutated.numel()
             kernel[(triton.cdiv(n_elements, 16),)](args, n_elements, BLOCK_SIZE=16)
-            return args.mutated + 1.0, args.alias * 2.0
+            return args.mutated, args.alias
 
         aliased = torch.arange(35, dtype=torch.float32, device="cpu")
         aliased_before = aliased.clone()
@@ -735,8 +962,8 @@ class KernelTests(torch._inductor.test_case.TestCase):
 
         mutated_result, alias_result = torch.compile(fn, fullgraph=True)(args)
 
-        self.assertEqual(mutated_result, aliased_before + 6.0)
-        self.assertEqual(alias_result, (aliased_before + 5.0) * 2.0)
+        self.assertEqual(mutated_result, aliased_before + 5.0)
+        self.assertEqual(alias_result, aliased_before + 5.0)
         self.assertEqual(aliased, aliased_before + 5.0)
 
     @unittest.skipUnless(
@@ -807,6 +1034,8 @@ class KernelTests(torch._inductor.test_case.TestCase):
         import triton
         import triton.language as tl
 
+        from torch._higher_order_ops import triton_kernel_wrap
+
         Config = collections.namedtuple("Config", ("scale", "bias"))
 
         @triton.jit
@@ -828,7 +1057,12 @@ class KernelTests(torch._inductor.test_case.TestCase):
         x = torch.arange(16, dtype=torch.float32, device="cpu")
         actual, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True), x)
         self.assertEqual(actual, x * 2 + 1)
-        FileCheck().check("tl.constexpr(Config(scale=2.0, bias=1.0))").run(code)
+        config_name = triton_kernel_wrap.create_structural_named_tuple_name(
+            "Config", Config._fields
+        )
+        FileCheck().check(
+            f"tl.constexpr({config_name}(scale=2.0, bias=1.0))"
+        ).run(code)
 
     @unittest.skipUnless(
         HAS_CPU and TRITON_HAS_CPU,
@@ -837,6 +1071,8 @@ class KernelTests(torch._inductor.test_case.TestCase):
     def test_triton_kernel_nested_explicit_constexpr_namedtuple(self):
         import triton
         import triton.language as tl
+
+        from torch._higher_order_ops import triton_kernel_wrap
 
         Transform = collections.namedtuple("Transform", ("scale", "bias"))
         Config = collections.namedtuple("Config", ("source", "transform"))
@@ -865,9 +1101,12 @@ class KernelTests(torch._inductor.test_case.TestCase):
         x = torch.arange(16, dtype=torch.float32, device="cpu")
         actual, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True), x)
         self.assertEqual(actual, x * 2 + 1)
-        FileCheck().check("transform=tl.constexpr(Transform(scale=2.0, bias=1.0))").run(
-            code
+        transform_name = triton_kernel_wrap.create_structural_named_tuple_name(
+            "Transform", Transform._fields
         )
+        FileCheck().check(
+            f"transform=tl.constexpr({transform_name}(scale=2.0, bias=1.0))"
+        ).run(code)
 
     @unittest.skipUnless(
         HAS_CPU and TRITON_HAS_CPU,
@@ -985,6 +1224,8 @@ class KernelTests(torch._inductor.test_case.TestCase):
         import triton
         import triton.language as tl
 
+        from torch._higher_order_ops import triton_kernel_wrap
+
         Transform = collections.namedtuple("Transform", ("scale", "bias"))
 
         @triton.jit
@@ -1007,7 +1248,12 @@ class KernelTests(torch._inductor.test_case.TestCase):
         x = torch.arange(16, dtype=torch.float32, device="cpu")
         actual, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True), x)
         self.assertEqual(actual, x * 2 + 1)
-        FileCheck().check("tl.constexpr((Transform(scale=2.0, bias=1.0),))").run(code)
+        transform_name = triton_kernel_wrap.create_structural_named_tuple_name(
+            "Transform", Transform._fields
+        )
+        FileCheck().check(
+            f"tl.constexpr(({transform_name}(scale=2.0, bias=1.0),))"
+        ).run(code)
 
     @unittest.skipUnless(
         HAS_CPU and TRITON_HAS_CPU,
@@ -1153,7 +1399,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
         import triton
         import triton.language as tl
 
-        Config = collections.namedtuple("Config", ("source", "scale"))
+        Config = collections.namedtuple("Config", ("source", "scale", "dtype"))
 
         @triton.autotune(
             configs=[
@@ -1166,7 +1412,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
         def kernel(config, out, n_elements, BLOCK_SIZE: tl.constexpr):
             offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
             mask = offsets < n_elements
-            values = tl.load(config.source + offsets, mask=mask)
+            values = tl.load(config.source + offsets, mask=mask).to(config.dtype)
             tl.store(out + offsets, values * config.scale, mask=mask)
 
         def fn(config):
@@ -1177,9 +1423,22 @@ class KernelTests(torch._inductor.test_case.TestCase):
             )
             return out
 
-        source = torch.arange(35, dtype=torch.float32, device="cpu")
-        actual = torch.compile(fn, fullgraph=True)(Config(source, 2.0))
-        self.assertEqual(actual, source * 2.0)
+        counter = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        with fresh_cache():
+            source = torch.arange(35, dtype=torch.float32, device="cpu")
+            actual = compiled(Config(source, 2.0, tl.constexpr(tl.float32)))
+            self.assertEqual(actual, source * 2.0)
+            frame_count = counter.frame_count
+
+            replacement = source + 1
+            actual = compiled(Config(replacement, 2.0, tl.constexpr(tl.float32)))
+            self.assertEqual(actual, replacement * 2.0)
+            self.assertEqual(counter.frame_count, frame_count)
+
+            actual = compiled(Config(source, 2.0, tl.constexpr(tl.int32)))
+            self.assertEqual(actual, source * 2.0)
+            self.assertGreater(counter.frame_count, frame_count)
 
     @unittest.skipUnless(
         HAS_CPU and TRITON_HAS_CPU,
@@ -1665,15 +1924,16 @@ class KernelTests(torch._inductor.test_case.TestCase):
         transformed = triton_kernel_wrap.fold_aggregate(
             spec,
             aggregate,
-            leaf_fn=lambda leaf_spec, values, path: 7
-            if leaf_spec[1] == "flat_scale"
-            else values[0] + len(leaf_spec[1]),
+            leaf_fn=lambda leaf_spec, values, path: (
+                7 if leaf_spec[1] == "flat_scale" else values[0] + len(leaf_spec[1])
+            ),
             container_fn=lambda spec, values, children, path: children,
         )
         materialized = triton_kernel_wrap.materialize_aggregate(spec, transformed)
 
         self.assertEqual(materialized.source, len("flat_source"))
         self.assertEqual(materialized.parameters, (7, 3 + len("flat_bias")))
+        self.assertTrue(type(materialized).__torch_inductor_ignore_constexpr_import__)
 
         none_spec = triton_kernel_wrap.create_tuple_spec(
             (triton_kernel_wrap.create_leaf_spec("flat_none"),)
@@ -1705,6 +1965,24 @@ class KernelTests(torch._inductor.test_case.TestCase):
         )
         with self.assertRaisesRegex(AssertionError, "referenced more than once"):
             triton_kernel_wrap.unflatten_aggregate(duplicate_spec, {"duplicate": 1})
+
+    def test_unsupported_aggregate_type_error(self):
+        from torch._higher_order_ops import triton_kernel_wrap
+
+        unsupported_spec = ("dict", (), False)
+        error = triton_kernel_wrap.unsupported_aggregate_type_error(
+            unsupported_spec, (1, 2)
+        )
+        self.assertIs(type(error), NotImplementedError)
+        self.assertEqual(
+            str(error), "Aggregate type 'dict' at path (1, 2) is not supported"
+        )
+
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            r"Aggregate type 'dict' at path \(\) is not supported",
+        ):
+            triton_kernel_wrap.get_aggregate_leaf_specs(unsupported_spec)
 
     def test_fold_aggregate_aligned_trees(self):
         from torch._higher_order_ops import triton_kernel_wrap
@@ -1830,7 +2108,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
         wrapper = object.__new__(PythonWrapperCodegen)
         with mock.patch.object(
             PythonWrapperCodegen,
-            "maybe_add_udtk_aggregate_type_def",
+            "maybe_register_udtk_aggregate_type_def",
             return_value="Config",
         ):
             source = wrapper._prepare_udtk_aggregate_call_str(
@@ -8417,6 +8695,8 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
         "requires triton cpu",
     )
     def test_fusion_relu_epilogue_nested_namedtuple_aggregate_cpu(self):
+        from torch._higher_order_ops import triton_kernel_wrap
+
         Nested = collections.namedtuple("Nested", ("destination",))
         Output = collections.namedtuple("Output", ("nested", "scale"))
 
@@ -8452,7 +8732,15 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
         self.assertEqual(actual, (source * 2.0).relu())
         self.assertEqual(metrics.generated_kernel_count, 1)
         self.check_code(code, num_kernels=1, num_allocs=1, num_deallocs=1)
-        FileCheck().check("Output(nested=Nested(destination=buf").run(code)
+        nested_name = triton_kernel_wrap.create_structural_named_tuple_name(
+            "Nested", Nested._fields
+        )
+        output_name = triton_kernel_wrap.create_structural_named_tuple_name(
+            "Output", Output._fields
+        )
+        FileCheck().check(
+            f"{output_name}(nested={nested_name}(destination=buf"
+        ).run(code)
 
     @requires_cuda_and_triton
     def test_fusion_relu_epilogue(self):

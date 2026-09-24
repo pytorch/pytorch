@@ -3800,6 +3800,7 @@ class SysFunctionVariable(VariableTracker):
 from torch._higher_order_ops.triton_kernel_wrap import (
     create_leaf_spec,
     create_named_tuple_spec,
+    create_structural_named_tuple_name,
     create_tuple_spec,
     create_tma_experimental_metadata,
     create_tma_stable_metadata,
@@ -3977,6 +3978,8 @@ class DynamoTritonHOPifier(TritonHOPifier):
 
     @staticmethod
     def _is_supported_aggregate_type(var: VariableTracker) -> bool:
+        # Note: this function must be kept in sync with
+        # _flatten_aggregate_and_collect_metadata
         from .lists import TupleVariable
 
         var = var.realize()
@@ -3992,7 +3995,7 @@ class DynamoTritonHOPifier(TritonHOPifier):
         self,
         param_name: str,
         param_value: VariableTracker,
-        kernel: "TritonKernelVariable",
+        kernel_variable: "TritonKernelVariable",
         combined_args: dict[str, Any],
         tma_descriptor_metadata: TMADescriptorMetadata,
         *,
@@ -4005,6 +4008,17 @@ class DynamoTritonHOPifier(TritonHOPifier):
         """
         from .lists import TupleVariable
         from .tensor import SymNodeVariable
+        from triton.runtime.autotuner import Autotuner
+
+        if isinstance(kernel := kernel_variable.kernel, Autotuner) and (
+            param_name in kernel.restore_value or param_name in kernel.reset_to_zero
+        ):
+            self.raise_unsupported(
+                "Triton does not support aggregate types in `restore_value` "
+                f"or `reset_to_zero` autotune arguments. Argument {param_name} is "
+                "an aggregate and you provided: "
+                f"{kernel.reset_to_zero=}, {kernel.restore_value=}."
+            )
 
         flat_vars_counter = 0
 
@@ -4031,13 +4045,18 @@ class DynamoTritonHOPifier(TritonHOPifier):
                 var = var.constexpr_value.realize()
 
             if type(var) is NamedTupleVariable:
+                fields = tuple(namedtuple_fields(var.tuple_cls))
                 children = tuple(
                     validate_and_flatten(child, within_constexpr=within_constexpr)
                     for child in var.items
                 )
+                # Heuristics and early config pruning have already run, so the
+                # original class identity and name are no longer required. Use a
+                # structural name that cannot clash with another field layout
+                # in the generated wrapper.
                 return create_named_tuple_spec(
-                    var.tuple_cls.__name__,
-                    tuple(namedtuple_fields(var.tuple_cls)),
+                    create_structural_named_tuple_name(var.tuple_cls.__name__, fields),
+                    fields,
                     children,
                     is_constexpr=is_constexpr,
                 )
@@ -4055,7 +4074,7 @@ class DynamoTritonHOPifier(TritonHOPifier):
             if within_constexpr:
                 if isinstance(var, SymNodeVariable):
                     # See [Note: Specialize tl.constexpr args in user-defined triton kernels]
-                    var = kernel.specialize_symbolic(var)
+                    var = kernel_variable.specialize_symbolic(var)
                 if not var.is_python_constant():
                     self.raise_unsupported(
                         "All leaves of a Triton tuple or NamedTuple that are "

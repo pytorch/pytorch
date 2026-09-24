@@ -568,7 +568,9 @@ class CachingAutotuner(KernelInterface):
         from torch._higher_order_ops.triton_kernel_wrap import (
             fold_aggregate,
             get_aggregate_leaf_specs,
+            namedtuple_type_from_spec,
             unflatten_aggregate,
+            unsupported_aggregate_type_error,
         )
 
         leaf_specs = get_aggregate_leaf_specs(spec)
@@ -588,10 +590,13 @@ class CachingAutotuner(KernelInterface):
         def rebuild_container(container_spec, values, children, path):
             if container_spec[0] == "tuple":
                 return children
-
-            tuple_type = namedtuple(container_spec[1], container_spec[2])
-            tuple_type.__reduce__ = CachingAutotuner.reduce_udtk_aggregate
-            return tuple_type(*children)
+            if container_spec[0] == "namedtuple":
+                tuple_type = namedtuple_type_from_spec(
+                    container_spec[1], container_spec[2]
+                )
+                tuple_type.__reduce__ = CachingAutotuner.reduce_udtk_aggregate
+                return tuple_type(*children)
+            raise unsupported_aggregate_type_error(container_spec, path)
 
         return fold_aggregate(
             spec,

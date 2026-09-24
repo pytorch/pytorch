@@ -218,6 +218,23 @@ class TestCodegenTriton(InductorTestCase):
             ],
         )
 
+    def test_importable_constexpr_types_ignored_container(self):
+        ignored_type = namedtuple("GeneratedAggregate", ("nested",))
+        ignored_type.__torch_inductor_ignore_constexpr_import__ = True
+        nested = UserDefinedTritonKernelNestedConfig(
+            nested=UserDefinedTritonKernelConfigNamespace.Nested(offset=2)
+        )
+
+        type_specs = get_importable_constexpr_types([ignored_type(nested)])
+
+        self.assertEqual(
+            [type_spec.qualname for type_spec in type_specs],
+            [
+                "UserDefinedTritonKernelConfigNamespace.Nested",
+                "UserDefinedTritonKernelNestedConfig",
+            ],
+        )
+
     def test_importable_constexpr_types_sibling_nested_classes(self):
         namespace = UserDefinedTritonKernelConfigNamespace
         type_specs = get_importable_constexpr_types(

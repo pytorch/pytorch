@@ -3,6 +3,7 @@ import collections
 import copy
 import dataclasses
 import functools
+import hashlib
 import inspect
 import itertools
 import logging
@@ -256,8 +257,6 @@ UDTK_AGGREGATE_VERSION_ERROR = (
     "Tuple and NamedTuple arguments to user-defined Triton kernels require "
     "Triton's V4 attrs-dict interface or later."
 )
-
-
 def triton_version_supports_udtk_aggregates() -> bool:
     # Aggregate signature entries and path-keyed constants use the raw attrs-dict
     # representation introduced by Triton V4.  The older AttrsDescriptor formats
@@ -292,6 +291,27 @@ def create_named_tuple_spec(
     return ("namedtuple", type_name, field_names, children, is_constexpr)
 
 
+def create_structural_named_tuple_name(
+    type_name: str, field_names: tuple[str, ...]
+) -> str:
+    """Return a collision-resistant name for a structural type."""
+    identity = "_".join((type_name, *field_names)).encode()
+    # Eight hex characters keep generated identifiers short while providing
+    # 32 bits of collision resistance for user-defined types across modules.
+    digest = hashlib.sha256(identity).hexdigest()[:8]
+    return f"_udtk_{digest}_{type_name}"
+
+
+def unsupported_aggregate_type_error(
+    spec: tuple[Any, ...], path: AggregatePath | None = None
+) -> NotImplementedError:
+    """Create the common error for an unsupported aggregate spec discriminator."""
+    path_suffix = f" at path {path}" if path is not None else ""
+    return NotImplementedError(
+        f"Aggregate type {spec[0]!r}{path_suffix} is not supported"
+    )
+
+
 def aggregate_spec_children(
     spec: TupleSpec | NamedTupleSpec,
 ) -> tuple[AggregateSpec, ...]:
@@ -299,14 +319,17 @@ def aggregate_spec_children(
         return spec[1]
     if spec[0] == "namedtuple":
         return spec[3]
-    raise AssertionError(f"Expected an aggregate container spec, got {spec!r}")
+    raise unsupported_aggregate_type_error(spec)
 
 
 @functools.cache
-def _namedtuple_type_from_spec(
-    type_name: str, field_names: tuple[str, ...]
+def namedtuple_type_from_spec(
+    type_name: str,
+    field_names: tuple[str, ...],
 ) -> type[tuple]:
-    return collections.namedtuple(type_name, field_names)
+    result = collections.namedtuple(type_name, field_names)
+    result.__torch_inductor_ignore_constexpr_import__ = True
+    return result
 
 
 def get_aggregate_leaf_specs(spec: AggregateSpec) -> tuple[LeafSpec, ...]:
@@ -364,9 +387,7 @@ def _validate_aggregate_spec(
                 f"but {len(spec[3])} children"
             )
     else:
-        raise NotImplementedError(
-            f"Aggregate type {kind!r} at path {path} is not supported"
-        )
+        raise unsupported_aggregate_type_error(spec, path)
     return kind
 
 
@@ -531,10 +552,12 @@ def materialize_aggregate(
     ) -> Any:
         if container_spec[0] == "tuple":
             result = children
-        else:
-            result = _namedtuple_type_from_spec(container_spec[1], container_spec[2])(
+        elif container_spec[0] == "namedtuple":
+            result = namedtuple_type_from_spec(container_spec[1], container_spec[2])(
                 *children
             )
+        else:
+            raise unsupported_aggregate_type_error(container_spec, path)
         if wrap_with_constexpr:
             return maybe_wrap_constexpr(container_spec, result)
         return result

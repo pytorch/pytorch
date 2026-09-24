@@ -123,7 +123,8 @@ if has_triton_package():
             equal_to_1=None,
             pointer_range_32=None,
         ):
-            # TODO(mwizak): Add comment for what this does
+            # Normalize legacy argument indices and nested aggregate paths to
+            # the tuple paths used as keys in Triton's argument attributes dict.
             def arg_path(index_or_path):
                 return (
                     index_or_path
