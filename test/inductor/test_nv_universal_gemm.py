@@ -354,12 +354,26 @@ class TestNVUniversalGemm(TestCase):
         from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
             NVUniversalGemmCaller,
         )
+        from torch._inductor.select_algorithm import AlgorithmSelectorCache
 
-        def benchmark(caller, *args, **kwargs):
-            is_target = caller.swap_ab and getattr(
-                caller.kernel.metadata.design, "use_prefetch", False
+        def is_target(caller):
+            return (
+                isinstance(caller, NVUniversalGemmCaller)
+                and caller.swap_ab
+                and caller.kernel.metadata.design.use_prefetch
+                and caller.kernel.metadata.operator_class.__name__
+                == "VendoredDenseBlockScaledGemmKernel"
             )
-            return 0.1 if is_target else 1.0
+
+        def benchmark(_selector, choices, *_args, **_kwargs):
+            nvgemm_choices = [
+                choice
+                for choice in choices
+                if isinstance(choice, NVUniversalGemmCaller)
+            ]
+            if nvgemm_choices:
+                self.assertTrue(any(is_target(choice) for choice in nvgemm_choices))
+            return {choice: 0.1 if is_target(choice) else 1.0 for choice in choices}
 
         with (
             config.patch(
@@ -367,10 +381,14 @@ class TestNVUniversalGemm(TestCase):
                     nvgemm_max_profiling_configs=1,
                     benchmark_epilogue_fusion=False,
                     compile_threads=2,
+                    force_disable_caches=True,
                 )
             ),
             mock.patch.object(
-                NVUniversalGemmCaller, "benchmark", autospec=True, side_effect=benchmark
+                AlgorithmSelectorCache,
+                "benchmark",
+                autospec=True,
+                side_effect=benchmark,
             ),
         ):
             compiled = torch.compile(scaled_mm)
@@ -626,6 +644,18 @@ class TestNVUniversalGemm(TestCase):
             ),
         ):
             self.assertFalse(_can_fold_scaled_mm_output_scale(match))
+
+    def test_scaled_mm_output_scale_does_not_fold_with_pipelined_autotuning(self):
+        """Keep the original graph when native-choice failures are deferred."""
+        from torch._inductor.fx_passes.post_grad import _can_fold_scaled_mm_output_scale
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "pipeline_max_autotune_gemm": True,
+            }
+        ):
+            self.assertFalse(_can_fold_scaled_mm_output_scale(MagicMock()))
 
     def test_scaled_mm_public_scale_result_preserves_bf16_semantics(self):
         """A public scale_result is ignored for BF16 output, as in ATen."""
