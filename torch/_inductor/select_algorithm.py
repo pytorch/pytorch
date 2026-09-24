@@ -4209,7 +4209,7 @@ class AlgorithmSelectorCache(PersistentCache):
             if use_pipelined_autotuning():
                 if config.benchmark_template_fusion:
                     raise AssertionError(
-                        "Benchmarking epilogues will cause gpu contention with pipelined autotuning"
+                        "Benchmarking template fusion will cause gpu contention with pipelined autotuning"
                     )
                 extern_kernels = [
                     c for c in choices if AlgorithmSelectorCache._is_extern(c)

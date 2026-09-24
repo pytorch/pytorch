@@ -1062,12 +1062,12 @@ fusion_memory_timeline_peak_memory_pct_threshold: float | None = None
 # choice selection from lowering to scheduling, where fused and unfused
 # alternatives can be compared. pipeline_max_autotune_gemm may independently
 # defer selection without benchmarking fusion when this option is disabled.
-benchmark_template_fusion: bool = Config(
-    default=True,
-    env_name_default=[
+benchmark_template_fusion: bool = (
+    os.environ.get(
         "TORCHINDUCTOR_BENCHMARK_TEMPLATE_FUSION",
-        "TORCHINDUCTOR_BENCHMARK_EPILOGUE_FUSION",
-    ],
+        os.environ.get("TORCHINDUCTOR_BENCHMARK_EPILOGUE_FUSION", "1"),
+    )
+    == "1"
 )
 
 # Deprecated compatibility alias for benchmark_template_fusion.
