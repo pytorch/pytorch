@@ -4,7 +4,7 @@ import asyncio
 from datetime import timedelta
 
 from torch.distributed._transport import wait_all
-from torch.distributed._transport._nixl._work import _PollingWork
+from torch.distributed._transport.nixl._work import _PollingWork
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 

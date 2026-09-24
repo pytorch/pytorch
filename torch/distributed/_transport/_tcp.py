@@ -7,7 +7,7 @@ import socket
 import struct
 import threading
 from dataclasses import dataclass, field
-from typing import cast, TYPE_CHECKING
+from typing import cast, Literal, TYPE_CHECKING
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 import torch
@@ -95,6 +95,8 @@ class TCPMemoryView:
 
 class TCPMutableMemoryView(TCPMemoryView):
     """A writable byte range in TCP-registered memory."""
+
+    writable: Literal[True] = True
 
 
 class TCPMemory:

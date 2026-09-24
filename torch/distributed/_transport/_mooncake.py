@@ -4,7 +4,7 @@ import socket
 from dataclasses import dataclass
 from importlib import import_module
 from threading import Lock
-from typing import Any, TYPE_CHECKING
+from typing import Any, Literal, TYPE_CHECKING
 
 import torch
 
@@ -52,6 +52,8 @@ class MooncakeMemoryView:
 
 class MooncakeMutableMemoryView(MooncakeMemoryView):
     """A writable byte range in Mooncake-registered memory."""
+
+    writable: Literal[True] = True
 
 
 class MooncakeMemory:
