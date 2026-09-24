@@ -186,7 +186,9 @@ Tensor segment_reduce_backward_mps(const Tensor& grad,
   }
   const auto prod_prefix =
       reduction == ReductionType::PROD ? at::empty(data.sizes(), data.options().dtype(kFloat)) : grad_input;
-  const auto name = fmt::format("segment_backward_{}_{}_{}",
+  const bool parallel = p.inner == 1 && p.axis_size / p.segments >= 1024;
+  const auto name = fmt::format("segment_backward_{}{}_{}_{}",
+                                parallel ? "parallel_" : "",
                                 scalarToMetalTypeString(data),
                                 scalarToMetalTypeString(offsets),
                                 reduction_name(reduction));
@@ -199,7 +201,11 @@ Tensor segment_reduce_backward_mps(const Tensor& grad,
       for (uint64_t base = 0; base < static_cast<uint64_t>(output.numel());) {
         const auto count = std::min<uint64_t>(output.numel() - base, std::numeric_limits<uint32_t>::max());
         mtl_setArgs(encoder, grad, output, data, grad_input, offsets, valid, p, base, prod_prefix);
-        mtl_dispatch1DJob(encoder, pipeline, count);
+        if (parallel) {
+          [encoder dispatchThreadgroups:MTLSizeMake(count, 1, 1) threadsPerThreadgroup:MTLSizeMake(256, 1, 1)];
+        } else {
+          mtl_dispatch1DJob(encoder, pipeline, count);
+        }
         base += count;
       }
     }

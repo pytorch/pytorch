@@ -16459,7 +16459,11 @@ class TestConsistency(TestCaseMPS):
         if use_float_ref and dtype is None and mps_sample.input.dtype in [torch.float16, torch.bfloat16]:
             dtype = torch.float32
 
-        cpu_sample = transform_opinfo_sample_to_cpu(mps_sample, dtype)
+        if op.name == "_segment_reduce" and dtype is not None:
+            cpu_sample = transform_opinfo_sample_to_cpu(mps_sample)
+            cpu_sample.input = cpu_sample.input.detach().to(dtype).requires_grad_(mps_sample.input.requires_grad)
+        else:
+            cpu_sample = transform_opinfo_sample_to_cpu(mps_sample, dtype)
 
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=UserWarning)
@@ -17161,6 +17165,37 @@ class TestCommon(TestCase):
     exact_dtype = True
 
     @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    @parametrize("reduce", ["sum", "mean", "min", "max"])
+    @parametrize("mode", ["lengths", "offsets"])
+    @parametrize("index_dtype", [torch.int32, torch.int64])
+    @parametrize("pattern", ["ties", "nan", "inf", "random"])
+    @parametrize("initial", [None, 2.])
+    def test_segment_reduce_long_segment_backward(self, device, dtype, reduce, mode, index_dtype, pattern, initial):
+        storage = torch.randint(-2, 3, (2, 8254), device=device).to(dtype)
+        data = storage[:, ::2]
+        if pattern == "ties":
+            data.fill_(1)
+        elif pattern == "nan":
+            data[:, 7::31] = float("nan")
+        elif pattern == "inf":
+            data[:, 7::31] = float("inf")
+            data[:, 11::31] = -float("inf")
+        data.requires_grad_()
+        values = [[0, 0, 1025, 3074, 4127], [0, 2051, 2052, 2052, 4127]]
+        if mode == "offsets":
+            values = [[0, 0, 1025, 3074, 4125], [3, 2051, 2052, 2052, 4125]]
+        metadata = torch.tensor(values, dtype=index_dtype, device=device)
+        if mode == "lengths":
+            metadata = metadata.diff()
+        actual = torch.segment_reduce(data, reduce, axis=1, initial=initial, **{mode: metadata})
+        reference = data.detach().cpu().float().requires_grad_()
+        expected = torch.segment_reduce(reference, reduce, axis=1, initial=initial, **{mode: metadata.cpu()})
+        grad = torch.tensor([[1, -2, 0, 3], [-1, 2, 3, 0]], dtype=dtype, device=device)
+        actual.backward(grad)
+        expected.backward(grad.cpu().float())
+        self.assertEqual(data.grad, reference.grad.to(device=device, dtype=dtype))
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
     @parametrize("reduce,zero", [("sum", False), ("mean", False), ("prod", False), ("prod", True)])
     @parametrize("inner", [1, 8])
     @parametrize("mode", ["lengths", "offsets"])
@@ -17184,6 +17219,31 @@ class TestCommon(TestCase):
     @dtypes(torch.float32, torch.float16, torch.bfloat16)
     @parametrize("mode", ["lengths", "offsets"])
     @parametrize("index_dtype", [torch.int32, torch.int64])
+    @parametrize("values", [
+        [2., 3., 4.], [-2., 3., 4.], [0., 2., 3.], [0., 0., 3.],
+        [float("nan"), 2., 3.], [float("inf"), 2., 3.], [0., float("inf"), 3.],
+    ])
+    @parametrize("initial", [None, 0., 2.])
+    def test_segment_reduce_prod_long_backward(self, device, dtype, mode, index_dtype, values, initial):
+        data = torch.ones((2, 8208), dtype=dtype, device=device)[:, ::2]
+        data[:, 1:4] = torch.tensor(values, dtype=dtype, device=device)
+        data[:, 2053:2056] = torch.tensor(values, dtype=dtype, device=device)
+        data.requires_grad_()
+        boundaries = [0, 2051, 2052, 2052, 4104] if mode == "lengths" else [1, 2051, 2052, 2052, 4103]
+        metadata = torch.tensor([boundaries, boundaries], dtype=index_dtype, device=device)
+        if mode == "lengths":
+            metadata = metadata.diff()
+        result = torch.segment_reduce(data, "prod", axis=1, initial=initial, **{mode: metadata})
+        reference = data.detach().cpu().double().requires_grad_()
+        expected = torch.segment_reduce(reference, "prod", axis=1, initial=initial, **{mode: metadata.cpu()})
+        grad = torch.tensor([[1, -1, 0, 2], [-2, 1, 0, 0]], dtype=dtype, device=device)
+        result.backward(grad)
+        expected.backward(grad.cpu().double())
+        self.assertEqual(data.grad, reference.grad.to(device=device, dtype=dtype))
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    @parametrize("mode", ["lengths", "offsets"])
+    @parametrize("index_dtype", [torch.int32, torch.int64])
     @parametrize("size,grad,expected", [(2, 10., 1000.), (3, 1., 10000.)])
     def test_segment_reduce_prod_backward_overflow(self, device, dtype, mode, index_dtype, size, grad, expected):
         data = torch.full((size,), 100., dtype=dtype, device=device, requires_grad=True)
@@ -17192,6 +17252,41 @@ class TestCommon(TestCase):
         output = torch.segment_reduce(data, "prod", **{mode: metadata})
         output.backward(torch.full_like(output, grad))
         self.assertEqual(data.grad, torch.full_like(data, expected))
+
+    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize("size", [1023, 1024, 4097, 65537])
+    @parametrize("initial", [None, 0., -0.3])
+    @parametrize("pattern", ["pairs", "random", "overflow", "underflow", "zero", "nan", "inf", "zero_inf",
+                             "grow_shrink", "shrink_grow"])
+    def test_segment_reduce_prod_low_precision_long_backward(self, device, dtype, size, initial, pattern):
+        data = torch.ones(size, dtype=dtype, device=device)
+        if pattern == "pairs":
+            data[:size - 1:2] = 0.5
+            data[1::2] = 2.
+        elif pattern == "random":
+            data = (1 + 0.01 * torch.randn(size, device=device)).to(dtype)
+        elif pattern == "overflow":
+            data[:3] = 100.
+        elif pattern == "underflow":
+            data[:3] = 0.01
+        elif pattern in ("grow_shrink", "shrink_grow"):
+            first, second = (2., 0.5) if pattern == "grow_shrink" else (0.5, 2.)
+            data[:256] = first
+            data[256:512] = second
+        else:
+            data[size // 2] = {"zero": -0., "nan": float("nan"), "inf": -float("inf"), "zero_inf": 0.}[pattern]
+            if pattern == "zero_inf":
+                data[-1] = float("inf")
+        data.requires_grad_()
+        offsets = torch.tensor([0, size], device=device)
+        actual = torch.segment_reduce(data, "prod", offsets=offsets, initial=initial)
+        reference = data.detach().cpu().float().requires_grad_()
+        rounded_initial = None if initial is None else torch.tensor(initial, dtype=dtype).item()
+        expected = torch.segment_reduce(reference, "prod", offsets=offsets.cpu(), initial=rounded_initial)
+        grad = torch.full_like(actual, -2.)
+        actual.backward(grad)
+        expected.backward(grad.cpu().float())
+        self.assertEqual(data.grad, reference.grad.to(device=device, dtype=dtype))
 
     @dtypes(torch.float32, torch.float16, torch.bfloat16)
     @parametrize("values,expected", [
