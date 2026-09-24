@@ -2058,7 +2058,7 @@ TORCH_LIBRARY(_test_pyobject_dispatch_cpp_fallback_torch_function, m) {
             return x.sin()
 
         @custom_ops.impl(f"{TestCustomOp.test_ns}::foo", device_types=device_type)
-        def foo_cuda(x):
+        def foo_accelerator(x):
             return x.cos()
 
         x = torch.randn(3)
@@ -2066,10 +2066,10 @@ TORCH_LIBRARY(_test_pyobject_dispatch_cpp_fallback_torch_function, m) {
         result = op(x)
         self.assertEqual(result, foo_cpu(x))
 
-        x_cuda = x.to(device_type)
+        x_accelerator = x.to(device_type)
         op = self.get_op(f"{self.test_ns}::foo")
-        result = op(x_cuda)
-        self.assertEqual(result, foo_cuda(x_cuda))
+        result = op(x_accelerator)
+        self.assertEqual(result, foo_accelerator(x_accelerator))
 
     @skipIfXpu(msg="Deprecated torch.custom_ops API")
     @unittest.skipIf(not TEST_ACCELERATOR, "requires accelerator")
@@ -2088,9 +2088,9 @@ TORCH_LIBRARY(_test_pyobject_dispatch_cpp_fallback_torch_function, m) {
         result = op(x)
         self.assertEqual(result, foo_impl(x))
 
-        x_cuda = x.to(device_type)
-        result = op(x_cuda)
-        self.assertEqual(result, foo_impl(x_cuda))
+        x_accelerator = x.to(device_type)
+        result = op(x_accelerator)
+        self.assertEqual(result, foo_impl(x_accelerator))
 
     def test_impl_abstract_overload(self):
         lib = self.lib()
@@ -2677,7 +2677,7 @@ Dynamic shape operator
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     @unittest.skipIf(not TEST_ACCELERATOR, "requires accelerator")
-    def test_impl_device_cuda(self):
+    def test_impl_device_accelerator(self):
         self._test_impl_device("foo4", "default", device_type)
         self._test_impl_device("foo5", [device_type], device_type)
         self._test_impl_device("foo6", ["cpu", device_type], device_type)
