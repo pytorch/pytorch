@@ -942,28 +942,6 @@ elseif(LINUX AND CPU_AARCH64)
   ]])
 endif()
 
-if(USE_LLVM_BOLT)
-  # In addition to the flags below, BOLT also requires --emit-relocs for the
-  # linker. Since --emit-relocs increases the binary size, we limit the use to
-  # libraries that are actually optimized by BOLT instead of applying globally
-  # (see torch_optimize_layout_if_enabled)
-  list(APPEND _bolt_flags
-    "-fno-plt" # shows a perf boost in NVIDIA internal CI
-    "-fno-reorder-blocks-and-partition" # required by BOLT when using GCC>=8
-  )
-  foreach(_flag IN LISTS _bolt_flags)
-    append_c_flag_if_supported("${_flag}" CMAKE_C_FLAGS)
-    append_cxx_flag_if_supported("${_flag}" CMAKE_CXX_FLAGS)
-  endforeach()
-
-  # Extract the committed BOLT profiles for the build-time optimization
-  # step (torch_optimize_layout_if_enabled in cmake/public/utils.cmake).
-  set(LLVM_BOLT_PROFILES_DIR "${CMAKE_BINARY_DIR}/bolt_profiles")
-  file(REMOVE_RECURSE "${LLVM_BOLT_PROFILES_DIR}")
-  file(ARCHIVE_EXTRACT INPUT "${CMAKE_SOURCE_DIR}/cmake/bolt_profiles/torch.tar.zst"
-       DESTINATION "${LLVM_BOLT_PROFILES_DIR}")
-endif()
-
 # Build libtorch mobile library, which contains ATen/TH ops and native support
 # for TorchScript model, but doesn't contain not-yet-unified caffe2 ops;
 if(INTERN_BUILD_MOBILE)
