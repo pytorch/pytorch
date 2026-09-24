@@ -176,6 +176,8 @@ class NativeSymNodeImpl final : public c10::SymNodeImpl {
   // The native result, or null. The caller holds the env lock.
   c10::SymNode try_binary(Op op, const NativeSymNodeImpl& other);
   c10::SymNode try_unary(bool is_not);
+  // op(*wrapped) in ProxyTorchDispatchMode.__sym_dispatch__, or null.
+  c10::SymNode proxy_compute(Op op, NativeSymNodeImpl& other);
   // sizes_strides_impl: natively when possible, else the Python impl.
   c10::SymNode sizes_strides(
       SizesStrides fn,

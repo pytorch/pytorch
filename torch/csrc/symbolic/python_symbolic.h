@@ -16,5 +16,8 @@ void initGlueBindings(py::module_& sm);
 // cls(node) for cls SymInt or SymBool, without running cls.__init__ while the
 // sealed glue is intact.
 py::object make_sym_object(py::handle cls, py::handle node);
+// Whether op(*args) on SymInt/SymBool operands runs the sealed native glue
+// without logging MAGIC.
+bool sym_glue_native();
 
 } // namespace torch::symbolic

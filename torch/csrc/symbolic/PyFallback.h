@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/SymNodeImpl.h>
+#include <c10/util/FunctionRef.h>
 
 #include <mutex>
 
@@ -44,11 +45,16 @@ c10::SymNode python_impl(const char* method, c10::ArrayRef<c10::SymNode> args);
 // branch can combine without raising:
 //   to_node(args[0], handle_sym_dispatch(op, tuple(map(wrap_node, args)), {}))
 // with op = METHOD_TO_OPERATOR[op_name], minus the Python frames around it.
+// Under a ProxyTorchDispatchMode (not a subclass) its __sym_dispatch__ is
+// native too: `compute` returns op(*wrapped) as a non-constant native node, or
+// null to call handle_sym_dispatch; `mul` enables the multiply-by-one peephole.
 // Calls python_impl when capture_provenance would log.
 c10::SymNode proxy_dispatch(
     const char* method,
     const char* op_name,
-    c10::ArrayRef<c10::SymNode> args);
+    c10::ArrayRef<c10::SymNode> args,
+    bool mul,
+    c10::function_ref<c10::SymNode()> compute);
 c10::SymNode python_impl(
     const char* method,
     const c10::SymNode& self,

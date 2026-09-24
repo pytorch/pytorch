@@ -1,5 +1,7 @@
 #include <torch/csrc/symbolic/NativeSymNodeImpl.h>
 
+#include <ATen/PythonTorchFunctionTLS.h>
+
 #include <torch/csrc/symbolic/PyFallback.h>
 
 #include <algorithm>
@@ -163,6 +165,12 @@ const Expr* channels_last_strides_generic(
   return r;
 }
 
+// sym_min/sym_max/sym_not reach a TorchFunctionMode through has_torch_function.
+bool torch_function_pending() {
+  return at::impl::torch_function_mode_enabled() ||
+      at::impl::PythonTorchFunctionTLS::peek_skip_next();
+}
+
 } // namespace
 
 NativeSymNodeImpl::NativeSymNodeImpl(
@@ -295,7 +303,10 @@ c10::SymNode NativeSymNodeImpl::binary(
     if (o == nullptr || python_hint) {
       return python_impl(proxy_methods[i], {clone(), other});
     }
-    return proxy_dispatch(proxy_methods[i], op_names[i], {clone(), other});
+    return proxy_dispatch(
+        proxy_methods[i], op_names[i], {clone(), other}, op == Op::Mul, [&] {
+          return proxy_compute(op, *o);
+        });
   }
   if (o != nullptr && o->env_ == env_) {
     auto lock = lock_env(*env_);
@@ -307,6 +318,55 @@ c10::SymNode NativeSymNodeImpl::binary(
     }
   }
   return (materialize(*this).get()->*fallback)(to_python(other));
+}
+
+// Python evaluates op(lhs, rhs) with a constant lhs through the method of rhs:
+// the reflected one computes lhs.op(rhs), a comparison or sym_min/sym_max
+// computes the mirrored rhs.op(lhs). Two constants are Python arithmetic.
+c10::SymNode NativeSymNodeImpl::proxy_compute(Op op, NativeSymNodeImpl& other) {
+  bool constant_lhs = !std::holds_alternative<std::monostate>(constant_);
+  if (other.env_ != env_ ||
+      (constant_lhs &&
+       !std::holds_alternative<std::monostate>(other.constant_)) ||
+      ((op == Op::Min || op == Op::Max) && torch_function_pending())) {
+    return {};
+  }
+  NativeSymNodeImpl* lhs = this;
+  NativeSymNodeImpl* rhs = &other;
+  if (constant_lhs) {
+    switch (op) {
+      case Op::Gt:
+        op = Op::Lt;
+        std::swap(lhs, rhs);
+        break;
+      case Op::Lt:
+        op = Op::Gt;
+        std::swap(lhs, rhs);
+        break;
+      case Op::Le:
+        op = Op::Ge;
+        std::swap(lhs, rhs);
+        break;
+      case Op::Ge:
+        op = Op::Le;
+        std::swap(lhs, rhs);
+        break;
+      case Op::Eq:
+      case Op::Ne:
+      case Op::Min:
+      case Op::Max:
+        std::swap(lhs, rhs);
+        break;
+      default:
+        break;
+    }
+  }
+  auto lock = lock_env(*env_);
+  try {
+    return lhs->try_binary(op, *rhs);
+  } catch (const NativeUnsupported&) {
+    return {};
+  }
 }
 
 c10::SymNode NativeSymNodeImpl::try_binary(
@@ -506,8 +566,21 @@ c10::SymNode NativeSymNodeImpl::try_binary(
 
 c10::SymNode NativeSymNodeImpl::unary(bool is_not, UnaryFn fallback) {
   if (proxy_mode()) {
-    return is_not ? proxy_dispatch("_sym_not", "sym_not", {clone()})
-                  : proxy_dispatch("_neg", "neg", {clone()});
+    auto compute = [&]() -> c10::SymNode {
+      if (!std::holds_alternative<std::monostate>(constant_) ||
+          (is_not && torch_function_pending())) {
+        return {};
+      }
+      auto lock = lock_env(*env_);
+      try {
+        return try_unary(is_not);
+      } catch (const NativeUnsupported&) {
+        return {};
+      }
+    };
+    return is_not
+        ? proxy_dispatch("_sym_not", "sym_not", {clone()}, false, compute)
+        : proxy_dispatch("_neg", "neg", {clone()}, false, compute);
   }
   {
     auto lock = lock_env(*env_);

@@ -1,5 +1,6 @@
 #include <torch/csrc/symbolic/python_symbolic.h>
 
+#include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/symbolic/Expr.h>
 #include <torch/csrc/symbolic/NativeShapeEnv.h>
 #include <torch/csrc/symbolic/NativeSymNodeImpl.h>
@@ -830,7 +831,9 @@ c10::SymNode python_impl(const char* method, c10::ArrayRef<c10::SymNode> args) {
 c10::SymNode proxy_dispatch(
     const char* method,
     const char* op_name,
-    c10::ArrayRef<c10::SymNode> args) {
+    c10::ArrayRef<c10::SymNode> args,
+    bool mul,
+    c10::function_ref<c10::SymNode()> compute) {
   py::gil_scoped_acquire gil;
   static const auto* modules = new std::array<py::object, 3>{
       py::module_::import("torch._logging._internal"),
@@ -852,8 +855,44 @@ c10::SymNode proxy_dispatch(
     }
   }
   py::object op = sym_node.attr("METHOD_TO_OPERATOR")[op_name];
-  py::object r =
-      proxy_tensor.attr("handle_sym_dispatch")(op, wrapped, py::dict());
+  py::object r;
+  static const auto* proxy_mode_type =
+      new py::object(proxy_tensor.attr("ProxyTorchDispatchMode"));
+  static PyObject* const sym_register_str =
+      PyUnicode_InternFromString("_sym_register");
+  static PyObject* const tracer_str = PyUnicode_InternFromString("tracer");
+  auto mode = pre_dispatch_proxy_set.load(std::memory_order_relaxed)
+      ? std::nullopt
+      : c10::impl::TorchDispatchModeTLS::get_mode(
+            c10::impl::TorchDispatchModeKey::PROXY);
+  PyObject* mode_obj =
+      mode.has_value() ? (*mode)->ptr(getPyInterpreter()) : nullptr;
+  if (mode_obj != nullptr &&
+      Py_TYPE(mode_obj) ==
+          reinterpret_cast<PyTypeObject*>(proxy_mode_type->ptr()) &&
+      sym_glue_native()) {
+    auto is_one = [](const c10::SymNode& n) {
+      const Hint& c = static_cast<NativeSymNodeImpl*>(n.get())->constant();
+      const int64_t* i = std::get_if<int64_t>(&c);
+      const bool* b = std::get_if<bool>(&c);
+      return (i != nullptr && *i == 1) || (b != nullptr && *b);
+    };
+    if (mul && is_one(args[1])) {
+      r = wrapped[0];
+    } else if (mul && is_one(args[0])) {
+      r = wrapped[1];
+    } else if (c10::SymNode out = compute()) {
+      py::object sym = make_sym_object(
+          out->is_int() ? get_symint_class() : get_symbool_class(),
+          node_to_py(out));
+      proxy_tensor.attr(sym_register_str)(
+          py::handle(mode_obj).attr(tracer_str), op, wrapped, sym);
+      return out;
+    }
+  }
+  if (!r) {
+    r = proxy_tensor.attr("handle_sym_dispatch")(op, wrapped, py::dict());
+  }
   if (is_symint(r) || is_symfloat(r) || is_symbool(r)) {
     return node_from_py(r.attr("node"));
   }

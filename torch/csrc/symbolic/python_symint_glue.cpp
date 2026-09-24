@@ -729,6 +729,10 @@ py::object hint_to_py(const Hint& h) {
       h);
 }
 
+bool sym_glue_native() {
+  return intact() && !magic_log_on();
+}
+
 py::object make_sym_object(py::handle cls, py::handle node) {
   if (!glue.construct || !intact()) {
     return py::reinterpret_borrow<py::object>(cls)(node);

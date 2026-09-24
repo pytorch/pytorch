@@ -18,7 +18,7 @@ from sympy.core.assumptions import _assume_defined, _assume_rules
 
 import torch
 from torch._dynamo.source import ConstantSource
-from torch.fx.experimental import sym_node, symbolic_shapes
+from torch.fx.experimental import proxy_tensor, sym_node, symbolic_shapes
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.sym_node import _NO_HINT, SymNode
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
@@ -3656,6 +3656,97 @@ class TestNativeSymNode(TestCase):
         # __sym_dispatch__ returns the operand itself.
         _, gm = self.trace(True, lambda a, b: (a * 1, 1 * b), False)
         self.assertNotIn("mul", gm.code)
+
+    def test_proxy_sym_dispatch(self):
+        # ProxyTorchDispatchMode.__sym_dispatch__ runs natively, including a
+        # constant lhs, which Python evaluates through the reflected or
+        # mirrored method of the rhs.
+        def f(a, b):
+            lt = a < b
+            w = a.node.wrap_int
+            return (
+                3 + a,
+                3 - a,
+                2 * a,
+                7 // a,
+                7 % a,
+                a * b - b,
+                3 < a,
+                3 > a,
+                3 <= a,
+                3 >= a,
+                3 == a,
+                3 != a,
+                a == 3,
+                torch.sym_max(3, a),
+                torch.sym_min(3, a),
+                torch.sym_max(a, 3),
+                True & lt,
+                False | lt,
+                lt & True,
+                lt | (a == b),
+                -a,
+                torch.sym_not(lt),
+                w(3).add(w(4)).constant,
+                w(3).lt(w(4)).constant,
+            )
+
+        sym_dispatch = mock.patch.object(
+            proxy_tensor,
+            "handle_sym_dispatch",
+            wraps=proxy_tensor.handle_sym_dispatch,
+        )
+        with sym_dispatch as m:
+            on_env, on = self.trace(True, f, False)
+        # Only the two-constant ops, which are Python arithmetic.
+        self.assertEqual(m.call_count, 2)
+        off_env, off = self.trace(False, f, False)
+        self.assertEqual(on.code, off.code)
+        self.assertEqual(
+            [str(x.expr) for x in on_env.guards],
+            [str(x.expr) for x in off_env.guards],
+        )
+        for x, y in zip(on.graph.nodes, off.graph.nodes, strict=True):
+            self.assertEqual(str(x.meta.get("val")), str(y.meta.get("val")))
+
+        # MAGIC logging keeps the Python dispatch.
+        def logged(native):
+            with self.assertLogs(sym_node.sym_node_log, level="DEBUG") as logs:
+                _, gm = self.trace(native, lambda a, b: a * b + 1, False)
+            return gm.code, [x for x in logs.output if "MAGIC" in x]
+
+        with sym_dispatch as m:
+            on = logged(True)
+        self.assertEqual(m.call_count, 2)
+        self.assertEqual(on, logged(False))
+
+    def test_proxy_torch_function(self):
+        # sym_min/sym_max/sym_not dispatch through torch functions, which a
+        # TorchFunctionMode sees.
+        class Spy(torch.overrides.TorchFunctionMode):
+            def __init__(self):
+                super().__init__()
+                self.funcs = []
+
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                self.funcs.append(func.__name__)
+                return func(*args, **(kwargs or {}))
+
+        def traced(native):
+            spy = Spy()
+
+            def f(a, b):
+                with spy:
+                    return a.__sym_max__(b), a.__sym_min__(b), (a < b).__sym_not__()
+
+            _, gm = self.trace(native, f, False)
+            return gm.code, spy.funcs
+
+        on_code, on_funcs = traced(True)
+        self.assertEqual(on_code, traced(False)[0])
+        # Not compared to off: the Python SymNode also calls torch.sym_max and
+        # torch.sym_min on the hints.
+        self.assertEqual(on_funcs, ["sym_max", "sym_min", "sym_not"])
 
     def test_proxy_hint_raises(self):
         # binary_magic_impl computes the hint before dispatching.
