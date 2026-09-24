@@ -344,6 +344,71 @@ class KernelTests(torch._inductor.test_case.TestCase):
                 (config[0] * config[1][0], source * 5),
             )
 
+    @requires_python_wrapper_for_aggregates
+    @_assert_no_mutation_fallback
+    def test_triton_kernel_same_named_structural_types_do_not_collide(self):
+        # Equal user type names with different fields need distinct generated types.
+        import triton
+        import triton.language as tl
+
+        from torch._higher_order_ops import triton_kernel_wrap
+
+        ScaleConfig = collections.namedtuple("Config", ("source", "scale"))
+        BiasConfig = collections.namedtuple("Config", ("source", "bias"))
+
+        @triton.jit
+        def kernel(
+            scale_config,
+            bias_config,
+            out,
+            n_elements,
+            BLOCK_SIZE: tl.constexpr,
+        ):
+            offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            scaled = (
+                tl.load(scale_config.source + offsets, mask=mask) * scale_config.scale
+            )
+            biased = tl.load(bias_config.source + offsets, mask=mask) + bias_config.bias
+            tl.store(out + offsets, scaled + biased, mask=mask)
+
+        def fn(left, right):
+            out = torch.empty_like(left)
+            n_elements = left.numel()
+            kernel[(triton.cdiv(n_elements, 16),)](
+                ScaleConfig(left, 2.0),
+                BiasConfig(right, 3.0),
+                out,
+                n_elements,
+                BLOCK_SIZE=16,
+            )
+            return out
+
+        left = torch.arange(32, dtype=torch.float32, device=GPU_TYPE)
+        right = torch.arange(32, dtype=torch.float32, device=GPU_TYPE) + 1
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, fullgraph=True), left, right
+        )
+
+        self.assertEqual(actual, left * 2.0 + right + 3.0)
+        scale_name = triton_kernel_wrap.create_structural_named_tuple_name(
+            "Config", ScaleConfig._fields
+        )
+        bias_name = triton_kernel_wrap.create_structural_named_tuple_name(
+            "Config", BiasConfig._fields
+        )
+        self.assertNotEqual(scale_name, bias_name)
+        self.assertRegex(scale_name, r"^_udtk_[0-9a-f]{8}_Config$")
+        self.assertRegex(bias_name, r"^_udtk_[0-9a-f]{8}_Config$")
+        self.assertEqual(
+            scale_name,
+            triton_kernel_wrap.create_structural_named_tuple_name(
+                "Config", ScaleConfig._fields
+            ),
+        )
+        self.assertIn(f"{scale_name} = collections.namedtuple", code)
+        self.assertIn(f"{bias_name} = collections.namedtuple", code)
+
     @requires_gpu
     @parametrize("version", ("V1_COMPILER", "V2_BACKENDS", "V3_BACKENDS_TUPLE"))
     @parametrize("aggregate", ("tuple", "namedtuple"))
@@ -385,6 +450,49 @@ class KernelTests(torch._inductor.test_case.TestCase):
             ),
         ):
             torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+
+    @requires_gpu
+    @parametrize("wrapper", ("cpp", "fx"))
+    @parametrize("aggregate", ("tuple", "namedtuple"))
+    def test_triton_kernel_aggregate_wrapper_unsupported(self, wrapper, aggregate):
+        # Both wrapper modes reject aggregates before generating launch code.
+        import triton
+        import triton.language as tl
+
+        Config = collections.namedtuple("Config", ("source", "scale"))
+
+        @triton.jit
+        def aggregate_kernel(config, out, BLOCK_SIZE: tl.constexpr):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            values = tl.load(config[0] + offsets)
+            tl.store(out + offsets, values * config[1])
+
+        def tuple_fn(x):
+            out = torch.empty_like(x)
+            aggregate_kernel[(1,)]((x, 2.0), out, BLOCK_SIZE=16)
+            return out
+
+        def namedtuple_fn(x):
+            out = torch.empty_like(x)
+            aggregate_kernel[(1,)](Config(x, 2.0), out, BLOCK_SIZE=16)
+            return out
+
+        x = torch.arange(16, dtype=torch.float32, device=GPU_TYPE)
+        fn = tuple_fn if aggregate == "tuple" else namedtuple_fn
+        config_patch = {"cpp_wrapper": wrapper == "cpp", "fx_wrapper": wrapper == "fx"}
+        if wrapper == "fx":
+            config_patch["compile_threads"] = 1
+        message = (
+            r"C\+\+ wrappers and AOTInductor" if wrapper == "cpp" else "FX wrappers"
+        )
+        with (
+            inductor_config.patch(config_patch),
+            self.assertRaisesRegex(
+                torch._inductor.exc.InductorError,
+                message + " do not support tuple or NamedTuple arguments",
+            ),
+        ):
+            torch.compile(fn, fullgraph=True)(x)
 
     @requires_gpu
     @_assert_no_mutation_fallback
@@ -449,6 +557,80 @@ class KernelTests(torch._inductor.test_case.TestCase):
             fn_with_existing_constexpr, backend="aot_eager", fullgraph=True
         )(x)
         self.assertEqual(actual, x * 2)
+
+    @requires_gpu
+    @requires_python_wrapper_for_aggregates
+    @_assert_no_mutation_fallback
+    def test_triton_kernel_recursive_mixed_aggregates(self):
+        # One graph must handle empty tuples, nested fields, repeated structural
+        # types, and a changed symbolic size without a new compilation.
+        import triton
+        import triton.language as tl
+
+        from torch._higher_order_ops import triton_kernel_wrap
+
+        Config = collections.namedtuple("Config", ("source", "scale"))
+
+        @triton.jit
+        def kernel(
+            empty,
+            left,
+            right,
+            mixed,
+            out,
+            BLOCK_SIZE: tl.constexpr,
+        ):
+            tl.static_assert(len(empty) == 0)
+            offsets = tl.arange(0, BLOCK_SIZE)
+            n_elements = mixed[1][0]
+            mask = offsets < n_elements
+            nested = mixed[0][0]
+            values = tl.load(left.source + offsets, mask=mask) * left.scale
+            values += tl.load(right.source + offsets, mask=mask) * right.scale
+            values += tl.load(nested.source + offsets, mask=mask) * nested.scale
+            tl.store(out + offsets, values, mask=mask)
+
+        def fn(left_source, right_source, nested_source):
+            out = torch.empty_like(left_source)
+            n_elements = left_source.shape[0]
+            kernel[(1,)](
+                (),
+                Config(left_source, 2.0),
+                Config(right_source, 3.0),
+                ((Config(nested_source, 4.0),), (n_elements,)),
+                out,
+                BLOCK_SIZE=64,
+            )
+            return out
+
+        counter = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+        compiled = torch.compile(fn, backend=counter, fullgraph=True, dynamic=True)
+        sources = tuple(
+            torch.arange(17, dtype=torch.float32, device=GPU_TYPE) + offset
+            for offset in range(3)
+        )
+        actual, (code,) = run_and_get_code(compiled, *sources)
+        self.assertEqual(
+            actual,
+            sources[0] * 2.0 + sources[1] * 3.0 + sources[2] * 4.0,
+        )
+        frame_count = counter.frame_count
+
+        sources = tuple(
+            torch.arange(33, dtype=torch.float32, device=GPU_TYPE) + offset
+            for offset in range(3)
+        )
+        self.assertEqual(
+            compiled(*sources),
+            sources[0] * 2.0 + sources[1] * 3.0 + sources[2] * 4.0,
+        )
+        self.assertEqual(counter.frame_count, frame_count)
+
+        config_name = triton_kernel_wrap.create_structural_named_tuple_name(
+            "Config", Config._fields
+        )
+        self.assertIn(f"{config_name} = collections.namedtuple", code)
+        self.assertGreaterEqual(code.count(f"{config_name}("), 3)
 
     @requires_gpu
     @_assert_no_mutation_fallback
@@ -519,6 +701,39 @@ class KernelTests(torch._inductor.test_case.TestCase):
         # A nested read-only leaf is neither cloned nor mutated.
         self.assertEqual(read_only_result, read_only_before)
         self.assertEqual(read_only, read_only_before)
+
+    @requires_gpu
+    @requires_python_wrapper_for_aggregates
+    @_assert_no_mutation_fallback
+    def test_triton_kernel_namedtuple_nested_specialized_one(self):
+        # A nested integer one needs both a constexpr signature leaf and a
+        # path-keyed constant for the compiled Triton launcher.
+        import triton
+        import triton.language as tl
+
+        from torch._higher_order_ops import triton_kernel_wrap
+
+        Config = collections.namedtuple("Config", ("source", "scale"))
+
+        @triton.jit
+        def specialized_one_kernel(config, out, BLOCK_SIZE: tl.constexpr):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            values = tl.load(config.source + offsets)
+            tl.store(out + offsets, values * config.scale)
+
+        def fn(x):
+            out = torch.empty_like(x)
+            specialized_one_kernel[(1,)](Config(source=x, scale=1), out, BLOCK_SIZE=16)
+            return out
+
+        x = torch.arange(16, dtype=torch.float32, device=GPU_TYPE)
+        actual, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True), x)
+        self.assertEqual(actual, x)
+        config_name = triton_kernel_wrap.create_structural_named_tuple_name(
+            "Config", Config._fields
+        )
+        self.assertIn(f"{config_name}(source='*fp32', scale='constexpr')", code)
+        self.assertIn("'constants': {(0, 1): 1", code)
 
     @requires_gpu
     @parametrize(
@@ -1010,6 +1225,50 @@ class KernelTests(torch._inductor.test_case.TestCase):
         )
         self.assertEqual(result, (1, "constant"))
         self.assertEqual(visited, [("visited", (0,))])
+
+    @unittest.skipUnless(has_triton_package(), "requires triton")
+    def test_aggregate_python_and_source_emission(self):
+        # In-process values and emitted Python must wrap the same aggregate node.
+        import triton.language as tl
+
+        from torch._higher_order_ops import triton_kernel_wrap
+        from torch._inductor.codegen.wrapper import PythonWrapperCodegen
+
+        spec = triton_kernel_wrap.create_named_tuple_spec(
+            "Config",
+            ("source", "options"),
+            (
+                triton_kernel_wrap.create_leaf_spec("source"),
+                triton_kernel_wrap.create_tuple_spec(
+                    (triton_kernel_wrap.create_leaf_spec("block"),),
+                    is_constexpr=True,
+                ),
+            ),
+        )
+        normalized = ("x", (16,))
+        materialized = triton_kernel_wrap.materialize_aggregate(spec, normalized)
+        self.assertEqual(materialized.source, "x")
+        self.assertIsInstance(materialized.options, tl.constexpr)
+        self.assertEqual(materialized.options.value, (16,))
+        constant = triton_kernel_wrap.materialize_aggregate(
+            spec, normalized, wrap_with_constexpr=False
+        )
+        self.assertEqual(constant.source, "x")
+        self.assertEqual(constant.options, (16,))
+
+        wrapper = object.__new__(PythonWrapperCodegen)
+        with mock.patch.object(
+            PythonWrapperCodegen,
+            "maybe_register_udtk_aggregate_type_def",
+            return_value="Config",
+        ):
+            source = wrapper._prepare_udtk_aggregate_call_str(
+                spec, normalized, leaf_fn=str
+            )
+        self.assertEqual(
+            source,
+            "Config(source=x, options=tl.constexpr((16,)))",
+        )
 
     def test_aggregate_type_metadata_uses_fx_literals(self):
         # The spec stays in FX-native literals so retracing adds no constructors.

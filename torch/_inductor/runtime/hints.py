@@ -123,12 +123,23 @@ if has_triton_package():
             equal_to_1=None,
             pointer_range_32=None,
         ):
+            # Normalize legacy argument indices and nested aggregate paths to
+            # the tuple paths used as keys in Triton's argument attributes dict.
+            def arg_path(index_or_path):
+                return (
+                    index_or_path
+                    if isinstance(index_or_path, tuple)
+                    else (index_or_path,)
+                )
+
             # pyrefly: ignore [not-iterable]
-            # Build attr dict merging divisibility and pointer_range per arg index,
-            # since a single arg can carry both attributes.
-            result = {(x,): [["tt.divisibility", 16]] for x in (divisible_by_16 or ())}
+            # Build the attr dict per argument path, merging attributes that
+            # apply to the same leaf.
+            result = {
+                arg_path(x): [["tt.divisibility", 16]] for x in (divisible_by_16 or ())
+            }
             for x in pointer_range_32 or ():
-                key = (x,)
+                key = arg_path(x)
                 if key in result:
                     result[key].append(["tt.pointer_range", 32])
                 else:
@@ -151,6 +162,7 @@ class HeuristicType(Enum):
     REDUCTION = auto()
     SPLIT_SCAN = auto()
     TEMPLATE = auto()
+
     USER_AUTOTUNE = auto()
     FIXED = auto()
 
@@ -245,7 +257,7 @@ class TritonMeta(typing.TypedDict, total=False):
     signature: dict[str, typing.Any]
     device: DeviceProperties
     device_type: str
-    constants: dict[str, typing.Any]
+    constants: dict[str | tuple[int, ...], typing.Any]
     configs: list[typing.Any]
     native_matmul: bool
     launch_cooperative_grid: bool
