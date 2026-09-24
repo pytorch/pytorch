@@ -744,12 +744,13 @@ def _build_installed_forward():
     import sys as _sys
 
     import torch
+    from torch._C._dynamo.eval_frame import _debug_get_cache_entry_list
     from torch._dynamo.eval_frame import (
         _RecompileRefusedError,
         _RefuseRecompileCallback,
         OptimizeContext,
     )
-    from torch._dynamo.package import CompilePackage
+    from torch._dynamo.package import _lookup_code, CompilePackage
     from torch._precompile import PrecompileError as _PrecompileError
 
     if tuple(_DYNAMO_PYTHON_VERSION) != _sys.version_info[:2]:
@@ -792,6 +793,18 @@ def _build_installed_forward():
                 "precompile: an installed artifact cannot load with "
                 "torch._dynamo.config.compiled_autograd enabled: backward graphs "
                 "would compile outside the artifact. Disable it before load()."
+            )
+        # The codes install() puts entries on; the entry's is innermost_fn's.
+        entries = package._codes.items()
+        targets = [_lookup_code(e) if e.code_source else c for c, e in entries]
+        live = [c.co_name for c in targets if _debug_get_cache_entry_list(c)]
+        if live:
+            raise _PrecompileError(
+                f"precompile: frames this artifact installs onto ({', '.join(live)}) "
+                f"already have live Dynamo cache entries in this process (the capture "
+                f"that produced this artifact, or a torch.compile of them), which "
+                f"would still serve any call the installed entries miss: load this "
+                f"artifact in a fresh process."
             )
         context = torch._dynamo.optimize(BACKEND, package=package)
         if not isinstance(context, OptimizeContext):
