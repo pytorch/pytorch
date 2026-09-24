@@ -225,6 +225,29 @@ class UserDefineSetAttr:
 
 
 class MiscTests(torch._inductor.test_case.TestCase):
+    def test_storage_offset_scalar_output(self):
+        def fn(x):
+            return x.storage_offset()
+
+        base = torch.arange(30)
+        inputs = (
+            base[:10],
+            base[5:15],
+            base[7:17],
+            base[:10],
+        )
+
+        compiled_fn = torch.compile(
+            fn,
+            backend="eager",
+            fullgraph=True,
+        )
+
+        for x in inputs:
+            result = compiled_fn(x)
+            self.assertIsInstance(result, int)
+            self.assertEqual(result, fn(x))
+
     def test_get_cache_entry(self):
         def f(x):
             return x + 1
@@ -8772,6 +8795,33 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             return C().fn(torch.ones(2, 3))
 
         self.assertTrue(torch.allclose(f(), torch.tensor([2.0])))
+
+    def test_opaque_value_instance_staticmethod(self):
+        from torch._library.opaque_object import register_opaque_type
+
+        class Quantizer:
+            def __eq__(self, other):
+                return type(self) is type(other)
+
+            def __hash__(self):
+                return hash(type(self))
+
+            def __fx_repr__(self):
+                name = type(self).__name__
+                return f"{name}()", {name: type(self)}
+
+            @staticmethod
+            def get_shape(shape):
+                return shape
+
+        register_opaque_type(Quantizer, typ="value")
+        q = Quantizer()
+
+        def fn(x):
+            return x + q.get_shape((3,))[0]
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(torch.zeros(3)), torch.full((3,), 3.0))
 
     def test_user_function_variable_supports_type_abcmeta_argument(self):
         class Foo(metaclass=abc.ABCMeta):
@@ -17705,6 +17755,29 @@ fn
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.randn(4)
         self.assertEqual(fn(x), opt_fn(x))
+
+    def test_guard_filter_entry_snapshots_the_guard_code(self):
+        # entry.code_parts is populated from orig_guard.code_list at inspection
+        # time and owned by the entry: a later build_guards rebinds that
+        # attribute (to None, then to a fresh list), so an entry that read it
+        # through orig_guard would see the later build, not the one inspected.
+        from torch._dynamo.guards import make_guard_filter_entry
+        from torch._dynamo.source import LocalSource
+        from torch._guards import Guard
+
+        guard = Guard(LocalSource("x"), lambda *a: None)
+        guard.code_list = ["___check_type_id(L['x'], 1)"]
+        builder = types.SimpleNamespace(get=lambda g: 1)
+        entry = make_guard_filter_entry(guard, builder)
+        self.assertEqual(entry.code_parts, ("___check_type_id(L['x'], 1)",))
+        # Stricter than production, which never mutates the list in place:
+        # keeps the tuple() copy from being replaced by the list reference.
+        guard.code_list.clear()
+        guard.code_list.append("something else")
+        self.assertEqual(entry.code_parts, ("___check_type_id(L['x'], 1)",))
+        guard.code_list = None
+        self.assertEqual(entry.code_parts, ("___check_type_id(L['x'], 1)",))
+        self.assertEqual(make_guard_filter_entry(guard, builder).code_parts, ())
 
     def test_guard_filter_fn_by_id(self):
         def guard_filter_fn(entries):

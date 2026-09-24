@@ -5584,10 +5584,6 @@ if HAS_CUDA_AND_TRITON:
 
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_single_captured_partition_not_static(self):
-            # When the only uncaptured region leads the forward, exactly one
-            # captured partition remains. The saved activation it consumes is
-            # still eager-allocated, so a partition count alone cannot tell the
-            # backward that saved activations move per call.
             from torch._inductor.utils import count_tangents
 
             class Mod(torch.nn.Module):
@@ -5596,8 +5592,8 @@ if HAS_CUDA_AND_TRITON:
                     self.linear = torch.nn.Linear(16, 16)
 
                 def forward(self, x):
-                    # Leading CPU round-trip, so everything after it is a single
-                    # captured partition and b is saved for backward.
+                    # Leading CPU round-trip: everything after it is one captured
+                    # partition, and the mul it feeds is saved for backward.
                     b = x.cpu().cuda()
                     c = b * b
                     return self.linear(c)
@@ -5612,18 +5608,13 @@ if HAS_CUDA_AND_TRITON:
             bw_graph = compiles.bw_graph
             self.assertIsNotNone(bw_graph)
             self.assertIsNotNone(compiles.bw_static_input_idxs)
-            # partition_maps holds only captured partitions. With two of them the
-            # pre-existing len(partition_maps) > 1 clause would satisfy everything
-            # below on its own, leaving has_uncaptured_partition uncovered.
             self.assertEqual(compiles.fw_captured_partitions, 1)
             self.assertTrue(compiles.fw_has_uncaptured_partition)
             names = [n.name for n in bw_graph.graph.find_nodes(op="placeholder")]
             static_names = {names[i] for i in compiles.bw_static_input_idxs}
             self.assertFalse({n for n in static_names if n.startswith("tangents")})
-            # b = x.cpu().cuda(); c = b * b, so "mul" is the saved activation. It
-            # is produced outside a CUDA Graph, hence reallocated every call.
             self.assertNotIn("mul", static_names)
-            # Non-vacuous: the name-based classification this replaces kept it.
+            # Non-vacuous: "mul" is a static-input candidate that the fix excludes.
             self.assertIn("mul", names[: count_tangents(bw_graph)])
             self.assertTrue(compiles.forward_is_cudagraph_partitioned)
 
