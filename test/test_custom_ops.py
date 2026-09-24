@@ -83,6 +83,8 @@ device_type = (
     else "cpu"
 )
 
+skipIfMPS = unittest.skipIf(device_type == "mps", "Not supported on MPS")
+
 
 def requires_compile(fun):
     fun = unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")(fun)
@@ -2071,6 +2073,7 @@ TORCH_LIBRARY(_test_pyobject_dispatch_cpp_fallback_torch_function, m) {
 
     @skipIfXpu(msg="Deprecated torch.custom_ops API")
     @unittest.skipIf(not TEST_ACCELERATOR, "requires accelerator")
+    @skipIfMPS
     def test_impl_multiple(self):
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
         def foo(x: torch.Tensor) -> torch.Tensor:
