@@ -1488,6 +1488,11 @@ class BuiltinVariable(BaseBuiltinVariable):
         allowed_nodes = (
             ast.Expression,
             ast.Constant,
+            ast.Tuple,
+            ast.Load,
+            ast.BoolOp,
+            ast.And,
+            ast.Or,
             ast.UnaryOp,
             ast.BinOp,
             ast.UAdd,
