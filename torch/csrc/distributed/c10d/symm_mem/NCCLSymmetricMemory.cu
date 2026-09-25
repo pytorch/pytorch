@@ -188,12 +188,10 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
 
 #ifdef USE_ROCM
     comm_generation_ = mgr.get_comm_generation(group_name_, comm_);
-    TORCH_CHECK(
-        mgr.comm_has_device_api_support(group_name_, comm_),
-        "RCCL symmetric memory requires device API support. Set "
-        "NCCL_CUMEM_ENABLE=1 and NCCL_WIN_ENABLE=1 before initializing the "
-        "process group, and ensure that all participating GPUs have peer "
-        "access.");
+    // Without device API support the handle is host-only: collectives on the
+    // buffer still work, but there are no peer pointers, and their accessors
+    // raise.
+    device_api_support_ = mgr.comm_has_device_api_support(group_name_, comm_);
 #endif
 
     // Register a single window over the combined signal pad + buffer region.
@@ -226,6 +224,11 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
           rank_));
 
 #ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+#ifdef USE_ROCM
+    if (!device_api_support_) {
+      return;
+    }
+#endif
     // (Host comm is already published into NCCLDevCommManager by the
     // owning backend at comm-init time. The earlier mgr.get_comm() call
     // above relied on that. No re-register here.)
@@ -432,6 +435,16 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
         "' is stale because its RCCL communicator was destroyed or replaced. "
         "Rendezvous again after initializing the successor process group.");
   }
+
+  void check_peer_pointers() const {
+    check_liveness();
+    TORCH_CHECK(
+        device_api_support_,
+        "RCCL symmetric-memory peer pointers require device API support: a "
+        "build whose RCCL nccl_device.h passed the host-compile probe, and "
+        "NCCL_CUMEM_ENABLE=1 plus NCCL_WIN_ENABLE=1 set before initializing "
+        "the process group, with peer access between all participating GPUs.");
+  }
 #endif
 
  private:
@@ -454,6 +467,7 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
   ncclComm_t comm_{nullptr};
 #ifdef USE_ROCM
   uint64_t comm_generation_{0};
+  bool device_api_support_{false};
 #endif
   friend class NCCLSymmetricMemory;
 };
@@ -487,28 +501,28 @@ void NCCLSymmetricMemory::check_liveness() const {
 
 std::vector<void*> NCCLSymmetricMemory::get_buffer_ptrs() {
 #ifdef USE_ROCM
-  check_liveness();
+  pai_->check_peer_pointers();
 #endif
   return pai_->buffers_;
 }
 
 std::vector<void*> NCCLSymmetricMemory::get_signal_pad_ptrs() {
 #ifdef USE_ROCM
-  check_liveness();
+  pai_->check_peer_pointers();
 #endif
   return pai_->signal_pads_;
 }
 
 void** NCCLSymmetricMemory::get_buffer_ptrs_dev() {
 #ifdef USE_ROCM
-  check_liveness();
+  pai_->check_peer_pointers();
 #endif
   return pai_->buffers_dev_;
 }
 
 void** NCCLSymmetricMemory::get_signal_pad_ptrs_dev() {
 #ifdef USE_ROCM
-  check_liveness();
+  pai_->check_peer_pointers();
 #endif
   return pai_->signal_pads_dev_;
 }
@@ -533,8 +547,9 @@ void* NCCLSymmetricMemory::get_multicast_ptr() {
 
 void NCCLSymmetricMemory::barrier(int channel, size_t timeout_ms) {
 #ifdef USE_ROCM
-  // Reject on the host before stale peer signal-pad pointers reach a kernel.
-  check_liveness();
+  // Reject on the host before stale or absent peer signal-pad pointers reach
+  // a kernel.
+  pai_->check_peer_pointers();
 #endif
 #ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
   TORCH_CHECK(

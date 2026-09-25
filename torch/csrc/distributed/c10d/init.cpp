@@ -1411,7 +1411,10 @@ Example:
 
   module.def("_detect_dma_connectivity", ::c10d::detect_dma_connectivity);
   module.def("_is_nccl_symmem_available", []() {
-#if defined(USE_C10D_NCCL) && defined(NCCL_HAS_SYMMEM_SUPPORT)
+  // On ROCm this reports the device API; host-only symmetric memory is
+  // available whenever NCCL_HAS_SYMMEM_SUPPORT is.
+#if defined(USE_C10D_NCCL) && defined(NCCL_HAS_SYMMEM_SUPPORT) && \
+    (!defined(USE_ROCM) || defined(NCCL_HAS_SYMMEM_DEVICE_SUPPORT))
     return true;
 #else
     return false;
