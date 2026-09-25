@@ -32,8 +32,8 @@ class MixedPrecisionPolicy:
             ``None``)
         reduce_dtype (Optional[torch.dtype]): This specifies the dtype for
             gradient reduction (i.e. reduce-scatter or all-reduce). If this is
-            ``None`` but ``param_dtype`` is not ``None``, then the reduction
-            uses the compute dtype. This can be used to run gradient reduction
+            ``None``, then the reduction uses ``grad_dtype`` if specified,
+            otherwise the compute dtype. This can be used to run gradient reduction
             in full precision while using low precision for compute. If also
             gradient reduction is disabled via :meth:`set_requires_gradient_sync`,
             then FSDP will accumulate gradients using ``reduce_dtype``.
@@ -46,12 +46,34 @@ class MixedPrecisionPolicy:
             forward's floating-point input tensors to ``param_dtype`` or not.
             For grouped ``fully_shard([a, b, ...])``, the cast is applied per
             module, before each module's forward.
+        grad_dtype (Optional[torch.dtype]): The dtype for gradients received by
+            unsharded parameters and stored on sharded parameters after reduction.
+            This lets a backward that produces higher-precision gradients retain
+            them even when ``param_dtype`` is lower precision. It does not change
+            backward kernels or recover precision already lost in their outputs.
+            When ``reduce_dtype`` is specified, communication and accumulation
+            without gradient synchronization still use ``reduce_dtype``. The
+            optimizer must support this gradient dtype with the original parameter
+            dtype. Higher-precision gradients may increase peak memory usage.
+            Specifying this option currently requires eager execution since
+            ``Tensor.grad_dtype`` is not supported by ``torch.compile``.
+            ``None`` preserves the existing behavior: unsharded gradients use the
+            compute dtype and sharded gradients use the original parameter dtype.
+            (Default: ``None``)
     """
 
     param_dtype: torch.dtype | None = None
     reduce_dtype: torch.dtype | None = None
     output_dtype: torch.dtype | None = None
     cast_forward_inputs: bool = True
+    grad_dtype: torch.dtype | None = None
+
+    def __post_init__(self):
+        if self.grad_dtype is not None and (
+            not isinstance(self.grad_dtype, torch.dtype)
+            or not self.grad_dtype.is_floating_point
+        ):
+            raise ValueError("grad_dtype must be a floating-point dtype or None")
 
 
 class Comm(ABC):

@@ -765,7 +765,7 @@ class FSDPParamGroup:
                     ),
                     self.comm_ctx.reduce_scatter_stream,
                     self._reduce_scatter_comm,
-                    self._orig_dtype,
+                    self.mp_policy.grad_dtype or self._orig_dtype,
                     self._reduce_dtype,
                     self.device,
                     self.gradient_divide_factor,

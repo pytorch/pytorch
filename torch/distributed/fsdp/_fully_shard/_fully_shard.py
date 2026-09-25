@@ -945,11 +945,45 @@ class FSDPModule:
             raise AssertionError(f"No FSDP state found on {self}")
         return state
 
-    def _apply(self, *args: Any, **kwargs: Any) -> Any:
+    def _apply(self, fn: Any, recurse: bool = True) -> Any:
         # Reshard to ensure that sharded parameters are registered
         self.reshard()
-        ret = super()._apply(*args, **kwargs)  # type: ignore[misc]
         state = self._get_fsdp_state()
+        # Module._apply recreates DTensor parameters before reattaching their
+        # gradients. Restore the policy before attaching a different-dtype grad.
+        saved_grads = []
+        params = set(cast(nn.Module, self).parameters(recurse=recurse))
+        with torch.no_grad():
+            for group in state._fsdp_param_groups:
+                if group.mp_policy.grad_dtype is None:
+                    continue
+                for fsdp_param in group.fsdp_params:
+                    param = fsdp_param.sharded_param
+                    if param not in params or param.grad is None:
+                        continue
+                    grad = param.grad
+                    converted_grad = fn(grad)
+                    if converted_grad.dtype != group.mp_policy.grad_dtype:
+                        # Keep the target device/layout and original gradient values.
+                        converted_grad = torch.empty_like(
+                            converted_grad, dtype=group.mp_policy.grad_dtype
+                        ).copy_(grad)
+                    converted_grad.requires_grad_(grad.requires_grad)
+                    saved_grads.append((fsdp_param, grad, converted_grad))
+        for fsdp_param, _, _ in saved_grads:
+            fsdp_param.sharded_param.grad = None
+        try:
+            ret = super()._apply(fn, recurse=recurse)  # type: ignore[misc]
+        except Exception:
+            with torch.no_grad():
+                for fsdp_param, grad, _ in saved_grads:
+                    # Earlier parameters may have moved before a later conversion failed.
+                    fsdp_param.reset_sharded_param()
+                    param = fsdp_param.sharded_param
+                    restored_grad = grad.to(device=param.device)
+                    restored_grad.requires_grad_(grad.requires_grad)
+                    param.grad = restored_grad
+            raise
         if not state._fsdp_param_groups:
             return ret
         # TODO: Remove this padding logic once DTensor pads the local tensor:
@@ -958,6 +992,8 @@ class FSDPModule:
             for fsdp_param_group in state._fsdp_param_groups:
                 for fsdp_param in fsdp_param_group.fsdp_params:
                     fsdp_param.reset_sharded_param()
+            for fsdp_param, _, grad in saved_grads:
+                fsdp_param.sharded_param.grad = grad
         return ret
 
 
