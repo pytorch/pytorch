@@ -975,6 +975,26 @@ class TestGetLfRunnersOutput(TestCase):
             self.assertEqual("", result)
             self.assertIn("must be one of", logs.output[0])
 
+    def test_malformed_yaml_returns_empty_and_logs_warning(self) -> None:
+        # A YAML syntax error must not escape and abort main() before it
+        # emits any of the other four outputs.
+        with tempfile.TemporaryDirectory() as d:
+            arc_yaml = self._arc_yaml(d, "lf_allowlist: [unterminated\n")
+            with self.assertLogs(rd.log, level="WARNING") as logs:
+                result = rd.get_lf_runners_output(arc_yaml, lf_enabled=True)
+            self.assertEqual("", result)
+            self.assertIn("treating as unrestricted", logs.output[0])
+
+    def test_non_mapping_lf_allowlist_returns_empty_and_logs_warning(self) -> None:
+        # lf_allowlist as a scalar (not a mapping) must not raise
+        # AttributeError out of get_lf_runners_output.
+        with tempfile.TemporaryDirectory() as d:
+            arc_yaml = self._arc_yaml(d, "lf_allowlist: not_a_mapping\n")
+            with self.assertLogs(rd.log, level="WARNING") as logs:
+                result = rd.get_lf_runners_output(arc_yaml, lf_enabled=True)
+            self.assertEqual("", result)
+            self.assertIn("treating as unrestricted", logs.output[0])
+
 
 class TestRunnerDeterminatorLfRestrictRunners(TestCase):
     """restrict_runners kill-switch propagation (ci-infra#1081, test-infra#5132)."""

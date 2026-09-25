@@ -167,5 +167,4 @@ jobs:
             --eligible-experiments "$CHECK_EXPERIMENTS" \
             --opt-out-experiments "$OPT_OUT_EXPERIMENTS" \
             --pr-number "${PR_NUMBER}" \
-            --workflow-name "${WORKFLOW_NAME}" \
-            --arc-yaml-path ".github/arc.yaml"
+            --workflow-name "${WORKFLOW_NAME}"

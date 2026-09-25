@@ -45,8 +45,11 @@ on:
         default: ""
         type: string
         description: |
-          Comma-separated LF allowlist, forwarded to map_ec2_to_arc.py's
-          --lf-runners verbatim. Empty means unrestricted. ci-infra#1081.
+          Comma-separated LF allowlist (ci-infra#1081). Empty means
+          unrestricted. Forwarded verbatim to map_ec2_to_arc.py's
+          --lf-runners for the test matrix, and also applied to this job's
+          own runs-on: below -- a build whose ARC target isn't listed is
+          forced onto 'mt-'.
       runner:
         required: false
         type: string
