@@ -164,6 +164,20 @@ jobs:
       compiler: gcc13
     secrets: inherit
 
+  linux-jammy-aarch64-py3_11-clang21-build:
+    name: linux-jammy-aarch64-py3.11-clang21
+    needs: get-label-type
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
+      runner: linux.arm64.m8g.4xlarge
+      build-environment: linux-jammy-aarch64-py3.11-clang21
+      docker-image-name: ci-image:pytorch-linux-jammy-aarch64-py3.11-clang21
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+      python-version: "3.11"
+      compiler: clang21
+    secrets: inherit
+
   linux-jammy-aarch64-py3_11-gcc13-test:
     name: linux-jammy-aarch64-py3.11
     uses: ./.github/workflows/_linux-test.yml
