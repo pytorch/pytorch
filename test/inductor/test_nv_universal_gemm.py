@@ -534,10 +534,10 @@ class TestNVUniversalGemm(TestCase):
         )
         repeated = compiled(a2, b2, scale_a2, scale_b2, side_input)
 
-        self.assertEqual(actual[0], expected[0], equal_nan=True, atol=0.1, rtol=0.1)
+        self.assertEqual(actual[0], expected[0], equal_nan=True, atol=0, rtol=0)
         self.assertEqual(actual[1], expected[1])
         self.assertEqual(
-            repeated[0], repeated_expected[0], equal_nan=True, atol=0.1, rtol=0.1
+            repeated[0], repeated_expected[0], equal_nan=True, atol=0, rtol=0
         )
         self.assertEqual(repeated[1], repeated_expected[1])
         consumer_marker = "Original ATen: [aten._to_copy, aten.add]"
@@ -575,7 +575,7 @@ class TestNVUniversalGemm(TestCase):
             scaled_mm_across_streams, a, b, scale_a, scale_b
         )
 
-        self.assertEqual(actual, expected, equal_nan=True, atol=0.1, rtol=0.1)
+        self.assertEqual(actual, expected, equal_nan=True, atol=0, rtol=0)
         self.assertIn("use_pdl=True", code)
         self.assertNotIn("'launch_pdl': True", code)
         self.assertNotIn("gdc_wait", code)
@@ -602,7 +602,7 @@ class TestNVUniversalGemm(TestCase):
             },
         )
 
-        self.assertEqual(actual, expected, equal_nan=True, atol=1.0, rtol=0.1)
+        self.assertEqual(actual, expected, equal_nan=True)
         self._assert_single_pdl_launch(code)
 
     def test_pdl_chain_handles_deferred_alignment_copy(self):
@@ -630,8 +630,8 @@ class TestNVUniversalGemm(TestCase):
         self.assertNotEqual(misaligned_input.data_ptr() % 16, 0)
         repeated = compiled(a, b, scale_a, scale_b, misaligned_input)
 
-        self.assertEqual(actual, expected, equal_nan=True, atol=0.1, rtol=0.1)
-        self.assertEqual(repeated, expected, equal_nan=True, atol=0.1, rtol=0.1)
+        self.assertEqual(actual, expected, equal_nan=True, atol=0, rtol=0)
+        self.assertEqual(repeated, expected, equal_nan=True, atol=0, rtol=0)
         self.assertIn("copy_if_misaligned", code)
         self._assert_single_pdl_launch(code)
 
@@ -810,7 +810,7 @@ class TestNVUniversalGemm(TestCase):
             result, (code,) = run_and_get_code(
                 compiled, a, b, scale_a, scale_b, alpha_source
             )
-            self.assertEqual(result, expected, equal_nan=True, atol=1.0, rtol=2e-2)
+            self.assertEqual(result, expected, equal_nan=True, atol=0, rtol=0)
 
             graph = torch.cuda.CUDAGraph()
             with torch.cuda.graph(graph):
@@ -824,7 +824,7 @@ class TestNVUniversalGemm(TestCase):
             torch.cuda.synchronize()
 
         self.assertEqual(
-            graph_result, replay_expected, equal_nan=True, atol=1.0, rtol=2e-2
+            graph_result, replay_expected, equal_nan=True, atol=0, rtol=0
         )
         self.assertIn("swap_ab=True", code)
         self.assertIn("output_scale=", code)
@@ -1049,7 +1049,7 @@ class TestNVUniversalGemm(TestCase):
             assume_supported_args=True,
         )
         torch.cuda.synchronize()
-        torch.testing.assert_close(out, expected, equal_nan=True, atol=1.0, rtol=2e-2)
+        torch.testing.assert_close(out, expected, equal_nan=True, atol=0, rtol=0)
 
         oversized_args, _, _ = make_args(tile_n + 8)
         status = kernel.supports(oversized_args)
@@ -1108,7 +1108,7 @@ class TestNVUniversalGemm(TestCase):
 
         for actual, reference in zip(result, expected):
             torch.testing.assert_close(
-                actual, reference, equal_nan=True, atol=1.0, rtol=2e-2
+                actual, reference, equal_nan=True, atol=0, rtol=0
             )
         self.assertEqual(counters["inductor"]["scaled_mm_output_scale_fused"], 1)
         self.assertIn("output_scale=", code)
@@ -1357,7 +1357,7 @@ class TestNVUniversalGemm(TestCase):
             self.assertEqual(actual.dtype, torch.float32)
             self.assertEqual(actual.shape, expected.shape)
         torch.testing.assert_close(
-            actual, expected, equal_nan=True, atol=1.0, rtol=2e-2
+            actual, expected, equal_nan=True, atol=0, rtol=0
         )
         self.assertEqual(counters["inductor"]["scaled_mm_output_scale_fused"], 0)
 
@@ -4529,13 +4529,13 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         result, code, epilogue_fused = self._compile_and_check(
             fn, a, b, scale_a, scale_b, output_scale
         )
-        torch.testing.assert_close(
-            result,
-            fn(a, b, scale_a, scale_b, output_scale),
-            equal_nan=True,
-            atol=1.0,
-            rtol=2e-2,
-        )
+        reference = fn(a, b, scale_a, scale_b, output_scale)
+        if nonpointwise_consumer:
+            torch.testing.assert_close(
+                result, reference, equal_nan=True, atol=0, rtol=0
+            )
+        else:
+            torch.testing.assert_close(result, reference, equal_nan=True)
         expected_folds = int(nonpointwise_consumer)
         self.assertEqual(
             counters["inductor"]["scaled_mm_output_scale_fused"], expected_folds
