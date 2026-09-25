@@ -1,9 +1,10 @@
 # mypy: allow-untyped-defs
 import ast
 import inspect
-import sys
 import textwrap
 import warnings
+
+from typing_extensions import Format, get_annotations
 
 import torch
 
@@ -75,16 +76,12 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
         init_ast = ast.parse(textwrap.dedent(source_lines))
 
         # Get items annotated in the class body
-        if sys.version_info >= (3, 14):
-            import annotationlib
-
-            self.class_level_annotations = list(
-                annotationlib.get_annotations(
-                    nn_module, format=annotationlib.Format.FORWARDREF
-                ).keys()
-            )
-        else:
-            self.class_level_annotations = list(nn_module.__annotations__.keys())
+        self.class_level_annotations = []
+        for cls in type(nn_module).__mro__:
+            annotations = get_annotations(cls, format=Format.FORWARDREF)
+            if annotations:
+                self.class_level_annotations = list(annotations)
+                break
 
         # Flag for later
         self.visiting_class_level_ann = False

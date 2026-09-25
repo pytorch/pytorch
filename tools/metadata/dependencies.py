@@ -28,7 +28,7 @@ __all__ = ["dynamic_metadata", "dynamic_wheel"]
 
 BASE_DEPENDENCIES = [
     "filelock",
-    "typing-extensions>=4.10.0",
+    "typing-extensions>=4.13.0",
     "setuptools>=77.0.3",
     "sympy>=1.13.3",
     "networkx>=2.5.1",
