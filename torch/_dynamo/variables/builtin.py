@@ -284,22 +284,28 @@ BUILTIN_TO_TENSOR_RFN_MAP: dict[Callable[..., Any], Callable[..., Any]] = {}
 _MISSING_SENTINEL = object()
 
 # Runtime-raising ops (e.g. truediv) excluded: recompute escapes traced handlers
-_COMPUTED_LAZY_CONSTANT_OPS: frozenset[Callable[..., Any]] = frozenset(
-    [
-        operator.add,
-        operator.sub,
-        operator.mul,
-        operator.and_,
-        operator.or_,
-        operator.xor,
-        operator.eq,
-        operator.ne,
-        operator.lt,
-        operator.le,
-        operator.gt,
-        operator.ge,
-    ]
-)
+_COMPUTED_LAZY_CONSTANT_OPS_BY_ARITY: dict[int, frozenset[Callable[..., Any]]] = {
+    # invert is excluded: SymNodeVariable has no nb_invert_impl for symbolic realization
+    1: frozenset([operator.neg, operator.pos, operator.abs, operator.not_]),
+    2: frozenset(
+        [
+            operator.add,
+            operator.sub,
+            operator.mul,
+            operator.and_,
+            operator.or_,
+            operator.xor,
+            operator.eq,
+            operator.ne,
+            operator.lt,
+            operator.le,
+            operator.gt,
+            operator.ge,
+        ]
+    ),
+}
+
+_BUILTIN_TO_OPERATOR: dict[Callable[..., Any], Callable[..., Any]] = {abs: operator.abs}
 
 
 def _try_computed_lazy_constant(
@@ -309,7 +315,8 @@ def _try_computed_lazy_constant(
     from .lazy import ComputedLazyConstantVariable, LazyConstantVariable
 
     fn = IN_PLACE_DESUGARING_MAP.get(fn, fn)
-    if fn not in _COMPUTED_LAZY_CONSTANT_OPS or len(args) != 2:
+    fn = _BUILTIN_TO_OPERATOR.get(fn, fn)
+    if fn not in _COMPUTED_LAZY_CONSTANT_OPS_BY_ARITY.get(len(args), frozenset()):
         return None
     any_unrealized = False
     for arg in args:
