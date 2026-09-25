@@ -131,10 +131,12 @@ TORCH_CUDA_CPP_API cublasLtHandle_t getCurrentCUDABlasLtHandle();
 // threads (e.g. autograd workers) can reserve one mid-capture.
 TORCH_CUDA_CPP_API void ensureCublasLtHandlesAvailable(size_t n);
 // Under capture, getCurrentCUDABlasHandle() returns a capture handle: one per
-// (thread, device, stream), with no rocBLAS arena, bound to a workspace from
-// the capture's memory pool. Once the public handle has been requested on the
-// current device, reserve this thread's capture handle for the current stream
-// and pre-stock one spare, because creating a handle is illegal under capture.
+// (thread, device), with no rocBLAS arena, shared by every stream the thread
+// uses in the capture. Each request points it at the current stream and binds
+// that stream's workspace from the capture's memory pool. Once the public
+// handle has been requested on the current device, reserve this thread's
+// capture handle and pre-stock one spare for another thread, because creating
+// a handle is illegal under capture.
 TORCH_CUDA_CPP_API void prepareCaptureCublasHandles();
 // Unbinds the capture handles used by this capture and frees their workspaces,
 // and the hipBLASLt workspaces getCUDABlasLtWorkspace handed out during it,
