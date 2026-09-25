@@ -1274,6 +1274,23 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     kwargs,
                 )
 
+        if hasattr(math, "sumprod"):  # Python 3.12+
+
+            @register(math.sumprod)
+            def handle_sumprod(
+                self,
+                tx: "InstructionTranslatorBase",
+                *args: VariableTracker,
+                **kwargs: VariableTracker,
+            ) -> VariableTracker | None:
+                no_keywords(tx, "math.sumprod", kwargs)
+                check_positional(tx, "sumprod", len(args), 2, 2)
+                if check_unspec_or_constant_args(args, kwargs):
+                    return None
+                return tx.inline_user_function_return(
+                    VariableTracker.build(tx, polyfills.sumprod), list(args), {}
+                )
+
         if hasattr(math, "fma"):  # Python 3.13+
 
             @register(math.fma)

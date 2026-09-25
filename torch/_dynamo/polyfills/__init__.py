@@ -109,6 +109,29 @@ def radians(x: float) -> float:
     return math.pi / 180.0 * x
 
 
+def sumprod(p: Iterable[Any], q: Iterable[Any], /) -> Any:
+    # Generic path of CPython's math_sumprod_impl, without the float fast path.
+    p_it = iter(p)
+    q_it = iter(q)
+    total = 0
+    while True:
+        try:
+            p_i = next(p_it)
+            p_stopped = False
+        except StopIteration:
+            p_stopped = True
+        try:
+            q_i = next(q_it)
+            q_stopped = False
+        except StopIteration:
+            q_stopped = True
+        if p_stopped != q_stopped:
+            raise ValueError("Inputs are not the same length")
+        if p_stopped:
+            return total
+        total = total + p_i * q_i
+
+
 def infer_size(a: Sequence[Any], b: Sequence[Any]) -> torch.Size:
     from torch.fx.experimental.symbolic_shapes import guard_or_false
 

@@ -5,6 +5,7 @@ import collections
 import collections.abc
 import contextlib
 import enum
+import fractions
 import functools
 import inspect
 import itertools
@@ -3541,6 +3542,62 @@ partial_fn = functools.partial(fn, scale=2)
         self.assertTrue(same(output, expected))
         if cnt.frame_count != 1:
             raise AssertionError(f"Expected frame_count 1, got {cnt.frame_count}")
+
+    @unittest.skipIf(
+        sys.version_info < (3, 12), "math.sumprod introduced in python 3.12"
+    )
+    def test_math_sumprod_non_constant(self):
+        class Seq:
+            def __init__(self, n):
+                self.i = 0
+                self.n = n
+
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                if self.i == self.n:
+                    raise StopIteration
+                self.i += 1
+                return self.i
+
+        def func(x):
+            fracs = [fractions.Fraction(1, 3), fractions.Fraction(2, 5)]
+            return (
+                x + 1,
+                math.sumprod(fracs, fracs),
+                math.sumprod((i for i in range(4)), [1, 2, 3, 4]),
+                math.sumprod(Seq(3), Seq(3)),
+            )
+
+        x = torch.rand(10)
+        opt = torch.compile(func, backend="eager", fullgraph=True)
+        self.assertEqual(opt(x), func(x))
+
+    @unittest.skipIf(
+        sys.version_info < (3, 12), "math.sumprod introduced in python 3.12"
+    )
+    @parametrize("call", ("uneven", "raising_mul", "keyword"))
+    def test_math_sumprod_errors(self, call):
+        class BadMul:
+            def __mul__(self, other):
+                raise RuntimeError("bad mul")
+
+        def func(x):
+            try:
+                if call == "uneven":
+                    math.sumprod((i for i in range(3)), [1, 2])
+                elif call == "raising_mul":
+                    math.sumprod([BadMul()], [1])
+                else:
+                    math.sumprod(p=(i for i in range(3)), q=[1, 2, 3])
+            except (ValueError, RuntimeError, TypeError) as exc:
+                return x + 1, type(exc), str(exc)
+            return x - 1, None, "no exception"
+
+        x = torch.rand(10)
+        opt = torch.compile(func, backend="eager", fullgraph=True)
+        self.assertEqual(opt(x), func(x))
 
     @unittest.skipIf(sys.version_info < (3, 13), "math.fma introduced in python 3.13")
     def test_math_fma(self):
