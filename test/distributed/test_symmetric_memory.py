@@ -2027,6 +2027,40 @@ class SymmMemNegativeTest(MultiProcessTestCase):
         )
         torch.manual_seed(42 + self.rank)
 
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_rendezvous_mismatch_fails_fast(self) -> None:
+        self._init_process()
+
+        if symm_mem.get_backend(torch.device("cuda")) != "CUDA":
+            self.skipTest(
+                "The allocation ordinal check is specific to the CUDA backend"
+            )
+
+        # Desynchronize the allocation order: rank 0 performs an extra
+        # allocation, so the tensor it rendezvous' below is its allocation #1
+        # while every other rank rendezvous' its allocation #0. Left
+        # undetected, the ranks could map different segments of the same
+        # MemPool and silently corrupt collectives.
+        #
+        # `extra` is held until the end of the test so the allocation it owns
+        # cannot be released and recycled underneath the rendezvous.
+        extra = symm_mem.empty(64, device="cuda") if self.rank == 0 else None
+
+        t = symm_mem.empty(64, device="cuda")
+
+        with self.assertRaises(RuntimeError) as ctx:
+            symm_mem.rendezvous(t, group=dist.group.WORLD)
+
+        self.assertIn(
+            "detected mismatched symmetric memory allocations across ranks",
+            str(ctx.exception),
+        )
+
+        del extra
+
     # These timeout tests are skipped on ROCm because timeout calls trap(), which
     # is handled differently inside hip runtime. It collects gpu coredump and causes
     # the linux kernel to create a core dump of the host application. The functionality
