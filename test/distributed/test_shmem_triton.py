@@ -447,11 +447,11 @@ class SHMEMTritonTest(MultiProcContinuousTest):
         flag = out_hdl.get_signal_pad(rank, (1,), dtype=torch.int64).fill_(0)
 
         peer = 1 - rank
-        from torch._C._distributed_c10d import _nvshmem_signal_op_values
+        from torch._C._distributed_c10d import _ShmemCompareOp, _ShmemSignalOp
 
-        NVSHMEM_SIGNAL_SET, _ = _nvshmem_signal_op_values()
+        NVSHMEM_SIGNAL_SET = int(_ShmemSignalOp.SET)
         SIGNAL_VAL = 1  # Signal completion value
-        NVSHMEM_CMP_EQ = 0  # compare equal for signal wait until
+        NVSHMEM_CMP_EQ = int(_ShmemCompareOp.EQ)
 
         # Barrier so rank 1's pad zeroing cannot erase rank 0's incoming signal.
         dist.barrier()
@@ -508,11 +508,11 @@ class SHMEMTritonTest(MultiProcContinuousTest):
         flag = out_hdl.get_signal_pad(rank, (1,), dtype=torch.int64).fill_(0)
 
         peer = 1 - rank
-        from torch._C._distributed_c10d import _nvshmem_signal_op_values
+        from torch._C._distributed_c10d import _ShmemCompareOp, _ShmemSignalOp
 
-        _, NVSHMEM_SIGNAL_ADD = _nvshmem_signal_op_values()
+        NVSHMEM_SIGNAL_ADD = int(_ShmemSignalOp.ADD)
         SIGNAL_VAL = 16  # val + NVSHMEM_SIGNAL_ADD
-        NVSHMEM_CMP_EQ = 0
+        NVSHMEM_CMP_EQ = int(_ShmemCompareOp.EQ)
 
         # Barrier so rank 1's pad zeroing cannot erase rank 0's incoming signal.
         dist.barrier()
