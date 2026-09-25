@@ -178,8 +178,7 @@ class TeamManager {
       const std::string& group_name,
       MembershipState& membership) {
     auto group = c10d::resolve_process_group(group_name);
-    c10d::symmetric_memory::StoreExchange exchange(
-        "NVSHMEMTeamManagerReuse");
+    c10d::symmetric_memory::StoreExchange exchange("NVSHMEMTeamManagerReuse");
     uint64_t search_from = 0;
     while (true) {
       auto it = membership.pending_pools.lower_bound(search_from);
@@ -203,8 +202,7 @@ class TeamManager {
       }
 
       TORCH_INTERNAL_ASSERT(it != membership.pending_pools.end());
-      auto result =
-          std::make_pair(candidate, std::move(it->second));
+      auto result = std::make_pair(candidate, std::move(it->second));
       membership.pending_pools.erase(it);
       return result;
     }
@@ -285,8 +283,7 @@ class TeamManager {
   // A map from group name to team pool for that group.
   std::unordered_map<std::string, TeamPool> group_name_to_team_pool_;
   // Membership and pool identity of each live group.
-  std::unordered_map<std::string, std::vector<int>>
-      group_name_to_global_ranks_;
+  std::unordered_map<std::string, std::vector<int>> group_name_to_global_ranks_;
   std::unordered_map<std::string, uint64_t> group_name_to_pool_id_;
   // Per-membership retired pools and their rank-comparable identities.
   std::vector<MembershipState> membership_states_;
