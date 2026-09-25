@@ -1808,7 +1808,7 @@
 - name: triangular_solve(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False) -> (Tensor solution, Tensor cloned_coefficient)
   self, A: triangular_solve_backward(grad_solution, grad_cloned_coefficient, self, A, solution, upper, transpose, unitriangular, grad_input_mask)
   solution: triangular_solve_jvp(solution, A_p, A_t, self_t, upper, transpose, unitriangular)
-  cloned_coefficient: A_t
+  cloned_coefficient: A_t.expand_as(cloned_coefficient)
 
 - name: linalg_solve_triangular(Tensor self, Tensor B, *, bool upper, bool left=True, bool unitriangular=False) -> Tensor
   self, B: linalg_solve_triangular_backward(grad, self, result, upper, left, unitriangular, grad_input_mask)

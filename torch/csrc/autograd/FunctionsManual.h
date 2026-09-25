@@ -196,11 +196,6 @@ at::Tensor prod_backward(
     at::Tensor result,
     int64_t dim,
     bool keepdim);
-at::Tensor solve_jvp(
-    const Tensor& X,
-    const Tensor& A,
-    const Tensor& dA,
-    const Tensor& dB);
 at::Tensor solve_backward_self(
     const at::Tensor& grad,
     const at::Tensor& self,
