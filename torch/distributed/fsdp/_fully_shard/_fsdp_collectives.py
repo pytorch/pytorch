@@ -340,6 +340,10 @@ def _record_grad_output_stream_default(
 
 
 def record_grad_output_stream(buffer: torch.Tensor, stream: torch.Stream) -> None:
+    # A CPU buffer has no device free to order against and no stream to record,
+    # so skip the op to avoid crashing on a CPU stream.
+    if buffer.device.type == "cpu":
+        return
     torch.ops.fsdp.record_grad_output_stream(
         buffer, stream.stream_id, stream.device_index, stream.device_type
     )
