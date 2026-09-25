@@ -649,6 +649,18 @@ _stream_fn_to_variable_cls: dict[object, type[StreamVariable]] = {
 }
 
 
+def register_stream_variable_cls(stream_fn: object, cls: type[StreamVariable]) -> None:
+    """Register a StreamVariable subclass for a ``current_stream`` function.
+
+    Out-of-tree backends call this at package import so that
+    ``handle_current_stream`` upcasts the backend's current stream to the
+    registered subclass, preserving its device-specific ``python_type`` and
+    ``tp_getset``. Register before any ``torch.compile`` tracing; entries
+    added after tracing started are not reflected in already-cached graphs.
+    """
+    _stream_fn_to_variable_cls[stream_fn] = cls
+
+
 def _get_stream_variable_cls(stream_fn: object) -> type[StreamVariable] | None:
     return _stream_fn_to_variable_cls.get(stream_fn)
 
