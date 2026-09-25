@@ -2604,6 +2604,8 @@ class VariableBuilder:
             if isinstance(backing_vt, UserDefinedListVariable)
             else backing_vt
         )
+        if source_seq is None:
+            raise AssertionError("_base_vt must not be None")
         result = ListReverseIteratorVariable(
             source_seq=source_seq,
             it_index=length - 1,
