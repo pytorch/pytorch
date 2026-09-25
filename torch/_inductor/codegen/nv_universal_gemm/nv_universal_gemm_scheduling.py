@@ -311,6 +311,38 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
             return False
         return NVUniversalGemmScheduling._is_nvgemm_ir_buffer(node.get_template_node())
 
+    @staticmethod
+    def is_pdl_enabled_template(node: BaseSchedulerNode) -> bool:
+        """Return whether a scheduler node resolves to a PDL-enabled NVGEMM."""
+        if isinstance(node, SchedulerNode):
+            ir_node = node.node
+        elif isinstance(node, FusedSchedulerNode):
+            ir_node = node.get_template_node()
+        else:
+            return False
+
+        if isinstance(ir_node, NVUniversalGemmBuffer):
+            return bool(ir_node.kernel_metadata.get("use_pdl", False))
+        if not isinstance(ir_node, MultiTemplateBuffer):
+            return False
+
+        selected = ir_node._render_caller
+        if selected is None:
+            try:
+                selected, _ = ir_node.get_min_choice()
+            except (RuntimeError, ValueError):
+                return False
+        if not isinstance(selected, NVUniversalGemmCaller):
+            return False
+        kernel_impl = getattr(selected.kernel, "impl", None)
+        return bool(
+            getattr(
+                kernel_impl,
+                "use_pdl",
+                getattr(selected.kernel.metadata.design, "use_pdl", False),
+            )
+        )
+
     def can_fuse_vertical(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
