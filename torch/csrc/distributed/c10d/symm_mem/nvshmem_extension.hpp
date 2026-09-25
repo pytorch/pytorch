@@ -1,7 +1,6 @@
 #pragma once
 
 #include <ATen/ATen.h>
-#include <utility>
 #include <c10/macros/Macros.h>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 
@@ -19,8 +18,31 @@ namespace c10d::nvshmem_extension {
 // Check if NVSHMEM is available
 TORCH_API bool is_nvshmem_available();
 
-// Return signal operation values from the NVSHMEM headers used to build PyTorch.
-TORCH_API std::pair<int64_t, int64_t> nvshmem_signal_op_values();
+#ifdef USE_ROCM
+#include <rocshmem/rocshmem.hpp>
+using ShmemSignalOp = rocshmem::ROCSHMEM_SIGNAL_OPS;
+using ShmemCompareOp = rocshmem::rocshmem_cmps;
+constexpr auto kShmemSignalSet = rocshmem::ROCSHMEM_SIGNAL_SET;
+constexpr auto kShmemSignalAdd = rocshmem::ROCSHMEM_SIGNAL_ADD;
+constexpr auto kShmemCmpEq = rocshmem::ROCSHMEM_CMP_EQ;
+constexpr auto kShmemCmpNe = rocshmem::ROCSHMEM_CMP_NE;
+constexpr auto kShmemCmpGt = rocshmem::ROCSHMEM_CMP_GT;
+constexpr auto kShmemCmpGe = rocshmem::ROCSHMEM_CMP_GE;
+constexpr auto kShmemCmpLt = rocshmem::ROCSHMEM_CMP_LT;
+constexpr auto kShmemCmpLe = rocshmem::ROCSHMEM_CMP_LE;
+#else
+#include <nvshmem.h>
+using ShmemSignalOp = nvshmemx_signal_op_t;
+using ShmemCompareOp = nvshmemx_cmp_type_t;
+constexpr auto kShmemSignalSet = NVSHMEM_SIGNAL_SET;
+constexpr auto kShmemSignalAdd = NVSHMEM_SIGNAL_ADD;
+constexpr auto kShmemCmpEq = NVSHMEM_CMP_EQ;
+constexpr auto kShmemCmpNe = NVSHMEM_CMP_NE;
+constexpr auto kShmemCmpGt = NVSHMEM_CMP_GT;
+constexpr auto kShmemCmpGe = NVSHMEM_CMP_GE;
+constexpr auto kShmemCmpLt = NVSHMEM_CMP_LT;
+constexpr auto kShmemCmpLe = NVSHMEM_CMP_LE;
+#endif
 
 // Initializes the device state in CUmodule so that it’s able to perform NVSHMEM
 // operations.
