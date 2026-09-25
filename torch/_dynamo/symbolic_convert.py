@@ -2283,7 +2283,8 @@ class InstructionTranslatorBase(
         from .variables.streams import get_current_stream, new_event
 
         device = var.device
-        if device is None or device.type not in ("cuda", "mtia", "xpu"):
+        acc = torch.accelerator.current_accelerator()
+        if device is None or acc is None or device.type != acc.type:
             return
 
         node = var.proxy.node
