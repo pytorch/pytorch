@@ -563,12 +563,19 @@ def raise_observed_exception(
     args: Sequence[object] | None = None,
     kwargs: dict[str, VariableTracker] | None = None,
 ) -> NoReturn:
+    from .variables.base import VariableTracker
     from .variables.builder import SourcelessBuilder
 
     if args:
-        # Callers may forward args from real exceptions, which can contain
-        # plain Python values rather than VariableTrackers.
-        args_ = [SourcelessBuilder.create(tx, arg) for arg in args]
+        # Callers commonly forward a real exception's .args, whose members are
+        # not all strings (TypeError("msg", 42)). Anything that is not already
+        # a VariableTracker has to be wrapped, or it reaches the VT machinery raw.
+        args_ = [
+            arg
+            if isinstance(arg, VariableTracker)
+            else SourcelessBuilder.create(tx, arg)
+            for arg in args
+        ]
     else:
         args_: list[VariableTracker] = []
 
