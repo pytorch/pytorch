@@ -33,8 +33,8 @@ namespace c10d::symmetric_memory {
 // - First level: keyed by process group name
 // - Second level: keyed by an optional key (defaults to caller function name)
 //
-// Device communicators are stored by value in the registry, and methods return
-// copies wrapped in std::optional.
+// Device communicators are stored by value in the registry, but methods return
+// references wrapped in std::optional for safe access.
 class TORCH_API NCCLDevCommManager {
  public:
   // Constructor
@@ -64,14 +64,12 @@ class TORCH_API NCCLDevCommManager {
   //     ncclDevComm devcomm = ncclDevCommCreate(...);
   //     devcomm_opt = register_devcomm(group_name, devcomm);
   //   }
-  //   ncclDevComm devcomm = *devcomm_opt;
-  //   // Use devcomm
+  //   ncclDevComm& devcomm_ref = *devcomm_opt;
+  //   // Use devcomm_ref
   // }
-  // Returned by value, not by reference: `mutex_` is released here, and
-  // `register_comm` can evict the registry entry while a caller still holds
-  // what it got back. Callers pass the devcomm to a kernel launch, which copies
-  // it anyway.
-  std::optional<ncclDevComm> get_devcomm(
+  // The reference points into the registry and dangles once the group's comm
+  // is replaced or unregistered; copy the devcomm if that can happen first.
+  std::optional<std::reference_wrapper<ncclDevComm>> get_devcomm(
       const std::string& group_name,
       const std::string& key = __builtin_FUNCTION()) {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -85,7 +83,10 @@ class TORCH_API NCCLDevCommManager {
     if (key_it == group_it->second.end()) {
       return std::nullopt;
     }
-    return std::make_optional(key_it->second);
+    // Return a reference wrapper to the device communicator
+    // Using reference_wrapper because std::optional cannot hold references
+    // directly
+    return std::make_optional(std::ref(key_it->second));
   }
 #endif // NCCL_HAS_SYMMEM_DEVICE_SUPPORT
 
@@ -191,8 +192,7 @@ class TORCH_API NCCLDevCommManager {
   // You can provide your own `key` if your function uses two different
   // device communicators on the same group at the same time, for example,
   // when concurrent collective operations are used.
-  // Returns a copy of the newly registered device communicator; see
-  // `get_devcomm` for why this is not a reference.
+  // Returns a reference to the newly registered device communicator.
   // @throws TORCH_CHECK if the device communicator is already registered for
   //         the given group and key combination.
   // Example:
@@ -204,8 +204,8 @@ class TORCH_API NCCLDevCommManager {
   //     ncclDevComm devcomm = ncclDevCommCreate(...);
   //     devcomm_opt = register_devcomm(group_name, devcomm);
   //   }
-  //   ncclDevComm devcomm = *devcomm_opt;
-  //   // Use devcomm
+  //   ncclDevComm& devcomm_ref = *devcomm_opt;
+  //   // Use devcomm_ref
   // }
   // void bar(const std::string& group_name) {
   //   ncclDevComm devcomm0 = ncclDevCommCreate(...);
@@ -215,7 +215,7 @@ class TORCH_API NCCLDevCommManager {
   //   register_devcomm(group_name, devcomm0, "bar0");
   //   register_devcomm(group_name, devcomm1, "bar1");
   // }
-  std::optional<ncclDevComm> register_devcomm(
+  std::optional<std::reference_wrapper<ncclDevComm>> register_devcomm(
       const std::string& group_name,
       ncclDevComm devcomm,
       const std::string& key = __builtin_FUNCTION()) {
@@ -238,7 +238,8 @@ class TORCH_API NCCLDevCommManager {
           key,
           " already registered.");
     }
-    return std::make_optional(key_it->second);
+    // Return a reference to the newly registered device communicator
+    return std::make_optional(std::ref(key_it->second));
   }
 #endif // NCCL_HAS_SYMMEM_DEVICE_SUPPORT
 
