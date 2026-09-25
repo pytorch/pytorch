@@ -7765,6 +7765,53 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         torch_fn = lambda x: torch.mm(x, x)  # noqa: E731
         self.compare_with_numpy(torch_fn, np_fn, sx[0])
 
+    @onlyCPU
+    @dtypes(torch.bfloat16)
+    @precisionOverride({torch.bfloat16: 0.05})
+    def test_bmm_shared_rhs_reduced_precision(self, device, dtype):
+        for rows, transpose_rhs, padded_out in itertools.product((1, 3), (False, True), (False, True)):
+            lhs = torch.randn(8, rows, 64, device=device, dtype=dtype)
+            rhs = torch.randn(1, 64, 64, device=device, dtype=dtype)
+            if transpose_rhs:
+                rhs = rhs.transpose(1, 2)
+            rhs = rhs.expand(8, -1, -1)
+            expected = torch.bmm(lhs.double(), rhs.double()).to(dtype)
+            self.assertEqual(torch.bmm(lhs, rhs), expected)
+            out = torch.empty(8, rows, 128 if padded_out else 64, device=device, dtype=dtype)
+            if padded_out:
+                out = out[..., ::2]
+            pointer, strides = out.data_ptr(), out.stride()
+            self.assertIs(torch.bmm(lhs, rhs, out=out), out)
+            self.assertEqual(out, expected)
+            self.assertEqual(out.data_ptr(), pointer)
+            self.assertEqual(out.stride(), strides)
+            for alpha, beta in ((1, 0), (0, 0), (0.5, 2), (-1, 1)):
+                bias = torch.randn_like(expected)
+                ref = alpha * torch.bmm(lhs.double(), rhs.double())
+                if beta == 0:
+                    bias.fill_(float("nan"))
+                else:
+                    ref += beta * bias.double()
+                self.assertEqual(torch.baddbmm(bias, lhs, rhs, alpha=alpha, beta=beta), ref.to(dtype))
+                bias.baddbmm_(lhs, rhs, alpha=alpha, beta=beta)
+                self.assertEqual(bias, ref.to(dtype))
+
+    @onlyCPU
+    @dtypes(torch.bfloat16)
+    def test_bmm_shared_rhs_does_not_materialize_batches(self, device, dtype):
+        lhs = torch.randn(64, 1, 128, device=device, dtype=dtype)
+        rhs = torch.randn(1, 128, 128, device=device, dtype=dtype).expand(64, -1, -1)
+        torch.bmm(lhs, rhs)
+        with torch.profiler.profile(
+            activities=[torch.profiler.ProfilerActivity.CPU], profile_memory=True
+        ) as prof:
+            torch.bmm(lhs, rhs)
+        repeated_bytes = rhs.numel() * rhs.element_size()
+        self.assertFalse(any(
+            event.name == "aten::clone" and event.cpu_memory_usage >= repeated_bytes
+            for event in prof.events()
+        ))
+
     @precisionOverride({torch.half: 0.05, torch.bfloat16: 0.05})
     @onlyNativeDeviceTypes
     @dtypes(*floating_and_complex_types_and(torch.bfloat16, torch.half))
