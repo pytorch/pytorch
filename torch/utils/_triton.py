@@ -309,6 +309,44 @@ def has_triton(*, include_cpu: bool = False) -> bool:
 
 
 @functools.cache
+def has_triton_for_device(device_type: str) -> bool:
+    """Whether Triton can compile+run kernels for *this* device type.
+
+    Same conjunction as has_triton() (package + device available +
+    per-device capability + backend actually built), scoped to one device.
+    Unknown devices (no registered interface) are False. CPU is always False,
+    mirroring has_triton()'s default: the triton-cpu backend is a deliberate
+    opt-in there (include_cpu=True) and callers that pad for an operand
+    device never target cpu. Cached for the process lifetime; call after
+    backends are imported.
+    """
+    if device_type == "cpu":
+        return False
+    if not has_triton_package():
+        return False
+
+    from torch._inductor.config import triton_disable_device_detection
+
+    if triton_disable_device_detection:
+        return False
+
+    from torch._dynamo.device_interface import get_interface_for_device
+    from torch._dynamo.exc import TritonUnavailableError
+
+    try:
+        device_interface = get_interface_for_device(device_type)
+    except NotImplementedError:
+        return False
+    if not (device_interface.is_available() and device_interface.is_triton_capable()):
+        return False
+    try:
+        device_interface.raise_if_triton_unavailable()
+    except TritonUnavailableError:
+        return False
+    return True
+
+
+@functools.cache
 def triton_backend() -> Any:
     from triton.compiler.compiler import make_backend
     from triton.runtime.driver import driver
