@@ -5,15 +5,16 @@ C10_METAL_CONSTEXPR uint32_t scaled_mm_tile = 32;
 C10_METAL_CONSTEXPR uint32_t scaled_mm_simdgroups = 4;
 C10_METAL_CONSTEXPR uint32_t scaled_mm_threads =
     scaled_mm_simdgroups * c10::metal::simdgroup_size;
-// Matrix A's max number of rows on which we dispatch gemv kernel
+// K, N, storage offsets and leading strides must be multiples of this
+C10_METAL_CONSTEXPR uint32_t scaled_mm_alignment = 16;
+// Matrix A's max number of rows on which we dispatch few rows kernel
 // Higher values per-row ALU work outweighs streaming matrix B once.
-C10_METAL_CONSTEXPR uint32_t scaled_mm_gemv_max_rows = 4;
-// Number of fp8 values loaded at once by gemv kernel (one uint4).
-// K, leading strides and storage offsets must be multiples of this.
-C10_METAL_CONSTEXPR uint32_t scaled_mm_gemv_load_bytes = 16;
+C10_METAL_CONSTEXPR uint32_t scaled_mm_few_rows_max = 4;
+// Number of fp8 values loaded at once by few rows kernel (one uint4).
+C10_METAL_CONSTEXPR uint32_t scaled_mm_few_rows_load_bytes = 16;
 // Number of K elements each simd lane handles at a time (two uint4 loads)
-C10_METAL_CONSTEXPR uint32_t scaled_mm_gemv_lane_chunk =
-    scaled_mm_gemv_load_bytes * 2;
+C10_METAL_CONSTEXPR uint32_t scaled_mm_few_rows_lane_chunk =
+    scaled_mm_few_rows_load_bytes * 2;
 C10_METAL_CONSTEXPR float scaled_mm_decode_scale = 256.0f;
 
 template <typename index_t = int64_t>

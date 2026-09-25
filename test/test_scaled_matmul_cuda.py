@@ -45,6 +45,7 @@ from torch.testing._internal.common_device_type import (
     e5m2_type,
     E4M3_MAX_POS,
     E5M2_MAX_POS,
+    expectedFailureCUDA,
     skipXPU,
     skipCUDAIf,
     skipCUDAIfNotRocm,
@@ -85,6 +86,11 @@ f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+, XPU and CPU devices
 f8_grouped_msg = "FP8 grouped is only supported on SM90 and MI300/MI350 devices"
 mx_skip_msg = "MX gemm is only supported on CUDA capability 10.0+"
 mxfp8_grouped_mm_skip_msg = "MXFP8 grouped GEMM is only supported when PyTorch is built with USE_MSLK=1 on SM100+"
+
+
+def xfailIfNoFP8(fn):
+    return expectedFailureCUDA(fn) if not PLATFORM_SUPPORTS_FP8 else fn
+
 
 # avoid division by zero when calculating scale
 EPS = 1e-12
@@ -1968,6 +1974,15 @@ class TestFP8Matmul(TestCase):
                 out_dtype=torch.bfloat16,
             )
 
+        if "mps" in device:
+            scale = torch.ones((), device=device)
+            with self.assertRaisesRegex(ValueError, "K and N to be divisible by 16"):
+                scaled_mm_wrap(x_fp8[:, 8:], y_fp8[8:], scale, scale)
+            with self.assertRaisesRegex(ValueError, "mat_a storage offset and leading stride"):
+                scaled_mm_wrap(x_fp8[:, 8:K - 8], y_fp8[:K - 16], scale, scale)
+            with self.assertRaisesRegex(ValueError, "mat_b storage offset and leading stride"):
+                scaled_mm_wrap(x_fp8[:, :K - 16], y_fp8[8:K - 8], scale, scale)
+
         def e5m2():
             out = scaled_mm_wrap(
                 x_fp8,
@@ -3671,7 +3686,7 @@ class TestFP8Matmul(TestCase):
         actual = torch.compile(fn, fullgraph=True)(a, b, scale_a, scale_b, offs)
         self.assertEqual(actual, expected)
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @xfailIfNoFP8
     @parametrize("rows", [1, 2, 3, 4])
     @parametrize("out_dtype", [torch.float16, torch.bfloat16, torch.float32])
     def test_scaled_mm_few_rows(self, device, rows, out_dtype):
@@ -3690,7 +3705,7 @@ class TestFP8Matmul(TestCase):
             atol = 3e-3
         self.assertEqual(out, out_emulated, atol=atol, rtol=rtol)
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @xfailIfNoFP8
     def test_scaled_mm_few_rows_fp8_values(self, device):
         values = torch.arange(256, dtype=torch.uint8).view(e4m3_type)
         x = torch.tensor([-1, 1, 2**-9, float("nan")], dtype=e4m3_type).view(4, 1).repeat(1, 16)

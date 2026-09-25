@@ -123,6 +123,30 @@ TORCH_IMPL_FUNC(_scaled_mm_mps_v2_out)
   if (out.numel() == 0) {
     return;
   }
+  TORCH_CHECK_VALUE(k % scaled_mm_alignment == 0 && n % scaled_mm_alignment == 0,
+                    "Expected K and N to be divisible by ",
+                    scaled_mm_alignment,
+                    " but got mat_a shape ",
+                    mat_a.sizes(),
+                    " and mat_b shape ",
+                    mat_b.sizes());
+  const auto check_alignment = [](const Tensor& mat, std::string_view name) {
+    if (mat.stride(0) != 1 && mat.stride(1) != 1) {
+      return;
+    }
+    const auto leading_stride = mat.stride(1) == 1 ? mat.stride(0) : mat.stride(1);
+    TORCH_CHECK_VALUE(mat.storage_offset() % scaled_mm_alignment == 0 && leading_stride % scaled_mm_alignment == 0,
+                      "Expected ",
+                      name,
+                      " storage offset and leading stride to be divisible by ",
+                      scaled_mm_alignment,
+                      " but got storage offset ",
+                      mat.storage_offset(),
+                      " and strides ",
+                      mat.strides());
+  };
+  check_alignment(mat_a, "mat_a");
+  check_alignment(mat_b, "mat_b");
   const auto bias_vec = bias.has_value() ? std::make_optional(bias->contiguous().view({n})) : std::nullopt;
   const ScaledMMParams<> params{
       .m = c10::checked_convert<uint32_t>(m, "m"),
@@ -140,16 +164,10 @@ TORCH_IMPL_FUNC(_scaled_mm_mps_v2_out)
   };
   using namespace std::string_view_literals;
   const auto type_str = scalarToMetalTypeString(dtype);
-  const auto is_load_aligned = [](const Tensor& t, int64_t stride) {
-    return stride % scaled_mm_gemv_load_bytes == 0 && t.storage_offset() % scaled_mm_gemv_load_bytes == 0;
-  };
-  const bool contiguous_k = mat_a.stride(1) == 1 && mat_b.stride(0) == 1;
-  const bool aligned_loads = (k % scaled_mm_gemv_load_bytes == 0) && is_load_aligned(mat_a, mat_a.stride(0)) &&
-      is_load_aligned(mat_b, mat_b.stride(1));
-  const bool gemv = (m <= scaled_mm_gemv_max_rows) && contiguous_k && aligned_loads;
-  const auto kernel_name = gemv ? fmt::format("scaled_mm_gemv_{}_{}", m, type_str)
-                                : fmt::format("scaled_mm_{}{}", has_mpp() ? "mpp_"sv : ""sv, type_str);
-  const auto cols_per_group = gemv ? scaled_mm_simdgroups : scaled_mm_tile;
+  const bool few_rows = m <= scaled_mm_few_rows_max && mat_a.stride(1) == 1 && mat_b.stride(0) == 1;
+  const auto kernel_name = few_rows ? fmt::format("scaled_mm_few_rows_{}_{}", m, type_str)
+                                    : fmt::format("scaled_mm_{}{}", has_mpp() ? "mpp_"sv : ""sv, type_str);
+  const auto cols_per_group = few_rows ? scaled_mm_simdgroups : scaled_mm_tile;
   auto pso = lib.getPipelineStateForFunc(kernel_name);
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
@@ -159,7 +177,7 @@ TORCH_IMPL_FUNC(_scaled_mm_mps_v2_out)
       [encoder setComputePipelineState:pso];
       mtl_setArgs(encoder, mat_a, mat_b, out, scale_a, scale_b, bias_vec, params);
       [encoder dispatchThreadgroups:MTLSizeMake(c10::metal::ceil_div<int64_t>(n, cols_per_group),
-                                                gemv ? 1 : c10::metal::ceil_div<int64_t>(m, scaled_mm_tile),
+                                                few_rows ? 1 : c10::metal::ceil_div<int64_t>(m, scaled_mm_tile),
                                                 1)
               threadsPerThreadgroup:MTLSizeMake(scaled_mm_threads, 1, 1)];
       getMPSProfiler().endProfileKernel(pso, stream);
