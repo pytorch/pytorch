@@ -148,11 +148,10 @@ def _epilogue_outputs(args, attr: str) -> tuple[EpilogueOutputPack, int]:
 
 
 def _ones_alpha():
-    """Cached per-device (4,)-ones alpha TensorWrapper (identity global scale).
+    """Cached per-device one-element alpha TensorWrapper (identity scale).
 
     The kernel always takes an alpha arg so its signature is consistent across
-    compile/run paths; when not fusing we pass ones (a no-op *1.0). Len is a
-    multiple of 4 (CuTeDSL requires the operand's last dim divisible by 4).
+    compile/run paths; when not fusing we pass one (a no-op *1.0).
     """
     from cutlass.operators.utils.tensor import TensorWrapper
 
@@ -161,7 +160,10 @@ def _ones_alpha():
     dev = torch.cuda.current_device()
     tw = _ONES_ALPHA.get(dev)
     if tw is None:
-        tw = TensorWrapper(torch.ones(4, dtype=torch.float32, device=f"cuda:{dev}"))
+        tw = TensorWrapper(
+            torch.ones(1, dtype=torch.float32, device=f"cuda:{dev}"),
+            alignment_bytes=4,
+        )
         _ONES_ALPHA[dev] = tw
     return tw
 
@@ -207,6 +209,7 @@ except ImportError:
 class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
     """Wrapper for vendored dense blockscaled GEMM template for SM100 GPUs."""
 
+    supports_output_scale = True
     supported_args_type = GemmArguments
     designed_for_min_cc = 100
 
@@ -264,13 +267,13 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
         # Fused global scale: alpha is ALWAYS threaded as a trailing kernel arg
         # (ones when not fusing) so the kernel signature is consistent across all
         # compile/run paths -- a None alpha is not reliably dropped from the
-        # runtime signature. args.alpha (a TensorWrapper, len multiple-of-4) is
-        # applied elementwise in the epilogue; closure capture cannot read a
-        # runtime tensor there.
+        # runtime signature. args.alpha is a one-element FP32 TensorWrapper
+        # with 4-byte alignment, applied elementwise in the epilogue; closure
+        # capture cannot read a runtime tensor there.
         alpha = getattr(args, "alpha", None)
         if alpha is None:
             alpha = cute.runtime.make_fake_compact_tensor(
-                cutlass.Float32, (4,), assumed_align=16
+                cutlass.Float32, (1,), assumed_align=4
             )
 
         def epilogue_op(v):

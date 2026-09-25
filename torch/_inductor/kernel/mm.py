@@ -2,7 +2,7 @@
 import functools
 import logging
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, cast
 
 import torch
 from torch._dynamo.utils import counters
@@ -52,13 +52,16 @@ from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
     KernelTemplate,
+    NoValidChoicesError,
     realize_inputs,
     TritonTemplate,
 )
 from ..utils import (
     _IntLike,
+    _use_autotune_backend,
     _use_cutlass_for_op,
     ceildiv,
+    FOLDED_SCALED_MM_OUTPUT_SCALE,
     GPU_ALIGN_BYTES,
     is_bf16x9_matmul,
     use_aten_gemm_kernels,
@@ -196,6 +199,34 @@ aten__sparse_semi_structured_mm = ExternKernelChoice(
 
 aten__fp8_mm = ExternKernelChoice(
     torch._scaled_mm, "at::_scaled_mm_out", op_overload=aten._scaled_mm.out
+)
+
+
+def scaled_mm_with_output_scale(
+    mat_a,
+    mat_b,
+    scale_a,
+    scale_b,
+    output_scale,
+    *,
+    out_dtype,
+    use_fast_accum,
+    out=None,
+):
+    result = torch._scaled_mm(
+        mat_a,
+        mat_b,
+        scale_a=scale_a,
+        scale_b=scale_b,
+        out_dtype=out_dtype,
+        use_fast_accum=use_fast_accum,
+        out=out,
+    )
+    return torch.mul(result, output_scale, out=result)
+
+
+aten__scaled_mm_with_output_scale = ExternKernelChoice(
+    scaled_mm_with_output_scale, None
 )
 
 
@@ -1687,6 +1718,23 @@ def tuned_scaled_mm(
     check_supported_striding(mat_a, mat_b)
 
     scale_a_real, scale_b_real = realize_inputs(scale_a, scale_b)
+    folded_output_scale = bool(
+        V.graph.current_node.meta.get(FOLDED_SCALED_MM_OUTPUT_SCALE, False)
+    )
+    folded_output_scale_real = (
+        realize_inputs(scale_result)
+        if folded_output_scale and scale_result is not None
+        else None
+    )
+
+    def apply_folded_output_scale(node):
+        if folded_output_scale_real is None:
+            return node
+        # The matched scale is a 0-D FP32 tensor, so eager treats it as a
+        # wrapped scalar and keeps the matrix result dtype during promotion.
+        scale = L.to_dtype(folded_output_scale_real, layout.dtype)
+        scale = L.expand(scale, node.get_size())
+        return lowerings[aten.mul.Tensor](node, scale)
 
     bias_real = realize_inputs(bias) if bias else None
 
@@ -1715,6 +1763,54 @@ def tuned_scaled_mm(
         )
 
     _, is_nonzero = _is_static_problem(layout)
+
+    # The vendored Blackwell block-scaled NVGEMM kernel has a native FP32
+    # output-scale argument. Prefer that semantic path only for the private
+    # graph-level ``_scaled_mm(...) * scalar`` rewrite. A public ``scale_result``
+    # argument has different ATen semantics and must not be treated as alpha.
+    if (
+        folded_output_scale_real is not None
+        and is_nonzero
+        and _use_autotune_backend("NVGEMM")
+        and use_nv_universal_gemm_template(layout, m, n, k, mat_a, mat_b)
+    ):
+        from ..codegen.nv_universal_gemm import (
+            add_nv_universal_scaled_gemm_choices,
+            NVUniversalGemmCaller,
+        )
+
+        scaled_choices: list[ChoiceCaller] = []
+        add_nv_universal_scaled_gemm_choices(
+            scaled_choices,
+            layout,
+            input_nodes,
+            kernel_inputs=kernel_inputs,
+            output_scale_node=folded_output_scale_real,
+        )
+        scaled_input_nodes = [*input_nodes, folded_output_scale_real]
+        if scaled_choices and use_aten_gemm_kernels():
+            native_request = cast(NVUniversalGemmCaller, scaled_choices[0]).bmreq
+            aten__scaled_mm_with_output_scale.maybe_append_choice(
+                scaled_choices,
+                input_nodes=scaled_input_nodes,
+                layout=layout,
+                out_dtype=out_dtype,
+                use_fast_accum=use_fast_accum,
+                benchmark_request_kwargs={
+                    "cudagraph_unroll": native_request.cudagraph_unroll,
+                    "cudagraph_cold_cache_input_indices": (
+                        native_request.cudagraph_cold_cache_input_indices
+                    ),
+                },
+            )
+        if scaled_choices:
+            try:
+                node, _ = autotune_select_algorithm(
+                    name, scaled_choices, scaled_input_nodes, layout
+                )
+                return node
+            except NoValidChoicesError:
+                pass
 
     if (
         # We don't have triton lowerings for the MX variants yet
@@ -1813,7 +1909,7 @@ def tuned_scaled_mm(
     # Early return for MX variants
     if scale_a.dtype != torch.float32:
         node, _ = autotune_select_algorithm(name, choices, input_nodes, layout)
-        return node
+        return apply_folded_output_scale(node)
 
     if (
         is_nonzero
@@ -1831,7 +1927,7 @@ def tuned_scaled_mm(
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, kernel_inputs.nodes())
 
     node, _ = autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
-    return node
+    return apply_folded_output_scale(node)
 
 
 @functools.cache
