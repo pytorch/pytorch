@@ -726,7 +726,15 @@ def get_lf_runners_output(
     restrict_runners is False (the kill-switch, test-infra#5132), or
     arc.yaml is missing/malformed (fail open but loud, see except below).
     """
-    if not lf_enabled or not restrict_runners:
+    if not lf_enabled:
+        return ""
+    if not restrict_runners:
+        # Not a misconfiguration -- record why the mapper is seeing "" so an
+        # incident-time kill-switch flip isn't mistaken for "nothing to log".
+        log.info(
+            "lf_allowlist restrict_runners kill-switch is off (test-infra#5132); "
+            "treating lf_allowlist as unrestricted"
+        )
         return ""
     try:
         with open(arc_yaml_path) as f:
@@ -743,6 +751,7 @@ def get_lf_runners_output(
             )
             return ""
         if mode != "restricted":
+            log.info(f"{arc_yaml_path}: lf_allowlist.mode is '{mode}'; unrestricted")
             return ""
         return ",".join(sorted(allowlist.get("runners") or []))
     except Exception as e:
