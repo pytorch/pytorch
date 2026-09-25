@@ -47,7 +47,6 @@ enum class Kind : uint8_t {
   Max,
   Min,
   PowByNatural,
-  // FloatPow..TruncToFloat fold Numbers including Floats (ExprArena::function).
   FloatPow,
   FloatTrueDiv,
   IntTrueDiv,
@@ -360,6 +359,8 @@ class ExprArena : public c10::intrusive_ptr_target {
   const Expr* float_pow(const Expr* b, int64_t e);
   // Mod.eval and PythonMod.eval; nullptr for None.
   const Expr* eval_mod(Kind kind, const Expr* p, const Expr* q);
+  // p % q of Numbers, one of them a Float.
+  const Expr* eval_float_mod(const Expr* p, const Expr* q);
   // FloorDiv.eval, also for CleanDiv; nullptr for None.
   const Expr* eval_floordiv(const Expr* base, const Expr* divisor);
   // PowByNatural.eval; nullptr for None.

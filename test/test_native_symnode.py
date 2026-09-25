@@ -1902,6 +1902,58 @@ class TestNativeFunctions(TestCase):
                 answered += r is not None
         self.assertGreater(answered, 3000)
 
+    def test_float_int_folds(self):
+        F = sympy.Float
+        nums = [0, 1, -1, 2, -3, 7, 2**53 + 1, 2**62, sympy.Rational(1, 3)]
+        nums += [sympy.Rational(-7, 2), F(0.5), F(-2.25), F(2.0), F(-2.0), F(1.0)]
+        nums += [F(-1.0), F(0.0), F(3.5), F(0.1), F(1e308), F(1e-300), F(5e-324)]
+        nums += [F(2.0**62), int_oo, -int_oo, sympy.oo, -sympy.oo]
+        nums = list(map(sympy.sympify, nums))
+        names = ("FloorDiv", "CleanDiv", "Mod", "PythonMod", "PowByNatural")
+        answered = 0
+        for a in nums:
+            for b in nums:
+                for name in names:
+                    if name == "PowByNatural" and b.is_Integer and abs(b) > 64:
+                        continue  # sympy computes the huge Rational power
+                    answered += self.check_call(name, a, b) is not None
+        self.assertGreater(answered, 1300)
+        rng = random.Random(0)
+        xs = [F(rng.uniform(-1, 1) * 10.0 ** rng.randint(-20, 20)) for _ in range(40)]
+        xs += [F(rng.randint(-(10**6), 10**6) / 64) for _ in range(20)]
+        xs += [sympy.Integer(rng.randint(-(2**63), 2**63 - 1)) for _ in range(10)]
+        xs += [
+            sympy.Rational(rng.randint(-99, 99), rng.randint(2, 99)) for _ in range(10)
+        ]
+        answered = 0
+        for a in xs:
+            for b in xs:
+                answered += self.check_call("PythonMod", a, b) is not None
+        self.assertGreater(answered, 4000)
+        cases = [
+            ("FloorDiv", (7, F(-1.0)), -7),
+            ("FloorDiv", (sympy.oo, F(-0.5)), -int_oo),
+            ("FloorDiv", (F(2.5), sympy.oo), 0),
+            ("FloorDiv", (F(5.0), 2), None),
+            ("PythonMod", (F(1.0), F(0.1)), F(0.0)),
+            ("Mod", (F(1.0), F(0.1)), None),
+            ("PythonMod", (F(1e308), F(1e-300)), F(0.0)),
+            ("Mod", (F(0.0), 7), 0),
+            ("Mod", (7, F(2.0)), F(1.0)),
+            ("Mod", (F(0.5), 1), 0),
+            ("PythonMod", (F(-1e-300), 2), F(2.0)),
+            ("PythonMod", (F(-2.25), sympy.Rational(1, 3)), F(1 / 12)),
+            ("PythonMod", (sympy.oo, sympy.oo), 0),
+            ("PythonMod", (F(0.5), sympy.oo), None),
+            ("PowByNatural", (F(0.5), sympy.oo), int_oo),
+            ("PowByNatural", (F(-0.5), int_oo), None),
+            ("PowByNatural", (F(1.5), 2), F(2.25)),
+            ("PythonMod", (F(0.0), sympy.Rational(1, 3)), F(0.0)),
+        ]
+        for name, args, expected in cases:
+            got = self.check_call(name, *map(sympy.sympify, args))
+            self.assertEqual(got, expected, f"{name}{args}")
+
     def test_to_int_unsupported(self):
         arena = torch._C._symbolic._Arena()
         cases = [
@@ -2272,7 +2324,7 @@ class TestNativeValueRanges(TestCase):
             (sympy.Lt(u0, zf), {u0: (0, 1), zf: (2.5, oo)}, (True, True)),
             (sympy.Eq(zf, 1), {zf: (2.5, 3.0)}, (False, False)),
             (FloorDiv(u0, 2) + zf, {}, (-oo, oo)),
-            (FloorDiv(zf, 2), {}, None),
+            (FloorDiv(zf, 2), {}, (-int_oo, int_oo)),
         ]
         for e, ranges, want in cases:
             ranges = {s: tuple(map(sympy.sympify, r)) for s, r in ranges.items()}
@@ -2282,7 +2334,9 @@ class TestNativeValueRanges(TestCase):
                 self.assertIsNone(got, msg)
             else:
                 self.assertIsNotNone(got, msg)
-                self.assertEqual((got.lower, got.upper), tuple(map(sympy.sympify, want)), msg)
+                self.assertEqual(
+                    (got.lower, got.upper), tuple(map(sympy.sympify, want)), msg
+                )
 
     def test_float_bound_ops(self):
         zg = sympy.Symbol("zg", real=True)
@@ -2370,6 +2424,10 @@ class TestNativeValueRanges(TestCase):
             (Mod(u0, zg), {zg: (0.25, 0.5)}, None),
             (FloorDiv(u0, zg), {u0: (1, 7), zg: (0.0, 2.0)}, (0, int_oo)),
             (FloorDiv(zg, u0), {zg: (-oo, -0.5), u0: (-3, 0)}, (0, int_oo)),
+            (FloorDiv(zg, u0), {zg: (2.5, oo), u0: (1, 3)}, None),
+            (FloorDiv(zg, u0), {zg: (-oo, oo), u0: (1, 3)}, (-int_oo, int_oo)),
+            (PowByNatural(zg, u0), {zg: (1.5, 2.5), u0: (0, int_oo)}, (1, int_oo)),
+            (PowByNatural(zg, u0), {zg: (1.5, oo), u0: (0, int_oo)}, None),
         ]
         for e, ranges, want in cases:
             ranges = {s: tuple(map(sympy.sympify, r)) for s, r in ranges.items()}
@@ -2439,7 +2497,9 @@ class TestNativeValueRanges(TestCase):
                 e = expr(3)
             except (ZeroDivisionError, ValueError, TypeError, AssertionError):
                 continue
-            if e.has(sympy.zoo, sympy.nan) or isinstance(e, sympy.logic.boolalg.BooleanAtom):
+            if e.has(sympy.zoo, sympy.nan) or isinstance(
+                e, sympy.logic.boolalg.BooleanAtom
+            ):
                 continue
             ranges = {}
             for s in rng.sample([u0, zf], rng.randint(0, 2)):

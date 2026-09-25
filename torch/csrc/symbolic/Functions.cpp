@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -276,8 +277,8 @@ const char* function_name(Kind k) {
 const Expr* ExprArena::function(Kind kind, c10::ArrayRef<const Expr*> args) {
   bool all_numbers = std::all_of(
       args.begin(), args.end(), [](const Expr* a) { return a->is_number(); });
-  bool float_fold =
-      all_numbers && kind >= Kind::FloatPow && kind <= Kind::TruncToFloat;
+  bool float_fold = all_numbers && kind != Kind::Max && kind != Kind::Min &&
+      kind != Kind::IsNonOverlappingAndDenseIndicator;
   if (!float_fold && std::any_of(args.begin(), args.end(), [](const Expr* a) {
         return a->has_float;
       })) {
@@ -396,12 +397,16 @@ const Expr* ExprArena::eval_mod(Kind kind, const Expr* p, const Expr* q) {
     return zero_;
   }
   if (p->is_number() && q->is_number()) {
-    // Number.__mod__; int_oo % x is nan.
-    if (is_int_oo(p) || is_int_oo(q)) {
-      throw NativeUnsupported("int_oo in Mod");
+    // Number.__mod__ is nan when a side is infinite.
+    if (is_infinite(p) || is_infinite(q)) {
+      throw NativeUnsupported("Mod gives nan");
     }
-    if (kind == Kind::Mod && (p->p < 0 || q->p < q->q)) {
+    if (kind == Kind::Mod &&
+        (compare_numbers(p, zero_) < 0 || compare_numbers(q, one_) < 0)) {
       throw NativeUnsupported("AssertionError in Mod");
+    }
+    if (p->kind == Kind::Float || q->kind == Kind::Float) {
+      return eval_float_mod(p, q);
     }
     // Rational.__mod__, which is Python's % for Integers.
     i128 n = floordiv128(i128(p->p) * q->q, i128(q->p) * p->q);
@@ -433,36 +438,106 @@ const Expr* ExprArena::eval_mod(Kind kind, const Expr* p, const Expr* q) {
   return nullptr;
 }
 
+const Expr* ExprArena::eval_float_mod(const Expr* p, const Expr* q) {
+  if (p->kind == Kind::Float && q->kind != Kind::Rational) {
+    double a = p->float_value();
+    // An Integer q rounds to nearest even, like other._as_mpf_op(53).
+    double b = to_double(q);
+    if (q->kind == Kind::Float) {
+      // Float(0) when the quotient, rounded with an unbounded exponent, is an
+      // integer.
+      double r = a / b;
+      if (a == 0 || std::isinf(r) || (r != 0 && r == std::trunc(r))) {
+        return float_number(0);
+      }
+    }
+    // mpf_mod rounds the exact remainder once, like float %. A subnormal
+    // result is exact.
+    double m = std::fmod(a, b);
+    if (m != 0 && (b < 0) != (m < 0)) {
+      m += b;
+    }
+    // Float._new(fzero) is S.Zero.
+    return m == 0 ? zero_ : float_number(m);
+  }
+  // Float(Rational(p) % Rational(q)): the exact remainder, rounded once.
+  auto exact = [](const Expr* e) -> std::pair<i128, i128> {
+    if (e->kind != Kind::Float) {
+      return {e->p, e->kind == Kind::Rational ? e->q : 1};
+    }
+    double v = e->float_value();
+    if (v == 0) {
+      return {0, 1};
+    }
+    int exp = 0;
+    auto man =
+        static_cast<uint64_t>(std::ldexp(std::frexp(std::abs(v), &exp), 53));
+    int tz = std::countr_zero(man);
+    man >>= tz;
+    exp += tz - 53;
+    if (exp > 63 - static_cast<int>(std::bit_width(man)) || exp < -62) {
+      throw NativeUnsupported("Float too large or too small for a Rational");
+    }
+    i128 n = v < 0 ? -i128(man) : i128(man);
+    return exp >= 0 ? std::pair<i128, i128>{n << exp, 1}
+                    : std::pair<i128, i128>{n, i128(1) << -exp};
+  };
+  auto [p1, q1] = exact(p);
+  auto [p2, q2] = exact(q);
+  i128 a = p1 * q2;
+  i128 b = p2 * q1;
+  i128 num = a % b;
+  if (num != 0 && (num < 0) != (b < 0)) {
+    num += b;
+  }
+  i128 den = q1 * q2;
+  double n = static_cast<double>(num);
+  double d = static_cast<double>(den);
+  if (static_cast<i128>(n) != num || static_cast<i128>(d) != den) {
+    throw NativeUnsupported("inexact remainder of a Float");
+  }
+  return float_number(n / d);
+}
+
 const Expr* ExprArena::eval_floordiv(const Expr* base, const Expr* divisor) {
   if (ask(divisor, Fact::zero) == Tri::True) {
     throw NativeUnsupported("division by zero");
   }
-  if (is_int_oo(base) && is_int_oo(divisor)) {
+  if (is_infinite(base) && is_infinite(divisor)) {
     throw NativeUnsupported("FloorDiv gives nan");
   }
   if (ask(base, Fact::zero) == Tri::True) {
     return zero_;
   }
-  if (ask(base, Fact::integer) == Tri::True && divisor == one_) {
-    return base;
-  }
-  if (ask(base, Fact::integer) == Tri::True && divisor == neg_one_) {
-    return mul({base, neg_one_});
+  if (ask(base, Fact::integer) == Tri::True) {
+    // equal_valued(divisor, +-1) also holds for the Floats 1.0 and -1.0.
+    double d = divisor->kind == Kind::Float ? divisor->float_value() : 0;
+    if (divisor == one_ || d == 1) {
+      return base;
+    }
+    if (divisor == neg_one_ || d == -1) {
+      return mul({base, neg_one_});
+    }
   }
   if (base == divisor) {
     return one_;
   }
-  if (base->is_number() && divisor->is_number() &&
-      (is_int_oo(base) || is_int_oo(divisor))) {
-    // floor(float(base) / float(divisor)), where exactly one side is infinite
-    // and the divisor is nonzero; a finite divisor here is a Rational.
-    if (is_int_oo(divisor)) {
+  if (base->is_number() && divisor->is_number()) {
+    if (is_infinite(divisor)) {
+      // floor(float(base) / float(divisor)) of a finite base.
       return zero_;
     }
-    return (base == neg_int_oo_) != (divisor->p < 0) ? neg_int_oo_ : int_oo_;
-  }
-  if (base->kind == Kind::Integer && divisor->kind == Kind::Integer) {
-    return integer(to_int64(floordiv128(base->p, divisor->p)));
+    if (is_infinite(base)) {
+      bool negative = base->kind == Kind::NegativeIntInfinity ||
+          base->kind == Kind::NegativeInfinity;
+      return negative != (compare_numbers(divisor, zero_) < 0) ? neg_int_oo_
+                                                               : int_oo_;
+    }
+    if (base->kind == Kind::Integer && divisor->kind == Kind::Integer) {
+      return integer(to_int64(floordiv128(base->p, divisor->p)));
+    }
+    // The remaining steps give None for Numbers.
+    return nullptr;
   }
   if (base->kind == Kind::FloorDiv || base->kind == Kind::CleanDiv) {
     return function(
@@ -555,7 +630,7 @@ const Expr* ExprArena::eval_pow_by_natural(const Expr* base, const Expr* exp) {
   if (exp->kind == Kind::Integer) {
     return pow(base, exp);
   }
-  if (exp == int_oo_) {
+  if (exp == int_oo_ || exp == oo_) {
     if (ask(base, Fact::nonnegative) == Tri::True) {
       return int_oo_;
     }
