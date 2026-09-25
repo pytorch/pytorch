@@ -184,7 +184,7 @@ from .variables.tensor import (
     UnspecializedPythonVariable,
 )
 from .variables.torch_function import TensorWithTFOverrideVariable
-from .variables.user_defined import UserDefinedDictVariable
+from .variables.user_defined import RandomCallOnSource, UserDefinedDictVariable
 
 
 if TYPE_CHECKING:
@@ -344,9 +344,17 @@ class GraphCompileReason:
             graph_break_reasons.append(self)
 
 
-def _get_gen_rand_values_fn(random_calls: Any) -> Callable[[], list[Any]]:
-    def _gen_rand_values() -> list[Any]:
-        return [fn(*args, **kwargs) for fn, args, kwargs in random_calls]
+def _get_gen_rand_values_fn(random_calls: Any) -> Callable[..., list[Any]]:
+    # replay_objs holds the runtime random.Random objects for the
+    # RandomCallOnSource entries, in random_calls order.
+    def _gen_rand_values(*replay_objs: Any) -> list[Any]:
+        objs = iter(replay_objs)
+        values = []
+        for fn, args, kwargs in random_calls:
+            if isinstance(fn, RandomCallOnSource):
+                fn = getattr(next(objs), fn.method_name)
+            values.append(fn(*args, **kwargs))
+        return values
 
     return _gen_rand_values
 
@@ -964,7 +972,11 @@ class OutputGraph(OutputGraphCommon):
         # random_calls tracks calls to random() and random_values_var stores the name of
         # the variable that stores __gen_rand_values results.
         self.random_calls: list[
-            tuple[Callable[..., object], tuple[object, ...], dict[str, object]]
+            tuple[
+                Callable[..., object] | RandomCallOnSource,
+                tuple[object, ...],
+                dict[str, object],
+            ]
         ] = []
         self.random_values_var: Any = None
 
@@ -2161,7 +2173,17 @@ class OutputGraph(OutputGraphCommon):
             random_calls_instructions.extend(
                 codegen.load_function_name(rand_fn_name, True)
             )
-            random_calls_instructions.extend(create_call_function(0, False))
+            replay_sources = [
+                fn.source
+                for fn, _, _ in self.random_calls
+                if isinstance(fn, RandomCallOnSource)
+            ]
+            for source in replay_sources:
+                codegen(source)
+            random_calls_instructions.extend(codegen.get_instructions())
+            random_calls_instructions.extend(
+                create_call_function(len(replay_sources), False)
+            )
             random_calls_instructions.append(
                 codegen.create_store(self.random_values_var),
             )

@@ -1,5 +1,5 @@
 diff --git a/test/cpython/v3_13/test_ordered_dict.py b/test/cpython/v3_13/test_ordered_dict.py
-index a9b6a84996e659012c7c4f5e3fed5b9669bc40bf..3c1bbd2887a7378df76084376c6132caa1504605 100644
+index a9b6a84996e659012c7c4f5e3fed5b9669bc40bf..222ebf968c70b9bd8362beedeedfddb6265a57f2 100644
 --- a/test/cpython/v3_13/test_ordered_dict.py
 +++ b/test/cpython/v3_13/test_ordered_dict.py
 @@ -1,3 +1,61 @@
@@ -64,7 +64,101 @@ index a9b6a84996e659012c7c4f5e3fed5b9669bc40bf..3c1bbd2887a7378df76084376c6132ca
  import builtins
  import contextlib
  import copy
-@@ -760,11 +818,15 @@ class _TriggerSideEffectOnEqual:
+@@ -58,9 +116,11 @@ class OrderedDictTests:
+             [('a', 1), ('b', 2), ('c', 3), ('d', 4), ('e', 5), ('f', 6), ('g', 7)])
+ 
+     def test_468(self):
++        from random import Random
++        rng = Random(0)
+         OrderedDict = self.OrderedDict
+         items = [('a', 1), ('b', 2), ('c', 3), ('d', 4), ('e', 5), ('f', 6), ('g', 7)]
+-        shuffle(items)
++        rng.shuffle(items)
+         argdict = OrderedDict(items)
+         d = OrderedDict(**argdict)
+         self.assertEqual(list(d.items()), items)
+@@ -150,9 +210,11 @@ class OrderedDictTests:
+         self.assertTrue(issubclass(OrderedDict, MutableMapping))
+ 
+     def test_clear(self):
++        from random import Random
++        rng = Random(0)
+         OrderedDict = self.OrderedDict
+         pairs = [('c', 1), ('b', 2), ('a', 3), ('d', 4), ('e', 5), ('f', 6)]
+-        shuffle(pairs)
++        rng.shuffle(pairs)
+         od = OrderedDict(pairs)
+         self.assertEqual(len(od), len(pairs))
+         od.clear()
+@@ -177,9 +239,11 @@ class OrderedDictTests:
+                          [('d', 1), ('b', 2), ('c', 10), ('a', 4), ('e', 5), ('f', 20)])
+ 
+     def test_iterators(self):
++        from random import Random
++        rng = Random(0)
+         OrderedDict = self.OrderedDict
+         pairs = [('c', 1), ('b', 2), ('a', 3), ('d', 4), ('e', 5), ('f', 6)]
+-        shuffle(pairs)
++        rng.shuffle(pairs)
+         od = OrderedDict(pairs)
+         self.assertEqual(list(od), [t[0] for t in pairs])
+         self.assertEqual(list(od.keys()), [t[0] for t in pairs])
+@@ -231,9 +295,11 @@ class OrderedDictTests:
+         self.assertEqual(list(reversed(od.items())), empty)
+ 
+     def test_popitem(self):
++        from random import Random
++        rng = Random(0)
+         OrderedDict = self.OrderedDict
+         pairs = [('c', 1), ('b', 2), ('a', 3), ('d', 4), ('e', 5), ('f', 6)]
+-        shuffle(pairs)
++        rng.shuffle(pairs)
+         od = OrderedDict(pairs)
+         while pairs:
+             self.assertEqual(od.popitem(), pairs.pop())
+@@ -253,11 +319,13 @@ class OrderedDictTests:
+         self.assertEqual(len(obj), 20)
+ 
+     def test_pop(self):
++        from random import Random
++        rng = Random(0)
+         OrderedDict = self.OrderedDict
+         pairs = [('c', 1), ('b', 2), ('a', 3), ('d', 4), ('e', 5), ('f', 6)]
+-        shuffle(pairs)
++        rng.shuffle(pairs)
+         od = OrderedDict(pairs)
+-        shuffle(pairs)
++        rng.shuffle(pairs)
+         while pairs:
+             k, v = pairs.pop()
+             self.assertEqual(od.pop(k), v)
+@@ -279,9 +347,11 @@ class OrderedDictTests:
+             m.pop('a')
+ 
+     def test_equality(self):
++        from random import Random
++        rng = Random(0)
+         OrderedDict = self.OrderedDict
+         pairs = [('c', 1), ('b', 2), ('a', 3), ('d', 4), ('e', 5), ('f', 6)]
+-        shuffle(pairs)
++        rng.shuffle(pairs)
+         od1 = OrderedDict(pairs)
+         od2 = OrderedDict(pairs)
+         self.assertEqual(od1, od2)          # same order implies equality
+@@ -402,9 +472,11 @@ class OrderedDictTests:
+         self.assertIsInstance(r, str)
+ 
+     def test_setdefault(self):
++        from random import Random
++        rng = Random(0)
+         OrderedDict = self.OrderedDict
+         pairs = [('c', 1), ('b', 2), ('a', 3), ('d', 4), ('e', 5), ('f', 6)]
+-        shuffle(pairs)
++        rng.shuffle(pairs)
+         od = OrderedDict(pairs)
+         pair_order = list(od.items())
+         self.assertEqual(od.setdefault('a', 10), 3)
+@@ -760,11 +832,15 @@ class _TriggerSideEffectOnEqual:
      def side_effect(self):
          raise NotImplementedError
  
@@ -81,7 +175,7 @@ index a9b6a84996e659012c7c4f5e3fed5b9669bc40bf..3c1bbd2887a7378df76084376c6132ca
      def test_issue119004_attribute_error(self):
          class Key(_TriggerSideEffectOnEqual):
              def side_effect(self):
-@@ -781,7 +843,7 @@ class PurePythonOrderedDictTests(OrderedDictTests, unittest.TestCase):
+@@ -781,7 +857,7 @@ class PurePythonOrderedDictTests(OrderedDictTests, unittest.TestCase):
          self.assertDictEqual(dict2, dict.fromkeys((0, Key(), 4.2)))
  
  
@@ -90,7 +184,7 @@ index a9b6a84996e659012c7c4f5e3fed5b9669bc40bf..3c1bbd2887a7378df76084376c6132ca
      """Builtin dict preserves insertion order.
  
      Reuse some of tests in OrderedDict selectively.
-@@ -800,12 +862,17 @@ for method in (
+@@ -800,12 +876,17 @@ for method in (
  del method
  
  
@@ -108,7 +202,7 @@ index a9b6a84996e659012c7c4f5e3fed5b9669bc40bf..3c1bbd2887a7378df76084376c6132ca
      def test_issue119004_change_size_by_clear(self):
          class Key(_TriggerSideEffectOnEqual):
              def side_effect(self):
-@@ -818,6 +885,10 @@ class CPythonOrderedDictSideEffects:
+@@ -818,6 +899,10 @@ class CPythonOrderedDictSideEffects:
          self.assertDictEqual(dict1, {})
          self.assertDictEqual(dict2, dict.fromkeys((0, Key(), 4.2)))
  
@@ -119,7 +213,7 @@ index a9b6a84996e659012c7c4f5e3fed5b9669bc40bf..3c1bbd2887a7378df76084376c6132ca
      def test_issue119004_change_size_by_delete_key(self):
          class Key(_TriggerSideEffectOnEqual):
              def side_effect(self):
-@@ -831,6 +902,10 @@ class CPythonOrderedDictSideEffects:
+@@ -831,6 +916,10 @@ class CPythonOrderedDictSideEffects:
          self.assertDictEqual(dict1, dict.fromkeys((0, 4.2)))
          self.assertDictEqual(dict2, dict.fromkeys((0, Key(), 4.2)))
  
@@ -130,7 +224,7 @@ index a9b6a84996e659012c7c4f5e3fed5b9669bc40bf..3c1bbd2887a7378df76084376c6132ca
      def test_issue119004_change_linked_list_by_clear(self):
          class Key(_TriggerSideEffectOnEqual):
              def side_effect(self):
-@@ -844,6 +919,10 @@ class CPythonOrderedDictSideEffects:
+@@ -844,6 +933,10 @@ class CPythonOrderedDictSideEffects:
          self.assertDictEqual(dict1, dict.fromkeys(('a', 'b'), 'c'))
          self.assertDictEqual(dict2, dict.fromkeys((0, Key(), 4.2)))
  
@@ -141,7 +235,7 @@ index a9b6a84996e659012c7c4f5e3fed5b9669bc40bf..3c1bbd2887a7378df76084376c6132ca
      def test_issue119004_change_linked_list_by_delete_key(self):
          class Key(_TriggerSideEffectOnEqual):
              def side_effect(self):
-@@ -858,6 +937,10 @@ class CPythonOrderedDictSideEffects:
+@@ -858,6 +951,10 @@ class CPythonOrderedDictSideEffects:
          self.assertDictEqual(dict1, {0: None, 'a': 'c', 4.2: None})
          self.assertDictEqual(dict2, dict.fromkeys((0, Key(), 4.2)))
  
@@ -152,7 +246,7 @@ index a9b6a84996e659012c7c4f5e3fed5b9669bc40bf..3c1bbd2887a7378df76084376c6132ca
      def test_issue119004_change_size_by_delete_key_in_dict_eq(self):
          class Key(_TriggerSideEffectOnEqual):
              trigger = 0
-@@ -878,7 +961,7 @@ class CPythonOrderedDictSideEffects:
+@@ -878,7 +975,7 @@ class CPythonOrderedDictSideEffects:
  @unittest.skipUnless(c_coll, 'requires the C version of the collections module')
  class CPythonOrderedDictTests(OrderedDictTests,
                                CPythonOrderedDictSideEffects,
@@ -161,7 +255,7 @@ index a9b6a84996e659012c7c4f5e3fed5b9669bc40bf..3c1bbd2887a7378df76084376c6132ca
  
      module = c_coll
      OrderedDict = c_coll.OrderedDict
-@@ -986,7 +1069,7 @@ class CPythonOrderedDictSubclassTests(CPythonOrderedDictTests):
+@@ -986,7 +1083,7 @@ class CPythonOrderedDictSubclassTests(CPythonOrderedDictTests):
          pass
  
  
@@ -170,7 +264,7 @@ index a9b6a84996e659012c7c4f5e3fed5b9669bc40bf..3c1bbd2887a7378df76084376c6132ca
  
      module = py_coll
      class OrderedDict(py_coll.OrderedDict):
-@@ -995,7 +1078,7 @@ class PurePythonOrderedDictWithSlotsCopyingTests(unittest.TestCase):
+@@ -995,7 +1092,7 @@ class PurePythonOrderedDictWithSlotsCopyingTests(unittest.TestCase):
  
  
  @unittest.skipUnless(c_coll, 'requires the C version of the collections module')
@@ -179,7 +273,7 @@ index a9b6a84996e659012c7c4f5e3fed5b9669bc40bf..3c1bbd2887a7378df76084376c6132ca
  
      module = c_coll
      class OrderedDict(c_coll.OrderedDict):
-@@ -1008,6 +1091,7 @@ class PurePythonGeneralMappingTests(mapping_tests.BasicTestMappingProtocol):
+@@ -1008,6 +1105,7 @@ class PurePythonGeneralMappingTests(mapping_tests.BasicTestMappingProtocol):
      @classmethod
      def setUpClass(cls):
          cls.type2test = py_coll.OrderedDict
@@ -187,7 +281,7 @@ index a9b6a84996e659012c7c4f5e3fed5b9669bc40bf..3c1bbd2887a7378df76084376c6132ca
  
      def test_popitem(self):
          d = self._empty_mapping()
-@@ -1020,6 +1104,7 @@ class CPythonGeneralMappingTests(mapping_tests.BasicTestMappingProtocol):
+@@ -1020,6 +1118,7 @@ class CPythonGeneralMappingTests(mapping_tests.BasicTestMappingProtocol):
      @classmethod
      def setUpClass(cls):
          cls.type2test = c_coll.OrderedDict
@@ -195,7 +289,7 @@ index a9b6a84996e659012c7c4f5e3fed5b9669bc40bf..3c1bbd2887a7378df76084376c6132ca
  
      def test_popitem(self):
          d = self._empty_mapping()
-@@ -1033,6 +1118,7 @@ class PurePythonSubclassMappingTests(mapping_tests.BasicTestMappingProtocol):
+@@ -1033,6 +1132,7 @@ class PurePythonSubclassMappingTests(mapping_tests.BasicTestMappingProtocol):
          class MyOrderedDict(py_coll.OrderedDict):
              pass
          cls.type2test = MyOrderedDict
@@ -203,7 +297,7 @@ index a9b6a84996e659012c7c4f5e3fed5b9669bc40bf..3c1bbd2887a7378df76084376c6132ca
  
      def test_popitem(self):
          d = self._empty_mapping()
-@@ -1047,6 +1133,7 @@ class CPythonSubclassMappingTests(mapping_tests.BasicTestMappingProtocol):
+@@ -1047,6 +1147,7 @@ class CPythonSubclassMappingTests(mapping_tests.BasicTestMappingProtocol):
          class MyOrderedDict(c_coll.OrderedDict):
              pass
          cls.type2test = MyOrderedDict
@@ -211,7 +305,7 @@ index a9b6a84996e659012c7c4f5e3fed5b9669bc40bf..3c1bbd2887a7378df76084376c6132ca
  
      def test_popitem(self):
          d = self._empty_mapping()
-@@ -1120,21 +1207,22 @@ class SimpleLRUCacheTests:
+@@ -1120,21 +1221,22 @@ class SimpleLRUCacheTests:
          self.assertEqual(list(c), [1, 3, 2])
  
  

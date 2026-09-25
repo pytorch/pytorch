@@ -3395,6 +3395,28 @@
       ]
     }
   ],
+  "GB7120": [
+    {
+      "Gb_type": "random.Random operation requires runtime state",
+      "Context": "random.Random.{name}",
+      "Explanation": "random.Random.{name} depends on the live state of an existing random.Random object. Capturing its trace-time state would produce incorrect results when the compiled graph is reused.",
+      "Hints": [
+        "Allow a graph break so this operation runs eagerly.",
+        "Seed the object inside the compiled region if a deterministic ",
+        "random sequence is intended."
+      ]
+    }
+  ],
+  "GB1678": [
+    {
+      "Gb_type": "random.Random.setstate with non-constant state",
+      "Context": "state={args[0]}",
+      "Explanation": "Dynamo cannot capture a runtime random.Random state.",
+      "Hints": [
+        "Allow a graph break so setstate runs eagerly."
+      ]
+    }
+  ],
   "GB0201": [
     {
       "Gb_type": "namedtuple construction",

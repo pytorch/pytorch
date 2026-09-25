@@ -93,7 +93,12 @@ from .functions import (
     UserMethodVariable,
 )
 from .object_protocol import generic_repr, generic_str, mro_attr_source
-from .user_defined import call_random_fn, is_standard_setattr, UserDefinedObjectVariable
+from .user_defined import (
+    call_random_fn,
+    is_standard_setattr,
+    RandomCallOnSource,
+    UserDefinedObjectVariable,
+)
 
 
 if TYPE_CHECKING:
@@ -3134,12 +3139,30 @@ class RandomVariable(VariableTracker):
         )
         return variables.ConstantVariable.create(None)
 
+    def _check_state_is_traceable(self, tx, name):
+        if self.source is not None and not tx.output.side_effects.is_modified(self):
+            unimplemented(
+                gb_type="random.Random operation requires runtime state",
+                context=f"random.Random.{name}",
+                explanation=(
+                    f"random.Random.{name} depends on the live state of an existing "
+                    "random.Random object. Capturing its trace-time state would "
+                    "produce incorrect results when the compiled graph is reused."
+                ),
+                hints=[
+                    "Allow a graph break so this operation runs eagerly.",
+                    "Seed the object inside the compiled region if a deterministic "
+                    "random sequence is intended.",
+                ],
+            )
+
     def getstate(
         self,
         tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        self._check_state_is_traceable(tx, "getstate")
         return self.wrap_state(self.random.getstate())
 
     def setstate(
@@ -3148,6 +3171,13 @@ class RandomVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if not args[0].is_python_constant():
+            unimplemented(
+                gb_type="random.Random.setstate with non-constant state",
+                context=f"state={args[0]}",
+                explanation="Dynamo cannot capture a runtime random.Random state.",
+                hints=["Allow a graph break so setstate runs eagerly."],
+            )
         tx.output.side_effects.mutation(self)
         self.random.setstate(self.unwrap_state(args[0]))
         return variables.ConstantVariable.create(None)
@@ -3159,6 +3189,7 @@ class RandomVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         name = "shuffle"
+        self._check_state_is_traceable(tx, name)
         check_positional(tx, name, len(args), 1, 1)
         no_keywords(tx, name, kwargs)
         seq = args[0].realize()
@@ -3181,6 +3212,7 @@ class RandomVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         name = "sample"
+        self._check_state_is_traceable(tx, name)
         check_positional(tx, name, len(args), 2, 2)
         no_keywords(tx, name, kwargs)
         elems = unpack_iterable(tx, args[0])
@@ -3201,7 +3233,17 @@ class RandomVariable(VariableTracker):
         )
 
     def _call_random(self, tx, name, args, kwargs):
-        tx.output.side_effects.mutation(self)
+        side_effects = tx.output.side_effects
+        if self.source is not None and not side_effects.is_modified(self):
+            # Live replay advances the runtime object, so no setstate write-back
+            # is needed. seed/setstate mark the object modified when its
+            # trace-time state must be written back instead.
+            side_effects.check_allowed_side_effect(self)
+            # The incoming state is unknown at trace time, so replay the draw
+            # on the runtime object using the shadow only for an example value.
+            replay = RandomCallOnSource(self.source, name)
+            return call_random_fn(tx, getattr(self.random, name), args, kwargs, replay)
+        side_effects.mutation(self)
         state = self.random.getstate()
 
         def call_random_meth(*args: Any, **kwargs: Any) -> Any:

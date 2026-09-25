@@ -253,14 +253,15 @@ class _TestBisect:
             )
 
     def test_insort(self):
-        from random import shuffle
+        from random import Random
         mod = self.module
 
         # Invariant:  As random elements are inserted in
         # a target list, the targetlist remains sorted.
         keyfunc = abs
         data = list(range(-10, 11)) + list(range(-20, 20, 2))
-        shuffle(data)
+        # Use a local seeded RNG so the input permutation is traceable in fullgraph.
+        Random(0).shuffle(data)
         target = []
         for x in data:
             mod.insort_left(target, x, key=keyfunc)

@@ -1944,11 +1944,21 @@ class RemovableHandleClass:
     pass
 
 
+class RandomCallOnSource:
+    """random_calls entry replayed on the runtime random.Random object at
+    `source`, so the draw reads and advances that object's live state."""
+
+    def __init__(self, source: Source, method_name: str) -> None:
+        self.source = source
+        self.method_name = method_name
+
+
 def call_random_fn(
     tx: "InstructionTranslatorBase",
     fn: Callable[..., Any],
     args: list[VariableTracker],
     kwargs: dict[str, VariableTracker],
+    replay_fn: RandomCallOnSource | None = None,
 ) -> VariableTracker:
     from .builder import VariableBuilder
 
@@ -1965,7 +1975,7 @@ def call_random_fn(
     # we just need the right type
     example_value = fn(*args, **kwargs)
     source = RandomValueSource(random_call_index)
-    tx.output.random_calls.append((fn, args, kwargs))  # type: ignore[arg-type]
+    tx.output.random_calls.append((replay_fn or fn, args, kwargs))  # type: ignore[arg-type]
     # TODO: arguably, this should route to wrap_symint/wrap_symfloat
     # (currently hypothetical), but I'm not going to poke my hand in
     # this nest for now
