@@ -19,15 +19,26 @@ bool is_int_oo(const Expr* e) {
   return e->kind == Kind::IntInfinity || e->kind == Kind::NegativeIntInfinity;
 }
 
-bool is_int_bound(const Expr* e) {
-  return e->kind == Kind::Integer || is_int_oo(e);
+bool is_infinite(const Expr* e) {
+  return is_int_oo(e) || e->kind == Kind::Infinity ||
+      e->kind == Kind::NegativeInfinity;
 }
 
 int sign(const Expr* e) {
-  if (is_int_oo(e)) {
-    return e->kind == Kind::IntInfinity ? 1 : -1;
+  switch (e->kind) {
+    case Kind::IntInfinity:
+    case Kind::Infinity:
+      return 1;
+    case Kind::NegativeIntInfinity:
+    case Kind::NegativeInfinity:
+      return -1;
+    case Kind::Float: {
+      double v = e->float_value();
+      return (v > 0) - (v < 0);
+    }
+    default:
+      return (e->p > 0) - (e->p < 0);
   }
-  return (e->p > 0) - (e->p < 0);
 }
 
 bool lt(const Expr* a, const Expr* b) {
@@ -44,8 +55,14 @@ const Expr* max_num(const Expr* a, const Expr* b) {
 }
 
 void require_int(const ValueRanges& r) {
+  if (!r.is_int()) {
+    throw NativeUnsupported("non-integer range in an integer handler");
+  }
+}
+
+void require_not_bool(const ValueRanges& r) {
   if (r.is_bool()) {
-    throw NativeUnsupported("bool range in an integer handler");
+    throw NativeUnsupported("bool range in a numeric handler");
   }
 }
 
@@ -76,6 +93,9 @@ class Analysis {
   const Expr* one() {
     return a_.integer(1);
   }
+  ValueRanges unknown() {
+    return {a_.neg_oo(), a_.oo()};
+  }
   ValueRanges unknown_int() {
     return {a_.neg_int_oo(), a_.int_oo()};
   }
@@ -87,6 +107,7 @@ class Analysis {
     return !lt(zero(), r.lower) && !lt(r.upper, zero());
   }
 
+  const Expr* keep_float(const Expr* r, const Expr* x, const Expr* y);
   const Expr* num_add(const Expr* x, const Expr* y);
   const Expr* num_sub(const Expr* x, const Expr* y) {
     return num_add(x, a_.neg(y));
@@ -124,14 +145,46 @@ class Analysis {
   const RangeMap* context_ranges_;
 };
 
+// functions._keep_float: Float(float(r)) if an operand is a Float and r isn't.
+const Expr* Analysis::keep_float(const Expr* r, const Expr* x, const Expr* y) {
+  if (r->kind == Kind::Float ||
+      (x->kind != Kind::Float && y->kind != Kind::Float)) {
+    return r;
+  }
+  switch (r->kind) {
+    case Kind::IntInfinity:
+    case Kind::Infinity:
+      return a_.oo();
+    case Kind::NegativeIntInfinity:
+    case Kind::NegativeInfinity:
+      return a_.neg_oo();
+    default:
+      if (r->kind == Kind::Integer && r->p == 0) {
+        return a_.float_number(0.0);
+      }
+      throw NativeUnsupported("keep_float of a finite non-Float");
+  }
+}
+
 const Expr* Analysis::num_add(const Expr* x, const Expr* y) {
-  if (is_int_oo(x) || is_int_oo(y)) {
-    if (is_int_oo(x) && is_int_oo(y) && x != y) {
+  bool x_inf = is_infinite(x);
+  bool y_inf = is_infinite(y);
+  if (!x_inf && !y_inf) {
+    return a_.add({x, y});
+  }
+  if (x_inf && y_inf && x != y) {
+    if (is_int_oo(x) == is_int_oo(y)) {
       throw NativeUnsupported("sympy expression is NaN");
     }
-    return is_int_oo(x) ? x : y;
+    // oo and -oo absorb +-int_oo, except that NegativeIntInfinity.__add__
+    // returns itself for -oo.
+    if (is_int_oo(x) &&
+        (x->kind == Kind::IntInfinity || y->kind == Kind::Infinity)) {
+      return y;
+    }
+    return x;
   }
-  return a_.add({x, y});
+  return x_inf ? x : y;
 }
 
 // safe_mul in SymPyValueRangeAnalysis.mul.
@@ -142,8 +195,13 @@ const Expr* Analysis::safe_mul(const Expr* x, const Expr* y) {
   if (sign(y) == 0) {
     return y;
   }
-  if (is_int_oo(x) || is_int_oo(y)) {
-    return sign(x) * sign(y) > 0 ? a_.int_oo() : a_.neg_int_oo();
+  if (is_infinite(x) || is_infinite(y)) {
+    // The infinity's class, x's when both are infinite.
+    bool positive = sign(x) * sign(y) > 0;
+    if (is_int_oo(is_infinite(x) ? x : y)) {
+      return positive ? a_.int_oo() : a_.neg_int_oo();
+    }
+    return positive ? a_.oo() : a_.neg_oo();
   }
   return a_.mul({x, y});
 }
@@ -176,7 +234,7 @@ const Expr* Analysis::pow_by_natural_fn(const Expr* base, const Expr* exp) {
 // _default_symbol_range.
 ValueRanges Analysis::default_symbol_range(const Expr* s) {
   if (a_.ask(s, Fact::integer) != Tri::True) {
-    throw NativeUnsupported("float value range");
+    return unknown();
   }
   if (a_.ask(s, Fact::positive) == Tri::True) {
     return {one(), a_.int_oo()};
@@ -232,7 +290,7 @@ ValueRanges Analysis::eq(ValueRanges x, ValueRanges y) {
 
 ValueRanges Analysis::lt_(const ValueRanges& x, const ValueRanges& y) {
   if (x.is_bool() != y.is_bool()) {
-    throw NativeUnsupported("lt of a bool and an integer range");
+    throw NativeUnsupported("lt of a bool and a numeric range");
   }
   if (x.is_bool()) {
     return and_(not_(x), y);
@@ -247,31 +305,37 @@ ValueRanges Analysis::lt_(const ValueRanges& x, const ValueRanges& y) {
 }
 
 ValueRanges Analysis::add(const ValueRanges& x, const ValueRanges& y) {
-  require_int(x);
-  require_int(y);
-  return {num_add(x.lower, y.lower), num_add(x.upper, y.upper)};
+  require_not_bool(x);
+  require_not_bool(y);
+  return make_value_range(
+      a_,
+      keep_float(num_add(x.lower, y.lower), x.lower, y.lower),
+      keep_float(num_add(x.upper, y.upper), x.upper, y.upper));
 }
 
 ValueRanges Analysis::mul(const ValueRanges& x, const ValueRanges& y) {
   if (x.is_bool() != y.is_bool()) {
-    throw NativeUnsupported("mul of a bool and an integer range");
+    throw NativeUnsupported("mul of a bool and a numeric range");
   }
   if (x.is_bool()) {
     return and_(x, y);
   }
   // coordinatewise_monotone_map
+  auto product = [this](const Expr* p, const Expr* q) {
+    return keep_float(safe_mul(p, q), p, q);
+  };
   const Expr* products[] = {
-      safe_mul(x.lower, y.lower),
-      safe_mul(x.lower, y.upper),
-      safe_mul(x.upper, y.lower),
-      safe_mul(x.upper, y.upper)};
+      product(x.lower, y.lower),
+      product(x.lower, y.upper),
+      product(x.upper, y.lower),
+      product(x.upper, y.upper)};
   const Expr* lo = products[0];
   const Expr* hi = products[0];
   for (const Expr* p : products) {
     lo = min_num(lo, p);
     hi = max_num(hi, p);
   }
-  return {lo, hi};
+  return make_value_range(a_, lo, hi);
 }
 
 ValueRanges Analysis::floordiv(const ValueRanges& x, const ValueRanges& y) {
@@ -395,13 +459,20 @@ ValueRanges Analysis::min_or_max(
     const ValueRanges& x,
     const ValueRanges& y) {
   if (x.is_bool() != y.is_bool()) {
-    throw NativeUnsupported("min/max of a bool and an integer range");
+    throw NativeUnsupported("min/max of a bool and a numeric range");
   }
   if (x.is_bool()) {
     return kind == Kind::Min ? and_(x, y) : or_(x, y);
   }
-  auto fn = kind == Kind::Min ? min_num : max_num;
-  return {fn(x.lower, y.lower), fn(x.upper, y.upper)};
+  // sympy.Min/Max break ties between different number types by type.
+  auto pick = [kind](const Expr* p, const Expr* q) {
+    int c = compare_numbers(p, q);
+    if (c == 0 && p != q) {
+      throw NativeUnsupported("Min/Max of equal numbers of different types");
+    }
+    return (kind == Kind::Min) == (c < 0) ? p : q;
+  };
+  return make_value_range(a_, pick(x.lower, y.lower), pick(x.upper, y.upper));
 }
 
 ValueRanges Analysis::increasing_map(Kind kind, const ValueRanges& x) {
@@ -416,10 +487,11 @@ ValueRanges Analysis::interp(const Expr* e) {
     case Kind::NegativeIntInfinity:
     case Kind::BooleanTrue:
     case Kind::BooleanFalse:
-      return {e, e};
     case Kind::Rational:
     case Kind::Float:
-      throw NativeUnsupported("float value range");
+    case Kind::Infinity:
+    case Kind::NegativeInfinity:
+      return {e, e};
     case Kind::Symbol: {
       const ValueRanges* r = find_range(e);
       return r != nullptr ? *r : default_symbol_range(e);
@@ -453,11 +525,12 @@ ValueRanges Analysis::interp(const Expr* e) {
     case Kind::Mul:
       return fold(binary(&Analysis::mul));
     case Kind::Pow:
-      // Integer exponents only; a negative one takes the float pow handler.
-      if (e->args[1]->kind != Kind::Integer || e->args[1]->p < 0) {
-        throw NativeUnsupported("float value range");
+      // The arena only builds Integer exponents; a negative one takes the pow
+      // handler, which is unknown().
+      if (e->args[1]->kind != Kind::Integer) {
+        throw NativeUnsupported("pow exponent");
       }
-      return pow_by_natural(args[0], args[1]);
+      return e->args[1]->p >= 0 ? pow_by_natural(args[0], args[1]) : unknown();
     case Kind::PowByNatural:
       return pow_by_natural(args[0], args[1]);
     case Kind::Mod:
@@ -535,7 +608,7 @@ bool Analysis::definitely_ge(const Expr* e, int64_t lower) {
   }
   if (e->kind == Kind::Symbol) {
     if (const ValueRanges* r = find_range(e)) {
-      require_int(*r);
+      require_not_bool(*r);
       return !lt(r->lower, a_.integer(lower));
     }
   }
@@ -702,7 +775,7 @@ bool has_mod(const Expr* e) {
 ValueRanges::ValueRanges(const Expr* lower, const Expr* upper)
     : lower(lower), upper(upper) {
   if (lower->is_boolean() != upper->is_boolean()) {
-    throw NativeUnsupported("mixed bool and integer bounds");
+    throw NativeUnsupported("mixed bool and numeric bounds");
   }
   if (lower->is_boolean()) {
     bool atoms = (lower->kind == Kind::BooleanTrue ||
@@ -716,12 +789,29 @@ ValueRanges::ValueRanges(const Expr* lower, const Expr* upper)
     }
     return;
   }
-  if (!is_int_bound(lower) || !is_int_bound(upper)) {
-    throw NativeUnsupported("float value range");
+  if (!lower->is_number() || !upper->is_number()) {
+    throw NativeUnsupported("symbolic value range bound");
   }
   if (lt(upper, lower)) {
     throw NativeUnsupported("Invalid ranges");
   }
+  if ((lower->kind == Kind::Integer && upper->kind == Kind::Infinity) ||
+      (upper->kind == Kind::Integer && lower->kind == Kind::NegativeInfinity)) {
+    throw NativeUnsupported("unnormalized value range");
+  }
+}
+
+ValueRanges make_value_range(
+    ExprArena& arena,
+    const Expr* lower,
+    const Expr* upper) {
+  if (lower->kind == Kind::Integer && upper == arena.oo()) {
+    upper = arena.int_oo();
+  }
+  if (upper->kind == Kind::Integer && lower == arena.neg_oo()) {
+    lower = arena.neg_int_oo();
+  }
+  return {lower, upper};
 }
 
 ValueRanges value_range_interp(

@@ -101,7 +101,7 @@ void NativeShapeEnv::add_symbol(
     std::optional<int64_t> hint,
     const ValueRanges& range,
     bool size_like) {
-  if (sym->kind != Kind::Symbol || range.is_bool() ||
+  if (sym->kind != Kind::Symbol || !range.is_int() ||
       arena_->symbol_info(sym).dummy_index != 0) {
     throw NativeUnsupported("add_symbol needs an integer symbol");
   }
@@ -117,7 +117,7 @@ void NativeShapeEnv::add_symbol(
 
 void NativeShapeEnv::update_range(const Expr* sym, const ValueRanges& range) {
   pristine_ = false;
-  if (range.is_bool()) {
+  if (!range.is_int()) {
     var_to_range_.erase(sym);
     throw NativeUnsupported("update_range needs an integer range");
   }

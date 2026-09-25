@@ -1209,7 +1209,8 @@ void initSymbolicBindings(PyObject* module) {
             for (const auto& [sym, lower, upper] : ranges) {
               m.insert_or_assign(
                   unwrap(self, sym),
-                  ValueRanges(unwrap(self, lower), unwrap(self, upper)));
+                  make_value_range(
+                      *self->arena, unwrap(self, lower), unwrap(self, upper)));
             }
             ValueRanges r = value_range_interp(*self->arena, unwrap(self, e), m);
             return std::make_pair(wrap(self, r.lower), wrap(self, r.upper));
@@ -1227,7 +1228,10 @@ void initSymbolicBindings(PyObject* module) {
               for (const auto& [sym, lower, upper] : rs) {
                 m.insert_or_assign(
                     unwrap(self, sym),
-                    ValueRanges(unwrap(self, lower), unwrap(self, upper)));
+                    make_value_range(
+                        *self->arena,
+                        unwrap(self, lower),
+                        unwrap(self, upper)));
               }
               return m;
             };
@@ -1341,7 +1345,10 @@ void initSymbolicBindings(PyObject* module) {
             self.env->add_symbol(
                 unwrap(self.owner, sym),
                 hint,
-                ValueRanges(unwrap(self.owner, lower), unwrap(self.owner, upper)),
+                make_value_range(
+                    *self.owner->arena,
+                    unwrap(self.owner, lower),
+                    unwrap(self.owner, upper)),
                 size_like);
           })
       .def(
@@ -1359,7 +1366,8 @@ void initSymbolicBindings(PyObject* module) {
               self.env->add_symbol(
                   a.from_sympy(sym),
                   to_int64(hint),
-                  ValueRanges(a.from_sympy(lower), a.from_sympy(upper)),
+                  make_value_range(
+                      *a.arena, a.from_sympy(lower), a.from_sympy(upper)),
                   /*size_like=*/false);
             } catch (const NativeUnsupported&) {
             }
@@ -1407,7 +1415,10 @@ void initSymbolicBindings(PyObject* module) {
             flush_mod_memo(self);
             self.env->update_range(
                 unwrap(self.owner, sym),
-                ValueRanges(unwrap(self.owner, lower), unwrap(self.owner, upper)));
+                make_value_range(
+                    *self.owner->arena,
+                    unwrap(self.owner, lower),
+                    unwrap(self.owner, upper)));
           })
       .def(
           "mark_not_pristine",

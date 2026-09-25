@@ -1250,7 +1250,6 @@ class TestNativeInfinity(TestCase):
             lambda: arena.mul([oo, x]),
             lambda: arena.function("Max", [oo, x]),
             lambda: arena.safe_expand(oo),
-            lambda: arena.value_range(oo, []),
             lambda: arena.add([oo, arena.from_sympy(int_oo)]),
         ]
         for i, fn in enumerate(cases):
@@ -2056,7 +2055,7 @@ class TestNativeValueRanges(TestCase):
             )
         except self.PYTHON_ERRORS:
             expected = None
-        if expected is None or not (expected.is_int or expected.is_bool):
+        if expected is None:
             with self.assertRaises(NativeUnsupported, msg=msg):
                 arena.value_range(n, native_ranges)
             return None
@@ -2077,7 +2076,7 @@ class TestNativeValueRanges(TestCase):
             (s0, {}, (1, oo)),
             (n, {}, (0, oo)),
             (u0, {}, (-oo, oo)),
-            (zf, {}, None),
+            (zf, {}, (-sympy.oo, sympy.oo)),
             (u0, {u0: (2, 5)}, (2, 5)),
             (s0 + u0, {u0: (-3, 5)}, (-2, oo)),
             (s0 * u0, {u0: (-3, 5)}, (-oo, oo)),
@@ -2103,7 +2102,7 @@ class TestNativeValueRanges(TestCase):
             (u0**2, {u0: (-3, -2)}, (4, 9)),
             (u0**3, {u0: (-oo, -oo)}, (-oo, -oo)),
             (u0**3, {u0: (-3, 2)}, (-27, 8)),
-            (u0**-1, {u0: (1, 2)}, None),
+            (u0**-1, {u0: (1, 2)}, (-sympy.oo, sympy.oo)),
             (Max(u0, u1, 3), {u0: (-oo, 0), u1: (1, 5)}, (3, 5)),
             (Min(u0, 3), {u0: (-oo, oo)}, (-oo, 3)),
             (TruncToInt(u0), {u0: (-3, oo)}, (-3, oo)),
@@ -2136,7 +2135,7 @@ class TestNativeValueRanges(TestCase):
     def test_invalid_ranges(self):
         arena = torch._C._symbolic._Arena()
         x = arena.from_sympy(u0)
-        for lo, hi in [(3, 2), (int_oo, 0), (0, sympy.Rational(1, 2)), (0, sympy.true)]:
+        for lo, hi in [(3, 2), (int_oo, 0), (sympy.Rational(1, 2), 0), (0, sympy.true)]:
             bounds = [arena.from_sympy(sympy.sympify(b)) for b in (lo, hi)]
             with self.assertRaises(NativeUnsupported):
                 arena.value_range(x, [(x, *bounds)])
@@ -2194,6 +2193,100 @@ class TestNativeValueRanges(TestCase):
                 answered += 1
         self.assertGreater(answered, calls // 3)
 
+    def test_float_known(self):
+        u1, oo, half = self.u1, sympy.oo, sympy.Rational(1, 2)
+        zg = sympy.Symbol("zg", real=True)
+        cases = [
+            (half, {}, (half, half)),
+            (sympy.Float(0.5), {}, (0.5, 0.5)),
+            (oo, {}, (oo, oo)),
+            (-zf, {}, (-oo, oo)),
+            (s0 / 2, {}, (half, int_oo)),
+            (0.5 * s0, {}, (0.5, oo)),
+            (s0 + 1.5, {}, (2.5, oo)),
+            (1 / s0, {}, (-oo, oo)),
+            (u0**-2 + 1, {u0: (1, 3)}, (-oo, oo)),
+            (Max(u0, half), {u0: (0, 3)}, (half, 3)),
+            (Max(u0, zf), {u0: (0, 3), zf: (-0.5, 2.0)}, (0, 3)),
+            (Max(zg, 1), {}, (1, int_oo)),
+            (Min(zg, 1), {}, (-int_oo, 1)),
+            (Max(u0, zf), {u0: (2, 2), zf: (2.0, 2.0)}, None),
+            (u0 * zf, {u0: (0, 0)}, (0, 0)),
+            (zf + u0, {zf: (0.5, 2.5), u0: (-1, 1)}, (-0.5, 3.5)),
+            (u0 * zf, {zf: (-0.5, 2.0), u0: (-1, 1)}, (-2.0, 2.0)),
+            (u0 * zf, {zf: (0.0, 2.0), u0: (1, int_oo)}, (0.0, oo)),
+            (u0 * u1, {u0: (-half, oo), u1: (0, 2)}, (-1, int_oo)),
+            (zf, {zf: (0, oo)}, (0, int_oo)),
+            (sympy.Lt(u0, zf), {u0: (0, 1), zf: (2.5, oo)}, (True, True)),
+            (sympy.Eq(zf, 1), {zf: (2.5, 3.0)}, (False, False)),
+            (FloorDiv(u0, 2) + zf, {}, (-oo, oo)),
+            (FloorDiv(zf, 2), {}, None),
+        ]
+        for e, ranges, want in cases:
+            ranges = {s: tuple(map(sympy.sympify, r)) for s, r in ranges.items()}
+            got = self.check(e, ranges)
+            msg = f"{e} {ranges}"
+            if want is None:
+                self.assertIsNone(got, msg)
+            else:
+                self.assertIsNotNone(got, msg)
+                self.assertEqual((got.lower, got.upper), tuple(map(sympy.sympify, want)), msg)
+
+    def test_float_bound_ops(self):
+        zg = sympy.Symbol("zg", real=True)
+        nums = [0, 2, -3, sympy.Rational(1, 2), sympy.Rational(-1, 3), 0.5, -2.0, 0.0]
+        nums = [*map(sympy.sympify, nums), int_oo, -int_oo, sympy.oo, -sympy.oo]
+        answered = 0
+        for x in nums:
+            for y in nums:
+                ranges = {zf: (x, x), zg: (y, y)}
+                for e in [zf + zg, zf * zg, Max(zf, zg), Min(zf, zg)]:
+                    answered += self.check(e, ranges) is not None
+        self.assertGreater(answered, 4 * len(nums) ** 2 * 3 // 4)
+
+    @parametrize("seed", range(4))
+    def test_float_fuzz(self, seed):
+        rng = random.Random(seed)
+        leaves = [s0, u0, self.n, zf, *map(sympy.Integer, range(-2, 3))]
+        leaves += [sympy.Rational(1, 2), sympy.Rational(-1, 3), sympy.Float(0.5)]
+        leaves += [sympy.Float(-2.0), sympy.Float(0.0)]
+        bounds = [-int_oo, -sympy.oo, int_oo, sympy.oo, *map(sympy.Integer, [-3, 0, 2])]
+        bounds += [sympy.Rational(1, 2), sympy.Float(-0.5), sympy.Float(2.0)]
+
+        def expr(depth):
+            if depth == 0 or rng.random() < 0.25:
+                return rng.choice(leaves)
+            a, b = expr(depth - 1), expr(depth - 1)
+            op = rng.choice(["add", "mul", "sub", "pow", "Max", "Min", "Lt"])
+            if op == "add":
+                return a + b
+            if op == "mul":
+                return a * b
+            if op == "sub":
+                return a - b
+            if op == "pow":
+                return a ** rng.choice([-1, 2, -2])
+            if op == "Lt":
+                return sympy.Lt(a, b)
+            return TestNativeFunctions.FUNCTIONS[op](a, b)
+
+        calls = answered = 0
+        for _ in range(500):
+            try:
+                e = expr(3)
+            except (ZeroDivisionError, ValueError, TypeError, AssertionError):
+                continue
+            if e.has(sympy.zoo, sympy.nan) or isinstance(e, sympy.logic.boolalg.BooleanAtom):
+                continue
+            ranges = {}
+            for s in rng.sample([u0, zf], rng.randint(0, 2)):
+                lo, hi = sorted(rng.sample(bounds, 2), key=float)
+                if lo <= hi:
+                    ranges[s] = (lo, hi)
+            calls += 1
+            answered += self.check(e, ranges) is not None
+        self.assertGreater(answered, calls // 3)
+
     def check_bound(self, e, ranges, context_ranges=None):
         """Differential bound_sympy; returns the Python range, or None if either side raised."""
         context_ranges = context_ranges or {}
@@ -2218,7 +2311,7 @@ class TestNativeValueRanges(TestCase):
             expected = bound_sympy(e, env)
         except self.PYTHON_ERRORS:
             expected = None
-        if expected is None or not (expected.is_int or expected.is_bool):
+        if expected is None:
             with self.assertRaises(NativeUnsupported, msg=msg):
                 arena.bound_sympy(n, native_ranges, native_context)
             return None
@@ -2239,7 +2332,7 @@ class TestNativeValueRanges(TestCase):
         cases = [
             (sympy.Integer(3), {}, {}, (3, 3)),
             (int_oo, {}, {}, (oo, oo)),
-            (sympy.Rational(1, 2), {}, {}, None),
+            (sympy.Rational(1, 2), {}, {}, (sympy.Rational(1, 2),) * 2),
             (u0, {}, {u0: (2, 5)}, (2, 5)),
             (u0, {u0: (3, 4)}, {u0: (2, 5)}, (3, 4)),
             (u0 + u1, {u0: (3, 4)}, {u1: (2, 5)}, (5, 9)),
