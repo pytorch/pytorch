@@ -885,8 +885,11 @@ class FSDPParamGroup:
     ) -> torch.dtype:
         if self._reduce_dtype is not None:
             return self._reduce_dtype
-        # Use accumulation dtypes since gradients may not be upcast yet, and
-        # keep the precision of pending reductions
+        # Promote over accumulation dtypes (grad_dtype, or the original dtype if
+        # unset) since they match across ranks. Gradient dtypes may not: a fresh
+        # gradient may not be upcast to its accumulation dtype yet, while an
+        # accumulated one is. grad_dtype=None has no accumulation dtype, so use
+        # its gradient's dtype. Keep the precision of pending HSDP reductions.
         dtypes = {p.unsharded_grad_dtype or g.dtype for p, g in zip(fsdp_params, grads)}
         if self._partial_reduce_output is not None:
             dtypes.add(self._partial_reduce_output.dtype)
