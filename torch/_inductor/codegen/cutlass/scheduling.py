@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-import dataclasses
 import hashlib
 import logging
 from collections.abc import Sequence
@@ -33,7 +32,6 @@ from ..common import BackendFeature, IndentedBuffer
 log = logging.getLogger(__name__)
 
 
-@dataclasses.dataclass(slots=True)
 class WhyNoFuseNames(WhyNoFuse):
     name1: str
     name2: str

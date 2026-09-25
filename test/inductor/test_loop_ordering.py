@@ -19,6 +19,7 @@ from torch._inductor.codegen.triton import TritonScheduling
 from torch._inductor.graph import GraphLowering
 from torch._inductor.invert_expr_analysis import generate_inverse_formula
 from torch._inductor.scheduler import (
+    _iter_loop_state_nodes,
     _LoopMutationTracker,
     ForeachKernelSchedulerNode,
     FusedSchedulerNode,
@@ -329,6 +330,33 @@ class ImplDetailTest(MockSchedulerTest):
             Scheduler.can_fuse(scheduler, *snodes)
 
         self.assertEqual(scheduler._loop_mutation_trackers, [])
+
+    def test_can_fuse_does_not_walk_candidates_without_mutation(self):
+        scheduler = mock.Mock(spec=Scheduler)
+        scheduler.available_buffer_names = ()
+        scheduler._loop_mutation_trackers = []
+        scheduler._fusion_memory_state = None
+        snodes = [
+            SchedulerNode(scheduler, self._create_computed_buffer_ax2())
+            for _ in range(2)
+        ]
+        scheduler._can_fuse_impl.return_value = False
+
+        with mock.patch(
+            "torch._inductor.scheduler._iter_loop_state_nodes",
+            wraps=_iter_loop_state_nodes,
+        ) as iter_nodes:
+            self.assertFalse(Scheduler.can_fuse(scheduler, *snodes))
+            iter_nodes.assert_not_called()
+
+            # Control: a mutation does trigger the walk, so the spy is wired up.
+            def mutate(*args, **kwargs):
+                snodes[0].apply_new_loop_order([1, 0])
+                return False
+
+            scheduler._can_fuse_impl.side_effect = mutate
+            self.assertFalse(Scheduler.can_fuse(scheduler, *snodes))
+            iter_nodes.assert_called()
 
     def test_expand_dimension_loop_state_rollback(self):
         snode = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
