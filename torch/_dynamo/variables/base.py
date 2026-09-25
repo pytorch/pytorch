@@ -516,6 +516,9 @@ def store_attr_mutation(
     se = tx.output.side_effects
     item = item.realize()
     if not se.is_attribute_mutation(item):
+        # This helper's callers model writable function and descriptor slots.
+        # Their sourced owners must already be tracked; unlike generic Python
+        # setattr, this closed path has no valid sourced-untracked fallback.
         if item.source is not None:
             raise AssertionError(
                 f"{item} has a source but was never registered via "
@@ -924,6 +927,10 @@ def _wrap_descr_get(
         raise_type_error(tx, "this method takes no keyword arguments")
     if len(args) not in (1, 2):
         raise_type_error(tx, f"expected 1 or 2 arguments, got {len(args)}")
+    # wrap_descr_get treats None as absent for both arguments and rejects the
+    # call when both are absent.
+    if all(a.is_constant_none() for a in args):
+        raise_type_error(tx, "__get__(None, None) is invalid")
     obj = args[0]
     owner = args[1] if len(args) > 1 else obj.tp_getattro_impl(tx, "__class__")
     return func(self, tx, obj, owner)
