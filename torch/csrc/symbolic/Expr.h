@@ -47,6 +47,7 @@ enum class Kind : uint8_t {
   Max,
   Min,
   PowByNatural,
+  // FloatPow..TruncToFloat fold Numbers including Floats (ExprArena::function).
   FloatPow,
   FloatTrueDiv,
   IntTrueDiv,

@@ -1521,8 +1521,6 @@ class TestNativeFunctions(TestCase):
             ("PowByNatural", -1, int_oo),
             ("PowByNatural", -int_oo, int_oo),
             ("PowByNatural", 1, -int_oo),
-            ("FloatPow", 2, 3),
-            ("FloatPow", int_oo, 2),
             ("FloatTrueDiv", s0, 0),
             ("IntTrueDiv", sympy.Rational(1, 2), sympy.Rational(1, 3)),
             ("IntTrueDiv", s0, 0),
@@ -1852,10 +1850,12 @@ class TestNativeFunctions(TestCase):
         answered = 0
         for a in nums:
             answered += self.check_call("ToFloat", a) is not None
+            for name in ("TruncToFloat", *self.UNARY_FUNCTIONS):
+                answered += self.check_call(name, a) is not None
             for b in nums:
-                for name in ("FloatTrueDiv", "IntTrueDiv"):
+                for name in ("FloatTrueDiv", "IntTrueDiv", "FloatPow"):
                     answered += self.check_call(name, a, b) is not None
-        self.assertGreater(answered, 400)
+        self.assertGreater(answered, 700)
         cases = [
             ("ToFloat", (2,), F(2.0)),
             ("ToFloat", (int_oo,), sympy.oo),
@@ -1865,10 +1865,42 @@ class TestNativeFunctions(TestCase):
             ("IntTrueDiv", (int_oo, 2), sympy.oo),
             ("FloatTrueDiv", (sympy.Rational(1, 3), F(0.5)), F(2 / 3)),
             ("FloatTrueDiv", (F(1e308), F(1e-10)), sympy.oo),
+            ("FloatPow", (F(2.0), -1074), F(5e-324)),
+            ("FloatPow", (-sympy.oo, 3), -sympy.oo),
+            ("FloatPow", (0, -sympy.oo), sympy.oo),
+            ("FloatPow", (F(-8.0), sympy.Rational(1, 3)), None),
+            ("FloatPow", (F(10.0), 400), None),
+            ("TruncToFloat", (F(-2.5),), F(-2.0)),
+            ("TruncToFloat", (sympy.Rational(7, 2),), F(3.0)),
+            ("TruncToInt", (F(0.0),), F(0.0)),
+            ("TruncToInt", (F(-2.5),), -2),
+            ("RoundToInt", (F(2.5),), 2),
+            ("RoundToInt", (-sympy.oo,), -int_oo),
+            ("CeilToInt", (F(0.5),), 1),
+            ("FloorToInt", (sympy.oo,), int_oo),
+            ("RoundDecimal", (F(2.675), 2), F(2.67)),
+            ("RoundDecimal", (F(149.5), -2), F(100.0)),
+            ("RoundDecimal", (F(250.0), -2), F(200.0)),
+            ("RoundDecimal", (int_oo, 2), sympy.oo),
+            ("RoundDecimal", (F(1.7976931348623157e308), -308), None),
         ]
         for name, xs, expected in cases:
             got = self.check_call(name, *map(sympy.sympify, xs))
             self.assertEqual(got, expected, f"{name}{xs}")
+
+    def test_round_decimal(self):
+        rng = random.Random(0)
+        xs = [0.125, 2.675, 149.5, 150.0, 250.0, 5e-324, 1e-310, -3.0, 0.5, 5.0]
+        xs += [1.5e308, 1.7976931348623157e308, 123456789.987654321, -0.0]
+        xs += [rng.uniform(-1, 1) * 10.0 ** rng.randint(-30, 30) for _ in range(150)]
+        xs += [rng.randint(-(10**6), 10**6) / 8 for _ in range(50)]
+        ndigits = [-400, -309, -308, -307, -30, -3, -2, -1, 0, 1, 2, 3, 17, 323, 324]
+        answered = 0
+        for x in xs:
+            for n in ndigits + [rng.randint(-20, 20)]:
+                r = self.check_call("RoundDecimal", sympy.Float(x), n)
+                answered += r is not None
+        self.assertGreater(answered, 3000)
 
     def test_to_int_unsupported(self):
         arena = torch._C._symbolic._Arena()
@@ -1879,8 +1911,6 @@ class TestNativeFunctions(TestCase):
             ("CeilToInt", (sympy.Rational(2**60 + 1, 3),)),
             ("ToFloat", (sympy.Rational(1, 2),)),
             ("TruncToFloat", (int_oo,)),
-            ("TruncToFloat", (sympy.Rational(1, 2),)),
-            ("RoundDecimal", (3, 2)),
             ("RoundDecimal", (sympy.Rational(1, 2), sympy.Rational(1, 2))),
             ("IsNonOverlappingAndDenseIndicator", (s0,)),
             ("IsNonOverlappingAndDenseIndicator", (sympy.Rational(1, 2), 3, 1, 1)),

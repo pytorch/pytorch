@@ -1,7 +1,9 @@
 #include <torch/csrc/symbolic/Expr.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <limits>
 #include <numeric>
@@ -56,6 +58,65 @@ double to_double(const Expr* e) {
     default:
       throw NativeUnsupported("expected a Number");
   }
+}
+
+// Float(int) keeps every digit, so it has more than 53 bits of precision from
+// 10**15 on.
+constexpr double kExactFloatOfInt = 1e15;
+
+// float.__pow__; throws where it raises or returns a complex.
+double py_float_pow(double b, double e) {
+  double r = std::pow(b, e);
+  // float_pow's special cases for infinities agree with IEEE pow. Otherwise
+  // an infinite result is an overflow or 0 ** negative, and nan is a negative
+  // base with a non-integer exponent. CPython also raises on ERANGE, which
+  // glibc sets for no nonzero result.
+  if (std::isfinite(b) && std::isfinite(e) && !std::isfinite(r)) {
+    throw NativeUnsupported("float pow raises or gives a complex");
+  }
+  return r;
+}
+
+// round(x, ndigits) of a finite float (float___round___impl, double_round).
+double py_round(double x, int64_t ndigits) {
+  if (ndigits > 323) {
+    return x;
+  }
+  if (ndigits < -308) {
+    return 0.0 * x;
+  }
+  // glibc printf rounds the exact binary value half-even, like _Py_dg_dtoa.
+  std::array<char, 700> buf{};
+  if (ndigits >= 0) {
+    std::snprintf(buf.data(), buf.size(), "%.*f", static_cast<int>(ndigits), x);
+  } else {
+    // Round to a multiple of 10**k by the number of integer digits of |x|.
+    const int k = static_cast<int>(-ndigits);
+    const double ip = std::trunc(std::fabs(x));
+    const int n =
+        ip == 0 ? 0 : std::snprintf(buf.data(), buf.size(), "%.0f", ip);
+    if (n > k) {
+      std::snprintf(buf.data(), buf.size(), "%.*e", n - k - 1, x);
+    } else {
+      // 0 or 10**k: up iff |x| > 5 * 10**(k-1), ties go to 0.
+      bool up = n == k &&
+          (buf[0] > '5' ||
+           (buf[0] == '5' &&
+            (ip != std::fabs(x) ||
+             std::any_of(buf.begin() + 1, buf.begin() + n, [](char c) {
+               return c != '0';
+             }))));
+      if (!up) {
+        return 0.0 * x;
+      }
+      std::snprintf(buf.data(), buf.size(), "%s1e%d", x < 0 ? "-" : "", k);
+    }
+  }
+  double r = std::strtod(buf.data(), nullptr);
+  if (std::isinf(r)) {
+    throw NativeUnsupported("rounded value too large to represent");
+  }
+  return r;
 }
 
 i128 floordiv128(i128 a, i128 b) {
@@ -215,9 +276,8 @@ const char* function_name(Kind k) {
 const Expr* ExprArena::function(Kind kind, c10::ArrayRef<const Expr*> args) {
   bool all_numbers = std::all_of(
       args.begin(), args.end(), [](const Expr* a) { return a->is_number(); });
-  bool float_fold = all_numbers &&
-      (kind == Kind::ToFloat || kind == Kind::IntTrueDiv ||
-       kind == Kind::FloatTrueDiv);
+  bool float_fold =
+      all_numbers && kind >= Kind::FloatPow && kind <= Kind::TruncToFloat;
   if (!float_fold && std::any_of(args.begin(), args.end(), [](const Expr* a) {
         return a->has_float;
       })) {
@@ -280,13 +340,29 @@ const Expr* ExprArena::function(Kind kind, c10::ArrayRef<const Expr*> args) {
       }
       break;
     case Kind::FloatPow:
-    case Kind::RoundDecimal:
-    case Kind::TruncToFloat:
-      // The folds of numbers return sympy.Floats or oo, or raise for
-      // TruncToFloat(int_oo). RoundDecimal with a non-Integer ndigits stays
-      // unevaluated, which the port rejects as well.
       if (all_numbers) {
-        throw NativeUnsupported("function of numbers gives a Float");
+        r = float_of_double(
+            py_float_pow(to_double(args[0]), to_double(args[1])));
+      }
+      break;
+    case Kind::RoundDecimal:
+      if (all_numbers && args[1]->kind == Kind::Integer) {
+        double x = to_double(args[0]);
+        r = float_of_double(std::isfinite(x) ? py_round(x, args[1]->p) : x);
+      }
+      break;
+    case Kind::TruncToFloat:
+      if (args[0]->kind == Kind::Infinity ||
+          args[0]->kind == Kind::NegativeInfinity) {
+        r = args[0];
+      } else if (all_numbers) {
+        // Float(math.trunc(float(number))).
+        double t = std::trunc(to_double(args[0]));
+        if (!(std::fabs(t) < kExactFloatOfInt)) {
+          throw NativeUnsupported(
+              "TruncToFloat of an infinite or large number");
+        }
+        r = float_number(t);
       }
       break;
     case Kind::CeilToInt:
@@ -529,9 +605,7 @@ const Expr* ExprArena::eval_to_float(const Expr* number) {
     case Kind::NegativeIntInfinity:
       return neg_oo_;
     case Kind::Integer:
-      // Float(int) keeps every digit, so it has more than 53 bits of precision
-      // from 10**15 on.
-      if (number->p >= 1000000000000000 || number->p <= -1000000000000000) {
+      if (std::fabs(static_cast<double>(number->p)) >= kExactFloatOfInt) {
         throw NativeUnsupported("ToFloat of a large Integer");
       }
       return float_number(static_cast<double>(number->p));
@@ -541,12 +615,14 @@ const Expr* ExprArena::eval_to_float(const Expr* number) {
 }
 
 const Expr* ExprArena::eval_to_int(Kind kind, const Expr* number) {
-  if (is_int_oo(number)) {
-    if (kind == Kind::RoundToInt) {
+  if (is_infinite(number)) {
+    if (kind == Kind::RoundToInt && is_int_oo(number)) {
       // RoundToInt only checks for the float oo; float(int_oo) is inf.
       throw NativeUnsupported("cannot convert float infinity to integer");
     }
-    return number;
+    return number->kind == Kind::IntInfinity || number->kind == Kind::Infinity
+        ? int_oo_
+        : neg_int_oo_;
   }
   if (kind == Kind::TruncToInt) {
     if (ask(number, Fact::integer) == Tri::True) {
@@ -564,7 +640,7 @@ const Expr* ExprArena::eval_to_int(Kind kind, const Expr* number) {
   if (kind == Kind::FloorToInt && number->kind == Kind::Integer) {
     return number;
   }
-  if (!number->is_rational()) {
+  if (!number->is_rational() && number->kind != Kind::Float) {
     return nullptr;
   }
   double x = to_double(number);
