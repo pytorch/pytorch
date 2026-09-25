@@ -1183,19 +1183,27 @@ Example:
       ::c10d::nvshmem_extension::nvshmemx_cumodule_init,
       py::arg("module"));
 
-  py::enum_<::c10d::nvshmem_extension::ShmemSignalOp>(
-      module, "_ShmemSignalOp")
-      .value("SET", ::c10d::nvshmem_extension::kShmemSignalSet)
-      .value("ADD", ::c10d::nvshmem_extension::kShmemSignalAdd);
+  const auto signal_ops =
+      ::c10d::nvshmem_extension::shmem_signal_op_values();
+  py::dict signal_op_members;
+  signal_op_members["SET"] = signal_ops[0];
+  signal_op_members["ADD"] = signal_ops[1];
+  module.attr("_ShmemSignalOp") =
+      py::module_::import("enum").attr("IntEnum")(
+          "_ShmemSignalOp", signal_op_members);
 
-  py::enum_<::c10d::nvshmem_extension::ShmemCompareOp>(
-      module, "_ShmemCompareOp")
-      .value("EQ", ::c10d::nvshmem_extension::kShmemCmpEq)
-      .value("NE", ::c10d::nvshmem_extension::kShmemCmpNe)
-      .value("GT", ::c10d::nvshmem_extension::kShmemCmpGt)
-      .value("GE", ::c10d::nvshmem_extension::kShmemCmpGe)
-      .value("LT", ::c10d::nvshmem_extension::kShmemCmpLt)
-      .value("LE", ::c10d::nvshmem_extension::kShmemCmpLe);
+  const auto compare_ops =
+      ::c10d::nvshmem_extension::shmem_compare_op_values();
+  py::dict compare_op_members;
+  compare_op_members["EQ"] = compare_ops[0];
+  compare_op_members["NE"] = compare_ops[1];
+  compare_op_members["GT"] = compare_ops[2];
+  compare_op_members["GE"] = compare_ops[3];
+  compare_op_members["LT"] = compare_ops[4];
+  compare_op_members["LE"] = compare_ops[5];
+  module.attr("_ShmemCompareOp") =
+      py::module_::import("enum").attr("IntEnum")(
+          "_ShmemCompareOp", compare_op_members);
 
   // Check if NVSHMEM is available on current system.
   module.def(
