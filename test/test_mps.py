@@ -10965,6 +10965,129 @@ class TestLargeTensors(TestCaseMPS):
         self.assertGreater(tail.unique().numel(), 50)
         del x
 
+    # Large-tensor pooling that only this backend can run. The portable cases
+    # live in test/nn/test_pooling.py; the reason each of these stayed is in
+    # its own body.
+    def test_max_unpool2d_rejects_out_of_range_index(self):
+        # 2**32 + 3 truncates to 3, which is in range for this output, so the
+        # index has to be checked at full width before it is narrowed. CUDA
+        # narrows first (MaxUnpooling.cu) and accepts it, so this stays MPS
+        # specific rather than joining test_MaxUnpool_index_errors.
+        x = torch.ones(1, 1, 2, 2, device="mps")
+        idx = torch.tensor([[[[0, 1], [2, 2**32 + 3]]]], dtype=torch.long, device="mps")
+        with self.assertRaisesRegex(torch.AcceleratorError, "invalid max index"):
+            F.max_unpool2d(x, idx, 2, output_size=(4, 4))
+            # The kernel reports through the Metal error buffer, which is only
+            # drained on the next sync, so the raise happens here.
+            torch.mps.synchronize()
+
+    @largeMPSBufferTest(int(4.2 * 1024**3), device="mps")
+    @largeTensorTest("10GB", device="mps")
+    @serialTest()
+    def test_adaptive_max_pool2d_64bit_indexing(self):
+        # The "max bwd template" case from PR #194460, which added the guards
+        # this removes, and on MPS one of the two ops whose backward reaches the
+        # Metal max_pool kernel. It stays here because CUDA computes the
+        # backward plane offset in int arithmetic
+        # (i_plane * isizeH * isizeW, AdaptiveMaxPooling2d.cu), which overflows
+        # at this shape: 32 * 8192 * 8192 is INT32_MAX + 1.
+        N, C, H, W, O = 33, 1, 8192, 8192, 128
+        x = torch.empty(N, C, H, W, dtype=torch.half, device="mps")
+        h_idx = torch.arange(H, device="mps", dtype=torch.float32).unsqueeze(1)
+        w_idx = torch.arange(W, device="mps", dtype=torch.float32)
+        for n in range(N):
+            x[n, 0] = (w_idx.remainder(31) + h_idx.remainder(17) * 32 + n).to(torch.half)
+        # The reference comes from x, so a fill that did not land would leave
+        # both sides zero and every comparison below would hold.
+        self.assertGreater(x[-1, 0, -1].abs().max().item(), 0)
+        self.assertGreater(sum((d - 1) * st for d, st in zip(x.shape, x.stride())),
+                           torch.iinfo(torch.int32).max)
+
+        x.requires_grad_(True)
+        y = F.adaptive_max_pool2d(x, O)
+        for n in [0, N - 1]:
+            step = H // O
+            ref = F.adaptive_max_pool2d(x[n:n + 1, :, :step, :].detach().float().cpu(), (1, O))
+            self.assertEqual(y[n:n + 1, :, :1, :].detach().float().cpu(), ref)
+
+        y.sum().backward()
+        self.assertEqual(x.grad.sum(dtype=torch.float32).item(), y.numel())
+        for n in [0, N - 1]:
+            self.assertEqual(x.grad[n].sum(dtype=torch.float32).item(), y[n].numel())
+
+        del x, y, h_idx, w_idx
+        gc.collect()
+        torch.mps.empty_cache()
+
+    @largeMPSBufferTest(int(3.0 * 1024**3), device="mps")
+    @largeTensorTest("7GB", device="mps")
+    @serialTest()
+    def test_pool_thread_id_above_int32_max(self):
+        # Thread ids are uint, offsets are int64 on this path, so every tid past
+        # INT32_MAX goes through a widening cast. uint8 keeps 3.2G threads in
+        # 3 GiB, and kernel 1 makes the pooling an identity. The value varies
+        # along every dimension, so a thread landing on any wrong offset reads a
+        # different number.
+        # Built with in-place broadcast adds: a (P, P, P) temporary would cost
+        # more than the tensor under test. Terms stay under 256 so uint8 never
+        # wraps.
+        N, P = 3, 1024
+        hw = ((torch.arange(P, device="mps") % 5).view(P, 1) * 3
+              + torch.arange(P, device="mps") % 13).to(torch.uint8)
+        d_col = (((torch.arange(P, device="mps") % 7) * 16).to(torch.uint8)).view(P, 1, 1)
+        x = torch.empty(N, 1, P, P, P, dtype=torch.uint8, device="mps")
+        for n in range(N):
+            x[n] = hw
+            x[n] += d_col
+            x[n] += n
+        self.assertGreater(x.numel(), torch.iinfo(torch.int32).max)
+        self.assertLess(x.numel(), 2**32)
+
+        y = F.avg_pool3d(x, 1)
+        flat = y.view(-1)
+        for i in [0, 2**31 - 1, 2**31, 2**31 + 1, x.numel() - 1]:
+            n, rem = divmod(i, P**3)
+            d, rem = divmod(rem, P**2)
+            h, w = divmod(rem, P)
+            expected = (d % 7) * 16 + (h % 5) * 3 + w % 13 + n
+            self.assertEqual(flat[i].item(), expected, msg=f"wrong value at linear index {i}")
+
+        del x, y, flat, hw, d_col
+        gc.collect()
+        torch.mps.empty_cache()
+
+    @largeMPSBufferTest(int(4.1 * 1024**3), device="mps")
+    @largeTensorTest("9GB", device="mps")
+    @serialTest()
+    def test_pool_grid_above_2_32_threads(self):
+        # A 1-D dispatch width is taken modulo 2**32, so a run this size has to
+        # be split into several dispatches with the kernel adding the offset
+        # back. Without that, exactly 2**32 threads runs nothing at all.
+        N, D, H, W = 2, 2048, 2048, 513
+        hw = ((torch.arange(H, device="mps") % 5).view(H, 1) * 3
+              + torch.arange(W, device="mps") % 13).to(torch.uint8)
+        d_col = (((torch.arange(D, device="mps") % 7) * 16).to(torch.uint8)).view(D, 1, 1)
+        x = torch.empty(N, 1, D, H, W, dtype=torch.uint8, device="mps")
+        for n in range(N):
+            x[n] = hw
+            x[n] += d_col
+            x[n] += n
+        self.assertGreater(x.numel(), 2**32)
+
+        y = F.avg_pool3d(x, 1)
+        flat = y.view(-1)
+        # Straddle the chunk boundary at 2**32 - 1.
+        for i in [0, 2**32 - 2, 2**32 - 1, 2**32, x.numel() - 1]:
+            n, rem = divmod(i, D * H * W)
+            d, rem = divmod(rem, H * W)
+            h, w = divmod(rem, W)
+            expected = (d % 7) * 16 + (h % 5) * 3 + w % 13 + n
+            self.assertEqual(flat[i].item(), expected, msg=f"wrong value at linear index {i}")
+
+        del x, y, flat, hw, d_col
+        gc.collect()
+        torch.mps.empty_cache()
+
     @serialTest()
     def test_64bit_strided_unary(self):
         # https://github.com/pytorch/pytorch/issues/183419: slice's byte-stride
