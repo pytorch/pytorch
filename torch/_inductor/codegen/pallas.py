@@ -3058,7 +3058,7 @@ class PallasKernel(SIMDKernel):
         # that will be handled by the reshape at store time
 
         # For iter vars, we need to count how many dimensions come after in the output
-        for i, var in enumerate(used_iter_vars):
+        for var in used_iter_vars:
             var_name = str(var)
             if var in self.range_tree_nodes:
                 range_entry = self.range_tree_nodes[var]
