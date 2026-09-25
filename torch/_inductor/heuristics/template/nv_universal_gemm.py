@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch._inductor import config
@@ -28,6 +28,68 @@ autotuning_log = getArtifactLogger(__name__, "autotuning")
 # tile_k excluded because nvMatmulHeuristics and cutlass.operators use it to mean different things.
 # TODO(nikhilap): Extend config key for stages/split_k https://github.com/pytorch/pytorch/issues/177578
 ConfigKey = tuple[int, int, int, int]
+
+_NVFP4_MAX_PROFILING_CONFIGS = 3
+_NVFP4_AUTOTUNE_CUDAGRAPH_UNROLL = 16
+_NVFP4_PDL_MAX_M = 256
+_NVFP4_PDL_MIN_WIDTH = 1024
+_NVFP4_PDL_MAX_WIDTH = 65536
+
+# Hand-picked configs in the space nvMatmulHeuristics does not currently
+# explore. The final entries are NVFP4 oracle-best configs from an 83-shape
+# LLM sweep; together, the supplemental pool reaches the oracle-best config on
+# 73 of those shapes.
+_SUPPLEMENT_CONFIGS: tuple[ConfigKey, ...] = (
+    (64, 128, 1, 1),
+    (64, 128, 1, 2),
+    (64, 128, 1, 4),
+    (64, 128, 1, 8),
+    (64, 128, 1, 16),
+    (64, 256, 1, 8),
+    (64, 256, 1, 16),
+    (64, 32, 1, 2),
+    (64, 32, 1, 4),
+    (128, 64, 1, 1),
+    (128, 64, 1, 4),
+    (128, 64, 2, 1),
+    (128, 128, 1, 8),
+    (128, 128, 1, 16),
+    (128, 128, 2, 2),
+    (128, 128, 2, 4),
+    (128, 128, 2, 8),
+    (128, 192, 1, 1),
+    (128, 192, 1, 2),
+    (128, 192, 1, 4),
+    (128, 192, 2, 1),
+    (128, 192, 2, 2),
+    (128, 256, 1, 4),
+    (128, 256, 1, 8),
+    (128, 256, 1, 16),
+    (128, 256, 2, 1),
+    (128, 256, 2, 8),
+    (256, 192, 1, 1),
+    (256, 192, 1, 2),
+    (256, 192, 1, 4),
+    (256, 192, 2, 1),
+    (256, 256, 2, 1),
+    (256, 256, 2, 4),
+    (256, 256, 4, 2),
+    (256, 256, 4, 4),
+    (256, 256, 8, 1),
+    (256, 256, 8, 2),
+    (256, 128, 2, 1),
+    (256, 128, 2, 2),
+    (128, 64, 1, 2),
+    (128, 128, 1, 1),
+    (128, 128, 1, 4),
+    (128, 256, 1, 1),
+    (256, 64, 2, 1),
+    (256, 128, 4, 1),
+    (256, 192, 2, 2),
+    (256, 192, 4, 1),
+    (256, 192, 4, 2),
+    (256, 256, 4, 1),
+)
 
 
 @dataclass
@@ -77,6 +139,232 @@ def _make_config_key_from_heuristics_kernel(kernel) -> ConfigKey:
         kernel.cluster[0],
         kernel.cluster[1],
     )
+
+
+def is_nvfp4_problem(
+    is_scaled_gemm: bool,
+    input_dtype_a: torch.dtype,
+    input_dtype_b: torch.dtype | None,
+    scale_type_a: Any | None,
+    scale_type_b: Any | None,
+) -> bool:
+    """Whether this is the block-scaled NVFP4 recipe tuned below."""
+    from torch.nn.functional import ScalingType  # type: ignore[attr-defined]
+
+    return (
+        is_scaled_gemm
+        and input_dtype_a == torch.float4_e2m1fn_x2
+        and input_dtype_b == torch.float4_e2m1fn_x2
+        and scale_type_a == ScalingType.BlockWise1x16
+        and scale_type_b == ScalingType.BlockWise1x16
+    )
+
+
+def use_swap_ab_for_scaled_gemm(
+    input_dtype_a: torch.dtype,
+    input_dtype_b: torch.dtype,
+    scale_type_a: Any,
+    scale_type_b: Any,
+    logical_m: int,
+    logical_n: int,
+) -> bool:
+    """Expose the transposed candidate family for decode-shaped NVFP4."""
+    return config.nvgemm_swap_ab or (
+        logical_m <= 256
+        and logical_n >= 1024
+        and is_nvfp4_problem(
+            True,
+            input_dtype_a,
+            input_dtype_b,
+            scale_type_a,
+            scale_type_b,
+        )
+    )
+
+
+def nvgemm_max_configs(is_nvfp4: bool, available: int) -> int:
+    """Bound the measured candidate count while retaining the global cap."""
+    general_limit = config.nvgemm_max_profiling_configs
+    if not general_limit:
+        return available
+    if is_nvfp4:
+        return min(general_limit, _NVFP4_MAX_PROFILING_CONFIGS)
+    return general_limit
+
+
+def nvgemm_cudagraph_unroll(
+    is_scaled_gemm: bool,
+    input_dtype_a: torch.dtype,
+    input_dtype_b: torch.dtype | None,
+    output_shape: torch.Size | list[int] | tuple[int, ...],
+    scale_type_a: Any | None,
+    scale_type_b: Any | None,
+    allow_mixed_backend_unroll: bool = False,
+) -> int:
+    """Return one common CUDA-graph unroll for an NVGEMM problem.
+
+    Candidate-dependent unrolls would make the fixed replay overhead differ
+    across choices, so this policy depends only on the GEMM problem. The
+    scoped value is limited to the decode-range NVFP4 cases measured in LLM
+    inference. Other problems retain the global replay count so candidates in
+    the same autotune decision stay comparable.
+    """
+    from torch._inductor.utils import _is_only_autotune_backend
+
+    if (
+        is_nvfp4_problem(
+            is_scaled_gemm,
+            input_dtype_a,
+            input_dtype_b,
+            scale_type_a,
+            scale_type_b,
+        )
+        and len(output_shape) == 2
+        and output_shape[0] <= 256
+        and (_is_only_autotune_backend("NVGEMM") or allow_mixed_backend_unroll)
+    ):
+        return _NVFP4_AUTOTUNE_CUDAGRAPH_UNROLL
+    return max(1, config.autotune_cudagraph_benchmarking_iters)
+
+
+def nvgemm_cold_cache_shape(
+    output_shape: torch.Size | list[int] | tuple[int, ...],
+) -> bool:
+    """Whether to rotate weights for the small-M inference regime."""
+    return len(output_shape) == 2 and 0 < output_shape[0] <= 256
+
+
+def _logical_nvfp4_k(packed_k: int) -> int:
+    return 2 * packed_k
+
+
+def use_nvfp4_pdl(logical_m: int, logical_n: int, packed_k: int) -> bool:
+    """Whether an NVFP4 shape should use programmatic dependent launch."""
+    if config.nvgemm_pdl == "1":
+        return True
+    if config.nvgemm_pdl != "auto":
+        return False
+    logical_k = _logical_nvfp4_k(packed_k)
+    width_min = min(logical_n, logical_k)
+    width_max = max(logical_n, logical_k)
+    return (
+        0 < logical_m <= _NVFP4_PDL_MAX_M
+        and _NVFP4_PDL_MIN_WIDTH <= width_min
+        and width_max <= _NVFP4_PDL_MAX_WIDTH
+        # Hybrid models regress in this intermediate-width batch 33-64 band.
+        and not (32 < logical_m <= 64 and 2048 < width_min < 4096)
+    )
+
+
+def use_nvfp4_late_pdl_wait(
+    *, use_pdl: bool, sf_vec_size: int, logical_m: int, logical_k: int
+) -> bool:
+    """Whether descriptor setup should overlap the NVFP4 PDL wait."""
+    return (
+        use_pdl
+        and sf_vec_size == 16
+        and (
+            (logical_m <= 32 and logical_k <= 4096)
+            or (32 < logical_m <= 64 and logical_k <= 5120)
+        )
+    )
+
+
+def kernel_uses_pdl(kernel) -> bool:
+    return bool(
+        getattr(
+            getattr(kernel, "impl", None),
+            "use_pdl",
+            getattr(kernel.metadata.design, "use_pdl", False),
+        )
+    )
+
+
+def prefer_pdl_kernels(
+    non_efc_kernels: list[Any],
+    efc_kernels: list[Any],
+    use_pdl: bool,
+) -> tuple[list[Any], list[Any]]:
+    """Prefer generated PDL variants while retaining a safe base fallback."""
+    if not use_pdl:
+        return non_efc_kernels, efc_kernels
+    pdl_non_efc_kernels = [
+        kernel for kernel in non_efc_kernels if kernel_uses_pdl(kernel)
+    ]
+    pdl_efc_kernels = [kernel for kernel in efc_kernels if kernel_uses_pdl(kernel)]
+    if not pdl_non_efc_kernels and not pdl_efc_kernels:
+        return non_efc_kernels, efc_kernels
+    return pdl_non_efc_kernels, pdl_efc_kernels
+
+
+def _nvfp4_candidate_configs(
+    *,
+    logical_m: int,
+    logical_n: int,
+    packed_k: int,
+    n_is_static: bool,
+    swap_ab: bool,
+) -> tuple[OrderedSet[ConfigKey], OrderedSet[ConfigKey], OrderedSet[ConfigKey]]:
+    """Return primary, all-variant, and prefetch configs for one NVFP4 shape."""
+    targeted: OrderedSet[ConfigKey] = OrderedSet()
+    all_variants: OrderedSet[ConfigKey] = OrderedSet()
+    prefetch: OrderedSet[ConfigKey] = OrderedSet()
+
+    # nvMatmulHeuristics currently ranks only 128-wide MMA tiles for these
+    # large-M projections. The 256x192 c2x2 family is consistently faster.
+    if not swap_ab and logical_m >= 1024 and config.nvgemm_supplement_configs:
+        config_key = (256, 192, 2, 2)
+        targeted.add(config_key)
+        all_variants.add(config_key)
+
+    # Medium-M native-orientation QKV and projection winners.
+    if not swap_ab and 64 < logical_m <= 256:
+        targeted.update(
+            (
+                (128, 64, 1, 1),
+                (128, 64, 1, 2),
+                (128, 128, 1, 1),
+                (128, 128, 1, 2),
+            )
+        )
+        if logical_n <= 16384:
+            prefetch.update(
+                (
+                    (128, 64, 1, 4),
+                    (128, 128, 1, 2),
+                    (128, 128, 1, 4),
+                )
+            )
+
+    # Medium-M transposed projection winners from a complete candidate sweep.
+    if swap_ab and n_is_static and 64 < logical_m <= 256 and logical_n >= 1024:
+        targeted.update(((256, 128, 4, 1), (256, 64, 2, 2), (128, 64, 2, 2)))
+        if logical_n <= 16384:
+            prefetch.update(((256, 64, 2, 2), (256, 64, 4, 2), (128, 64, 2, 2)))
+
+    # Batch 33-64 transposed projection winners.
+    if swap_ab and n_is_static and 32 < logical_m <= 64 and logical_n >= 1024:
+        targeted.add((128, 64, 1, 1))
+        prefetch.update(((256, 64, 2, 2), (256, 64, 4, 2)))
+
+    # Native batch 33-64 down-projection winner.
+    if not swap_ab and 32 < logical_m <= 64 and logical_n >= 1024 and packed_k >= 3000:
+        targeted.add((256, 64, 2, 2))
+
+    # Decode-shaped transposed winners absent from the CUTLASS3 discovery set.
+    if swap_ab and n_is_static and logical_m <= 32 and logical_n >= 1024:
+        targeted.update(((128, 32, 1, 1), (128, 64, 1, 1), (128, 32, 4, 1)))
+        logical_k = _logical_nvfp4_k(packed_k)
+        if min(logical_n, logical_k) <= 4608 or max(logical_n, logical_k) <= 8192:
+            targeted.add((128, 32, 2, 1))
+            prefetch.add((128, 32, 4, 1))
+        if logical_m <= 8:
+            targeted.update(((128, 8, 1, 1), (128, 8, 4, 1), (128, 16, 1, 1)))
+
+    if config.nvgemm_supplement_configs:
+        targeted.update(_SUPPLEMENT_CONFIGS)
+
+    return targeted, all_variants, prefetch
 
 
 class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
@@ -208,204 +496,22 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         selected = matched[:count]
         result = [k for k, _ in selected]
 
-        # nvMatmulHeuristics currently ranks only 128-wide MMA tiles for the
-        # large-M NVFP4 projections used by FLUX.2.  A 256x192 tile with a
-        # 2x2 cluster is consistently 10-16% faster for its two repeated
-        # single-stream GEMMs (M=4608), while adding only one extra candidate
-        # to profile for each kernel family.
         targeted_configs: OrderedSet[ConfigKey] = OrderedSet()
         all_kernel_variants_configs: OrderedSet[ConfigKey] = OrderedSet()
         prefetch_configs: OrderedSet[ConfigKey] = OrderedSet()
-        if (
-            config.nvgemm_supplement_configs
-            and is_nvfp4
-            and not swap_ab
-            and logical_m >= 1024
-        ):
-            large_m_nvfp4_config = (256, 192, 2, 2)
-            targeted_configs.add(large_m_nvfp4_config)
-            all_kernel_variants_configs.add(large_m_nvfp4_config)
-
-        # nvMatmulHeuristics can omit useful one-cluster kernels for medium-M
-        # NVFP4 problems.  Keep the observed 128x64 variants plus the 128x128
-        # c1x1 QKV winner and let accurate CUDA-graph autotuning decide.
-        if is_nvfp4 and not swap_ab and 64 < logical_m <= 256:
-            targeted_configs.update(
-                (
-                    (128, 64, 1, 1),
-                    (128, 64, 1, 2),
-                    (128, 128, 1, 1),
-                    (128, 128, 1, 2),
-                )
+        if is_nvfp4:
+            (
+                targeted_configs,
+                all_kernel_variants_configs,
+                prefetch_configs,
+            ) = _nvfp4_candidate_configs(
+                logical_m=logical_m,
+                logical_n=logical_n,
+                packed_k=k,
+                n_is_static=n_is_static,
+                swap_ab=swap_ab,
             )
-            if n <= 16384:
-                prefetch_configs.update(
-                    (
-                        (128, 64, 1, 4),
-                        (128, 128, 1, 2),
-                        (128, 128, 1, 4),
-                    )
-                )
-
-        # In the swapped orientation, N is the original token count. A full
-        # 120-candidate sweep at M=128, timed with 16 CUDA-graph replays, found
-        # these configurations were the strongest across both narrow and wide
-        # output projections.
-        if (
-            is_nvfp4
-            and swap_ab
-            and n_is_static
-            and 64 < logical_m <= 256
-            and logical_n >= 1024
-        ):
-            medium_m_swap_configs: tuple[ConfigKey, ...] = (
-                (256, 128, 4, 1),
-                (256, 64, 2, 2),
-                (128, 64, 2, 2),
-            )
-            targeted_configs.update(medium_m_swap_configs)
-            if logical_n <= 16384:
-                prefetch_configs.update(
-                    (
-                        (256, 64, 2, 2),
-                        (256, 64, 4, 2),
-                        (128, 64, 2, 2),
-                    )
-                )
-
-        # The SM100 heuristic can also miss useful 64-wide swapped tactics at
-        # batch sizes between 33 and 64. A cross-model sweep found winners in
-        # both the 1x1 128x64 and prefetched 4x2 256x64 families. Keep one
-        # candidate from each family and let CUDA-graph autotuning reject them
-        # for nearby shapes where the existing 2x1 tactic remains faster.
-        if (
-            is_nvfp4
-            and swap_ab
-            and n_is_static
-            and 32 < logical_m <= 64
-            and logical_n >= 1024
-        ):
-            targeted_configs.add((128, 64, 1, 1))
-            prefetch_configs.update(((256, 64, 2, 2), (256, 64, 4, 2)))
-
-        # The corresponding native-orientation 256x64 c2x2 tactic is useful
-        # for batch-64 down projections with a comparatively large K.  Scope
-        # it to that regime so smaller-K QKV/output shapes do not pay for an
-        # extra candidate that has not shown a win.
-        if (
-            is_nvfp4
-            and not swap_ab
-            and 32 < logical_m <= 64
-            and logical_n >= 1024
-            and k >= 3000
-        ):
-            targeted_configs.add((256, 64, 2, 2))
-
-        # Once a small-M projection is transposed, the original token count is
-        # the kernel's N dimension. nvMatmulHeuristics' CUTLASS3 discovery set
-        # does not currently return the Blackwell block-scaled narrow-N
-        # tactics that win the common M=32 decode shape. Keep the empirically
-        # useful one-cluster 32/64-wide tactics in the autotune set. Retain the
-        # 4x1 32-wide tactic as well: it remains competitive for very wide
-        # projections and protects against device/clock-dependent ranking.
-        if (
-            is_nvfp4
-            and swap_ab
-            and n_is_static
-            and logical_m <= 32
-            and logical_n >= 1024
-        ):
-            targeted_configs.update(
-                (
-                    (128, 32, 1, 1),
-                    (128, 64, 1, 1),
-                    (128, 32, 4, 1),
-                )
-            )
-            # Prefetch startup is competitive when the projection is either
-            # skinny in one logical dimension or compact in both. Express the
-            # policy in logical matrix dimensions instead of checkpoint-sized
-            # cutoffs; FP4 K is packed two values per byte here.
-            logical_k = 2 * k
-            is_skinny_projection = min(logical_n, logical_k) <= 4608
-            is_compact_projection = max(logical_n, logical_k) <= 8192
-            if is_skinny_projection or is_compact_projection:
-                targeted_configs.add((128, 32, 2, 1))
-                prefetch_configs.add((128, 32, 4, 1))
-
-            # A complete CUDA-graph autotune sweep over representative batch-8
-            # projections found three additional narrow-N winners.
-            # Keep them scoped to the transposed M<=8 decode regime: broader
-            # M=32 sweeps retained the existing 32-wide configs, while adding
-            # these globally would increase tuning cost without measured gain.
-            if n <= 8:
-                targeted_configs.update(
-                    (
-                        (128, 8, 1, 1),
-                        (128, 8, 4, 1),
-                        (128, 16, 1, 1),
-                    )
-                )
-
-        # Supplement with hand-picked configs in the space nvMatmulHeuristics doesn't currently explore.
-        if config.nvgemm_supplement_configs:
-            _SUPPLEMENT_CONFIGS: OrderedSet[ConfigKey] = OrderedSet(
-                [
-                    (64, 128, 1, 1),
-                    (64, 128, 1, 2),
-                    (64, 128, 1, 4),
-                    (64, 128, 1, 8),
-                    (64, 128, 1, 16),
-                    (64, 256, 1, 8),
-                    (64, 256, 1, 16),
-                    (64, 32, 1, 2),
-                    (64, 32, 1, 4),
-                    (128, 64, 1, 1),
-                    (128, 64, 1, 4),
-                    (128, 64, 2, 1),
-                    (128, 128, 1, 8),
-                    (128, 128, 1, 16),
-                    (128, 128, 2, 2),
-                    (128, 128, 2, 4),
-                    (128, 128, 2, 8),
-                    (128, 192, 1, 1),
-                    (128, 192, 1, 2),
-                    (128, 192, 1, 4),
-                    (128, 192, 2, 1),
-                    (128, 192, 2, 2),
-                    (128, 256, 1, 4),
-                    (128, 256, 1, 8),
-                    (128, 256, 1, 16),
-                    (128, 256, 2, 1),
-                    (128, 256, 2, 8),
-                    (256, 192, 1, 1),
-                    (256, 192, 1, 2),
-                    (256, 192, 1, 4),
-                    (256, 192, 2, 1),
-                    (256, 256, 2, 1),
-                    (256, 256, 2, 4),
-                    (256, 256, 4, 2),
-                    (256, 256, 4, 4),
-                    (256, 256, 8, 1),
-                    (256, 256, 8, 2),
-                    (256, 128, 2, 1),
-                    (256, 128, 2, 2),
-                    # NVFP4 oracle-best configs (per-shape autotune winners over
-                    # an 83-shape LLM sweep) that nvMatmulHeuristics does not
-                    # propose; adding them lets autotune reach the oracle-best
-                    # config on 73/83 of those shapes.
-                    (128, 64, 1, 2),
-                    (128, 128, 1, 1),
-                    (128, 128, 1, 4),
-                    (128, 256, 1, 1),
-                    (256, 64, 2, 1),
-                    (256, 128, 4, 1),
-                    (256, 192, 2, 2),
-                    (256, 192, 4, 1),
-                    (256, 192, 4, 2),
-                    (256, 256, 4, 1),
-                ]
-            )
+        elif config.nvgemm_supplement_configs:
             targeted_configs.update(_SUPPLEMENT_CONFIGS)
 
         selected_keys = OrderedSet(

@@ -241,22 +241,18 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
         )
 
     def _use_late_pdl_wait(self, args: GemmArguments) -> bool:
-        # Descriptor/layout setup is a material fraction of small NVFP4 decode
-        # kernels. Keep the previously validated M<=32, K<=4096 scope, and use
-        # the same placement for the next decode bucket when K<=5120. The
-        # latter matches FlashInfer's prologue ordering and avoids giving up
-        # useful setup overlap on common batch-64 attention/MLP projections.
+        from torch._inductor.heuristics.template.nv_universal_gemm import (
+            use_nvfp4_late_pdl_wait,
+        )
+
         logical_m = getattr(args, "logical_m", None)
         if logical_m is None:
             logical_m = args.out.shape[-2]
-        logical_k = args.A.shape[-1]
-        return (
-            self.use_pdl
-            and self.sf_vec_size == 16
-            and (
-                (logical_m <= 32 and logical_k <= 4096)
-                or (32 < logical_m <= 64 and logical_k <= 5120)
-            )
+        return use_nvfp4_late_pdl_wait(
+            use_pdl=self.use_pdl,
+            sf_vec_size=self.sf_vec_size,
+            logical_m=logical_m,
+            logical_k=args.A.shape[-1],
         )
 
     @staticmethod

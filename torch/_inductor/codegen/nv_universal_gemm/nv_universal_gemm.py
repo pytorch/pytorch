@@ -32,7 +32,17 @@ from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
     _unwrap_efc_compiled_obj,
     CuTeDSLEpilogueArguments,
 )
-from torch._inductor.heuristics.template.nv_universal_gemm import get_nvgemm_heuristics
+from torch._inductor.heuristics.template.nv_universal_gemm import (
+    get_nvgemm_heuristics,
+    is_nvfp4_problem,
+    kernel_uses_pdl,
+    nvgemm_cold_cache_shape,
+    nvgemm_cudagraph_unroll,
+    nvgemm_max_configs,
+    prefer_pdl_kernels,
+    use_nvfp4_pdl,
+    use_swap_ab_for_scaled_gemm,
+)
 from torch._inductor.ir import (
     Buffer,
     ChoiceCaller,
@@ -49,12 +59,6 @@ from torch._logging import getArtifactLogger
 
 
 log = getArtifactLogger(__name__, "output_code")
-
-_NVFP4_MAX_PROFILING_CONFIGS = 3
-_NVFP4_AUTOTUNE_CUDAGRAPH_UNROLL = 16
-_NVFP4_PDL_MAX_M = 256
-_NVFP4_PDL_MIN_WIDTH = 1024
-_NVFP4_PDL_MAX_WIDTH = 65536
 
 
 class GemmVariant(Enum):
@@ -88,119 +92,6 @@ class GemmVariant(Enum):
 
             return DENSE_GEMM_REDUCTION_CAPABILITIES.supports_contract(plan)
         return False
-
-
-def _is_nvfp4_problem(
-    variant: GemmVariant,
-    input_dtype_a: torch.dtype,
-    input_dtype_b: torch.dtype | None,
-    scale_type_a: Any | None,
-    scale_type_b: Any | None,
-) -> bool:
-    from torch.nn.functional import ScalingType  # type: ignore[attr-defined]
-
-    return (
-        variant == GemmVariant.SCALED_GEMM
-        and input_dtype_a == torch.float4_e2m1fn_x2
-        and input_dtype_b == torch.float4_e2m1fn_x2
-        and scale_type_a == ScalingType.BlockWise1x16
-        and scale_type_b == ScalingType.BlockWise1x16
-    )
-
-
-def _use_swap_ab_for_scaled_gemm(
-    input_dtype_a: torch.dtype,
-    input_dtype_b: torch.dtype,
-    scale_type_a: Any,
-    scale_type_b: Any,
-    logical_m: int,
-    logical_n: int,
-) -> bool:
-    return config.nvgemm_swap_ab or (
-        logical_m <= 256
-        and logical_n >= 1024
-        and _is_nvfp4_problem(
-            GemmVariant.SCALED_GEMM,
-            input_dtype_a,
-            input_dtype_b,
-            scale_type_a,
-            scale_type_b,
-        )
-    )
-
-
-def _use_nvfp4_pdl(logical_m: int, logical_n: int, logical_k: int) -> bool:
-    if config.nvgemm_pdl == "1":
-        return True
-    if config.nvgemm_pdl != "auto":
-        return False
-    # Keep the automatic policy within the measured transformer decode
-    # envelope. End-to-end hybrid-model measurements at M=48 and M=64 regress
-    # with PDL when the smaller contracted/output width is intermediate-sized,
-    # even though the same kernels can be faster in isolation.
-    width_min = min(logical_n, logical_k)
-    width_max = max(logical_n, logical_k)
-    return (
-        0 < logical_m <= _NVFP4_PDL_MAX_M
-        and _NVFP4_PDL_MIN_WIDTH <= width_min
-        and width_max <= _NVFP4_PDL_MAX_WIDTH
-        and not (32 < logical_m <= 64 and 2048 < width_min < 4096)
-    )
-
-
-def _nvgemm_max_configs(is_nvfp4: bool, available: int) -> int:
-    general_limit = config.nvgemm_max_profiling_configs
-    if not general_limit:
-        return available
-    if is_nvfp4:
-        return min(general_limit, _NVFP4_MAX_PROFILING_CONFIGS)
-    return general_limit
-
-
-def _nvgemm_cudagraph_unroll(
-    variant: GemmVariant,
-    input_dtype_a: torch.dtype,
-    input_dtype_b: torch.dtype | None,
-    output_shape: torch.Size | list[int] | tuple[int, ...],
-    scale_type_a: Any | None,
-    scale_type_b: Any | None,
-    allow_mixed_backend_unroll: bool = False,
-) -> int:
-    """Return one common CUDA-graph unroll for an NVGEMM problem.
-
-    Candidate-dependent unrolls would make the fixed replay overhead differ
-    across choices, so this policy depends only on the GEMM problem.  The
-    scoped value is intentionally limited to the decode-range NVFP4 cases
-    measured in LLM inference. It is used when NVGEMM is the only backend or
-    when the caller explicitly applies the same unroll to every mixed-backend
-    choice. Other problems retain the global replay count so NVGEMM and
-    non-NVGEMM candidates in the same autotune decision stay comparable.
-    """
-    from torch._inductor.utils import _is_only_autotune_backend
-
-    if (
-        _is_nvfp4_problem(
-            variant,
-            input_dtype_a,
-            input_dtype_b,
-            scale_type_a,
-            scale_type_b,
-        )
-        and len(output_shape) == 2
-        and output_shape[0] <= 256
-        and (_is_only_autotune_backend("NVGEMM") or allow_mixed_backend_unroll)
-    ):
-        return _NVFP4_AUTOTUNE_CUDAGRAPH_UNROLL
-    return max(1, config.autotune_cudagraph_benchmarking_iters)
-
-
-def _nvgemm_cold_cache_shape(
-    output_shape: torch.Size | list[int] | tuple[int, ...],
-) -> bool:
-    # Apply cold-weight benchmarking uniformly to the small-M inference regime;
-    # the benchmarker derives the rotation-pool size from the actual operand
-    # footprint and device cache size.
-    return len(output_shape) == 2 and 0 < output_shape[0] <= 256
 
 
 class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
@@ -240,8 +131,8 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
         input_dtype_b = (
             self.input_tensor_meta[1].dtype if len(self.input_tensor_meta) > 1 else None
         )
-        self.cudagraph_unroll = _nvgemm_cudagraph_unroll(
-            variant,
+        self.cudagraph_unroll = nvgemm_cudagraph_unroll(
+            variant == GemmVariant.SCALED_GEMM,
             self.input_tensor_meta[0].dtype,
             input_dtype_b,
             self.output_tensor_meta.sizes,
@@ -253,14 +144,14 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
 
         self.cold_cache_benchmarking = (
             (_is_only_autotune_backend("NVGEMM") or has_output_scale)
-            and _is_nvfp4_problem(
-                variant,
+            and is_nvfp4_problem(
+                variant == GemmVariant.SCALED_GEMM,
                 self.input_tensor_meta[0].dtype,
                 input_dtype_b,
                 scale_type_a,
                 scale_type_b,
             )
-            and _nvgemm_cold_cache_shape(self.output_tensor_meta.sizes)
+            and nvgemm_cold_cache_shape(self.output_tensor_meta.sizes)
         )
         self.cudagraph_cold_cache_input_indices = (
             (1, 3) if self.cold_cache_benchmarking else ()
@@ -732,11 +623,7 @@ class NVUniversalGemmCaller(ChoiceCaller):
                 "use_prefetch",
                 getattr(self.kernel.metadata.design, "use_prefetch", False),
             ),
-            "use_pdl": getattr(
-                kernel_impl,
-                "use_pdl",
-                getattr(self.kernel.metadata.design, "use_pdl", False),
-            ),
+            "use_pdl": kernel_uses_pdl(self.kernel),
             "output_dtype": self.layout.dtype,
         }
         accumulator_type = self.accumulator_type
@@ -1012,8 +899,8 @@ def _add_nv_gemm_choices_impl(
     if mm_inputs is not None:
         input_dtype_a = mm_inputs.dtype(mm_inputs._mat1_idx)
         input_dtype_b = mm_inputs.dtype(mm_inputs._mat2_idx)
-        is_nvfp4 = _is_nvfp4_problem(
-            variant,
+        is_nvfp4 = is_nvfp4_problem(
+            variant == GemmVariant.SCALED_GEMM,
             input_dtype_a,
             input_dtype_b,
             scale_type_a,
@@ -1023,8 +910,7 @@ def _add_nv_gemm_choices_impl(
         logical_m = problem_n if swap_ab else problem_m
         logical_n = problem_m if swap_ab else problem_n
         if is_nvfp4:
-            # NVFP4 operands store two logical K values per byte.
-            scaled_use_pdl = _use_nvfp4_pdl(logical_m, logical_n, 2 * problem_k)
+            scaled_use_pdl = use_nvfp4_pdl(logical_m, logical_n, problem_k)
 
     non_efc_kernels, efc_kernels = partition_compatible_kernels(
         args,
@@ -1047,15 +933,18 @@ def _add_nv_gemm_choices_impl(
             if getattr(kernel, "supports_output_scale", False)
         ]
         efc_kernels = []
+    non_efc_kernels, efc_kernels = prefer_pdl_kernels(
+        non_efc_kernels, efc_kernels, scaled_use_pdl
+    )
     if not non_efc_kernels and not efc_kernels:
         log.debug("No compatible %s kernels found", variant.op_name)
         return
 
-    max_configs = _nvgemm_max_configs(
+    max_configs = nvgemm_max_configs(
         is_nvfp4,
         max(len(non_efc_kernels), len(efc_kernels)),
     )
-    fallback_max_configs = _nvgemm_max_configs(
+    fallback_max_configs = nvgemm_max_configs(
         False,
         max(len(non_efc_kernels), len(efc_kernels)),
     )
@@ -1378,7 +1267,7 @@ def add_nv_universal_scaled_gemm_choices(
             return
     else:
         m, n, _ = kernel_inputs.mnk_hinted()
-        if not _use_swap_ab_for_scaled_gemm(
+        if not use_swap_ab_for_scaled_gemm(
             kernel_inputs.dtype(kernel_inputs._mat1_idx),
             kernel_inputs.dtype(kernel_inputs._mat2_idx),
             scale_type_a,

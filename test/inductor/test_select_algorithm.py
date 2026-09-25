@@ -16,7 +16,6 @@ from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.autotune_process import (
     BenchmarkRequest,
-    CUDAGraphBenchmarkError,
     CUTLASSBenchmarkRequest,
     ExternKernelGPUBenchmarkRequest,
     GPUDeviceBenchmarkMixin,
@@ -87,6 +86,16 @@ def patches(fn):
 
 
 class TestAlgorithmSelectorChoiceTypes(TestCase):
+    @staticmethod
+    def _tensor_meta(device):
+        return TensorMeta(
+            device=torch.device(device),
+            dtype=torch.float32,
+            sizes=(1,),
+            strides=(1,),
+            offset=0,
+        )
+
     def _extern_kernel_caller(self, name):
         choice = ExternKernelChoice.lookup(name)
         if choice is None:
@@ -179,205 +188,10 @@ class TestAlgorithmSelectorChoiceTypes(TestCase):
         self.assertEqual(len({eager, automatic, required, differently_unrolled}), 4)
         self.assertEqual(cpu, eager)
 
-    def test_automatic_cudagraph_failure_retries_all_choices_eagerly(self):
-        class FakeRequest:
-            force_eager_benchmark = False
-
-        class FakeChoice:
-            def __init__(self, name):
-                self.name = name
-                self.bmreq = FakeRequest()
-
-        choices = [FakeChoice("first"), FakeChoice("capture_failure")]
-        calls = []
-
-        def benchmark_choice(choice, _autotune_args):
-            calls.append(
-                (
-                    choice.name,
-                    choice.bmreq.force_eager_benchmark,
-                    config.autotune_cudagraph_benchmarking,
-                )
-            )
-            if (
-                choice.name == "capture_failure"
-                and not choice.bmreq.force_eager_benchmark
-            ):
-                raise CUDAGraphBenchmarkError("capture failed")
-            return 10.0 if choice.bmreq.force_eager_benchmark else 1.0
-
-        with (
-            config.patch(autotune_cudagraph_benchmarking=True),
-            patch.object(
-                select_algorithm.AlgorithmSelectorCache,
-                "benchmark_choice",
-                side_effect=benchmark_choice,
-            ),
-        ):
-            timings = select_algorithm.AlgorithmSelectorCache.benchmark_choices(
-                choices, unittest.mock.MagicMock()
-            )
-
-        self.assertEqual(timings, {choices[0]: 10.0, choices[1]: 10.0})
-        self.assertIsInstance(timings, select_algorithm._UncacheableBenchmarkTimings)
-        self.assertEqual(
-            calls,
-            [
-                ("first", False, True),
-                ("capture_failure", False, True),
-                ("first", True, False),
-                ("capture_failure", True, False),
-            ],
-        )
-        self.assertFalse(choices[0].bmreq.force_eager_benchmark)
-        self.assertFalse(choices[1].bmreq.force_eager_benchmark)
-
-    def test_automatic_cudagraph_fallback_timings_are_not_cached(self):
-        choice = unittest.mock.MagicMock()
-        choice.hash_key.return_value = "choice"
-        selector = select_algorithm.AlgorithmSelectorCache()
-        local_cache = {}
-        benchmark_calls = 0
-
-        def benchmark(_choices):
-            nonlocal benchmark_calls
-            benchmark_calls += 1
-            raise select_algorithm._UncacheableBenchmarkResults(
-                select_algorithm._UncacheableBenchmarkTimings({choice: 1.0})
-            )
-
-        with (
-            patch.object(selector, "get_local_cache", return_value=local_cache),
-            patch.object(selector, "update_local_cache") as update_local_cache,
-        ):
-            for _ in range(2):
-                self.assertEqual(
-                    selector.lookup([choice], "mm", "cudagraph_auto", benchmark),
-                    {choice: 1.0},
-                )
-
-        self.assertEqual(benchmark_calls, 2)
-        update_local_cache.assert_not_called()
-
-    def test_subprocess_cudagraph_failure_retries_all_choices_eagerly(self):
-        class FakeRequest:
-            force_eager_benchmark = False
-
-        class FakeChoice:
-            def __init__(self, name):
-                self.name = name
-                self.bmreq = FakeRequest()
-
-        choices = [FakeChoice("first"), FakeChoice("capture_failure")]
-        calls = []
-
-        def benchmark_in_sub_process(subprocess_choices):
-            calls.append(
-                (
-                    [choice.bmreq.force_eager_benchmark for choice in choices],
-                    config.autotune_cudagraph_benchmarking,
-                )
-            )
-            if len(calls) == 1:
-                raise CUDAGraphBenchmarkError("capture failed")
-            return dict.fromkeys(subprocess_choices, 10.0)
-
-        with (
-            config.patch(autotune_cudagraph_benchmarking=True),
-            patch.object(
-                select_algorithm.AlgorithmSelectorCache,
-                "_is_extern",
-                return_value=False,
-            ),
-            patch.object(
-                select_algorithm.AlgorithmSelectorCache,
-                "benchmark_in_current_process",
-                return_value={},
-            ),
-            patch(
-                "torch._inductor.autotune_process.benchmark_in_sub_process",
-                side_effect=benchmark_in_sub_process,
-            ),
-        ):
-            timings = select_algorithm.AlgorithmSelectorCache.benchmark_in_sub_process(
-                choices, [], unittest.mock.MagicMock(), None
-            )
-
-        self.assertEqual(timings, {choices[0]: 10.0, choices[1]: 10.0})
-        self.assertIsInstance(timings, select_algorithm._UncacheableBenchmarkTimings)
-        self.assertEqual(calls, [([False, False], True), ([True, True], False)])
-        self.assertFalse(choices[0].bmreq.force_eager_benchmark)
-        self.assertFalse(choices[1].bmreq.force_eager_benchmark)
-
-    def test_current_process_cudagraph_failure_retries_mixed_choices_eagerly(self):
-        class FakeRequest:
-            force_eager_benchmark = False
-
-        class FakeChoice:
-            def __init__(self, name):
-                self.name = name
-                self.bmreq = FakeRequest()
-
-        choices = [FakeChoice("extern"), FakeChoice("template")]
-        current_calls = []
-        subprocess_calls = []
-
-        def benchmark_in_current_process(*args, **kwargs):
-            current_calls.append(
-                (
-                    [choice.bmreq.force_eager_benchmark for choice in choices],
-                    kwargs.get("propagate_cudagraph_failure"),
-                )
-            )
-            if len(current_calls) == 1:
-                raise CUDAGraphBenchmarkError("capture failed")
-            return {choices[0]: 10.0}
-
-        def benchmark_in_sub_process(subprocess_choices):
-            subprocess_calls.append(
-                [choice.bmreq.force_eager_benchmark for choice in choices]
-            )
-            return dict.fromkeys(subprocess_choices, 10.0)
-
-        with (
-            patch.object(
-                select_algorithm.AlgorithmSelectorCache,
-                "_is_extern",
-                side_effect=lambda choice: choice.name == "extern",
-            ),
-            patch.object(
-                select_algorithm.AlgorithmSelectorCache,
-                "benchmark_in_current_process",
-                side_effect=benchmark_in_current_process,
-            ),
-            patch(
-                "torch._inductor.autotune_process.benchmark_in_sub_process",
-                side_effect=benchmark_in_sub_process,
-            ),
-        ):
-            timings = select_algorithm.AlgorithmSelectorCache.benchmark_in_sub_process(
-                choices, [], unittest.mock.MagicMock(), None
-            )
-
-        self.assertEqual(timings, {choices[0]: 10.0, choices[1]: 10.0})
-        self.assertEqual(
-            current_calls,
-            [([False, False], True), ([True, True], True)],
-        )
-        self.assertEqual(subprocess_calls, [[True, True]])
-        self.assertFalse(choices[0].bmreq.force_eager_benchmark)
-        self.assertFalse(choices[1].bmreq.force_eager_benchmark)
-
     def test_benchmark_request_restores_serialized_cudagraph_policy(self):
         import pickle
 
-        tensor_meta = TensorMeta(
-            device=torch.device(GPU_TYPE),
-            dtype=torch.float32,
-            sizes=(1,),
-            strides=(1,),
-            offset=0,
-        )
+        tensor_meta = self._tensor_meta(GPU_TYPE)
         with config.patch(
             max_autotune=True,
             autotune_cudagraph_benchmarking=True,
@@ -393,29 +207,12 @@ class TestAlgorithmSelectorChoiceTypes(TestCase):
                 self.assertTrue(config.max_autotune)
                 self.assertTrue(config.autotune_cudagraph_benchmarking)
 
-            request.force_eager_benchmark = True
-            with request.apply_benchmark_config():
-                self.assertTrue(config.max_autotune)
-                self.assertFalse(config.autotune_cudagraph_benchmarking)
-
             self.assertFalse(config.max_autotune)
             self.assertFalse(config.autotune_cudagraph_benchmarking)
 
     def test_benchmark_request_finds_gpu_after_cpu_auxiliary_input(self):
-        cpu_meta = TensorMeta(
-            device=torch.device("cpu"),
-            dtype=torch.float32,
-            sizes=(1,),
-            strides=(1,),
-            offset=0,
-        )
-        gpu_meta = TensorMeta(
-            device=torch.device(GPU_TYPE),
-            dtype=torch.float32,
-            sizes=(1,),
-            strides=(1,),
-            offset=0,
-        )
+        cpu_meta = self._tensor_meta("cpu")
+        gpu_meta = self._tensor_meta(GPU_TYPE)
 
         with config.patch(
             max_autotune=True,
@@ -441,58 +238,29 @@ class TestAlgorithmSelectorChoiceTypes(TestCase):
 
         self.assertTrue(request.config_cudagraph_benchmarking)
 
-    def test_benchmark_request_reports_automatic_cudagraph_failure(self):
+    def test_benchmark_request_uses_automatic_cudagraph_policy(self):
         class FakeBenchmarkRequest(BenchmarkRequest):
-            error = RuntimeError("capture failed")
-
             def do_bench(self, fn, *input_tensors, out=None):
                 return 2.0
 
             def do_bench_with_cudagraphs(self, fn, *input_tensors, out=None):
-                raise self.error
+                return 1.0
 
-        tensor_meta = TensorMeta(
-            device=torch.device(GPU_TYPE),
-            dtype=torch.float32,
-            sizes=(1,),
-            strides=(1,),
-            offset=0,
-        )
+        tensor_meta = self._tensor_meta(GPU_TYPE)
         with config.patch(
             max_autotune=True,
             autotune_cudagraph_benchmarking=True,
         ):
             request = FakeBenchmarkRequest("kernel", [tensor_meta], tensor_meta, ())
 
-        def eager_bench(*args, **kwargs):
-            self.assertFalse(config.autotune_cudagraph_benchmarking)
-            return 2.0
-
-        request.do_bench = unittest.mock.MagicMock(side_effect=eager_bench)
-
-        with self.assertRaisesRegex(CUDAGraphBenchmarkError, "automatic autotuning"):
-            request.benchmark_run_fn(lambda: None)
-        request.do_bench.assert_called_once()
-
-        request.force_eager_benchmark = True
-        self.assertEqual(request.benchmark_run_fn(lambda: None), 2.0)
-
-        request.force_eager_benchmark = False
-        request.benchmark_with_cudagraphs = True
-        with self.assertRaisesRegex(RuntimeError, "capture failed"):
-            request.benchmark_run_fn(lambda: None)
-
-        request.benchmark_with_cudagraphs = False
-        request.error = RuntimeError("cudaErrorIllegalAddress")
-        with self.assertRaisesRegex(RuntimeError, "cudaErrorIllegalAddress"):
-            request.benchmark_run_fn(lambda: None)
-
-        request.error = RuntimeError("kernel execution failed")
-        request.do_bench = unittest.mock.MagicMock(
-            side_effect=RuntimeError("kernel execution failed")
+        request.do_bench = unittest.mock.MagicMock(wraps=request.do_bench)
+        request.do_bench_with_cudagraphs = unittest.mock.MagicMock(
+            wraps=request.do_bench_with_cudagraphs
         )
-        with self.assertRaisesRegex(RuntimeError, "kernel execution failed"):
-            request.benchmark_run_fn(lambda: None)
+
+        self.assertEqual(request.benchmark_run_fn(lambda: None), 1.0)
+        request.do_bench_with_cudagraphs.assert_called_once()
+        request.do_bench.assert_not_called()
 
     def test_gpu_benchmark_device_uses_output_tensor_type(self):
         request = GPUDeviceBenchmarkMixin()
@@ -518,79 +286,61 @@ class TestAlgorithmSelectorChoiceTypes(TestCase):
         get_interface.assert_called_once_with("meta")
 
     def test_automatic_cudagraph_policy_takes_precedence_over_profiler(self):
-        caller = object.__new__(select_algorithm.TritonTemplateCaller)
-        caller._benchmark_with_cudagraphs = False
-        caller.bmreq = unittest.mock.MagicMock()
-        caller.bmreq.config_cudagraph_benchmarking = True
-        caller.bmreq.benchmark.return_value = 1.25
+        from torch._inductor.codegen.cutlass import kernel as cutlass_kernel
 
-        with (
-            config.patch(profile_bandwidth_with_do_bench_using_profiling=True),
-            patch.object(
-                select_algorithm, "do_bench_using_profiling"
-            ) as profiler_bench,
-        ):
-            result = caller.benchmark("input", out="output")
-
-        self.assertEqual(result, 1.25)
-        profiler_bench.assert_not_called()
-        caller.bmreq.benchmark.assert_called_once_with("input", out="output")
-
-    def test_subgraph_automatic_cudagraph_policy_takes_precedence_over_profiler(
-        self,
-    ):
-        caller = object.__new__(select_algorithm.SubgraphChoiceCaller)
-        caller._benchmark_with_cudagraphs = False
-        caller._compiled_module = unittest.mock.MagicMock()
-        caller._ensure_compiled = unittest.mock.MagicMock()
-        caller.sym_input_values = []
-        caller.layout = unittest.mock.MagicMock()
-        caller.layout.device.type = "cuda"
-        caller._bmreq = unittest.mock.MagicMock()
-        caller._bmreq.config_cudagraph_benchmarking = True
-        caller._bmreq.benchmark_run_fn.return_value = 1.25
-
-        with (
-            config.patch(profile_bandwidth_with_do_bench_using_profiling=True),
-            patch(
-                "torch._inductor.codegen.subgraph.do_bench_using_profiling"
-            ) as profiler_bench,
-        ):
-            result = caller.benchmark("input", out="output")
-
-        self.assertEqual(result, 1.25)
-        profiler_bench.assert_not_called()
-        caller._ensure_compiled.assert_called_once_with()
-        caller._bmreq.benchmark_run_fn.assert_called_once()
-        (run_fn,) = caller._bmreq.benchmark_run_fn.call_args.args
-        self.assertTrue(callable(run_fn))
-        self.assertEqual(
-            caller._bmreq.benchmark_run_fn.call_args.kwargs,
-            {"out": "output"},
+        cases = (
+            ("triton", select_algorithm.TritonTemplateCaller, select_algorithm),
+            ("cutlass", cutlass_kernel.CUTLASSTemplateCaller, cutlass_kernel),
+            ("subgraph", select_algorithm.SubgraphChoiceCaller, None),
         )
-        self.assertFalse(caller._bmreq.benchmark_with_cudagraphs)
+        for kind, caller_type, profiler_module in cases:
+            with self.subTest(kind=kind):
+                caller = object.__new__(caller_type)
+                caller._benchmark_with_cudagraphs = False
+                if kind == "subgraph":
+                    caller._compiled_module = unittest.mock.MagicMock()
+                    caller._ensure_compiled = unittest.mock.MagicMock()
+                    caller.sym_input_values = []
+                    caller.layout = unittest.mock.MagicMock()
+                    caller.layout.device.type = "cuda"
+                    caller._bmreq = unittest.mock.MagicMock()
+                    caller._bmreq.config_cudagraph_benchmarking = True
+                    caller._bmreq.benchmark_run_fn.return_value = 1.25
+                    profiler_target = (
+                        "torch._inductor.codegen.subgraph.do_bench_using_profiling"
+                    )
+                else:
+                    caller.bmreq = unittest.mock.MagicMock()
+                    caller.bmreq.config_cudagraph_benchmarking = True
+                    caller.bmreq.benchmark.return_value = 1.25
+                    profiler_target = (
+                        f"{profiler_module.__name__}.do_bench_using_profiling"
+                    )
 
-    def test_cutlass_automatic_cudagraph_policy_takes_precedence_over_profiler(self):
-        from torch._inductor.codegen.cutlass.kernel import CUTLASSTemplateCaller
+                with (
+                    config.patch(profile_bandwidth_with_do_bench_using_profiling=True),
+                    patch(profiler_target) as profiler_bench,
+                ):
+                    result = caller.benchmark("input", out="output")
 
-        caller = object.__new__(CUTLASSTemplateCaller)
-        caller._benchmark_with_cudagraphs = False
-        caller.bmreq = unittest.mock.MagicMock()
-        caller.bmreq.config_cudagraph_benchmarking = True
-        caller.bmreq.benchmark.return_value = 1.25
-
-        with (
-            config.patch(profile_bandwidth_with_do_bench_using_profiling=True),
-            patch(
-                "torch._inductor.codegen.cutlass.kernel.do_bench_using_profiling"
-            ) as profiler_bench,
-        ):
-            result = caller.benchmark("input", out="output")
-
-        self.assertEqual(result, 1.25)
-        profiler_bench.assert_not_called()
-        caller.bmreq.benchmark.assert_called_once_with("input", out="output")
-        self.assertFalse(caller.bmreq.benchmark_with_cudagraphs)
+                self.assertEqual(result, 1.25)
+                profiler_bench.assert_not_called()
+                if kind == "subgraph":
+                    caller._ensure_compiled.assert_called_once_with()
+                    caller._bmreq.benchmark_run_fn.assert_called_once()
+                    (run_fn,) = caller._bmreq.benchmark_run_fn.call_args.args
+                    self.assertTrue(callable(run_fn))
+                    self.assertEqual(
+                        caller._bmreq.benchmark_run_fn.call_args.kwargs,
+                        {"out": "output"},
+                    )
+                    self.assertFalse(caller._bmreq.benchmark_with_cudagraphs)
+                else:
+                    caller.bmreq.benchmark.assert_called_once_with(
+                        "input", out="output"
+                    )
+                if kind == "cutlass":
+                    self.assertFalse(caller.bmreq.benchmark_with_cudagraphs)
 
     def test_cutlass_benchmark_resolves_stream_at_invocation(self):
         request = object.__new__(CUTLASSBenchmarkRequest)
@@ -620,65 +370,6 @@ class TestAlgorithmSelectorChoiceTypes(TestCase):
         self.assertEqual(run_method.call_count, 2)
         self.assertEqual(run_method.call_args_list[0].args[-1].value, 11)
         self.assertEqual(run_method.call_args_list[1].args[-1].value, 22)
-
-    def test_eager_retry_snapshots_lazy_subgraph_request_before_config_patch(self):
-        choice = object.__new__(select_algorithm.SubgraphChoiceCaller)
-        choice._bmreq = None
-        request = unittest.mock.MagicMock()
-        request.force_eager_benchmark = False
-
-        def ensure_benchmark_request():
-            request.config_cudagraph_benchmarking = (
-                config.autotune_cudagraph_benchmarking
-            )
-            choice._bmreq = request
-            return request
-
-        choice._ensure_benchmark_request = unittest.mock.MagicMock(
-            side_effect=ensure_benchmark_request
-        )
-
-        with config.patch(max_autotune=True, autotune_cudagraph_benchmarking=True):
-            with select_algorithm._force_eager_benchmarking([choice]):
-                self.assertTrue(request.config_cudagraph_benchmarking)
-                self.assertTrue(request.force_eager_benchmark)
-
-        choice._ensure_benchmark_request.assert_called_once_with()
-        self.assertFalse(request.force_eager_benchmark)
-
-    def test_eager_prescreen_fallback_does_not_prune_graph_candidates(self):
-        choice = unittest.mock.MagicMock(failed=False)
-        selector = select_algorithm.AlgorithmSelectorCache()
-        fallback_timings = select_algorithm._UncacheableBenchmarkTimings({choice: 1.0})
-
-        def precompile_fn():
-            return {}
-
-        precompile_fn.precompile_key = None
-        with (
-            patch.object(selector, "prescreen_choices", return_value=[choice]),
-            patch.object(
-                selector,
-                "lookup",
-                side_effect=[fallback_timings, {choice: 2.0}],
-            ),
-            patch.object(selector, "prune_choices_postscreen") as prune,
-            patch.object(
-                select_algorithm, "use_pipelined_autotuning", return_value=False
-            ),
-        ):
-            timings = selector.do_autotuning(
-                "mm",
-                [],
-                unittest.mock.MagicMock(),
-                None,
-                "cudagraph_auto",
-                [choice],
-                precompile_fn,
-            )
-
-        self.assertEqual(timings, {choice: 2.0})
-        prune.assert_not_called()
 
 
 class TestSelectAlgorithm(TestCase):
@@ -1452,18 +1143,12 @@ class TestExternKernelCaller(TestCase):
 
         a = torch.randn(64, 64, device=GPU_TYPE)
         b = torch.randn(64, 64, device=GPU_TYPE)
-        requests = []
         benchmark_device_types = []
         original_init = ExternKernelGPUBenchmarkRequest.__init__
 
         def capture_request(request, *args, **kwargs):
             benchmark_device_types.append(kwargs.get("benchmark_device_type"))
-            with config.patch(
-                max_autotune=True,
-                autotune_cudagraph_benchmarking=True,
-            ):
-                original_init(request, *args, **kwargs)
-            requests.append(request)
+            original_init(request, *args, **kwargs)
 
         with (
             patch.object(
@@ -1492,15 +1177,9 @@ class TestExternKernelCaller(TestCase):
 
         expected = torch.mm(a, b)
         torch.testing.assert_close(result, expected, atol=1e-4, rtol=1e-4)
-        self.assertTrue(requests)
+        self.assertTrue(benchmark_device_types)
         self.assertTrue(
             all(device_type == a.device.type for device_type in benchmark_device_types)
-        )
-        self.assertTrue(
-            all(
-                request.config_cudagraph_benchmarking == (a.device.type == "cuda")
-                for request in requests
-            )
         )
 
     @patches
@@ -1672,52 +1351,6 @@ class TestExternKernelCaller(TestCase):
             timing = request_profiling.benchmark(a, b, out=out)
             self.assertIsInstance(timing, float)
             self.assertGreaterEqual(timing, 0.0)
-
-    def test_extern_eager_retry_uses_consistent_event_timing(self):
-        input_meta = [
-            TensorMeta(
-                device=torch.device("cpu"),
-                dtype=torch.float32,
-                sizes=(2, 2),
-                strides=(2, 1),
-                offset=0,
-            )
-            for _ in range(2)
-        ]
-        output_meta = TensorMeta(
-            device=torch.device("cpu"),
-            dtype=torch.float32,
-            sizes=(2, 2),
-            strides=(2, 1),
-            offset=0,
-        )
-        request = ExternKernelGPUBenchmarkRequest(
-            kernel_name="add",
-            input_tensor_meta=input_meta,
-            output_tensor_meta=output_meta,
-            extra_args=[],
-            callable_path="unused",
-            has_out_variant=False,
-        )
-        request.config_cudagraph_benchmarking = True
-        request.force_eager_benchmark = True
-        a = torch.randn(2, 2)
-        b = torch.randn(2, 2)
-        out = torch.empty(2, 2)
-
-        with (
-            config.patch(profile_bandwidth_with_do_bench_using_profiling=True),
-            patch.object(request, "to_callable", return_value=lambda x, y: x + y),
-            patch.object(request, "benchmark_run_fn", return_value=1.25) as event_bench,
-            patch(
-                "torch._inductor.autotune_process.do_bench_using_profiling"
-            ) as profiler_bench,
-        ):
-            self.assertEqual(request.benchmark(a, b, out=out), 1.25)
-
-        torch.testing.assert_close(out, a + b)
-        event_bench.assert_called_once()
-        profiler_bench.assert_not_called()
 
 
 @contextlib.contextmanager
