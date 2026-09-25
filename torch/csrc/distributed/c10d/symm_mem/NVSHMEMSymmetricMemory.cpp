@@ -2,6 +2,7 @@
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryTypes.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/GroupStreamGuard.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/NVSHMEMSymmetricMemoryKernels.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.hpp>
@@ -278,6 +279,7 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
         "over direct load/store access (NVLink/P2P). NYI: signaling "
         "network-connected peers (e.g. via nvshmemx_signal_op).");
     c10::cuda::CUDAGuard device_guard(device_idx_);
+    GroupStreamGuard stream_guard(group_name_);
     launch_barrier_kernel(
         reinterpret_cast<uint32_t**>(pai_->signal_pads_dev_),
         channel,
@@ -294,6 +296,7 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
         "be reachable over direct load/store access (NVLink/P2P). NYI: "
         "signaling network-connected peers (e.g. via nvshmemx_signal_op).");
     c10::cuda::CUDAGuard device_guard(device_idx_);
+    GroupStreamGuard stream_guard(group_name_);
     launch_put_signal_kernel(
         reinterpret_cast<uint32_t**>(pai_->signal_pads_dev_),
         dst_rank,
@@ -311,6 +314,7 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
         "reachable over direct load/store access (NVLink/P2P). NYI: "
         "signaling network-connected peers (e.g. via nvshmemx_signal_op).");
     c10::cuda::CUDAGuard device_guard(device_idx_);
+    GroupStreamGuard stream_guard(group_name_);
     launch_wait_signal_kernel(
         reinterpret_cast<uint32_t**>(pai_->signal_pads_dev_),
         src_rank,
