@@ -60,7 +60,6 @@ from torch.testing._internal.common_device_type import (
     onlyAccelerator,
     onlyCPU,
     onlyCUDA,
-    skipCPUIf,
     skipMeta,
     skipXPUIf,
 )
@@ -14792,7 +14791,7 @@ class TestAutogradDeviceType(TestCase):
         self.assertEqual(result, x * 2)
 
     @skipXPUIf(True, "torch._C._scatter Not implemented on XPU, issue #143239")
-    @skipCPUIf(True, "DataParallel requires CUDA")
+    @onlyAccelerator
     def test_checkpointing_without_reentrant_dataparallel(self, device):
         """
         Verifies gradient correctness when checkpoint without reentrant autograd
