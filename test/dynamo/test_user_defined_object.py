@@ -1636,6 +1636,21 @@ class TestSimpleNamespace(TestCase):
             torch.compile(fn, backend="eager", fullgraph=True)(x)
         self.assertEqual(torch.compile(fn, backend="eager")(x)[0], fn(x)[0])
 
+    def test_str_subclass_key_in_sourced_namespace_graph_breaks(self):
+        # A namespace built in eager and passed in has a str subclass key in
+        # its instance dict; vars() must graph break instead of crashing.
+        class MyStr(str):
+            __slots__ = ()
+
+        ns = types.SimpleNamespace()
+        ns.__dict__[MyStr("a")] = 1
+
+        def fn(x, ns):
+            return len(vars(ns)), x + 1
+
+        x = torch.randn(3)
+        self.assertEqual(torch.compile(fn, backend="eager")(x, ns)[0], fn(x, ns)[0])
+
     @unittest.skipIf(sys.version_info < (3, 13), "positional argument added in 3.13")
     def test_non_constant_key_graph_breaks(self):
         # Formatting a tensor produces a StringFormatVariable, which is str-typed
