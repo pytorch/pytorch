@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: distributed"]
 
-import time
 from concurrent.futures import Future
 from dataclasses import dataclass, field
 from enum import auto, Enum
@@ -46,7 +45,10 @@ from torch.testing._internal.common_utils import (
     run_tests,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    _get_device_type,
+    DTensorContinuousTestBase,
     DTensorTestBase,
+    NUM_DEVICES,
     skip_if_lt_x_gpu,
     with_comms,
 )
@@ -305,12 +307,6 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
                         f"Expected AsyncSaveResponse, got {type(async_save_response_or_future)}"
                     )
                 save_future = async_save_response_or_future.upload_completion
-            # wait for the future to complete
-            t = time.monotonic()
-            while not save_future.done():
-                time.sleep(1)
-                print(f"still waiting... {time.monotonic() - t}")
-
             save_future.result()
         else:
             DCP.save(sd, checkpoint_id=self.temp_dir)
@@ -386,6 +382,64 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
         # Validate that the non-stateful state dict was replaced with the loaded state dict
         self.assertTrue(sd.set_sd_item_called)
 
+    @with_temp_dir
+    def test_no_dist(self):
+        # since comm's are not initialized in this method, `no_dist`
+        # is assumed False
+        DCP.save({}, checkpoint_id=self.temp_dir)
+        DCP.load({}, checkpoint_id=self.temp_dir)
+
+    @skip_if_lt_x_gpu(4)
+    @with_comms
+    @with_temp_dir
+    def test_partial_load(self):
+        model, optim = self._create_model(compile=False, model_type=ModelType.NONE)
+        _train(model, optim, train_steps=2)
+
+        dist_model, dist_optim = self._create_model(
+            compile=False, model_type=ModelType.FSDP
+        )
+        _train(dist_model, dist_optim, train_steps=2)
+
+        DCP.save(
+            {"model": dist_model, "optimizer": dist_optim}, checkpoint_id=self.temp_dir
+        )
+
+        dist_model, _ = self._create_model(compile=False, model_type=ModelType.FSDP)
+        DCP.load({"model": dist_model}, checkpoint_id=self.temp_dir)
+
+        dist_msd = get_model_state_dict(dist_model)
+        model_sd = get_model_state_dict(model)
+        self._verify_msd(model_sd, dist_msd)
+
+        # another way
+        loaded_model_sd = _load_state_dict_from_keys(
+            "model", checkpoint_id=self.temp_dir
+        )["model"]
+        self._verify_msd(model_sd, loaded_model_sd, offload_to_cpu=True)
+
+        loaded_optim_state = _load_state_dict_from_keys(
+            "optimizer.state", checkpoint_id=self.temp_dir
+        )["optimizer"]["state"]
+        self.assertNotIn("param_groups", loaded_optim_state)
+        for k, v in dist_optim.state_dict()["state"].items():
+            for optim_key in ["exp_avg", "exp_avg_sq", "step"]:
+                self._compare_tensor(
+                    loaded_optim_state[k][optim_key], v[optim_key], offload_to_cpu=True
+                )
+
+
+class TestCheckpointOrderingAndOverwrite(DTensorContinuousTestBase):
+    world_size = NUM_DEVICES
+
+    @classmethod
+    def backend_str(cls):
+        device = _get_device_type(cls.world_size)
+        if device == "cpu":
+            return "gloo"
+        backend = dist.get_default_backend_for_device(device)
+        return f"cpu:gloo,{device}:{backend}"
+
     @skip_if_lt_x_gpu(4)
     @with_comms
     @with_temp_dir
@@ -437,52 +491,6 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
 
         DCP.save(sd, checkpoint_id=self.temp_dir)
         DCP.load(sd, checkpoint_id=self.temp_dir)
-
-    @with_temp_dir
-    def test_no_dist(self):
-        # since comm's are not initialized in this method, `no_dist`
-        # is assumed False
-        DCP.save({}, checkpoint_id=self.temp_dir)
-        DCP.load({}, checkpoint_id=self.temp_dir)
-
-    @skip_if_lt_x_gpu(4)
-    @with_comms
-    @with_temp_dir
-    def test_partial_load(self):
-        model, optim = self._create_model(compile=False, model_type=ModelType.NONE)
-        _train(model, optim, train_steps=2)
-
-        dist_model, dist_optim = self._create_model(
-            compile=False, model_type=ModelType.FSDP
-        )
-        _train(dist_model, dist_optim, train_steps=2)
-
-        DCP.save(
-            {"model": dist_model, "optimizer": dist_optim}, checkpoint_id=self.temp_dir
-        )
-
-        dist_model, _ = self._create_model(compile=False, model_type=ModelType.FSDP)
-        DCP.load({"model": dist_model}, checkpoint_id=self.temp_dir)
-
-        dist_msd = get_model_state_dict(dist_model)
-        model_sd = get_model_state_dict(model)
-        self._verify_msd(model_sd, dist_msd)
-
-        # another way
-        loaded_model_sd = _load_state_dict_from_keys(
-            "model", checkpoint_id=self.temp_dir
-        )["model"]
-        self._verify_msd(model_sd, loaded_model_sd, offload_to_cpu=True)
-
-        loaded_optim_state = _load_state_dict_from_keys(
-            "optimizer.state", checkpoint_id=self.temp_dir
-        )["optimizer"]["state"]
-        self.assertNotIn("param_groups", loaded_optim_state)
-        for k, v in dist_optim.state_dict()["state"].items():
-            for optim_key in ["exp_avg", "exp_avg_sq", "step"]:
-                self._compare_tensor(
-                    loaded_optim_state[k][optim_key], v[optim_key], offload_to_cpu=True
-                )
 
     @skip_if_lt_x_gpu(4)
     @with_comms

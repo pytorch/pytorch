@@ -28,7 +28,17 @@ from ..codegen.rocm.ck_tile_universal_gemm_template import CKTileGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
 from ..codegen.wrapper import PythonWrapperCodegen
-from ..ir import Buffer, ChoiceCaller, IRNode, is_triton, is_unaligned, Layout
+from ..fx_utils import get_fake_args_kwargs
+from ..ir import (
+    Buffer,
+    ChoiceCaller,
+    ExternKernel,
+    FallbackKernel,
+    IRNode,
+    is_triton,
+    is_unaligned,
+    Layout,
+)
 from ..kernel_inputs import MMKernelInputs
 from ..lowering import (
     fallback_handler,
@@ -69,6 +79,7 @@ from .mm_common import (
     _fits_int32_buffer_span,
     _is_static_problem,
     _use_small_mm_pointwise,
+    blackwell_persistent_mm_grid,
     load_kernel_template,
     mm_args,
     mm_grid,
@@ -149,7 +160,7 @@ flydsl_mm_template = FlyDSLTemplate(
 
 blackwell_ws_persistent_tma_mm_template = TritonTemplate(
     name="blackwell_ws_persistent_tma",
-    grid=persistent_mm_grid,
+    grid=blackwell_persistent_mm_grid,
     source=load_kernel_template("triton_blackwell_ws_persistent_tma_mm"),
 )
 
@@ -185,6 +196,48 @@ aten__sparse_semi_structured_mm = ExternKernelChoice(
 
 aten__fp8_mm = ExternKernelChoice(
     torch._scaled_mm, "at::_scaled_mm_out", op_overload=aten._scaled_mm.out
+)
+
+
+def scaled_mm_v2_choice(
+    mat_a,
+    mat_b,
+    scale_a,
+    scale_b,
+    bias=None,
+    *,
+    recipe_a,
+    recipe_b,
+    out_dtype,
+    use_fast_accum,
+    kernel=aten._scaled_mm_v2.out,
+    **kwargs,
+):
+    """Restore v2's tensor-list schema from flat autotuning inputs."""
+    return kernel(
+        mat_a,
+        mat_b,
+        [scale_a],
+        [recipe_a],
+        [0],
+        [scale_b],
+        [recipe_b],
+        [0],
+        bias,
+        out_dtype,
+        [],
+        use_fast_accum,
+        **kwargs,
+    )
+
+
+aten__fp8_mm_v2 = ExternKernelChoice(
+    scaled_mm_v2_choice,
+    name="_scaled_mm_v2",
+    kernel_creator=functools.partial(
+        scaled_mm_v2_choice,
+        kernel=functools.partial(FallbackKernel.create, aten._scaled_mm_v2.default),
+    ),
 )
 
 
@@ -1233,6 +1286,78 @@ def get_scaling_options(
     )  # verify that shapes are supported by at least one existing pairing
 
 
+def scaled_mm_v2_constraint(
+    fx_node: torch.fx.Node, *args: Any, **kwargs: Any
+) -> tuple[tuple[Any, ...], dict[str, Any]]:
+    """Construct kernel-compatible layouts instead of preserving eager strides."""
+    if not isinstance(fx_node.target, torch._ops.OpOverload):
+        raise AssertionError("scaled_mm_v2_constraint expects an OpOverload")
+    names = [arg.name for arg in fx_node.target._schema.arguments]
+    operands = dict(zip(names, args))
+    operands.update(kwargs)
+
+    # The optimized lowering requires row-major A and column-major B. Keep
+    # compatible leading dimensions rather than making both matrices dense.
+    for name, inner_dim in (("self", 1), ("mat2", 0)):
+        matrix = operands[name]
+        strides = matrix.maybe_get_stride()
+        if strides is None or not V.graph.sizevars.statically_known_equals(
+            strides[inner_dim], 1
+        ):
+            m, n = matrix.get_size()
+            strides = (n, 1) if inner_dim == 1 else (1, m)
+            operands[name] = ExternKernel.require_exact_strides(matrix, strides)
+
+    device = operands["self"].get_device_or_error().type
+    for side in ("a", "b"):
+        scales = operands[f"scale_{side}"]
+        recipes = operands[f"recipe_{side}"]
+        constrained_scales = []
+        for index, (scale, recipe) in enumerate(zip(scales, recipes, strict=True)):
+            recipe = ScalingType(recipe)
+            if (
+                device == "cuda"
+                and not torch.version.hip
+                and recipe in (ScalingType.BlockWise1x128, ScalingType.BlockWise128x128)
+            ):
+                matrix = operands["self" if side == "a" else "mat2"]
+                if recipe == ScalingType.BlockWise128x128 and all(
+                    _blockwise128x128_shape_match(
+                        scale.get_size(), matrix.get_size(), transpose=side == "b"
+                    )[:2]
+                ):
+                    # Ambiguous scale shapes encode their orientation in strides.
+                    # Use FX metadata even when a producer's IR layout is flexible.
+                    _, fake_args, fake_kwargs = get_fake_args_kwargs(fx_node)
+                    fake_operands = dict(zip(names, fake_args))
+                    fake_operands.update(fake_kwargs)
+                    fake_scale = fake_operands[f"scale_{side}"][index]
+                    if not isinstance(fake_scale, torch.Tensor):
+                        raise AssertionError("expected scale tensor metadata")
+                    scale = L.constrain_to_fake_tensor(scale, fake_scale)
+                else:
+                    scale = ExternKernel.require_exact_strides(
+                        scale, (1, scale.get_size()[0])
+                    )
+            elif recipe != ScalingType.TensorWise:
+                # Rowwise and packed/swizzled MX/NV scales are dense. XPU
+                # consumes row-major DeepSeek scales via oneDNN as well.
+                scale = ExternKernel.require_contiguous(scale)
+            constrained_scales.append(scale)
+        operands[f"scale_{side}"] = constrained_scales
+
+    if operands.get("bias") is not None:
+        operands["bias"] = ExternKernel.require_contiguous(operands["bias"])
+
+    # Keep the caller's argument structure for mutation propagation (including out).
+    return tuple(operands[name] for name in names[: len(args)]), {
+        name: operands[name] for name in kwargs
+    }
+
+
+L.add_layout_constraint(aten._scaled_mm_v2, scaled_mm_v2_constraint)
+
+
 # Inductor has no template or extern choice that understands swizzled scale
 # layouts for _scaled_mm_v2 yet; defer those to the eager op. add_to_fallback_set
 # is False because this handler is invoked manually from the lowering below, not
@@ -1276,8 +1401,7 @@ def tuned_scaled_mm_v2(
     #     expresses MX/NVFP4, with NO_SWIZZLE)
     #   - multi-level scales (two-level NVFP4)
     #   - any non-fp32 block scale
-    # The eager op is called directly so it keeps its native v2 scale_b
-    # convention, unlike the v1 aten__fp8_mm choice used on the supported path.
+    # Call the eager v2 op directly to preserve its recipes and scale conventions.
     def fallback():
         # contraction_dim is a non-optional int[] in the schema (default []);
         # this lowering defaults it to None, so coerce before the eager call.
@@ -1312,6 +1436,9 @@ def tuned_scaled_mm_v2(
         or not is_single_level_scale
         or scale_a[0].dtype != torch.float32
     ):
+        return fallback()
+
+    if mat_a.get_device().type == "mps":
         return fallback()
 
     def _is_dynamic(sz) -> bool:
@@ -1374,10 +1501,19 @@ def tuned_scaled_mm_v2(
     kwarg_overrides = {}
 
     if use_aten_gemm_kernels():
-        templates_to_use.append(aten__fp8_mm)
-        kwarg_overrides[aten__fp8_mm.uid] = dict(
-            out_dtype=out_dtype, use_fast_accum=use_fast_accum
-        )
+        # DeepSeek v2 scale axes/padding differ from the legacy extern schema.
+        # Keep the existing v1 choice for compatible tensorwise/rowwise paths.
+        extern_kwargs = dict(out_dtype=out_dtype, use_fast_accum=use_fast_accum)
+        if (
+            scale_option_a in main_loop_scaling_types
+            or scale_option_b in main_loop_scaling_types
+        ):
+            choice = aten__fp8_mm_v2
+            extern_kwargs.update(recipe_a=recipe_a[0], recipe_b=recipe_b[0])
+        else:
+            choice = aten__fp8_mm
+        templates_to_use.append(choice)
+        kwarg_overrides[choice.uid] = extern_kwargs
 
     _, is_nonzero = _is_static_problem(layout)
 
@@ -1410,6 +1546,21 @@ def tuned_scaled_mm_v2(
             elif use_triton_scaling_template(
                 scale_option_a, scale_option_b, main_loop_scaling_types
             ):
+                # Shared inference accepts v1 RHS shapes; v2 loads require v2 extents.
+                for scale, mat, outer, recipe, transpose in (
+                    (scale_a_real, mat_a, m, scale_option_a, False),
+                    (scale_b_real, mat_b, n, scale_option_b, True),
+                ):
+                    scale_size = scale.get_size()
+                    if len(scale_size) != 2:
+                        raise RuntimeError("DeepSeek scales must be two-dimensional")
+                    if recipe == ScalingType.BlockWise1x128:
+                        for actual, expected in zip(
+                            scale_size, (outer, ceildiv(k, 128))
+                        ):
+                            V.graph.sizevars.check_equals(actual, expected)
+                    elif not is_desired_scaling(mat, scale_size, recipe, transpose):
+                        raise RuntimeError("DeepSeek scale shape does not match recipe")
                 overriders["TILE_SIZE_A"] = get_tile_size(scale_option_a)
                 overriders["TILE_SIZE_B"] = get_tile_size(scale_option_b)
                 overriders["SCALE_A_TRANSPOSED"] = _scale_is_transposed(
