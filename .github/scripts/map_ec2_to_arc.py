@@ -58,15 +58,16 @@ def strip_prefix(label: str, prefix: str) -> str:
     return label
 
 
-def load_mapping(arc_yaml: Path) -> dict[str, str]:
+def load_arc_yaml(arc_yaml: Path) -> dict:
     with open(arc_yaml) as f:
-        data = yaml.safe_load(f)
+        return yaml.safe_load(f)
+
+
+def load_mapping(data: dict) -> dict[str, str]:
     return data["runner_mapping"]
 
 
-def load_meta_only(arc_yaml: Path) -> set[str]:
-    with open(arc_yaml) as f:
-        data = yaml.safe_load(f)
+def load_meta_only(data: dict) -> set[str]:
     return set(data.get("meta_only_runners") or [])
 
 
@@ -76,14 +77,12 @@ def parse_lf_runners_arg(value: str) -> frozenset[str] | None:
     return runners or None
 
 
-def load_lf_config(arc_yaml: Path) -> tuple[str, frozenset[str]]:
-    """Read and validate arc.yaml's lf_allowlist (ci-infra#1081).
+def load_lf_config(data: dict) -> tuple[str, frozenset[str]]:
+    """Validate and extract arc.yaml's lf_allowlist (ci-infra#1081).
 
     Always validates mode, even if the caller ends up using --lf-runners
     instead, so a broken arc.yaml isn't masked by an override.
     """
-    with open(arc_yaml) as f:
-        data = yaml.safe_load(f)
     allowlist = data.get("lf_allowlist") or {}
     mode = allowlist.get("mode", "all")
     if mode not in LF_MODES:
@@ -97,7 +96,7 @@ def load_lf_config(arc_yaml: Path) -> tuple[str, frozenset[str]]:
 
 
 def resolve_lf_allowlist(
-    lf_runners_arg: str | None, arc_yaml: Path
+    lf_runners_arg: str | None, data: dict
 ) -> frozenset[str] | None:
     """--lf-runners wins when given (mode is still validated); else arc.yaml.
 
@@ -106,7 +105,7 @@ def resolve_lf_allowlist(
     arc.yaml would mean two different things depending on which of the two
     code paths reads it (ci-infra#1081).
     """
-    mode, runners = load_lf_config(arc_yaml)
+    mode, runners = load_lf_config(data)
     if lf_runners_arg is not None:
         return parse_lf_runners_arg(lf_runners_arg)
     if mode == "restricted":
@@ -134,9 +133,10 @@ def set_output(name: str, val: str) -> None:
 def main() -> None:
     args = parse_args()
     arc_yaml = get_arc_yaml_path()
-    mapping = load_mapping(arc_yaml)
-    meta_only = load_meta_only(arc_yaml)
-    lf_allowlist = resolve_lf_allowlist(args.lf_runners, arc_yaml)
+    data = load_arc_yaml(arc_yaml)
+    mapping = load_mapping(data)
+    meta_only = load_meta_only(data)
+    lf_allowlist = resolve_lf_allowlist(args.lf_runners, data)
     if lf_allowlist is not None:
         print(f"LF allowlist active ({len(lf_allowlist)} runners)")
 
