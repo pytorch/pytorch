@@ -73,7 +73,6 @@ logger = logging.getLogger(__name__)
 
 d_hid = 512
 batch_size = 64
-
 none_grad_d_hid = 32
 none_grad_microbatches = 8
 torch.manual_seed(0)

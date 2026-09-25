@@ -471,7 +471,6 @@ class TestDistributedReshardOnLoad(MultiProcContinuousTest):
         self.assertEqual([1], state_dict_to_load["bytes0"])
         self.assertEqual("string", state_dict_to_load["bytes1"])
 
-    @unittest.skipIf(TEST_XPU, "XPU does not support gloo backend")
     @parametrize("thread_count", _THREAD_COUNTS)
     def test_switch_between_sharded_tensor_to_tensor(self, thread_count) -> None:
         path = self.get_file_path()

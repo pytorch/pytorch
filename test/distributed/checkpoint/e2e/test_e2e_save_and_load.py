@@ -521,11 +521,7 @@ class TestCheckpointOrderingAndOverwrite(DTensorContinuousTestBase):
 class TestNoCPU(DTensorTestBase):
     @property
     def backend(self):
-        return (
-            torch.distributed.distributed_c10d.Backend.default_device_backend_map.get(
-                device_type
-            )
-        )
+        return dist.get_default_backend_for_device(self.device_type)
 
     @with_comms
     @requires_accelerator_dist_backend()
