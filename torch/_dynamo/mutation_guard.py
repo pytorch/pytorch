@@ -16,7 +16,6 @@ import functools
 import inspect
 import weakref
 from collections.abc import MutableMapping
-from dataclasses import dataclass
 from typing import Any
 
 import torch.nn
@@ -75,36 +74,39 @@ def ensure_patched(cls: Any) -> None:
         cls.__setattr__ = custom_setattr
 
 
-@dataclass(slots=True)
-class _GenerationTracker:
-    dynamic_classes: ExactWeakKeyDictionary = ExactWeakKeyDictionary()
+class GenerationTracker:
     generation: int = 0
+    dynamic_classes: ExactWeakKeyDictionary = ExactWeakKeyDictionary()
     generation_values: ExactWeakKeyDictionary = ExactWeakKeyDictionary()
 
-    def tag(self, obj: Any) -> None:
-        self.generation_values[obj] = self.generation
+    @classmethod
+    def tag(cls, obj: Any) -> None:
+        cls.generation_values[obj] = cls.generation
 
-    def mark_class_dynamic(self, cls: type[torch.nn.Module]) -> None:
+    @staticmethod
+    def mark_class_dynamic(cls: type[torch.nn.Module]) -> None:
         if not issubclass(cls, torch.nn.Module):
             raise AssertionError(f"Expected a torch.nn.Module subclass, got {cls}")
-        self.dynamic_classes[cls] = True
+        GenerationTracker.dynamic_classes[cls] = True
 
-    def get_generation_value(self, obj: Any) -> int:
-        return self.generation_values.get(obj, -1)
+    @classmethod
+    def get_generation_value(cls, obj: Any) -> int:
+        if obj not in cls.generation_values:
+            return -1
+        return cls.generation_values[obj]
 
-    def check(self, obj: Any) -> bool:
+    @classmethod
+    def check(cls, obj: Any) -> bool:
         return (
-            obj in self.generation_values
-            and self.generation_values[obj] == self.generation
+            obj in cls.generation_values
+            and cls.generation_values[obj] == cls.generation
         )
 
-    def clear(self) -> None:
-        self.generation = 0
-        self.dynamic_classes = ExactWeakKeyDictionary()
-        self.generation_values = ExactWeakKeyDictionary()
-
-
-GenerationTracker = _GenerationTracker()
+    @classmethod
+    def clear(cls) -> None:
+        cls.generation = 0
+        cls.dynamic_classes = ExactWeakKeyDictionary()
+        cls.generation_values = ExactWeakKeyDictionary()
 
 
 def is_dynamic_nn_module(obj: Any, is_export: bool) -> bool:
@@ -138,11 +140,7 @@ def install_generation_tagging_init() -> None:
     so we can detect nn.Module instances created dynamically inside forward methods.
     """
 
-    # try/except benchmarks faster than hasattr when we expect the attribute to be
-    # present nearly always (which should be true here on every call except the first).
-    try:
-        Module.___has_generation_tag_patch  # type: ignore[missing-attribute]
-    except AttributeError:
+    if getattr(Module, "___needs_generation_tag_patch", True):
         init = Module.__init__
 
         def patched_init(self: Module, *args: Any, **kwargs: Any) -> None:
@@ -159,6 +157,6 @@ def install_generation_tagging_init() -> None:
 
         Module.__setstate__ = patched_setstate  # type: ignore[method-assign]
 
-        Module.___has_generation_tag_patch = True  # type: ignore[attr-defined]
+        Module.___needs_generation_tag_patch = False  # type: ignore[attr-defined]
 
     GenerationTracker.generation += 1

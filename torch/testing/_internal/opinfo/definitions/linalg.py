@@ -42,6 +42,7 @@ from torch.testing._internal.common_utils import (
     skipIfNoNvmath,
     skipIfSlowGradcheckEnv,
     slowTest,
+    TEST_ACL,
     TEST_WITH_ROCM,
     TEST_WITH_TORCHINDUCTOR,
     TEST_XPU,
@@ -1722,6 +1723,15 @@ op_db: list[OpInfo] = [
                 dtypes=[torch.complex64],
                 active_if=IS_LINUX or IS_WINDOWS,
             ),
+            # COW input materializes in the oneDNN/ACL matmul path (addmm_impl_cpu_ -> mkldnn_matmul)
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCompositeCompliance",
+                "test_cow_input",
+                device_type="cpu",
+                dtypes=(torch.float32,),
+                active_if=TEST_ACL,
+            ),
         ),
     ),
     OpInfo(
@@ -1750,6 +1760,15 @@ op_db: list[OpInfo] = [
                 unittest.expectedFailure,
                 "TestOperatorSignatures",
                 "test_get_torch_func_signature_exhaustive",
+            ),
+            # COW input materializes in the oneDNN/ACL matmul path (addmm_impl_cpu_ -> mkldnn_matmul)
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCompositeCompliance",
+                "test_cow_input",
+                device_type="cpu",
+                dtypes=(torch.float32,),
+                active_if=TEST_ACL,
             ),
         ),
     ),
@@ -1833,6 +1852,15 @@ op_db: list[OpInfo] = [
                 "test_nnc_correctness",
                 device_type="cpu",
                 dtypes=(torch.long,),
+            ),
+            # COW input materializes in the oneDNN/ACL matmul path (addmm_impl_cpu_ -> mkldnn_matmul)
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCompositeCompliance",
+                "test_cow_input",
+                device_type="cpu",
+                dtypes=(torch.float32,),
+                active_if=TEST_ACL,
             ),
         ),
         decorators=[
@@ -2050,6 +2078,15 @@ op_db: list[OpInfo] = [
                 "test_compare_cpu",
                 active_if=(not TEST_XPU),
             ),
+            # COW input materializes in the oneDNN/ACL matmul path (addmm_impl_cpu_ -> mkldnn_matmul)
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCompositeCompliance",
+                "test_cow_input",
+                device_type="cpu",
+                dtypes=(torch.float32,),
+                active_if=TEST_ACL,
+            ),
         ),
     ),
     OpInfo(
@@ -2070,6 +2107,15 @@ op_db: list[OpInfo] = [
                 "TestCommon",
                 "test_compare_cpu",
                 active_if=(not TEST_XPU),
+            ),
+            # COW input materializes in the oneDNN/ACL matmul path (addmm_impl_cpu_ -> mkldnn_matmul)
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCompositeCompliance",
+                "test_cow_input",
+                device_type="cpu",
+                dtypes=(torch.float32,),
+                active_if=TEST_ACL,
             ),
         ),
     ),
@@ -2101,6 +2147,15 @@ op_db: list[OpInfo] = [
                 device_type="cuda",
                 dtypes=(torch.float32,),
             ),
+            # COW input materializes in the oneDNN/ACL matmul path (addmm_impl_cpu_ -> mkldnn_matmul)
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCompositeCompliance",
+                "test_cow_input",
+                device_type="cpu",
+                dtypes=(torch.float32,),
+                active_if=TEST_ACL,
+            ),
         ),
     ),
     OpInfo(
@@ -2119,6 +2174,15 @@ op_db: list[OpInfo] = [
                 unittest.skip("Tests different backward paths"),
                 "TestCommon",
                 "test_floating_inputs_are_differentiable",
+            ),
+            # COW input materializes in the oneDNN/ACL matmul path (addmm_impl_cpu_ -> mkldnn_matmul)
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCompositeCompliance",
+                "test_cow_input",
+                device_type="cpu",
+                dtypes=(torch.float32,),
+                active_if=TEST_ACL,
             ),
         ),
         decorators=[skipCPUIfNoLapack, skipCUDAIfNoMagmaAndNoLinalgsolver],

@@ -3174,6 +3174,14 @@ end
                                 pass
 
                         del buf_view
+
+                        if torch.accelerator.is_available():
+                            # Constants have just been copied to host, so most of
+                            # the caching allocator's pool is now free-but-reserved
+                            # slack. Hand it back before packaging, which otherwise
+                            # reserves its own allocation on top and sets a new
+                            # high-water mark.
+                            torch.accelerator.empty_cache()
                     else:
                         serialized_weights = b""
             else:

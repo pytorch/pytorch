@@ -5,6 +5,7 @@
 #include <c10/core/impl/PyInterpreter.h>
 #include <c10/util/Exception.h>
 #define PY_SSIZE_T_CLEAN
+#include <ATen/DeviceAccelerator.h>
 #include <ATen/EmptyTensor.h>
 #include <ATen/SparseCsrTensorUtils.h>
 #include <c10/util/Synchronized.h>
@@ -17,7 +18,6 @@
 #include <torch/csrc/dynamo/guards.h>
 #include <torch/csrc/inductor/inductor_ops.h>
 #include <torch/csrc/utils/disable_torch_function.h>
-#include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
@@ -25,7 +25,6 @@
 #include <torch/csrc/utils/pythoncapi_compat.h>
 #include <torch/csrc/utils/tensor_memoryformats.h>
 #include <torch/extension.h>
-#include <array>
 #include <cstdint>
 #include <cstring>
 
@@ -177,17 +176,51 @@ static std::string format_tensor_type_mismatch(
   return fail_reason.str();
 }
 
+namespace {
+thread_local std::optional<c10::DeviceIndex>* current_device_index_cache =
+    nullptr;
+
+at::DeviceIndex current_device_index() {
+  if (current_device_index_cache == nullptr) {
+    return at::accelerator::getDeviceIndex();
+  }
+  if (!current_device_index_cache->has_value()) {
+    *current_device_index_cache = at::accelerator::getDeviceIndex();
+  }
+  return **current_device_index_cache;
+}
+
+class CurrentDeviceIndexCacheScope {
+ public:
+  CurrentDeviceIndexCacheScope() : previous_cache_(current_device_index_cache) {
+    current_device_index_cache = &cache_;
+  }
+
+  ~CurrentDeviceIndexCacheScope() {
+    current_device_index_cache = previous_cache_;
+  }
+
+ private:
+  std::optional<c10::DeviceIndex> cache_;
+  std::optional<c10::DeviceIndex>* previous_cache_;
+};
+} // namespace
+
 TensorCheck::TensorCheck(
     const LocalState& state,
     PyTypeObject* pt,
     const at::Tensor& v,
     c10::DispatchKeySet dispatch_key_set,
     std::vector<std::optional<c10::SymInt>> dynamic_dims_sizes,
-    std::vector<std::optional<c10::SymInt>> dynamic_dims_strides)
+    std::vector<std::optional<c10::SymInt>> dynamic_dims_strides,
+    bool device_index_is_current)
     : pytype(pt),
       dispatch_key_(state.apply(dispatch_key_set).raw_repr()),
       dtype_(v.dtype().toScalarType()),
-      device_index_(v.device().index()),
+      device_index_(
+          device_index_is_current
+              ? std::nullopt
+              : std::optional<c10::DeviceIndex>(v.device().index())),
       requires_grad_(v.requires_grad()),
       sizes_(std::move(dynamic_dims_sizes)),
       strides_(std::move(dynamic_dims_strides)),
@@ -213,6 +246,20 @@ TensorCheck::TensorCheck(
       sizes_(std::move(dynamic_dims_sizes)),
       strides_(std::move(dynamic_dims_strides)),
       dim_(static_cast<int64_t>(sizes_.size())) {}
+
+bool TensorCheck::deviceIndexMatches(const c10::Device& device) const {
+  // An unset index means the guard accepts the current accelerator rather than
+  // a recorded one -- still a real check, just not a rank-specific one. Neither
+  // form admits a tensor on some other device.
+  //
+  // Deliberately not value_or(current_device_index()): that evaluates its
+  // argument eagerly, querying the current device on every recorded-index check
+  // too. This runs per guarded tensor, so keep the common path call-free.
+  if (device_index_.has_value()) {
+    return *device_index_ == device.index();
+  }
+  return device.index() == current_device_index();
+}
 
 // See note in guards.py [Note - On Export Tensor Guards]
 // Logic parallel to here must be maintained in python
@@ -245,7 +292,7 @@ bool TensorCheck::check(
     const c10::SymIntArrayRef& sym_strides,
     const bool& requires_grad) {
   if (dispatch_key_ != state.apply(dispatch_key_set).raw_repr() ||
-      dtype_ != dtype || device_index_ != device.index() ||
+      dtype_ != dtype || !deviceIndexMatches(device) ||
       requires_grad_ != requires_grad) {
     return false;
   }
@@ -293,9 +340,15 @@ std::string TensorCheck::check_verbose(
     fail_reason << "dtype mismatch. expected " << dtype_ << ", actual "
                 << v.dtype().toScalarType();
     return std::move(fail_reason).str();
-  } else if (device_index_ != v.device().index()) {
-    fail_reason << "Tensor device index mismatch. Expected device index to be "
-                << device_index_ << ", actual " << v.device().index();
+  } else if (!deviceIndexMatches(v.device())) {
+    fail_reason << "Tensor device index mismatch. Expected device index to be ";
+    if (device_index_.has_value()) {
+      fail_reason << static_cast<int>(*device_index_);
+    } else {
+      fail_reason << "the current device ("
+                  << static_cast<int>(current_device_index()) << ")";
+    }
+    fail_reason << ", actual " << static_cast<int>(v.device().index());
     return std::move(fail_reason).str();
   } else if (requires_grad_ != v.requires_grad()) {
     // return fmt::format("tensor requires_grad mismatch. expected {}",
@@ -893,46 +946,34 @@ static PyMethodDef GlobalStateGuard_methods[] = {
 static PyTypeObject GlobalStateGuardType = {PyVarObject_HEAD_INIT(nullptr, 0)
 };
 
-static PyObject* check_type_id(
-    PyObject* /*self*/,
-    PyObject* const* args,
-    Py_ssize_t nargs) {
+static PyObject* check_type_id(PyObject* dummy, PyObject* args) {
   // faster `lambda obj, expected: id(type(obj)) == expected`
-  HANDLE_TH_ERRORS
-  TORCH_CHECK(nargs == 2, "check_type_id expects two arguments");
-
-  auto expected{PyLong_AsVoidPtr(args[1])};
-  if (!expected && PyErr_Occurred()) {
+  PyObject* obj = nullptr;
+  unsigned long long expected = 0;
+  if (!PyArg_ParseTuple(args, "OK", &obj, &expected)) {
     return nullptr;
   }
-
-  if (Py_TYPE(args[0]) == expected) {
+  // NOLINTNEXTLINE(performance-no-int-to-ptr)
+  if (Py_TYPE(obj) == (void*)expected) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
   }
-  END_HANDLE_TH_ERRORS
 }
 
-static PyObject* check_obj_id(
-    PyObject* /*self*/,
-    PyObject* const* args,
-    Py_ssize_t nargs) {
+static PyObject* check_obj_id(PyObject* dummy, PyObject* args) {
   // faster `lambda obj, expected: id(obj) == expected`
-  HANDLE_TH_ERRORS
-  TORCH_CHECK(nargs == 2, "check_obj_id expects two arguments");
-
-  auto expected{PyLong_AsVoidPtr(args[1])};
-  if (!expected && PyErr_Occurred()) {
+  PyObject* obj = nullptr;
+  unsigned long long expected = 0;
+  if (!PyArg_ParseTuple(args, "OK", &obj, &expected)) {
     return nullptr;
   }
-
-  if (args[0] == expected) {
+  // NOLINTNEXTLINE(performance-no-int-to-ptr)
+  if (obj == (void*)expected) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
   }
-  END_HANDLE_TH_ERRORS
 }
 
 #if IS_PYTHON_3_12_PLUS
@@ -1000,7 +1041,7 @@ static bool check_size_stride(
    of size==1 dimensions.  Implemented in C++ as this is on the hot path.
   */
   if (!THPVariable_CheckExact(item) && !THPVariable_Check(item)) {
-    std::ostringstream msg;
+    std::stringstream msg;
     msg << "expected Tensor()";
     if (op_name) {
       msg << " for op: " << op_name;
@@ -1009,7 +1050,7 @@ static bool check_size_stride(
     return false;
   }
   if (!PyTuple_CheckExact(size) || !PyTuple_CheckExact(stride)) {
-    std::ostringstream msg;
+    std::stringstream msg;
     msg << "expected tuple()";
     if (op_name) {
       msg << " for op: " << op_name;
@@ -1017,10 +1058,10 @@ static bool check_size_stride(
     PyErr_SetString(PyExc_TypeError, std::move(msg).str().c_str());
     return false;
   }
-  const auto& tensor{THPVariable_Unpack(item)};
+  at::Tensor tensor = THPVariable_Unpack(item);
   int64_t ndim = tensor.ndimension();
   if (PyTuple_GET_SIZE(size) != ndim || PyTuple_GET_SIZE(stride) != ndim) {
-    std::ostringstream msg;
+    std::stringstream msg;
     msg << "wrong number of dimensions" << ndim;
     if (op_name) {
       msg << " for op: " << op_name;
@@ -1035,15 +1076,13 @@ static bool check_size_stride(
     return true;
   }
 
-  std::optional<std::ostringstream> msg;
+  std::optional<std::stringstream> msg;
   int num_errors = 0;
-  auto sizes = tensor.sizes();
-  auto strides = tensor.strides();
   for (auto i : c10::irange(ndim)) {
     int64_t want_size = THPUtils_unpackLong(PyTuple_GET_ITEM(size, i));
     int64_t want_stride = THPUtils_unpackLong(PyTuple_GET_ITEM(stride, i));
-    auto actual_size = sizes[i];
-    auto actual_stride = strides[i];
+    int64_t actual_size = tensor.size(i);
+    int64_t actual_stride = tensor.stride(i);
     if (want_size != actual_size ||
         // ignore stride differences when size is 1
         (want_stride != actual_stride && actual_size > 1)) {
@@ -1076,29 +1115,20 @@ static bool check_size_stride(
   return true;
 }
 
-static PyObject* assert_size_stride(
-    PyObject* /*self*/,
-    PyObject* const* args,
-    Py_ssize_t nargs) {
-  HANDLE_TH_ERRORS
-  TORCH_CHECK(
-      nargs == 3 || nargs == 4, "expect 3 args, with 1 optional str arg");
-  auto item{args[0]};
-  auto size{args[1]};
-  auto stride{args[2]};
+static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
+  PyObject* item = nullptr;
+  PyObject* size = nullptr;
+  PyObject* stride = nullptr;
+  const char* op_name = nullptr;
 
-  const char* op_name{
-      nargs == 4 ? PyUnicode_AsUTF8AndSize(args[3], nullptr) : nullptr};
-  if (nargs == 4 && !op_name) {
+  if (!PyArg_ParseTuple(args, "OOO|s", &item, &size, &stride, &op_name)) {
     return nullptr;
   }
-
   if (!check_size_stride(item, size, stride, op_name)) {
     return nullptr;
   }
 
   Py_RETURN_TRUE;
-  END_HANDLE_TH_ERRORS
 }
 
 static Py_ssize_t tuple_or_list_size(PyObject* obj) {
@@ -1118,20 +1148,13 @@ static PyObject* tuple_or_list_get_item(PyObject* obj, Py_ssize_t index) {
   return PyList_GET_ITEM(obj, index);
 }
 
-static PyObject* assert_size_stride_grouped(
-    PyObject* /*self*/,
-    PyObject* const* args,
-    Py_ssize_t nargs) {
-  HANDLE_TH_ERRORS
-  TORCH_CHECK(
-      nargs == 3 || nargs == 4, "expect 3 args, with 1 optional str arg");
-  auto items{args[0]};
-  auto sizes{args[1]};
-  auto strides{args[2]};
+static PyObject* assert_size_stride_grouped(PyObject* dummy, PyObject* args) {
+  PyObject* items = nullptr;
+  PyObject* sizes = nullptr;
+  PyObject* strides = nullptr;
+  const char* op_name = nullptr;
 
-  const char* op_name{
-      nargs == 4 ? PyUnicode_AsUTF8AndSize(args[3], nullptr) : nullptr};
-  if (nargs == 4 && !op_name) {
+  if (!PyArg_ParseTuple(args, "OOO|s", &items, &sizes, &strides, &op_name)) {
     return nullptr;
   }
 
@@ -1139,7 +1162,7 @@ static PyObject* assert_size_stride_grouped(
   Py_ssize_t num_sizes = tuple_or_list_size(sizes);
   Py_ssize_t num_strides = tuple_or_list_size(strides);
   if (num_items < 0 || num_sizes < 0 || num_strides < 0) {
-    std::ostringstream msg;
+    std::stringstream msg;
     msg << "expected tuple() or list()";
     if (op_name) {
       msg << " for op: " << op_name;
@@ -1148,7 +1171,7 @@ static PyObject* assert_size_stride_grouped(
     return nullptr;
   }
   if (num_sizes != num_items || num_strides != num_items) {
-    std::ostringstream msg;
+    std::stringstream msg;
     msg << "expected equal numbers of items, sizes, and strides";
     if (op_name) {
       msg << " for op: " << op_name;
@@ -1168,30 +1191,22 @@ static PyObject* assert_size_stride_grouped(
   }
 
   Py_RETURN_TRUE;
-  END_HANDLE_TH_ERRORS
 }
 
-static PyObject* assert_alignment(
-    PyObject* /*self*/,
-    PyObject* const* args,
-    Py_ssize_t nargs) {
+static PyObject* assert_alignment(PyObject* dummy, PyObject* args) {
   /*
    * Asserts that a given tensor meets certain alignment.
    * This C++ version of torch._inductor.utils.tensor_is_aligned
    */
-  HANDLE_TH_ERRORS
-  TORCH_CHECK(
-      nargs == 2 || nargs == 3, "expect 2 args, with 1 optional str arg");
-  auto item{args[0]};
-  auto alignment{THPUtils_unpackUInt64(args[1])};
-  const char* op_name{
-      nargs == 3 ? PyUnicode_AsUTF8AndSize(args[2], nullptr) : nullptr};
-  if (nargs == 3 && !op_name) {
+  PyObject* item = nullptr;
+  unsigned long alignment = 0;
+  const char* op_name = nullptr;
+
+  if (!PyArg_ParseTuple(args, "Ok|s", &item, &alignment, &op_name)) {
     return nullptr;
   }
-
   if (!THPVariable_CheckExact(item) && !THPVariable_Check(item)) {
-    std::ostringstream msg;
+    std::stringstream msg;
     msg << "expected Tensor()";
     if (op_name) {
       msg << " for op: " << op_name;
@@ -1200,7 +1215,7 @@ static PyObject* assert_alignment(
     return nullptr;
   }
   if (alignment == 0) {
-    std::ostringstream msg;
+    std::stringstream msg;
     msg << "alignment cannot be 0";
     if (op_name) {
       msg << " in op: " << op_name;
@@ -1209,11 +1224,12 @@ static PyObject* assert_alignment(
     return nullptr;
   }
 
-  const auto& tensor{THPVariable_Unpack(item)};
+  at::Tensor tensor = THPVariable_Unpack(item);
+
   int64_t storage_offset = tensor.storage_offset();
   size_t itemsize = tensor.itemsize();
   if (storage_offset * itemsize % alignment != 0) {
-    std::ostringstream msg;
+    std::stringstream msg;
     if (op_name) {
       msg << "\nError in op: " << op_name;
     }
@@ -1225,10 +1241,9 @@ static PyObject* assert_alignment(
   }
 
   Py_RETURN_TRUE;
-  END_HANDLE_TH_ERRORS
 }
 
-static PyObject* copy_if_misaligned(PyObject* /*self*/, PyObject* item) {
+static PyObject* copy_if_misaligned(PyObject* dummy, PyObject* item) {
   /*
    * If the tensor's data pointer is not 16-byte aligned, return a
    * clone that preserves strides. Otherwise return the original
@@ -1246,7 +1261,7 @@ static PyObject* copy_if_misaligned(PyObject* /*self*/, PyObject* item) {
     return nullptr;
   }
 
-  const auto& tensor{THPVariable_Unpack(item)};
+  at::Tensor tensor = THPVariable_Unpack(item);
 
   if (reinterpret_cast<uintptr_t>(tensor.data_ptr()) % kAlignment == 0) {
     // Already aligned – return the original tensor.
@@ -1269,52 +1284,62 @@ static PyObject* copy_if_misaligned(PyObject* /*self*/, PyObject* item) {
   return THPVariable_Wrap(std::move(result));
 }
 
-static at::SmallVector<int64_t, 8> unwrap_size_tuple(PyObject* obj) {
+template <typename T>
+static void unwrap_size_tuple(PyObject* obj, T& output) {
   TORCH_CHECK(PyTuple_CheckExact(obj));
-  auto len{PyTuple_GET_SIZE(obj)};
-  at::SmallVector<int64_t, 8> ret;
-  ret.reserve(len);
-  for (Py_ssize_t i{0}; i < len; ++i) {
-    auto result{PyLong_AsSsize_t(PyTuple_GET_ITEM(obj, i))};
+  size_t len = PyTuple_GET_SIZE(obj);
+  output.reserve(len);
+  for (size_t i = 0; i < len; ++i) {
+    auto result = PyLong_AsSsize_t(PyTuple_GET_ITEM(obj, i));
     TORCH_CHECK(result >= 0);
-    ret.emplace_back(result);
+    output.emplace_back(result);
   }
-  return ret;
 }
 
-template <c10::DeviceType device_type>
+template <typename T>
+static void _parse_empty_strided_args(
+    PyObject* args,
+    T& sizes,
+    T& strides,
+    at::ScalarType& dtype) {
+  TORCH_CHECK(PyTuple_CheckExact(args));
+  TORCH_CHECK(PyTuple_GET_SIZE(args) == 3);
+  // note PyTuple_GET_ITEM returns a borrowed ref, so no need for refcounts
+  unwrap_size_tuple(PyTuple_GET_ITEM(args, 0), sizes);
+  unwrap_size_tuple(PyTuple_GET_ITEM(args, 1), strides);
+  PyObject* py_dtype = PyTuple_GET_ITEM(args, 2);
+  TORCH_CHECK(THPDtype_Check(py_dtype));
+  dtype = reinterpret_cast<THPDtype*>(py_dtype)->scalar_type;
+}
+
 static PyObject* _empty_strided_device(
-    PyObject* const* args,
-    Py_ssize_t nargs,
+    PyObject* dummy,
+    PyObject* args,
+    c10::DeviceType device_type,
     bool is_pinned = false) {
   HANDLE_TH_ERRORS;
-  TORCH_CHECK(nargs == 3);
-
-  auto sizes{unwrap_size_tuple(args[0])};
-  auto strides{unwrap_size_tuple(args[1])};
-
-  auto* py_dtype{args[2]};
-  TORCH_CHECK(THPDtype_Check(py_dtype));
-  auto dtype{reinterpret_cast<THPDtype*>(py_dtype)->scalar_type};
-
-  if constexpr (device_type == c10::DeviceType::CPU) {
+  at::SmallVector<int64_t, 8> sizes;
+  at::SmallVector<int64_t, 8> strides;
+  at::ScalarType dtype{at::ScalarType::Undefined};
+  _parse_empty_strided_args(args, sizes, strides, dtype);
+  if (device_type == c10::DeviceType::CPU) {
     return THPVariable_Wrap(
         at::detail::empty_strided_cpu(sizes, strides, dtype, is_pinned));
   }
 #ifdef USE_CUDA
-  else if constexpr (device_type == c10::DeviceType::CUDA) {
+  else if (device_type == c10::DeviceType::CUDA) {
     return THPVariable_Wrap(at::detail::empty_strided_cuda(
         sizes, strides, dtype, c10::DeviceType::CUDA));
   }
 #endif
 #ifdef USE_XPU
-  else if constexpr (device_type == c10::DeviceType::XPU) {
+  else if (device_type == c10::DeviceType::XPU) {
     return THPVariable_Wrap(at::detail::empty_strided_xpu(
         sizes, strides, dtype, c10::DeviceType::XPU));
   }
 #endif
 #ifdef USE_MTIA
-  else if constexpr (device_type == c10::DeviceType::MTIA) {
+  else if (device_type == c10::DeviceType::MTIA) {
     return THPVariable_Wrap(at::detail::empty_strided_mtia(
         sizes, strides, dtype, c10::DeviceType::MTIA));
   }
@@ -1327,71 +1352,83 @@ static PyObject* _empty_strided_device(
   END_HANDLE_TH_ERRORS;
 }
 
-static PyObject* _empty_strided_cpu(
-    PyObject* /*self*/,
-    PyObject* const* args,
-    Py_ssize_t nargs) {
+static PyObject* _empty_strided_cpu(PyObject* dummy, PyObject* args) {
   // at::empty_strided is surprising slow.  This is a lower-overhead
   // version that saves ~2us on every allocation.
-  return _empty_strided_device<c10::DeviceType::CPU>(args, nargs);
+  return _empty_strided_device(dummy, args, c10::DeviceType::CPU);
 }
 
-static PyObject* _empty_strided_cpu_pinned(
-    PyObject* /*self*/,
-    PyObject* const* args,
-    Py_ssize_t nargs) {
+static PyObject* _empty_strided_cpu_pinned(PyObject* dummy, PyObject* args) {
   // at::empty_strided is surprising slow.  This is a lower-overhead
   // version that saves ~2us on every allocation.
-  return _empty_strided_device<c10::DeviceType::CPU>(
-      args, nargs, /*is_pinned=*/true);
+  return _empty_strided_device(
+      dummy, args, c10::DeviceType::CPU, /*is_pinned=*/true);
 }
 
-static PyObject* _empty_strided_cuda(
-    PyObject* /*self*/,
-    PyObject* const* args,
-    Py_ssize_t nargs) {
+static PyObject* _empty_strided_cuda(PyObject* dummy, PyObject* args) {
   // at::empty_strided is surprising slow.  This is lower-overhead.
-  return _empty_strided_device<c10::DeviceType::CUDA>(args, nargs);
+  return _empty_strided_device(dummy, args, c10::DeviceType::CUDA);
 }
 
-static PyObject* _empty_strided_xpu(
-    PyObject* /*self*/,
-    PyObject* const* args,
-    Py_ssize_t nargs) {
+static PyObject* _empty_strided_xpu(PyObject* dummy, PyObject* args) {
   // at::empty_strided is surprising slow.  This is lower-overhead.
-  return _empty_strided_device<c10::DeviceType::XPU>(args, nargs);
+  return _empty_strided_device(dummy, args, c10::DeviceType::XPU);
 }
 
-static PyObject* _empty_strided_mtia(
-    PyObject* /*self*/,
-    PyObject* const* args,
-    Py_ssize_t nargs) {
-  return _empty_strided_device<c10::DeviceType::MTIA>(args, nargs);
+static PyObject* _empty_strided_mtia(PyObject* dummy, PyObject* args) {
+  return _empty_strided_device(dummy, args, c10::DeviceType::MTIA);
 }
 
-static PyObject* _reinterpret_tensor(
-    PyObject* /*self*/,
-    PyObject* const* args,
-    Py_ssize_t nargs) {
+static PyObject* _reinterpret_tensor(PyObject* dummy, PyObject* args) {
   HANDLE_TH_ERRORS;
-  TORCH_CHECK(
-      nargs == 3 || nargs == 4, "expects 3 args, with 1 optional int arg");
+  static PythonArgParser parser(
+      {"_reinterpret_tensor(Tensor base, IntArrayRef sizes, IntArrayRef strides, int64_t offset_increment=0)"},
+      /*traceable=*/true);
 
-  TORCH_CHECK(THPVariable_CheckExact(args[0]) || THPVariable_Check(args[0]));
-  const auto& self{THPVariable_Unpack(args[0])};
+  ParsedArgs<4> parsed_args;
+  auto r = parser.parse(args, /*kwargs=*/nullptr, parsed_args);
 
-  auto sizes{unwrap_size_tuple(args[1])};
-  auto strides{unwrap_size_tuple(args[2])};
+  Tensor self = r.tensor(0);
+  auto sizes = r.intlist(1);
+  auto strides = r.intlist(2);
+  auto offset_increment = r.toInt64(3);
 
-  auto offset_increment{nargs == 4 ? PyLong_AsLongLong(args[3]) : 0};
-  if (offset_increment == -1 && PyErr_Occurred()) {
-    return nullptr;
-  }
+  auto res = torch::inductor::_reinterpret_tensor(
+      self, sizes, strides, offset_increment);
+  return torch::autograd::utils::wrap(res);
 
-  return THPVariable_Wrap(torch::inductor::_reinterpret_tensor(
-      self, sizes, strides, offset_increment));
   END_HANDLE_TH_ERRORS;
 }
+
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
+static PyMethodDef _methods[] = {
+    {"check_type_id", check_type_id, METH_VARARGS, nullptr},
+    {"check_obj_id", check_obj_id, METH_VARARGS, nullptr},
+    {"assert_size_stride", assert_size_stride, METH_VARARGS, nullptr},
+    {"assert_size_stride_grouped",
+     assert_size_stride_grouped,
+     METH_VARARGS,
+     nullptr},
+    {"assert_alignment", assert_alignment, METH_VARARGS, nullptr},
+    {"copy_if_misaligned", copy_if_misaligned, METH_O, nullptr},
+    {"dict_version", dict_version, METH_O, nullptr},
+    {"_empty_strided_cpu", _empty_strided_cpu, METH_VARARGS, nullptr},
+    {"_empty_strided_cpu_pinned",
+     _empty_strided_cpu_pinned,
+     METH_VARARGS,
+     nullptr},
+    {"_empty_strided_cuda", _empty_strided_cuda, METH_VARARGS, nullptr},
+    {"_empty_strided_xpu", _empty_strided_xpu, METH_VARARGS, nullptr},
+    {"_empty_strided_mtia", _empty_strided_mtia, METH_VARARGS, nullptr},
+    {"_reinterpret_tensor", _reinterpret_tensor, METH_VARARGS, nullptr},
+    {nullptr, nullptr, 0, nullptr}};
+
+static struct PyModuleDef _module = {
+    PyModuleDef_HEAD_INIT,
+    "torch._C._dynamo.guards",
+    "Module containing checks on tensors",
+    -1,
+    _methods};
 
 std::string get_exception_message() {
   PyObject *ptype = nullptr, *pvalue = nullptr, *ptraceback = nullptr;
@@ -3265,7 +3302,8 @@ inline std::vector<std::optional<c10::SymInt>> to_opt_symint(
 // dtype, device, requires_grad, sizes, strides) for the dict-tag fast path.
 inline TensorCheck make_tensor_check(
     const LocalState& state,
-    const at::Tensor& tensor) {
+    const at::Tensor& tensor,
+    bool device_index_is_current) {
   auto layout = tensor.layout();
   bool sparse = layout == c10::kSparseCsr || layout == c10::kSparseCsc ||
       layout == c10::kSparseBsc || layout == c10::kSparseBsr;
@@ -3280,7 +3318,24 @@ inline TensorCheck make_tensor_check(
       tensor,
       tensor.key_set(),
       to_opt_symint(tensor.sizes()),
-      std::move(strides));
+      std::move(strides),
+      device_index_is_current);
+}
+
+// Mirrors _guard_device_index_is_current in torch/_dynamo/guards.py: under
+// compile_on_one_rank an accelerator tensor's index is the compiling rank's and
+// carries no information, so the snapshot has to compare against the runtime
+// current device the way the TENSOR_MATCH leaf does. Pinning it here instead
+// would let the unchanged-dict-tag fast path accept a tensor left behind on
+// another device, which the leaf itself rejects.
+inline bool coor_device_index_is_current(
+    bool compile_on_one_rank,
+    const at::Tensor& tensor) {
+  if (!compile_on_one_rank) {
+    return false;
+  }
+  auto acc = at::accelerator::getAccelerator(false);
+  return acc.has_value() && tensor.device().type() == acc.value();
 }
 
 struct RecordedTensorMetadata {
@@ -4399,6 +4454,7 @@ class RootGuardManager : public GuardManager {
       LocalState state;
       _local_state = state;
     }
+    CurrentDeviceIndexCacheScope current_device_index_cache_scope;
 
     if (!GuardManager::check_leaf_guards_nopybind(value)) {
       _reset_relational_guard_state();
@@ -4457,6 +4513,7 @@ class RootGuardManager : public GuardManager {
       LocalState state;
       _local_state = state;
     }
+    CurrentDeviceIndexCacheScope current_device_index_cache_scope;
 
     int num_guards_executed = 0;
 
@@ -4530,6 +4587,7 @@ class RootGuardManager : public GuardManager {
         std::make_unique<RootGuardManager>();
     cloned_root->_local_state = _local_state;
     cloned_root->_init_local_state = _init_local_state;
+    cloned_root->_compile_on_one_rank = _compile_on_one_rank;
     clone_common(cloned_root.get(), cloned_root.get(), clone_filter_fn);
     for (const auto& guard : _epilogue_lambda_guards) {
       cloned_root->_epilogue_lambda_guards.emplace_back(guard);
@@ -4607,10 +4665,20 @@ class RootGuardManager : public GuardManager {
   }
 
   void record_tensor_metadata(PyObject* tensor_pointer) {
+    const at::Tensor& tensor = THPVariable_Unpack(tensor_pointer);
     _recorded_tensor_metadata.push_back(RecordedTensorMetadata{
         py::reinterpret_borrow<py::object>(tensor_pointer),
-        make_tensor_check(_local_state, THPVariable_Unpack(tensor_pointer)),
+        make_tensor_check(
+            _local_state,
+            tensor,
+            coor_device_index_is_current(_compile_on_one_rank, tensor)),
     });
+  }
+
+  // Whether this graph was traced with compile_on_one_rank. Set from Python
+  // alongside guard construction; see record_tensor_metadata.
+  void set_compile_on_one_rank(bool value) {
+    _compile_on_one_rank = value;
   }
 
  public:
@@ -4618,6 +4686,9 @@ class RootGuardManager : public GuardManager {
   LocalState _local_state;
 
  private:
+  // See set_compile_on_one_rank.
+  bool _compile_on_one_rank = false;
+
   // All the relational guards under this guard manager. We only use these
   // when the guard evaluates to False. This ensures that guard state is reset
   // on guard failure so that next invocation is clean.
@@ -5232,7 +5303,8 @@ class TENSOR_MATCH : public LeafGuard {
       py::object verbose_code_parts,
       py::object user_stack,
       py::object pytype,
-      py::object dispatch_keys)
+      py::object dispatch_keys,
+      bool device_index_is_current)
       : LeafGuard(
             root_guard_manager,
             std::move(verbose_code_parts),
@@ -5267,7 +5339,8 @@ class TENSOR_MATCH : public LeafGuard {
         std::move(tensor),
         dispatch_keys.cast<c10::DispatchKeySet>(),
         std::move(tensor_dims_size),
-        std::move(tensor_dims_stride));
+        std::move(tensor_dims_stride),
+        device_index_is_current);
   }
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
@@ -7612,64 +7685,8 @@ PyObject* torch_c_dynamo_guards_init() {
   if (PyType_Ready(&GlobalStateGuardType) < 0)
     return nullptr;
 
-  static std::array<PyMethodDef, 14> _methods{
-      {{"check_type_id",
-        castPyCFunctionFast(check_type_id),
-        METH_FASTCALL,
-        nullptr},
-       {"check_obj_id",
-        castPyCFunctionFast(check_obj_id),
-        METH_FASTCALL,
-        nullptr},
-       {"assert_size_stride",
-        castPyCFunctionFast(assert_size_stride),
-        METH_FASTCALL,
-        nullptr},
-       {"assert_size_stride_grouped",
-        castPyCFunctionFast(assert_size_stride_grouped),
-        METH_FASTCALL,
-        nullptr},
-       {"assert_alignment",
-        castPyCFunctionFast(assert_alignment),
-        METH_FASTCALL,
-        nullptr},
-       {"copy_if_misaligned", copy_if_misaligned, METH_O, nullptr},
-       {"dict_version", dict_version, METH_O, nullptr},
-       {"_empty_strided_cpu",
-        castPyCFunctionFast(_empty_strided_cpu),
-        METH_FASTCALL,
-        nullptr},
-       {"_empty_strided_cpu_pinned",
-        castPyCFunctionFast(_empty_strided_cpu_pinned),
-        METH_FASTCALL,
-        nullptr},
-       {"_empty_strided_cuda",
-        castPyCFunctionFast(_empty_strided_cuda),
-        METH_FASTCALL,
-        nullptr},
-       {"_empty_strided_xpu",
-        castPyCFunctionFast(_empty_strided_xpu),
-        METH_FASTCALL,
-        nullptr},
-       {"_empty_strided_mtia",
-        castPyCFunctionFast(_empty_strided_mtia),
-        METH_FASTCALL,
-        nullptr},
-       {"_reinterpret_tensor",
-        castPyCFunctionFast(_reinterpret_tensor),
-        METH_FASTCALL,
-        nullptr},
-       {nullptr, nullptr, 0, nullptr}}};
-
-  static PyModuleDef _module{
-      PyModuleDef_HEAD_INIT,
-      "torch._C._dynamo.guards",
-      "Module containing checks on tensors",
-      -1,
-      _methods.data()};
-
   auto m = PyModule_Create(&_module);
-  if (!m)
+  if (m == nullptr)
     return nullptr;
 
 #ifdef Py_GIL_DISABLED
@@ -7918,7 +7935,8 @@ PyObject* torch_c_dynamo_guards_init() {
            py::list,
            py::object,
            py::type,
-           py::object>())
+           py::object,
+           bool>())
       .def("__call__", &TENSOR_MATCH::check);
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<RelationalGuard, LeafGuard, std::shared_ptr<RelationalGuard>>(
@@ -8449,7 +8467,8 @@ PyObject* torch_c_dynamo_guards_init() {
              py::object verbose_code_parts,
              py::object user_stack,
              py::object pytype,
-             py::object dispatch_keys) -> void {
+             py::object dispatch_keys,
+             bool device_index_is_current) -> void {
             SKIP_IF_GUARD_ALREADY_PRESENT("TENSOR_MATCH");
             self.add_leaf_guard(std::make_shared<TENSOR_MATCH>(
                 self.get_root(),
@@ -8460,8 +8479,18 @@ PyObject* torch_c_dynamo_guards_init() {
                 std::move(verbose_code_parts),
                 std::move(user_stack),
                 std::move(pytype),
-                std::move(dispatch_keys)));
-          })
+                std::move(dispatch_keys),
+                device_index_is_current));
+          },
+          py::arg("value"),
+          py::arg("sizes"),
+          py::arg("strides"),
+          py::arg("tensor_name"),
+          py::arg("verbose_code_parts"),
+          py::arg("user_stack"),
+          py::arg("pytype"),
+          py::arg("dispatch_keys"),
+          py::arg("device_index_is_current") = false)
 
       // return by reference because GuardManager has the ownership of accessors
       // and guard managers
@@ -8855,6 +8884,8 @@ PyObject* torch_c_dynamo_guards_init() {
       .def("attach_compile_id", &RootGuardManager::attach_compile_id)
       .def("get_local_state", &RootGuardManager::get_local_state)
       .def("set_local_state", &RootGuardManager::set_local_state)
+      .def(
+          "set_compile_on_one_rank", &RootGuardManager::set_compile_on_one_rank)
       .def("clone_manager", &RootGuardManager::clone_manager)
       // return by reference because GuardManager has the ownership of leaf
       // guards
