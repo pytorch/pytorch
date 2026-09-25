@@ -19005,6 +19005,64 @@ def forward(self, L_x_ : torch.Tensor):
         with self.assertRaises(RuntimeError):
             fn(torch.randn(3))
 
+    def test_builtin_lhs_dispatches_to_subclass_ror(self):
+        # A set subclass that inherits __or__ but overrides __ror__ must still
+        # win reflected dispatch when the lhs is a plain builtin set.
+        class S(set):
+            def __ror__(self, other):
+                return "reverse"
+
+        def fn(x, value):
+            return x + 1, {1} | value
+
+        cnts = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        x = torch.tensor(1)
+        self.assertEqual(opt_fn(x, S({2})), fn(x, S({2})))
+        self.assertEqual(opt_fn(x, S({2}))[1], "reverse")
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_subclass_lhs_dispatches_to_deeper_subclass_ror(self):
+        # Subtype priority: when the rhs is a strict subclass of the lhs type
+        # and overrides the reflected method, the reflected method runs first.
+        class BaseSet(set):
+            pass
+
+        class SubSet(BaseSet):
+            def __ror__(self, other):
+                return "reverse"
+
+        def fn(x, lhs, rhs):
+            return x + 1, lhs | rhs
+
+        cnts = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        x = torch.tensor(1)
+        lhs, rhs = BaseSet({1}), SubSet({2})
+        self.assertEqual(opt_fn(x, lhs, rhs), fn(x, lhs, rhs))
+        self.assertEqual(opt_fn(x, lhs, rhs)[1], "reverse")
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_deque_subclass_attr_only_mutation_keeps_iterator_valid(self):
+        # Setting only an instance attribute must not replay the deque
+        # contents (clear + extend), which would invalidate live iterators.
+        class D(collections.deque):
+            pass
+
+        def fn(x, value):
+            value.marker = "set"
+            return x + 1
+
+        value = D([1, 2])
+        iterator = iter(value)
+        cnts = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        opt_fn(torch.tensor(1), value)
+        self.assertEqual(value.marker, "set")
+        self.assertEqual(list(value), [1, 2])
+        self.assertEqual(next(iterator), 1)
+        self.assertEqual(cnts.frame_count, 1)
+
 
 instantiate_parametrized_tests(MiscTests)
 

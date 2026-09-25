@@ -13,7 +13,9 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
     make_dynamo_test,
+    parametrize,
 )
 
 
@@ -699,6 +701,85 @@ class SymIntIndexTests(torch._dynamo.test_case.TestCase):
         compiled = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
         with self.assertRaises(torch._dynamo.exc.UserError):
             compiled(torch.ones(3, dtype=torch.int64))
+
+
+class ListSubclass(list):
+    pass
+
+
+class DequeSubclass(collections.deque):
+    pass
+
+
+@instantiate_parametrized_tests
+class SubclassSideEffectTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    # A container subclass input can mutate on two axes at once: the builtin
+    # contents and the instance __dict__. Both must be replayed on the caller's
+    # object.
+    @parametrize("cls", [ListSubclass, DequeSubclass], name_fn=lambda cls: cls.__name__)
+    def test_subclass_input_append(self, cls):
+        def fn(lst, x):
+            lst.append(5)
+            lst.attr = len(lst)
+            for v in lst:
+                x = x * v
+            return x
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        ref, res = cls([1, 2]), cls([1, 2])
+        self.assertEqual(fn(ref, x), opt_fn(res, x))
+        self.assertEqual(list(ref), list(res))
+        self.assertEqual(list(res), [1, 2, 5])
+        self.assertEqual(res.attr, ref.attr)
+
+    @parametrize("cls", [ListSubclass, DequeSubclass], name_fn=lambda cls: cls.__name__)
+    def test_subclass_input_pop(self, cls):
+        def fn(lst, x):
+            lst.pop()
+            return x * len(lst)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        ref, res = cls([1, 2, 3]), cls([1, 2, 3])
+        self.assertEqual(fn(ref, x), opt_fn(res, x))
+        self.assertEqual(list(ref), list(res))
+        self.assertEqual(list(res), [1, 2])
+
+    @parametrize("cls", [ListSubclass, DequeSubclass], name_fn=lambda cls: cls.__name__)
+    def test_subclass_input_iadd_ignores_rhs_radd(self, cls):
+        # A list/deque subclass inherits nb_inplace_add = list_inplace_concat,
+        # so `+=` must extend in place and never consult the rhs __radd__.
+        class Rhs(cls):
+            def __radd__(self, other):
+                return "radd"
+
+        def fn(lst, x):
+            lst += Rhs([3])
+            return x * len(lst)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        ref, res = cls([1, 2]), cls([1, 2])
+        self.assertEqual(fn(ref, x), opt_fn(res, x))
+        self.assertEqual(list(ref), list(res))
+        self.assertEqual(list(res), [1, 2, 3])
+
+    def test_list_subclass_input_read_only(self):
+        def fn(lst, x):
+            return x * len(lst)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        ref, res = ListSubclass([1, 2]), ListSubclass([1, 2])
+        self.assertEqual(fn(ref, x), opt_fn(res, x))
+        self.assertEqual(list(res), [1, 2])
 
 
 if __name__ == "__main__":
