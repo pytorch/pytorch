@@ -3144,6 +3144,21 @@ TORCH_IMPL_FUNC(_linalg_svd_out)(const Tensor& A,
                                  const Tensor & U,
                                  const Tensor & S,
                                  const Tensor & Vh) {
+  // The driver argument is only supported by the cuSOLVER path. Validate it
+  // before handling empty inputs so they follow the same contract as non-empty
+  // inputs.
+  const bool use_cusolver = at::native::svd_uses_cusolver(A);
+  TORCH_CHECK(use_cusolver || !driver.has_value(),
+    "torch.linalg.svd: keyword argument `driver=` is only supported on CUDA inputs with cuSOLVER backend.");
+  if (driver.has_value()) {
+    TORCH_CHECK(
+        *driver == "gesvd" || *driver == "gesvdj" || *driver == "gesvda",
+        "torch.linalg.svd: unknown svd driver ",
+        *driver,
+        " in svd_cusolver computation. ",
+        "Check doc at https://pytorch.org/docs/stable/generated/torch.linalg.svd.html");
+  }
+
   // Half optimisation half precondition for some parts of the LAPACK / cuSOLVER
   // In particular, the call to lapackSvd to compute lwork fails otherwise
   if (A.numel() == 0) {
@@ -3161,12 +3176,6 @@ TORCH_IMPL_FUNC(_linalg_svd_out)(const Tensor& A,
     }
     return;
   }
-
-  // We need to distinguish the cuSOLVER case, as cuSOLVER expects F-contig matrices, but
-  // it computes V rather than Vh
-  const bool use_cusolver = at::native::svd_uses_cusolver(A);
-  TORCH_CHECK(use_cusolver || !driver.has_value(),
-    "torch.linalg.svd: keyword argument `driver=` is only supported on CUDA inputs with cuSOLVER backend.");
 
   // A always needs to be copied as its contents will be destroyed during the computation of the SVD
   // Now, MAGMA needs the copy to be on CPU, while cuSOLVER needs it to be on CUDA, so we'll defer

@@ -3132,6 +3132,63 @@ class TestLinalg(TestCase):
                 S_s = torch.svd(A, compute_uv=False).S
                 self.assertEqual(S_s, S)
 
+    def _assert_svd_driver_error(self, A, driver, msg):
+        calls = (
+            ("svd", partial(torch.linalg.svd, A, driver=driver)),
+            ("svd_out", partial(
+                torch.linalg.svd, A, driver=driver,
+                out=(A.new_empty(0), A.new_empty(0), A.new_empty(0)))),
+            ("svdvals", partial(torch.linalg.svdvals, A, driver=driver)),
+            ("svdvals_out", partial(
+                torch.linalg.svdvals, A, driver=driver, out=A.new_empty(0))),
+        )
+        for op, call in calls:
+            with self.subTest(shape=A.shape, op=op):
+                with self.assertRaisesRegex(RuntimeError, msg):
+                    call()
+
+    @onlyCUDA
+    @skipCUDAIfNoCusolver
+    def test_svd_driver_validation(self, device):
+        msg = "unknown svd driver invalid"
+
+        for shape in ((2, 2), (0, 0), (2, 0), (0, 2), (0, 2, 2)):
+            self._assert_svd_driver_error(
+                torch.empty(shape, device=device), "invalid", msg)
+
+    @onlyCPU
+    def test_svd_driver_empty_cpu(self, device):
+        msg = "keyword argument `driver=` is only supported on CUDA inputs with cuSOLVER backend"
+
+        for driver in ("gesvd", "invalid"):
+            for shape in ((0, 0), (2, 0), (0, 2), (0, 2, 2)):
+                self._assert_svd_driver_error(
+                    torch.empty(shape, device=device), driver, msg)
+
+    @onlyCUDA
+    @skipIfRocm
+    @unittest.skipIf(not torch.cuda.has_magma, "requires MAGMA")
+    @setLinalgBackendsToDefaultFinally
+    def test_svd_driver_empty_magma(self, device):
+        torch.backends.cuda.preferred_linalg_library("magma")
+        msg = "keyword argument `driver=` is only supported on CUDA inputs with cuSOLVER backend"
+
+        for driver in ("gesvd", "invalid"):
+            self._assert_svd_driver_error(
+                torch.empty((0, 0), device=device), driver, msg)
+
+    @onlyCUDA
+    @skipCUDAIfNoCusolver
+    @unittest.skipIf(not TEST_WITH_ROCM, "ROCm-only test")
+    def test_svd_driver_ignored_on_rocm(self, device):
+        A = torch.diag(torch.tensor([2.0, 1.0], device=device))
+        expected = torch.linalg.svd(A)
+        expected_values = torch.linalg.svdvals(A)
+
+        for driver in ("gesvd", "gesvdj", "gesvda"):
+            self.assertEqual(torch.linalg.svd(A, driver=driver), expected)
+            self.assertEqual(torch.linalg.svdvals(A, driver=driver), expected_values)
+
     @skipCPUIfNoLapack
     @skipCUDAIf(
         not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 8) and not torch.cuda.has_magma,
