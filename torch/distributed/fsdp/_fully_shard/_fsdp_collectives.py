@@ -612,6 +612,9 @@ def foreach_reduce(
         # Same per-gradient casts autograd would run with reduce_dtype set to
         # this dtype, deferred here so unsharded gradients keep their grad_dtype
         # (e.g. bf16) during backward
+        # TODO: these casts allocate temporaries that chunk_cat then copies. If
+        # _chunk_cat.out accepted mixed input dtypes, its generic path would cast
+        # during the copy-in instead (~2x faster, lower peak memory)
         unsharded_grads[:] = [grad.to(reduce_dtype) for grad in unsharded_grads]
     (predivide_factor, postdivide_factor, reduce_scatter_op, all_reduce_op) = (
         _get_gradient_divide_factors(

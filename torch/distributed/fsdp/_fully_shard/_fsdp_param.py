@@ -200,6 +200,8 @@ class FSDPParam:
     _sharded_post_forward_param: nn.Parameter | None  # ND
     _unsharded_param: nn.Parameter  # ND
     _sharding_spec: DTensorSpec
+    # _sharding_spec per dtype, for sharded grads; reset when _sharding_spec changes
+    _sharding_spec_by_dtype: dict[torch.dtype, DTensorSpec]
     _unsharded_dtensor_spec: (
         DTensorSpec | None
     )  # set for DTensor params (SPMD or TP/EP)
@@ -311,6 +313,7 @@ class FSDPParam:
         self.is_dtensor = isinstance(param, DTensor)
         self._orig_param_uid = _get_orig_param_uid(param)
         param_data = self._init_sharding_spec(param, fsdp_placement, shard_dim)
+        self._sharding_spec_by_dtype = {}
         if not param_data.is_contiguous():
             raise AssertionError(
                 f"Expected contiguous tensor, got {param_data.shape=} {param_data.stride()=}"
@@ -1030,7 +1033,10 @@ class FSDPParam:
             _raise_assert_with_print(
                 f"Expects size {self.sharded_size} but got {tensor.shape}"
             )
-        spec = _get_dtensor_spec_with_dtype(self._sharding_spec, tensor.dtype)
+        spec = self._sharding_spec_by_dtype.get(tensor.dtype)
+        if spec is None:
+            spec = _get_dtensor_spec_with_dtype(self._sharding_spec, tensor.dtype)
+            self._sharding_spec_by_dtype[tensor.dtype] = spec
         return _from_local_no_grad(tensor, spec)
 
     def to_sharded_post_forward_dtensor(self, tensor: torch.Tensor) -> DTensor:
@@ -1332,6 +1338,7 @@ class FSDPParam:
                     "Expected sharded_param._local_tensor to be contiguous"
                 )
         self._sharding_spec = self.sharded_param._spec
+        self._sharding_spec_by_dtype.clear()
 
     def __repr__(self):
         return f"FSDPParam(fqn={self._param_fqn}, orig_size={self._orig_size})"
