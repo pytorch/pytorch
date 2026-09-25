@@ -288,10 +288,23 @@ template <
     typename T,
     typename U,
     ::metal::enable_if_t<
-        !::metal::is_same_v<U, T> && (is_complex_v<T> == is_complex_v<U>),
+        !::metal::is_same_v<U, T> && (is_complex_v<T> == is_complex_v<U>) &&
+            !is_float8_v<T> && !is_float8_v<U>,
         bool> = true>
 inline T cast_to(const U from) {
   return static_cast<T>(from);
+}
+
+// Metal rejects static_cast<bfloat>(fp8)
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<
+        !::metal::is_same_v<U, T> && !is_complex_v<T> && !is_complex_v<U> &&
+            (is_float8_v<T> || is_float8_v<U>),
+        bool> = true>
+inline T cast_to(const U from) {
+  return T(float(from));
 }
 
 // - Scalar to complex
