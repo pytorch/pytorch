@@ -263,6 +263,8 @@ def require_n_gpus_for_nccl_backend(n, backend):
             else:
                 return func(*args, **kwargs)
 
+        if backend == "nccl":
+            wrapper._min_gpus_required = n
         return wrapper
 
     return decorator
@@ -318,6 +320,9 @@ def skip_if_lt_x_gpu(x, *, allow_cpu=False):
             if not _maybe_handle_skip_if_lt_x_gpu(args, test_skip.message):
                 sys.exit(test_skip.exit_code)
 
+        # Record the accelerator requirement so the collection-time GPU-count
+        # resolver (test/conftest.py) can read it without running the test.
+        wrapper._min_gpus_required = x
         return wrapper
 
     return decorator
@@ -381,6 +386,8 @@ def nccl_skip_if_lt_x_gpu(backend, x):
             if not _maybe_handle_skip_if_lt_x_gpu(args, test_skip.message):
                 sys.exit(test_skip.exit_code)
 
+        if backend == "nccl":
+            wrapper._min_gpus_required = x
         return wrapper
 
     return decorator
