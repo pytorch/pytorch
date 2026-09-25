@@ -1153,16 +1153,6 @@ class TransferEvents {
   }
 
  private:
-  static long long extractIndex(const std::string& metadata_json) {
-    static const auto prefix = fmt::format("\"{}\": ", indexKey);
-    auto pos = metadata_json.find(prefix);
-    return (pos == std::string::npos) ? unmatchedIndex : [&]() {
-      auto end = metadata_json.find(',', pos);
-      end = (end == std::string::npos) ? metadata_json.size() : end;
-      return std::stoll(metadata_json.substr(pos + prefix.size(), end));
-    }();
-  }
-
   std::shared_ptr<Result> lookup(const itrace_t* key) {
     if (key == nullptr) {
       return nullptr;
@@ -1174,10 +1164,10 @@ class TransferEvents {
       return it->second;
     }
 
-    // Then fallback to the encoded metadata.
-    const auto index = extractIndex(key ? key->metadataJson() : "");
-    if (index != unmatchedIndex) {
-      auto out = results_.get().at(index);
+    // Then fallback to the event index metadata.
+    const auto index_str = key->getMetadataValue(indexKey);
+    if (!index_str.empty()) {
+      auto out = results_.get().at(std::stoll(index_str));
       kineto_events_[key] = out;
       return out;
     }
@@ -1274,35 +1264,26 @@ class TransferEvents {
     for (const auto* activity : trace_activities_) {
       auto e = toResult(activity);
       if (e) {
-        // Flow data for Kineto events is already set during
-        // resultFromActivity(). TorchOp events need it copied here because
-        // their Result is created during RecordFunction callbacks, before
-        // flow data exists on the GenericTraceActivity.
+        const auto expose_metadata =
+            config_.get().experimental_config.expose_kineto_event_metadata;
         e->visit(c10::overloaded(
             [&](ExtraFields<EventType::TorchOp>& i) {
+              // Kineto event flow is set during resultFromActivity(). TorchOp
+              // events are created before flow data exists on the activity.
               i.flow = {
                   /*id=*/static_cast<uint32_t>(activity->flowId()),
                   /*type=*/static_cast<uint32_t>(activity->flowType()),
                   /*start=*/activity->flowStart()};
+              if (expose_metadata) {
+                i.metadata_json_ = activity->metadataJson();
+              }
             },
-            [](auto&) {}));
-        if (config_.get().experimental_config.expose_kineto_event_metadata) {
-          e->visit(c10::overloaded(
-              [&](ExtraFields<EventType::TorchOp>& i) {
+            [&](ExtraFields<EventType::Kineto>& i) {
+              if (expose_metadata) {
                 i.metadata_json_ = activity->metadataJson();
-              },
-              [&](ExtraFields<EventType::Kineto>& i) {
-                i.metadata_json_ = activity->metadataJson();
-              },
-              [](auto&) { return; }));
-          // Parse metadataJson() into extra_meta_ so events() exposes
-          // Kineto metadata as typed fields without export_chrome_trace().
-          e->visit(c10::overloaded(
-              [&](ExtraFields<EventType::Kineto>& i) {
-                auto json_str = activity->metadataJson();
-                if (!json_str.empty()) {
+                if (!i.metadata_json_.empty()) {
                   auto j = nlohmann::json::parse(
-                      "{" + json_str + "}", nullptr, false);
+                      "{" + i.metadata_json_ + "}", nullptr, false);
                   if (!j.is_discarded()) {
                     for (auto& [key, val] : j.items()) {
                       i.extra_meta_.emplace(
@@ -1312,17 +1293,12 @@ class TransferEvents {
                     }
                   }
                 }
-              },
-              [](auto&) {}));
-          // Populate the data exposed as FunctionEvent.metadata.
-          e->visit(c10::overloaded(
-              [&](ExtraFields<EventType::Kineto>& i) {
                 IValueMetadataVisitor visitor;
                 activity->visitTypedMetadata(visitor);
                 i.typed_metadata_ = std::move(visitor).metadata();
-              },
-              [](auto&) { return; }));
-        }
+              }
+            },
+            [](auto&) {}));
         const auto* linked_activity = activity->linkedActivity();
         if (linked_activity) {
           e->visit(c10::overloaded(
@@ -1424,7 +1400,6 @@ class TransferEvents {
     }
   }
 
-  static constexpr long long unmatchedIndex = -1;
   static constexpr auto noTID = std::numeric_limits<uint64_t>::max();
   std::reference_wrapper<std::vector<std::shared_ptr<Result>>> results_;
   std::reference_wrapper<const ProfilerConfig> config_;
