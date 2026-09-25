@@ -648,6 +648,31 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_backward_reference_still_uses_staticmethod_path(self):
+        class MyFn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output * 2
+
+        def fn(ctx, g):
+            f = MyFn.backward
+            return f(ctx, g)
+
+        compiled_fn = torch.compile(fn, fullgraph=True, backend="eager")
+
+        class FakeCtx:
+            pass
+
+        ctx = FakeCtx()
+        g = torch.randn(2)
+        result = compiled_fn(ctx, g)
+
+        self.assertEqual(result, g * 2)
+
     def test_missing_attribute_graph_breaks(self):
         class Function(torch.autograd.Function):
             pass
