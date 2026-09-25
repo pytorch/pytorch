@@ -51,7 +51,7 @@ env:
   # the role it is paid for with. Matches .github/workflows/claude-code.yml.
   # The `model` column of the telemetry row is NOT set from this: it is read
   # back out of the run's own usage file, so the row records what answered.
-  REVIEW_MODEL: global.anthropic.claude-opus-5
+  REVIEW_MODEL: global.anthropic.claude-opus-5-5
   AWS_REGION: us-east-1
   S3_BUCKET: ossci-raw-job-status
   S3_PREFIX: pr_review_verdicts
@@ -492,6 +492,9 @@ jobs:
             sts.us-east-1.amazonaws.com:443
             bedrock-runtime.us-east-1.amazonaws.com:443
             api.anthropic.com:443
+            claude.ai:443
+            downloads.claude.ai:443
+            release-assets.githubusercontent.com:443
             github.com:443
             api.github.com:443
             codeload.github.com:443
@@ -726,7 +729,7 @@ jobs:
           PR_REVIEW_FILES_FILE: /tmp/pr-files.txt
           PR_REVIEW_SCRIPTS_DIR: ${{ github.workspace }}/trusted/scripts/pr_review
           PR_REVIEW_HOOK_LOG: ${{ runner.temp }}/pr-review-hooks.log
-        uses: anthropics/claude-code-action@6e2bd52842c65e914eba5c8badd17560bd26b5de # v1.0.89
+        uses: anthropics/claude-code-action@9ca9355b36297178e28d37c799d1c9c8a28e6507 # Claude Code 2.1.280
         with:
           use_bedrock: "true"
           settings: |

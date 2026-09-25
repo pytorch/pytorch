@@ -23,6 +23,7 @@ from torch.nn.functional import (
 )
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.testing._internal.common_cuda import (
+    IS_SM12X,
     IS_SM90,
     _get_torch_cuda_version,
     rocm_mx_swizzle,
@@ -31,7 +32,6 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_MX_GEMM,
     PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM,
     SM100OrLater,
-    SM120OrLater,
     SM89OrLater,
     SM90OrLater,
     with_tf32_off,
@@ -725,6 +725,8 @@ class TestFP8Matmul(TestCase):
                               size: int = 16) -> None:
         if not PLATFORM_SUPPORTS_FP8:
             raise unittest.SkipTest(f8_msg)
+        if "mps" in device and e5m2_type in (x_dtype, y_dtype):
+            raise unittest.SkipTest("MPS has no float8_e5m2")
         x_fp8 = torch.rand(size, size, device=device).to(x_dtype)
         y_fp8 = torch.eye(size, device=device, dtype=y_dtype)
         if not x_cm:
@@ -905,7 +907,8 @@ class TestFP8Matmul(TestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_float8_basics_invalid_out_dtype(self, device) -> None:
         with self.assertRaises(
-            AssertionError if (torch.version.hip or "xpu" in device or "cpu" in device)
+            TypeError if "mps" in device
+            else AssertionError if (torch.version.hip or "xpu" in device or "cpu" in device)
             else RuntimeError
         ):
             self._test_tautological_mm(device, out_dtype=e5m2_type)
@@ -914,8 +917,8 @@ class TestFP8Matmul(TestCase):
     def test_float8_scale(self, device) -> None:
         size = (16, 16)
         x = torch.full(size, .5, device=device, dtype=e4m3_type)
-        # hipblaslt does not yet support mixed e4m3_type input
-        y_type = e4m3_type if torch.version.hip else e5m2_type
+        # hipblaslt does not yet support mixed e4m3_type input; MPS has no e5m2
+        y_type = e4m3_type if torch.version.hip or "mps" in device else e5m2_type
         y = torch.full(size, .5, device=device, dtype=y_type).t()
         scale_one = torch.tensor(1.0, device=device)
         scale_a = torch.tensor(1.5, device=device)
@@ -974,9 +977,6 @@ class TestFP8Matmul(TestCase):
     @parametrize("use_out", [False, True])
     def test_mxfp8_nvfp4_scaled_grouped_mm_2d_2d(self, G, M, N, K, format, use_out, device):
         torch.manual_seed(42)
-
-        if format == "mxfp4" and SM120OrLater:
-            raise unittest.SkipTest("MXFP4 on CUDA only supported on B200/B300")
 
         total_K = K  # Alias for clarity, communicating this consists of several groups along this dim
         input_group_end_offsets = generate_jagged_offs(
@@ -1056,9 +1056,6 @@ class TestFP8Matmul(TestCase):
     @parametrize("use_out", [False, True])
     def test_mxfp8_scaled_grouped_mm_2d_3d(self, G, M, N, K, format, use_out, device):
         torch.manual_seed(42)
-
-        if format == "mxfp4" and SM120OrLater:
-            raise unittest.SkipTest("MXFP4 on CUDA only supported on B200/B300")
 
         # Simulate 2d-3d grouped gemm `out = input @ weight.t()`
         # 2D inputs with groups along M, 3D weights.
@@ -1841,7 +1838,7 @@ class TestFP8Matmul(TestCase):
         # XPU and CPU supports the case when out_dtype is fp32 + bias. So we just test it with normal run.
         if "xpu" not in device and "cpu" not in device:
             self.assertRaisesRegex(
-                ValueError if torch.cuda.is_available() else RuntimeError,
+                ValueError if torch.cuda.is_available() or "mps" in device else RuntimeError,
                 "Bias is not supported when out_dtype is set to Float32",
                 lambda: scaled_mm_wrap(x, y, scale_a, scale_b, bias=bias, out_dtype=torch.float32),
             )
@@ -1865,8 +1862,8 @@ class TestFP8Matmul(TestCase):
     def test_float8_scale_fast_accum(self, device) -> None:
         size = (16, 16)
         x = torch.full(size, .5, device=device, dtype=e4m3_type)
-        # hipblaslt does not yet support mixed e4m3_type input
-        y_type = e4m3_type if torch.version.hip else e5m2_type
+        # hipblaslt does not yet support mixed e4m3_type input; MPS has no e5m2
+        y_type = e4m3_type if torch.version.hip or "mps" in device else e5m2_type
         y = torch.full(size, .5, device=device, dtype=y_type).t()
         scale_a = torch.tensor(1.5, device=device)
         scale_b = torch.tensor(0.66, device=device)
@@ -1978,7 +1975,11 @@ class TestFP8Matmul(TestCase):
         is_cuda_device = "cuda" in device
         is_xpu_device = "xpu" in device
 
-        if is_xpu_device or not is_cuda_device:
+        if "mps" in device:
+            # MPS has no float8_e5m2 dtype
+            with self.assertRaisesRegex(RuntimeError, "Undefined type Float8_e5m2"):
+                e5m2()
+        elif is_xpu_device or not is_cuda_device:
             out = e5m2()
             self.assertEqual(out, torch.ones_like(out) * 128.)
         elif (torch.cuda.get_device_capability() == (9, 0) and
@@ -2082,6 +2083,8 @@ class TestFP8Matmul(TestCase):
         # the CUTLASS fallback depending on CUDA version / arch.
         if torch.version.hip and output_dtype is not torch.bfloat16:
             raise unittest.SkipTest("hipblaslt rowwise _scaled_mm only supports BFloat16")
+        if "mps" in device and not wrap_v2:
+            raise unittest.SkipTest("MPS only implements _scaled_mm_v2")
 
         M, K, N = 256, 512, 768
         torch.manual_seed(42)
@@ -2776,7 +2779,7 @@ class TestFP8Matmul(TestCase):
             raise unittest.SkipTest("nvfp4 not supported on ROCm, skipping")
         if (recipe == "nvfp4" or recipe == "mxfp4") and fast_accum:
             raise unittest.SkipTest("fast_accum not supported in nvfp4/mxfp4 cublas gemm, skipping")
-        if recipe == "mxfp4" and SM120OrLater:
+        if recipe == "mxfp4" and IS_SM12X:
             raise unittest.SkipTest("MXFP4 on CUDA only supported on B200/B300")
         if "xpu" in device:
             if fast_accum:
@@ -3129,11 +3132,13 @@ class TestFP8Matmul(TestCase):
 
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM or IS_WINDOWS, mx_skip_msg)
-    @parametrize("recipe", ["mxfp8", "mxfp4" if torch.version.hip else "nvfp4"])
-    def test_blockwise_mxfp8_nvfp4_error_messages(self, device, recipe) -> None:
+    @parametrize("recipe", ["mxfp8", "mxfp4", "nvfp4"])
+    def test_blockwise_mxfp8_nvfp4_mxfp4_error_messages(self, device, recipe) -> None:
         if "xpu" in device:
             raise unittest.SkipTest("Error messages test not supported on XPU, skipping")
-        if recipe == "mxfp4" and SM120OrLater:
+        if recipe == "nvfp4" and torch.version.hip:
+            raise unittest.SkipTest("nvfp4 not supported on ROCm, skipping")
+        if recipe == "mxfp4" and IS_SM12X:
             raise unittest.SkipTest("MXFP4 on CUDA only supported on B200/B300")
         M, K, N = (1024, 512, 2048)
         BLOCK_SIZE_K = 16 if recipe == "nvfp4" else 32
@@ -3429,11 +3434,16 @@ class TestFP8Matmul(TestCase):
 
     @onlyAccelerator
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
-    def test_blockwise_nvfp4_compile(self, device) -> None:
+    @parametrize("recipe", ["nvfp4", "mxfp4"])
+    def test_blockwise_nvfp4_mxfp4_compile(self, device, recipe) -> None:
+        if recipe == "nvfp4" and torch.version.hip:
+            raise unittest.SkipTest("nvfp4 not supported on ROCm, skipping")
+        if recipe == "mxfp4" and IS_SM12X:
+            raise unittest.SkipTest("MXFP4 on CUDA only supported on B200/B300")
 
         M, K, N = 128, 128, 128
-        BLOCK_SIZE = 32 if torch.version.hip else 16
-        fp4_scaling_dtype = torch.float8_e8m0fnu if torch.version.hip else torch.float8_e4m3fn
+        BLOCK_SIZE = 16 if recipe == "nvfp4" else 32
+        fp4_scaling_dtype = torch.float8_e4m3fn if recipe == "nvfp4" else torch.float8_e8m0fnu
 
         A_ref = torch.eye(M, device=device, dtype=torch.bfloat16)
         B_ref = torch.eye(M, device=device, dtype=torch.bfloat16)
@@ -3449,8 +3459,7 @@ class TestFP8Matmul(TestCase):
 
         C_ref = A_ref @ B_ref.t()
 
-        # ROCm runs this as MX FP4 (1x32 e8m0 scales), NVIDIA as NVFP4 (1x16).
-        block_recipe = ScalingType.BlockWise1x32 if torch.version.hip else ScalingType.BlockWise1x16
+        block_recipe = ScalingType.BlockWise1x16 if recipe == "nvfp4" else ScalingType.BlockWise1x32
         swizzle = mx_swizzle_for(device, A.dtype)
 
         compiled_scaled_mm = torch.compile(scaled_mm_wrap, backend="inductor")
@@ -3663,7 +3672,7 @@ class TestFP8Matmul(TestCase):
         self.assertEqual(actual, expected)
 
 
-instantiate_device_type_tests(TestFP8Matmul, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestFP8Matmul, globals(), allow_xpu=True, allow_mps=True)
 
 if __name__ == '__main__':
     TestCase._default_dtype_check_enabled = True

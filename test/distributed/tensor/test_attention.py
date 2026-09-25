@@ -56,9 +56,15 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests, skipIfRocm, TestCase
+from torch.testing._internal.common_utils import (
+    run_tests,
+    skipIfRocm,
+    TEST_WITH_ROCM,
+    TestCase,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
+    DTensorContinuousTestBase,
     DTensorTestBase,
     map_local_tensor_for_rank,
     with_comms,
@@ -108,7 +114,6 @@ class RingAttentionTest(DTensorTestBase):
         return False
 
     @skip_if_lt_x_gpu(2)
-    @skipIfRocm  # Missing _c10d_functional_autograd::all_to_all_single
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FUSED_ATTENTION,
         "Does not support flash nor efficient attention",
@@ -306,18 +311,20 @@ class RingAttentionTest(DTensorTestBase):
         )
 
         # Due to numerical error, we need to choose different atol for different
-        # attention kernels
+        # attention kernels, and the ROCm backends need more room than the CUDA ones.
         (cp_out,) = context_parallel_unshard(device_mesh, [cp_out], [seq_dim])
-        atol = (
-            2e-06
-            if backend == SDPBackend.EFFICIENT_ATTENTION
-            else 8e-3 * self.world_size
-        )
-        rtol = (
-            1e-05
-            if backend == SDPBackend.EFFICIENT_ATTENTION
-            else 1e-3 * self.world_size
-        )
+        if backend == SDPBackend.EFFICIENT_ATTENTION:
+            # AOTriton's merge drifts by one rescaling step per rank, so on ROCm the
+            # atol has to scale with world_size where a flat value does for CUDA.
+            atol = 1e-06 * self.world_size if TEST_WITH_ROCM else 2e-06
+            rtol = 1e-05
+        else:
+            atol = 8e-3 * self.world_size
+            # bf16's own quantization floor: dv sums the whole sequence, so with
+            # grad_out=ones it reaches ~10 under a causal mask, where one bf16 ulp is
+            # already 0.0625. That floor does not shrink with world_size the way a
+            # scaled rtol does, so ROCm needs an rtol above bf16 eps (2**-8).
+            rtol = 2e-2 if TEST_WITH_ROCM else 1e-3 * self.world_size
         torch.testing.assert_close(out, cp_out, atol=atol, rtol=rtol)
 
         if test_forward_only:
@@ -617,6 +624,34 @@ class CPFlexAttentionTest(DTensorTestBase):
 
     @skip_if_lt_x_gpu(2)
     @with_comms
+    def test_cp_flex_attention_preserves_block_size(self) -> None:
+        qkv_size = 256 * self.world_size
+        device_mesh = init_device_mesh(
+            device_type=self.device_type,
+            mesh_shape=(self.world_size,),
+            mesh_dim_names=("cp",),
+        )
+        block_mask = create_block_mask(
+            causal_mask,
+            B=1,
+            H=1,
+            Q_LEN=qkv_size,
+            KV_LEN=qkv_size,
+            device=self.device_type,
+            BLOCK_SIZE=(256, 128),
+        )
+
+        (cp_block_mask,) = _context_parallel_shard(
+            device_mesh,
+            [block_mask],
+            [2],
+        )
+        self.assertEqual(cp_block_mask.BLOCK_SIZE, block_mask.BLOCK_SIZE)
+        expected_mask = block_mask.to_dense().chunk(self.world_size, dim=-2)[self.rank]
+        self.assertEqual(cp_block_mask.to_dense(), expected_mask)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
     )
@@ -901,12 +936,10 @@ class TestSharding(DTensorTestBase):
                 self.assertIn(out.placements[0], [Replicate(), Shard(0), Shard(1)])
 
 
-class TestContextParallelStyle(DTensorTestBase):
+class TestContextParallelStyle(DTensorContinuousTestBase):
     """Test suite for _ContextParallel.flex_input_fn argument handling"""
 
-    @property
-    def world_size(self) -> int:
-        return 2
+    world_size = 2
 
     def _create_test_tensors(self):
         """Helper to create test query, key, value tensors"""
@@ -1070,12 +1103,10 @@ class TestContextParallelStyle(DTensorTestBase):
         self.assertEqual(out_kwargs["enable_gqa"], False)
 
 
-class TestContextParallelStyleSDPA(DTensorTestBase):
+class TestContextParallelStyleSDPA(DTensorContinuousTestBase):
     """Test suite for _ContextParallel.sdpa_input_fn argument handling"""
 
-    @property
-    def world_size(self) -> int:
-        return 2
+    world_size = 2
 
     def _create_test_tensors(self):
         """Helper to create test query, key, value tensors"""
@@ -1192,6 +1223,7 @@ CPFlexAttentionTestWithLocalTensor = create_local_tensor_test_class(
     skipped_tests=[
         # Missing support for batched tensors
         "test_cp_flex_attention_document_mask",
+        "test_cp_flex_attention_preserves_block_size",
     ],
 )
 

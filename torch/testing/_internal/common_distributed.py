@@ -328,7 +328,11 @@ def requires_world_size(n: int):
     """
     Decorator to request a specific world size for a test. The test harness can
     read this attribute to set the number of ranks to spawn. If there are fewer
-    than `n` CUDA devices available, the test should be skipped by the harness.
+    than ``n`` accelerators available, the test is skipped.
+
+    NOTE: The skip logic is hardware-agnostic and works for any accelerator
+    supported by ``torch.accelerator`` (e.g. CUDA, XPU, HPU, and
+    PrivateUse1-based backends).
 
     Usage:
         @require_world_size(3)
@@ -338,9 +342,9 @@ def requires_world_size(n: int):
 
     def decorator(func):
         func._required_world_size = n
-        available = torch.cuda.device_count()
+        available = torch.accelerator.device_count()
         return unittest.skipUnless(
-            available >= n, f"requires {n} GPUs, found {available}"
+            available >= n, f"requires {n} accelerators, found {available}"
         )(func)
 
     return decorator
@@ -403,6 +407,34 @@ def verify_ddp_error_logged(model_DDP, err_substr):
         raise AssertionError(
             f"Did not find expected {actual} in ddp logging data error: {logging_err}"
         )
+
+
+@contextmanager
+def core_dumps_disabled():
+    """Make a device-side assert raise instead of killing the caller.
+
+    The HIP runtime aborts the process on a GPU exception whenever core dumps
+    are enabled, so that it can write a GPU core file; with RLIMIT_CORE at 0 it
+    instead keeps a sticky error that surfaces as an exception at the next
+    sync, which is what CUDA does either way. The limit is read when the fault
+    happens, so this works after the GPU context already exists. CI runs with
+    core dumps off already; this lets the same tests pass on a dev box.
+
+    The fault is processed asynchronously, so keep the block open through the
+    sync that surfaces the error. The previous soft limit is restored on exit.
+    No-op on Windows, which has no RLIMIT_CORE.
+    """
+    if sys.platform == "win32":
+        yield
+        return
+    import resource
+
+    soft, hard = resource.getrlimit(resource.RLIMIT_CORE)
+    resource.setrlimit(resource.RLIMIT_CORE, (0, hard))
+    try:
+        yield
+    finally:
+        resource.setrlimit(resource.RLIMIT_CORE, (soft, hard))
 
 
 def with_nccl_blocking_wait(func):

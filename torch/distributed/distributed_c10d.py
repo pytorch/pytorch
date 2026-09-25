@@ -335,6 +335,75 @@ torch.serialization.add_safe_globals(
 GroupName = NewType("GroupName", str)
 
 
+def _resolve_torchcomms_device(
+    device: str, device_id: torch.device | None
+) -> torch.device:
+    torch_device = torch.device(device)
+    if (
+        device_id is not None
+        and device_id.index is not None
+        and device_id.type == torch_device.type
+    ):
+        return device_id
+    return torch_device
+
+
+def _create_torchcomms_backend(
+    backend: str,
+    device: str,
+    *,
+    group_rank: int,
+    group_size: int,
+    group_name: GroupName,
+    store: Store,
+    device_id: torch.device | None,
+    backend_options: object | None,
+) -> C10DBackend:
+    """Create a c10d BackendWrapper for one TorchComms backend instance."""
+    if not _TORCHCOMM_AVAILABLE:
+        raise RuntimeError("TorchComms is not available")
+
+    torch_device = _resolve_torchcomms_device(device, device_id)
+
+    hints: dict[str, str] = {"persistent_store": "true"}
+    if backend_options is not None:
+        extra = _pg_options_to_hints(backend_options)
+        if extra:
+            hints.update(extra)
+
+    # Process-group creation is documented as single-threaded. Preserve the
+    # caller's process-wide rank and size while TorchComms initializes this group.
+    saved_rank_size = (
+        os.environ.get("TORCHCOMM_RANK"),
+        os.environ.get("TORCHCOMM_SIZE"),
+    )
+    os.environ["TORCHCOMM_RANK"] = str(group_rank)
+    os.environ["TORCHCOMM_SIZE"] = str(group_size)
+    try:
+        comm = new_comm(
+            _resolve_torchcomms_backend(backend),
+            torch_device,
+            name=group_name,
+            store=store,
+            hints=hints,
+        )
+    finally:
+        for key, value in zip(("TORCHCOMM_RANK", "TORCHCOMM_SIZE"), saved_rank_size):
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+    buffer_size = os.environ.get(
+        "TORCH_FR_BUFFER_SIZE",
+        os.environ.get("TORCH_NCCL_TRACE_BUFFER_SIZE", "0"),
+    )
+    recorder = _TorchCommsFlightRecorderHook(max_entries=int(buffer_size))
+    recorder.register_with_comm(comm)
+    _world.comms.append(comm)
+    return _BackendWrapper(comm)
+
+
 # Change __module__ of all imported types from torch._C._distributed_c10d that are public
 def _export_c_types() -> None:
     _public_types_to_change_module = [
@@ -2451,7 +2520,7 @@ def init_process_group(
             When TORCH_NCCL_BLOCKING_WAIT is set, the process will block and wait for this timeout.
 
         group_name (str, optional, deprecated): Group name. This argument is ignored
-        pg_options (ProcessGroupOptions, optional): process group options
+        pg_options (``Backend.Options``, optional): process group options
             specifying what additional options need to be passed in during
             the construction of specific process groups. As of now, the only
             options we support is ``ProcessGroupNCCL.Options`` for the ``nccl``
@@ -2715,7 +2784,17 @@ def init_process_group(
             _store_based_barrier(rank, store, group_name, world_size, timeout)
 
 
-def _get_split_source(pg: ProcessGroup) -> C10DBackend | None:
+def _get_split_source(
+    pg: ProcessGroup, requested_backend: str | Backend
+) -> C10DBackend | None:
+    """Return a split source only when the requested backend matches it.
+
+    An eagerly initialized default process group is not, by itself, enough to
+    make a subgroup eligible for communicator splitting. A split preserves the
+    parent's backend implementation, so a request for a different backend must
+    create a fresh communicator instead. In particular, non-members must not
+    issue a NOCOLOR split on the parent when members will create a fresh backend.
+    """
     split_from = None
     if pg.bound_device_id:
         split_from = pg._get_backend(pg.bound_device_id)
@@ -2736,7 +2815,57 @@ def _get_split_source(pg: ProcessGroup) -> C10DBackend | None:
     while is_gloo_available() and isinstance(split_from, _ProcessGroupWrapper):
         split_from = split_from.wrapped_pg
 
+    split_device = pg.bound_device_id
+    if split_device is None:
+        return None
+
+    parent_pg_state = _world.pg_map.get(pg)
+    if parent_pg_state is None:
+        return None
+
+    parent_backend, _ = parent_pg_state
+    parent_backend_name = _get_backend_name_for_device(
+        parent_backend, split_device.type
+    )
+    requested_backend_name = _get_backend_name_for_device(
+        requested_backend, split_device.type
+    )
+    if (
+        parent_backend_name is None
+        or requested_backend_name is None
+        or parent_backend_name != requested_backend_name
+    ):
+        return None
     return split_from
+
+
+def _get_backend_name_for_device(
+    backend: str | Backend, device_type: str
+) -> str | None:
+    """Resolve one device's backend name without registration or validation."""
+    normalized_backend = str(backend).lower()
+    if normalized_backend == Backend.UNDEFINED:
+        return Backend.default_device_backend_map.get(device_type)
+    if ":" not in normalized_backend:
+        supported_devices = Backend.backend_capability.get(normalized_backend)
+        if supported_devices is not None and device_type not in supported_devices:
+            return None
+        return normalized_backend or None
+
+    result: str | None = None
+    seen_devices: set[str] = set()
+    for pair in normalized_backend.split(","):
+        pieces = pair.split(":")
+        if len(pieces) != 2:
+            return None
+        device, backend_name = pieces
+        if not device or not backend_name or device in seen_devices:
+            return None
+        seen_devices.add(device)
+        if device != device_type:
+            continue
+        result = backend_name
+    return result
 
 
 # Backends that feed a FlightRecorder without any help: ProcessGroupGloo
@@ -2858,7 +2987,7 @@ def _new_process_group_helper(
     # split when we *know* the default PG has already started communicator initialization.
     # We know this if we have bound a device id to the default pg (eager initialized).
     if is_initialized() and _get_default_group().bound_device_id:
-        split_from = _get_split_source(_get_default_group())
+        split_from = _get_split_source(_get_default_group(), backend)
     else:
         split_from = None
 
@@ -2924,75 +3053,24 @@ def _new_process_group_helper(
             and backend_str not in [Backend.FAKE]
             and _torchcomms_handles_backend(backend_str)
         ):
-            torch_device = torch.device(device)
-            # Pass this rank's actual device WITH its index. A device-type-only
-            # torch.device(device) makes the TorchComms bootstrap default the
-            # device to (group-local rank % device_count) -- correct only for the
-            # world group (group-local == global rank). For a subgroup the
-            # group-local rank differs from the rank's physical device, so the
-            # comm (and its lazy P2P pair comms) would be created on the wrong
-            # device, causing illegal memory access. The default PG's
-            # bound_device_id is this rank's device for every group it joins.
-            if (
-                device_id is not None
-                and device_id.index is not None
-                and device_id.type == torch_device.type
-            ):
-                torch_device = device_id
-            torchcomms_backend = _resolve_torchcomms_backend(backend_str)
             logger.warning(
                 "Using TorchComms backend (enabled via %s) for device %s with backend %s",
                 "TORCH_DISTRIBUTED_USE_TORCHCOMMS env var"
                 if os.environ.get("TORCH_DISTRIBUTED_USE_TORCHCOMMS")
                 else "dist_config.use_torchcomms",
-                torch_device,
-                torchcomms_backend,
+                _resolve_torchcomms_device(device, device_id),
+                _resolve_torchcomms_backend(backend_str),
             )
-            # `persistent_store=true` tells torchcomms to reuse the c10d-side
-            # `backend_prefix_store` directly instead of constructing its own
-            # TCPStore via StoreManager (which would otherwise require an
-            # explicit MASTER_ADDR/MASTER_PORT and conflict with the c10d
-            # rendezvous store on rapid re-binds).
-            hints: dict[str, str] = {"persistent_store": "true"}
-            if backend_options is not None:
-                extra = _pg_options_to_hints(backend_options)
-                if extra:
-                    hints.update(extra)
-            # new_comm has no rank/size params -- the TorchComms bootstrap reads
-            # them from TORCHCOMM_RANK/SIZE. Seed from this group's rank/size so
-            # non-Torchrun launchers (which TorchComms cannot auto-detect, e.g.
-            # process-spawning inference servers) work without each caller having
-            # to set these. Save/restore around the call (single-threaded here).
-            _tc_saved = (
-                os.environ.get("TORCHCOMM_RANK"),
-                os.environ.get("TORCHCOMM_SIZE"),
+            backend_class = _create_torchcomms_backend(
+                backend_str,
+                device,
+                group_rank=group_rank,
+                group_size=group_size,
+                group_name=group_name,
+                store=backend_prefix_store,
+                device_id=device_id,
+                backend_options=backend_options,
             )
-            os.environ["TORCHCOMM_RANK"] = str(group_rank)
-            os.environ["TORCHCOMM_SIZE"] = str(group_size)
-            try:
-                comm = new_comm(
-                    torchcomms_backend,
-                    torch_device,
-                    name=group_name,
-                    store=backend_prefix_store,
-                    hints=hints,
-                )
-            finally:
-                for _k, _v in zip(("TORCHCOMM_RANK", "TORCHCOMM_SIZE"), _tc_saved):
-                    if _v is None:
-                        os.environ.pop(_k, None)
-                    else:
-                        os.environ[_k] = _v
-            buffer_size = os.environ.get(
-                "TORCH_FR_BUFFER_SIZE",
-                os.environ.get("TORCH_NCCL_TRACE_BUFFER_SIZE", "0"),
-            )
-            recorder = _TorchCommsFlightRecorderHook(max_entries=int(buffer_size))
-            recorder.register_with_comm(comm)
-            # Keep a reference so the comm outlives this function scope.
-            _world.comms.append(comm)
-            group_name = GroupName(group_name)
-            backend_class = _BackendWrapper(comm)
             # Use the underlying backend's BackendType so distinct torchcomms
             # backends (e.g. gloo vs nccl in a "cpu:gloo,cuda:nccl" PG) don't
             # collide in ProcessGroup::setBackend's backendTypeToBackend_ map
@@ -6707,8 +6785,13 @@ def split_group(
     """
     Create a new process group split from the given parent process group.
 
-    warning:: This is an experimental API. Only the ``NCCL`` and custom plugin backends
-    are supported. Other backends will raise an error.
+    .. warning::
+        This is an experimental API. The selected parent backend must
+        implement process-group splitting. Built-in support includes ``NCCL``,
+        ``XCCL``, and ``Gloo``. Custom backends are responsible for cloning the
+        prefixed child Store if they require an independent connection or mutate
+        connection-global state such as the Store timeout.
+
     Users of this API must guarantee that all ranks in the parent group enter this API call,
     and the split of the sub groups is the same across all ranks in the parent group.
 
@@ -6727,7 +6810,7 @@ def split_group(
             list determines the group rank in the new group. All ranks must pass
             the same ordering.
         timeout (timedelta, optional): see `init_process_group` for details and default value.
-        pg_options (ProcessGroupOptions, optional): Additional options need to be passed in during
+        pg_options (``Backend.Options``, optional): Additional options need to be passed in during
             the construction of specific process groups. i.e.``is_high_priority_stream``
             can be specified so that process group can pick up high priority cuda streams.
         group_desc (str, optional): a string to describe the process group.
@@ -6774,22 +6857,19 @@ def split_group(
 
     parent_group_rank = parent_global_to_group_ranks[global_rank]
 
-    if torch.accelerator.is_available():
-        parent_backend = parent_pg._get_backend(
-            torch.accelerator.current_accelerator()  # pyrefly: ignore[bad-argument-type]
-        )
-    elif _use_torchcomms_enabled():
-        # torchcomms supports CPU/gloo splitting; no accelerator is required.
-        parent_backend = parent_pg._get_backend(
-            torch.device("cpu")  # pyrefly: ignore[bad-argument-type]
-        )
+    parent_device_types = {device.type for device in parent_pg._device_types}
+    accelerator = torch.accelerator.current_accelerator()
+    if accelerator is not None and accelerator.type in parent_device_types:
+        parent_backend_device = accelerator
+    elif "cpu" in parent_device_types:
+        parent_backend_device = torch.device("cpu")
     else:
         raise RuntimeError(
             "No backend for the parent process group or its backend does not support splitting"
         )
+    parent_backend = parent_pg._get_backend(parent_backend_device)
 
-    # if the parent backend does not support splitting, raise error
-    # currently this API only support NCCL and XCCL backend
+    # If the parent backend does not support splitting, raise an error.
     if (
         not parent_backend or not parent_backend.supports_splitting
     ) and not _use_torchcomms_enabled():
@@ -7006,7 +7086,7 @@ def new_group(
             ``Backend.GLOO``). If ``None`` is passed in, the backend
             corresponding to the default process group will be used. Default is
             ``None``.
-        pg_options (ProcessGroupOptions, optional): process group options
+        pg_options (``Backend.Options``, optional): process group options
             specifying what additional options need to be passed in during
             the construction of specific process groups. i.e. for the ``nccl``
             backend, ``is_high_priority_stream`` can be specified so that
@@ -7281,7 +7361,7 @@ def new_subgroups(
             ``Backend.GLOO``). If ``None`` is passed in, the backend
             corresponding to the default process group will be used. Default is
             ``None``.
-        pg_options (ProcessGroupOptions, optional): process group options
+        pg_options (``Backend.Options``, optional): process group options
             specifying what additional options need to be passed in during
             the construction of specific process groups. i.e. for the ``nccl``
             backend, ``is_high_priority_stream`` can be specified so that
@@ -7381,7 +7461,7 @@ def new_subgroups_by_enumeration(
              ``Backend.GLOO``). If ``None`` is passed in, the backend
              corresponding to the default process group will be used. Default is
              ``None``.
-        pg_options (ProcessGroupOptions, optional): process group options
+        pg_options (``Backend.Options``, optional): process group options
             specifying what additional options need to be passed in during
             the construction of specific process groups. i.e. for the ``nccl``
             backend, ``is_high_priority_stream`` can be specified so that
@@ -7548,7 +7628,7 @@ def shrink_group(
             ``SHRINK_ABORT`` will attempt to terminate ongoing operations
             in the parent communicator before shrinking.
             Defaults to ``SHRINK_DEFAULT``.
-        pg_options (ProcessGroupOptions, optional): Backend-specific options to apply
+        pg_options (``Backend.Options``, optional): Backend-specific options to apply
             to the shrunken process group. If provided, the backend will use
             these options when creating the new group. If omitted, the new group
             inherits defaults from the parent.
@@ -7843,7 +7923,8 @@ def _create_shrunk_process_group(
     else:
         group_desc = f"{metadata['original_group_name']}:shrunk"
 
-    # Create process group with new communicator (clone the parent store like split does)
+    # A shrunk communicator is re-registered and may rendezvous later, so it
+    # retains an independent Store connection like both backend shrink paths.
     prefix_store = PrefixStore(
         f"{group_name}/",
         metadata["store"].clone(),
