@@ -972,6 +972,79 @@ kernel void reduction_flat(
   }
 }
 
+// Pass-1 kernel for two-pass full reductions over a non-contiguous input that
+// collapses to rows of one equal-strided run: element (r, k) lives at
+// r * strides.x + k * strides.y. Rows longer than the GPU can use are split
+// into sizes.z equal chunks of sizes.y elements, so a view that collapses to
+// a single run (a strided 1-D tensor) still spreads over every threadgroup.
+//
+// Threadgroups grid-stride over the rows * chunks virtual rows and pay one
+// divmod per virtual row; inside a row, lanes step the run with a fixed
+// stride. This keeps the input in place: the alternative is a .contiguous()
+// copy, which moves more bytes than the reduction itself reads.
+template <typename OP, typename TI, typename TO, uint NCHAINS = SUM_NCHAINS>
+kernel void reduction_flat_strided(
+    constant TI* input [[buffer(0)]],
+    device TO* output [[buffer(1)]],
+    // [rows, chunk_len, chunks_per_row, unused]
+    constant uint4& sizes [[buffer(2)]],
+    // [row_stride, element_stride, unused, unused]
+    constant uint4& strides [[buffer(3)]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint tptg [[threads_per_threadgroup]],
+    uint tgid [[threadgroup_position_in_grid]],
+    uint ntg [[threadgroups_per_grid]]) {
+  using TA = typename OP::acc_t;
+  const uint chunk_len = sizes.y;
+  const uint num_chunks = sizes.z;
+  const uint num_vrows = sizes.x * num_chunks;
+
+  // Short rows would leave most of a threadgroup idle, so split it into
+  // several row-workers of the smallest power-of-two width covering a row.
+  uint tpr = simdgroup_size;
+  while (tpr < chunk_len && tpr < tptg) {
+    tpr <<= 1;
+  }
+  tpr = ::metal::min(tpr, tptg);
+  const uint rows_at_once = tptg / tpr;
+  const uint row_of = tid / tpr;
+  const uint col_of = tid % tpr;
+
+  metal::array<TA, NCHAINS> acc;
+  for (uint j = 0; j < NCHAINS; j++) {
+    acc[j] = OP::identity();
+  }
+  // Lanes past rows_at_once * tpr, and threadgroups that draw no rows, keep
+  // OP::identity(), which the threadgroup reduction and pass 2 absorb.
+  if (row_of < rows_at_once) {
+    for (uint v = tgid * rows_at_once + row_of; v < num_vrows;
+         v += ntg * rows_at_once) {
+      const uint r = v / num_chunks;
+      const uint c = v - r * num_chunks;
+      constant TI* in = input + r * strides.x + c * chunk_len * strides.y;
+      uint k = col_of;
+      for (; k + (NCHAINS - 1) * tpr < chunk_len; k += tpr * NCHAINS) {
+#pragma unroll
+        for (uint j = 0; j < NCHAINS; j++) {
+          acc[j] = OP::combine(acc[j], OP::load(in[(k + j * tpr) * strides.y]));
+        }
+      }
+      for (; k < chunk_len; k += tpr) {
+        acc[0] = OP::combine(acc[0], OP::load(in[k * strides.y]));
+      }
+    }
+  }
+  TA val = acc[0];
+  for (uint j = 1; j < NCHAINS; j++) {
+    val = OP::combine(val, acc[j]);
+  }
+  threadgroup TA shared[MAX_THREADGROUP_SIZE / 32];
+  val = OP::threadgroup_reduce(shared, val, tid, tptg);
+  if (tid == 0) {
+    output[tgid] = OP::finalize(val, 0);
+  }
+}
+
 #define INSTANTIATE_KERNEL(name, func, ...) \
   template [[host_name(                     \
       name)]] [[kernel]] decltype(func<__VA_ARGS__>) func<__VA_ARGS__>
@@ -986,6 +1059,12 @@ kernel void reduction_flat(
   INSTANTIATE_KERNEL(                                  \
       PREFIX "reduction_flat_" #TI "_" #TO,            \
       reduction_flat,                                  \
+      __VA_ARGS__,                                     \
+      TI,                                              \
+      TO);                                             \
+  INSTANTIATE_KERNEL(                                  \
+      PREFIX "reduction_flat_strided_" #TI "_" #TO,    \
+      reduction_flat_strided,                          \
       __VA_ARGS__,                                     \
       TI,                                              \
       TO);                                             \
