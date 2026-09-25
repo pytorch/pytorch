@@ -6693,7 +6693,6 @@ def exponential(self, rate=1, generator=None):
 def geometric(self, p, generator=None):
     if generator is not None:
         raise AssertionError("generator is not supported in refs")
-    # TODO: fix inductor rand_like for integer, bool dtypes
     torch._check(
         not utils.is_complex_dtype(self.dtype)
         and not utils.is_boolean_dtype(self.dtype),
@@ -6703,7 +6702,13 @@ def geometric(self, p, generator=None):
         0 < p and p < 1,
         lambda: f"geometric_ expects p to be in (0, 1), but got p={p}",
     )
-    return torch.floor(torch.log1p(-torch.rand_like(self)) / math.log1p(-p)) + 1
+    # geometric is discrete, so an integral self is valid, but a uniform sample of
+    # one is not: draw the sample in floating point and convert the result back.
+    sample_dtype = (
+        self.dtype if utils.is_float_dtype(self.dtype) else torch.get_default_dtype()
+    )
+    uniform_val = torch.rand_like(self, dtype=sample_dtype)
+    return (torch.floor(torch.log1p(-uniform_val) / math.log1p(-p)) + 1).to(self.dtype)
 
 
 @register_decomposition(aten.log_normal)

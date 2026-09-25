@@ -23656,12 +23656,7 @@ python_ref_db = [
         torch_opinfo_name="geometric",
         supports_out=True,
         decorators=(
-            # dtypes that do not support check_uniform_bounds of rand_like
             DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_dtypes'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta',
-                         dtypes=(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64)),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                         dtypes=(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64)),
 
             # TODO: RuntimeError: no _refs support for torch.rand_like
             DecorateInfo(unittest.skip("TODO: RuntimeError: no _refs support for torch.rand_like"),

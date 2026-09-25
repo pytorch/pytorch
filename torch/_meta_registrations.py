@@ -560,6 +560,13 @@ def meta_randint_low(
 @register_meta([aten.rand.default, aten.rand.out])
 @out_wrapper()
 def meta_rand_default(size, *, dtype=None, layout=None, device=None, pin_memory=None):
+    # Inductor's replace_random pass rewrites aten.rand before the uniform
+    # decomposition runs, so the check the decomposition does is repeated here.
+    resolved_dtype = torch.get_default_dtype() if dtype is None else dtype
+    torch._check_not_implemented(
+        resolved_dtype.is_floating_point or resolved_dtype.is_complex,
+        lambda: f"\"check_uniform_bounds\" not implemented for '{resolved_dtype}'",
+    )
     return torch.empty(
         size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
     )
