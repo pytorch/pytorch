@@ -6,7 +6,8 @@ from typing import NamedTuple
 import torch
 from torch import nn
 
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo
+from torch.testing._internal.common_utils import HardwareClassification, run_tests, skipIfTorchDynamo
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.jit_utils import JitTestCase
 
 from test_tensorexpr import warmup_and_run_forward
@@ -25,6 +26,8 @@ CONV_TRANSPOSE_MODULES = {2: torch.nn.ConvTranspose2d}
 @skipIfTorchDynamo("too slow")
 @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled")
 class TestMkldnnFusion(JitTestCase):
+    hw_classification = HardwareClassification.CPU
+
     def assertFused(self, graph, fused_patterns):
         for pat in fused_patterns:
             self.assertGraphContainsExactly(graph, pat, 0)
@@ -60,7 +63,7 @@ class TestMkldnnFusion(JitTestCase):
         torch._C._jit_set_te_must_use_llvm_cpu(old_te_must_use_llvm_cpu)
         return graph
 
-    def test_single_conv(self):
+    def test_single_conv(self, device):
         class M(nn.Module):
             def __init__(self, in_channels, out_channels, bias, **kwargs):
                 super().__init__()
@@ -90,7 +93,7 @@ class TestMkldnnFusion(JitTestCase):
                           padding=1,
                           dilation=dilation,
                           groups=groups).to(memory_format=memory_format)
-                    x = torch.randn(batch_size, iC, input_size, input_size).to(memory_format=memory_format)
+                    x = torch.randn(batch_size, iC, input_size, input_size, device=device).to(memory_format=memory_format)
                     graph = self._check_model(m, x, trace)
                     conv_node_name = 'aten::_convolution' if trace else 'aten::conv2d'
                     if enabled:
@@ -99,7 +102,7 @@ class TestMkldnnFusion(JitTestCase):
                     else:
                         self.assertGraphContains(graph, kind=conv_node_name)
 
-    def test_conv_unary_fusion_nnc(self):
+    def test_conv_unary_fusion_nnc(self, device):
         class M(nn.Module):
             def __init__(self, unary_fn, in_channels, out_channels, bias, **kwargs):
                 super().__init__()
@@ -119,7 +122,7 @@ class TestMkldnnFusion(JitTestCase):
                 for bias in [True, False]:
                     for oC in [1, 10]:
                         m = M(unary_fn, 3, oC, bias, kernel_size=(3, 3)).to(memory_format=memory_format)
-                        x = torch.randn(1, 3, 224, 224).to(memory_format=memory_format)
+                        x = torch.randn(1, 3, 224, 224, device=device).to(memory_format=memory_format)
 
                         graph = self._check_model(m, x)
                         if enabled:
@@ -128,7 +131,7 @@ class TestMkldnnFusion(JitTestCase):
                         else:
                             self.assertGraphContains(graph, kind='aten::conv2d')
 
-    def test_unsupported_conv(self):
+    def test_unsupported_conv(self, device):
         class M(nn.Module):
             def __init__(self, m, in_channels, out_channels, bias, **kwargs):
                 super().__init__()
@@ -165,7 +168,7 @@ class TestMkldnnFusion(JitTestCase):
             input_sizes = [batch_size, iC, input_size, input_size]
             if dim == 3:
                 input_sizes.append(input_size)
-            x = torch.randn(input_sizes).to(memory_format=memory_format)
+            x = torch.randn(input_sizes, device=device).to(memory_format=memory_format)
             graph = self._check_model(m, x, trace)
             self.assertGraphContains(graph, kind='aten::_convolution')
 
@@ -191,7 +194,7 @@ class TestMkldnnFusion(JitTestCase):
         }
         return binary_list
 
-    def test_linear_unary_fusion_ops(self):
+    def test_linear_unary_fusion_ops(self, device):
         class M(nn.Module):
             def __init__(self, unary_fn, in_channels, out_channels, bias, **kwargs):
                 super().__init__()
@@ -212,7 +215,7 @@ class TestMkldnnFusion(JitTestCase):
             for (input_shape, input_stride), bias in options:
                 with torch.no_grad():
                     mod = M(pointwise_info.pointwise_module, input_shape[-1], 10, bias).eval()
-                    v = torch.randn(input_shape)
+                    v = torch.randn(input_shape, device=device)
                     if input_stride is not None:
                         v = v.as_strided(input_shape, input_stride)
                     ref = mod(v)
@@ -225,7 +228,7 @@ class TestMkldnnFusion(JitTestCase):
                     self.assertEqual(ref, fused)
 
 
-    def test_conv_unary_fusion_ops(self):
+    def test_conv_unary_fusion_ops(self, device):
         class M(nn.Module):
             def __init__(self, unary_fn, dim, in_channels, out_channels, dilation, groups, bias, **kwargs):
                 super().__init__()
@@ -246,7 +249,7 @@ class TestMkldnnFusion(JitTestCase):
                     oC = 32 * groups
                     iC = 3 * groups
                     x_shape = (1, iC) + input_shapes[dim]
-                    x = torch.randn(x_shape, dtype=torch.float32).to(memory_format=memory_format)
+                    x = torch.randn(x_shape, dtype=torch.float32, device=device).to(memory_format=memory_format)
                     mod = M(pointwise_info.pointwise_module, dim, iC, oC, dilation, groups, bias, kernel_size=3)
                     mod = mod.to(memory_format=memory_format).eval()
                     with torch.no_grad():
@@ -260,15 +263,15 @@ class TestMkldnnFusion(JitTestCase):
                         )
                     self.assertEqual(ref, fused)
 
-    def test_conv_unary_fusion_none_attr_reported_shape(self):
+    def test_conv_unary_fusion_none_attr_reported_shape(self, device):
         for memory_format in [torch.contiguous_format, torch.channels_last]:
-            x = torch.randn(5, 1, 28, 28, dtype=torch.float32).to(
+            x = torch.randn(5, 1, 28, 28, dtype=torch.float32, device=device).to(
                 memory_format=memory_format
             )
-            weight = torch.randn(64, 1, 3, 3, dtype=torch.float32).to(
+            weight = torch.randn(64, 1, 3, 3, dtype=torch.float32, device=device).to(
                 memory_format=memory_format
             )
-            bias = torch.randn(64, dtype=torch.float32)
+            bias = torch.randn(64, dtype=torch.float32, device=device)
             with torch.no_grad():
                 ref = torch.nn.functional.conv2d(x, weight, bias)
                 fused = torch.ops.mkldnn._convolution_pointwise(
@@ -286,7 +289,7 @@ class TestMkldnnFusion(JitTestCase):
             self.assertEqual(ref, fused)
 
 
-    def test_conv_binary_fusion_ops(self):
+    def test_conv_binary_fusion_ops(self, device):
         class M(nn.Module):
             def __init__(self, binary_fn, dim, in_channels, out_channels, dilation, groups, bias, **kwargs):
                 super().__init__()
@@ -307,7 +310,7 @@ class TestMkldnnFusion(JitTestCase):
                     oC = 32 * groups
                     iC = 3 * groups
                     x_shape = (1, iC) + input_shapes[dim]
-                    x = torch.randn(x_shape, dtype=torch.float32).to(memory_format=memory_format)
+                    x = torch.randn(x_shape, dtype=torch.float32, device=device).to(memory_format=memory_format)
                     mod = M(pointwise_fn, dim, iC, oC, dilation, groups, bias, kernel_size=3)
                     mod = mod.to(memory_format=memory_format).eval()
                     other = torch.randn_like(mod.conv(x))
@@ -334,7 +337,7 @@ class TestMkldnnFusion(JitTestCase):
                         self.assertEqual(ref, fused, atol=5e-4, rtol=5e-4)
 
 
-    def test_linear_binary_fusion_ops(self):
+    def test_linear_binary_fusion_ops(self, device):
         class M(nn.Module):
             def __init__(self, binary_fn, in_channels, out_channels, bias, **kwargs):
                 super().__init__()
@@ -356,10 +359,10 @@ class TestMkldnnFusion(JitTestCase):
             for (input_shape, input_stride), bias in options:
                 with torch.no_grad():
                     mod = M(pointwise_fn, input_shape[-1], out_feature, bias).eval()
-                    v = torch.randn(input_shape)
+                    v = torch.randn(input_shape, device=device)
                     if input_stride is not None:
                         v = v.as_strided(input_shape, input_stride)
-                    other = torch.randn(input_shape[:-1] + [out_feature])
+                    other = torch.randn(input_shape[:-1] + [out_feature], device=device)
                     ref = mod(v, other)
                     attr = pointwise_name
                     fused = torch.ops.mkldnn._linear_pointwise(
@@ -367,7 +370,7 @@ class TestMkldnnFusion(JitTestCase):
                     )
                     self.assertEqual(ref, fused)
 
-    def test_conv_transpose_unary_fusion_ops(self):
+    def test_conv_transpose_unary_fusion_ops(self, device):
         class M(nn.Module):
             def __init__(self, unary_fn, dim, in_channels, out_channels, kernel_size, **kwargs):
                 super().__init__()
@@ -389,7 +392,7 @@ class TestMkldnnFusion(JitTestCase):
                     oC = 32 * groups
                     iC = 3 * groups
                     x_shape = (1, iC) + input_shapes[dim]
-                    x = torch.randn(x_shape, dtype=torch.float32).to(memory_format=memory_format)
+                    x = torch.randn(x_shape, dtype=torch.float32, device=device).to(memory_format=memory_format)
                     mod = M(pointwise_info.pointwise_module, dim, iC, oC, kernel_size, dilation=dilation, groups=groups, bias=bias)
                     mod = mod.to(memory_format=memory_format).eval()
                     with torch.no_grad():
@@ -425,6 +428,8 @@ class TestMkldnnFusion(JitTestCase):
                             scalars,
                             algorithm)
                     self.assertEqual(ref, fused)
+
+instantiate_device_type_tests(TestMkldnnFusion, globals(), only_for="cpu")
 
 if __name__ == "__main__":
     run_tests()

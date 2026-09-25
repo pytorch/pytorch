@@ -1,11 +1,13 @@
 # Owner(s): ["module: unknown"]
 
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import HardwareClassification, TestCase, run_tests
 import os
 import subprocess
 import sys
 
 class TestMKLVerbose(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_verbose_on(self):
         num = 0
         loc = os.path.dirname(os.path.abspath(__file__))
