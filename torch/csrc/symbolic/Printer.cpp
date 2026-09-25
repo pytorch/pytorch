@@ -200,6 +200,20 @@ class StrPrinter {
       case Kind::BitwiseOr:
       case Kind::BitwiseXor:
       case Kind::Where:
+      case Kind::OpaqueSqrt:
+      case Kind::OpaqueCos:
+      case Kind::OpaqueCosh:
+      case Kind::OpaqueSin:
+      case Kind::OpaqueSinh:
+      case Kind::OpaqueTan:
+      case Kind::OpaqueTanh:
+      case Kind::OpaqueAsin:
+      case Kind::OpaqueAcos:
+      case Kind::OpaqueAtan:
+      case Kind::OpaqueExp:
+      case Kind::OpaqueLog:
+      case Kind::OpaqueAsinh:
+      case Kind::OpaqueLog2:
         // _print_Function.
         return std::string(function_name(e->kind)) + "(" +
             stringify(e->args, ", ", 0) + ")";
@@ -292,6 +306,20 @@ class StrPrinter {
       case Kind::ToFloat:
       case Kind::TruncToFloat:
       case Kind::IsNonOverlappingAndDenseIndicator:
+      case Kind::OpaqueSqrt:
+      case Kind::OpaqueCos:
+      case Kind::OpaqueCosh:
+      case Kind::OpaqueSin:
+      case Kind::OpaqueSinh:
+      case Kind::OpaqueTan:
+      case Kind::OpaqueTanh:
+      case Kind::OpaqueAsin:
+      case Kind::OpaqueAcos:
+      case Kind::OpaqueAtan:
+      case Kind::OpaqueExp:
+      case Kind::OpaqueLog:
+      case Kind::OpaqueAsinh:
+      case Kind::OpaqueLog2:
         // PRECEDENCE_VALUES["Function"].
         return kFunc;
       default:

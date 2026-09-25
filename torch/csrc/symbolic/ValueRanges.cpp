@@ -801,6 +801,31 @@ ValueRanges Analysis::interp(const Expr* e) {
       return args[0];
     case Kind::Where:
       return where(args[0], args[1], args[2]);
+    case Kind::OpaqueSqrt:
+    case Kind::OpaqueLog:
+    case Kind::OpaqueLog2: {
+      require_not_bool(args[0]);
+      // sqrt: x.lower < 0; log, log2: x.lower <= 0.
+      int c = compare_numbers(args[0].lower, zero());
+      if (e->kind == Kind::OpaqueSqrt ? c < 0 : c <= 0) {
+        return unknown();
+      }
+      return increasing_map(e->kind, args[0]);
+    }
+    case Kind::OpaqueExp:
+      return increasing_map(e->kind, args[0]);
+    case Kind::OpaqueCos:
+    case Kind::OpaqueSin:
+      return make_value_range(a_, a_.float_number(-1.0), a_.float_number(1.0));
+    case Kind::OpaqueCosh:
+      return make_value_range(a_, a_.float_number(0.0), a_.oo());
+    case Kind::OpaqueSinh:
+    case Kind::OpaqueTan:
+    case Kind::OpaqueTanh:
+    case Kind::OpaqueAsin:
+    case Kind::OpaqueAcos:
+    case Kind::OpaqueAtan:
+      return unknown();
     case Kind::FloatTrueDiv:
     case Kind::IntTrueDiv:
       return true_div(e->kind, args[0], args[1]);

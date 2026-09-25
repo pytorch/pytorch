@@ -47,6 +47,10 @@ from torch.utils._sympy.functions import (
     Min,
     Mod,
     ModularIndexing,
+    OpaqueUnaryFn_exp,
+    OpaqueUnaryFn_log,
+    OpaqueUnaryFn_log2,
+    OpaqueUnaryFn_sqrt,
     PowByNatural,
     PythonMod,
     RoundDecimal,
@@ -1329,11 +1333,17 @@ class TestNativeFunctions(TestCase):
     ALL_FUNCTIONS.update((f.__name__, f) for f in BITWISE)
     ALL_FUNCTIONS["Identity"] = Identity
     ALL_FUNCTIONS["Where"] = Where
+    OPAQUE_NAMES = "sqrt cos cosh sin sinh tan tanh asin acos atan exp log asinh log2"
+    OPAQUE = tuple(
+        getattr(torch.utils._sympy.functions, f"OpaqueUnaryFn_{name}")
+        for name in OPAQUE_NAMES.split()
+    )
+    ALL_FUNCTIONS.update((f.__name__, f) for f in OPAQUE)
     NODE_TYPES = (Mod, PythonMod, FloorDiv, Max, Min, PowByNatural, FloatPow)
     NODE_TYPES += (FloatTrueDiv, IntTrueDiv, CeilToInt, FloorToInt, TruncToInt)
     NODE_TYPES += (RoundToInt, ToFloat, TruncToFloat, RoundDecimal)
     NODE_TYPES += (IsNonOverlappingAndDenseIndicator, ModularIndexing, *BITWISE)
-    NODE_TYPES += (Identity, Where)
+    NODE_TYPES += (Identity, Where, *OPAQUE)
     PYTHON_ERRORS = (ZeroDivisionError, AssertionError, TypeError, ValueError)
     PYTHON_ERRORS += (OverflowError,)
 
@@ -1960,6 +1970,44 @@ class TestNativeFunctions(TestCase):
                     unsupported += 1
         self.assertGreater(answered, 5 * unsupported)
 
+    def test_opaque_unary_known(self):
+        nums = [*range(-3, 6), 1000, 2**53 + 1, -(2**63), 2**63 - 1, 0.5, -0.5]
+        nums += [1e300, 5e-324, -1e-320, 709.0, 710.0, 1e-310, sympy.Rational(1, 2)]
+        nums = [*map(sympy.sympify, nums), int_oo, -int_oo, sympy.oo, -sympy.oo]
+        folded = 0
+        for fn in self.OPAQUE:
+            for x in nums:
+                folded += self.check_call(fn.__name__, x) is not None
+            for x in [s0, u0, zf, s0 + 1, -u0, FloorDiv(u0, 2), fn(s0)]:
+                self.assertEqual(self.check_call(fn.__name__, x), fn(x))
+            for x in [zf + 0.5, sympy.true, sympy.Eq(u0, 1)]:
+                self.assertIsNone(self.check_call(fn.__name__, x))
+        self.assertGreater(folded, 250)
+        sqrt, exp = OpaqueUnaryFn_sqrt(s0), OpaqueUnaryFn_exp(u0)
+        exprs = [sqrt + 1, 2 * exp, -sqrt, sqrt**2, exp / s0, s0 - sqrt, sqrt < 3]
+        exprs += [sympy.Eq(exp, s0), sqrt * exp, Identity(exp), sqrt - exp]
+        exprs += [fn(zf) + u0 for fn in self.OPAQUE]
+        rng = random.Random(0)
+        for e in exprs:
+            self.assertTrue(self.check_expr(e, rng), str(e))
+
+    @parametrize("seed", range(2))
+    def test_opaque_unary_fuzz(self, seed):
+        rng = random.Random(seed)
+        nodes = [fn(x) for fn in self.OPAQUE for x in [s0, u0, zf, 2 * s0 + 1]]
+        answered = unsupported = 0
+        for _ in range(60):
+            t = random_tree(rng, 3, LEAVES + nodes)
+            for sub in subtrees(t):
+                v = sympy.sympify(sympy_eval(sub))
+                if v.has(sympy.zoo, sympy.nan):
+                    continue
+                if self.check_expr(v, rng):
+                    answered += 1
+                else:
+                    unsupported += 1
+        self.assertGreater(answered, 5 * unsupported)
+
     def test_minmax_known(self):
         u1 = sympy.Symbol("u1", integer=True)
         n = sympy.Symbol("n", integer=True, nonnegative=True)
@@ -2406,6 +2454,7 @@ class TestNativeFunctions(TestCase):
 class TestNativeValueRanges(TestCase):
     PYTHON_ERRORS = (AssertionError, TypeError, ValueError, ValueRangeError)
     PYTHON_ERRORS += (RecursionError, ZeroDivisionError, OverflowError)
+    PYTHON_ERRORS += (AttributeError,)
     u1 = sympy.Symbol("u1", integer=True)
     n = sympy.Symbol("n", integer=True, nonnegative=True)
     INT_LEAVES = [s0, s1, u0, u1, n, *map(sympy.Integer, range(-3, 5))]
@@ -2730,6 +2779,25 @@ class TestNativeValueRanges(TestCase):
                     ranges[s] = (lo, hi)
                 answered += self.check(e, ranges) is not None
         self.assertGreater(answered, 250)
+
+    def test_opaque_unary(self):
+        sqrt, exp, log = OpaqueUnaryFn_sqrt, OpaqueUnaryFn_exp, OpaqueUnaryFn_log
+        ints = self.BOUNDS
+        floats = [-sympy.oo, sympy.oo, *map(sympy.Float, [-2.5, -1, 0, 0.5, 1, 3, 800])]
+        cases = [(fn(u0), ints) for fn in TestNativeFunctions.OPAQUE]
+        cases += [(fn(zf), floats) for fn in TestNativeFunctions.OPAQUE]
+        cases += [(sqrt(self.n) + 1, ints), (exp(u0) * 2, ints)]
+        cases += [(log(u0 + 3), ints), (OpaqueUnaryFn_log2(zf) + zf, floats)]
+        rng = random.Random(0)
+        answered = 0
+        for e, bounds in cases:
+            for _ in range(40):
+                ranges = {}
+                for s in sorted(e.free_symbols, key=str):
+                    lo, hi = sorted(rng.sample(bounds, 2))
+                    ranges[s] = (lo, hi)
+                answered += self.check(e, ranges) is not None
+        self.assertGreater(answered, 900)
 
     def test_bitwise(self):
         zg = sympy.Symbol("zg", real=True)

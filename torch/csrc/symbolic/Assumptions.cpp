@@ -1539,7 +1539,22 @@ Tri ExprArena::eval_fact(const Expr* e, Fact f) {
     case Kind::BitwiseAnd:
     case Kind::BitwiseOr:
     case Kind::BitwiseXor:
-      // Function._eval_is_commutative; BitwiseFn has no other facts.
+    case Kind::OpaqueSqrt:
+    case Kind::OpaqueCos:
+    case Kind::OpaqueCosh:
+    case Kind::OpaqueSin:
+    case Kind::OpaqueSinh:
+    case Kind::OpaqueTan:
+    case Kind::OpaqueTanh:
+    case Kind::OpaqueAsin:
+    case Kind::OpaqueAcos:
+    case Kind::OpaqueAtan:
+    case Kind::OpaqueExp:
+    case Kind::OpaqueLog:
+    case Kind::OpaqueAsinh:
+    case Kind::OpaqueLog2:
+      // Function._eval_is_commutative; BitwiseFn and OpaqueUnaryFn have no
+      // other facts.
       return f == F::commutative ? fuzzy_and_or(*this, e->args, f, false)
                                  : Tri::Unknown;
     case Kind::Identity:

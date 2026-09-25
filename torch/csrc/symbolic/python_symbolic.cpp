@@ -51,7 +51,21 @@ constexpr Kind kFunctionKinds[] = {
     Kind::BitwiseOr,
     Kind::BitwiseXor,
     Kind::Identity,
-    Kind::Where};
+    Kind::Where,
+    Kind::OpaqueSqrt,
+    Kind::OpaqueCos,
+    Kind::OpaqueCosh,
+    Kind::OpaqueSin,
+    Kind::OpaqueSinh,
+    Kind::OpaqueTan,
+    Kind::OpaqueTanh,
+    Kind::OpaqueAsin,
+    Kind::OpaqueAcos,
+    Kind::OpaqueAtan,
+    Kind::OpaqueExp,
+    Kind::OpaqueLog,
+    Kind::OpaqueAsinh,
+    Kind::OpaqueLog2};
 
 // Python-side state for an ExprArena: the sympy Symbol objects that native
 // symbols came from and a conversion cache (conversion is pure per Expr).
@@ -441,7 +455,21 @@ py::object PyArena::to_sympy(const Expr* e) {
     case Kind::BitwiseOr:
     case Kind::BitwiseXor:
     case Kind::Identity:
-    case Kind::Where: {
+    case Kind::Where:
+    case Kind::OpaqueSqrt:
+    case Kind::OpaqueCos:
+    case Kind::OpaqueCosh:
+    case Kind::OpaqueSin:
+    case Kind::OpaqueSinh:
+    case Kind::OpaqueTan:
+    case Kind::OpaqueTanh:
+    case Kind::OpaqueAsin:
+    case Kind::OpaqueAcos:
+    case Kind::OpaqueAtan:
+    case Kind::OpaqueExp:
+    case Kind::OpaqueLog:
+    case Kind::OpaqueAsinh:
+    case Kind::OpaqueLog2: {
       py::tuple args(e->args.size());
       for (size_t i = 0; i < e->args.size(); ++i) {
         args[i] = to_sympy(e->args[i]);
@@ -527,6 +555,20 @@ const char* kind_name(Kind k) {
     case Kind::BitwiseXor:
     case Kind::Identity:
     case Kind::Where:
+    case Kind::OpaqueSqrt:
+    case Kind::OpaqueCos:
+    case Kind::OpaqueCosh:
+    case Kind::OpaqueSin:
+    case Kind::OpaqueSinh:
+    case Kind::OpaqueTan:
+    case Kind::OpaqueTanh:
+    case Kind::OpaqueAsin:
+    case Kind::OpaqueAcos:
+    case Kind::OpaqueAtan:
+    case Kind::OpaqueExp:
+    case Kind::OpaqueLog:
+    case Kind::OpaqueAsinh:
+    case Kind::OpaqueLog2:
       return function_name(k);
   }
   return "?";

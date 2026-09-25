@@ -65,6 +65,41 @@ double to_double(const Expr* e) {
 // 10**15 on.
 constexpr double kExactFloatOfInt = 1e15;
 
+struct OpaqueUnaryFn {
+  const char* name;
+  double (*fn)(double);
+};
+
+// Indexed by kind - Kind::OpaqueSqrt.
+constexpr std::array<OpaqueUnaryFn, 14> kOpaqueUnaryFns = {{
+    {"OpaqueUnaryFn_sqrt", [](double x) { return std::sqrt(x); }},
+    {"OpaqueUnaryFn_cos", [](double x) { return std::cos(x); }},
+    {"OpaqueUnaryFn_cosh", [](double x) { return std::cosh(x); }},
+    {"OpaqueUnaryFn_sin", [](double x) { return std::sin(x); }},
+    {"OpaqueUnaryFn_sinh", [](double x) { return std::sinh(x); }},
+    {"OpaqueUnaryFn_tan", [](double x) { return std::tan(x); }},
+    {"OpaqueUnaryFn_tanh", [](double x) { return std::tanh(x); }},
+    {"OpaqueUnaryFn_asin", [](double x) { return std::asin(x); }},
+    {"OpaqueUnaryFn_acos", [](double x) { return std::acos(x); }},
+    {"OpaqueUnaryFn_atan", [](double x) { return std::atan(x); }},
+    {"OpaqueUnaryFn_exp", [](double x) { return std::exp(x); }},
+    {"OpaqueUnaryFn_log", [](double x) { return std::log(x); }},
+    {"OpaqueUnaryFn_asinh", [](double x) { return std::asinh(x); }},
+    {"OpaqueUnaryFn_log2", [](double x) { return std::log2(x); }},
+}};
+
+constexpr int kFirstOpaque = static_cast<int>(Kind::OpaqueSqrt);
+constexpr int kLastOpaque = static_cast<int>(Kind::OpaqueLog2);
+static_assert(kOpaqueUnaryFns.size() == kLastOpaque - kFirstOpaque + 1);
+
+bool is_opaque_unary(Kind k) {
+  return k >= Kind::OpaqueSqrt && k <= Kind::OpaqueLog2;
+}
+
+const OpaqueUnaryFn& opaque_unary_fn(Kind k) {
+  return kOpaqueUnaryFns[static_cast<int>(k) - kFirstOpaque];
+}
+
 // float.__pow__; throws where it raises or returns a complex.
 double py_float_pow(double b, double e) {
   double r = std::pow(b, e);
@@ -395,6 +430,9 @@ const char* function_name(Kind k) {
     case Kind::Where:
       return "Where";
     default:
+      if (is_opaque_unary(k)) {
+        return opaque_unary_fn(k).name;
+      }
       throw NativeUnsupported("not a function kind");
   }
 }
@@ -432,6 +470,9 @@ const Expr* ExprArena::function(Kind kind, c10::ArrayRef<const Expr*> args) {
       arity = 3;
       break;
     default:
+      if (is_opaque_unary(kind)) {
+        arity = 1;
+      }
       break;
   }
   if (args.size() != arity) {
@@ -523,7 +564,8 @@ const Expr* ExprArena::function(Kind kind, c10::ArrayRef<const Expr*> args) {
       r = args[0] == true_ ? args[1] : args[0] == false_ ? args[2] : nullptr;
       break;
     default:
-      throw NativeUnsupported("not a function kind");
+      r = eval_opaque_unary(kind, args[0]);
+      break;
   }
   if (r != nullptr) {
     return r;
@@ -545,6 +587,51 @@ const Expr* ExprArena::function(Kind kind, c10::ArrayRef<const Expr*> args) {
     throw NativeUnsupported("unevaluated function of a Boolean");
   }
   return r;
+}
+
+// OpaqueUnaryFn.eval: math.<name>(float(a)) on Integers and Floats, sympy's
+// function on infinities.
+const Expr* ExprArena::eval_opaque_unary(Kind kind, const Expr* a) {
+  if (!is_opaque_unary(kind)) {
+    throw NativeUnsupported("not a function kind");
+  }
+  if (a->kind == Kind::Integer || a->kind == Kind::Float) {
+    // The math module calls libm. Where libm gives nan or an infinity it
+    // raises ValueError, which propagates, or OverflowError, after which eval
+    // returns sympy's function of the arg.
+    double r = opaque_unary_fn(kind).fn(to_double(a));
+    if (!std::isfinite(r)) {
+      throw NativeUnsupported("math domain error or overflow");
+    }
+    return float_number(r);
+  }
+  if (!is_infinite(a)) {
+    return nullptr;
+  }
+  bool positive = a->kind == Kind::IntInfinity || a->kind == Kind::Infinity;
+  switch (kind) {
+    case Kind::OpaqueSqrt:
+      if (positive) {
+        return oo_;
+      }
+      break;
+    case Kind::OpaqueCosh:
+    case Kind::OpaqueLog:
+    case Kind::OpaqueLog2:
+      return oo_;
+    case Kind::OpaqueSinh:
+    case Kind::OpaqueAsinh:
+      return positive ? oo_ : neg_oo_;
+    case Kind::OpaqueTanh:
+      return positive ? one_ : neg_one_;
+    case Kind::OpaqueExp:
+      return positive ? oo_ : zero_;
+    default:
+      break;
+  }
+  // sqrt(-oo) and asin/acos(+-oo) are imaginary, atan(+-oo) is +-pi/2 and
+  // cos/sin/tan give AccumBounds.
+  throw NativeUnsupported("OpaqueUnaryFn of an infinity");
 }
 
 const Expr* ExprArena::eval_bitwise(Kind kind, const Expr* a, const Expr* b) {
