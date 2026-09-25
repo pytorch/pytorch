@@ -37,7 +37,7 @@ from torch._dynamo import (
     utils as dynamo_utils,
 )
 from torch._dynamo.backends import common as dynamo_common
-from torch._dynamo.device_interface import get_interface_for_device
+from torch._dynamo.device_interface import DeviceInterface, get_interface_for_device
 from torch._dynamo.repro.after_aot import wrap_compiler_debug
 from torch._dynamo.utils import (
     chromium_event_timed,
@@ -1696,8 +1696,8 @@ class _InProcessFxCompile(FxCompile):
             )
             with V.set_fake_mode(fake_mode):
                 # has some issues with memory in training
-                cuda_context = get_cuda_device_context(gm)
-                with cuda_context:
+                device_context = get_device_context(gm)
+                with device_context:
                     _recursive_post_grad_passes(gm, is_inference=is_inference)
                 V.debug.fx_graph_transformed(gm, example_inputs)
                 post_grad_graphs_log.debug(
@@ -2650,22 +2650,55 @@ def get_cpp_wrapper_config(log_cudagraph_skip: bool = True) -> dict[str, object]
     }
 
 
-def get_cuda_device_context(gm: torch.fx.GraphModule) -> AbstractContextManager[None]:
+def get_device_context(gm: torch.fx.GraphModule) -> AbstractContextManager[None]:
     """
-    Returns a cuda device context manager if there is a single device in the graph
+    Returns a device context manager if the graph lives on a single device whose
+    backend provides a real device guard. If CUDA is unavailable, or the backend
+    only provides the fallback protocol, returns a null context.
     """
-    if not torch.cuda.is_available():
+    all_devices = get_all_devices(gm)
+
+    # Historically this helper only considered CUDA: a graph with a single CUDA
+    # device activates the cuda context, even alongside other device types.
+    # Keep that precedence so such graphs behave exactly as before.
+    cuda_devices: OrderedSet[torch.device] = OrderedSet(
+        device for device in all_devices if device.type == "cuda"
+    )
+    if len(cuda_devices) == 1:
+        if torch.cuda.is_available():
+            return torch.cuda.device(next(iter(cuda_devices)))  # type: ignore[return-value]
         return contextlib.nullcontext()
 
-    cuda_devices: OrderedSet[torch.device] = OrderedSet(
-        device for device in get_all_devices(gm) if device.type == "cuda"
-    )
+    # No single cuda device.  Extend the same semantic to any other device type
+    # that has an interface with a real device context manager: only a graph that
+    # lives on exactly one device type is eligible.
+    device_types: OrderedSet[str] = OrderedSet(device.type for device in all_devices)
+    if len(device_types) != 1:
+        return contextlib.nullcontext()
 
-    return (
-        torch.cuda.device(next(iter(cuda_devices)))  # type: ignore[return-value]
-        if len(cuda_devices) == 1
-        else contextlib.nullcontext()
+    device_type = next(iter(device_types))
+    try:
+        interface = get_interface_for_device(device_type)
+    except NotImplementedError:
+        # Backend has no registered interface; it cannot provide a context.
+        return contextlib.nullcontext()
+
+    if interface.device in (DeviceInterface.device, torch.device):
+        # Base implementation raises if used. torch.device's context-manager
+        # protocol is a default-device TorchFunctionMode, not a device guard,
+        # so it is not a valid substitute (e.g. torch_npu sets this).
+        return contextlib.nullcontext()
+
+    devices: OrderedSet[torch.device] = OrderedSet(
+        device for device in all_devices if device.type == device_type
     )
+    if len(devices) == 1:
+        return interface.device(next(iter(devices)))  # type: ignore[return-value]
+    return contextlib.nullcontext()
+
+
+# Backwards-compatible name: external callers and downstream patches may alias this.
+get_cuda_device_context = get_device_context
 
 
 def partition_fn(
@@ -2680,8 +2713,8 @@ def partition_fn(
     partitioner_fn_override: Callable[..., Any] | None = None,
     **kwargs: object,
 ) -> tuple[GraphModule, GraphModule]:
-    cuda_context = get_cuda_device_context(gm)
-    with cuda_context:
+    device_context = get_device_context(gm)
+    with device_context:
         # We can skip the invoke_subgraph because the
         # entire_partition_fn is called recursively for invoke_subgraph
         # in partitioning.
@@ -3119,6 +3152,17 @@ class _ConstantDecompTable(Generic[_P, _T]):
         return self.table
 
 
+def _should_wakeup_async_compile(example_inputs: Sequence[InputType]) -> bool:
+    """Whether the AsyncCompile pool should be woken early for these inputs.
+
+    Wake the pool whenever an input lives on a GPU-class accelerator (registered
+    via ``GPU_TYPES`` / ``is_gpu``).
+    """
+    return any(
+        isinstance(e, torch.Tensor) and is_gpu(e.device.type) for e in example_inputs
+    )
+
+
 def compile_fx(
     model_: GraphModule,
     example_inputs_: Sequence[InputType],
@@ -3177,11 +3221,9 @@ def compile_fx(
         compile_region_name=compile_region_name,
     )
 
-    # Wake up the AsyncCompile subproc pool as early as possible (if there's cuda).
-    if any(
-        isinstance(e, torch.Tensor) and e.device.type in ("cuda", "xpu")
-        for e in example_inputs_
-    ):
+    # Wake up the AsyncCompile subproc pool as early as possible if any input
+    # lives on a GPU-class accelerator.
+    if _should_wakeup_async_compile(example_inputs_):
         torch._inductor.async_compile.AsyncCompile.wakeup()
 
     if config.cpp_wrapper or config.fx_wrapper:
