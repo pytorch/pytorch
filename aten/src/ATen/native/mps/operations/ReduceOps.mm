@@ -261,102 +261,6 @@ static void reduction_out_mps(const Tensor& input_t,
   }
 }
 
-static void norm_kernel_mps(TensorIterator& iter, const Scalar& p_scalar) {
-  const Tensor& output = iter.output(0);
-  const Tensor& input = iter.input(0);
-  auto p = p_scalar.to<double>();
-
-  if (input.numel() == 0) {
-    output.fill_((p < 0) ? INFINITY : 0);
-    return;
-  }
-
-  if (output.numel() == 0) {
-    return;
-  }
-
-  TORCH_CHECK_NOT_IMPLEMENTED(canUse32BitIndexMath(input, 1LL << 32),
-                              "MPS norm: tensors requiring 64-bit indexing are not supported (numel=",
-                              input.numel(),
-                              ")");
-  // Number of input elements that are reduced into one output element
-  uint32_t reduction_size = input.numel() / output.numel();
-
-  TORCH_INTERNAL_ASSERT(output.dim() == input.dim());
-
-  // Fast path: L1/L2 norm over the innermost contiguous dim reuses the sum
-  // innermost kernel (abs/square load + sqrt)
-  if ((p == 1.0 || p == 2.0) && output.numel() > 1 && input.is_contiguous() && output.is_contiguous() &&
-      input.scalar_type() == output.scalar_type() &&
-      (input.scalar_type() == kFloat || input.scalar_type() == kHalf || input.scalar_type() == kBFloat16)) {
-    int num_reduced = 0;
-    int reduced_dim = -1;
-    for (const auto d : c10::irange(input.dim())) {
-      if (input.size(d) != output.size(d)) {
-        num_reduced++;
-        reduced_dim = d;
-      }
-    }
-    if (num_reduced == 1 && reduced_dim == input.dim() - 1) {
-      uint32_t N = input.size(input.dim() - 1);
-      uint32_t M = input.numel() / N;
-      auto kernel_name = fmt::format("norm_{}_reduction_innermost_{}_{}",
-                                     p == 2.0 ? "l2" : "l1",
-                                     scalarToMetalTypeString(input),
-                                     scalarToMetalTypeString(output));
-      constexpr uint32_t rows_per_tg = INNER_TG_SIZE / c10::metal::simdgroup_size;
-      const auto num_tgs = c10::metal::ceil_div(M, rows_per_tg);
-      MPSStream* stream = getCurrentMPSStream();
-      return dispatch_sync_with_rethrow(stream->queue(), ^() {
-        @autoreleasepool {
-          id<MTLComputeCommandEncoder> ce = stream->commandEncoder();
-          auto ps = lib.getPipelineStateForFunc(kernel_name);
-          getMPSProfiler().beginProfileKernel(ps, "norm_reduction_innermost", {input}, stream);
-          [ce setComputePipelineState:ps];
-          mtl_setArgs(ce, input, output, std::array<uint32_t, 2>{M, N}, 0.0f);
-          [ce dispatchThreads:MTLSizeMake(num_tgs * INNER_TG_SIZE, 1, 1)
-              threadsPerThreadgroup:MTLSizeMake(INNER_TG_SIZE, 1, 1)];
-          getMPSProfiler().endProfileKernel(ps, stream);
-        }
-      });
-    }
-  }
-
-  NormParams params;
-
-  params.ndim = input.dim();
-  params.p = static_cast<float>(p);
-  params.reduction_size = reduction_size;
-
-  for (const auto dim_idx : c10::irange(input.dim())) {
-    params.input_sizes[dim_idx] = input.size(dim_idx);
-    params.input_strides[dim_idx] = input.stride(dim_idx);
-    params.output_sizes[dim_idx] = output.size(dim_idx);
-    params.output_strides[dim_idx] = output.stride(dim_idx);
-  }
-
-  MPSStream* stream = getCurrentMPSStream();
-
-  dispatch_sync_with_rethrow(stream->queue(), ^() {
-    @autoreleasepool {
-      id<MTLComputeCommandEncoder> compute_encoder = stream->commandEncoder();
-      auto pipeline_state = lib.getPipelineStateForFunc(
-          fmt::format("norm_{}_{}", scalarToMetalTypeString(input), scalarToMetalTypeString(output)));
-      getMPSProfiler().beginProfileKernel(pipeline_state, "norm", {input}, stream);
-      [compute_encoder setComputePipelineState:pipeline_state];
-      mtl_setArgs(compute_encoder, input, output, params);
-
-      auto threads_per_group = std::min(MAX_THREADGROUP_SIZE, reduction_size);
-      const auto num_threads = static_cast<uint64_t>(output.numel()) * threads_per_group;
-
-      [compute_encoder dispatchThreads:MTLSizeMake(num_threads, 1, 1)
-                 threadsPerThreadgroup:MTLSizeMake(threads_per_group, 1, 1)];
-
-      getMPSProfiler().endProfileKernel(pipeline_state, stream);
-    }
-  });
-}
-
 static void argmax_argmin_out_mps(const Tensor& input_t,
                                   std::optional<int64_t> dim,
                                   bool keepdim,
@@ -1003,6 +907,41 @@ static void mean_kernel_mps(TensorIterator& iter) {
 
 static void count_nonzero_kernel_mps(TensorIterator& iter) {
   sum_nansum_kernel_mps(iter, "count_nonzero_");
+}
+
+static void norm_kernel_mps(TensorIterator& iter, const Scalar& p_scalar) {
+  const Tensor& output = iter.output(0);
+  Tensor input = iter.input(0);
+  auto p = p_scalar.to<double>();
+
+  if (input.numel() == 0) {
+    output.fill_((p < 0) ? INFINITY : 0);
+    return;
+  }
+
+  if (output.numel() == 0) {
+    return;
+  }
+
+  if (input.is_complex()) {
+    input = input.abs();
+  }
+  const auto dtype = input.scalar_type();
+  const auto acc_type = at::toOpMathType(dtype);
+  if (p == INFINITY || p == -INFINITY) {
+    const ReductionOp op{/*is_arg=*/false, p > 0 ? "norm_inf_" : "norm_neginf_", dtype, dtype};
+    reduction_dispatch_mps(std::move(input), output, op, dtype, p > 0 ? "max_" : "min_");
+  } else if (p == 0 || p == 1 || p == 2) {
+    const auto prefix = p == 0 ? "norm_l0_" : p == 1 ? "norm_l1_" : "norm_l2_";
+    const ReductionOp op{/*is_arg=*/false, prefix, dtype, dtype, p == 2 ? 1.0f : 0.0f};
+    reduction_dispatch_mps(std::move(input), output, op, acc_type, p == 2 ? "norm_l2_combine_" : "sum_");
+  } else {
+    // Sum and take the root in float, then cast: sum(|x|^p) can overflow half/bf16 even if the norm fits
+    auto acc = at::empty(output.sizes(), output.options().dtype(acc_type));
+    const ReductionOp op{/*is_arg=*/false, "sum_", acc_type, acc_type};
+    reduction_dispatch_mps(input.abs().to(acc_type).pow_(p), acc, op, acc_type, "sum_");
+    output.copy_(acc.pow_(1 / p));
+  }
 }
 
 // Value reductions: min/max (Op + identity load on T), all/any (Op +
