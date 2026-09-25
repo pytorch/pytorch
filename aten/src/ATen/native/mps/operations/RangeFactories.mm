@@ -65,13 +65,14 @@ void arange_range_fill_mps(const Scalar& start, const Scalar& step, Tensor& resu
         auto encoder = stream->commandEncoder();
         [encoder setComputePipelineState:pso];
         bind_start_step(encoder);
-        dispatch_1d_chunks(encoder, pso, steps, [&](int64_t base) {
-          if (use32) {
-            mtl_setArgs<2>(encoder, std::array<int32_t, 2>{int32_t(stride), int32_t(base)});
-          } else {
+        if (use32) {
+          mtl_setArgs<2>(encoder, std::array<int32_t, 2>{int32_t(stride), 0});
+          mtl_dispatch1DJob(encoder, pso, steps);
+        } else {
+          dispatch_1d_chunks(encoder, pso, steps, [&](int64_t base) {
             mtl_setArgs<2>(encoder, std::array<int64_t, 2>{stride, base});
-          }
-        });
+          });
+        }
       }
     });
   } else {
@@ -233,13 +234,14 @@ Tensor& linspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
         } else {
           mtl_setArgs(encoder, result, vals);
         }
-        dispatch_1d_chunks(encoder, pso, steps, [&](int64_t base) {
-          if (use32) {
-            mtl_setArgs<2>(encoder, std::array<int32_t, 3>{int32_t(steps), int32_t(stride), int32_t(base)});
-          } else {
+        if (use32) {
+          mtl_setArgs<2>(encoder, std::array<int32_t, 3>{int32_t(steps), int32_t(stride), 0});
+          mtl_dispatch1DJob(encoder, pso, steps);
+        } else {
+          dispatch_1d_chunks(encoder, pso, steps, [&](int64_t base) {
             mtl_setArgs<2>(encoder, std::array<int64_t, 3>{steps, stride, base});
-          }
-        });
+          });
+        }
       }
     });
   } else {
@@ -312,13 +314,14 @@ Tensor& logspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
         auto encoder = stream->commandEncoder();
         [encoder setComputePipelineState:pso];
         mtl_setArgs(encoder, result, vals);
-        dispatch_1d_chunks(encoder, pso, steps, [&](int64_t base) {
-          if (use32) {
-            mtl_setArgs<2>(encoder, std::array<int32_t, 3>{int32_t(steps), int32_t(stride), int32_t(base)});
-          } else {
-            mtl_setArgs<2>(encoder, std::array<int64_t, 3>{steps, stride, base});
-          }
-        });
+        if (use32) {
+          mtl_setArgs<2>(encoder, std::array<int32_t, 3>{int32_t(steps), int32_t(stride), 0});
+          mtl_dispatch1DJob(encoder, pso, steps);
+        } else {
+          dispatch_1d_chunks(encoder, pso, steps, [&](int64_t first) {
+            mtl_setArgs<2>(encoder, std::array<int64_t, 3>{steps, stride, first});
+          });
+        }
       }
     });
   } else {
@@ -333,7 +336,7 @@ Tensor& logspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
         mtl_setArgs(encoder, result, vals);
         mtl_setArgs<3>(encoder, ndim, sizes, strides);
         dispatch_1d_chunks(
-            encoder, pso, steps, [&](int64_t base) { mtl_setArgs<2>(encoder, std::array<int64_t, 2>{steps, base}); });
+            encoder, pso, steps, [&](int64_t first) { mtl_setArgs<2>(encoder, std::array<int64_t, 2>{steps, first}); });
       }
     });
   }
