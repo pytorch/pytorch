@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstdlib>
 
+#include <functional>
 #include <memory>
 #include <mutex>
 
@@ -300,17 +301,6 @@ class NCCLComm {
 
   ncclComm_t getNcclComm();
 
-#ifdef USE_ROCM
-  // The raw handle, without the aborted and ready checks `getNcclComm` makes.
-  // For teardown bookkeeping that has to run on an aborted communicator and
-  // uses the handle only as an identity token, never as a call target.
-  // Throwing is not an option there: it runs from a destructor.
-  ncclComm_t getNcclCommUnchecked() const {
-    LockType lock(mutex_);
-    return ncclComm_;
-  }
-#endif
-
   // Wait for the communicator to be ready. This is a blocking function.
   // Useful in nonblocking mode: NCCL requires the communicator to be ready
   // before issuing a second command.
@@ -333,6 +323,11 @@ class NCCLComm {
 
   // Destroy a communicator. This is a blocking function.
   void destroy();
+
+  // `hook` runs once, at the start of the first abort() or destroy(), while
+  // the handle is still valid. It must not throw and must not call back into
+  // the owner: abort() can run with the owner's locks held. Only run on ROCm.
+  void setPreInvalidateHook(std::function<void()> hook);
 
   bool isInitialized() const;
 
@@ -371,6 +366,11 @@ class NCCLComm {
   // Unique hash for this communicator.
   std::string uniqueHash_;
   bool aborted_{false};
+  // Declared on every platform so the class layout does not depend on
+  // USE_ROCM.
+  std::function<void()> preInvalidateHook_;
+  // Caller must hold `mutex_`.
+  void runPreInvalidateHook();
   uint64_t ncclCommSplitCounter_{0};
   ncclResult_t ncclAsyncErr_{ncclSuccess};
   mutable MutexType mutex_;
