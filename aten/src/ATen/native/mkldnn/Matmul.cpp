@@ -289,6 +289,11 @@ bool mkldnn_bf16_gemm(
     const c10::BFloat16 *b, int64_t ldb,
     float beta,
     c10::BFloat16 *c, int64_t ldc) {
+#if AT_MKLDNN_ACL_ENABLED()
+  if (n == 1 && alpha == 1.0f && is_arm_neoverse()) {
+    return false;
+  }
+#endif
   return mkldnn_gemm<c10::BFloat16>(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
 }
 
