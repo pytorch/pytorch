@@ -794,7 +794,7 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
 @dataclasses.dataclass(frozen=True)
 class SystemInfo:
     """
-    System information including Python, PyTorch, and GPU details.
+    System information including Python, PyTorch, and accelerator details.
     This information is used to ensure compiled artifacts can only be loaded
     with compatible system configurations.
     """
@@ -804,22 +804,23 @@ class SystemInfo:
     toolkit_version: str | None
     triton_version: tuple[int, int] | None
     gpu_name: str | None
-    CHECK_GPUS = ("cuda", "xpu")
 
     @classmethod
     def current(cls) -> "SystemInfo":
         """Create a SystemInfo instance with current system information."""
-        # Get GPU name if CUDA or XPU is available
-        gpu_name = None
+        # Record the name and toolkit version of the current accelerator, if
+        # one is available. The accelerator is resolved through
+        # torch.accelerator so out-of-tree backends are covered as well.
         from torch.utils._triton import get_triton_version
 
         gpu_name, toolkit_version = None, None
-        for device_type in cls.CHECK_GPUS:
-            if getattr(torch, device_type).is_available():
+        accelerator = torch.accelerator.current_accelerator(check_available=True)
+        if accelerator is not None:
+            device_module = getattr(torch, accelerator.type, None)
+            if device_module is not None:
                 try:
-                    gpu_name = getattr(torch, device_type).get_device_name()
-                    toolkit_version = getattr(torch.version, device_type)
-                    break
+                    gpu_name = device_module.get_device_name()
+                    toolkit_version = getattr(torch.version, accelerator.type, None)
                 except Exception:
                     pass
 
@@ -847,8 +848,17 @@ class SystemInfo:
             raise RuntimeError(
                 f"Compile package was created with a different PyTorch version: {self.torch_version}"
             )
-        if device_type in self.CHECK_GPUS:
-            if not getattr(torch, device_type).is_available():
+        # The hardware checks apply to any accelerator the artifact was
+        # compiled for. Device types without a corresponding
+        # ``torch.<device_type>`` module (e.g. "meta") keep the old skip
+        # behavior.
+        device_module = getattr(torch, device_type, None)
+        if (
+            device_type != "cpu"
+            and device_module is not None
+            and hasattr(device_module, "is_available")
+        ):
+            if not device_module.is_available():
                 raise RuntimeError(f"{device_type} is not available")
 
             if self.toolkit_version != other.toolkit_version:
@@ -864,7 +874,7 @@ class SystemInfo:
                     f"Compile package was created with a different Triton version: {self.triton_version}"
                 )
 
-            # Check GPU name if CUDA/XPU was used
+            # Check the accelerator name if the save-time probe recorded one
             if other.gpu_name is not None and self.gpu_name != other.gpu_name:
                 raise RuntimeError(
                     f"Compile package was created with different GPU: "
@@ -874,15 +884,12 @@ class SystemInfo:
 
 def _collapse_device_types(device_types: frozenset[str]) -> str:
     """The single device type a package or an AOT artifact records: an
-    accelerator wins over cpu, and naming no device reads as cpu. Among several
-    accelerators one in `SystemInfo.CHECK_GPUS` wins, since any other name skips
-    the load check; the rest tie alphabetically. One string cannot say that a
+    accelerator wins over cpu, and naming no device reads as cpu. Several
+    accelerators tie alphabetically: the load check now runs for every
+    accelerator, so none needs to be preferred. One string cannot say that a
     graph needs two accelerators: it records the preferred one, and the load
     check is for that one.
     """
-    for device_type in SystemInfo.CHECK_GPUS:
-        if device_type in device_types:
-            return device_type
     return next((d for d in sorted(device_types) if d != "cpu"), "cpu")
 
 

@@ -25,6 +25,7 @@ from torch._dynamo.package import (
     CompilePackage,
     DiskDynamoStore,
     DynamoCache,
+    SystemInfo,
 )
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.symbolic_convert import _import_module
@@ -35,6 +36,7 @@ from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_LINUX,
     parametrize,
@@ -161,15 +163,16 @@ class TestPackage(torch._inductor.test_case.TestCase):
         PrecompileContext.clear()
 
     def test_collapse_device_types_prefers_an_accelerator(self):
-        # The single string both callers record. Among several accelerators
-        # one SystemInfo.check_compatibility checks wins: alphabetical order
-        # would record "mps" for {"mps", "xpu"}, and a name outside CHECK_GPUS
-        # skips every host check the way the old "cpu" did.
+        # The single string both callers record. An accelerator wins over
+        # cpu: alphabetical order alone would record "cpu" for
+        # {"cpu", "cuda"}. Ties among accelerators break alphabetically:
+        # check_compatibility now arms its host checks for every
+        # accelerator, so no name needs to be preferred over another.
         self.assertEqual(_collapse_device_types(frozenset()), "cpu")
         self.assertEqual(_collapse_device_types(frozenset(("cpu",))), "cpu")
         self.assertEqual(_collapse_device_types(frozenset(("cpu", "cuda"))), "cuda")
         self.assertEqual(_collapse_device_types(frozenset(("cuda", "xpu"))), "cuda")
-        self.assertEqual(_collapse_device_types(frozenset(("mps", "xpu"))), "xpu")
+        self.assertEqual(_collapse_device_types(frozenset(("mps", "xpu"))), "mps")
         self.assertEqual(_collapse_device_types(frozenset(("hpu", "mps"))), "hpu")
 
     def test_package_records_the_devices_a_graph_names(self):
@@ -1525,6 +1528,113 @@ def add(x, y):
             options=dict(guard_filter_fn=torch.compiler.skip_guard_on_globals_unsafe),
         )
         compiled_fn(x)
+
+
+class TestSystemInfoDeviceCompatibility(torch._inductor.test_case.TestCase):
+    # Pure framework logic driven through mocks: no real device, no device
+    # variants.
+    hw_classification = HardwareClassification.GENERIC
+
+    def _system_info(
+        self,
+        python_version="3.12.0",
+        torch_version="2.13.0a0",
+        toolkit_version=None,
+        triton_version=(0, 0),
+        gpu_name=None,
+    ):
+        return SystemInfo(
+            python_version=python_version,
+            torch_version=torch_version,
+            toolkit_version=toolkit_version,
+            triton_version=triton_version,
+            gpu_name=gpu_name,
+        )
+
+    # Default-path probes patch torch.accelerator.current_accelerator: on a
+    # GPU CI machine it would resolve to cuda and break determinism.
+
+    def test_current_records_nothing_without_accelerator(self):
+        with patch.object(torch.accelerator, "current_accelerator", return_value=None):
+            info = SystemInfo.current()
+        self.assertIsNone(info.gpu_name)
+        self.assertIsNone(info.toolkit_version)
+
+    def test_current_records_out_of_tree_backend_identity(self):
+        # The accelerator return value is a plain namespace because
+        # torch.device("npu") cannot be constructed without the out-of-tree
+        # backend installed.
+        accelerator = types.SimpleNamespace(type="npu")
+        fake_npu = types.SimpleNamespace(
+            get_device_name=lambda *args, **kwargs: "FakeNPU910B"
+        )
+        with patch.object(
+            torch.accelerator, "current_accelerator", return_value=accelerator
+        ):
+            with patch.object(torch, "npu", fake_npu, create=True):
+                with patch.object(torch.version, "npu", "7.7.0", create=True):
+                    info = SystemInfo.current()
+        self.assertEqual(info.gpu_name, "FakeNPU910B")
+        self.assertEqual(info.toolkit_version, "7.7.0")
+
+    def test_current_records_in_tree_backend_identity(self):
+        with patch.object(
+            torch.accelerator,
+            "current_accelerator",
+            return_value=torch.device("xpu"),
+        ):
+            with patch.object(torch.xpu, "get_device_name", return_value="FakeXPU"):
+                with patch.object(torch.version, "xpu", "1.0", create=True):
+                    info = SystemInfo.current()
+        self.assertEqual(info.gpu_name, "FakeXPU")
+        self.assertEqual(info.toolkit_version, "1.0")
+
+    def test_check_compatibility_arms_checks_for_out_of_tree_backend(self):
+        here = self._system_info()
+        other = self._system_info()
+        fake_npu = types.SimpleNamespace(is_available=lambda: False)
+        with patch.object(torch, "npu", fake_npu, create=True):
+            with self.assertRaisesRegex(RuntimeError, "npu is not available"):
+                here.check_compatibility(other, "npu")
+
+    def test_check_compatibility_checks_gpu_name_for_out_of_tree_backend(self):
+        here = self._system_info(gpu_name="FakeNPU-910B")
+        other = self._system_info(gpu_name="FakeNPU-310P")
+        fake_npu = types.SimpleNamespace(is_available=lambda: True)
+        with patch.object(torch, "npu", fake_npu, create=True):
+            with self.assertRaisesRegex(RuntimeError, "different GPU"):
+                here.check_compatibility(other, "npu")
+
+    def test_check_compatibility_passes_without_oot_toolkit_info(self):
+        # torch.version.<backend> may not exist for out-of-tree backends:
+        # both sides recording None must not be rejected.
+        here = self._system_info()
+        other = self._system_info()
+        fake_npu = types.SimpleNamespace(is_available=lambda: True)
+        with patch.object(torch, "npu", fake_npu, create=True):
+            here.check_compatibility(other, "npu")
+
+    def test_check_compatibility_skips_device_types_without_a_module(self):
+        # "meta" has no torch.meta module: the hardware checks must stay
+        # skipped, matching the old whitelist behavior for anything outside
+        # ("cuda", "xpu").
+        here = self._system_info()
+        other = self._system_info()
+        here.check_compatibility(other, "meta")
+
+    def test_check_compatibility_cuda_unavailable_unchanged(self):
+        here = self._system_info()
+        other = self._system_info()
+        with patch.object(torch.cuda, "is_available", return_value=False):
+            with self.assertRaisesRegex(RuntimeError, "cuda is not available"):
+                here.check_compatibility(other, "cuda")
+
+    def test_check_compatibility_cuda_toolkit_mismatch_unchanged(self):
+        here = self._system_info(toolkit_version="12.8")
+        other = self._system_info(toolkit_version="12.4")
+        with patch.object(torch.cuda, "is_available", return_value=True):
+            with self.assertRaisesRegex(RuntimeError, "different toolkit version"):
+                here.check_compatibility(other, "cuda")
 
 
 if __name__ == "__main__":
