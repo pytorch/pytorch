@@ -75,8 +75,8 @@ skip_if_mi350_rocm_lt_10_1 = lazy_skip_if(
 )
 skip_if_rccl_symmem_not_compiled = skip_but_pass_in_sandcastle_if(
     TEST_WITH_ROCM and not NCCL_SYMMEM_COMPILED,
-    "RCCL symmetric memory was disabled at build time; nccl_device.h did not "
-    "pass the host-translation-unit compatibility probe",
+    "RCCL symmetric memory was disabled at build time: RCCL is older than "
+    "2.30.4 or nccl_device.h failed the host-compile probe",
 )
 skip_if_rccl_lt_2_30_4 = skip_but_pass_in_sandcastle_if(
     TEST_WITH_ROCM and nccl.version() < (2, 30, 4),
@@ -672,20 +672,12 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         torch.cuda.set_device(self.rank)
         c10d.all_reduce(torch.ones(1, device=self.device))
 
-        variable = "TORCH_NCCL_SYMM_MEM_DISABLE_CAPTURE_ALLOC"
-        previous = os.environ.get(variable)
-        os.environ[variable] = "1"
-        try:
-            graph = torch.cuda.CUDAGraph()
-            capture_stream = torch.cuda.Stream(device=self.device)
-            with self.assertRaisesRegex(RuntimeError, "requires RCCL 2.30.7"):
-                with torch.cuda.graph(graph, stream=capture_stream):
-                    symm_mem.empty(1_000_003, device=self.device)
-        finally:
-            if previous is None:
-                os.environ.pop(variable, None)
-            else:
-                os.environ[variable] = previous
+        patch_env(self, TORCH_NCCL_SYMM_MEM_DISABLE_CAPTURE_ALLOC="1")
+        graph = torch.cuda.CUDAGraph()
+        capture_stream = torch.cuda.Stream(device=self.device)
+        with self.assertRaisesRegex(RuntimeError, "requires RCCL 2.30.7"):
+            with torch.cuda.graph(graph, stream=capture_stream):
+                symm_mem.empty(1_000_003, device=self.device)
 
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @requires_nccl_version(
@@ -1031,8 +1023,8 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
     @skip_if_lt_x_gpu(2)
     def test_reduce_scatter_offset_rejects_oversized_block(self):
         """A block taller than the uint16_t the device-side info struct stores
-        it in used to be truncated, reducing owned_sizes[j] % 65536 rows and
-        returning wrong data with no error. The host rejects it instead."""
+        it in used to be truncated, reducing only owned_sizes[j] % 65536 of its
+        extent and returning wrong data with no error. The host rejects it instead."""
         symm_mem.set_backend("NCCL")
         torch.cuda.set_device(self.rank)
         c10d.all_reduce(torch.ones(1, device=self.device))
@@ -1486,7 +1478,7 @@ def requires_cft_support() -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
 
 
 @skip_but_pass_in_sandcastle_if(
-    TEST_WITH_ROCM, "NCCL symmetric memory is not supported on ROCm"
+    TEST_WITH_ROCM, "Host-side CFT is not supported on ROCm"
 )
 class SymmMemCftHandleTest(MultiProcessTestCase):
     """Host-side NCCL CFT logical-endpoint handles exposed on _SymmetricMemory.
@@ -1605,11 +1597,10 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
 
     def setUp(self) -> None:
         super().setUp()
-        # These are consumed while the spawned worker imports torch and while
+        # Read by the spawned worker when it registers the nccl backend and when
         # RCCL creates its first communicator.
         patch_env(
             self,
-            TORCH_SYMMEM="NCCL",
             TORCH_DIST_USE_NCCL2="1",
             NCCL_CUMEM_ENABLE="1",
             NCCL_WIN_ENABLE="1",
@@ -1828,15 +1819,21 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
         ):
             symm_mem.rendezvous(tensor, group=group_name)
 
+    @parametrize("backend_name", ["nccl", "nccl-legacy"])
     @skip_if_lt_x_gpu(2)
-    def test_retained_handle_stale_after_wait_timeout_abort(self) -> None:
-        # WorkNCCL::wait() aborts the comm itself when the work failed, before
+    def test_retained_handle_stale_after_wait_timeout_abort(
+        self, backend_name: str
+    ) -> None:
+        # A timed-out blocking wait aborts the comm from the work object, before
         # any process-group teardown runs.
         patch_env(
-            self, TORCH_NCCL_ASYNC_ERROR_HANDLING="0", TORCH_NCCL_DUMP_ON_TIMEOUT="0"
+            self,
+            TORCH_NCCL_BLOCKING_WAIT="1",
+            TORCH_NCCL_ASYNC_ERROR_HANDLING="0",
+            TORCH_NCCL_DUMP_ON_TIMEOUT="0",
         )
         symm_mem.set_backend("NCCL")
-        self._init_process_group("nccl-legacy", "_wait_abort")
+        self._init_process_group(backend_name, "_wait_abort")
         _tensor, handle = self._retained_handle()
         side_store = c10d.FileStore(self.file_name + "_wait_side", self.world_size)
         if self.rank == 0:
@@ -1847,7 +1844,7 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
             return
         try:
             work = c10d.all_reduce(torch.ones(1, device=self.device), async_op=True)
-            with self.assertRaises(c10d.DistBackendError):
+            with self.assertRaisesRegex(RuntimeError, "timed out|timeout"):
                 work.wait(timeout=timedelta(seconds=2))
             self._assert_stale(handle)
             c10d.destroy_process_group()
@@ -1855,8 +1852,11 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
         finally:
             side_store.set("peer_done", "1")
 
+    @parametrize("backend_name", ["nccl", "nccl-legacy"])
     @skip_if_lt_x_gpu(2)
-    def test_retained_handle_stale_after_watchdog_abort(self) -> None:
+    def test_retained_handle_stale_after_watchdog_abort(
+        self, backend_name: str
+    ) -> None:
         # With cleanup enabled, the watchdog aborts the timed-out work's comm
         # before it aborts the process group's comms.
         patch_env(
@@ -1869,7 +1869,7 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
         # Only the peer's watchdog may time out: the holding rank's abort waits
         # for its held-back work, which a short timeout would cut off.
         self._init_process_group(
-            "nccl-legacy",
+            backend_name,
             "_watchdog_abort",
             timeout=timedelta(seconds=2) if self.rank == 1 else None,
         )
@@ -1920,7 +1920,7 @@ class NCCLSymmetricMemoryCapabilityGateTest(MultiProcessTestCase):
 
     def setUp(self) -> None:
         super().setUp()
-        patch_env(self, TORCH_SYMMEM="NCCL", TORCH_DIST_USE_NCCL2="1")
+        patch_env(self, TORCH_DIST_USE_NCCL2="1")
         # The capability snapshot has to be taken with these absent.
         for name in ("NCCL_CUMEM_ENABLE", "NCCL_WIN_ENABLE"):
             os.environ.pop(name, None)
@@ -2018,7 +2018,7 @@ class NCCLSymmetricMemorySubgroupTest(MultiProcessTestCase):
 
     def setUp(self) -> None:
         super().setUp()
-        patch_env(self, TORCH_SYMMEM="NCCL", NCCL_CUMEM_ENABLE="1", NCCL_WIN_ENABLE="1")
+        patch_env(self, NCCL_CUMEM_ENABLE="1", NCCL_WIN_ENABLE="1")
         self._spawn_processes()
 
     @property
@@ -2196,14 +2196,10 @@ class NCCLSymmetricMemoryRestartTest(MultiProcContinuousTest):
     )
     @requires_nccl_version((2, 28, 0), "nccl_all_to_all_nd requires nccl 2.28")
     def test_successor_pg_survives_predecessor_teardown(self):
-        """A process group retires its registry entry by the identity it was
-        given when it registered. The predecessor is destroyed before the
-        successor is created, so the allocator routinely hands the successor
-        the predecessor's ncclComm_t address; identifying the registration by
-        that pointer alone would let the predecessor's late destructor
-        unpublish the successor and leave symmetric memory with no
-        communicator to resolve. Also covers device-comm eviction: one cached
-        against the predecessor must not be handed to a kernel afterwards.
+        """A same-name successor process group must be usable after its
+        predecessor's teardown: symmetric memory resolves the successor's
+        communicator, and a device comm cached against the predecessor is not
+        reused, even if the successor lands at the predecessor's address.
         """
         symm_mem.set_backend("NCCL")
         c10d.all_reduce(torch.ones(1, device=self.device))
