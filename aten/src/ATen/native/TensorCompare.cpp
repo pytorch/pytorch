@@ -1002,6 +1002,40 @@ TORCH_IMPL_FUNC(clamp_min_Tensor_out)
   maximum_stub(device_type(), *this);
 }
 
+Tensor clamp(const Tensor& self, const Tensor& min, const Scalar& max) {
+  return at::clamp(self, min, at::native::wrapped_scalar_tensor(max));
+}
+
+Tensor& clamp_(Tensor& self, const Tensor& min, const Scalar& max) {
+  return at::clamp_(self, min, at::native::wrapped_scalar_tensor(max));
+}
+
+Tensor& clamp_out(
+    const Tensor& self,
+    const Tensor& min,
+    const Scalar& max,
+    Tensor& result) {
+  return at::clamp_outf(
+      self, min, at::native::wrapped_scalar_tensor(max), result);
+}
+
+Tensor clamp(const Tensor& self, const Scalar& min, const Tensor& max) {
+  return at::clamp(self, at::native::wrapped_scalar_tensor(min), max);
+}
+
+Tensor& clamp_(Tensor& self, const Scalar& min, const Tensor& max) {
+  return at::clamp_(self, at::native::wrapped_scalar_tensor(min), max);
+}
+
+Tensor& clamp_out(
+    const Tensor& self,
+    const Scalar& min,
+    const Tensor& max,
+    Tensor& result) {
+  return at::clamp_outf(
+      self, at::native::wrapped_scalar_tensor(min), max, result);
+}
+
 // Implements the "clip" alias for clamp
 Tensor& clip_out(
     const Tensor& self,
@@ -1019,6 +1053,22 @@ Tensor& clip_out(
   return at::clamp_outf(self, min, max, result);
 }
 
+Tensor& clip_out(
+    const Tensor& self,
+    const Tensor& min,
+    const Scalar& max,
+    Tensor& result) {
+  return at::clamp_outf(self, min, max, result);
+}
+
+Tensor& clip_out(
+    const Tensor& self,
+    const Scalar& min,
+    const Tensor& max,
+    Tensor& result) {
+  return at::clamp_outf(self, min, max, result);
+}
+
 Tensor clip(
     const Tensor& self,
     const std::optional<Scalar>& min,
@@ -1030,6 +1080,14 @@ Tensor clip(
     const Tensor& self,
     const std::optional<Tensor>& min,
     const std::optional<Tensor>& max) {
+  return at::clamp(self, min, max);
+}
+
+Tensor clip(const Tensor& self, const Tensor& min, const Scalar& max) {
+  return at::clamp(self, min, max);
+}
+
+Tensor clip(const Tensor& self, const Scalar& min, const Tensor& max) {
   return at::clamp(self, min, max);
 }
 
@@ -1044,6 +1102,14 @@ Tensor& clip_(
     Tensor& self,
     const std::optional<Tensor>& min,
     const std::optional<Tensor>& max) {
+  return at::clamp_(self, min, max);
+}
+
+Tensor& clip_(Tensor& self, const Tensor& min, const Scalar& max) {
+  return at::clamp_(self, min, max);
+}
+
+Tensor& clip_(Tensor& self, const Scalar& min, const Tensor& max) {
   return at::clamp_(self, min, max);
 }
 
