@@ -2506,12 +2506,14 @@ def init_process_group(
         group_name (str, optional, deprecated): Group name. This argument is ignored
         pg_options (``Backend.Options``, optional): process group options
             specifying what additional options need to be passed in during
-            the construction of specific process groups. As of now, the only
-            options we support is ``ProcessGroupNCCL.Options`` for the ``nccl``
-            backend, ``is_high_priority_stream`` can be specified so that
-            the nccl backend can pick up high priority cuda streams when
-            there're compute kernels waiting. For other available options to config nccl,
+            the construction of specific process groups. Pass an instance of
+            the ``Options`` class belonging to the backend being initialized,
+            for example ``ProcessGroupNCCL.Options`` for the ``nccl`` backend,
+            whose ``is_high_priority_stream`` field lets the nccl backend pick
+            up high priority cuda streams when there're compute kernels
+            waiting. For other available options to config nccl,
             See https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/types.html#ncclconfig-t
+            See :ref:`backend-options` for the option class of each backend.
         device_id (torch.device | int, optional): a single, specific device
             this process will work on, allowing for backend-specific
             optimizations.  Currently this has two effects, only under
