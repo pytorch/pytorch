@@ -31,7 +31,12 @@ permissions:
   contents: read
 
 jobs:
+  check-ci:
+    if: github.repository_owner == 'pytorch'
+    uses: ./.github/workflows/_check-ci.yml
+
   docker-build:
+    needs: check-ci
     if: github.repository_owner == 'pytorch'
     environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
     timeout-minutes: 240
@@ -43,12 +48,14 @@ jobs:
         # both amd64 and arm64 builds. Only `buildkit_addr` differs per arch.
         buildkit_addr: ["tcp://buildkitd-amd64.buildkit:1234"]
         docker-image-name: [
+          pytorch-linux-jammy-cuda12.6-cudnn9-py3.11-gcc11,
           pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11,
           pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11,
           pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11-inductor-benchmarks,
           pytorch-linux-jammy-cuda13.2-cudnn9-py3.12-gcc11,
           pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11,
           pytorch-linux-jammy-cuda13.4-cudnn9-py3-gcc11,
+          pytorch-linux-jammy-cuda13.4-cudnn9-py3.12-gcc11,
           pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11-vllm,
           pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks,
           pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11-inductor-benchmarks,
@@ -59,11 +66,12 @@ jobs:
           pytorch-linux-jammy-py3.14-clang21,
           pytorch-linux-jammy-py3.14t-clang21,
           pytorch-linux-jammy-rocm-n-py3,
-          pytorch-linux-noble-rocm-n-py3,
-          pytorch-linux-noble-rocm-preview-py3,
+          pytorch-linux-noble-rocm-n-py3.11,
+          pytorch-linux-noble-rocm-preview-py3.12,
           pytorch-linux-jammy-rocm-n-py3-benchmarks,
           pytorch-linux-jammy-cuda13.0-cudnn9-py3.10-clang20,
           pytorch-linux-jammy-cuda13.2-cudnn9-py3.10-clang20,
+          pytorch-linux-jammy-cuda13.4-cudnn9-py3.10-clang20,
           pytorch-linux-jammy-py3-gcc11-inductor-benchmarks,
           pytorch-linux-jammy-py3.12-halide,
           pytorch-linux-jammy-cuda13.0-py3.12-pallas,

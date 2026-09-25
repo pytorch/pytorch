@@ -828,7 +828,16 @@ def _graph_has_dynamic_shapes(gm: GraphModule) -> bool:
     strides has static sizes, and treating it as static would silently specialize the
     artifact to the example strides. (Unbacked symints appearing only in intermediates,
     not on any placeholder, are still missed here, but such a graph fails loudly
-    downstream when emit_value rejects the still-symbolic metadata.)"""
+    downstream when emit_value rejects the still-symbolic metadata.)
+
+    Both metadata keys are checked: make_fx stashes the fake under "val", while a Dynamo
+    graph (which torch.compiler.precompile's dynamo tracer feeds here) stashes it under
+    "example_value" -- reading only "val" would call a dynamic Dynamo graph static and
+    silently specialize it to the example sizes. The check is a union, not a fallback: a
+    symbolic value under EITHER key makes the graph dynamic, even if the other key holds a
+    static fake (graphs carrying both keys exist, e.g. split_module copies the whole meta
+    dict onto partition placeholders). The make_fx path is unchanged because make_fx never
+    writes "example_value", not because "val" takes precedence."""
     import torch
 
     def _is_symbolic(v: Any) -> bool:
@@ -837,15 +846,16 @@ def _graph_has_dynamic_shapes(gm: GraphModule) -> bool:
     for node in gm.graph.nodes:
         if node.op != "placeholder":
             continue
-        val = node.meta.get("val")
-        if _is_symbolic(val):
-            return True
-        if isinstance(val, torch.Tensor) and (
-            any(_is_symbolic(s) for s in val.shape)
-            or any(_is_symbolic(s) for s in val.stride())
-            or _is_symbolic(val.storage_offset())
-        ):
-            return True
+        for key in ("val", "example_value"):
+            val = node.meta.get(key)
+            if _is_symbolic(val):
+                return True
+            if isinstance(val, torch.Tensor) and (
+                any(_is_symbolic(s) for s in val.shape)
+                or any(_is_symbolic(s) for s in val.stride())
+                or _is_symbolic(val.storage_offset())
+            ):
+                return True
     return False
 
 
