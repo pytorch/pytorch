@@ -276,7 +276,6 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         )
         cls.pg = c10d.distributed_c10d._get_default_group()
 
-    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @requires_nccl_version((2, 27), "NCCL Symmetric Memory support from nccl 2.27")
     @skip_if_lt_x_gpu(2)

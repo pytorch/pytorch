@@ -265,6 +265,13 @@ alignment_asserts = (
     == "1"
 )
 
+# Strict mode for input alignment: assert alignment of graph inputs which
+# were codegenned under the assumption that they are aligned, instead of the
+# runtime silently realigning misaligned inputs with a clone.
+alignment_asserts_inputs = (
+    os.environ.get("TORCHINDUCTOR_ALIGNMENT_ASSERTS_INPUTS") == "1"
+)
+
 # enable loop reordering based on input orders
 pick_loop_orders = True
 
@@ -586,6 +593,17 @@ inductor_default_autotune_rep = int(
 # will run under external CUDA graph capture. Only applies with max_autotune.
 autotune_cudagraph_benchmarking: bool = (
     os.environ.get("TORCHINDUCTOR_AUTOTUNE_CUDAGRAPH_BENCHMARKING") == "1"
+)
+
+# Number of calls of the benchmarked callable captured into each CUDA graph by
+# benchmark_gpu_with_cuda_graph; the replay time is divided by this count so the
+# graph launch and inter-kernel gaps are amortized. With 1 (the default) each
+# timed sample is a full graph launch, which for microsecond kernels exceeds the
+# kernel time and hides the differences between autotune choices. Counts above
+# 1 trade cold-cache fidelity for launch-overhead rejection: the L2 flush in
+# benchmark_gpu runs once per replay, so only the first captured call is cold.
+autotune_cudagraph_benchmarking_iters: int = int(
+    os.environ.get("TORCHINDUCTOR_AUTOTUNE_CUDAGRAPH_BENCHMARKING_ITERS", "1")
 )
 
 
@@ -1029,6 +1047,17 @@ loop_index_inversion_in_fusion: bool = True
 # For the cases loop ordering after fusion does not help, we don't lose much.
 score_fusion_memory_threshold = 10
 
+# Memory-timeline fusion gating.
+#   None: disable that threshold dimension
+#   0: allow no graph-peak increase
+#   value: allow total graph-peak delta up to that limit
+# The absolute threshold is in GiB: 1 means 1024**3 bytes.
+# The percentage threshold is fractional: 0.1 means 10%.
+# The accepted delta is measured against the original graph peak before fusion.
+# When both thresholds are set, the tighter limit wins.
+fusion_memory_timeline_peak_memory_increase_gb: float | None = None
+fusion_memory_timeline_peak_memory_pct_threshold: float | None = None
+
 # For Triton Templates, select fastest of best template + epilogue vs best template + separate epilogue kernel
 benchmark_epilogue_fusion = (
     os.environ.get("TORCHINDUCTOR_BENCHMARK_EPILOGUE_FUSION", "1") == "1"
@@ -1088,11 +1117,23 @@ deterministic = os.getenv("TORCHINDUCTOR_DETERMINISTIC") == "1"
 # Batch-invariant mode: stable per-sample compiled kernel across batch sizes. Implies deterministic.
 batch_invariant = os.getenv("TORCHINDUCTOR_BATCH_INVARIANT") == "1"
 
-# Use eager's opt-in INNER_TREE order for eligible NVIDIA CUDA sums.
+# "strict_pointwise" requests eager-compatible pointwise math, and
+# "strict_reduction" requests eager INNER_TREE order for reductions.
+# "strict" requests both. Strict modes may reduce performance.
+# TODO: Route pointwise and reduction consumers through their respective modes.
 # pyrefly: ignore [bad-assignment]
-numerics: Literal["default", "strict"] = os.environ.get(
-    "TORCHINDUCTOR_NUMERICS", "default"
-)  # type: ignore[assignment]
+numerics: Literal["default", "strict_pointwise", "strict_reduction", "strict"] = Config(
+    default=os.environ.get("TORCHINDUCTOR_NUMERICS", "default"),
+    implies={
+        mode: {
+            "eager_numerics.disable_ftz": True,
+            "eager_numerics.division_rounding": True,
+            "emulate_precision_casts": True,
+        }
+        for mode in ("strict_pointwise", "strict")
+    },
+)
+
 
 # When we do split reduction, this number control the minimum value for
 # num_split. Too small num_split make the split reduction less efficient.
@@ -2110,6 +2151,18 @@ class triton:
     # note: we are conservative here and choose a large limit.
     cudagraph_unexpected_rerecord_limit = 128
 
+    # Cudagraph-managed input pointer-change count at which the configured
+    # action is applied for a parent/function edge. "copy" copies eligible
+    # inputs into stable replay buffers; "skip" runs that edge eagerly.
+    cudagraph_managed_input_rerecord_limit = 5
+    cudagraph_managed_input_rerecord_action: Literal["copy", "skip"] = "copy"
+
+    # If set, allocate this many GiB in the cudagraph memory pool when the
+    # pool is created (once per device). The upfront allocation reserves one
+    # large contiguous segment for later recordings to carve up, rather than
+    # growing the pool a segment at a time, which reduces fragmentation.
+    cudagraph_initial_mempool_allocation_gb: float | None = None
+
     # Warn loudly when the number of cudagraphs due to dynamic shape
     # exceeds this limit
     cudagraph_dynamic_shape_warn_limit: int | None = 8
@@ -2339,6 +2392,13 @@ class triton:
     # can be satisfied, along with any existing requirements for index expressions
     use_tensor_descriptor = False
 
+    # Whether FlexAttention forward/decode may select AMD TDM descriptors on
+    # gfx1250. Defaults on: selection is capability-driven, so this is a kill
+    # switch for callers that do not own the flex_attention() call site and
+    # therefore cannot pass USE_TMA. It does not affect NVIDIA, XPU, dense GEMM
+    # or generic descriptor codegen.
+    enable_flex_tdm = True
+
     # (Experimental)
     # Whether to allow reordering tensor descriptor matches with descending
     # strides, at the expense of transposing values after load / before store.
@@ -2481,6 +2541,19 @@ class aot_inductor:
     # autotuning. When False (default), tensors are shared across kernels
     # and del'd at their last consumer (faster but higher peak memory).
     autotune_per_kernel_alloc: bool = False
+
+    # Offload graph constants to disk across the autotune block once they occupy
+    # this share of the device. AOT only.
+    #
+    # Defaults to 1.0, which never fires: constants are resident on the card, so
+    # they cannot reach 100% of its capacity. The offload is opt-in until it has
+    # more production mileage; set it to e.g. 0.10 to enable.
+    #
+    # A fraction rather than an absolute size so a chosen threshold scales with
+    # the card: 0.10 is ~9.5 GiB on a 95 GiB H100 but ~29 GiB on a 288 GiB
+    # MI350X, which should not pay the spill for a working set that only
+    # threatens the smaller card.
+    autotune_offload_constants_min_device_fraction: float = 1.0
 
     # AOTInductor output path
     # If an absolute path is specified, the generated lib files will be stored under the directory;

@@ -406,28 +406,15 @@ def _load_global_deps() -> None:
     # Determine the file extension based on the platform
     lib_ext = ".dylib" if platform.system() == "Darwin" else ".so"
     lib_name = f"libtorch_global_deps{lib_ext}"
-    here = os.path.abspath(__file__)
-    global_deps_lib_path = os.path.join(os.path.dirname(here), "lib", lib_name)
-
-    # In scikit-build-core editable installs with redirect mode, native libs are
-    # installed to the dist package location rather than relative to __file__.
+    # get_file_path follows the compiled extension, which under a redirect-mode
+    # editable install lives beside the installed distribution, not __file__.
+    global_deps_lib_path = get_file_path("torch", "lib", lib_name)
     if not os.path.exists(global_deps_lib_path):
-        try:
-            from importlib.metadata import distribution
-
-            installed = distribution("torch").locate_file(
-                os.path.join("torch", "lib", lib_name)
-            )
-            # The importlib metadata SimplePath protocol was missing the exists
-            # method in older versions; however, the actual Path implementation
-            # has it and newer versions of importlib metadata have added it to
-            # the protocol, making the following ignore unnecessary from
-            # importlib_metadata 7.0.1 and Python 3.13 onwards.
-            # pyrefly: ignore[missing-attribute]
-            if installed.exists():
-                global_deps_lib_path = str(installed)
-        except Exception:
-            pass
+        # Handing a missing path to CDLL would surface as an unrelated dlopen
+        # failure through the CUDA-dependency retry below.
+        raise OSError(
+            f"{global_deps_lib_path} is missing; torch is not fully installed"
+        )
 
     try:
         ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
@@ -2894,23 +2881,36 @@ class _TorchCompileInductorWrapper:
             return
 
         from torch._inductor import config
-
-        current_config: dict[str, _Any] = config.get_config_copy()
+        from torch._inductor.codegen.common import (
+            get_compile_option_owner,
+            init_backend_registration,
+        )
 
         for key, val in options.items():
             attr_name = key.replace("-", "_")
-            if attr_name not in current_config:
-                raise RuntimeError(
-                    f"Unexpected optimization option {key}, known options are {list(current_config.keys())}"
+            if attr_name in config._config:  # type: ignore[attr-defined]
+                # core inductor keys take precedence over device namespaces
+                owner_config, target_key = config, attr_name
+            else:
+                # a deferred privateuse1 backend may not have registered yet
+                init_backend_registration()
+                owner_config, target_key = get_compile_option_owner(attr_name) or (
+                    config,
+                    attr_name,
                 )
-            attr_type = config.get_type(attr_name)  # type: ignore[attr-defined]
+            if target_key not in owner_config._config:  # type: ignore[attr-defined]
+                raise RuntimeError(
+                    f"Unexpected optimization option {key}, known options are "
+                    f"{list(config.get_config_copy())}"
+                )
+            attr_type = owner_config.get_type(target_key)  # type: ignore[attr-defined]
             # Subscriptable generic types don't support isinstance so skip the type
             # check. There doesn't seem to be a good way of checking membership without
             # 3rd party libraries.
             if _get_origin(attr_type) is None:
                 if not isinstance(val, attr_type):
                     val_type_str = type(val).__name__
-                    expected_type_str = type(current_config[attr_name]).__name__
+                    expected_type_str = type(getattr(owner_config, target_key)).__name__
                     raise RuntimeError(
                         f"Unexpected type of attr {key}, got {val_type_str} should be {expected_type_str}"
                     )
@@ -2996,6 +2996,7 @@ class _TorchCompileWrapper:
         mode: str | None,
         options: dict[str, _Any] | None,
         dynamic: builtins.bool | None,
+        name: str | None = None,
     ) -> None:
         from torch._dynamo.backends.registry import lookup_backend
 
@@ -3006,6 +3007,7 @@ class _TorchCompileWrapper:
         else:
             self.compiler_name = str(backend)
         self.dynamic = dynamic
+        self.name = name
         self.compiler_fn = lookup_backend(backend)
         self.kwargs: dict[str, _Any] = {}
         # only pass the args if they non-empty
@@ -3013,6 +3015,8 @@ class _TorchCompileWrapper:
             self.kwargs["mode"] = mode
         if options:
             self.kwargs["options"] = options
+        if name:
+            self.kwargs["name"] = name
 
     def __eq__(self, other: object) -> builtins.bool:
         return (
@@ -3020,6 +3024,7 @@ class _TorchCompileWrapper:
             and self.compiler_fn == other.compiler_fn
             and self.kwargs == other.kwargs
             and self.dynamic == other.dynamic
+            and self.name == other.name
         )
 
     def __call__(self, model_: _Any, inputs_: _Any) -> _Any:
@@ -3209,8 +3214,8 @@ def compile(
     import sysconfig
 
     _C._log_api_usage_once("torch.compile")
-    if sys.version_info >= (3, 15):
-        raise RuntimeError("torch.compile is not supported on Python 3.15+")
+    if sys.version_info >= (3, 16):
+        raise RuntimeError("torch.compile is not supported on Python 3.16+")
     elif sysconfig.get_config_var("Py_GIL_DISABLED") == 1 and sys.version_info < (
         3,
         13,
@@ -3306,7 +3311,7 @@ def compile(
         else:
             backend = _TorchCompileInductorWrapper(mode, options, dynamic, name)
     else:
-        backend = _TorchCompileWrapper(backend, mode, options, dynamic)
+        backend = _TorchCompileWrapper(backend, mode, options, dynamic, name)
 
     return torch._dynamo.optimize(
         backend=backend,
