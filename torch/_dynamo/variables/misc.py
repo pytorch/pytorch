@@ -2472,6 +2472,7 @@ class StringFormatVariable(VariableTracker):
     @classmethod
     def create(
         cls,
+        tx: "InstructionTranslatorBase",
         format_string: str,
         sym_args: list[VariableTracker],
         sym_kwargs: dict[str, VariableTracker],
@@ -2480,12 +2481,14 @@ class StringFormatVariable(VariableTracker):
             x.is_python_constant()
             for x in itertools.chain(sym_args, sym_kwargs.values())
         ):
-            return variables.ConstantVariable.create(
-                format_string.format(
+            try:
+                result = format_string.format(
                     *[v.as_python_constant() for v in sym_args],
                     **{k: v.as_python_constant() for k, v in sym_kwargs.items()},
                 )
-            )
+            except (ValueError, TypeError, IndexError, KeyError) as e:
+                raise_observed_exception(type(e), tx, args=list(e.args))
+            return variables.ConstantVariable.create(result)
         return cls(format_string, list(sym_args), dict(sym_kwargs))
 
     def __init__(

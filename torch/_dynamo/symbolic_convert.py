@@ -4488,7 +4488,7 @@ class InstructionTranslatorBase(
                 )
         self.push(
             variables.StringFormatVariable.create(
-                "".join(format_string_parts), args, kwargs
+                self, "".join(format_string_parts), args, kwargs
             )
         )
 

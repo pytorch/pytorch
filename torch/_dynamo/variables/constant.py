@@ -356,6 +356,8 @@ class ConstantVariable(VariableTracker):
                 return ConstantVariable.create(self.value.join(arg_const))
             except NotImplementedError:
                 return super().call_method(tx, name, args, kwargs)
+            except TypeError as e:
+                raise_observed_exception(type(e), tx, args=list(e.args))
 
         if any(isinstance(x, SymNodeVariable) for x in args):
             # Promote to SymNodeVariable for operations involving dynamic shapes.
@@ -377,7 +379,7 @@ class ConstantVariable(VariableTracker):
             try:
                 result = method(*const_args, **const_kwargs)
             except Exception as e:
-                raise_observed_exception(type(e), tx)
+                raise_observed_exception(type(e), tx, args=list(e.args))
             # str.split/rsplit/splitlines return a fresh caller-owned list;
             # mark it mutable so in-place ops (.sort(), shuffle, etc.) are tracked.
             if name in ("split", "rsplit", "splitlines"):
@@ -531,7 +533,10 @@ class ConstantVariable(VariableTracker):
         # CPython: int defines nb_int (long_long, returns copy).
         # bool inherits nb_int from int via slot inheritance.
         # float defines nb_int (truncates toward zero via PyLong_FromDouble).
-        return ConstantVariable.create(int(self.value))
+        try:
+            return ConstantVariable.create(int(self.value))
+        except (OverflowError, ValueError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
 
     def nb_float_impl(
         self,
@@ -540,7 +545,10 @@ class ConstantVariable(VariableTracker):
         # CPython: float defines nb_float (float_float, returns copy).
         # int defines nb_float (long_float, converts to float).
         # bool inherits nb_float from int via slot inheritance.
-        return ConstantVariable.create(float(self.value))
+        try:
+            return ConstantVariable.create(float(self.value))
+        except (OverflowError, ValueError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
 
     def _nb_binary_impl(
         self,
