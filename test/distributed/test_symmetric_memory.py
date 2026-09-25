@@ -1077,8 +1077,8 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         completes before every rank arrived and the fill on stream B lands
         before the fill on stream A. The peer then reads the wrong value."""
         self._init_process()
-        if symm_mem.get_backend(self.device) not in ("CUDA", "XPU"):
-            self.skipTest("test applies to the CUDA and XPU symm mem backends")
+        if symm_mem.get_backend(self.device) not in ("CUDA", "XPU", "NVSHMEM"):
+            self.skipTest("test applies to the CUDA, XPU and NVSHMEM symm mem backends")
 
         t = symm_mem.empty(64, dtype=torch.float32, device=device_type)
         hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
@@ -1119,8 +1119,8 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         signal, so round two completes out of order and the final fill is not
         the one the peer observes."""
         self._init_process()
-        if symm_mem.get_backend(self.device) != "CUDA":
-            self.skipTest("test applies to the CUDA symm mem backend")
+        if symm_mem.get_backend(self.device) not in ("CUDA", "NVSHMEM"):
+            self.skipTest("test applies to the CUDA and NVSHMEM symm mem backends")
 
         t = symm_mem.empty(64, dtype=torch.float32, device=device_type)
         hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
@@ -1166,8 +1166,8 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         recorded at the start of B's guard instead of right after A's launch,
         B would also wait for the sleep and this would fail."""
         self._init_process()
-        if symm_mem.get_backend(self.device) != "CUDA":
-            self.skipTest("test applies to the CUDA symm mem backend")
+        if symm_mem.get_backend(self.device) not in ("CUDA", "NVSHMEM"):
+            self.skipTest("test applies to the CUDA and NVSHMEM symm mem backends")
 
         t = symm_mem.empty(64, dtype=torch.float32, device=device_type)
         hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
@@ -1212,8 +1212,8 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         import threading
 
         self._init_process()
-        if symm_mem.get_backend(self.device) != "CUDA":
-            self.skipTest("test applies to the CUDA symm mem backend")
+        if symm_mem.get_backend(self.device) not in ("CUDA", "NVSHMEM"):
+            self.skipTest("test applies to the CUDA and NVSHMEM symm mem backends")
 
         t = symm_mem.empty(64, dtype=torch.float32, device=device_type)
         hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
@@ -1286,8 +1286,8 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         here differ by name, so this covers group isolation generally, not the
         identity keying, which only differs under thread isolation mode."""
         self._init_process()
-        if symm_mem.get_backend(self.device) != "CUDA":
-            self.skipTest("test applies to the CUDA symm mem backend")
+        if symm_mem.get_backend(self.device) not in ("CUDA", "NVSHMEM"):
+            self.skipTest("test applies to the CUDA and NVSHMEM symm mem backends")
 
         t_a = symm_mem.empty(64, dtype=torch.float32, device=device_type)
         t_b = symm_mem.empty(64, dtype=torch.float32, device=device_type)
@@ -1355,15 +1355,15 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         Exercises the GroupStreamGuard placement in
         CUDASymmetricMemoryOps.cu."""
         self._init_process()
-        if symm_mem.get_backend(self.device) != "CUDA":
-            self.skipTest("test applies to the CUDA symm mem backend")
+        if symm_mem.get_backend(self.device) not in ("CUDA", "NVSHMEM"):
+            self.skipTest("test applies to the CUDA and NVSHMEM symm mem backends")
 
         group_name = dist.group.WORLD.group_name
 
         stream_a = device_module.Stream()
         stream_b = device_module.Stream()
 
-        inp = symm_mem.empty(64, dtype=torch.float32, device=self.device)
+        inp = symm_mem.empty(64, dtype=torch.float32, device="cuda")
         symm_mem.rendezvous(inp, group=group_name)
 
         # Fill on stream_a, then all_reduce. one_shot_all_reduce is
@@ -1395,8 +1395,8 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         """A barrier captured in a CUDA graph replays correctly. Inside a
         capture the guard's event record and wait become graph nodes."""
         self._init_process()
-        if symm_mem.get_backend(self.device) not in ("CUDA", "XPU"):
-            self.skipTest("test applies to the CUDA and XPU symm mem backends")
+        if symm_mem.get_backend(self.device) not in ("CUDA", "XPU", "NVSHMEM"):
+            self.skipTest("test applies to the CUDA, XPU and NVSHMEM symm mem backends")
 
         t = symm_mem.empty(64, dtype=torch.float32, device=device_type)
         hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
@@ -1434,8 +1434,8 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         graph, recorded only when the graph runs, so waiting on it from
         outside the capture is invalid."""
         self._init_process()
-        if symm_mem.get_backend(self.device) != "CUDA":
-            self.skipTest("test applies to the CUDA symm mem backend")
+        if symm_mem.get_backend(self.device) not in ("CUDA", "NVSHMEM"):
+            self.skipTest("test applies to the CUDA and NVSHMEM symm mem backends")
 
         t = symm_mem.empty(64, dtype=torch.float32, device=device_type)
         hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
@@ -1477,8 +1477,8 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         rank. Replayed several times: a balanced pad protocol must leave the
         pad zero between replays."""
         self._init_process()
-        if symm_mem.get_backend(self.device) != "CUDA":
-            self.skipTest("test applies to the CUDA symm mem backend")
+        if symm_mem.get_backend(self.device) not in ("CUDA", "NVSHMEM"):
+            self.skipTest("test applies to the CUDA and NVSHMEM symm mem backends")
 
         t = symm_mem.empty(64, dtype=torch.float32, device=device_type)
         hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
