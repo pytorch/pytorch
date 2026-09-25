@@ -177,24 +177,26 @@ def _clone_inputs(args):
 
 
 # This is purely for developer debugging.  We are not going to advertise it.
-_JIT_TIME = os.environ.get("PYTORCH_JIT_TIME", False)  # CUDA-only timing
+_JIT_TIME = os.environ.get("PYTORCH_JIT_TIME", False)  # Accelerator timing (dev debug)
 _JIT_DISABLE = os.environ.get("PYTORCH_JIT_DISABLE", False)
 _JIT_STATS = os.environ.get("PYTORCH_JIT_STATS", False)
 
 
 @contextlib.contextmanager
 def _time(trace_name, name, time=True):
-    if (not _JIT_TIME and not time) or not torch.cuda.is_available():
+    # Dev-only timing helper for manual instrumentation while debugging JIT
+    # trace. Gated by PYTORCH_JIT_TIME or time=True; no in-tree callers.
+    if (not _JIT_TIME and not time) or not torch.accelerator.is_available():
         yield
         return
-    stream = torch.cuda.current_stream()
-    start = torch.cuda.Event(enable_timing=True)
-    end = torch.cuda.Event(enable_timing=True)
-    stream.record_event(start)
+    stream = torch.accelerator.current_stream()
+    start = torch.Event(enable_timing=True)
+    end = torch.Event(enable_timing=True)
+    start.record(stream)
     try:
         yield
     finally:
-        stream.record_event(end)
+        end.record(stream)
         end.synchronize()
         print(f"{trace_name} {name} time: {start.elapsed_time(end)} ms")
 

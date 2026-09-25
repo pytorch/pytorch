@@ -2836,5 +2836,16 @@ class TestMixTracingScripting(JitTestCase):
                 self.assertTrue(n.output().isCompleteTensor())
 
 
+class TestJitTraceTimingHelper(JitTestCase):
+    def test_time_helper_smoke(self) -> None:
+        if not torch.accelerator.is_available():
+            self.skipTest("requires an accelerator")
+        from torch.jit._trace import _time
+
+        device = torch.accelerator.current_accelerator()
+        with _time("test", "smoke", time=True):
+            torch.zeros(1, device=device)
+
+
 if __name__ == "__main__":
     raise_on_run_directly("test/test_jit.py")
