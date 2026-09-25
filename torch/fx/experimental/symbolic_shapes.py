@@ -7787,13 +7787,17 @@ class ShapeEnv:
                 if self.replace(Mod(base, divisor)) in self.divisible:
                     div_replacements[fd] = CleanDiv(base, divisor)
             if div_replacements:
-                new_expr = expr.xreplace(div_replacements)
-                new_expr = safe_expand(new_expr)
+                clean_expr = safe_expand(expr.xreplace(div_replacements))
+                exact_divisions = {
+                    clean_div: clean_div.args[0] / clean_div.args[1]
+                    for clean_div in div_replacements.values()
+                }
+                new_expr = safe_expand(clean_expr.xreplace(exact_divisions))
                 new_pows = new_expr.atoms(sympy.Pow)
                 new_rationals = new_expr.atoms(sympy.Rational).difference(
                     new_expr.atoms(sympy.Integer)
                 )
-                # divisions simplified away
+                # Keep the temporary exact divisions only when they cancel completely.
                 if new_pows.issubset(pows) and new_rationals.issubset(rationals):
                     expr = new_expr
         return expr

@@ -2650,6 +2650,19 @@ class TestFloorDiv(TestCase):
             self.assertEqual(shape_env.simplify(expr), result)
             self.assertEqual(shape_env.evaluate_expr(expr), result)
 
+    def test_floordiv_simplify_with_divisibility_guard(self):
+        shape_env = ShapeEnv()
+        x = create_symint(shape_env, 4, duck=False)
+        equality = x == 2 * (x // 2)
+
+        self.assertFalse(statically_known_true(equality))
+        self.assertTrue(bool(x % 2 == 0))
+        self.assertTrue(statically_known_true(equality))
+        self.assertEqual(
+            shape_env.simplify((3 * (x // 2)).node.expr),
+            3 * FloorDiv(x.node.expr, 2),
+        )
+
     def test_floordiv_assumptions(self):
         cases = (
             sympy.Symbol("i1", integer=True),
