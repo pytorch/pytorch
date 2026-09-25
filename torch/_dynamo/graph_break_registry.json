@@ -1975,6 +1975,16 @@
       "Hints": []
     }
   ],
+  "GB9613": [
+    {
+      "Gb_type": "current_stream device mismatch",
+      "Context": "requested={requested_type}, tracking={tracked_type}",
+      "Explanation": "Dynamo stream mismatch: Requested '{requested_type}' stream, but SymbolicStreamState is tracking '{tracked_type}'. Dynamo only tracks streams of the default accelerator (plus stream contexts entered during tracing). Please ensure you are using the default accelerator.",
+      "Hints": [
+        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      ]
+    }
+  ],
   "GB9186": [
     {
       "Gb_type": "using `torch.autograd.grad` with `torch._dynamo.config.trace_autograd_ops=False`",
