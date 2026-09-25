@@ -2351,6 +2351,16 @@
       ]
     }
   ],
+  "GB0912": [
+    {
+      "Gb_type": "Sourceless skipped callable missing attribute",
+      "Context": "{self.value} has no attribute {name}",
+      "Explanation": "Dynamo cannot guard that the attribute stays absent on a skipped callable with no source, so it cannot raise the AttributeError that eager would raise here.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0149": [
     {
       "Gb_type": "Unsupported functorch tracing attempt",

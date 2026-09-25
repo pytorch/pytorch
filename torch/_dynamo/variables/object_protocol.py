@@ -2186,6 +2186,21 @@ def mro_lookup(py_type: type, name: str) -> object:
     return NO_SUCH_SUBOBJ
 
 
+def type_uses_generic_getattr(py_type: type) -> bool:
+    """Whether instances of *py_type* look attributes up with plain
+    PyObject_GenericGetAttr and no __getattr__ hook.
+
+    When this holds, object_generic_getattr models the lookup exactly, so a miss
+    at step 7 is a real AttributeError rather than a gap in Dynamo's model.
+    Types with a custom tp_getattro (type, module, ...) or a __getattr__ hook
+    resolve names object_generic_getattr never sees.
+    """
+    return (
+        mro_lookup(py_type, "__getattribute__") is object.__getattribute__
+        and mro_lookup(py_type, "__getattr__") is NO_SUCH_SUBOBJ
+    )
+
+
 def _resolve_descriptor_get(
     tx: "InstructionTranslatorBase",
     type_attr: object,
