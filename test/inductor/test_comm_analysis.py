@@ -8,19 +8,24 @@ import torch
 import torch.distributed as dist
 
 
-if not dist.is_available() or not dist.is_nccl_available():
-    print("c10d NCCL not available, skipping tests", file=sys.stderr)
+if not dist.is_available():
+    print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
 try:
-    from torch.testing._internal.common_distributed import requires_nccl
+    from torch.testing._internal.common_distributed import (
+        requires_accelerator_dist_backend,
+    )
 except ImportError:
     print("common_distributed not importable, skipping tests", file=sys.stderr)
     sys.exit(0)
 
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, skipIfXpu, TestCase
+
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+device_module = torch.get_device_module(device_type)
 
 
 def _get_all_gather_node(group_size, group_name):
@@ -92,14 +97,21 @@ class TestNcclEstimateDeviceResolution(TestCase):
         finally:
             self._destroy_pg()
 
-    @requires_nccl()
-    @unittest.skipUnless(TEST_CUDA, "requires CUDA")
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @unittest.skipUnless(torch.accelerator.is_available(), "requires an accelerator")
+    @skipIfXpu(
+        msg="XCCL does not implement supportsTimeEstimation(): "
+        "https://github.com/intel/torch-xpu-ops/issues/5405"
+    )
     def test_multi_backend_pg_resolves_to_nccl(self):
         """
-        Multi-backend PG ("cpu:gloo,cuda:nccl"): We should resolve to the cuda device's backend.
+        Multi-backend PG ("cpu:gloo,cuda:nccl"): We should resolve to the accelerator's backend.
         """
-        torch.cuda.set_device(0)
-        pg, group_name, group_size = self._init_pg_real_store("cpu:gloo,cuda:nccl")
+        device_module.set_device(0)
+        accel_backend = dist.get_default_backend_for_device(device_type)
+        pg, group_name, group_size = self._init_pg_real_store(
+            f"cpu:gloo,{device_type}:{accel_backend}"
+        )
         try:
             from torch.distributed.distributed_c10d import _get_pg_default_device
 
@@ -108,7 +120,7 @@ class TestNcclEstimateDeviceResolution(TestCase):
                 default_device = _get_pg_default_device(pg)
             self.assertEqual(default_device, torch.device("cpu"))
 
-            nccl_backend = pg._get_backend(torch.device("cuda"))
+            nccl_backend = pg._get_backend(torch.device(device_type))
             self.assertTrue(nccl_backend._supports_time_estimate)
 
             gloo_backend = pg._get_backend(torch.device("cpu"))
@@ -116,14 +128,20 @@ class TestNcclEstimateDeviceResolution(TestCase):
         finally:
             self._destroy_pg()
 
-    @requires_nccl()
-    @unittest.skipUnless(TEST_CUDA, "requires CUDA")
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @unittest.skipUnless(torch.accelerator.is_available(), "requires an accelerator")
+    @skipIfXpu(
+        msg="XCCL does not implement supportsTimeEstimation(): "
+        "https://github.com/intel/torch-xpu-ops/issues/5405"
+    )
     def test_single_nccl_backend_resolves_correctly(self):
-        """Single NCCL backend PG: cuda device resolves to NCCL with time estimation."""
-        torch.cuda.set_device(0)
-        pg, group_name, group_size = self._init_pg_real_store("nccl")
+        """Single NCCL backend PG: accelerator device resolves to a backend with time estimation."""
+        device_module.set_device(0)
+        pg, group_name, group_size = self._init_pg_real_store(
+            dist.get_default_backend_for_device(device_type)
+        )
         try:
-            backend = pg._get_backend(torch.device("cuda"))
+            backend = pg._get_backend(torch.device(device_type))
             self.assertTrue(backend._supports_time_estimate)
         finally:
             self._destroy_pg()
