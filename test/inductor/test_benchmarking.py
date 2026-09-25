@@ -2,6 +2,7 @@
 
 import contextlib
 import unittest
+import warnings
 from unittest.mock import patch
 
 import torch
@@ -15,9 +16,15 @@ from torch._inductor.runtime.benchmarking import (
     InductorBenchmarker,
     TorchProfilerBenchmarker,
     TritonBenchmarker,
+    _GPU_BENCHMARK_DEVICE_TYPES,
+    _get_default_gpu_device_type,
+    get_gpu_benchmark_device_types,
+    register_gpu_benchmark_device_type,
+    unregister_gpu_benchmark_device_type,
 )
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     decorateIf,
     instantiate_parametrized_tests,
     parametrize,
@@ -653,6 +660,100 @@ class TestBenchmarker(TestCase):
         self.assertGreater(len(captured_buffer_lengths), 0)
         self.assertEqual(captured_buffer_lengths[0], expected_buffer_size_bytes // 4)
         self.assertEqual(captured_buffer_devices[0], device)
+
+
+class TestGpuBenchmarkDeviceTypes(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    _SENTINEL_DEVICE = "privateuse1_test_device"
+
+    def tearDown(self):
+        unregister_gpu_benchmark_device_type(self._SENTINEL_DEVICE)
+        super().tearDown()
+
+    def test_default_types_present(self):
+        for device_type in ("cuda", "xpu", "mtia"):
+            self.assertIn(device_type, _GPU_BENCHMARK_DEVICE_TYPES)
+
+    def test_register_and_unregister(self):
+        self.assertNotIn(self._SENTINEL_DEVICE, _GPU_BENCHMARK_DEVICE_TYPES)
+        register_gpu_benchmark_device_type(self._SENTINEL_DEVICE)
+        self.assertIn(self._SENTINEL_DEVICE, _GPU_BENCHMARK_DEVICE_TYPES)
+        self.assertIn(self._SENTINEL_DEVICE, get_gpu_benchmark_device_types())
+        unregister_gpu_benchmark_device_type(self._SENTINEL_DEVICE)
+        self.assertNotIn(self._SENTINEL_DEVICE, _GPU_BENCHMARK_DEVICE_TYPES)
+        self.assertNotIn(self._SENTINEL_DEVICE, get_gpu_benchmark_device_types())
+
+    def test_unregister_is_idempotent(self):
+        unregister_gpu_benchmark_device_type(self._SENTINEL_DEVICE)
+        unregister_gpu_benchmark_device_type(self._SENTINEL_DEVICE)
+        self.assertNotIn(self._SENTINEL_DEVICE, _GPU_BENCHMARK_DEVICE_TYPES)
+
+    def test_register_rejects_empty(self):
+        for bad in ("", None, 123):
+            with self.assertRaises((ValueError, TypeError)):
+                register_gpu_benchmark_device_type(bad)  # type: ignore[arg-type]
+
+    def test_get_includes_privateuse1(self):
+        private_backend = torch._C._get_privateuse1_backend_name()
+        if private_backend == "privateuseone":
+            self.skipTest("no PrivateUse1 backend registered")
+        types = get_gpu_benchmark_device_types()
+        self.assertIn(private_backend, types)
+
+    def test_get_reflects_registration(self):
+        private_backend = torch._C._get_privateuse1_backend_name()
+        register_gpu_benchmark_device_type(self._SENTINEL_DEVICE)
+        types = get_gpu_benchmark_device_types()
+        self.assertIn(self._SENTINEL_DEVICE, types)
+        if private_backend != "privateuseone":
+            self.assertIn(private_backend, types)
+
+    def test_register_does_not_duplicate(self):
+        register_gpu_benchmark_device_type(self._SENTINEL_DEVICE)
+        register_gpu_benchmark_device_type(self._SENTINEL_DEVICE)
+        self.assertEqual(
+            list(_GPU_BENCHMARK_DEVICE_TYPES).count(self._SENTINEL_DEVICE), 1
+        )
+        self.assertEqual(get_gpu_benchmark_device_types().count(self._SENTINEL_DEVICE), 1)
+
+    def test_get_default_gpu_device_type_ignores_unloaded_module(self):
+        register_gpu_benchmark_device_type(self._SENTINEL_DEVICE)
+        self.assertFalse(hasattr(torch, self._SENTINEL_DEVICE))
+        with patch(
+            "torch._inductor.runtime.benchmarking.get_gpu_benchmark_device_types",
+            return_value=[self._SENTINEL_DEVICE, "cuda"],
+        ), patch("torch.cuda.is_available", return_value=False):
+            self.assertEqual(_get_default_gpu_device_type(), "cuda")
+
+    def test_get_default_gpu_device_type_multiple_available(self):
+        register_gpu_benchmark_device_type(self._SENTINEL_DEVICE)
+
+        class _FakeMod:
+            @staticmethod
+            def is_available():
+                return True
+
+        with patch(
+            "torch._inductor.runtime.benchmarking.get_gpu_benchmark_device_types",
+            return_value=[self._SENTINEL_DEVICE, "cuda"],
+        ), patch.object(torch, self._SENTINEL_DEVICE, _FakeMod, create=True), patch(
+            "torch.cuda.is_available", return_value=True
+        ):
+            with self.assertRaises(AssertionError):
+                _get_default_gpu_device_type()
+
+    def test_deprecated_module_attribute_warns(self):
+        import torch._inductor.runtime.benchmarking as bench_mod
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            value = bench_mod.GPU_BENCHMARK_DEVICE_TYPES  # type: ignore[attr-defined]
+        self.assertTrue(
+            any(issubclass(w.category, DeprecationWarning) for w in caught)
+        )
+        self.assertIsInstance(value, tuple)
+        self.assertIn("cuda", value)
 
 
 if __name__ == "__main__":

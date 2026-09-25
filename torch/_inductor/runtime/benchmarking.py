@@ -19,7 +19,9 @@ from torch.utils._ordered_set import OrderedSet
 
 
 logger = torch._logging.getArtifactLogger(__name__, "benchmarking")
-GPU_BENCHMARK_DEVICE_TYPES = ("cuda", "xpu", "mtia")
+# Device types that support GPU-style benchmarking. Third-party backends can
+# register additional types via register_gpu_benchmark_device_type.
+_GPU_BENCHMARK_DEVICE_TYPES: OrderedSet[str] = OrderedSet(("cuda", "xpu", "mtia"))
 _CALLABLE_PROFILE_EVENT_NAME = "_CALLABLE"
 
 
@@ -29,17 +31,59 @@ P = ParamSpec("P")
 T = TypeVar("T")
 
 
+def register_gpu_benchmark_device_type(device_type: str) -> None:
+    """Register a device type as a GPU benchmark device.
+
+    Third-party backends call this during initialization so that
+    _get_default_gpu_device_type() can discover them.
+    """
+    if not isinstance(device_type, str) or not device_type:
+        raise ValueError(
+            "device_type must be a non-empty string matching torch.device.type"
+        )
+    _GPU_BENCHMARK_DEVICE_TYPES.add(device_type)
+
+
+def unregister_gpu_benchmark_device_type(device_type: str) -> None:
+    """Unregister a device type from the GPU benchmark device set."""
+    _GPU_BENCHMARK_DEVICE_TYPES.discard(device_type)
+
+
+def get_gpu_benchmark_device_types() -> list[str]:
+    """Return all registered GPU benchmark device types, including PrivateUse1."""
+    result = list(_GPU_BENCHMARK_DEVICE_TYPES)
+    private_backend = torch._C._get_privateuse1_backend_name()
+    if private_backend != "privateuseone" and private_backend not in result:
+        result.append(private_backend)
+    return result
+
+
 def _get_default_gpu_device_type() -> str:
     avail_gpus = [
         device_type
-        for device_type in GPU_BENCHMARK_DEVICE_TYPES
-        if getattr(torch, device_type).is_available()
+        for device_type in get_gpu_benchmark_device_types()
+        if (mod := getattr(torch, device_type, None)) is not None
+        and mod.is_available()
     ]
     if len(avail_gpus) > 1:
         raise AssertionError(
             f"expected at most one available GPU type, got {avail_gpus}"
         )
     return "cuda" if len(avail_gpus) == 0 else avail_gpus.pop()
+
+
+def __getattr__(name: str) -> Any:
+    if name == "GPU_BENCHMARK_DEVICE_TYPES":
+        import warnings
+
+        warnings.warn(
+            "GPU_BENCHMARK_DEVICE_TYPES is deprecated, "
+            "use get_gpu_benchmark_device_types() instead",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return tuple(get_gpu_benchmark_device_types())
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def _normalize_gpu_device_type(device_type: str | torch.device | None) -> str:
