@@ -69,8 +69,8 @@ Windows llvm will not have this definition.
 #endif
 #define VECTOR_WIDTH 64
 #define int_vector __m512i
-#elif defined(__aarch64__) && \
-    !defined(CPU_CAPABILITY_SVE256) // CPU_CAPABILITY_AVX512
+#elif (defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE256)) || \
+    defined(CPU_CAPABILITY_ZVECTOR) // CPU_CAPABILITY_AVX512
 // SVE code expects 256-vectors; leave that set for SVE?
 #if defined(__GNUC__)
 #define __at_align__ __attribute__((aligned(16)))
@@ -343,27 +343,11 @@ struct Vectorized {
     }
     return ret;
   }
-  T reduce(T (*const f)(T)) const {
-    T ret = 0;
-    for (int64_t i = 0; i < size(); i++) {
-      ret = f(ret, values[i]);
-      if (++i < size())
-        ret = f(ret, values[i]);
-    }
-    return ret;
-  }
 #else
   Vectorized<T> map(T (*const f)(T)) const {
     Vectorized<T> ret;
     for (int64_t i = 0; i != size(); i++) {
       ret[i] = f(values[i]);
-    }
-    return ret;
-  }
-  T reduce(T (*const f)(T)) const {
-    T ret = 0;
-    for (int64_t i = 0; i != size(); i++) {
-      ret = f(ret, values[i]);
     }
     return ret;
   }
@@ -375,10 +359,13 @@ struct Vectorized {
     }
     return ret;
   }
-  T reduce(T (*const f)(const T&)) const {
-    T ret = 0;
-    for (int64_t i = 0; i != size(); i++) {
-      ret = f(ret, values[i]);
+  // Seeded with lane 0 rather than an identity element, so that `op` need not
+  // have one.
+  template <typename Op>
+  T reduce(Op op) const {
+    T ret = values[0];
+    for (int64_t i = 1; i != size(); i++) {
+      ret = op(ret, values[i]);
     }
     return ret;
   }
@@ -693,8 +680,11 @@ struct Vectorized {
   T reduce_add() const {
     return reduce([](T x, T y) -> T { return x + y; });
   }
+  // Propagates NaN, matching maximum() and torch.max. A NaN accumulator has to
+  // be carried explicitly: every comparison against it is false, so the naive
+  // ternary would let the next lane displace it.
   T reduce_max() const {
-    return reduce(std::max);
+    return reduce([](T x, T y) -> T { return (_isnan(x) || x > y) ? x : y; });
   }
 
  private:
