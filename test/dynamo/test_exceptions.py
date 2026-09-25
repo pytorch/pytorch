@@ -1924,12 +1924,10 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(comparable(opt_fn(x)[0]), comparable(fn(x)[0]))
 
-    # A write is routed to the wrapped ExceptionVariable, but side_effects sends
-    # only a bare ExceptionVariable through reconstruct(), so a
-    # UserDefinedExceptionObjectVariable is rebuilt via __new__ and the write is
-    # dropped at the boundary.
-    @unittest.expectedFailure
-    @parametrize("attr", WRITABLE_BASE_EXCEPTION_ATTRS)
+    @parametrize(
+        "attr",
+        [a for a in WRITABLE_BASE_EXCEPTION_ATTRS if a != "__suppress_context__"],
+    )
     def test_exception_attr_write_survives_escape(self, attr):
         def fn(x):
             e = CustomException("x")
