@@ -7678,6 +7678,18 @@ class TestCudaAllocator(TestCase):
         with self.assertRaises(ValueError):
             torch._C._accelerator_setAllocatorSettings("throw_on_cudamalloc_oom:maybe")
 
+        # Test pinned_numa_aware config parsing - invalid formats. The
+        # tokenizer rejects these before the NUMA availability check, so they
+        # fail identically on machines with and without NUMA support, and a
+        # rejected value leaves the setting untouched. Accepting a *valid*
+        # value depends on NUMA being available and is covered by
+        # TestPinnedNumaAware, which isolates the setting in a subprocess.
+        with self.assertRaises(ValueError):
+            torch._C._accelerator_setAllocatorSettings("pinned_numa_aware:none")
+
+        with self.assertRaises(ValueError):
+            torch._C._accelerator_setAllocatorSettings("pinned_numa_aware:2")
+
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "throw_on_cudamalloc_oom not supported")
     @serialTest()
     def test_throw_on_cudamalloc_oom(self):
@@ -8757,6 +8769,470 @@ class TestCachingHostAllocatorConfig(TestCase):
             b = torch.empty(large, dtype=torch.uint8, pin_memory=True)
             # Must not reuse the smaller cached block.
             self.assertNotEqual(b.data_ptr(), small_ptr)
+
+
+# Reports the NUMA nodes this process can actually run on. A node counts only
+# if at least one of its CPUs is in our affinity mask: node ids are
+# host-global, so a cpuset can leave a process with a single usable node on a
+# machine that has several. Used by the child scripts below to decide which
+# behaviour to expect, so that they assert something real on a single-node CI
+# runner instead of skipping.
+_NUMA_HELPERS = """\
+import gc
+import os
+import torch
+
+
+def usable_numa_nodes():
+    base = "/sys/devices/system/node"
+    if not os.path.isdir(base):
+        return {}
+    allowed = os.sched_getaffinity(0)
+    nodes = {}
+    for name in sorted(os.listdir(base)):
+        if not name.startswith("node") or not name[4:].isdigit():
+            continue
+        try:
+            with open(os.path.join(base, name, "cpulist")) as f:
+                spec = f.read().strip()
+        except OSError:
+            continue
+        cpus = set()
+        for part in filter(None, spec.split(",")):
+            if "-" in part:
+                lo, hi = part.split("-")
+                cpus.update(range(int(lo), int(hi) + 1))
+            else:
+                cpus.add(int(part))
+        cpus &= allowed
+        if cpus:
+            nodes[int(name[4:])] = cpus
+    return nodes
+"""
+
+# Shrink the process down to a single NUMA node. Turns a multi-node host into
+# the single-node case that most CI runners are, without needing such a runner.
+_PIN_TO_ONE_NODE = """\
+_nodes = usable_numa_nodes()
+if _nodes:
+    os.sched_setaffinity(0, _nodes[sorted(_nodes)[0]])
+"""
+
+# Allocate a pinned block on node A, move the thread to node B *before* letting
+# go of it, then ask for the same size from B and from A in turn, reporting
+# which request got the original block back.
+#
+# Freeing from the other node is the whole point of the shape. A block has to
+# go back to the pool for the node its pages are actually on, which the block
+# records at allocation time, and not to the pool for whichever node the thread
+# that happens to drop the last reference is running on -- a background loader,
+# a worker that migrated, or just a differently scheduled main thread. If the
+# free were done from node A, an allocator that routed by the freeing thread's
+# node would agree with one that routes by the block's node, and so would an
+# allocator with a single shared pool once B's request came in.
+#
+# Set USE_EVENTS to send the free down the deferred path instead: a block that
+# was the source of an async H2D copy carries a recorded stream, so free() parks
+# it on the pool's event list and process_events caches it later. Both paths
+# pick their destination with pool_from_block, so both have to land on A.
+_FREE_ROUTING_BODY = """\
+SIZE = 32 * 1024 * 1024
+
+
+def host_stat(key):
+    return torch.cuda.host_memory_stats()[key]
+
+
+nodes = usable_numa_nodes()
+ids = sorted(nodes)
+print("NODES", len(ids))
+torch.cuda.init()
+node_a, node_b = nodes[ids[0]], nodes[ids[-1]]
+
+os.sched_setaffinity(0, node_a)
+first = torch.empty(SIZE, dtype=torch.uint8, pin_memory=True)
+first_ptr = first.data_ptr()
+if USE_EVENTS:
+    dev = torch.empty(SIZE, dtype=torch.uint8, device="cuda")
+    dev.copy_(first, non_blocking=True)
+    torch.cuda.synchronize()
+baseline_allocs = host_stat("num_host_alloc")
+
+os.sched_setaffinity(0, node_b)
+del first
+gc.collect()
+# 1 means free() parked the block on an event list (deferred path); 0 means it
+# cached the block outright (fast path). Reported rather than assumed so the
+# test can tell whether the path it meant to exercise was the one taken.
+print("DEFERRED", host_stat("active_requests.current"))
+if USE_EVENTS:
+    # The event is recorded during free(), so drain it here: a request that
+    # missed because the event was still pending would look exactly like one
+    # that missed because of pool routing.
+    torch.cuda.synchronize()
+
+second = torch.empty(SIZE, dtype=torch.uint8, pin_memory=True)
+print("B_REUSED", second.data_ptr() == first_ptr)
+print("B_ALLOCS", host_stat("num_host_alloc") - baseline_allocs)
+del second
+gc.collect()
+
+os.sched_setaffinity(0, node_a)
+third = torch.empty(SIZE, dtype=torch.uint8, pin_memory=True)
+print("A_REUSED", third.data_ptr() == first_ptr)
+print("A_ALLOCS", host_stat("num_host_alloc") - baseline_allocs)
+"""
+
+
+@unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
+class TestPinnedNumaAware(TestCase):
+    """Tests for the pinned_numa_aware allocator setting.
+
+    The setting is latched when the pinned host allocator serves its first
+    request and changing it afterwards raises, so nothing here can run
+    in-process alongside the rest of the suite: every case drives a fresh
+    subprocess with the setting supplied through the environment.
+    """
+
+    def _run(self, script, alloc_conf=None, check=False):
+        env = os.environ.copy()
+        # PYTORCH_CUDA_ALLOC_CONF and PYTORCH_HIP_ALLOC_CONF are read first and
+        # win outright, so an ambient one would shadow what we set here.
+        env.pop("PYTORCH_CUDA_ALLOC_CONF", None)
+        env.pop("PYTORCH_HIP_ALLOC_CONF", None)
+        if alloc_conf is None:
+            env.pop("PYTORCH_ALLOC_CONF", None)
+        else:
+            env["PYTORCH_ALLOC_CONF"] = alloc_conf
+        proc = subprocess.run(
+            [sys.executable, "-c", script],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        if check:
+            self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+        return proc
+
+    @staticmethod
+    def _field(stdout, key):
+        for line in stdout.splitlines():
+            if line.startswith(key + " "):
+                return line[len(key) + 1 :].strip()
+        raise AssertionError(f"{key!r} not found in child stdout:\n{stdout}")
+
+    _numa_usable_cache = None
+
+    def _numa_usable(self):
+        # Whether this build can turn the flag on at all. Cases that only exist
+        # once it can have to know, because the setting is rejected as invalid
+        # before any of their own conditions are looked at. Cached: the answer
+        # is a property of the build and costs a subprocess to obtain.
+        if TestPinnedNumaAware._numa_usable_cache is None:
+            proc = self._run(
+                "import torch\n"
+                "torch._C._accelerator_setAllocatorSettings('pinned_numa_aware:True')\n"
+            )
+            TestPinnedNumaAware._numa_usable_cache = proc.returncode == 0
+        return TestPinnedNumaAware._numa_usable_cache
+
+    def test_enable_requires_numa_support(self):
+        # Requesting the flag without usable NUMA support must fail loudly: a
+        # build with no libnuma cannot tell which node a thread is on, so every
+        # block would land in one pool and the setting would look enabled while
+        # doing nothing. Which half of this applies is a property of the
+        # machine, not of the change, so assert whichever one is reachable
+        # here; a runner without libnuma exercises the rejection.
+        #
+        # Deliberately weak, and worth knowing how weak. On a NUMA-capable host
+        # only the first branch is reachable, and all it establishes is that
+        # both valid spellings parse. numa_available() is not exposed to
+        # Python, so there is no independent oracle for the machine's
+        # capability here and an implementation that accepted the flag
+        # unconditionally would pass. What such an implementation would then go
+        # on to do is what the rest of this class checks.
+        proc = self._run(
+            "import torch\n"
+            "torch._C._accelerator_setAllocatorSettings('pinned_numa_aware:True')\n"
+            "torch._C._accelerator_setAllocatorSettings('pinned_numa_aware:False')\n"
+            "print('ACCEPTED')\n"
+        )
+        if proc.returncode == 0:
+            # NUMA is usable, so both valid values parse.
+            self.assertIn("ACCEPTED", proc.stdout)
+        else:
+            self.assertIn("no usable NUMA support", proc.stderr)
+
+    def test_cannot_change_after_first_allocation(self):
+        # The pools are sized once, on the first pinned request. Flipping the
+        # setting afterwards would either leave a single pool forever or leave
+        # the split on with no way to undo it, so the setter refuses.
+        #
+        # It has to be the setter that refuses, and this checks that it is: the
+        # refusal used to come from the allocator, which meant it also fired on
+        # the free path, where an exception reaches a noexcept destructor. See
+        # test_free_survives_rejected_change.
+        if not self._numa_usable():
+            # Nothing to latch against. 'True' is rejected as invalid before
+            # the latched value is ever consulted, and 'False' agrees with the
+            # only value the flag can have had, so no call can reach the check.
+            self.skipTest("no usable NUMA support on this machine")
+
+        script = (
+            "import torch\n"
+            "torch.empty(1024, dtype=torch.uint8, pin_memory=True)\n"
+            "torch._C._accelerator_setAllocatorSettings('pinned_numa_aware:{}')\n"
+            "print('ACCEPTED')\n"
+        )
+
+        # Off when the pools were sized: turning it on afterwards is refused.
+        proc = self._run(script.format("True"))
+        self.assertNotEqual(proc.returncode, 0, msg=proc.stdout)
+        self.assertIn("pinned_numa_aware cannot be changed", proc.stderr)
+        self.assertIn("it was disabled at that point", proc.stderr)
+
+        # On when they were sized: turning it off afterwards is equally refused.
+        proc = self._run(script.format("False"), alloc_conf="pinned_numa_aware:True")
+        self.assertNotEqual(proc.returncode, 0, msg=proc.stdout)
+        self.assertIn("pinned_numa_aware cannot be changed", proc.stderr)
+        self.assertIn("it was enabled at that point", proc.stderr)
+
+        # Re-stating the value it already has stays legal. Programs re-apply
+        # their whole settings string routinely; only a real change is a
+        # problem, and refusing a no-op would break them for nothing.
+        self._run(script.format("False"), check=True)
+
+    def test_free_survives_rejected_change(self):
+        # A rejected change must not take the process down with it. The check
+        # used to live in the allocator and ran on free() as well as on
+        # allocate(), so flipping the setting while a pinned tensor was alive
+        # turned that tensor's release into std::terminate: the exception
+        # escaped ~StorageImpl, which is noexcept. Refusing in the setter
+        # instead makes it an ordinary Python exception that the caller can see
+        # and recover from, and leaves the free path with nothing to raise.
+        if not self._numa_usable():
+            self.skipTest("no usable NUMA support on this machine")
+        proc = self._run(
+            "import gc\n"
+            "import torch\n"
+            # Alive across the attempted change: this is the tensor whose
+            # release used to abort.
+            "held = torch.empty(1024, dtype=torch.uint8, pin_memory=True)\n"
+            "try:\n"
+            "    torch._C._accelerator_setAllocatorSettings('pinned_numa_aware:True')\n"
+            "except RuntimeError as e:\n"
+            "    assert 'cannot be changed' in str(e), e\n"
+            "    print('REFUSED', flush=True)\n"
+            "else:\n"
+            "    print('ACCEPTED', flush=True)\n"
+            "del held\n"
+            "gc.collect()\n"
+            "print('FREED', flush=True)\n"
+            # ...and the allocator is still usable, not merely still running.
+            "again = torch.empty(1024, dtype=torch.uint8, pin_memory=True)\n"
+            "del again\n"
+            "gc.collect()\n"
+            "print('DONE', flush=True)\n"
+        )
+        # A negative return code is a signal; SIGABRT (-6) is the old failure.
+        self.assertEqual(
+            proc.returncode,
+            0,
+            msg=f"child exited {proc.returncode}\n{proc.stdout}\n{proc.stderr}",
+        )
+        self.assertIn("REFUSED", proc.stdout)
+        self.assertIn("FREED", proc.stdout)
+        self.assertIn("DONE", proc.stdout)
+
+    def test_rejects_reserve_segment(self):
+        # The reserve segment is one process-wide allocation carved by whoever
+        # touched it first, so a block handed to a node-1 thread may well be
+        # backed by node-0 pages. Recording a node per block would be a lie.
+        proc = self._run(
+            "import torch\ntorch.empty(1024, dtype=torch.uint8, pin_memory=True)\n",
+            alloc_conf="pinned_numa_aware:True,pinned_reserve_segment_size_mb:64",
+        )
+        if "no usable NUMA support" in proc.stderr:
+            self.skipTest("no usable NUMA support on this machine")
+        self.assertNotEqual(proc.returncode, 0, msg=proc.stdout)
+        self.assertIn(
+            "cannot be combined with pinned_reserve_segment_size_mb", proc.stderr
+        )
+
+    def test_rejects_multithreaded_host_register(self):
+        # The parallel pre-fault path touches pages from a shared thread pool
+        # that is not bound to the requesting node, so first touch decides
+        # placement arbitrarily. One thread means the caller does the touching,
+        # which is trustworthy and stays allowed.
+        conf = "pinned_numa_aware:True,pinned_use_cuda_host_register:True"
+        script = (
+            "import torch\n"
+            "torch.empty(1024, dtype=torch.uint8, pin_memory=True)\n"
+            "print('OK')\n"
+        )
+
+        proc = self._run(script, alloc_conf=f"{conf},pinned_num_register_threads:8")
+        if "no usable NUMA support" in proc.stderr:
+            self.skipTest("no usable NUMA support on this machine")
+        self.assertNotEqual(proc.returncode, 0, msg=proc.stdout)
+        self.assertIn("requires pinned_num_register_threads:1", proc.stderr)
+
+        # The single-threaded register path is accepted.
+        proc = self._run(script, alloc_conf=f"{conf},pinned_num_register_threads:1")
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+
+    def test_rejects_incompatible_setting_enabled_after_the_fact(self):
+        # The settings that decide whether page placement can be trusted are
+        # mutable, so agreeing to them once, when the pools were sized, is not
+        # enough: every backing allocation asks again. Without that, turning one
+        # on mid-run would keep stamping each new block with the node of the
+        # thread that asked for it while something else chose where its pages
+        # went, and the pools would be partitioned on fiction.
+        #
+        # Only requests that miss the cache reach the check, which is correct --
+        # a hit returns a block whose node was recorded back when placement was
+        # still trustworthy -- so the rejected request below has to be for a
+        # size that has never been allocated.
+        script = (
+            # Staying on one node keeps the cached block and the request that
+            # is meant to hit it in the same pool: an unpinned thread that
+            # migrated between the two would miss, reach the check, and fail
+            # this test for a reason it is not about.
+            _NUMA_HELPERS + _PIN_TO_ONE_NODE + "torch.cuda.init()\n"
+            "CACHED = 4 * 1024 * 1024\n"
+            "FRESH = 64 * 1024 * 1024\n"
+            "\n"
+            "def allocs():\n"
+            "    return torch.cuda.host_memory_stats()['num_host_alloc']\n"
+            "\n"
+            # Size the pools and leave a block of CACHED bytes on a free list.
+            "warm = torch.empty(CACHED, dtype=torch.uint8, pin_memory=True)\n"
+            "del warm\n"
+            "gc.collect()\n"
+            "torch._C._accelerator_setAllocatorSettings(\n"
+            "    'pinned_use_cuda_host_register:True,pinned_num_register_threads:8')\n"
+            "before = allocs()\n"
+            "hit = torch.empty(CACHED, dtype=torch.uint8, pin_memory=True)\n"
+            "print('HIT_ALLOCS', allocs() - before, flush=True)\n"
+            "try:\n"
+            "    torch.empty(FRESH, dtype=torch.uint8, pin_memory=True)\n"
+            "except RuntimeError as e:\n"
+            "    assert 'pinned_numa_aware' in str(e), e\n"
+            "    assert 'pinned_num_register_threads:1' in str(e), e\n"
+            "    print('MISS_REJECTED', flush=True)\n"
+            "else:\n"
+            "    print('MISS_ALLOWED', flush=True)\n"
+            # A rejected allocation must leave the allocator usable: the check
+            # runs before anything is allocated, so there is nothing half-done.
+            "del hit\n"
+            "gc.collect()\n"
+            "print('DONE', flush=True)\n"
+        )
+        proc = self._run(script, alloc_conf="pinned_numa_aware:True")
+        if "no usable NUMA support" in proc.stderr:
+            self.skipTest("no usable NUMA support on this machine")
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+        # The premise of the split: the first request was served from cache, so
+        # it never reached the check, and the second one had to allocate.
+        self.assertEqual(self._field(proc.stdout, "HIT_ALLOCS"), "0")
+        self.assertIn("MISS_REJECTED", proc.stdout)
+        self.assertIn("DONE", proc.stdout)
+
+    @unittest.skipIf(not IS_LINUX, "NUMA topology is read from /sys, Linux only")
+    @parametrize("deferred", [False, True])
+    def test_free_routes_by_block_node_not_by_freeing_thread(self, deferred):
+        # The invariant the whole flag rests on. A block is returned to the pool
+        # for the node it records, so freeing it from a thread on some other
+        # node changes nothing: that other node still must not be handed it, and
+        # the owning node still must get it back. Nothing else here distinguishes
+        # per-node pools from a single shared pool that happens to be described
+        # as several.
+        #
+        # deferred picks which of free()'s two paths carries the block: straight
+        # into the free list, or onto the pool's event list first because an
+        # async copy left a stream recorded on it.
+        script = _NUMA_HELPERS + f"USE_EVENTS = {deferred}\n" + _FREE_ROUTING_BODY
+
+        on = self._run(script, alloc_conf="pinned_numa_aware:True")
+        if "no usable NUMA support" in on.stderr:
+            self.skipTest("no usable NUMA support on this machine")
+        self.assertEqual(on.returncode, 0, msg=on.stderr)
+        if int(self._field(on.stdout, "NODES")) < 2:
+            self.skipTest(
+                "needs two NUMA nodes this process may run on; with one node "
+                "there is one pool and nothing to route"
+            )
+
+        self.assertEqual(
+            self._field(on.stdout, "DEFERRED"),
+            "1" if deferred else "0",
+            "free() took the other path, so this run did not test the one asked "
+            "for (1 = parked on the event list, 0 = cached immediately)",
+        )
+
+        self.assertEqual(
+            self._field(on.stdout, "B_REUSED"),
+            "False",
+            "the node that freed the block was handed it back; blocks are being "
+            "routed by the freeing thread's node rather than by their own",
+        )
+        self.assertEqual(self._field(on.stdout, "B_ALLOCS"), "1")
+        self.assertEqual(
+            self._field(on.stdout, "A_REUSED"),
+            "True",
+            "the block never came back to the node whose memory it is on; it "
+            "was routed somewhere else or dropped",
+        )
+        self.assertEqual(self._field(on.stdout, "A_ALLOCS"), "1")
+
+        # Control. The same script with the flag off does hand node B the block,
+        # which is what makes the assertions above mean something: it rules out
+        # the block being unreusable for a reason that has nothing to do with
+        # nodes -- too large to cache, still holding an event, freed outright.
+        off = self._run(script, alloc_conf="pinned_numa_aware:False", check=True)
+        self.assertEqual(
+            self._field(off.stdout, "B_REUSED"),
+            "True",
+            "with one pool the block should have been reused across nodes; the "
+            "run above proved nothing about routing",
+        )
+        self.assertEqual(self._field(off.stdout, "B_ALLOCS"), "0")
+
+    @unittest.skipIf(not IS_LINUX, "NUMA topology is read from /sys, Linux only")
+    def test_restricted_affinity_matches_disabled(self):
+        # A process confined to one node must see no difference between the
+        # flag on and off.  Narrowing affinity does not lower
+        # GetNUMANodeIdUpperBound(), which is host-global, so on a multi-node
+        # host the enabled run still builds one pool per node; what this covers
+        # is that such a process only ever touches one of them.  Genuine
+        # single-node pool construction (nodes <= 1) needs a single-node host
+        # and is not reached from here.
+        script = (
+            _NUMA_HELPERS
+            + _PIN_TO_ONE_NODE
+            + "USE_EVENTS = False\n"
+            + _FREE_ROUTING_BODY
+        )
+
+        on = self._run(script, alloc_conf="pinned_numa_aware:True")
+        if "no usable NUMA support" in on.stderr:
+            self.skipTest("no usable NUMA support on this machine")
+        self.assertEqual(on.returncode, 0, msg=on.stderr)
+        off = self._run(script, alloc_conf="pinned_numa_aware:False", check=True)
+
+        self.assertEqual(self._field(on.stdout, "NODES"), "1")
+        self.assertEqual(self._field(off.stdout, "NODES"), "1")
+        for key in ("B_REUSED", "B_ALLOCS", "A_REUSED", "A_ALLOCS"):
+            self.assertEqual(
+                self._field(on.stdout, key),
+                self._field(off.stdout, key),
+                f"{key} differs between pinned_numa_aware on and off "
+                "with a single usable NUMA node",
+            )
+        # Both halves of the script end up on the one pool, so both reuse.
+        self.assertEqual(self._field(on.stdout, "B_REUSED"), "True")
+        self.assertEqual(self._field(on.stdout, "B_ALLOCS"), "0")
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
@@ -12415,6 +12891,7 @@ instantiate_parametrized_tests(TestCudaAllocator)
 instantiate_parametrized_tests(TestCompileKernel)
 instantiate_parametrized_tests(TestCachingHostAllocatorCudaGraph)
 instantiate_parametrized_tests(TestCachingHostAllocatorConfig)
+instantiate_parametrized_tests(TestPinnedNumaAware)
 instantiate_parametrized_tests(TestGDS)
 instantiate_device_type_tests(TestCudaOptims, globals())
 instantiate_device_type_tests(TestCudaDeviceParametrized, globals())

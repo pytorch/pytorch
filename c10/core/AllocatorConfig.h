@@ -222,6 +222,27 @@ class C10_API AcceleratorAllocatorConfig {
     return instance().pinned_use_background_threads_;
   }
 
+  // Returns whether the pinned host allocator keeps a separate free list per
+  // NUMA node, so that a block is only reused by a thread on the node its free
+  // list belongs to.  Pinned pages do not migrate, so a block recycled across
+  // nodes silently makes every later copy through it cross the interconnect.
+  // Off by default: each node holds its own blocks, so the same sizes may be
+  // cached more than once, which is the wrong trade for the common
+  // single-node-per-process deployment.  See
+  // https://github.com/pytorch/pytorch/issues/160420
+  static bool pinned_numa_aware() {
+    return instance().pinned_numa_aware_;
+  }
+
+  // Published by the pinned host allocator once it has sized its pools; -1
+  // before that.  The pools cannot be resized afterwards, so the setter rejects
+  // a conflicting change here rather than letting an unrelated allocate or free
+  // raise later -- raising out of free would reach a noexcept destruction path.
+  static std::atomic<int>& pinned_numa_aware_latch() {
+    static std::atomic<int> latch{-1};
+    return latch;
+  }
+
   // Returns the max size to allocate power-of-2.
   static size_t pinned_max_round_threshold() {
     return instance().pinned_max_round_threshold_;
@@ -325,6 +346,9 @@ class C10_API AcceleratorAllocatorConfig {
       const ConfigTokenizer& tokenizer,
       size_t i);
 
+  // Parse `pinned_numa_aware` from environment variable.
+  size_t parsePinnedNumaAware(const ConfigTokenizer& tokenizer, size_t i);
+
   // Parse `max_round_threshold` from environment variable.
   size_t parsePinnedMaxRoundThreshold(
       const ConfigTokenizer& tokenizer,
@@ -354,6 +378,9 @@ class C10_API AcceleratorAllocatorConfig {
 
   // A flag to enable background thread for processing events.
   std::atomic<bool> pinned_use_background_threads_{false};
+
+  // A flag to keep one free list per NUMA node in the pinned host allocator.
+  std::atomic<bool> pinned_numa_aware_{false};
 
   // Above this threshold, don't round allocations to power-of-2.
   size_t pinned_max_round_threshold_{std::numeric_limits<size_t>::max()};

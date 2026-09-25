@@ -148,7 +148,7 @@ void* alloc_cpu(size_t nbytes) {
 #endif
 
   // move data to a thread's NUMA node
-  NUMAMove(data, nbytes, GetCurrentNUMANode());
+  NUMAMove(data, nbytes, GetCurrentNUMANodeIfEnabled());
   CHECK(
       !FLAGS_caffe2_cpu_allocator_do_zero_fill ||
       !FLAGS_caffe2_cpu_allocator_do_junk_fill)

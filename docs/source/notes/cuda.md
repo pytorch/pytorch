@@ -695,6 +695,54 @@ Available options:
   This can help reduce peak memory usage for workloads with large pinned memory allocations
   that are used infrequently. By default, this option is disabled (all blocks are cached).
 
+* `pinned_numa_aware` option is a boolean flag that determines whether the pinned memory
+  allocator keeps a separate free list for each NUMA node. When set to True, an allocation
+  is served from the free list of the node the calling thread is running on, and a freed
+  block is returned to the free list it was allocated from rather than the one belonging to
+  the thread that frees it, so that blocks do not drift between nodes. Pinned pages cannot
+  be migrated, so a block that is reused on a different node makes every later copy through
+  it cross the interconnect, which is noticeably slower than a copy that stays on one node.
+  The node is inferred from the calling thread, so the allocation interface is unchanged.
+  The number of free lists is the highest NUMA node id on the machine plus one, not the
+  number of nodes, because node ids can be sparse. By default, this option is disabled.
+
+  This option is meant for a single process that drives several GPUs attached to different
+  NUMA nodes. The pinned allocator otherwise assumes one process per GPU, in which case
+  memory is pinned and used on the same node and this problem does not come up; the option
+  exists for deployments that do not follow that assumption.
+
+  What each block records is the node of the free list it was allocated from, not a checked
+  location of its physical pages. The pages are expected to follow, because the backing
+  allocation is requested and first touched by the allocating thread, but that expectation
+  holds only under the default first-touch memory policy: an explicit policy such as
+  `numactl --membind` or `numactl --interleave` places pages irrespective of which thread
+  touches them. With `pinned_use_cuda_host_register` the backing memory comes from `malloc`,
+  so pages that are already resident from an earlier use keep whatever placement they got
+  then. A thread that migrates between the point the free list is chosen and the point the
+  backing allocation is made does not confuse the bookkeeping, since the block is still
+  returned to the free list it came from, but its pages can end up on the other node.
+
+  It is disabled by default because the cost is memory rather than speed. Each node keeps
+  its own free list, so a block cached on one node cannot serve a request from another and
+  the same sizes may be held more than once. How much is duplicated in practice depends on
+  how many nodes actually allocate pinned memory and on how the workload is spread across
+  them, not on how many free lists exist. `pinned_max_cached_size_mb` limits the effect for
+  large allocations, since a block above that size is freed instead of being put on any free
+  list, but it is a per-block threshold and does not cap the total amount cached.
+
+  Because the node is inferred from the calling thread, this option only helps when the
+  threads that allocate pinned memory already have their NUMA affinity set. With unbound
+  threads the node observed at allocation time is arbitrary and the free lists end up
+  mixed. Requesting `True` on a build without usable NUMA support raises an error instead
+  of silently behaving like a single node. Enabling it together with
+  `pinned_reserve_segment_size_mb`, or together with `pinned_use_cuda_host_register` with
+  `pinned_num_register_threads` set to anything other than 1, also raises an error, because
+  in those modes the pages are placed by something other than the requesting thread and the
+  node recorded for each block would carry no information. The setting is read when the
+  pinned allocator serves its first request and cannot be changed after that. A machine that
+  reports a single NUMA node has a single free list either way, so allocation behaves as it
+  does with the option off, but these checks and this latching still apply.
+
 * `graph_capture_record_stream_reuse` (experimental, default: `False`)
   If set to `True`, the CUDA caching allocator will attempt to reclaim device memory during
   CUDA Graph capture by using the graph topology (instead of CUDA events) to determine
