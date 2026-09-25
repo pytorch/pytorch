@@ -498,13 +498,19 @@ def compiled_module_main(
         times = args.times
         repeat = args.repeat
 
-        if torch.cuda.is_available():
-            torch.cuda.reset_peak_memory_stats()
+        # Match the old torch.cuda.is_available() gate: only report peak
+        # memory when a usable accelerator is present.
+        acc = torch.accelerator.current_accelerator(check_available=True)
+        if acc is not None:
+            torch.accelerator.reset_peak_memory_stats()
         wall_time_ms = benchmark_compiled_module_fn(times=times, repeat=repeat) * 1000
 
-        if torch.cuda.is_available():
-            peak_mem = torch.cuda.max_memory_allocated()
-            print(f"Peak GPU memory usage {peak_mem / 1e6:.3f} MB")
+        if acc is not None:
+            peak_mem = torch.accelerator.max_memory_allocated()
+            # Keep the historical CUDA label ("GPU") so scripts that scrape this
+            # line keep working; other accelerators print their device type.
+            device_name = "GPU" if acc.type == "cuda" else acc.type.upper()
+            print(f"Peak {device_name} memory usage {peak_mem / 1e6:.3f} MB")
 
         if torch.cuda.is_available() and args.cuda_memory_snapshot:
             collect_memory_snapshot(benchmark_compiled_module_fn)
