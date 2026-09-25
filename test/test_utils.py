@@ -1056,6 +1056,73 @@ class TestCppExtensionUtils(TestCase):
     def test_cc_compiler_is_ok(self):
         self.assertTrue(torch.utils.cpp_extension.check_compiler_ok_for_platform("cc"))
 
+    def test_compile_objects_serializes_on_the_build_directory(self):
+        # `build_ext -j` compiles extensions in threads that all share one
+        # build_temp. Ninja owns its directory, so two of them running there at
+        # once replace each other's build.ninja and both append to the same
+        # .ninja_deps, which the next run reports as a premature end of file and
+        # recovers from by rebuilding everything.
+        import threading
+        import time
+
+        depth = 0
+        peak = 0
+        counter = threading.Lock()
+
+        def run_ninja(*args, **kwargs):
+            nonlocal depth, peak
+            with counter:
+                depth += 1
+                peak = max(peak, depth)
+            time.sleep(0.05)
+            with counter:
+                depth -= 1
+
+        cpp_extension = torch.utils.cpp_extension
+        with tempfile.TemporaryDirectory() as build_directory:
+            with (
+                mock.patch.object(cpp_extension, "verify_ninja_availability"),
+                mock.patch.object(
+                    cpp_extension, "get_cxx_compiler", return_value="c++"
+                ),
+                mock.patch.object(
+                    cpp_extension, "get_compiler_abi_compatibility_and_version"
+                ),
+                mock.patch.object(cpp_extension, "_write_ninja_file"),
+                mock.patch.object(
+                    cpp_extension, "_run_ninja_build", side_effect=run_ninja
+                ),
+            ):
+
+                def compile_one(name):
+                    cpp_extension._write_ninja_file_and_compile_objects(
+                        sources=[f"{name}.cpp"],
+                        objects=[f"{name}.o"],
+                        cflags=[],
+                        post_cflags=[],
+                        cuda_cflags=None,
+                        cuda_post_cflags=None,
+                        cuda_dlink_post_cflags=None,
+                        sycl_cflags=None,
+                        sycl_post_cflags=None,
+                        sycl_dlink_post_cflags=None,
+                        build_directory=build_directory,
+                        verbose=False,
+                        with_cuda=False,
+                        with_sycl=False,
+                    )
+
+                threads = [
+                    threading.Thread(target=compile_one, args=(name,))
+                    for name in ("a", "b", "c")
+                ]
+                for thread in threads:
+                    thread.start()
+                for thread in threads:
+                    thread.join()
+
+        self.assertEqual(peak, 1)
+
     @staticmethod
     def _fake_version_module(**attrs):
         module = types.ModuleType("fake_torch_version")

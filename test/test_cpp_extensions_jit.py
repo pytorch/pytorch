@@ -11,6 +11,7 @@ import subprocess
 import sys
 import sysconfig
 import tempfile
+import threading
 import unittest
 import warnings
 from unittest import mock
@@ -26,6 +27,7 @@ from torch.utils.cpp_extension import (
     _get_cuda_arch_flags,
     _TORCH_PATH,
     check_compiler_is_gcc,
+    COMMON_MSVC_FLAGS,
     CUDA_HOME,
     get_cxx_compiler,
     remove_extension_h_precompiler_headers,
@@ -39,6 +41,8 @@ TEST_CUDA = TEST_CUDA and CUDA_HOME is not None
 TEST_MPS = torch.backends.mps.is_available()
 IS_WINDOWS = sys.platform == "win32"
 IS_LINUX = sys.platform.startswith("linux")
+# setuptools always supplies these on the MSVC path; a bare `cl -c` is missing /EHsc.
+BASE_CFLAGS = COMMON_MSVC_FLAGS if IS_WINDOWS else []
 
 
 class TestCppExtensionImport(common.TestCase):
@@ -87,6 +91,7 @@ with tempfile.TemporaryDirectory() as tmpdir:
 
 # There's only one test that runs gradcheck, run slow mode manually
 @torch.testing._internal.common_utils.markDynamoStrictTest
+@common.instantiate_parametrized_tests
 class TestCppExtensionJIT(common.TestCase):
     """Tests just-in-time cpp extensions.
     Don't confuse this with the PyTorch JIT (aka TorchScript).
@@ -1718,6 +1723,196 @@ except RuntimeError as e:
                         error_message,
                         f"Did not expect 'C++ CapturedTraceback:' in error message when TORCH_SHOW_CPP_STACKTRACES=0, got: {error_message}",
                     )
+
+    def _write_ninja_sources(self, root, name, count=2):
+        directory = os.path.join(root, name)
+        os.makedirs(directory)
+        sources = []
+        for i in range(count):
+            path = os.path.join(directory, f"{name}_{i}.cpp")
+            with open(path, "w") as source:
+                source.write(
+                    "#ifndef MODE\n"
+                    "#define MODE 0\n"
+                    "#endif\n"
+                    f"int {name}_{i}() {{ return MODE; }}\n"
+                )
+            sources.append(path)
+        return sources
+
+    def _compile_objects_into(self, sources, objects, build_directory, cflags):
+        torch.utils.cpp_extension._write_ninja_file_and_compile_objects(
+            sources=sources,
+            objects=objects,
+            cflags=cflags,
+            post_cflags=[],
+            cuda_cflags=None,
+            cuda_post_cflags=None,
+            cuda_dlink_post_cflags=None,
+            sycl_cflags=None,
+            sycl_post_cflags=None,
+            sycl_dlink_post_cflags=None,
+            build_directory=build_directory,
+            verbose=False,
+            with_cuda=False,
+            with_sycl=False,
+        )
+
+    @unittest.skipIf(
+        not torch.utils.cpp_extension.is_ninja_available(), "ninja is not available"
+    )
+    def test_parallel_build_ext_compiles_every_extension(self):
+        # setuptools gives every extension of a project the same build_temp and
+        # `build_ext -j` compiles them in threads, so two of them used to write
+        # build.ninja and run ninja in that one directory at the same time. The
+        # second build file replaced the first, and all but one extension came
+        # out with no objects at all while still reporting success.
+        obj_suffix = ".obj" if IS_WINDOWS else ".o"
+        with tempfile.TemporaryDirectory() as root:
+            shared = os.path.abspath(os.path.join(root, "temp.shared"))
+            os.makedirs(shared)
+
+            plan = {}
+            for name in ("ext0", "ext1"):
+                sources = self._write_ninja_sources(root, name)
+                os.makedirs(os.path.join(shared, name))
+                plan[name] = (
+                    sources,
+                    [
+                        os.path.join(
+                            shared,
+                            name,
+                            os.path.basename(s)[: -len(".cpp")] + obj_suffix,
+                        )
+                        for s in sources
+                    ],
+                )
+
+            errors = []
+
+            def build(name):
+                sources, objects = plan[name]
+                try:
+                    self._compile_objects_into(sources, objects, shared, BASE_CFLAGS)
+                except Exception as error:
+                    errors.append(error)
+
+            # every _run_ninja_build already fans out to #cpus+2 on its own
+            with mock.patch.dict(os.environ, {"MAX_JOBS": "2"}):
+                threads = [threading.Thread(target=build, args=(n,)) for n in plan]
+                for thread in threads:
+                    thread.start()
+                for thread in threads:
+                    thread.join()
+
+            if errors:
+                raise errors[0]
+            for name, (_, objects) in plan.items():
+                for obj in objects:
+                    self.assertTrue(
+                        os.path.exists(obj),
+                        f"compiling {name} reported success but produced no {obj}",
+                    )
+
+    @unittest.skipIf(
+        not torch.utils.cpp_extension.is_ninja_available(), "ninja is not available"
+    )
+    @common.parametrize("dependency_log", [True, False])
+    def test_rebuilds_when_only_the_flags_change(self, dependency_log):
+        # Ninja decides an output is up to date from the command it recorded for
+        # that output last time, so the build log has to stay shared across every
+        # build that writes the object. Rules that keep no dependency log, the
+        # ROCm and HIP compile rules and the device-link and link rules, have
+        # nothing else to fall back on.
+        obj_suffix = ".obj" if IS_WINDOWS else ".o"
+        writer = torch.utils.cpp_extension._write_ninja_file
+        with tempfile.TemporaryDirectory() as root:
+            shared = os.path.abspath(os.path.join(root, "temp.shared"))
+            os.makedirs(shared)
+            sources = self._write_ninja_sources(root, "ext", count=1)
+            objects = [os.path.join(shared, "ext_0" + obj_suffix)]
+
+            def write_ninja(*args, **kwargs):
+                writer(*args, **kwargs)
+                if not dependency_log:
+                    # Reproduce rules without dependency logs using a CPU compiler.
+                    path = kwargs["path"]
+                    with open(path) as build_file:
+                        lines = build_file.readlines()
+                    with open(path, "w") as build_file:
+                        build_file.writelines(
+                            line
+                            for line in lines
+                            if not line.strip().startswith("deps =")
+                        )
+
+            def compile_with_mode(mode):
+                self._compile_objects_into(
+                    sources, objects, shared, BASE_CFLAGS + [f"-DMODE={mode}"]
+                )
+                with open(objects[0], "rb") as compiled:
+                    return compiled.read()
+
+            with mock.patch.object(
+                torch.utils.cpp_extension, "_write_ninja_file", write_ninja
+            ):
+                first = compile_with_mode(1)
+                second = compile_with_mode(2)
+                self.assertNotEqual(first, second)
+                self.assertEqual(first, compile_with_mode(1))
+                timestamp = os.stat(objects[0]).st_mtime_ns
+                self.assertEqual(first, compile_with_mode(1))
+                self.assertEqual(timestamp, os.stat(objects[0]).st_mtime_ns)
+
+    @unittest.skipIf(
+        not torch.utils.cpp_extension.is_ninja_available(), "ninja is not available"
+    )
+    @common.parametrize("dependency_log", [True, False])
+    def test_rebuilds_an_object_another_build_overwrote(self, dependency_log):
+        # Two builds that merely share an object path, one compiling {a}, the
+        # other {a, b}, still have to share the log entry for that object. If
+        # each got a log of its own, rerunning the first would find its own
+        # command recorded and leave the second build's object in place.
+        obj_suffix = ".obj" if IS_WINDOWS else ".o"
+        writer = torch.utils.cpp_extension._write_ninja_file
+        with tempfile.TemporaryDirectory() as root:
+            shared = os.path.abspath(os.path.join(root, "temp.shared"))
+            os.makedirs(shared)
+            both = self._write_ninja_sources(root, "ext", count=2)
+            objects = [os.path.join(shared, f"ext_{i}" + obj_suffix) for i in range(2)]
+
+            def write_ninja(*args, **kwargs):
+                writer(*args, **kwargs)
+                if not dependency_log:
+                    path = kwargs["path"]
+                    with open(path) as build_file:
+                        lines = build_file.readlines()
+                    with open(path, "w") as build_file:
+                        build_file.writelines(
+                            line
+                            for line in lines
+                            if not line.strip().startswith("deps =")
+                        )
+
+            def compile_first_only(mode):
+                self._compile_objects_into(
+                    both[:1], objects[:1], shared, BASE_CFLAGS + [f"-DMODE={mode}"]
+                )
+                with open(objects[0], "rb") as compiled:
+                    return compiled.read()
+
+            with mock.patch.object(
+                torch.utils.cpp_extension, "_write_ninja_file", write_ninja
+            ):
+                alone = compile_first_only(1)
+                # A wider build overwrites the shared object with other flags.
+                self._compile_objects_into(
+                    both, objects, shared, BASE_CFLAGS + ["-DMODE=2"]
+                )
+                with open(objects[0], "rb") as compiled:
+                    self.assertNotEqual(alone, compiled.read())
+                # The narrow build must take its own object back.
+                self.assertEqual(alone, compile_first_only(1))
 
 
 if __name__ == "__main__":
