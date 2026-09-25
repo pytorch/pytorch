@@ -282,8 +282,9 @@ def linalg_matrix_sqrth(self):
 def cummaxmin(self, dim):
     values = torch.empty(self.shape, device=self.device, dtype=self.dtype)
     indices = torch.empty(self.shape, device=self.device, dtype=torch.int64)
-    if self.numel() != 0 and self.ndim != 0:
-        # Checks that dim is within bounds
+    if self.ndim != 0:
+        # Checks that dim is within bounds. Done for empty tensors too so the
+        # fake/meta path matches eager, which validates dim regardless of numel.
         maybe_wrap_dim(dim, self.ndim)
     return values, indices
 
