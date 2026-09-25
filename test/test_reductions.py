@@ -807,7 +807,10 @@ class TestReductions(TestCase):
         if t.dtype == torch.float:
             self.assertEqual(n, t, rtol=1e-03, atol=1e-05, equal_nan=True)
         else:
-            self.assertEqual(n, t, equal_nan=True)
+            # numpy 1.x on Windows promotes low integer dtypes to int32 vs torch's int64.
+            # PR : https://github.com/pytorch/pytorch/pull/38628#issuecomment-655905370
+            exact_dtype = not (IS_WINDOWS and np.__version__[0] == '1' and t.dtype in integral_types())
+            self.assertEqual(n, t, equal_nan=True, exact_dtype=exact_dtype)
 
     # TODO: update this and tests that use it to use the device argument properly
     def _test_dim_ops(self, pytorch_op, numpy_op, device,
