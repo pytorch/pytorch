@@ -5252,9 +5252,9 @@ def scatter_reduce(x, dim: int, index, src, reduction_type, **kwargs):
 
 @register_lowering(aten.scatter_reduce_, type_promotion_kind=None)
 def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = True):
-    if reduce not in (None, "sum", "prod", "mean", "amax", "amin"):
+    if reduce not in (None, "sum", "prod", "mean", "amax", "amin", "none", "last"):
         raise AssertionError(
-            'expected: reduce in (None, "sum", "prod", "mean", "amax", "amin")'
+            'expected: reduce in (None, "sum", "prod", "mean", "amax", "amin", "none", "last")'
         )
     if not (
         len(aten.scatter_reduce_.overloads()) == 1
@@ -5326,6 +5326,8 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
     def backend_reduce_str(reduce):
         if reduce == "sum":
             return "atomic_add"
+        elif reduce in ("none", "last"):
+            return None  # non-atomic overwrite
         else:
             # TODO: Need to support more reduction type
             if reduce is not None:

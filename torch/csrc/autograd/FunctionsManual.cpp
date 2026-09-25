@@ -7658,7 +7658,7 @@ Tensor scatter_reduce_jvp(
     std::string_view reduce,
     bool include_self,
     const Tensor& result) {
-  if (reduce == "sum" || reduce == "mean") {
+  if (reduce == "sum" || reduce == "mean" || reduce == "none" || reduce == "last") {
     // The function is linear
     return at::scatter_reduce(self_t, dim, index, src_t, reduce, include_self);
     //  auto mask = x == restore_reduced_dims(result, dim, keepdim);
@@ -7754,10 +7754,16 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
     Tensor grad_distributed = grad / N_to_distribute;
     grad_self = (self == result) * grad_distributed;
     grad_src = (src == value) * grad_distributed.gather(dim, index);
+  } else if (reduce == "none" || reduce == "last") {
+    // out[index] = src (last write wins, duplicates are UB)
+    // Gradient at indexed positions flows only to src, not self
+    grad_self = grad.scatter(dim, index, 0);
+    grad_src = grad.gather(dim, index);
+    return std::make_tuple(std::move(grad_self), std::move(grad_src));
   } else {
     TORCH_CHECK(
         false,
-        "Expected 'reduce' to be one of 'sum', 'prod', 'mean', 'amax', 'amin' but got ",
+        "Expected 'reduce' to be one of 'sum', 'prod', 'mean', 'amax', 'amin', 'none' but got ",
         reduce,
         ".");
   }

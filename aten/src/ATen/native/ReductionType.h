@@ -4,7 +4,7 @@
 
 namespace at::native {
 
-enum class ReductionType {MAX, MEAN, MIN, SUM, PROD};
+enum class ReductionType {MAX, MEAN, MIN, SUM, PROD, NONE};
 
 inline ReductionType get_reduction_enum(const std::string_view& reduce) {
   if (reduce == "max" || reduce == "amax") {
@@ -17,8 +17,10 @@ inline ReductionType get_reduction_enum(const std::string_view& reduce) {
     return ReductionType::SUM;
   } else if (reduce == "prod") {
     return ReductionType::PROD;
+  } else if (reduce == "none" || reduce == "last") {
+    return ReductionType::NONE;
   } else {
-    TORCH_CHECK(false, "reduce argument must be either sum, prod, mean, amax or amin, got ", reduce);
+    TORCH_CHECK(false, "reduce argument must be either sum, prod, mean, amax, amin, or none, got ", reduce);
   }
 }
 

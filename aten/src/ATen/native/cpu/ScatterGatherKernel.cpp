@@ -1171,6 +1171,10 @@ void scatter_reduce_two_cpu_kernel(const Tensor& self, const int64_t dim, const 
     cpu_scatter_gather_base_kernel<>()(self, dim, index, src,
                                        "scatter_reduce_mean_", reduce_mean);
     break;
+  case ReductionType::NONE :
+    cpu_scatter_gather_base_kernel<>()(self, dim, index, src,
+                                       "scatter_reduce_none_", tensor_assign);
+    break;
   }
 }
 

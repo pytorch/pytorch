@@ -6264,9 +6264,11 @@ def get_operator_enum(reduce_, use_new_options=False):
             return "REDUCE_MAXIMUM"
         elif reduce_ == "amin":
             return "REDUCE_MINIMUM"
+        elif reduce_ == "none" or reduce_ == "last":
+            return "REDUCE_NONE"
         torch._check(
             False,
-            lambda: "reduce argument must be either sum, prod, mean, amax or amin.",
+            lambda: "reduce argument must be either sum, prod, mean, amax, amin, or none.",
         )
         return
     else:

@@ -2162,6 +2162,9 @@ static void scatter_reduce_exclude_self_helper(
           case ReductionType::MEAN:
             init_val = (scalar_t)0;
             break;
+          case ReductionType::NONE:
+            init_val = (scalar_t)0;
+            break;
         }
         self.scatter_(dim, index, init_val);
       });
@@ -2392,6 +2395,14 @@ TORCH_IMPL_FUNC(scatter_reduce_two)
   }
 
   const auto op = get_operator_enum(reduce, true);
+
+  // "none"/"last": no reduction, just overwrite; avoids atomic ops entirely
+  if (op == ReductionType::NONE) {
+    if (index.numel() > 0) {
+      scatter_stub(self.device().type(), const_cast<Tensor&>(out), dim, index, src);
+    }
+    return;
+  }
 
   if (can_use_expanded_index_path(
           out, dim, index, src, /*is_scatter_like*/ true)) {

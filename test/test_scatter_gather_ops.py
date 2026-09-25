@@ -698,6 +698,35 @@ class TestScatterGatherDevice(TestCase):
                     expected_result[2] = 0
                 self.assertEqual(input, expected_result)
 
+    @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True))
+    @dtypesIfCUDA(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False, include_bool=False))
+    @dtypesIfXPU(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False, include_bool=False))
+    def test_scatter_reduce_none(self, device, dtype):
+        # "none"/"last" requires unique indices since duplicate behavior is undefined
+        for include_self in (True, False):
+            self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,
+                                    is_scalar=False, reduction='none', unique_indices=True,
+                                    include_self=include_self)
+
+        # "last" is an alias for "none" — both must produce the same result from the same input
+        base = make_tensor((4,), device=device, dtype=dtype)
+        src = make_tensor((3,), device=device, dtype=dtype)
+        idx = torch.tensor([0, 1, 2], device=device)
+        result_none = base.clone().scatter_reduce_(0, idx, src, reduce='none')
+        result_last = base.clone().scatter_reduce_(0, idx, src, reduce='last')
+        self.assertEqual(result_none, result_last, atol=0, rtol=0)
+
+        # Values at non-indexed positions are preserved; indexed positions hold src values exactly
+        base2 = make_tensor((5,), device=device, dtype=dtype)
+        src2 = make_tensor((3,), device=device, dtype=dtype)
+        idx2 = torch.tensor([1, 3, 4], device=device)
+        result2 = base2.clone().scatter_reduce_(0, idx2, src2, reduce='none')
+        self.assertEqual(result2[0], base2[0], atol=0, rtol=0)
+        self.assertEqual(result2[2], base2[2], atol=0, rtol=0)
+        self.assertEqual(result2[1], src2[0], atol=0, rtol=0)
+        self.assertEqual(result2[3], src2[1], atol=0, rtol=0)
+        self.assertEqual(result2[4], src2[2], atol=0, rtol=0)
+
     @dtypes(torch.float32)
     def test_scatter_add_broadcasted_index_deterministic(self, device, dtype):
         for d in (0, 1):
