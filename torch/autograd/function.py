@@ -65,7 +65,9 @@ class FunctionCtx:
             >>>     @staticmethod
             >>>     def forward(ctx, x, weight):
             >>>         ctx.save_for_backward(x, weight)
-            >>>         return x @ weight
+            >>>         output = x @ weight
+            >>>         ctx.set_output_grad_dtype(None)
+            >>>         return output
             >>>
             >>>     @staticmethod
             >>>     def backward(ctx, grad_output):
@@ -87,7 +89,9 @@ class FunctionCtx:
         If ``other_op`` produces its contribution first, ``x_buffer`` can expose
         that partial sum. If ``Matmul`` runs first, ``x_buffer`` is ``None`` and it
         returns a separate tensor instead. The fallback lets the function work
-        under either ordering.
+        under either ordering. ``set_output_grad_dtype(None)`` preserves the dtype
+        supplied by downstream consumers while their contributions are accumulated
+        and passed to this function as ``grad_output``.
 
         .. warning::
             A returned buffer is valid only while the current custom ``backward``
