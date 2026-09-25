@@ -148,10 +148,28 @@ struct TORCH_CUDA_CPP_API ConvolutionDescriptor
           miopenConvolutionDescriptor,
           &miopenCreateConvolutionDescriptor,
           &miopenDestroyConvolutionDescriptor> {
-  void set(miopenDataType_t dataType, miopenConvolutionMode_t c_mode,  int dim, int* pad, int* stride, int * upscale /* aka dilation */, int groups, bool benchmark, bool deterministic) {
+  void set(miopenDataType_t dataType, miopenConvolutionMode_t c_mode,  int dim, int* pad, int* stride, int * upscale /* aka dilation */, int groups, bool benchmark, bool deterministic, bool allow_tf32) {
     MIOPEN_CHECK(miopenInitConvolutionNdDescriptor(mut_desc(), dim, pad, stride, upscale, c_mode));
     MIOPEN_CHECK(miopenSetConvolutionGroupCount(mut_desc(), groups));
     MIOPEN_CHECK(miopenSetConvolutionAttribute(mut_desc(), MIOPEN_CONVOLUTION_ATTRIB_DETERMINISTIC, deterministic ? 1 : 0));
+#if MIOPEN_HAS_TF32_MATH_TYPE
+    // TF32 is an fp32 compute mode: miopenMathDefault uses TF32 when possible,
+    // miopenMathPedantic keeps strict IEEE fp32. Only meaningful for fp32 input.
+    if (dataType == miopenFloat) {
+#if MIOPEN_HAS_DETERMINISTIC_TF32
+      bool use_tf32 = allow_tf32;
+#else
+      // MIOpen < 3.6.1 inverts the SetNextValue() wraparound test in the
+      // deterministic branch of the grouped Bwd/Wrw xdlops perf configs, so an
+      // exhaustive find with a cold perf-db spins forever once TF32 narrows the
+      // candidate list to a single kernel. Fixed by ROCm/rocm-libraries#10240.
+      bool use_tf32 = allow_tf32 && !deterministic;
+#endif
+      MIOPEN_CHECK(miopenSetConvolutionAttribute(mut_desc(), MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE, use_tf32 ? miopenMathDefault : miopenMathPedantic));
+    }
+#else
+    (void)allow_tf32;  // no math-type attribute before MIOpen 3.5.2
+#endif
     if (benchmark) {
       MIOPEN_CHECK(miopenSetConvolutionFindMode(mut_desc(), miopenConvolutionFindModeNormal));
     }
