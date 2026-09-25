@@ -2,6 +2,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import itertools
+from unittest.mock import patch
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -24,7 +25,11 @@ from torch.distributed.tensor._random import (
 from torch.distributed.tensor._utils import compute_local_shape_and_global_offset
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import ColwiseParallel, parallelize_module
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorTestBase,
@@ -43,6 +48,7 @@ def get_generator_seed_for_device_type(device_type: str):
     return _get_seed(device_type)
 
 
+@instantiate_parametrized_tests
 class DistTensorRandomInitTest(DTensorTestBase):
     def _run_init_op(self, init_op, *args, **kwargs):
         device_mesh = self.build_device_mesh()
@@ -99,6 +105,58 @@ class DistTensorRandomInitTest(DTensorTestBase):
             self._run_init_op(torch.rand_like, dtype=dtype)
             self._run_init_op(torch.randn_like, dtype=dtype)
             self._run_init_op(torch.randint_like, low=0, high=100, dtype=dtype)
+
+    @with_comms
+    @skip_unless_torch_gpu
+    @parametrize(
+        "op",
+        [
+            torch.Tensor.normal_,
+            torch.Tensor.uniform_,
+            torch.rand_like,
+            torch.randn_like,
+        ],
+    )
+    @parametrize("placement", [Shard(0), Replicate()])
+    @parametrize("init_tracker", [False, True])
+    def test_random_op_device_mismatch(self, op, placement, init_tracker):
+        mesh = self.build_device_mesh()
+        meta_dt = DTensor.from_local(
+            torch.empty(8, 4, device="meta"), mesh, [placement]
+        )
+        dt = torch.empty_like(meta_dt, device="cpu").fill_(1)
+        tracker = OffsetBasedRNGTracker(mesh) if init_tracker else None
+        device_module = torch.get_device_module(self.device_type)
+        cpu_state = torch.get_rng_state()
+        device_state = device_module.get_rng_state()
+
+        with patch.object(random, "_rng_tracker", tracker):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                f"DTensor random op .*cpu.*{self.device_type}",
+            ):
+                op(dt)
+            self.assertIs(random._rng_tracker, tracker)
+
+        self.assertEqual(dt.to_local(), torch.ones_like(dt.to_local()))
+        self.assertEqual(torch.get_rng_state(), cpu_state)
+        self.assertEqual(device_module.get_rng_state(), device_state)
+
+        self.assertTrue(op(meta_dt).is_meta)
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_fsdp_cpu_init_device_mismatch(self):
+        mesh = self.build_device_mesh()
+        with torch.device("meta"):
+            model = torch.nn.Linear(8, 8, bias=False)
+        fully_shard(model, mesh=mesh)
+        model.to_empty(device="cpu")
+
+        with self.assertRaisesRegex(
+            RuntimeError, f"DTensor random op .*cpu.*{self.device_type}"
+        ):
+            torch.nn.init.trunc_normal_(model.weight)
 
     @with_comms
     def test_multinomial_sharded(self):
