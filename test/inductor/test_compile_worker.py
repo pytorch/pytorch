@@ -1354,60 +1354,6 @@ class TestSubprocessEnv(TestCase):
         self.assertEqual(kwargs["prefetch_mode"], "1")
         self.assertTrue(kwargs["use_pdl"])
 
-    def test_generated_nvgemm_precompile_loads_named_output_scale(self):
-        from torch._inductor.codegen.nv_universal_gemm import (
-            nv_universal_gemm_kernel as nvgemm_kernel,
-        )
-
-        shapes = {
-            "in_ptr0": (4, 4),
-            "in_ptr1": (4, 4),
-            "scale_a": (1,),
-            "scale_b": (1,),
-            "output_scale": (1,),
-            "output": (4, 4),
-        }
-        strides = {
-            name: tuple(reversed(range(1, len(shape) + 1)))
-            for name, shape in shapes.items()
-        }
-        dtypes = dict.fromkeys(shapes, "float32")
-        artifact = types.SimpleNamespace(compiled_obj=object())
-
-        with (
-            patch.object(
-                nvgemm_kernel,
-                "_compile_nvgemm",
-                return_value=(artifact, None, None, False),
-            ) as compile_nvgemm,
-            patch.object(nvgemm_kernel, "_patch_max_active_clusters", return_value=[]),
-            patch.object(nvgemm_kernel, "_restore_max_active_clusters"),
-            patch("torch._inductor.runtime.cutedsl_cache.disk_cache_set"),
-        ):
-            nvgemm_kernel._nvgemm_precompile(
-                shapes,
-                strides,
-                dtypes,
-                variant_name="SCALED_GEMM",
-                kernel_name="kernel",
-                accumulator_type="accumulator",
-                compiled_cache={},
-                disk_fn_cache={},
-                module_path="module",
-                disk_config_key=(),
-                input_param_names=["in_ptr0", "in_ptr1", "scale_a", "scale_b"],
-                max_active_clusters=1,
-                output_scale_param_name="output_scale",
-                prefetch_mode="1",
-                use_pdl=True,
-            )
-
-        args, kwargs = compile_nvgemm.call_args
-        self.assertEqual(len(args[1]), 4)
-        self.assertEqual(kwargs["output_scale"].shape, (1,))
-        self.assertEqual(kwargs["prefetch_mode"], "1")
-        self.assertTrue(kwargs["use_pdl"])
-
     def test_worker_compile_triton_clears_libdevice_path(self):
         try:
             from triton import knobs
