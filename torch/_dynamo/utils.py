@@ -5360,6 +5360,20 @@ def _extract_anchors_from_expr(segment: str) -> _Anchors | None:
     return None
 
 
+def _is_expression_range(
+    source_lines: list[str], col_offset: int, end_col_offset: int
+) -> bool:
+    import ast
+
+    first = source_lines[0][_fix_offset(source_lines[0], col_offset) :]
+    last = source_lines[-1][: _fix_offset(source_lines[-1], end_col_offset)]
+    try:
+        ast.parse("\n".join([first, *source_lines[1:-1], last]), mode="eval")
+    except SyntaxError:
+        return False
+    return True
+
+
 def format_source_range(
     filename: str,
     lineno: int | None,
@@ -5379,6 +5393,18 @@ def format_source_range(
     ]
     if not any(source_lines):
         return ""
+
+    if (
+        end_lineno is not None
+        and end_lineno != lineno
+        and col_offset is not None
+        and end_col_offset is not None
+        and not _is_expression_range(source_lines, col_offset, end_col_offset)
+    ):
+        # Python 3.11 gives statement-level instructions such as FOR_ITER a
+        # range spanning the whole statement body. Only multiline expressions
+        # are rendered as ranges.
+        return source_lines[0]
 
     if (
         sys.version_info >= (3, 13)

@@ -732,6 +732,31 @@ Failed Source Expressions:
         self.assertGreater(result.count("^"), 0)
 
     @unittest.skipIf(sys.version_info < (3, 11), "requires column metadata")
+    def test_user_stack_multiline_statement_range_shows_first_line(self):
+        # Python 3.11 gives FOR_ITER a range spanning the whole loop body.
+        filename = f"{__file__}.statement"
+        source_lines = ["    for i in s:\n", "        z += i\n"]
+        source = "".join(source_lines)
+        linecache.cache[filename] = (len(source), None, source_lines, filename)
+        self.addCleanup(linecache.cache.pop, filename, None)
+        frame = traceback.FrameSummary(
+            filename,
+            1,
+            "fn",
+            lookup_line=False,
+            end_lineno=2,
+            colno=len("    "),
+            end_colno=len("        z += i"),
+        )
+
+        result = format_user_stack([frame])
+
+        self.assertIn("for i in s:", result)
+        self.assertNotIn("z += i", result)
+        self.assertNotIn("~", result)
+        self.assertNotIn("^", result)
+
+    @unittest.skipIf(sys.version_info < (3, 11), "requires column metadata")
     def test_user_stack_long_multiline_range_is_bounded(self):
         filename = f"{__file__}.long"
         source_lines = ["class Foo:\n"] + [
