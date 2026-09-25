@@ -418,12 +418,12 @@ void mkldnn_matmul(
   mat2_ = may_convert_to_default_contiguous_strides(mat2_);
 
   // mkldnn_matmul only proceed CPU tensor
-  const ideep::tensor x = itensor_view_from_dense(mat1_);
-  const ideep::tensor w = itensor_view_from_dense(mat2_);
+  const ideep::tensor x = itensor_view_from_const_dense(mat1_);
+  const ideep::tensor w = itensor_view_from_const_dense(mat2_);
   ideep::tensor y = itensor_view_from_dense(result_unsqueezed);
   ideep::matmul_forward::compute(x, w, y, alpha, beta,
       ideep::scale_t(), ideep::scale_t(), ideep::scale_t(), op_attr);
-  if (y.get_data_handle() != result.data_ptr()){
+  if (y.get_data_handle() != result.mutable_data_ptr()){
     // ideep will query onednn expect format of output
     // if given output format is not expected, ideep will re-init an output buffer
     // under this case, we need copy the re-inited buffer back to given buffer
@@ -544,17 +544,17 @@ static void _mkldnn_matmul_i8i8i32_with_primitive(
       {mat1.sizes().vec(),
        src_dtype,
        mat1.strides().vec()},
-      mat1.data_ptr());
+      const_cast<void*>(mat1.const_data_ptr()));
   auto wei = ideep::tensor(
       {mat2.sizes().vec(),
        ideep::tensor::data_type::s8,
        mat2.strides().vec()},
-      mat2.data_ptr());
+      const_cast<void*>(mat2.const_data_ptr()));
   auto dst = ideep::tensor(
       {result.sizes().vec(),
        ideep::tensor::data_type::s32,
        result.strides().vec()},
-      result.data_ptr());
+      result.mutable_data_ptr());
   // Create primitive desc
   auto engine = ideep::engine::cpu_engine();
   ideep::attr_t op_attr;
@@ -607,14 +607,20 @@ static void _mkldnn_gemm_i8i8i32_with_blas(
         transa, transb, offsetc, m, n, k,                     \
         alpha,                                                \
         static_cast<a_ptr_type>(a_data_ptr), lda, ao,         \
-        static_cast<int8_t*>(mat2.data_ptr()), ldb, bo,       \
+        static_cast<int8_t*>(const_cast<void*>(mat2.const_data_ptr())), ldb, bo, \
         beta,                                                 \
-        static_cast<int32_t*>(result.data_ptr()), ldc, &co)
+        static_cast<int32_t*>(result.mutable_data_ptr()), ldc, &co)
 
     if (self.scalar_type() == at::kByte) { //uint8
-      CALL_DNNL_GEMM(dnnl::gemm_u8s8s32, uint8_t*, self.data_ptr());
+      CALL_DNNL_GEMM(
+          dnnl::gemm_u8s8s32,
+          uint8_t*,
+          const_cast<void*>(self.const_data_ptr()));
     } else { //int8
-      CALL_DNNL_GEMM(dnnl::gemm_s8s8s32, int8_t*, self.data_ptr());
+      CALL_DNNL_GEMM(
+          dnnl::gemm_s8s8s32,
+          int8_t*,
+          const_cast<void*>(self.const_data_ptr()));
     }
   }
 

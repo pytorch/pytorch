@@ -166,11 +166,11 @@ void lstm_onednn_xpu(
         layer_input.options().dtype(at::kByte));
 
     auto src_layer_mem =
-        make_onednn_memory(src_layer_md, engine, layer_input.data_ptr());
+        make_onednn_memory(src_layer_md, engine, layer_input.const_data_ptr());
     auto src_iter_mem =
-        make_onednn_memory(src_iter_md, engine, layer_hx.data_ptr());
+        make_onednn_memory(src_iter_md, engine, layer_hx.const_data_ptr());
     auto src_iter_c_mem =
-        make_onednn_memory(src_iter_c_md, engine, layer_cx.data_ptr());
+        make_onednn_memory(src_iter_c_md, engine, layer_cx.const_data_ptr());
 
     // Handle potential weight reorder
     auto expected_wl_md = pd.weights_layer_desc();
@@ -184,12 +184,12 @@ void lstm_onednn_xpu(
           {static_cast<int64_t>(expected_wl_md.get_size())},
           layer_input.options().dtype(at::kByte));
       auto wl_src =
-          make_onednn_memory(weights_layer_md, engine, w_ih.data_ptr());
+          make_onednn_memory(weights_layer_md, engine, w_ih.const_data_ptr());
       wl_mem =
-          make_onednn_memory(expected_wl_md, engine, wl_reordered.data_ptr());
+          make_onednn_memory(expected_wl_md, engine, wl_reordered.mutable_data_ptr());
       dnnl::reorder(wl_src, wl_mem).execute(stream, wl_src, wl_mem);
     } else {
-      wl_mem = make_onednn_memory(weights_layer_md, engine, w_ih.data_ptr());
+      wl_mem = make_onednn_memory(weights_layer_md, engine, w_ih.const_data_ptr());
     }
 
     if (expected_wi_md != weights_iter_md) {
@@ -197,23 +197,23 @@ void lstm_onednn_xpu(
           {static_cast<int64_t>(expected_wi_md.get_size())},
           layer_input.options().dtype(at::kByte));
       auto wi_src =
-          make_onednn_memory(weights_iter_md, engine, w_hh.data_ptr());
+          make_onednn_memory(weights_iter_md, engine, w_hh.const_data_ptr());
       wi_mem =
-          make_onednn_memory(expected_wi_md, engine, wi_reordered.data_ptr());
+          make_onednn_memory(expected_wi_md, engine, wi_reordered.mutable_data_ptr());
       dnnl::reorder(wi_src, wi_mem).execute(stream, wi_src, wi_mem);
     } else {
-      wi_mem = make_onednn_memory(weights_iter_md, engine, w_hh.data_ptr());
+      wi_mem = make_onednn_memory(weights_iter_md, engine, w_hh.const_data_ptr());
     }
 
-    auto bias_mem = make_onednn_memory(bias_md, engine, bias.data_ptr());
+    auto bias_mem = make_onednn_memory(bias_md, engine, bias.const_data_ptr());
     auto dst_layer_mem =
-        make_onednn_memory(dst_layer_md, engine, layer_out.data_ptr());
+        make_onednn_memory(dst_layer_md, engine, layer_out.mutable_data_ptr());
     auto dst_iter_mem =
-        make_onednn_memory(dst_iter_md, engine, out_hy.data_ptr());
+        make_onednn_memory(dst_iter_md, engine, out_hy.mutable_data_ptr());
     auto dst_iter_c_mem =
-        make_onednn_memory(dst_iter_c_md, engine, out_cy.data_ptr());
+        make_onednn_memory(dst_iter_c_md, engine, out_cy.mutable_data_ptr());
     auto scratchpad_mem = make_onednn_memory(
-        pd.scratchpad_desc(), engine, scratchpad_tensor.data_ptr());
+        pd.scratchpad_desc(), engine, scratchpad_tensor.mutable_data_ptr());
 
     std::unordered_map<int, dnnl::memory> args = {
         {DNNL_ARG_SRC_LAYER, src_layer_mem},
