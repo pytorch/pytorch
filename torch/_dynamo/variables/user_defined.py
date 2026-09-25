@@ -5296,6 +5296,19 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
             raise AssertionError("_base_vt must not be None in items")
         return self._base_vt.items  # pyrefly: ignore[missing-attribute]
 
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # https://github.com/python/cpython/blob/v3.13.3/Objects/setobject.c#L517-L568
+        if self._maybe_get_baseclass_method("__repr__") not in self._base_methods:
+            return super().tp_repr_impl(tx)
+        name = self.python_type_name()
+        if not self.items:
+            return VariableTracker.build(tx, f"{name}()")
+        items = ", ".join(tracked_repr(tx, item.vt) for item in self.set_items)
+        return VariableTracker.build(tx, f"{name}({{{items}}})")
+
+    def repr_recursive_sentinel(self) -> str:
+        return f"{self.python_type_name()}(...)"
+
 
 class UserDefinedListVariable(UserDefinedObjectVariable):
     """
