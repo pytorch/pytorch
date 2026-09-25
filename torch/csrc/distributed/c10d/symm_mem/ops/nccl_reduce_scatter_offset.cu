@@ -1,6 +1,9 @@
 #ifdef USE_ROCM
-// RCCL gates its reduce/copy device APIs on CUDA's extended-lambda macro. HIP
-// supports the required device lambdas but does not define that macro.
+// RCCL's nccl_device.h gates its reduce/copy device API on the macro nvcc
+// defines for --extended-lambda. hipcc supports device lambdas without a flag
+// and never defines it, so define it before the first include (nccl_dev_cap.hpp
+// pulls nccl_device.h in), as RCCL's own test/DeviceApiMPITests.cpp does.
+// TODO: drop once RCCL gates that API on HIP itself.
 #ifndef __CUDACC_EXTENDED_LAMBDA__
 #define __CUDACC_EXTENDED_LAMBDA__ 1
 #endif
@@ -19,8 +22,9 @@
 #include <torch/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.hpp>
 
 #if defined(NCCL_DEVICE_HAS_REDUCE_COPY) && defined(USE_ROCM)
-// PyTorch disables HIP's half operators, but RCCL's reduce/copy headers
-// instantiate OpSum<__half> for half reductions.
+// PyTorch disables HIP's half operators, but RCCL's generic OpSum<T> adds with
+// `a + b`, which half reductions instantiate.
+// TODO: drop once RCCL specializes OpSum<__half> with __hadd.
 #if defined(__HIP_NO_HALF_OPERATORS__)
 __device__ __forceinline__ __half operator+(const __half& a, const __half& b) {
   return __float2half(__half2float(a) + __half2float(b));
