@@ -3,6 +3,8 @@
 #include <c10/util/SmallVector.h>
 
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <limits>
 
 // SymPyValueRangeAnalysis and sympy_interp (torch/utils/_sympy/interp.py).
@@ -43,6 +45,12 @@ int sign(const Expr* e) {
 
 bool lt(const Expr* a, const Expr* b) {
   return compare_numbers(a, b) < 0;
+}
+
+// x in r by bounds (Python's x in ValueRanges.unknown_int() is True for any x;
+// see true_div).
+bool contains(const ValueRanges& r, const Expr* x) {
+  return !lt(x, r.lower) && !lt(r.upper, x);
 }
 
 // Python's min(a, b) and max(a, b).
@@ -133,7 +141,23 @@ class Analysis {
   ValueRanges python_mod(const ValueRanges& x, const ValueRanges& y);
   ValueRanges pow_by_natural(const ValueRanges& x, const ValueRanges& y);
   ValueRanges min_or_max(Kind kind, const ValueRanges& x, const ValueRanges& y);
-  ValueRanges increasing_map(Kind kind, const ValueRanges& x);
+  ValueRanges true_div(Kind kind, const ValueRanges& x, const ValueRanges& y);
+  const Expr* floor_or_ceiling(Kind kind, const Expr* x);
+
+  template <typename F>
+  ValueRanges increasing_map(const ValueRanges& x, const F& fn) {
+    require_not_bool(x);
+    return make_value_range(a_, fn(x.lower), fn(x.upper));
+  }
+  ValueRanges increasing_map(Kind kind, const ValueRanges& x) {
+    return increasing_map(
+        x, [&](const Expr* b) { return a_.function(kind, {b}); });
+  }
+  template <typename F>
+  ValueRanges coordinatewise_monotone_map(
+      const ValueRanges& x,
+      const ValueRanges& y,
+      const F& fn);
 
   const ValueRanges* find_range(const Expr* s) const;
   bool definitely_ge(const Expr* e, int64_t lower);
@@ -320,22 +344,82 @@ ValueRanges Analysis::mul(const ValueRanges& x, const ValueRanges& y) {
   if (x.is_bool()) {
     return and_(x, y);
   }
-  // coordinatewise_monotone_map
   auto product = [this](const Expr* p, const Expr* q) {
     return keep_float(safe_mul(p, q), p, q);
   };
-  const Expr* products[] = {
-      product(x.lower, y.lower),
-      product(x.lower, y.upper),
-      product(x.upper, y.lower),
-      product(x.upper, y.upper)};
+  return coordinatewise_monotone_map(x, y, product);
+}
+
+template <typename F>
+ValueRanges Analysis::coordinatewise_monotone_map(
+    const ValueRanges& x,
+    const ValueRanges& y,
+    const F& fn) {
+  std::array<const Expr*, 4> products = {
+      fn(x.lower, y.lower),
+      fn(x.lower, y.upper),
+      fn(x.upper, y.lower),
+      fn(x.upper, y.upper)};
   const Expr* lo = products[0];
   const Expr* hi = products[0];
   for (const Expr* p : products) {
+    if (!p->is_number()) {
+      throw NativeUnsupported("symbolic value range bound");
+    }
     lo = min_num(lo, p);
     hi = max_num(hi, p);
   }
   return make_value_range(a_, lo, hi);
+}
+
+// int_truediv and truediv.
+ValueRanges Analysis::true_div(
+    Kind kind,
+    const ValueRanges& x,
+    const ValueRanges& y) {
+  require_not_bool(x);
+  require_not_bool(y);
+  if (contains(y, zero())) {
+    return unknown();
+  }
+  bool is_int = kind == Kind::IntTrueDiv;
+  const Expr* pos = is_int ? a_.int_oo() : a_.oo();
+  const Expr* neg = is_int ? a_.neg_int_oo() : a_.neg_oo();
+  if (contains(y, neg) || contains(y, pos)) {
+    if (contains(x, neg) || contains(x, pos)) {
+      return unknown();
+    }
+    // Python gives unknown() if x is the cached unknown_int() and otherwise
+    // raises on a nan product.
+    if (x.lower == a_.neg_int_oo() && x.upper == a_.int_oo()) {
+      throw NativeUnsupported("membership in unknown_int() is by identity");
+    }
+  }
+  return coordinatewise_monotone_map(x, y, [&](const Expr* p, const Expr* q) {
+    return keep_float(a_.function(kind, {p, q}), p, q);
+  });
+}
+
+// sympy.floor / sympy.ceiling of a number.
+const Expr* Analysis::floor_or_ceiling(Kind kind, const Expr* x) {
+  bool ceil = kind == Kind::CeilToInt;
+  switch (x->kind) {
+    case Kind::Rational: {
+      i128 p = ceil ? -i128(x->p) : i128(x->p);
+      i128 f = p / x->q - (p % x->q < 0);
+      return a_.integer(static_cast<int64_t>(ceil ? -f : f));
+    }
+    case Kind::Float: {
+      double v = x->float_value();
+      double r = ceil ? std::ceil(v) : std::floor(v);
+      if (!(r >= -0x1p63 && r < 0x1p63)) {
+        throw NativeUnsupported("integer overflow");
+      }
+      return a_.integer(static_cast<int64_t>(r));
+    }
+    default:
+      return x;
+  }
 }
 
 ValueRanges Analysis::floordiv(const ValueRanges& x, const ValueRanges& y) {
@@ -475,11 +559,6 @@ ValueRanges Analysis::min_or_max(
   return make_value_range(a_, pick(x.lower, y.lower), pick(x.upper, y.upper));
 }
 
-ValueRanges Analysis::increasing_map(Kind kind, const ValueRanges& x) {
-  require_int(x);
-  return {a_.function(kind, {x.lower}), a_.function(kind, {x.upper})};
-}
-
 ValueRanges Analysis::interp(const Expr* e) {
   switch (e->kind) {
     case Kind::Integer:
@@ -547,21 +626,34 @@ ValueRanges Analysis::interp(const Expr* e) {
       });
     case Kind::CeilToInt:
     case Kind::FloorToInt:
-      // sympy.ceiling / sympy.floor are the identity on integer bounds.
-      require_int(args[0]);
-      return args[0];
+      // increasing_map(sympy.ceiling / sympy.floor), the identity on integer
+      // bounds.
+      if (args[0].is_int()) {
+        return args[0];
+      }
+      return increasing_map(
+          args[0], [&](const Expr* b) { return floor_or_ceiling(e->kind, b); });
     case Kind::TruncToInt:
     case Kind::RoundToInt:
+    case Kind::ToFloat:
+    case Kind::TruncToFloat:
       return increasing_map(e->kind, args[0]);
     case Kind::IsNonOverlappingAndDenseIndicator:
       return unknown_int();
-    case Kind::FloatPow:
     case Kind::FloatTrueDiv:
     case Kind::IntTrueDiv:
-    case Kind::RoundDecimal:
-    case Kind::ToFloat:
-    case Kind::TruncToFloat:
-      throw NativeUnsupported("float value range");
+      return true_div(e->kind, args[0], args[1]);
+    case Kind::FloatPow:
+      return unknown();
+    case Kind::RoundDecimal: {
+      if (!args[1].is_singleton()) {
+        return unknown();
+      }
+      const Expr* ndigits = args[1].lower;
+      return increasing_map(args[0], [&](const Expr* b) {
+        return a_.function(Kind::RoundDecimal, {b, ndigits});
+      });
+    }
     case Kind::Eq:
       return eq(args[0], args[1]);
     case Kind::Ne:

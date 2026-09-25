@@ -2161,7 +2161,7 @@ class TestNativeValueRanges(TestCase):
             (RoundToInt(u0), {u0: (-3, 4)}, (-3, 4)),
             (RoundToInt(u0), {u0: (-3, oo)}, None),
             (FloorToInt(u0), {u0: (-3, oo)}, (-3, oo)),
-            (ToFloat(u0), {}, None),
+            (ToFloat(u0), {}, (-sympy.oo, sympy.oo)),
             (sympy.Eq(u0, 3), {u0: (4, 6)}, (False, False)),
             (sympy.Eq(u0, u1), {u0: (4, 4), u1: (4, 4)}, (True, True)),
             (sympy.Ne(u0, 3), {u0: (0, 6)}, (False, True)),
@@ -2296,6 +2296,64 @@ class TestNativeValueRanges(TestCase):
                     answered += self.check(e, ranges) is not None
         self.assertGreater(answered, 4 * len(nums) ** 2 * 3 // 4)
 
+    def test_float_handlers_known(self):
+        u1, oo, zg = self.u1, sympy.oo, sympy.Symbol("zg", real=True)
+        cases = [
+            (FloatTrueDiv(u0, 2), {u0: (1, 7)}, (0.5, 3.5)),
+            (IntTrueDiv(u0, 2), {u0: (1, 7)}, (0.5, 3.5)),
+            (IntTrueDiv(u0, u1), {u0: (1, 7), u1: (-1, 2)}, (-oo, oo)),
+            (IntTrueDiv(u0, u1), {u0: (1, int_oo), u1: (2, int_oo)}, (-oo, oo)),
+            (IntTrueDiv(u0, u1), {u0: (1, int_oo), u1: (2, 3)}, (1 / 3, oo)),
+            (FloatTrueDiv(s0, 2), {}, (0.5, oo)),
+            (FloatTrueDiv(u0, zf), {u0: (1, 4), zf: (2.0, oo)}, (0.0, 2.0)),
+            (FloatTrueDiv(u0, zf), {zf: (2.0, oo)}, None),
+            (FloatTrueDiv(u0, zf), {u0: (-int_oo, int_oo), zf: (2.0, oo)}, None),
+            (FloatTrueDiv(zg, zf), {zf: (2.0, oo)}, (-oo, oo)),
+            (ToFloat(u0), {u0: (0, int_oo)}, (0.0, oo)),
+            (ToFloat(u0), {}, (-oo, oo)),
+            (FloorToInt(zf), {zf: (0.5, 2.5)}, (0, 2)),
+            (CeilToInt(zf), {zf: (0.5, oo)}, (1, int_oo)),
+            (CeilToInt(zg), {}, (-oo, oo)),
+            (FloorToInt(u0 / 2), {u0: (-7, 7)}, (-4, 3)),
+            (CeilToInt(u0 / 2), {u0: (-7, 7)}, (-3, 4)),
+            (CeilToInt(zf), {zf: (1e20, oo)}, None),
+            (TruncToInt(zf), {zf: (-2.5, 2.5)}, (-2, 2)),
+            (RoundToInt(zf), {zf: (0.5, 2.5)}, (0, 2)),
+            (TruncToFloat(zf), {zf: (-2.5, oo)}, (-2.0, oo)),
+            (RoundDecimal(zf, 1), {zf: (0.25, 1.5)}, (0.2, 1.5)),
+            (RoundDecimal(zf, u0), {zf: (0.5, 1.5), u0: (0, 2)}, (-oo, oo)),
+            (FloatPow(zf, 2), {}, (-oo, oo)),
+        ]
+        for e, ranges, want in cases:
+            ranges = {s: tuple(map(sympy.sympify, r)) for s, r in ranges.items()}
+            got = self.check(e, ranges)
+            msg = f"{e} {ranges}"
+            if want is None:
+                self.assertIsNone(got, msg)
+            else:
+                self.assertIsNotNone(got, msg)
+                want = tuple(map(sympy.sympify, want))
+                self.assertEqual((got.lower, got.upper), want, msg)
+
+    def test_float_handler_ops(self):
+        zg = sympy.Symbol("zg", real=True)
+        half, m7_2 = sympy.Rational(1, 2), sympy.Rational(-7, 2)
+        nums = [-3, 0, 2, half, m7_2, -0.5, 2.5, 0.0, 1e20]
+        nums = [*map(sympy.sympify, nums), int_oo, -int_oo, sympy.oo, -sympy.oo]
+        pairs = [(lo, hi) for lo in nums for hi in nums if lo <= hi]
+        unary = [*TestNativeFunctions.UNARY_FUNCTIONS.values()]
+        answered = 0
+        for x in pairs:
+            for f in unary:
+                answered += self.check(f(zf), {zf: x}) is not None
+            for n in [-1, 0, 1, 2]:
+                answered += self.check(RoundDecimal(zf, n), {zf: x}) is not None
+            for y in pairs:
+                ranges = {zf: x, zg: y}
+                for f in [FloatTrueDiv, IntTrueDiv]:
+                    answered += self.check(f(zf, zg), ranges) is not None
+        self.assertGreater(answered, len(pairs) ** 2)
+
     @parametrize("seed", range(4))
     def test_float_fuzz(self, seed):
         rng = random.Random(seed)
@@ -2309,7 +2367,11 @@ class TestNativeValueRanges(TestCase):
             if depth == 0 or rng.random() < 0.25:
                 return rng.choice(leaves)
             a, b = expr(depth - 1), expr(depth - 1)
-            op = rng.choice(["add", "mul", "sub", "pow", "Max", "Min", "Lt"])
+            op = rng.choice(["add", "mul", "sub", "pow", "Max", "Min", "Lt", "unary"])
+            if rng.random() < 0.2:
+                op = rng.choice(["FloatTrueDiv", "IntTrueDiv"])
+            if op == "unary":
+                return rng.choice([*TestNativeFunctions.UNARY_FUNCTIONS.values()])(a)
             if op == "add":
                 return a + b
             if op == "mul":
