@@ -969,7 +969,7 @@ class TestLookupTableE2E(BaseE2ELookupTableTest):
             operation, tensors, {"triton.enable_persistent_tma_matmul": True}
         )
 
-    # Enable decompose_k for this test (disabled by default on ROCm)
+    # Keep the split count explicit for this test.
     @fresh_cache()
     def test_decompose_k_lookup_table_entry(self):
         """Test decompose_k template entry"""

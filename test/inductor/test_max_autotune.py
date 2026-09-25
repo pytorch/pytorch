@@ -1826,8 +1826,7 @@ class TestMaxAutotune(TestCase):
         shape_padding=False,
     )
     def test_max_autotune_decompose_k(self, sizes, dtype, dynamic):
-        # UT specific change to force testing decompose K feature on ROCm until
-        # enabled by default, same strategy as #169948
+        # Keep the split count explicit. Same strategy as #169948.
         with config.patch(_DECOMPOSE_K_PATCH_ROCM):
             fp16_red_setting = (
                 torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
@@ -1996,8 +1995,7 @@ class TestMaxAutotune(TestCase):
         max_autotune_gemm_backends="TRITON",
     )
     def test_max_autotune_decompose_k_dynamic_input(self):
-        # UT specific change to force testing decompose K feature on ROCm until
-        # enabled by default, same strategy as #169948
+        # Keep the split count explicit. Same strategy as #169948.
         with config.patch(_DECOMPOSE_K_PATCH_ROCM):
 
             def f(a, b):
@@ -2049,8 +2047,7 @@ class TestMaxAutotune(TestCase):
         max_autotune_gemm_backends="TRITON",
     )
     def test_max_autotune_decompose_k_dynamic_input_bwd(self):
-        # UT specific change to force testing decompose K feature on ROCm until
-        # enabled by default, same strategy as #169948
+        # Keep the split count explicit. Same strategy as #169948.
         with config.patch(_DECOMPOSE_K_PATCH_ROCM):
 
             def f(a, b):
@@ -2115,8 +2112,7 @@ class TestMaxAutotune(TestCase):
         max_autotune_gemm_backends="TRITON",
     )
     def test_max_autotune_decompose_k_output_stride(self):
-        # UT specific change to force testing decompose K feature on ROCm until
-        # enabled by default, same strategy as #169948
+        # Keep the split count explicit. Same strategy as #169948.
         with config.patch(_DECOMPOSE_K_PATCH_ROCM):
 
             def f(a, b):
