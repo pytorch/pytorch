@@ -77,6 +77,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
+from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
 
@@ -287,6 +288,33 @@ class TestGradTransform(TestCase):
         x = torch.randn(2, 3, 4, device=device)
         result = grad(lambda x: torch.flatten(x).sum())(x)
         self.assertEqual(result, torch.ones_like(x))
+
+    def test_linear_nd_inplace_activation(self, device):
+        # linear_hack shadows at::native::linear under functorch transforms, so its
+        # nD fast path needs its own coverage: it must unflatten with _unsafe_view,
+        # otherwise the relu_ below rebases history onto CopySlices.
+        x = torch.randn(2, 3, 8, device=device, dtype=torch.double)
+        w = torch.randn(16, 8, device=device, dtype=torch.double)
+        b = torch.randn(16, device=device, dtype=torch.double)
+
+        ops = []
+
+        class RecordOps(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                ops.append(func)
+                return func(*args, **(kwargs or {}))
+
+        def f(x, w, b):
+            return F.linear(x, w, b).relu_().sum()
+
+        with RecordOps():
+            result = torch.func.grad(f, argnums=(0, 1, 2))(x, w, b)
+
+        self.assertIn(torch.ops.aten._unsafe_view.default, ops)
+
+        xr, wr, br = (t.clone().requires_grad_() for t in (x, w, b))
+        (xr @ wr.t() + br).relu().sum().backward()
+        self.assertEqual(result, (xr.grad, wr.grad, br.grad))
 
     def test_fn_with_kwargs(self, device):
         def foo(x, y):
@@ -4956,6 +4984,37 @@ class TestFunctionalize(TestCase):
             return x
 
         self._check_functionalize_correctness(f, torch.zeros(4, 2, device=device))
+
+    def test_multioutput_view_preserves_autograd_metadata(self, device):
+        # Regenerating the view rebuilds it as a select, so it carries a
+        # SelectBackward, but autograd must still reject mutating it: the
+        # restriction rides on CreationMeta, which the replay restores.
+        def f(x):
+            base = x.clone()
+            out = base.unbind(0)[0]
+            base.add_(1)
+            return out
+
+        out = torch.func.functionalize(f)(
+            torch.ones(2, 3, device=device, requires_grad=True)
+        )
+        with self.assertRaisesRegex(
+            RuntimeError, "output of a function that returns multiple views"
+        ):
+            out.mul_(2)
+
+    def test_multioutput_view_regeneration_matches_eager(self, device):
+        # An uneven split exercises the short final chunk, where the generated
+        # single-output replay relies on slice clamping the end, and the
+        # accumulating offsets of split_with_sizes.
+        def f(x):
+            base = x.clone()
+            outs = base.split(2)
+            base.add_(1)
+            return tuple(o.clone() for o in outs)
+
+        x = torch.arange(15.0, device=device).reshape(5, 3)
+        self.assertEqual(torch.func.functionalize(f)(x), f(x))
 
     def test_inplace_view(self, device):
         def f(x: torch.Tensor) -> torch.Tensor:

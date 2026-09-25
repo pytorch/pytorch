@@ -7,6 +7,7 @@ import unittest
 import numpy as np
 
 import torch
+from torch._inductor.codegen.mps import MetalKernel
 from torch.testing import FileCheck, make_tensor
 from torch.testing._internal.common_dtype import get_all_dtypes
 from torch.testing._internal.common_utils import (
@@ -353,6 +354,9 @@ class MPSBasicTests(TestCase):
                 torch.randn(1, na, 1, 1, 2, device="mps"),
             ),
         )
+
+    def test_metal_kernel_device_type(self):
+        self.assertEqual(MetalKernel.device_type, "mps")
 
 
 @unittest.skipUnless(torch.backends.mps.is_available(), "MPS not available")
