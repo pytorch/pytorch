@@ -1541,9 +1541,7 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
             # method_getattro forwards __dict__ to __func__; a bound method has
             # no __dict__ of its own. Read-only: CPython rejects writes through
             # a method ("'method' object has no attribute 'x'"), and Dynamo
-            # matches that because UserMethodVariable does not override
-            # get_value_for_setattr, so the VT default declines the store
-            # rather than mutating the function's shared __dict__.
+            # matches that: the write never reaches the function's shared dict.
             return object.__getattribute__(vt.get_function(), "__dict__")
         elif istype(vt, variables.ExceptionVariable):
             # Synthetic exceptions created during tracing have no backing
