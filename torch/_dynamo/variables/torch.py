@@ -99,6 +99,7 @@ from ..utils import (
 )
 from .base import AsPythonConstantNotImplementedError, Method, typestr, VariableTracker
 from .ctx_manager import (
+    _autocast_entries,
     AutocastModeVariable,
     ProfilerContextVariable,
     ProfilerRecordFunctionContextVariable,
@@ -261,6 +262,64 @@ if torch.distributed.is_available():
 # Convert to dict for O(1) access times
 constant_fold_functions_need_guards = dict.fromkeys(constant_fold_functions_need_guards)
 constant_fold_functions = dict.fromkeys(constant_fold_functions)
+
+# Third-party backends (e.g. PrivateUse1 devices) register after torch is
+# imported, so the module-level sets above cannot contain their entries.
+# Backends extend the autocast handling through register_device_autocast_entry
+# below; _get_supported_ctx_manager_classes queries the registries lazily so
+# registrations take effect regardless of import order.
+
+_extra_ctx_manager_classes: dict[Any, None] = {}
+
+
+def register_device_autocast_entry(fn: Any, device_type: str) -> None:
+    """Register a legacy device-specific autocast entry point, e.g.
+    ``torch.npu.amp.autocast``.
+
+    Such entries mirror ``torch.cuda.amp.autocast``: they accept
+    ``(dtype=..., enabled=..., cache_enabled=...)`` and omit ``device_type``,
+    which is supplied from the registration instead. Registration also makes
+    the entry traceable as a context manager, so a single call is sufficient.
+    """
+    if not callable(fn):
+        raise TypeError(f"expected a callable autocast function, got {fn!r}")
+    if not isinstance(device_type, str):
+        raise TypeError(f"expected a device_type string, got {device_type!r}")
+    if not device_type:
+        raise ValueError(f"expected a non-empty device_type, got {device_type!r}")
+    if fn in _autocast_entries:
+        raise ValueError(f"autocast entry already registered: {fn!r}")
+    signature = inspect.signature(fn)
+    required = ("dtype", "enabled", "cache_enabled")
+    missing = [name for name in required if name not in signature.parameters]
+    if missing:
+        raise TypeError(
+            "expected an autocast entry accepting (dtype, enabled, "
+            f"cache_enabled), missing parameter(s) {missing} in {fn!r}"
+        )
+    extra = [name for name in signature.parameters if name not in required]
+    if extra:
+        raise TypeError(
+            "expected an autocast entry accepting exactly (dtype, enabled, "
+            f"cache_enabled), got extra parameter(s) {extra} in {fn!r}"
+        )
+    try:
+        signature.bind(dtype=None, enabled=True, cache_enabled=None)
+    except TypeError as exc:
+        raise TypeError(
+            "expected an autocast entry callable as (dtype, enabled, "
+            f"cache_enabled), got {fn!r}: {exc}"
+        ) from exc
+    _autocast_entries[fn] = device_type
+    _extra_ctx_manager_classes[fn] = None
+
+
+def _get_supported_ctx_manager_classes() -> dict[Any, None]:
+    """supported_ctx_manager_classes plus late registrations."""
+    if not _extra_ctx_manager_classes:
+        return supported_ctx_manager_classes
+    return {**supported_ctx_manager_classes, **_extra_ctx_manager_classes}
+
 
 # Ops that consume scalar values from 0-d tensors (via .item()) for computation
 # only, not for output shapes. When capture_scalar_outputs is enabled, these ops
@@ -698,7 +757,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             callable(value)
             and (
                 hashable(value)  # accesses value.__hash__()
-                and value in supported_ctx_manager_classes
+                and value in _get_supported_ctx_manager_classes()
             )
         )
 
@@ -834,12 +893,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                     {},
                 ),
             )
-        elif self.value in (
-            torch.amp.autocast_mode.autocast,
-            torch.cuda.amp.autocast,
-            torch.cpu.amp.autocast,
-        ):
-            # pyrefly: ignore [bad-argument-type]
+        elif self.value in _autocast_entries:
             return AutocastModeVariable.create(self.value, args, kwargs)
         elif self.value in (
             torch.profiler.record_function,
