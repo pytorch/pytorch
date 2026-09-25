@@ -1009,7 +1009,7 @@ class TestFlexDecoding(InductorTestCase):
         # The pointwise producer's layout follows its [B, S, H, D] input, not the
         # contiguous [B, H, S, D] strides it has when flex decoding is lowered.
         Hq, Hkv = head_dims
-        Q_S, D = 32, 16
+        Q_S, D = 4, 16
         x = torch.randn(2, Q_S, Hq * D, device=device)
         scale = torch.rand(D, device=device) + 0.5
         k = torch.randn(2, Hkv, Q_S, D, device=device)
