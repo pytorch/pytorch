@@ -614,13 +614,16 @@ static ReductionPlan select_reduction_plan(const Tensor& input, const Tensor& ou
   // The outer and innermost kernels index in 32 bits.
   if (output.is_contiguous() && canUse32BitIndexMath(input)) {
     int num_reduced = 0;
+    int64_t first_reduced = input.dim();
     int64_t reduced_dim = -1;
     for (const auto d : c10::irange(input.dim())) {
       if (input.size(d) != output.size(d)) {
         num_reduced++;
+        first_reduced = std::min(first_reduced, d);
         reduced_dim = d;
       }
     }
+    const bool reduced_dims_adjacent = num_reduced == (reduced_dim - first_reduced + 1);
     if (num_reduced == 1 && reduced_dim < input.dim() - 1) {
       if (auto layout = outer_reduction_layout(input, reduced_dim)) {
         return select_outer_reduction(*layout, is_arg, input.numel());
@@ -629,6 +632,9 @@ static ReductionPlan select_reduction_plan(const Tensor& input, const Tensor& ou
       // Innermost dim, which also covers the flattened dim=None argmax/argmin
       // view. Strided innermost reductions stay on the generic kernel below.
       return select_inner_reduction(plan.layout, is_arg, input.numel());
+    } else if (input.is_contiguous() && reduced_dims_adjacent) {
+      return select_reduction_plan(
+          input.flatten(first_reduced, reduced_dim), output.flatten(first_reduced, reduced_dim), is_arg);
     }
   }
   // Generic single-pass fallback.
