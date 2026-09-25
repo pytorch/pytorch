@@ -25,6 +25,7 @@ yet.
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import hashlib
 import importlib.machinery
@@ -37,10 +38,14 @@ import types
 from typing import TYPE_CHECKING
 
 import torch
+import torch._functorch.config as functorch_config
 from torch._guards import ChainedSource
+from torch.compiler._precompile_types import PrecompileSummary
 from torch.utils._config_module import ConfigModule
 
 from .aot_compile import _BUILTINS_DICT_PREFIX, _IMPORT_ALIAS_PREFIX
+from .convert_frame import ConvertFrame
+from .exc import PackageError
 from .guards import CheckFunctionManager
 from .source import (
     AttrSource,
@@ -53,12 +58,147 @@ from .source import (
 
 if TYPE_CHECKING:
     import traceback
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+    from typing import NoReturn
 
     from torch._guards import Source
     from torch.compiler._precompile_types import GuardFact as _GuardFact
 
-    from .types import GuardFilterEntry
+    from .convert_frame import ConvertFrameReturn
+    from .hooks import Hooks
+    from .package import _DynamoCacheEntry
+    from .repro.after_dynamo import WrapBackendDebug
+    from .types import CacheEntry, DynamoFrameType, GuardFilterEntry
+    from .variables.builder import FrameStateSizeEntry
+
+
+# Built once: config.patch() allocates a class and a ContextVar each time it is
+# called, and this runs on every frame Dynamo compiles for a package.
+_ALLOW_EMPTY_GRAPHS = torch._dynamo.config._make_closure_patcher(
+    allow_empty_graphs=True
+)
+
+
+@contextlib.contextmanager
+def _capture_config(training: bool) -> Iterator[None]:
+    """The compiler configuration a multi-graph capture's calls run under.
+
+    Backends serialize into the artifact (``bundled_autograd_cache``) rather
+    than the process-local inductor cache. A training capture lowers its
+    backward eagerly: AOTAutograd otherwise defers it to the first
+    ``.backward()``, and a capture that never makes one records no backend.
+    ``allow_empty_graphs`` keeps an empty graph as a compiled frame so its
+    guards reach the artifact; it also extends the lifetime of objects the frame
+    holds -- with it on, a weakref callback on a value the frame captured does
+    not fire when the caller drops its reference (test/dynamo/test_repros.py
+    ReproTests.test_weakref_callback).
+
+    Every scope patches and restores for itself: ``config.patch`` is re-entrant
+    and per-thread, so nested scopes unwind in order (an inner ``training=True``
+    still lowers the backward) and a worker thread sees only its own.
+    """
+    if torch.compiler.config.force_disable_caches:
+        raise PackageError(
+            "Cannot precompile with torch.compiler.config.force_disable_caches=True: "
+            "compiled backends reach the artifact through the AOTAutograd cache, "
+            "which that setting turns off, so the capture would record no graphs"
+        )
+    functorch_patch = {
+        "bundled_autograd_cache": True,
+        # AOTAutogradCache refuses to KEY a graph it cannot address soundly -- a
+        # graph calling anything outside its allowlist -- and a refusal means it
+        # never saves, so the bundled artifact precompile needs is never
+        # recorded and the capture ends with nothing to serialize. That gate
+        # asks whether the key tells this graph's behaviour apart from
+        # another's, which a precompile artifact does not depend on: it is
+        # addressed by backend id and pinned to one torch build, so fall back to
+        # a nonce key rather than declining, as torch._dynamo.aot_compile and
+        # aot_compile_joint_with_descriptors already do.
+        "bypass_autograd_cache_key": True,
+    }
+    if training:
+        functorch_patch["force_non_lazy_backward_lowering"] = True
+    # AOTAutogradCache honours strict_precompile when it loads but not when it
+    # saves: a bundled entry that fails to pickle is dropped with a warning and
+    # the capture is short one backend, so raise where the pickle fails instead.
+    if torch._dynamo.config.strict_precompile:
+        functorch_patch["strict_autograd_cache"] = True
+    with (
+        functorch_config.patch(functorch_patch),
+        torch._dynamo.config.patch(allow_empty_graphs=True),
+    ):
+        yield
+
+
+class _AllowEmptyGraphsConvertFrame(ConvertFrame):
+    """The package's frame converter, compiling its frames with allow_empty_graphs.
+
+    An uncovered no-op branch must become a guarded variant rather than Dynamo's
+    ordinary eager-only SkipFrame: a skip applies to the code object, so one
+    fallback call permanently skips that frame and no later call can capture
+    its other variants. Applied here as well as in _capture_config so the
+    package's frames get it -- with the object-lifetime side effect noted there
+    -- whenever this converter compiles them, including recompiles of a loaded
+    artifact outside any capture-config scope. Beneath CatchErrorsWrapper
+    rather than replacing it: frames its skipfile checks reject never pay the
+    patch, and this frame stays out of the user stack dynamo_start reports.
+    A frame under DistributedDataParallel with optimize_ddp="ddp_optimizer" is
+    refused by name when a package is attached; _clone_with_backend below, the
+    hook CatchErrorsWrapper calls only for that frame, says why. Without a
+    package the DDP clone keeps this subclass, so the flag survives it.
+    """
+
+    @property
+    def _clone_with_backend(self) -> Callable[[WrapBackendDebug], ConvertFrame]:
+        # CatchErrorsWrapper asks for this clone only for a frame under an
+        # active DDP module in ddp_optimizer mode (the default, optimize_ddp=True);
+        # the other optimize_ddp modes never reach it. DDPOptimizer compiles the
+        # graph one bucket at a time and no bucket carries the backend id the
+        # package records, so the artifact could never be completed; the base
+        # clone would drop the package silently instead. The wrapper probes the
+        # attribute with hasattr before calling it, and hasattr swallows only
+        # AttributeError, so a getter that raised would raise PackageError out of
+        # the probe itself; raising from the returned callable puts the error at
+        # the call the wrapper actually makes. A package-less converter is what
+        # the tests build, and what a capture session may build before it
+        # attaches a package; its clone keeps the subclass, hooks and limit. The
+        # stance path (eval_frame._create_wrapped_callback, behind set_stance)
+        # rebuilds a plain ConvertFrame with no package and is outside a capture
+        # session's contract.
+        if self._inner_convert._package is None:
+            return lambda backend: type(self)(
+                backend, self._hooks, recompile_limit=self._recompile_limit
+            )
+
+        def refuse(backend: WrapBackendDebug) -> NoReturn:
+            raise PackageError(
+                "Cannot precompile a DistributedDataParallel forward with "
+                f"torch._dynamo.config.optimize_ddp={torch._dynamo.config.optimize_ddp!r}: "
+                "DDPOptimizer compiles the graph one bucket at a time and no bucket "
+                "records a backend under the id the package saves. Set "
+                'torch._dynamo.config.optimize_ddp="no_optimization" to precompile '
+                "a DDP forward (this disables DDPOptimizer's comm/compute overlap); "
+                'the "python_reducer" and "python_reducer_without_compiled_forward" '
+                "modes bypass DDPOptimizer as well"
+            )
+
+        return refuse
+
+    def __call__(
+        self,
+        frame: DynamoFrameType,
+        cache_entry: CacheEntry | None,
+        hooks: Hooks,
+        frame_state: dict[str, int | FrameStateSizeEntry],
+        skip: int = 0,
+    ) -> ConvertFrameReturn:
+        revert = _ALLOW_EMPTY_GRAPHS()
+        try:
+            return super().__call__(
+                frame, cache_entry, hooks, frame_state, skip=skip + 1
+            )
+        finally:
+            revert()
 
 
 def default_guard_filter_fn(guard_entries: Sequence[GuardFilterEntry]) -> list[bool]:
@@ -884,6 +1024,60 @@ def _is_risky_drop(
     return True
 
 
+# The guards that pin a Python value by equality. CONSTANT_MATCH is the front
+# door: it delegates a bool to BOOL_MATCH, None to NONE_MATCH, a code object to
+# ID_MATCH and everything else -- ints included -- to EQUALS_MATCH, and it is
+# the only guard method that derives into another one of these, so a slot's
+# top-level guard type is enough here. CONSTANT_SUBCLASS_MATCH pins the base
+# value of an int/float/str subclass argument; the two iterator guards pin an
+# iterator argument's exact position. Length and key-set guards
+# (SEQUENCE_LENGTH, TUPLE_ITERATOR_LEN, MAPPING_KEYS_CHECK) pin a container's
+# structure rather than a value and are deliberately not counted; the set keys
+# on guard type alone, so an EQUALS_MATCH installed on a container argument
+# itself (a dict_keys or a frozenset of torch ops, variables/builder.py) IS
+# counted, its contents being the value the artifact then serves only for.
+_VALUE_EQUALITY_GUARD_TYPES = frozenset(
+    {
+        "CONSTANT_MATCH",
+        "CONSTANT_SUBCLASS_MATCH",
+        "COUNT_ITERATOR_MATCH",
+        "EQUALS_MATCH",
+        "RANGE_ITERATOR_MATCH",
+    }
+)
+
+
+def _pins_a_value(guard_type: str, name: str) -> bool:
+    """
+    Whether this kept guard makes the artifact serve only the value it saw.
+
+    Two things have to line up, and keying on either one alone is wrong.
+
+    The guard has to be a value-equality one. TENSOR_MATCH, SHAPE_ENV and the
+    global-state guards are what every capture has and they generalize fine --
+    a TENSOR that crosses a graph break gets TENSOR_MATCH on a ``___stackN``
+    source and is emphatically not a pin.
+
+    And the source has to be a BARE name -- a plain local of some traced frame,
+    or the ``___stackN`` Dynamo gives a value crossing a graph break. Anything
+    dotted or subscripted (``self.eps``, ``model._modules['ln'].eps``,
+    ``G['CFG'].width``) is reached THROUGH an argument rather than being one,
+    which is where model config lives: every LayerNorm and Dropout contributes
+    a CONSTANT_MATCH there, so counting those would flag every model and make
+    the field noise. The EMPTY source of a guard checked against no source
+    (``GuardFact.source`` for SHAPE_ENV, GLOBAL_STATE) is not a name either.
+
+    KNOWN GAP: a constant inside a container argument is guarded on a
+    subscripted source (``dims[0]`` for ``x.sum(dim=[0])``) and is not counted.
+    ``kept_guards`` is the authoritative list; this is a lint over it.
+    """
+    return (
+        bool(name)
+        and guard_type in _VALUE_EQUALITY_GUARD_TYPES
+        and not any(c in name for c in ".[")
+    )
+
+
 # Object addresses differ every run, so they are scrubbed from rendered guard
 # facts. Keep these anchored to the call shapes that carry addresses: a bare
 # \b\d{9,}\b also eats a user constant (a dict key, a slice bound), so two
@@ -1234,3 +1428,154 @@ def _fact_order(fact: _GuardFact) -> tuple[str, str, str, str]:
     # TENSOR_MATCH renders no code, so two shape specializations would otherwise
     # tie and sort unstably, making the file differ run to run.
     return (fact.source, fact.guard_type, " ".join(fact.code), fact.value)
+
+
+def _wont_generalize(
+    kept: set[tuple[str, str]],
+    guard_sets: Mapping[tuple[str, str, int], Sequence[frozenset[_GuardFact]]],
+) -> tuple[str, ...]:
+    """Sources no captured variant will serve a new value for.
+
+    A source pinned in ONE variant is not pinned for the artifact: the union of
+    kept guards says "some graph equality-matched this", while what the warning
+    claims is "no graph will take anything else". A frame whose other variant
+    guards the same source generically -- the ordinary shape once two examples
+    are captured -- serves the new value fine, and warning about it tells the
+    caller to enumerate values that already work.
+
+    Cancellation is per frame, like every comparison in this module: a bare
+    name means nothing across frames, and ``___stack0`` names whatever crossed
+    the break in EVERY resume frame -- a tensor in one, an ``.item()`` int in
+    the next -- so a generic mention elsewhere must not erase a real pin here.
+    ``GuardFact.source`` and a kept slot's name share one spelling, the
+    ``GuardFilterEntry.name`` with local scope stripped (``L['x']`` -> ``x``).
+    A fact whose guard the filter dropped (``enforced`` False) checks nothing,
+    so its variant counts as serving the source generically, not as pinning it;
+    the drop itself is what ``dropped_guards`` reports, so the case changes
+    fields rather than disappearing. A variant's OWN companion guards on a
+    source it pins (the SEQUENCE_LENGTH beside a dict_keys EQUALS_MATCH) are
+    not a generic mention, hence the ``- here`` below.
+
+    KNOWN GAP: "reached it without pinning it" is read as "serves other
+    values", and an unspecialized int breaks that: its variant carries only a
+    TYPE_MATCH on the name, and if the trace then specializes the symbol the
+    ``L['scale'] == 3`` check is a SHAPE_ENV fact with an EMPTY source, so the
+    variant looks generic and cancels a sibling's pin that nothing serves.
+    """
+    pinned = {n for t, n in kept if _pins_a_value(t, n)}
+    if not pinned:
+        return ()
+    # A source survives if SOME frame pins it and never serves it generically;
+    # a frame that does both cancels only its own pin, not another frame's.
+    survivors: set[str] = set()
+    for variants in guard_sets.values():
+        pins: set[str] = set()
+        generic: set[str] = set()
+        for facts in variants:
+            here = {
+                f.source
+                for f in facts
+                if f.enforced and _pins_a_value(f.guard_type, f.source)
+            }
+            pins |= here
+            # A variant that reached the source without pinning it is the
+            # graph that serves other values.
+            generic |= {f.source for f in facts} - here
+        survivors |= pins - generic
+    return tuple(sorted(pinned & survivors))
+
+
+def _varying_guard_slots(
+    guard_sets: Mapping[tuple[str, str, int], Sequence[frozenset[_GuardFact]]],
+) -> frozenset[tuple[str, str]]:
+    """The guard slots that actually discriminate between captured variants.
+
+    A slot is ``(guard_type, source)``, the source as ``GuardFact.source``
+    spells it: the ``GuardFilterEntry.name`` with local scope stripped
+    (``L['x']`` -> ``x``). It varies when two variants of one frame
+    recorded DIFFERENT facts for it, and also when it is present in some
+    variants and absent in others -- a guard only one variant carries is what
+    tells that variant apart, and comparing values alone would call it
+    invariant and drop it. That present-in-some case is the majority of what is
+    kept, not an edge. A fact is its rendered code and value; ``enforced`` says
+    whether the serialized copy keeps the guard, not what it checks, so two
+    variants that differ only there agree. One variant can hold several facts
+    on one slot (a ``HASATTR`` per attribute name, all on the parent source),
+    so what is compared across variants is each variant's SET of facts for the
+    slot, never one fact against another inside a variant.
+
+    Everything else held identically in every variant, which is what licenses a
+    caller to leave it out of the serialized copy.
+    """
+    varying: set[tuple[str, str]] = set()
+    for variants in guard_sets.values():
+        seen: dict[tuple[str, str], list[frozenset[tuple[tuple[str, ...], str]]]] = {}
+        for facts in variants:
+            rendered: dict[tuple[str, str], set[tuple[tuple[str, ...], str]]] = {}
+            for f in facts:
+                slot = (f.guard_type, f.source)
+                rendered.setdefault(slot, set()).add((f.code, f.value))
+            for slot, facts_here in rendered.items():
+                seen.setdefault(slot, []).append(frozenset(facts_here))
+        for slot, per_variant in seen.items():
+            if len(per_variant) != len(variants) or len(set(per_variant)) > 1:
+                varying.add(slot)
+    return frozenset(varying)
+
+
+def _summarize(
+    entry: _DynamoCacheEntry,
+    *,
+    dropped: set[tuple[str, str]],
+    kept: set[tuple[str, str]],
+    policy_dropped: set[tuple[str, str]],
+    risky: set[tuple[str, str]],
+    truncated: frozenset[str],
+    capture_errors: Sequence[str],
+    guard_sets: Mapping[tuple[str, str, int], Sequence[frozenset[_GuardFact]]],
+    dropped_code: Mapping[tuple[str, str], str],
+) -> PrecompileSummary:
+    """Assemble the report. ``dropped_code`` maps a dropped slot to the one
+    rendering the report carries for it, the caller's pick among the variants
+    that dropped it; a slot without one gets no ``dropped_guard_code`` entry.
+
+    ``bypassed`` and ``uncovered_frames`` are read off the entry, one bare
+    ``co_name`` per frame, so a repeated name is two frames and both lists are
+    subsets of ``frames`` by construction. Uncovered is the coverage gap: the
+    frame entered Dynamo (``has_compile_id``) and holds no guarded code, and was
+    not bypassed. ``install()`` ``skip_code()``s a superset, every entry that is
+    not bypassed and has no guarded codes whether or not it entered Dynamo, so a
+    generated-but-never-executed resume entry is skipped there and is not a gap
+    here. ``backend_graphs`` counts the backend ids of the entries that are not
+    bypassed, the ones ``install()`` loads: a save-time bypass
+    (``PrecompileCacheEntry.from_cache_entry``, backend artifact missing) marks
+    the entry and leaves its ids in place. ``truncated`` comes from the compile
+    path, which sees a frame hit the limit once and records it as ``co_name
+    (filename:firstlineno)``, so that set cannot merge two frames.
+    """
+    return PrecompileSummary(
+        frames=len(entry.codes),
+        resume_functions=sum(1 for c in entry.codes if c.install_to_global),
+        guarded_codes=sum(len(c.guarded_codes) for c in entry.codes),
+        backend_graphs=len(
+            {b for c in entry.codes if not c.bypassed for b in c.backend_ids}
+        ),
+        bypassed=tuple(c.python_code.co_name for c in entry.codes if c.bypassed),
+        truncated=tuple(sorted(truncated)),
+        uncovered_frames=tuple(
+            c.python_code.co_name
+            for c in entry.codes
+            if c.has_compile_id and not c.guarded_codes and not c.bypassed
+        ),
+        wont_generalize=_wont_generalize(kept, guard_sets),
+        dropped_guards=tuple(sorted(dropped)),
+        dropped_guard_code=tuple(
+            (gtype, name, dropped_code[(gtype, name)])
+            for gtype, name in sorted(dropped | policy_dropped)
+            if (gtype, name) in dropped_code
+        ),
+        kept_guards=tuple(sorted(kept)),
+        risky_dropped_guards=tuple(sorted(risky)),
+        policy_dropped_guards=tuple(sorted(policy_dropped)),
+        capture_errors=tuple(capture_errors),
+    )

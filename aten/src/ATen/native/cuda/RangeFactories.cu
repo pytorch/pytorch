@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/AccumulateType.h>
+#include <ATen/OpMathType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -44,7 +45,11 @@ C10_LAUNCH_BOUNDS_1(num_threads())
 __global__ void elementwise_kernel_with_index(index_t N, func_t f, typename function_traits<func_t>::result_type *data) {
   #pragma unroll
   for (int i = 0; i < thread_work_size; i++) {
-    index_t idx = block_work_size * blockIdx.x + num_threads() * i + threadIdx.x;
+    // Widen before multiplying: block_work_size * blockIdx.x is otherwise
+    // computed in 32-bit unsigned arithmetic and wraps for N >= 2**32,
+    // leaving the tail of the output unwritten.
+    index_t idx = static_cast<index_t>(block_work_size) * blockIdx.x +
+        num_threads() * i + threadIdx.x;
     if (idx < N) {
       data[idx] = f(idx);
     }
@@ -141,9 +146,13 @@ Tensor& linspace_cuda_out(const Scalar& start, const Scalar& end, int64_t steps,
     });
   } else {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, r.scalar_type(), "linspace_cuda", [&]() {
+      // Rounding the step to half or bfloat16 before multiplying it by the index
+      // compounds that rounding across the range, so accumulate in the opmath
+      // type. Matches the CPU and MPS kernels.
+      using step_t = at::opmath_type<scalar_t>;
       scalar_t scalar_start = start.to<scalar_t>();
       scalar_t scalar_end = end.to<scalar_t>();
-      scalar_t step = (scalar_end - scalar_start) / static_cast<scalar_t>(steps - 1);
+      step_t step = (static_cast<step_t>(scalar_end) - static_cast<step_t>(scalar_start)) / static_cast<step_t>(steps - 1);
       const int64_t halfway = steps / 2;
       gpu_kernel_with_index(r, [scalar_start, scalar_end, steps, step, halfway]GPU_LAMBDA(int64_t ind) -> scalar_t {
         if (ind < halfway) {
@@ -195,10 +204,12 @@ Tensor& logspace_cuda_out(const Scalar& start, const Scalar& end, int64_t steps,
     });
   } else {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, r.scalar_type(), "logspace_cuda", [&]() {
-      scalar_t scalar_base = static_cast<scalar_t>(base);
+      // See linspace_cuda_out: keep the step, and hence the pow, in the opmath type
+      using step_t = at::opmath_type<scalar_t>;
+      step_t scalar_base = static_cast<step_t>(base);
       scalar_t scalar_start = start.to<scalar_t>();
       scalar_t scalar_end = end.to<scalar_t>();
-      scalar_t step = (scalar_end - scalar_start) / static_cast<scalar_t>(steps - 1);
+      step_t step = (static_cast<step_t>(scalar_end) - static_cast<step_t>(scalar_start)) / static_cast<step_t>(steps - 1);
       const int64_t halfway = steps / 2;
       gpu_kernel_with_index(r, [scalar_start, scalar_end, scalar_base, steps, step, halfway]GPU_LAMBDA(int64_t ind) -> scalar_t {
         if (ind < halfway) {
