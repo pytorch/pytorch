@@ -230,7 +230,14 @@ class ConstantVariable(VariableTracker):
 
     def hash_impl(self, tx: InstructionTranslatorBase) -> tuple[int, bool]:
         """Dynamo tracing rule for long_hash, float_hash, unicode_hash, etc."""
+        from torch.fx.experimental.proxy_tensor import _coor_enabled
+
         from .user_defined import _CONSTANT_BASE_TYPES
+
+        if isinstance(self.value, torch.device) and _coor_enabled():
+            # Drop the index so an explicit cuda:N lands in the same bucket as a
+            # rank-relative CurrentDeviceVariable; see its hash_impl.
+            return hash(torch.device(self.value.type)), False
 
         value_type = cast(Any, type(self.value))
         mro = value_type.__mro__
