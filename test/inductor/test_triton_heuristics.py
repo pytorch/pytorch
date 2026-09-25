@@ -17,6 +17,7 @@ from torch._dynamo.testing import rand_strided
 from torch._inductor.runtime.triton_compat import HAS_WARP_SPEC
 from torch._inductor.utils import clone_preserve_strides
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_LINUX,
     parametrize,
@@ -104,6 +105,8 @@ def get_autotuned_amd_sqr_kernel():
 
 @instantiate_parametrized_tests
 class TestTritonHeuristics(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     device_type = GPU_TYPE
 
     def test_find_names_ignores_frame_locals(self):
@@ -436,52 +439,6 @@ class TestTritonHeuristics(TestCase):
         self.assertIsNone(autotune_cache)
         self.assertEqual(autotune_cache_info["autotune_cache_state"], "only 1 config")
 
-    def _test_artificial_zgrid(self):
-        def forward(primals_1, primals_2, primals_5):
-            view = torch.ops.aten.reshape.default(primals_5, [-1, 2, 4])
-            primals_5 = None
-            permute = torch.ops.aten.permute.default(view, [0, 2, 1])
-            clone = torch.ops.aten.clone.default(
-                permute, memory_format=torch.contiguous_format
-            )
-            permute = None
-            view_1 = torch.ops.aten.reshape.default(clone, [-1, 4])
-            clone = None
-            permute_1 = torch.ops.aten.permute.default(primals_1, [1, 0])
-            primals_1 = None
-            addmm = torch.ops.aten.addmm.default(primals_2, view_1, permute_1)
-            primals_2 = None
-            return addmm
-
-        s0 = 16777472
-        s1 = 8
-
-        args = [
-            torch.rand([2, 4], device=GPU_TYPE),
-            torch.rand([2], device=GPU_TYPE),
-            torch.rand([s0, s1], device=GPU_TYPE),
-        ]
-        torch._dynamo.mark_dynamic(args[-1], 0)
-        foo_c = torch.compile(forward)
-
-        self.assertEqual(forward(*args), foo_c(*args))
-
-        args = [
-            torch.rand([2, 4], device=GPU_TYPE),
-            torch.rand([2], device=GPU_TYPE),
-            torch.rand([s0, s1], device=GPU_TYPE),
-        ]
-        self.assertEqual(forward(*args), foo_c(*args))
-
-    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
-    def test_artificial_zgrid(self):
-        self._test_artificial_zgrid()
-
-    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
-    @config.patch("cpp_wrapper", True)
-    def test_artificial_grid_cpp_wrapper(self):
-        self._test_artificial_zgrid()
-
     @staticmethod
     def _get_cos_kernel_caching_autotuner_args():
         @triton.jit
@@ -527,63 +484,6 @@ class TestTritonHeuristics(TestCase):
             "heuristic_type": HeuristicType.POINTWISE,
             "inductor_meta": inductor_meta,
         }
-
-    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
-    def test_pre_hook_assert(self):
-        # assert if any of the configs passed to the CachingAutotuner have pre-hooks
-        args = self._get_cos_kernel_caching_autotuner_args()
-
-        def pre_hook(kwargs):
-            if "in_ptr0" in kwargs:
-                kwargs["in_ptr0"].zero_()
-
-        for cfg in args["configs"]:
-            cfg.pre_hook = pre_hook
-
-        with self.assertRaisesRegex(AssertionError, "pre_hook"):
-            CachingAutotuner(**args)
-
-    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
-    def test_autotune_hints_to_configs(self):
-        device_props = DeviceProperties.create(torch.device(GPU_TYPE))
-        device_props = device_props._replace(warp_size=8)
-
-        hints = {AutotuneHint.ONE_ELEMENT_PER_THREAD}
-        size_hints = (1024,)
-        block_size = 256
-
-        seen_num_elements_per_warp = set()
-
-        def mock_triton_config(
-            size_hints,
-            x,
-            y=None,
-            z=None,
-            num_stages=None,
-            num_elements_per_warp=None,
-            min_elem_per_thread=None,
-            *,
-            warp_size=32,
-        ):
-            seen_num_elements_per_warp.add(num_elements_per_warp)
-            return None
-
-        with unittest.mock.patch(
-            "torch._inductor.runtime.triton_heuristics.triton_config",
-            mock_triton_config,
-        ):
-            _ = autotune_hints_to_configs(hints, size_hints, block_size, device_props)
-
-        self.assertTrue(8 in seen_num_elements_per_warp)
-        self.assertEqual(
-            autotune_hints_to_configs(
-                {AutotuneHint.SCALAR_ACCUMULATORS},
-                size_hints,
-                block_size,
-                device_props,
-            ),
-            [],
-        )
 
     @unittest.skipIf(not HAS_WARP_SPEC, "FBCODE Triton is required for this test")
     def test_template_function_ws(self):
@@ -660,52 +560,154 @@ class TestTritonHeuristics(TestCase):
 
         self.assertEqual(configs[0].kwargs, expected_kwargs)
 
-    @runOnRocm
-    def test_amd_special_config_args(self):
-        """
-        waves_per_eu is an example of a special config arg on AMD; if it is explicitly specified
-        in a config, the kwarg will exist in the kwargs but not in the function signature.
-        """
 
-        @torch.library.triton_op("test_triton_heuristics::triton_sqr", mutates_args=())
-        def triton_sqr(x: torch.Tensor) -> torch.Tensor:
-            y = torch.empty_like(x)
+class TestTritonHeuristicsRuntime(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
-            def grid(meta):
-                return (triton.cdiv(x.numel(), meta["BLOCK_SIZE"]),)
-
-            torch.library.wrap_triton(get_autotuned_amd_sqr_kernel())[grid](
-                x, y, x.numel()
+    def _test_artificial_zgrid(self):
+        def forward(primals_1, primals_2, primals_5):
+            view = torch.ops.aten.reshape.default(primals_5, [-1, 2, 4])
+            primals_5 = None
+            permute = torch.ops.aten.permute.default(view, [0, 2, 1])
+            clone = torch.ops.aten.clone.default(
+                permute, memory_format=torch.contiguous_format
             )
+            permute = None
+            view_1 = torch.ops.aten.reshape.default(clone, [-1, 4])
+            clone = None
+            permute_1 = torch.ops.aten.permute.default(primals_1, [1, 0])
+            primals_1 = None
+            addmm = torch.ops.aten.addmm.default(primals_2, view_1, permute_1)
+            primals_2 = None
+            return addmm
 
-        def fn(x):
-            return triton_sqr(x)
+        s0 = 16777472
+        s1 = 8
 
-        x = torch.randn(32, device=GPU_TYPE)
-        ref = fn(x)
-        res = torch.compile(fn)(x)
-        self.assertEqual(ref, res)
+        args = [
+            torch.rand([2, 4], device=GPU_TYPE),
+            torch.rand([2], device=GPU_TYPE),
+            torch.rand([s0, s1], device=GPU_TYPE),
+        ]
+        torch._dynamo.mark_dynamic(args[-1], 0)
+        foo_c = torch.compile(forward)
 
-    @runOnRocm
-    def test_rocm_exhaustive_configs_do_not_enumerate_num_stages(self):
-        """ROCmConfigHeuristic._filter_configs forces num_stages to
-        default_num_stages, so enumerating num_stages in exhaustive_configs would
-        only yield duplicates that get deduped again in _finalize_mm_configs.
-        """
-        from torch._inductor.heuristics.template.triton import (
-            GemmConfig,
-            ROCmConfigHeuristic,
-        )
+        self.assertEqual(forward(*args), foo_c(*args))
 
-        heuristic = ROCmConfigHeuristic()
+        args = [
+            torch.rand([2, 4], device=GPU_TYPE),
+            torch.rand([2], device=GPU_TYPE),
+            torch.rand([s0, s1], device=GPU_TYPE),
+        ]
+        self.assertEqual(forward(*args), foo_c(*args))
+
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    def test_artificial_zgrid(self):
+        self._test_artificial_zgrid()
+
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    @config.patch("cpp_wrapper", True)
+    def test_artificial_grid_cpp_wrapper(self):
+        self._test_artificial_zgrid()
+
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    def test_pre_hook_assert(self):
+        # assert if any of the configs passed to the CachingAutotuner have pre-hooks
+        args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
+
+        def pre_hook(kwargs):
+            if "in_ptr0" in kwargs:
+                kwargs["in_ptr0"].zero_()
+
+        for cfg in args["configs"]:
+            cfg.pre_hook = pre_hook
+
+        with self.assertRaisesRegex(AssertionError, "pre_hook"):
+            CachingAutotuner(**args)
+
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    def test_autotune_hints_to_configs(self):
+        device_props = DeviceProperties.create(torch.device(GPU_TYPE))
+        device_props = device_props._replace(warp_size=8)
+
+        hints = {AutotuneHint.ONE_ELEMENT_PER_THREAD}
+        size_hints = (1024,)
+        block_size = 256
+
+        seen_num_elements_per_warp = set()
+
+        def mock_triton_config(
+            size_hints,
+            x,
+            y=None,
+            z=None,
+            num_stages=None,
+            num_elements_per_warp=None,
+            min_elem_per_thread=None,
+            *,
+            warp_size=32,
+        ):
+            seen_num_elements_per_warp.add(num_elements_per_warp)
+            return None
+
+        with unittest.mock.patch(
+            "torch._inductor.runtime.triton_heuristics.triton_config",
+            mock_triton_config,
+        ):
+            _ = autotune_hints_to_configs(hints, size_hints, block_size, device_props)
+
+        self.assertTrue(8 in seen_num_elements_per_warp)
         self.assertEqual(
-            {c.num_stages for c in heuristic.exhaustive_configs},
-            {heuristic.default_num_stages},
+            autotune_hints_to_configs(
+                {AutotuneHint.SCALAR_ACCUMULATORS},
+                size_hints,
+                block_size,
+                device_props,
+            ),
+            [],
         )
 
-        # the invariant above is only safe because _filter_configs clobbers it
-        filtered = heuristic._filter_configs([GemmConfig(32, 32, 32, 1, 4, group_m=8)])
-        self.assertEqual(filtered[0].num_stages, heuristic.default_num_stages)
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    def test_compile_time_autotune_not_repeated_at_runtime(self):
+        def fn(x):
+            return (x + 1).sum(dim=1)
+
+        x = torch.randn(2048, 2048, device=GPU_TYPE)
+        benchmark_calls = []
+
+        def fake_benchmark_all_configs(autotuner, *args, **kwargs):
+            benchmark_calls.append(autotuner.inductor_meta.get("kernel_name"))
+            return {
+                launcher: float(idx) for idx, launcher in enumerate(autotuner.launchers)
+            }
+
+        torch._dynamo.reset()
+        with (
+            fresh_cache(),
+            config.patch(
+                {
+                    "triton.autotune_at_compile_time": True,
+                    "max_autotune_pointwise": True,
+                    "compile_threads": 1,
+                }
+            ),
+            patch.object(
+                CachingAutotuner,
+                "benchmark_all_configs",
+                fake_benchmark_all_configs,
+            ),
+        ):
+            compiled = torch.compile(fn, backend="inductor")
+            self.assertEqual(compiled(x), fn(x))
+            self.assertEqual(len(benchmark_calls), 1)
+
+            self.assertEqual(compiled(x), fn(x))
+            self.assertEqual(len(benchmark_calls), 1)
+
+
+@instantiate_parametrized_tests
+class TestTritonHeuristicsBackendConfig(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     @parametrize("do_pruning", [False, True])
@@ -739,6 +741,36 @@ class TestTritonHeuristics(TestCase):
                 config_heuristic.get_mm_configs()(3, 3, 3, dtype_size=4, op_name="mm")
             )
             self.assertEqual(len(configs), expected_count)
+
+
+class TestTritonHeuristicsROCm(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @runOnRocm
+    def test_amd_special_config_args(self):
+        """
+        waves_per_eu is an example of a special config arg on AMD; if it is explicitly specified
+        in a config, the kwarg will exist in the kwargs but not in the function signature.
+        """
+
+        @torch.library.triton_op("test_triton_heuristics::triton_sqr", mutates_args=())
+        def triton_sqr(x: torch.Tensor) -> torch.Tensor:
+            y = torch.empty_like(x)
+
+            def grid(meta):
+                return (triton.cdiv(x.numel(), meta["BLOCK_SIZE"]),)
+
+            torch.library.wrap_triton(get_autotuned_amd_sqr_kernel())[grid](
+                x, y, x.numel()
+            )
+
+        def fn(x):
+            return triton_sqr(x)
+
+        x = torch.randn(32, device=GPU_TYPE)
+        ref = fn(x)
+        res = torch.compile(fn)(x)
+        self.assertEqual(ref, res)
 
     @runOnRocm
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
@@ -811,42 +843,30 @@ class TestTritonHeuristics(TestCase):
                         self.assertEqual(configs, [tuned], msg=arch)
                         self.assertNotEqual(configs, fallback, msg=arch)
 
-    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
-    def test_compile_time_autotune_not_repeated_at_runtime(self):
-        def fn(x):
-            return (x + 1).sum(dim=1)
 
-        x = torch.randn(2048, 2048, device=GPU_TYPE)
-        benchmark_calls = []
+class TestROCmExhaustiveConfigs(TestCase):
+    hw_classification = HardwareClassification.CUDA
 
-        def fake_benchmark_all_configs(autotuner, *args, **kwargs):
-            benchmark_calls.append(autotuner.inductor_meta.get("kernel_name"))
-            return {
-                launcher: float(idx) for idx, launcher in enumerate(autotuner.launchers)
-            }
+    @runOnRocm
+    def test_rocm_exhaustive_configs_do_not_enumerate_num_stages(self):
+        """ROCmConfigHeuristic._filter_configs forces num_stages to
+        default_num_stages, so enumerating num_stages in exhaustive_configs would
+        only yield duplicates that get deduped again in _finalize_mm_configs.
+        """
+        from torch._inductor.heuristics.template.triton import (
+            GemmConfig,
+            ROCmConfigHeuristic,
+        )
 
-        torch._dynamo.reset()
-        with (
-            fresh_cache(),
-            config.patch(
-                {
-                    "triton.autotune_at_compile_time": True,
-                    "max_autotune_pointwise": True,
-                    "compile_threads": 1,
-                }
-            ),
-            patch.object(
-                CachingAutotuner,
-                "benchmark_all_configs",
-                fake_benchmark_all_configs,
-            ),
-        ):
-            compiled = torch.compile(fn, backend="inductor")
-            self.assertEqual(compiled(x), fn(x))
-            self.assertEqual(len(benchmark_calls), 1)
+        heuristic = ROCmConfigHeuristic()
+        self.assertEqual(
+            {c.num_stages for c in heuristic.exhaustive_configs},
+            {heuristic.default_num_stages},
+        )
 
-            self.assertEqual(compiled(x), fn(x))
-            self.assertEqual(len(benchmark_calls), 1)
+        # the invariant above is only safe because _filter_configs clobbers it
+        filtered = heuristic._filter_configs([GemmConfig(32, 32, 32, 1, 4, group_m=8)])
+        self.assertEqual(filtered[0].num_stages, heuristic.default_num_stages)
 
 
 _PLUGIN_FACTORY_PATH = (
@@ -855,6 +875,8 @@ _PLUGIN_FACTORY_PATH = (
 
 
 class TestCachingAutotunerPrecompileDriverSetup(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @skipIfRocm
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     def test_warm_cache_only_precompile_skips_driver_setup_in_context(self):
@@ -883,6 +905,8 @@ class TestCachingAutotunerPrecompileDriverSetup(TestCase):
 
 @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
 class TestCachingAutotunerPlugin(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     device_type = GPU_TYPE
 
     @staticmethod
@@ -1052,6 +1076,8 @@ class TestCachingAutotunerPlugin(TestCase):
 
 
 class TestArgumentCloneAndRestore(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     # Our tensor is large enough. If a unexpected copy happens, the
     # peak memory increase should be larger than tolerance and the test
     # will fail.
@@ -1134,6 +1160,8 @@ class TestArgumentCloneAndRestore(TestCase):
 
 class TestDumpLaunchTensors(TestCase):
     """Test the _dump_launch_tensors functionality"""
+
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def setUp(self):
         super().setUp()
@@ -1244,6 +1272,8 @@ class TestDumpLaunchTensors(TestCase):
 
 class TestRecheckAutotuneCache(TestCase):
     """Tests for CachingAutotuner.recheck_autotune_cache"""
+
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @staticmethod
     def _make_compile_result(cfg):
@@ -1403,6 +1433,8 @@ def get_hip_autotune_kernel_with_invalid_config():
 
 
 class TestHIPInvalidConfigHandling(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @runOnRocm
     @skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
     def test_benchmark_returns_inf_on_invalid_config(self):
@@ -1441,6 +1473,8 @@ class TestHIPInvalidConfigHandling(TestCase):
 
 
 class TestGridExprMaximum(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_maximum_cpp_mode_casts_int_constants_to_long(self):
         from torch._inductor.runtime.triton_heuristics import Grid1D
 
@@ -1458,6 +1492,8 @@ class TestGridExprMaximum(TestCase):
 
 class TestGrid2DWithYZOverflowZeroYnumel(TestCase):
     """Regression test for https://github.com/pytorch/pytorch/issues/178530"""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_grid2d_yz_overflow_zero_ynumel_python(self):
         from torch._inductor.runtime.triton_heuristics import Grid2DWithYZOverflow
@@ -1507,6 +1543,8 @@ class TestGrid2DWithYZOverflowZeroYnumel(TestCase):
 
 
 class TestFastLauncherDeviceSupport(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @staticmethod
     def _make_autotuner(device_type):
         def triton_():
@@ -1579,6 +1617,8 @@ class TestDynamicScaleRblockCacheInteraction(TestCase):
     and skip re-autotuning.
     """
 
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @staticmethod
     def _make_compile_result(cfg):
         from torch._inductor.runtime.triton_heuristics import StaticTritonCompileResult
@@ -1637,6 +1677,47 @@ class TestDynamicScaleRblockCacheInteraction(TestCase):
         autotuner.autotune_cache_info = None
 
         autotuner._dynamic_scale_rblock()
+
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    def test_recheck_autotune_cache_compiles_dynamic_config(self):
+        """
+        When the cached best config was added by _dynamic_scale_rblock
+        and isn't in compile_results, recheck_autotune_cache must compile
+        it (not silently drop it, leaving all original configs active).
+        """
+        from triton import Config
+
+        cfg_a = Config({"XBLOCK": 1, "R0_BLOCK": 2048}, num_warps=16, num_stages=1)
+        cfg_b = Config({"XBLOCK": 8, "R0_BLOCK": 512}, num_warps=4, num_stages=1)
+        result_a = self._make_compile_result(cfg_a)
+        result_b = self._make_compile_result(cfg_b)
+
+        autotuner = self._make_autotuner_with_results(
+            [cfg_a, cfg_b], [result_a, result_b]
+        )
+
+        dynamic_cfg = Config(
+            {"XBLOCK": 1, "R0_BLOCK": 1024}, num_warps=16, num_stages=1
+        )
+
+        mock_precompile = MagicMock(return_value=self._make_compile_result(dynamic_cfg))
+        autotuner._precompile_config = mock_precompile
+
+        reload_fn = MagicMock()
+        reload_fn.return_value.fn = MagicMock()
+
+        with patch(
+            "torch._inductor.runtime.triton_heuristics.check_autotune_cache",
+            return_value=([dynamic_cfg], None, {"autotune_cache_state": "hit"}),
+        ):
+            autotuner.recheck_autotune_cache(reload_kernel_from_src=reload_fn)
+
+        self.assertEqual(len(autotuner.compile_results), 1)
+        mock_precompile.assert_called_once_with(dynamic_cfg)
+
+
+class TestDynamicScaleRblockCacheLoading(TestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     def test_load_cached_autotuning_reconstructs_unknown_config(self):
@@ -1728,43 +1809,6 @@ class TestDynamicScaleRblockCacheInteraction(TestCase):
 
         self.assertIsNone(result)
 
-    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
-    def test_recheck_autotune_cache_compiles_dynamic_config(self):
-        """
-        When the cached best config was added by _dynamic_scale_rblock
-        and isn't in compile_results, recheck_autotune_cache must compile
-        it (not silently drop it, leaving all original configs active).
-        """
-        from triton import Config
-
-        cfg_a = Config({"XBLOCK": 1, "R0_BLOCK": 2048}, num_warps=16, num_stages=1)
-        cfg_b = Config({"XBLOCK": 8, "R0_BLOCK": 512}, num_warps=4, num_stages=1)
-        result_a = self._make_compile_result(cfg_a)
-        result_b = self._make_compile_result(cfg_b)
-
-        autotuner = self._make_autotuner_with_results(
-            [cfg_a, cfg_b], [result_a, result_b]
-        )
-
-        dynamic_cfg = Config(
-            {"XBLOCK": 1, "R0_BLOCK": 1024}, num_warps=16, num_stages=1
-        )
-
-        mock_precompile = MagicMock(return_value=self._make_compile_result(dynamic_cfg))
-        autotuner._precompile_config = mock_precompile
-
-        reload_fn = MagicMock()
-        reload_fn.return_value.fn = MagicMock()
-
-        with patch(
-            "torch._inductor.runtime.triton_heuristics.check_autotune_cache",
-            return_value=([dynamic_cfg], None, {"autotune_cache_state": "hit"}),
-        ):
-            autotuner.recheck_autotune_cache(reload_kernel_from_src=reload_fn)
-
-        self.assertEqual(len(autotuner.compile_results), 1)
-        mock_precompile.assert_called_once_with(dynamic_cfg)
-
 
 @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
 class TestCheckLauncherCallArgs(TestCase):
@@ -1774,6 +1818,8 @@ class TestCheckLauncherCallArgs(TestCase):
     but the shared cos-kernel fixture still builds a CachingAutotuner (which
     resolves DeviceProperties for GPU_TYPE), so they require a GPU.
     """
+
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def _make_autotuner(self):
         """Return a CachingAutotuner configured with the cos kernel fixture."""
@@ -1837,6 +1883,8 @@ class TestCheckLauncherCallArgs(TestCase):
 
 class TestWarpSizeUnification(TestCase):
     """Tests for the unified warp_size threading through config helpers."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_warp_size_or_default(self):
         none_props = DeviceProperties(
@@ -1909,6 +1957,8 @@ class TestWarpSizeUnification(TestCase):
 
 
 class TestMakeLaunchersMemory(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_failed_config_exception_not_retained(self):
         """Regression (D107597017 / PR #184285): CachingAutotuner._make_launchers
         must not retain the failed-config build exception past its return. That
