@@ -674,6 +674,8 @@ ValueRanges Analysis::interp(const Expr* e) {
       return increasing_map(e->kind, args[0]);
     case Kind::IsNonOverlappingAndDenseIndicator:
       return unknown_int();
+    case Kind::ModularIndexing:
+      return mod(floordiv(args[0], args[1]), args[2]);
     case Kind::FloatTrueDiv:
     case Kind::IntTrueDiv:
       return true_div(e->kind, args[0], args[1]);

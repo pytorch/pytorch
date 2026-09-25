@@ -42,6 +42,7 @@ from torch.utils._sympy.functions import (
     Max,
     Min,
     Mod,
+    ModularIndexing,
     PowByNatural,
     PythonMod,
     RoundDecimal,
@@ -1318,10 +1319,11 @@ class TestNativeFunctions(TestCase):
     ALL_FUNCTIONS["IsNonOverlappingAndDenseIndicator"] = (
         IsNonOverlappingAndDenseIndicator
     )
+    ALL_FUNCTIONS["ModularIndexing"] = ModularIndexing
     NODE_TYPES = (Mod, PythonMod, FloorDiv, Max, Min, PowByNatural, FloatPow)
     NODE_TYPES += (FloatTrueDiv, IntTrueDiv, CeilToInt, FloorToInt, TruncToInt)
     NODE_TYPES += (RoundToInt, ToFloat, TruncToFloat, RoundDecimal)
-    NODE_TYPES += (IsNonOverlappingAndDenseIndicator,)
+    NODE_TYPES += (IsNonOverlappingAndDenseIndicator, ModularIndexing)
     PYTHON_ERRORS = (ZeroDivisionError, AssertionError, TypeError, ValueError)
     PYTHON_ERRORS += (OverflowError,)
 
@@ -1687,6 +1689,83 @@ class TestNativeFunctions(TestCase):
             if self.check_call("CeilDiv", a, b) is not None:
                 supported += 1
         self.assertGreater(supported, calls // 2)
+
+    def test_modular_indexing_known(self):
+        n = sympy.Symbol("n", integer=True, nonnegative=True)
+        cases = [
+            ((7, 2, 3), 0),
+            ((-7, 2, 3), 2),
+            ((7, -2, 3), 2),
+            ((7, 2, -3), 0),
+            ((0, s0, s1), 0),
+            ((s0, s1, 1), 0),
+            ((s0, 2, 8), ModularIndexing(s0, 2, 8)),
+            ((4 * s0 + 8, 2, 8), ModularIndexing(2 * s0 + 4, 1, 8)),
+            ((2 * s0 * s1, 2 * s1, 8), ModularIndexing(s0, 1, 8)),
+            ((6 * s0**2 * s1, 4 * s0, 8), ModularIndexing(3 * s0 * s1, 2, 8)),
+            ((s0 + 8 * n, 1, 8), ModularIndexing(s0, 1, 8)),
+            ((u0 + 8 * n, 1, 8), ModularIndexing(u0 + 8 * n, 1, 8)),
+            ((16 * n + 8 * s0, 2, 4), 0),
+            ((FloorDiv(s0, 4), 2, 8), ModularIndexing(s0, 8, 8)),
+            ((s0 * s1 + s0, s0, 8), ModularIndexing(s1 + 1, 1, 8)),
+            ((s0**2 * s1 + s0**2, s0, 8), None),
+            ((s0 + 1, s0 + 2, 8), None),
+            ((sympy.Rational(1, 2), 2, 3), None),
+            ((s0 * FloorDiv(s0 * (s1 + 1), 3), FloorDiv(s0 * s1 + s0, 3), 5), None),
+            ((8 * s1 * Max(3, s0 * (s1 + 1)) + s0, Max(3, s0 * (s1 + 1)), 8), None),
+            ((2 * s0 + 2 * FloorDiv(-u0 - 3, -s1), 2, 8), None),
+        ]
+        for args, expected in cases:
+            got = self.check_call("ModularIndexing", *map(sympy.sympify, args))
+            self.assertEqual(got, expected, f"ModularIndexing{args}")
+
+    @parametrize("seed", range(4))
+    def test_modular_indexing_fuzz(self, seed):
+        rng = random.Random(seed)
+        n = sympy.Symbol("n", integer=True, nonnegative=True)
+        atoms = [s0, s1, u0, n, FloorDiv(s0, 2), Mod(s1, 3), FloorDiv(u0, 4)]
+
+        def monomial():
+            c = rng.choice([-4, -2, -1, 1, 1, 2, 3, 4, 6, 8, 16, 128])
+            return sympy.Mul(c, *(rng.choice(atoms) for _ in range(rng.randint(0, 2))))
+
+        def poly():
+            return sympy.Add(*(monomial() for _ in range(rng.randint(1, 4))))
+
+        def integer():
+            return sympy.Integer(rng.choice([-4, -2, 1, 1, 2, 3, 4, 8, 64]))
+
+        calls = supported = 0
+        nodes = []
+        for _ in range(300):
+            a = rng.choice([poly, poly, monomial])()
+            if rng.random() < 0.2:
+                a = FloorDiv(a, rng.choice([2, 4, s1]))
+            b = rng.choice([monomial, integer, integer, poly])()
+            c = rng.choice([monomial, integer, integer])()
+            calls += 1
+            r = self.check_call("ModularIndexing", a, b, c)
+            if r is not None:
+                supported += 1
+                nodes += [
+                    x
+                    for x in sympy.preorder_traversal(r)
+                    if isinstance(x, ModularIndexing)
+                ]
+        self.assertGreater(supported, calls // 2)
+        self.assertGreater(len(nodes), 20)
+        answered = unsupported = 0
+        for _ in range(40):
+            t = random_tree(rng, 3, LEAVES + nodes)
+            for sub in subtrees(t):
+                v = sympy.sympify(sympy_eval(sub))
+                if v.has(sympy.zoo, sympy.nan):
+                    continue
+                if self.check_expr(v, rng):
+                    answered += 1
+                else:
+                    unsupported += 1
+        self.assertGreater(answered, 5 * unsupported)
 
     def test_minmax_known(self):
         u1 = sympy.Symbol("u1", integer=True)
@@ -2407,6 +2486,26 @@ class TestNativeValueRanges(TestCase):
                 for f in [FloatTrueDiv, IntTrueDiv]:
                     answered += self.check(f(zf, zg), ranges) is not None
         self.assertGreater(answered, len(pairs) ** 2)
+
+    def test_modular_indexing(self):
+        u1, n = self.u1, self.n
+        exprs = [
+            ModularIndexing(u0, 2, 8),
+            ModularIndexing(u0, -2, 5),
+            ModularIndexing(u0 + u1, n, 3),
+            ModularIndexing(n, 4, u1),
+            ModularIndexing(u0, u1, n),
+        ]
+        rng = random.Random(0)
+        answered = 0
+        for e in exprs:
+            for _ in range(200):
+                ranges = {}
+                for s in sorted(e.free_symbols, key=str):
+                    lo, hi = sorted(rng.sample(self.BOUNDS, 2))
+                    ranges[s] = (lo, hi)
+                answered += self.check(e, ranges) is not None
+        self.assertGreater(answered, 500)
 
     def test_float_int_handlers_known(self):
         half, oo, zg = sympy.Rational(1, 2), sympy.oo, sympy.Symbol("zg", real=True)

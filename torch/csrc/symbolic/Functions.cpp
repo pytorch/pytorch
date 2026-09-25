@@ -229,6 +229,119 @@ const Expr* simple_floordiv_gcd(ExprArena& A, const Expr* p, const Expr* q) {
   return gcd;
 }
 
+// functions._is_wide_add.
+bool is_wide_add(const Expr* e) {
+  return e->kind == Kind::Add && e->args.size() > 20;
+}
+
+// Expressions that expand() returns unchanged. sympy.gcd expands function
+// nodes, so only function nodes of these are generators as they stand.
+bool expand_fixed(const Expr* e) {
+  switch (e->kind) {
+    case Kind::Integer:
+    case Kind::Rational:
+    case Kind::Symbol:
+      return true;
+    case Kind::Pow:
+      return e->args[0]->kind == Kind::Symbol &&
+          e->args[1]->kind == Kind::Integer && e->args[1]->p > 0;
+    case Kind::Mul:
+      return std::all_of(e->args.begin(), e->args.end(), [](const Expr* a) {
+        return a->kind != Kind::Add && expand_fixed(a);
+      });
+    case Kind::Add:
+      return std::all_of(e->args.begin(), e->args.end(), expand_fixed);
+    default:
+      return e->is_function() &&
+          std::all_of(e->args.begin(), e->args.end(), expand_fixed);
+  }
+}
+
+// sympy.gcd(p, q) over ZZ when p or q is a single term whose generators are
+// symbols and function nodes; nullptr if not decided.
+const Expr* monomial_gcd(ExprArena& A, const Expr* p, const Expr* q) {
+  if (p->kind == Kind::Add && q->kind == Kind::Add) {
+    return nullptr;
+  }
+  using Powers = c10::SmallVector<std::pair<const Expr*, int64_t>, 4>;
+  c10::SmallVector<Powers, 4> terms;
+  int64_t g = 0;
+  for (const Expr* e : {p, q}) {
+    for (const Expr* t : make_args(Kind::Add, e)) {
+      Powers& powers = terms.emplace_back();
+      int64_t c = 1;
+      for (const Expr* f : make_args(Kind::Mul, t)) {
+        bool is_pow = f->kind == Kind::Pow;
+        const Expr* x = is_pow ? f->args[0] : f;
+        if (f->kind == Kind::Integer) {
+          c = f->p;
+        } else if (
+            (x->kind == Kind::Symbol ||
+             (x->is_function() && expand_fixed(x))) &&
+            (!is_pow ||
+             (f->args[1]->kind == Kind::Integer && f->args[1]->p > 0))) {
+          powers.emplace_back(x, is_pow ? f->args[1]->p : 1);
+        } else {
+          return nullptr;
+        }
+      }
+      if (c == 0 || c == std::numeric_limits<int64_t>::min()) {
+        return nullptr;
+      }
+      g = std::gcd(g, std::abs(c));
+    }
+  }
+  c10::SmallVector<const Expr*, 4> factors{A.integer(g)};
+  for (const auto& [x, k0] : terms[0]) {
+    int64_t k = k0;
+    for (const Powers& t : terms) {
+      auto it = std::find_if(
+          t.begin(), t.end(), [&](const auto& xk) { return xk.first == x; });
+      k = it == t.end() ? 0 : std::min(k, it->second);
+    }
+    if (k > 0) {
+      factors.push_back(k == 1 ? x : A.pow(x, A.integer(k)));
+    }
+  }
+  return A.mul(factors);
+}
+
+// Monomials, and sums of Integer multiples of symbols and of integer
+// division functions of such expressions: sympy.simplify returns them
+// unchanged.
+bool simplify_fixed(ExprArena& A, const Expr* e) {
+  if (is_monomial(e)) {
+    return true;
+  }
+  auto fixed = [&](const Expr* x) { return simplify_fixed(A, x); };
+  auto terms = make_args(Kind::Add, e);
+  return std::all_of(terms.begin(), terms.end(), [&](const Expr* t) {
+    if (t->kind == Kind::Mul && t->args.size() == 2 &&
+        t->args[0]->kind == Kind::Integer) {
+      t = t->args[1];
+    }
+    switch (t->kind) {
+      case Kind::Integer:
+      case Kind::Symbol:
+        return true;
+      case Kind::FloorDiv:
+      case Kind::CleanDiv:
+        // signsimp negates both args of FloorDiv(-a, -b), which then cancels.
+        if (A.could_extract_minus_sign(t->args[0]) ||
+            A.could_extract_minus_sign(t->args[1])) {
+          return false;
+        }
+        [[fallthrough]];
+      case Kind::Mod:
+      case Kind::PythonMod:
+      case Kind::ModularIndexing:
+        return std::all_of(t->args.begin(), t->args.end(), fixed);
+      default:
+        return false;
+    }
+  });
+}
+
 } // namespace
 
 const char* function_name(Kind k) {
@@ -269,6 +382,8 @@ const char* function_name(Kind k) {
       return "TruncToFloat";
     case Kind::IsNonOverlappingAndDenseIndicator:
       return "IsNonOverlappingAndDenseIndicator";
+    case Kind::ModularIndexing:
+      return "ModularIndexing";
     default:
       throw NativeUnsupported("not a function kind");
   }
@@ -278,7 +393,8 @@ const Expr* ExprArena::function(Kind kind, c10::ArrayRef<const Expr*> args) {
   bool all_numbers = std::all_of(
       args.begin(), args.end(), [](const Expr* a) { return a->is_number(); });
   bool float_fold = all_numbers && kind != Kind::Max && kind != Kind::Min &&
-      kind != Kind::IsNonOverlappingAndDenseIndicator;
+      kind != Kind::IsNonOverlappingAndDenseIndicator &&
+      kind != Kind::ModularIndexing;
   if (!float_fold && std::any_of(args.begin(), args.end(), [](const Expr* a) {
         return a->has_float;
       })) {
@@ -299,6 +415,9 @@ const Expr* ExprArena::function(Kind kind, c10::ArrayRef<const Expr*> args) {
       break;
     case Kind::IsNonOverlappingAndDenseIndicator:
       arity = args.size();
+      break;
+    case Kind::ModularIndexing:
+      arity = 3;
       break;
     default:
       break;
@@ -374,6 +493,9 @@ const Expr* ExprArena::function(Kind kind, c10::ArrayRef<const Expr*> args) {
       break;
     case Kind::IsNonOverlappingAndDenseIndicator:
       r = eval_is_non_overlapping_and_dense(args);
+      break;
+    case Kind::ModularIndexing:
+      r = eval_modular_indexing(args[0], args[1], args[2]);
       break;
     default:
       throw NativeUnsupported("not a function kind");
@@ -486,6 +608,9 @@ const Expr* ExprArena::eval_float_mod(const Expr* p, const Expr* q) {
   auto [p2, q2] = exact(q);
   i128 a = p1 * q2;
   i128 b = p2 * q1;
+  if (b == 0) {
+    throw NativeUnsupported("Modulo by zero");
+  }
   i128 num = a % b;
   if (num != 0 && (num < 0) != (b < 0)) {
     num += b;
@@ -573,12 +698,9 @@ const Expr* ExprArena::eval_floordiv(const Expr* base, const Expr* divisor) {
 
   const Expr* gcd = simple_floordiv_gcd(*this, base, divisor);
   if (gcd == one_ && divisor->kind == Kind::Add) {
-    auto is_wide = [](const Expr* e) {
-      return e->kind == Kind::Add && e->args.size() > 20;
-    };
     // For a wide Add, safe_gcd falls back to simple_floordiv_gcd, which
     // gives 1 again.
-    if (!is_wide(base) && !is_wide(divisor) &&
+    if (!is_wide_add(base) && !is_wide_add(divisor) &&
         !monomial_coprime_to_sum(base, divisor)) {
       throw NativeUnsupported("FloorDiv needs sympy.gcd");
     }
@@ -591,6 +713,81 @@ const Expr* ExprArena::eval_floordiv(const Expr* base, const Expr* divisor) {
       throw NativeUnsupported("FloorDiv needs sympy.simplify");
     }
     return function(Kind::FloorDiv, {b, d});
+  }
+  return nullptr;
+}
+
+const Expr* ExprArena::eval_modular_indexing(
+    const Expr* base,
+    const Expr* divisor,
+    const Expr* modulus) {
+  if (base == zero_ || modulus == one_) {
+    return zero_;
+  }
+  if (base->kind == Kind::Integer && divisor->kind == Kind::Integer &&
+      modulus->kind == Kind::Integer) {
+    if (divisor->p == 0 || modulus->p == 0) {
+      throw NativeUnsupported("division by zero");
+    }
+    i128 r = floordiv128(base->p, divisor->p) % modulus->p;
+    if (r != 0 && (r < 0) != (modulus->p < 0)) {
+      r += modulus->p;
+    }
+    return integer(static_cast<int64_t>(r));
+  }
+  auto safe_gcd = [&](const Expr* p, const Expr* q) {
+    if (is_wide_add(p) || is_wide_add(q)) {
+      return simple_floordiv_gcd(*this, p, q);
+    }
+    const Expr* g = monomial_gcd(*this, p, q);
+    if (g == nullptr) {
+      throw NativeUnsupported("ModularIndexing needs sympy.gcd");
+    }
+    return g;
+  };
+  if (divisor != one_) {
+    const Expr* gcd = safe_gcd(base, divisor);
+    if (gcd != one_) {
+      // sympy.simplify(x / gcd), with gcd dividing every term of x.
+      const Expr* inv = pow(gcd, neg_one_);
+      auto quotient = [&](const Expr* x) {
+        c10::SmallVector<const Expr*, 4> terms;
+        for (const Expr* t : make_args(Kind::Add, x)) {
+          terms.push_back(mul({t, inv}));
+        }
+        const Expr* r = add(terms);
+        if (!simplify_fixed(*this, r)) {
+          throw NativeUnsupported("ModularIndexing needs sympy.simplify");
+        }
+        return r;
+      };
+      return function(
+          Kind::ModularIndexing, {quotient(base), quotient(divisor), modulus});
+    }
+  }
+  if (base->kind == Kind::Add && !is_wide_add(base)) {
+    const Expr* md = mul({modulus, divisor});
+    c10::SmallVector<const Expr*, 4> new_terms;
+    bool all_nonnegative = true;
+    for (const Expr* t : base->args) {
+      if (safe_gcd(t, md) != md) {
+        // Only provably nonnegative terms may stay (triton issue 619).
+        if (ask(t, Fact::nonnegative) != Tri::True) {
+          all_nonnegative = false;
+          break;
+        }
+        new_terms.push_back(t);
+      }
+    }
+    if (new_terms.size() != base->args.size() && all_nonnegative) {
+      const Expr* sum = new_terms.empty() ? zero_ : add(new_terms);
+      return function(Kind::ModularIndexing, {sum, divisor, modulus});
+    }
+  }
+  if (base->kind == Kind::FloorDiv || base->kind == Kind::CleanDiv) {
+    return function(
+        Kind::ModularIndexing,
+        {base->args[0], mul({base->args[1], divisor}), modulus});
   }
   return nullptr;
 }

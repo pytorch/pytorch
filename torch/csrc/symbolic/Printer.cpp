@@ -194,6 +194,7 @@ class StrPrinter {
       case Kind::ToFloat:
       case Kind::TruncToFloat:
       case Kind::IsNonOverlappingAndDenseIndicator:
+      case Kind::ModularIndexing:
         // _print_Function.
         return std::string(function_name(e->kind)) + "(" +
             stringify(e->args, ", ", 0) + ")";
@@ -259,6 +260,7 @@ class StrPrinter {
       case Kind::CleanDiv:
       case Kind::FloatTrueDiv:
       case Kind::IntTrueDiv:
+      case Kind::ModularIndexing:
         // The classes' precedence attribute.
         return 35;
       case Kind::PowByNatural:

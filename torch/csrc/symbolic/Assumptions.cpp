@@ -1379,6 +1379,7 @@ FactKB ExprArena::default_kb(const Expr* e) {
     case Kind::TruncToInt:
     case Kind::RoundToInt:
     case Kind::IsNonOverlappingAndDenseIndicator:
+    case Kind::ModularIndexing:
       return kbs[6];
     case Kind::Mod:
       return kbs[7];
@@ -1525,6 +1526,15 @@ Tri ExprArena::eval_fact(const Expr* e, Fact f) {
           (f == F::nonnegative || f == F::nonpositive)) {
         Fact sign = f == F::nonnegative ? F::positive : F::negative;
         return ask(e->args[1], sign) == Tri::True ? Tri::True : Tri::Unknown;
+      }
+      return Tri::Unknown;
+    case Kind::ModularIndexing:
+      if (f == F::nonnegative) {
+        // fuzzy_eq(p.is_nonnegative, q.is_nonnegative)
+        Tri p = ask(e->args[0], F::nonnegative);
+        Tri q = ask(e->args[1], F::nonnegative);
+        return p == Tri::Unknown || q == Tri::Unknown ? Tri::Unknown
+                                                      : tri(p == q);
       }
       return Tri::Unknown;
     case Kind::FloorDiv:
