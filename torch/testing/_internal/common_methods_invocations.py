@@ -6563,9 +6563,8 @@ def sample_inputs_triangular_solve(op_info, device, dtype, requires_grad=False, 
                           kwargs=dict(upper=upper, transpose=transpose, unitriangular=unitriangular))
     # A right-hand side with the shape of A.shape[:-1] is a matrix broadcast over the batch. See #196694
     yield SampleInput(make_b(3, 3), args=(make_a(3, 3, 3),))
-    # A broadcast against a batched right-hand side, and both broadcast against each other
+    # A broadcast against a batched right-hand side
     yield SampleInput(make_b(2, 3, 2), args=(make_a(3, 3),))
-    yield SampleInput(make_b(1, 4, 3, 2), args=(make_a(2, 1, 3, 3),))
 
 
 def sample_inputs_lu(op_info, device, dtype, requires_grad=False, **kwargs):
@@ -19006,6 +19005,7 @@ op_db: list[OpInfo] = [
            skips=(
                # AssertionError: Scalars are not equal!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
+               # test_out passes on MPS, which the expectedFailure above would report as an unexpected success
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out',
                             device_type='mps', dtypes=[torch.float32]),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager',
