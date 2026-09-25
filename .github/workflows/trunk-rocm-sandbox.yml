@@ -6,6 +6,11 @@ on:
   #  branches:
   #    - main
   #    - release/*
+  # TEMPORARY: remove before merge. trunk-rocm-sandbox has no dedicated ciflow
+  # label, so use the registered ciflow/trunk push tag for PR validation.
+  push:
+    tags:
+      - ciflow/trunk/*
   workflow_dispatch:
   schedule:
     - cron: 0 0,3,6,9,12,15,18,21 * * * # run every 3 hours for regression coverage
@@ -75,7 +80,7 @@ jobs:
 
   linux-noble-rocm-py3_11-test:
     name: linux-noble-rocm-py3.11-mi350
-    uses: ./.github/workflows/_rocm-test.yml
+    uses: ./.github/workflows/_rocm-test-kubernetes.yml
     needs:
       - linux-noble-rocm-py3_11-build
       - target-determination

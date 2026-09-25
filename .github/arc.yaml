@@ -64,13 +64,13 @@ runner_mapping:
 
   # ---- x86 GPU — A10G (g5 family) ----
 
-  linux.g5.4xlarge.nvidia.gpu: l-x86aavx2-29-113-a10g            # g5.4xlarge
+  linux.g5.4xlarge.nvidia.gpu: l-x86aavx2-11-41-a10g            # g5.4xlarge
   linux.g5.12xlarge.nvidia.gpu: l-x86aavx2-45-167-a10g-4         # g5.12xlarge
   linux.g5.48xlarge.nvidia.gpu: l-x86aavx2-189-704-a10g-8        # g5.48xlarge
 
   # ---- x86 GPU — L4 (g6 family) ----
 
-  linux.g6.4xlarge.experimental.nvidia.gpu: l-x86aavx2-29-113-l4 # g6.4xlarge
+  linux.g6.4xlarge.experimental.nvidia.gpu: l-x86aavx2-11-41-l4 # g6.4xlarge
   linux.g6.12xlarge.nvidia.gpu: l-x86aavx2-45-172-l4-4           # g6.12xlarge
 
   # ---- ARM64 — Graviton ----
@@ -109,8 +109,6 @@ runner_mapping:
   linux.rocm.gpu.mi300.4: linux.rocm.gpu.mi300.4
   linux.rocm.gpu.gfx950.1: linux.rocm.gpu.gfx950.1
   linux.rocm.gpu.gfx950.2: linux.rocm.gpu.gfx950.2
-  linux.rocm.gpu.mi350.dpx.1: linux.rocm.gpu.mi350.dpx.1
-  linux.rocm.gpu.mi350.dpx.2: linux.rocm.gpu.mi350.dpx.2
   amd-dpx-linux.rocm.gpu.gfx950.1: amd-dpx-linux.rocm.gpu.gfx950.1
   amd-dpx-linux.rocm.gpu.gfx950.2: amd-dpx-linux.rocm.gpu.gfx950.2
   linux.rocm.gpu.rx7900.1: linux.rocm.gpu.rx7900.1
