@@ -69,7 +69,7 @@ requires_cuda_tma = unittest.skipIf(
 
 requires_python_wrapper_for_aggregates = unittest.skipIf(
     inductor_config.cpp_wrapper,
-    "C++ wrapper not yet supported for aggregate types",
+    "FX / C++ wrapper types not yet supported for aggregate types",
 )
 
 
@@ -337,8 +337,9 @@ class KernelTests(torch._inductor.test_case.TestCase):
     @parametrize("backend", ("eager",))
     @requires_python_wrapper_for_aggregates
     @_assert_no_mutation_fallback
-    def test_triton_kernel_namedtuple_nested_constexpr(self, backend):
-        # All three ways to create a constexpr leaf must survive eager capture.
+    def test_triton_kernel_aggregate_with_tl_constexpr_use(self, backend):
+        # tl.constexpr type should be captured in dynamo and also preserved
+        # with nested types
         import triton
         import triton.language as tl
 
@@ -353,35 +354,28 @@ class KernelTests(torch._inductor.test_case.TestCase):
                 values *= 2
             tl.store(out + offsets, values, mask=mask)
 
-        def fn(x):
+        def fn(x, *, use_value_keyword: bool):
             out = torch.empty_like(x)
             nested_constexpr_kernel[(1,)](
-                Config(x, tl.constexpr("double")),
+                Config(x, tl.constexpr(value="double") if use_value_keyword else tl.constexpr("double")),
                 out,
                 x.numel(),
                 BLOCK_SIZE=16,
             )
             return out
 
+        # tl.constexpr(value) capture
         x = torch.arange(16, dtype=torch.float32, device=GPU_TYPE)
-        actual = torch.compile(fn, backend=backend, fullgraph=True)(x)
+        actual = torch.compile(fn, backend=backend, fullgraph=True)(x, use_value_keyword=False)
         self.assertEqual(actual, x * 2)
 
-        def fn_with_keyword_constexpr(x):
-            out = torch.empty_like(x)
-            nested_constexpr_kernel[(1,)](
-                Config(x, tl.constexpr(value="double")),
-                out,
-                x.numel(),
-                BLOCK_SIZE=16,
-            )
-            return out
-
+        # tl.constexpr(value=value) capture
         actual = torch.compile(
-            fn_with_keyword_constexpr, backend=backend, fullgraph=True
-        )(x)
+            fn, backend=backend, fullgraph=True
+        )(x, use_value_keyword=True)
         self.assertEqual(actual, x * 2)
 
+        # tl.constexpr from outside the graph
         mode = tl.constexpr("double")
 
         def fn_with_existing_constexpr(x):
@@ -424,8 +418,8 @@ class KernelTests(torch._inductor.test_case.TestCase):
     @requires_gpu
     @_assert_no_mutation_fallback
     def test_generate_ttir_namedtuple_nested_constexpr(self):
-        # Fake tensor leaves become real representatives for TTIR, while the
-        # nested constexpr leaf disappears from the native argument list.
+        # Constexpr values are removed from the native argument list for TTIR
+        # so test that nested constexpr values in an aggregate are also removed
         import triton
         import triton.language as tl
 
@@ -480,6 +474,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
             {"config": spec},
         )
 
+        # BLOCK_SIZE and flat_mode are constexpr so they are removed
         self.assertEqual(
             ordered_arg_names,
             ["flat_source", "flat_scale", "flat_bias", "out"],
@@ -497,7 +492,9 @@ class KernelTests(torch._inductor.test_case.TestCase):
     )
     @_assert_no_mutation_fallback
     def test_generate_ttir_namedtuple_with_tma_fake_tensor_leaves(self):
-        # TTIR generation needs representative descriptors, not runtime TMA
+        # Test that tensor descriptors are handled appropriately in an
+        # aggregate type
+        # Also TTIR generation needs representative descriptors, not runtime TMA
         # materialization from the fake backing tensors.
         import triton
         import triton.language as tl
@@ -546,6 +543,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
                 {"config": spec},
             )
 
+        # Tensor descriptors are identified in the aggregate
         self.assertEqual(
             ordered_arg_names,
             [
@@ -562,7 +560,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
         self.assertIn("config.destination", ttir_text)
 
     def test_reconstruct_triton_kernel_args_materializes_tma_first(self):
-        # Replace descriptor leaves before rebuilding their owning NamedTuple.
+        # Replace descriptor leaves before rebuilding their owning container.
         from torch._higher_order_ops import triton_kernel_wrap
 
         spec = triton_kernel_wrap.create_named_tuple_spec(
