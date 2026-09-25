@@ -74,7 +74,6 @@ from torch.testing._internal.common_device_type import (
     e4m3_type,
     instantiate_device_type_tests,
     onlyAccelerator,
-    skipXPUIf,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -9179,7 +9178,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertIsNotNone(opt_f)
 
     @onlyAccelerator
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5321")
     def test_layer_norm_mixed_dtype_aot_eager_decomp_partition_errors(self, device):
         # https://github.com/pytorch/pytorch/issues/151478
         if not torch.get_device_module(device).is_bf16_supported():
