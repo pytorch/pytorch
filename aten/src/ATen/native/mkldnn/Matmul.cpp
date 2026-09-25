@@ -418,8 +418,8 @@ void mkldnn_matmul(
   mat2_ = may_convert_to_default_contiguous_strides(mat2_);
 
   // mkldnn_matmul only proceed CPU tensor
-  const ideep::tensor x = itensor_view_from_dense(mat1_);
-  const ideep::tensor w = itensor_view_from_dense(mat2_);
+  const ideep::tensor x = itensor_view_from_dense(mat1_, /*from_const_data_ptr*/true);
+  const ideep::tensor w = itensor_view_from_dense(mat2_, /*from_const_data_ptr*/true);
   ideep::tensor y = itensor_view_from_dense(result_unsqueezed);
   ideep::matmul_forward::compute(x, w, y, alpha, beta,
       ideep::scale_t(), ideep::scale_t(), ideep::scale_t(), op_attr);
