@@ -30,7 +30,13 @@ from torch._inductor.runtime.triton_heuristics import (
 )
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_cuda import SM80OrLater
-from torch.testing._internal.common_utils import IS_WINDOWS, skipIfRocm, skipIfXpu
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_WINDOWS,
+    skipIfRocm,
+    skipIfXpu,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_XPU_AND_TRITON
 from torch.testing._internal.triton_utils import requires_gpu_and_triton
 from torch.utils._triton import has_triton_tma_device
@@ -925,6 +931,8 @@ class TestStaticTritonCompileResult(TestCase):
 class TestFastCudaLauncher(TestCase):
     """Tests for _FastCudaLauncher vectorcall C extension."""
 
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self):
         super().setUp()
         self.tmp_files = []
@@ -949,16 +957,19 @@ class TestFastCudaLauncher(TestCase):
     def _make_launcher(
         self,
         compiled_kernel: CompiledKernel,
+        device: str,
     ) -> StaticallyLaunchedCudaKernel:
         cubin_file = self.write_cubin_to_tmp(compiled_kernel)
         compiled_kernel._cubin_path = cubin_file
-        result = statically_launched_kernel_by_device(compiled_kernel, GPU_TYPE)
+        result = statically_launched_kernel_by_device(
+            compiled_kernel, torch.device(device).type
+        )
         old_cubin_path = result.cubin_path
         if old_cubin_path is None:
             raise AssertionError
         result.cubin_path = None
         result.reload_cubin_from_raw(old_cubin_path)
-        device_interface = get_interface_for_device(GPU_TYPE)
+        device_interface = get_interface_for_device(torch.device(device).type)
         result.load_kernel(device_interface.current_device())
         return result
 
@@ -974,25 +985,23 @@ class TestFastCudaLauncher(TestCase):
             kernel.function, kernel.num_warps, kernel.shared, kernel.arg_tys, n_scratch
         )
 
-    def test_basic(self):
+    def test_basic(self, device):
         @triton.jit
         def simple_kernel(arg0, arg1):
             x = tl.load(arg0)
             y = arg1
             tl.store(arg0, x + y)
 
-        arg0 = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
+        arg0 = torch.zeros(1, dtype=torch.int32, device=device)
         compiled_kernel = simple_kernel[(1,)](arg0, 5)
-        launcher = self._make_launcher(compiled_kernel)
+        launcher = self._make_launcher(compiled_kernel, device)
         fast = self._make_fast_launcher(launcher)
 
-        new_arg0 = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
-        device_interface = get_interface_for_device(GPU_TYPE)
+        new_arg0 = torch.zeros(1, dtype=torch.int32, device=device)
+        device_interface = get_interface_for_device(torch.device(device).type)
         stream = device_interface.get_raw_stream(device_interface.current_device())
         fast(1, 1, 1, stream, new_arg0, 5)
-        self.assertEqual(
-            new_arg0, torch.tensor([5], dtype=torch.int32, device=GPU_TYPE)
-        )
+        self.assertEqual(new_arg0, torch.tensor([5], dtype=torch.int32, device=device))
 
     def test_float_scalars(self):
         @triton.jit
@@ -1039,7 +1048,7 @@ class TestFastCudaLauncher(TestCase):
         fast(1, 1, 1, stream, new_arg0, scalar, 1.0, 1.0)
         self.assertEqual(new_arg0, expected)
 
-    def test_multiple_tensor_args(self):
+    def test_multiple_tensor_args(self, device):
         """Verify _FastCudaLauncher handles multiple tensor pointer args correctly."""
 
         @triton.jit
@@ -1048,20 +1057,20 @@ class TestFastCudaLauncher(TestCase):
             y = tl.load(b)
             tl.store(out, x + y)
 
-        a = torch.tensor([3], dtype=torch.int32, device=GPU_TYPE)
-        b = torch.tensor([7], dtype=torch.int32, device=GPU_TYPE)
-        out = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
+        a = torch.tensor([3], dtype=torch.int32, device=device)
+        b = torch.tensor([7], dtype=torch.int32, device=device)
+        out = torch.zeros(1, dtype=torch.int32, device=device)
         compiled_kernel = add_kernel[(1,)](a, b, out)
-        launcher = self._make_launcher(compiled_kernel)
+        launcher = self._make_launcher(compiled_kernel, device)
         fast = self._make_fast_launcher(launcher)
 
-        out2 = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
-        device_interface = get_interface_for_device(GPU_TYPE)
+        out2 = torch.zeros(1, dtype=torch.int32, device=device)
+        device_interface = get_interface_for_device(torch.device(device).type)
         stream = device_interface.get_raw_stream(device_interface.current_device())
         fast(1, 1, 1, stream, a, b, out2)
-        self.assertEqual(out2, torch.tensor([10], dtype=torch.int32, device=GPU_TYPE))
+        self.assertEqual(out2, torch.tensor([10], dtype=torch.int32, device=device))
 
-    def test_zero_grid(self):
+    def test_zero_grid(self, device):
         """Verify zero-grid launch is a no-op (kernel does not execute)."""
 
         @triton.jit
@@ -1069,18 +1078,18 @@ class TestFastCudaLauncher(TestCase):
             x = tl.load(arg0)
             tl.store(arg0, x + arg1)
 
-        arg0 = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
+        arg0 = torch.zeros(1, dtype=torch.int32, device=device)
         compiled_kernel = simple_kernel[(1,)](arg0, 5)
-        launcher = self._make_launcher(compiled_kernel)
+        launcher = self._make_launcher(compiled_kernel, device)
         fast = self._make_fast_launcher(launcher)
 
-        target = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
-        device_interface = get_interface_for_device(GPU_TYPE)
+        target = torch.zeros(1, dtype=torch.int32, device=device)
+        device_interface = get_interface_for_device(torch.device(device).type)
         stream = device_interface.get_raw_stream(device_interface.current_device())
         fast(0, 1, 1, stream, target, 99)
-        self.assertEqual(target, torch.tensor([0], dtype=torch.int32, device=GPU_TYPE))
+        self.assertEqual(target, torch.tensor([0], dtype=torch.int32, device=device))
 
-    def test_wrong_arg_count(self):
+    def test_wrong_arg_count(self, device):
         """Verify _FastCudaLauncher raises RuntimeError on argument count mismatch."""
 
         @triton.jit
@@ -1088,17 +1097,17 @@ class TestFastCudaLauncher(TestCase):
             x = tl.load(arg0)
             tl.store(arg0, x + arg1)
 
-        arg0 = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
+        arg0 = torch.zeros(1, dtype=torch.int32, device=device)
         compiled_kernel = simple_kernel[(1,)](arg0, 5)
-        launcher = self._make_launcher(compiled_kernel)
+        launcher = self._make_launcher(compiled_kernel, device)
         fast = self._make_fast_launcher(launcher)
 
-        device_interface = get_interface_for_device(GPU_TYPE)
+        device_interface = get_interface_for_device(torch.device(device).type)
         stream = device_interface.get_raw_stream(device_interface.current_device())
         with self.assertRaises(RuntimeError):
             fast(1, 1, 1, stream, arg0)  # missing arg1
 
-    def test_too_many_args_raises_value_error(self):
+    def test_too_many_args_raises_value_error(self, device):
         """Verify _FastCudaLauncher raises ValueError when nArgs > MAX_ARGS (121)."""
         from torch._C import _FastCudaLauncher
 
@@ -1291,6 +1300,9 @@ class TestFastCudaLauncherCompileResult(TestCase):
             any(results),
             "global-scratch kernels must use the regular static launcher",
         )
+
+
+instantiate_device_type_tests(TestFastCudaLauncher, globals(), only_for=("cuda",))
 
 
 if __name__ == "__main__":
