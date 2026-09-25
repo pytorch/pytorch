@@ -476,7 +476,9 @@ class TestStandaloneInductor(TestCase):
         "torch._inductor.codegen.cuda.compile_utils._nvcc_arch_as_compile_option",
         return_value="100a",
     )
-    def test_aoti_cuda_cmake_uses_multi_arch_gencode_flags(self, _nvcc_arch, _cuda_available):
+    def test_aoti_cuda_cmake_uses_multi_arch_gencode_flags(
+        self, _nvcc_arch, _cuda_available
+    ):
         build_option = BuildOptionsBase(compiler="c++")
         with tempfile.TemporaryDirectory() as tmp_dir:
             cmake_path = os.path.join(tmp_dir, "CMakeLists.txt")
@@ -486,9 +488,7 @@ class TestStandaloneInductor(TestCase):
                 output_dir=tmp_dir,
                 BuildOption=build_option,
             )
-            cuda_arch_patch = (
-                {"cuda.arch": "80"} if torch.version.hip is None else {}
-            )
+            cuda_arch_patch = {"cuda.arch": "80"} if torch.version.hip is None else {}
             with config.patch(cuda_arch_patch):
                 cpp_builder.save_compile_cmd_to_cmake(cmake_path, "cuda")
             with open(cmake_path) as f:
