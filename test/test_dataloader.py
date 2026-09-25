@@ -3056,11 +3056,11 @@ class TestDataLoaderDevice(TestCase):
 
 
 class IntegrationTestDataLoaderDataPipe(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     r"""
     Verify the behavior of a certain ``DataPipes`` with ``DataLoader``
     """
-
-    hw_classification = HardwareClassification.GENERIC
 
     def test_shuffler_iterdatapipe(self):
         r"""
@@ -3748,7 +3748,7 @@ def collate_into_packed_sequence_batch_first(batch):
     "fork is not supported. Dying (set die_after_fork=0 to override)",
 )
 class TestCustomPinFn(TestCase):
-    hw_classification = HardwareClassification.GENERIC
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def setUp(self):
         super().setUp()
@@ -3757,7 +3757,7 @@ class TestCustomPinFn(TestCase):
         self.dataset = TensorDataset(inps, tgts)
 
     @unittest.skipIf(not TEST_PIN_MEMORY, "pin_memory requires accelerator")
-    def test_custom_batch_pin(self):
+    def test_custom_batch_pin(self, device):
         test_cases = [
             (collate_wrapper, self_module.SimpleCustomBatch),
             (collate_into_packed_sequence, torch.nn.utils.rnn.PackedSequence),
@@ -3775,7 +3775,7 @@ class TestCustomPinFn(TestCase):
                 self.assertTrue(sample.is_pinned())
 
     @unittest.skipIf(not TEST_PIN_MEMORY, "pin_memory requires accelerator")
-    def test_custom_batch_pin_worker(self):
+    def test_custom_batch_pin_worker(self, device):
         test_cases = [
             (collate_wrapper, self_module.SimpleCustomBatch),
             (collate_into_packed_sequence, torch.nn.utils.rnn.PackedSequence),
@@ -4048,6 +4048,7 @@ class TestOutOfOrderDataLoader(TestCase):
 
 
 instantiate_device_type_tests(TestDataLoaderDevice, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestCustomPinFn, globals(), except_for=["cpu"])
 
 
 if __name__ == "__main__":
