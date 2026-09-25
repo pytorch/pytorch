@@ -2317,6 +2317,25 @@ def _pointwise_chain_can_fuse_to_output(node: torch.fx.Node) -> bool:
     return reaches_output and has_pointwise
 
 
+def _normalized_scaled_mm(
+    match: Match,
+) -> tuple[torch.fx.Node, dict[str, Any]] | None:
+    scaled_mm = next(
+        node
+        for node in match.nodes
+        if node.op == "call_function" and node.target is aten._scaled_mm.default
+    )
+    from torch.fx.operator_schemas import normalize_function
+
+    normalized = normalize_function(
+        scaled_mm.target,
+        scaled_mm.args,
+        scaled_mm.kwargs,
+        normalize_to_only_use_kwargs=True,
+    )
+    return None if normalized is None else (scaled_mm, normalized.kwargs)
+
+
 def _can_fold_scaled_mm_output_scale(match: Match) -> bool:
     """Whether ``_scaled_mm(...) * scale`` can use its native output scale.
 
@@ -2336,17 +2355,22 @@ def _can_fold_scaled_mm_output_scale(match: Match) -> bool:
     if not _use_autotune_backend("NVGEMM"):
         return False
 
+    normalized = _normalized_scaled_mm(match)
+    if normalized is None:
+        return False
+    scaled_mm, normalized_kwargs = normalized
+
     # The native alpha argument is currently implemented only by the vendored
     # NVFP4 provider.  The packed FP4 dtype is shared with MXFP4, so include the
     # scale dtype in the recipe check instead of keying on the operands alone.
     expected_dtypes = {
-        "mat_a": torch.float4_e2m1fn_x2,
-        "mat_b": torch.float4_e2m1fn_x2,
+        "input": torch.float4_e2m1fn_x2,
+        "mat2": torch.float4_e2m1fn_x2,
         "scale_a": torch.float8_e4m3fn,
         "scale_b": torch.float8_e4m3fn,
     }
     for name, expected_dtype in expected_dtypes.items():
-        arg = match.kwargs[name]
+        arg = normalized_kwargs[name]
         value = arg.meta.get("val") if isinstance(arg, torch.fx.Node) else None
         if not isinstance(value, torch.Tensor) or value.dtype != expected_dtype:
             return False
@@ -2363,26 +2387,8 @@ def _can_fold_scaled_mm_output_scale(match: Match) -> bool:
     ):
         return False
 
-    scaled_mm = next(
-        (
-            node
-            for node in match.nodes
-            if node.op == "call_function" and node.target is aten._scaled_mm.default
-        ),
-        None,
-    )
-    if scaled_mm is None:
-        return False
     if config._micro_pipeline_tp and is_micro_pipeline_tp_candidate(scaled_mm):
         return False
-    # Replacing only the multiply would duplicate the GEMM when its unscaled
-    # result is also consumed elsewhere in the graph.
-    if len(scaled_mm.users) != 1:
-        return False
-    target = scaled_mm.target
-    if not callable(target):
-        return False
-
     # Leave a fully lowerable pointwise chain to scheduler epilogue fusion.
     # Fold early when that chain reaches an opaque/non-pointwise consumer,
     # since the scheduler cannot carry the scale across that boundary.
@@ -2390,61 +2396,20 @@ def _can_fold_scaled_mm_output_scale(match: Match) -> bool:
     if _pointwise_chain_can_fuse_to_output(output):
         return False
 
-    from torch.fx.operator_schemas import normalize_function
-
-    normalized = normalize_function(
-        target,
-        scaled_mm.args,
-        scaled_mm.kwargs,
-        normalize_to_only_use_kwargs=True,
-    )
-    if normalized is None:
-        return False
     return (
-        normalized.kwargs["bias"] is None
-        and normalized.kwargs["scale_result"] is None
-        and not normalized.kwargs["use_fast_accum"]
+        normalized_kwargs["bias"] is None
+        and normalized_kwargs["scale_result"] is None
+        and not normalized_kwargs["use_fast_accum"]
     )
 
 
-_scaled_mm_without_output_scale = CallFunction(
-    aten._scaled_mm.default,
-    KeywordArg("mat_a"),
-    KeywordArg("mat_b"),
-    KeywordArg("scale_a"),
-    KeywordArg("scale_b"),
-    None,
-    None,
-    KeywordArg("out_dtype"),
-)
-
-_scaled_mm_without_output_scale_fast_accum = CallFunction(
-    aten._scaled_mm.default,
-    KeywordArg("mat_a"),
-    KeywordArg("mat_b"),
-    KeywordArg("scale_a"),
-    KeywordArg("scale_b"),
-    None,
-    None,
-    KeywordArg("out_dtype"),
-    KeywordArg("use_fast_accum"),
-)
+_scaled_mm_call = CallFunctionVarArgs(aten._scaled_mm.default)
 
 
 @register_graph_pattern(
     CallFunction(
         aten.mul.Tensor,
-        _scaled_mm_without_output_scale,
-        KeywordArg("output_scale"),
-    ),
-    # pyrefly: ignore [bad-argument-type]
-    pass_dict=pass_patterns[1],
-    extra_check=_can_fold_scaled_mm_output_scale,
-)
-@register_graph_pattern(
-    CallFunction(
-        aten.mul.Tensor,
-        _scaled_mm_without_output_scale_fast_accum,
+        _scaled_mm_call,
         KeywordArg("output_scale"),
     ),
     # pyrefly: ignore [bad-argument-type]
@@ -2455,17 +2420,7 @@ _scaled_mm_without_output_scale_fast_accum = CallFunction(
     CallFunction(
         aten.mul.Tensor,
         KeywordArg("output_scale"),
-        _scaled_mm_without_output_scale,
-    ),
-    # pyrefly: ignore [bad-argument-type]
-    pass_dict=pass_patterns[1],
-    extra_check=_can_fold_scaled_mm_output_scale,
-)
-@register_graph_pattern(
-    CallFunction(
-        aten.mul.Tensor,
-        KeywordArg("output_scale"),
-        _scaled_mm_without_output_scale_fast_accum,
+        _scaled_mm_call,
     ),
     # pyrefly: ignore [bad-argument-type]
     pass_dict=pass_patterns[1],
@@ -2473,13 +2428,9 @@ _scaled_mm_without_output_scale_fast_accum = CallFunction(
 )
 def _fold_scaled_mm_output_scale(
     match: Match,
-    mat_a,
-    mat_b,
-    scale_a,
-    scale_b,
-    out_dtype,
+    *_args,
     output_scale,
-    use_fast_accum=False,
+    **_kwargs,
 ) -> None:
     """Move a scalar multiply into ``aten._scaled_mm.scale_result``.
 
@@ -2508,16 +2459,20 @@ def _fold_scaled_mm_output_scale(
         )
 
     counters["inductor"]["scaled_mm_output_scale_fused"] += 1
+    normalized = _normalized_scaled_mm(match)
+    if normalized is None:
+        raise AssertionError("matched _scaled_mm arguments could not be normalized")
+    _, normalized_kwargs = normalized
     replacement_nodes = match.replace_by_example(
         repl,
         [
-            mat_a,
-            mat_b,
-            scale_a,
-            scale_b,
-            out_dtype,
+            normalized_kwargs["input"],
+            normalized_kwargs["mat2"],
+            normalized_kwargs["scale_a"],
+            normalized_kwargs["scale_b"],
+            normalized_kwargs["out_dtype"],
             output_scale,
-            use_fast_accum,
+            normalized_kwargs["use_fast_accum"],
         ],
     )
     scaled_mm = next(

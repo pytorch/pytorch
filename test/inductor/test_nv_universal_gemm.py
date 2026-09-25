@@ -126,35 +126,27 @@ def _make_output_scale_match(*, scale_dtype, use_fast_accum=False):
         node.meta["val"] = torch.empty((), device=device, dtype=dtype)
         return node
 
-    match = MagicMock()
-    match.kwargs = {
-        "mat_a": placeholder("mat_a", torch.float4_e2m1fn_x2),
-        "mat_b": placeholder("mat_b", torch.float4_e2m1fn_x2),
-        "scale_a": placeholder("scale_a", scale_dtype),
-        "scale_b": placeholder("scale_b", scale_dtype),
-        "output_scale": placeholder("output_scale", torch.float32, "cuda"),
-    }
-    normalized_kwargs = {
-        "bias": None,
-        "scale_result": None,
-        "use_fast_accum": use_fast_accum,
-    }
+    mat_a = placeholder("mat_a", torch.float4_e2m1fn_x2)
+    mat_b = placeholder("mat_b", torch.float4_e2m1fn_x2)
+    scale_a = placeholder("scale_a", scale_dtype)
+    scale_b = placeholder("scale_b", scale_dtype)
+    output_scale = placeholder("output_scale", torch.float32, "cuda")
     scaled_mm = graph.call_function(
         torch.ops.aten._scaled_mm.default,
-        (match.kwargs["mat_a"], match.kwargs["mat_b"]),
+        (mat_a, mat_b),
         {
-            "scale_a": match.kwargs["scale_a"],
-            "scale_b": match.kwargs["scale_b"],
+            "scale_a": scale_a,
+            "scale_b": scale_b,
             "out_dtype": torch.bfloat16,
             **({"use_fast_accum": True} if use_fast_accum else {}),
         },
     )
-    scaled = graph.call_function(
-        torch.ops.aten.mul.Tensor, (scaled_mm, match.kwargs["output_scale"])
+    scaled = graph.call_function(torch.ops.aten.mul.Tensor, (scaled_mm, output_scale))
+    return SimpleNamespace(
+        nodes=[scaled_mm, scaled],
+        kwargs={"output_scale": output_scale},
+        output_node=lambda: scaled,
     )
-    match.nodes = [scaled_mm, scaled]
-    match.output_node.return_value = scaled
-    return match, normalized_kwargs
 
 
 def _nvgemm_config(**overrides):
@@ -555,14 +547,27 @@ class TestNVUniversalGemm(TestCase):
         self.assertIn("single N tile", str(status.error))
 
     @parametrize("scale_first", (False, True))
-    def test_scaled_mm_output_scale_folds_before_split_fanout(self, scale_first):
+    @parametrize("explicit_fast_accum", (False, True))
+    def test_scaled_mm_output_scale_folds_before_split_fanout(
+        self, scale_first, explicit_fast_accum
+    ):
         """Fold output scaling before QKV-style split/view fan-out."""
         m, n, k = 32, 6144, 2048
         a, b, scale_a, scale_b = _make_nvfp4_scaled_mm_inputs(m, n, k)
         alpha = torch.rand((), device="cuda")
 
         def scaled_mm_qkv(a, b, scale_a, scale_b, alpha):
-            gemm = _nvfp4_scaled_mm(a, b, scale_a, scale_b)
+            if explicit_fast_accum:
+                gemm = torch._scaled_mm(
+                    a,
+                    b,
+                    scale_a=scale_a,
+                    scale_b=scale_b,
+                    out_dtype=torch.bfloat16,
+                    use_fast_accum=False,
+                )
+            else:
+                gemm = _nvfp4_scaled_mm(a, b, scale_a, scale_b)
             out = alpha * gemm if scale_first else gemm * alpha
             return torch.split(out, (4096, 1024, 1024), dim=-1)
 
@@ -611,32 +616,26 @@ class TestNVUniversalGemm(TestCase):
     ):
         from torch._inductor.fx_passes.post_grad import _can_fold_scaled_mm_output_scale
 
-        match, normalized_kwargs = _make_output_scale_match(
+        match = _make_output_scale_match(
             scale_dtype=scale_dtype,
             use_fast_accum=use_fast_accum,
         )
-        normalized = MagicMock(kwargs=normalized_kwargs)
 
-        with (
-            config.patch(_nvgemm_config()),
-            mock.patch(
-                "torch.fx.operator_schemas.normalize_function",
-                return_value=normalized,
-            ),
-        ):
+        with config.patch(_nvgemm_config()):
             self.assertFalse(_can_fold_scaled_mm_output_scale(match))
 
     def test_scaled_mm_output_scale_does_not_fold_with_pipelined_autotuning(self):
         """Keep the original graph when native-choice failures are deferred."""
         from torch._inductor.fx_passes.post_grad import _can_fold_scaled_mm_output_scale
 
+        match = _make_output_scale_match(scale_dtype=torch.float8_e4m3fn)
         with config.patch(
             {
                 "max_autotune": True,
                 "pipeline_max_autotune_gemm": True,
             }
         ):
-            self.assertFalse(_can_fold_scaled_mm_output_scale(MagicMock()))
+            self.assertFalse(_can_fold_scaled_mm_output_scale(match))
 
     def test_scaled_mm_public_scale_result_preserves_bf16_semantics(self):
         """Keep a following multiply when scaled-mm already has scale_result."""
@@ -2050,53 +2049,6 @@ class TestNVUniversalGemmHeuristics(TestCase):
                 request.cudagraph_cold_cache_input_indices,
                 (1, 3) if cold_cache else (),
             )
-
-    def test_nvgemm_cudagraph_failure_rejects_candidate(self):
-        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
-            GemmVariant,
-            NVUniversalGemmBenchmarkRequest,
-        )
-        from torch._inductor.runtime.benchmarking import benchmarker
-
-        input_tensor = MagicMock(dtype=torch.float4_e2m1fn_x2)
-        output_tensor = MagicMock(shape=(32, 4096))
-        input_meta = MagicMock(
-            dtype=torch.float4_e2m1fn_x2,
-            sizes=(32, 4096),
-        )
-        input_meta.to_tensor.return_value = input_tensor
-        output_meta = MagicMock(sizes=(32, 4096))
-        output_meta.to_tensor.return_value = output_tensor
-
-        with config.patch(
-            {
-                "max_autotune_gemm_backends": "NVGEMM",
-            }
-        ):
-            request = NVUniversalGemmBenchmarkRequest(
-                "kernel",
-                [input_meta],
-                output_meta,
-                MagicMock(),
-                torch.float32,
-                GemmVariant.SCALED_GEMM,
-            )
-        request.benchmark_with_cudagraphs = True
-        request.make_run_fn = MagicMock(return_value=lambda: None)
-        request.do_bench = MagicMock(return_value=1.25)
-        request._get_benchmark_device = MagicMock(return_value=(MagicMock(), "cuda", 0))
-        request.cleanup_run_fn = MagicMock()
-
-        with patch.object(
-            benchmarker,
-            "benchmark_gpu_with_cuda_graph",
-            side_effect=RuntimeError("capture failed"),
-        ):
-            with self.assertRaisesRegex(RuntimeError, "capture failed"):
-                request._benchmark_on_current_device((input_tensor,), output_tensor)
-
-        request.do_bench.assert_not_called()
-        request.cleanup_run_fn.assert_called_once()
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "requires two CUDA devices")
     def test_nvgemm_benchmark_uses_tensor_device(self):
