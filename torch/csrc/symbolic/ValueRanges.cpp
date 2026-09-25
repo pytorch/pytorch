@@ -111,8 +111,7 @@ class Analysis {
     return {a_.boolean(false), a_.boolean(true)};
   }
   bool contains_zero(const ValueRanges& r) {
-    require_int(r);
-    return !lt(zero(), r.lower) && !lt(r.upper, zero());
+    return contains(r, zero());
   }
 
   const Expr* keep_float(const Expr* r, const Expr* x, const Expr* y);
@@ -121,10 +120,11 @@ class Analysis {
     return num_add(x, a_.neg(y));
   }
   const Expr* num_abs(const Expr* x) {
-    return is_int_oo(x) ? a_.int_oo() : x->p < 0 ? a_.neg(x) : x;
+    return sign(x) < 0 ? a_.neg(x) : x;
   }
   const Expr* safe_mul(const Expr* x, const Expr* y);
   const Expr* safe_pow(const Expr* base, const Expr* exp);
+  const Expr* safe_pow_abs(const Expr* base, int64_t exp);
   const Expr* pow_by_natural_fn(const Expr* base, const Expr* exp);
 
   ValueRanges default_symbol_range(const Expr* s);
@@ -243,7 +243,38 @@ const Expr* Analysis::safe_pow(const Expr* base, const Expr* exp) {
     return base == a_.neg_int_oo() && exp->p % 2 == 1 ? a_.neg_int_oo()
                                                         : a_.int_oo();
   }
-  return a_.function(Kind::PowByNatural, {base, exp});
+  if (base->kind == Kind::Integer) {
+    return a_.function(Kind::PowByNatural, {base, exp});
+  }
+  if (sign(base) < 0) {
+    const Expr* r = safe_pow_abs(a_.neg(base), exp->p);
+    return exp->p % 2 == 0 ? r : a_.neg(r);
+  }
+  return safe_pow_abs(base, exp->p);
+}
+
+// functions._safe_pow: repeated squaring with sympy products, int_oo past
+// sys.maxsize.
+const Expr* Analysis::safe_pow_abs(const Expr* base, int64_t exp) {
+  if (exp == 0) {
+    return one();
+  }
+  const Expr* half = safe_pow_abs(base, exp / 2);
+  if (half == a_.int_oo()) {
+    return half;
+  }
+  const Expr* max_size = a_.integer(std::numeric_limits<int64_t>::max());
+  const Expr* r = a_.mul({half, half});
+  if (lt(max_size, r)) {
+    return a_.int_oo();
+  }
+  if (exp % 2 == 1) {
+    r = a_.mul({r, base});
+    if (lt(max_size, r)) {
+      return a_.int_oo();
+    }
+  }
+  return r;
 }
 
 // PowByNatural(base, exp) for base >= 1 and exp >= 0.
@@ -423,7 +454,8 @@ const Expr* Analysis::floor_or_ceiling(Kind kind, const Expr* x) {
 }
 
 ValueRanges Analysis::floordiv(const ValueRanges& x, const ValueRanges& y) {
-  require_int(x);
+  require_not_bool(x);
+  require_not_bool(y);
   if (contains_zero(y)) {
     bool x_nonneg = !lt(x.lower, zero());
     bool x_nonpos = !lt(zero(), x.upper);
@@ -437,28 +469,26 @@ ValueRanges Analysis::floordiv(const ValueRanges& x, const ValueRanges& y) {
     }
     return unknown_int();
   }
-  const Expr* lo = nullptr;
-  const Expr* hi = nullptr;
-  for (const Expr* xb : {x.lower, x.upper}) {
-    for (const Expr* yb : {y.lower, y.upper}) {
-      // FloorDiv is nan when both sides are infinite.
-      const Expr* r = is_int_oo(xb) && is_int_oo(yb)
-          ? (sign(xb) * sign(yb) > 0 ? a_.int_oo() : a_.neg_int_oo())
-          : a_.function(Kind::FloorDiv, {xb, yb});
-      lo = lo == nullptr ? r : min_num(lo, r);
-      hi = hi == nullptr ? r : max_num(hi, r);
+  auto quotient = [this](const Expr* p, const Expr* q) {
+    // FloorDiv is nan when both sides are infinite.
+    if (is_infinite(p) && is_infinite(q)) {
+      return sign(p) * sign(q) > 0 ? a_.int_oo() : a_.neg_int_oo();
     }
-  }
-  return {lo, hi};
+    return a_.function(Kind::FloorDiv, {p, q});
+  };
+  return coordinatewise_monotone_map(x, y, quotient);
 }
 
 // C semantics, like SymPyValueRangeAnalysis.mod.
 ValueRanges Analysis::mod(const ValueRanges& x, const ValueRanges& y) {
-  require_int(x);
+  require_not_bool(x);
+  require_not_bool(y);
   if (contains_zero(y)) {
     return unknown_int();
   }
   if (y.is_singleton()) {
+    require_int(x);
+    require_int(y);
     if (is_int_oo(y.lower)) {
       throw NativeUnsupported("int_oo in Mod");
     }
@@ -492,24 +522,25 @@ ValueRanges Analysis::mod(const ValueRanges& x, const ValueRanges& y) {
   // cls.abs(y).upper - 1; 0 is not in y, so abs is a monotone map.
   const Expr* upper =
       num_sub(max_num(num_abs(y.lower), num_abs(y.upper)), one());
-  return {a_.neg(upper), upper};
+  return make_value_range(a_, a_.neg(upper), upper);
 }
 
 ValueRanges Analysis::python_mod(const ValueRanges& x, const ValueRanges& y) {
-  require_int(x);
-  require_int(y);
+  require_not_bool(x);
+  require_not_bool(y);
   if (!lt(x.lower, zero()) && !lt(y.lower, zero())) {
     return mod(x, y);
   }
-  return {
+  return make_value_range(
+      a_,
       lt(y.lower, zero()) ? num_add(y.lower, one()) : zero(),
-      lt(zero(), y.upper) ? num_sub(y.upper, one()) : zero()};
+      lt(zero(), y.upper) ? num_sub(y.upper, one()) : zero());
 }
 
 ValueRanges Analysis::pow_by_natural(
     const ValueRanges& x,
     const ValueRanges& y) {
-  require_int(x);
+  require_not_bool(x);
   require_int(y);
   if (x.is_singleton() && y.is_singleton()) {
     const Expr* r = safe_pow(x.lower, y.lower);
@@ -518,9 +549,10 @@ ValueRanges Analysis::pow_by_natural(
   if (!lt(x.lower, one())) {
     // y & ValueRanges(0, int_oo)
     ValueRanges exp(max_num(y.lower, zero()), y.upper);
-    return {
+    return make_value_range(
+        a_,
         pow_by_natural_fn(x.lower, exp.lower),
-        pow_by_natural_fn(x.upper, exp.upper)};
+        pow_by_natural_fn(x.upper, exp.upper));
   }
   if (y.is_singleton()) {
     const Expr* l = safe_pow(x.lower, y.lower);
@@ -530,7 +562,9 @@ ValueRanges Analysis::pow_by_natural(
     }
     // convex_min_zero_map
     if (contains_zero(x)) {
-      return {zero(), max_num(l, u)};
+      const Expr* upper = max_num(l, u);
+      bool is_float = upper->kind == Kind::Float;
+      return {is_float ? a_.float_number(0.0) : zero(), upper};
     }
     return {min_num(l, u), max_num(l, u)};
   }

@@ -2354,6 +2354,55 @@ class TestNativeValueRanges(TestCase):
                     answered += self.check(f(zf, zg), ranges) is not None
         self.assertGreater(answered, len(pairs) ** 2)
 
+    def test_float_int_handlers_known(self):
+        half, oo, zg = sympy.Rational(1, 2), sympy.oo, sympy.Symbol("zg", real=True)
+        cases = [
+            (zf**2, {zf: (half, 3 * half)}, (half**2, 9 * half**2)),
+            (zf**2, {zf: (-half, 3 * half)}, (0, 9 * half**2)),
+            (zf**2, {zf: (-0.5, 1.5)}, (0.0, 2.25)),
+            (zf**3, {zf: (-0.5, 1.5)}, (-0.125, 3.375)),
+            (zf**2, {zf: (-oo, oo)}, (0, int_oo)),
+            (zf**3, {}, (-int_oo, int_oo)),
+            (zf**2, {zf: (half, half)}, (half**2, half**2)),
+            (Mod(u0, zg), {u0: (1, 7), zg: (half, 2)}, (-1, 1)),
+            (Mod(u0, zg), {zg: (2.5, oo)}, (-oo, oo)),
+            (Mod(u0, zg), {zg: (-0.5, 2.0)}, (-int_oo, int_oo)),
+            (Mod(u0, zg), {zg: (0.25, 0.5)}, None),
+            (FloorDiv(u0, zg), {u0: (1, 7), zg: (0.0, 2.0)}, (0, int_oo)),
+            (FloorDiv(zg, u0), {zg: (-oo, -0.5), u0: (-3, 0)}, (0, int_oo)),
+        ]
+        for e, ranges, want in cases:
+            ranges = {s: tuple(map(sympy.sympify, r)) for s, r in ranges.items()}
+            got = self.check(e, ranges)
+            msg = f"{e} {ranges}"
+            if want is None:
+                self.assertIsNone(got, msg)
+            else:
+                self.assertIsNotNone(got, msg)
+                want = tuple(map(sympy.sympify, want))
+                self.assertEqual((got.lower, got.upper), want, msg)
+
+    def test_float_int_handler_ops(self):
+        zg = sympy.Symbol("zg", real=True)
+        half, m7_2 = sympy.Rational(1, 2), sympy.Rational(-7, 2)
+        nums = [-3, 0, 1, 2, half, m7_2, -0.5, 1.5, 0.0]
+        nums = [*map(sympy.sympify, nums), int_oo, -int_oo, sympy.oo, -sympy.oo]
+        pairs = [(lo, hi) for lo in nums for hi in nums if lo <= hi]
+        int_pairs = [(lo, hi) for lo, hi in pairs if lo.is_integer and hi.is_integer]
+        answered = 0
+        for x in pairs:
+            for n in range(4):
+                answered += self.check(zf**n, {zf: x}) is not None
+            for y in int_pairs:
+                answered += self.check(PowByNatural(zf, u0), {zf: x, u0: y}) is not None
+                answered += self.check(FloorDiv(u0, zf), {zf: x, u0: y}) is not None
+                answered += self.check(Mod(u0, zf), {zf: x, u0: y}) is not None
+            for y in pairs:
+                ranges = {zf: x, zg: y}
+                for f in [FloorDiv, Mod]:
+                    answered += self.check(f(zf, zg), ranges) is not None
+        self.assertGreater(answered, len(pairs) ** 2)
+
     @parametrize("seed", range(4))
     def test_float_fuzz(self, seed):
         rng = random.Random(seed)
