@@ -35,13 +35,10 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
-    getRocmVersion,
     instantiate_parametrized_tests,
     IS_WINDOWS,
-    isRocmArchAnyOf,
     lazy_skip_if,
     load_tests,
-    MI350_ARCH,
     NoTest,
     parametrize,
     requires_cuda_p2p_access,
@@ -63,16 +60,6 @@ NCCL_SYMMEM_COMPILED = getattr(
     lambda: False,
 )()
 
-# The symmetric-memory defect that motivates a ROCm floor on the classes below
-# only reproduced on MI350, and was fixed in ROCm 10.1. Gating on the pair keeps
-# MI300 and MI200 covered on older ROCm instead of skipping every ROCm runner.
-skip_if_mi350_rocm_lt_10_1 = lazy_skip_if(
-    lambda: TEST_WITH_ROCM
-    and torch.cuda.device_count() > 0
-    and isRocmArchAnyOf(MI350_ARCH)
-    and getRocmVersion() < (10, 1),
-    "MI350 symmetric memory requires ROCm 10.1 or newer",
-)
 skip_if_rccl_symmem_not_compiled = skip_but_pass_in_sandcastle_if(
     TEST_WITH_ROCM and not NCCL_SYMMEM_COMPILED,
     "RCCL symmetric memory was disabled at build time: RCCL is older than "
@@ -81,6 +68,10 @@ skip_if_rccl_symmem_not_compiled = skip_but_pass_in_sandcastle_if(
 skip_if_rccl_lt_2_30_4 = skip_but_pass_in_sandcastle_if(
     TEST_WITH_ROCM and nccl.version() < (2, 30, 4),
     "RCCL host device APIs require RCCL 2.30.4 or newer",
+)
+skip_if_rccl_lt_2_31_2 = skip_but_pass_in_sandcastle_if(
+    TEST_WITH_ROCM and nccl.version() < (2, 31, 2),
+    "RCCL one-sided signal ops are validated on RCCL 2.31.2 or newer",
 )
 
 
@@ -293,7 +284,6 @@ class TestNCCL(TestCase):
 
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
-@skip_if_mi350_rocm_lt_10_1
 @skip_if_rccl_lt_2_30_4
 @skip_if_rccl_symmem_not_compiled
 class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
@@ -442,7 +432,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
             handle.barrier(channel=max_channel)
         handle.barrier(channel=max_channel - 1)
 
-    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
+    @skip_if_rccl_lt_2_31_2
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @requires_nccl_version((2, 29), "NCCL one-sided host API support from nccl 2.29")
     @skip_if_lt_x_gpu(2)
@@ -1177,7 +1167,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
                     msg=f"rank {self.rank}: out[:, {j}, :] should be peer {j}'s row block",
                 )
 
-    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
+    @skip_if_rccl_lt_2_31_2
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @requires_nccl_version((2, 29), "NCCL one-sided host API support from nccl 2.29")
     @skip_if_lt_x_gpu(2)
@@ -1326,7 +1316,6 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
 
 @requires_cuda_p2p_access()
-@skip_if_mi350_rocm_lt_10_1
 @skip_if_rccl_symmem_not_compiled
 class NCCLSymmetricMemoryNccl2Test(MultiProcContinuousTest):
     """NCCL symmetric memory over an nccl2-backed process group.
@@ -1420,7 +1409,6 @@ class NCCLSymmetricMemoryNccl2Test(MultiProcContinuousTest):
             )
 
 
-@skip_if_mi350_rocm_lt_10_1
 class NCCLSymmetricMemoryNcclLazyTest(NCCLSymmetricMemoryNccl2Test):
     backend_name = "nccl-lazy"
 
@@ -1590,7 +1578,6 @@ class SymmMemCftHandleTest(MultiProcessTestCase):
 
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
-@skip_if_mi350_rocm_lt_10_1
 @skip_but_pass_in_sandcastle_if(
     not TEST_WITH_ROCM, "ROCm-specific symmetric-memory lifecycle test"
 )
@@ -1905,7 +1892,6 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
 
 
 @requires_cuda_p2p_access()
-@skip_if_mi350_rocm_lt_10_1
 @skip_but_pass_in_sandcastle_if(
     not TEST_WITH_ROCM, "ROCm-specific symmetric-memory capability gating test"
 )
@@ -2002,7 +1988,6 @@ class NCCLSymmetricMemoryCapabilityGateTest(MultiProcessTestCase):
 
 
 @requires_cuda_p2p_access()
-@skip_if_mi350_rocm_lt_10_1
 @skip_but_pass_in_sandcastle_if(
     not TEST_WITH_ROCM, "ROCm-specific subgroup rendezvous ordering test"
 )
@@ -2072,7 +2057,6 @@ class NCCLSymmetricMemorySubgroupTest(MultiProcessTestCase):
 
 
 @requires_cuda_p2p_access()
-@skip_if_mi350_rocm_lt_10_1
 @skip_if_rccl_symmem_not_compiled
 class NCCLOneSidedOpHandleTypeTest(MultiProcessTestCase):
     """The one-sided ops are schema'd over the SymmetricMemory base class, so a
@@ -2128,7 +2112,6 @@ class NCCLOneSidedOpHandleTypeTest(MultiProcessTestCase):
 
 
 @requires_cuda_p2p_access()
-@skip_if_mi350_rocm_lt_10_1
 @skip_if_rccl_lt_2_30_4
 @skip_if_rccl_symmem_not_compiled
 class NCCLSymmetricMemoryRestartTest(MultiProcContinuousTest):
