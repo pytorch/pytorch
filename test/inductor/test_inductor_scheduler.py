@@ -756,7 +756,7 @@ class TestScheduler(TestCase):
                 (row, feature),
                 (2, child_width),
             )
-            return NestedReduction._prove_sub_parent_translation(
+            return NestedReduction.prove_sub_parent_translation(
                 (source,),
                 consumer,
                 2,
