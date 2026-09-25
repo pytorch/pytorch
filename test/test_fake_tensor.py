@@ -3741,7 +3741,44 @@ class TestFakeTensorSerialization(TestCase):
             self.assertEqual(x.device, y.device)
 
 
-class TestFakeTensorDispatchCache(TestCase):
+class _TestFakeTensorDispatchCacheHelpers:
+    """Cache assertions shared with TestFakeTensorDispatchCacheDevice."""
+
+    def _test_cache_key(self, fm, x, y, z):
+        """
+        Helper for all test_cache_key_* tests below. Assert that the
+        cache keys for inputs x and y are the same, but z is different.
+        """
+        func = aten.add.Tensor
+        state = _CacheKeyState()
+        key_x = fm._cache_key(state, func, [x], {})
+        key_y = fm._cache_key(state, func, [y], {})
+        key_z = fm._cache_key(state, func, [z], {})
+
+        self.assertEqual(key_x, key_y)
+        self.assertNotEqual(key_x, key_z)
+
+    def assertHitsMisses(self, hits, misses):
+        """
+        Helper to assert on the number of recorded hits and misses.
+        """
+        info = FakeTensorMode.cache_info()
+        self.assertEqual(info.hits, hits)
+        self.assertEqual(info.misses, misses)
+
+    def assertBypasses(self, reason, count):
+        """
+        Helper to assert on the number of recorded bypasses.
+        """
+        info = FakeTensorMode.cache_info()
+        if count > 0:
+            self.assertIn(reason, info.bypasses)
+            self.assertEqual(info.bypasses[reason], count)
+        else:
+            self.assertNotIn(reason, info.bypasses)
+
+
+class TestFakeTensorDispatchCache(_TestFakeTensorDispatchCacheHelpers, TestCase):
     def test_shape_env_settings(self):
         """
         Validation that any boolean settings in ShapeEnv are present in the
@@ -3760,20 +3797,6 @@ class TestFakeTensorDispatchCache(TestCase):
         settings = [f.name for f in dataclasses.fields(ShapeEnvSettings)]
         for arg in args:
             self.assertTrue(arg in settings)
-
-    def _test_cache_key(self, fm, x, y, z):
-        """
-        Helper for all test_cache_key_* tests below. Assert that the
-        cache keys for inputs x and y are the same, but z is different.
-        """
-        func = aten.add.Tensor
-        state = _CacheKeyState()
-        key_x = fm._cache_key(state, func, [x], {})
-        key_y = fm._cache_key(state, func, [y], {})
-        key_z = fm._cache_key(state, func, [z], {})
-
-        self.assertEqual(key_x, key_y)
-        self.assertNotEqual(key_x, key_z)
 
     def test_cache_key_dtype(self):
         with FakeTensorMode() as fm:
@@ -3891,25 +3914,6 @@ class TestFakeTensorDispatchCache(TestCase):
 
         self.assertNotEqual(key_x, key_y)
 
-    def assertHitsMisses(self, hits, misses):
-        """
-        Helper to assert on the number of recorded hits and misses.
-        """
-        info = FakeTensorMode.cache_info()
-        self.assertEqual(info.hits, hits)
-        self.assertEqual(info.misses, misses)
-
-    def assertBypasses(self, reason, count):
-        """
-        Helper to assert on the number of recorded bypasses.
-        """
-        info = FakeTensorMode.cache_info()
-        if count > 0:
-            self.assertIn(reason, info.bypasses)
-            self.assertEqual(info.bypasses[reason], count)
-        else:
-            self.assertNotIn(reason, info.bypasses)
-
     def test_cache_hit(self):
         """
         Test that cache hit/miss counters are updated correctly.
@@ -3981,36 +3985,6 @@ class TestFakeTensorDispatchCache(TestCase):
             y = x + 1.0
             self.assertEqual(y.dtype, torch.float32)
             self.assertHitsMisses(1, 2)
-
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_cache_default_device(self):
-        """
-        Test that the default device is respected when serving cached results.
-        """
-        with FakeTensorMode():
-            FakeTensorMode.cache_clear()
-            self.assertHitsMisses(0, 0)
-
-            try:
-                torch.set_default_device("cpu")
-                x = torch.tensor([1, 2])
-                y = x + 1.0
-                self.assertEqual(y.device.type, "cpu")
-                self.assertHitsMisses(0, 1)
-
-                torch.set_default_device("cuda")
-                x = torch.tensor([1, 2])
-                y = x + 1.0
-                self.assertEqual(y.device.type, "cuda")
-                self.assertHitsMisses(0, 2)
-
-                torch.set_default_device("cpu")
-                x = torch.tensor([1, 2])
-                y = x + 1.0
-                self.assertEqual(y.device.type, "cpu")
-                self.assertHitsMisses(1, 2)
-            finally:
-                torch.set_default_device(None)
 
     def test_cache_inplace_op(self):
         """
@@ -4165,66 +4139,6 @@ class TestFakeTensorDispatchCache(TestCase):
                 extract_tensor_metadata(res2),
                 extract_tensor_metadata(res4),
             )
-
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_wrapper_tensor_subclass_different_device(self):
-        class DifferentDeviceTensor(torch.Tensor):
-            @staticmethod
-            def __new__(cls, a):
-                kwargs = {}
-                kwargs["strides"] = a.stride()
-                kwargs["storage_offset"] = a.storage_offset()
-                kwargs["device"] = torch.device("cpu")
-                kwargs["layout"] = a.layout
-                kwargs["requires_grad"] = a.requires_grad
-                kwargs["dtype"] = a.dtype
-                out = torch.Tensor._make_wrapper_subclass(cls, a.size(), **kwargs)
-                return out
-
-            def __init__(self, a):
-                self.inner_tensor = a
-
-            def __repr__(self):
-                return f"DifferentDeviceTensor({repr(self.inner_tensor)})"
-
-            def __tensor_flatten__(self):
-                return ["inner_tensor"], None
-
-            @staticmethod
-            def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
-                if meta is not None:
-                    raise AssertionError(f"expected meta is None, got {meta}")
-                return DifferentDeviceTensor(inner_tensors["inner_tensor"])
-
-            @classmethod
-            def __torch_dispatch__(cls, func, types, args, kwargs):
-                if kwargs is None:
-                    kwargs = {}
-                args = pytree.tree_map_only(
-                    DifferentDeviceTensor, lambda x: x.inner_tensor, args
-                )
-                kwargs = pytree.tree_map_only(
-                    DifferentDeviceTensor, lambda x: x.inner_tensor, kwargs
-                )
-                # Returns unwrapped tensor
-                return func(*args, **kwargs)
-
-        a = torch.ones(2, 2, 768, device="cuda")
-        wrapped_a = DifferentDeviceTensor(a)
-
-        # Outer Tensor is on cpu, inner is on cuda
-        self.assertTrue(wrapped_a.is_cpu)
-        self.assertFalse(wrapped_a.inner_tensor.is_cpu)
-
-        with FakeTensorMode() as fake_mode:
-            fake_wrapped_a = fake_mode.from_tensor(wrapped_a)
-
-        self.assertTrue(fake_wrapped_a.is_cpu)
-        if not isinstance(fake_wrapped_a, DifferentDeviceTensor):
-            raise AssertionError(
-                f"expected DifferentDeviceTensor, got {type(fake_wrapped_a)}"
-            )
-        self.assertFalse(fake_wrapped_a.inner_tensor.is_cpu)
 
     def test__upsample_bilinear2d_aa_backward_dynamic_shapes(self):
         def f(x):
@@ -4547,6 +4461,112 @@ def forward(self, dummy_1):
         FakeTensorMode.cache_clear()
         ep.run_decompositions({})
         self.assertBypasses("unrepresented symbol in output", 2)
+
+
+class TestFakeTensorDispatchCacheDevice(_TestFakeTensorDispatchCacheHelpers, TestCase):
+    """Accelerator-only TestFakeTensorDispatchCache cases (see only_for below)."""
+
+    def test_cache_key_device(self, device):
+        with FakeTensorMode() as fm:
+            x = torch.randn(4, 3)
+            y = torch.randn(4, 3)
+            z = x.to(device=device)
+            self._test_cache_key(fm, x, y, z)
+
+    def test_cache_default_device(self, device):
+        """
+        Test that the default device is respected when serving cached results.
+        """
+        with FakeTensorMode():
+            FakeTensorMode.cache_clear()
+            self.assertHitsMisses(0, 0)
+
+            try:
+                torch.set_default_device("cpu")
+                x = torch.tensor([1, 2])
+                y = x + 1.0
+                self.assertEqual(y.device.type, "cpu")
+                self.assertHitsMisses(0, 1)
+
+                torch.set_default_device(device)
+                x = torch.tensor([1, 2])
+                y = x + 1.0
+                self.assertEqual(y.device.type, self.device_type)
+                self.assertHitsMisses(0, 2)
+
+                torch.set_default_device("cpu")
+                x = torch.tensor([1, 2])
+                y = x + 1.0
+                self.assertEqual(y.device.type, "cpu")
+                self.assertHitsMisses(1, 2)
+            finally:
+                torch.set_default_device(None)
+
+    def test_wrapper_tensor_subclass_different_device(self, device):
+        class DifferentDeviceTensor(torch.Tensor):
+            @staticmethod
+            def __new__(cls, a):
+                kwargs = {}
+                kwargs["strides"] = a.stride()
+                kwargs["storage_offset"] = a.storage_offset()
+                kwargs["device"] = torch.device("cpu")
+                kwargs["layout"] = a.layout
+                kwargs["requires_grad"] = a.requires_grad
+                kwargs["dtype"] = a.dtype
+                out = torch.Tensor._make_wrapper_subclass(cls, a.size(), **kwargs)
+                return out
+
+            def __init__(self, a):
+                self.inner_tensor = a
+
+            def __repr__(self):
+                return f"DifferentDeviceTensor({repr(self.inner_tensor)})"
+
+            def __tensor_flatten__(self):
+                return ["inner_tensor"], None
+
+            @staticmethod
+            def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
+                if meta is not None:
+                    raise AssertionError(f"expected meta is None, got {meta}")
+                return DifferentDeviceTensor(inner_tensors["inner_tensor"])
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args, kwargs):
+                if kwargs is None:
+                    kwargs = {}
+                args = pytree.tree_map_only(
+                    DifferentDeviceTensor, lambda x: x.inner_tensor, args
+                )
+                kwargs = pytree.tree_map_only(
+                    DifferentDeviceTensor, lambda x: x.inner_tensor, kwargs
+                )
+                # Returns unwrapped tensor
+                return func(*args, **kwargs)
+
+        a = torch.ones(2, 2, 768, device=device)
+        wrapped_a = DifferentDeviceTensor(a)
+
+        # Outer Tensor is on cpu, inner is on the accelerator
+        self.assertTrue(wrapped_a.is_cpu)
+        self.assertFalse(wrapped_a.inner_tensor.is_cpu)
+
+        with FakeTensorMode() as fake_mode:
+            fake_wrapped_a = fake_mode.from_tensor(wrapped_a)
+
+        self.assertTrue(fake_wrapped_a.is_cpu)
+        if not isinstance(fake_wrapped_a, DifferentDeviceTensor):
+            raise AssertionError(
+                f"expected DifferentDeviceTensor, got {type(fake_wrapped_a)}"
+            )
+        self.assertFalse(fake_wrapped_a.inner_tensor.is_cpu)
+
+
+instantiate_device_type_tests(
+    TestFakeTensorDispatchCacheDevice,
+    globals(),
+    only_for=("cuda",),
+)
 
 
 class TestFakeTensorPreferDeviceType(TestCase):
