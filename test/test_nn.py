@@ -730,6 +730,38 @@ class TestNN(NNTestCase):
         m.register_parameter('param_name', param3)
         self.assertEqual(m.param_name, param3)
 
+    @parametrize_test("name", ["shadow_method", "shadow_value", "shadow_property"])
+    @parametrize_test("inherited", [False, True])
+    def test_module_assignment_rejects_class_attributes(self, name, inherited):
+        class Parent(nn.Module):
+            shadow_value = None
+
+            def shadow_method(self):
+                return "class method"
+
+            @property
+            def shadow_property(self):
+                return "class property"
+
+        class Child(Parent):
+            pass
+
+        module = Child() if inherited else Parent()
+        with self.assertRaisesRegex(KeyError, f"attribute '{name}' already exists"):
+            setattr(module, name, nn.ReLU())
+        self.assertNotIn(name, dict(module.named_children()))
+
+    def test_module_assignment_replaces_instance_attributes(self):
+        module = nn.Module()
+        module.child = 123
+        first = nn.ReLU()
+        module.child = first
+        self.assertIs(module.child, first)
+        second = nn.Sigmoid()
+        module.child = second
+        self.assertIs(module.child, second)
+        self.assertEqual(dict(module.named_children()), {"child": second})
+
     def test_add_module_raises_error_if_attr_exists(self):
         methods_to_test = ['add_module', 'register_module']
         for fn in methods_to_test:

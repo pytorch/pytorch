@@ -2013,6 +2013,8 @@ class Module:
                     raise AttributeError(
                         "cannot assign module before Module.__init__() call"
                     )
+                if name not in modules and hasattr(type(self), name):
+                    raise KeyError(f"attribute '{name}' already exists")
                 remove_from(
                     self.__dict__,
                     self._parameters,
