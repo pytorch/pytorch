@@ -273,15 +273,14 @@ def prove_identity_translation(
     Returns:
         The proof, or None if the accesses do not share one relation.
     """
-    if isinstance(source_accesses, MemoryDep):
-        sources = (source_accesses,)
-    else:
-        sources = tuple(source_accesses)
-    if not sources or not isinstance(consumer_access, MemoryDep):
+    sources = (
+        (source_accesses,)
+        if isinstance(source_accesses, MemoryDep)
+        else source_accesses
+    )
+    if not sources:
         return None
-    if not all(isinstance(source, MemoryDep) for source in sources):
-        return None
-
+   
     raw_proofs = tuple(
         prove_identity_translation_pair(source, consumer_access, context)
         for source in sources
