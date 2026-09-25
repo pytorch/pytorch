@@ -480,8 +480,15 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
 
     @skip_if_lt_x_gpu(2)
     @parametrize("grouped", [False, True])
-    @parametrize("all_reduce_only", [False, True])
-    def test_grad_dtype_copy_in(self, grouped: bool, all_reduce_only: bool):
+    # HSDP process groups live as long as this class's workers, and too many
+    # exhaust NVLS multicast memory, so HSDP runs with one reduce dtype
+    @parametrize(
+        "all_reduce_only,reduce_dtype",
+        [(False, None), (False, torch.float32), (True, torch.float32)],
+    )
+    def test_grad_dtype_copy_in(
+        self, grouped: bool, all_reduce_only: bool, reduce_dtype: torch.dtype | None
+    ):
         if all_reduce_only and self.world_size != 4:
             self.skipTest("HSDP requires four devices")
         mesh = init_device_mesh(
@@ -502,7 +509,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
 
         model = Model().to(device_type)
         mp_policy = MixedPrecisionPolicy(
-            param_dtype=torch.bfloat16, reduce_dtype=torch.float32
+            param_dtype=torch.bfloat16, reduce_dtype=reduce_dtype
         )
         if grouped:
             fully_shard([model.first, model.second], mesh=mesh, mp_policy=mp_policy)
@@ -549,7 +556,8 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
                 if not sync:
                     grad_owner = model.first if grouped else model
                     if all_reduce_only:
-                        self.assertEqual(copy_dtypes, [(torch.float32, torch.float32)])
+                        bf16 = torch.bfloat16
+                        self.assertEqual(copy_dtypes, [(bf16, bf16)])
                         for param in model.parameters():
                             self.assertIsNone(param.grad)
                         grad_owner.unshard()
@@ -566,12 +574,61 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
                     self.assertIsNone(model.second.weight.grad)
                     grad_owner.reshard()
                     continue
-                self.assertEqual(copy_dtypes, [(torch.float32, torch.float32)])
+                # Fresh gradients stay bf16 until the copy-in, while an fp32
+                # accumulated gradient makes foreach_reduce upcast the group
+                accumulated = iteration == 11 and not all_reduce_only
+                dtype = torch.float32 if accumulated else torch.bfloat16
+                self.assertEqual(copy_dtypes, [(dtype, dtype)])
                 for index, param in enumerate(model.parameters()):
                     factor = 2 if iteration == 11 and index == 0 else 1
                     self.assertEqual(param.grad.dtype, torch.float32)
                     self.assertEqual(param.grad.placements, param.placements)
                     self.assertEqual(param.grad.to_local(), reduced_grad * factor)
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize("reduce_dtype", [None, torch.float32])
+    def test_grad_dtype_deferred_upcast_keeps_fp32_grad(
+        self, reduce_dtype: torch.dtype | None
+    ):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = nn.Parameter(torch.ones(8, device=device_type))
+                # Not representable in bf16
+                scale = torch.full((8,), 1 + 2**-10, device=device_type)
+                self.register_buffer("scale", scale)
+
+            def forward(self):
+                # The fp32 buffer makes the bf16 weight's gradient fp32
+                return (self.weight * self.scale).sum()
+
+        model = Model()
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16, reduce_dtype=reduce_dtype
+        )
+        fully_shard(model, mp_policy=mp_policy)
+        model().backward()
+        self.assertEqual(model.weight.grad.full_tensor(), model.scale)
+
+    @skip_if_lt_x_gpu(2)
+    def test_grad_dtype_restored_by_reset_iter_state(self):
+        model = nn.Linear(8, 8, bias=False, device=device_type)
+        fully_shard(model, mp_policy=MixedPrecisionPolicy(param_dtype=torch.bfloat16))
+        inp = torch.ones(2, 8, device=device_type)
+        out = model(inp)
+
+        def abort_backward(grad: torch.Tensor):
+            raise RuntimeError("abort backward")
+
+        # Runs after pre-backward defers the upcast
+        out.register_hook(abort_backward)
+        with self.assertRaisesRegex(RuntimeError, "abort backward"):
+            out.sum().backward()
+        model.reset_iter_state()
+        model.set_requires_gradient_sync(False)
+        model(inp).sum().backward()
+        model.unshard()
+        self.assertEqual(model.weight.grad.dtype, torch.float32)
 
     @skip_if_lt_x_gpu(2)
     @parametrize("reshard_after_backward", [False, True])

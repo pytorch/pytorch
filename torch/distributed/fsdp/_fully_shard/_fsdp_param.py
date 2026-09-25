@@ -1176,9 +1176,11 @@ class FSDPParam:
         param = getattr(self, "_unsharded_param", None)
         return param.grad if param is not None else None
 
-    def get_unsharded_zero_grad_data(self, dtype: torch.dtype) -> torch.Tensor:
+    def get_unsharded_zero_grad_data(self) -> torch.Tensor:
+        # Use the dtype autograd would produce so group gradients stay uniform
+        param = self.unsharded_param
         return self._get_grad_inner_tensor(
-            torch.zeros_like(self.unsharded_param, dtype=dtype)
+            torch.zeros_like(param, dtype=param.grad_dtype)
         )
 
     def _get_grad_inner_tensor(self, grad: torch.Tensor) -> torch.Tensor:
