@@ -17656,6 +17656,35 @@ fn
 
     @unittest.expectedFailure
     @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_build_class_closure_body_rebinding(self):
+        def fn(t):
+            state = []
+
+            class C:
+                nonlocal state
+                state = [1]
+
+                def get(self):
+                    return tuple(state)
+
+            return t + 1, C().get(), tuple(state)
+
+        t = torch.tensor(0.0)
+        expected = (t + 1, (1,), (1,))
+        self.assertEqual(fn(t), expected)
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Invalid call to __build_class__"
+        ):
+            compiled_fn(t)
+
+        torch._dynamo.reset()
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=False)
+        self.assertEqual(compiled_fn(t), expected)
+
+    @unittest.expectedFailure
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
     def test_return_obj___build_class__(self):
         @torch.compile(fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         def fn(t):
