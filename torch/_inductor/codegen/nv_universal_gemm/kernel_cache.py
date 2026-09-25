@@ -490,6 +490,7 @@ def partition_compatible_kernels(
     efc_only: bool = False,
     candidate_source: Literal["args", "scaled", "manifest"] = "manifest",
     classifier_key: str | None = None,
+    scaled_use_pdl: bool | None = None,
 ) -> list[list[Any]]:
     """Partition the operators compatible with `args` into N buckets.
 
@@ -506,7 +507,10 @@ def partition_compatible_kernels(
     """
     sig = _partition_sig(args)
     generation_policy = (
-        (_SCALED_PREFETCH_MODE, config.nvgemm_pdl == "1")
+        (
+            _SCALED_PREFETCH_MODE,
+            config.nvgemm_pdl == "1" if scaled_use_pdl is None else scaled_use_pdl,
+        )
         if candidate_source == "scaled"
         else None
     )
@@ -536,6 +540,7 @@ def partition_compatible_kernels(
             cc,
             efc_only,
             prefetch_mode=_SCALED_PREFETCH_MODE,
+            use_pdl=scaled_use_pdl,
         )
     elif candidate_source == "manifest":
         candidates = _manifest_candidates(args, cc, efc_only)
