@@ -1,6 +1,10 @@
 # Owner(s): ["module: functionalization"]
 import torch
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 from torch.fx.passes.reinplace import reinplace
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -14,6 +18,7 @@ except Exception:
     HAS_FUNCTIONALIZATION = False
 
 class TestReinplacePass(TestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     def test_reinplace_basic(self):
         # Basic test: the out-of-place add() call should be converted

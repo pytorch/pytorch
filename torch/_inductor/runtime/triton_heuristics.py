@@ -47,6 +47,7 @@ from ..utils import (
     GPU_KERNEL_BIN_EXTS,
     prefix_is_reduction,
     tlx_only_cuda_options,
+    tlx_only_hip_options,
     TMA_ALIGNMENT,
     triton_version_uses_attrs_dict,
     XPU_KERNEL_FORMAT,
@@ -1074,7 +1075,7 @@ class CachingAutotuner(KernelInterface):
         exc = None
         try:
             load_device = _resolve_load_device(
-                self.triton_meta["device"], self.device_props.type
+                self.device_props.index, self.device_props.type
             )
             # DeviceGuard ensures each launcher's binary loads onto the right device.
             with DeviceGuard(device_interface, cast(int, load_device)):
@@ -3032,6 +3033,11 @@ class StaticTritonCompileResult(CompileResult[_T]):
         triton_meta: TritonMeta,
         heuristic_type: HeuristicType,
     ) -> _KernelType | None:
+        """The statically launchable kernel for this compile, or None to fall back.
+
+        None sends the caller to TritonCompileResult instead; the bypass reason is
+        logged, and strict_static_triton_launcher turns it into an error.
+        """
         if not torch._inductor.config.use_static_triton_launcher:
             return None
 
@@ -3053,8 +3059,13 @@ class StaticTritonCompileResult(CompileResult[_T]):
             if (
                 heuristic_type == HeuristicType.USER_AUTOTUNE
                 and not torch._inductor.config.static_launch_user_defined_triton_kernels
+                and triton_meta.get("device") is not None
             ):
-                # Don't support user defined triton kernels yet
+                # Don't support user defined triton kernels yet -- unless the device index
+                # was dropped (compile-on-one-rank), where one artifact serves every
+                # device and only the static launcher keeps its handles per device. The
+                # TritonCompileResult fallback bakes a single CUfunction, so it raises
+                # `invalid resource handle` on the second device.
                 raise CannotStaticallyLaunchKernel("User defined triton kernel")
 
             if inductor_meta.get("store_cubin"):
@@ -5100,6 +5111,7 @@ def template(
         "num_stages": num_stages,
         "num_warps": num_warps,
     }
+    config_kwargs = {}
 
     # Conditionally add arguments based on HAS_WARP_SPEC
     if HAS_WARP_SPEC:
@@ -5110,13 +5122,18 @@ def template(
             }
         )
 
+    if torch.version.hip:
+        for k in tlx_only_hip_options():
+            if k in triton_meta:
+                config_kwargs[k] = triton_meta[k]
+
     for k in tlx_only_cuda_options():
         if v := triton_meta.get(k, None):
             config_args[k] = v
 
     return cached_autotune(
         None,
-        [triton.Config({}, **config_args)],
+        [triton.Config(config_kwargs, **config_args)],
         triton_meta=triton_meta,
         inductor_meta=inductor_meta,
         heuristic_type=HeuristicType.TEMPLATE,

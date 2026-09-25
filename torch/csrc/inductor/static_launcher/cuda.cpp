@@ -113,31 +113,28 @@ static_assert(
     sizeof(CUtensorMap) == 128,
     "CUtensorMap is expected to be 128 bytes (CUDA ABI change?)");
 
-// Mirror of triton's PyCUtensorMap object (nvidia/backend/driver.c) so we can
-// read its embedded CUtensorMap.
-struct PyCUtensorMapObject {
-  PyObject_HEAD
-  alignas(alignof(CUtensorMap)) CUtensorMap tensorMap;
-};
-
 // Pointer to the CUtensorMap in a host-side TMA descriptor arg (triton's
 // PyCUtensorMap, or a duck-typed tma_desc_cpu_ptr()). Owned by `obj`, which
 // must stay alive across the launch.
 void* getTmaDescPtr(PyObject* obj) {
   if (std::strcmp(
           Py_TYPE(obj)->tp_name, "triton.backends.nvidia.PyCUtensorMap") == 0) {
-    // Fail loudly if triton's object no longer matches our mirror: tp_basicsize
-    // catches a resized field or a CUDA-major mismatch (alignof is 64 on 12.x
-    // vs 128 on 13.x). A same-size reorder isn't caught here; correctness tests
-    // are.
+    // triton stores the CUtensorMap as the trailing field of a PyObject_HEAD
+    // struct, so derive its offset from tp_basicsize instead of mirroring the
+    // struct: triton may be built against a different CUDA major than we are,
+    // and alignof(CUtensorMap) is 64 on 12.x vs 128 on 13.x. 64 is the weaker
+    // of the two, so checking against it accepts either build.
+    constexpr Py_ssize_t kMinTensorMapAlign = 64;
+    const Py_ssize_t basicsize = Py_TYPE(obj)->tp_basicsize;
+    const Py_ssize_t offset =
+        basicsize - static_cast<Py_ssize_t>(sizeof(CUtensorMap));
     TORCH_CHECK(
-        Py_TYPE(obj)->tp_basicsize == sizeof(PyCUtensorMapObject),
+        offset >= static_cast<Py_ssize_t>(sizeof(PyObject)) &&
+            offset % kMinTensorMapAlign == 0,
         "triton PyCUtensorMap layout changed (tp_basicsize=",
-        Py_TYPE(obj)->tp_basicsize,
-        ", expected ",
-        sizeof(PyCUtensorMapObject),
-        "); the static launcher's CUtensorMap mirror is stale");
-    return &reinterpret_cast<PyCUtensorMapObject*>(obj)->tensorMap;
+        basicsize,
+        "); the static launcher cannot locate its CUtensorMap");
+    return reinterpret_cast<char*>(obj) + offset;
   }
   // Duck-typed fallback: tma_desc_cpu_ptr() -> host pointer to a CUtensorMap.
   THPObjectPtr method{PyObject_GetAttrString(obj, "tma_desc_cpu_ptr")};

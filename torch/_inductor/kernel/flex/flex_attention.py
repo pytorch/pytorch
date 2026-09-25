@@ -25,7 +25,7 @@ from ...select_algorithm import (
     SymbolicGridFn,
     TritonTemplate,
 )
-from ...utils import can_use_tma
+from ...utils import can_use_tma, use_flex_tdm_descriptor
 from .common import (
     _flex_kernel_options_example,
     _flex_kernel_tuning_options,
@@ -131,9 +131,10 @@ def flex_attention_grid(batch_size, q_heads, num_queries, d_model, meta, *, cdiv
 def set_float32_precision(kernel_options: dict[str, Any], dtype: torch.dtype) -> None:
     precision = torch.backends.cuda.matmul.fp32_precision
     if precision == "none":
-        precision = (
-            "ieee" if torch.get_float32_matmul_precision() == "highest" else "tf32"
-        )
+        # Unset at every level of the per-backend hierarchy; the legacy
+        # default is "highest". Do not fall back to the legacy getter,
+        # which throws under mixed legacy/new API state.
+        precision = "ieee"
     if dtype == torch.float32 and precision == "bfx9":
         # See Note [BF16x9 precision] in torch/_inductor/utils.py.
         warning_once(
@@ -473,12 +474,6 @@ def flex_attention(
                 "num_buffers_warp_spec", num_buffers_warp_spec
             )
 
-        # Intel GPU enables TMA by default
-        cur_kernel_options.setdefault("USE_TMA", bool(torch.xpu.is_available()))
-
-        if cur_kernel_options["USE_TMA"] and not can_use_tma(query, key, value):
-            cur_kernel_options["USE_TMA"] = False
-
         # Shrink default tiles to fit smaller pow2 sparse block sizes;
         # user-pinned tiles and non-pow2 sparse sizes still error out below.
         block_m, block_n = conf.block_m, conf.block_n
@@ -490,6 +485,7 @@ def flex_attention(
             block_n = min(block_n, SPARSE_KV_BLOCK_SIZE)
         cur_kernel_options.setdefault("BLOCK_M", block_m)
         cur_kernel_options.setdefault("BLOCK_N", block_n)
+
         # Blocksparse options
         cur_kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", SPARSE_Q_BLOCK_SIZE)
         cur_kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
@@ -510,6 +506,44 @@ def flex_attention(
                     SPARSE_KV_BLOCK_SIZE,
                 )
             continue
+
+        # Descriptor selection runs after the tile rejection above so a config
+        # that is about to be discarded cannot install descriptor range bounds.
+        #
+        # A default of True means "absent": omission keeps automatic selection,
+        # while any explicit falsy value (False, 0, None) forces pointer loads.
+        tdm_requested = bool(cur_kernel_options.get("USE_TMA", True))
+
+        # ROCm reports device type "cuda", so route it exclusively. The generic
+        # probe excludes HIP only in its CUDA arm, so it can read true on a ROCm
+        # host and would then enable descriptors under NVIDIA's rules, skipping
+        # the ROCm floor, the gfx1250 probe and the operand policy.
+        if torch.version.hip is not None and query.get_device().type == "cuda":
+            cur_kernel_options["USE_TMA"] = tdm_requested and use_flex_tdm_descriptor(
+                query,
+                key,
+                value,
+                block_shapes=[
+                    (
+                        cur_kernel_options["BLOCK_M"],
+                        cur_kernel_options["QK_HEAD_DIM_ROUNDED"],
+                    ),
+                    (
+                        cur_kernel_options["BLOCK_N"],
+                        cur_kernel_options["QK_HEAD_DIM_ROUNDED"],
+                    ),
+                    (
+                        cur_kernel_options["BLOCK_N"],
+                        cur_kernel_options["V_HEAD_DIM_ROUNDED"],
+                    ),
+                ],
+            )
+        else:
+            # Intel GPU enables TMA by default
+            cur_kernel_options.setdefault("USE_TMA", bool(torch.xpu.is_available()))
+
+            if cur_kernel_options["USE_TMA"] and not can_use_tma(query, key, value):
+                cur_kernel_options["USE_TMA"] = False
 
         # ROCm specific kernargs
         for attrib in ["kpack", "matrix_instr_nonkdim", "waves_per_eu"]:
@@ -1007,6 +1041,35 @@ def flex_attention_backward(*args, **kwargs):
     invalid_block_options: dict[str, Any] | None = None
 
     original_kernel_options = kernel_options.copy()
+    bwd_input_nodes = [
+        query,
+        key,
+        value,
+        logsumexp,
+        delta,
+        grad_out,
+        grad_query,
+        broadcasted_grad_value,
+        kv_num_blocks,
+        kv_indices,
+        q_num_blocks,
+        q_indices,
+        full_kv_num_blocks,
+        full_kv_indices,
+        full_q_num_blocks,
+        full_q_indices,
+    ]
+    bwd_subgraphs = [
+        fw_subgraph_buffer,
+        joint_outputs.grad_input,
+        mask_graph_buffer,
+        joint_outputs.captured_grads_compute,
+    ]
+    bwd_mutated_inputs = [
+        grad_query,
+        broadcasted_grad_value,
+        *joint_outputs.mutated_grads,
+    ]
 
     for conf in configs:
         # Performance tuning
@@ -1092,39 +1155,25 @@ def flex_attention_backward(*args, **kwargs):
 
         flex_attention_backward_template.maybe_append_choice(
             choices=choices,
-            input_nodes=[
-                query,
-                key,
-                value,
-                logsumexp,
-                delta,
-                grad_out,
-                grad_query,
-                broadcasted_grad_value,
-                kv_num_blocks,
-                kv_indices,
-                q_num_blocks,
-                q_indices,
-                full_kv_num_blocks,
-                full_kv_indices,
-                full_q_num_blocks,
-                full_q_indices,
-            ],
+            input_nodes=bwd_input_nodes,
             layout=layout_broadcasted_k,  # We use store_output only for grad_key
-            subgraphs=[
-                fw_subgraph_buffer,
-                joint_outputs.grad_input,
-                mask_graph_buffer,
-                joint_outputs.captured_grads_compute,
-            ],
-            mutated_inputs=[
-                grad_query,
-                broadcasted_grad_value,
-                *joint_outputs.mutated_grads,
-            ],
+            subgraphs=bwd_subgraphs,
+            mutated_inputs=bwd_mutated_inputs,
             call_sizes=query.get_size() + key.get_size()[1:3],
             **cur_kernel_options,
         )
+
+    choices = V.choices.append_flex_attention_backward_choices(
+        choices,
+        configs,
+        list(bwd_input_nodes),
+        list(bwd_subgraphs),
+        layout_broadcasted_k,
+        original_kernel_options,
+        SPARSE_Q_BLOCK_SIZE,
+        SPARSE_KV_BLOCK_SIZE,
+        mutated_inputs=list(bwd_mutated_inputs),
+    )
 
     if not choices and invalid_block_options is not None:
         raise_flex_kernel_options_error(
@@ -1139,24 +1188,7 @@ def flex_attention_backward(*args, **kwargs):
     mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers)
 
     inputs_for_autotuning = (
-        [
-            query,
-            key,
-            value,
-            logsumexp,
-            delta,
-            grad_out,
-            grad_query,
-            broadcasted_grad_value,
-            kv_num_blocks,
-            kv_indices,
-            q_num_blocks,
-            q_indices,
-            full_kv_num_blocks,
-            full_kv_indices,
-            full_q_num_blocks,
-            full_q_indices,
-        ]
+        bwd_input_nodes
         + list(score_mod_other_buffers)
         + list(mask_mod_other_buffers)
         + joint_outputs.mutated_grads

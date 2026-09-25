@@ -323,9 +323,7 @@ kernel void grouped_mm(
       tile, params, a_tile, b_tile, simd_group, simd_lane);
 }
 
-#if __METAL_VERSION__ >= 400 && \
-    __has_include(<MetalPerformancePrimitives/MetalPerformancePrimitives.h>)
-#include <MetalPerformancePrimitives/MetalPerformancePrimitives.h>
+#if C10_METAL_HAS_MPP
 
 // matmul2d tile op. TA/TB name the operand layouts ('t' = column-major); every
 // tensor is presented to matmul2d with a unit innermost stride and the matching

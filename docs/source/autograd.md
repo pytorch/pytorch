@@ -217,7 +217,7 @@ like the following:
 
 ## Context method mixins
 
-When creating a new {class}`Function`, the following methods are available to `ctx`.
+When creating a new {class}`Function`, the following members are available to `ctx`.
 
 ```{eval-rst}
 .. autoclass:: torch.autograd.function.FunctionCtx
@@ -230,6 +230,7 @@ When creating a new {class}`Function`, the following methods are available to `c
     :toctree: generated
     :nosignatures:
 
+    function.FunctionCtx.input_grad_buffers
     function.FunctionCtx.mark_dirty
     function.FunctionCtx.mark_non_differentiable
     function.FunctionCtx.save_for_backward

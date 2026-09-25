@@ -7,9 +7,10 @@ import os
 import shutil
 import tempfile
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 from enum import Enum
 from functools import partial
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, TypeVar
 from typing_extensions import deprecated, Self
 from warnings import warn
 
@@ -39,7 +40,10 @@ __all__ = [
     "schedule",
     "tensorboard_trace_handler",
     "profile",
+    "CuspyConfig",
     "ExecutionTraceObserver",
+    "PerformanceMetricsConfig",
+    "ProfilerActivityConfig",
 ]
 PROFILER_STEP_NAME = "ProfilerStep"
 
@@ -120,17 +124,134 @@ class _ITraceObserver(ABC):
         pass
 
 
+class _ProfilerExtensionConfig(ABC):
+    """Additional profiler configuration serialized as key-value entries."""
+
+    @abstractmethod
+    def _to_config_entries(self) -> dict[str, str]:
+        pass
+
+
+_ProfilerConfigT = TypeVar("_ProfilerConfigT", bound=_ProfilerExtensionConfig)
+
+
+@dataclass(frozen=True)
+class CuspyConfig(_ProfilerExtensionConfig):
+    """Configure Cuspy CUDA activity collection.
+
+    CPU activity is currently required because Cuspy merges its trace with the
+    CPU trace.
+
+    Args:
+        enable_cuda_sync_events (bool, optional): Collect CUDA synchronization
+            activities.
+        enable_environment_counters (bool, optional): Collect GPU environment
+            counters.
+        enable_graph_dependencies (bool, optional): Record CUDA graph
+            dependency edges.
+        enable_event_node_ids (bool, optional): Associate CUDA events with CUDA
+            graph event-record nodes.
+    """
+
+    enable_cuda_sync_events: bool = False
+    enable_environment_counters: bool = False
+    enable_graph_dependencies: bool = False
+    enable_event_node_ids: bool = False
+
+    def _to_config_entries(self) -> dict[str, str]:
+        return {}
+
+
+@dataclass
+class PerformanceMetricsConfig(_ProfilerExtensionConfig):
+    """Configure hardware performance-counter metric collection.
+
+    This configuration collects hardware counters.
+
+    Args:
+        metric_names (list[str]): Backend-specific hardware metric names to collect.
+        sampling_interval_ms (float, optional): CUDA PM-sampling interval in
+            milliseconds. Defaults to 1 millisecond.
+        lookback_window_ms (float, optional): CUDA PM-sampling look-back window
+            in milliseconds. This bounds the recent sample history retained for
+            decoding; the capacity is the look-back window divided by the
+            sampling interval. Defaults to 10 seconds.
+
+    CUDA PM sampling uses the current CUDA device.
+    """
+
+    metric_names: list[str]
+    sampling_interval_ms: float | None = None
+    lookback_window_ms: float | None = None
+
+    def _to_config_entries(self) -> dict[str, str]:
+        config = {"PERFORMANCE_METRICS": ",".join(self.metric_names)}
+        if self.sampling_interval_ms is not None:
+            config["PERFORMANCE_METRICS_SAMPLING_INTERVAL_MS"] = str(
+                self.sampling_interval_ms
+            )
+        if self.lookback_window_ms is not None:
+            config["PERFORMANCE_METRICS_LOOKBACK_WINDOW_MS"] = str(
+                self.lookback_window_ms
+            )
+        return config
+
+
+@dataclass
+class ProfilerActivityConfig:
+    """Configure collection for an activity group.
+
+    Args:
+        activity_types (list[str], optional): Fine-grained activity types to
+            collect. ``None`` collects the group's default activity types,
+            while an empty list collects none.
+        profiler_configs (list): Additional profiler configurations associated
+            with this activity group, such as :class:`PerformanceMetricsConfig`
+            and :class:`CuspyConfig`.
+    """
+
+    activity_types: list[str] | None = None
+    profiler_configs: list[_ProfilerExtensionConfig] = field(default_factory=list)
+
+    def _get_profiler_config(
+        self, config_type: type[_ProfilerConfigT]
+    ) -> _ProfilerConfigT | None:
+        return next(
+            (
+                config
+                for config in self.profiler_configs
+                if isinstance(config, config_type)
+            ),
+            None,
+        )
+
+
+def _get_profiler_extensions(
+    profiler_configs: Iterable[_ProfilerExtensionConfig],
+) -> dict[str, str]:
+    profiler_extensions = {}
+    for profiler_config in profiler_configs:
+        profiler_extensions.update(profiler_config._to_config_entries())
+    return profiler_extensions
+
+
 def _parse_activities(
-    activities: Iterable[ProfilerActivity | dict[ProfilerActivity, list[str]]],
-) -> tuple[set[ProfilerActivity], dict[ProfilerActivity, set[str]]]:
-    """Parse a mixed activities list into a set of activities and a filter dict.
+    activities: Iterable[
+        ProfilerActivity | dict[ProfilerActivity, list[str] | ProfilerActivityConfig]
+    ],
+) -> tuple[
+    set[ProfilerActivity],
+    dict[ProfilerActivity, ProfilerActivityConfig],
+]:
+    """Parse selected activities and their configurations.
 
     Each item is either a bare ``ProfilerActivity`` (collect all defaults) or a
-    ``dict[ProfilerActivity, list[str]]`` (collect only the named subset).
-    An empty list value (e.g. ``{CUDA: []}``) means collect nothing for that group.
+    dict containing an activity-type name list or activity configuration. An
+    empty activity-type list collects no activity events for that group;
+    configured profiler extensions may still collect data.
     """
     parsed_activities: set[ProfilerActivity] = set()
-    activity_filters: dict[ProfilerActivity, set[str]] = {}
+    activity_configs: dict[ProfilerActivity, ProfilerActivityConfig] = {}
     for item in activities:
         if isinstance(item, ProfilerActivity):
             if item in parsed_activities:
@@ -141,10 +262,12 @@ def _parse_activities(
                 if key in parsed_activities:
                     raise ValueError(f"Activity {key} specified more than once")
                 parsed_activities.add(key)
-                activity_filters[key] = set(val)
+                if not isinstance(val, ProfilerActivityConfig):
+                    val = ProfilerActivityConfig(activity_types=val)
+                activity_configs[key] = val
         else:
             raise TypeError(f"Expected ProfilerActivity or dict, got {type(item)}")
-    return parsed_activities, activity_filters
+    return parsed_activities, activity_configs
 
 
 class _KinetoProfile:
@@ -208,7 +331,10 @@ class _KinetoProfile:
     def __init__(
         self,
         *,
-        activities: Iterable[ProfilerActivity | dict[ProfilerActivity, list[str]]]
+        activities: Iterable[
+            ProfilerActivity
+            | dict[ProfilerActivity, list[str] | ProfilerActivityConfig]
+        ]
         | None = None,
         record_shapes: bool = False,
         profile_memory: bool = False,
@@ -222,10 +348,10 @@ class _KinetoProfile:
         post_processing_timeout_s: float | None = None,
     ) -> None:
         if activities is not None:
-            self.activities, self.activity_filters = _parse_activities(activities)
+            self.activities, self.activity_configs = _parse_activities(activities)
         else:
             self.activities = supported_activities()
-            self.activity_filters: dict[ProfilerActivity, set[str]] = {}
+            self.activity_configs: dict[ProfilerActivity, ProfilerActivityConfig] = {}
         self.record_shapes = record_shapes
         self.with_flops = with_flops
         self.profile_memory = profile_memory
@@ -279,9 +405,19 @@ class _KinetoProfile:
         self._custom_profiler_config = _parse_custom_profiler_config(
             self.experimental_config
         )
-        self._use_cuspy = self._custom_profiler_config.get(
-            "backend"
-        ) == "cuspy" or bool(self._custom_profiler_config.get("cuspy"))
+
+        # Handle combinations of legacy _custom_profiler_config/new ProfilerActivityConfig
+        # implementations for both cuspy and pm sampling until we have migrated off _custom_profiler_config.
+        cuda_config = self.activity_configs.get(ProfilerActivity.CUDA)
+        self._cuspy_config: CuspyConfig | None = (
+            cuda_config._get_profiler_config(CuspyConfig)
+            if cuda_config is not None
+            else None
+        )
+        self._use_cuspy = self._cuspy_config is not None or (
+            self._custom_profiler_config.get("backend") == "cuspy"
+            or bool(self._custom_profiler_config.get("cuspy"))
+        )
         # The ProfilerObserver driving the shared Cuspy singleton this session; window opened
         # at start, closed at stop (_cuspy_window_id), exported by export_chrome_trace.
         self._cuspy_profiler_observer: Any = None
@@ -291,10 +427,23 @@ class _KinetoProfile:
         # wait_for_exports; cuspy-only, rejected elsewhere.
         self._cuspy_async_export = False
         if self._use_cuspy:
-            if ProfilerActivity.CPU not in self.activities:
-                raise ValueError(
-                    "cuspy profiler backend currently requires CPU activity"
+            if self._cuspy_config is None:
+                self._cuspy_config = CuspyConfig(
+                    enable_cuda_sync_events=bool(
+                        self._custom_profiler_config.get("enable_cuda_sync_events")
+                    ),
+                    enable_environment_counters=bool(
+                        self._custom_profiler_config.get("enable_environment_counters")
+                    ),
+                    enable_graph_dependencies=bool(
+                        self._custom_profiler_config.get("enable_graph_dependencies")
+                    ),
+                    enable_event_node_ids=bool(
+                        self._custom_profiler_config.get("enable_event_node_ids")
+                    ),
                 )
+            if ProfilerActivity.CPU not in self.activities:
+                raise ValueError("Cuspy currently requires CPU activity")
             self._cuspy_async_export = bool(
                 self._custom_profiler_config.get("cuspy_async_export", False)
             )
@@ -302,13 +451,13 @@ class _KinetoProfile:
             # training loop captures its CUDA graphs. The recording hook must observe each
             # graph's one-time instantiate(); the per-window ProfilerObserver registers it
             # too late (at prepare_trace, after warm-up capture) to catch replay-only graphs.
-            if self._custom_profiler_config.get("enable_graph_dependencies"):
+            if self._cuspy_config.enable_graph_dependencies:
                 from torch.profiler._cuspy._graph_deps import _GraphDependencyRecorder
 
                 _GraphDependencyRecorder().arm()
             # Same early-arm rationale for the CUDA_EVENT -> graph event-record node bridge:
             # the recorder reads each graph's event nodes at its one-time instantiate().
-            if self._custom_profiler_config.get("enable_event_node_ids"):
+            if self._cuspy_config.enable_event_node_ids:
                 from torch.profiler._cuspy._event_nodes import _EventNodeRecorder
 
                 _EventNodeRecorder().arm()
@@ -337,6 +486,23 @@ class _KinetoProfile:
             )
         if (self.profiler is None) or (not self.acc_events):
             use_device = None if self._use_cuspy else self.use_device
+            activity_filters = {}
+            profiler_configs = []
+            for activity, config in self.activity_configs.items():
+                if config.activity_types is not None:
+                    activity_filters[activity] = set(config.activity_types)
+                profiler_configs.extend(config.profiler_configs)
+            if self._use_cuspy:
+                profiler_configs = [
+                    config
+                    for config in profiler_configs
+                    if not isinstance(config, PerformanceMetricsConfig)
+                ]
+            profiler_extensions = _get_profiler_extensions(profiler_configs)
+            if "PERFORMANCE_METRICS" in profiler_extensions:
+                profiler_extensions["PERFORMANCE_METRICS_DEVICE_ID"] = str(
+                    torch.cuda.current_device()
+                )
             self.profiler = prof.profile(
                 use_cpu=(ProfilerActivity.CPU in self.activities),
                 use_device=use_device,
@@ -350,43 +516,46 @@ class _KinetoProfile:
                 acc_events=self.acc_events,
                 custom_trace_id_callback=self.custom_trace_id_callback,
                 post_processing_timeout_s=self.post_processing_timeout_s,
-                activity_filters=self.activity_filters
-                if self.activity_filters
-                else None,
+                activity_filters=activity_filters or None,
+                _profiler_extensions=profiler_extensions,
             )
-        if self._use_cuspy:
+        if self._cuspy_config is not None:
             from torch.profiler._cuspy.observers.profiler import ProfilerObserver
 
+            cuda_config = self.activity_configs.get(ProfilerActivity.CUDA)
+            pm_config = (
+                cuda_config._get_profiler_config(PerformanceMetricsConfig)
+                if cuda_config is not None
+                else None
+            )
+            pm_config = pm_config or PerformanceMetricsConfig(
+                metric_names=self._custom_profiler_config.get("pm_metrics") or []
+            )
             self._cuspy_trace_window = None
             # Constructing the observer registers it with the shared Cuspy singleton and
             # collection. cuda_sync events are opt-in via the config, matching kineto's flag.
             self._cuspy_profiler_observer = ProfilerObserver(
-                enable_cuda_sync=bool(
-                    self._custom_profiler_config.get("enable_cuda_sync_events")
-                ),
+                enable_cuda_sync=self._cuspy_config.enable_cuda_sync_events,
                 # GPU environment counters (power/clock/thermal/cooling) are periodically
                 # sampled; opt-in since the sampling adds overhead.
-                enable_environment_counters=bool(
-                    self._custom_profiler_config.get("enable_environment_counters")
+                enable_environment_counters=(
+                    self._cuspy_config.enable_environment_counters
                 ),
                 # PM sampling (true SM-active % + DRAM-throughput % counters) is a Cuspy
-                # feature, opt-in like the env counters. The metrics are per-profile
-                # (custom_profiler_config["pm_metrics"], a list of CUPTI metric names).
-                enable_pm_sampling=bool(
-                    self._custom_profiler_config.get("enable_pm_sampling")
-                ),
-                pm_metrics=self._custom_profiler_config.get("pm_metrics"),
+                # feature, opt-in like the env counters. PerformanceMetricsConfig supplies
+                # the metrics; custom_profiler_config remains supported during migration.
+                enable_pm_sampling=pm_config is not None
+                or bool(self._custom_profiler_config.get("enable_pm_sampling")),
+                pm_metrics=pm_config.metric_names,
+                pm_sampling_interval_ms=pm_config.sampling_interval_ms,
+                pm_lookback_window_ms=pm_config.lookback_window_ms,
                 # Node->node CUDA-graph dependency arrows are opt-in (extra work at graph
                 # instantiate + arrow rendering); off unless the config requests them.
-                enable_graph_dependencies=bool(
-                    self._custom_profiler_config.get("enable_graph_dependencies")
-                ),
+                enable_graph_dependencies=self._cuspy_config.enable_graph_dependencies,
                 # Join CUDA_EVENT records (graph event-record nodes, e.g. NCCL under
                 # NCCL_GRAPH_MIXING_SUPPORT) back to their graph_node_id. Opt-in: pulls in the
                 # CUDA_EVENT record kind.
-                enable_event_node_ids=bool(
-                    self._custom_profiler_config.get("enable_event_node_ids")
-                ),
+                enable_event_node_ids=self._cuspy_config.enable_event_node_ids,
                 # gzip level for the native .pftrace encoder (0-9; 1 = fast, the default).
                 pftrace_compression_level=int(
                     self._custom_profiler_config.get("pftrace_compression_level", 1)
@@ -1059,7 +1228,10 @@ class profile(_KinetoProfile):
     def __init__(
         self,
         *,
-        activities: Iterable[ProfilerActivity | dict[ProfilerActivity, list[str]]]
+        activities: Iterable[
+            ProfilerActivity
+            | dict[ProfilerActivity, list[str] | ProfilerActivityConfig]
+        ]
         | None = None,
         schedule: Callable[[int], ProfilerAction] | None = None,
         on_trace_ready: Callable[..., Any] | None = None,

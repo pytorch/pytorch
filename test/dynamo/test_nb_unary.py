@@ -8,6 +8,7 @@ import torch
 import torch._dynamo.testing
 from torch._dynamo.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     make_dynamo_test,
     parametrize,
@@ -29,6 +30,8 @@ ALL_UNARY_OPS = UNARY_OPS + [
 
 
 class NbUnaryTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # --- int (ConstantVariable) ---
 
     @parametrize("op,dunder", ALL_UNARY_OPS)

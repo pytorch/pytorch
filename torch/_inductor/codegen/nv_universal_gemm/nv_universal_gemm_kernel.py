@@ -25,6 +25,7 @@ from torch._inductor.codegen.common import (
     WorkspaceArg,
     WorkspaceZeroMode,
 )
+from torch._inductor.codegen.cutedsl.compile_lock import CUTEDSL_COMPILE_LOCK
 from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import CuteDSLOpOverrides
 from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_utils import (
     to_cutlass_scale_mode,
@@ -86,6 +87,14 @@ def _normalize_epilogue_input_tensor(value: Any, permute=None) -> Any:
     return value
 
 
+def _transpose_local_reduce_tensors(
+    reduction: GemmReductionArguments,
+) -> GemmReductionArguments:
+    return reduction.map_tensors(
+        lambda tensor: tensor.mT if tensor.ndim == 2 else tensor
+    )
+
+
 @functools.cache
 def _cutedsl_epilogue_io(
     epilogue_fn: str,
@@ -145,6 +154,9 @@ class CuTeDSLEpilogueArguments:
         result.traced_epilogue = None
         return result
 
+    def copy(self) -> CuTeDSLEpilogueArguments:
+        return self.with_tensors(self.tensors)
+
     @property
     def parameters(self) -> list[Any]:
         return list(self.tensors.values())
@@ -191,13 +203,13 @@ def _current_target_sm(dev_idx: int):
 def _make_disk_config_key(
     kernel_name: str,
     variant_name: str,
-    accumulator_type: Any,
-    scale_type_a: Any | None = None,
-    scale_type_b: Any | None = None,
-    swizzle_type_a: Any | None = None,
-    swizzle_type_b: Any | None = None,
+    accumulator_type: object,
+    scale_type_a: object = None,
+    scale_type_b: object = None,
+    swizzle_type_a: object = None,
+    swizzle_type_b: object = None,
     epilogue_source: str = "",
-) -> tuple:
+) -> tuple[str, ...]:
     return (
         kernel_name,
         variant_name,
@@ -228,9 +240,9 @@ def _compile_nvgemm(
 ):
     """Compile an NVGEMM artifact, trying a fallback (disk cache) first.
 
-    Thread safety is handled at the dispatch layer: autotuning precompile
-    runs in subprocess workers (process-isolated), runtime is
-    single-threaded per graph execution.
+    Autotuning precompile runs in subprocess workers (process-isolated); the
+    in-process compile takes ``CUTEDSL_COMPILE_LOCK`` because other CuTeDSL
+    templates precompile on threads of this process.
 
     kernel_obj: pre-resolved kernel (skips _lookup_gemm_kernel).
     kernel_name: kernel name for _lookup_gemm_kernel.
@@ -269,7 +281,8 @@ def _compile_nvgemm(
     if fallback_fn is not None:
         artifact = fallback_fn(kernel)
     if artifact is None:
-        artifact = kernel.compile(args)
+        with CUTEDSL_COMPILE_LOCK:
+            artifact = kernel.compile(args)
         was_compiled = True
 
     return artifact, args, kernel, was_compiled
@@ -654,6 +667,7 @@ def _lookup_gemm_kernel(
 
     if base_kernel is None and fast:
         base_kernel = get_kernel_by_name_via_args(kernel_name, args, cc)
+    epilogue_args = getattr(args, "epilogue", None) or epilogue_args
     kernel = get_efc_kernel_with_epilogue(
         kernel_name,
         epilogue_args,
@@ -893,9 +907,10 @@ def _nvgemm_run(
 
         reduction = variant_kwargs.get("local_reduce") if variant_kwargs else None
         if isinstance(reduction, GemmReductionArguments) and reduction.enabled:
-            raise NotImplementedError(
-                "NVGEMM swap_ab does not support fused local reductions"
-            )
+            if variant_kwargs is None:
+                raise AssertionError("expected local-reduction keyword arguments")
+            variant_kwargs = dict(variant_kwargs)
+            variant_kwargs["local_reduce"] = _transpose_local_reduce_tensors(reduction)
         a, b = input_tensors[0], input_tensors[1]
         if len(input_tensors) >= 4:
             sa, sb = input_tensors[2], input_tensors[3]
@@ -1376,7 +1391,8 @@ class NVUniversalGemmKernel(Kernel):
                 )
             else:
                 code.writeline(
-                    "from cutlass.operators.arguments import EpilogueArguments"
+                    "from cutlass.operators.arguments import "
+                    "EpilogueArguments as CuTeDSLEpilogueArguments"
                 )
         code.writeline("")
 
@@ -1451,12 +1467,7 @@ class NVUniversalGemmKernel(Kernel):
                 epi_kwargs_str = "epilogue_fn=_EPILOGUE_FN_SRC"
                 if epilogue_kwargs:
                     epi_kwargs_str += f", {epilogue_kwargs}"
-                epilogue_args_type = (
-                    "CuTeDSLEpilogueArguments"
-                    if not self.epilogue.is_evt_fallback
-                    else "EpilogueArguments"
-                )
-                code.writeline(f"epi_args = {epilogue_args_type}({epi_kwargs_str})")
+                code.writeline(f"epi_args = CuTeDSLEpilogueArguments({epi_kwargs_str})")
                 epi_args_expr = "epi_args"
                 epi_source_expr = "_EPILOGUE_FN_SOURCE"
                 aux_tensors.extend(self.epilogue.reads)
@@ -1471,7 +1482,10 @@ class NVUniversalGemmKernel(Kernel):
                     else f"out_ptr{output_buffers.index(reduce_name)}"
                 )
                 if reduce_name is not None:
-                    squeeze_dim = -1 if reduction.axis == 1 else -2
+                    logical_axis = (
+                        1 - reduction.axis if self.swap_ab else reduction.axis
+                    )
+                    squeeze_dim = -1 if logical_axis == 1 else -2
                     reduce_ptr = f"{reduce_ptr}.squeeze({squeeze_dim})"
 
                 def feed_output_ptr(output_name: str | None) -> str:
