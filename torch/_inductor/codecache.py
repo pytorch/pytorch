@@ -3098,8 +3098,8 @@ end
                 if specified_artifact_name
                 else str(wrapper_path_operator.with_suffix(".so"))
             )
-            all_cuda = all(
-                graph.get_original_value_of_constant(name).is_cuda
+            all_on_accelerator = all(
+                graph.get_original_value_of_constant(name).device.type != "cpu"
                 for name in graph.constants
                 if name not in graph.folded_constants
             )
@@ -3140,7 +3140,7 @@ end
                             sizes.append(n)
                             total_size += (
                                 n
-                                if all_cuda
+                                if all_on_accelerator
                                 else (n + ALIGN_BYTES - 1) // ALIGN_BYTES * ALIGN_BYTES
                             )
 

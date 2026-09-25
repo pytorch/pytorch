@@ -1332,8 +1332,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     raise AssertionError(f"input {name=} cannot be symbolic")
                 self.write_input_output_info("inputs_info_", idx, name)
 
-            all_cuda = all(
-                V.graph.get_original_value_of_constant(name).is_cuda
+            all_on_accelerator = all(
+                V.graph.get_original_value_of_constant(name).device.type != "cpu"
                 for name in V.graph.constants
                 if name not in V.graph.folded_constants
             )
@@ -1372,7 +1372,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     else tensor.untyped_storage().nbytes()
                 )
                 self.prefix.writeline(
-                    f"constants_info_[{idx}].data_size = {data_size if all_cuda else _align(data_size)};"
+                    f"constants_info_[{idx}].data_size = {data_size if all_on_accelerator else _align(data_size)};"
                 )
 
                 from_folded = "true" if name in V.graph.folded_constants else "false"

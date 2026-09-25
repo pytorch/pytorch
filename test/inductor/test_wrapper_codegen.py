@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 import types
+import unittest
 from itertools import count
 from types import SimpleNamespace
 
@@ -18,6 +19,7 @@ from torch._inductor.utils import IndentedBuffer
 from torch._inductor.virtualized import V
 from torch.fx.experimental.symbolic_shapes import CallMethodKey
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
 )
@@ -515,6 +517,92 @@ int64_t s0 = s1;""",
         self.assertNotEqual(first, second)
         self.assertIn(f"{first}[] = {{2, 3}};", first_buffer.getvalue())
         self.assertIn(f"{second}[] = {{2, 3}};", second_buffer.getvalue())
+
+
+class TestCppWrapperConstantsAlignment(TestCase):
+    """codegen_model_constructor decides whether serialized constants need 64-byte
+    alignment from the constants' device types. All-CPU constants must stay aligned;
+    constants living on a registered accelerator device (e.g. a PrivateUse1 backend)
+    must not be aligned, mirroring the historical CUDA behavior."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def _wrapper(self, device: str):
+        wrapper = CppWrapperCpu.__new__(CppWrapperCpu)
+        wrapper.prefix = IndentedBuffer()
+        wrapper.aoti_model_class_name = "AOTInductorModel"
+        wrapper.device = device
+        wrapper.used_cached_devices = OrderedSet()
+        wrapper.used_cached_dtypes = OrderedSet()
+        wrapper.used_cached_layouts = OrderedSet()
+        wrapper.used_cached_memory_formats = OrderedSet()
+        wrapper.used_cached_stride_orders = OrderedSet()
+        wrapper.used_switch_selector = OrderedSet()
+        return wrapper
+
+    @staticmethod
+    def _constant(name: str, device_type: str, nbytes: int):
+        tensor = unittest.mock.Mock(spec=torch.Tensor)
+        tensor.device = SimpleNamespace(type=device_type, index=0)
+        tensor.dtype = torch.float32
+        tensor.layout = torch.strided
+        tensor.is_mkldnn = False
+        tensor.storage_offset.return_value = 0
+        tensor.size.return_value = torch.Size([nbytes // 4])
+        tensor.stride.return_value = (1,)
+        tensor.untyped_storage.return_value.nbytes.return_value = nbytes
+        return name, tensor
+
+    def _codegen_constructor(self, constants, *, device="cpu"):
+        graph = SimpleNamespace(
+            graph_inputs={},
+            graph_outputs=[],
+            constants=dict(constants),
+            folded_constants=set(),
+            get_original_value_of_constant=lambda name: dict(constants)[name],
+            named_parameters={},
+            named_buffers={},
+            dynamo_flat_name_to_original_fqn={name: name for name, _ in constants},
+            allocated_constant_name={},
+            device_type=device,
+            device_idxs=OrderedSet(),
+            aot_mode=True,
+        )
+        wrapper = self._wrapper(device)
+        with (
+            V.set_graph_handler(graph),
+            unittest.mock.patch.object(
+                wrapper, "codegen_device", return_value="cached_torch_device_type_x, 0"
+            ),
+        ):
+            wrapper.codegen_model_constructor()
+        return wrapper.prefix.getvalue()
+
+    def test_cpu_only_constants_stay_aligned_by_default(self):
+        # Default path (no PrivateUse1 backend registered): CPU constants keep the
+        # historical behavior of aligning data_size up to 64 bytes.
+        code = self._codegen_constructor([self._constant("c0", "cpu", 16)])
+        self.assertIn("constants_info_[0].data_size = 64;", code)
+
+    def test_accelerator_constants_not_aligned_when_privateuse1_registered(self):
+        # Registered path: constants on a PrivateUse1 accelerator device must not be
+        # aligned, matching what CUDA constants historically got.
+        code = self._codegen_constructor(
+            [self._constant("c0", "privateuseone", 16)], device="privateuseone"
+        )
+        self.assertIn("constants_info_[0].data_size = 16;", code)
+        self.assertNotIn("_align", code)
+
+    def test_mixed_cpu_and_accelerator_constants_align(self):
+        # A model holding both CPU and accelerator constants serializes CPU tensors,
+        # so data_size must stay aligned for every constant.
+        constants = [
+            self._constant("cpu_c", "cpu", 16),
+            self._constant("accel_c", "privateuseone", 16),
+        ]
+        code = self._codegen_constructor(constants, device="privateuseone")
+        self.assertIn("constants_info_[0].data_size = 64;", code)
+        self.assertIn("constants_info_[1].data_size = 64;", code)
 
 
 if __name__ == "__main__":
