@@ -88,7 +88,6 @@ from torch.testing._internal.common_utils import (
     IS_X86,
     load_tests,
     MI350_ARCH,
-    NAVI_ARCH,
     parametrize,
     recover_orig_fp32_precision,
     requires_cuda_python_bindings,
@@ -6903,7 +6902,6 @@ class TestCudaAllocator(TestCase):
         finally:
             torch.cuda.memory._record_memory_history(None)
 
-    @skipIfRocmArch(NAVI_ARCH)
     def test_memory_profiler_viz(self):
         with torch.profiler.profile(
             with_stack=True, profile_memory=True, record_shapes=True
