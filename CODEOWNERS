@@ -629,12 +629,12 @@
 #
 # [backend_mps]
 # /aten/src/ATen/metal/
-/aten/src/ATen/mps/ @malfet
-/aten/src/ATen/native/mps/ @malfet
-/c10/metal/ @malfet
+/aten/src/ATen/mps/ @malfet @Isalia20
+/aten/src/ATen/native/mps/ @malfet @Isalia20
+/c10/metal/ @malfet @Isalia20
 # /test/metal/
 # /test/test_metal.py
-/test/test_mps.py @malfet
+/test/test_mps.py @malfet @Isalia20
 # /torch/backends/mps/
 # /torch/csrc/mps/
 # /torch/mps/
