@@ -29,10 +29,33 @@ void topk_impl_loop(
     return;
   }
   using elem_t = std::pair<accscalar_t, int64_t>;
+
+  // Comparator in output order. largest/has-NaN are passed as types, so each
+  // instantiation folds down to a body with no branch of its own.
+  // we want nan to be sorted as top for numpy compatibility
+  auto make_comp = [](auto largest_c, auto check_nan_c) {
+    return [](const elem_t& x, const elem_t& y) -> bool {
+      constexpr bool kLargest = decltype(largest_c)::value;
+      constexpr bool kCheckNan = decltype(check_nan_c)::value;
+      // Ordering for `smallest` is the `largest` one with operands swapped.
+      const elem_t& a = kLargest ? x : y;
+      const elem_t& b = kLargest ? y : x;
+      bool result = a.first > b.first;
+      if constexpr (kCheckNan) {
+        result = result ||
+            (_isnan<accscalar_t>(a.first) && !_isnan<accscalar_t>(b.first));
+      }
+      return result;
+    };
+  };
+
+  const bool use_heap = k * 64 <= dim_size;
+  // Holds the k kept elements on the heap path, or the whole row otherwise.
   // Reused across topk_impl_loop calls on this thread (e.g. once per decoded
-  // token) so a steady-state dim_size doesn't pay a fresh malloc/free each time.
-  static thread_local std::vector<elem_t> queue;
-  queue.resize(dim_size);
+  // token) so a steady-state size doesn't pay a fresh malloc/free each time.
+  static thread_local std::vector<elem_t> buf;
+  buf.resize(use_heap ? k : dim_size);
+
   for (const auto i : c10::irange(n)) {
     TensorAccessor<scalar_t, 1> mode_values(
         reinterpret_cast<scalar_t*>(data[0] + i * strides[0]),
@@ -44,61 +67,71 @@ void topk_impl_loop(
         reinterpret_cast<scalar_t*>(data[2] + i * strides[2]),
         &dim_size, &tmp_values_stride);
 
-    auto n_2 = dim_size;
-    auto use_partial_sort = k * 64 <= n_2;
-
-    // NaN is rare in practice (e.g. model logits), so fold the check into
-    // this already-required pass and let every comparator below skip it.
-    bool has_nan = false;
-    for (const auto j : c10::irange(n_2)) {
-      queue[j].first = tmp_values[j];
-      queue[j].second = j;
-      has_nan = has_nan || _isnan<accscalar_t>(queue[j].first);
-    }
-
-    // we want nan to be sorted as top for numpy compatibility
-    auto select = [&](auto comp) {
-      if (use_partial_sort) {
-        std::partial_sort(queue.begin(), queue.begin() + k, queue.end(), comp);
-      } else {
-        std::nth_element(queue.begin(), queue.begin() + k - 1, queue.end(), comp);
-        if (sorted) {
-          std::sort(queue.begin(), queue.begin() + k - 1, comp);
-        }
-      }
-    };
-
-    // largest/has_nan are passed as types, so each instantiation folds down to
-    // a comparator with no branch of its own on the hot comparison path.
-    auto select_as = [&](auto largest_c, auto check_nan_c) {
-      select([](const elem_t& x, const elem_t& y) -> bool {
+    if (use_heap) {
+      // Bounded size-k heap, rooted at the weakest of the k kept so far. Most
+      // elements are rejected by a single compare, so the row is never copied.
+      auto run = [&](auto largest_c) {
         constexpr bool kLargest = decltype(largest_c)::value;
-        constexpr bool kCheckNan = decltype(check_nan_c)::value;
-        // Ordering for `smallest` is the `largest` one with operands swapped.
-        const elem_t& a = kLargest ? x : y;
-        const elem_t& b = kLargest ? y : x;
-        bool result = a.first > b.first;
-        if constexpr (kCheckNan) {
-          result = result ||
-              (_isnan<accscalar_t>(a.first) && !_isnan<accscalar_t>(b.first));
+        auto comp = make_comp(largest_c, std::true_type{});
+        for (const auto j : c10::irange(k)) {
+          buf[j] = elem_t(tmp_values[j], j);
         }
-        return result;
-      });
-    };
-
-    if (largest && has_nan) {
-      select_as(std::true_type{}, std::true_type{});
-    } else if (largest) {
-      select_as(std::true_type{}, std::false_type{});
-    } else if (has_nan) {
-      select_as(std::false_type{}, std::true_type{});
+        std::make_heap(buf.begin(), buf.end(), comp);
+        for (const auto j : c10::irange(k, dim_size)) {
+          const accscalar_t v = tmp_values[j];
+          const accscalar_t w = buf.front().first;
+          // Cheap filter that never rejects a NaN on either side; those fall
+          // through to the exact test, which applies the NaN ordering.
+          if (kLargest ? !(v <= w) : !(w <= v)) {
+            const elem_t cand(v, j);
+            if (comp(cand, buf.front())) {
+              std::pop_heap(buf.begin(), buf.end(), comp);
+              buf.back() = cand;
+              std::push_heap(buf.begin(), buf.end(), comp);
+            }
+          }
+        }
+        std::sort_heap(buf.begin(), buf.end(), comp);
+      };
+      if (largest) {
+        run(std::true_type{});
+      } else {
+        run(std::false_type{});
+      }
     } else {
-      select_as(std::false_type{}, std::false_type{});
+      // NaN is rare in practice (e.g. model logits), so fold the check into
+      // this already-required pass and let the comparator below skip it.
+      // `|=` rather than `||`: the short-circuit form serializes the loop and
+      // blocks vectorization of the copy.
+      bool has_nan = false;
+      for (const auto j : c10::irange(dim_size)) {
+        buf[j].first = tmp_values[j];
+        buf[j].second = j;
+        has_nan |= _isnan<accscalar_t>(buf[j].first);
+      }
+
+      auto run = [&](auto largest_c, auto check_nan_c) {
+        auto comp = make_comp(largest_c, check_nan_c);
+        std::nth_element(buf.begin(), buf.begin() + k - 1, buf.end(), comp);
+        if (sorted) {
+          std::sort(buf.begin(), buf.begin() + k - 1, comp);
+        }
+      };
+
+      if (largest && has_nan) {
+        run(std::true_type{}, std::true_type{});
+      } else if (largest) {
+        run(std::true_type{}, std::false_type{});
+      } else if (has_nan) {
+        run(std::false_type{}, std::true_type{});
+      } else {
+        run(std::false_type{}, std::false_type{});
+      }
     }
 
     for (const auto j : c10::irange(k)) {
-      mode_values[j] = queue[j].first;
-      mode_indices[j] = queue[j].second;
+      mode_values[j] = buf[j].first;
+      mode_indices[j] = buf[j].second;
     }
   }
 }
