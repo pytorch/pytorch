@@ -57,10 +57,7 @@ inline long histogramdd_index(
     const T leftmost_edge = bin_seq[bin_seq_offset];
     const T rightmost_edge = bin_seq[bin_seq_offset + num_bin_edges[dim] - 1];
 
-    // Skips elements which fall outside the specified bins and NaN elements.
-    // The CPU kernel compares against the edges exactly; widening this test
-    // counts elements that both CPU and numpy drop, and lets the linear paths
-    // derive an index outside the histogram.
+    // Skips elements which fall outside the specified bins and NaN elements
     if (!(element >= leftmost_edge && element <= rightmost_edge)) {
       return -1;
     }

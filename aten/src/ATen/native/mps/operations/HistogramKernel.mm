@@ -115,7 +115,7 @@ void histogramdd_kernel_impl(Tensor& hist_output,
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
 
-      const std::string kernel = (use_atomic ? "histogramdd_atomic_" : "histogramdd_") + scalarToMetalTypeString(input);
+      const auto kernel = fmt::format("histogramdd_{}{}", use_atomic ? "atomic_" : "", scalarToMetalTypeString(input));
       id<MTLComputePipelineState> histogramPSO = lib.getPipelineStateForFunc(kernel);
 
       // this function call is a no-op if MPS Profiler is not enabled
