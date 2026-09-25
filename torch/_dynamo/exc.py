@@ -560,18 +560,12 @@ def raise_observed_exception(
     exc_type: type[Exception],
     tx: InstructionTranslatorBase,
     *,
-    args: list[VariableTracker] | list[str] | None = None,
+    args: list[Any] | None = None,
     kwargs: dict[str, VariableTracker] | None = None,
 ) -> NoReturn:
     from .variables.builder import SourcelessBuilder
 
-    if args:
-        args_ = [
-            SourcelessBuilder.create(tx, arg) if isinstance(arg, str) else arg
-            for arg in args
-        ]
-    else:
-        args_: list[VariableTracker] = []
+    args_ = [SourcelessBuilder.create(tx, arg) for arg in args or []]
 
     # CPython here raises an exception. Since there is no python code, we have to manually setup the exception
     # stack and raise the exception.
