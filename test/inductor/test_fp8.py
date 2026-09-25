@@ -1116,14 +1116,15 @@ class TestFP8Lowering(TestCase):
         ).run(code[0])
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
-    @skipIfRocm(msg="FP8 tensorwise eager path is not supported by hipBLAS")
     @onlyOn(["cpu", "cuda", "xpu"])
     @parametrize("rowwise", [False, True])
     @parametrize("keyword_args", [False, True])
     def test_scaled_mm_v2_constructs_layouts(self, device, rowwise, keyword_args):
         m, k, n = 32, 64, 32
-        a = torch.randn(m, k, device=device).to(torch.float8_e4m3fn)
-        b = torch.randn(k, n, device=device).to(torch.float8_e4m3fn)
+        # gfx94x hipBLASLt rejects float8_e4m3fn; it implements the fnuz variant.
+        dtype_float8 = _fix_fp8_dtype_for_rocm(torch.float8_e4m3fn, device)
+        a = torch.randn(m, k, device=device).to(dtype_float8)
+        b = torch.randn(k, n, device=device).to(dtype_float8)
         sa = torch.rand((m, 1) if rowwise else (), device=device) + 0.5
         sb = torch.rand((1, n) if rowwise else (), device=device) + 0.5
         recipe = ScalingType.RowWise if rowwise else ScalingType.TensorWise
@@ -1179,7 +1180,6 @@ class TestFP8Lowering(TestCase):
             torch.compile(fn, fullgraph=True)(a, a.t(), scale)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
-    @skipIfRocm(msg="FP8 tensorwise eager path is not supported by hipBLAS")
     @onlyOn(["cpu", "cuda", "xpu"])
     def test_scaled_mm_v2_out_dynamic_layouts(self, device):
         def fn(a, b, scale, bias, out):
@@ -1198,9 +1198,11 @@ class TestFP8Lowering(TestCase):
             )
 
         compiled = torch.compile(fn, fullgraph=True, dynamic=True)
+        # gfx94x hipBLASLt rejects float8_e4m3fn; it implements the fnuz variant.
+        dtype_float8 = _fix_fp8_dtype_for_rocm(torch.float8_e4m3fn, device)
         for m in (32, 64):
-            a = torch.randn(m, 64, device=device).to(torch.float8_e4m3fn)
-            b = torch.randn(64, 32, device=device).to(torch.float8_e4m3fn)
+            a = torch.randn(m, 64, device=device).to(dtype_float8)
+            b = torch.randn(64, 32, device=device).to(dtype_float8)
             scale = torch.tensor(0.5, device=device)
             bias = torch.randn(64, device=device, dtype=torch.bfloat16)[::2]
             out = torch.empty(m, 32, device=device, dtype=torch.bfloat16)
