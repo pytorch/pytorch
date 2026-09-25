@@ -106,6 +106,16 @@ kernel void exponential(
   }
 }
 
+// Workaround for compiler bug that incorrectly eliminates float to bfloat cast
+template <typename T>
+T volcast(float x) {
+  if IF_CONSTEXPR (metal::is_same_v<T, bfloat>) {
+    volatile float v = x;
+    return static_cast<T>(v);
+  }
+  return static_cast<T>(x);
+}
+
 // Uniform[from, to). One Philox round per 4 outputs.
 template <typename T>
 kernel void uniform_dist(
@@ -122,7 +132,9 @@ kernel void uniform_dist(
   uint count = min(4u, numel - base);
   for (uint i = 0; i < count; ++i) {
     float u = c10::metal::detail::uint32_to_uniform_float(raw[i]);
-    output[base + i] = static_cast<T>(from + scale * u);
+    T value = static_cast<T>(from + scale * u);
+    // Casting to T can round up to the excluded upper bound.
+    output[base + i] = value == params.y ? volcast<T>(from) : value;
   }
 }
 

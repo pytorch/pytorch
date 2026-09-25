@@ -18,12 +18,10 @@ from torch.utils._sympy.functions import Min, Mod
 from torch.utils._triton import has_triton_stable_tma_api
 
 from ... import config
-from ...autows_utils import meta_ws_enabled
+from ...autows_utils import has_two_ctas, meta_ws_enabled
 from ...kernel.bmm import bmm_template
 from ...kernel.mm import (
     blackwell_ws_persistent_tma_mm_template,
-    get_scaling_options,
-    get_tile_size,
     mm_template,
     persistent_mm_template,
     persistent_tdm_mm_template,
@@ -277,6 +275,7 @@ class BlackwellGPUGemmConfig(GemmConfig):
     use_meta_ws: bool = dataclasses.field(kw_only=True, default=False)
     data_partition_factor: int = dataclasses.field(kw_only=True, default=1)
     separate_epilogue_store: bool = dataclasses.field(kw_only=True, default=False)
+    two_ctas: bool = dataclasses.field(kw_only=True, default=False)
 
 
 # FlexAttention Configs
@@ -998,6 +997,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                     conf.use_meta_ws,
                     conf.data_partition_factor,
                     conf.separate_epilogue_store,
+                    conf.two_ctas,
                 )
 
             extra_key, extra_kwargs = self._get_extra_config_key_and_kwargs(conf)
@@ -1024,6 +1024,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                     kwargs["USE_META_WS"] = conf.use_meta_ws
                     kwargs["DATA_PARTITION_FACTOR"] = conf.data_partition_factor
                     kwargs["SEPARATE_EPILOGUE_STORE"] = conf.separate_epilogue_store
+                    kwargs["TWO_CTAS"] = conf.two_ctas
 
                 kwargs.update(extra_kwargs)
 
@@ -2989,6 +2990,11 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
         """
         Generate TMA template configs by calling super and adding TMA-specific options.
         """
+        if not isinstance(kernel_inputs, MMKernelInputs):
+            raise AssertionError("Blackwell GEMM requires MMKernelInputs")
+        _, mat2 = kernel_inputs.mat1mat2()
+        element_size = mat2.get_dtype().itemsize
+
         # Get base template configs from superclass
         for template_kwargs in super()._get_template_configs_impl(
             kernel_inputs,
@@ -2998,7 +3004,9 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
             use_meta_ws = template_kwargs.get("USE_META_WS", False)
             # autoWS configs come from a full sweep; drop combos the lowering
             # does not support so no invalid config reaches codegen.
-            if use_meta_ws and not self._autows_constraints_ok(template_kwargs):
+            if use_meta_ws and not self._autows_constraints_ok(
+                template_kwargs, element_size=element_size
+            ):
                 continue
             # Some Triton versions requires num_warps >= 4 for WS
             # to avoid compilation issues. Triton disables WS if num_warps < 4
@@ -3016,28 +3024,42 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
                 and not constraints_violated
                 and not use_meta_ws
             )
-            yield {
+            two_ctas = template_kwargs.get("TWO_CTAS", False)
+            out = {
                 **template_kwargs,
-                "NUM_SMS": get_num_sms(),
+                "NUM_SMS": get_num_sms(two_ctas=two_ctas),
                 "WARP_SPECIALIZE": ws,
                 "FLATTEN": flatten,
                 "HOST_SIDE_TMA": config.triton.enable_host_side_tma,
             }
+            if two_ctas:
+                out["ctas_per_cga"] = (2, 1, 1)
+            yield out
 
     @staticmethod
-    def _autows_constraints_ok(template_kwargs: dict[str, Any]) -> bool:
+    def _autows_constraints_ok(
+        template_kwargs: dict[str, Any], *, element_size: int
+    ) -> bool:
         """autoWS lowering constraints; swept configs violating these are pruned."""
         block_m = template_kwargs["BLOCK_M"]
         block_n = template_kwargs["BLOCK_N"]
         subtile = template_kwargs.get("EPILOGUE_SUBTILE", 1)
+        dp = template_kwargs.get("DATA_PARTITION_FACTOR", 1)
         # each epilogue subtile is BLOCK_N // EPILOGUE_SUBTILE wide
         if block_n // subtile < 32:
             return False
         # dp=2 splits the row tile into two MMA partitions; BLOCK_M=64 fails in
         # the fb-triton WS pass pipeline, so keep the tile at 128 or 256
-        dp = template_kwargs.get("DATA_PARTITION_FACTOR", 1)
         if dp == 2 and block_m not in (128, 256):
             return False
+        if template_kwargs.get("TWO_CTAS", False):
+            # This MetaWS 2CTA template currently requires TMA epilogue stores.
+            if not (has_two_ctas() and config.triton.enable_template_tma_store):
+                return False
+            # 2CTA halves B along N. Each CTA's slice must still span at least
+            # 128 bytes to use the required swizzle.
+            if block_m < 128 or (block_n // 2) * element_size < 128:
+                return False
         return True
 
     def _get_config_generator(
@@ -3063,22 +3085,24 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
                     for epilogue_subtile in [1, 2, 4, 8]:
                         for data_partition_factor in [1, 2]:
                             for separate_epilogue_store in [False, True]:
-                                configs.append(
-                                    BlackwellGPUGemmConfig(
-                                        block_m=BLOCK_M,
-                                        block_n=BLOCK_N,
-                                        block_k=BLOCK_K,
-                                        num_stages=num_stages,
-                                        num_warps=num_warps,
-                                        group_m=8,
-                                        epilogue_subtile=epilogue_subtile,
-                                        use_meta_ws=True,
-                                        data_partition_factor=data_partition_factor,
-                                        separate_epilogue_store=separate_epilogue_store,
-                                        warp_specialize=True,
-                                        flatten=False,
+                                for two_ctas in [False, True]:
+                                    configs.append(
+                                        BlackwellGPUGemmConfig(
+                                            block_m=BLOCK_M,
+                                            block_n=BLOCK_N,
+                                            block_k=BLOCK_K,
+                                            num_stages=num_stages,
+                                            num_warps=num_warps,
+                                            group_m=8,
+                                            epilogue_subtile=epilogue_subtile,
+                                            use_meta_ws=True,
+                                            data_partition_factor=data_partition_factor,
+                                            separate_epilogue_store=separate_epilogue_store,
+                                            two_ctas=two_ctas,
+                                            warp_specialize=True,
+                                            flatten=False,
+                                        )
                                     )
-                                )
         return configs
 
     @staticmethod
@@ -3615,10 +3639,7 @@ class CUDAScaledTMAEpilogueScalingTemplateConfigHeuristic(
 class CUDAScaledTMAMainLoopScalingTemplateConfigHeuristic(
     ScaledTMAConfigMixin, CUDAConfigHeuristic
 ):
-    """
-    Scaled TMA template heuristic for CUDA:
-        main loop scaling variants (BlockWise1x128, BlockWise1x32, BlockWise1x16, BlockWise128x128)
-    """
+    """Scaled TMA configurations for 128-element main-loop scale blocks."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -3634,14 +3655,9 @@ class CUDAScaledTMAMainLoopScalingTemplateConfigHeuristic(
         """
         Generate main loop scaling kernel inputs.
         """
-        mat_a, mat_b, scale_a, scale_b = kernel_inputs._input_nodes
-        scale_a_size, scale_b_size = scale_a.get_size(), scale_b.get_size()
-
-        scale_option_a, scale_option_b = get_scaling_options(
-            mat_a, mat_b, scale_a_size, scale_b_size
-        )
-        tile_size_a = get_tile_size(scale_option_a)
-        tile_size_b = get_tile_size(scale_option_b)
+        # Both main-loop recipes scale 128 elements along K. Inferring them
+        # again from shapes misclassifies single-K-block inputs as rowwise.
+        tile_size_a = tile_size_b = 128
 
         # Get base scaled MM template configs from superclass
         for template_kwargs in super()._get_template_configs_impl(
@@ -3652,8 +3668,8 @@ class CUDAScaledTMAMainLoopScalingTemplateConfigHeuristic(
             # Add scaling-specific options for main loop scaling variants
 
             # Inductor templates require compile-time constants passed in as tl.constexpr values.
-            # In cases in which the block size (BLOCK_*) is smaller than the tile size (128, 32, 16),
-            # scales must be broadcasted to BLOCK_* (rather than to a tile_sizextile_size chunk).
+            # When BLOCK_* is smaller than 128, broadcast scales to BLOCK_*
+            # rather than to a full 128x128 tile.
 
             template_kwargs["TILE_SIZE_A"] = tile_size_a
             template_kwargs["TILE_SIZE_B"] = tile_size_b
