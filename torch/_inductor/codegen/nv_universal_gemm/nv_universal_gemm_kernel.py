@@ -154,6 +154,9 @@ class CuTeDSLEpilogueArguments:
         result.traced_epilogue = None
         return result
 
+    def copy(self) -> CuTeDSLEpilogueArguments:
+        return self.with_tensors(self.tensors)
+
     @property
     def parameters(self) -> list[Any]:
         return list(self.tensors.values())
@@ -664,6 +667,7 @@ def _lookup_gemm_kernel(
 
     if base_kernel is None and fast:
         base_kernel = get_kernel_by_name_via_args(kernel_name, args, cc)
+    epilogue_args = getattr(args, "epilogue", None) or epilogue_args
     kernel = get_efc_kernel_with_epilogue(
         kernel_name,
         epilogue_args,
@@ -1387,7 +1391,8 @@ class NVUniversalGemmKernel(Kernel):
                 )
             else:
                 code.writeline(
-                    "from cutlass.operators.arguments import EpilogueArguments"
+                    "from cutlass.operators.arguments import "
+                    "EpilogueArguments as CuTeDSLEpilogueArguments"
                 )
         code.writeline("")
 
@@ -1462,12 +1467,7 @@ class NVUniversalGemmKernel(Kernel):
                 epi_kwargs_str = "epilogue_fn=_EPILOGUE_FN_SRC"
                 if epilogue_kwargs:
                     epi_kwargs_str += f", {epilogue_kwargs}"
-                epilogue_args_type = (
-                    "CuTeDSLEpilogueArguments"
-                    if not self.epilogue.is_evt_fallback
-                    else "EpilogueArguments"
-                )
-                code.writeline(f"epi_args = {epilogue_args_type}({epi_kwargs_str})")
+                code.writeline(f"epi_args = CuTeDSLEpilogueArguments({epi_kwargs_str})")
                 epi_args_expr = "epi_args"
                 epi_source_expr = "_EPILOGUE_FN_SOURCE"
                 aux_tensors.extend(self.epilogue.reads)

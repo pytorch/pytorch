@@ -2781,6 +2781,41 @@ instantiate_device_type_tests(
 
 @requires_cuda
 class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
+    @torch.compiler.config.patch(compile_on_one_rank=True)
+    def test_synchronize_preserves_indexless_device_under_coor(self) -> None:
+        def f(x):
+            torch.cuda.synchronize(torch.device("cuda"))
+            return x + 1
+
+        torch._dynamo.reset()
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(f, backend=backend, fullgraph=True)
+        x = torch.zeros(1, device="cuda:0")
+        # Cycling the current device must not recompile: a guard pinning the index
+        # is what would stop one artifact from serving every rank. Asserting only
+        # one graph under a single current device cannot tell "no guard" from
+        # "guard satisfied", so vary the device and pin the unresolved index too.
+        for index in range(torch.cuda.device_count()):
+            with torch.cuda.device(index):
+                # CooR requires an input to be on the current accelerator, so build
+                # one per iteration instead of reusing a cuda:0 tensor throughout.
+                compiled(torch.zeros(1, device="cuda"))
+
+        self.assertEqual(len(backend.graphs), 1)
+        self.assertEqual(
+            [
+                node.args
+                for node in backend.graphs[0].graph.nodes
+                if "synchronize_device" in str(node.target)
+            ],
+            [("cuda", None)],
+        )
+
+        with torch.cuda.device(0):
+            with patch.object(torch.accelerator, "synchronize") as synchronize:
+                compiled(x)
+        self.assertEqual(synchronize.call_args.args, (torch.device("cuda"),))
+
     def test_wait_stream_anchors_following_record(self) -> None:
         """A record_event on the WAITING stream after a wait_stream must chain to
         the wait_stream (which runs on that stream), not float above it as a bare

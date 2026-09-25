@@ -593,6 +593,7 @@ exclude_patterns = [
     # Vendored: raw throws are upstream's call, not ours.
     'c10/util/flat_hash_map.h',  # skarupke/flat_hash_map
     'third_party/concurrentqueue/**',
+    'third_party/kineto/libkineto/third_party/**',  # Kineto's own third_party
     # Fork of flat_hash_map. Also: at()'s out_of_range becomes KeyError in
     # jit/python/python_dict.cpp, so converting it breaks TorchScript dicts.
     'c10/util/order_preserving_flat_hash_map.h',
@@ -606,7 +607,11 @@ exclude_patterns = [
     'c10/util/SmallVector.cpp',  # length_error -> ValueError, bad_alloc -> MemoryError
     'c10/util/StringUtil.cpp',  # range_error -> ValueError
     # Burned down later in this stack. Nothing may be added here.
-    'torch/csrc/jit/**',
+    # NNC. The TorchScript frontend is deprecated, but this is not dead code:
+    # it is compiled unconditionally, it is still the default fuser for a CUDA
+    # torch.jit.script, and Static Runtime and mkldnn_rewrite.cpp link it
+    # regardless of that. 294 findings, so it gets its own PR.
+    'torch/csrc/jit/tensorexpr/**',
 ]
 command = [
     'python3',
@@ -910,6 +915,8 @@ include_patterns = [
 # therefore are permitted to use logging
 exclude_patterns = [
     'tools/**',
+    'third_party/kineto/tools/**',  # copies of tools/linter, excluded above
+    'third_party/kineto/libkineto/third_party/**',  # Kineto's own third_party
     'test/**',
     'benchmarks/**',
     'torch/distributed/run.py',
@@ -1595,6 +1602,25 @@ command = [
 ]
 include_patterns = [
     "**/pyproject.toml",
+]
+
+[[linter]]
+code = 'LICENSE_FILES'
+command = [
+    'uv',
+    'run',
+    '--python',
+    '3.10',
+    '--script',
+    'tools/linter/adapters/license_files_linter.py',
+    '--',
+    '@{{PATHSFILE}}'
+]
+include_patterns = [
+    'pyproject.toml',
+    'test/test_license.py',
+    'tools/linter/license_files_audit.py',
+    'tools/linter/license_audit_manifest.toml',
 ]
 
 [[linter]]

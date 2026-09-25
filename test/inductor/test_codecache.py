@@ -3,6 +3,7 @@ import base64
 import copy
 import functools
 import hashlib
+import io
 import json
 import logging
 import os
@@ -41,6 +42,7 @@ from torch._inductor.codecache import (
     BypassFxGraphCache,
     CacheabilityValidator,
     CacheBase,
+    compiled_fx_graph_hash,
     CppWrapperCodeCache,
     CUDACodeCache,
     FxGraphCache,
@@ -50,6 +52,7 @@ from torch._inductor.codecache import (
     TensorMetadata,
     TensorMetadataAndValues,
 )
+from torch._inductor.codegen.cuda import compile_utils as cuda_compile_utils
 from torch._inductor.codegen.cuda.compile_utils import cuda_compile_command
 from torch._inductor.cpp_builder import normalize_path_separator
 from torch._inductor.custom_graph_pass import (
@@ -122,13 +125,8 @@ STATIC_LAUNCHER_DEVICES = ("cuda", "xpu")
 
 @instantiate_parametrized_tests
 class TestCacheKeyStrategy(TestCase):
-    @parametrize(
-        "backend_precision,expected,legacy_calls",
-        (("bfx9", "bfx9", 0), ("tf32", "high", 1)),
-    )
-    def test_precompile_cache_key_handles_bfx9(
-        self, backend_precision, expected, legacy_calls
-    ):
+    @parametrize("backend_precision", ("bfx9", "tf32"))
+    def test_precompile_cache_key_handles_bfx9(self, backend_precision):
         from torch._inductor.select_algorithm import create_precompile_key
 
         choice = types.SimpleNamespace(kernel_hash_key=lambda: "choice")
@@ -144,11 +142,12 @@ class TestCacheKeyStrategy(TestCase):
                 return_value="high",
             ) as legacy_getter,
         ):
+            expected = f"cuda:{backend_precision},mkldnn:{backend_precision}"
             self.assertEqual(
                 create_precompile_key("op", "inputs", [choice]),
                 f"op:inputs:{expected}:choice",
             )
-            self.assertEqual(legacy_getter.call_count, legacy_calls)
+            self.assertEqual(legacy_getter.call_count, 0)
 
     def _compact_sha256(self, data: bytes) -> str:
         return (
@@ -811,6 +810,43 @@ class TestFxGraphCache(TestCase):
     def test_cpu_thread_count_cache_key_no_input_randperm(self):
         self._check_cpu_thread_count_cache_key_no_input(
             "torch.randperm(1 << 12, dtype=torch.float32).log()"
+        )
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    def test_fx_graph_cache_artifact_contains_hash_components(self):
+        def fn(x):
+            return x.sin() + 1
+
+        with (
+            fresh_cache(),
+            mock.patch("torch._inductor.compile_fx.trace_structured") as mock_trace,
+        ):
+            torch.compile(fn, backend="inductor")(torch.ones(2))
+
+        cache_payloads = []
+        for call in mock_trace.call_args_list:
+            if not call.args or call.args[0] != "artifact":
+                continue
+
+            metadata_fn = call.kwargs.get("metadata_fn")
+            if metadata_fn is None and len(call.args) > 1:
+                metadata_fn = call.args[1]
+            if metadata_fn is None:
+                continue
+
+            metadata = metadata_fn()
+            if metadata.get("name") != "fx_graph_cache_miss":
+                continue
+
+            payload_fn = call.kwargs.get("payload_fn")
+            self.assertIsNotNone(payload_fn)
+            cache_payloads.append(json.loads(payload_fn()))
+
+        self.assertEqual(len(cache_payloads), 1)
+        self.assertEqual(cache_payloads[0]["cache_state"], "miss")
+        self.assertTrue(
+            any("example_inputs[0]" in line for line in cache_payloads[0]["components"])
         )
 
     @requires_triton()
@@ -3777,6 +3813,33 @@ class TestFxGraphCacheHashing(TestCase):
         finally:
             torch.set_num_threads(orig_num_threads)
 
+    def test_compiled_fx_graph_hash_details_are_not_debug_logged(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.call_function(torch.ops.aten.sin.default, (x,))
+        graph.output((y,))
+        gm = torch.fx.GraphModule({}, graph)
+
+        stream = io.StringIO()
+        handler = logging.StreamHandler(stream)
+        handler.setLevel(logging.DEBUG)
+        logger = logging.getLogger("torch._inductor.codecache")
+        old_level = logger.level
+        old_propagate = logger.propagate
+        logger.setLevel(logging.DEBUG)
+        logger.propagate = False
+        logger.addHandler(handler)
+        try:
+            _, debug_lines = compiled_fx_graph_hash(gm, [torch.randn(2)], {}, [])
+        finally:
+            logger.removeHandler(handler)
+            logger.setLevel(old_level)
+            logger.propagate = old_propagate
+
+        self.assertTrue(any("example_inputs[0]" in line for line in debug_lines))
+        self.assertNotIn("FX graph cache hash details", stream.getvalue())
+        self.assertNotIn("example_inputs[0]", stream.getvalue())
+
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "requires MKLDNN")
     def test_cacheability_validator_checks_mkldnn_constant(self):
         graph = torch.fx.Graph()
@@ -3804,15 +3867,15 @@ class TestFxGraphCacheHashing(TestCase):
         # A region's inductor_config_patches must be part of the cache key,
         # otherwise two regions differing only in their patches would collide
         # and reuse a stale compiled artifact.
-        same1 = self._nested_region_gm({"max_autotune": True})
-        same2 = self._nested_region_gm({"max_autotune": True})
-        different = self._nested_region_gm({"max_autotune": False})
+        same1 = self._nested_region_gm({"fallback_by_default": True})
+        same2 = self._nested_region_gm({"fallback_by_default": True})
+        different = self._nested_region_gm({"fallback_by_default": False})
 
         self.assertEqual(
             FxGraphHashDetails(
                 same1, [], cast(Any, {}), []
             ).nested_inductor_config_patches,
-            (("", (("max_autotune", True),)),),
+            (("", (("fallback_by_default", True),)),),
         )
         self.assertEqual(
             self._fx_graph_cache_key(same1, []),
@@ -3824,40 +3887,16 @@ class TestFxGraphCacheHashing(TestCase):
         )
 
     def test_nested_region_uncacheable_config_bypasses_cache(self):
-        # A callable patch value can't be hashed into the cache key.
-        def custom_pass(graph):
-            return graph
+        # Config annotations are not enforced when a patch is applied, so an
+        # allowed key can still carry a callable value that cannot be cached.
+        def invalid_value():
+            pass
 
         with self.assertRaisesRegex(BypassFxGraphCache, "callable value"):
             CacheabilityValidator(
-                self._nested_region_gm({"post_grad_custom_pre_pass": custom_pass}),
+                self._nested_region_gm({"fallback_by_default": invalid_value}),
                 require_shape_env=False,
             ).validate()
-
-        # A non-callable value under a custom-pass key is uncacheable too.
-        with self.assertRaisesRegex(BypassFxGraphCache, "custom pass"):
-            CacheabilityValidator(
-                self._nested_region_gm({"post_grad_custom_pre_pass": "sentinel"}),
-                require_shape_env=False,
-            ).validate()
-
-        # A callable hidden inside a list value (e.g.
-        # _fuse_ddp_communication_passes) is uncacheable too.
-        with self.assertRaisesRegex(BypassFxGraphCache, "callable value"):
-            CacheabilityValidator(
-                self._nested_region_gm(
-                    {"_fuse_ddp_communication_passes": [custom_pass]}
-                ),
-                require_shape_env=False,
-            ).validate()
-
-        # A list of non-callables stays cacheable.
-        CacheabilityValidator(
-            self._nested_region_gm(
-                {"_fuse_ddp_communication_passes": ["fuse_ddp_with_concat_op"]}
-            ),
-            require_shape_env=False,
-        ).validate()
 
     def _nested_region_bw_gm(self, bw_patches):
         from torch._higher_order_ops.invoke_subgraph import (
@@ -3891,17 +3930,17 @@ class TestFxGraphCacheHashing(TestCase):
         # Backward config replaces (does not merge with) the forward config.
         bw_config = get_backward_nested_region_config(
             get_invoke_subgraph_compile_options(
-                bw_inductor_config_patches={"max_autotune": True}
+                bw_inductor_config_patches={"fallback_by_default": True}
             )
         )
         self.assertEqual(
             bw_config.inductor_config_patches,
-            {"max_autotune": True},
+            {"fallback_by_default": True},
         )
 
-        same1 = self._nested_region_bw_gm({"max_autotune": True})
-        same2 = self._nested_region_bw_gm({"max_autotune": True})
-        different = self._nested_region_bw_gm({"max_autotune": False})
+        same1 = self._nested_region_bw_gm({"fallback_by_default": True})
+        same2 = self._nested_region_bw_gm({"fallback_by_default": True})
+        different = self._nested_region_bw_gm({"fallback_by_default": False})
         self.assertEqual(
             self._fx_graph_cache_key(same1, []),
             self._fx_graph_cache_key(same2, []),
@@ -4860,6 +4899,79 @@ class TestFxGraphCacheHashing(TestCase):
 
 
 class TestCudaCompileCommand(TestCase):
+    def setUp(self):
+        super().setUp()
+        cuda_compile_utils._cuda_driver_lib_dirs.cache_clear()
+        self.addCleanup(cuda_compile_utils._cuda_driver_lib_dirs.cache_clear)
+
+    def test_cuda_driver_lib_dirs_from_ldconfig(self):
+        ldconfig_output = (
+            b"\tlibcuda.so.1 (libc6,x86-64) => /usr/lib/x86_64-linux-gnu/libcuda.so.1\n"
+        )
+        with (
+            mock.patch("subprocess.check_output", return_value=ldconfig_output),
+            mock.patch.dict(os.environ, {"LD_LIBRARY_PATH": ""}),
+        ):
+            self.assertEqual(
+                cuda_compile_utils._cuda_driver_lib_dirs(),
+                ["/usr/lib/x86_64-linux-gnu"],
+            )
+
+    def test_cuda_driver_lib_dirs_from_ld_library_path(self):
+        with tempfile.TemporaryDirectory() as cuda_dir:
+            open(os.path.join(cuda_dir, "libcuda.so.1"), "w").close()
+            with (
+                mock.patch("subprocess.check_output", return_value=b""),
+                mock.patch.dict(os.environ, {"LD_LIBRARY_PATH": cuda_dir}),
+            ):
+                self.assertEqual(
+                    cuda_compile_utils._cuda_driver_lib_dirs(),
+                    [cuda_dir],
+                )
+
+    def test_cuda_lib_options_uses_versioned_driver_soname(self):
+        with (
+            mock.patch(
+                "torch.utils.cpp_extension.library_paths",
+                return_value=["/fake/cuda/lib64"],
+            ),
+            mock.patch.object(
+                cuda_compile_utils, "_transform_cuda_paths", lambda lpaths: None
+            ),
+            mock.patch.object(cuda_compile_utils, "is_linux", lambda: True),
+            mock.patch.object(
+                cuda_compile_utils,
+                "_cuda_driver_lib_dirs",
+                return_value=["/usr/lib/x86_64-linux-gnu"],
+            ),
+        ):
+            flags = cuda_compile_utils._cuda_lib_options()
+
+        self.assertIn("-L/usr/lib/x86_64-linux-gnu", flags)
+        self.assertIn("-l:libcuda.so.1", flags)
+        self.assertNotIn("-lcuda", flags)
+        self.assertIn("-lcudart", flags)
+
+    def test_cuda_lib_options_keeps_stub_fallback_without_driver_soname(self):
+        with (
+            mock.patch(
+                "torch.utils.cpp_extension.library_paths",
+                return_value=["/fake/cuda/lib64", "/fake/cuda/lib64/stubs"],
+            ),
+            mock.patch.object(
+                cuda_compile_utils, "_transform_cuda_paths", lambda lpaths: None
+            ),
+            mock.patch.object(cuda_compile_utils, "is_linux", lambda: True),
+            mock.patch.object(
+                cuda_compile_utils, "_cuda_driver_lib_dirs", return_value=[]
+            ),
+        ):
+            flags = cuda_compile_utils._cuda_lib_options()
+
+        self.assertIn("-lcuda", flags)
+        self.assertNotIn("-l:libcuda.so.1", flags)
+        self.assertIn("-lcudart", flags)
+
     @requires_cuda_and_triton
     def test_cuda_compile_command(self):
         cmd_no_extra_args: str = cuda_compile_command(
