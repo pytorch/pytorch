@@ -209,6 +209,18 @@ def evaluate_platform_supports_ck_sdpa():
     else:
         return False
 
+# Gate for RDNA 3/3.5, which supports SDPA but up to 256
+def evaluate_platform_sdpa_supports_hdim512():
+    if not TEST_WITH_ROCM:
+        return True
+    if not torch.cuda.is_available():
+        return False
+    gcn_arch_name = torch.cuda.get_device_properties('cuda').gcnArchName
+    if gcn_arch_name.startswith('gfx11'):
+        return True
+    return False
+
+
 def evaluate_platform_supports_efficient_attention():
     if TEST_WITH_ROCM:
         # NOTE: gfx1250 is omitted until mem-efficient-attention artifacts ship
@@ -251,6 +263,7 @@ PLATFORM_SUPPORTS_FUSED_SDPA: bool = TEST_CUDA and not TEST_WITH_ROCM
 
 PLATFORM_SUPPORTS_CK_SDPA: bool = LazyVal(lambda: evaluate_platform_supports_ck_sdpa())
 
+PLATFORM_FUSED_ATTENTION_SUPPORTS_HDIM512: bool = LazyVal(lambda: evaluate_platform_sdpa_supports_hdim512())
 
 def evaluate_platform_supports_bf16():
     if torch.version.cuda:
