@@ -1579,7 +1579,8 @@ class MixOrderReductionNumericTest(TestBase):
             "triton.mix_order_reduction_autotune_split_size": True,
         }
     )
-    def test_fixed_config_skips_split_autotuning(self, device):
+    @parametrize("use_tensor_descriptor", (False, True))
+    def test_fixed_config_skips_split_autotuning(self, device, use_tensor_descriptor):
         rows = 40961
         props = DeviceProperties.create(torch.device(device))
         split_size = min(
@@ -1608,7 +1609,15 @@ class MixOrderReductionNumericTest(TestBase):
 
         x = torch.zeros((rows, 129), dtype=torch.bfloat16, device=device)
         expected = f(x)
-        with V.set_choices_handler(FixedMixOrderChoices()):
+        with (
+            V.set_choices_handler(FixedMixOrderChoices()),
+            inductor_config.patch(
+                {
+                    "triton.use_tensor_descriptor": use_tensor_descriptor,
+                    "assume_aligned_inputs": use_tensor_descriptor,
+                }
+            ),
+        ):
             actual = torch.compile(f)(x)
 
         self.assertEqual(actual, expected)

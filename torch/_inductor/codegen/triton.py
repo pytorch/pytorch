@@ -8194,8 +8194,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         )
 
     def max_block(self, prefix: str) -> int:
-        if self.fixed_config:
-            return self.fixed_config[f"{prefix.upper()}BLOCK"]
+        block = f"{prefix.upper()}BLOCK"
+        if self.fixed_config and block in self.fixed_config:
+            return self.fixed_config[block]
         return TRITON_MAX_BLOCK[prefix.upper()]
 
     def _has_constant_mask(self, tree: IterationRangesRoot) -> bool:
