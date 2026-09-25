@@ -405,10 +405,10 @@ jobs:
       python-version: "3.11"
     secrets: inherit
 
-  # Default ROCm shards can run on the kubernetes-novolume scale set when the CI
-  # image is on the public GHCR mirror (same tag docker-builds pushed to ECR).
-  # Otherwise they stay on DinD, which can log into ECR at job start. Non-default
-  # configs (inductor, distributed, ...) always use DinD regardless.
+  # Default and distributed ROCm shards can run on the kubernetes-novolume scale
+  # set when the CI image is on the public GHCR mirror (same tag docker-builds
+  # pushed to ECR). Otherwise they stay on DinD, which can log into ECR at job
+  # start. Inductor configs always use DinD regardless.
   linux-noble-rocm-py3_11-ghcr-probe:
     if: github.repository_owner == 'pytorch'
     name: linux-noble-rocm-py3.11-mi350-ghcr-probe
@@ -452,9 +452,9 @@ jobs:
           echo "ghcr-available=${ghcr_available}" >> "${GITHUB_OUTPUT}"
 
           if [[ "${ghcr_available}" == true ]]; then
-            dind_matrix="$(echo "${BUILD_TEST_MATRIX}" | jq -c '.include |= map(select(.config != "default" or .num_shards != 8))')"
+            dind_matrix="$(echo "${BUILD_TEST_MATRIX}" | jq -c '.include |= map(select((.config != "default" or .num_shards != 8) and .config != "distributed"))')"
           else
-            echo "GHCR mirror absent; default shards will run on DinD"
+            echo "GHCR mirror absent; default and distributed shards will run on DinD"
             dind_matrix="${BUILD_TEST_MATRIX}"
           fi
 
@@ -482,11 +482,12 @@ jobs:
       tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
     secrets: inherit
 
-  # Default shards on the kubernetes-novolume scale set when the GHCR mirror exists.
-  # The matrix is spelled out here rather than reusing the build output because
-  # it needs the no-dind runner label, and it carries no experiment prefix: the
-  # ARC scale set registers the bare label, so a prefix would resolve to a
-  # runner group that does not exist and the jobs would queue forever.
+  # Default (1 GPU) and distributed (2 GPU) shards on the kubernetes-novolume
+  # scale set when the GHCR mirror exists. The matrix is spelled out here rather
+  # than reusing the build output because it needs the no-dind runner labels, and
+  # it carries no experiment prefix: the ARC scale set registers the bare label,
+  # so a prefix would resolve to a runner group that does not exist and the jobs
+  # would queue forever.
   linux-noble-rocm-py3_11-test-k8s:
     name: linux-noble-rocm-py3.11-mi350-k8s
     uses: ./.github/workflows/_rocm-test-kubernetes.yml
@@ -509,6 +510,9 @@ jobs:
           { config: "default", shard: 6, num_shards: 8, runner: "linux.rocm.gpu.mi350.dpx.1" },
           { config: "default", shard: 7, num_shards: 8, runner: "linux.rocm.gpu.mi350.dpx.1" },
           { config: "default", shard: 8, num_shards: 8, runner: "linux.rocm.gpu.mi350.dpx.1" },
+          { config: "distributed", shard: 1, num_shards: 3, runner: "linux.rocm.gpu.mi350.dpx.2" },
+          { config: "distributed", shard: 2, num_shards: 3, runner: "linux.rocm.gpu.mi350.dpx.2" },
+          { config: "distributed", shard: 3, num_shards: 3, runner: "linux.rocm.gpu.mi350.dpx.2" },
         ]}
       # The default config picks these up by discovery; the inductor config in
       # this same job already runs them. Only affects default (see EXCLUDE_CLAUSE
