@@ -1615,7 +1615,7 @@ class NestedReduction:
         Independent epilogue inputs remain ordinary derived-domain loads. Shared
         parent inputs must have one normalized parent access. Each epilogue access
         is proved either as an interleaved lane projection or, when explicitly
-        enabled, as an identity-plus-translation relation in a common row/feature
+        enabled, as a dense translation relation in a common row/feature
         frame.
         ``known_extent_subs`` carries divisibility already proved by a surrounding
         nested-reduction topology.
@@ -1779,7 +1779,7 @@ class NestedReduction:
         parent_rnumel: sympy.Expr,
         sub_parent_factor: int,
         extent_subs: dict[sympy.Expr, sympy.Expr],
-    ) -> IdentityTranslationProof | None:
+    ) -> TranslationProof | None:
         """Prove a translated access in the parent X/R coordinate frame.
 
         Args:
@@ -1858,7 +1858,7 @@ class NestedReduction:
             extent_subs,
         ):
             return None
-        proof = SubParentAccessRelation.prove_identity_translation(
+        proof = SubParentAccessRelation.prove_translation(
             typing.cast("tuple[MemoryDep, ...]", source_frames),
             typing.cast("MemoryDep", consumer_frame),
             sizevars=V.graph.sizevars,
@@ -2557,9 +2557,9 @@ class NestedReduction:
                 return False
             if not translated:
                 continue
-            source_sets = {
+            source_sets = OrderedSet([
                 frozenset(relation.source_accesses) for relation in translated
-            }
+            ])
             # ``requires_live_source`` is relation-specific: the same source
             # name may be forwarded for one output and remain an external or
             # graph-output access for another.  The codegen descriptor retains
@@ -2967,7 +2967,7 @@ class SubParentAccessRelation:
     flat and grouped reads of one input. Fusion proves each consumer against these
     accesses; codegen validates their per-name replay consequences. ``parent_lane``
     selects one part of a parent-width value. ``translation`` records an
-    identity-plus-translation proof in a common row-major frame. Sharing a buffer
+    dense translation proof in a common row-major frame. Sharing a buffer
     name alone does not establish this relation.
 
     TODO: Consider alternate designs: infer these relations from codegen access
