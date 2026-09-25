@@ -5685,6 +5685,32 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         with self.assertRaises(TypeError):
             fn(torch.randn(4))
 
+    @parametrize(
+        "case",
+        [
+            subtest("no_args", name="no_args"),
+            subtest("one_arg", name="one_arg"),
+            subtest("too_many_args", name="too_many_args"),
+            subtest("keyword_arg", name="keyword_arg"),
+        ],
+    )
+    def test_getattr_wrong_args_raises(self, case):
+        def fn(x):
+            try:
+                if case == "no_args":
+                    return getattr()
+                if case == "one_arg":
+                    return getattr(x)
+                if case == "too_many_args":
+                    return getattr(x, "shape", None, None)
+                return getattr(x, name="shape")
+            except TypeError as exc:
+                return x.sin(), str(exc)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
     def test_user_defined_class_name(self):
         class MyClassFoo:
             pass
@@ -14168,8 +14194,13 @@ def ___make_guard_fn():
 
         x = torch.randn([0, 1, 2, 3, 4, 5])
         compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, "infinite generator"
+        # symbolic_convert imports the limit by value, so patch it there. A small
+        # limit exercises the same bail-out without tracing 100k YIELD_VALUEs.
+        with (
+            unittest.mock.patch.object(
+                torch._dynamo.symbolic_convert, "MAX_ITERATOR_LIMIT", 100
+            ),
+            self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "infinite generator"),
         ):
             compiled_fn(x)
 
@@ -18107,6 +18138,33 @@ fn
         self.assertEqual(res[8], -1)
         self.assertEqual(res[9], float.fromhex("0x1.ffffp10"))
         self.assertEqual(res[10], "0x1.8000000000000p+0")
+
+    def test_builtin_numeric_unbound_method_constant_fold(self):
+        def fn():
+            out = [
+                complex.__radd__(3j, 4.0),
+                float.__rsub__(3.0, 1),
+                float.__sub__(3.0, 1),
+                float.__rpow__(2.0, 3),
+                float.__radd__(3.0, "x"),
+                int.__radd__(3, 4),
+                int.__rsub__(3, 10),
+                int.__radd__(3, 4.5),
+                int.__pow__(3, 4, 5),
+                int.__repr__(True),
+                float.__round__(2.567, 1),
+            ]
+            try:
+                float.__rtruediv__(0.0, 1)
+            except ZeroDivisionError as e:
+                out.append(str(e))
+            try:
+                int.__add__("a", 1)
+            except TypeError as e:
+                out.append(str(e))
+            return out
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
 
     def test_builtin_constant_fold_str_conversions(self):
         @torch.compile(backend="eager", fullgraph=True)

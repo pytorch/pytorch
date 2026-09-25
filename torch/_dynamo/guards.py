@@ -335,7 +335,7 @@ class GuardManagerWrapper:
         self.cache_entry: CacheEntry | None = None
         self.extra_state: ExtraState | None = None
         self.id_matched_objs: dict[str, ReferenceType[object]] = {}
-        self.no_tensor_aliasing_sources: list[str] = []
+        self.no_tensor_aliasing_sources: list[Source] = []
 
         self.printed_relational_guards: set[RelationalGuard] = set()
 
@@ -1016,6 +1016,37 @@ def convert_to_concrete_values(size_or_stride: Sequence[Any]) -> list[int | None
     return [convert_int_to_concrete_values(dim) for dim in size_or_stride]
 
 
+def _guard_device_index_is_current(
+    value: torch.Tensor, compile_on_one_rank: bool
+) -> bool:
+    """Whether this tensor's device index may be guarded as "the current device".
+
+    Only under compile_on_one_rank, and only for an accelerator tensor. There the
+    index is just the compiling rank's and carries no information: any tensor on a
+    different accelerator was already refused while tracing, by
+    _coor_check_tensor_device. cpu is left alone -- it is portable across ranks
+    already, and its index is not a rank identity. Outside CooR several accelerator
+    devices can legitimately be live at once, so there the index stays pinned.
+
+    *compile_on_one_rank* comes from the traced graph's recorded state, not from the
+    ambient config. Loading a serialized guard rebuilds it through here, and the two
+    kinds of guard are not interchangeable: a relaxed one reloaded with CooR off
+    would be rebuilt pinned and reject the very device it was saved to accept, and a
+    pinned one reloaded with CooR on would be rebuilt relaxed and accept a device it
+    was saved to reject.
+
+    This deliberately does not compare against the current index. Guards are rebuilt
+    when a serialized state is loaded on another rank, where the saved tensor carries
+    the *saving* rank's device; anything derived from that comparison would be the
+    wrong answer there. Keyed on the device type alone, the answer is the same on
+    every rank, so there is nothing to record and replay.
+    """
+    if not compile_on_one_rank:
+        return False
+    acc = torch.accelerator.current_accelerator()
+    return acc is not None and value.device.type == acc.type
+
+
 def get_tensor_guard_code_part(
     value: torch.Tensor,
     name: str,
@@ -1023,12 +1054,17 @@ def get_tensor_guard_code_part(
     strides: list[int | None],
     pytype: type,
     dispatch_keys: DispatchKeySet,
+    device_index_is_current: bool = False,
 ) -> str:
     dispatch_key = (
         dispatch_keys | torch._C._dispatch_tls_local_include_set()
     ) - torch._C._dispatch_tls_local_exclude_set()
     dtype = value.dtype
-    device_index = value.device.index
+    # Render the relaxed form as "current" so diagnostics describe the
+    # rank-relative runtime check rather than the compiling rank's device index.
+    device_index: int | str | None = (
+        "current" if device_index_is_current else value.device.index
+    )
     requires_grad = value.requires_grad
     guard_str = (
         f"check_tensor({name}, {pytype.__qualname__}, {dispatch_key}, {dtype}, "
@@ -1412,6 +1448,7 @@ class GuardBuilder(GuardBuilderBase):
         # Collect the guard managers and debug info to insert no tensor aliasing
         # guards.
         self.no_tensor_aliasing_names: list[str] = []
+        self.no_tensor_aliasing_sources: list[Source] = []
         self.no_tensor_aliasing_guard_managers: list[GuardManager] = []
 
         self.check_fn_manager: CheckFunctionManager = check_fn_manager
@@ -3870,6 +3907,7 @@ class GuardBuilder(GuardBuilderBase):
                     # Keep track of all the tensor guard managers to insert
                     # NoAliasing check at the end.
                     self.no_tensor_aliasing_names.append(tensor_name)
+                    self.no_tensor_aliasing_sources.append(guard.originating_source)
                     self.no_tensor_aliasing_guard_managers.append(guard_manager)
 
                 output_graph = self.check_fn_manager.output_graph
@@ -3878,6 +3916,9 @@ class GuardBuilder(GuardBuilderBase):
                 ]
                 size = convert_to_concrete_values(metadata["size"])
                 stride = convert_to_concrete_values(metadata["stride"])
+                device_index_is_current = _guard_device_index_is_current(
+                    value, output_graph.compile_on_one_rank
+                )
 
                 verbose_code_parts = get_verbose_code_parts(
                     get_tensor_guard_code_part(
@@ -3887,6 +3928,7 @@ class GuardBuilder(GuardBuilderBase):
                         stride,
                         pytype,
                         dispatch_keys,
+                        device_index_is_current,
                     ),
                     guard,
                 )
@@ -3900,6 +3942,7 @@ class GuardBuilder(GuardBuilderBase):
                     user_stack,
                     pytype,
                     dispatch_keys,
+                    device_index_is_current,
                 )
 
                 # We consider TENSOR_MATCH guard to be important enough to be
@@ -5428,6 +5471,10 @@ class CheckFunctionManager:
     ) -> tuple[GuardBuilder, GuardManagerWrapper]:
         guard_manager = GuardManagerWrapper(local_state=self.guard_build_local_state)
         guard_manager.diff_guard_sources = existing_diff_guard_sources
+        # The recursive-dict-tag fast path snapshots tensor metadata of its own
+        # accord, so it has to know to snapshot the relative form too; otherwise an
+        # unchanged tag accepts a tensor the TENSOR_MATCH leaf would reject.
+        guard_manager.root.set_compile_on_one_rank(output_graph.compile_on_one_rank)
 
         w_builder = None
 
@@ -5700,7 +5747,9 @@ class CheckFunctionManager:
         # when the CacheEntry is constructed
         self.guard_manager.cache_entry = None
         self.guard_manager.extra_state = None
-        self.guard_manager.no_tensor_aliasing_sources = no_tensor_aliasing_names
+        self.guard_manager.no_tensor_aliasing_sources = (
+            builder.no_tensor_aliasing_sources
+        )
 
     def invalidate(self, obj_str: str) -> None:
         # Some tests reveal that CheckFunctionManager has no attribute
@@ -5819,6 +5868,111 @@ def make_torch_function_mode_stack_guard(
 
 
 Scope = TypeAliasType("Scope", dict[str, object])
+_MISSING_SOURCE_MEMBER = object()
+_BUILTIN_GETITEM_METHODS = (
+    bytearray.__getitem__,
+    bytes.__getitem__,
+    collections.deque.__getitem__,
+    collections.OrderedDict.__getitem__,
+    dict.__getitem__,
+    list.__getitem__,
+    range.__getitem__,
+    str.__getitem__,
+    tuple.__getitem__,
+)
+_TUPLE_ITERATOR_TYPE = type(iter(()))
+
+
+class _GuardSourceLookupError(Exception):
+    def __init__(self, error: Exception) -> None:
+        super().__init__(str(error))
+        self.error = error
+
+
+def _has_builtin_getitem(value: Any) -> bool:
+    getitem = inspect.getattr_static(type(value), "__getitem__", None)
+    if not any(getitem is method for method in _BUILTIN_GETITEM_METHODS):
+        return False
+    return not (
+        isinstance(value, dict)
+        and inspect.getattr_static(type(value), "__missing__", None) is not None
+    )
+
+
+def _is_unavailable_getitem_error(value: Any, error: Exception) -> bool:
+    return isinstance(error, (LookupError, TypeError)) and (
+        _has_builtin_getitem(value)
+        or (
+            isinstance(error, TypeError)
+            and inspect.getattr_static(type(value), "__getitem__", None) is None
+        )
+    )
+
+
+def _is_statically_missing_attribute(value: Any, member: str) -> bool:
+    return (
+        inspect.getattr_static(value, member, _MISSING_SOURCE_MEMBER)
+        is _MISSING_SOURCE_MEMBER
+        and inspect.getattr_static(type(value), "__getattr__", None) is None
+        and inspect.getattr_static(
+            type(value), "__getattribute__", object.__getattribute__
+        )
+        is object.__getattribute__
+    )
+
+
+def _raise_if_unavailable_guard_source(
+    source: Source,
+    base_value: Any,
+    error: Exception,
+) -> None:
+    unavailable = False
+    if isinstance(source, (GlobalSource, LocalSource)) and isinstance(error, KeyError):
+        unavailable = True
+    elif isinstance(source, AttrSource) and isinstance(error, AttributeError):
+        unavailable = _is_statically_missing_attribute(base_value, source.member)
+    elif isinstance(source, DefaultsSource):
+        if isinstance(error, AttributeError):
+            unavailable = _is_statically_missing_attribute(base_value, source.field)
+        else:
+            unavailable = isinstance(error, (LookupError, TypeError)) and (
+                base_value is None or _has_builtin_getitem(base_value)
+            )
+    elif isinstance(source, (ConstDictKeySource, ListGetItemSource)):
+        unavailable = isinstance(error, (LookupError, TypeError))
+    elif isinstance(source, NonSerializableSetGetItemSource):
+        unavailable = isinstance(error, (LookupError, TypeError)) and (
+            isinstance(base_value, (frozenset, set))
+            or (
+                isinstance(error, TypeError)
+                and inspect.getattr_static(type(base_value), "__iter__", None) is None
+            )
+        )
+    elif isinstance(source, TupleIteratorGetItemSource):
+        unavailable = isinstance(error, (LookupError, TypeError)) and isinstance(
+            base_value, _TUPLE_ITERATOR_TYPE
+        )
+    elif isinstance(source, DictSubclassGetItemSource):
+        if isinstance(source.index, Source):
+            unavailable = isinstance(error, TypeError) and not isinstance(
+                base_value, dict
+            )
+        else:
+            unavailable = _is_unavailable_getitem_error(base_value, error)
+    elif isinstance(source, DictGetItemSource):
+        if isinstance(source.index, Source):
+            unavailable = (
+                isinstance(error, TypeError)
+                and inspect.getattr_static(type(base_value), "__getitem__", None)
+                is None
+            )
+        else:
+            unavailable = _is_unavailable_getitem_error(base_value, error)
+    elif isinstance(source, GetItemSource):
+        unavailable = _is_unavailable_getitem_error(base_value, error)
+
+    if unavailable:
+        raise _GuardSourceLookupError(error) from error
 
 
 def recompilation_reason_for_no_tensor_aliasing_guard(
@@ -5828,17 +5982,45 @@ def recompilation_reason_for_no_tensor_aliasing_guard(
         raise AssertionError("guard_manager.global_scope must not be None")
     global_scope = dict(guard_manager.global_scope)
     ids_to_source = collections.defaultdict(list)
+    source_eval_failures: list[str] = []
+    cache: dict[Source, Any] = {}
     for tensor_source in guard_manager.no_tensor_aliasing_sources:
-        global_scope["__compile_source__"] = tensor_source
-        tensor_id = id(eval(tensor_source, global_scope, scope))
-        ids_to_source[tensor_id].append(tensor_source)
+        tensor_source_name = tensor_source.name
+        global_scope["__compile_source__"] = tensor_source_name
+        try:
+            tensor = tensor_source.get_value(
+                global_scope,
+                dict(scope),
+                cache,
+                on_error=_raise_if_unavailable_guard_source,
+            )
+        except _GuardSourceLookupError as e:
+            # The compiled source path may no longer exist after container
+            # structure or object type changes; keep explaining other sources.
+            error = e.error
+            source_eval_failures.append(
+                f"{tensor_source_name} ({type(error).__name__}: {error})"
+            )
+            continue
+        tensor_id = id(tensor)
+        ids_to_source[tensor_id].append(tensor_source_name)
 
     duplicate_tensors = [
         f"{ids_to_source[key]}" for key in ids_to_source if len(ids_to_source[key]) > 1
     ]
 
-    reason = ", ".join(duplicate_tensors)
-    return [f"Duplicate tensors found: {reason}"]
+    reasons: list[str] = []
+    if duplicate_tensors:
+        reason = ", ".join(duplicate_tensors)
+        reasons.append(f"Duplicate tensors found: {reason}")
+    if source_eval_failures:
+        reason = ", ".join(source_eval_failures)
+        reasons.append(
+            "NO_TENSOR_ALIASING guard source(s) no longer evaluate: " + reason
+        )
+    if not reasons:
+        reasons.append("NO_TENSOR_ALIASING guard failed")
+    return reasons
 
 
 def strip_local_scope(s: str) -> str:
