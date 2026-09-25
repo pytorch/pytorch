@@ -130,8 +130,9 @@ def fully_shard(
     on ``module`` frees them (if needed). Similar backward hooks all-gather
     parameters and later free parameters and reduce-scatter gradients.
 
-    Parameter dtypes and ``grad_dtype`` may change until the first forward (e.g.
-    ``module.bfloat16()``); later changes are unsupported. An explicit
+    Parameter dtypes and ``grad_dtype`` may change (e.g. ``module.bfloat16()``)
+    until lazy initialization at the first forward or
+    :meth:`FSDPModule.unshard`; later changes are unsupported. An explicit
     ``grad_dtype`` survives dtype conversions and is inherited by a parameter
     that ``load_state_dict(assign=True)`` registers without one. Device moves
     preserve sharded gradient dtypes and leave pending gradients on their

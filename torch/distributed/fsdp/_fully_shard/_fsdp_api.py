@@ -32,8 +32,9 @@ class MixedPrecisionPolicy:
             ``None``)
         reduce_dtype (Optional[torch.dtype]): The dtype for autograd accumulation
             and gradient reduction (reduce-scatter or all-reduce). If ``None``,
-            follows the parameter's ``grad_dtype`` configured before the first
-            forward: unset uses the original parameter dtype;
+            follows the parameter's ``grad_dtype`` configured before lazy
+            initialization (the first forward or :meth:`FSDPModule.unshard`):
+            unset uses the original parameter dtype;
             explicit ``None`` accepts any incoming gradient dtype. This fallback
             is independent of ``param_dtype``. Gradients with different dtypes
             in one communication group are reduced in their promoted dtype

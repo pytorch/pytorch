@@ -1150,7 +1150,7 @@ class FSDPParam:
             return self.reduce_dtype
         if self._has_sharded_grad_dtype_override:
             return self.sharded_grad_dtype
-        # Use the original parameter dtype captured during FSDP initialization.
+        # Use the original parameter dtype recorded at lazy initialization.
         return self.orig_dtype
 
     @property
