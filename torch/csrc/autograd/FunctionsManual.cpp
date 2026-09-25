@@ -1110,22 +1110,6 @@ Tensor prod_backward(
   }
 }
 
-template <typename solve_f>
-static Tensor generic_solve_jvp(
-    solve_f solve,
-    const Tensor& X,
-    const Tensor& A,
-    const Tensor& dA,
-    const Tensor& dB) {
-  auto is_vector_case = at::native::linalg_solve_is_vector_rhs(dA, dB);
-  auto dA_contrib =
-      is_vector_case ? dA.matmul(X.unsqueeze(-1)).squeeze(-1) : dA.matmul(X);
-  // In general,
-  // dX = solve(A, dB - dA_contrib), but this behavior is different for
-  // lu_solve. For refer to lu_solve_jvp for more details on this.
-  return solve(A, dB, dA_contrib);
-}
-
 Tensor cumsum_backward(const Tensor& grad, int64_t dim) {
   // Trivial case
   if (grad.sym_numel() <= 1 || grad.sym_size(dim) == 1) {
@@ -4952,15 +4936,15 @@ Tensor triangular_solve_jvp(
     const bool upper,
     const bool transpose,
     const bool unitriangular) {
-  return generic_solve_jvp(
-      [&](const Tensor& A, const Tensor& dB, const Tensor& dA_contrib) {
-        return std::get<0>(at::triangular_solve(
-            dB - dA_contrib, A, upper, transpose, unitriangular));
-      },
-      X,
-      A,
-      dA,
-      dB);
+  at::NoTF32Guard disable_tf32;
+  // Keep only the part of dA the op reads (strict when unitriangular)
+  auto dA_read = upper ? dA.triu(static_cast<int>(unitriangular))
+                       : dA.tril(-static_cast<int>(unitriangular));
+  if (transpose) {
+    dA_read = dA_read.mT();
+  }
+  return std::get<0>(at::triangular_solve(
+      dB - dA_read.matmul(X), A, upper, transpose, unitriangular));
 }
 
 Tensor linalg_solve_triangular_forward_AD(
@@ -5075,14 +5059,7 @@ Tensor cholesky_solve_jvp(
   at::NoTF32Guard disable_tf32;
   auto dK = upper ? dU.mH().matmul(U) : dU.matmul(U.mH());
   auto dA = dK + dK.mH();
-  return generic_solve_jvp(
-      [&](const Tensor& A, const Tensor& dB, const Tensor& dA_contrib) {
-        return at::cholesky_solve(dB - dA_contrib, A, upper);
-      },
-      X,
-      /*A=*/U,
-      dA,
-      dB);
+  return at::cholesky_solve(dB - dA.matmul(X), U, upper);
 }
 
 Tensor fft_c2r_backward(
@@ -6692,21 +6669,6 @@ std::tuple<Tensor, Tensor> linalg_solve_backward(
   return std::make_tuple(
       A_requires_grad ? std::move(gA_) : Tensor{},
       B_requires_grad ? matrix_to_vector(gB_) : Tensor{});
-}
-
-Tensor solve_jvp(
-    const Tensor& X,
-    const Tensor& A,
-    const Tensor& dA,
-    const Tensor& dB) {
-  return generic_solve_jvp(
-      [](const Tensor& A, const Tensor& dB, const Tensor& dA_contrib) {
-        return at::linalg_solve(A, dB - dA_contrib);
-      },
-      X,
-      A,
-      dA,
-      dB);
 }
 
 Tensor lu_unpack_backward(
