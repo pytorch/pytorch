@@ -434,8 +434,8 @@ if has_triton():
                              Must be 8-byte aligned symmetric memory.
             signal (int64): Value to be used in the signal operation.
             sig_op (int32): Signal operation type. Common values:
-                           - NVSHMEM_SIGNAL_SET (0): Atomic set operation
-                           - NVSHMEM_SIGNAL_ADD (5): Atomic add operation
+                           - NVSHMEM_SIGNAL_SET (9): Atomic set operation
+                           - NVSHMEM_SIGNAL_ADD (10): Atomic add operation
             pe (int32): PE number of the remote PE (0 ≤ pe < nvshmem_n_pes()).
 
         Returns:
@@ -452,7 +452,7 @@ if has_triton():
         Example:
             ```
             # Transfer data and set completion flag to 1
-            NVSHMEM_SIGNAL_SET = 0
+            NVSHMEM_SIGNAL_SET = 9
             nvshmem.putmem_signal_block(
                 dst_ptr, src_ptr, 1024, sig_ptr, 1, NVSHMEM_SIGNAL_SET, target_pe
             )
@@ -517,9 +517,9 @@ if has_triton():
                  - NVSHMEM_CMP_EQ (0): Wait until ivar == cmp_val
                  - NVSHMEM_CMP_NE (1): Wait until ivar != cmp_val
                  - NVSHMEM_CMP_GT (2): Wait until ivar > cmp_val
-                 - NVSHMEM_CMP_GE (3): Wait until ivar >= cmp_val
+                 - NVSHMEM_CMP_LE (3): Wait until ivar <= cmp_val
                  - NVSHMEM_CMP_LT (4): Wait until ivar < cmp_val
-                 - NVSHMEM_CMP_LE (5): Wait until ivar <= cmp_val
+                 - NVSHMEM_CMP_GE (5): Wait until ivar >= cmp_val
             cmp_val: Value to compare against.
 
         Notes:
@@ -574,9 +574,9 @@ if has_triton():
                         - NVSHMEM_CMP_EQ (0): Wait until signal == cmp_val
                         - NVSHMEM_CMP_NE (1): Wait until signal != cmp_val
                         - NVSHMEM_CMP_GT (2): Wait until signal > cmp_val
-                        - NVSHMEM_CMP_GE (3): Wait until signal >= cmp_val
+                        - NVSHMEM_CMP_LE (3): Wait until signal <= cmp_val
                         - NVSHMEM_CMP_LT (4): Wait until signal < cmp_val
-                        - NVSHMEM_CMP_LE (5): Wait until signal <= cmp_val
+                        - NVSHMEM_CMP_GE (5): Wait until signal >= cmp_val
             cmp_val (int64): Value to compare against.
 
         Returns:
@@ -632,8 +632,8 @@ if has_triton():
                              Must be 8-byte aligned symmetric memory.
             signal (int64): Value to be used in the signal operation.
             sig_op (int32): Signal operation type. Common values:
-                           - NVSHMEM_SIGNAL_SET (0): Atomically set sig_addr = signal
-                           - NVSHMEM_SIGNAL_ADD (5): Atomically set sig_addr += signal
+                           - NVSHMEM_SIGNAL_SET (9): Atomically set sig_addr = signal
+                           - NVSHMEM_SIGNAL_ADD (10): Atomically set sig_addr += signal
             pe (int32): PE number of the remote PE (0 ≤ pe < nvshmem_n_pes()).
             _semantic: Optional semantic information for Triton compilation.
 
@@ -650,7 +650,7 @@ if has_triton():
         Example:
             ```python
             # Atomically set remote signal to 1 to notify completion
-            NVSHMEM_SIGNAL_SET = 0
+            NVSHMEM_SIGNAL_SET = 9
             nvshmem.signal_op(remote_signal_ptr, 1, NVSHMEM_SIGNAL_SET, target_pe)
             ```
         """
