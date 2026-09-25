@@ -813,11 +813,11 @@ static void upsample_bilinear2d_backward_out_cuda_template_deterministic(
               grad_input.const_data_ptr<scalar_t>())) >= vector_size &&
           memory::can_vectorize_up_to<scalar_t>(reinterpret_cast<const char*>(
               grad_output.const_data_ptr<scalar_t>())) >= vector_size;
-      const size_t num_kernels = static_cast<size_t>(nbatch) * channels *
+      const size_t num_input_elements = static_cast<size_t>(nbatch) * channels *
           input_height * input_width;
       const size_t work_items = vectorized
-          ? num_kernels / vector_size
-          : num_kernels;
+          ? num_input_elements / vector_size
+          : num_input_elements;
       const auto* properties = at::cuda::getCurrentDeviceProperties();
       const size_t num_blocks = std::min(
           ceil_div(work_items, static_cast<size_t>(num_threads)),
@@ -860,10 +860,10 @@ static void upsample_bilinear2d_backward_out_cuda_template_deterministic(
         : at::empty(grad_input.sizes(), grad_input.options());
     Tensor grad_output = grad_output_.contiguous();
 
-    const size_t num_kernels =
+    const size_t num_input_elements =
         static_cast<size_t>(nbatch) * channels * input_height * input_width;
     const size_t num_blocks = std::min(
-        ceil_div(num_kernels, static_cast<size_t>(num_threads)),
+        ceil_div(num_input_elements, static_cast<size_t>(num_threads)),
         static_cast<size_t>(at::cuda::getCurrentDeviceProperties()->maxGridSize[0]));
 
     upsample_bilinear2d_backward_gather_out_frame<scalar_t, accscalar_t>
