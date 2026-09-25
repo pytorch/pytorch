@@ -6241,8 +6241,10 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         """
 
         f = global_func_with_default_tensor_args
-        self.addCleanup(setattr, f, "__defaults__", (torch.zeros((2, 2)),))
-        self.addCleanup(setattr, f, "__kwdefaults__", {"kw_x": torch.zeros((1, 2))})
+        defaults = tuple(t.clone() for t in f.__defaults__)
+        kwdefaults = {k: t.clone() for k, t in f.__kwdefaults__.items()}
+        self.addCleanup(setattr, f, "__defaults__", defaults)
+        self.addCleanup(setattr, f, "__kwdefaults__", kwdefaults)
 
         def func():
             return global_func_with_default_tensor_args()
@@ -6288,8 +6290,10 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         compiled function
         """
         fwd = ModuleWithDefaultTensorArgsMethod.forward
-        self.addCleanup(setattr, fwd, "__defaults__", (torch.zeros((2, 2)),))
-        self.addCleanup(setattr, fwd, "__kwdefaults__", {"kw_x": torch.zeros((1, 2))})
+        defaults = tuple(t.clone() for t in fwd.__defaults__)
+        kwdefaults = {k: t.clone() for k, t in fwd.__kwdefaults__.items()}
+        self.addCleanup(setattr, fwd, "__defaults__", defaults)
+        self.addCleanup(setattr, fwd, "__kwdefaults__", kwdefaults)
         mod = WrapperModule()
         cnts = torch._dynamo.testing.CompileCounter()
         compiled_mod = torch.compile(mod, backend=cnts)
