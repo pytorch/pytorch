@@ -74,6 +74,12 @@ bool is_nvshmem_available() {
   return is_available == 1;
 }
 
+std::pair<int64_t, int64_t> nvshmem_signal_op_values() {
+  return {
+      static_cast<int64_t>(NVSHMEM_SIGNAL_SET),
+      static_cast<int64_t>(NVSHMEM_SIGNAL_ADD)};
+}
+
 // Initializes the device state in CUmodule so that it’s able to perform NVSHMEM
 // operations.
 void nvshmemx_cumodule_init(uintptr_t module) {
