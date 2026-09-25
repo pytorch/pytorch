@@ -9138,7 +9138,7 @@ class TestQNNPackOps(TestCase):
                              msg="QNNPACK Sigmoid failed (FBGEMM ref)!")
 
     """Tests the correctness of the quantized::add (qnnpack) op."""
-    @settings(suppress_health_check=(HealthCheck.filter_too_much,))
+    @settings(suppress_health_check=(HealthCheck.filter_too_much, HealthCheck.too_slow))
     @given(A=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
                        qparams=hu.qparams(dtypes=[torch.quint8, torch.qint8])),
            zero_point=st.sampled_from([0, 2, 5, 15, 127]),
