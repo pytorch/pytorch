@@ -114,6 +114,7 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     is_traceable_wrapper_subclass_type,
+    TraceableWrapperSubclass,
 )
 from torch.utils.weak import TensorWeakRef
 
@@ -5127,6 +5128,39 @@ def wrap_to_fake_tensor_and_record(
         )
 
 
+def _coor_check_tensor_device(
+    e: torch.Tensor | TraceableWrapperSubclass, source: Source
+) -> None:
+    """Refuse a tensor on a non-current accelerator under compile-on-one-rank.
+
+    Its index is the tracing rank's, so no guard on it can be rank-portable and the
+    artifact could not be shared. The make_fx backends already refuse such a graph
+    (_coor_check_current_accelerator), but Dynamo builds the tensor guards before any
+    backend runs, so a backend that never traces -- "eager" -- would otherwise reach
+    the guard with a device only the tracing rank has. Refusing here is what lets
+    TENSOR_MATCH decide relative-vs-exact from the device type alone, identically on
+    every rank, instead of recording the decision and replaying it.
+    """
+    from torch.fx.experimental.proxy_tensor import _coor_enabled
+
+    if not _coor_enabled():
+        return
+    device = e.device
+    if device.type in ("cpu", "meta"):
+        return
+    acc = torch.accelerator.current_accelerator()
+    cur = None
+    if acc is not None and device.type == acc.type:
+        cur = torch.device(acc.type, torch.accelerator.current_device_index())
+        if device.index is None or device.index == cur.index:
+            return
+    raise RuntimeError(
+        f"device_as_parameter: {source.name} is on {device}, which is not the "
+        f"current accelerator ({cur or acc}); the traced graph cannot be made "
+        f"device-agnostic for compile-on-one-rank."
+    )
+
+
 def _wrap_to_fake_tensor_and_record_impl(
     e: Any,
     tx: "InstructionTranslatorBase",
@@ -5143,6 +5177,7 @@ def _wrap_to_fake_tensor_and_record_impl(
     ):
         if source is None:
             raise AssertionError("source must not be None for tensor wrapping")
+        _coor_check_tensor_device(e, source)
         static_shapes, _reason = tensor_always_has_static_shape(
             e,
             is_tensor,

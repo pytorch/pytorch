@@ -51,6 +51,7 @@ from ..utils import (
     raise_args_mismatch,
     range_iterator,
     set_example_value,
+    specialize_symnode,
     tracked_repr,
     unpack_and_apply_fn,
     unpack_iterable,
@@ -767,6 +768,7 @@ class BaseListVariable(VariableTracker):
 class RangeVariable(BaseListVariable):
     # PyRange_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/rangeobject.c#L767
     _cpython_type = range
+    _index_not_found_msg = "sequence.index(x): x not in sequence"
 
     def __init__(self, items: list[VariableTracker], **kwargs: Any) -> None:
         items_to_map = items
@@ -1102,7 +1104,20 @@ class RangeVariable(BaseListVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        x = args[0].as_python_constant()
+        # ref: https://github.com/python/cpython/blob/v3.13.5/Objects/rangeobject.c (range_index)
+        if maybe_get_python_type(args[0]) not in (int, bool):
+            # Specialize symbolic bounds before using the guarded iterator path.
+            iterator = RangeVariable(
+                [specialize_symnode(item) for item in self.items]
+            ).tp_iter_impl(tx)
+            if isinstance(iterator, variables.misc.DelayGraphBreakVariable):
+                return iterator.call_function(tx, [], {})
+            return tx.inline_user_function_return(
+                VariableTracker.build(tx, polyfills.index),
+                [iterator, args[0]],
+                {"not_found_msg": ConstantVariable.create(self._index_not_found_msg)},
+            )
+        x = specialize_symnode(args[0]).as_python_constant()
         start, stop, step = self.start(), self.stop(), self.step()
         in_range = (start <= x < stop) if step > 0 else (stop < x <= start)
         if in_range and ((x - start) % step) == 0:
@@ -1113,8 +1128,6 @@ class RangeVariable(BaseListVariable):
             args=[f"{x} is not in range"],
         )
 
-    # Reuse BaseListVariable's table, overriding index/count with range's
-    # arithmetic implementations.
     def range_reversed(
         self,
         tx: "InstructionTranslatorBase",
@@ -1130,6 +1143,7 @@ class RangeVariable(BaseListVariable):
         new_step = -step
         return RangeIteratorVariable(new_start, 0, new_step, length)
 
+    # Override BaseListVariable's methods with range-specific implementations.
     # ref: https://github.com/python/cpython/blob/c3aefdb9eff0734058376b96fc86d89b1a345d75/Objects/rangeobject.c#L781-L787
     tp_methods = {
         "count": Method(count),

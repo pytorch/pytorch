@@ -1996,8 +1996,8 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
         mt = var.mutation_type
         if isinstance(mt, AttributeMutationNew):
             contents_modified = True
-        elif isinstance(mt, AttributeMutationExisting):
-            contents_modified = side_effects.is_modified(var)
+        elif isinstance(mt, ValueMutationExisting):
+            contents_modified = mt.is_modified
         else:
             contents_modified = False
         if isinstance(var, variables.UserDefinedListVariable) and contents_modified:
