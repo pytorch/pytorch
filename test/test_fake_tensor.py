@@ -4570,73 +4570,12 @@ instantiate_device_type_tests(
 
 
 class TestFakeTensorPreferDeviceType(TestCase):
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_fake_tensor_prefer_device_type(self):
-        """
-        Test that fake_tensor_prefer_device_type configuration works correctly
-        for device mismatch scenarios.
-        """
-
-        # Create a custom operation that would normally cause device mismatch
-        def mixed_device_op(a, b):
-            # This simulates an operation where 'a' is on MTIA/CUDA but 'b' is created on CPU
-            cpu_tensor = torch.arange(a.shape[0], device="cpu")
-            return a + cpu_tensor.unsqueeze(-1)
-
-        with FakeTensorMode():
-            # Test default behavior (should raise error on device mismatch)
-            cuda_tensor = torch.randn(3, 4, device="cuda")
-
-            # Without the config, this should raise a device mismatch error
-            with self.assertRaisesRegex(
-                RuntimeError,
-                "Expected all tensors to be on the same device",
-            ):
-                mixed_device_op(cuda_tensor, None)
-
-        # Test with prefer_device_type set to "cuda"
-        with torch._functorch.config.patch(fake_tensor_prefer_device_type="cuda"):
-            with FakeTensorMode():
-                cuda_tensor = torch.randn(3, 4, device="cuda")
-
-                # This should now work and prefer the CUDA device
-                result = mixed_device_op(cuda_tensor, None)
-
-                # The result should be on CUDA device (preferred device type)
-                self.assertEqual(result.device.type, "cuda")
-                self.assertEqual(result.shape, (3, 4))
-                self.assertTrue(is_fake_tensor(result))
-
-        # Test that the configuration doesn't affect normal operations
-        with torch._functorch.config.patch(fake_tensor_prefer_device_type="cuda"):
-            with FakeTensorMode():
-                # Normal same-device operations should work as before
-                x = torch.randn(2, 3, device="cuda")
-                y = torch.randn(2, 3, device="cuda")
-                result = x + y
-                self.assertEqual(result.device.type, "cuda")
-
-                # CPU operations should still work
-                x_cpu = torch.randn(2, 3, device="cpu")
-                y_cpu = torch.randn(2, 3, device="cpu")
-                result_cpu = x_cpu + y_cpu
-                self.assertEqual(result_cpu.device.type, "cpu")
-
-        # Test that the configuration is properly scoped
-        with FakeTensorMode():
-            cuda_tensor = torch.randn(3, 4, device="cuda")
-
-            # After exiting the config context, should raise error again
-            with self.assertRaisesRegex(
-                RuntimeError,
-                "Expected all tensors to be on the same device",
-            ):
-                mixed_device_op(cuda_tensor, None)
-
     def test_fake_tensor_prefer_device_type_cpu_only(self):
         """
         Test that fake_tensor_prefer_device_type works correctly when only CPU tensors are involved.
         """
+        # The preferred type only has to differ from the tensors' device; nothing
+        # is ever dispatched to it, so this needs no accelerator.
         with torch._functorch.config.patch(fake_tensor_prefer_device_type="cuda"):
             with FakeTensorMode():
                 # When all tensors are CPU, the result should still be CPU
@@ -4647,21 +4586,96 @@ class TestFakeTensorPreferDeviceType(TestCase):
                 self.assertTrue(is_fake_tensor(result))
 
 
-class TestFakeTensorMetaDevicePropagation(TestCase):
-    @parametrize("device", ["cpu", "cuda"])
-    def test_inplace_add_with_meta_rhs_keeps_destination_device(self, device):
-        if device == "cuda" and not RUN_CUDA:
-            self.skipTest("requires cuda")
+class TestFakeTensorPreferDeviceTypeDevice(TestCase):
+    """Accelerator-only TestFakeTensorPreferDeviceType cases (see only_for below)."""
 
+    def test_fake_tensor_prefer_device_type(self, device):
+        """
+        Test that fake_tensor_prefer_device_type configuration works correctly
+        for device mismatch scenarios.
+        """
+        device_type = torch.device(device).type
+
+        # Create a custom operation that would normally cause device mismatch
+        def mixed_device_op(a, b):
+            # This simulates an operation where 'a' is on the accelerator but
+            # 'b' is created on CPU
+            cpu_tensor = torch.arange(a.shape[0], device="cpu")
+            return a + cpu_tensor.unsqueeze(-1)
+
+        with FakeTensorMode():
+            # Test default behavior (should raise error on device mismatch)
+            gpu_tensor = torch.randn(3, 4, device=device)
+
+            # Without the config, this should raise a device mismatch error
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Expected all tensors to be on the same device",
+            ):
+                mixed_device_op(gpu_tensor, None)
+
+        # Test with prefer_device_type set to the accelerator
+        with torch._functorch.config.patch(fake_tensor_prefer_device_type=device_type):
+            with FakeTensorMode():
+                gpu_tensor = torch.randn(3, 4, device=device)
+
+                # This should now work and prefer the accelerator device
+                result = mixed_device_op(gpu_tensor, None)
+
+                # The result should be on the accelerator (preferred device type)
+                self.assertEqual(result.device.type, device_type)
+                self.assertEqual(result.shape, (3, 4))
+                self.assertTrue(is_fake_tensor(result))
+
+        # Test that the configuration doesn't affect normal operations
+        with torch._functorch.config.patch(fake_tensor_prefer_device_type=device_type):
+            with FakeTensorMode():
+                # Normal same-device operations should work as before
+                x = torch.randn(2, 3, device=device)
+                y = torch.randn(2, 3, device=device)
+                result = x + y
+                self.assertEqual(result.device.type, device_type)
+
+                # CPU operations should still work
+                x_cpu = torch.randn(2, 3, device="cpu")
+                y_cpu = torch.randn(2, 3, device="cpu")
+                result_cpu = x_cpu + y_cpu
+                self.assertEqual(result_cpu.device.type, "cpu")
+
+        # Test that the configuration is properly scoped
+        with FakeTensorMode():
+            gpu_tensor = torch.randn(3, 4, device=device)
+
+            # After exiting the config context, should raise error again
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Expected all tensors to be on the same device",
+            ):
+                mixed_device_op(gpu_tensor, None)
+
+
+instantiate_device_type_tests(
+    TestFakeTensorPreferDeviceTypeDevice,
+    globals(),
+    only_for=("cuda",),
+)
+
+
+class TestFakeTensorMetaDevicePropagationDevice(TestCase):
+    def test_inplace_add_with_meta_rhs_keeps_destination_device(self, device):
         with FakeTensorMode():
             log_det = torch.zeros(2, device=device)
             log_det += torch.zeros(2, device="meta")
 
-            self.assertEqual(log_det.device.type, device)
+            self.assertEqual(log_det.device.type, self.device_type)
             self.assertTrue(is_fake_tensor(log_det))
 
 
-instantiate_parametrized_tests(TestFakeTensorMetaDevicePropagation)
+instantiate_device_type_tests(
+    TestFakeTensorMetaDevicePropagationDevice,
+    globals(),
+    only_for=("cpu", "cuda"),
+)
 
 
 class TestFakeTensorViewCopy(TestCase):
