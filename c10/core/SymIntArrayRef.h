@@ -7,9 +7,16 @@
 #include <c10/util/irange.h>
 #include <cstdint>
 #include <optional>
+#include <string>
 
 namespace c10 {
 using SymIntArrayRef = ArrayRef<SymInt>;
+
+C10_API std::string formatSymIntArrayRefToIntArrayRefError(
+    SymIntArrayRef ar,
+    const SymInt& problem,
+    const char* file,
+    int64_t line);
 
 inline at::IntArrayRef asIntArrayRefUnchecked(c10::SymIntArrayRef ar) {
   return IntArrayRef(reinterpret_cast<const int64_t*>(ar.data()), ar.size());
@@ -39,10 +46,7 @@ inline at::IntArrayRef asIntArrayRefSlow(
   for (const c10::SymInt& sci : ar) {
     TORCH_CHECK(
         !sci.is_heap_allocated(),
-        file,
-        ":",
-        line,
-        ": SymIntArrayRef expected to contain only concrete integers");
+        formatSymIntArrayRefToIntArrayRefError(ar, sci, file, line));
   }
   return asIntArrayRefUnchecked(ar);
 }
@@ -91,7 +95,7 @@ inline c10::SymBool sym_equals(SymIntArrayRef LHS, SymIntArrayRef RHS) {
     return c10::SymBool(false);
   }
 
-  c10::SymBool result = sym_eq(LHS.size(), RHS.size());
+  c10::SymBool result(true);
   for (size_t i = 0; i < RHS.size(); ++i) {
     c10::SymBool equals = sym_eq(LHS[i], RHS[i]);
     std::optional<bool> equals_bool = equals.maybe_as_bool();
