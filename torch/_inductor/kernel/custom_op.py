@@ -476,6 +476,7 @@ def autotune_custom_op(
     config_patches_list: list[dict[str, Any]] | None = None,
     min_speedup_threshold: float = 1.0,
     benchmark_with_cudagraphs: bool = False,
+    include_fallback: bool = True,
 ) -> tuple[TensorBox, _AutotuneChoice]:
     """Autotune custom operations by comparing multiple decomposition implementations.
 
@@ -495,6 +496,7 @@ def autotune_custom_op(
         user_input_gen_fns: Optional custom input generators for benchmarking.
                            Maps input indices to functions that take fake tensors
                            and return real tensors for performance measurement.
+        include_fallback: Include the custom op itself as an external fallback choice.
 
     Returns:
         Tuple of (IR node representing the optimized operation result, winning choice)
@@ -535,32 +537,33 @@ def autotune_custom_op(
         config_patches_list=config_patches_list,
     )
 
-    # Add fallback choice that calls the op eagerly (not through inductor lowering)
-    # This provides a baseline to compare decompositions against
     from torch._inductor import config
 
-    fallback_kwargs = non_tensor_args[0] if non_tensor_args else {}
+    if include_fallback:
+        # Add the custom op itself as an external choice. This provides a
+        # baseline for ordinary custom-op users.
+        fallback_kwargs = non_tensor_args[0] if non_tensor_args else {}
 
-    with V.fake_mode:
-        # pyrefly: ignore [no-matching-overload]
-        fake_inputs = [ir_node_to_tensor(inp) for inp in inputs]
-        fake_output = op_overload(*fake_inputs, **fallback_kwargs)
+        with V.fake_mode:
+            # pyrefly: ignore [no-matching-overload]
+            fake_inputs = [ir_node_to_tensor(inp) for inp in inputs]
+            fake_output = op_overload(*fake_inputs, **fallback_kwargs)
 
-    output_size = tuple(convert_symint_to_expr(s) for s in fake_output.shape)
-    output_stride = tuple(convert_symint_to_expr(s) for s in fake_output.stride())
+        output_size = tuple(convert_symint_to_expr(s) for s in fake_output.shape)
+        output_stride = tuple(convert_symint_to_expr(s) for s in fake_output.stride())
 
-    fallback_choice = _create_fallback_choice(op_overload)
-    fallback_choice.maybe_append_choice(
-        choices=choices,
-        input_nodes=list(inputs),
-        layout=FixedLayout(
-            device=fake_output.device,
-            dtype=fake_output.dtype,
-            size=output_size,
-            stride=output_stride,
-        ),
-        **fallback_kwargs,
-    )
+        fallback_choice = _create_fallback_choice(op_overload)
+        fallback_choice.maybe_append_choice(
+            choices=choices,
+            input_nodes=list(inputs),
+            layout=FixedLayout(
+                device=fake_output.device,
+                dtype=fake_output.dtype,
+                size=output_size,
+                stride=output_stride,
+            ),
+            **fallback_kwargs,
+        )
 
     if not choices:
         raise RuntimeError(f"No valid choices generated for {name}")
@@ -722,6 +725,7 @@ def _standard_lowering_fn(
     | None = None,
     min_speedup_threshold: float = 1.0,
     benchmark_with_cudagraphs: bool = False,
+    include_fallback: bool = True,
 ) -> TensorBox | None:
     """Standard autotuning lowering function.
 
@@ -754,6 +758,7 @@ def _standard_lowering_fn(
         user_input_gen_fns=input_gen_fns,
         min_speedup_threshold=min_speedup_threshold,
         benchmark_with_cudagraphs=benchmark_with_cudagraphs,
+        include_fallback=include_fallback,
     )
 
     validate_ir(result)
@@ -864,6 +869,7 @@ def _range_based_lowering_fn(
     | None = None,
     min_speedup_threshold: float = 1.0,
     benchmark_with_cudagraphs: bool = False,
+    include_fallback: bool = True,
 ) -> TensorBox | None:
     """Range-based autotuning lowering function."""
     from torch._inductor.codegen.subgraph import inline_subgraph_to_ir_nodes
@@ -913,6 +919,7 @@ def _range_based_lowering_fn(
             min_speedup_threshold=min_speedup_threshold,
             benchmark_with_cudagraphs=benchmark_with_cudagraphs,
             config_patches_list=config_patches_list,
+            include_fallback=include_fallback,
         )
 
         if winning_choice.decomposition is not None:
@@ -1100,6 +1107,7 @@ def _create_autotuning_lowering(
     split_points: list[int] | None = None,
     min_speedup_threshold: float = 1.0,
     benchmark_with_cudagraphs: bool = False,
+    include_fallback: bool = True,
 ) -> Callable[..., Any]:
     """Create the lowering function for autotuning."""
     if not is_range_based:
@@ -1120,6 +1128,7 @@ def _create_autotuning_lowering(
                 config_generator=config_generator,
                 min_speedup_threshold=min_speedup_threshold,
                 benchmark_with_cudagraphs=benchmark_with_cudagraphs,
+                include_fallback=include_fallback,
             )
 
         return standard_lowering_wrapper
@@ -1150,6 +1159,7 @@ def _create_autotuning_lowering(
             config_generator=config_generator,
             min_speedup_threshold=min_speedup_threshold,
             benchmark_with_cudagraphs=benchmark_with_cudagraphs,
+            include_fallback=include_fallback,
         )
 
     return range_based_lowering_wrapper
@@ -1166,6 +1176,7 @@ def register_custom_op_autotuning(
     split_points: list[int] | None = None,
     min_speedup_threshold: float = 1.0,
     benchmark_with_cudagraphs: bool = False,
+    include_fallback: bool = True,
 ) -> None:
     """Register custom op for autotuning with custom_op configs where each config
     specifies a decomposition implementation function with its parameter values.
@@ -1193,6 +1204,8 @@ def register_custom_op_autotuning(
             to require 10% speedup over fallback.
         benchmark_with_cudagraphs: If True, benchmark the fallback kernel using CUDA graph
             capture and replay for fair comparison with compiled kernels. Default is False.
+        include_fallback: Include the custom op itself as an external fallback
+            choice. Default is True.
 
     The default/fallback implementation is automatically derived:
     - For CustomOpDef: Uses the decorated function
@@ -1354,6 +1367,7 @@ def register_custom_op_autotuning(
         range_upper_bound=range_upper_bound,
         min_speedup_threshold=min_speedup_threshold,
         benchmark_with_cudagraphs=benchmark_with_cudagraphs,
+        include_fallback=include_fallback,
     )
 
     # Register in user_lowerings which takes priority over built-in lowerings
