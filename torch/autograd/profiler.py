@@ -258,16 +258,6 @@ class profile:
             )
             experimental_config = copy.copy(experimental_config)
             experimental_config.trace_only = False
-        if (
-            experimental_config.profiler_metrics
-            or experimental_config.profiler_measure_per_kernel
-        ):
-            warn(
-                "profiler_metrics and profiler_measure_per_kernel are deprecated "
-                "and ignored. These options will be removed in a future release.",
-                FutureWarning,
-                stacklevel=2,
-            )
         if experimental_config.adjust_profiler_step:
             warn(
                 "adjust_profiler_step is deprecated and ignored. It will be "
@@ -757,7 +747,6 @@ class profile:
                 is_user_annotation=kineto_event.is_user_annotation(),
                 is_python_function=kineto_event.is_python_function(),
                 activity_type=kineto_event.activity_type(),
-                metadata_json=kineto_event.metadata_json(),
                 extra_meta=kineto_event.extra_meta() or None,
                 typed_metadata=kineto_event.typed_metadata() or None,
                 flow_id=kineto_event.flow_id(),
