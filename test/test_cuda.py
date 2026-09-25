@@ -18,6 +18,7 @@ import unittest
 import warnings
 import weakref
 from collections import defaultdict
+from collections.abc import Sequence
 from copy import deepcopy
 from itertools import product
 from random import randint
@@ -47,6 +48,7 @@ from torch.testing._internal.common_cuda import (
     ROCM_VERSION,
     SM70OrLater,
     SM89OrLater,
+    SM90OrLater,
     TEST_CUDNN,
     TEST_MULTIGPU,
     tf32_enabled,
@@ -97,6 +99,9 @@ from torch.testing._internal.common_utils import (
     setBlasBackendsToDefaultFinally,
     skipCUDAMemoryLeakCheckIf,
     skipCUDANonDefaultStreamIf,
+    skipIfCudaMPS,
+    skipIfCudaSMCountLessThan,
+    skipIfNoGreenContextLocalization,
     skipIfRocm,
     skipIfRocmArch,
     skipIfRocmVersionAtLeast,
@@ -12340,6 +12345,390 @@ class TestCudaGreenContexts(TestCase):
         full_res = torch.matmul(a, a)
         self.assertEqual(partial_res, full_res)
 
+    def _check_disjoint_sm_ids(
+        self,
+        contexts: Sequence[torch.cuda.green_contexts.GreenContext],
+        device: str,
+    ) -> None:
+        # MPS virtualizes SM IDs, making sets from different contexts incomparable.
+        # Callers use skipIfCudaMPS before creating any green contexts.
+        with torch.cuda.device(device):
+            kernel = torch.cuda._compile_kernel(
+                r"""
+                __global__ void record_sm_ids(int* ids) {
+                    if (threadIdx.x == 0) {
+                        unsigned int smid;
+                        asm volatile("mov.u32 %0, %%smid;" : "=r"(smid));
+                        ids[blockIdx.x] = smid;
+                    }
+                    unsigned long long start = clock64();
+                    while (clock64() - start < 10000) {}
+                }
+                """,
+                "record_sm_ids",
+            )
+            # Use a device-scaled workload to exercise every allocated SM.
+            blocks = torch.cuda.get_device_properties(device).multi_processor_count * 64
+            seen: set[int] = set()
+            for context in contexts:
+                stream = context.Stream()
+                with torch.cuda.stream(stream):
+                    ids = torch.full((blocks,), -1, dtype=torch.int32, device=device)
+                    kernel(
+                        grid=(blocks, 1, 1),
+                        block=(512, 1, 1),
+                        shared_mem=16 * 1024,
+                        args=[ids],
+                    )
+                stream.synchronize()
+                used = set(ids.tolist())
+                self.assertNotIn(-1, used)
+                self.assertEqual(len(used), context.sm_count, "Incomplete SM coverage")
+                overlap = seen & used
+                self.assertFalse(overlap, f"Overlapping SM IDs: {overlap}")
+                seen.update(used)
+
+    def test_greencontext_sm_count(self, device):
+        from torch.cuda._utils import _check_cuda_bindings, _cuda_bindings_driver as drv
+        from torch.cuda.green_contexts import GreenContext, SMPartition
+
+        device_id = torch.device(device).index
+        source = SMPartition.from_device(device_id)
+        self.assertEqual(
+            source.sm_count,
+            torch.cuda.get_device_properties(device).multi_processor_count,
+        )
+        context = GreenContext(num_sms=4, device_id=device_id)
+        actual = _check_cuda_bindings(
+            drv.cuGreenCtxGetDevResource(
+                context._green_ctx, drv.CUdevResourceType.CU_DEV_RESOURCE_TYPE_SM
+            )
+        )
+        self.assertEqual(context.sm_count, actual.sm.smCount)
+        self.assertEqual(context.sm_partition.device_id, device_id)
+        self.assertEqual(context.sm_count, context.sm_partition.sm_count)
+
+    def test_greencontext_resource_without_context(self, device):
+        code = """
+import sys
+import torch
+from torch.cuda.green_contexts import SMPartition
+from torch.cuda._utils import _check_cuda_bindings, _cuda_bindings_driver as drv
+resource = SMPartition.from_device(int(sys.argv[1]))
+print(resource.sm_count, torch.cuda.is_initialized(), int(_check_cuda_bindings(drv.cuCtxGetCurrent())))
+"""
+        output = subprocess.check_output(
+            [sys.executable, "-c", code, str(torch.device(device).index)], text=True
+        )
+        count = torch.cuda.get_device_properties(device).multi_processor_count
+        self.assertEqual(output.strip(), f"{count} False 0")
+
+    @parametrize("nvml_failure", ["unavailable", "error"])
+    @skipIfNoGreenContextLocalization
+    def test_greencontext_locality_nvml_driver_fallback(self, device, nvml_failure):
+        code = """
+import json
+import sys
+import warnings
+from unittest.mock import patch
+import torch
+from torch.cuda.green_contexts import get_num_locality_domains
+from torch.cuda._utils import _check_cuda_bindings, _cuda_bindings_driver as drv
+
+error = RuntimeError("NVML unavailable") if sys.argv[2] == "error" else None
+with patch("torch.cuda._device_count_nvml", return_value=-1, side_effect=error):
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        count = get_num_locality_domains(int(sys.argv[1]))
+print(json.dumps({
+    "count": count,
+    "torch_initialized": torch.cuda.is_initialized(),
+    "context": int(_check_cuda_bindings(drv.cuCtxGetCurrent())),
+    "warned": any("Falling back to CUDA driver initialization" in str(w.message) for w in caught),
+}))
+"""
+        output = subprocess.check_output(
+            [sys.executable, "-c", code, str(torch.device(device).index), nvml_failure],
+            text=True,
+        )
+        self.assertEqual(
+            json.loads(output),
+            {
+                "count": torch.cuda.green_contexts.get_num_locality_domains(device),
+                "torch_initialized": False,
+                "context": 0,
+                "warned": True,
+            },
+        )
+
+    def test_greencontext_partition_lifetime(self, device):
+        from torch.cuda.green_contexts import GreenContext
+
+        context = GreenContext(num_sms=4, device_id=torch.device(device).index)
+        partition = context.sm_partition
+        owner = weakref.ref(context)
+        del context
+        gc.collect()
+        self.assertIsNotNone(owner())
+        child = GreenContext(sm_partition=partition)
+        del partition
+        gc.collect()
+        self.assertIsNone(owner())
+        self.assertGreater(child.sm_count, 0)
+        stream = child.Stream()
+        with torch.cuda.stream(stream):
+            result = torch.arange(32, device=device) + 1
+        stream.synchronize()
+        self.assertEqual(result, torch.arange(32, device=device) + 1)
+
+    @serialTest()
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_WORKQUEUE_CONFIG, "Disjoint SM splits are not supported"
+    )
+    @skipIfCudaMPS
+    @skipCUDAIf(not SM90OrLater, "Co-scheduled groups larger than 2 require SM90+")
+    @skipIfCudaSMCountLessThan(13)
+    def test_greencontext_recursive_sm_partitions(self, device):
+        from torch.cuda.green_contexts import GreenContext, SMPartition
+
+        source = SMPartition.from_device(torch.device(device).index)
+        (first,), rest = source.split(num_sms=4, coscheduled_sm_count=2)
+        rest_ctx = GreenContext(sm_partition=rest)
+        (second,), rest = rest_ctx.sm_partition.split(num_sms=8, coscheduled_sm_count=4)
+        self.assertEqual((first.sm_count, second.sm_count), (4, 8))
+        self.assertEqual(rest.sm_count, source.sm_count - 12)
+        self.assertEqual(first.coscheduled_sm_count, 2)
+        self.assertEqual(second.coscheduled_sm_count, 4)
+        first_ctx = GreenContext(sm_partition=first)
+        (a, b), empty = first_ctx.sm_partition.split(
+            num_sms=(2, 2), coscheduled_sm_count=2
+        )
+        self.assertIsNone(empty)
+        parent = GreenContext(sm_partition=second)
+        (c, d), empty = parent.sm_partition.split(
+            num_sms=(4, 4), coscheduled_sm_count=2
+        )
+        self.assertIsNone(empty)
+        self.assertEqual([p.sm_count for p in (a, b, c, d)], [2, 2, 4, 4])
+        contexts = [GreenContext(sm_partition=p) for p in (a, b, c, d)]
+        self.assertEqual([context.sm_count for context in contexts], [2, 2, 4, 4])
+        self._check_disjoint_sm_ids(contexts, device)
+
+    @parametrize("workqueue_scope", [None, "balanced", "device_ctx"])
+    @serialTest()
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_WORKQUEUE_CONFIG, "Disjoint SM splits are not supported"
+    )
+    @skipIfCudaMPS
+    @skipIfCudaSMCountLessThan(24)
+    def test_greencontext_split(self, device, workqueue_scope):
+        from torch.cuda._utils import _check_cuda_bindings, _cuda_bindings_driver as drv
+        from torch.cuda.green_contexts import GreenContext
+
+        co_count = 8 if torch.cuda.get_device_capability(device)[0] >= 9 else 2
+        contexts = GreenContext.split(
+            num_sms=(8, 16),
+            coscheduled_sm_count=(2, co_count),
+            preferred_coscheduled_sm_count=co_count,
+            workqueue_scope=workqueue_scope,
+            workqueue_concurrency_limit=1 if workqueue_scope else None,
+            device_id=torch.device(device).index,
+        )
+        self.assertEqual([context.sm_count for context in contexts], [8, 16])
+        for context, minimum in zip(contexts, (2, co_count)):
+            self.assertGreaterEqual(context.sm_partition.coscheduled_sm_count, minimum)
+            stream = context.Stream()
+            with torch.cuda.stream(stream):
+                result = torch.arange(32, device=device) + 1
+            stream.synchronize()
+            self.assertEqual(result, torch.arange(32, device=device) + 1)
+        if workqueue_scope:
+            for context in contexts:
+                resource = _check_cuda_bindings(
+                    drv.cuGreenCtxGetDevResource(
+                        context._green_ctx,
+                        drv.CUdevResourceType.CU_DEV_RESOURCE_TYPE_WORKQUEUE_CONFIG,
+                    )
+                )
+                self.assertEqual(resource.wqConfig.wqConcurrencyLimit, 1)
+
+        self._check_disjoint_sm_ids(contexts, device)
+
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_WORKQUEUE_CONFIG, "Disjoint SM splits are not supported"
+    )
+    def test_greencontext_split_discovery(self, device):
+        from torch.cuda.green_contexts import SMPartition
+
+        source = SMPartition.from_device(torch.device(device).index)
+        (first, rest), empty = source.split(num_sms=(4, 0), coscheduled_sm_count=2)
+        self.assertEqual(first.sm_count, 4)
+        self.assertEqual(rest.sm_count, source.sm_count - 4)
+        self.assertIsNone(empty)
+
+    @skipIfNoGreenContextLocalization
+    def test_greencontext_dynamic_split(self, device):
+        from torch.cuda.green_contexts import SMPartition
+
+        source = SMPartition.from_device(torch.device(device).index)
+        (first,), rest = source.split(num_sms=2)
+        self.assertEqual(first.sm_count, 2)
+        self.assertEqual(first.coscheduled_sm_count, 0)
+        self.assertEqual(rest.sm_count, source.sm_count - 2)
+        (whole,), empty = source.split()
+        self.assertEqual(whole.sm_count, source.sm_count)
+        self.assertIsNone(empty)
+
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_WORKQUEUE_CONFIG, "Disjoint SM splits are not supported"
+    )
+    @skipCUDAIf(not SM90OrLater, "Co-scheduled groups larger than 2 require SM90+")
+    @skipIfCudaSMCountLessThan(11)
+    def test_greencontext_split_backfill(self, device):
+        from torch.cuda.green_contexts import SMPartition
+
+        source = SMPartition.from_device(torch.device(device).index)
+        with self.assertRaises(RuntimeError):
+            source.split(num_sms=10, coscheduled_sm_count=8)
+        (partition,), rest = source.split(
+            num_sms=10, coscheduled_sm_count=8, backfill=True
+        )
+        self.assertEqual(partition.sm_count, 10)
+        self.assertEqual(rest.sm_count, source.sm_count - 10)
+
+    @parametrize(
+        "kwargs,message",
+        [
+            ({"num_sms": ()}, "at least one"),
+            ({"num_sms": -1}, "nonnegative integers"),
+            ({"num_sms": (4, 4), "coscheduled_sm_count": (2,)}, "same length"),
+            ({"num_sms": True}, "nonnegative integers"),
+            ({"num_sms": 4.0}, "nonnegative integers"),
+            ({"num_sms": 4, "backfill": 1}, "bool"),
+            ({"coscheduled_sm_count": False}, "nonnegative integers"),
+            ({"preferred_coscheduled_sm_count": -1}, "nonnegative integers"),
+            ({"locality_domain_ids": (None, None), "backfill": (True,)}, "same length"),
+        ],
+    )
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_WORKQUEUE_CONFIG, "Disjoint SM splits are not supported"
+    )
+    def test_greencontext_split_invalid_arguments(self, device, kwargs, message):
+        from torch.cuda.green_contexts import SMPartition
+
+        source = SMPartition.from_device(torch.device(device).index)
+        with self.assertRaisesRegex(ValueError, message):
+            source.split(**kwargs)
+
+    @serialTest()
+    @skipIfNoGreenContextLocalization
+    @skipIfCudaMPS
+    def test_greencontext_locality_split(self, device):
+        from torch.cuda._utils import _check_cuda_bindings, _cuda_bindings_driver as drv
+        from torch.cuda.green_contexts import GreenContext
+
+        count = torch.cuda.green_contexts.get_num_locality_domains(device)
+        device_id = torch.device(device).index
+        sms_per_domain = _check_cuda_bindings(
+            drv.cuDeviceGetAttribute(
+                drv.CUdevice_attribute.CU_DEVICE_ATTRIBUTE_LOCALITY_DOMAIN_MULTIPROCESSOR_COUNT,
+                device_id,
+            )
+        )
+        contexts = GreenContext.split(
+            coscheduled_sm_count=2,
+            locality_domain_ids=tuple(range(count)),
+            device_id=device_id,
+        )
+        self.assertEqual(
+            [context.locality_domain_id for context in contexts], list(range(count))
+        )
+        self.assertEqual(
+            [context.sm_count for context in contexts], [sms_per_domain] * count
+        )
+        self._check_disjoint_sm_ids(contexts, device)
+
+    @serialTest()
+    @skipIfNoGreenContextLocalization
+    @skipIfCudaMPS
+    def test_greencontext_locality_recursive_split(self, device):
+        from torch.cuda.green_contexts import GreenContext, SMPartition
+
+        count = torch.cuda.green_contexts.get_num_locality_domains(device)
+        source = SMPartition.from_device(torch.device(device).index)
+        (first,), rest = source.split(
+            num_sms=4, coscheduled_sm_count=2, locality_domain_ids=0
+        )
+        rest_ctx = GreenContext(sm_partition=rest)
+        (second, unconstrained), rest = rest_ctx.sm_partition.split(
+            num_sms=(4, 4),
+            coscheduled_sm_count=2,
+            locality_domain_ids=(count - 1, None),
+        )
+        self.assertEqual(first.locality_domain_id, 0)
+        self.assertEqual(second.locality_domain_id, count - 1)
+        self.assertEqual(rest.sm_count, source.sm_count - 12)
+        parent = GreenContext(sm_partition=first)
+        (child,), rest = parent.sm_partition.split(
+            num_sms=2, coscheduled_sm_count=2, locality_domain_ids=0
+        )
+        self.assertEqual((child.sm_count, rest.sm_count), (2, 2))
+        self.assertEqual(child.locality_domain_id, 0)
+        contexts = [
+            GreenContext(sm_partition=p) for p in (child, second, unconstrained)
+        ]
+        self.assertEqual([context.sm_count for context in contexts], [2, 4, 4])
+        self.assertEqual(
+            [context.locality_domain_id for context in contexts],
+            [0, count - 1, None],
+        )
+        self._check_disjoint_sm_ids(contexts, device)
+
+    @skipIfNoGreenContextLocalization
+    def test_greencontext_locality_backfill(self, device):
+        from torch.cuda.green_contexts import SMPartition
+
+        source = SMPartition.from_device(torch.device(device).index)
+        with self.assertRaises(RuntimeError):
+            source.split(
+                num_sms=source.sm_count, coscheduled_sm_count=2, locality_domain_ids=0
+            )
+        (partition,), rest = source.split(
+            num_sms=source.sm_count,
+            coscheduled_sm_count=2,
+            locality_domain_ids=0,
+            backfill=True,
+        )
+        self.assertEqual(partition.sm_count, source.sm_count)
+        self.assertIsNone(rest)
+
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_WORKQUEUE_CONFIG, "Disjoint SM splits are not supported"
+    )
+    def test_greencontext_split_broadcasts_scalars(self, device):
+        from torch.cuda.green_contexts import SMPartition
+
+        source = SMPartition.from_device(torch.device(device).index)
+        parts, remainder = source.split(
+            num_sms=2,
+            coscheduled_sm_count=[2, 2],
+            backfill=[False, True],
+        )
+        self.assertEqual([part.sm_count for part in parts], [2, 2])
+        self.assertIsNotNone(remainder)
+        self.assertEqual(remainder.sm_count, source.sm_count - 4)
+
+    def test_greencontext_partition_constructor_arguments(self, device):
+        from torch.cuda.green_contexts import GreenContext, SMPartition
+
+        source = SMPartition.from_device(torch.device(device).index)
+        with self.assertRaisesRegex(ValueError, "device_id must match"):
+            GreenContext(sm_partition=source, device_id=source.device_id + 1)
+        with self.assertRaisesRegex(RuntimeError, "cannot be specified together"):
+            GreenContext(num_sms=2, sm_partition=source)
+        with self.assertRaisesRegex(TypeError, "must be an SMPartition"):
+            GreenContext(sm_partition=object())
+
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_WORKQUEUE_CONFIG, "Workqueue config is not supported"
     )
@@ -12395,6 +12784,212 @@ class TestCudaGreenContexts(TestCase):
         limited_time = t3 - t2
 
         self.assertGreater(limited_time, baseline_time)
+
+    @serialTest()
+    def test_greencontext_stream_registry_is_weak(self):
+        from torch.cuda import green_contexts
+
+        ctx = green_contexts.GreenContext(num_sms=1)
+        stream = ctx.Stream()
+        stream_id = stream.cuda_stream
+        ctx_ref = weakref.ref(ctx)
+        with green_contexts._STREAM_TO_GREEN_CTX_LOCK:
+            self.assertIs(green_contexts._STREAM_TO_GREEN_CTX.get(stream_id), ctx)
+
+        del ctx
+        gc.collect()
+        try:
+            self.assertIsNone(ctx_ref())
+            with green_contexts._STREAM_TO_GREEN_CTX_LOCK:
+                self.assertNotIn(stream_id, green_contexts._STREAM_TO_GREEN_CTX)
+        finally:
+            with green_contexts._STREAM_TO_GREEN_CTX_LOCK:
+                green_contexts._STREAM_TO_GREEN_CTX.pop(stream_id, None)
+        del stream
+
+    @serialTest()
+    def test_greencontext_nonowning_wrapper_destroys_created_streams(self):
+        from torch.cuda import green_contexts
+
+        next_stream = [20_000_000]
+        destroyed_streams = []
+        destroyed_contexts = []
+
+        class FakeDriver:
+            class CUstream_flags:
+                CU_STREAM_NON_BLOCKING = 0
+
+            @staticmethod
+            def cuGreenCtxStreamCreate(*args):
+                next_stream[0] += 1
+                return next_stream[0]
+
+            @staticmethod
+            def cuStreamDestroy(stream):
+                destroyed_streams.append(int(stream))
+
+            @staticmethod
+            def cuGreenCtxDestroy(green_ctx):
+                destroyed_contexts.append(int(green_ctx))
+
+        ctx = object.__new__(green_contexts.GreenContext)
+        ctx._is_owning = False
+        ctx._init_from_cuda_objects(0, 1, 1, None, 0)
+        with (
+            patch.object(green_contexts, "_drv", FakeDriver),
+            patch.object(
+                green_contexts, "_check_cuda_bindings", new=lambda result: result
+            ),
+            patch.object(green_contexts.GreenContext, "_drv_", FakeDriver),
+            patch.object(
+                green_contexts.GreenContext,
+                "_check_cuda_bindings_",
+                new=lambda result: result,
+            ),
+            patch.object(
+                torch.cuda,
+                "ExternalStream",
+                new=lambda stream, device_id: stream,
+            ),
+        ):
+            streams = [ctx.Stream(), ctx.Stream()]
+            ctx_ref = weakref.ref(ctx)
+            del ctx
+            gc.collect()
+
+        self.assertIsNone(ctx_ref())
+        self.assertEqual(destroyed_streams, list(reversed(streams)))
+        self.assertEqual(destroyed_contexts, [])
+
+    @serialTest()
+    def test_greencontext_concurrent_stream_creation_uses_distinct_slots(self):
+        from torch.cuda import green_contexts
+
+        barrier = threading.Barrier(2)
+        counter_lock = threading.Lock()
+        next_stream = [10_000_000]
+        destroyed_streams = []
+        destroyed_contexts = []
+
+        class FakeDriver:
+            class CUstream_flags:
+                CU_STREAM_NON_BLOCKING = 0
+
+            @staticmethod
+            def cuGreenCtxStreamCreate(*args):
+                barrier.wait(timeout=5)
+                with counter_lock:
+                    next_stream[0] += 1
+                    return next_stream[0]
+
+            @staticmethod
+            def cuStreamDestroy(stream):
+                destroyed_streams.append(int(stream))
+
+            @staticmethod
+            def cuGreenCtxDestroy(green_ctx):
+                destroyed_contexts.append(int(green_ctx))
+
+        ctx = object.__new__(green_contexts.GreenContext)
+        ctx._is_owning = False
+        ctx._init_from_cuda_objects(0, 1, 1, None, 0)
+        ctx_holder = [ctx]
+        streams = []
+        errors = []
+
+        def create_stream():
+            try:
+                streams.append(ctx_holder[0].Stream())
+            except Exception as e:
+                errors.append(e)
+
+        with (
+            patch.object(green_contexts, "_drv", FakeDriver),
+            patch.object(
+                green_contexts, "_check_cuda_bindings", new=lambda result: result
+            ),
+            patch.object(
+                torch.cuda,
+                "ExternalStream",
+                new=lambda stream, device_id: stream,
+            ),
+        ):
+            threads = [threading.Thread(target=create_stream) for _ in range(2)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=10)
+
+        for thread in threads:
+            self.assertFalse(thread.is_alive())
+        if errors:
+            raise errors[0]
+        self.assertEqual(ctx._curr_stream_idx, 1)
+        self.assertEqual(len(set(streams)), 2)
+        self.assertEqual(
+            sum(stream is not None for stream in ctx._green_ctx_streams), 2
+        )
+        expected_destroyed_streams = [
+            int(stream) for stream in reversed(ctx._green_ctx_streams[:2])
+        ]
+        with (
+            patch.object(green_contexts.GreenContext, "_drv_", FakeDriver),
+            patch.object(
+                green_contexts.GreenContext,
+                "_check_cuda_bindings_",
+                new=lambda result: result,
+            ),
+        ):
+            ctx_ref = weakref.ref(ctx)
+            del ctx
+            ctx_holder.clear()
+            gc.collect()
+        self.assertIsNone(ctx_ref())
+        self.assertEqual(destroyed_streams, expected_destroyed_streams)
+        self.assertEqual(destroyed_contexts, [])
+
+    @serialTest()
+    def test_execute_in_green_contexts(self):
+        from torch.cuda import green_contexts
+
+        contexts = [green_contexts.GreenContext(num_sms=1) for _ in range(2)]
+        streams = [context.Stream() for context in contexts]
+        outputs = [torch.empty((), device="cuda") for _ in streams]
+        callback_streams = []
+        caller_stream = torch.cuda.current_stream()
+
+        def work(index):
+            context = green_contexts.get_green_context_from_stream(
+                torch.cuda.current_stream()
+            )
+            self.assertIsNotNone(context)
+            callback_streams.append(torch.cuda.current_stream().cuda_stream)
+            outputs[index].fill_(index + 1)
+
+        green_contexts.execute_in_green_contexts(streams, work)
+
+        self.assertEqual(torch.cuda.current_stream(), caller_stream)
+        self.assertEqual(callback_streams, [stream.cuda_stream for stream in streams])
+        for stream in streams:
+            stream.synchronize()
+        self.assertEqual(outputs[0], torch.tensor(1.0, device="cuda"))
+        self.assertEqual(outputs[1], torch.tensor(2.0, device="cuda"))
+
+    @serialTest()
+    def test_execute_in_green_contexts_restores_stream_on_error(self):
+        from torch.cuda import green_contexts
+
+        contexts = [green_contexts.GreenContext(num_sms=1) for _ in range(2)]
+        streams = [context.Stream() for context in contexts]
+        caller_stream = torch.cuda.current_stream()
+
+        def fail(index):
+            raise RuntimeError("callback failure")
+
+        with self.assertRaisesRegex(RuntimeError, "callback failure"):
+            green_contexts.execute_in_green_contexts(streams, fail)
+
+        self.assertEqual(torch.cuda.current_stream(), caller_stream)
 
 
 class TestCudaArchList(TestCase):

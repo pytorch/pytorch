@@ -498,6 +498,93 @@ custom stream.
 The `GreenContext.set_context()` and `GreenContext.pop_context()` methods are
 deprecated compatibility APIs.
 
+To create contexts with disjoint SM allocations (CUDA driver and bindings
+13.1+), specify all groups in one operation:
+
+```python
+from torch.cuda.green_contexts import GreenContext, SMPartition
+
+a, b = GreenContext.split(
+    num_sms=(24, 40), coscheduled_sm_count=(8, 4), device_id=0
+)
+print(a.sm_count, b.sm_count)
+```
+
+To retain the remainder, use `SMPartition.split`. To subdivide a returned
+partition or remainder, create a context from it and split the resource queried
+through its `sm_partition` property. CUDA drivers can reject raw split outputs
+as already partitioned resources, so the context creation is explicit:
+
+```python
+sms = SMPartition.from_device(device_id=0)
+(first,), rest = sms.split(num_sms=4, coscheduled_sm_count=2)
+rest_ctx = GreenContext(sm_partition=rest)
+(second,), rest = rest_ctx.sm_partition.split(num_sms=4, coscheduled_sm_count=2)
+ctx = GreenContext(sm_partition=second, workqueue_scope="balanced")
+```
+
+Each split partitions its input resource. Its children and remainder are
+mutually disjoint, but overlap the parent. Separate split operations may overlap.
+CUDA evaluates new constraints when subdividing a resource; the remainder does
+not inherit the earlier split's alignment or locality metadata.
+Partitioning does not reserve SMs against other contexts or guarantee concurrent
+execution. Every split option accepts a scalar or a sequence. All sequences
+must have the same nonzero length, and scalars are broadcast to that length.
+With scalars only, one group is created. The default `num_sms=0` enables
+discovery, so `sms.split(locality_domain_ids=(0, 1))` discovers both domains.
+Groups are evaluated in order; early discovery groups can exhaust the resources
+needed by later groups.
+CUDA validates hardware constraints without PyTorch rounding the requested sizes.
+CUDA permits kernels to use additional SMs in some configurations involving MPS
+or dynamic parallelism; see the
+[CUDA green-context documentation](https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__GREEN__CONTEXTS.html).
+
+`GreenContext.sm_count` reports the actual allocation, including for contexts
+created through the existing `num_sms` constructor. Independent constructor
+calls do not guarantee disjoint SMs. A context's `sm_partition` property returns
+a resource that can be subdivided and keeps its originating context alive.
+
+Locality domains describe hardware topology. With CUDA driver and bindings
+13.4+, add locality constraints when splitting a resource:
+
+```python
+from torch.cuda.green_contexts import get_num_locality_domains
+
+n = get_num_locality_domains(device=0)
+contexts = GreenContext.split(
+    coscheduled_sm_count=2,
+    locality_domain_ids=tuple(range(n)),
+    device_id=0,
+)
+```
+
+Here, zero SM counts discover the available SMs in each domain. Some device SMs
+may be outside all locality domains and remain unassigned. A domain can contain
+multiple partitions; its ID can also constrain subdivision through an existing
+context's queried SM resource, as shown above. Use `None` for a group with no
+locality constraint. Workqueue settings can be combined with either kind of split.
+
+`backfill=True` permits CUDA to fill a group with SMs outside its co-scheduling
+or locality constraints. It preserves the separation between sibling partitions.
+The `locality_domain_id` property on partitions and contexts reads CUDA's
+reported metadata and returns `None` if CUDA does not specify a domain or the
+software does not support locality queries. Nested splits need not inherit a
+parent's locality metadata. With backfill, a reported domain does not guarantee
+that every SM belongs to that domain.
+
+With `coscheduled_sm_count=0`, CUDA determines cluster capabilities from the
+selected resources. `preferred_coscheduled_sm_count` requests a preferred larger
+grouping without requiring that CUDA can satisfy it.
+
+`get_num_locality_domains` accepts a CUDA device index, string, or
+`torch.device`, and defaults to the current device after CUDA initialization.
+Before initialization it tries NVML to infer the count without initializing
+CUDA. If NVML cannot determine the count, it warns and initializes the CUDA
+driver to query the count directly. This fallback does not create a primary
+context, but may poison subsequent forks that use CUDA. If support still cannot
+be established, it returns one.
+`is_localization_supported` returns false when support cannot be established.
+
 ```{eval-rst}
 .. currentmodule:: torch.cuda.green_contexts
 ```
@@ -508,6 +595,11 @@ deprecated compatibility APIs.
     :nosignatures:
 
     GreenContext
+    SMPartition
+    execute_in_green_contexts
+    get_green_context_from_stream
+    get_num_locality_domains
+    is_localization_supported
 ```
 
 
