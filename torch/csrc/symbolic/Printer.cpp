@@ -136,6 +136,10 @@ class StrPrinter {
         return "int_oo";
       case Kind::NegativeIntInfinity:
         return "-int_oo";
+      case Kind::Infinity:
+        return "oo";
+      case Kind::NegativeInfinity:
+        return "-oo";
       case Kind::Symbol: {
         const SymbolInfo& info = arena_.symbol_info(e);
         if (info.dummy_index == 0) {
@@ -221,6 +225,9 @@ class StrPrinter {
         return e->p < 0 ? kAdd : kMul;
       case Kind::Float:
         return is_negative(e) ? kAdd : kAtom;
+      case Kind::NegativeInfinity:
+        // PRECEDENCE_VALUES["NegativeInfinity"].
+        return kAdd;
       case Kind::Mul:
         for (const Expr* a : e->args) {
           if (a->is_function() && precedence(a) < kMul) {

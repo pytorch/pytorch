@@ -33,6 +33,8 @@ enum class Kind : uint8_t {
   Float,
   IntInfinity,
   NegativeIntInfinity,
+  Infinity,
+  NegativeInfinity,
   Symbol,
   Pow,
   Mul,
@@ -163,11 +165,11 @@ struct Expr {
   c10::SmallVector<const Expr*, 3> args;
   // Assumptions cache, like sympy's obj._assumptions.
   mutable FactKB kb;
-  // A Float occurs in the expression.
+  // A Float, oo or -oo occurs in the expression.
   bool has_float = false;
 
   bool is_number() const {
-    return kind <= Kind::NegativeIntInfinity;
+    return kind <= Kind::NegativeInfinity;
   }
   bool is_rational() const {
     return kind == Kind::Integer || kind == Kind::Rational;
@@ -208,7 +210,7 @@ struct SortKey {
 // Python's three-way tuple comparison; unorderable types throw.
 int compare_keys(const SortKey& a, const SortKey& b);
 
-// Three-way numeric comparison of two Numbers, int_oo-aware.
+// Three-way numeric comparison of two Numbers, int_oo- and oo-aware.
 int compare_numbers(const Expr* a, const Expr* b);
 
 struct Num {
@@ -240,6 +242,13 @@ class ExprArena : public c10::intrusive_ptr_target {
   }
   const Expr* boolean(bool v) const {
     return v ? true_ : false_;
+  }
+  // sympy.oo and -sympy.oo.
+  const Expr* oo() const {
+    return oo_;
+  }
+  const Expr* neg_oo() const {
+    return neg_oo_;
   }
   const Expr* symbol(const std::string& name, const Facts& facts);
   // A fresh Dummy(name, **{fact: True}).
@@ -387,6 +396,8 @@ class ExprArena : public c10::intrusive_ptr_target {
   const Expr* neg_one_;
   const Expr* int_oo_;
   const Expr* neg_int_oo_;
+  const Expr* oo_;
+  const Expr* neg_oo_;
   const Expr* true_;
   const Expr* false_;
   // sympy.core.exprtools._eps, a Dummy(positive=True).

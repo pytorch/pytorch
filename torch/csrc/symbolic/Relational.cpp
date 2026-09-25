@@ -35,12 +35,25 @@ bool is_int_oo(const Expr* e) {
   return e->kind == Kind::IntInfinity || e->kind == Kind::NegativeIntInfinity;
 }
 
-// Position on the extended integer line, for comparing numbers where at least
-// one is +-int_oo.
+bool is_oo(const Expr* e) {
+  return e->kind == Kind::Infinity || e->kind == Kind::NegativeInfinity;
+}
+
+// Position on the extended real line, for comparing numbers where at least one
+// is +-int_oo or +-oo: -oo < -int_oo < finite numbers < int_oo < oo.
 int infinity_rank(const Expr* e) {
-  return e->kind == Kind::IntInfinity        ? 1
-      : e->kind == Kind::NegativeIntInfinity ? -1
-                                             : 0;
+  switch (e->kind) {
+    case Kind::Infinity:
+      return 2;
+    case Kind::IntInfinity:
+      return 1;
+    case Kind::NegativeIntInfinity:
+      return -1;
+    case Kind::NegativeInfinity:
+      return -2;
+    default:
+      return 0;
+  }
 }
 
 Kind reversed_kind(Kind k) {
@@ -130,12 +143,15 @@ Tri ExprArena::is_ge(const Expr* lhs, const Expr* rhs) {
     return tri(i128(lhs->p) * rhs->q >= i128(rhs->p) * lhs->q);
   }
   if (lhs->is_number() && rhs->is_number()) {
-    if (is_int_oo(lhs) || is_int_oo(rhs)) {
-      // int_oo - int_oo is nan, so neither _n2 nor the difference decides.
-      if (lhs == rhs) {
+    int rl = infinity_rank(lhs);
+    int rr = infinity_rank(rhs);
+    if (rl != 0 || rr != 0) {
+      // _n2 decides unless the difference is nan. oo - oo is decided by oo
+      // being infinite; int_oo - int_oo is not decided.
+      if (lhs == rhs && is_int_oo(lhs)) {
         return Tri::Unknown;
       }
-      return tri(infinity_rank(lhs) >= infinity_rank(rhs));
+      return tri(rl >= rr);
     }
     // _n2: the sign of the difference, rounded to a double.
     return tri(compare_numbers(sub(lhs, rhs), zero_) >= 0);
@@ -279,7 +295,7 @@ const Expr* ExprArena::logical_not(const Expr* a) {
   if (a->is_rational()) {
     return boolean(a->p == 0);
   }
-  if (is_int_oo(a) || a == true_) {
+  if (is_int_oo(a) || is_oo(a) || a == true_) {
     return false_;
   }
   if (a == false_) {

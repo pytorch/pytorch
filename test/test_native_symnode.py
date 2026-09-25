@@ -1146,6 +1146,151 @@ class TestNativeFloat(TestCase):
                 c()
 
 
+class TestNativeInfinity(TestCase):
+    NUMS = [sympy.oo, -sympy.oo, int_oo, -int_oo, *map(sympy.Integer, [0, 3, -2])]
+    NUMS += [sympy.Rational(1, 2), *map(sympy.Float, [0.5, -2.0, 0.0])]
+
+    def check_result(self, arena, what, expected, fn):
+        """Checks fn() against sympy's result. Returns False if native raised
+        NativeUnsupported."""
+        if expected is sympy.nan:
+            with self.assertRaises(NativeUnsupported, msg=what):
+                fn()
+            return True
+        try:
+            n = fn()
+        except NativeUnsupported:
+            return False
+        got = arena.to_sympy(n)
+        self.assertTrue(got == expected and type(got) is type(expected), what)
+        self.assertIs(arena.from_sympy(expected).id, n.id)
+        return True
+
+    def test_leaves(self):
+        for v in [sympy.oo, -sympy.oo]:
+            TestNativeFloat.check_expr(self, v)
+            arena = torch._C._symbolic._Arena()
+            self.assertEqual(arena.from_sympy(v).kind, type(v).__name__)
+
+    def test_arithmetic(self):
+        arena = torch._C._symbolic._Arena()
+        for a in self.NUMS:
+            na = arena.from_sympy(a)
+            # int_oo is not supported in core arithmetic.
+            finite_a = a not in (int_oo, -int_oo)
+            ok = self.check_result(arena, f"-{a}", -a, lambda: arena.neg(na))
+            self.assertTrue(ok or not finite_a, f"-{a}")
+            for e in range(-2, 4):
+                with contextlib.suppress(ZeroDivisionError):
+                    expected = a**e
+                    self.check_result(
+                        arena,
+                        f"{a}**{e}",
+                        expected,
+                        lambda: arena.pow(na, arena.integer(e)),
+                    )
+            for b in self.NUMS:
+                nb = arena.from_sympy(b)
+                supported = finite_a and b not in (int_oo, -int_oo)
+                for name, expected, fn in [
+                    ("add", sympy.Add(a, b), lambda: arena.add([na, nb])),
+                    ("mul", sympy.Mul(a, b), lambda: arena.mul([na, nb])),
+                    ("sub", a - b, lambda: arena.sub(na, nb)),
+                ]:
+                    ok = self.check_result(arena, f"{name}({a}, {b})", expected, fn)
+                    self.assertTrue(ok or not supported, f"{name}({a}, {b})")
+
+    def test_compare(self):
+        nums = self.NUMS + [sympy.Rational(-1, 3), s0, zf]
+        arena = torch._C._symbolic._Arena()
+        for a in nums:
+            for b in nums:
+                na, nb = arena.from_sympy(a), arena.from_sympy(b)
+                self.assertEqual(arena.compare(na, nb), a.compare(b), f"{a}, {b}")
+        for v in [s0 * sympy.Float(0.5) + zf, s0 + u0]:
+            terms = [arena.from_sympy(v), arena.from_sympy(sympy.oo)]
+            got = [arena.to_sympy(x) for x in arena.ordered(terms)]
+            self.assertEqual(got, list(sympy.ordered([v, sympy.oo])))
+
+    def test_relational(self):
+        rel = TestNativeRelational.check_rel
+        for op in RELATIONS:
+            for a in self.NUMS:
+                for b in self.NUMS:
+                    self.assertTrue(rel(self, op, a, b), f"{op}({a}, {b})")
+        oo = sympy.oo
+        cases = [("Lt", s0, oo), ("Ge", u0, -oo), ("Eq", s0, oo), ("Le", oo, zf)]
+        cases += [("Lt", -oo, u0), ("Ne", zf, -oo), ("Gt", u0, oo), ("Eq", oo, oo)]
+        cases += [("Lt", u0, -oo), ("Gt", -oo, u0), ("Le", s0 + 1, oo)]
+        for op, a, b in cases:
+            self.assertTrue(rel(self, op, a, b), f"{op}({a}, {b})")
+        arena = torch._C._symbolic._Arena()
+        for v in [sympy.Lt(u0, -oo, evaluate=False), sympy.Gt(-oo, u0, evaluate=False)]:
+            self.assertEqual(arena.sstr(arena.from_sympy(v)), str(v))
+        n = arena.from_sympy(sympy.oo)
+        self.assertIs(arena.to_sympy(arena.logical_not(n)), sympy.false)
+
+    def test_symbolic(self):
+        oo = sympy.oo
+        cases = [[s0, oo], [u0, -oo], [zf, oo], [2 * s0, 1, oo], [-zf, -oo]]
+        cases += [[s0, u0, -oo], [oo, u0, zf], [sympy.Float(0.5) * zf, -oo]]
+        for terms in cases:
+            arena = torch._C._symbolic._Arena()
+            n = arena.add([arena.from_sympy(a) for a in terms])
+            self.assertIs(arena.to_sympy(n), sympy.Add(*terms), f"{terms}")
+
+    def test_unsupported(self):
+        arena = torch._C._symbolic._Arena()
+        oo = arena.from_sympy(sympy.oo)
+        neg_oo = arena.from_sympy(-sympy.oo)
+        x = arena.from_sympy(s0)
+        cases = [
+            lambda: arena.add([oo, neg_oo]),
+            lambda: arena.mul([arena.integer(0), oo]),
+            lambda: arena.mul([oo, x]),
+            lambda: arena.function("Max", [oo, x]),
+            lambda: arena.safe_expand(oo),
+            lambda: arena.value_range(oo, []),
+            lambda: arena.add([oo, arena.from_sympy(int_oo)]),
+        ]
+        for i, fn in enumerate(cases):
+            with self.assertRaises(NativeUnsupported, msg=f"case {i}"):
+                fn()
+
+    @parametrize("seed", range(4))
+    def test_fuzz(self, seed):
+        rng = random.Random(seed)
+        leaves = LEAVES + FLOAT_LEAVES + [sympy.oo, -sympy.oo]
+        checked = 0
+        for _ in range(300):
+            t = random_tree(rng, 3, leaves)
+            try:
+                expected = sympy.sympify(sympy_eval(t))
+            except ZeroDivisionError:
+                continue
+            arena = torch._C._symbolic._Arena()
+            if expected.has(sympy.nan, sympy.zoo):
+                with contextlib.suppress(NativeUnsupported):
+                    n = native_eval(arena, t)
+                    self.fail(f"{t}: native {arena.to_sympy(n)}, sympy {expected}")
+                continue
+            try:
+                n = native_eval(arena, t)
+            except NativeUnsupported:
+                continue
+            got = arena.to_sympy(n)
+            self.assertTrue(got == expected, f"{t}: native {got} != sympy {expected}")
+            self.assertEqual(arena.from_sympy(expected), n)
+            with contextlib.suppress(NativeUnsupported):
+                self.assertEqual(arena.sstr(n), str(expected))
+            for f in FACTS:
+                with contextlib.suppress(NativeUnsupported):
+                    got = arena.ask(n, f)
+                    self.assertIs(got, getattr(expected, "is_" + f), f"{t}.is_{f}")
+            checked += 1
+        self.assertGreater(checked, 100)
+
+
 class TestNativeFunctions(TestCase):
     FUNCTIONS = {
         "Mod": Mod,
@@ -4769,6 +4914,7 @@ class TestNativeSymIntGlue(TestCase):
 
 instantiate_parametrized_tests(TestNativeExpr)
 instantiate_parametrized_tests(TestNativeFloat)
+instantiate_parametrized_tests(TestNativeInfinity)
 instantiate_parametrized_tests(TestNativeCompoundAssumptions)
 instantiate_parametrized_tests(TestNativeExprTools)
 instantiate_parametrized_tests(TestNativeRelational)

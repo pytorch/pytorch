@@ -1285,7 +1285,7 @@ FactKB ExprArena::default_kb(const Expr* e) {
     FactKB float_kb = make(
         {{F::commutative, true}, {F::real, true}, {F::extended_real, true}});
     float_kb.known |= bit(F::rational) | bit(F::irrational);
-    return std::array<FactKB, 11>{
+    return std::array<FactKB, 13>{
         // Integer, NegativeOne
         make(
             {{F::commutative, true},
@@ -1337,6 +1337,22 @@ FactKB ExprArena::default_kb(const Expr* e) {
         // is_real = True
         make({{F::real, true}}),
         float_kb,
+        // Infinity
+        make(
+            {{F::commutative, true},
+             {F::complex, false},
+             {F::extended_real, true},
+             {F::infinite, true},
+             {F::extended_positive, true},
+             {F::prime, false}}),
+        // NegativeInfinity
+        make(
+            {{F::commutative, true},
+             {F::complex, false},
+             {F::extended_real, true},
+             {F::infinite, true},
+             {F::extended_negative, true},
+             {F::prime, false}}),
     };
   }();
   switch (e->kind) {
@@ -1350,6 +1366,10 @@ FactKB ExprArena::default_kb(const Expr* e) {
       return kbs[4];
     case Kind::NegativeIntInfinity:
       return kbs[5];
+    case Kind::Infinity:
+      return kbs[11];
+    case Kind::NegativeInfinity:
+      return kbs[12];
     case Kind::PythonMod:
     case Kind::FloorDiv:
     case Kind::CleanDiv:
@@ -1468,6 +1488,8 @@ Tri ExprArena::eval_fact(const Expr* e, Fact f) {
     }
     case Kind::IntInfinity:
     case Kind::NegativeIntInfinity:
+    case Kind::Infinity:
+    case Kind::NegativeInfinity:
     case Kind::Symbol:
       // Their only handlers decide extended_positive/negative, which their KBs
       // already know or which are None for symbols.

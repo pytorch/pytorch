@@ -40,14 +40,25 @@ SortKeyPtr key_tuple(std::vector<SortKeyPtr> items) {
   return k;
 }
 
+// -oo < -int_oo < finite numbers < int_oo < oo.
 int infinity_rank(const Expr* e) {
-  return e->kind == Kind::IntInfinity        ? 1
-      : e->kind == Kind::NegativeIntInfinity ? -1
-                                             : 0;
+  switch (e->kind) {
+    case Kind::Infinity:
+      return 2;
+    case Kind::IntInfinity:
+      return 1;
+    case Kind::NegativeIntInfinity:
+      return -1;
+    case Kind::NegativeInfinity:
+      return -2;
+    default:
+      return 0;
+  }
 }
 
 bool is_negative_number(const Expr* e) {
   return e->kind == Kind::NegativeIntInfinity ||
+      e->kind == Kind::NegativeInfinity ||
       (e->kind == Kind::Float ? e->float_value() < 0
                               : e->is_rational() && e->p < 0);
 }
@@ -127,7 +138,7 @@ size_t node_count(const Expr* e) {
 
 } // namespace
 
-// Number.__lt__ / __gt__, including int_oo's overloads.
+// Number.__lt__ / __gt__, including int_oo's overloads and oo.
 int compare_numbers(const Expr* a, const Expr* b) {
   int ra = infinity_rank(a);
   int rb = infinity_rank(b);
@@ -461,6 +472,8 @@ bool ExprArena::could_extract_minus_sign(const Expr* e) {
     case Kind::Float:
     case Kind::IntInfinity:
     case Kind::NegativeIntInfinity:
+    case Kind::Infinity:
+    case Kind::NegativeInfinity:
       return is_negative_number(e);
     case Kind::Mul:
       // self == -self only for zoo factors, which the arena cannot hold.

@@ -32,8 +32,9 @@ c10::SmallVector<const Expr*, 4> atoms(
 }
 
 bool is_nonnegative_value(const Expr* value) {
-  return value->kind == Kind::IntInfinity ||
-      (value->kind != Kind::NegativeIntInfinity && value->p >= 0);
+  return value->kind == Kind::IntInfinity || value->kind == Kind::Infinity ||
+      (value->kind != Kind::NegativeIntInfinity &&
+       value->kind != Kind::NegativeInfinity && value->p >= 0);
 }
 
 std::atomic<uint64_t> query_seq{0};

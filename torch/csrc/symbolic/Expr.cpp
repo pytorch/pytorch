@@ -32,6 +32,10 @@ int class_rank(const Expr* e) {
       return e->p == 1 && e->q == 2 ? 2 : 8;
     case Kind::Float:
       return 9;
+    case Kind::Infinity:
+      return 3;
+    case Kind::NegativeInfinity:
+      return 6;
     case Kind::Symbol:
       return 13;
     case Kind::Pow:
@@ -137,25 +141,37 @@ int64_t checked_mul(int64_t a, int64_t b) {
   return r;
 }
 
-// A Number during Add/Mul flattening: the Rational r, or the Float f.
+// A Number during Add/Mul flattening: the Rational r, the Float f, or oo
+// (inf 1) or -oo (inf -1).
 struct NumVal {
   Num r;
   bool is_float = false;
   double f = 0;
+  int inf = 0;
 };
 
 NumVal num_val(const Expr* e) {
   if (e->kind == Kind::Float) {
     return {{0, 0}, true, e->float_value()};
   }
-  if (!e->is_rational()) {
-    throw NativeUnsupported("expected a Rational or a Float");
+  if (e->is_rational()) {
+    return {{e->p, e->q}};
   }
-  return {{e->p, e->q}};
+  if (e->kind == Kind::Infinity || e->kind == Kind::NegativeInfinity) {
+    return {{0, 0}, false, 0, e->kind == Kind::Infinity ? 1 : -1};
+  }
+  throw NativeUnsupported("expected a Rational, a Float or oo");
 }
 
 bool is_zero(const NumVal& n) {
-  return n.is_float ? n.f == 0 : n.r.p == 0;
+  return n.inf == 0 && (n.is_float ? n.f == 0 : n.r.p == 0);
+}
+
+int sign(const NumVal& n) {
+  if (n.inf != 0) {
+    return n.inf;
+  }
+  return n.is_float ? (n.f > 0) - (n.f < 0) : (n.r.p > 0) - (n.r.p < 0);
 }
 
 // other._as_mpf_op(53) of Float's arithmetic: Integers round to nearest even
@@ -189,6 +205,13 @@ NumVal float_result(double v) {
 }
 
 NumVal num_add(const NumVal& a, const NumVal& b) {
+  // Float._new maps an infinite mpf to oo, so a Float operand does not matter.
+  if (a.inf != 0 || b.inf != 0) {
+    if (a.inf == -b.inf) {
+      throw NativeUnsupported("oo - oo is nan");
+    }
+    return a.inf != 0 ? a : b;
+  }
   if (a.is_float || b.is_float) {
     return float_result(float_operand(a) + float_operand(b));
   }
@@ -197,6 +220,13 @@ NumVal num_add(const NumVal& a, const NumVal& b) {
 }
 
 NumVal num_mul(const NumVal& a, const NumVal& b) {
+  if (a.inf != 0 || b.inf != 0) {
+    int s = sign(a) * sign(b);
+    if (s == 0) {
+      throw NativeUnsupported("0*oo is nan");
+    }
+    return {{0, 0}, false, 0, s};
+  }
   if (a.is_float || b.is_float) {
     if (is_zero(a) || is_zero(b)) {
       return {{0, 1}};
@@ -298,6 +328,8 @@ ExprArena::ExprArena() {
   neg_one_ = integer(-1);
   int_oo_ = intern(Kind::IntInfinity, 0, 0, {});
   neg_int_oo_ = intern(Kind::NegativeIntInfinity, 0, 0, {});
+  oo_ = intern(Kind::Infinity, 0, 0, {});
+  neg_oo_ = intern(Kind::NegativeInfinity, 0, 0, {});
   true_ = intern(Kind::BooleanTrue, 0, 0, {});
   false_ = intern(Kind::BooleanFalse, 0, 0, {});
   eps_ = dummy("_eps", Fact::positive);
@@ -327,10 +359,11 @@ const Expr* ExprArena::intern(
   }
   Expr key{kind, static_cast<uint32_t>(storage_.size()), h, p, q, {}, {}};
   key.args.assign(args.begin(), args.end());
-  key.has_float =
-      kind == Kind::Float || std::any_of(args.begin(), args.end(), [](auto a) {
-        return a->has_float;
-      });
+  key.has_float = kind == Kind::Float || kind == Kind::Infinity ||
+      kind == Kind::NegativeInfinity ||
+      std::any_of(args.begin(), args.end(), [](auto a) {
+                    return a->has_float;
+                  });
   key.kb = kind == Kind::Symbol ? symbols_.at(p).facts : default_kb(&key);
   const Expr* e = &storage_.emplace_back(std::move(key));
   table_[i] = {h, e};
@@ -531,7 +564,9 @@ const Expr* ExprArena::add(c10::ArrayRef<const Expr*> in) {
     return seq[0];
   }
   auto to_expr = [this](const NumVal& n) {
-    return n.is_float ? float_number(n.f) : number(n.r);
+    return n.inf != 0 ? (n.inf > 0 ? oo_ : neg_oo_)
+        : n.is_float  ? float_number(n.f)
+                      : number(n.r);
   };
   NumVal coeff{{0, 1}};
   c10::SmallVector<std::pair<const Expr*, NumVal>, 8> terms;
@@ -544,6 +579,8 @@ const Expr* ExprArena::add(c10::ArrayRef<const Expr*> in) {
       case Kind::Integer:
       case Kind::Rational:
       case Kind::Float:
+      case Kind::Infinity:
+      case Kind::NegativeInfinity:
         coeff = num_add(coeff, num_val(o));
         continue;
       case Kind::IntInfinity:
@@ -591,6 +628,17 @@ const Expr* ExprArena::add(c10::ArrayRef<const Expr*> in) {
     } else {
       newseq.push_back(intern(Kind::Mul, 0, 0, {ce, s}));
     }
+  }
+  if (coeff.inf != 0) {
+    // oo absorbs the terms that are real or of its sign.
+    Fact same_sign =
+        coeff.inf > 0 ? Fact::extended_nonnegative : Fact::extended_nonpositive;
+    for (const Expr* t : newseq) {
+      if (ask(t, same_sign) != Tri::True && ask(t, Fact::real) != Tri::True) {
+        throw NativeUnsupported("oo plus a term it does not absorb");
+      }
+    }
+    return to_expr(coeff);
   }
   std::sort(newseq.begin(), newseq.end(), [this](auto a, auto b) {
     return compare(a, b) < 0;
@@ -665,6 +713,8 @@ const Expr* ExprArena::mul(c10::ArrayRef<const Expr*> in) {
       case Kind::Integer:
       case Kind::Rational:
       case Kind::Float:
+      case Kind::Infinity:
+      case Kind::NegativeInfinity:
         coeff = num_mul(coeff, num_val(o));
         continue;
       case Kind::IntInfinity:
@@ -699,9 +749,15 @@ const Expr* ExprArena::mul(c10::ArrayRef<const Expr*> in) {
     }
     c_part.push_back(p);
   }
+  if (coeff.inf != 0 && !c_part.empty()) {
+    throw NativeUnsupported("oo times a symbolic factor");
+  }
   std::sort(c_part.begin(), c_part.end(), [this](auto a, auto b) {
     return compare(a, b) < 0;
   });
+  if (coeff.inf != 0) {
+    return coeff.inf > 0 ? oo_ : neg_oo_;
+  }
   if (coeff.is_float || !(coeff.r.p == 1 && coeff.r.q == 1)) {
     const Expr* c = coeff.is_float ? float_number(coeff.f) : number(coeff.r);
     if (c_part.size() == 1 && c_part[0]->kind == Kind::Add) {
@@ -736,6 +792,14 @@ const Expr* ExprArena::pow(const Expr* b, const Expr* e) {
       return number_pow(as_num(b), e->p);
     case Kind::Float:
       return float_pow(b, e->p);
+    case Kind::Infinity:
+    case Kind::NegativeInfinity:
+      // Infinity._eval_power, and NegativeInfinity's through Pow.__new__'s
+      // sign extraction.
+      if (e->p < 0) {
+        return zero_;
+      }
+      return b == neg_oo_ && e->p % 2 != 0 ? neg_oo_ : oo_;
     case Kind::IntInfinity:
     case Kind::NegativeIntInfinity:
       throw NativeUnsupported("int_oo in Pow");
@@ -830,9 +894,13 @@ int ExprArena::compare(const Expr* a, const Expr* b) const {
 }
 
 const Expr* ExprArena::neg(const Expr* a) {
-  // IntInfinity.__neg__ and NegativeIntInfinity.__neg__.
+  // The __neg__ of IntInfinity, NegativeIntInfinity, Infinity and
+  // NegativeInfinity.
   if (a == int_oo_ || a == neg_int_oo_) {
     return a == int_oo_ ? neg_int_oo_ : int_oo_;
+  }
+  if (a == oo_ || a == neg_oo_) {
+    return a == oo_ ? neg_oo_ : oo_;
   }
   // Float.__neg__ keeps a zero a Float.
   if (a->kind == Kind::Float) {
@@ -846,6 +914,9 @@ const Expr* ExprArena::sub(const Expr* a, const Expr* b) {
   if (a->is_number() && b->is_number() &&
       (a->kind == Kind::Float || b->kind == Kind::Float)) {
     NumVal r = num_add(num_val(a), num_val(neg(b)));
+    if (r.inf != 0) {
+      return r.inf > 0 ? oo_ : neg_oo_;
+    }
     return r.is_float ? float_number(r.f) : number(r.r);
   }
   return add({a, neg(b)});

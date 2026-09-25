@@ -64,17 +64,19 @@ struct PyArena {
     IntInfinity = numbers.attr("IntInfinity");
     NegativeIntInfinity = numbers.attr("NegativeIntInfinity");
     int_oo = numbers.attr("int_oo");
+    oo = sympy.attr("oo");
+    neg_oo = sympy.attr("S").attr("NegativeInfinity");
     true_ = sympy.attr("true");
     false_ = sympy.attr("false");
     Not = sympy.attr("Not");
     And = sympy.attr("And");
     Or = sympy.attr("Or");
-    lattice_new = py::module_::import("builtins")
-                      .attr("super")(
-                          py::module_::import("sympy.core.operations")
-                              .attr("AssocOp"),
-                          And)
-                      .attr("__new__");
+    lattice_new =
+        py::module_::import("builtins")
+            .attr("super")(
+                py::module_::import("sympy.core.operations").attr("AssocOp"),
+                And)
+            .attr("__new__");
     for (const char* name : {"Eq", "Ne", "Lt", "Le", "Gt", "Ge"}) {
       relationals.push_back(sympy.attr(name));
     }
@@ -94,7 +96,8 @@ struct PyArena {
   std::unordered_map<uint32_t, py::object> sympy_cache;
 
   py::object Integer, Rational, Float, Symbol, Dummy, Add, Mul, Pow,
-      IntInfinity, NegativeIntInfinity, int_oo, true_, false_, Not, And, Or;
+      IntInfinity, NegativeIntInfinity, int_oo, oo, neg_oo, true_, false_, Not,
+      And, Or;
   // super(AssocOp, cls).__new__, which LatticeOp.__new__ calls with the final
   // ordered args.
   py::object lattice_new;
@@ -205,6 +208,13 @@ const Expr* PyArena::from_sympy(py::handle obj) {
   }
   if (py::isinstance(obj, NegativeIntInfinity)) {
     return arena->neg_int_oo();
+  }
+  // S.Infinity and S.NegativeInfinity are singletons.
+  if (obj.is(oo)) {
+    return arena->oo();
+  }
+  if (obj.is(neg_oo)) {
+    return arena->neg_oo();
   }
   // Exact type: Dummy/Wild compare by more than name and assumptions.
   if (Py_TYPE(obj.ptr()) == reinterpret_cast<PyTypeObject*>(Symbol.ptr())) {
@@ -331,6 +341,12 @@ py::object PyArena::to_sympy(const Expr* e) {
     case Kind::NegativeIntInfinity:
       r = int_oo.attr("__neg__")();
       break;
+    case Kind::Infinity:
+      r = oo;
+      break;
+    case Kind::NegativeInfinity:
+      r = neg_oo;
+      break;
     case Kind::Symbol: {
       const SymbolInfo& info = arena->symbol_info(e);
       if (info.dummy_index == 0) {
@@ -441,6 +457,10 @@ const char* kind_name(Kind k) {
       return "IntInfinity";
     case Kind::NegativeIntInfinity:
       return "NegativeIntInfinity";
+    case Kind::Infinity:
+      return "Infinity";
+    case Kind::NegativeInfinity:
+      return "NegativeInfinity";
     case Kind::Symbol:
       return "Symbol";
     case Kind::Pow:
