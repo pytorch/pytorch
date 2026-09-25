@@ -573,7 +573,9 @@ class DistributedRendezvousOpExecutorTest(TestCase, CustomAssertMixin):
     def tearDown(self) -> None:
         self._datetime_patch.stop()
 
-    def _create_settings(self) -> RendezvousSettings:
+    def _create_settings(
+        self, cas_backoff_max_seconds: float = 0.3
+    ) -> RendezvousSettings:
         return RendezvousSettings(
             run_id="dummy_run_id",
             min_nodes=self._min_nodes,
@@ -581,6 +583,7 @@ class DistributedRendezvousOpExecutorTest(TestCase, CustomAssertMixin):
             timeout=self._timeout,
             keep_alive_interval=timedelta(seconds=30),
             keep_alive_max_attempt=3,
+            cas_backoff_max_seconds=cas_backoff_max_seconds,
         )
 
     def _create_op_executor(
@@ -856,6 +859,29 @@ class DistributedRendezvousOpExecutorTest(TestCase, CustomAssertMixin):
         self.assertListEqual(
             self._mock_state_holder.mock_calls, [call.sync(), call.sync()]
         )
+
+    def test_run_backs_off_only_after_failed_state_write(self) -> None:
+        for has_set, delay in (
+            (False, 0.3),
+            (False, 0.7),
+            (True, 0.7),
+            (None, 0.7),
+            (False, 0),
+        ):
+            with self.subTest(has_set=has_set, delay=delay):
+                executor = self._create_op_executor(self._create_settings(delay))
+                with (
+                    patch.object(self._state_holder, "sync", return_value=has_set),
+                    patch(
+                        "torch.distributed.elastic.rendezvous.dynamic_rendezvous._delay"
+                    ) as mock_delay,
+                ):
+                    executor.run(Mock(return_value=_Action.FINISH), deadline=1)
+
+                if has_set is False and delay > 0:
+                    mock_delay.assert_called_once_with(seconds=(0, delay))
+                else:
+                    mock_delay.assert_not_called()
 
 
 class AbstractTestRendezvousOp(ABC):
