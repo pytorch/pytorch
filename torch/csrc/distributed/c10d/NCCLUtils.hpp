@@ -324,11 +324,6 @@ class NCCLComm {
   // Destroy a communicator. This is a blocking function.
   void destroy();
 
-  // `hook` runs once, at the start of the first abort() or destroy(), while
-  // the handle is still valid. It must not throw and must not call back into
-  // the owner: abort() can run with the owner's locks held. Only run on ROCm.
-  void setPreInvalidateHook(std::function<void()> hook);
-
   bool isInitialized() const;
 
   bool isAborted() const;
@@ -366,8 +361,10 @@ class NCCLComm {
   // Unique hash for this communicator.
   std::string uniqueHash_;
   bool aborted_{false};
-  // Declared on every platform so the class layout does not depend on
-  // USE_ROCM.
+  // On ROCm, run once at the start of the first abort() or destroy(), while
+  // the handle is still valid. Set by the owner under `mutex_`; must not throw
+  // or call back into the owner, whose locks abort() can run under. Declared on
+  // every platform so the class layout does not depend on USE_ROCM.
   std::function<void()> preInvalidateHook_;
   // Caller must hold `mutex_`.
   void runPreInvalidateHook();

@@ -330,11 +330,6 @@ std::shared_ptr<NCCLComm> NCCLComm::shrink(
 }
 #endif // NCCL_HAS_COMM_SHRINK
 
-void NCCLComm::setPreInvalidateHook(std::function<void()> hook) {
-  LockType lock(mutex_);
-  preInvalidateHook_ = std::move(hook);
-}
-
 void NCCLComm::runPreInvalidateHook() {
   auto hook = std::exchange(preInvalidateHook_, nullptr);
   if (!hook) {
