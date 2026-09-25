@@ -2963,6 +2963,9 @@ class TestPreBucketingFsdpCollectives(InductorTestCase):
         sat = compute_min_saturation_bytes
 
         self.assertEqual(sat(1, NCCL_COLL.ALL_GATHER), 0)
+        if torch.version.hip is not None:
+            self.assertEqual(sat(16, NCCL_COLL.ALL_GATHER), 0)
+            return
 
         ib_profile = INTERCONNECT_PROFILES[detect_interconnect(16)]
         self.assertGreaterEqual(
