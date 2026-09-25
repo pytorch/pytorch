@@ -2626,6 +2626,51 @@ class SkipFunctionVariable(VariableTracker):
 
         return object_richcompare(self, tx, other, op)
 
+    def _uses_generic_getattr(self) -> bool:
+        from .object_protocol import type_uses_generic_getattr
+
+        return type_uses_generic_getattr(type(self.value))
+
+    def lookup_instance_dict(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> "VariableTracker | None":
+        # A skipped callable can carry arbitrary attributes in its __dict__
+        # (tp_dictoffset). Resolve them here so getattr finds them before
+        # call_getattr_fallback declares the attribute missing.
+        if not self._uses_generic_getattr():
+            return None
+        obj_dict = getattr(self.value, "__dict__", None)
+        if not istype(obj_dict, dict) or name not in obj_dict:
+            return None
+        source = self.source and AttrSource(self.source, name)
+        if source is not None:
+            return variables.LazyVariableTracker.create(obj_dict[name], source, tx=tx)
+        return VariableTracker.build(tx, obj_dict[name])
+
+    def call_getattr_fallback(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> "VariableTracker | None":
+        # Reaching step 6 means the type MRO and the instance dict both missed.
+        # Only conclude "absent" for types whose lookup object_generic_getattr
+        # models exactly; otherwise decline and let the caller defer.
+        if not self._uses_generic_getattr():
+            return None
+        if self.source is None:
+            # An absence baked into the trace needs a HASATTR guard, and a
+            # sourceless value has nothing to guard on.
+            unimplemented(
+                gb_type="Sourceless skipped callable missing attribute",
+                context=f"{self.value} has no attribute {name}",
+                explanation="Dynamo cannot guard that the attribute stays absent "
+                "on a skipped callable with no source, so it cannot raise the "
+                "AttributeError that eager would raise here.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        install_guard(
+            self.source.make_guard(functools.partial(GuardBuilder.HASATTR, attr=name))
+        )
+        raise_observed_exception(AttributeError, tx, args=[name])
+
     def as_python_constant(self) -> Any:
         return self.value
 

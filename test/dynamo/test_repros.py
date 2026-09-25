@@ -2680,6 +2680,258 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         res = fn()
         self.assertEqual(((3, 5), (3, 5)), res)
 
+    def test_missing_attr_on_skipped_function_is_catchable(self):
+        # A missing attribute on a skipped callable used to become a deferred
+        # GetAttrVariable, which the graph break below materialized where the
+        # value is reconstructed -- outside the try/except guarding the original
+        # access -- so the AttributeError escaped. Shape taken from
+        # inspect._signature_from_callable, which probes obj.__signature__.
+        import torch.fx
+
+        obj = torch.fx.Node.prepend  # skipped callable
+
+        def fn(t):
+            torch._dynamo.graph_break()
+            try:
+                s = obj.__signature__
+            except AttributeError:
+                s = "caught"
+            return t + 1, s
+
+        x = torch.zeros(2)
+        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+
+    def test_getattr_on_skipped_function_matches_eager(self):
+        # Pins what the catchability test does not: a present attribute still
+        # resolves, a missing non-dunder also raises, and hasattr agrees with
+        # eager in both directions.
+        import torch.fx
+
+        obj = torch.fx.Node.prepend
+
+        def fn(t):
+            present = obj.__name__
+            try:
+                obj.not_a_real_attr
+                missing = "no-raise"
+            except AttributeError:
+                missing = "raised"
+            return (
+                t + 1,
+                present,
+                missing,
+                hasattr(obj, "__name__"),
+                hasattr(obj, "__nope__"),
+            )
+
+        x = torch.zeros(2)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_missing_attr_on_skipped_function_is_guarded(self):
+        # The absence is a compile-time answer baked into the trace, so it must
+        # be guarded: adding the attribute later has to recompile rather than
+        # reuse the "missing" branch.
+        import torch.fx
+
+        obj = torch.fx.Node.prepend
+        x = torch.zeros(2)
+
+        def fn(t):
+            try:
+                s = obj.late_bound_attr
+            except AttributeError:
+                s = "missing"
+            return t + 1, s
+
+        cfn = torch.compile(fn, backend="eager")
+        try:
+            self.assertEqual(cfn(x), fn(x))
+            obj.late_bound_attr = "PRESENT"
+            self.assertEqual(cfn(x), fn(x))
+        finally:
+            if hasattr(obj, "late_bound_attr"):
+                del obj.late_bound_attr
+
+    # the deferred access is only reached through inspect under nested graph
+    # breaks; without them the whole inspect frame falls back to eager
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_inspect_signature_on_skipped_function(self):
+        # The reported failure: test_fx.py's test_function_back_compat calls
+        # inspect.signature on @compatibility-marked functions, and
+        # _signature_from_callable probes obj.__signature__ inside a
+        # try/except AttributeError.
+        import torch.fx
+
+        obj = torch.fx.Node.prepend
+
+        def fn(t):
+            name = torch.typename(obj)
+            return t + 1, name, str(inspect.signature(obj))
+
+        x = torch.zeros(2)
+        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+
+    def _assert_slot_attr_matches_eager(self, obj, attr):
+        if not hasattr(obj, attr):
+            self.skipTest(f"{attr} does not exist on this Python version")
+        # repr/== are compile-time uses: returning the value alone hides a wrong
+        # one, because the source re-reads the real attribute at runtime.
+        expected = getattr(obj, attr)
+
+        def fn(t):
+            v = getattr(obj, attr)
+            return t + 1, repr(v), type(v).__name__, v == expected
+
+        x = torch.zeros(2)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    # the C-level slots of a skipped callable must still resolve to their
+    # values, not be mistaken for absent attributes
+    @parametrize(
+        "attr",
+        (
+            "__name__",
+            "__qualname__",
+            "__self__",
+            "__module__",
+            "__doc__",
+            "__text_signature__",
+        ),
+    )
+    def test_slot_attr_on_skipped_function(self, attr):
+        import time
+
+        self._assert_slot_attr_matches_eager(time.time, attr)
+
+    def _disallow_in_graph_obj(self, obj):
+        torch._dynamo.decorators._disallow_in_graph_helper(throw_if_not_allowed=False)(
+            obj
+        )
+        self.addCleanup(
+            torch._dynamo.trace_rules._disallowed_callable_ids.remove, id(obj)
+        )
+        return obj
+
+    def test_getattr_on_skipped_instance_matches_eager(self):
+        # A skipped callable is any disallow_in_graph'd callable, not just a
+        # plain function: a class attribute, an instance-dict attribute and a
+        # missing attribute must all answer as they do in eager.
+        class Skipped:
+            present = "on-class"
+
+            def __call__(self, t):
+                return t
+
+        obj = self._disallow_in_graph_obj(Skipped())
+        obj.instance_attr = "in-dict"
+
+        def fn(t):
+            try:
+                missing = obj.not_a_real_attr
+            except AttributeError:
+                missing = "raised"
+            return (
+                t + 1,
+                obj.present,
+                obj.instance_attr,
+                missing,
+                hasattr(obj, "instance_attr"),
+                hasattr(obj, "not_a_real_attr"),
+                getattr(obj, "not_a_real_attr", "default"),
+            )
+
+        x = torch.zeros(2)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_missing_attr_on_skipped_builtin_is_catchable(self):
+        # A builtin callable has no __dict__ at all, so the instance-dict step
+        # is skipped entirely and the absence comes from the type MRO alone.
+        import time
+
+        def fn(t):
+            try:
+                s = time.time.not_a_real_attr
+            except AttributeError:
+                s = "raised"
+            return t + 1, s, time.time.__name__, hasattr(time.time, "not_a_real_attr")
+
+        x = torch.zeros(2)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_traced_setattr_on_skipped_callable_matches_eager(self):
+        # A skipped callable is setattr-able during tracing, so the attribute
+        # answer must come from the pending mutation rather than from the
+        # instance dict as it stood when tracing started.
+        def probe(x):
+            return x
+
+        self._disallow_in_graph_obj(probe)
+        self.addCleanup(lambda: probe.__dict__.pop("traced_attr", None))
+
+        def fn(t):
+            probe.traced_attr = 5
+            try:
+                probe.not_a_real_attr
+                missing = "no-raise"
+            except AttributeError:
+                missing = "raised"
+            return t + 1, probe.traced_attr, hasattr(probe, "traced_attr"), missing
+
+        x = torch.zeros(2)
+        got = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        del probe.traced_attr
+        self.assertEqual(got, fn(x))
+
+    def test_getattr_hook_on_skipped_callable_matches_eager(self):
+        # A type-level __getattr__ answers names the MRO walk never sees, and
+        # running it during tracing is not allowed, so absence must not be
+        # concluded here -- the access stays deferred instead.
+        ran = []
+
+        class Skipped:
+            def __getattr__(self, name):
+                # guards read __code__ off the object, so only record the probe
+                if name == "not_a_real_attr":
+                    ran.append(name)
+                return f"hook-{name}"
+
+            def __call__(self, t):
+                return t
+
+        obj = self._disallow_in_graph_obj(Skipped())
+
+        ran_while_compiling = []
+
+        def backend(gm, example_inputs):
+            ran_while_compiling.append(list(ran))
+            return gm.forward
+
+        def fn(t):
+            return t + 1, obj.not_a_real_attr
+
+        x = torch.zeros(2)
+        got = torch.compile(fn, backend=backend)(x)
+        self.assertEqual(ran_while_compiling, [[]])
+        self.assertEqual(got, fn(x))
+
+    def test_getattr_on_skipped_class_matches_eager(self):
+        # A class does not use object.__getattribute__, so the MRO walk over
+        # type() does not model its lookup; the access must not be answered
+        # from that walk.
+        class Skipped:
+            present = "on-class"
+
+            def __init__(self, t):
+                self.t = t
+
+        cls = self._disallow_in_graph_obj(Skipped)
+
+        def fn(t):
+            return t + 1, cls.present
+
+        x = torch.zeros(2)
+        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+
     def _assert_named_out_resize_break(self, fn):
         # Out variants whose out arguments are not spelled "out" used to skip
         # the resize check, so the resize landed on the fake tensor only and the
