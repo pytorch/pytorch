@@ -1000,6 +1000,18 @@ def _fused_all_gather_matmul(
         )
 
 
+# Upper bound on the K dimension (A_shard.shape[-1]) for which the native
+# async-TP path outperforms the decomposition fallback on ROCm (gfx942/gfx950).
+# Benchmarks on MI350 (gfx950, ws=4, bf16, col-major B, repeats=5) show:
+#   K=512:  native ~0.49-0.65x fused_fallback  (clear win)
+#   K=1024: native ~0.84-0.96x fused_fallback  (win or parity)
+#   K=2048: native ~1.17-1.34x fused_fallback  (loss across all combos)
+#   K=4096: native ~1.79x fused_fallback        (large loss)
+# The threshold is architecture-independent from the CUDA side (CUTLASS path
+# does not use this selector).
+_NATIVE_ASYNC_TP_MAX_K = 2048
+
+
 def _should_use_fused_all_gather_matmul_native(
     A_shard: torch.Tensor,
     Bs: list[torch.Tensor],
@@ -1022,10 +1034,25 @@ def _should_use_fused_all_gather_matmul_native(
         and 2048 < local_M * group.size() <= 4096
         # _async_input_mm only supports a single B.
         and len(Bs) == 1
+        # Profitability gate (ROCm only): native loses to the decomposition
+        # fallback for large K due to staging/protocol overhead dominating the
+        # CK GEMM. Benchmarked on MI350 (gfx950); CUDA/CUTLASS has different
+        # K-scaling and is not gated here. See _NATIVE_ASYNC_TP_MAX_K.
+        and (torch.version.hip is None or A_shard.shape[-1] < _NATIVE_ASYNC_TP_MAX_K)
     )
 
 
 def _fused_all_gather_matmul_native(
+    A_shard: torch.Tensor,
+    B: torch.Tensor,
+    group_name: c10d.GroupName,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    if torch.version.hip is None:
+        return _fused_all_gather_matmul_native_cuda(A_shard, B, group_name)
+    return _fused_all_gather_matmul_native_rocm(A_shard, B, group_name)
+
+
+def _fused_all_gather_matmul_native_cuda(
     A_shard: torch.Tensor,
     B: torch.Tensor,
     group_name: c10d.GroupName,
@@ -1074,6 +1101,86 @@ def _fused_all_gather_matmul_native(
 
     current_stream.wait_stream(backend_stream)
     backend_stream.wait_stream(current_stream)
+
+    symm_mem.barrier()
+    return A, out
+
+
+def _fused_all_gather_matmul_native_rocm(
+    A_shard: torch.Tensor,
+    B: torch.Tensor,
+    group_name: c10d.GroupName,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    # ROCm-specific variant of the native all-gather + matmul.
+    #
+    # It differs from the CUDA path (_fused_all_gather_matmul_native_cuda) in the
+    # producer/consumer ordering required by the CK async-input GEMM: an extra
+    # barrier is issued before any signal is written so that every rank's
+    # A_signals buffer is zero-initialized before a peer can set a chunk-ready
+    # flag, avoiding a read-before-init race observed on ROCm. The local shard is
+    # tracked separately from the symmetric-memory (remote) buffer so the local
+    # copy does not depend on the rendezvous buffer.
+    #
+    # NOTE: the divergence from the CUDA path is a ROCm/CK ordering requirement,
+    # not a fundamental algorithm difference; it should be raised with the ROCm
+    # team so the two paths can converge once CK guarantees the ordering
+    # internally.
+    local_A_shard = A_shard
+    remote_A_shard = A_shard
+
+    symm_mem = rendezvous(remote_A_shard, group_name)
+    if symm_mem is None:
+        symm_mem = get_symm_mem_workspace(
+            group_name, remote_A_shard.numel() * remote_A_shard.element_size()
+        )
+        buf = symm_mem.get_buffer(
+            symm_mem.rank, remote_A_shard.shape, remote_A_shard.dtype
+        )
+        buf.copy_(remote_A_shard)
+        remote_A_shard = buf
+
+    rank = symm_mem.rank
+    world_size = symm_mem.world_size
+
+    current_stream = torch.cuda.current_stream()
+    backend_stream = _get_backend_stream(priority=-1)
+
+    A = local_A_shard.new_empty(
+        local_A_shard.shape[0] * world_size, local_A_shard.shape[1]
+    )
+    A_signals = torch.zeros(world_size, dtype=torch.uint32, device=local_A_shard.device)
+    A_shards = A.chunk(world_size)
+
+    # Order signal initialization before backend-stream signal writes.
+    symm_mem.barrier()
+    backend_stream.wait_stream(current_stream)
+    current_stream.wait_stream(backend_stream)
+
+    A_shards[rank].copy_(local_A_shard)
+    if not torch.cuda.is_current_stream_capturing():
+        _SymmetricMemory.stream_write_value32(A_signals, rank, 1)
+    else:
+        _SymmetricMemory.memset32(A_signals, offset=rank, val=1, count=1)
+
+    out = torch.ops.symm_mem._async_input_mm(A, B, A_signals, rank)
+    for step in range(1, world_size):
+        src_rank = (rank + step) % world_size
+        src_buf = symm_mem.get_buffer(
+            src_rank, remote_A_shard.shape, remote_A_shard.dtype
+        )
+        with backend_stream:
+            A_shards[src_rank].copy_(src_buf)
+            if not torch.cuda.is_current_stream_capturing():
+                # stream_write_value32 issues a system level fence before the write
+                _SymmetricMemory.stream_write_value32(A_signals, src_rank, 1)
+            else:
+                _SymmetricMemory.memset32(A_signals, offset=src_rank, val=1, count=1)
+
+    # Unlike the CUDA path, the backend stream is intentionally not joined back
+    # into current_stream here: the next native call re-orders backend_stream
+    # against current_stream at entry before issuing any new backend-stream work,
+    # so the closing join is redundant on ROCm and removing it is a measured win.
+    current_stream.wait_stream(backend_stream)
 
     symm_mem.barrier()
     return A, out
