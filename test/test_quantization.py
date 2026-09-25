@@ -82,6 +82,14 @@ try:
     from quantization.fx.test_numeric_suite_fx import TestFXNumericSuiteCoreAPIsModels  # noqa: F401
 except ImportError as e:
     log.warning(e)
+try:
+    from quantization.fx.test_numeric_suite_fx import TestFXNumericSuiteCoreAPIsAcceleratorCPU  # noqa: F401
+except ImportError as e:
+    log.warning(e)
+try:
+    from quantization.fx.test_numeric_suite_fx import TestFXNumericSuiteCoreAPIsAcceleratorCUDA  # noqa: F401
+except ImportError as e:
+    log.warning(e)
 
 # Test the model report module
 try:
