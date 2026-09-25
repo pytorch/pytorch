@@ -191,6 +191,18 @@ class TestFwdGradients(TestGradients):
         _, actual = torch.func.jvp(f, (t,), (torch.ones_like(t),))
         self.assertEqual(actual, torch.tensor(-5.0, dtype=dtype, device=device))
 
+    def test_logcumsumexp_jvp_nan_tangent(self, device):
+        # Pos/neg log-domain split must not drop NaN tangents (review on #196741).
+        dtype = torch.float64
+        x = torch.zeros(3, dtype=dtype, device=device)
+        t = torch.tensor(
+            [float("nan"), 1.0, 1.0], dtype=dtype, device=device
+        )
+        _, j = torch.func.jvp(
+            lambda y: y.logcumsumexp(0), (x,), (t,)
+        )
+        self.assertTrue(torch.isnan(j).all())
+
 
 instantiate_device_type_tests(TestFwdGradients, globals(), allow_xpu=True)
 
