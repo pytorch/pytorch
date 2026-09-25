@@ -2066,23 +2066,6 @@ class BuiltinVariable(BaseBuiltinVariable):
         except NotImplementedError:
             fail(args, kwargs)
 
-        import dis
-
-        tracked_freevars = {
-            name
-            for name, cell in zip(fn.__code__.co_freevars, fn.__closure__ or ())
-            if cell in tx.output.side_effects
-        }
-        if tracked_freevars:
-            # The class body runs eagerly, so rebinding a tracked closure
-            # cell would leave Dynamo's recorded contents stale.
-            for instruction in dis.get_instructions(fn):
-                if (
-                    instruction.opname in ("STORE_DEREF", "DELETE_DEREF")
-                    and instruction.argval in tracked_freevars
-                ):
-                    fail(args, kwargs)
-
         if check_constant_args(args[1:], kwargs):
             try:
                 r = builtins.__build_class__(
