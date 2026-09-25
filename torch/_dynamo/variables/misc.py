@@ -58,10 +58,8 @@ from ..guards import GuardBuilder, install_guard
 from ..mutation_guard import unpatched_nn_module_init
 from ..source import (
     AttrSource,
-    DictGetItemSource,
     GenericAttrSource,
     GetItemSource,
-    TypeDictSource,
     TypeMROSource,
     TypeSource,
     WeakRefCallSource,
@@ -94,7 +92,7 @@ from .functions import (
     UserFunctionVariable,
     UserMethodVariable,
 )
-from .object_protocol import generic_str
+from .object_protocol import generic_repr, generic_str, mro_attr_source
 from .user_defined import call_random_fn, is_standard_setattr, UserDefinedObjectVariable
 
 
@@ -905,6 +903,9 @@ class ExceptionVariable(VariableTracker):
         if len(self.args) == 0:
             return VariableTracker.build(tx, "")
         elif len(self.args) == 1:
+            # KeyError.__str__ uses repr for a single key, unlike BaseException.
+            if self.exc_type is KeyError:
+                return generic_repr(tx, self.args[0])
             return generic_str(tx, self.args[0])
         else:
             from . import TupleVariable
@@ -1529,35 +1530,10 @@ class AutogradFunctionVariable(VariableTracker):
         if self.fn_cls_source is None:
             return None
 
-        for idx, klass in enumerate(self.fn_cls.__mro__):
-            if name not in klass.__dict__:
-                continue
-
-            for absent_idx in range(idx):
-                absent_klass = self.fn_cls.__mro__[absent_idx]
-                cache_key = (id(absent_klass), name)
-                if cache_key in tx.output.guarded_mro_absent_keys:
-                    continue
-                tx.output.guarded_mro_absent_keys.add(cache_key)
-                klass_source: Source = self.fn_cls_source
-                if absent_idx:
-                    klass_source = GetItemSource(
-                        TypeMROSource(self.fn_cls_source), absent_idx
-                    )
-                install_guard(
-                    TypeDictSource(klass_source).make_guard(
-                        functools.partial(GuardBuilder.DICT_NOT_CONTAINS, key=name)
-                    )
-                )
-
-            klass_source = self.fn_cls_source
-            if idx:
-                klass_source = GetItemSource(TypeMROSource(self.fn_cls_source), idx)
-            source = DictGetItemSource(TypeDictSource(klass_source), name)
+        source = mro_attr_source(tx, self.fn_cls, self.fn_cls_source, name)
+        if source is not None:
             install_guard(source.make_guard(GuardBuilder.TYPE_MATCH))
-            return source
-
-        return None
+        return source
 
     def _unsupported_method(self, name: str) -> NoReturn:
         unimplemented(
