@@ -1986,7 +1986,6 @@ class TestMaxAutotune(TestCase):
         max_autotune_gemm_backends="TRITON",
     )
     def test_max_autotune_decompose_k_dynamic_input(self):
-
         def f(a, b):
             a_in = torch.stack((a, a), dim=0)
             return (a_in @ b).relu()
@@ -2036,7 +2035,6 @@ class TestMaxAutotune(TestCase):
         max_autotune_gemm_backends="TRITON",
     )
     def test_max_autotune_decompose_k_dynamic_input_bwd(self):
-
         def f(a, b):
             # 256 * s0
             a_in = torch.cat([a for _ in range(256)], dim=0)
@@ -2099,7 +2097,6 @@ class TestMaxAutotune(TestCase):
         max_autotune_gemm_backends="TRITON",
     )
     def test_max_autotune_decompose_k_output_stride(self):
-
         def f(a, b):
             a = a.transpose(0, 1)
             return a @ b
@@ -2113,9 +2110,7 @@ class TestMaxAutotune(TestCase):
         with (
             override_template_heuristics(
                 device_type=GPU_TYPE,
-                template_op_pairs=[
-                    (torch._inductor.kernel.mm.mm_template.name, "mm")
-                ],
+                template_op_pairs=[(torch._inductor.kernel.mm.mm_template.name, "mm")],
             ),
             mock.patch(
                 "torch._inductor.kernel.mm.use_decompose_k_choice"
