@@ -5252,28 +5252,35 @@ def should_fold(tensor1: torch.Tensor, tensor2: torch.Tensor, is_out: bool) -> b
     # For comments of the logic of this function see eager in /native/LinearAlgebra.cpp
 
     tensor1_larger = tensor1.ndim >= tensor2.ndim
-    t1 = tensor1 if tensor1_larger else tensor2.mT
     t2 = tensor2 if tensor1_larger else tensor1
+    # Mirror native's `tensor1_larger ? tensor1 : tensor2.mT()` on metadata.
+    # Avoid emitting dead `aten.transpose` node when tracing this decomposition.
+    if tensor1_larger:
+        t1_shape = tensor1.shape
+        t1_stride = tensor1.stride()
+    else:
+        shape, stride = tensor2.shape, tensor2.stride()
+        t1_shape = (*shape[:-2], shape[-1], shape[-2])
+        t1_stride = (*stride[:-2], stride[-1], stride[-2])
 
     from torch.fx.experimental.symbolic_shapes import guard_or_false
 
-    if not (t1.ndim >= 3 and t2.ndim <= 2):
+    if not (len(t1_shape) >= 3 and t2.ndim <= 2):
         return False
     if t2.requires_grad and not is_out:
         return True
     if tensor1.ndim == 2:
         return False
-    if guard_or_false(sym_numel(t1) == 0):
+    if guard_or_false(reduce(operator.mul, t1_shape, 1) == 0):
         return True
 
     from torch._subclasses.fake_impls import _compute_stride
 
-    t1_shape = t1.shape
     folded_shape = (reduce(operator.mul, t1_shape[:-1], 1), t1_shape[-1])
     return (
         _compute_stride(
             t1_shape,
-            t1.stride(),
+            t1_stride,
             folded_shape,
             size_oblivious=True,
         )

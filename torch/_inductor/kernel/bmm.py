@@ -7,6 +7,7 @@ import torch
 from torch._dynamo.utils import counters
 from torch._inductor.codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from torch._inductor.kernel.mm_common import load_kernel_template
+from torch._prims_common import is_integer_dtype
 
 from .. import config as inductor_config, ir, lowering as L
 from ..kernel_inputs import MMKernelInputs
@@ -197,7 +198,11 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
 
     if all(x.get_device().type == "cpu" for x in [mat1, mat2]):
         # decompose to small ops when memory bound
-        if mat1.get_size()[1] == 1 or mat2.get_size()[2] == 1:
+        # Integer dtypes must not go through sum_: the reduction promotes
+        # them to int64 (see sum_ lowering), while at::bmm preserves the input dtype.
+        if (
+            mat1.get_size()[1] == 1 or mat2.get_size()[2] == 1
+        ) and not is_integer_dtype(mat1.get_dtype()):
             mat1 = L.unsqueeze(mat1, -1)
             mat2 = L.unsqueeze(mat2, 1)
             return L.sum_(L.mul(mat1, mat2), axis=2)
