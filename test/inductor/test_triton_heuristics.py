@@ -620,7 +620,15 @@ class TestTritonHeuristics(TestCase):
                     "kpack": 1,
                 },
             ),
-            ("7.2", (), {}),
+            (
+                "7.2",
+                (),
+                {
+                    "matrix_instr_nonkdim": 16,
+                    "waves_per_eu": 0,
+                    "kpack": 1,
+                },
+            ),
             (
                 None,
                 ("matrix_instr_nonkdim", "waves_per_eu", "kpack"),
@@ -628,7 +636,7 @@ class TestTritonHeuristics(TestCase):
             ),
         ],
     )
-    def test_template_function_preserves_tlx_hip_options(
+    def test_template_function_preserves_rocm_backend_options(
         self, hip_version, tlx_options, expected_kwargs
     ):
         triton_meta = {

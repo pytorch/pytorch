@@ -5111,7 +5111,7 @@ def template(
         "num_stages": num_stages,
         "num_warps": num_warps,
     }
-    config_kwargs = {}
+    config_kwargs: dict[str, Any] = {}
 
     # Conditionally add arguments based on HAS_WARP_SPEC
     if HAS_WARP_SPEC:
@@ -5123,7 +5123,13 @@ def template(
         )
 
     if torch.version.hip:
-        for k in tlx_only_hip_options():
+        rocm_options = (
+            "matrix_instr_nonkdim",
+            "waves_per_eu",
+            "kpack",
+            *tlx_only_hip_options(),
+        )
+        for k in dict.fromkeys(rocm_options):
             if k in triton_meta:
                 config_kwargs[k] = triton_meta[k]
 
