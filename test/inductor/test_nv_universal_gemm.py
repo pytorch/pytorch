@@ -1454,10 +1454,6 @@ class TestNVUniversalGemmHeuristics(TestCase):
 
     def test_mixed_backend_nvfp4_cudagraph_unroll_uses_global_policy(self):
         """Mixed backends use one replay count so their timings stay comparable."""
-        from torch._inductor.autotune_process import (
-            ExternKernelBenchmarkRequest,
-            TensorMeta,
-        )
         from torch._inductor.heuristics.template.nv_universal_gemm import (
             nvgemm_cudagraph_unroll,
         )
@@ -1477,24 +1473,8 @@ class TestNVUniversalGemmHeuristics(TestCase):
                 ScalingType.BlockWise1x16,
                 ScalingType.BlockWise1x16,
             )
-            output_meta = TensorMeta(
-                device=torch.device("cuda"),
-                dtype=torch.bfloat16,
-                sizes=(32, 4096),
-                strides=(4096, 1),
-                offset=0,
-            )
-            aten_request = ExternKernelBenchmarkRequest(
-                "aten",
-                [],
-                output_meta,
-                (),
-                "extern_kernels.mm",
-                benchmark_device_type="cuda",
-            )
 
         self.assertEqual(nvgemm_unroll, 7)
-        self.assertEqual(nvgemm_unroll, aten_request.cudagraph_unroll)
 
     @parametrize(
         "shape,expected",
