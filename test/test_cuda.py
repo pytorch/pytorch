@@ -49,6 +49,9 @@ from torch.testing._internal.common_cuda import (
     SM89OrLater,
     TEST_CUDNN,
     TEST_MULTIGPU,
+    tf32_enabled,
+    tf32_off,
+    tf32_on,
     tf32_on_and_off,
     xfailCUDAIfSM89OrLaterOnWindows,
 )
@@ -68,12 +71,13 @@ from torch.testing._internal.common_optimizers import (
     TensorTracker,
 )
 from torch.testing._internal.common_utils import (
+    _restore_fp32_precision,
+    _snapshot_fp32_precision,
     cuda_python_error_check,
     EXPANDABLE_SEGMENTS,
     freeze_rng_state,
     gcIfJetson,
     get_cycles_per_ms,
-    getRocmVersion,
     instantiate_parametrized_tests,
     IS_ARM64,
     IS_FBCODE,
@@ -83,8 +87,8 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     IS_X86,
     load_tests,
-    MI200_ARCH,
     MI350_ARCH,
+    NAVI_ARCH,
     parametrize,
     recover_orig_fp32_precision,
     requires_cuda_python_bindings,
@@ -96,6 +100,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     skipIfRocmArch,
     skipIfRocmVersionAtLeast,
+    skipIfRocmVersionInRange,
     skipIfRocmVersionLessThan,
     slowTest,
     subtest,
@@ -646,11 +651,6 @@ print(t.is_pinned())
         IS_JETSON, "oom reporting has issues on jetson igx due to partial nvml support"
     )
     def test_out_of_memory(self):
-        if TEST_WITH_ROCM and getRocmVersion() >= (7, 14) and EXPANDABLE_SEGMENTS:
-            self.skipTest(
-                "TestCuda.test_out_of_memory: OOM tensor flag is False on ROCm "
-                "expandable segments (7.14+)"
-            )
         tensor = torch.zeros(1024, device="cuda")
 
         oom_regex = (
@@ -753,12 +753,6 @@ print("RECOVERED")
         IS_JETSON, "oom reporting has issues on jetson igx due to partial nvml support"
     )
     def test_set_per_process_memory_fraction(self):
-        if TEST_WITH_ROCM and getRocmVersion() >= (7, 14) and EXPANDABLE_SEGMENTS:
-            self.skipTest(
-                "ROCm 7.14+ expandable segments reports OOM below the expected "
-                "per-process memory fraction limit"
-            )
-
         torch.cuda.empty_cache()
         orig = torch.cuda.get_per_process_memory_fraction(0)
         torch.cuda.reset_peak_memory_stats(0)
@@ -1613,6 +1607,65 @@ print(mem_after_first, mem_after_set, torch.cuda.memory_allocated())
             with self.assertRaisesRegex(RuntimeError, "mix of the legacy and new APIs"):
                 print(torch.backends.cuda.matmul.allow_tf32)
 
+    @recover_orig_fp32_precision
+    @serialTest()
+    def test_fp32_precision_new_api_internal_readers(self):
+        # Framework-internal readers must use the per-backend getters and stay
+        # usable after new-style writes put the legacy enum out of sync (the
+        # state test_invalid_status_for_legacy_api asserts throws above).
+        from torch._dynamo.graph_region_tracker import get_global_state_key
+        from torch._inductor.kernel.flex.flex_attention import set_float32_precision
+        from torch._inductor.utils import fp32_matmul_precision_key
+
+        torch.backends.cuda.matmul.fp32_precision = "tf32"
+        torch.backends.mkldnn.matmul.fp32_precision = "bf16"
+        self.assertEqual(fp32_matmul_precision_key(), "cuda:tf32,mkldnn:bf16")
+        expected = "'ieee'" if torch.version.hip else "'tf32'"
+        kernel_options = {}
+        set_float32_precision(kernel_options, torch.float32)
+        self.assertEqual(kernel_options["FLOAT32_PRECISION"], expected)
+        self.assertEqual(get_global_state_key()[7], "tf32")
+
+    @recover_orig_fp32_precision
+    @serialTest()
+    def test_tf32_context_managers_restore_matmul_precision(self):
+        # The tf32 helpers switch TF32 through the allow_tf32 setter, which
+        # writes both the legacy Float32MatmulPrecision enum and the new
+        # fp32_precision. Restoring only one of them leaves the two
+        # disagreeing, and every later allow_tf32 read in the process raises.
+        starts = (("highest", "none"), ("high", "tf32"), ("medium", "tf32"))
+        ctxs = (
+            ("tf32_off", tf32_off),
+            ("tf32_on", lambda: tf32_on(self)),
+            ("tf32_enabled", tf32_enabled),
+        )
+        for (legacy, cuda_precision), (name, make_ctx) in product(starts, ctxs):
+            with self.subTest(legacy=legacy, cuda_precision=cuda_precision, ctx=name):
+                torch.set_float32_matmul_precision(legacy)
+                torch.backends.cuda.matmul.fp32_precision = cuda_precision
+                before = _snapshot_fp32_precision()
+                with make_ctx():
+                    pass
+                self.assertEqual(_snapshot_fp32_precision(), before)
+                # Reading allow_tf32 raises if the two representations disagree.
+                allow_tf32 = torch.backends.cuda.matmul.allow_tf32
+                self.assertEqual(allow_tf32, legacy != "highest")
+
+    @recover_orig_fp32_precision
+    @serialTest()
+    def test_fp32_precision_snapshot_tracks_legacy_matmul_precision(self):
+        torch.set_float32_matmul_precision("highest")
+        before = _snapshot_fp32_precision()
+        # The leak the tf32 helpers used to leave behind: allow_tf32 moves the
+        # legacy enum to "high" and only fp32_precision is put back.
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cuda.matmul.fp32_precision = "ieee"
+        self.assertEqual(torch.get_float32_matmul_precision(), "high")
+        self.assertNotEqual(_snapshot_fp32_precision(), before)
+        _restore_fp32_precision(before)
+        self.assertEqual(_snapshot_fp32_precision(), before)
+        self.assertFalse(torch.backends.cuda.matmul.allow_tf32)
+
     def test_type_conversions(self):
         x = torch.randn(5, 5)
         self.assertIsInstance(x.float(), torch.FloatTensor)
@@ -2012,7 +2065,6 @@ print(mem_after_first, mem_after_set, torch.cuda.memory_allocated())
                 tmp3 = torch.cuda.FloatTensor(t.size())
                 self.assertEqual(tmp3.data_ptr(), ptr[0], msg="allocation not reused")
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/120318")
     def test_record_stream_on_shifted_view(self):
         # See issue #27366
 
@@ -2388,6 +2440,78 @@ if __name__ == '__main__':
         self.assertTrue(
             has_device_side_assert(stderr),
             lambda msg: f"{msg}\nExpected device assert error in stderr, got: {stderr}",
+        )
+
+    @slowTest
+    @unittest.skipIf(
+        not TEST_WITH_ROCM
+        or (
+            "USE_ROCM_KERNEL_ASSERT=1" not in torch.__config__.show()
+            and "USE_ROCM_KERNEL_ASSERT=ON" not in torch.__config__.show()
+        ),
+        "requires ROCm build with USE_ROCM_KERNEL_ASSERT enabled",
+    )
+    def test_rocm_kernel_assert_percent_in_condition(self):
+        # Device assert with '%' in #cond; stderr must match stock HIP format and
+        # the subprocess must fail (assert must not compile away silently).
+        code = """\
+import torch
+from torch.utils.cpp_extension import load_inline
+
+cuda_source = r'''
+#include <c10/macros/Macros.h>
+#include <cuda_runtime.h>
+
+__global__ void assert_mod_kernel(const int* x) {
+  CUDA_KERNEL_ASSERT(x[0] % 2 == 0);
+}
+
+void trigger_device_assert() {
+  int h = 1;
+  int* d = nullptr;
+  cudaMalloc(&d, sizeof(int));
+  cudaMemcpy(d, &h, sizeof(int), cudaMemcpyHostToDevice);
+  assert_mod_kernel<<<1, 1>>>(d);
+  cudaDeviceSynchronize();
+}
+'''
+cpp_source = "void trigger_device_assert();"
+
+mod = load_inline(
+    name="rocm_kernel_assert_percent_test",
+    cpp_sources=cpp_source,
+    cuda_sources=cuda_source,
+    functions=["trigger_device_assert"],
+    verbose=False,
+)
+mod.trigger_device_assert()
+raise RuntimeError("device assert did not fire")
+"""
+        env = os.environ.copy()
+        env["PYTORCH_API_USAGE_STDERR"] = "1"
+        env.pop("CI", None)
+        env.pop("TEST_SHOWLOCALS", None)
+        proc = subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True,
+            env=env,
+        )
+        stderr = proc.stderr.decode("ascii", errors="replace")
+        self.assertNotEqual(
+            proc.returncode,
+            0,
+            msg=(
+                "expected subprocess failure after device assert, "
+                f"got rc={proc.returncode}\n{stderr}"
+            ),
+        )
+        self.assertRegex(
+            stderr,
+            (
+                r"[^\n]+:\d+: assert_mod_kernel: "
+                r"Device-side assertion `x\[0\] % 2 == 0' failed\."
+            ),
+            msg=f"expected full HIP-format assert line in stderr, got:\n{stderr}",
         )
 
     @slowTest
@@ -3225,7 +3349,6 @@ torch.cuda.synchronize()
         torch.cuda.synchronize()
         return x, w, y
 
-    @skipIfRocm(msg="hipBLASLt lazy handle initialization fails during graph capture")
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
@@ -3249,7 +3372,6 @@ torch.cuda.synchronize()
                 g.capture_end()
         torch.cuda.synchronize()
 
-    @skipIfRocm(msg="hipBLASLt lazy handle initialization fails during graph capture")
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
@@ -3549,10 +3671,6 @@ torch.cuda.synchronize()
     )
     def test_graph_rng_after_failed_capture(self):
         """Test that a stream can be captured again for RNG after a failed capture."""
-        if TEST_WITH_ROCM and self.expandable_segments:
-            self.skipTest(
-                "ROCm expandable segments has known issue with graph capture recovery - #179911"
-            )
         torch.cuda.synchronize()
         gc.collect()
         torch.cuda.empty_cache()
@@ -4668,7 +4786,6 @@ exit(2)
             torch.cuda.synchronize()
             torch.cuda.empty_cache()
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/104055")
     @unittest.skipIf(
         (not TEST_CUDA_GRAPH) or IS_WINDOWS,
         "Graph bindings disallow concurrent replay; "
@@ -6076,7 +6193,7 @@ with torch.cuda.graph(g):
             self.assertEqual(rc, "3")
 
     @unittest.skipIf(not TEST_WITH_ROCM, "not relevant for CUDA testing")
-    @skipIfRocmVersionAtLeast([7, 14])
+    @skipIfRocmVersionInRange([7, 14], [10, 2], "rocprofiler-sdk visibility conflict")
     def test_hip_device_count(self):
         """Validate device_count works with both CUDA/HIP visible devices"""
         test_script = """\
@@ -6575,6 +6692,58 @@ class TestCudaAllocator(TestCase):
         _check_allocator_settings_on_tear_down(self)
 
     @unittest.skipIf(
+        not EXPANDABLE_SEGMENTS,
+        "requires expandable_segments mode (run via test_cuda_expandable_segments.py)",
+    )
+    @unittest.skipIf(not TEST_MULTIGPU, "requires multiple devices")
+    @unittest.skipIf(not SM70OrLater, "requires system-scope PTX loads")
+    @skipIfRocm(msg="expandable_segments mode is not supported on ROCm")
+    def test_expandable_segments_empty_cache_wrong_device(self):
+        flag_cpu = torch.zeros(1, dtype=torch.int32, device="cpu").pin_memory()
+        empty_cache_started = threading.Event()
+        empty_cache_done = threading.Event()
+        empty_cache_errors = []
+
+        torch.cuda.synchronize(0)
+        with torch.cuda.device(1):
+            spin_wait_kernel = get_wait_for_cpu_kernel()
+            src = torch.ones(48 * 1024 * 1024, dtype=torch.uint8, device="cuda")
+            spin_wait_kernel(grid=(1, 1, 1), block=(1, 1, 1), args=[flag_cpu])
+            dst = torch.empty_like(src)
+            dst.copy_(src)
+            del dst
+
+        def empty_cache_from_device_zero():
+            try:
+                with torch.cuda.device(0):
+                    empty_cache_started.set()
+                    torch.cuda.empty_cache()
+            except Exception as error:
+                empty_cache_errors.append(error)
+            finally:
+                empty_cache_done.set()
+
+        thread = threading.Thread(target=empty_cache_from_device_zero)
+        thread.start()
+        completed_before_release = None
+        try:
+            self.assertTrue(empty_cache_started.wait(timeout=10))
+            completed_before_release = empty_cache_done.wait(timeout=1)
+        finally:
+            flag_cpu[0] = 1
+            thread.join(timeout=10)
+
+        self.assertFalse(thread.is_alive())
+        if empty_cache_errors:
+            raise empty_cache_errors[0]
+        torch.cuda.synchronize(1)
+        self.assertFalse(
+            completed_before_release,
+            "empty_cache() did not wait for work on the segment's device",
+        )
+        del src
+
+    @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
     )
     def test_memory_snapshot(self):
@@ -6734,7 +6903,7 @@ class TestCudaAllocator(TestCase):
         finally:
             torch.cuda.memory._record_memory_history(None)
 
-    @skipIfRocm(msg="ROCTracer does not capture Python stack frames in profiler output")
+    @skipIfRocmArch(NAVI_ARCH)
     def test_memory_profiler_viz(self):
         with torch.profiler.profile(
             with_stack=True, profile_memory=True, record_shapes=True
@@ -7757,14 +7926,6 @@ print(value, end="")
 
     def test_allocator_fuzz(self):
         # fuzz
-        if (
-            torch.version.hip
-            and "expandable_segments:True"
-            in torch._C._accelerator_getAllocatorSettings()
-        ):
-            raise unittest.SkipTest(
-                "ROCm needs https://github.com/ROCm/rocm-systems/pull/3023"
-            )
         state = random.getstate()
         random.seed(123)
         N = 10000
@@ -7845,6 +8006,7 @@ print(value, end="")
     def test_power_draw(self):
         self.assertTrue(torch.cuda.power_draw() >= 0)
 
+    @skipIfRocmVersionAtLeast([10, 1])  # ROCM-30651
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     @skipIfRocmArch(MI350_ARCH)
     def test_clock_speed(self):
@@ -7879,10 +8041,7 @@ print(value, end="")
         uuids = subprocess.check_output(cmd, shell=True, text=True).strip().split("\n")
         uuids = [s.strip() for s in uuids]
         raw_uuids = torch.cuda._raw_device_uuid_amdsmi()
-        for uuid in uuids:
-            matching = True
-            if not any(uuid in raw_id for raw_id in raw_uuids):
-                matching = False
+        matching = all(any(uuid in raw_id for raw_id in raw_uuids) for uuid in uuids)
         self.assertEqual(True, matching)
 
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180123")
@@ -9222,7 +9381,6 @@ class TestMemPool(TestCase):
             torch.cuda.empty_cache()
 
     @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/176145")
-    @skipIfRocmArch(MI200_ARCH)
     @serialTest()
     def test_deleted_mempool_not_used_on_oom(self):
         """
@@ -10084,11 +10242,6 @@ class TestMemPool(TestCase):
           1. Default pool -- OOM recovery releases cached blocks, succeeds.
           2. use_mem_pool -- same recovery should work (the fix).
         """
-        if TEST_WITH_ROCM and getRocmVersion() >= (7, 14) and EXPANDABLE_SEGMENTS:
-            self.skipTest(
-                "ROCm 7.14+ expandable segments OOMs before mempool cached "
-                "blocks can be recovered"
-            )
 
         MB = 1024 * 1024
         device = torch.device("cuda:0")
@@ -10260,7 +10413,6 @@ class TestMemPool(TestCase):
     def test_reserved_bytes_by_private_pools(self):
         self._check_reserved_bytes_by_private_pools()
 
-    @skipIfRocm(msg="expandable_segments mode is not supported on ROCm")
     @serialTest()
     def test_reserved_bytes_by_private_pools_expandable(self):
         torch.cuda.empty_cache()
@@ -10275,7 +10427,6 @@ class TestMemPool(TestCase):
                 f"expandable_segments:{EXPANDABLE_SEGMENTS}"
             )
 
-    @skipIfRocm(msg="cudaMallocManaged (UVM) is not supported on ROCm")
     @requires_cuda_python_bindings
     def test_use_uvm(self):
         with torch.cuda._use_uvm():
@@ -10285,7 +10436,6 @@ class TestMemPool(TestCase):
         self.assertEqual(z.shape, (256, 256))
         self.assertTrue(z.is_cuda)
 
-    @skipIfRocm(msg="cudaMallocManaged (UVM) is not supported on ROCm")
     @requires_cuda_python_bindings
     def test_use_uvm_numerics(self):
         torch.manual_seed(42)
@@ -10295,7 +10445,6 @@ class TestMemPool(TestCase):
         a_reg = torch.randn(128, 128, device="cuda")
         self.assertEqual(a_uvm, a_reg)
 
-    @skipIfRocm(msg="cudaMallocManaged (UVM) is not supported on ROCm")
     @requires_cuda_python_bindings
     def test_use_uvm_backward(self):
         with torch.cuda._use_uvm():
@@ -10306,7 +10455,6 @@ class TestMemPool(TestCase):
         self.assertIsNotNone(model.weight.grad)
         self.assertEqual(model.weight.grad.shape, (512, 512))
 
-    @skipIfRocm(msg="cudaMallocManaged (UVM) is not supported on ROCm")
     @requires_cuda_python_bindings
     def test_use_uvm_tensor_outlives_context(self):
         # Regression test: a tensor allocated inside _use_uvm() can outlive the
@@ -11293,9 +11441,7 @@ class TestCudaAutocast(TestAutocast):
             torch.randn([32, 32], dtype=torch.float32, device="cuda"),
         ]
 
-        with self.assertRaisesRegex(
-            RuntimeError, "batch_sizes tensor should be on CPU"
-        ):
+        def run_rnn():
             torch.ops.aten.rnn_relu(
                 data,
                 batch_sizes=batch_sizes,
@@ -11307,6 +11453,17 @@ class TestCudaAutocast(TestAutocast):
                 train=False,
                 bidirectional=False,
             )
+
+        with self.assertRaisesRegex(
+            RuntimeError, "batch_sizes tensor should be on CPU"
+        ):
+            run_rnn()
+
+        with torch.backends.cudnn.flags(enabled=False):
+            with self.assertRaisesRegex(
+                RuntimeError, "batch_sizes tensor should be on CPU"
+            ):
+                run_rnn()
 
     @serialTest()
     def test_autocast_cache_leak(self):
@@ -11348,7 +11505,6 @@ class TestCudaAutocast(TestAutocast):
                 _ = torch.ones(10)
 
 
-@unittest.skipIf(torch.version.rocm == "10.1.0", "HIPRTC issue (AIRUNTIME-2707)")
 class TestCompileKernel(TestCase):
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel(self):
@@ -11880,7 +12036,6 @@ class TestCompileKernel(TestCase):
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 class TestCudaDeviceParametrized(TestCase):
-    @unittest.skipIf(torch.version.rocm == "10.1.0", "HIPRTC issue (AIRUNTIME-2707)")
     @skipIfRocmVersionLessThan((7, 0))
     @skipCUDAIf(
         not SM70OrLater, "Compute capability >= SM70 required for relaxed ptx flag"

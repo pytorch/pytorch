@@ -199,6 +199,8 @@
   - test/test_mps.py
   - test/inductor/test_mps_basic.py
   - torch/testing/_internal/common_mps.py
+  - torch/testing/_internal/common_methods_invocations.py
+  - torch/testing/_internal/opinfo/**
   - aten/src/ATen/native/native_functions.yaml
   - aten/src/ATen/mps/**
   - aten/src/ATen/native/mps/**
@@ -207,6 +209,7 @@
   - malfet
   - kurtamohler
   - jhavukainen
+  - Isalia20
 
   mandatory_checks_name:
   - EasyCLA
@@ -479,6 +482,28 @@
   - Lint
   - pull
 
+- name: Profiler
+  patterns:
+  - test/cpp/profiler/**
+  - test/profiler/**
+  - third_party/kineto
+  - torch/_C/_profiler.pyi
+  - torch/autograd/profiler*
+  - torch/csrc/autograd/profiler*
+  - torch/csrc/profiler/**
+  - torch/profiler/**
+  approved_by:
+  - ryanzhang22
+  - scotts
+  - ngimel
+  - dolpm
+  - sanrise
+  - NicolasHug
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
 - name: Dynamo
   patterns:
   - torch/_dynamo/**
@@ -520,8 +545,9 @@
   - torch/_C/__init__.pyi.in
   approved_by:
   - EikanWang
-  - jgong5
   - gujinghui
+  - guangyey
+  - etaf
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -564,19 +590,29 @@
   - Lint
   - pull
 
+- name: Testing (Temporarily used for test refactoring)
+  patterns:
+  - torch/testing/**
+  - test/**
+  approved_by:
+  - fffrog
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
 - name: Metamates
   patterns:
   - '*'
   approved_by:
   - aditvenk
   - AmesingFlank
-  - amirafzali
   - angelayi
+  - anshul-si
   - aorenste
   - atalman
   - blaine-rister
   - bobrenjc93
-  - ColinPeppler
   - d4l3k
   - dcci
   - desertfire
@@ -588,7 +624,6 @@
   - frgossen
   - georgehong
   - han3101
-  - haoyuz
   - htyu
   - huydhn
   - IvanKobzarev
@@ -605,13 +640,15 @@
   - liangel-02
   - Microve
   - mlazos
+  - nandesuka
+  - NicolasHug
   - njriasan
   - oulgen
   - pianpwk
   - ryanzhang22
   - sanketpurandare
+  - sanrise
   - scotts
-  - seemethere
   - sevenEng
   - SherlockNoMad
   - slayton58

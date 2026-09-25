@@ -1439,6 +1439,67 @@ kernel void binary_alpha_dense_scalar_lhs_cast(
           constant uint4& sizes_types,                                        \
           uint tid)
 
+// Decodes the dispatch coordinates and accumulates all four operand offsets in
+// one pass. The obvious alternative -- materialize `pos[max_ndim]`, then call
+// offset_from_coord per operand -- costs ~3x on index-bound shapes such as
+// broadcast operands: with a runtime trip count the array lands in scratch
+// memory instead of registers.
+inline long4 ternary_offsets(
+    uint3 thread_pos,
+    constant long* sizes,
+    uint ndim,
+    constant long* strides0,
+    constant long* strides1,
+    constant long* strides2,
+    constant long* strides3) {
+  // 32-bit offset math: the host splits any iterator that fails
+  // can_use_32bit_indexing(), which bounds every operand's byte offset to
+  // int32. 64-bit accumulation here costs ~1.8x on index-bound 3D shapes.
+  const int p0 = int(thread_pos.x);
+  int4 offs = int4(
+      p0 * int(strides0[0]),
+      p0 * int(strides1[0]),
+      p0 * int(strides2[0]),
+      p0 * int(strides3[0]));
+  if (ndim == 1) {
+    return long4(offs);
+  }
+  const int p1 = int(thread_pos.y);
+  offs += int4(
+      p1 * int(strides0[1]),
+      p1 * int(strides1[1]),
+      p1 * int(strides2[1]),
+      p1 * int(strides3[1]));
+  if (ndim == 2) {
+    return long4(offs);
+  }
+  // `ndim` lives in a constant buffer, so these branches are uniform across the
+  // threadgroup. Up to 3 dims the coordinates come straight from the dispatch
+  // grid and no division is needed at all; only dims past the third pay for it.
+  if (ndim == 3) {
+    const int p2 = int(thread_pos.z);
+    return long4(
+        offs +
+        int4(
+            p2 * int(strides0[2]),
+            p2 * int(strides1[2]),
+            p2 * int(strides2[2]),
+            p2 * int(strides3[2])));
+  }
+  int idx = int(thread_pos.z);
+  for (uint i = 2; i < ndim; ++i) {
+    const int sz = int(sizes[i]);
+    const int p = idx % sz;
+    idx /= sz;
+    offs += int4(
+        p * int(strides0[i]),
+        p * int(strides1[i]),
+        p * int(strides2[i]),
+        p * int(strides3[i]));
+  }
+  return long4(offs);
+}
+
 // Ternary elementwise ops kernels
 // Right now there are 4 flavors available:
 // - ternary_dense where both input, other1, other2, and output are dense and
@@ -1466,19 +1527,21 @@ kernel void ternary_strided(
     constant long* other1_strides [[buffer(7)]],
     constant long* other2_strides [[buffer(8)]],
     constant uint& ndim [[buffer(9)]],
-    uint index [[thread_position_in_grid]]) {
+    uint3 thread_pos [[thread_position_in_grid]]) {
   F f;
   using res_t = result_of<F, T, T, T>;
-  int pos[max_ndim];
-  pos_from_thread_index(int(index), pos, sizes, ndim);
-  const auto input_offs = offset_from_coord(pos, input_strides, ndim);
-  const auto other1_offs = offset_from_coord(pos, other1_strides, ndim);
-  const auto other2_offs = offset_from_coord(pos, other2_strides, ndim);
-  const auto output_offs = offset_from_coord(pos, output_strides, ndim);
-  const auto a = val_at_offs<T>(input, input_offs);
-  const auto b = val_at_offs<T>(other1, other1_offs);
-  const auto c = val_at_offs<T>(other2, other2_offs);
-  ref_at_offs<res_t>(output, output_offs) =
+  const auto offs = ternary_offsets(
+      thread_pos,
+      sizes,
+      ndim,
+      output_strides,
+      input_strides,
+      other1_strides,
+      other2_strides);
+  const auto a = val_at_offs<T>(input, offs.y);
+  const auto b = val_at_offs<T>(other1, offs.z);
+  const auto c = val_at_offs<T>(other2, offs.w);
+  ref_at_offs<res_t>(output, offs.x) =
       static_cast<res_t>(f(om_t(a), om_t(b), om_t(c)));
 }
 
@@ -1495,22 +1558,24 @@ kernel void ternary_strided_cast(
     constant long* other2_strides [[buffer(8)]],
     constant uint& ndim [[buffer(9)]],
     constant uint4& types [[buffer(10)]],
-    uint index [[thread_position_in_grid]]) {
+    uint3 thread_pos [[thread_position_in_grid]]) {
   F f;
   using res_t = result_of<F, T, T, T>;
-  int pos[max_ndim];
-  pos_from_thread_index(int(index), pos, sizes, ndim);
-  const auto input_offs = offset_from_coord(pos, input_strides, ndim);
-  const auto other1_offs = offset_from_coord(pos, other1_strides, ndim);
-  const auto other2_offs = offset_from_coord(pos, other2_strides, ndim);
-  const auto output_offs = offset_from_coord(pos, output_strides, ndim);
+  const auto offs = ternary_offsets(
+      thread_pos,
+      sizes,
+      ndim,
+      output_strides,
+      input_strides,
+      other1_strides,
+      other2_strides);
   const auto a =
-      val_at_offs<om_t>(input, input_offs, static_cast<ScalarType>(types.x));
+      val_at_offs<om_t>(input, offs.y, static_cast<ScalarType>(types.x));
   const auto b =
-      val_at_offs<om_t>(other1, other1_offs, static_cast<ScalarType>(types.y));
+      val_at_offs<om_t>(other1, offs.z, static_cast<ScalarType>(types.y));
   const auto c =
-      val_at_offs<om_t>(other2, other2_offs, static_cast<ScalarType>(types.z));
-  ref_at_offs<res_t>(output, output_offs) = static_cast<res_t>(f(a, b, c));
+      val_at_offs<om_t>(other2, offs.w, static_cast<ScalarType>(types.z));
+  ref_at_offs<res_t>(output, offs.x) = static_cast<res_t>(f(a, b, c));
 }
 
 template <typename T, typename F, typename om_t = opmath_t<T>>
@@ -1564,7 +1629,7 @@ kernel void ternary_dense_cast(
           constant long* other1_strides,                                       \
           constant long* other2_strides,                                       \
           constant uint& ndim,                                                 \
-          uint tid);                                                           \
+          uint3 tid);                                                          \
   template [[host_name(#NAME "_strided_cast_" #DTYPEI)]] kernel void ::c10::   \
       metal::ternary_strided_cast<DTYPEI, NAME##_functor, OMT>(                \
           device void* out,                                                    \
@@ -1578,7 +1643,7 @@ kernel void ternary_dense_cast(
           constant long* other2_strides,                                       \
           constant uint& ndim,                                                 \
           constant uint4& types,                                               \
-          uint tid);                                                           \
+          uint3 tid);                                                          \
   template [[host_name(#NAME "_dense_" #DTYPEO "_" #DTYPEI)]] kernel void ::   \
       c10::metal::ternary_dense<DTYPEI, NAME##_functor, OMT>(                  \
           device ::c10::metal::                                                \

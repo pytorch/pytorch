@@ -3768,6 +3768,8 @@ def sdpa_constraint(fx_node, *args, **kwargs):
 make_fallback(aten._adaptive_avg_pool3d)  # @isuruf
 make_fallback(aten.adaptive_max_pool3d, override_decomp=True)
 make_fallback(aten._scaled_dot_product_attention_math_for_mps)  # @malfet
+make_fallback(aten._scaled_addmm.default, warn=False)
+make_fallback(aten._scaled_addmm_.default, warn=False)
 
 
 # 1) Easy
@@ -3899,6 +3901,7 @@ make_fallback(aten.unique_dim_consecutive.default, warn=False)
 
 # Misc
 make_fallback(aten.gcd.default, warn=False)
+make_fallback(aten.split_with_sizes_copy.out, override_decomp=True)
 make_fallback(aten._thnn_fused_lstm_cell, require_dense)
 make_fallback(torch._prims.rng_prims.run_and_save_rng_state)
 make_fallback(torch._prims.rng_prims.run_with_rng_state)
@@ -5835,6 +5838,22 @@ def max_pool_checks(
     return kernel_size, stride, padding, dilation, use_fallback
 
 
+def _pool_argmax_inner_fn(x, kernel_size, inner_fn):
+    # Loop reordering runs after lowering and may permute the reduction ranges, so
+    # the offset is returned as an explicit row-major index into the window.
+    supports_logical_index_argreduce = is_triton(x) or (
+        ir.get_device_type(x) == "cpu" and config.cpu_backend == "cpp"
+    )
+    if len(kernel_size) == 1 or not supports_logical_index_argreduce:
+        return inner_fn
+
+    def inner_fn_with_index(idx, reduction_idx):
+        logical_index = inductor_prims._flatten_index(reduction_idx, kernel_size)
+        return inner_fn(idx, reduction_idx), ops.index_expr(logical_index, torch.int64)
+
+    return inner_fn_with_index
+
+
 def _max_pool_with_offsets(
     x,
     kernel_size,
@@ -5896,7 +5915,7 @@ def _max_pool_with_offsets(
         device=x.get_device(),
         dst_dtype=torch.int64,
         src_dtype=dtype,
-        inner_fn=fn_inner,
+        inner_fn=_pool_argmax_inner_fn(x, kernel_size, fn_inner),
         ranges=new_size,
         reduction_ranges=kernel_size,
     )
@@ -6627,7 +6646,7 @@ def _fractional_max_pool(x, kernel_size, output_size, random_samples, n_dim):
             device=x.get_device(),
             dst_dtype=torch.int64,
             src_dtype=dtype,
-            inner_fn=fn_inner,
+            inner_fn=_pool_argmax_inner_fn(x, kernel_size, fn_inner),
             ranges=new_size,
             reduction_ranges=kernel_size,
         )

@@ -841,7 +841,9 @@ if "__compile_source__" in globals():
                     f"    _output_size = reader.args[{output_size_idx}]"
                 )
                 writer._lines.append(
-                    "    if isinstance(_repeats, torch.Tensor) and _repeats.dtype == torch.int64:"
+                    "    if isinstance(_repeats, torch.Tensor) and "
+                    "_repeats.dtype in (torch.int32, torch.int64) and "
+                    "_repeats.numel() > 0:"
                 )
                 writer._lines.append("        _n = _repeats.numel()")
                 writer._lines.append("        _repeats.fill_(_output_size // _n)")
@@ -1049,12 +1051,19 @@ def isolate_fails(
 
         stdout.seek(0)
         stderr.seek(0)
+        # errors="replace": the subprocess can emit non-UTF-8 bytes (e.g. HIP
+        # runtime output on ROCm); a strict decode here kills minification
+        # before repro.py is written. Mirrors #190696's harness-side fix.
         print(
-            textwrap.indent(stdout.read().decode("utf-8"), prefix=">>  "),
+            textwrap.indent(
+                stdout.read().decode("utf-8", errors="replace"), prefix=">>  "
+            ),
             file=sys.stdout,
         )
         print(
-            textwrap.indent(stderr.read().decode("utf-8"), prefix=">>  "),
+            textwrap.indent(
+                stderr.read().decode("utf-8", errors="replace"), prefix=">>  "
+            ),
             file=sys.stderr,
         )
         # print(f"Isolated test failed - {file_name}")

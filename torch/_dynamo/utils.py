@@ -34,6 +34,7 @@ import math
 import operator
 import os
 import re
+import struct
 import sys
 import textwrap
 import threading
@@ -552,7 +553,7 @@ class CompileEventLogger:
 
     @staticmethod
     def add_to_set(
-        event_name: str, log_level: CompileEventLogLevel, key: str, value: Any
+        event_name: str, log_level: CompileEventLogLevel, key: str, value: object
     ) -> None:
         """
         Add metadata <value> to a set of values with key <key>. Creates a set if it doesn't exist.
@@ -587,7 +588,7 @@ class CompileEventLogger:
     @staticmethod
     def add_to_set_toplevel(
         key: str,
-        value: Any,
+        value: object,
         log_level: CompileEventLogLevel = CompileEventLogLevel.COMPILATION_METRIC,
     ) -> None:
         """
@@ -901,7 +902,7 @@ def dynamo_timed(
                 runtime_context = get_runtime_metrics_context()
                 runtime_context.increment(dynamo_compile_column_us, duration_us)
                 if is_outer_event:
-                    extra = {
+                    extra: dict[str, object] = {
                         "compile_id": compile_id,
                         "is_runtime": True,
                         "is_forward": not is_backward,
@@ -1240,6 +1241,45 @@ def istype(obj: object, allowed_types: Any) -> bool:
     if isinstance(allowed_types, (tuple, list, set)):
         return type(obj) in allowed_types
     return type(obj) is allowed_types
+
+
+def constant_bits(value: Any, /) -> bytes | None:
+    if type(value) is float:
+        return struct.pack(">d", value)
+    if type(value) is complex:
+        return struct.pack(">dd", value.real, value.imag)
+    return None
+
+
+def constants_identical(a: Any, b: Any, /) -> bool:
+    """Value-identity comparison for specialized constants. Python float eq is
+    not value-identity: nan != nan while -0.0 == 0.0, so compare float and
+    complex values by IEEE-754 bit pattern, recursively through containers."""
+    bits = constant_bits(a)
+    if type(a) is type(b) and bits is not None:
+        return bits == constant_bits(b)
+
+    if type(a) is type(b) and type(a) in (list, tuple, torch.Size):
+        if a is b:
+            return True
+        return len(a) == len(b) and all(constants_identical(x, y) for x, y in zip(a, b))
+
+    if type(a) is type(b) and type(a) in (set, frozenset):
+        if a is b:
+            return True
+        if len(a) != len(b):
+            return False
+        remaining = list(b)
+        for x in a:
+            for i, y in enumerate(remaining):
+                if constants_identical(x, y):
+                    remaining.pop(i)
+                    break
+            else:
+                return False
+        return True
+
+    return a == b
 
 
 _builtin_final_typing_classes: tuple[Any, ...] = tuple()
@@ -1742,7 +1782,7 @@ class CompilationMetrics:
     functorch_config: str | None = None
 
     @classmethod
-    def create(cls, metrics: dict[str, Any]) -> CompilationMetrics:
+    def create(cls, metrics: dict[str, object]) -> CompilationMetrics:
         """
         Factory method to create a CompilationMetrics from a dict of fields.
         Includes the logic to add legacy fields and any pre-processing, e.g.,
@@ -1781,30 +1821,36 @@ class CompilationMetrics:
         # TODO: The following are legacy fields, populated from the fields that replace
         # them. Remove these when we decide we can really deprecate them.
         legacy_metrics = {
-            "start_time": us_to_s(metrics.get("start_time_us")),
+            "start_time": us_to_s(cast("int | None", metrics.get("start_time_us"))),
             "entire_frame_compile_time_s": us_to_s(
-                metrics.get("dynamo_cumulative_compile_time_us")
+                cast("int | None", metrics.get("dynamo_cumulative_compile_time_us"))
             ),
             "backend_compile_time_s": us_to_s(
-                metrics.get("aot_autograd_cumulative_compile_time_us")
+                cast(
+                    "int | None",
+                    metrics.get("aot_autograd_cumulative_compile_time_us"),
+                )
             ),
             "inductor_compile_time_s": us_to_s(
-                metrics.get("inductor_cumulative_compile_time_us")
+                cast("int | None", metrics.get("inductor_cumulative_compile_time_us"))
             ),
             "code_gen_time_s": us_to_s(
-                metrics.get("inductor_code_gen_cumulative_compile_time_us")
+                cast(
+                    "int | None",
+                    metrics.get("inductor_code_gen_cumulative_compile_time_us"),
+                )
             ),
             "remote_cache_time_saved_s": us_to_s(
-                metrics.get("distributed_ephemeral_timeout_us")
+                cast("int | None", metrics.get("distributed_ephemeral_timeout_us"))
             ),
             "remote_fx_graph_cache_get_time_ms": us_to_ms(
-                metrics.get("remote_fx_graph_cache_get_time_us")
+                cast("int | None", metrics.get("remote_fx_graph_cache_get_time_us"))
             ),
             "remote_fx_graph_cache_put_time_ms": us_to_ms(
-                metrics.get("remote_fx_graph_cache_put_time_us")
+                cast("int | None", metrics.get("remote_fx_graph_cache_put_time_us"))
             ),
             "structured_logging_overhead_s": us_to_s(
-                metrics.get("structured_logging_overhead_us")
+                cast("int | None", metrics.get("structured_logging_overhead_us"))
             ),
         }
 
@@ -2025,7 +2071,7 @@ def _functorch_config_for_logging() -> str | None:
 def record_compilation_metrics(
     start_time_ns: int,
     end_time_ns: int,
-    metrics: dict[str, Any],
+    metrics: dict[str, object],
     exc_type: type[BaseException] | None,
     exc_value: BaseException | None,
 ) -> None:
@@ -2044,7 +2090,7 @@ def record_compilation_metrics(
 
     # Populate the compile_id from the metrics context if it's set. Otherwise,
     # look for it in the current compile context.
-    compile_id = metrics.get("compile_id")
+    compile_id = cast("CompileId | None", metrics.get("compile_id"))
     if not compile_id:
         compile_id = torch._guards.CompileContext.current_compile_id()
 
@@ -2551,8 +2597,9 @@ class CleanupHook:
             CleanupManager.count -= 1
         # Hooks fire when the owning code object is collected, which can happen
         # after something else has taken over this name -- CompilePackage.install()
-        # reinstalls precompiled state under names a pre-reset compile still
-        # owns. Only clean up while nothing has claimed the name out from under us.
+        # rebinds one a pre-reset compile still owns, and an aot_compile load claims
+        # a builtins-dict key while leaving the binding as it is. Only clean up
+        # while nothing has claimed the name out from under us.
         key = (id(self.scope), self.name)
         if _cleanup_owners.pop(key, None) is not self.token:
             return
