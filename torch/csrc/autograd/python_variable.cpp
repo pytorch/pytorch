@@ -1,6 +1,5 @@
 #include <ATen/DTensorState.h>
 #include <ATen/native/Resize.h>
-#include <c10/core/DeviceType.h>
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/core/impl/GPUTrace.h>
 #include <c10/core/impl/PythonDispatcherTLS.h>
@@ -14,7 +13,6 @@
 #include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/Size.h>
 #include <torch/csrc/THP.h>
-#include <torch/csrc/Types.h>
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/function.h>
@@ -33,7 +31,6 @@
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/pyobject_preservation.h>
 #include <torch/csrc/utils/python_arg_parser.h>
-#include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/python_dispatch.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/tensor_new.h>
@@ -551,8 +548,8 @@ static PyObject* view_func_impl(
           out = view_func(new_base);
         }
       } else {
-        out = new_base.as_strided(
-            self.sizes(), self.strides(), self.storage_offset());
+        out = new_base.as_strided_symint(
+            self.sym_sizes(), self.sym_strides(), self.sym_storage_offset());
       }
     }
   }
@@ -3307,6 +3304,24 @@ static PyObject* THPVariable_get_grad_dtype(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPVariable_get_has_grad_dtype_override(
+    THPVariable* self,
+    void* unused) {
+  HANDLE_TH_ERRORS
+  if (has_torch_function((PyObject*)self)) {
+    return handle_torch_function_getter(self, "_has_grad_dtype_override");
+  }
+  const auto& var = THPVariable_Unpack(self);
+  TORCH_CHECK(
+      !var.grad_fn(),
+      "_has_grad_dtype_override is only supported for leaf tensors.");
+  const auto* meta = torch::autograd::impl::get_autograd_meta(var);
+  return torch::autograd::utils::wrap(
+      meta &&
+      (meta->grad_dtype_.has_value() || meta->allow_grad_dtype_mismatch_));
+  END_HANDLE_TH_ERRORS
+}
+
 static int THPVariable_set_grad_dtype(
     THPVariable* self,
     PyObject* obj,
@@ -3497,6 +3512,11 @@ static struct PyGetSetDef THPVariable_properties[] = {
     {"grad_dtype",
      (getter)THPVariable_get_grad_dtype,
      (setter)THPVariable_set_grad_dtype,
+     nullptr,
+     nullptr},
+    {"_has_grad_dtype_override",
+     (getter)THPVariable_get_has_grad_dtype_override,
+     nullptr,
      nullptr,
      nullptr},
     {nullptr}};

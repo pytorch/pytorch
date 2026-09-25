@@ -14,10 +14,17 @@ from torch import Tensor
 from torch._dynamo.testing import CompileCounterWithBackend
 from torch._dynamo.utils import counters
 from torch._higher_order_ops.auto_functionalize import try_use_slice
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
+)
 from torch.testing._internal.logging_utils import logs_to_string
 
 
 class AutoFunctionalizeTests(torch._inductor.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_auto_functionalize_can_with_default(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
@@ -352,24 +359,31 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
     )
-    def test_unbacked_auto_functionalize_op(self):
-        @torch.library.custom_op(
-            "mylib::mk_image", mutates_args=("decoder",), device_types=["cpu"]
-        )
-        def mk_image(decoder: Tensor) -> Tensor:
-            return torch.randn(2, 3, 4, 5)
+    @parametrize("increase_gb", (None, 0.0))
+    def test_unbacked_auto_functionalize_op(self, increase_gb):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("mk_image(Tensor(a!) decoder) -> Tensor")
 
-        @torch.library.register_fake("mylib::mk_image")
-        def _(decoder: Tensor) -> Tensor:
-            image_size = [torch.library.get_ctx().new_dynamic_size() for _ in range(4)]
-            return torch.empty(image_size)
+            @torch.library.impl("mylib::mk_image", "CPU", lib=lib)
+            def mk_image(decoder: Tensor) -> Tensor:
+                return torch.randn(2, 3, 4, 5)
 
-        @torch.compile(fullgraph=True)
-        def f(x):
-            return torch.ops.mylib.mk_image.default(x)
+            @torch.library.register_fake("mylib::mk_image", lib=lib)
+            def _(decoder: Tensor) -> Tensor:
+                image_size = [
+                    torch.library.get_ctx().new_dynamic_size() for _ in range(4)
+                ]
+                return torch.empty(image_size)
 
-        x = torch.zeros(100, dtype=torch.int64)
-        f(x)
+            @torch.compile(fullgraph=True)
+            def f(x):
+                return torch.ops.mylib.mk_image.default(x)
+
+            x = torch.zeros(100, dtype=torch.int64)
+            with inductor_config.patch(
+                fusion_memory_timeline_peak_memory_increase_gb=increase_gb
+            ):
+                f(x)
 
     @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
     def test_auto_functionalize_v2(self, _dynamic=False):
@@ -1321,11 +1335,9 @@ def forward(self, arg0_1: "f32[10, 10][10, 1]cpu"):
         auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.mylib.foo.default, _x_base_index = 0, _x_slice_dim = 1, _x_slice_start = 0, _x_slice_end = 4, _y_base_index = 0, _y_slice_dim = 1, _y_slice_start = 4, _y_slice_end = 10, _all_bases = [arg0_1])
         getitem_3: "f32[10, 10][10, 1]cpu" = auto_functionalized_v2[1];  auto_functionalized_v2 = None
         copy_: "f32[10, 10][10, 1]cpu" = torch.ops.aten.copy_.default(arg0_1, getitem_3);  arg0_1 = copy_ = None
-        split_with_sizes_1 = torch.ops.aten.split_with_sizes.default(getitem_3, [4, 6], 1)
-        getitem_4: "f32[10, 4][10, 1]cpu" = split_with_sizes_1[0];  split_with_sizes_1 = None
-        split_with_sizes_2 = torch.ops.aten.split_with_sizes.default(getitem_3, [4, 6], 1);  getitem_3 = None
-        getitem_7: "f32[10, 6][10, 1]cpu" = split_with_sizes_2[1];  split_with_sizes_2 = None
-        return (getitem_4, getitem_7)""",
+        slice_1: "f32[10, 4][10, 1]cpu" = torch.ops.aten.slice.Tensor(getitem_3, 1, 0, 4)
+        slice_2: "f32[10, 6][10, 1]cpu" = torch.ops.aten.slice.Tensor(getitem_3, 1, 4, 10);  getitem_3 = None
+        return (slice_1, slice_2)""",
                         ignore_comments=True,
                         ignore_empty_lines=True,
                     )
@@ -1337,11 +1349,9 @@ def forward(self, arg0_1: "f32[10, 10][10, 1]cpu"):
         auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.mylib.foo.default, _x_base_index = 0, _x_slice_dim = 1, _x_slice_start = 0, _x_slice_end = 4, _y_base_index = 0, _y_slice_dim = 1, _y_slice_start = 4, _y_slice_end = 10, _all_bases = [arg0_1])
         getitem_3: "f32[10, 10][10, 1]cpu" = auto_functionalized_v2[1];  auto_functionalized_v2 = None
         copy_: "f32[10, 10][10, 1]cpu" = torch.ops.aten.copy_.default(arg0_1, getitem_3);  arg0_1 = copy_ = None
-        split_with_sizes_1 = torch.ops.aten.split_with_sizes.default(getitem_3, [4, 6], 1)
-        getitem_4: "f32[10, 4][10, 1]cpu" = split_with_sizes_1[0];  split_with_sizes_1 = None
-        split_with_sizes_2 = torch.ops.aten.split_with_sizes.default(getitem_3, [4, 6], 1);  getitem_3 = None
-        getitem_7: "f32[10, 6][10, 1]cpu" = split_with_sizes_2[1];  split_with_sizes_2 = None
-        return (getitem_4, getitem_7)""",
+        slice_1: "f32[10, 4][10, 1]cpu" = torch.ops.aten.slice.Tensor(getitem_3, 1, 0, 4)
+        slice_2: "f32[10, 6][10, 1]cpu" = torch.ops.aten.slice.Tensor(getitem_3, 1, 4, 10);  getitem_3 = None
+        return (slice_1, slice_2)""",
                         ignore_comments=True,
                         ignore_empty_lines=True,
                     )
@@ -1358,11 +1368,9 @@ def forward(self, arg0_1: "f32[10, 10][10, 1]cpu"):
         slice_tensor_1: "f32[10, 6][10, 1]cpu" = torch.ops.aten.slice.Tensor(arg0_1, 1, 4, 10)
         foo_default = torch.ops.mylib.foo.default(slice_tensor, slice_tensor_1);  slice_tensor = slice_tensor_1 = foo_default = None
         copy_: "f32[10, 10][10, 1]cpu" = torch.ops.aten.copy_.default(arg0_1, arg0_1);  copy_ = None
-        split_with_sizes_1 = torch.ops.aten.split_with_sizes.default(arg0_1, [4, 6], 1)
-        getitem_4: "f32[10, 4][10, 1]cpu" = split_with_sizes_1[0];  split_with_sizes_1 = None
-        split_with_sizes_2 = torch.ops.aten.split_with_sizes.default(arg0_1, [4, 6], 1);  arg0_1 = None
-        getitem_7: "f32[10, 6][10, 1]cpu" = split_with_sizes_2[1];  split_with_sizes_2 = None
-        return (getitem_4, getitem_7)""",
+        slice_1: "f32[10, 4][10, 1]cpu" = torch.ops.aten.slice.Tensor(arg0_1, 1, 0, 4)
+        slice_2: "f32[10, 6][10, 1]cpu" = torch.ops.aten.slice.Tensor(arg0_1, 1, 4, 10);  arg0_1 = None
+        return (slice_1, slice_2)""",
                         ignore_comments=True,
                         ignore_empty_lines=True,
                     )
@@ -1375,11 +1383,9 @@ def forward(self, arg0_1: "f32[10, 10][10, 1]cpu"):
         slice_tensor_1: "f32[10, 6][10, 1]cpu" = torch.ops.aten.slice.Tensor(arg0_1, 1, 4, 10)
         foo_default = torch.ops.mylib.foo.default(slice_tensor, slice_tensor_1);  slice_tensor = slice_tensor_1 = foo_default = None
         copy_: "f32[10, 10][10, 1]cpu" = torch.ops.aten.copy_.default(arg0_1, arg0_1);  copy_ = None
-        split_with_sizes_1 = torch.ops.aten.split_with_sizes.default(arg0_1, [4, 6], 1)
-        getitem_4: "f32[10, 4][10, 1]cpu" = split_with_sizes_1[0];  split_with_sizes_1 = None
-        split_with_sizes_2 = torch.ops.aten.split_with_sizes.default(arg0_1, [4, 6], 1);  arg0_1 = None
-        getitem_7: "f32[10, 6][10, 1]cpu" = split_with_sizes_2[1];  split_with_sizes_2 = None
-        return (getitem_4, getitem_7)""",
+        slice_1: "f32[10, 4][10, 1]cpu" = torch.ops.aten.slice.Tensor(arg0_1, 1, 0, 4)
+        slice_2: "f32[10, 6][10, 1]cpu" = torch.ops.aten.slice.Tensor(arg0_1, 1, 4, 10);  arg0_1 = None
+        return (slice_1, slice_2)""",
                         ignore_comments=True,
                         ignore_empty_lines=True,
                     )
@@ -2153,6 +2159,9 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
             expected = f(dout, weight, 8)
             got = torch.compile(f, fullgraph=True, dynamic=True)(dout, weight, 8)
             self.assertEqual(got, expected)
+
+
+instantiate_parametrized_tests(AutoFunctionalizeTests)
 
 
 if __name__ == "__main__":

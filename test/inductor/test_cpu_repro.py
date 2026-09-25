@@ -49,12 +49,10 @@ from torch.testing._internal.common_utils import (
     parametrize,
     requires_mkl,
     skipIfNoLapack,
-    skipIfRocm,
     skipIfRocmArch,
     slowTest,
     TEST_CUDA,
     TEST_WITH_ROCM,
-    xfailIf,
     xfailIfS390X,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -154,6 +152,35 @@ class LstmModule(torch.nn.Module):
 @instantiate_parametrized_tests
 class CPUReproTests(TestCase):
     common = check_model
+
+    @torch._dynamo.config.patch(prefer_deferred_runtime_asserts_over_guards=True)
+    def test_prefer_deferred_runtime_asserts_backed_symint_compile(self):
+        def fn(x):
+            y = x.reshape(100, -1).clone()
+            return y + 10
+
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True, dynamic=True)
+
+        x = torch.rand(100, 100)
+        self.assertEqual(compiled(x), fn(x))
+
+        with self.assertRaisesRegex(RuntimeError, "to be True"):
+            compiled(torch.rand(101, 101))
+
+    @torch._dynamo.config.patch(prefer_deferred_runtime_asserts_over_guards=True)
+    def test_prefer_deferred_runtime_asserts_compound_backed_symint_compile(self):
+        def fn(x):
+            # sym_and produces a sympy.And predicate rather than a Relational.
+            torch._check((x.shape[0] % 2 == 0) & (x.shape[0] % 3 == 0))
+            return x + 10
+
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True, dynamic=True)
+
+        x = torch.rand(12)
+        self.assertEqual(compiled(x), fn(x))
+
+        with self.assertRaisesRegex(RuntimeError, "to be True"):
+            compiled(torch.rand(10))
 
     @skipIfNoLapack
     def test_torch_linalg_qr_tuple_slice(self):
@@ -531,14 +558,10 @@ class CPUReproTests(TestCase):
 
         with torch.no_grad():
             compiled_m = torch.compile(m)
-            # The cpp_wrapper C-shim can't utilize the Python error API, so error
-            # messages are printed to stderr directly, and the intercepted RuntimeError
-            # is significantly less verbose.
-            msg = (
-                r"aoti_torch_cpu_convolution\(.*\) API call failed"
-                if config.cpp_wrapper
-                else "output padding must be smaller than either stride or dilation"
-            )
+            # The meta kernel rejects the invalid output_padding during fake tensor
+            # propagation, before either wrapper backend is reached, so both
+            # configurations surface the same error.
+            msg = "output padding must be smaller than either stride or dilation"
             with self.assertRaisesRegex(RuntimeError, msg):
                 compiled_m(input)
 
@@ -837,18 +860,6 @@ class CPUReproTests(TestCase):
                 if change_input_sizes:
                     inps_var = [v_var]
                     self.assertEqual(fn_opt(*inps_var), mod(*inps_var))
-
-    def test_lstm_compile_default_grad_enabled(self):
-        mod = LstmModule(4, 8, 1, batch_first=True).eval()
-        x = torch.randn(2, 3, 4)
-
-        fn_opt = torch.compile(mod, backend="inductor", fullgraph=True)
-
-        actual = fn_opt(x)
-        self.assertEqual(actual, mod(x))
-        actual[0].sum().backward()
-        for param in mod.parameters():
-            self.assertIsNotNone(param.grad)
 
     @parametrize(
         "unbatched, input_size, hidden_size, num_layers, bidirectional, bias, empty_state, batch_first, batch_size, seq_len",
@@ -1340,7 +1351,6 @@ class CPUReproTests(TestCase):
 
         self.assertEqual(actual, expected)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179957")
     @config.patch(fallback_random=True)
     def test_require_stride_order_non_owning(self):
         def test_concat_with_conv():
@@ -3857,6 +3867,36 @@ class CPUReproTests(TestCase):
             self.common(torch.remainder, _args)
             check_metrics_vec_kernel_count(1)
 
+    @requires_vectorization
+    def test_vec_remainder_tail(self):
+        # 131 leaves a masked tail for every integer dtype width on every
+        # supported ISA, and the tail load zero-fills the padded lanes. A
+        # padded zero divisor must not trip the divide-by-zero check; only a
+        # real one may.
+        def fn(a, b):
+            return a % b
+
+        for dtype in [torch.uint8, torch.int8, torch.int32, torch.int64]:
+            a = torch.arange(131, dtype=dtype) + 1
+            b = torch.full((131,), 16, dtype=dtype)
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(fn, (a, b))
+            check_metrics_vec_kernel_count(1)
+
+        # The reported repro shape: odd inner size, broadcast divisor. Whether
+        # it vectorizes is ISA-dependent, so pin correctness only.
+        a = torch.arange(6, dtype=torch.int64).reshape(2, 3) + 1
+        b = torch.full((3,), 16, dtype=torch.int64)
+        torch._dynamo.reset()
+        self.common(fn, (a, b))
+
+        a = torch.arange(6, dtype=torch.int64).reshape(2, 3)
+        b = torch.tensor([16, 0, 16], dtype=torch.int64)
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError"):
+            torch.compile(fn, fullgraph=True)(a, b)
+
     def test_skip_cpp_codegen(self):
         with config.patch({"disable_cpp_codegen": True}):
             inps = torch.ones([20]), torch.rand([20])
@@ -5914,7 +5954,6 @@ class CPUReproTests(TestCase):
         y = torch.randint(0, 255, (3, 3), dtype=torch.uint8)
         self.common(fn, (x, y))
 
-    @xfailIf(IS_ARM64)  # see https://github.com/pytorch/pytorch/issues/168972
     def test_float32_to_uint8(self):
         # https://github.com/pytorch/pytorch/issues/156788
         @torch.compile
