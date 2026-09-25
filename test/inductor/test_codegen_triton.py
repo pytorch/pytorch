@@ -360,12 +360,11 @@ def helper(x):
     def test_mix_order_partial_accumulate_masks_x(
         self, reduction_type, identity, reduction_fn, xnumel, optimize_mask
     ):
-        self._stack.enter_context(self._graph.set_current_device(torch.device("cuda")))
+        self._stack.enter_context(self._graph.set_current_device(torch.device("cpu")))
         rnumel = sympy.Integer(129)
         kernel = TritonKernel(
             {"x": xnumel, "r0_": rnumel},
             features=SIMDKernelFeatures([], xnumel, rnumel),
-            fixed_config=FixedTritonConfig({"XBLOCK": 128, "R0_BLOCK": 1}),
             mix_order_reduction=True,
             optimize_mask=optimize_mask,
             override_persistent_reduction=True,
@@ -379,7 +378,6 @@ def helper(x):
             value = ops.add(xvalue, rvalue)
             value = ops.add(value, ops.constant(0.25, torch.float32))
             ops.partial_accumulate("out", reduction_type, value, {})
-            kernel.fixed_config = None
             kernel.codegen_body()
 
         code = kernel.body.getvalue()
