@@ -331,7 +331,6 @@ with profile(activities=[ProfilerActivity.CUDA]):
                 workload()
 
             with TemporaryFileName(mode="w+") as fname:
-                # fname = "/tmp/kineto_out.json"
                 prof.export_chrome_trace(fname)
                 with open(fname) as f:
                     j = json.load(f)

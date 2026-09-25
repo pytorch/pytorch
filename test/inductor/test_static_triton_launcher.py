@@ -70,7 +70,7 @@ class TestStaticTritonLauncherUnit(TestCase):
         compiled_kernel = FakeCompiledKernel(
             src=src,
             metadata=metadata,
-            _cubin_path="/tmp/scratch_kernel.cubin",
+            _cubin_path=tempfile.gettempdir() + "/scratch_kernel.cubin",
             hash="hash",
             asm={"cubin": b"cubin"},
         )
@@ -94,7 +94,7 @@ class TestStaticTritonLauncherUnit(TestCase):
         launcher.device_agnostic = False
         launcher.functions = {}
         launcher.modules = {}
-        launcher.cubin_path = "/tmp/kernel.zebin"
+        launcher.cubin_path = tempfile.gettempdir() + "/kernel.zebin"
         launcher.cubin_raw = b"zebin"
         launcher.name = "kernel"
         launcher.shared = 13
@@ -102,7 +102,9 @@ class TestStaticTritonLauncherUnit(TestCase):
 
         launcher.load_kernel(3)
 
-        self.assertEqual(load_calls, [("/tmp/kernel.zebin", "kernel", 13, 3)])
+        self.assertEqual(
+            load_calls, [(tempfile.gettempdir() + "/kernel.zebin", "kernel", 13, 3)]
+        )
         self.assertIs(launcher.function, kernel_capsule)
         self.assertEqual(launcher.n_regs, 7)
         self.assertEqual(launcher.n_spills, 11)

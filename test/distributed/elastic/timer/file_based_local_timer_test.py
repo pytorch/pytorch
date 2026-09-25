@@ -6,12 +6,11 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 import multiprocessing as mp
-import os
 import signal
+import tempfile
 import time
 import unittest
 import unittest.mock as mock
-import uuid
 
 import torch.distributed.elastic.timer as timer
 from torch.testing._internal.common_utils import (
@@ -42,7 +41,8 @@ if not (IS_WINDOWS or IS_MACOS or IS_ARM64):
         def setUp(self):
             super().setUp()
             self.max_interval = 0.01
-            self.file_path = f"/tmp/test_file_path_{os.getpid()}_{uuid.uuid4()}"
+            with tempfile.NamedTemporaryFile() as f:
+                self.file_path = f.name
             self.server = timer.FileTimerServer(
                 self.file_path, "test", self.max_interval
             )
@@ -213,7 +213,8 @@ if not (IS_WINDOWS or IS_MACOS or IS_ARM64):
 
         def setUp(self):
             super().setUp()
-            self.file_path = f"/tmp/test_file_path_{os.getpid()}_{uuid.uuid4()}"
+            with tempfile.NamedTemporaryFile() as f:
+                self.file_path = f.name
             self.max_interval = 0.01
             self.server = timer.FileTimerServer(
                 self.file_path, "test", self.max_interval

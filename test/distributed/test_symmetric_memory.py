@@ -3448,7 +3448,7 @@ class TorchCommsCudaSymmMemTest(MultiProcContinuousTest):
         group_name = f"torchcomms_cuda_symm_mem_nccl_{suffix}"
         store_path = os.environ.get(
             "TORCHCOMM_STORE_PATH",
-            f"/tmp/test_torchcomms_cuda_symm_mem_"
+            f"/{tempfile.gettempdir()}/test_torchcomms_cuda_symm_mem_"
             f"{os.environ.get('MASTER_PORT', '0')}_{suffix}",
         )
         pg = setup_torchcomms_pg(

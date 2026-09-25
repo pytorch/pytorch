@@ -8,6 +8,7 @@ import multiprocessing
 import os
 import operator
 import random
+import tempfile
 import traceback
 import unittest
 from typing import NamedTuple, TYPE_CHECKING
@@ -6598,7 +6599,7 @@ class TestQuantizedConv(TestCase):
 
         def trace_handler(p):
             output = p.key_averages().table(sort_by="self_cpu_time_total", row_limit=10)
-            p.export_chrome_trace("/tmp/trace_" + str(p.step_num) + ".json")
+            p.export_chrome_trace(f"/{tempfile.gettempdir()}/trace_{p.step_num}.json")
 
         my_schedule = torch.profiler.schedule(
             wait=5,
