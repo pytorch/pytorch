@@ -1403,6 +1403,63 @@ class ListVariable(BaseListVariable):
     }
 
 
+class WarningMessageVariable(VariableTracker):
+    _nonvar_fields = {"warning", *VariableTracker._nonvar_fields}
+
+    def __init__(self, warning: Any, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.warning = warning
+
+    def python_type(self) -> type:
+        return type(self.warning)
+
+    def tp_getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        if name == "message":
+            from .misc import ExceptionVariable
+
+            warning = self.warning.message
+            args: list[VariableTracker] = [
+                ConstantVariable.create(arg) for arg in warning.args
+            ]
+            return ExceptionVariable(type(warning), args)
+        return VariableTracker.build(tx, getattr(self.warning, name))
+
+
+class WarningRecordListVariable(ListVariable):
+    _nonvar_fields = {"recorded_warnings", *ListVariable._nonvar_fields}
+
+    def __init__(self, recorded_warnings: list[Any], **kwargs: Any) -> None:
+        super().__init__([], mutation_type=ValueMutationNew(), **kwargs)
+        self.recorded_warnings = recorded_warnings
+
+    def _sync(self, tx: "InstructionTranslatorBase") -> None:
+        self.items[:] = [
+            WarningMessageVariable(warning) for warning in self.recorded_warnings
+        ]
+
+    def getitem_const(
+        self, tx: "InstructionTranslatorBase", arg: VariableTracker
+    ) -> VariableTracker:
+        self._sync(tx)
+        return super().getitem_const(tx, arg)
+
+    def sq_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        self._sync(tx)
+        return super().sq_length_impl(tx)
+
+    def unpack_var_sequence(
+        self, tx: "InstructionTranslatorBase"
+    ) -> list[VariableTracker]:
+        self._sync(tx)
+        return super().unpack_var_sequence(tx)
+
+    def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        self._sync(tx)
+        return super().tp_iter_impl(tx)
+
+
 class DequeVariable(BaseListVariable):
     # deque_spec: https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L1866
     # tp_hash = PyObject_HashNotImplemented (unhashable)

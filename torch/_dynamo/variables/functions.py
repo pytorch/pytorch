@@ -442,6 +442,8 @@ class BaseUserFunctionVariable(VariableTracker):
             if args[0].is_constant_match("__annotations__"):
                 self.annotations = args[1]
                 return ConstantVariable.create(None)
+            if args[0].is_constant_match("__code__"):
+                return self._set_code(tx, args[1])
             return self.get_dict_vt(tx).call_method(
                 tx, "__setitem__", list(args), kwargs
             )
@@ -449,6 +451,8 @@ class BaseUserFunctionVariable(VariableTracker):
             if args[0].is_constant_match("__annotations__"):
                 self.annotations = None
                 return ConstantVariable.create(None)
+            if args[0].is_constant_match("__code__"):
+                return self._set_code(tx, None)
             return self.get_dict_vt(tx).call_method(tx, "__delitem__", list(args), {})
         return super().call_method(tx, name, list(args), kwargs)
 
@@ -540,6 +544,25 @@ class BaseUserFunctionVariable(VariableTracker):
             raise_type_error(tx, "__qualname__ must be set to a string object")
         store_attr_mutation(tx, self, "__qualname__", value)
 
+    def _set_code(
+        self,
+        tx: "InstructionTranslatorBase",
+        value: "VariableTracker | None",
+    ) -> "VariableTracker":
+        if not isinstance(self, NestedUserFunctionVariable):
+            return unmodeled_setter(self, tx, value)
+        try:
+            fn = self.get_function()
+            code = value.as_python_constant() if value is not None else None
+        except (ClosureConversionError, NotImplementedError):
+            return unmodeled_setter(self, tx, value)
+        if value is None:
+            delattr(fn, "__code__")
+            raise AssertionError("Deleting function __code__ unexpectedly succeeded")
+        fn.__code__ = cast(types.CodeType, code)
+        self.code = value
+        return ConstantVariable.create(None)
+
     def _get_annotations(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # func_get_annotations lazily creates and stores an empty dict. The dict
         # is a fresh value (ValueMutationNew), so it must carry no source.
@@ -598,7 +621,7 @@ class BaseUserFunctionVariable(VariableTracker):
                 "__code__",
                 source=lambda s: s.source and AttrSource(s.source, "__code__"),
             ),
-            unmodeled_setter,
+            _set_code,
         ),
         "__dict__": GetSet(
             lambda s, tx: s.get_dict_vt(tx),
