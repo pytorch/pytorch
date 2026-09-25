@@ -217,8 +217,8 @@ def evaluate_platform_sdpa_supports_hdim512():
         return False
     gcn_arch_name = torch.cuda.get_device_properties('cuda').gcnArchName
     if gcn_arch_name.startswith('gfx11'):
-        return True
-    return False
+        return False
+    return True
 
 
 def evaluate_platform_supports_efficient_attention():
