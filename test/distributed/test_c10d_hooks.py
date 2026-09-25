@@ -1,16 +1,14 @@
 # Owner(s): ["oncall: distributed"]
 
-import os
-
 import torch
 import torch.distributed as dist
 from torch._C._distributed_c10d import HookOpName
 from torch.distributed.distributed_c10d import _get_default_group
-from torch.testing._internal.common_distributed import MultiProcessTestCase
+from torch.testing._internal.common_distributed import MultiProcContinuousTest
 from torch.testing._internal.common_utils import HardwareClassification, run_tests
 
 
-class TestProcessGroupHooks(MultiProcessTestCase):
+class TestProcessGroupHooks(MultiProcContinuousTest):
     """
     Verify that pre/post collective hooks registered on a ProcessGroup fire for
     every collective issued through it. The hooks are wired into the c10d
@@ -23,30 +21,13 @@ class TestProcessGroupHooks(MultiProcessTestCase):
 
     hw_classification = HardwareClassification.GENERIC
 
-    def setUp(self):
-        super().setUp()
-        self._spawn_processes()
+    world_size = 2
 
-    def tearDown(self):
-        super().tearDown()
-        try:
-            os.remove(self.file_name)
-        except OSError:
-            pass
-
-    @property
-    def world_size(self):
-        return 2
+    @classmethod
+    def backend_str(cls):
+        return "gloo"
 
     def test_hooks_fire_for_all_collectives(self):
-        store = dist.FileStore(self.file_name, self.world_size)
-        dist.init_process_group(
-            backend="gloo",
-            store=store,
-            rank=self.rank,
-            world_size=self.world_size,
-        )
-
         pg = _get_default_group()
         # The pre-hook fires before the op is issued, the post-hook after, with
         # a matching op_id correlating the two.
@@ -133,7 +114,6 @@ class TestProcessGroupHooks(MultiProcessTestCase):
         self.assertEqual(len(post_ops), post_count)
 
         dist.barrier()
-        dist.destroy_process_group()
 
     def test_hooks_fire_on_captured_graph_replay(self):
         # make_fx traces at the dispatcher (op) level and records the raw
@@ -142,13 +122,6 @@ class TestProcessGroupHooks(MultiProcessTestCase):
         # they live in the dispatcher kernels (Ops.cpp), not on ProcessGroup.
         from torch.fx.experimental.proxy_tensor import make_fx
 
-        store = dist.FileStore(self.file_name, self.world_size)
-        dist.init_process_group(
-            backend="gloo",
-            store=store,
-            rank=self.rank,
-            world_size=self.world_size,
-        )
         pg = _get_default_group()
         pre_ops: list[HookOpName] = []
         pg.register_pre_hook(0, lambda args: pre_ops.append(args.name))
@@ -167,9 +140,9 @@ class TestProcessGroupHooks(MultiProcessTestCase):
         pre_ops.clear()
         graph(torch.ones(2))
         self.assertIn(HookOpName.ALLREDUCE, pre_ops)
+        pg.unregister_pre_hook(0)
 
         dist.barrier()
-        dist.destroy_process_group()
 
 
 if __name__ == "__main__":

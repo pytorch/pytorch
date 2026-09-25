@@ -521,9 +521,28 @@ Tensor isreal(const Tensor& self) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, TYPE, NAME, __VA_ARGS__)
 #endif
 
+// Float8_e5m2 is the only fp8 dtype with an infinity encoding. Listed one dtype
+// at a time so that a newly added fp8 dtype has to make a decision here instead
+// of inheriting one.
+static bool is_fp8_type_without_inf(ScalarType dtype) {
+  const bool without_inf = dtype == kFloat8_e4m3fn ||
+      dtype == kFloat8_e4m3fnuz || dtype == kFloat8_e5m2fnuz ||
+      dtype == kFloat8_e8m0fnu;
+  TORCH_INTERNAL_ASSERT(
+      without_inf || dtype == kFloat8_e5m2 || !c10::isFloat8Type(dtype),
+      "unhandled fp8 dtype ",
+      dtype);
+  return without_inf;
+}
+
 Tensor isinf(const Tensor& self) {
   // Note: Integral tensor values are never infinite
   if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
+    return at::zeros_like(self, at::kBool, at::MemoryFormat::Preserve);
+  }
+
+  // Note: fp8 dtypes with no infinity encoding are never infinite
+  if (is_fp8_type_without_inf(self.scalar_type())) {
     return at::zeros_like(self, at::kBool, at::MemoryFormat::Preserve);
   }
 
@@ -542,6 +561,12 @@ Tensor isfinite(const Tensor& self) {
   if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true) ||
       self.scalar_type() == kFloat8_e8m0fnu) {
     return at::ones_like(self, at::kBool, at::MemoryFormat::Preserve);
+  }
+
+  // Note: with no infinity encoding, finiteness reduces to !isnan()
+  if (is_fp8_type_without_inf(self.scalar_type())) {
+    // NOLINTNEXTLINE(misc-redundant-expression)
+    return self == self;
   }
 
   // Note: a complex value is finite iff both parts are finite
