@@ -291,22 +291,6 @@ bool shouldAllCommunicatorsRegisterAllTensors() {
   return flag;
 }
 
-#if defined(NCCL_HAS_SYMMEM_DEVICE_SUPPORT) && !defined(USE_ROCM)
-// Retire this process group's registry entry. Identity-safe, so a delayed
-// caller cannot erase a same-name successor's entry. Aborted comms are skipped
-// because deregistering through one fails on the tested ROCm stack.
-void unregisterSymmetricMemoryComm(
-    const std::shared_ptr<NCCLComm>& ncclComm,
-    const std::string& groupUid) {
-  if (!ncclComm || ncclComm->isAborted()) {
-    return;
-  }
-  c10::Device device(at::kCUDA, ncclComm->getDeviceIndex());
-  c10d::symmetric_memory::NCCLDevCommManager::get(device).unregister_comm(
-      groupUid, ncclComm->getNcclComm());
-}
-#endif
-
 } // namespace
 
 // Map each communicator to the memory pools registered with it.
@@ -1628,15 +1612,20 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL destructor entered.";
 
 #if defined(NCCL_HAS_SYMMEM_DEVICE_SUPPORT) && !defined(USE_ROCM)
-  // Drop our entry from each per-device NCCLDevCommManager. The removal is
-  // identity-safe, so a successor PG that re-registered under the same
-  // group_uid (e.g. restart-after-error) keeps its own entry rather than
-  // having it silently wiped here. ROCm retires through the comm's
-  // pre-invalidate hook instead; see initNCCLComm.
+  // Drop our entry from each per-device NCCLDevCommManager. Skip aborted
+  // comms -- a successor PG may have already re-registered under the same
+  // group_uid (e.g. restart-after-error), and unconditionally clearing
+  // would silently wipe the successor's entry.
+  // ROCm retires through the comm's pre-invalidate hook; see initNCCLComm.
   {
     std::lock_guard<std::mutex> lock(mutex_);
     for (auto& [_, ncclComm] : devNCCLCommMap_) {
-      unregisterSymmetricMemoryComm(ncclComm, getGroupUid());
+      if (!ncclComm || ncclComm->isAborted()) {
+        continue;
+      }
+      c10::Device device(at::kCUDA, ncclComm->getDeviceIndex());
+      c10d::symmetric_memory::NCCLDevCommManager::get(device).unregister_comm(
+          getGroupUid());
     }
   }
 #endif
