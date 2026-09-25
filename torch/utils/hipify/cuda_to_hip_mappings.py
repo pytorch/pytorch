@@ -3438,8 +3438,16 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict([
     # NVSHMEM → rocSHMEM mappings (only symbols used in hipified files).
     ("NVSHMEM_TEAM_INVALID", "rocshmem::ROCSHMEM_TEAM_INVALID"),
     ("NVSHMEM_TEAM_WORLD", "rocshmem::ROCSHMEM_TEAM_WORLD"),
-    ("NVSHMEM_SIGNAL_SET", "ROCSHMEM_SIGNAL_SET"),
-    ("NVSHMEM_SIGNAL_ADD", "ROCSHMEM_SIGNAL_ADD"),
+    ("nvshmemx_signal_op_t", "rocshmem::ROCSHMEM_SIGNAL_OPS"),
+    ("NVSHMEM_SIGNAL_SET", "rocshmem::ROCSHMEM_SIGNAL_SET"),
+    ("NVSHMEM_SIGNAL_ADD", "rocshmem::ROCSHMEM_SIGNAL_ADD"),
+    ("nvshmemx_cmp_type_t", "rocshmem::rocshmem_cmps"),
+    ("NVSHMEM_CMP_EQ", "rocshmem::ROCSHMEM_CMP_EQ"),
+    ("NVSHMEM_CMP_NE", "rocshmem::ROCSHMEM_CMP_NE"),
+    ("NVSHMEM_CMP_GT", "rocshmem::ROCSHMEM_CMP_GT"),
+    ("NVSHMEM_CMP_GE", "rocshmem::ROCSHMEM_CMP_GE"),
+    ("NVSHMEM_CMP_LT", "rocshmem::ROCSHMEM_CMP_LT"),
+    ("NVSHMEM_CMP_LE", "rocshmem::ROCSHMEM_CMP_LE"),
     ("NVSHMEMX_INIT_WITH_UNIQUEID", "rocshmem::ROCSHMEM_INIT_WITH_UNIQUEID"),
 
     ("nvshmem_malloc", "rocshmem::rocshmem_malloc"),
