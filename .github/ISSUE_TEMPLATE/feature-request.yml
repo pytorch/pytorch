@@ -5,7 +5,7 @@ body:
 - type: markdown
   attributes:
     value: >
-      #### Before submitting, please review the [contribution guide](https://github.com/pytorch/pytorch/wiki/The-Ultimate-Guide-to-PyTorch-Contributions) and [AI-Assisted Development](https://github.com/pytorch/pytorch/blob/main/AI_POLICY.md) policy. Issues that do not follow these practices will be automatically closed and users breaking these rules repeatedly may be banned.
+      #### Before submitting, please review the [contribution guide](https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md#issue-lifecycle) and [AI-Assisted Development](https://github.com/pytorch/pytorch/blob/main/AI_POLICY.md) policy. Issues that do not follow these practices will be automatically closed and users breaking these rules repeatedly may be banned.
 - type: markdown
   attributes:
     value: >
@@ -14,7 +14,7 @@ body:
   attributes:
     label: 🚀 The feature, motivation and pitch
     description: >
-      A clear and concise description of the feature proposal. Please outline the motivation for the proposal. Is your feature request related to a specific problem? e.g., *"I'm working on X and would like Y to be possible"*. If this is related to another GitHub issue, please link here too.
+      A clear and concise description of the feature proposal. Please outline the motivation for the proposal. Is your feature request related to a specific problem? e.g., *"I'm working on X and would like Y to be possible"*. If this is related to another GitHub issue, please link here too. Focus on the problem you are facing; do not include an AI-generated proposal for how to implement it.
   validations:
     required: true
 - type: textarea

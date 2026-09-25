@@ -582,7 +582,7 @@ Pointers to get you started:
 
 ## Communication
 * Forums: Discuss implementations, research, etc. https://discuss.pytorch.org
-* GitHub Issues: Bug reports, feature requests, install issues, RFCs, thoughts, etc.
+* GitHub Issues: Bug reports, feature requests, install issues, RFCs, thoughts, etc. See the [issue lifecycle](CONTRIBUTING.md#issue-lifecycle) for how they are handled.
 * Slack: The [PyTorch Slack](https://pytorch.slack.com/) hosts a primary audience of moderate to experienced PyTorch users and developers for general chat, online discussions, collaboration, etc.
 * Facebook Page: Important announcements about PyTorch. https://www.facebook.com/pytorch
 * For brand guidelines, please visit our website at [pytorch.org](https://pytorch.org/)
@@ -591,10 +591,10 @@ Pointers to get you started:
 
 Typically, PyTorch has three minor releases a year. Please let us know if you encounter a bug by [filing an issue](https://github.com/pytorch/pytorch/issues).
 
-We appreciate all contributions. If you are planning to contribute back bug-fixes, please do so without any further discussion.
-
-If you plan to contribute new features, utility functions, or extensions to the core, please first open an issue and discuss the feature with us.
-Sending a PR without discussion might end up resulting in a rejected PR because we might be taking the core in a different direction than you might be aware of.
+We appreciate all contributions. Whether you plan to contribute a bug-fix or a new feature, please first open an issue (or find an existing one) and discuss it with us.
+Once a maintainer marks the issue "actionable", you can send a PR for it.
+Sending a PR without an actionable issue will most likely result in the PR being closed, as we might be taking the core in a different direction than you might be aware of.
+See the [Issue and PR Workflow](CONTRIBUTING.md#issue-and-pr-workflow) for details.
 
 To learn more about making a contribution to PyTorch, please see our [Contribution page](CONTRIBUTING.md). For more information about PyTorch releases, see [Release page](RELEASE.md).
 
