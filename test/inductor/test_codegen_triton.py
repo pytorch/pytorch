@@ -418,12 +418,29 @@ def helper(x):
         self.assertFalse(compatible)
         self.assertEqual(kernel.tma_min_block_sizes, {})
 
-    def test_mix_order_rejects_incompatible_fixed_xblock(self):
+    @parametrize(
+        "split_size,fixed_config,error",
+        (
+            (
+                48,
+                {"XBLOCK": 32},
+                "RSPLIT_SIZE=48 is incompatible with fixed XBLOCK=32",
+            ),
+            (
+                18,
+                {"XBLOCK": 2, "RSPLIT_SIZE": 32, "NUM_STAGES": 1},
+                "fixed RSPLIT_SIZE=32 does not match scheduled RSPLIT_SIZE=18",
+            ),
+        ),
+    )
+    def test_mix_order_rejects_incompatible_fixed_config(
+        self, split_size, fixed_config, error
+    ):
         class CustomChoices(InductorChoices):
             def triton_kernel_kwargs(self, kernel_cls, features, groups, kernel_kwargs):
                 return {
                     **kernel_kwargs,
-                    "fixed_config": FixedTritonConfig({"XBLOCK": 32}),
+                    "fixed_config": FixedTritonConfig(fixed_config),
                 }
 
         xnumel = sympy.Integer(40961)
@@ -431,13 +448,11 @@ def helper(x):
         with (
             self._graph.set_current_device(torch.device("cpu")),
             V.set_choices_handler(CustomChoices()),
-            self.assertRaisesRegex(
-                ValueError, "RSPLIT_SIZE=48 is incompatible with fixed XBLOCK=32"
-            ),
+            self.assertRaisesRegex(ValueError, error),
         ):
             TritonScheduling(None)._generate_kernel_code_for_mix_order_reduction(
                 SIMDKernelFeatures([], xnumel, rnumel),
-                split_size=48,
+                split_size=split_size,
                 for_benchmark=False,
             )
 

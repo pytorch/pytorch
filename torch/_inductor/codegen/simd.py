@@ -3343,13 +3343,28 @@ class SIMDScheduling(BaseScheduling):
                 "tiling_scores": None,
                 "mix_order_reduction": True,
                 "override_persistent_reduction": True,
-                "rsplit_size": split_size,
             },
         )[0]
+        kernel.rsplit_size = split_size
         if not kernel.persistent_reduction:
             raise AssertionError("expected kernel.persistent_reduction")
         if not kernel.mix_order_reduction:
             raise AssertionError("expected kernel.mix_order_reduction")
+        if kernel.fixed_config:
+            if (
+                "RSPLIT_SIZE" in kernel.fixed_config
+                and kernel.fixed_config["RSPLIT_SIZE"] != split_size
+            ):
+                raise ValueError(
+                    f"fixed RSPLIT_SIZE={kernel.fixed_config['RSPLIT_SIZE']} does not "
+                    f"match scheduled RSPLIT_SIZE={split_size}"
+                )
+            xblock = kernel.fixed_config["XBLOCK"]
+            if split_size % xblock != 0:
+                raise ValueError(
+                    f"RSPLIT_SIZE={split_size} is incompatible with fixed "
+                    f"XBLOCK={xblock}"
+                )
         self.codegen_node_schedule_with_kernel(node_schedule, kernel)
 
         # allocate workspace for this kernel
