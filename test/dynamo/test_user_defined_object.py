@@ -867,6 +867,46 @@ class TestClassSetattr(TestCase):
         MyModule.x = 10
 
 
+class TestObjectNew(TestCase):
+    def test_object_new_on_plain_class(self):
+        def fn():
+            return object.__new__(Plain)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertIsInstance(opt_fn(), Plain)
+
+    def test_object_new_rejects_kwargs(self):
+        def fn():
+            return object.__new__(Plain, extra=1)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertRaises(Unsupported, opt_fn)
+
+    def test_new_on_class_with_unsupported_c_level_new(self):
+        # torch._C._DisableFuncTorch (a pybind11 extension type) inherits
+        # its __new__ from pybind11_object, a C-level __new__ that isn't
+        # one of the constructors Dynamo recognizes (unlike object.__new__,
+        # dict.__new__, etc). Explicitly calling __new__ should gracefully
+        # graph-break (fullgraph=True -> Unsupported) instead of hard
+        # crashing with an internal AssertionError in get_example_value.
+        def fn():
+            return torch._C._DisableFuncTorch.__new__(torch._C._DisableFuncTorch)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertRaises(Unsupported, opt_fn)
+
+    def test_construct_class_with_unsupported_c_level_new(self):
+        # Normal (non-fullgraph) construction/use of such a class must
+        # still work correctly by falling back gracefully.
+        def fn(x):
+            with torch._C._DisableFuncTorch():
+                return x + 1
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(fn(x), opt_fn(x))
+
+
 # ---------------------------------------------------------------------------
 # __setitem__ on user-defined classes / metaclasses
 # ---------------------------------------------------------------------------

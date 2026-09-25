@@ -1196,6 +1196,26 @@ class ListVariable(BaseListVariable):
         items = ", ".join(tracked_repr(tx, item) for item in self.items)
         return VariableTracker.build(tx, f"[{items}]")
 
+    def tp_new_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # list.__new__(cls); `self` is the ListBuiltinVariable __new__ was
+        # found on, `args[0]` is the actual (possibly subclassed) cls.
+        # list.__new__ (PyType_GenericNew) ignores extra args *and* kwargs --
+        # population happens later via __init__.
+        from .builtin import ListBuiltinVariable
+
+        if not args:
+            return VariableTracker.tp_new_impl(self, tx, args, kwargs)
+        if isinstance(args[0], ListBuiltinVariable):
+            return ListVariable([], mutation_type=ValueMutationNew())
+        return tx.output.side_effects.track_new_user_defined_object(
+            self, args[0], [], tx=tx
+        )
+
     def reconstruct(self, codegen: "PyCodegen") -> None:
         if self._contains_self_reference():
             # Self-referential list: create empty, cache, then extend
@@ -1983,6 +2003,28 @@ class TupleVariable(BaseListVariable):
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/tupleobject.c#L1101-L1117
         return TupleIteratorVariable(self.items, mutation_type=ValueMutationNew())
+
+    def tp_new_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # tuple.__new__(cls, iterable=()); `self` is the BuiltinVariable(tuple)
+        # __new__ was found on (there's no TupleBuiltinVariable -- BuiltinVariable
+        # delegates here explicitly), `args[0]` is the actual (possibly
+        # subclassed) cls.
+        from .builtin import BuiltinVariable
+
+        if len(args) != 2:
+            return VariableTracker.tp_new_impl(self, tx, args, kwargs)
+        no_keywords(tx, "tuple", kwargs)
+        if isinstance(args[0], BuiltinVariable) and args[0].fn is tuple:
+            init_args = unpack_iterable(tx, args[1])
+            return TupleVariable(init_args, mutation_type=ValueMutationNew())
+        return tx.output.side_effects.track_new_user_defined_object(
+            self, args[0], args[1:], tx=tx
+        )
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.foreach(self.items)

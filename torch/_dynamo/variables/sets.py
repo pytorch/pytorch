@@ -33,6 +33,7 @@ from ..utils import (
     cmp_name_to_op_mapping,
     istype,
     lazily_unpack,
+    no_keywords,
     raise_args_mismatch,
     set_methods,
     tracked_repr,
@@ -587,6 +588,25 @@ class SetVariable(BaseSetVariable):
             return VariableTracker.build(tx, f"{self.python_type_name()}()")
         items = ", ".join(tracked_repr(tx, item.vt) for item in self.set_items)
         return VariableTracker.build(tx, "{" + items + "}")
+
+    def tp_new_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # set.__new__(cls, iterable=()); `self` is the BuiltinVariable(set)
+        # __new__ was found on, `args[0]` is the actual (possibly subclassed)
+        # cls. set.__new__ (tp_new) ignores extra args *and* kwargs --
+        # population happens later via __init__, called separately after
+        # __new__ returns.
+        if not args:
+            return VariableTracker.tp_new_impl(self, tx, args, kwargs)
+        if isinstance(args[0], variables.BuiltinVariable) and args[0].fn is set:
+            return SetVariable([], mutation_type=ValueMutationNew())
+        return tx.output.side_effects.track_new_user_defined_object(
+            self, args[0], [], tx=tx
+        )
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.foreach([x.vt for x in self.set_items])
@@ -1161,6 +1181,28 @@ class FrozensetVariable(BaseSetVariable):
             return VariableTracker.build(tx, f"{self.python_type_name()}()")
         items = ", ".join(tracked_repr(tx, item.vt) for item in self.set_items)
         return VariableTracker.build(tx, f"{self.python_type_name()}({{{items}}})")
+
+    def tp_new_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # frozenset.__new__(cls, iterable=()); `self` is the
+        # BuiltinVariable(frozenset) __new__ was found on, `args[0]` is the
+        # actual (possibly subclassed) cls. frozenset is immutable:
+        # frozenset.__new__ (tp_new) populates contents directly from the
+        # iterable, since frozenset.__init__ is a no-op, and (unlike set)
+        # rejects kwargs.
+        if not args:
+            return VariableTracker.tp_new_impl(self, tx, args, kwargs)
+        no_keywords(tx, "frozenset", kwargs)
+        if isinstance(args[0], variables.BuiltinVariable) and args[0].fn is frozenset:
+            init_args = unpack_iterable(tx, args[1]) if len(args) > 1 else []
+            return FrozensetVariable(init_args, mutation_type=ValueMutationNew())
+        return tx.output.side_effects.track_new_user_defined_object(
+            self, args[0], args[1:], tx=tx
+        )
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(

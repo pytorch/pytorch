@@ -870,6 +870,21 @@ def _wrap_init(
     return func(self, tx, args, kwargs)
 
 
+def _wrap_new(
+    self: VariableTracker,
+    tx: InstructionTranslatorBase,
+    func: Callable[..., VariableTracker],
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> VariableTracker:
+    # tp_new via __new__: variadic, forwards kwargs. Unlike every other
+    # tp_*_impl, `self` stays the type __new__ was found on (e.g.
+    # BuiltinVariable(set)), not an instance -- `args[0]` is the actual
+    # `cls` (possibly a subclass, e.g. via super().__new__(cls, ...)).
+    # See tp_new_impl's docstring for the full calling convention.
+    return func(self, tx, args, kwargs)
+
+
 def _wrap_setattr(
     self: VariableTracker,
     tx: InstructionTranslatorBase,
@@ -1296,7 +1311,7 @@ _SLOTDEFS: list[SlotDef] = [
         _wrap_descr_delete,
     ),
     TPSLOT("__init__", "tp_init_impl", PyTypeSlots.TP_INIT, _wrap_init),
-    # SlotDef("__new__", ...), # missing
+    TPSLOT("__new__", "tp_new_impl", PyTypeSlots.TP_NEW, _wrap_new),
     # SlotDef("__del__", ...), # missing
     # SlotDef("__buffer__", ...), # missing
     # SlotDef("__release_buffer__", ...), # missing
@@ -2349,6 +2364,41 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             context=f"tp_init_impl not implemented for {self.python_type_name()}",
             explanation=f"Dynamo does not know how to trace __init__ on `{self.debug_repr()}`.",
             hints=[*graph_break_hints.DYNAMO_BUG],
+        )
+
+    def tp_new_impl(
+        self,
+        tx: InstructionTranslatorBase,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        """tp_new slot (__new__). Unlike every other tp_*_impl, `self` here is
+        the type being constructed *from* (e.g. BuiltinVariable(set)), not an
+        instance -- there is no instance yet. `args[0]` is `cls` (possibly a
+        subclass of `self`, e.g. via `super().__new__(cls, ...)`), not a
+        receiver, so callers must not forward it to `args[0].call_method`.
+        VTs representing a constructible type (BuiltinVariable,
+        DictBuiltinVariable, ListBuiltinVariable, UserDefinedClassVariable)
+        override this to implement `cls.__new__(cls, ...)`. The default here
+        implements `object.__new__(cls)`, the ultimate fallback every type's
+        `__new__` chain bottoms out at.
+        """
+        klass = self.as_python_constant()
+        if klass is not object:
+            unimplemented(
+                gb_type="missing tp_new",
+                context=f"tp_new_impl not implemented for {klass.__name__}",
+                explanation=f"Dynamo does not know how to trace __new__ on `{self.debug_repr()}`.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        if len(args) != 1 or len(kwargs) != 0:
+            raise_type_error(
+                tx,
+                "object.__new__() takes exactly one argument (the type to instantiate)",
+            )
+
+        return tx.output.side_effects.track_new_user_defined_object(
+            self, args[0], args[1:], tx=tx
         )
 
     def call_function(
