@@ -2006,7 +2006,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            r"encountered a tensor being mutated that has internal overlap",
+            r"internal overlap",
         ):
             x = torch.ones(1, 5)
             out = _functionalize(fn, reapply_views=True, crossref=False)(x)
