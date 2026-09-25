@@ -46,9 +46,7 @@ from torch.utils._ordered_set import OrderedSet
 from ..utils._sympy.functions import CeilDiv, Max, Min
 from . import config, ir
 from .autotune_process import (
-    _is_sticky_cuda_error,
     AsyncAutotuner,
-    CUDAGraphBenchmarkError,
     PrecompileThreadPool,
     TensorMeta,
     TritonBenchmarkRequest,
@@ -3870,16 +3868,6 @@ class NoValidChoicesError(RuntimeError):
     pass
 
 
-class _UncacheableBenchmarkTimings(dict[ChoiceCaller, float]):
-    """Timings produced after changing benchmark policy during a retry."""
-
-
-class _UncacheableBenchmarkResults(RuntimeError):
-    def __init__(self, timings: _UncacheableBenchmarkTimings) -> None:
-        super().__init__("benchmark policy changed while collecting timings")
-        self.timings = timings
-
-
 @functools.cache
 def get_num_workers() -> int:
     if "TORCHINDUCTOR_COMPILE_THREADS" in os.environ:
@@ -3960,30 +3948,6 @@ def _benchmark_request_for_choice(choice: ChoiceCaller) -> Any | None:
         return vars(choice).get("bmreq")
     except TypeError:
         return None
-
-
-@contextlib.contextmanager
-def _force_eager_benchmarking(choices: Sequence[ChoiceCaller]):
-    """Temporarily make an automatically graphed candidate set benchmark eagerly."""
-    for choice in choices:
-        if isinstance(choice, SubgraphChoiceCaller):
-            choice._ensure_benchmark_request()
-    requests = [
-        request
-        for choice in choices
-        if (request := _benchmark_request_for_choice(choice)) is not None
-    ]
-    prior_values = [
-        getattr(request, "force_eager_benchmark", False) for request in requests
-    ]
-    for request in requests:
-        request.force_eager_benchmark = True
-    try:
-        with config.patch(autotune_cudagraph_benchmarking=False):
-            yield
-    finally:
-        for request, prior_value in zip(requests, prior_values):
-            request.force_eager_benchmark = prior_value
 
 
 # Args to FeedbackFunctions
@@ -4184,29 +4148,6 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # registers `self.cache_clear(...)` to be called when a fresh Inductor cache is requested
         clear_on_fresh_cache(self)
-
-    def lookup(
-        self,
-        choices: list[ChoiceCaller],
-        op: str,
-        inputs: str,
-        benchmark: Callable[[Any], dict[ChoiceCaller, float]] | None,
-        hint_override: int | None = None,
-    ) -> dict[ChoiceCaller, float]:
-        try:
-            return super().lookup(
-                choices,
-                op,
-                inputs,
-                benchmark,
-                hint_override=hint_override,
-            )
-        except _UncacheableBenchmarkResults as result:
-            # Automatic CUDA-graph benchmarking retries the whole candidate set
-            # eagerly after a capture failure. Use those internally consistent
-            # timings for this compile, but do not store them under the automatic
-            # CUDA-graph cache namespace.
-            return result.timings
 
     def _register_default_preprocessing_fns(self):
         """Register default preprocessing functions."""
@@ -4613,8 +4554,6 @@ class AlgorithmSelectorCache(PersistentCache):
                 _log_autotune_choices_stats(
                     f"{name}_template_autotuning", benchmark_results
                 )
-            if isinstance(benchmark_results, _UncacheableBenchmarkTimings):
-                raise _UncacheableBenchmarkResults(benchmark_results)
             return benchmark_results
 
     def do_autotuning(
@@ -4725,15 +4664,9 @@ class AlgorithmSelectorCache(PersistentCache):
                 ),
                 hint_override=hint_override,
             )
-            if not isinstance(timings, _UncacheableBenchmarkTimings):
-                choices = self.prune_choices_postscreen(
-                    choices, timings, name, inputs_key, self.prescreening_cache
-                )
-            else:
-                log.warning(
-                    "Skipping candidate pruning after CUDA-graph prescreening "
-                    "fell back to eager benchmarking"
-                )
+            choices = self.prune_choices_postscreen(
+                choices, timings, name, inputs_key, self.prescreening_cache
+            )
             prescreening_elapse = time.time() - prescreening_start_ts
             log.debug("Prescreening elapsed time: %.02fs", prescreening_elapse)
 
@@ -5514,7 +5447,6 @@ class AlgorithmSelectorCache(PersistentCache):
         choices: Sequence[ChoiceCaller],
         autotune_args: AutotuneArgs,
         is_collective: bool = False,
-        propagate_cudagraph_failure: bool = False,
     ) -> dict[ChoiceCaller, float]:
         """
         Benchmark a list of choices and return timing dict.
@@ -5553,16 +5485,12 @@ class AlgorithmSelectorCache(PersistentCache):
                     rank,
                 )
         timings = {}
-        retry_all_eager = False
         for choice in choices:
             try:
                 if is_collective:
                     timing = cls.benchmark_collective_choice(choice, autotune_args)
                 else:
                     timing = cls.benchmark_choice(choice, autotune_args)
-            except CUDAGraphBenchmarkError:
-                retry_all_eager = True
-                break
             except CUDACompileError:
                 if not isinstance(choice, CUTLASSTemplateCaller):
                     log.exception(
@@ -5573,8 +5501,6 @@ class AlgorithmSelectorCache(PersistentCache):
                 log.warning("Not yet implemented", exc_info=True)
                 timing = float("inf")
             except RuntimeError as e:
-                if _is_sticky_cuda_error(e):
-                    raise
                 msg = str(e)
                 if "invalid argument" in msg:
                     msg += "\n\nThis may mean this GPU is too small for max_autotune mode.\n\n"
@@ -5641,20 +5567,6 @@ class AlgorithmSelectorCache(PersistentCache):
                             timings[c] = float("inf")
                     break
 
-        if retry_all_eager:
-            if propagate_cudagraph_failure:
-                raise CUDAGraphBenchmarkError(
-                    "CUDA graph capture failed during automatic autotuning"
-                )
-            log.warning(
-                "CUDA graph capture failed during automatic autotuning; "
-                "retrying every candidate eagerly"
-            )
-            with _force_eager_benchmarking(choices):
-                return _UncacheableBenchmarkTimings(
-                    cls.benchmark_choices(choices, autotune_args, is_collective)
-                )
-
         return timings
 
     @classmethod
@@ -5666,7 +5578,6 @@ class AlgorithmSelectorCache(PersistentCache):
         input_gen_fns: dict[int, Callable[[ir.Buffer], torch.Tensor]] | None,
         hint_override: int | None = None,
         is_collective=False,
-        propagate_cudagraph_failure: bool = False,
     ) -> dict[ChoiceCaller, float]:
         inputs = cls.get_inputs(
             choices, input_nodes, layout, input_gen_fns, hint_override=hint_override
@@ -5675,7 +5586,6 @@ class AlgorithmSelectorCache(PersistentCache):
             choices,
             inputs,
             is_collective=is_collective,
-            propagate_cudagraph_failure=propagate_cudagraph_failure,
         )
 
     @classmethod
@@ -5699,32 +5609,13 @@ class AlgorithmSelectorCache(PersistentCache):
         ]
         cutlass = [c for c in choices if isinstance(c, CUTLASSTemplateCaller)]
 
-        def benchmark_all():
-            timings = cls.benchmark_in_current_process(
-                extern,
-                input_nodes,
-                layout,
-                input_gen_fns,
-                hint_override=hint_override,
-                propagate_cudagraph_failure=True,
-            )
-            # Order Triton before CUTLASS so valid Triton timings are collected
-            # before any CUTLASS kernel can crash the subprocess (#171094)
-            subprocess_timings: dict[ChoiceCaller, float] = (
-                autotune_process.benchmark_in_sub_process(non_cutlass + cutlass)  # type: ignore[arg-type, assignment]
-            )
-            timings.update(subprocess_timings)
-            return timings
-
-        try:
-            return benchmark_all()
-        except CUDAGraphBenchmarkError:
-            log.warning(
-                "CUDA graph capture failed during automatic subprocess autotuning; "
-                "retrying every candidate eagerly"
-            )
-            with _force_eager_benchmarking(choices):
-                return _UncacheableBenchmarkTimings(benchmark_all())
+        timings = cls.benchmark_in_current_process(
+            extern, input_nodes, layout, input_gen_fns, hint_override=hint_override
+        )
+        # Order Triton before CUTLASS so valid Triton timings are collected
+        # before any CUTLASS kernel can crash the subprocess (#171094)
+        timings.update(autotune_process.benchmark_in_sub_process(non_cutlass + cutlass))  # type: ignore[arg-type]
+        return timings
 
     @classmethod
     def make_benchmark_fn(
