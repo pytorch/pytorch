@@ -102,7 +102,8 @@ def manual_seed(seed: int) -> None:
     .. note::
         Seeding makes device-side sampling reproducible on the same GPU; the same
         seed is not guaranteed to give the same values on a different GPU model or
-        on a MIG partition. See :ref:`reproducibility`.
+        on a partitioned GPU (e.g. NVIDIA MIG or AMD Instinct compute partitioning).
+        See :ref:`reproducibility`.
     """
     seed = int(seed)
 
