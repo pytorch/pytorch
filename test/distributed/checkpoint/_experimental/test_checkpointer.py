@@ -31,7 +31,6 @@ from torch.distributed.checkpoint._experimental.types import RankInfo
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
-    skipIfRocm,
     TestCase,
 )
 
@@ -481,7 +480,6 @@ class TestAsyncCheckpointerSpecific(TestCase):
             reader=self.reader,
         )
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179976")
     def test_async_returns_futures(self):
         """Test that async save returns futures."""
         checkpointer = self._create_async_checkpointer()
