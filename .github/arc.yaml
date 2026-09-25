@@ -138,6 +138,6 @@ lf_allowlist:
     - l-x86iavx512-32-256      # r5.8xlarge
     - l-x86iavx512-48-384      # c5.12xlarge, c7i.12xlarge, r5.12xlarge
     - l-x86iamx-8-64           # m7i-flex.2xlarge
-    - l-x86aavx2-29-113-l4     # g6.4xlarge
-    - l-x86aavx2-29-113-a10g   # g5.4xlarge
+    - l-x86aavx2-11-41-l4      # g6.4xlarge
+    - l-x86aavx2-11-41-a10g    # g5.4xlarge
     - l-x86aavx2-45-167-a10g-4 # g5.12xlarge
