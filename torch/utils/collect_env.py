@@ -52,6 +52,10 @@ SystemEnv = namedtuple(
         "is_xnnpack_available",
         "cpu_info",
         "rocm_compiled_version",
+        "is_mps_available",
+        "accelerator_info",
+        "build_environment",
+        "test_config",
     ],
 )
 
@@ -225,6 +229,49 @@ def get_gpu_info(run_lambda):
         return None
     # Anonymize GPUs by removing their UUID
     return re.sub(uuid_regex, "", out)
+
+
+def get_mac_gpu_info(run_lambda):
+    out = run_and_read_all(run_lambda, "system_profiler SPDisplaysDataType")
+    if not out:
+        return None
+    fields = {
+        k.strip(): v.strip()
+        for k, _, v in (line.partition(":") for line in out.splitlines())
+        if v.strip()
+    }
+    if "Chipset Model" not in fields:
+        return None
+    details = [
+        "{} GPU cores".format(fields["Total Number of Cores"])
+        if "Total Number of Cores" in fields
+        else None,
+        fields.get("Metal Support") or fields.get("Metal Family"),
+    ]
+    details = [d for d in details if d]
+    if not details:
+        return fields["Chipset Model"]
+    return "{} ({})".format(fields["Chipset Model"], ", ".join(details))
+
+
+def get_accelerator_info():
+    """Report the active torch.accelerator, covering out-of-tree backends (e.g. TPU)."""
+    if not TORCH_AVAILABLE or not hasattr(torch, "accelerator"):
+        return "N/A"
+    acc = torch.accelerator.current_accelerator() if torch.accelerator.is_available() else None
+    if acc is None:
+        return "None"
+    count = torch.accelerator.device_count()
+    lst = ["{} ({} devices)".format(acc.type, count)]
+    mod = getattr(torch, acc.type, None)
+    if hasattr(mod, "get_device_name"):
+        try:
+            lst.extend(
+                "* [{}] {}".format(i, mod.get_device_name(i)) for i in range(count)
+            )
+        except Exception as e:
+            lst.append("Could not get device names: {}".format(e))
+    return "\n".join(lst)
 
 
 def get_running_cuda_version(run_lambda):
@@ -535,7 +582,9 @@ def get_cpu_info(run_lambda):
                 lst.append(str(e))
             out = "\n".join(lst)
     elif get_platform() == "darwin":
-        rc, out, err = run_lambda("sysctl -n machdep.cpu.brand_string")
+        rc, out, err = run_lambda(
+            "sysctl machdep.cpu.brand_string hw.physicalcpu hw.logicalcpu hw.memsize"
+        )
     cpu_info = "None"
     if rc == 0:
         cpu_info = out
@@ -570,8 +619,8 @@ def get_windows_version(run_lambda):
     try:
         obj = json.loads(ret)
         ret = f'{obj["Caption"]} ({obj["Version"]} {obj["OSArchitecture"]})'
-    except ValueError as e:
-        ret += f"\n{str(e)}"
+    except (ValueError, TypeError) as e:
+        ret = f"{ret}\n{str(e)}"
     return ret
 
 
@@ -698,7 +747,8 @@ def get_env_info():
     runtime version, CUDA module loading config, GPU model and configuration, Nvidia
     driver version, cuDNN version, pip version and versions of relevant pip and
     conda packages, HIP runtime version, MIOpen runtime version,
-    Caching allocator config, XNNPACK availability and CPU information.
+    Caching allocator config, XNNPACK availability, MPS availability,
+    the current torch.accelerator and CPU information.
 
     Returns:
         SystemEnv (namedtuple): A tuple containing various environment details
@@ -721,6 +771,12 @@ def get_env_info():
                 + f"Intel GPU models onboard:\n{get_intel_gpu_onboard(run_lambda)}\n"
                 + f"Intel GPU models detected:\n{get_intel_gpu_detected(run_lambda)}"
             )
+        mps_available_str = "N/A"
+        if get_platform() == "darwin":
+            mps_available_str = str(torch.backends.mps.is_available())
+            mac_gpu = get_mac_gpu_info(run_lambda)
+            if mac_gpu:
+                mps_available_str += f"\nApple GPU: {mac_gpu}"
         if (
             not hasattr(torch.version, "hip") or torch.version.hip is None
         ):  # cuda version
@@ -741,7 +797,7 @@ def get_env_info():
             rocm_compiled_version = getattr(torch.version, "rocm", None) or "N/A"
             hip_compiled_version = torch.version.hip
     else:
-        version_str = debug_mode_str = cuda_available_str = cuda_version_str = xpu_available_str = "N/A"  # type: ignore[assignment]
+        version_str = debug_mode_str = cuda_available_str = cuda_version_str = xpu_available_str = mps_available_str = "N/A"  # type: ignore[assignment]
         hip_compiled_version = hip_runtime_version = miopen_runtime_version = "N/A"
         rocm_compiled_version = "N/A"
 
@@ -779,10 +835,17 @@ def get_env_info():
         is_xnnpack_available=is_xnnpack_available(),
         cpu_info=get_cpu_info(run_lambda),
         rocm_compiled_version=rocm_compiled_version,
+        is_mps_available=mps_available_str,
+        accelerator_info=get_accelerator_info(),
+        build_environment=os.environ.get("BUILD_ENVIRONMENT", "N/A"),
+        test_config=os.environ.get("TEST_CONFIG", "N/A"),
     )
 
 
 env_info_fmt = """
+CI build environment: {build_environment}
+CI test config: {test_config}
+
 PyTorch version: {torch_version}
 Is debug build: {is_debug_build}
 CUDA used to build PyTorch: {cuda_compiled_version}
@@ -804,6 +867,8 @@ GPU models and configuration: {nvidia_gpu_models}
 Nvidia driver version: {nvidia_driver_version}
 cuDNN version: {cudnn_version}
 Is XPU available: {is_xpu_available}
+Is MPS available: {is_mps_available}
+Current accelerator: {accelerator_info}
 HIP runtime version: {hip_runtime_version}
 MIOpen runtime version: {miopen_runtime_version}
 Is XNNPACK available: {is_xnnpack_available}

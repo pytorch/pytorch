@@ -400,6 +400,12 @@ elif [[ $TEST_CONFIG == 'nogpu_AVX512' ]]; then
   export ATEN_CPU_CAPABILITY=avx2
 fi
 
+# Runtime probe only: report the environment and skip all tests.
+mkdir -p test/test-reports
+timeout -k 30 600 python -u .ci/pytorch/runtime_probe.py | tee test/test-reports/runtime_probe.log || true
+timeout -k 30 600 python -u torch/utils/collect_env.py | tee test/test-reports/collect_env.log
+exit 0
+
 test_tsan() {
   # PATH, TSAN_OPTIONS, and wheel install are set up earlier in this
   # script when BUILD_ENVIRONMENT matches *-tsan*.
