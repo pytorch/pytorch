@@ -993,7 +993,8 @@ command = [
 [[linter]]
 code = 'SHELLCHECK'
 include_patterns = [
-    '.ci/pytorch/**/*.sh'
+    '.ci/pytorch/**/*.sh',
+    '.claude/hooks/claude_code/*.sh',
 ]
 exclude_patterns = [
     '**/fb/**',
