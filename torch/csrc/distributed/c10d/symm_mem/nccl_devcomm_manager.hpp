@@ -284,9 +284,7 @@ class TORCH_API NCCLDevCommManager {
     int runtime_version = 0;
     capture_allocation_support =
         ncclGetVersion(&runtime_version) == ncclSuccess &&
-        runtime_version >= NCCL_VERSION(2, 30, 7) && device_api_support &&
-        c10::utils::check_env("NCCL_CUMEM_ENABLE") == true &&
-        c10::utils::check_env("NCCL_WIN_ENABLE") == true;
+        runtime_version >= NCCL_VERSION(2, 30, 7) && device_api_support;
     if (capture_allocation_support && capture_setup_stream_ == nullptr) {
       c10::cuda::CUDAGuard device_guard(device_);
       const cudaError_t status = cudaStreamCreateWithFlags(

@@ -406,12 +406,9 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
 
 #ifdef USE_ROCM
   bool is_live() const {
-    auto& manager = NCCLDevCommManager::get(
-        c10::Device(c10::DeviceType::CUDA, device_idx_));
-    auto live_comm = manager.find_comm(group_name_);
-    return live_comm.has_value() && *live_comm == comm_ &&
-        manager.comm_registration_is_live(
-               group_name_, comm_, comm_generation_);
+    return NCCLDevCommManager::get(
+               c10::Device(c10::DeviceType::CUDA, device_idx_))
+        .comm_registration_is_live(group_name_, comm_, comm_generation_);
   }
 
   // Some registration other than this one is live for this group, so this
