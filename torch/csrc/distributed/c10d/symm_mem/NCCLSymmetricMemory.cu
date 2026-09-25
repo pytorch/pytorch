@@ -470,11 +470,12 @@ NCCLSymmetricMemory::NCCLSymmetricMemory(
 }
 
 #ifdef USE_ROCM
-// Liveness gating is ROCm-only because retirement is: stock ProcessGroupNCCL
-// retires this group's registry identity before RCCL invalidates the comm,
-// which is what makes a stale handle detectable here. The use-after-destroy
-// hazard itself is not ROCm-specific; extending the gating to CUDA is left as
-// a follow-up so this change cannot alter CUDA behavior.
+// Liveness gating is ROCm-only: it relies on every producer retiring its
+// registry identity before the comm is invalidated, which nccl2 does on both
+// platforms but stock ProcessGroupNCCL does only on ROCm. It covers use after
+// teardown, not use that races a concurrent abort. The hazard itself is not
+// ROCm-specific; extending the gating to CUDA is left as a follow-up so this
+// change cannot alter CUDA behavior.
 bool NCCLSymmetricMemory::has_successor_comm() const {
   return pai_->has_successor_comm();
 }
