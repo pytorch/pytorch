@@ -76,11 +76,16 @@ class ExprPrinter(StrPrinter):
         if exp != int(exp):
             raise AssertionError(exp)
         exp = int(exp)
-        if exp < 0:
-            raise AssertionError(f"exponent must be non-negative, got {exp}")
         if exp > 0:
             return self.stringify([base] * exp, "*", PRECEDENCE["Mul"])
-        return "1"
+        elif exp < -1:
+            return (
+                "1/(" + self.stringify([base] * abs(exp), "*", PRECEDENCE["Mul"]) + ")"
+            )
+        elif exp == -1:
+            return "1/" + self.parenthesize(base, PRECEDENCE["Mul"])
+        else:
+            return "1"
 
     # Explicit NotImplemented functions are to prevent default sympy printing
     # behavior, which will just barf out ToFloat(...) to your IR.  The error
