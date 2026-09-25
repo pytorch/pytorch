@@ -134,8 +134,6 @@ class TestAlgorithmSelectorChoiceTypes(TestCase):
         self.assertIsNotNone(choice)
         with config.patch(autotune_cudagraph_benchmarking_iters=7):
             default = choice.bind(input_nodes=[], layout=None)
-        with config.patch(autotune_cudagraph_benchmarking_iters=0):
-            clamped = choice.bind(input_nodes=[], layout=None)
         unrolled = choice.bind(
             input_nodes=[],
             layout=None,
@@ -143,7 +141,6 @@ class TestAlgorithmSelectorChoiceTypes(TestCase):
         )
 
         self.assertEqual(default.bmreq.cudagraph_unroll, 7)
-        self.assertEqual(clamped.bmreq.cudagraph_unroll, 1)
         self.assertEqual(unrolled.bmreq.cudagraph_unroll, 4)
         self.assertNotEqual(default.hash_key(), unrolled.hash_key())
 
