@@ -7800,6 +7800,8 @@ class ShapeEnv:
                 # Keep the temporary exact divisions only when they cancel completely.
                 if new_pows.issubset(pows) and new_rationals.issubset(rationals):
                     expr = new_expr
+                else:
+                    expr = clean_expr
         return expr
 
     # TODO: overload for allow_none literal

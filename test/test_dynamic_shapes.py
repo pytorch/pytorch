@@ -2656,12 +2656,21 @@ class TestFloorDiv(TestCase):
         equality = x == 2 * (x // 2)
 
         self.assertFalse(statically_known_true(equality))
-        self.assertTrue(bool(x % 2 == 0))
+        torch._check(x % 2 == 0)
         self.assertTrue(statically_known_true(equality))
         self.assertEqual(
             shape_env.simplify((3 * (x // 2)).node.expr),
-            3 * FloorDiv(x.node.expr, 2),
+            3 * CleanDiv(x.node.expr, 2),
         )
+
+    def test_floordiv_simplify_with_unbacked_runtime_assert(self):
+        shape_env = ShapeEnv()
+        x = shape_env.create_unbacked_symint()
+        equality = x == 2 * (x // 2)
+
+        self.assertFalse(statically_known_true(equality))
+        torch._check(x % 2 == 0)
+        self.assertFalse(statically_known_true(equality))
 
     def test_floordiv_assumptions(self):
         cases = (
