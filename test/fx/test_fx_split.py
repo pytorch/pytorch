@@ -115,6 +115,77 @@ class TestFXSplit(TestCase):
         split_module_result = split_result(test_input)
         self.assertTrue(torch.equal(original_result, split_module_result))
 
+    def test_update_deps_for_fusions_matches_per_member_form(self):
+        """
+        update_deps_for_fusions() processes each fusion group once rather than
+        once per member. Assert it produces the same dependency graph as the
+        per-member form it replaced, on a grouping where members have distinct
+        outside dependencies and distinct outside users.
+        """
+
+        class Chain(torch.nn.Module):
+            def forward(self, x):
+                a = torch.sin(x)
+                b = torch.cos(a)
+                c = a + b
+                d = torch.sin(c)
+                e = c * d
+                return e - b
+
+        class AllSupported(op_support.OperatorSupportBase):
+            def is_node_supported(self, submodules, node) -> bool:
+                return True
+
+        class Splitter(splitter_base._SplitterBase):
+            def __init__(self, module, sample_input, operator_support):
+                super().__init__(
+                    module,
+                    sample_input,
+                    operator_support,
+                    splitter_base._SplitterSettingBase(),
+                )
+
+        def reference(deps, fusions):
+            """The per-member form, verbatim."""
+            for node in fusions:
+                fusion = fusions[node]
+                for fused_neighbor in fusion:
+                    deps[node].update(deps[fused_neighbor] - fusion)
+                    for user in fused_neighbor.users:
+                        if user not in fusion:
+                            deps[user].add(node)
+            return deps
+
+        def normalise(deps):
+            return {k.name: sorted(n.name for n in v) for k, v in deps.items() if v}
+
+        gm = torch.fx.symbolic_trace(Chain())
+        splitter = Splitter(gm, [torch.randn(4, 4)], AllSupported())
+
+        callables = [
+            n for n in gm.graph.nodes if n.op in splitter_base.CALLABLE_NODE_OPS
+        ]
+        self.assertGreaterEqual(len(callables), 4)
+
+        # One group spanning several nodes, built the way FxNetAccFusionsFinder
+        # builds them: every member maps to the same set object.
+        group = set(callables[:3])
+        fusions = dict.fromkeys(group, group)
+
+        splitter.fusions = fusions
+        splitter.deps = splitter.find_deps()
+        splitter.update_deps_for_fusions()
+        actual = normalise(splitter.deps)
+
+        expected = normalise(reference(splitter.find_deps(), fusions))
+
+        self.assertEqual(actual, expected)
+
+        # The documented contract: members of a fusion share their outer deps.
+        member_deps = [splitter.deps[n] - group for n in group]
+        for other in member_deps[1:]:
+            self.assertEqual(member_deps[0], other)
+
 
 class TestSplitByTags(TestCase):
     hw_classification = HardwareClassification.GENERIC
