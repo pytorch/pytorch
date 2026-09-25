@@ -33,8 +33,8 @@ namespace c10d::symmetric_memory {
 // - First level: keyed by process group name
 // - Second level: keyed by an optional key (defaults to caller function name)
 //
-// Device communicators are stored by value in the registry, but methods return
-// references wrapped in std::optional for safe access.
+// Device communicators are stored by value in the registry, and methods return
+// copies wrapped in std::optional.
 class TORCH_API NCCLDevCommManager {
  public:
   // Constructor
@@ -108,8 +108,8 @@ class TORCH_API NCCLDevCommManager {
   }
 
 #ifdef USE_ROCM
-  // Non-throwing lookup for ROCm teardown paths, where the owning process group
-  // may already have removed or replaced its communicator.
+  // Non-throwing lookup for rendezvous recovery, where the group may have no
+  // communicator registered or a different one.
   std::optional<ncclComm_t> find_comm(const std::string& group_name) {
     std::lock_guard<std::mutex> lock(mutex_);
     auto it = group_to_comm_.find(group_name);
@@ -126,10 +126,9 @@ class TORCH_API NCCLDevCommManager {
     TORCH_CHECK(
         comm_it != group_to_comm_.end() && comm_it->second == comm &&
             generation_it != group_to_comm_generation_.end(),
-        "ROCm NCCL communicator registration changed while symmetric memory "
-        "was rendezvousing group '",
+        "ROCm NCCL communicator registration for group '",
         group_name,
-        "'");
+        "' changed before its generation was read");
     return generation_it->second;
   }
 
@@ -263,10 +262,10 @@ class TORCH_API NCCLDevCommManager {
     // skips `ncclDevCommDestroy` for the reason given at `unregister_comm`.
     //
     // Identity is the pointer alone, so a successor at a recycled `ncclComm_t`
-    // address looks like a re-registration and skips the eviction. On ROCm,
-    // ProcessGroupNCCL retires before its comm is invalidated, which rules that
-    // out for it; on CUDA it keeps the entry of a destroyed comm, so a
-    // successor created after destroy_process_group can reach this case.
+    // address looks like a re-registration and skips the eviction. Producers
+    // that retire before invalidating their comm (nccl2, and ProcessGroupNCCL
+    // on ROCm) rule that out; on CUDA, ProcessGroupNCCL keeps the entry of a
+    // destroyed comm, so a successor after destroy_process_group can reach it.
     if (registered_comm != group_to_comm_.end() &&
         registered_comm->second != comm) {
       devcomm_registry_.erase(group_name);

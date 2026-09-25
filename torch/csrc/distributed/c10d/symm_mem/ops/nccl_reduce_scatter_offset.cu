@@ -26,7 +26,6 @@ __device__ __forceinline__ __half operator+(const __half& a, const __half& b) {
   return __float2half(__half2float(a) + __half2float(b));
 }
 #endif
-#include <nccl_device.h>
 #endif
 
 // Simultaneously reduce N blocks of a 2-D input tensor from a symmetric memory
@@ -337,7 +336,7 @@ void nccl_reduce_scatter_offset(
         "nccl_reduce_scatter_offset: out[", j, "] must have the same dtype as input");
     // ReduceScatterOffsetsInfo stores the per-slot size in a uint16_t, so a
     // larger block would be truncated on the device and silently reduce only
-    // owned_sizes[j] % 65536 of the rows.
+    // owned_sizes[j] % 65536 of its extent along `dim`.
     TORCH_CHECK(
         owned_sizes[j] <= std::numeric_limits<uint16_t>::max(),
         "nccl_reduce_scatter_offset: block size ", owned_sizes[j], " at j=", j,
