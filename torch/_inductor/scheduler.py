@@ -3019,7 +3019,7 @@ class SubParentAccessRelation:
 
 @dataclasses.dataclass(frozen=True)
 class MemoryDepMatch:
-    """An exact producer write and consumer read relation."""
+    """An exact producer write and consumer read relation proved for fusion."""
 
     write: MemoryDep
     read: MemoryDep
