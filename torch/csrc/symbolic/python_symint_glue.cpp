@@ -196,6 +196,14 @@ py::object steal_or_throw(PyObject* obj) {
   return py::reinterpret_steal<py::object>(obj);
 }
 
+// The node held by an object of exactly type glue.native_node, without
+// pybind11's type lookup.
+NativeSymNodeImpl* native_of(PyObject* obj) {
+  return reinterpret_cast<py::detail::instance*>(obj)
+      ->get_value_and_holder()
+      .value_ptr<NativeSymNodeImpl>();
+}
+
 // An operand of a magic method: a SymInt/SymBool with a native node, or an
 // exact int (fitting int64) or bool.
 struct Operand {
@@ -239,8 +247,7 @@ const char* parse(PyObject* obj, Operand& op) {
   if (Py_TYPE(node) != glue.native_node) {
     return "python node";
   }
-  op.node = c10::intrusive_ptr<c10::SymNodeImpl>::reclaim_copy(
-      py::cast<NativeSymNodeImpl*>(op.node_obj));
+  op.node = c10::intrusive_ptr<c10::SymNodeImpl>::reclaim_copy(native_of(node));
   op.symbool = t == glue.symbool;
   return nullptr;
 }
@@ -315,7 +322,7 @@ py::object constant_result(py::object ret) {
 // wrap_node(ret), for a binary method followed by the constant check.
 py::object wrap_result(py::object ret, bool binary) {
   if (Py_TYPE(ret.ptr()) == glue.native_node) {
-    return wrap_native(*py::cast<NativeSymNodeImpl*>(ret), ret);
+    return wrap_native(*native_of(ret.ptr()), ret);
   }
   PyObject* wrap_node =
       PyDict_GetItemWithError(glue.sym_node_dict, names.wrap_node);
@@ -551,7 +558,7 @@ std::optional<py::object> sym_sum_fast(PyObject* found_obj, PyObject* items) {
       return std::nullopt;
     }
   }
-  auto* found = py::cast<NativeSymNodeImpl*>(found_obj);
+  auto* found = native_of(found_obj);
   std::vector<c10::SymNode> nodes;
   nodes.reserve(n);
   for (auto& op : ops) {

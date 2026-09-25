@@ -619,23 +619,38 @@ struct ConfigEntry {
   }
 
   // Aliased, justknob and hidden entries count as set.
-  bool falsy(py::handle unset, py::handle hide_str) const {
-    if (!plain || py::bool_(entry.attr(hide_str))) {
+  bool falsy(PyObject* unset, PyObject* hide_str) const {
+    if (!plain) {
       return false;
     }
-    py::object v = forced;
-    if (v.is(unset)) {
-      PyObject* override_value = nullptr;
-      if (PyContextVar_Get(user_override.ptr(), nullptr, &override_value) !=
-          0) {
+    py::object hidden = py::reinterpret_steal<py::object>(
+        PyObject_GetAttr(entry.ptr(), hide_str));
+    if (!hidden) {
+      throw py::error_already_set();
+    }
+    int r = PyObject_IsTrue(hidden.ptr());
+    if (r != 0) {
+      if (r < 0) {
         throw py::error_already_set();
       }
-      v = py::reinterpret_steal<py::object>(override_value);
+      return false;
     }
-    if (v.is(unset)) {
-      v = fallback;
+    PyObject* value = forced.ptr();
+    py::object override_value;
+    if (value == unset) {
+      if (PyContextVar_Get(user_override.ptr(), nullptr, &value) != 0) {
+        throw py::error_already_set();
+      }
+      override_value = py::reinterpret_steal<py::object>(value);
     }
-    return !py::bool_(v);
+    if (value == unset) {
+      value = fallback.ptr();
+    }
+    r = PyObject_IsTrue(value);
+    if (r < 0) {
+      throw py::error_already_set();
+    }
+    return r == 0;
   }
 
   py::object entry;
@@ -741,7 +756,10 @@ py::object node_to_py(const c10::SymNode& n) {
 }
 
 bool native_config_is_default() {
-  py::gil_scoped_acquire gil;
+  std::optional<py::gil_scoped_acquire> gil;
+  if (py::detail::get_thread_state_unchecked() == nullptr) {
+    gil.emplace();
+  }
   struct Entries {
     py::object unset;
     py::object hide_str;
@@ -759,8 +777,10 @@ bool native_config_is_default() {
         ConfigEntry(config["backed_size_oblivious"], unset),
         ConfigEntry(config["aggressive_guard_free_semantics"], unset)};
   }();
-  return entries->backed.falsy(entries->unset, entries->hide_str) &&
-      entries->aggressive.falsy(entries->unset, entries->hide_str);
+  PyObject* unset = entries->unset.ptr();
+  PyObject* hide_str = entries->hide_str.ptr();
+  return entries->backed.falsy(unset, hide_str) &&
+      entries->aggressive.falsy(unset, hide_str);
 }
 
 void live_nodes_changed(NativeShapeEnv& env) {

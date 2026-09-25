@@ -222,6 +222,37 @@ std::tuple<int, uint64_t, int64_t, int> float_mpf(double v) {
   return {v < 0, man, int64_t(e) - 53 + tz, std::bit_width(man)};
 }
 
+// Position of key among the (key, value) pairs of a flatten, appending
+// {key, value} when absent. Small flattens scan linearly; larger ones switch to
+// `index` so a flatten stays linear in its size.
+template <typename Terms, typename V>
+std::pair<size_t, bool> find_or_append(
+    Terms& terms,
+    std::unordered_map<const Expr*, size_t>& index,
+    const Expr* key,
+    V value) {
+  constexpr size_t kMaxLinear = 16;
+  if (index.empty() && terms.size() < kMaxLinear) {
+    for (size_t i = 0; i < terms.size(); ++i) {
+      if (terms[i].first == key) {
+        return {i, false};
+      }
+    }
+  } else {
+    if (index.empty()) {
+      for (size_t i = 0; i < terms.size(); ++i) {
+        index.emplace(terms[i].first, i);
+      }
+    }
+    auto [it, fresh] = index.emplace(key, terms.size());
+    if (!fresh) {
+      return {it->second, false};
+    }
+  }
+  terms.emplace_back(key, value);
+  return {terms.size() - 1, true};
+}
+
 } // namespace
 
 const char* fact_name(Fact f) {
@@ -261,12 +292,6 @@ const char* fact_name(Fact f) {
   return names.at(static_cast<size_t>(f));
 }
 
-bool ExprArena::KeyEq::operator()(const Expr* a, const Expr* b) const {
-  return a->kind == b->kind && a->p == b->p && a->q == b->q &&
-      a->args.size() == b->args.size() &&
-      std::equal(a->args.begin(), a->args.end(), b->args.begin());
-}
-
 ExprArena::ExprArena() {
   zero_ = integer(0);
   one_ = integer(1);
@@ -283,26 +308,50 @@ const Expr* ExprArena::intern(
     int64_t p,
     int64_t q,
     c10::ArrayRef<const Expr*> args) {
-  Expr key{kind, 0, 0, p, q, {}, {}};
+  size_t h = c10::get_hash(static_cast<int>(kind), p, q);
+  for (const Expr* a : args) {
+    h = c10::hash_combine(h, a->id);
+  }
+  if ((storage_.size() + 1) * 4 > table_.size() * 3) {
+    grow_table();
+  }
+  size_t mask = table_.size() - 1;
+  size_t i = (h * 0x9E3779B97F4A7C15ULL) >> table_shift_;
+  for (; table_[i].e != nullptr; i = (i + 1) & mask) {
+    const Slot& s = table_[i];
+    if (s.hash == h && s.e->kind == kind && s.e->p == p && s.e->q == q &&
+        std::equal(
+            s.e->args.begin(), s.e->args.end(), args.begin(), args.end())) {
+      return s.e;
+    }
+  }
+  Expr key{kind, static_cast<uint32_t>(storage_.size()), h, p, q, {}, {}};
   key.args.assign(args.begin(), args.end());
   key.has_float =
       kind == Kind::Float || std::any_of(args.begin(), args.end(), [](auto a) {
         return a->has_float;
       });
-  size_t h = c10::get_hash(static_cast<int>(kind), p, q);
-  for (const Expr* a : args) {
-    h = c10::hash_combine(h, a->id);
-  }
-  key.hash = h;
-  auto it = table_.find(&key);
-  if (it != table_.end()) {
-    return *it;
-  }
-  key.id = static_cast<uint32_t>(storage_.size());
   key.kb = kind == Kind::Symbol ? symbols_.at(p).facts : default_kb(&key);
   const Expr* e = &storage_.emplace_back(std::move(key));
-  table_.insert(e);
+  table_[i] = {h, e};
   return e;
+}
+
+void ExprArena::grow_table() {
+  std::vector<Slot> old = std::exchange(
+      table_, std::vector<Slot>(table_.empty() ? 1024 : table_.size() * 2));
+  table_shift_ = 64 - static_cast<int>(std::countr_zero(table_.size()));
+  size_t mask = table_.size() - 1;
+  for (const Slot& s : old) {
+    if (s.e == nullptr) {
+      continue;
+    }
+    size_t i = (s.hash * 0x9E3779B97F4A7C15ULL) >> table_shift_;
+    while (table_[i].e != nullptr) {
+      i = (i + 1) & mask;
+    }
+    table_[i] = s;
+  }
 }
 
 const Expr* ExprArena::integer(int64_t v) {
@@ -518,13 +567,9 @@ const Expr* ExprArena::add(c10::ArrayRef<const Expr*> in) {
         break;
     }
     NumVal cn = num_val(c);
-    auto it = term_index.find(s);
-    if (it == term_index.end()) {
-      term_index.emplace(s, terms.size());
-      terms.emplace_back(s, cn);
-    } else {
-      NumVal& acc = terms[it->second].second;
-      acc = num_add(acc, cn);
+    auto [pos, fresh] = find_or_append(terms, term_index, s, cn);
+    if (!fresh) {
+      terms[pos].second = num_add(terms[pos].second, cn);
     }
   }
   c10::SmallVector<const Expr*, 8> newseq;
@@ -632,12 +677,9 @@ const Expr* ExprArena::mul(c10::ArrayRef<const Expr*> in) {
       default:
         break;
     }
-    auto it = power_index.find(b);
-    if (it == power_index.end()) {
-      power_index.emplace(b, powers.size());
-      powers.emplace_back(b, e);
-    } else {
-      int64_t& acc = powers[it->second].second;
+    auto [pos, fresh] = find_or_append(powers, power_index, b, e);
+    if (!fresh) {
+      int64_t& acc = powers[pos].second;
       if (__builtin_add_overflow(acc, e, &acc)) {
         throw NativeUnsupported("integer overflow");
       }

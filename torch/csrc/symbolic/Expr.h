@@ -12,7 +12,6 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -369,17 +368,18 @@ class ExprArena : public c10::intrusive_ptr_target {
   Tri eval_fact(const Expr* e, Fact f);
   static FactKB default_kb(const Expr* e);
 
-  struct KeyHash {
-    size_t operator()(const Expr* e) const {
-      return e->hash;
-    }
-  };
-  struct KeyEq {
-    bool operator()(const Expr* a, const Expr* b) const;
+  void grow_table();
+
+  // Open-addressing intern table over Expr::hash with linear probing; the
+  // capacity is a power of two, 1 << (64 - table_shift_).
+  struct Slot {
+    size_t hash;
+    const Expr* e;
   };
 
   std::deque<Expr> storage_;
-  std::unordered_set<const Expr*, KeyHash, KeyEq> table_;
+  std::vector<Slot> table_;
+  int table_shift_ = 64;
   std::vector<SymbolInfo> symbols_;
   std::unordered_map<std::string, std::vector<uint32_t>> symbols_by_name_;
   const Expr* zero_;
