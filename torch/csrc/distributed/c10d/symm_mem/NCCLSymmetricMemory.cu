@@ -277,25 +277,16 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
         : static_cast<char*>(signal_pads_[i]) + buffer_offset_;
   }
 #ifdef USE_ROCM
-  // A synchronous H2D copy returns HIP 906 and invalidates an active capture,
-  // so ROCm uploads the peer tables asynchronously. The copies go on the
-  // non-captured setup stream rather than the current stream: these tables are
-  // immutable for the lifetime of this object, so they only ever need to be
-  // written once, and writing them off the capturing stream means the handle
-  // is fully initialized when rendezvous returns instead of depending on a
-  // later graph replay. The synchronize also retires the enqueued copies
-  // before a failure can unwind this object, whose members are the copy
-  // sources. CUDA keeps its existing synchronous path.
+  // Upload the peer tables asynchronously on the non-captured setup stream: a
+  // synchronous H2D copy invalidates an active capture, and a copy recorded on
+  // the capturing stream would only run on replay. The tables are immutable,
+  // so writing them once here leaves the handle fully initialized when
+  // rendezvous returns. The synchronize also retires the copies before a
+  // failure can unwind this object, whose members are their sources.
   //
-  // Being off the capturing stream is not by itself enough to make the
-  // synchronize legal: under a Global-mode capture any host-side wait is a
-  // prohibited action, so cudaStreamSynchronize on this stream returns HIP 900
-  // and the subsequent end-capture fails with 901 (measured on gfx950 /
-  // HIP 7.16; hipStreamWaitEvent is the only wait that survives untouched).
-  // The Relaxed guard opts this thread out of that check for the duration,
-  // which keeps the capture usable and replayable while preserving the
-  // host-side ordering above. This mirrors alloc(), which already wraps its
-  // setup-stream memset the same way.
+  // A host-side wait is illegal under a Global-mode capture even on a
+  // non-captured stream, so the synchronize runs in Relaxed thread mode, as
+  // alloc() does for its setup-stream memset. CUDA keeps its synchronous path.
   if (mgr.capture_allocation_supported()) {
     std::lock_guard<std::mutex> setup_lock(mgr.capture_setup_mutex());
     const cudaStream_t setup_stream = mgr.capture_setup_stream();
@@ -321,10 +312,9 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
     C10_CUDA_CHECK(signal_pads_copy_status);
     C10_CUDA_CHECK(sync_status);
   } else {
-    // No setup stream exists, which also means this configuration cannot
-    // rendezvous under capture at all: window registration above already
-    // fails during capture on the tested older RCCL. The synchronous copies
-    // are therefore safe here and match CUDA.
+    // Without capture-allocation support (older RCCL, no device API, or the
+    // kill switch), rendezvous is only supported outside capture, so the
+    // synchronous copies are safe here and match CUDA.
     C10_CUDA_CHECK(cudaMemcpy(
         buffers_dev_, buffers_.data(), arr_size, cudaMemcpyHostToDevice));
     C10_CUDA_CHECK(cudaMemcpy(
@@ -375,14 +365,10 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
     c10::cuda::CUDAGuard guard(device_idx_);
     if (combined_win_ != nullptr) {
 #ifdef USE_ROCM
-      // Skip if this group no longer owns `comm_`. Stock ProcessGroupNCCL now
-      // removes this identity before destroying or aborting RCCL, so a retained
-      // handle cannot attempt late window deregistration through that comm.
-      // Matching on the registration generation as well as the pointer means
-      // the comparison stays correct even if a same-name successor is handed a
-      // recycled `ncclComm_t` address; that is defensive rather than an
-      // observed RCCL allocation behavior.
-      // Relaxed: the destructor may run during HIP capture, and RCCL 2.30.7
+      // Deregister only while this exact registration, pointer and generation,
+      // is live: a retired comm may already be freed, and a successor may sit
+      // at the same address.
+      // Relaxed: the destructor may run during HIP capture, and RCCL's
       // ncclCommWindowDeregister leaves the calling thread in Relaxed mode;
       // the guard restores the caller's mode on exit.
       // TODO: drop this guard once RCCL restores the caller's capture thread
@@ -429,16 +415,12 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
   }
 
   // Some registration other than this one is live for this group, so this
-  // handle can be rebuilt against it. Strictly narrower than `!is_live()`,
-  // which also covers the group having no communicator at all: that case has
-  // nothing to rebuild against and every rank observes it identically, so it is
-  // left to the staleness check to report rather than triggering a rebuild that
-  // would enter a collective window registration on only some ranks.
-  //
-  // "Other than this one" has to be decided the same way `is_live` decides it,
-  // on the pointer and the generation together. A successor handed a recycled
-  // `ncclComm_t` address compares equal on the pointer alone and would look
-  // like no successor at all, which would turn recovery into an error.
+  // handle can be rebuilt against it. Strictly narrower than `!is_live()`: with
+  // no communicator at all there is nothing to rebuild against, every rank sees
+  // the same thing, and the staleness check reports it instead of starting a
+  // collective window registration only some ranks would enter. "Other than
+  // this one" compares pointer and generation, as `is_live` does, so a
+  // successor at a recycled address still counts as a successor.
   bool has_successor_comm() const {
     auto& manager = NCCLDevCommManager::get(
         c10::Device(c10::DeviceType::CUDA, device_idx_));
@@ -491,14 +473,11 @@ NCCLSymmetricMemory::NCCLSymmetricMemory(
 }
 
 #ifdef USE_ROCM
-// Liveness gating is ROCm-only because the mechanism it relies on is ROCm-only:
-// stock ProcessGroupNCCL retires this group's registry identity before RCCL
-// destroy or abort, which is what makes a stale handle detectable here. The
-// use-after-destroy hazard itself is not ROCm-specific; it is fixed here first
-// because on the tested gfx950 stack it surfaced as a hard
-// HSA_STATUS_ERROR_MEMORY_FAULT from a barrier kernel launched through a
-// destroyed communicator. Extending the same gating to CUDA is left as a
-// follow-up so this change cannot alter CUDA behavior.
+// Liveness gating is ROCm-only because retirement is: stock ProcessGroupNCCL
+// retires this group's registry identity before RCCL invalidates the comm,
+// which is what makes a stale handle detectable here. The use-after-destroy
+// hazard itself is not ROCm-specific; extending the gating to CUDA is left as
+// a follow-up so this change cannot alter CUDA behavior.
 bool NCCLSymmetricMemory::has_successor_comm() const {
   return pai_->has_successor_comm();
 }
@@ -556,7 +535,7 @@ void* NCCLSymmetricMemory::get_multicast_ptr() {
 
 void NCCLSymmetricMemory::barrier(int channel, size_t timeout_ms) {
 #ifdef USE_ROCM
-  // Reject on the host before stale peer signal-pad pointers reach gfx950.
+  // Reject on the host before stale peer signal-pad pointers reach a kernel.
   check_liveness();
 #endif
 #ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
@@ -783,19 +762,16 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
 #endif
     void* alloc_base;
 #ifdef USE_ROCM
-    // Keep CUDA's existing allocation path unchanged. On the tested HIP stack
-    // the default allocation and zeroing sequence has three separate problems
-    // under graph capture: ncclMemAlloc falls back to hipMalloc, which capture
-    // rejects; a synchronous hipMemset returns HIP 906 and invalidates the
-    // capture; and an async memset recorded on the capturing stream becomes a
-    // replayable node that can wipe a peer's signal pad on every replay.
+    // Keep CUDA's existing allocation path unchanged. Under HIP graph capture
+    // the default sequence fails three ways: ncclMemAlloc falls back to
+    // hipMalloc, which capture rejects; a synchronous hipMemset invalidates the
+    // capture; and an async memset on the capturing stream becomes a replayed
+    // node that can wipe a peer's signal pad.
     //
     // CUMEM allocation plus an async zero on a non-captured setup stream
-    // avoids all three, so it is used wherever RCCL supports it rather than
-    // only while capturing. Keying on capability instead of capture state
-    // gives the supported configuration a single code path and removes any
-    // dependence on detecting capture. Support is snapshotted at comm init
-    // from RCCL 2.30.7 / device API / CUMEM+WIN (see NCCLDevCommManager).
+    // avoids all three, so it is used wherever RCCL supports it, not only while
+    // capturing, which gives one code path and no dependence on detecting
+    // capture. Support is snapshotted at comm init (see NCCLDevCommManager).
     auto& mgr = NCCLDevCommManager::get(
         c10::Device(c10::DeviceType::CUDA, device_idx));
     if (mgr.capture_allocation_supported()) {
