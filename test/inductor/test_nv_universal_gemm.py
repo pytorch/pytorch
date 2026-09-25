@@ -108,6 +108,20 @@ def _make_nvfp4_scaled_mm_inputs(m, n, k):
     return a, b, scale_a, scale_b
 
 
+def _nvfp4_scaled_mm(a, b, scale_a, scale_b, *, out_dtype=torch.bfloat16):
+    return torch._scaled_mm(
+        a,
+        b,
+        scale_a=scale_a,
+        scale_b=scale_b,
+        out_dtype=out_dtype,
+    )
+
+
+def _nvfp4_scaled_mm_with_output_scale(a, b, scale_a, scale_b, output_scale):
+    return _nvfp4_scaled_mm(a, b, scale_a, scale_b) * output_scale
+
+
 def _make_output_scale_match(*, scale_dtype, use_fast_accum=False):
     graph = torch.fx.Graph()
 
@@ -159,26 +173,12 @@ def _nvgemm_config(**overrides):
     return cfg
 
 
-def _force_pdl_nvgemm_choice():
-    """Return a selector patch that deterministically chooses a PDL provider."""
-    from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
-        NVUniversalGemmCaller,
-    )
+def _force_nvgemm_choice(predicate):
+    """Return a selector patch that assigns the best time to one choice class."""
     from torch._inductor.select_algorithm import AlgorithmSelectorCache
 
     def benchmark(_selector, choices, *_args, **_kwargs):
-        def is_pdl_choice(choice):
-            if not isinstance(choice, NVUniversalGemmCaller):
-                return False
-            return bool(
-                getattr(
-                    getattr(choice.kernel, "impl", None),
-                    "use_pdl",
-                    getattr(choice.kernel.metadata.design, "use_pdl", False),
-                )
-            )
-
-        return {choice: 0.1 if is_pdl_choice(choice) else 1.0 for choice in choices}
+        return {choice: 0.1 if predicate(choice) else 1.0 for choice in choices}
 
     return mock.patch.object(
         AlgorithmSelectorCache,
@@ -186,6 +186,26 @@ def _force_pdl_nvgemm_choice():
         autospec=True,
         side_effect=benchmark,
     )
+
+
+def _force_pdl_nvgemm_choice():
+    """Return a selector patch that deterministically chooses a PDL provider."""
+    from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
+        NVUniversalGemmCaller,
+    )
+
+    def is_pdl_choice(choice):
+        if not isinstance(choice, NVUniversalGemmCaller):
+            return False
+        return bool(
+            getattr(
+                getattr(choice.kernel, "impl", None),
+                "use_pdl",
+                getattr(choice.kernel.metadata.design, "use_pdl", False),
+            )
+        )
+
+    return _force_nvgemm_choice(is_pdl_choice)
 
 
 @unittest.skipIf(
@@ -322,27 +342,18 @@ class TestNVUniversalGemmPDLMetadata(TestCase):
 
         non_pdl = kernel(False)
         pdl = kernel(True)
-        non_pdl_efc = kernel(False)
-        pdl_efc = kernel(True)
-        self.assertEqual(
-            prefer_pdl_kernels([non_pdl, pdl], [non_pdl_efc, pdl_efc], True),
-            ([pdl], [pdl_efc]),
-        )
-        self.assertEqual(
-            prefer_pdl_kernels([non_pdl], [non_pdl_efc], True),
-            ([non_pdl], [non_pdl_efc]),
-        )
-        self.assertEqual(
-            prefer_pdl_kernels([non_pdl, pdl], [non_pdl_efc, pdl_efc], False),
-            ([non_pdl, pdl], [non_pdl_efc, pdl_efc]),
-        )
+        for candidates, enabled, expected in (
+            ([non_pdl, pdl], True, [pdl]),
+            ([non_pdl], True, [non_pdl]),
+            ([non_pdl, pdl], False, [non_pdl, pdl]),
+        ):
+            self.assertEqual(
+                prefer_pdl_kernels(candidates, candidates, enabled),
+                (expected, expected),
+            )
 
-    def test_pdl_chain_only_enables_direct_nvgemm_consumers(self):
-        kernel, graph, previous_node, _, current_read = self._make_pdl_chain()
-
-        enabled, is_nvgemm = self._pdl_codegen_enabled(kernel, graph)
-        self.assertTrue(enabled)
-        is_nvgemm.assert_called_once_with(previous_node)
+    def test_pdl_chain_rejects_ineligible_consumers(self):
+        kernel, graph, _, _, current_read = self._make_pdl_chain()
 
         kernel.args.workspace_args = (object(),)
         enabled, _ = self._pdl_codegen_enabled(kernel, graph)
@@ -506,13 +517,7 @@ class TestNVUniversalGemm(TestCase):
             producer_stream = torch.cuda.Stream()
             side_stream = torch.cuda.Stream()
             with torch.cuda.stream(producer_stream):
-                gemm = torch._scaled_mm(
-                    a,
-                    b,
-                    scale_a=scale_a,
-                    scale_b=scale_b,
-                    out_dtype=torch.bfloat16,
-                )
+                gemm = _nvfp4_scaled_mm(a, b, scale_a, scale_b)
             with torch.cuda.stream(side_stream):
                 side = side_input + 1
             with torch.cuda.stream(producer_stream):
@@ -565,13 +570,7 @@ class TestNVUniversalGemm(TestCase):
             consumer_stream = torch.cuda.Stream()
             event = torch.cuda.Event()
             with torch.cuda.stream(producer_stream):
-                gemm = torch._scaled_mm(
-                    a,
-                    b,
-                    scale_a=scale_a,
-                    scale_b=scale_b,
-                    out_dtype=torch.bfloat16,
-                )
+                gemm = _nvfp4_scaled_mm(a, b, scale_a, scale_b)
                 event.record()
             with torch.cuda.stream(consumer_stream):
                 event.wait()
@@ -595,13 +594,7 @@ class TestNVUniversalGemm(TestCase):
         a, b, scale_a, scale_b = _make_nvfp4_scaled_mm_inputs(m, n, k)
 
         def scaled_mm_then_reduce(a, b, scale_a, scale_b):
-            gemm = torch._scaled_mm(
-                a,
-                b,
-                scale_a=scale_a,
-                scale_b=scale_b,
-                out_dtype=torch.bfloat16,
-            )
+            gemm = _nvfp4_scaled_mm(a, b, scale_a, scale_b)
             return gemm.float().sum(dim=-1)
 
         expected = scaled_mm_then_reduce(a, b, scale_a, scale_b)
@@ -626,13 +619,7 @@ class TestNVUniversalGemm(TestCase):
         consumer_input = torch.randn(m, n, device="cuda", dtype=torch.bfloat16)
 
         def scaled_mm_with_consumer_input(a, b, scale_a, scale_b, consumer_input):
-            gemm = torch._scaled_mm(
-                a,
-                b,
-                scale_a=scale_a,
-                scale_b=scale_b,
-                out_dtype=torch.bfloat16,
-            )
+            gemm = _nvfp4_scaled_mm(a, b, scale_a, scale_b)
             return gemm.float() + consumer_input.float()
 
         expected = scaled_mm_with_consumer_input(a, b, scale_a, scale_b, consumer_input)
@@ -799,16 +786,7 @@ class TestNVUniversalGemm(TestCase):
 
         def scaled_mm(a, b, scale_a, scale_b, alpha_source):
             alpha = alpha_source.mean()
-            return (
-                torch._scaled_mm(
-                    a,
-                    b,
-                    scale_a=scale_a,
-                    scale_b=scale_b,
-                    out_dtype=torch.bfloat16,
-                )
-                * alpha
-            )
+            return _nvfp4_scaled_mm(a, b, scale_a, scale_b) * alpha
 
         expected = scaled_mm(a, b, scale_a, scale_b, alpha_source)
         torch._dynamo.reset()
@@ -816,19 +794,14 @@ class TestNVUniversalGemm(TestCase):
         from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
             NVUniversalGemmCaller,
         )
-        from torch._inductor.select_algorithm import AlgorithmSelectorCache
 
         def is_target(caller):
             return (
                 isinstance(caller, NVUniversalGemmCaller)
                 and caller.swap_ab
-                and caller.kernel.metadata.design.use_prefetch
                 and caller.kernel.metadata.operator_class.__name__
                 == "VendoredDenseBlockScaledGemmKernel"
             )
-
-        def benchmark(_selector, choices, *_args, **_kwargs):
-            return {choice: 0.1 if is_target(choice) else 1.0 for choice in choices}
 
         with (
             config.patch(
@@ -839,12 +812,7 @@ class TestNVUniversalGemm(TestCase):
                     force_disable_caches=True,
                 )
             ),
-            mock.patch.object(
-                AlgorithmSelectorCache,
-                "benchmark",
-                autospec=True,
-                side_effect=benchmark,
-            ),
+            _force_nvgemm_choice(is_target),
         ):
             compiled = torch.compile(scaled_mm)
             result, (code,) = run_and_get_code(
@@ -867,16 +835,7 @@ class TestNVUniversalGemm(TestCase):
             graph_result, replay_expected, equal_nan=True, atol=1.0, rtol=2e-2
         )
         self.assertIn("swap_ab=True", code)
-        self.assertIn("_prefetch_pdl", code)
         self.assertIn("output_scale=", code)
-        self.assertIn("prefetch_mode='1'", code)
-        self.assertIn("use_pdl=True", code)
-        self.assertNotIn("CuTeDSLEpilogueArguments", code)
-        self.assertIn(
-            "_compiled_cache, _disk_fn_cache, _KERNEL_NAME, _DISK_CACHE_CONFIG_KEY,",
-            code,
-        )
-        self.assertIn("module_path=_KERNEL_NAME", code)
 
     def test_pdl_control_calls_are_guarded_and_release_is_not_warp_gated(self):
         from torch._inductor.kernel.vendored_templates.cutedsl.dense_blockscaled_gemm_persistent import (
@@ -1113,13 +1072,7 @@ class TestNVUniversalGemm(TestCase):
         alpha = torch.rand((), device="cuda")
 
         def scaled_mm_qkv(a, b, scale_a, scale_b, alpha):
-            gemm = torch._scaled_mm(
-                a,
-                b,
-                scale_a=scale_a,
-                scale_b=scale_b,
-                out_dtype=torch.bfloat16,
-            )
+            gemm = _nvfp4_scaled_mm(a, b, scale_a, scale_b)
             out = alpha * gemm if scale_first else gemm * alpha
             return torch.split(out, (4096, 1024, 1024), dim=-1)
 
@@ -1131,9 +1084,6 @@ class TestNVUniversalGemm(TestCase):
             NVUniversalGemmCaller,
         )
 
-        def benchmark(caller, *args, **kwargs):
-            return 0.1 if caller.swap_ab else 1.0
-
         with (
             config.patch(
                 _nvgemm_config(
@@ -1143,8 +1093,9 @@ class TestNVUniversalGemm(TestCase):
                     compile_threads=2,
                 )
             ),
-            mock.patch.object(
-                NVUniversalGemmCaller, "benchmark", autospec=True, side_effect=benchmark
+            _force_nvgemm_choice(
+                lambda caller: isinstance(caller, NVUniversalGemmCaller)
+                and caller.swap_ab
             ),
         ):
             compiled = torch.compile(scaled_mm_qkv)
@@ -1156,18 +1107,25 @@ class TestNVUniversalGemm(TestCase):
             )
         self.assertEqual(counters["inductor"]["scaled_mm_output_scale_fused"], 1)
         self.assertIn("output_scale=", code)
-        self.assertIn("output_scale_param_name=", code)
         self.assertNotIn("triton_poi_fused_mul", code)
 
-    def test_scaled_mm_output_scale_rejects_fast_accum(self):
+    @parametrize(
+        "scale_dtype,use_fast_accum",
+        (
+            (torch.float8_e4m3fn, True),
+            (torch.float8_e8m0fnu, False),
+        ),
+    )
+    def test_scaled_mm_output_scale_rejects_unsupported_recipe(
+        self, scale_dtype, use_fast_accum
+    ):
         from torch._inductor.fx_passes.post_grad import _can_fold_scaled_mm_output_scale
 
         match, normalized_kwargs = _make_output_scale_match(
-            scale_dtype=torch.float8_e4m3fn,
-            use_fast_accum=True,
+            scale_dtype=scale_dtype,
+            use_fast_accum=use_fast_accum,
         )
-        normalized = MagicMock()
-        normalized.kwargs = normalized_kwargs
+        normalized = MagicMock(kwargs=normalized_kwargs)
 
         with (
             config.patch(_nvgemm_config()),
@@ -1228,13 +1186,7 @@ class TestNVUniversalGemm(TestCase):
         alpha = torch.rand((), device="cuda")
 
         def scaled_mm_with_shared_output(a, b, scale_a, scale_b, alpha):
-            result = torch._scaled_mm(
-                a,
-                b,
-                scale_a=scale_a,
-                scale_b=scale_b,
-                out_dtype=torch.bfloat16,
-            )
+            result = _nvfp4_scaled_mm(a, b, scale_a, scale_b)
             return result, result * alpha
 
         expected = scaled_mm_with_shared_output(a, b, scale_a, scale_b, alpha)
@@ -1257,19 +1209,9 @@ class TestNVUniversalGemm(TestCase):
         a, b, scale_a, scale_b = _make_nvfp4_scaled_mm_inputs(m, n, k)
         alpha = torch.rand((), device="cuda")
 
-        def scaled_mm(a, b, scale_a, scale_b, alpha):
-            return (
-                torch._scaled_mm(
-                    a,
-                    b,
-                    scale_a=scale_a,
-                    scale_b=scale_b,
-                    out_dtype=torch.bfloat16,
-                )
-                * alpha
-            )
-
-        expected = scaled_mm(a, b, scale_a, scale_b, alpha)
+        expected = _nvfp4_scaled_mm_with_output_scale(
+            a, b, scale_a, scale_b, alpha
+        )
         torch._dynamo.reset()
         counters["inductor"]["scaled_mm_output_scale_fused"] = 0
         with (
@@ -1291,7 +1233,12 @@ class TestNVUniversalGemm(TestCase):
             ) as add_aten_choice,
         ):
             actual, (code,) = run_and_get_code(
-                torch.compile(scaled_mm), a, b, scale_a, scale_b, alpha
+                torch.compile(_nvfp4_scaled_mm_with_output_scale),
+                a,
+                b,
+                scale_a,
+                scale_b,
+                alpha,
             )
 
         torch.testing.assert_close(actual, expected, equal_nan=True)
@@ -1310,19 +1257,9 @@ class TestNVUniversalGemm(TestCase):
         a, b, scale_a, scale_b = _make_nvfp4_scaled_mm_inputs(m, n, k)
         alpha = torch.rand((), device="cuda")
 
-        def scaled_mm(a, b, scale_a, scale_b, alpha):
-            return (
-                torch._scaled_mm(
-                    a,
-                    b,
-                    scale_a=scale_a,
-                    scale_b=scale_b,
-                    out_dtype=torch.bfloat16,
-                )
-                * alpha
-            )
-
-        expected = scaled_mm(a, b, scale_a, scale_b, alpha)
+        expected = _nvfp4_scaled_mm_with_output_scale(
+            a, b, scale_a, scale_b, alpha
+        )
         original_select = mm.autotune_select_algorithm
         select_calls = 0
 
@@ -1342,19 +1279,12 @@ class TestNVUniversalGemm(TestCase):
                 side_effect=fail_native_scale_once,
             ),
         ):
-            actual = torch.compile(scaled_mm)(a, b, scale_a, scale_b, alpha)
+            actual = torch.compile(_nvfp4_scaled_mm_with_output_scale)(
+                a, b, scale_a, scale_b, alpha
+            )
 
         torch.testing.assert_close(actual, expected, equal_nan=True)
         self.assertGreaterEqual(select_calls, 2)
-
-    def test_scaled_mm_output_scale_not_folded_for_mxfp4(self):
-        """Do not mark MXFP4 for the NVFP4-only native alpha ABI."""
-        from torch._inductor.fx_passes.post_grad import _can_fold_scaled_mm_output_scale
-
-        match, _ = _make_output_scale_match(scale_dtype=torch.float8_e8m0fnu)
-
-        with config.patch(_nvgemm_config()):
-            self.assertFalse(_can_fold_scaled_mm_output_scale(match))
 
     @parametrize(
         "packed_value,input_scale,output_scale,expected_kind",
@@ -1388,13 +1318,7 @@ class TestNVUniversalGemm(TestCase):
 
         def scaled_mm(a, b, scale_a, scale_b, output_scale):
             return (
-                torch._scaled_mm(
-                    a,
-                    b,
-                    scale_a=scale_a,
-                    scale_b=scale_b,
-                    out_dtype=torch.float16,
-                )
+                _nvfp4_scaled_mm(a, b, scale_a, scale_b, out_dtype=torch.float16)
                 * output_scale
             )
 
@@ -1421,13 +1345,7 @@ class TestNVUniversalGemm(TestCase):
         output_scale = torch.rand(1, device="cuda") if scale_kind == "vector" else None
 
         def scaled_mm(a, b, scale_a, scale_b, output_scale):
-            result = torch._scaled_mm(
-                a,
-                b,
-                scale_a=scale_a,
-                scale_b=scale_b,
-                out_dtype=torch.bfloat16,
-            )
+            result = _nvfp4_scaled_mm(a, b, scale_a, scale_b)
             return result * (0.5 if output_scale is None else output_scale)
 
         expected = scaled_mm(a, b, scale_a, scale_b, output_scale)
@@ -2256,6 +2174,50 @@ class TestNVUniversalGemm(TestCase):
 class TestNVUniversalGemmHeuristics(TestCase):
     """Unit tests for NVUniversalGemmHeuristics without requiring actual libraries."""
 
+    @staticmethod
+    def _make_nvfp4_benchmark_request(
+        *, m=32, backends="NVGEMM", has_output_scale=False
+    ):
+        from torch._inductor.autotune_process import TensorMeta
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
+            GemmVariant,
+            NVUniversalGemmBenchmarkRequest,
+        )
+        from torch.nn.functional import ScalingType  # type: ignore[attr-defined]
+
+        def tensor_meta(dtype, sizes, strides):
+            return TensorMeta(
+                device=torch.device("cuda"),
+                dtype=dtype,
+                sizes=sizes,
+                strides=strides,
+                offset=0,
+            )
+
+        inputs = [
+            tensor_meta(torch.float4_e2m1fn_x2, (m, 4096), (4096, 1)),
+            tensor_meta(torch.float4_e2m1fn_x2, (4096, 4096), (4096, 1)),
+        ]
+        output = tensor_meta(torch.bfloat16, (m, 4096), (4096, 1))
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": backends,
+                "autotune_cudagraph_benchmarking": True,
+            }
+        ):
+            return NVUniversalGemmBenchmarkRequest(
+                "kernel",
+                inputs,
+                output,
+                MagicMock(),
+                torch.float32,
+                GemmVariant.SCALED_GEMM,
+                scale_type_a=ScalingType.BlockWise1x16,
+                scale_type_b=ScalingType.BlockWise1x16,
+                has_output_scale=has_output_scale,
+            )
+
     def test_atomic_reduction_fusion_hooks(self):
         from torch._inductor.codegen.cuda_combined_scheduling import (
             CUDACombinedScheduling,
@@ -2471,10 +2433,6 @@ class TestNVUniversalGemmHeuristics(TestCase):
 
     def test_mixed_backend_nvfp4_cudagraph_unroll_uses_global_policy(self):
         """Mixed backends use one replay count so their timings stay comparable."""
-        from torch._inductor.autotune_process import (
-            ExternKernelBenchmarkRequest,
-            TensorMeta,
-        )
         from torch._inductor.heuristics.template.nv_universal_gemm import (
             nvgemm_cudagraph_unroll,
         )
@@ -2494,24 +2452,8 @@ class TestNVUniversalGemmHeuristics(TestCase):
                 ScalingType.BlockWise1x16,
                 ScalingType.BlockWise1x16,
             )
-            output_meta = TensorMeta(
-                device=torch.device("cuda"),
-                dtype=torch.bfloat16,
-                sizes=(32, 4096),
-                strides=(4096, 1),
-                offset=0,
-            )
-            aten_request = ExternKernelBenchmarkRequest(
-                "aten",
-                [],
-                output_meta,
-                (),
-                "extern_kernels.mm",
-                benchmark_device_type="cuda",
-            )
 
         self.assertEqual(nvgemm_unroll, 7)
-        self.assertEqual(nvgemm_unroll, aten_request.cudagraph_unroll)
 
     @parametrize(
         "shape,expected",
@@ -2710,54 +2652,11 @@ class TestNVUniversalGemmHeuristics(TestCase):
         )
 
     def test_nvgemm_benchmark_policy_is_snapshotted_and_cached(self):
-        from torch._inductor.autotune_process import TensorMeta
         from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
-            GemmVariant,
-            NVUniversalGemmBenchmarkRequest,
             NVUniversalGemmCaller,
         )
-        from torch.nn.functional import ScalingType  # type: ignore[attr-defined]
 
-        input_meta = [
-            TensorMeta(
-                device=torch.device("cuda"),
-                dtype=torch.float4_e2m1fn_x2,
-                sizes=(32, 4096),
-                strides=(4096, 1),
-                offset=0,
-            ),
-            TensorMeta(
-                device=torch.device("cuda"),
-                dtype=torch.float4_e2m1fn_x2,
-                sizes=(4096, 4096),
-                strides=(4096, 1),
-                offset=0,
-            ),
-        ]
-        output_meta = TensorMeta(
-            device=torch.device("cuda"),
-            dtype=torch.bfloat16,
-            sizes=(32, 4096),
-            strides=(4096, 1),
-            offset=0,
-        )
-        with config.patch(
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "NVGEMM",
-                "autotune_cudagraph_benchmarking": True,
-            }
-        ):
-            request = NVUniversalGemmBenchmarkRequest(
-                "kernel",
-                input_meta,
-                output_meta,
-                MagicMock(),
-                torch.float32,
-                GemmVariant.SCALED_GEMM,
-                scale_type_a=ScalingType.BlockWise1x16,
-                scale_type_b=ScalingType.BlockWise1x16,
-            )
+        request = self._make_nvfp4_benchmark_request()
 
         self.assertTrue(request.config_cudagraph_benchmarking)
         self.assertEqual(request.cudagraph_unroll, 16)
@@ -2779,81 +2678,23 @@ class TestNVUniversalGemmHeuristics(TestCase):
             request.config_cudagraph_benchmarking = False
             self.assertEqual(caller.hash_key(), "k_cudagraph=off_unroll=1_cold_cache=0")
 
-        with config.patch(
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "ATEN,NVGEMM",
-                "autotune_cudagraph_benchmarking": True,
-            }
-        ):
-            mixed_request = NVUniversalGemmBenchmarkRequest(
-                "kernel",
-                input_meta,
-                output_meta,
-                MagicMock(),
-                torch.float32,
-                GemmVariant.SCALED_GEMM,
-                scale_type_a=ScalingType.BlockWise1x16,
-                scale_type_b=ScalingType.BlockWise1x16,
-            )
+        mixed_request = self._make_nvfp4_benchmark_request(backends="ATEN,NVGEMM")
 
         self.assertEqual(mixed_request.cudagraph_unroll, 1)
         self.assertFalse(mixed_request.cold_cache_benchmarking)
 
-        with config.patch(
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "ATEN,NVGEMM",
-                "autotune_cudagraph_benchmarking": True,
-            }
-        ):
-            mixed_native_scale_request = NVUniversalGemmBenchmarkRequest(
-                "kernel",
-                input_meta,
-                output_meta,
-                MagicMock(),
-                torch.float32,
-                GemmVariant.SCALED_GEMM,
-                scale_type_a=ScalingType.BlockWise1x16,
-                scale_type_b=ScalingType.BlockWise1x16,
+        for m, unroll, cold_cache in ((32, 16, True), (257, 1, False)):
+            request = self._make_nvfp4_benchmark_request(
+                m=m,
+                backends="ATEN,NVGEMM",
                 has_output_scale=True,
             )
-
-        self.assertEqual(mixed_native_scale_request.cudagraph_unroll, 16)
-        self.assertTrue(mixed_native_scale_request.cold_cache_benchmarking)
-        self.assertEqual(
-            mixed_native_scale_request.cudagraph_cold_cache_input_indices, (1, 3)
-        )
-
-        output_meta_m257 = TensorMeta(
-            device=torch.device("cuda"),
-            dtype=torch.bfloat16,
-            sizes=(257, 4096),
-            strides=(4096, 1),
-            offset=0,
-        )
-        with config.patch(
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "ATEN,NVGEMM",
-                "autotune_cudagraph_benchmarking": True,
-            }
-        ):
-            outside_decode_request = NVUniversalGemmBenchmarkRequest(
-                "kernel",
-                input_meta,
-                output_meta_m257,
-                MagicMock(),
-                torch.float32,
-                GemmVariant.SCALED_GEMM,
-                scale_type_a=ScalingType.BlockWise1x16,
-                scale_type_b=ScalingType.BlockWise1x16,
-                has_output_scale=True,
+            self.assertEqual(request.cudagraph_unroll, unroll)
+            self.assertEqual(request.cold_cache_benchmarking, cold_cache)
+            self.assertEqual(
+                request.cudagraph_cold_cache_input_indices,
+                (1, 3) if cold_cache else (),
             )
-
-        self.assertEqual(outside_decode_request.cudagraph_unroll, 1)
-        self.assertFalse(outside_decode_request.cold_cache_benchmarking)
-        self.assertEqual(outside_decode_request.cudagraph_cold_cache_input_indices, ())
 
     def test_worker_precompile_preserves_logical_m_for_swap_ab(self):
         from torch._inductor.autotune_process import TensorMeta

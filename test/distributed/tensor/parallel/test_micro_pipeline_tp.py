@@ -130,16 +130,16 @@ class MicroPipelineTPTest(TestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "Test requires FP8 support")
     @fresh_cache()
     @parametrize(
-        "gather_dim,with_reshape,expected_folds,expect_fusion",
-        ((0, False, 0, True), (0, True, 1, False)),
+        "with_reshape,expected_folds,expect_fusion",
+        ((False, 0, True), (True, 1, False)),
     )
     def test_scaled_mm_output_scale_preserves_all_gather_fusion(
-        self, gather_dim, with_reshape, expected_folds, expect_fusion
+        self, with_reshape, expected_folds, expect_fusion
     ):
         group = dist.group.WORLD
 
         def func(A_shard, B, A_scale, B_scale, output_scale):
-            A = _fp8_all_gather(A_shard, gather_dim, group.group_name)
+            A = _fp8_all_gather(A_shard, 0, group.group_name)
             if with_reshape:
                 A = A.reshape(-1, A.shape[-1])
             result = (
@@ -148,11 +148,8 @@ class MicroPipelineTPTest(TestCase):
             )
             return result.reshape(4, 16, 128) if with_reshape else result
 
-        packed_k = 1024 if gather_dim == 1 else 256
-        if gather_dim == 1:
-            A_shard_shape = (64, packed_k // 2)
-        else:
-            A_shard_shape = (2, 16, packed_k) if with_reshape else (32, packed_k)
+        packed_k = 256
+        A_shard_shape = (2, 16, packed_k) if with_reshape else (32, packed_k)
         inputs = self._make_nvfp4_inputs(A_shard_shape, packed_k)
         gm = _make_post_grad_fx(func, *inputs)
         self._apply_scaled_mm_output_scale_fold(gm, expected_folds=expected_folds)
@@ -164,7 +161,7 @@ class MicroPipelineTPTest(TestCase):
 
         if not expect_fusion:
             # The existing collective pattern does not cross the explicit
-            # multiply or an unsupported all-gather dimension.
+            # multiply and reshape.
             self.assertNotIn("fused_all_gather_scaled_matmul", str(gm.graph))
             self.assertIn("all_gather_into_tensor", str(gm.graph))
         else:
