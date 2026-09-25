@@ -1819,14 +1819,13 @@ def gather_node_runtime_estimations(
             compute_nodes.append(node)
             compute_analytical.append(est)
         elif node.op == "call_function" and node not in estimations:
+            est = None
             if custom_runtime_estimation is not None:
                 est = custom_runtime_estimation(node, None)
-                if est is not None:
-                    estimations[node] = est
-            else:
+            if est is None:
                 est = estimate_roofline_runtime_ms(node)
-                if est > 0:
-                    estimations[node] = est
+            if est > 0:
+                estimations[node] = est
 
     # Apply fused costs: replace individual I/O estimates with fusion-aware ones
     estimations.update(fused_costs)

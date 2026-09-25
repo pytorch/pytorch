@@ -13,6 +13,7 @@ and no cross-rank synchronization is needed.
 from __future__ import annotations
 
 import functools
+import gzip
 import json
 import logging
 import math
@@ -41,6 +42,8 @@ from torch.utils._ordered_set import OrderedSet
 
 
 log = logging.getLogger(__name__)
+
+_OpInputMetadata = tuple[tuple[object, ...], ...]
 
 
 def _rank_stride(ranks: tuple[int, ...]) -> int | None:
@@ -89,13 +92,13 @@ class OpRecord:
     """A single op observation from the profile (any CPU op with GPU kernels)."""
 
     op_name: str  # normalized name, e.g. "aten::mm", "mylib::my_custom_op"
-    input_shapes: tuple[tuple[int, ...], ...]
-    input_strides: tuple[tuple[int, ...], ...]
+    input_shapes: _OpInputMetadata
+    input_strides: _OpInputMetadata
     dtype: torch.dtype | None
     duration_us: float  # sum of all GPU kernels for this CPU op
 
 
-def _to_nested_tuple(x: Any) -> Any:
+def _to_nested_tuple(x: object) -> object:
     """Recursively convert nested lists to tuples for hashability."""
     if isinstance(x, (list, tuple)):
         return tuple(_to_nested_tuple(i) for i in x)
@@ -133,8 +136,8 @@ class ProfileData:
     _op_index: dict[
         tuple[
             str,
-            tuple[tuple[int, ...], ...],
-            tuple[tuple[int, ...], ...],
+            _OpInputMetadata,
+            _OpInputMetadata,
             torch.dtype | None,
         ],
         float,
@@ -147,6 +150,7 @@ class ProfileData:
     _pg_desc_peak_bw: dict[tuple[str, int], float] = field(default_factory=dict)
     profile_count: int = 0
     arrival_corrected_collectives: int = 0
+    arrival_partial_collectives: int = 0
     arrival_clock_fallback_collectives: int = 0
     arrival_incomplete_collectives: int = 0
     collective_record_count: int = 0
@@ -170,7 +174,8 @@ class ProfileData:
                     f"PGE trace file not found: {path}. "
                     f"Check config.aten_distributed_optimizations.profile_guided_estimations_profile_path"
                 )
-            with open(path) as f:
+            opener = gzip.open if path.endswith(".gz") else open
+            with opener(path, "rt") as f:
                 data = json.load(f)
 
             capture_ids.append(self._capture_id(data))
@@ -211,7 +216,7 @@ class ProfileData:
         log.info(
             "PGE loaded %d profiles: %d collectives, %d op records "
             "(%d distinct shapes), %d PGs; corrected=%d, clock_fallback=%d, "
-            "incomplete=%d",
+            "partial=%d, incomplete=%d",
             self.profile_count,
             self.collective_record_count,
             self.op_record_count,
@@ -219,6 +224,7 @@ class ProfileData:
             len(self.pg_configs),
             self.arrival_corrected_collectives,
             self.arrival_clock_fallback_collectives,
+            self.arrival_partial_collectives,
             self.arrival_incomplete_collectives,
         )
 
@@ -299,7 +305,7 @@ class ProfileData:
                 args = ev.get("args", {})
                 eid = args.get("External id")
                 dur = ev.get("dur", 0.0)
-                if eid is not None and dur > 0:
+                if eid is not None and dur > 0 and args.get("Collective name") is None:
                     gpu_dur[eid] += dur
 
         # Parse collectives from GPU kernel events directly
@@ -365,16 +371,16 @@ class ProfileData:
             self._parse_op(cpu_ev.get("name", ""), cpu_ev.get("args", {}), total_dur)
 
     def _correct_collective_arrival_delays(self) -> None:
-        """Replace complete cross-rank observations with post-arrival durations."""
+        """Replace cross-rank observations with arrival-corrected durations."""
         grouped: defaultdict[tuple[Any, ...], list[CollectiveRecord]] = defaultdict(
             list
         )
         ungrouped: list[CollectiveRecord] = []
         for rec in self.collectives:
-            if rec.comms_id is not None:
-                key = ("comms_id", rec.comms_id, rec.pg_ranks)
-            elif rec.sequence is not None and rec.pg_ranks:
+            if rec.sequence is not None and rec.pg_ranks:
                 key = ("sequence", rec.pg_name, rec.pg_ranks, rec.sequence)
+            elif rec.comms_id is not None:
+                key = ("comms_id", rec.comms_id, rec.pg_ranks)
             else:
                 ungrouped.append(rec)
                 continue
@@ -403,7 +409,6 @@ class ProfileData:
             )
             if (
                 not expected_ranks
-                or observed_ranks != expected_ranks
                 or len(signatures) != 1
                 or any(rec.start_us is None for rec in records)
             ):
@@ -427,6 +432,21 @@ class ProfileData:
                 )
                 for rank_intervals in intervals_by_rank.values()
             ]
+            if observed_ranks != expected_ranks:
+                self.arrival_incomplete_collectives += 1
+                if len(intervals) == 1:
+                    corrected.extend(records)
+                    continue
+                # Even a partial set of ranks can remove some arrival skew. The
+                # shortest observed span is clock-independent and remains an
+                # upper bound when an unobserved rank arrived later.
+                duration_us = min(end - start for start, end in intervals)
+                self.arrival_partial_collectives += 1
+                corrected.append(
+                    replace(records[0], duration_us=duration_us, rank=None)
+                )
+                continue
+
             last_arrival = max(start for start, _ in intervals)
             first_completion = min(end for _, end in intervals)
             clock_domains = OrderedSet([rec.clock_domain for rec in records])
@@ -478,17 +498,24 @@ class ProfileData:
         input_types = args.get("Input type", [])
         if not input_dims:
             return
-        dtype_str = input_types[0] if input_types else ""
+        dtype_str = next(
+            (
+                input_types[index]
+                for index, dims in enumerate(input_dims)
+                if index < len(input_types) and isinstance(dims, (list, tuple)) and dims
+            ),
+            "",
+        )
         dtype = _dtype_map.get(dtype_str)
-        # Skip empty entries (non-tensor args like scalars/None) so the
-        # tuples match what _get_node_input_shapes/strides extract from FX nodes.
+        # Skip empty entries for non-tensor args. Flat entries match the FX lookup
+        # keys; nested TensorList entries remain hashable but cannot match them.
         shapes = tuple(
-            _to_nested_tuple(d)
+            tuple(_to_nested_tuple(i) for i in d)
             for d in input_dims
             if isinstance(d, (list, tuple)) and d
         )
         strides = tuple(
-            _to_nested_tuple(d)
+            tuple(_to_nested_tuple(i) for i in d)
             for d in input_strides
             if isinstance(d, (list, tuple)) and d
         )
@@ -555,8 +582,8 @@ class ProfileData:
         op_groups: defaultdict[
             tuple[
                 str,
-                tuple[tuple[int, ...], ...],
-                tuple[tuple[int, ...], ...],
+                _OpInputMetadata,
+                _OpInputMetadata,
                 torch.dtype | None,
             ],
             list[float],
@@ -821,8 +848,11 @@ class ProfileData:
             # EXTRAPOLATION_CAP in lookup_collective limits how far this reaches.
             return (lower[1] * target_nelems / lower[0]) / 1e3
         elif upper is not None:
-            # Linear extrapolation from nearest upper
-            return (upper[1] * target_nelems / upper[0]) / 1e3
+            # Preserve the observed launch-latency floor when extrapolating
+            # below the smallest profiled message.
+            latency_floor = min(dur for _, dur in entries if dur > 0)
+            duration_us = upper[1] * target_nelems / upper[0]
+            return max(duration_us, latency_floor) / 1e3
 
         return None
 
@@ -856,15 +886,18 @@ def _dtype_to_nccl_str(dtype: torch.dtype) -> str:
     )
 
 
-def _get_node_dtype(node: fx.Node) -> torch.dtype | None:
-    """Extract dtype from FX node metadata."""
-    val = node.meta.get("val")
-    if isinstance(val, torch.Tensor):
-        return val.dtype
-    if isinstance(val, (list, tuple)) and val:
-        first = val[0]
-        if isinstance(first, torch.Tensor):
-            return first.dtype
+def _get_node_input_dtype(node: fx.Node) -> torch.dtype | None:
+    """Extract the first tensor input dtype, matching profiler input metadata."""
+    for arg in node.args:
+        if not isinstance(arg, fx.Node):
+            continue
+        val = arg.meta.get("val")
+        if isinstance(val, torch.Tensor):
+            return val.dtype
+        if isinstance(val, (list, tuple)):
+            for item in val:
+                if isinstance(item, torch.Tensor):
+                    return item.dtype
     return None
 
 
@@ -1097,6 +1130,7 @@ class ProfileGuidedEstimator:
                 "clock_fallback_collectives": (
                     profile.arrival_clock_fallback_collectives
                 ),
+                "partial_collectives": profile.arrival_partial_collectives,
                 "incomplete_collectives": profile.arrival_incomplete_collectives,
             },
         }
@@ -1148,5 +1182,5 @@ class ProfileGuidedEstimator:
         if result is None:
             return None
         input_shapes, input_strides = result
-        dtype = _get_node_dtype(node)
+        dtype = _get_node_input_dtype(node)
         return self.profile.lookup_op(profile_name, input_shapes, input_strides, dtype)

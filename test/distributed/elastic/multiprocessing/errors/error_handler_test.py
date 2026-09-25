@@ -9,6 +9,9 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from torch.distributed.elastic.multiprocessing.errors import (
+    error_handler as error_handler_mod,
+)
 from torch.distributed.elastic.multiprocessing.errors.error_handler import ErrorHandler
 from torch.distributed.elastic.multiprocessing.errors.handlers import get_error_handler
 
@@ -66,6 +69,53 @@ class ErrorHandlerTest(unittest.TestCase):
             self.assertIsNotNone(err["message"]["message"])
             self.assertIsNotNone(err["message"]["extraInfo"]["py_callstack"])
             self.assertIsNotNone(err["message"]["extraInfo"]["timestamp"])
+
+    def test_record_exception_with_fn_name(self):
+        with patch.dict(os.environ, {"TORCHELASTIC_ERROR_FILE": self.test_error_file}):
+            eh = ErrorHandler()
+            eh.set_entrypoint_fn_name("raise_exception_fn")
+            eh.initialize()
+
+            with self.assertLogs(error_handler_mod.logger, level="DEBUG") as logs:
+                try:
+                    raise_exception_fn()
+                except Exception as e:
+                    eh.record_exception(e)
+
+            self.assertTrue(any("raise_exception_fn" in line for line in logs.output))
+
+            # extraInfo is a map<string,string> for downstream consumers, so the
+            # base handler logs fn_name rather than writing it to the error file
+            with open(self.test_error_file) as fp:
+                err = json.load(fp)
+            self.assertNotIn("fn_name", err["message"]["extraInfo"])
+
+    def test_record_success_with_fn_name(self):
+        eh = ErrorHandler()
+        eh.set_entrypoint_fn_name("good_fn")
+
+        with self.assertLogs(error_handler_mod.logger, level="DEBUG") as logs:
+            eh.record_success()
+
+        self.assertTrue(any("good_fn" in line for line in logs.output))
+
+    def test_record_success_no_fn_name_does_not_log(self):
+        # without an entrypoint fn_name the base handler is a no-op and must not log
+        eh = ErrorHandler()
+
+        with patch.object(error_handler_mod.logger, "debug") as debug_mock:
+            eh.record_success()
+
+        debug_mock.assert_not_called()
+
+    def test_record_success_does_not_write_error_file(self):
+        # success must never produce an error file
+        with patch.dict(os.environ, {"TORCHELASTIC_ERROR_FILE": self.test_error_file}):
+            eh = ErrorHandler()
+            eh.set_entrypoint_fn_name("good_fn")
+            eh.record_success()
+
+        self.assertFalse(os.path.isfile(self.test_error_file))
 
     def test_record_exception_no_error_file(self):
         # make sure record does not fail when no error file is specified in env vars
