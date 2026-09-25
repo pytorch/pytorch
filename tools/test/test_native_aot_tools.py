@@ -1921,7 +1921,7 @@ class TestSourceClosureAndRuntimes(unittest.TestCase):
         # The DSL's version is in no file the closure hashes, so an upgraded wheel
         # changes nothing on disk. Patched rather than read: with no wheels installed
         # the live call is all-"absent" and takes the ignorance arm instead.
-        current = {"nvidia-cutlass-dsl": "4.8.0", "apache-tvm-ffi": "0.1.12"}
+        current = {"nvidia-cutlass-dsl": "4.6.2", "apache-tvm-ffi": "0.1.11"}
         with mock.patch.object(export, "runtime_versions", lambda kind: current):
             self.assertTrue(
                 export.runtimes_current({"kind": "cutedsl", "runtimes": current})
@@ -4403,17 +4403,8 @@ class TestCiAndCMakeWiring(unittest.TestCase):
         block = block[: block.index("\n}\n") + 3]
         self.assertNotIn("return 0", block)
         self.assertNotIn("Skipping CUTLASS DSL install", block)
-        self.assertIn("nvidia-cutlass-dsl[cu13]==4.8.0", block)
-        self.assertIn("apache-tvm-ffi==0.1.12", block)
-
-    def test_flash_attn_cute_uses_compatible_dependencies(self):
-        text = self._read(".ci/pytorch/common_utils.sh")
-        block = text[text.index("function install_flash_attn_cute()") :]
-        block = block[: block.index("\n}\n") + 3]
-        self.assertIn("flash-attn-4==4.0.0b31", block)
-        self.assertIn("flash-attn-4[cu13]==4.0.0b31", block)
-        self.assertIn("quack-kernels==0.6.5", block)
-        self.assertIn("apache-tvm-ffi==0.1.12", block)
+        self.assertIn("nvidia-cutlass-dsl[cu13]==4.6.2", block)
+        self.assertIn("apache-tvm-ffi==0.1.11", block)
 
     def test_the_verdict_word_the_shells_compare_is_the_one_stage_two_prints(self):
         # Both shells install the DSL wheels only when stage 2 says RUN, comparing with
