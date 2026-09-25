@@ -44,6 +44,7 @@ from torch._inductor.scheduler import (
     SubParentEpilogueCandidate,
     SubParentEpilogueGrouping,
     SubParentOutputGroup,
+    WhyNoFuse,
 )
 from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.utils import fresh_inductor_cache, snode_args_kwargs
@@ -122,6 +123,21 @@ def _test_cases(device, dtype):
 
 
 class TestScheduler(TestCase):
+    def test_why_no_fuse_names_are_lazy(self):
+        node1 = Mock()
+        node2 = Mock()
+        node1.get_name.return_value = "node1"
+        node2.get_name.return_value = "node2"
+
+        why = WhyNoFuse(node1, node2)
+        with patch("torch._inductor.scheduler.fusion_log.debug") as debug:
+            why("reason %s", "details")
+        debug.assert_called_once_with(why)
+        node1.get_name.assert_not_called()
+        node2.get_name.assert_not_called()
+
+        self.assertEqual(str(why), "cannot fuse node1 with node2: reason details")
+
     def _mock_base_snode(self, name, device=None):
         node = Mock()
         node.get_name.return_value = name
@@ -693,6 +709,7 @@ class TestScheduler(TestCase):
 
         scheduler.name_to_fused_node = {"node1": node1, "node2": node2}
         scheduler._fusion_memory_state = None
+        scheduler._loop_mutation_trackers = []
         scheduler._can_fuse_impl = Mock(return_value=True)
         scheduler.will_fusion_create_cycle = Mock(return_value=True)
         scheduler.unfusable_node = Mock(return_value=False)
