@@ -37,7 +37,12 @@ from torch._library import capture_triton
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_device_type import largeTensorTest
-from torch.testing._internal.common_utils import parametrize, skipIfWindows, skipIfXpu
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    parametrize,
+    skipIfWindows,
+    skipIfXpu,
+)
 from torch.testing._internal.inductor_utils import (
     get_func_call,
     GPU_TYPE,
@@ -234,7 +239,7 @@ if HAS_GPU:
         return f
 
 
-class KernelTests(torch._inductor.test_case.TestCase):
+class _KernelTestsBase(torch._inductor.test_case.TestCase):
     def _kernel_launched_in_code(self, kernel_name: str, code: str) -> bool:
         if inductor_config.cpp_wrapper:
             return f"launchKernel({kernel_name}" in code
@@ -263,6 +268,10 @@ class KernelTests(torch._inductor.test_case.TestCase):
             f"expected triton.compile options to include "
             f"{name}={expected_value!r}, got {options!r}",
         )
+
+
+class KernelTests(_KernelTestsBase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @requires_gpu
     def test_triton_kernel_with_kernel_param(self):
@@ -307,6 +316,10 @@ class KernelTests(torch._inductor.test_case.TestCase):
 
         self.assertIsNone(_re.search(r"\b__dunder_add_kernel_0\b", code))
         self.assertIsNotNone(_re.search(r"\b_dunder_add_kernel_0\b", code))
+
+
+class KernelTestsArgReductionSemantics(_KernelTestsBase):
+    hw_classification = HardwareClassification.CUDA
 
     @inductor_config.patch(strict_signed_zero=True)
     @requires_cuda_and_triton
@@ -406,6 +419,10 @@ class KernelTests(torch._inductor.test_case.TestCase):
                 torch.signbit(actual_values), torch.signbit(expected_values)
             )
             self.assertEqual(actual_indices, expected_indices)
+
+
+class KernelTestsCompilation(_KernelTestsBase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @requires_gpu
     def test_triton_kernel_ill_formed(self):
@@ -797,6 +814,10 @@ def forward(self, x_1, output_1):
             self.assertEqual(output_code.count('float("nan")'), 0)
             self.assertEqual(output_code.count("float('nan')"), 0)
 
+
+class KernelTestsFloatingPointRewrites(_KernelTestsBase):
+    hw_classification = HardwareClassification.CUDA
+
     @requires_cuda_and_triton
     def test_fp_self_sub_rewrite_preserves_nonfinite_semantics(self):
         def fn(x):
@@ -857,6 +878,10 @@ def forward(self, x_1, output_1):
 
             actual = torch.compile(fn, fullgraph=True)(x)
             self.assertEqual(actual, torch.zeros_like(actual), atol=0, rtol=0)
+
+
+class KernelTestsRuntime(_KernelTestsBase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @requires_gpu
     @common_utils.parametrize("grad_fn", [torch.no_grad, torch.enable_grad])
@@ -2084,37 +2109,6 @@ def forward(self, x_1, output_1):
             self.assertTrue(_triton_get_ast_equal_to_str(()) in sources[0])
         self.assertEqual(compiled_out, eager_out)
 
-    @requires_gpu
-    def test_triton_kernel_with_imported_symbol(self):
-        @triton.jit
-        def add_kernel_with_imported_symbol(
-            in_ptr,
-            out_ptr,
-            n_elements,
-            BLOCK_SIZE: "tl.constexpr",
-        ):
-            pid = tl.program_id(axis=0)
-            block_start = pid * BLOCK_SIZE
-            offsets = block_start + tl.arange(0, BLOCK_SIZE)
-            mask = offsets < n_elements
-            x = tl.load(in_ptr + offsets, mask=mask)
-            output = fast_dividef(x, 3.14)
-            tl.store(out_ptr + offsets, output, mask=mask)
-
-        def f(x):
-            out = torch.empty_like(x)
-            n_elements = x.numel()
-            add_kernel_with_imported_symbol[(n_elements,)](
-                x, out, n_elements, BLOCK_SIZE=16
-            )
-            return out
-
-        x = torch.randn(4, device=GPU_TYPE)
-        eager_out = f(x)
-        compiled_out = torch.compile(f)(x)
-
-        self.assertEqual(compiled_out, eager_out)
-
     @unittest.skipIf(
         not HAS_GPU or not hasattr(triton, "constexpr_function"),
         "newer triton version required",
@@ -2191,37 +2185,6 @@ def forward(self, x_1, output_1):
         # Verify correctness
         self.assertEqual(compiled_out, eager_out)
         self.assertTrue(torch.all(compiled_out == 1.0).item())
-
-    @requires_gpu
-    def test_triton_kernel_with_imported_symbol_with_custom_name(self):
-        @triton.jit
-        def add_kernel_with_imported_symbol(
-            in_ptr,
-            out_ptr,
-            n_elements,
-            BLOCK_SIZE: "tl.constexpr",
-        ):
-            pid = tl.program_id(axis=0)
-            block_start = pid * BLOCK_SIZE
-            offsets = block_start + tl.arange(0, BLOCK_SIZE)
-            mask = offsets < n_elements
-            x = tl.load(in_ptr + offsets, mask=mask)
-            output = my_fast_dividef(x, 3.14)
-            tl.store(out_ptr + offsets, output, mask=mask)
-
-        def f(x):
-            out = torch.empty_like(x)
-            n_elements = x.numel()
-            add_kernel_with_imported_symbol[(n_elements,)](
-                x, out, n_elements, BLOCK_SIZE=16
-            )
-            return out
-
-        x = torch.randn(4, device=GPU_TYPE)
-        eager_out = f(x)
-        compiled_out = torch.compile(f)(x)
-
-        self.assertEqual(compiled_out, eager_out)
 
     @requires_gpu
     @common_utils.parametrize("size", [4, 16])
@@ -3780,6 +3743,10 @@ def forward(self, arg0_1, arg1_1):
         expected = torch.compile(fn, fullgraph=True)(345)
         self.assertEqual(actual, expected)
 
+
+class KernelTestsInlineAsm(_KernelTestsBase):
+    hw_classification = HardwareClassification.CUDA
+
     @requires_gpu
     @skipIfXpu(
         msg="`tl.inline_asm_elementwise` is not yet supported on Intel GPUs, "
@@ -3814,6 +3781,10 @@ def forward(self, arg0_1, arg1_1):
         actual = fn(inp)
         expected = torch.compile(fn, fullgraph=True)(inp)
         self.assertEqual(actual, expected)
+
+
+class KernelTestsPrecisionAndConstexpr(_KernelTestsBase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @requires_gpu
     @inductor_config.patch("emulate_precision_casts", True)
@@ -3905,6 +3876,72 @@ def forward(self, arg0_1, arg1_1):
         self.assertNotIn("maybe_param", ttir_str)
 
 
+class KernelTestsImportedSymbols(_KernelTestsBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @requires_gpu
+    def test_triton_kernel_with_imported_symbol(self):
+        @triton.jit
+        def add_kernel_with_imported_symbol(
+            in_ptr,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr + offsets, mask=mask)
+            output = fast_dividef(x, 3.14)
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def f(x):
+            out = torch.empty_like(x)
+            n_elements = x.numel()
+            add_kernel_with_imported_symbol[(n_elements,)](
+                x, out, n_elements, BLOCK_SIZE=16
+            )
+            return out
+
+        x = torch.randn(4, device=GPU_TYPE)
+        eager_out = f(x)
+        compiled_out = torch.compile(f)(x)
+
+        self.assertEqual(compiled_out, eager_out)
+
+    @requires_gpu
+    def test_triton_kernel_with_imported_symbol_with_custom_name(self):
+        @triton.jit
+        def add_kernel_with_imported_symbol(
+            in_ptr,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr + offsets, mask=mask)
+            output = my_fast_dividef(x, 3.14)
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def f(x):
+            out = torch.empty_like(x)
+            n_elements = x.numel()
+            add_kernel_with_imported_symbol[(n_elements,)](
+                x, out, n_elements, BLOCK_SIZE=16
+            )
+            return out
+
+        x = torch.randn(4, device=GPU_TYPE)
+        eager_out = f(x)
+        compiled_out = torch.compile(f)(x)
+
+        self.assertEqual(compiled_out, eager_out)
+
+
 def make_mutation_test(fn):
     @requires_gpu
     def test_fn(self):
@@ -3937,6 +3974,8 @@ if HAS_GPU:
 
 
 class MutationTests(torch._inductor.test_case.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     # Tests injected below
 
     # Test that a scalar args are not flagged as mutated when passed
@@ -4714,6 +4753,131 @@ class MutationTests(torch._inductor.test_case.TestCase):
             ["out_ptr"],
         )
 
+    @unittest.skipIf(
+        not has_triton_experimental_host_tma(),
+        "requires experimental TMA descriptor API",
+    )
+    @make_mutation_test
+    def test_add_kernel_on_device_tma_old_api():
+        a = torch.randn(1024, 1024)
+        b = torch.randn(1024, 1024)
+        c = torch.empty(1024, 1024)
+        workspace = torch.empty(128 * 3, dtype=torch.int8)
+        return (
+            add_kernel_on_device_tma_old_api,
+            {
+                "a_ptr": a,
+                "b_ptr": b,
+                "c_ptr": c,
+                "m": 1024,
+                "n": 1024,
+                "workspace": workspace,
+                "BLOCK_SIZE": 32,
+            },
+            {},
+            ["c_ptr", "workspace"],
+        )
+
+    @unittest.skipIf(
+        not has_triton_tensor_descriptor_host_tma(),
+        "requires TensorDescriptor API in Triton",
+    )
+    @make_mutation_test
+    def test_add_kernel_on_device_tma_new_api():
+        a = torch.randn(1024, 1024)
+        b = torch.randn(1024, 1024)
+        c = torch.empty(1024, 1024)
+        workspace = torch.empty(
+            128 * 3, dtype=torch.int8
+        )  # Not used by the new API but kept for consistency
+        return (
+            add_kernel_on_device_tma_new_api,
+            {
+                "a_ptr": a,
+                "b_ptr": b,
+                "c_ptr": c,
+                "m": 1024,
+                "n": 1024,
+                "workspace": workspace,
+                "BLOCK_SIZE": 32,
+            },
+            {},
+            ["c_ptr"],
+        )
+
+    @unittest.skipIf(
+        not has_triton_tensor_descriptor_host_tma(),
+        "requires TensorDescriptor API in Triton",
+    )
+    @requires_gpu
+    def test_descriptor_load_store_read_write_detection(self):
+        """
+        Regression test: tl.make_tensor_descriptor + desc.load()/desc.store()
+        generates tt.descriptor_load/tt.descriptor_store ops in TTIR. These
+        must be recognized by identify_accessed_tensors so that Inductor
+        correctly tracks read/write dependencies.
+        """
+        from torch._higher_order_ops.triton_kernel_wrap import identify_accessed_tensors
+
+        @triton.jit
+        def add_kernel_descriptor_method(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            M,
+            N,
+            BLOCK_M: "tl.constexpr",
+            BLOCK_N: "tl.constexpr",
+        ):
+            in0_desc = tl.make_tensor_descriptor(
+                in_ptr0,
+                [M, N],
+                [N, 1],
+                [BLOCK_M, BLOCK_N],
+            )
+            in1_desc = tl.make_tensor_descriptor(
+                in_ptr1,
+                [M, N],
+                [N, 1],
+                [BLOCK_M, BLOCK_N],
+            )
+            out_desc = tl.make_tensor_descriptor(
+                out_ptr,
+                [M, N],
+                [N, 1],
+                [BLOCK_M, BLOCK_N],
+            )
+            pid_m = tl.program_id(0)
+            pid_n = tl.program_id(1)
+            off_m = pid_m * BLOCK_M
+            off_n = pid_n * BLOCK_N
+            a = in0_desc.load([off_m, off_n])
+            b = in1_desc.load([off_m, off_n])
+            out_desc.store([off_m, off_n], a + b)
+
+        t = torch.randn(64, 64)
+        tensor_accesses = identify_accessed_tensors(
+            add_kernel_descriptor_method,
+            {
+                "in_ptr0": t,
+                "in_ptr1": t,
+                "out_ptr": t,
+                "M": 64,
+                "N": 64,
+                "BLOCK_M": 32,
+                "BLOCK_N": 32,
+            },
+            {},
+        )
+        read_names = [dep.name for dep in tensor_accesses.read_writes.reads]
+        write_names = [dep.name for dep in tensor_accesses.read_writes.writes]
+        self.assertListEqual(read_names, ["in_ptr0", "in_ptr1"])
+        self.assertListEqual(write_names, ["out_ptr"])
+
+
+class MutationTestsGeneric(torch._inductor.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_get_tma_stores(self):
         from torch._higher_order_ops.triton_kernel_wrap import (
             get_tma_stores,
@@ -4882,127 +5046,8 @@ class MutationTests(torch._inductor.test_case.TestCase):
         self.assertListEqual(read_names, ["in_out_ptr"])
         self.assertListEqual(write_names, ["in_out_ptr"])
 
-    @unittest.skipIf(
-        not has_triton_experimental_host_tma(),
-        "requires experimental TMA descriptor API",
-    )
-    @make_mutation_test
-    def test_add_kernel_on_device_tma_old_api():
-        a = torch.randn(1024, 1024)
-        b = torch.randn(1024, 1024)
-        c = torch.empty(1024, 1024)
-        workspace = torch.empty(128 * 3, dtype=torch.int8)
-        return (
-            add_kernel_on_device_tma_old_api,
-            {
-                "a_ptr": a,
-                "b_ptr": b,
-                "c_ptr": c,
-                "m": 1024,
-                "n": 1024,
-                "workspace": workspace,
-                "BLOCK_SIZE": 32,
-            },
-            {},
-            ["c_ptr", "workspace"],
-        )
 
-    @unittest.skipIf(
-        not has_triton_tensor_descriptor_host_tma(),
-        "requires TensorDescriptor API in Triton",
-    )
-    @make_mutation_test
-    def test_add_kernel_on_device_tma_new_api():
-        a = torch.randn(1024, 1024)
-        b = torch.randn(1024, 1024)
-        c = torch.empty(1024, 1024)
-        workspace = torch.empty(
-            128 * 3, dtype=torch.int8
-        )  # Not used by the new API but kept for consistency
-        return (
-            add_kernel_on_device_tma_new_api,
-            {
-                "a_ptr": a,
-                "b_ptr": b,
-                "c_ptr": c,
-                "m": 1024,
-                "n": 1024,
-                "workspace": workspace,
-                "BLOCK_SIZE": 32,
-            },
-            {},
-            ["c_ptr"],
-        )
-
-    @unittest.skipIf(
-        not has_triton_tensor_descriptor_host_tma(),
-        "requires TensorDescriptor API in Triton",
-    )
-    @requires_gpu
-    def test_descriptor_load_store_read_write_detection(self):
-        """
-        Regression test: tl.make_tensor_descriptor + desc.load()/desc.store()
-        generates tt.descriptor_load/tt.descriptor_store ops in TTIR. These
-        must be recognized by identify_accessed_tensors so that Inductor
-        correctly tracks read/write dependencies.
-        """
-        from torch._higher_order_ops.triton_kernel_wrap import identify_accessed_tensors
-
-        @triton.jit
-        def add_kernel_descriptor_method(
-            in_ptr0,
-            in_ptr1,
-            out_ptr,
-            M,
-            N,
-            BLOCK_M: "tl.constexpr",
-            BLOCK_N: "tl.constexpr",
-        ):
-            in0_desc = tl.make_tensor_descriptor(
-                in_ptr0,
-                [M, N],
-                [N, 1],
-                [BLOCK_M, BLOCK_N],
-            )
-            in1_desc = tl.make_tensor_descriptor(
-                in_ptr1,
-                [M, N],
-                [N, 1],
-                [BLOCK_M, BLOCK_N],
-            )
-            out_desc = tl.make_tensor_descriptor(
-                out_ptr,
-                [M, N],
-                [N, 1],
-                [BLOCK_M, BLOCK_N],
-            )
-            pid_m = tl.program_id(0)
-            pid_n = tl.program_id(1)
-            off_m = pid_m * BLOCK_M
-            off_n = pid_n * BLOCK_N
-            a = in0_desc.load([off_m, off_n])
-            b = in1_desc.load([off_m, off_n])
-            out_desc.store([off_m, off_n], a + b)
-
-        t = torch.randn(64, 64)
-        tensor_accesses = identify_accessed_tensors(
-            add_kernel_descriptor_method,
-            {
-                "in_ptr0": t,
-                "in_ptr1": t,
-                "out_ptr": t,
-                "M": 64,
-                "N": 64,
-                "BLOCK_M": 32,
-                "BLOCK_N": 32,
-            },
-            {},
-        )
-        read_names = [dep.name for dep in tensor_accesses.read_writes.reads]
-        write_names = [dep.name for dep in tensor_accesses.read_writes.writes]
-        self.assertListEqual(read_names, ["in_ptr0", "in_ptr1"])
-        self.assertListEqual(write_names, ["out_ptr"])
-
+class MutationTestsTritonLauncher(torch._inductor.test_case.TestCase):
     @unittest.skipUnless(
         HAS_GPU or (HAS_CPU and TRITON_HAS_CPU),
         "requires gpu or triton cpu",
@@ -5288,6 +5333,8 @@ if HAS_GPU:
 class CustomOpTests(torch._inductor.test_case.TestCase):
     """Tests for custom ops wrapping triton kernels"""
 
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @requires_gpu
     @common_utils.parametrize("autotuned", [False, True])
     @common_utils.parametrize("dynamic", [False, True])
@@ -5566,49 +5613,6 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         f(torch.randn(8, device=GPU_TYPE))
         f(torch.randn(16, device=GPU_TYPE))
 
-    @unittest.skipIf(not has_triton_package(), "requires triton")
-    def test_capture_triton_meta(self):
-        import triton
-        import triton.language as tl
-
-        @triton.jit
-        def add_kernel(
-            in_ptr0,
-            in_ptr1,
-            out_ptr,
-            n_elements,
-            BLOCK_SIZE: "tl.constexpr",
-        ):
-            pid = tl.program_id(axis=0)
-            block_start = pid * BLOCK_SIZE
-            offsets = block_start + tl.arange(0, BLOCK_SIZE)
-            mask = offsets < n_elements
-            x = tl.load(in_ptr0 + offsets, mask=mask)
-            y = tl.load(in_ptr1 + offsets, mask=mask)
-            output = x + y
-            tl.store(out_ptr + offsets, output, mask=mask)
-
-        @torch.library.triton_op("mylib::add", mutates_args=())
-        def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-            output = torch.empty_like(x)
-            n_elements = output.numel()
-
-            def grid(meta):
-                return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-
-            capture_triton(add_kernel)[grid](x, y, output, n_elements, 16)
-            return output
-
-        def f(x, y):
-            return add(x, y)
-
-        x = torch.randn(3, device="meta")
-        y = torch.randn(3, device="meta")
-
-        out = f(x, y)
-        expected = torch.empty_like(x)
-        self.assertEqual(out, expected)
-
     @requires_gpu
     def test_wrap_triton_disabled_in_triton_op(self):
         import triton  # @manual
@@ -5664,6 +5668,10 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         z = add(x, y)
         self.assertEqual(status[-1], False)
         self.assertEqual(z, (x + y) * 2)
+
+
+class CustomOpTestsInterpretMode(torch._inductor.test_case.TestCase):
+    hw_classification = HardwareClassification.CUDA
 
     @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
     def test_wrap_triton_triton_interpret_eager(self):
@@ -5754,6 +5762,10 @@ else:
 """
 
         subprocess.run([sys.executable, "-c", script], check=True)
+
+
+class CustomOpTestsRuntime(torch._inductor.test_case.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @requires_gpu
     @common_utils.parametrize(
@@ -6660,7 +6672,56 @@ else:
                 compiled_f(dst, src, N=N)
 
 
+class CustomOpTestsGeneric(torch._inductor.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @unittest.skipIf(not has_triton_package(), "requires triton")
+    def test_capture_triton_meta(self):
+        import triton
+        import triton.language as tl
+
+        @triton.jit
+        def add_kernel(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            output = x + y
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        @torch.library.triton_op("mylib::add", mutates_args=())
+        def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            output = torch.empty_like(x)
+            n_elements = output.numel()
+
+            def grid(meta):
+                return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+            capture_triton(add_kernel)[grid](x, y, output, n_elements, 16)
+            return output
+
+        def f(x, y):
+            return add(x, y)
+
+        x = torch.randn(3, device="meta")
+        y = torch.randn(3, device="meta")
+
+        out = f(x, y)
+        expected = torch.empty_like(x)
+        self.assertEqual(out, expected)
+
+
 class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -7163,7 +7224,12 @@ if HAS_CUDA_AND_TRITON:
 
 
 common_utils.instantiate_parametrized_tests(KernelTests)
+common_utils.instantiate_parametrized_tests(KernelTestsCompilation)
+common_utils.instantiate_parametrized_tests(KernelTestsFloatingPointRewrites)
+common_utils.instantiate_parametrized_tests(KernelTestsRuntime)
+common_utils.instantiate_parametrized_tests(KernelTestsInlineAsm)
 common_utils.instantiate_parametrized_tests(CustomOpTests)
+common_utils.instantiate_parametrized_tests(CustomOpTestsRuntime)
 common_utils.instantiate_parametrized_tests(TestUserKernelEpilogueFusion)
 
 
