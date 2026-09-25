@@ -1131,6 +1131,23 @@ def _register_quantization_reshape():
     )
 
 
+# Device types on which the weight-only-quant (WOQ) int8 fusions may fire.
+# Third-party backends that implement aten._weight_int8pack_mm can opt in
+# via the register_* functions below.
+_concat_linear_int8_woq_devices: set[str] = {"cpu", "cuda"}
+_woq_int8pack_fusion_devices: set[str] = {"cpu", "cuda", "xpu"}
+
+
+def register_concat_linear_int8_woq_device(device_type: str) -> None:
+    """Enable the concat-linear int8 WOQ fusion on ``device_type``."""
+    _concat_linear_int8_woq_devices.add(device_type)
+
+
+def register_woq_int8pack_fusion_device(device_type: str) -> None:
+    """Enable the WOQ int8pack-mm fusion on ``device_type``."""
+    _woq_int8pack_fusion_devices.add(device_type)
+
+
 def _is_valid_concat_linear_int8_woq_optimization_pattern():
     def fn(match):
         if not config.cpp.enable_concat_linear:
@@ -1161,7 +1178,7 @@ def _is_valid_concat_linear_int8_woq_optimization_pattern():
             and w2.dtype == torch.int8
             and w3.dtype == torch.int8
             and scales.dtype == torch.bfloat16
-            and x.device.type in ("cpu", "cuda")
+            and x.device.type in _concat_linear_int8_woq_devices
             and x.device == w1.device
             and w1.device == w2.device
             and w2.device == w3.device
@@ -1189,7 +1206,7 @@ def _is_valid_woq_optimization_pattern():
             x.dtype == torch.bfloat16
             and weight.dtype == torch.int8
             and scales.dtype == torch.bfloat16
-            and x.device.type in ("cpu", "cuda", "xpu")
+            and x.device.type in _woq_int8pack_fusion_devices
             and x.device == weight.device
             and x.device == scales.device
         )
@@ -1498,6 +1515,8 @@ def concat_linear_woq_int4(gm: torch.fx.GraphModule):
         if (
             not node._erased
             and isinstance(node.meta.get("val"), torch.Tensor)
+            # Intentionally CPU-only: the fused op
+            # aten._weight_int4pack_mm_for_cpu is a CPU-specific ATen op.
             and node.meta["val"].device.type == "cpu"
         ):
             act = node.args[0]
