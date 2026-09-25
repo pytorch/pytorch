@@ -98,6 +98,10 @@ aten = torch.ops.aten
 torch._dynamo.config.fake_tensor_cache_enabled = True
 torch._dynamo.config.fake_tensor_cache_crosscheck_enabled = True
 
+# A conv with cpu inputs and xpu weights dispatches to aten::_slow_conv2d_forward, which
+# is unimplemented on XPU, so the expected device-mismatch error never surfaces.
+XPU_SLOW_CONV2D_SKIP = "XPU lacks aten::_slow_conv2d_forward for mixed cpu/xpu conv, see https://github.com/intel/torch-xpu-ops/issues/5125"
+
 
 def expectedFailurePropagateRealTensors(fn):
     fn._expected_failure_propagate_real_tensors = True
@@ -2302,6 +2306,12 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
 
     @onlyAccelerator
     def test_conv_rejects_mismatched_fake_devices(self, device):
+        if (
+            torch._functorch.config.fake_tensor_propagate_real_tensors
+            and self.device_type == "xpu"
+        ):
+            # Runs a real conv, which needs aten::_slow_conv2d_forward.
+            self.skipTest(XPU_SLOW_CONV2D_SKIP)
         with FakeTensorMode():
             x = torch.empty(1, 3, 8, 8)
             w = torch.empty(3, 3, 3, 3, device=device)
@@ -2315,6 +2325,9 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
                     x, w, b, [1, 1], [1, 1], [1, 1], False, [0, 0], 1
                 )
 
+    # The fake half of this comparison is covered on XPU by
+    # test_conv_rejects_mismatched_fake_devices.
+    @skipXPUIf(True, XPU_SLOW_CONV2D_SKIP)
     @onlyAccelerator
     def test_conv_mismatched_device_error_matches_eager(self, device):
         error = f"Expected all tensors to be on the same device.*weight is on {device}"
@@ -2663,11 +2676,14 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
 
 
 make_propagate_real_tensors_cls(TestFakeTensorDevice)
-instantiate_device_type_tests(TestFakeTensorDevice, globals(), only_for=("cpu", "cuda"))
+instantiate_device_type_tests(
+    TestFakeTensorDevice, globals(), only_for=("cpu", "cuda", "xpu"), allow_xpu=True
+)
 instantiate_device_type_tests(
     PropagateRealTensorsTestFakeTensorDevice,  # noqa: F821
     globals(),
-    only_for=("cpu", "cuda"),
+    only_for=("cpu", "cuda", "xpu"),
+    allow_xpu=True,
 )
 
 
@@ -2784,7 +2800,10 @@ class TestFakeTensorOpInfoDevice(TestCase):
 
 make_propagate_real_tensors_cls(TestFakeTensorOpInfoDevice)
 instantiate_device_type_tests(
-    TestFakeTensorOpInfoDevice, globals(), only_for=("cpu", "cuda")
+    TestFakeTensorOpInfoDevice,
+    globals(),
+    only_for=("cpu", "cuda", "xpu"),
+    allow_xpu=True,
 )
 instantiate_device_type_tests(
     PropagateRealTensorsTestFakeTensorOpInfoDevice,  # noqa: F821
@@ -3212,7 +3231,10 @@ class TestFakeTensorOperatorInvariants(TestCase):
 
             self.assertEqual(ref.size(), meta_out.size())
 
-    # IMPORTANT!!! Always run even if CUDA is not available
+    # IMPORTANT!!! Always run even if CUDA is not available: this guards that
+    # naming a GPU device under fake mode skips device lazy init (#122636).
+    # Hence GPU_TYPE rather than a device-generic class -- the latter only emits
+    # variants for devices the machine has, degrading this to cpu == cpu.
     def test_fake_gpu_no_init(self):
         # Skip this test, we will try to run CUDA operations to real prop so
         # it clearly will not work on CPU runner
@@ -3229,7 +3251,13 @@ class TestFakeTensorOperatorInvariants(TestCase):
                 torch.tensor([[3.14, 2], [1, 2]], device=GPU_TYPE).device.type, GPU_TYPE
             )
 
-    @unittest.skipIf(not torch.backends.cuda.is_built(), "requires CUDA build")
+    # GPU_TYPE rather than a device-generic class: the fake-only path has to stay
+    # reachable on a CUDA build with no GPU present, where no cuda test variant
+    # would be generated.
+    @unittest.skipIf(
+        not TEST_ACCELERATOR and not torch.backends.cuda.is_built(),
+        "requires an accelerator, or a CUDA build for the fake-only path",
+    )
     def test_move_module_under_fake(self):
         if torch._functorch.config.fake_tensor_propagate_real_tensors:
             self.skipTest("Propagate real tensor not supported")
@@ -3446,12 +3474,14 @@ make_propagate_real_tensors_cls(TestFakeTensorOperatorInvariantsDevice)
 instantiate_device_type_tests(
     TestFakeTensorOperatorInvariantsDevice,
     globals(),
-    only_for=("cuda",),
+    only_for=("cuda", "xpu"),
+    allow_xpu=True,
 )
 instantiate_device_type_tests(
     PropagateRealTensorsTestFakeTensorOperatorInvariantsDevice,  # noqa: F821
     globals(),
-    only_for=("cuda",),
+    only_for=("cuda", "xpu"),
+    allow_xpu=True,
 )
 
 
@@ -3714,11 +3744,14 @@ class TestFakeTensorPropDevice(TestCase):
 
 
 make_propagate_real_tensors_cls(TestFakeTensorPropDevice)
-instantiate_device_type_tests(TestFakeTensorPropDevice, globals(), only_for=("cuda",))
+instantiate_device_type_tests(
+    TestFakeTensorPropDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+)
 instantiate_device_type_tests(
     PropagateRealTensorsTestFakeTensorPropDevice,  # noqa: F821
     globals(),
-    only_for=("cuda",),
+    only_for=("cuda", "xpu"),
+    allow_xpu=True,
 )
 
 
@@ -4565,7 +4598,8 @@ class TestFakeTensorDispatchCacheDevice(_TestFakeTensorDispatchCacheHelpers, Tes
 instantiate_device_type_tests(
     TestFakeTensorDispatchCacheDevice,
     globals(),
-    only_for=("cuda",),
+    only_for=("cuda", "xpu"),
+    allow_xpu=True,
 )
 
 
@@ -4657,7 +4691,8 @@ class TestFakeTensorPreferDeviceTypeDevice(TestCase):
 instantiate_device_type_tests(
     TestFakeTensorPreferDeviceTypeDevice,
     globals(),
-    only_for=("cuda",),
+    only_for=("cuda", "xpu"),
+    allow_xpu=True,
 )
 
 
@@ -4674,7 +4709,8 @@ class TestFakeTensorMetaDevicePropagationDevice(TestCase):
 instantiate_device_type_tests(
     TestFakeTensorMetaDevicePropagationDevice,
     globals(),
-    only_for=("cpu", "cuda"),
+    only_for=("cpu", "cuda", "xpu"),
+    allow_xpu=True,
 )
 
 
