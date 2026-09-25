@@ -392,6 +392,32 @@ def test_no_lf_runners_flag_falls_back_to_restricted_arc_yaml():
         )
 
 
+def test_no_lf_runners_flag_restricted_with_empty_runners_is_unrestricted():
+    """An empty runners: list under mode: restricted must mean unrestricted,
+    matching what an explicit --lf-runners "" means (ci-infra#1081) -- else
+    trimming the last entry from arc.yaml silently blocks every LF job."""
+    with tempfile.TemporaryDirectory() as d:
+        arc_yaml = write_arc_yaml(
+            d,
+            textwrap.dedent("""\
+                lf_allowlist:
+                  mode: restricted
+                  runners: []
+                """),
+        )
+        matrix = """{ include: [
+          { config: "default", shard: 1, num_shards: 1, runner: "lf-linux.4xlarge" },
+        ]}"""
+        result = run(matrix, prefix="lf-", arc_yaml=arc_yaml)
+        check(result.returncode == 0, result.stderr)
+        output = parse_output(result.stdout)
+        actual = output["include"][0]["runner"]
+        check(
+            actual == "lf-l-x86iavx512-16-128",
+            f"empty runners: under restricted mode should mean unrestricted, got {actual}",
+        )
+
+
 def test_no_lf_runners_flag_arc_yaml_mode_all_is_noop():
     with tempfile.TemporaryDirectory() as d:
         arc_yaml = write_arc_yaml(

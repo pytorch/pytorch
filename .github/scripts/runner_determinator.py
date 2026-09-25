@@ -722,33 +722,38 @@ def get_lf_runners_output(
 ) -> str:
     """Comma-separated allowlist for --lf-runners (ci-infra#1081).
 
-    Empty means unrestricted: lf disabled, mode "all", no lf_allowlist, or
-    restrict_runners is False (the kill-switch, test-infra#5132).
+    Empty means unrestricted: lf disabled, mode "all", no lf_allowlist,
+    restrict_runners is False (the kill-switch, test-infra#5132), or
+    arc.yaml is missing/malformed (fail open but loud, see except below).
     """
     if not lf_enabled or not restrict_runners:
         return ""
     try:
         with open(arc_yaml_path) as f:
             data = yaml.safe_load(f)
-    except OSError:
+        allowlist = (data or {}).get("lf_allowlist") or {}
+        mode = allowlist.get("mode", "all")
+        if mode not in LF_ALLOWLIST_MODES:
+            # Fail open but loud: map_ec2_to_arc.py validates the same field
+            # and will hard-exit every build job on this typo. Logging here
+            # points at the root cause from the one place that only runs once.
+            log.error(
+                f"{arc_yaml_path}: lf_allowlist.mode must be one of "
+                f"{LF_ALLOWLIST_MODES}, got '{mode}'; treating as unrestricted"
+            )
+            return ""
+        if mode != "restricted":
+            return ""
+        return ",".join(sorted(allowlist.get("runners") or []))
+    except Exception as e:
+        # Broad by design: a syntax error, a non-mapping lf_allowlist, or an
+        # unsortable runners: list must not abort main() before it emits any
+        # of the other four outputs (ci-infra#1081).
         log.warning(
-            f"Could not read {arc_yaml_path}; treating lf_allowlist as unrestricted"
+            f"Could not read lf_allowlist from {arc_yaml_path} ({e}); "
+            "treating as unrestricted"
         )
         return ""
-    allowlist = (data or {}).get("lf_allowlist") or {}
-    mode = allowlist.get("mode", "all")
-    if mode not in LF_ALLOWLIST_MODES:
-        # Fail open but loud: map_ec2_to_arc.py validates the same field and
-        # will hard-exit every build job on this typo. Logging here points
-        # at the root cause from the one place that only runs once.
-        log.error(
-            f"{arc_yaml_path}: lf_allowlist.mode must be one of "
-            f"{LF_ALLOWLIST_MODES}, got '{mode}'; treating as unrestricted"
-        )
-        return ""
-    if mode != "restricted":
-        return ""
-    return ",".join(sorted(allowlist.get("runners") or []))
 
 
 def get_rollout_state_from_issue(github_token: str, repo: str, issue_num: int) -> str:

@@ -99,11 +99,19 @@ def load_lf_config(arc_yaml: Path) -> tuple[str, frozenset[str]]:
 def resolve_lf_allowlist(
     lf_runners_arg: str | None, arc_yaml: Path
 ) -> frozenset[str] | None:
-    """--lf-runners wins when given (mode is still validated); else arc.yaml."""
+    """--lf-runners wins when given (mode is still validated); else arc.yaml.
+
+    An empty runners: list under mode: restricted also means unrestricted,
+    matching what an explicit --lf-runners "" means -- otherwise the same
+    arc.yaml would mean two different things depending on which of the two
+    code paths reads it (ci-infra#1081).
+    """
     mode, runners = load_lf_config(arc_yaml)
     if lf_runners_arg is not None:
         return parse_lf_runners_arg(lf_runners_arg)
-    return runners if mode == "restricted" else None
+    if mode == "restricted":
+        return runners or None
+    return None
 
 
 def get_arc_yaml_path() -> Path:
@@ -167,7 +175,7 @@ def main() -> None:
         # Some hardware (H100, B200) exists only on the Meta fleet, so force the
         # 'mt-' prefix regardless of the build job's fleet assignment.
         if clean in meta_only:
-            entry["runner"] = "mt-" + mapped
+            entry["runner"] = META_PREFIX + mapped
             continue
         # Passthrough runners (e.g. linux.rocm.gpu.2, linux.idc.xpu) are not
         # OSDC-managed so they keep their original label without the prefix.
