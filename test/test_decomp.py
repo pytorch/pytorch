@@ -18,6 +18,7 @@ from torch._decomp import (
 from torch._dispatch.python import enable_python_dispatcher
 from torch._export.utils import _is_cia_op
 from torch._ops import DispatchKey
+from torch._subclasses import FakeTensorMode
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import SM70OrLater, tf32_off
 from torch.testing._internal.common_device_type import (
@@ -33,6 +34,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     is_iterable_of_tensors,
     run_tests,
     skipIfCrossRef,
@@ -576,6 +578,7 @@ comprehensive_failures = {
 
 @unMarkDynamoStrictTest
 class TestDecomp(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
     longMessage = True
 
     # NB: This actually overlaps with test_comprehensive, but it only
@@ -754,6 +757,27 @@ class TestDecomp(TestCase):
             input, weight, bias, mean, var, False, 1, 1e-05
         )
         self.assertEqual(shape, res[0].shape)
+
+    def test_log_sigmoid_forward_buffer_shape(self, device):
+        # The buffer output of aten.log_sigmoid_forward is only consumed by the
+        # CPU backward kernel (log_sigmoid_backward_cpu); accelerator kernels
+        # (CUDA/XPU/MPS/PrivateUse1) allocate an empty (0,) buffer and ignore it
+        # (see the NOTE comments in log_sigmoid_backward_{cuda,mps}). The
+        # decomposition used for FakeTensor shape inference must match the real
+        # kernels, otherwise torch.compile/export raise a MetadataMismatchError
+        # (see log_sigmoid_forward in torch/_decomp/decompositions.py). The
+        # assertions pivot on fake/meta devices and are independent of the
+        # injected `device`.
+        with FakeTensorMode():
+            for fake_device, expected_shape in (("cpu", (3,)), ("cuda", (0,))):
+                _, buffer = torch.ops.aten.log_sigmoid_forward(
+                    torch.randn(3, device=fake_device)
+                )
+                self.assertEqual(buffer.shape, torch.Size(expected_shape))
+        # Meta tensors follow the CPU branch: this op has no Meta kernel, so
+        # the decomposition defines its meta behavior.
+        _, buffer = torch.ops.aten.log_sigmoid_forward(torch.randn(3, device="meta"))
+        self.assertEqual(buffer.shape, torch.Size([3]))
 
     def test_batch_norm_eval_emits_rsqrt(self, device):
         # The eval/inference branch of native_batch_norm_helper computes the
@@ -1178,6 +1202,8 @@ instantiate_device_type_tests(TestDecomp, globals())
 
 
 class DecompOneOffTests(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @onlyNativeDeviceTypes
     @skipIfCrossRef
     def test_polar_decomposition_is_functional(self, device):
@@ -1583,6 +1609,8 @@ instantiate_device_type_tests(DecompOneOffTests, globals())
 
 
 class HasDecompTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.maxDiff = None
