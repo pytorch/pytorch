@@ -653,8 +653,8 @@ if has_triton():
         Example:
             ```python
             # Atomically set remote signal to 1 to notify completion
-            from torch._C._distributed_c10d import _nvshmem_signal_op_values
-            NVSHMEM_SIGNAL_SET, _ = _nvshmem_signal_op_values()
+            from torch._C._distributed_c10d import _ShmemSignalOp
+            NVSHMEM_SIGNAL_SET = int(_ShmemSignalOp.SET)
             nvshmem.signal_op(remote_signal_ptr, 1, NVSHMEM_SIGNAL_SET, target_pe)
             ```
         """
