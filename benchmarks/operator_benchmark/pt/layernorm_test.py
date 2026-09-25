@@ -13,17 +13,23 @@ layernorm_configs_short = op_bench.cross_product_configs(
         (32, 8, 16),
         (64, 128, 56, 56),
     ),
+    # affine selects which of weight/bias are passed; None args hit the
+    # vectorized null-affine paths in the CPU LayerNormSecondPass kernel.
+    affine=("both", "weight_only", "bias_only", "none"),
     tags=["short"],
 )
 
 
 class LayerNormBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, dims):
+    def init(self, dims, affine):
         input = (torch.rand(*dims) - 0.5) * 256
+        normalized_shape = input.size()[1:]
+        weight = torch.rand(*normalized_shape, dtype=torch.float)
+        bias = torch.rand(*normalized_shape, dtype=torch.float)
         self.inputs = {
             "input": input,
-            "weight": torch.rand(*input.size()[1:], dtype=torch.float),
-            "bias": torch.rand(*input.size()[1:], dtype=torch.float),
+            "weight": weight if affine in ("both", "weight_only") else None,
+            "bias": bias if affine in ("both", "bias_only") else None,
             "eps": 1e-5,
         }
 
