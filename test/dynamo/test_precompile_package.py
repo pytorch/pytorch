@@ -16,6 +16,7 @@ import subprocess
 import sys
 import sysconfig
 import tempfile
+import threading
 import traceback
 import types
 import typing
@@ -878,6 +879,12 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # abspath: drive-qualified on Windows, where 3.13's isabs rejects \x
         bogus = os.path.abspath(os.path.join(os.sep, "elsewhere", "torch"))
         stub = types.SimpleNamespace(__path__=[None, bogus])
+        # The package directory has two spellings, both roots: the one torch's
+        # __path__ names and two levels up from where this file resolves. They
+        # are one directory on a plain checkout and two in a per-file symlink
+        # farm (a Buck link-tree), so the expectation carries both.
+        resolved = norm(precompile_package.__file__)
+        anchored = {own, os.path.dirname(os.path.dirname(resolved))}
         self._clear_root_caches()
         with mock.patch.dict(sys.modules, {"torch": stub}):
             # A substituted torch's __path__ is ignored until it lists the torch
@@ -886,13 +893,13 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             # relies on, and a relative one, which realpath would resolve into
             # the process cwd, is not. A __path__ that is no sequence at all is
             # ignored as well.
-            self.assertEqual(torch_roots(), (own,))
+            self.assertEqual(set(torch_roots()), anchored)
             stub.__path__ += [os.path.dirname(torch.__file__), "", "relative"]
             torch_roots.cache_clear()
-            self.assertEqual(set(torch_roots()), {own, norm(bogus)})
+            self.assertEqual(set(torch_roots()), anchored | {norm(bogus)})
             stub.__path__ = None
             torch_roots.cache_clear()
-            self.assertEqual(torch_roots(), (own,))
+            self.assertEqual(set(torch_roots()), anchored)
         with mock.patch.object(precompile_package, "__file__", None):
             torch_roots.cache_clear()
             self.assertEqual(torch_roots(), ())  # frozen: no directory to anchor to
@@ -2094,6 +2101,446 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # code read the same here although the guard compares their ids.
         digest = precompile_package._hash_text(pack.code)
         self.assertEqual(rendered, f"hooks=({digest}, {digest})")
+
+    def test_wont_generalize_cancels_pins_only_within_a_frame(self):
+        from torch._dynamo.precompile_package import (
+            _pins_a_value,
+            _SHAPE_BEARING_GUARD_TYPES,
+            _VALUE_EQUALITY_GUARD_TYPES,
+            _wont_generalize,
+        )
+        from torch.compiler._precompile_types import GuardFact
+
+        # A value pin is never policy-droppable, so a new value-pinning guard
+        # type has to be triaged into the shape-bearing set to land here.
+        self.assertTrue(_VALUE_EQUALITY_GUARD_TYPES <= _SHAPE_BEARING_GUARD_TYPES)
+        self.assertTrue(_pins_a_value("EQUALS_MATCH", "scale"))
+        self.assertTrue(_pins_a_value("CONSTANT_MATCH", "___stack0"))
+        self.assertTrue(_pins_a_value("CONSTANT_SUBCLASS_MATCH", "n"))
+        self.assertTrue(_pins_a_value("RANGE_ITERATOR_MATCH", "it"))
+        self.assertTrue(_pins_a_value("COUNT_ITERATOR_MATCH", "it"))
+        # The empty source of a sourceless guard is not a bare name.
+        self.assertFalse(_pins_a_value("EQUALS_MATCH", ""))
+        # Reached THROUGH an argument, or a container element: not counted.
+        self.assertFalse(_pins_a_value("CONSTANT_MATCH", "self.eps"))
+        self.assertFalse(_pins_a_value("EQUALS_MATCH", "dims[0]"))
+        self.assertFalse(_pins_a_value("EQUALS_MATCH", "G['CFG'].width"))
+        self.assertFalse(_pins_a_value("TENSOR_MATCH", "x"))
+        self.assertFalse(_pins_a_value("SEQUENCE_LENGTH", "xs"))
+
+        def fact(guard_type, source, live=True):
+            return GuardFact(
+                guard_type=guard_type, source=source, code=(), value="", enforced=live
+            )
+
+        entry = ("step", "m.py", 1)
+        resume_a = ("torch_dynamo_resume_in_step_at_7", "m.py", 7)
+        resume_b = ("torch_dynamo_resume_in_step_at_9", "m.py", 9)
+        kept = {
+            ("EQUALS_MATCH", "scale"),
+            ("EQUALS_MATCH", "mode"),
+            ("CONSTANT_MATCH", "___stack0"),
+            ("CONSTANT_MATCH", "fn"),
+            ("EQUALS_MATCH", "keys"),
+            ("TENSOR_MATCH", "x"),
+        }
+        pinned_scale = fact("EQUALS_MATCH", "scale")
+        pinned_mode = fact("EQUALS_MATCH", "mode")
+        generic_scale = fact("TYPE_MATCH", "scale")
+        pinned_keys = fact("EQUALS_MATCH", "keys")
+        it = fact("COUNT_ITERATOR_MATCH", "it")
+        x = fact("TENSOR_MATCH", "x")
+        guard_sets = {
+            # Two variants of the entry: one pins scale and mode, the other
+            # serves scale generically -- the ordinary shape once two examples
+            # are captured -- so only mode stays pinned.
+            entry: [
+                frozenset({pinned_scale, pinned_mode, x}),
+                frozenset({generic_scale, pinned_mode, x}),
+            ],
+            # ___stack0 is a tensor in this resume frame ...
+            resume_a: [frozenset({fact("TENSOR_MATCH", "___stack0")})],
+            # ... and the .item() int in this one. The tensor elsewhere is a
+            # different local under the same bare name and must not cancel it.
+            resume_b: [frozenset({fact("CONSTANT_MATCH", "___stack0")})],
+            # A variant whose value guard the filter dropped checks nothing and
+            # serves any fn, so it cancels the sibling's pin like a generic one.
+            ("gate", "m.py", 12): [
+                frozenset({fact("CONSTANT_MATCH", "fn")}),
+                frozenset({fact("CONSTANT_MATCH", "fn", live=False)}),
+            ],
+            # A dict_keys argument gets EQUALS_MATCH and SEQUENCE_LENGTH on one
+            # source in ONE variant (variables/builder.py): a variant's own
+            # companion guard must not cancel its pin. The iterator pin on `it`
+            # has no kept slot, so it is never reported.
+            ("lookup", "m.py", 15): [
+                frozenset({pinned_keys, fact("SEQUENCE_LENGTH", "keys"), it})
+            ],
+        }
+        self.assertEqual(
+            _wont_generalize(kept, guard_sets), ("___stack0", "keys", "mode")
+        )
+        # A frame that pins scale in its only variant is a real pin; the entry
+        # frame's generic variant cancels the entry's pin, not this one.
+        guard_sets[("helper", "m.py", 20)] = [frozenset({pinned_scale})]
+        self.assertEqual(
+            _wont_generalize(kept, guard_sets), ("___stack0", "keys", "mode", "scale")
+        )
+        # Nothing pinned: nothing to report, whatever the frames say.
+        self.assertEqual(_wont_generalize({("TENSOR_MATCH", "x")}, guard_sets), ())
+
+    def test_varying_guard_slots_are_the_differing_and_present_in_some_ones(self):
+        from torch._dynamo.precompile_package import _varying_guard_slots
+        from torch.compiler._precompile_types import GuardFact
+
+        def fact(guard_type, source, code=(), value="", enforced=True):
+            return GuardFact(
+                guard_type=guard_type,
+                source=source,
+                code=code,
+                value=value,
+                enforced=enforced,
+            )
+
+        x_f32 = fact("TENSOR_MATCH", "L['x']", value="dtype=float32")
+        x_f16 = fact("TENSOR_MATCH", "L['x']", value="dtype=float16")
+        flag = fact("CONSTANT_MATCH", "L['flag']", code=("L['flag'] == 1",))
+        fn_id = fact("ID_MATCH", "G['fn']", value="is mod.fn", enforced=False)
+        # Same check as fn_id, only the filter's verdict differs.
+        fn_id_kept = fact("ID_MATCH", "G['fn']", value="is mod.fn")
+        frame = ("forward", "m.py", 12)
+
+        self.assertEqual(_varying_guard_slots({}), frozenset())
+        # One variant discriminates nothing.
+        self.assertEqual(
+            _varying_guard_slots({frame: [frozenset({x_f32, flag, fn_id})]}),
+            frozenset(),
+        )
+        varying = _varying_guard_slots(
+            {frame: [frozenset({x_f32, fn_id}), frozenset({x_f16, flag, fn_id_kept})]}
+        )
+        self.assertEqual(
+            varying,
+            frozenset({("TENSOR_MATCH", "L['x']"), ("CONSTANT_MATCH", "L['flag']")}),
+        )
+        # Frames are never compared with each other: the same slot pinned to
+        # different values in two frames is invariant within each.
+        other = ("torch_dynamo_resume_in_forward_at_14", "m.py", 14)
+        self.assertEqual(
+            _varying_guard_slots(
+                {frame: [frozenset({x_f32})], other: [frozenset({x_f16})]}
+            ),
+            frozenset(),
+        )
+        # One HASATTR per attribute, all on the parent source: two facts on one
+        # slot inside a variant are that variant's rendering of it, and the slot
+        # varies only when the variants' renderings differ (here by code alone).
+        has_w = fact("HASATTR", "L['mod']", code=("hasattr(L['mod'], 'weight')",))
+        has_b = fact("HASATTR", "L['mod']", code=("hasattr(L['mod'], 'bias')",))
+        both = frozenset({has_w, has_b})
+        self.assertEqual(_varying_guard_slots({frame: [both]}), frozenset())
+        self.assertEqual(_varying_guard_slots({frame: [both, both]}), frozenset())
+        self.assertEqual(
+            _varying_guard_slots({frame: [frozenset({has_w}), frozenset({has_b})]}),
+            frozenset({("HASATTR", "L['mod']")}),
+        )
+
+    def test_summarize_reads_the_frame_lists_off_the_entry(self):
+        from torch._dynamo.package import (
+            _DynamoCacheEntry,
+            _DynamoCodeCacheEntry,
+            _GuardedCodeCacheEntry,
+            SerializedCode,
+            SourceInfo,
+        )
+        from torch._dynamo.precompile_package import _summarize
+        from torch.compiler._precompile_types import GuardFact
+
+        def entry(
+            code,
+            guarded=0,
+            backend_ids=(),
+            bypassed=False,
+            entered=True,
+            install_to_global=False,
+        ):
+            serialized = SerializedCode.from_code_object(code)
+            return _DynamoCodeCacheEntry(
+                python_code=serialized,
+                python_module=__name__,
+                function_names=[],
+                guarded_codes=[
+                    _GuardedCodeCacheEntry(guards_state=b"", dynamo_code=serialized)
+                    for _ in range(guarded)
+                ],
+                import_sources={},
+                backend_ids=list(backend_ids),
+                code_source=None,
+                install_to_global=install_to_global,
+                has_compile_id=entered,
+                bypassed=bypassed,
+            )
+
+        # Three distinct code objects that share the name every nn.Module has.
+        class A:
+            def forward(self):
+                pass
+
+        class B:
+            def forward(self):
+                pass
+
+        class C:
+            def forward(self):
+                pass
+
+        def helper():
+            pass
+
+        def resume():
+            pass
+
+        # A save-time bypass (from_cache_entry) leaves the entry's backend ids
+        # in place; install() loads none of them, so they are not counted.
+        codes = [
+            entry(A.forward.__code__, guarded=1, backend_ids=["__compiled_fn_1"]),
+            entry(B.forward.__code__),
+            entry(C.forward.__code__),
+            entry(helper.__code__, bypassed=True, backend_ids=["__compiled_fn_2"]),
+            # Generated but never executed: no compile id, so not a gap.
+            entry(resume.__code__, entered=False, install_to_global=True),
+        ]
+        info = SourceInfo(inlined_sources=set())
+        cache = _DynamoCacheEntry(codes=codes, source_info=info, device_type="cpu")
+        fn_id, flag = ("ID_MATCH", "G['fn']"), ("HASATTR", "mod")
+        mode, torch_mod = ("EQUALS_MATCH", "mode"), ("MODULE_MATCH", "G['torch']")
+        has_bias, is_torch = "hasattr(L['mod'], 'bias')", "G['torch'] is torch"
+        pinned_mode = GuardFact(
+            guard_type="EQUALS_MATCH",
+            source="mode",
+            code=("L['mode'] == 1",),
+            value="",
+            enforced=True,
+        )
+        summary = _summarize(
+            cache,
+            dropped={fn_id, flag},
+            kept={mode, ("TENSOR_MATCH", "x")},
+            policy_dropped={torch_mod},
+            risky={fn_id},
+            truncated=frozenset({"forward (m.py:3)"}),
+            capture_errors=("boom",),
+            guard_sets={("forward", "m.py", 3): [frozenset({pinned_mode})]},
+            # One rendering per dropped slot, from either drop list; fn_id has none.
+            dropped_code={flag: has_bias, torch_mod: is_torch},
+        )
+        # One bare co_name per frame: two uncovered forwards stay two, and the
+        # frame lists are drawn from the frames the count covers.
+        self.assertEqual(summary.frames, 5)
+        self.assertEqual(summary.resume_functions, 1)
+        self.assertEqual(summary.guarded_codes, 1)
+        self.assertEqual(summary.backend_graphs, 1)
+        self.assertEqual(summary.bypassed, ("helper",))
+        self.assertEqual(summary.uncovered_frames, ("forward", "forward"))
+        self.assertFalse(summary.complete)
+        self.assertEqual(summary.dropped_guards, (flag, fn_id))
+        self.assertEqual(summary.kept_guards, (mode, ("TENSOR_MATCH", "x")))
+        self.assertEqual(summary.policy_dropped_guards, (torch_mod,))
+        self.assertEqual(summary.risky_dropped_guards, (fn_id,))
+        self.assertEqual(
+            summary.dropped_guard_code, ((*flag, has_bias), (*torch_mod, is_torch))
+        )
+        self.assertEqual(summary.wont_generalize, ("mode",))
+        self.assertEqual(summary.capture_errors, ("boom",))
+
+    def test_capture_config_is_scoped_per_entry_and_per_thread(self):
+        import torch._functorch.config as functorch_config
+        from torch._dynamo.precompile_package import _capture_config
+
+        def flags():
+            return (
+                functorch_config.bundled_autograd_cache,
+                functorch_config.bypass_autograd_cache_key,
+                functorch_config.force_non_lazy_backward_lowering,
+                torch._dynamo.config.allow_empty_graphs,
+            )
+
+        ambient = (False, False, False, False)
+        with (
+            functorch_config.patch(
+                bundled_autograd_cache=False,
+                bypass_autograd_cache_key=False,
+                force_non_lazy_backward_lowering=False,
+            ),
+            torch._dynamo.config.patch(allow_empty_graphs=False),
+        ):
+            self.assertEqual(flags(), ambient)
+            with _capture_config(training=False):
+                self.assertEqual(flags(), (True, True, False, True))
+                # The inner scope's training wins while it is open, and the
+                # outer scope's setting comes back when it closes.
+                with _capture_config(training=True):
+                    self.assertEqual(flags(), (True, True, True, True))
+                self.assertEqual(flags(), (True, True, False, True))
+            self.assertEqual(flags(), ambient)
+
+            with self.assertRaisesRegex(RuntimeError, "boom"):
+                with _capture_config(training=True):
+                    raise RuntimeError("boom")
+            self.assertEqual(flags(), ambient)
+
+            # Config values are per thread, so a worker entering the scope
+            # patches only itself and the main thread stays ambient.
+            entered, release = threading.Event(), threading.Event()
+            seen = []
+
+            def hold():
+                seen.append(flags())
+                with _capture_config(training=False):
+                    seen.append(flags())
+                    entered.set()
+                    release.wait(10)
+                seen.append(flags())
+
+            worker = threading.Thread(target=hold)
+            worker.start()
+            self.assertTrue(entered.wait(10))
+            self.assertEqual(flags(), ambient)
+            release.set()
+            worker.join(10)
+            self.assertFalse(worker.is_alive())
+            self.assertEqual(seen[1], (True, True, False, True))
+            self.assertEqual(seen[0], seen[2])
+            self.assertNotEqual(seen[0], seen[1])
+
+    def test_capture_config_refuses_disabled_caches_and_honours_strict(self):
+        import torch._functorch.config as functorch_config
+        from torch._dynamo.exc import PackageError
+        from torch._dynamo.precompile_package import _capture_config
+
+        # Backends reach the artifact through the bundled AOTAutograd cache, so
+        # a capture with caches forced off would record nothing; say so up front.
+        with torch.compiler.config.patch(force_disable_caches=True):
+            with self.assertRaisesRegex(PackageError, "force_disable_caches"):
+                with _capture_config(training=False):
+                    pass
+
+        with functorch_config.patch(strict_autograd_cache=False):
+            with torch._dynamo.config.patch(strict_precompile=False):
+                with _capture_config(training=False):
+                    self.assertFalse(functorch_config.strict_autograd_cache)
+            with torch._dynamo.config.patch(strict_precompile=True):
+                with _capture_config(training=False):
+                    self.assertTrue(functorch_config.strict_autograd_cache)
+            self.assertFalse(functorch_config.strict_autograd_cache)
+
+    def test_allow_empty_graphs_convert_frame_keeps_a_no_op_frame_compilable(self):
+        from torch._dynamo.convert_frame import ConvertFrame
+        from torch._dynamo.precompile_package import _AllowEmptyGraphsConvertFrame
+        from torch._dynamo.testing import CompileCounter
+
+        def fn(x, flag):
+            if flag:
+                return x.sin()
+            return x
+
+        # Install a converter of the given class beneath the CatchErrorsWrapper
+        # torch._dynamo.optimize built, the way a capture session will, and
+        # count the variants of fn the backend compiles after a no-op call.
+        def compiled_variants(cls):
+            torch._dynamo.reset()
+            counter = CompileCounter()
+            optimize_ctx = torch._dynamo.optimize(counter)
+            wrapper = optimize_ctx.callback
+            built = wrapper._torchdynamo_orig_backend
+            wrapper._torchdynamo_orig_backend = cls(
+                built._torchdynamo_orig_backend,
+                wrapper.hooks,
+                recompile_limit=built._recompile_limit,
+            )
+            x = torch.ones(2)
+            optimize_ctx(fn)(x, False)
+            optimize_ctx(fn)(x, True)
+            return counter.frame_count
+
+        # The plain converter skips the code object on the empty graph, so the
+        # later sin variant is never compiled; the subclass compiles both.
+        self.assertEqual(compiled_variants(ConvertFrame), 0)
+        self.assertEqual(compiled_variants(_AllowEmptyGraphsConvertFrame), 2)
+        self.assertFalse(torch._dynamo.config.allow_empty_graphs)
+
+    def test_allow_empty_graphs_convert_frame_refuses_a_ddp_optimizer_frame(self):
+        from torch._dynamo.hooks import Hooks
+        from torch._dynamo.package import CompilePackage
+        from torch._dynamo.precompile_package import _AllowEmptyGraphsConvertFrame
+        from torch._dynamo.testing import CompileCounter
+        from torch.nn.parallel import DistributedDataParallel
+
+        def fn(x):
+            return x.sin()
+
+        # A stub active DDP module takes CatchErrorsWrapper down its DDPOptimizer
+        # branch, the one that asks the converter for a clone.
+        ddp_module = types.SimpleNamespace(bucket_bytes_cap=25 * 1024 * 1024)
+        for optimize_ddp in (True, "ddp_optimizer", "no_optimization"):
+            torch._dynamo.reset()
+            counter = CompileCounter()
+            optimize_ctx = torch._dynamo.optimize(counter)
+            wrapper = optimize_ctx.callback
+            built = wrapper._torchdynamo_orig_backend
+            conv = _AllowEmptyGraphsConvertFrame(
+                built._torchdynamo_orig_backend,
+                wrapper.hooks,
+                package=CompilePackage(fn),
+                recompile_limit=built._recompile_limit,
+            )
+            wrapper._torchdynamo_orig_backend = conv
+            # The wrapper's capability probe must still say yes with a package.
+            self.assertTrue(hasattr(conv, "_clone_with_backend"))
+            with (
+                torch._dynamo.config.patch(optimize_ddp=optimize_ddp),
+                mock.patch.object(
+                    DistributedDataParallel, "_active_ddp_module", ddp_module
+                ),
+            ):
+                if optimize_ddp == "no_optimization":
+                    optimize_ctx(fn)(torch.ones(2))
+                    self.assertEqual(counter.frame_count, 1)
+                else:
+                    msg = r'DistributedDataParallel forward.*optimize_ddp=.*optimize_ddp="no_optimization"'
+                    with self.assertRaisesRegex(PackageError, msg):
+                        optimize_ctx(fn)(torch.ones(2))
+                    self.assertEqual(counter.frame_count, 0)
+            self.assertFalse(torch._dynamo.config.allow_empty_graphs)
+        # Without a package the DDP clone keeps the subclass, hooks and limit.
+        backend, hooks = CompileCounter(), Hooks()
+        plain = _AllowEmptyGraphsConvertFrame(backend, hooks, recompile_limit=3)
+        clone = plain._clone_with_backend(backend)
+        self.assertIs(type(clone), _AllowEmptyGraphsConvertFrame)
+        self.assertIs(clone._hooks, hooks)
+        self.assertEqual(clone._recompile_limit, 3)
+
+    def test_allow_empty_graphs_convert_frame_reverts_the_flag_when_the_compile_raises(
+        self,
+    ):
+        from torch._dynamo.convert_frame import ConvertFrame
+        from torch._dynamo.hooks import Hooks
+        from torch._dynamo.precompile_package import _AllowEmptyGraphsConvertFrame
+
+        seen = []
+
+        def failing_compile(self, frame, cache_entry, hooks, frame_state, skip=0):
+            seen.append((torch._dynamo.config.allow_empty_graphs, skip))
+            raise RuntimeError("compile failed")
+
+        converter = _AllowEmptyGraphsConvertFrame(lambda gm, inputs: gm, Hooks())
+        with mock.patch.object(ConvertFrame, "__call__", failing_compile):
+            with self.assertRaisesRegex(RuntimeError, "compile failed"):
+                converter(mock.Mock(), None, Hooks(), {}, skip=1)
+        # The flag was on for the compile and the converter's own frame is
+        # accounted for in the traceback skip count.
+        self.assertEqual(seen, [(True, 2)])
+        self.assertFalse(torch._dynamo.config.allow_empty_graphs)
 
 
 instantiate_parametrized_tests(TestPrecompilePackage)
