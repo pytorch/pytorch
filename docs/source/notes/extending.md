@@ -128,6 +128,15 @@ the autograd engine.
   default all output tensors that are of differentiable type will be set
   to require gradient. Tensors of non-differentiable type (i.e., integral types)
   are never marked as requiring gradients.
+- {meth}`~torch.autograd.function.FunctionCtx.set_output_grad_dtype` can be
+  used to choose the dtype in which each output gradient is accumulated and
+  passed to {meth}`~Function.backward`. Call it at most once from
+  {meth}`~Function.forward` or {meth}`~Function.setup_context`, with one
+  declaration for every returned value. Pass a {class}`torch.dtype` to request
+  that dtype, or ``None`` to accept the gradient's existing dtype without a
+  conversion. ``None`` is also required for non-Tensor and non-differentiable
+  outputs. Without a declaration, a differentiable output's gradient uses the
+  output's dtype.
 - {meth}`~torch.autograd.function.FunctionCtx.set_materialize_grads` can be
   used to tell the autograd engine to optimize gradient computations in the cases where
   the output does not depend on the input by not materializing grad tensors given to backward
