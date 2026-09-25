@@ -505,11 +505,13 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
             local_reduce_source_op = lambda value: value
             local_reduce_finalize = lambda value, group: value
             local_reduce_consumer = None
+            tensor_epilogue_returns_local_reduce = False
         else:
             (
                 local_reduce_group,
                 local_reduce_axis,
                 local_reduce_feeds_main,
+                tensor_epilogue_returns_local_reduce,
                 local_reduce_op,
                 local_reduce_init,
                 local_reduce_combine,
@@ -558,6 +560,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         self.local_reduce_source_op = local_reduce_source_op
         self.local_reduce_finalize = local_reduce_finalize
         self.local_reduce_consumer = local_reduce_consumer
+        self.tensor_epilogue_returns_local_reduce = tensor_epilogue_returns_local_reduce
         self.has_cross_warp_local_reduce = cutlass.const_expr(
             (local_reduce_tensor is not None or local_reduce_feeds_main)
             and local_reduce_axis == 0
@@ -1562,6 +1565,10 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                     cur_tile_coord[1],
                     cur_tile_coord[2],
                 )
+                mma_tile_offset_m = (
+                    mma_tile_coord_mnl[0] * self.mma_tiler[0]
+                    + mma_tile_coord_v * self.cta_tile_shape_mnk[0]
+                )
 
                 #
                 # Slice to per mma tile index
@@ -1699,10 +1706,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                             ):
                                 row_idx = coord_flt[i][0]
                                 col_idx = coord_flt[i][1]
-                                global_m = (
-                                    mma_tile_coord_mnl[0] * self.cta_tile_shape_mnk[0]
-                                    + row_idx
-                                )
+                                global_m = mma_tile_offset_m + row_idx
                                 global_n = (
                                     mma_tile_coord_mnl[1] * self.cta_tile_shape_mnk[1]
                                     + col_idx
@@ -1731,7 +1735,12 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                         local_reduce_vec = acc_vec.to(epilogue_input_dtype).to(
                             self.acc_dtype
                         )
-                        local_reduce_vec = self.local_reduce_source_op(local_reduce_vec)
+                        if cutlass.const_expr(
+                            not self.tensor_epilogue_returns_local_reduce
+                        ):
+                            local_reduce_vec = self.local_reduce_source_op(
+                                local_reduce_vec
+                            )
                     if cutlass.const_expr(self.local_reduce_feeds_main):
                         group = cutlass.const_expr(self.local_reduce_group)
                         if cutlass.const_expr(self.local_reduce_axis == 1):
@@ -1765,6 +1774,13 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                         epilogue_result = epilogue_op(
                             acc_vec.to(epilogue_input_dtype), *tuple(epilogue_values)
                         )
+                    if cutlass.const_expr(self.tensor_epilogue_returns_local_reduce):
+                        assert not self.local_reduce_feeds_main
+                        local_reduce_vec = epilogue_result[-1].to(self.acc_dtype)
+                        if cutlass.const_expr(has_epilogue_outputs):
+                            epilogue_result = epilogue_result[:-1]
+                        else:
+                            epilogue_result = epilogue_result[0]
                     if cutlass.const_expr(
                         local_reduce_feed_tensor is not None
                         and self.local_reduce_axis == 1
@@ -1782,10 +1798,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                         ):
                             row_idx = coord_flt[i][0]
                             col_idx = coord_flt[i][1]
-                            global_m = (
-                                mma_tile_coord_mnl[0] * self.cta_tile_shape_mnk[0]
-                                + row_idx
-                            )
+                            global_m = mma_tile_offset_m + row_idx
                             global_n = (
                                 mma_tile_coord_mnl[1] * self.cta_tile_shape_mnk[1]
                                 + col_idx
@@ -1816,10 +1829,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                             ):
                                 row_idx = coord_flt[i][0]
                                 col_idx = coord_flt[i][1]
-                                global_m = (
-                                    mma_tile_coord_mnl[0] * self.cta_tile_shape_mnk[0]
-                                    + row_idx
-                                )
+                                global_m = mma_tile_offset_m + row_idx
                                 global_n = (
                                     mma_tile_coord_mnl[1] * self.cta_tile_shape_mnk[1]
                                     + col_idx
@@ -1860,11 +1870,16 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                             grouped = local_reduce_vec.reshape(
                                 ((1, fragment_group, repeats), 1, 1)
                             )
-                            reduced = grouped.reduce(
-                                self.local_reduce_op,
-                                init_val=self.local_reduce_init,
-                                reduction_profile=((None, 1, None), 1, 1),
-                            )
+                            if cutlass.const_expr(
+                                self.tensor_epilogue_returns_local_reduce
+                            ):
+                                reduced = grouped[((0, 0, None), None, None)]
+                            else:
+                                reduced = grouped.reduce(
+                                    self.local_reduce_op,
+                                    init_val=self.local_reduce_init,
+                                    reduction_profile=((None, 1, None), 1, 1),
+                                )
                             if cutlass.const_expr(group <= fragment_n):
                                 reduced = self.local_reduce_finalize(reduced, group)
                             reduced = reduced.reshape(((1, 1, repeats), 1, 1))
@@ -1903,20 +1918,19 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                             )
                             gReduce = cute.local_tile(
                                 mReduce,
-                                (self.cta_tile_shape_mnk[0], groups_per_cta),
+                                (self.mma_tiler[0], groups_per_cta),
                                 mma_tile_coord_mnl[:2],
                             )
-                            limit_m = min(
-                                cute.size(local_reduce_tensor, mode=[1])
-                                - mma_tile_coord_mnl[0] * self.cta_tile_shape_mnk[0],
-                                self.cta_tile_shape_mnk[0],
-                            )
+                            row_offset = mma_tile_coord_v * self.cta_tile_shape_mnk[0]
+                            limit_m = cute.size(local_reduce_tensor, mode=[1])
                             limit_groups = cute.size(local_reduce_tensor, mode=[2])
                             for i in cutlass.range(
                                 cute.size(reduced_flt), unroll_full=True
                             ):
                                 row_idx = coord_flt[i][0]
                                 n_idx = coord_flt[i][1]
+                                output_row = row_idx + row_offset
+                                global_row = mma_tile_offset_m + row_idx
                                 group_idx = n_idx // group
                                 global_group_idx = (
                                     mma_tile_coord_mnl[1] * groups_per_cta + group_idx
@@ -1924,10 +1938,10 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                 if (
                                     should_store
                                     and n_idx % group == store_offset
-                                    and row_idx < limit_m
+                                    and global_row < limit_m
                                     and global_group_idx < limit_groups
                                 ):
-                                    gReduce[row_idx, group_idx] = reduced_flt[i]
+                                    gReduce[output_row, group_idx] = reduced_flt[i]
                         else:
                             tDrReduce = cute.make_rmem_tensor_like(
                                 local_reduce_vec, self.acc_dtype
@@ -2116,11 +2130,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                 ):
                                     row_idx = coord_flt[i][0]
                                     col_idx = coord_flt[i][1]
-                                    global_m = (
-                                        mma_tile_coord_mnl[0]
-                                        * self.cta_tile_shape_mnk[0]
-                                        + row_idx
-                                    )
+                                    global_m = mma_tile_offset_m + row_idx
                                     global_n = (
                                         mma_tile_coord_mnl[1]
                                         * self.cta_tile_shape_mnk[1]
@@ -2262,9 +2272,16 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         :rtype: Tuple[cute.TiledCopy, cute.Tensor, cute.Tensor]
         """
         # Make tiledCopy for tensor memory load
+        # Generated reductions use logical M/N fragments; output stores keep
+        # the physical output layout.
+        accumulator_layout = (
+            utils.LayoutEnum.ROW_MAJOR
+            if self.tensor_epilogue_returns_local_reduce
+            else self.c_layout
+        )
         copy_atom_t2r = sm100_utils.get_tmem_load_op(
             self.cta_tile_shape_mnk,
-            self.c_layout,
+            accumulator_layout,
             self.c_dtype,
             self.acc_dtype,
             epi_tile,
@@ -2284,16 +2301,21 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         # (T2R, T2R_M, T2R_N, EPI_M, EPI_M, STAGE)
         tTR_tAcc = thr_copy_t2r.partition_S(tAcc_epi)
 
-        # (EPI_TILE_M, EPI_TILE_N, EPI_M, EPI_N, RestM, RestN, RestL)
-        gC_mnl_epi = cute.flat_divide(
-            gC_mnl[((None, None), 0, 0, None, None, None)], epi_tile
-        )
-        # (T2R, T2R_M, T2R_N, EPI_M, EPI_N, RestM, RestN, RestL)
-        tTR_gC = thr_copy_t2r.partition_D(gC_mnl_epi)
-        # (T2R, T2R_M, T2R_N)
-        tTR_rAcc = cute.make_rmem_tensor(
-            tTR_gC[(None, None, None, 0, 0, 0, 0, 0)].shape, self.acc_dtype
-        )
+        if cutlass.const_expr(self.tensor_epilogue_returns_local_reduce):
+            cAcc = cute.make_identity_tensor(self.cta_tile_shape_mnk[:2])
+            cAcc_epi = cute.flat_divide(cAcc, epi_tile)
+            tTR_cAcc = thr_copy_t2r.partition_D(cAcc_epi)
+            tTR_rAcc = cute.make_rmem_tensor(
+                tTR_cAcc[(None, None, None, 0, 0)].shape, self.acc_dtype
+            )
+        else:
+            gC_mnl_epi = cute.flat_divide(
+                gC_mnl[((None, None), 0, 0, None, None, None)], epi_tile
+            )
+            tTR_gC = thr_copy_t2r.partition_D(gC_mnl_epi)
+            tTR_rAcc = cute.make_rmem_tensor(
+                tTR_gC[(None, None, None, 0, 0, 0, 0, 0)].shape, self.acc_dtype
+            )
         return tiled_copy_t2r, tTR_tAcc, tTR_rAcc
 
     def epilog_smem_copy_and_partition(

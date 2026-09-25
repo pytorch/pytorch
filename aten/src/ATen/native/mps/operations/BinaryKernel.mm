@@ -1,20 +1,21 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/ExpandUtils.h>
+#include <ATen/OpMathType.h>
 #include <ATen/TensorIndexing.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/Lerp.h>
+#include <ATen/native/Pow.h>
 #include <ATen/native/TensorFactories.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/mps/OperationUtils.h>
-#include <ATen/native/mps/operations/BinaryKernel.h>
-#include <fmt/format.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/complex_native.h>
+#include <ATen/ops/empty_like.h>
 #include <ATen/ops/maximum.h>
 #include <ATen/ops/minimum.h>
 #include <ATen/ops/nextafter_native.h>
@@ -29,38 +30,12 @@ static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
 #include <ATen/native/mps/BinaryKernel_metallib.h>
 #endif
 
-namespace mps {
-
-void binary_op_kernel(const std::string func_name,
-                      const Tensor& input,
-                      const Tensor& other,
-                      const Tensor& output,
-                      const std::optional<Scalar> alpha) {
-  auto new_size = at::infer_size(input.sizes(), other.sizes());
-  if (!output.sizes().equals(new_size)) {
-    output.resize_(new_size);
-  }
-  uint32_t length = output.numel();
-  if (length == 0) {
-    return;
-  }
-
-  auto iter = TensorIteratorConfig()
-                  .allow_cpu_scalars(true)
-                  .add_output(output)
-                  .add_const_input(input)
-                  .add_const_input(other)
-                  .check_all_same_dtype(false)
-                  .promote_inputs_to_common_dtype(true)
-                  .build();
-
-  lib.exec_binary_kernel(iter, func_name, alpha);
-}
-
-} // namespace mps
-
 static void atan2_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "atan2");
+}
+
+static void pow_tensor_tensor_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "pow");
 }
 
 static void fmax_mps_kernel(TensorIteratorBase& iter) {
@@ -184,6 +159,10 @@ static void laguerre_polynomial_l_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "laguerre_polynomial_l");
 }
 
+static void heaviside_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "heaviside");
+}
+
 static void polar_mps_kernel(TensorIterator& iter) {
   lib.exec_binary_kernel(iter, "polar");
 }
@@ -192,70 +171,42 @@ static void complex_mps_kernel(TensorIterator& iter) {
   lib.exec_binary_kernel(iter, "make_complex");
 }
 
+// `sub_out` routes through `add_stub` with a negated alpha, same as CPU/CUDA/XPU
+static void add_mps_kernel(TensorIteratorBase& iter, const Scalar& alpha) {
+  const auto alpha_val = alpha.toComplexDouble();
+  if (alpha_val == 1.0) {
+    return lib.exec_binary_kernel(iter, "add");
+  }
+  if (alpha_val == -1.0 && iter.common_dtype() != kBool) {
+    return lib.exec_binary_kernel(iter, "sub");
+  }
+  lib.exec_binary_kernel(iter, "add_alpha", alpha);
+}
+
 static void lerp_scalar_mps_kernel(at::TensorIteratorBase& iter, const Scalar& weight) {
-  lib.exec_binary_kernel(iter, "lerp_alpha", weight);
+  // Narrowing the weight to a low-precision dtype would overflow for weights outside its
+  // range and lose accuracy inside it, so hand it over at opmath precision.
+  lib.exec_binary_kernel(iter, "lerp_alpha", weight, at::toOpMathType(iter.common_dtype()));
 }
 
 static void lerp_tensor_mps_kernel(at::TensorIteratorBase& iter) {
-  using namespace mps;
-  auto type_str = scalarToMetalTypeString(iter.common_dtype());
-  auto numel = static_cast<uint32_t>(iter.numel());
-  auto ndim = static_cast<uint32_t>(iter.ndim());
+  // `lerp.Tensor` lets only a 0-dim `weight` differ in dtype from `self`/`end`, and
+  // TensorIterator materializes that promotion only when the common device is CPU, leaving
+  // other backends to cast while loading. `exec_ternary_kernel` picks the cast flavor for
+  // anything that disagrees with the common dtype.
+  const auto common_dtype = iter.common_dtype();
 
-  // simple elementwise kernel for dense tensors
-  if (iter.is_contiguous()) {
-    auto pso = lib.getPipelineStateForFunc("lerp_tensor_dense_" + type_str);
-    dispatch_sync_with_rethrow(getCurrentMPSStream()->queue(), ^() {
-      auto computeEncoder = getCurrentMPSStream()->commandEncoder();
-      [computeEncoder setComputePipelineState:pso];
-      bind_iter_tensors(computeEncoder, iter);
-      mtl_dispatch1DJob(computeEncoder, pso, numel);
-    });
-    return;
+  // Mirror the CUDA kernel: read a CPU scalar weight on the host, drop it from the iterator
+  // and let the scalar-weight path cast it to the compute dtype. `lerp_alpha` is instantiated
+  // for a single tensor dtype, so this needs the other operands to already agree.
+  if (iter.is_cpu_scalar(3) && iter.dtype(0) == common_dtype && iter.dtype(1) == common_dtype &&
+      iter.dtype(2) == common_dtype) {
+    const auto weight = iter.tensor(3).item();
+    iter.remove_operand(3);
+    return lerp_scalar_mps_kernel(iter, weight);
   }
 
-  // Scalar weight broadcast path
-  if (ndim == 1 && iter.strides(3)[0] == 0) {
-    auto pso = lib.getPipelineStateForFunc("lerp_tensor_scalar_weight_" + type_str);
-    dispatch_sync_with_rethrow(getCurrentMPSStream()->queue(), ^() {
-      auto computeEncoder = getCurrentMPSStream()->commandEncoder();
-      [computeEncoder setComputePipelineState:pso];
-      bind_iter_tensors(computeEncoder, iter);
-      mtl_dispatch1DJob(computeEncoder, pso, numel);
-    });
-    return;
-  }
-
-  // 2D/3D: multi-dimensional dispatch, to avoid integer division for coordinates
-  if (ndim >= 2 && ndim <= 3) {
-    auto pso = lib.getPipelineStateForFunc(fmt::format("lerp_tensor_strided_{}d_{}", ndim, type_str));
-    dispatch_sync_with_rethrow(getCurrentMPSStream()->queue(), ^() {
-      auto computeEncoder = getCurrentMPSStream()->commandEncoder();
-      [computeEncoder setComputePipelineState:pso];
-      bind_iter_tensors(computeEncoder, iter);
-      mtl_setArgs<4>(computeEncoder, iter.strides(0), iter.strides(1), iter.strides(2), iter.strides(3));
-      auto sizes = iter.shape();
-      auto maxTg = [pso maxTotalThreadsPerThreadgroup];
-      auto tg_x = std::min(static_cast<NSUInteger>(sizes[0]), maxTg);
-      auto tg_y = std::min(static_cast<NSUInteger>(sizes[1]), maxTg / tg_x);
-      auto grid_z = ndim > 2 ? static_cast<NSUInteger>(sizes[2]) : 1;
-      auto tg_z = std::clamp(grid_z, 1UL, maxTg / (tg_x * tg_y));
-      [computeEncoder dispatchThreads:MTLSizeMake(sizes[0], sizes[1], grid_z)
-                threadsPerThreadgroup:MTLSizeMake(tg_x, tg_y, tg_z)];
-    });
-    return;
-  }
-
-  // General strided fallback
-  auto pso = lib.getPipelineStateForFunc("lerp_tensor_strided_" + type_str);
-  dispatch_sync_with_rethrow(getCurrentMPSStream()->queue(), ^() {
-    auto computeEncoder = getCurrentMPSStream()->commandEncoder();
-    [computeEncoder setComputePipelineState:pso];
-    bind_iter_tensors(computeEncoder, iter);
-    mtl_setArgs<4>(
-        computeEncoder, iter.shape(), iter.strides(0), iter.strides(1), iter.strides(2), iter.strides(3), ndim);
-    mtl_dispatch1DJob(computeEncoder, pso, numel);
-  });
+  lib.exec_ternary_kernel(iter, "lerp");
 }
 
 static void mul_mps_kernel(TensorIteratorBase& iter) {
@@ -375,6 +326,7 @@ static void logical_xor_mps_kernel(TensorIterator& iter) {
   lib.exec_binary_kernel(iter, "logical_xor", std::nullopt, std::nullopt, kBool, kCmpILPThreshold);
 }
 
+REGISTER_DISPATCH(add_stub, &add_mps_kernel)
 REGISTER_DISPATCH(atan2_stub, &atan2_mps_kernel)
 REGISTER_DISPATCH(fmax_stub, &fmax_mps_kernel)
 REGISTER_DISPATCH(fmin_stub, &fmin_mps_kernel)
@@ -406,6 +358,7 @@ REGISTER_DISPATCH(mul_stub, &mul_mps_kernel)
 REGISTER_DISPATCH(div_true_stub, &div_true_mps_kernel)
 REGISTER_DISPATCH(div_floor_stub, &div_floor_mps_kernel)
 REGISTER_DISPATCH(div_trunc_stub, &div_trunc_mps_kernel)
+REGISTER_DISPATCH(heaviside_stub, &heaviside_mps_kernel)
 REGISTER_DISPATCH(fmod_stub, &fmod_mps_kernel)
 REGISTER_DISPATCH(remainder_stub, &remainder_mps_kernel)
 REGISTER_DISPATCH(igamma_stub, &igamma_mps_kernel)
@@ -413,6 +366,7 @@ REGISTER_DISPATCH(igammac_stub, &igammac_mps_kernel)
 REGISTER_DISPATCH(hypot_stub, &hypot_mps_kernel)
 REGISTER_DISPATCH(gcd_stub, &gcd_mps_kernel)
 REGISTER_DISPATCH(lcm_stub, &lcm_mps_kernel)
+REGISTER_DISPATCH(pow_tensor_tensor_stub, &pow_tensor_tensor_mps_kernel)
 REGISTER_DISPATCH(bitwise_and_stub, &bitwise_and_mps_kernel)
 REGISTER_DISPATCH(bitwise_or_stub, &bitwise_or_mps_kernel)
 REGISTER_DISPATCH(bitwise_xor_stub, &bitwise_xor_mps_kernel)

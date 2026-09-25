@@ -93,6 +93,7 @@
 #include <torch/csrc/onnx/init.h>
 #include <torch/csrc/profiler/python/init.h>
 #include <torch/csrc/tensor/python_tensor.h>
+#include <torch/csrc/utils/cpp_stacktraces.h>
 #include <torch/csrc/utils/disable_torch_function.h>
 #include <torch/csrc/utils/init.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
@@ -886,6 +887,22 @@ static PyObject* THModule_getCppBacktrace(PyObject* _unused, PyObject* args) {
   }
   return THPUtils_packString(
       c10::get_backtrace(frames_to_skip, maximum_number_of_frames, true));
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THModule_getSymbolizeMode(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  switch (torch::get_symbolize_mode()) {
+    case torch::unwind::Mode::addr2line:
+      return THPUtils_packString("addr2line");
+    case torch::unwind::Mode::fast:
+      return THPUtils_packString("fast");
+    case torch::unwind::Mode::dladdr:
+      return THPUtils_packString("dladdr");
+  }
+  TORCH_INTERNAL_ASSERT(false, "Unknown symbolize mode");
   END_HANDLE_TH_ERRORS
 }
 
@@ -2297,6 +2314,7 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      METH_NOARGS,
      nullptr},
     {"_get_cpp_backtrace", THModule_getCppBacktrace, METH_VARARGS, nullptr},
+    {"_get_symbolize_mode", THModule_getSymbolizeMode, METH_NOARGS, nullptr},
     {"_rename_privateuse1_backend",
      THModule_rename_privateuse1_backend,
      METH_O,
@@ -2780,6 +2798,25 @@ Call this whenever a new thread is created in order to propagate values from
     at::caching::set_cached_tensors_enabled(enabled);
   });
 
+  py_module.def("_set_native_aot_enabled", [](bool enabled) {
+    at::globalContext().setAllowNativeAot(enabled);
+  });
+
+  py_module.def("_get_native_aot_enabled", []() {
+    return at::globalContext().allowNativeAot();
+  });
+
+  // Not a user-facing switch, unlike _set_native_aot_enabled: it masks ops
+  // whose AOT kernels ARE the implementation, changing what the op computes.
+  // Called only by torch._native._unconditional_masked().
+  py_module.def("_set_native_aot_unconditional_masked", [](bool masked) {
+    at::globalContext().setMaskUnconditionalNativeAot(masked);
+  });
+
+  py_module.def("_get_native_aot_unconditional_masked", []() {
+    return at::globalContext().maskUnconditionalNativeAot();
+  });
+
   py_module.def("_add_cached_tensor", [](const at::Tensor& t) {
     at::caching::add_cached_tensor(t);
   });
@@ -2795,6 +2832,38 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def("_is_fake_tensor", [](const at::Tensor& t) -> bool {
     return t.is_fake();
   });
+
+  py_module.def("_get_fake_constant", [](const at::Tensor& t) -> py::object {
+    TORCH_CHECK(t.defined(), "Expected a defined tensor");
+    TORCH_CHECK(t.is_fake(), "Expected a fake tensor");
+    auto mode = t.unsafeGetTensorImpl()->fake_tensor_mode();
+    TORCH_CHECK(mode, "Fake tensor has no associated FakeTensorMode");
+    const auto& constant = mode->get_constant(t.unsafeGetTensorImpl());
+    if (!constant) {
+      return py::none();
+    }
+    return py::cast(at::Tensor(constant));
+  });
+
+  py_module.def(
+      "_set_fake_constant",
+      [](const at::Tensor& fake, const std::optional<at::Tensor>& constant) {
+        TORCH_CHECK(fake.defined(), "Expected a defined tensor");
+        TORCH_CHECK(fake.is_fake(), "Expected a fake tensor");
+        if (constant) {
+          TORCH_CHECK(
+              constant->defined(), "Expected a defined constant tensor");
+          TORCH_CHECK(
+              !constant->is_fake(), "Expected a non-fake constant tensor");
+        }
+        auto mode = fake.unsafeGetTensorImpl()->fake_tensor_mode();
+        TORCH_CHECK(mode, "Fake tensor has no associated FakeTensorMode");
+        mode->set_constant(
+            fake.unsafeGetTensorImpl(),
+            constant ? constant->getIntrusivePtr() : nullptr);
+      },
+      py::arg("fake"),
+      py::arg("constant"));
 
   py_module.def("_storage_Use_Count", [](size_t storage_impl_ptr) {
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
@@ -3052,6 +3121,13 @@ Call this whenever a new thread is created in order to propagate values from
         return false;
 #endif
       });
+  py_module.def("_is_cudnn_attention_decode_disabled", []() {
+#ifdef USE_CUDA
+    return sdp::is_cudnn_attention_decode_disabled();
+#else
+    return false;
+#endif
+  });
 
   py::enum_<at::LinalgBackend>(py_module, "_LinalgBackend")
       .value("Default", at::LinalgBackend::Default)
@@ -3112,7 +3188,11 @@ Call this whenever a new thread is created in order to propagate values from
       .value(
           "SWIZZLE_32_4_4",
           at::blas::SwizzleType::SWIZZLE_32_4_4,
-          "Blackwell-style 32x4x4 swizzle");
+          "Blackwell-style 32x4x4 swizzle")
+      .value(
+          "SWIZZLE_32_8",
+          at::blas::SwizzleType::SWIZZLE_32_8,
+          "gfx950-style 32x8 swizzle (hipBLASLt BLK32_UE8M0_32_8)");
 
   py::enum_<at::ROCmFABackend>(py_module, "_ROCmFABackend")
       .value("Default", at::ROCmFABackend::Default)

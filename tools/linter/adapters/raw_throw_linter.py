@@ -64,6 +64,39 @@ ALLOWED_EXCEPTION_TYPES = {
     "py::stop_iteration": "",
     # Carries the device error code alongside the message.
     "c10::AcceleratorError": "",
+    # Same shape as AcceleratorError: carries the ncclResult_t alongside the
+    # message, and is what this backend's own NCCL_CHECK macros raise.
+    "NCCLException": "torch/csrc/distributed/c10d/nccl2/",
+    # Built from a SourceRange/TreeRef/Token and carries the TorchScript
+    # compilation call stack, so what() points at the user's Python source.
+    # TORCH_CHECK stamps this file's C++ location instead, which is not the
+    # same diagnostic.
+    "ErrorReport": "torch/csrc/jit/",
+    # More TorchScript control flow, each caught by name:
+    # JITException by the translator in torch/csrc/Exceptions.h, so a scripted
+    # `raise` keeps its Python type; RecursiveMethodCallError in
+    # frontend/sugared_value.h to fall back off a recursive compile;
+    # ObjectAttributeError in python/script_init.cpp to become AttributeError.
+    "JITException": "torch/csrc/jit/",
+    "RecursiveMethodCallError": "torch/csrc/jit/",
+    "ObjectAttributeError": "torch/csrc/jit/",
+    # Carries the delegated backend's debug handle alongside the message, and
+    # is caught by name in mobile/module.cpp and mobile/interpreter.cpp.
+    "c10::BackendRuntimeException": "torch/csrc/jit/",
+    # Shape propagation's own bail-out signal, caught by name in
+    # shape_analysis.cpp to fall back to running the op. It carries no message
+    # at all, so it is a signal rather than an error report.
+    "propagation_error": "torch/csrc/jit/passes/",
+    # Collected by value into a std::vector<schema_match_error> by the
+    # overload-resolution loop in pybind_utils.cpp, which builds one combined
+    # message from them. Its std::runtime_error base is load-bearing too: RPC
+    # catches that base to drive its overload fallback.
+    "schema_match_error": "torch/csrc/jit/python/",
+    # torch::AttributeError. CATCH_CORE_ERRORS catches its PyTorchError base
+    # and dispatches through the virtual python_type() to raise
+    # PyExc_AttributeError. c10 has no AttributeError, so TORCH_CHECK would
+    # make __getattr__ failures RuntimeError and break hasattr().
+    "AttributeError": "torch/csrc/jit/python/",
 }
 
 
@@ -310,9 +343,10 @@ def is_allowed(path: str, expression: str) -> bool:
     posix = "/" + path.replace("\\", "/")
     if f"/{allowed_under}" not in posix:
         return False
-    # The constructor call has to be the whole operand. Checking only that a
-    # `(` follows would let any violation be laundered by prefixing an allowed
-    # one, as in `throw py::key_error(m).with_context(x)`.
+    # The constructor call has to be the whole operand, give or take a `<<`
+    # chain. Checking only that a `(` follows would let any violation be
+    # laundered by prefixing an allowed one, as in
+    # `throw py::key_error(m).with_context(x)`.
     return _is_whole_call(thrown[match.end() :].lstrip())
 
 
@@ -322,8 +356,15 @@ def _as_statement(expression: str) -> str:
 
 
 def _is_whole_call(rest: str) -> bool:
-    """Whether `rest` is exactly one balanced `(...)` or `{...}` and nothing
-    else."""
+    """Whether `rest` is one balanced `(...)` or `{...}`, optionally followed by
+    a `<<` chain.
+
+    The chain is allowed because `throw Foo(loc) << "a" << b` parses as
+    `(Foo(loc) << "a") << b`, so the thrown value is whatever `operator<<`
+    returns for the allowed type - for `ErrorReport`, a reference to itself.
+    Only `<<` is permitted: a trailing `.member()` or `->member()` could return
+    anything, which is the laundering this check exists to stop.
+    """
     if not rest or rest[0] not in "({":
         return False
     depth = 0
@@ -333,7 +374,8 @@ def _is_whole_call(rest: str) -> bool:
         elif char in ")}":
             depth -= 1
             if depth == 0:
-                return not rest[i + 1 :].strip()
+                tail = rest[i + 1 :].strip()
+                return not tail or tail.startswith("<<")
     return False
 
 
@@ -364,6 +406,9 @@ def replacement_macro(path: str) -> str:
         or "torch/csrc/stable/" in posix
         # Installed, and deliberately depends on torch/headeronly only.
         or posix.endswith("torch/csrc/utils/generated_serialization_types.h")
+        # Exists to prove torch/headeronly builds without c10, so it cannot
+        # reach for TORCH_CHECK either.
+        or "test/cpp/aoti_abi_check/" in posix
     ):
         return "STD_TORCH_CHECK"
     return "TORCH_CHECK"

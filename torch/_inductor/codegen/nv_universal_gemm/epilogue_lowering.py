@@ -28,6 +28,7 @@ from torch.utils._ordered_set import OrderedSet
 
 from ...ir import Buffer, ComputedBuffer, Pointwise, Reduction
 from ...kernel.gemm_epilogue import (
+    GEMM_REDUCTION_IDENTITY_SOURCE,
     GemmReductionConfig,
     GemmReductionGeometry,
     GemmReductionPlan,
@@ -38,12 +39,10 @@ from ...kernel.loop_ir_epilogue_lowering import (
     GemmEpilogueIRFinalizer,
     GemmEpilogueIRStore,
     grouped_reduction_axis_ir,
+    grouped_reduction_pattern_ir,
 )
 from ...scheduler import BaseSchedulerNode
 from ...virtualized import V
-
-
-GEMM_REDUCTION_IDENTITY_SOURCE = "def _local_reduce_source(value):\n    return value"
 
 
 def _matches_affine_index(
@@ -52,6 +51,7 @@ def _matches_affine_index(
     strides: Sequence[Any],
     known_equals: Callable[[Any, Any], bool],
 ) -> bool:
+    range_vars = tuple(var for var in range_vars if var != 0)
     if not range_vars:
         range_vars = tuple(sorted(index.free_symbols, key=str))
     if len(range_vars) != len(strides):
@@ -194,6 +194,79 @@ class NVGemmEpilogueProgram:
         return geometries
 
     @property
+    def has_composite_generated_reduction_plan(self) -> bool:
+        plan = self.reduction_plan
+        analysis = self.capture.analysis
+        if (
+            plan is None
+            or not plan.tensor_epilogue_returns_local_reduce
+            or plan.reduction_output is None
+            or analysis is None
+        ):
+            return False
+        try:
+            n = V.graph.sizevars.optimization_hint(self.capture.gemm.get_size()[1])
+        except (GuardOnDataDependentSymNode, TypeError, ValueError):
+            return False
+        match = analysis.synthetic_reduction_program(
+            plan.reduction_output,
+            self.capture.gemm.get_name(),
+            self.capture.gemm.get_dtype(),
+            n,
+        )
+        return match is not None and len(match.region.reductions) > 1
+
+    def oriented_reduction_geometries(
+        self, swap_ab: bool
+    ) -> dict[str, GemmReductionGeometry]:
+        geometries = self.generated_reduction_geometries
+        if not swap_ab:
+            return geometries
+        return {name: geometry.transposed() for name, geometry in geometries.items()}
+
+    def oriented_reduction_plan(self, swap_ab: bool) -> GemmReductionPlan | None:
+        plan = self.reduction_plan
+        if not swap_ab:
+            return plan
+        physical_outputs = tuple(
+            name
+            for name, geometry in self.generated_reduction_geometries.items()
+            if geometry.transposed().needs_physical_callbacks
+        )
+        if len(physical_outputs) > 1 or (physical_outputs and plan is None):
+            raise NotImplementedError(
+                "swapped epilogues support one cross-fragment reduction"
+            )
+        if plan is None:
+            return None
+        geometry = plan.geometry.transposed()
+        if not plan.tensor_epilogue_returns_local_reduce:
+            return dataclasses.replace(plan, axis=geometry.axis)
+        if plan.reduction_output is None or self.capture.analysis is None:
+            raise NotImplementedError(
+                "swapped generated reductions require a materialized output"
+            )
+        combine_fn = None
+        finalizer_fn = None
+        if geometry.needs_physical_callbacks:
+            from torch._inductor.kernel.loop_ir_cutedsl_codegen import (
+                LoopIRCuteDSLCodegen,
+            )
+
+            combine_fn, finalizer_fn = LoopIRCuteDSLCodegen.reduction_callbacks(
+                self.capture.gemm.get_name(),
+                self.capture.analysis,
+                plan.reduction_output,
+                geometry,
+            )
+        return dataclasses.replace(
+            plan,
+            axis=geometry.axis,
+            combine_fn=combine_fn,
+            finalizer_fn=finalizer_fn,
+        )
+
+    @property
     def supported(self) -> bool:
         """Whether every claimed reduction has a backend lowering contract."""
         return not self.has_unclaimed_reduction and (
@@ -244,27 +317,36 @@ class NVGemmEpilogueProgram:
     def feeds_main(self) -> bool:
         return self.reduction_plan is not None and self.reduction_plan.feeds_main
 
-    @property
-    def min_tile_n(self) -> int:
+    def min_tile(self, axis: int) -> int:
         groups = [
             config.group
             for config in self.reduction_partition.configs
-            if config.axis == 1
+            if config.axis == axis
         ]
         plan = self.reduction_plan
-        if plan is not None and plan.feeds_main and plan.axis == 1:
+        if plan is not None and plan.feeds_main and plan.axis == axis:
             groups.append(plan.group)
         return max(groups, default=0)
 
     @property
+    def min_tile_shape(self) -> tuple[int, int]:
+        return self.min_tile(0), self.min_tile(1)
+
+    @property
     def owned_nodes(self) -> tuple[BaseSchedulerNode, ...]:
+        reduction_plan = self.reduction_plan
+        generated_regions = (
+            self.generated_reduction_regions
+            if reduction_plan is not None
+            and reduction_plan.tensor_epilogue_returns_local_reduce
+            else ()
+        )
         generated = OrderedSet(
-            node for region in self.generated_reduction_regions for node in region.nodes
+            node for region in generated_regions for node in region.nodes
         )
         owned = OrderedSet(
             node for node in self.reduction_partition.nodes if node not in generated
         )
-        reduction_plan = self.reduction_plan
         feed_names = (
             (
                 reduction_plan.primary_output,
@@ -316,13 +398,6 @@ class NVGemmEpilogueCapture:
             gemm=gemm,
             nodes=normalized_nodes,
             analysis=analysis,
-        )
-
-    @property
-    def has_gemm_read(self) -> bool:
-        name = self.gemm.get_name()
-        return any(
-            read.name == name for node in self.nodes for read in node.read_writes.reads
         )
 
 
@@ -418,6 +493,10 @@ class NVGemmEpilogueLowering:
         )
         if len(buffers) == 2 and finalizer_store is None:
             return None
+        if len(buffers) == 2:
+            source_name = buffers[0].get_name()
+            if source_name in V.graph.get_output_names():
+                return None
         reduction_type = None
         if isinstance(node.data, Reduction):
             reduction_type = node.data.reduction_type
@@ -469,8 +548,7 @@ class NVGemmEpilogueLowering:
             group, axis = geometry.group, geometry.axis
         if group <= 1:
             return None
-
-        from ...kernel.loop_ir_epilogue_lowering import grouped_reduction_pattern_ir
+        geometry = GemmReductionGeometry(group, axis)
 
         store = analysis.store(node.get_name())
         reduction_ir = (
@@ -485,12 +563,12 @@ class NVGemmEpilogueLowering:
         )
         if reduction_ir is None:
             return None
-        physical_type, source_expression = reduction_ir
-        if physical_type not in ("sum", "mean", "prod", "max", "min"):
+        matched_reduction_type, source_expression = reduction_ir
+        if matched_reduction_type not in ("sum", "mean", "prod", "max", "min"):
             return None
         if isinstance(node.data, Pointwise):
-            reduction_type = physical_type
-        elif physical_type != reduction_type:
+            reduction_type = matched_reduction_type
+        elif matched_reduction_type != reduction_type:
             return None
         finalizer = (
             analysis.reduction_finalizer(output_name, node.get_name())
@@ -508,16 +586,41 @@ class NVGemmEpilogueLowering:
             source_fn = LoopIRCuteDSLCodegen.source_from_expression(
                 gemm_node.get_name(), source_expression, "_local_reduce_source"
             )
+            finalizer_fn = (
+                LoopIRCuteDSLCodegen.finalizer_from_buffer(
+                    node.get_name(), buffers[-1], "_local_reduce_finalize"
+                )
+                if finalizer is not None and finalizer.materialize
+                else None
+            )
+            if isinstance(node.data, Pointwise) and finalizer_store is None:
+                region = analysis.reduction_region(
+                    output_name,
+                    gemm_node.get_name(),
+                    group,
+                    gemm_node.get_dtype(),
+                )
+                if region is None or len(region.reductions) != 1:
+                    return None
+                reduction = region.reductions[0]
+                if (
+                    reduction.reduction_type == "mean"
+                    or reduction.source is not region.expression
+                ):
+                    _, finalizer_fn = LoopIRCuteDSLCodegen.reduction_callbacks(
+                        gemm_node.get_name(), analysis, output_name, geometry
+                    )
         except NotImplementedError:
             return None
 
         if isinstance(node.data, Reduction):
             if expected_strides is None:
                 return None
-            reads = list(access_node.read_writes.reads)
+            read_writes = node.get_read_writes()
+            reads = list(read_writes.reads)
             if len(reads) != 1 or reads[0].name != gemm_node.get_name():
                 return None
-            range_vars = access_node.read_writes.range_vars
+            range_vars = read_writes.range_vars
             if range_vars is None:
                 return None
             expected_stride_options = [expected_strides]
@@ -537,8 +640,8 @@ class NVGemmEpilogueLowering:
             group=group,
             axis=axis,
             reduction_type=reduction_type,
-            source_type="identity",
             source_fn=source_fn,
+            finalizer_fn=finalizer_fn,
         )
 
     @classmethod
@@ -593,35 +696,81 @@ class NVGemmEpilogueLowering:
             group=2,
             axis=1,
             reduction_type="sum",
-            source_type="identity",
             source_fn=GEMM_REDUCTION_IDENTITY_SOURCE,
             secondary_consumer_fn=secondary_consumer_fn,
+        )
+
+    @staticmethod
+    def _reduction_source_fn(gemm_name: str, reduction: Any) -> str | None:
+        from torch._inductor.kernel.loop_ir_cutedsl_codegen import LoopIRCuteDSLCodegen
+
+        expression = reduction.synthetic_element or reduction.source
+        try:
+            return LoopIRCuteDSLCodegen.source_from_expression(
+                gemm_name, expression, "_local_reduce_source"
+            )
+        except NotImplementedError:
+            return None
+
+    @classmethod
+    def _synthetic_feed_config(
+        cls,
+        context: NVGemmEpilogueCapture,
+        scheduler_node: BaseSchedulerNode,
+        buffer: ComputedBuffer,
+    ) -> GemmReductionConfig | None:
+        analysis = context.analysis
+        if analysis is None:
+            return None
+        gemm_name = context.gemm.get_name()
+        reads = OrderedSet(read.name for read in scheduler_node.read_writes.reads)
+        if reads != OrderedSet((gemm_name,)):
+            return None
+        try:
+            m, n = map(V.graph.sizevars.optimization_hint, context.gemm.get_size())
+        except (GuardOnDataDependentSymNode, TypeError, ValueError):
+            return None
+        inferred = analysis.synthetic_reduction_region(
+            buffer.get_name(),
+            gemm_name,
+            V.graph.get_dtype(gemm_name),
+            n,
+        )
+        if inferred is None:
+            return None
+        geometry, region = inferred.geometry, inferred.region
+        if (m, n)[
+            geometry.axis
+        ] % geometry.group != 0 or not geometry.matches_output_shape(
+            buffer.get_size(), context.gemm.get_size()
+        ):
+            return None
+        reduction = region.reductions[0]
+        generated_source = cls._reduction_source_fn(gemm_name, reduction)
+        if generated_source is None or reduction.reduction_type not in (
+            "sum",
+            "mean",
+            "prod",
+            "max",
+            "min",
+        ):
+            return None
+        return GemmReductionConfig(
+            output_name=buffer.get_name(),
+            group=geometry.group,
+            axis=geometry.axis,
+            reduction_type=cast(GemmReductionType, reduction.reduction_type),
+            source_fn=generated_source,
         )
 
     @classmethod
     def _feed_main_config(
         cls, context: NVGemmEpilogueCapture
     ) -> GemmReductionConfig | None:
-        return cls._generic_feed_main_config(context)
-
-    @classmethod
-    def _generic_feed_main_config(
-        cls, context: NVGemmEpilogueCapture
-    ) -> GemmReductionConfig | None:
         analysis = context.analysis
         if analysis is None:
             return None
         gemm_name = context.gemm.get_name()
-        from torch._inductor.kernel.loop_ir_cutedsl_codegen import LoopIRCuteDSLCodegen
-
-        def source_fn(reduction) -> str | None:
-            expression = reduction.synthetic_element or reduction.source
-            try:
-                return LoopIRCuteDSLCodegen.source_from_expression(
-                    gemm_name, expression, "_local_reduce_source"
-                )
-            except NotImplementedError:
-                return None
 
         for scheduler_node, buffer in zip(context.nodes, analysis.buffers):
             if not isinstance(buffer.data, Pointwise):
@@ -658,48 +807,12 @@ class NVGemmEpilogueLowering:
                 if (
                     axis == config.axis
                     and reduction.reduction_type == config.reduction_type
-                    and source_fn(reduction) == config.source_fn
+                    and cls._reduction_source_fn(gemm_name, reduction)
+                    == config.source_fn
                 ):
                     return dataclasses.replace(config, output_name=buffer.get_name())
-            if reads != OrderedSet((gemm_name,)):
-                continue
-            try:
-                m, n = map(V.graph.sizevars.optimization_hint, context.gemm.get_size())
-            except (GuardOnDataDependentSymNode, TypeError, ValueError):
-                continue
-            inferred = analysis.synthetic_reduction_region(
-                buffer.get_name(),
-                gemm_name,
-                V.graph.get_dtype(gemm_name),
-                n,
-            )
-            if inferred is None:
-                continue
-            geometry, region = inferred.geometry, inferred.region
-            if (m, n)[geometry.axis] % geometry.group != 0:
-                continue
-            if not geometry.matches_output_shape(
-                buffer.get_size(), context.gemm.get_size()
-            ):
-                continue
-            reduction = region.reductions[0]
-            generated_source = source_fn(reduction)
-            if generated_source is None or reduction.reduction_type not in (
-                "sum",
-                "mean",
-                "prod",
-                "max",
-                "min",
-            ):
-                continue
-            return GemmReductionConfig(
-                output_name=buffer.get_name(),
-                group=geometry.group,
-                axis=geometry.axis,
-                reduction_type=cast(GemmReductionType, reduction.reduction_type),
-                source_type="identity",
-                source_fn=generated_source,
-            )
+            if config := cls._synthetic_feed_config(context, scheduler_node, buffer):
+                return config
         return None
 
     @staticmethod
@@ -756,6 +869,51 @@ class NVGemmEpilogueLowering:
         candidates: Sequence[BaseSchedulerNode],
         analysis: GemmEpilogueIRAnalysis,
     ) -> NVGemmReductionRegion:
+        def is_mean_finalizer(store: GemmEpilogueIRStore) -> bool:
+            expression = store.value
+            while getattr(expression, "op", None) in (
+                "to_dtype",
+                "to_dtype_bitcast",
+                "identity",
+            ):
+                expression = expression.args[0]
+
+            if getattr(expression, "op", None) == "truediv":
+                value, divisor = expression.args
+                return (
+                    getattr(value, "op", None) == "load"
+                    and value.args[0] == config.output_name
+                    and getattr(divisor, "op", None) in ("constant", "index_expr")
+                    and divisor.args[0] == config.group
+                )
+
+            if getattr(expression, "op", None) != "mul":
+                return False
+            left, right = expression.args
+            for value, scale in ((left, right), (right, left)):
+                if (
+                    getattr(value, "op", None) == "load"
+                    and value.args[0] == config.output_name
+                    and getattr(scale, "op", None) in ("constant", "index_expr")
+                    and scale.args[0] == 1.0 / config.group
+                ):
+                    return True
+            return False
+
+        source_buffers = _computed_buffers(source.get_nodes())
+        if source_buffers is not None and len(source_buffers) == 2:
+            finalizer = analysis.reduction_finalizer(
+                config.output_name, source_buffers[0].get_name()
+            )
+            return NVGemmReductionRegion(
+                config=config,
+                nodes=(source,),
+                finalizer=(
+                    finalizer
+                    if finalizer is not None and finalizer.materialize
+                    else None
+                ),
+            )
         matches = []
         for candidate in candidates:
             if candidate is source:
@@ -768,11 +926,53 @@ class NVGemmEpilogueLowering:
                 buffer.get_name(), config.output_name
             )
             if finalizer is not None:
-                matches.append((candidate, finalizer))
+                matches.append((candidate, finalizer, store))
         if len(matches) != 1:
             return NVGemmReductionRegion(config=config, nodes=(source,))
-        candidate, finalizer = matches[0]
-        config = dataclasses.replace(config, output_name=finalizer.output_name)
+        candidate, finalizer, store = matches[0]
+        users = V.graph.scheduler.name_to_buf[config.output_name].users
+        if config.output_name in V.graph.get_output_names() or any(
+            user.get_name() == "OUTPUT" for user in users
+        ):
+            return NVGemmReductionRegion(config=config, nodes=(source,))
+        if (
+            config.reduction_type == "sum"
+            and finalizer.materialize
+            and config.output_name not in V.graph.get_output_names()
+            and len(users) == 1
+            and users[0].node in candidate.get_nodes()
+            and is_mean_finalizer(store)
+        ):
+            config = dataclasses.replace(
+                config,
+                output_name=finalizer.output_name,
+                reduction_type="mean",
+                finalizer_fn=None,
+            )
+            return NVGemmReductionRegion(
+                config=config,
+                nodes=(source, candidate),
+            )
+        finalizer_fn = None
+        if finalizer.materialize:
+            buffer = cast(ComputedBuffer, candidate.get_nodes()[0].node)
+            from torch._inductor.kernel.loop_ir_cutedsl_codegen import (
+                LoopIRCuteDSLCodegen,
+            )
+
+            try:
+                finalizer_fn = LoopIRCuteDSLCodegen.finalizer_from_buffer(
+                    finalizer.source_name,
+                    buffer,
+                    "_local_reduce_finalize",
+                )
+            except NotImplementedError:
+                return NVGemmReductionRegion(config=config, nodes=(source,))
+        config = dataclasses.replace(
+            config,
+            output_name=finalizer.output_name,
+            finalizer_fn=finalizer_fn,
+        )
         return NVGemmReductionRegion(
             config=config,
             nodes=(source, candidate),
@@ -916,13 +1116,11 @@ class NVGemmEpilogueLowering:
             )
 
             try:
-                combine_fn, finalizer_fn = (
-                    LoopIRCuteDSLCodegen.physical_reduction_callbacks(
-                        context.gemm.get_name(),
-                        analysis,
-                        buffer.get_name(),
-                        geometry,
-                    )
+                combine_fn, finalizer_fn = LoopIRCuteDSLCodegen.reduction_callbacks(
+                    context.gemm.get_name(),
+                    analysis,
+                    buffer.get_name(),
+                    geometry,
                 )
             except NotImplementedError:
                 return None
@@ -932,20 +1130,22 @@ class NVGemmEpilogueLowering:
             group=geometry.group,
             axis=geometry.axis,
             reduction_type=None,
-            source_type="identity",
             source_fn=None,
             combine_fn=combine_fn,
             finalizer_fn=finalizer_fn,
-            tensor_epilogue_returns_local_reduce=True,
         )
 
-    @staticmethod
+    @classmethod
     def _feed_plan(
+        cls,
         context: NVGemmEpilogueCapture,
         feed_main: GemmReductionConfig,
     ) -> NVGemmFeedPlan | None:
         gemm_node = context.gemm
         nodes = context.nodes
+        analysis = context.analysis
+        if analysis is None:
+            return None
         output_name = feed_main.output_name
         feed_output = (
             output_name
@@ -972,11 +1172,11 @@ class NVGemmEpilogueLowering:
             for scheduler_node in nodes
             if isinstance(scheduler_node.node, ComputedBuffer)
         }
+        reduction_name = next(iter(feed_reads)) if feed_reads else None
 
         def consumer_source(buffer: ComputedBuffer) -> str | None:
             if len(feed_reads) > 1:
                 return None
-            reduction_name = next(iter(feed_reads)) if feed_reads else None
             try:
                 return LoopIRCuteDSLCodegen.consumer_from_buffer(
                     gemm_node.get_name(),
@@ -992,6 +1192,22 @@ class NVGemmEpilogueLowering:
         matched_source = (
             consumer_source(matched_buffer) if matched_buffer is not None else None
         )
+        consumer_finalizer_fn = None
+        if reduction_name is None:
+            consumer_finalizer_fn = LoopIRCuteDSLCodegen.logical_reduction_finalizer(
+                feed_main.reduction_type,
+                "_local_reduce_consumer_finalize",
+            )
+        else:
+            try:
+                _, consumer_finalizer_fn = LoopIRCuteDSLCodegen.reduction_callbacks(
+                    gemm_node.get_name(),
+                    analysis,
+                    reduction_name,
+                    feed_main.geometry,
+                )
+            except NotImplementedError:
+                return None
         equivalent = []
         secondary = None
         secondary_consumer = None
@@ -1014,6 +1230,16 @@ class NVGemmEpilogueLowering:
             )
             if candidate_reads != feed_reads:
                 continue
+            if not feed_reads:
+                candidate_reduction = cls._synthetic_feed_config(
+                    context, scheduler_node, buffer
+                )
+                if candidate_reduction is not None and (
+                    candidate_reduction.geometry != geometry
+                    or candidate_reduction.reduction_type != feed_main.reduction_type
+                    or candidate_reduction.source_fn != feed_main.source_fn
+                ):
+                    return None
             candidate_source = consumer_source(buffer)
             if candidate_source is None:
                 continue
@@ -1045,6 +1271,7 @@ class NVGemmEpilogueLowering:
                 feed_output=feed_output,
                 secondary_feed_output=secondary,
                 consumer_fn=matched_source,
+                consumer_finalizer_fn=consumer_finalizer_fn,
                 secondary_consumer_fn=secondary_consumer,
             ),
             intermediate_outputs=tuple(feed_reads),
@@ -1089,9 +1316,18 @@ class NVGemmEpilogueLowering:
             local_reduce.geometry != plan.geometry
             or local_reduce.reduction_type != plan.reduction_type
             or local_reduce.source_fn != plan.source_fn
+            or (
+                local_reduce.finalizer_fn is not None
+                and plan.finalizer_fn is not None
+                and local_reduce.finalizer_fn != plan.finalizer_fn
+            )
         ):
             return None
-        return dataclasses.replace(plan, reduction_output=local_reduce.reduction_output)
+        return dataclasses.replace(
+            plan,
+            reduction_output=local_reduce.reduction_output,
+            finalizer_fn=local_reduce.finalizer_fn or plan.finalizer_fn,
+        )
 
 
 def _computed_buffers(
@@ -1101,13 +1337,6 @@ def _computed_buffers(
     if not buffers or not all(isinstance(buffer, ComputedBuffer) for buffer in buffers):
         return None
     return cast(tuple[ComputedBuffer, ...], buffers)
-
-
-def _single_computed_buffer(node: BaseSchedulerNode) -> ComputedBuffer | None:
-    nodes = node.get_nodes()
-    if len(nodes) != 1 or not isinstance(nodes[0].node, ComputedBuffer):
-        return None
-    return nodes[0].node
 
 
 def _compressed_output_size(shape: Sequence[Any]) -> tuple[Any, Any] | None:

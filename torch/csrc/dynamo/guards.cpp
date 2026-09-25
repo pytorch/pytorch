@@ -5,6 +5,7 @@
 #include <c10/core/impl/PyInterpreter.h>
 #include <c10/util/Exception.h>
 #define PY_SSIZE_T_CLEAN
+#include <ATen/DeviceAccelerator.h>
 #include <ATen/EmptyTensor.h>
 #include <ATen/SparseCsrTensorUtils.h>
 #include <c10/util/Synchronized.h>
@@ -25,6 +26,7 @@
 #include <torch/csrc/utils/tensor_memoryformats.h>
 #include <torch/extension.h>
 #include <cstdint>
+#include <cstring>
 
 #include <nlohmann/json.hpp>
 
@@ -174,17 +176,51 @@ static std::string format_tensor_type_mismatch(
   return fail_reason.str();
 }
 
+namespace {
+thread_local std::optional<c10::DeviceIndex>* current_device_index_cache =
+    nullptr;
+
+at::DeviceIndex current_device_index() {
+  if (current_device_index_cache == nullptr) {
+    return at::accelerator::getDeviceIndex();
+  }
+  if (!current_device_index_cache->has_value()) {
+    *current_device_index_cache = at::accelerator::getDeviceIndex();
+  }
+  return **current_device_index_cache;
+}
+
+class CurrentDeviceIndexCacheScope {
+ public:
+  CurrentDeviceIndexCacheScope() : previous_cache_(current_device_index_cache) {
+    current_device_index_cache = &cache_;
+  }
+
+  ~CurrentDeviceIndexCacheScope() {
+    current_device_index_cache = previous_cache_;
+  }
+
+ private:
+  std::optional<c10::DeviceIndex> cache_;
+  std::optional<c10::DeviceIndex>* previous_cache_;
+};
+} // namespace
+
 TensorCheck::TensorCheck(
     const LocalState& state,
     PyTypeObject* pt,
     const at::Tensor& v,
     c10::DispatchKeySet dispatch_key_set,
     std::vector<std::optional<c10::SymInt>> dynamic_dims_sizes,
-    std::vector<std::optional<c10::SymInt>> dynamic_dims_strides)
+    std::vector<std::optional<c10::SymInt>> dynamic_dims_strides,
+    bool device_index_is_current)
     : pytype(pt),
       dispatch_key_(state.apply(dispatch_key_set).raw_repr()),
       dtype_(v.dtype().toScalarType()),
-      device_index_(v.device().index()),
+      device_index_(
+          device_index_is_current
+              ? std::nullopt
+              : std::optional<c10::DeviceIndex>(v.device().index())),
       requires_grad_(v.requires_grad()),
       sizes_(std::move(dynamic_dims_sizes)),
       strides_(std::move(dynamic_dims_strides)),
@@ -210,6 +246,20 @@ TensorCheck::TensorCheck(
       sizes_(std::move(dynamic_dims_sizes)),
       strides_(std::move(dynamic_dims_strides)),
       dim_(static_cast<int64_t>(sizes_.size())) {}
+
+bool TensorCheck::deviceIndexMatches(const c10::Device& device) const {
+  // An unset index means the guard accepts the current accelerator rather than
+  // a recorded one -- still a real check, just not a rank-specific one. Neither
+  // form admits a tensor on some other device.
+  //
+  // Deliberately not value_or(current_device_index()): that evaluates its
+  // argument eagerly, querying the current device on every recorded-index check
+  // too. This runs per guarded tensor, so keep the common path call-free.
+  if (device_index_.has_value()) {
+    return *device_index_ == device.index();
+  }
+  return device.index() == current_device_index();
+}
 
 // See note in guards.py [Note - On Export Tensor Guards]
 // Logic parallel to here must be maintained in python
@@ -242,7 +292,7 @@ bool TensorCheck::check(
     const c10::SymIntArrayRef& sym_strides,
     const bool& requires_grad) {
   if (dispatch_key_ != state.apply(dispatch_key_set).raw_repr() ||
-      dtype_ != dtype || device_index_ != device.index() ||
+      dtype_ != dtype || !deviceIndexMatches(device) ||
       requires_grad_ != requires_grad) {
     return false;
   }
@@ -290,9 +340,15 @@ std::string TensorCheck::check_verbose(
     fail_reason << "dtype mismatch. expected " << dtype_ << ", actual "
                 << v.dtype().toScalarType();
     return std::move(fail_reason).str();
-  } else if (device_index_ != v.device().index()) {
-    fail_reason << "Tensor device index mismatch. Expected device index to be "
-                << device_index_ << ", actual " << v.device().index();
+  } else if (!deviceIndexMatches(v.device())) {
+    fail_reason << "Tensor device index mismatch. Expected device index to be ";
+    if (device_index_.has_value()) {
+      fail_reason << static_cast<int>(*device_index_);
+    } else {
+      fail_reason << "the current device ("
+                  << static_cast<int>(current_device_index()) << ")";
+    }
+    fail_reason << ", actual " << static_cast<int>(v.device().index());
     return std::move(fail_reason).str();
   } else if (requires_grad_ != v.requires_grad()) {
     // return fmt::format("tensor requires_grad mismatch. expected {}",
@@ -2112,9 +2168,29 @@ class EQUALS_MATCH : public LeafGuard {
       if (Py_TYPE(value) != _value_type) {
         return false;
       }
+      // Python float eq is not value-identity: -0.0 == 0.0, but a graph
+      // specialized on 0.0 must not be reused for -0.0 (e.g. copysign,
+      // 1/x). Compare float/complex bitwise. NaN constants never reach
+      // EQUALS_MATCH (they use FLOAT_IS_NAN/COMPLEX_IS_NAN guards).
+      if (PyFloat_CheckExact(value)) {
+        return bits_of(PyFloat_AS_DOUBLE(value)) ==
+            bits_of(PyFloat_AS_DOUBLE(_value.ptr()));
+      }
+      if (PyComplex_CheckExact(value)) {
+        Py_complex a = PyComplex_AsCComplex(value);
+        Py_complex b = PyComplex_AsCComplex(_value.ptr());
+        return bits_of(a.real) == bits_of(b.real) &&
+            bits_of(a.imag) == bits_of(b.imag);
+      }
       return py_equals(value, _value.ptr(), /*false_on_error=*/true);
     }
     return true;
+  }
+
+  static uint64_t bits_of(double x) {
+    uint64_t bits = 0;
+    std::memcpy(&bits, &x, sizeof(bits));
+    return bits;
   }
 
  private:
@@ -2495,45 +2571,65 @@ class SET_CONTAINS : public LeafGuard {
   py::object _item;
 };
 
-// Check if the float is nan
+// Check that a nan float constant matches bitwise. isnan alone is not
+// enough: nan sign and payload are observable (math.copysign,
+// torch.tensor(x).view(int64)), so a graph specialized on one nan must not
+// be reused for a different nan bit pattern.
 class FLOAT_IS_NAN : public LeafGuard {
  public:
   FLOAT_IS_NAN(
       RootGuardManager* root_guard_manager,
+      py::object value,
       py::object verbose_code_parts,
       py::object user_stack)
       : LeafGuard(
             root_guard_manager,
             std::move(verbose_code_parts),
-            std::move(user_stack)) {}
+            std::move(user_stack)),
+        _value_bits(EQUALS_MATCH::bits_of(PyFloat_AsDouble(value.ptr()))) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
     if (!PyFloat_CheckExact(value)) {
       return false;
     }
-    return std::isnan(PyFloat_AsDouble(value));
+    return EQUALS_MATCH::bits_of(PyFloat_AS_DOUBLE(value)) == _value_bits;
   }
+
+ private:
+  uint64_t _value_bits;
 };
 
-// Check if the float is nan
+// Check that a complex constant with a nan component matches bitwise.
+// nan == nan is false, so a py_equals-style check would always fail; and a
+// bare "any component is nan" check would wrongly match complex(7.0, nan)
+// against a guard on complex(5.0, nan). Bitwise comparison also
+// distinguishes nan sign/payload, which are observable (see FLOAT_IS_NAN).
 class COMPLEX_IS_NAN : public LeafGuard {
  public:
   COMPLEX_IS_NAN(
       RootGuardManager* root_guard_manager,
+      py::object value,
       py::object verbose_code_parts,
       py::object user_stack)
       : LeafGuard(
             root_guard_manager,
             std::move(verbose_code_parts),
-            std::move(user_stack)) {}
+            std::move(user_stack)),
+        _value(PyComplex_AsCComplex(value.ptr())) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
     if (!PyComplex_CheckExact(value)) {
       return false;
     }
     Py_complex c_value = PyComplex_AsCComplex(value);
-    return std::isnan(c_value.real) || std::isnan(c_value.imag);
+    return EQUALS_MATCH::bits_of(c_value.real) ==
+        EQUALS_MATCH::bits_of(_value.real) &&
+        EQUALS_MATCH::bits_of(c_value.imag) ==
+        EQUALS_MATCH::bits_of(_value.imag);
   }
+
+ private:
+  Py_complex _value;
 };
 
 // Check if the dual level is the same as the one in fx graph
@@ -3206,7 +3302,8 @@ inline std::vector<std::optional<c10::SymInt>> to_opt_symint(
 // dtype, device, requires_grad, sizes, strides) for the dict-tag fast path.
 inline TensorCheck make_tensor_check(
     const LocalState& state,
-    const at::Tensor& tensor) {
+    const at::Tensor& tensor,
+    bool device_index_is_current) {
   auto layout = tensor.layout();
   bool sparse = layout == c10::kSparseCsr || layout == c10::kSparseCsc ||
       layout == c10::kSparseBsc || layout == c10::kSparseBsr;
@@ -3221,7 +3318,24 @@ inline TensorCheck make_tensor_check(
       tensor,
       tensor.key_set(),
       to_opt_symint(tensor.sizes()),
-      std::move(strides));
+      std::move(strides),
+      device_index_is_current);
+}
+
+// Mirrors _guard_device_index_is_current in torch/_dynamo/guards.py: under
+// compile_on_one_rank an accelerator tensor's index is the compiling rank's and
+// carries no information, so the snapshot has to compare against the runtime
+// current device the way the TENSOR_MATCH leaf does. Pinning it here instead
+// would let the unchanged-dict-tag fast path accept a tensor left behind on
+// another device, which the leaf itself rejects.
+inline bool coor_device_index_is_current(
+    bool compile_on_one_rank,
+    const at::Tensor& tensor) {
+  if (!compile_on_one_rank) {
+    return false;
+  }
+  auto acc = at::accelerator::getAccelerator(false);
+  return acc.has_value() && tensor.device().type() == acc.value();
 }
 
 struct RecordedTensorMetadata {
@@ -4340,6 +4454,7 @@ class RootGuardManager : public GuardManager {
       LocalState state;
       _local_state = state;
     }
+    CurrentDeviceIndexCacheScope current_device_index_cache_scope;
 
     if (!GuardManager::check_leaf_guards_nopybind(value)) {
       _reset_relational_guard_state();
@@ -4398,6 +4513,7 @@ class RootGuardManager : public GuardManager {
       LocalState state;
       _local_state = state;
     }
+    CurrentDeviceIndexCacheScope current_device_index_cache_scope;
 
     int num_guards_executed = 0;
 
@@ -4471,6 +4587,7 @@ class RootGuardManager : public GuardManager {
         std::make_unique<RootGuardManager>();
     cloned_root->_local_state = _local_state;
     cloned_root->_init_local_state = _init_local_state;
+    cloned_root->_compile_on_one_rank = _compile_on_one_rank;
     clone_common(cloned_root.get(), cloned_root.get(), clone_filter_fn);
     for (const auto& guard : _epilogue_lambda_guards) {
       cloned_root->_epilogue_lambda_guards.emplace_back(guard);
@@ -4548,10 +4665,20 @@ class RootGuardManager : public GuardManager {
   }
 
   void record_tensor_metadata(PyObject* tensor_pointer) {
+    const at::Tensor& tensor = THPVariable_Unpack(tensor_pointer);
     _recorded_tensor_metadata.push_back(RecordedTensorMetadata{
         py::reinterpret_borrow<py::object>(tensor_pointer),
-        make_tensor_check(_local_state, THPVariable_Unpack(tensor_pointer)),
+        make_tensor_check(
+            _local_state,
+            tensor,
+            coor_device_index_is_current(_compile_on_one_rank, tensor)),
     });
+  }
+
+  // Whether this graph was traced with compile_on_one_rank. Set from Python
+  // alongside guard construction; see record_tensor_metadata.
+  void set_compile_on_one_rank(bool value) {
+    _compile_on_one_rank = value;
   }
 
  public:
@@ -4559,6 +4686,9 @@ class RootGuardManager : public GuardManager {
   LocalState _local_state;
 
  private:
+  // See set_compile_on_one_rank.
+  bool _compile_on_one_rank = false;
+
   // All the relational guards under this guard manager. We only use these
   // when the guard evaluates to False. This ensures that guard state is reset
   // on guard failure so that next invocation is clean.
@@ -5173,7 +5303,8 @@ class TENSOR_MATCH : public LeafGuard {
       py::object verbose_code_parts,
       py::object user_stack,
       py::object pytype,
-      py::object dispatch_keys)
+      py::object dispatch_keys,
+      bool device_index_is_current)
       : LeafGuard(
             root_guard_manager,
             std::move(verbose_code_parts),
@@ -5208,7 +5339,8 @@ class TENSOR_MATCH : public LeafGuard {
         std::move(tensor),
         dispatch_keys.cast<c10::DispatchKeySet>(),
         std::move(tensor_dims_size),
-        std::move(tensor_dims_stride));
+        std::move(tensor_dims_stride),
+        device_index_is_current);
   }
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
@@ -7763,11 +7895,11 @@ PyObject* torch_c_dynamo_guards_init() {
       .def("__call__", &DUAL_LEVEL_MATCH::check);
   py::class_<FLOAT_IS_NAN, LeafGuard, std::shared_ptr<FLOAT_IS_NAN>>(
       py_m, "FLOAT_IS_NAN")
-      .def(py::init<RootGuardManager*, py::list, py::object>())
+      .def(py::init<RootGuardManager*, py::object, py::list, py::object>())
       .def("__call__", &FLOAT_IS_NAN::check);
   py::class_<COMPLEX_IS_NAN, LeafGuard, std::shared_ptr<COMPLEX_IS_NAN>>(
       py_m, "COMPLEX_IS_NAN")
-      .def(py::init<RootGuardManager*, py::list, py::object>())
+      .def(py::init<RootGuardManager*, py::object, py::list, py::object>())
       .def("__call__", &COMPLEX_IS_NAN::check);
   py::class_<
       DIMENSION_DYNAMIC_MARKING_GUARD,
@@ -7803,7 +7935,8 @@ PyObject* torch_c_dynamo_guards_init() {
            py::list,
            py::object,
            py::type,
-           py::object>())
+           py::object,
+           bool>())
       .def("__call__", &TENSOR_MATCH::check);
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<RelationalGuard, LeafGuard, std::shared_ptr<RelationalGuard>>(
@@ -8273,20 +8406,24 @@ PyObject* torch_c_dynamo_guards_init() {
       .def(
           "add_float_is_nan_guard",
           [](GuardManager& self,
+             py::object value,
              py::object verbose_code_parts,
              py::object user_stack) -> void {
             self.add_leaf_guard(std::make_shared<FLOAT_IS_NAN>(
                 self.get_root(),
+                std::move(value),
                 std::move(verbose_code_parts),
                 std::move(user_stack)));
           })
       .def(
           "add_complex_is_nan_guard",
           [](GuardManager& self,
+             py::object value,
              py::object verbose_code_parts,
              py::object user_stack) -> void {
             self.add_leaf_guard(std::make_shared<COMPLEX_IS_NAN>(
                 self.get_root(),
+                std::move(value),
                 std::move(verbose_code_parts),
                 std::move(user_stack)));
           })
@@ -8330,7 +8467,8 @@ PyObject* torch_c_dynamo_guards_init() {
              py::object verbose_code_parts,
              py::object user_stack,
              py::object pytype,
-             py::object dispatch_keys) -> void {
+             py::object dispatch_keys,
+             bool device_index_is_current) -> void {
             SKIP_IF_GUARD_ALREADY_PRESENT("TENSOR_MATCH");
             self.add_leaf_guard(std::make_shared<TENSOR_MATCH>(
                 self.get_root(),
@@ -8341,8 +8479,18 @@ PyObject* torch_c_dynamo_guards_init() {
                 std::move(verbose_code_parts),
                 std::move(user_stack),
                 std::move(pytype),
-                std::move(dispatch_keys)));
-          })
+                std::move(dispatch_keys),
+                device_index_is_current));
+          },
+          py::arg("value"),
+          py::arg("sizes"),
+          py::arg("strides"),
+          py::arg("tensor_name"),
+          py::arg("verbose_code_parts"),
+          py::arg("user_stack"),
+          py::arg("pytype"),
+          py::arg("dispatch_keys"),
+          py::arg("device_index_is_current") = false)
 
       // return by reference because GuardManager has the ownership of accessors
       // and guard managers
@@ -8736,6 +8884,8 @@ PyObject* torch_c_dynamo_guards_init() {
       .def("attach_compile_id", &RootGuardManager::attach_compile_id)
       .def("get_local_state", &RootGuardManager::get_local_state)
       .def("set_local_state", &RootGuardManager::set_local_state)
+      .def(
+          "set_compile_on_one_rank", &RootGuardManager::set_compile_on_one_rank)
       .def("clone_manager", &RootGuardManager::clone_manager)
       // return by reference because GuardManager has the ownership of leaf
       // guards

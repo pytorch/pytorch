@@ -266,7 +266,6 @@ exclude_patterns = [
     'c10/util/llvmMathExtras.h',
     'c10/util/NetworkFlow.cpp',
     'c10/util/order_preserving_flat_hash_map.h',
-    'c10/util/overflows.h',
     'c10/util/safe_numerics.h',
     'c10/util/signal_handler.cpp',
     'c10/util/StringUtil.cpp',
@@ -278,6 +277,7 @@ exclude_patterns = [
     'torch/headeronly/util/BFloat16-math.h',
     'torch/headeronly/util/irange.h',
     'torch/headeronly/util/MathConstants.h',
+    'torch/headeronly/util/overflows.h',
 ]
 init_command = [
     'python3',
@@ -329,6 +329,7 @@ include_patterns = [
     'torch/headeronly/util/complex.h',
     'torch/headeronly/util/floating_point_utils.h',
     'torch/headeronly/util/irange.h',
+    'torch/headeronly/util/overflows.h',
 ]
 exclude_patterns = [
     '**/fb/**',
@@ -587,11 +588,19 @@ code = 'RAWTHROW'
 include_patterns = [
     '**/*.cpp',
     '**/*.h',
+    '**/*.cc',
+    '**/*.cu',
+    '**/*.cuh',
+    '**/*.hpp',
+    '**/*.inl',
+    '**/*.mm',
 ]
 exclude_patterns = [
     # Vendored: raw throws are upstream's call, not ours.
     'c10/util/flat_hash_map.h',  # skarupke/flat_hash_map
     'third_party/concurrentqueue/**',
+    'third_party/kineto/libkineto/third_party/**',  # Kineto's own third_party
+    'third_party/perfetto/sdk/**',  # amalgamated perfetto SDK
     # Fork of flat_hash_map. Also: at()'s out_of_range becomes KeyError in
     # jit/python/python_dict.cpp, so converting it breaks TorchScript dicts.
     'c10/util/order_preserving_flat_hash_map.h',
@@ -600,15 +609,12 @@ exclude_patterns = [
     # c10/util/Exception.h would break those builds. AlignedAllocator.h has a
     # second reason: its bad_alloc reaches Python as MemoryError.
     'aten/src/ATen/native/quantized/cpu/qnnpack/**',
-    # Converting these changes the Python-visible exception type, so they get
-    # their own PR later in this stack.
-    'c10/util/SmallVector.cpp',  # length_error -> ValueError, bad_alloc -> MemoryError
-    'c10/util/StringUtil.cpp',  # range_error -> ValueError
-    # Burned down later in this stack. Nothing may be added here.
-    # nccl2 is all that is left of torch/csrc/distributed/**: its NCCLException
-    # needs a decision that does not belong in a mechanical PR.
-    'torch/csrc/distributed/c10d/nccl2/**',
-    'torch/csrc/jit/**',
+    # llvm/ADT/SmallVector.cpp, carried verbatim under Apache-2.0 WITH
+    # LLVM-exception with a three-line delta recorded at the top of the file.
+    # Its length_error/bad_alloc are upstream's contract, and c10 has no type
+    # that preserves bad_alloc's MemoryError anyway: torch.OutOfMemoryError
+    # derives from RuntimeError, not MemoryError.
+    'c10/util/SmallVector.cpp',
 ]
 command = [
     'python3',
@@ -912,6 +918,8 @@ include_patterns = [
 # therefore are permitted to use logging
 exclude_patterns = [
     'tools/**',
+    'third_party/kineto/tools/**',  # copies of tools/linter, excluded above
+    'third_party/kineto/libkineto/third_party/**',  # Kineto's own third_party
     'test/**',
     'benchmarks/**',
     'torch/distributed/run.py',
@@ -1597,6 +1605,25 @@ command = [
 ]
 include_patterns = [
     "**/pyproject.toml",
+]
+
+[[linter]]
+code = 'LICENSE_FILES'
+command = [
+    'uv',
+    'run',
+    '--python',
+    '3.10',
+    '--script',
+    'tools/linter/adapters/license_files_linter.py',
+    '--',
+    '@{{PATHSFILE}}'
+]
+include_patterns = [
+    'pyproject.toml',
+    'test/test_license.py',
+    'tools/linter/license_files_audit.py',
+    'tools/linter/license_audit_manifest.toml',
 ]
 
 [[linter]]

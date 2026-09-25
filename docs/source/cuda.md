@@ -157,7 +157,19 @@ is not supported on ROCm. Use
 
 The end-to-end workflow: annotate during capture, profile the replay,
 then merge the annotations into the exported trace and view it in
-[Perfetto](https://ui.perfetto.dev). During capture:
+[Perfetto](https://ui.perfetto.dev).
+
+```{note}
+Keep the graphs alive until all profiles using their annotations have been
+exported. For asynchronous Cuspy exports, also call
+`prof.wait_for_exports()` before resetting or destroying the graphs.
+Stopping the profiler or synchronizing CUDA alone does not guarantee that
+buffered profiling records have been processed. Resetting or destroying a
+graph removes its annotations, so pending profiles can lose that metadata.
+Save any Python launch stacks before graph cleanup as well.
+```
+
+During capture:
 
 ```python
 import torch
@@ -212,6 +224,50 @@ Because annotations live in a process-global registry keyed by ids that
 match the profiler's, the pickle of ``dict(get_kernel_annotations())``
 can equally be saved next to a trace and joined offline.
 
+To capture Python launch stacks as well, set
+``annotation_config={"record_py_stacks": True}`` with ``enable_annotations=True``.
+Recording uses Cuspy's CUPTI node-creation callbacks, even when no profiler
+session is running. It requires `cupti-python`, CUPTI >= 13.3, and a CUPTI
+subscription not already held by Kineto, Nsight Systems, or another profiler.
+Use Cuspy for subsequent GPU profiling in the same process. Disable autograd
+multithreading during both warmup and capture.
+
+Stacks contain user Python frames on the launching thread for kernel, memcpy,
+memset, batch-memory, event, and host nodes. Framework and generated Inductor
+frames are omitted by default; C++ autograd nodes do not recover their forward Python
+stacks. Conditional and child-graph body stacks require ``key_by="source"``
+(CUPTI and driver >= 13.4); they are omitted with ``key_by="exec"``.
+
+```python
+from torch.cuda.graph_annotations import dump_kernel_py_stacks
+
+g = torch.cuda.CUDAGraph()
+with (
+    torch.autograd.grad_mode.set_multithreading_enabled(False),
+    torch.cuda.graph(
+        g, enable_annotations=True, annotation_config={"record_py_stacks": True}
+    ),
+):
+    y = x @ x.t()
+dump_kernel_py_stacks("graph_stacks.json.gz")
+```
+
+Use ``annotation_config["py_stack_filter_paths"]`` to customize filtering:
+``None`` keeps the defaults, a list or tuple of directory paths replaces them,
+and ``[]`` disables frame filtering. For example, ``{"record_py_stacks": True, "py_stack_filter_paths":
+["/my_project/wrappers"]}`` excludes only frames in that directory. Paths match
+on directory boundaries, and relative paths are resolved when capture begins.
+
+Read stacks with {func}`~torch.cuda.graph_annotations.get_kernel_py_stacks`
+or save them beside the trace with
+{func}`~torch.cuda.graph_annotations.dump_kernel_py_stacks`. The gzip-compressed
+JSON maps decimal node-id strings to newline-separated ``filename:line:function``
+frames, innermost first. With the default ``key_by="exec"``, look up a Cuspy
+Chrome trace event using ``str((args["graph id"] << 32) | args["graph node id"])``.
+For consumers reading CUPTI's ``sourceGraphNodeId``, use ``key_by="source"``
+and look up that ID directly.
+Save after instantiation and before resetting or destroying the graph.
+
 ```{eval-rst}
 .. currentmodule:: torch.cuda.graph_annotations
 ```
@@ -224,6 +280,8 @@ can equally be saved next to a trace and joined offline.
     is_available
     mark_kernels
     get_kernel_annotations
+    get_kernel_py_stacks
+    dump_kernel_py_stacks
     clear_kernel_annotations
 ```
 
@@ -383,9 +441,14 @@ direct memory access transfers between GPU memory and storage, avoiding a bounce
 [cufile api documentation](https://docs.nvidia.com/gpudirect-storage/api-reference-guide/index.html#cufile-io-api)
 for more details.
 
-These APIs can be used in versions greater than or equal to CUDA 12.6. In order to use these APIs, one must
+These APIs can be used with CUDA 12.6 or newer. In order to use these APIs, one must
 ensure that their system is appropriately configured to use GPUDirect Storage per the
 [GPUDirect Storage documentation](https://docs.nvidia.com/gpudirect-storage/troubleshooting-guide/contents.html).
+
+On ROCm, the same APIs are backed by [hipFile](https://rocm.docs.amd.com/projects/hipFile/en/latest/)
+rather than cuFile and require ROCm 7.14 or newer. The hipFile entry points and the ROCm system
+configuration steps, which differ from the CUDA ones, are covered in
+{ref}`hipFile (GPUDirect Storage)<rocm-gds>`.
 
 See the docs for {class}`~torch.cuda.gds.GdsFile` for an example of how to use these.
 

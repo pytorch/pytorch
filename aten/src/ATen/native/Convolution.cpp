@@ -498,6 +498,38 @@ struct ConvParams {
            && !(groups > 1 && is_dilated()) // MIOpen currently does not support dilation with groups of size > 1
            ;
   }
+
+  // MIOpen serves every depthwise convolution use_miopen() accepts, so unlike
+  // use_cudnn_depthwise(), which consults depthwise_kernel only for the fp16 4-D
+  // shapes cuDNN has a kernel for, "native" here diverts every dtype MIOpen takes.
+  // What it cannot divert is what the native kernel rejects: it is 4-D only, and
+  // DepthwiseConv2d.cu range-checks the output as well as the input, which a
+  // channel multiplier makes the larger of the two. Channels-last stays on MIOpen,
+  // but only when MIOpen is the one asked to suggest NHWC.
+  bool use_miopen_depthwise(const at::Tensor& input, const at::Tensor& weight, bool bias_defined) const  {
+    if (!use_miopen(input, weight, bias_defined)) {
+      return false;
+    }
+    if (at::globalContext().cudnnDepthwiseKernel() != at::CuDNNDepthwiseKernel::NATIVE) {
+      return true;
+    }
+    auto native_fits_32_bit_indexing = [&]() {
+      constexpr int64_t max_elem = std::numeric_limits<int32_t>::max();
+      T output_numel(1);
+      for (const auto& size : conv_output_size(at::symint::sizes<T>(input), at::symint::sizes<T>(weight), padding, stride, dilation)) {
+        output_numel = output_numel * size;
+      }
+      if constexpr (std::is_same_v<T, c10::SymInt>) {
+        return TORCH_GUARD_OR_FALSE(at::symint::numel<T>(input).sym_lt(max_elem))
+            && TORCH_GUARD_OR_FALSE(at::symint::numel<T>(weight).sym_lt(max_elem))
+            && TORCH_GUARD_OR_FALSE(output_numel.sym_lt(max_elem));
+      } else {
+        return at::symint::numel<T>(input) < max_elem && at::symint::numel<T>(weight) < max_elem && output_numel < max_elem;
+      }
+    };
+    return !(input.dim() == 4 && native_fits_32_bit_indexing()
+             && miopen_conv_suggest_memory_format(input, weight) == at::MemoryFormat::Contiguous);
+  }
   bool use_mkldnn(const at::Tensor& input, const at::Tensor& weight) const  {
 #if AT_MKLDNN_ENABLED()
     if (!at::globalContext().userEnabledMkldnn()) {
@@ -1072,8 +1104,8 @@ static Tensor convolution_same(
               "stride cannot broadcast to ", dim, " dimensions");
   TORCH_CHECK(dilation.size() == dim || dilation.size() == 1U,
               "dilation cannot broadcast to ", dim, " dimensions");
-  for (auto i: c10::irange(stride.size())) {
-    TORCH_CHECK(stride[i] == 1, "padding='same' is not supported for strided convolutions");
+  for (const auto& stride_elem : stride) {
+    TORCH_CHECK(stride_elem == 1, "padding='same' is not supported for strided convolutions");
   }
 
   // Calculate the correct padding
@@ -1288,7 +1320,7 @@ static ConvBackend _select_conv_backend(
   if (params.is_depthwise(input, weight)) {
     if (params.use_cudnn_depthwise(input, weight)) {
       return ConvBackend::Cudnn;
-    } else if (params.use_miopen(input, weight, bias_sizes_opt.has_value())) {
+    } else if (params.use_miopen_depthwise(input, weight, bias_sizes_opt.has_value())) {
       return ConvBackend::MiopenDepthwise;
     } else {
       if (input.ndimension() == 4) {

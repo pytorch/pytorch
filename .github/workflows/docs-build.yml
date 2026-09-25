@@ -42,21 +42,21 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
       check_experiments: lf
 
-  linux-jammy-py3_10-gcc11-build:
-    name: linux-jammy-py3.10-gcc11
+  linux-jammy-py3_11-gcc11-build:
+    name: linux-jammy-py3.11-gcc11
     uses: ./.github/workflows/_linux-build.yml
     needs:
       - get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-py3.10-gcc11
-      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang21
+      build-environment: linux-jammy-py3.11-gcc11
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.11-clang21
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
           { config: "docs_test", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
         ]}
-      python-version: "3.10"
+      python-version: "3.11"
       compiler: gcc11
     secrets: inherit
 
@@ -64,13 +64,13 @@ jobs:
     name: linux-docs
     uses: ./.github/workflows/_docs.yml
     needs:
-      - linux-jammy-py3_10-gcc11-build
+      - linux-jammy-py3_11-gcc11-build
       - get-label-type
     with:
-      build-environment: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.build-environment }}
-      docker-image: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.docker-image }}
+      build-environment: ${{ needs.linux-jammy-py3_11-gcc11-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-jammy-py3_11-gcc11-build.outputs.docker-image }}
       run-doxygen: true
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      python-version: "3.10"
+      python-version: "3.11"
       compiler: gcc11
     secrets: inherit
