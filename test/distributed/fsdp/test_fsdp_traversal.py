@@ -12,7 +12,11 @@ from torch.testing._internal.common_fsdp import (
     FSDPTestContinuous,
     NestedWrappedModule,
 )
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
+)
 
 
 if not dist.is_available():
@@ -27,6 +31,8 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 
 class TestTraversal(FSDPTestContinuous):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         if torch.torch.accelerator.is_available():
@@ -36,7 +42,7 @@ class TestTraversal(FSDPTestContinuous):
         return 2
 
     @skip_if_lt_x_gpu(2)
-    def test_fsdp_modules(self):
+    def test_fsdp_modules(self, device):
         nested_wrapped_module = NestedWrappedModule.init(
             self.process_group,
             FSDPInitMode.RECURSIVE,
@@ -61,9 +67,8 @@ class TestTraversal(FSDPTestContinuous):
         )
 
 
-devices = ("cuda", "hpu", "xpu")
 instantiate_device_type_tests(
-    TestTraversal, globals(), only_for=devices, allow_xpu=True
+    TestTraversal, globals(), except_for="cpu", allow_xpu=True
 )
 if __name__ == "__main__":
     run_tests()
