@@ -104,7 +104,7 @@ def expectedFailurePropagateRealTensors(fn):
     return fn
 
 
-class FakeTensorTest(TestCase):
+class TestFakeTensor(TestCase):
     def fake_with_unbacked_batch(self, *tensors):
         shape_env = ShapeEnv()
         fake_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=shape_env)
@@ -2639,7 +2639,7 @@ assert not torch.cuda.is_initialized()
                 torch.select(x, dim=1, index=-10)
 
 
-instantiate_parametrized_tests(FakeTensorTest)
+instantiate_parametrized_tests(TestFakeTensor)
 
 
 def make_propagate_real_tensors_cls(cls):
@@ -2656,10 +2656,10 @@ def make_propagate_real_tensors_cls(cls):
     globals()[cls.__name__] = cls
 
 
-make_propagate_real_tensors_cls(FakeTensorTest)
+make_propagate_real_tensors_cls(TestFakeTensor)
 
 
-class FakeTensorConstHandling(TestCase):
+class TestFakeTensorConstHandling(TestCase):
     def assertConst(self, *args):
         for arg in args:
             self.assertTrue(arg.constant is not None)
@@ -2751,7 +2751,7 @@ class FakeTensorConstHandling(TestCase):
             self.assertConst(y)
 
 
-make_propagate_real_tensors_cls(FakeTensorConstHandling)
+make_propagate_real_tensors_cls(TestFakeTensorConstHandling)
 
 
 def contains_type(type: torch.Type, maybe_contained_type: torch.Type):
@@ -2760,7 +2760,7 @@ def contains_type(type: torch.Type, maybe_contained_type: torch.Type):
     )
 
 
-class FakeTensorOpInfoTest(TestCase):
+class TestFakeTensorOpInfoDevice(TestCase):
     @ops(custom_op_db, dtypes=OpDTypes.any_one)
     def test_fake(self, device, dtype, op):
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
@@ -2770,16 +2770,18 @@ class FakeTensorOpInfoTest(TestCase):
             optests.fake_check(op, args, kwargs)
 
 
-make_propagate_real_tensors_cls(FakeTensorOpInfoTest)
-instantiate_device_type_tests(FakeTensorOpInfoTest, globals(), only_for=("cpu", "cuda"))
+make_propagate_real_tensors_cls(TestFakeTensorOpInfoDevice)
 instantiate_device_type_tests(
-    PropagateRealTensorsFakeTensorOpInfoTest,  # noqa: F821
+    TestFakeTensorOpInfoDevice, globals(), only_for=("cpu", "cuda")
+)
+instantiate_device_type_tests(
+    PropagateRealTensorsTestFakeTensorOpInfoDevice,  # noqa: F821
     globals(),
     only_for=("cpu",),
 )
 
 
-class FakeTensorConverterTest(TestCase):
+class TestFakeTensorConverter(TestCase):
     def test_memoized_conversion_to_meta(self):
         x = torch.rand(2, 2, 2)
         mode = FakeTensorMode()
@@ -3054,10 +3056,10 @@ class FakeTensorConverterTest(TestCase):
         self.assertEqual(g_eager.dtype, g_traced.dtype)
 
 
-make_propagate_real_tensors_cls(FakeTensorConverterTest)
+make_propagate_real_tensors_cls(TestFakeTensorConverter)
 
 
-class FakeTensorOperatorInvariants(TestCase):
+class TestFakeTensorOperatorInvariants(TestCase):
     def get_aten_op(self, schema):
         namespace, name = schema.name.split("::")
         overload = schema.overload_name if schema.overload_name else "default"
@@ -3422,10 +3424,10 @@ class FakeTensorOperatorInvariants(TestCase):
             _check_device(m.state_dict(), "cuda")
 
 
-make_propagate_real_tensors_cls(FakeTensorOperatorInvariants)
+make_propagate_real_tensors_cls(TestFakeTensorOperatorInvariants)
 
 
-class FakeTensorPropTest(TestCase):
+class TestFakeTensorProp(TestCase):
     def test_fake_tensor_prop_on_nn_module(self):
         class ToyNnModuleWithParameters(torch.nn.Module):
             def __init__(self) -> None:
@@ -3677,10 +3679,10 @@ class FakeTensorPropTest(TestCase):
                 self.assertTrue(statically_known_true(sx == sy))
 
 
-make_propagate_real_tensors_cls(FakeTensorPropTest)
+make_propagate_real_tensors_cls(TestFakeTensorProp)
 
 
-class FakeTensorSerialization(TestCase):
+class TestFakeTensorSerialization(TestCase):
     def test_serialization(self):
         x = torch.tensor([0], device="cpu")
         with FakeTensorMode():
@@ -3699,7 +3701,7 @@ class FakeTensorSerialization(TestCase):
             self.assertEqual(x.device, y.device)
 
 
-class FakeTensorDispatchCache(TestCase):
+class TestFakeTensorDispatchCache(TestCase):
     def test_shape_env_settings(self):
         """
         Validation that any boolean settings in ShapeEnv are present in the
@@ -4507,7 +4509,7 @@ def forward(self, dummy_1):
         self.assertBypasses("unrepresented symbol in output", 2)
 
 
-class FakeTensorPreferDeviceType(TestCase):
+class TestFakeTensorPreferDeviceType(TestCase):
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_fake_tensor_prefer_device_type(self):
         """
@@ -4585,7 +4587,7 @@ class FakeTensorPreferDeviceType(TestCase):
                 self.assertTrue(is_fake_tensor(result))
 
 
-class FakeTensorMetaDevicePropagation(TestCase):
+class TestFakeTensorMetaDevicePropagation(TestCase):
     @parametrize("device", ["cpu", "cuda"])
     def test_inplace_add_with_meta_rhs_keeps_destination_device(self, device):
         if device == "cuda" and not RUN_CUDA:
@@ -4599,10 +4601,10 @@ class FakeTensorMetaDevicePropagation(TestCase):
             self.assertTrue(is_fake_tensor(log_det))
 
 
-instantiate_parametrized_tests(FakeTensorMetaDevicePropagation)
+instantiate_parametrized_tests(TestFakeTensorMetaDevicePropagation)
 
 
-class FakeTensorViewCopy(TestCase):
+class TestFakeTensorViewCopy(TestCase):
     def test_expand_then_view_copy_matches_eager_mode(self):
         x = torch.arange(7)
         y = x.expand(12, 7)
