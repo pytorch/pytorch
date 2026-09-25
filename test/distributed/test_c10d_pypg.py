@@ -44,7 +44,7 @@ class MyWork(dist._Work):
         self.future_.set_result(result)
         self.pg_ = weakref.ref(pg)
 
-    def wait(self, timeout):
+    def wait(self, timeout=timedelta(0)):
         self.pg_().wait_count += 1
         return True
 
@@ -264,6 +264,10 @@ class AbstractDDPSingleRank(test_c10d_common.CommonDistributedDataParallelTest):
 
         self.assertEqual(pg.wait_count, 0)
         self.assertEqual(pg.get_future_count, 0)
+
+    @unittest.skip("DDP pickling only supports the default process group")
+    def test_manual_backward_finalization_pickle_compatibility(self):
+        pass
 
 
 class TestDDPWithWorkSubclass(AbstractDDPSingleRank, MultiThreadedTestCase):
