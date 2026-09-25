@@ -453,6 +453,12 @@ TEST(NCCLDevCommManagerTest, ReregistrationAfterUnregisterAdvancesGeneration) {
   EXPECT_TRUE(
       manager.comm_registration_is_live(group_name, comm, fresh_generation));
 
+  // A delayed retire carrying the previous lifetime's generation must leave
+  // the successor at the same address registered.
+  manager.unregister_comm(group_name, comm, stale_generation);
+  EXPECT_TRUE(
+      manager.comm_registration_is_live(group_name, comm, fresh_generation));
+
   manager.unregister_comm(group_name, comm);
   EXPECT_EQ(ncclCommDestroy(comm), ncclSuccess);
 }
