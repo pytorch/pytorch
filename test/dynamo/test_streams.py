@@ -466,6 +466,18 @@ class TestStreamsGeneric(torch._dynamo.test_case.TestCase):
         res = torch.compile(fn, backend="eager", fullgraph=True)(MyEvent(device="cpu"))
         self.assertEqual(res, torch.ones(2))
 
+    @unittest.skipIf(
+        not (hasattr(torch, "npu") and torch.npu.is_available()), "requires npu"
+    )
+    def test_npu_stream_context_python_type(self):
+        def fn(s):
+            ctx = torch.npu.stream(s)
+            return torch.ones(2) if isinstance(ctx, torch.npu.StreamContext) else torch.zeros(2)
+
+        s = torch.npu.Stream()
+        res = torch.compile(fn, backend="eager", fullgraph=True)(s)
+        self.assertEqual(res, torch.ones(2))
+
 
 @requires_accelerator
 class TestStreams(torch._dynamo.test_case.TestCase):
@@ -476,6 +488,16 @@ class TestStreams(torch._dynamo.test_case.TestCase):
     @classmethod
     def tearDownClass(cls):
         super().tearDownClass()
+
+    def test_stream_context_python_type(self, device):
+        device_mod = getattr(torch, device)
+        def fn(s):
+            ctx = device_mod.stream(s)
+            return torch.ones(2) if isinstance(ctx, device_mod.StreamContext) else torch.zeros(2)
+
+        s = device_mod.Stream()
+        res = torch.compile(fn, backend="eager", fullgraph=True)(s)
+        self.assertEqual(res, torch.ones(2))
 
     def test_stream_weakref(self, device):
         s = torch.Stream(device=device)
@@ -3074,6 +3096,35 @@ class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
         self.assertEqual(actual_s2, expected_s2)
         self.assertEqual(actual_default, default_s.cuda_stream)
 
+    def test_cuda_stream_context_attribute_access(self):
+        def fn(s):
+            ctx = torch.cuda.stream(s)
+            with ctx:
+                pass
+            return ctx.stream
+
+        s = torch.cuda.Stream()
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(s), fn(s))
+
+    def test_stream_context_python_type_identity(self):
+        from torch._dynamo.comptime import comptime
+
+        SELF = self
+
+        def fn(s):
+            ctx = torch.cuda.stream(s)
+            @comptime
+            def probe(ctx):
+                SELF.assertIs(ctx.python_type(), torch.cuda.StreamContext)
+            probe(ctx)
+            with ctx:
+                return torch.ones(2)
+
+        s = torch.cuda.Stream()
+        res = torch.compile(fn, backend="eager", fullgraph=True)(s)
+        self.assertEqual(res, torch.ones(2))
+
 
 @requires_xpu
 class TestStreamsXPUSpecific(torch._dynamo.test_case.TestCase):
@@ -3164,6 +3215,15 @@ class TestStreamsXPUSpecific(torch._dynamo.test_case.TestCase):
         self.assertEqual(actual_s1, expected_s1)
         self.assertEqual(actual_s2, expected_s2)
         self.assertEqual(actual_default, default_s.sycl_queue)
+
+    def test_xpu_stream_context_python_type(self):
+        def fn(s):
+            ctx = torch.xpu.stream(s)
+            return torch.ones(2) if isinstance(ctx, torch.xpu.StreamContext) else torch.zeros(2)
+
+        s = torch.xpu.Stream()
+        res = torch.compile(fn, backend="eager", fullgraph=True)(s)
+        self.assertEqual(res, torch.ones(2))
 
 
 if __name__ == "__main__":
