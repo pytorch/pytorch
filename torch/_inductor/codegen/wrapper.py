@@ -771,6 +771,43 @@ class EnterSubgraphLine(WrapperLine):
 
 
 @dataclasses.dataclass
+class EnterKernelProfileScopeLine(WrapperLine):
+    """Opens the `{` of a kernel profiling block.
+
+    The block is a real C++ scope, so everything a kernel call declares inside
+    it dies at the closing brace. Every memo that decides whether a
+    declaration is emitted has to be scoped with it, or a later line outside
+    the block names a variable that no longer exists: the buffer reuse pool
+    (a workspace freed inside would be handed to an allocation outside as
+    `auto new = std::move(inner)`), the precomputed-size memo, and the int
+    array cache.
+    """
+
+    wrapper: PythonWrapperCodegen
+
+    def __post_init__(self) -> None:
+        self.wrapper.push_computed_sizes(self.wrapper.computed_sizes)
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        self.wrapper.push_kernel_profile_scope_state()
+        code.writeline("{")
+
+
+@dataclasses.dataclass
+class ExitKernelProfileScopeLine(WrapperLine):
+    """Closes the `{` that EnterKernelProfileScopeLine opened."""
+
+    wrapper: PythonWrapperCodegen
+
+    def __post_init__(self) -> None:
+        self.wrapper.computed_sizes = self.wrapper.pop_computed_sizes()
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        self.wrapper.pop_kernel_profile_scope_state()
+        code.writeline("}")
+
+
+@dataclasses.dataclass
 class SwitchLine(WrapperLine):
     wrapper: PythonWrapperCodegen
     node: ir.Switch
@@ -920,8 +957,17 @@ def kernel_profile_enabled() -> bool:
     through an include that only these platforms emit. Callers that build
     profiling metadata must use this rather than the config flag alone:
     `_get_profiling_args` emits codegen for ReinterpretView arguments, so
-    building metadata the shim then declines to emit would leak a handle."""
-    return config.cpp.enable_kernel_profile and sys.platform in ("linux", "win32")
+    building metadata the shim then declines to emit would leak a handle.
+
+    `config.memory_planning` disables it: every record sits in a `{}` block,
+    and those blocks are a boundary only to memory_plan_reuse. MemoryPlanner
+    runs in its place and does not see them, so a pool first created inside one
+    would be declared there and named by a line after it."""
+    return (
+        config.cpp.enable_kernel_profile
+        and sys.platform in ("linux", "win32")
+        and not config.memory_planning
+    )
 
 
 def _profiling_arg_entry(value: Any) -> str | None:
@@ -1918,6 +1964,11 @@ class PythonWrapperCodegen(CodeGen):
         # its own braces -- does not register; anything emitting a numel inside
         # one has to maintain the depth too.
         self.kernel_profile_scope_depth: int = 0
+        # Index in self.lines of the `{` opening the outermost profiling block
+        # currently being collected, or None when there is none. A declaration
+        # that has to stay visible after the block closes is inserted there,
+        # which puts it in front of the brace, instead of appended.
+        self.kernel_profile_scope_hoist_index: int | None = None
         self.lines: list[Line] = []
         self.declare = ""
         self.declare_maybe_reference = ""
@@ -2564,6 +2615,30 @@ class PythonWrapperCodegen(CodeGen):
     def pop_codegened_graph(self):
         return self.codegened_graph_stack.pop()
 
+    def push_kernel_profile_scope_state(self):
+        """Save the declaration memos a profiling block is about to shadow.
+
+        Nothing to save for the Python wrapper, which has no block scope.
+        """
+
+    def pop_kernel_profile_scope_state(self):
+        """Restore what push_kernel_profile_scope_state saved."""
+
+    def writeline_outside_kernel_profile_scope(self, line):
+        """Emit a declaration that has to outlive every open profiling block,
+        such as a workspace allocated once per graph and never freed.
+
+        The line is hoisted in front of the outermost block, not the enclosing
+        one, so this is only correct for something whose lifetime is the whole
+        graph. A block-local declaration hoisted this way would be lifted too
+        far."""
+        index = self.kernel_profile_scope_hoist_index
+        if index is None:
+            self.writeline(line)
+        else:
+            self.lines.insert(index, line)
+            self.kernel_profile_scope_hoist_index = index + 1
+
     def push_computed_sizes(self, computed_sizes):
         from copy import deepcopy
 
@@ -3196,6 +3271,15 @@ class PythonWrapperCodegen(CodeGen):
                 past_planning_states.append(planning_states.pop())
                 if config.allow_buffer_reuse:
                     self.estimate_peak = peak_estimate_stack.pop()
+            elif isinstance(line, EnterKernelProfileScopeLine):
+                # A buffer freed inside the block must not be offered to an
+                # allocation after it, and one freed before it must not be
+                # reused inside: either way the ReuseLine declares its new name
+                # on the wrong side of a brace. The state is the same graph's,
+                # so estimate_peak is left alone.
+                planning_states.append(MemoryPlanningState())
+            elif isinstance(line, ExitKernelProfileScopeLine):
+                past_planning_states.append(planning_states.pop())
         past_planning_states.append(planning_states.pop())
         if len(planning_states) != 0:
             raise AssertionError(
@@ -4356,8 +4440,12 @@ class PythonWrapperCodegen(CodeGen):
                 # expand existing allocation
                 prior.node = WorkspaceArg.maximum(prior.node, ws)
             else:
-                self.writeline(line)
-                self.writeline(self.make_zero_buffer(name))
+                # Allocated once at first use and never freed, so it has to be
+                # declared outside any profiling block: the first kernel to
+                # need it may sit inside one, and every later kernel that
+                # names it sits in a different block.
+                self.writeline_outside_kernel_profile_scope(line)
+                self.writeline_outside_kernel_profile_scope(self.make_zero_buffer(name))
                 self.allocated_workspaces[name] = line
         else:
             raise AssertionError(ws.zero_mode)
@@ -5580,6 +5668,10 @@ class PythonWrapperCodegen(CodeGen):
 
         A profiling block is a C++ construct, so this does nothing for the
         Python wrapper; CppWrapperCpu overrides it to emit the real block.
+        There, `enabled` left as None means "read the config", which is not the
+        same as False: a caller that also records a RecordFunction passes
+        kernel_profile_enabled() so the block opens on the same condition as
+        the handle.
         """
         yield
 
