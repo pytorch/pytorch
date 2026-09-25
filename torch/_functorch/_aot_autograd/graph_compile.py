@@ -61,6 +61,7 @@ from .autograd_cache import (
     should_bundle_autograd_cache,
     should_use_remote_autograd_cache,
 )
+from .codegen import aggregate_runtime_wrapper_sources
 from .descriptors import AOTOutput, PlainAOTOutput
 from .graph_capture import aot_dispatch_autograd_graph, aot_dispatch_base_graph
 from .logging_utils import track_graph_compiling
@@ -357,21 +358,22 @@ def aot_stage2_compile(
     if inference_compiler is None:
         inference_compiler = fw_compiler
 
-    if aot_state.needs_autograd and not aot_state.aot_config.pre_dispatch:
-        return aot_stage2_autograd(
-            aot_state,
-            aot_graph_capture,
-            partition_fn,
-            fw_compiler,
-            bw_compiler,
-        )
-    else:
-        return aot_stage2_inference(
-            aot_state,
-            aot_graph_capture,
-            partition_fn,
-            inference_compiler,
-        )
+    with aggregate_runtime_wrapper_sources():
+        if aot_state.needs_autograd and not aot_state.aot_config.pre_dispatch:
+            return aot_stage2_autograd(
+                aot_state,
+                aot_graph_capture,
+                partition_fn,
+                fw_compiler,
+                bw_compiler,
+            )
+        else:
+            return aot_stage2_inference(
+                aot_state,
+                aot_graph_capture,
+                partition_fn,
+                inference_compiler,
+            )
 
 
 def _log_inference_graph(
