@@ -434,8 +434,8 @@ if has_triton():
                              Must be 8-byte aligned symmetric memory.
             signal (int64): Value to be used in the signal operation.
             sig_op (int32): Signal operation type. Common values:
-                           - NVSHMEM_SIGNAL_SET (9): Atomic set operation
-                           - NVSHMEM_SIGNAL_ADD (10): Atomic add operation
+                           - NVSHMEM_SIGNAL_SET: Atomic set operation
+                           - NVSHMEM_SIGNAL_ADD: Atomic add operation
             pe (int32): PE number of the remote PE (0 ≤ pe < nvshmem_n_pes()).
 
         Returns:
@@ -452,7 +452,7 @@ if has_triton():
         Example:
             ```
             # Transfer data and set completion flag to 1
-            NVSHMEM_SIGNAL_SET = 9
+            NVSHMEM_SIGNAL_SET = <value from NVSHMEM headers>
             nvshmem.putmem_signal_block(
                 dst_ptr, src_ptr, 1024, sig_ptr, 1, NVSHMEM_SIGNAL_SET, target_pe
             )
@@ -632,8 +632,8 @@ if has_triton():
                              Must be 8-byte aligned symmetric memory.
             signal (int64): Value to be used in the signal operation.
             sig_op (int32): Signal operation type. Common values:
-                           - NVSHMEM_SIGNAL_SET (9): Atomically set sig_addr = signal
-                           - NVSHMEM_SIGNAL_ADD (10): Atomically set sig_addr += signal
+                           - NVSHMEM_SIGNAL_SET: Atomically set sig_addr = signal
+                           - NVSHMEM_SIGNAL_ADD: Atomically set sig_addr += signal
             pe (int32): PE number of the remote PE (0 ≤ pe < nvshmem_n_pes()).
             _semantic: Optional semantic information for Triton compilation.
 
@@ -650,7 +650,7 @@ if has_triton():
         Example:
             ```python
             # Atomically set remote signal to 1 to notify completion
-            NVSHMEM_SIGNAL_SET = 9
+            NVSHMEM_SIGNAL_SET = <value from NVSHMEM headers>
             nvshmem.signal_op(remote_signal_ptr, 1, NVSHMEM_SIGNAL_SET, target_pe)
             ```
         """
