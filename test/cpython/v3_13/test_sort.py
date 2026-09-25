@@ -260,7 +260,7 @@ class TestDecorateSortUndecorate(__TestCase):
     def test_decorated(self):
         data = 'The quick Brown fox Jumped over The lazy Dog'.split()
         copy = data[:]
-        random.shuffle(data)
+        random.Random(0).shuffle(data)
         data.sort(key=str.lower)
         def my_cmp(x, y):
             xlower, ylower = x.lower(), y.lower()
@@ -335,7 +335,7 @@ class TestDecorateSortUndecorate(__TestCase):
 
     def test_reverse(self):
         data = list(range(100))
-        random.shuffle(data)
+        random.Random(0).shuffle(data)
         data.sort(reverse=True)
         self.assertEqual(data, list(range(99,-1,-1)))
 
