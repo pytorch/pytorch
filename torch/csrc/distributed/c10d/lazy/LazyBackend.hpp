@@ -372,6 +372,9 @@ class LazyBackend : public Backend {
   bool supportsSplitting() const override {
     return primary_->supportsSplitting();
   }
+  bool isInitialized() override {
+    return primary_->isInitialized();
+  }
   // Split just the primary comm; the child is a bare backend for the subgroup.
   // We deliberately don't split the P2P pair comms: like a reconfigure, they
   // encode the parent membership's global ranks and can't be carried into the
