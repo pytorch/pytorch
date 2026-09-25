@@ -855,6 +855,39 @@ if HAS_CUDA_AND_TRITON:
 
             self.assertEqual(fn(x, y), torch.nn.functional.pad(x, (4, -4)))
 
+        @torch._inductor.config.patch("triton.cudagraph_skip_dynamic_graphs", True)
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_skip_dynamic_does_not_propagate_to_static_downstream(self):
+            """Static-shaped ops downstream of a dynamic-to-static boundary
+            should be captured in cudagraph partitions, not excluded."""
+
+            def fn(x, w1, w2, w3):
+                m = x.t() @ x  # [s0, 256]^T @ [s0, 256] -> [256, 256]
+                return m @ w1 @ w2 @ w3
+
+            fn_c = torch.compile(fn, mode="reduce-overhead")
+            x = torch.randn(512, 256, device="cuda")
+            torch._dynamo.mark_dynamic(x, 0)
+            ws = [torch.randn(256, 256, device="cuda") for _ in range(3)]
+
+            scheduler_log, sctx = logs_to_string(
+                "torch._inductor.scheduler", "cudagraphs"
+            )
+            with sctx():
+                _, code = run_and_get_code(fn_c, x, *ws)
+
+            # The dynamic mm (x.t() @ x) should be excluded
+            log_text = scheduler_log.getvalue()
+            FileCheck().check("reason=dynamic shape ops").run(log_text)
+
+            # But the downstream static mms should form a cudagraph partition
+            self.assertGreaterEqual(get_num_partitions(code), 1)
+
+            # Verify correctness
+            expected = fn(x, *ws)
+            result = fn_c(x, *ws)
+            self.assertEqual(result, expected)
+
         @parametrize("backend", ("inductor", "cudagraphs"))
         @torch._dynamo.config.patch("cudagraph_backend_keep_input_mutation", True)
         @torch._dynamo.config.patch("cudagraph_backend_support_input_mutation", True)
