@@ -6413,6 +6413,41 @@ class TestNumericalStability(DistributionsTestCase):
                 msg=lambda msg: f"{msg}\nIncorrect gradient for tensor type: {type(x)}. Expected = {expected_gradient}, Actual = {p.grad}",
             )
 
+    def test_normal_log_prob_extreme_scale(self):
+        log_normalizer = math.log(math.sqrt(2 * math.pi))
+        for dtype in (torch.float32, torch.float64):
+            finfo = torch.finfo(dtype)
+            scale = torch.tensor([finfo.max, finfo.tiny], dtype=dtype)
+            loc = torch.zeros_like(scale)
+            value = torch.tensor([finfo.max, 0.0], dtype=dtype)
+
+            actual = Normal(loc, scale).log_prob(value)
+            expected = torch.tensor(
+                [
+                    -0.5 - math.log(finfo.max) - log_normalizer,
+                    -math.log(finfo.tiny) - log_normalizer,
+                ],
+                dtype=dtype,
+            )
+
+            self.assertTrue(torch.isfinite(actual).all())
+            self.assertEqual(actual, expected)
+
+    def test_normal_log_prob_large_standardized_residual(self):
+        # Multiplying by -0.5 before the second factor keeps this representable
+        # even though squaring the residual first would overflow in float32.
+        value = torch.tensor([2e19], dtype=torch.float32)
+        actual = Normal(torch.zeros_like(value), torch.ones_like(value)).log_prob(
+            value
+        )
+        expected = torch.tensor(
+            [-0.5 * (float(value.item()) ** 2) - math.log(math.sqrt(2 * math.pi))],
+            dtype=torch.float32,
+        )
+
+        self.assertTrue(torch.isfinite(actual).all())
+        self.assertEqual(actual, expected)
+
     def test_bernoulli_gradient(self):
         for tensor_type in [torch.FloatTensor, torch.DoubleTensor]:
             self._test_pdf_score(

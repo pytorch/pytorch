@@ -87,15 +87,16 @@ class Normal(ExponentialFamily):
     def log_prob(self, value):
         if self._validate_args:
             self._validate_sample(value)
-        # compute the variance
-        var = self.scale**2
+        # Standardize before squaring to avoid overflow/underflow in the
+        # intermediate squares of the scale and residual.
+        z = (value - self.loc) / self.scale
         log_scale = (
             math.log(self.scale)
             if isinstance(self.scale, _Number)
             else self.scale.log()
         )
         return (
-            -((value - self.loc) ** 2) / (2 * var)
+            -0.5 * z * z
             - log_scale
             - math.log(math.sqrt(2 * math.pi))
         )
