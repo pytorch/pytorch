@@ -112,7 +112,7 @@ def _make_config_key_from_heuristic(cfg: HeuristicConfig) -> ConfigKey:
 
 
 def _make_config_key_from_kernel_design(design) -> ConfigKey | None:
-    """Build config key from cutlass.operators kernel metadata.design."""
+    """Build a raw config key from cutlass.operators kernel metadata.design."""
     if (
         hasattr(design, "tile_shape")
         and len(design.tile_shape) >= 2
@@ -124,6 +124,27 @@ def _make_config_key_from_kernel_design(design) -> ConfigKey | None:
             design.tile_shape[1],
             design.cluster_shape[0],
             design.cluster_shape[1],
+        )
+    return None
+
+
+def _make_config_key_from_kernel(kernel) -> ConfigKey | None:
+    """Build a per-CTA config key from a cutlass.operators kernel."""
+    design = kernel.metadata.design
+    key = _make_config_key_from_kernel_design(design)
+    if key is not None:
+        use_2cta_instrs = getattr(
+            getattr(kernel, "impl", None),
+            "use_2cta_instrs",
+            None,
+        )
+        if use_2cta_instrs is None:
+            use_2cta_instrs = bool(getattr(design, "use_2cta_mma", False))
+        return (
+            key[0] // (2 if use_2cta_instrs else 1),
+            key[1],
+            key[2],
+            key[3],
         )
     return None
 
@@ -448,15 +469,26 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         elif config.nvgemm_supplement_configs:
             targeted_configs.update(_SUPPLEMENT_CONFIGS)
 
-        selected_keys = OrderedSet(
-            [_make_config_key_from_kernel_design(k.metadata.design) for k in result]
+        # Heuristic matching uses per-CTA tile shapes, but targeted configs
+        # describe the raw generated design. Keep those two namespaces
+        # separate so 2-CTA designs remain discoverable as supplements.
+        design_config_to_kernels: dict[ConfigKey, list] = defaultdict(list)
+        for kernel in kernels:
+            if key := _make_config_key_from_kernel_design(kernel.metadata.design):
+                design_config_to_kernels[key].append(kernel)
+
+        selected_design_keys = OrderedSet(
+            key
+            for kernel in result
+            if (key := _make_config_key_from_kernel_design(kernel.metadata.design))
+            is not None
         )
-        for key, key_kernels in config_to_kernels.items():
+        for key, key_kernels in design_config_to_kernels.items():
             if key in all_kernel_variants_configs:
                 for kernel in key_kernels:
                     if is_primary_variant(kernel) and kernel not in result:
                         result.append(kernel)
-            elif key not in selected_keys and key in targeted_configs:
+            elif key not in selected_design_keys and key in targeted_configs:
                 primary = next(filter(is_primary_variant, key_kernels), None)
                 if primary is not None:
                     result.append(primary)
@@ -505,7 +537,7 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         config_to_kernels: dict[ConfigKey, list] = defaultdict(list)
 
         for kernel in kernels:
-            key = _make_config_key_from_kernel_design(kernel.metadata.design)
+            key = _make_config_key_from_kernel(kernel)
             if key is not None:
                 config_to_kernels[key].append(kernel)
 

@@ -2585,6 +2585,65 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertRaises(Exception, lambda: lstm(input, (cx, hx)))
 
 
+    def test_rnn_cell_native_rank_validation(self):
+        input_size, hidden_size = 5, 3
+        x2d = torch.randn(1, input_size)
+        x1d = torch.randn(input_size)
+        hx2d = torch.randn(1, hidden_size)
+        hx3d = torch.randn(1, hidden_size, 1)
+
+        lstm_w_ih = torch.randn(4 * hidden_size, input_size)
+        lstm_w_hh = torch.randn(4 * hidden_size, hidden_size)
+        lstm_b_ih = torch.randn(4 * hidden_size)
+        lstm_b_hh = torch.randn(4 * hidden_size)
+        lstm_hx = (hx2d, hx2d)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected 2D input"):
+            torch.lstm_cell(x1d, lstm_hx, lstm_w_ih, lstm_w_hh, lstm_b_ih, lstm_b_hh)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected 2D hidden0"):
+            torch.lstm_cell(x2d, (hx3d, hx2d), lstm_w_ih, lstm_w_hh, lstm_b_ih, lstm_b_hh)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected 2D hidden1"):
+            torch.lstm_cell(x2d, (hx2d, hx3d), lstm_w_ih, lstm_w_hh, lstm_b_ih, lstm_b_hh)
+
+        gru_w_ih = torch.randn(3 * hidden_size, input_size)
+        gru_w_hh = torch.randn(3 * hidden_size, hidden_size)
+        gru_b_ih = torch.randn(3 * hidden_size)
+        gru_b_hh = torch.randn(3 * hidden_size)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected 2D input"):
+            torch.gru_cell(x1d, hx2d, gru_w_ih, gru_w_hh, gru_b_ih, gru_b_hh)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected 2D hidden0"):
+            torch.gru_cell(x2d, hx3d, gru_w_ih, gru_w_hh, gru_b_ih, gru_b_hh)
+
+        rnn_w_ih = torch.randn(hidden_size, input_size)
+        rnn_w_hh = torch.randn(hidden_size, hidden_size)
+        rnn_b_ih = torch.randn(hidden_size)
+        rnn_b_hh = torch.randn(hidden_size)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected 2D input"):
+            torch.rnn_tanh_cell(x1d, hx2d, rnn_w_ih, rnn_w_hh, rnn_b_ih, rnn_b_hh)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected 2D hidden0"):
+            torch.rnn_tanh_cell(x2d, hx3d, rnn_w_ih, rnn_w_hh, rnn_b_ih, rnn_b_hh)
+
+    def test_rnn_cell_module_rank_validation(self):
+        # Unbatched input with 2D hidden: Python unsqueeze produces 3D hidden, caught in native checks.
+        with self.assertRaisesRegex(RuntimeError, "Expected 2D hidden0"):
+            nn.LSTMCell(5, 3)(torch.randn(5), (torch.randn(3, 3), torch.randn(3, 3)))
+
+        with self.assertRaisesRegex(RuntimeError, "Expected 2D hidden0"):
+            nn.GRUCell(5, 3)(torch.randn(5), torch.randn(3, 3))
+
+        with self.assertRaisesRegex(RuntimeError, "Expected 2D hidden0"):
+            nn.RNNCell(5, 3)(torch.randn(5), torch.randn(3, 3))
+
+        # Batched input with hx[1] rank mismatch only.
+        with self.assertRaisesRegex(RuntimeError, "Expected 2D hidden1"):
+            nn.LSTMCell(5, 3)(torch.randn(3, 5), (torch.randn(3, 3), torch.randn(3)))
+
     def test_Transformer_cell(self):
         # this is just a smoke test; these modules are implemented through
         # autograd so no Jacobian test is needed
@@ -9490,6 +9549,29 @@ class TestNNDeviceType(NNTestCase):
             expected_out[0, 0, o] = in_t[0, 0, i]
         expected_out = expected_out.to(device=device)
         self.assertEqual(out_t, expected_out)
+
+    @parametrize_test("shape, output_width", [
+        ((0, 2, 4), 12),
+        ((2, 3, 4), 12),
+        ((2, 3, 32768), 65536),
+    ])
+    def test_upsamplingLinear1d_kernel_paths(self, device, shape, output_width):
+        # The CUDA/ROCm implementation picks between an unrolled kernel and the
+        # original one based on ceil_div(output_width, 512), so output widths on
+        # either side of 512 * 128 exercise different kernels. An empty batch dim
+        # (the only empty dim the op accepts) used to launch a zero-block grid.
+        x = torch.randn(shape, device=device, requires_grad=True)
+        x_cpu = x.detach().cpu().requires_grad_()
+
+        out = F.interpolate(x, size=output_width, mode="linear", align_corners=False)
+        out_cpu = F.interpolate(x_cpu, size=output_width, mode="linear", align_corners=False)
+        self.assertEqual(out.shape, (shape[0], shape[1], output_width))
+        self.assertEqual(out.cpu(), out_cpu)
+
+        grad_cpu = torch.randn_like(out_cpu)
+        out.backward(grad_cpu.to(device))
+        out_cpu.backward(grad_cpu)
+        self.assertEqual(x.grad.cpu(), x_cpu.grad)
 
     @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
