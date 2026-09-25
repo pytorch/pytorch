@@ -354,7 +354,6 @@ void nccl_reduce_scatter_offset(
   const int elems_per_cta = RS_THREADS_PER_CTA * unroll;
   const size_t window_base_offset = nccl_hdl->get_window_offset();
 
-#ifndef USE_ROCM
   // Build the per-slot info struct.
   // For dim=1: byte_offsets encodes the column-block start within the window.
   // For dim=0: byte_offsets encodes the row-block start within the window.
@@ -379,6 +378,7 @@ void nccl_reduce_scatter_offset(
       info.cta_slot[k] = static_cast<uint8_t>(j);
     }
   }
+#ifndef USE_ROCM
   const int total_ctas = info.ctas_offset[n_owned - 1];
 
   auto window = nccl_hdl->get_window();
@@ -425,32 +425,23 @@ void nccl_reduce_scatter_offset(
       "nccl_reduce_scatter_offset",
       [&]() {
         for (int j = 0; j < n_owned; j++) {
-          const int i = owned_indices[j];
-          const int64_t block_start = (i > 0 ? effective_offsets[i - 1] : 0);
-          const size_t elem_offset = col_sharded
-              ? static_cast<size_t>(input.storage_offset() + block_start)
-              : static_cast<size_t>(input.storage_offset()) +
-                    static_cast<size_t>(block_start) * outer_stride;
-          const int numel_j = static_cast<int>(owned_sizes[j]) * fixed_dim_size;
-          const int ctas_j = std::max(1, std::min(
-              (numel_j + elems_per_cta - 1) / elems_per_cta, RS_MAX_CTAS_PER_BLOCK));
-
-          ReduceScatterOffsetsInfo info;
-          info.n_owned = 1;
-          info.byte_offsets[0] =
-              window_base_offset + elem_offset * input.element_size();
-          info.dst_ptrs[0] = out[j].data_ptr();
-          info.dst_block_size[0] = static_cast<uint16_t>(owned_sizes[j]);
-          info.ctas_offset[0] = static_cast<uint16_t>(ctas_j);
+          const int ctas_j =
+              info.ctas_offset[j] - (j > 0 ? info.ctas_offset[j - 1] : 0);
+          ReduceScatterOffsetsInfo slot;
+          slot.n_owned = 1;
+          slot.byte_offsets[0] = info.byte_offsets[j];
+          slot.dst_ptrs[0] = info.dst_ptrs[j];
+          slot.dst_block_size[0] = info.dst_block_size[j];
+          slot.ctas_offset[0] = static_cast<uint16_t>(ctas_j);
           for (int k = 0; k < ctas_j; ++k) {
-            info.cta_slot[k] = 0;
+            slot.cta_slot[k] = 0;
           }
 
           if (use_multimem) {
             reduce_scatter_offset_kernel<scalar_t, true>
                 <<<ctas_j, RS_THREADS_PER_CTA, 0, stream>>>(
                     window,
-                    info,
+                    slot,
                     fixed_dim_size,
                     col_sharded,
                     outer_stride,
@@ -460,7 +451,7 @@ void nccl_reduce_scatter_offset(
             reduce_scatter_offset_kernel<scalar_t, false>
                 <<<ctas_j, RS_THREADS_PER_CTA, 0, stream>>>(
                     window,
-                    info,
+                    slot,
                     fixed_dim_size,
                     col_sharded,
                     outer_stride,
