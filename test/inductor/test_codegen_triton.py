@@ -22,9 +22,11 @@ from torch._inductor.codegen.simd import IterationRangesRoot
 from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
 from torch._inductor.codegen.triton import (
     _materialize_trunc_to_float_expr,
+    BlockParameters,
     FixedTritonConfig,
     get_triton_reduction_function,
     IndexingOptions,
+    TMACompatibilityChecker,
     TritonCSEVariable,
     TritonKernel,
     TritonKernelOverrides,
@@ -386,6 +388,34 @@ def helper(x):
             rf"\s+tmp\d+ = {re.escape(reduction_fn)}\((?P=masked), 0\)"
         )
         self.assertRegex(code, masked_reduction)
+
+    def test_mix_order_rejects_tma_xblock_above_heuristic_limit(self):
+        xnumel = sympy.Integer(8192)
+        rnumel = sympy.Integer(8)
+        with self._graph.set_current_device(torch.device("cpu")):
+            kernel = TritonKernel(
+                {"x": xnumel, "r0_": rnumel},
+                features=SIMDKernelFeatures([], xnumel, rnumel),
+                mix_order_reduction=True,
+                override_persistent_reduction=True,
+                override_cooperative_reduction=False,
+            )
+        kernel.rsplit_size = 64
+        xblock = TritonSymbols.block_sizes[SymT.XBLOCK]
+        block_params = BlockParameters(
+            shape=[rnumel, xnumel],
+            block_shape=[rnumel, FloorDiv(xblock, rnumel)],
+            strides=[xnumel, sympy.Integer(1)],
+            offsets=[sympy.Integer(0), sympy.Integer(0)],
+        )
+
+        checker = TMACompatibilityChecker(
+            kernel, torch.float32, for_store=False, force=False
+        )
+        with self._graph.set_current_device(torch.device("cuda")):
+            compatible = checker.are_block_parameters_compatible(block_params)
+        self.assertFalse(compatible)
+        self.assertEqual(kernel.tma_min_block_sizes, {})
 
     def test_reduction_invariant_load_indexing(self):
         self._stack.enter_context(self._graph.set_current_device(torch.device("cuda")))

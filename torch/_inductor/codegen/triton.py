@@ -59,6 +59,7 @@ from ..runtime.hints import (
     native_matmul_persistent_rblock,
     ReductionHint,
     TRITON_MAX_BLOCK,
+    TRITON_MAX_MIX_ORDER_XBLOCK,
     TRITON_MAX_RSPLIT,
     TritonMeta,
 )
@@ -3218,10 +3219,16 @@ class TMACompatibilityChecker:
                 if (
                     self.kernel.mix_order_reduction
                     and innermost_block_symt == SymT.XBLOCK
-                    and self.kernel.rsplit_size % min_block_size != 0
+                    and (
+                        self.kernel.rsplit_size % min_block_size != 0
+                        or (
+                            not self.kernel.fixed_config
+                            and min_block_size > TRITON_MAX_MIX_ORDER_XBLOCK
+                        )
+                    )
                 ):
                     log.debug(
-                        "%s mix-order RSPLIT_SIZE=%d has no XBLOCK divisor satisfying the minimum block size %d",
+                        "%s mix-order RSPLIT_SIZE=%d has no supported XBLOCK satisfying the minimum block size %d",
                         self.failed_debug_prefix,
                         self.kernel.rsplit_size,
                         min_block_size,
