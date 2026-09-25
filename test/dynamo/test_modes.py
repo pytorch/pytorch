@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import inspect
 import operator
 import unittest
 from unittest.mock import patch
@@ -1089,6 +1090,56 @@ class outer_fn(torch.nn.Module):
             return (add,)
 """,
         )
+
+    @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
+    def test_make_fx_over_compiled_function_preserves_source_lines(self):
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        # The inner compiled function is replayed as an invoke_subgraph during
+        # the outer make_fx trace. Its operation nodes must retain the source
+        # locations recorded when the inner function was originally captured.
+        def inner_fn(x):
+            y = x.sin()
+            return y.cos()
+
+        torch._dynamo.reset()
+        compiled_fn = torch.compile(inner_fn, backend="invoke_subgraph")
+
+        def outer_fn(x):
+            return compiled_fn(x)
+
+        x = torch.randn(3)
+        traced = make_fx(outer_fn, tracing_mode="fake", record_stack_traces=True)(x)
+
+        invoke_subgraph_node = next(
+            node
+            for node in traced.graph.nodes
+            if node.target == torch.ops.higher_order.invoke_subgraph
+        )
+        subgraph = traced.get_submodule(invoke_subgraph_node.args[0].target)
+
+        # Missing metadata here is the regression: executing the generated
+        # GraphModule code during the invoke_subgraph re-trace loses the source
+        # lines from inner_fn. Check each operation against its exact definition.
+        source_file = inspect.getsourcefile(inner_fn)
+        first_line = inspect.getsourcelines(inner_fn)[1]
+        source_lines = {
+            node.target: node.meta["stack_trace"]
+            for node in subgraph.graph.nodes
+            if node.op == "call_function"
+        }
+
+        self.assertIn(
+            f'File "{source_file}", line {first_line + 1}',
+            source_lines[torch.ops.aten.sin.default],
+        )
+        self.assertIn(
+            f'File "{source_file}", line {first_line + 2}',
+            source_lines[torch.ops.aten.cos.default],
+        )
+
+        # Metadata preservation must not change the executable graph's result.
+        self.assertEqual(outer_fn(x), traced(x))
 
     @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
     def test_same_compiled_fn_called_twice_shares_subgraph(self):
