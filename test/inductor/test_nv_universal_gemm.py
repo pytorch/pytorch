@@ -423,7 +423,7 @@ class TestNVUniversalGemm(TestCase):
             assume_supported_args=True,
         )
         torch.cuda.synchronize()
-        torch.testing.assert_close(out, expected, equal_nan=True, atol=1.0, rtol=2e-2)
+        torch.testing.assert_close(out, expected, equal_nan=True, atol=0, rtol=0)
 
         oversized_args, _, _ = make_args(tile_n + 8)
         status = kernel.supports(oversized_args)
