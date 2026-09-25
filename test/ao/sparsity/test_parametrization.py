@@ -5,7 +5,11 @@ import torch
 from torch import nn
 from torch.ao.pruning.sparsifier import utils
 from torch.nn.utils import parametrize
-from torch.testing._internal.common_utils import raise_on_run_directly, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    raise_on_run_directly,
+    TestCase,
+)
 
 
 class ModelUnderTest(nn.Module):
@@ -32,6 +36,8 @@ class ModelUnderTest(nn.Module):
 
 
 class TestFakeSparsity(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_masking_logic(self):
         model = nn.Linear(16, 16, bias=False)
         model.weight = nn.Parameter(torch.eye(16))
