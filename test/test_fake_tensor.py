@@ -1293,29 +1293,6 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             with self.assertRaisesRegex(RuntimeError, error):
                 torch.as_strided(x, (17, 18), (-80, 1), 1)
 
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_out_multi_device(self):
-        with FakeTensorMode():
-            x = torch.rand([4])
-            y = torch.rand([4], device="cuda")
-
-            with self.assertRaisesRegex(Exception, "found.+two.+devices"):
-                torch.sin(x, out=y)
-
-            with self.assertRaisesRegex(Exception, "found.+two.+devices"):
-                x.add_(y)
-
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
-    )
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_normalize_device(self):
-        with FakeTensorMode():
-            x = torch.empty(1, device="cuda")
-            y = torch.empty(1, device=f"cuda:{torch.cuda.current_device()}")
-            out = x + y
-        self.checkType(out, "cuda", [1])
-
     def test_recursive_invocation(self):
         mode = FakeTensorMode()
         with mode:
@@ -1784,19 +1761,6 @@ def forward(self, x_1):
     @unittest.skipIf(
         TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
     )
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_new(self):
-        with FakeTensorMode():
-            a = torch.rand([16, 1])
-            self.checkType(a.new(10, 10), "cpu", [10, 10])
-            self.checkType(a.new([1, 2, 3, 4]), "cpu", [4])
-            b = torch.rand([4, 4], device="cuda")
-            self.checkType(b.new(device="cuda"), "cuda", [0])
-            self.checkType(a.new(torch.rand([1])), "cpu", [1])
-
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
-    )
     def test_scalar_inputs(self):
         with FakeTensorMode():
             self.checkType(torch.div(3, 2), "cpu", [])
@@ -1848,15 +1812,6 @@ def forward(self, x_1):
             cpu_indices = torch.zeros(4, 5, dtype=torch.long)
             meta_weight_out = torch.nn.functional.embedding(cpu_indices, meta_weight)
 
-            run_cuda_cases = (
-                not torch._functorch.config.fake_tensor_propagate_real_tensors
-                or RUN_CUDA
-            )
-            if run_cuda_cases:
-                cuda_weight = torch.empty(20, 8, device="cuda")
-                cuda_indices = torch.zeros(2, 3, dtype=torch.long, device="cuda")
-                cuda_out = torch.nn.functional.embedding(cuda_indices, cuda_weight)
-
         self.assertIsInstance(out, FakeTensor)
         self.assertEqual(out.shape, (2, 3, 8))
         self.assertEqual(out.dtype, weight.dtype)
@@ -1868,22 +1823,6 @@ def forward(self, x_1):
         self.assertEqual(meta_weight_out.dtype, meta_weight.dtype)
         self.assertEqual(meta_weight_out.device, meta_weight.device)
         self.assertEqual(meta_weight_out.fake_device, meta_weight.fake_device)
-
-        if run_cuda_cases:
-            self.assertIsInstance(cuda_out, FakeTensor)
-            self.assertEqual(cuda_out.shape, (2, 3, 8))
-            self.assertEqual(cuda_out.device, cuda_weight.device)
-            self.assertEqual(cuda_out.fake_device, cuda_weight.fake_device)
-
-        if run_cuda_cases:
-            with FakeTensorMode():
-                cpu_weight = torch.empty(20, 8)
-                cuda_indices = torch.empty(2, 3, dtype=torch.long, device="cuda")
-                with self.assertRaisesRegex(
-                    (FakeTensorDeviceMismatchError, RuntimeError),
-                    "same device|different from other tensors",
-                ):
-                    torch.nn.functional.embedding(cuda_indices, cpu_weight)
 
     @skipIfTorchDynamo("uses torch.compile")
     def test_embedding_meta_indices_torch_compile(self):
@@ -1944,84 +1883,6 @@ def forward(self, x_1):
         with FakeTensorMode(allow_non_fake_inputs=True):
             out = mod(torch.randn(1, 1, 3, 3))
         self.checkType(out, "cpu", (1, 1, 3, 3))
-
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
-    )
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_aten_copy_multi_device(self):
-        with FakeTensorMode():
-            x1 = torch.rand(4, device="cpu")
-            x2 = torch.rand(4, device="cuda")
-            copy1 = torch.ops.aten.copy.default(x1, x2)
-            copy2 = torch.ops.aten.copy.default(x2, x1)
-            out = torch.empty(4, device="cpu")
-            torch.ops.aten.copy.out(x1, x2, out=out)
-        self.checkType(copy1, "cpu", (4,))
-        self.checkType(copy2, "cuda", (4,))
-        self.checkType(out, "cpu", (4,))
-
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
-    )
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_aten_index_multi_device(self):
-        with FakeTensorMode():
-            x1 = torch.rand(4, 4, device="cpu")
-            x2 = torch.rand(4, 4, device="cuda")
-            i1 = torch.tensor([0, 1], device="cuda")
-            i2 = torch.tensor([0, 1], device="cpu")
-            # NB: This one does not work: cuda indices not allowed on cpu
-            # tensor
-            # r1 = torch.ops.aten.index(x1, i1)
-            r2 = torch.ops.aten.index(x2, i2)
-
-            y1 = torch.rand(4, device="cpu")
-            y2 = torch.rand(4, device="cuda")
-            j1 = torch.tensor([2], device="cuda")
-            j2 = torch.tensor([2], device="cpu")
-            r3 = torch.ops.aten.index_put.default(x1, j1, y1)
-            r4 = torch.ops.aten.index_put.default(x2, j2, y2)
-        # self.checkType(r1, "cpu", ())
-        self.checkType(r2, "cuda", ())
-        self.checkType(r3, "cpu", (4, 4))
-        self.checkType(r4, "cuda", (4, 4))
-
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
-    )
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_aten_slice_scatter_multi_device(self):
-        with FakeTensorMode():
-            x1 = torch.rand(4, 4, device="cpu")
-            y1 = torch.rand(2, 4, device="cuda")
-            x2 = torch.rand(4, 4, device="cuda")
-            y2 = torch.rand(2, 4, device="cpu")
-            out = torch.empty(4, 4, device="cpu")
-            r1 = torch.ops.aten.slice_scatter.default(x1, y1, start=2)
-            r2 = torch.ops.aten.slice_scatter.default(x2, y2, start=2)
-            r3 = torch.ops.aten.slice_scatter.out(x1, y1, out=out, start=2)
-        self.checkType(r1, "cpu", (4, 4))
-        self.checkType(r2, "cuda", (4, 4))
-        self.checkType(r3, "cpu", (4, 4))
-        self.checkType(out, "cpu", (4, 4))
-
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
-    )
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_aten_set_data_multi_device(self):
-        with FakeTensorMode():
-            x1 = torch.rand(4, device="cpu")
-            x2 = torch.rand(4, device="cuda")
-            # cpu -> cuda
-            torch.ops.aten.shallow_copy_data_(x1, x2)
-            self.checkType(x1, "cuda", (4,))
-            # cuda -> cpu
-            x3 = torch.rand(4, device="cuda")
-            x4 = torch.rand(4, device="cpu")
-            torch.ops.aten.shallow_copy_data_(x3, x4)
-            self.checkType(x3, "cpu", (4,))
 
     def test__adaptive_avg_pool2d_backward(self):
         with FakeTensorMode():
@@ -2663,6 +2524,144 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
             out = torch.nn.functional.conv2d(inputs, filters, padding=1)
             self.assertEqual(out.device.type, self.device_type)
             self.assertEqual(list(out.size()), [1, 8, 5, 5])
+
+    @onlyAccelerator
+    def test_out_multi_device(self, device):
+        with FakeTensorMode():
+            x = torch.rand([4])
+            y = torch.rand([4], device=device)
+
+            with self.assertRaisesRegex(Exception, "found.+two.+devices"):
+                torch.sin(x, out=y)
+
+            with self.assertRaisesRegex(Exception, "found.+two.+devices"):
+                x.add_(y)
+
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
+    )
+    def test_normalize_device(self, device):
+        with FakeTensorMode():
+            # device carries an index, self.device_type does not
+            x = torch.empty(1, device=self.device_type)
+            y = torch.empty(1, device=device)
+            out = x + y
+        self.checkType(out, self.device_type, [1])
+
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
+    )
+    @onlyAccelerator
+    def test_new(self, device):
+        with FakeTensorMode():
+            a = torch.rand([16, 1])
+            self.checkType(a.new(10, 10), "cpu", [10, 10])
+            self.checkType(a.new([1, 2, 3, 4]), "cpu", [4])
+            b = torch.rand([4, 4], device=device)
+            self.checkType(b.new(device=device), self.device_type, [0])
+            self.checkType(a.new(torch.rand([1])), "cpu", [1])
+
+    @onlyAccelerator
+    def test_embedding_device_indices(self, device):
+        with FakeTensorMode():
+            weight = torch.empty(20, 8, device=device)
+            # Indices must be in range: under propagate_real_tensors the real
+            # embedding gather runs, and uninitialized (torch.empty) indices read
+            # out of bounds -- a hard GPU fault on some backends (e.g. ROCm).
+            indices = torch.zeros(2, 3, dtype=torch.long, device=device)
+            out = torch.nn.functional.embedding(indices, weight)
+
+        self.assertIsInstance(out, FakeTensor)
+        self.assertEqual(out.shape, (2, 3, 8))
+        self.assertEqual(out.device, weight.device)
+        self.assertEqual(out.fake_device, weight.fake_device)
+
+        with FakeTensorMode():
+            cpu_weight = torch.empty(20, 8)
+            indices = torch.zeros(2, 3, dtype=torch.long, device=device)
+            with self.assertRaisesRegex(
+                (FakeTensorDeviceMismatchError, RuntimeError),
+                "same device|different from other tensors",
+            ):
+                torch.nn.functional.embedding(indices, cpu_weight)
+
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
+    )
+    @onlyAccelerator
+    def test_aten_copy_multi_device(self, device):
+        with FakeTensorMode():
+            x1 = torch.rand(4, device="cpu")
+            x2 = torch.rand(4, device=device)
+            copy1 = torch.ops.aten.copy.default(x1, x2)
+            copy2 = torch.ops.aten.copy.default(x2, x1)
+            out = torch.empty(4, device="cpu")
+            torch.ops.aten.copy.out(x1, x2, out=out)
+        self.checkType(copy1, "cpu", (4,))
+        self.checkType(copy2, self.device_type, (4,))
+        self.checkType(out, "cpu", (4,))
+
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
+    )
+    @onlyAccelerator
+    def test_aten_index_multi_device(self, device):
+        with FakeTensorMode():
+            x1 = torch.rand(4, 4, device="cpu")
+            x2 = torch.rand(4, 4, device=device)
+            i1 = torch.tensor([0, 1], device=device)
+            i2 = torch.tensor([0, 1], device="cpu")
+            # NB: This one does not work: accelerator indices not allowed on cpu
+            # tensor
+            # r1 = torch.ops.aten.index(x1, i1)
+            r2 = torch.ops.aten.index(x2, i2)
+
+            y1 = torch.rand(4, device="cpu")
+            y2 = torch.rand(4, device=device)
+            j1 = torch.tensor([2], device=device)
+            j2 = torch.tensor([2], device="cpu")
+            r3 = torch.ops.aten.index_put.default(x1, j1, y1)
+            r4 = torch.ops.aten.index_put.default(x2, j2, y2)
+        # self.checkType(r1, "cpu", ())
+        self.checkType(r2, self.device_type, ())
+        self.checkType(r3, "cpu", (4, 4))
+        self.checkType(r4, self.device_type, (4, 4))
+
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
+    )
+    @onlyAccelerator
+    def test_aten_slice_scatter_multi_device(self, device):
+        with FakeTensorMode():
+            x1 = torch.rand(4, 4, device="cpu")
+            y1 = torch.rand(2, 4, device=device)
+            x2 = torch.rand(4, 4, device=device)
+            y2 = torch.rand(2, 4, device="cpu")
+            out = torch.empty(4, 4, device="cpu")
+            r1 = torch.ops.aten.slice_scatter.default(x1, y1, start=2)
+            r2 = torch.ops.aten.slice_scatter.default(x2, y2, start=2)
+            r3 = torch.ops.aten.slice_scatter.out(x1, y1, out=out, start=2)
+        self.checkType(r1, "cpu", (4, 4))
+        self.checkType(r2, self.device_type, (4, 4))
+        self.checkType(r3, "cpu", (4, 4))
+        self.checkType(out, "cpu", (4, 4))
+
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
+    )
+    @onlyAccelerator
+    def test_aten_set_data_multi_device(self, device):
+        with FakeTensorMode():
+            x1 = torch.rand(4, device="cpu")
+            x2 = torch.rand(4, device=device)
+            # cpu -> accelerator
+            torch.ops.aten.shallow_copy_data_(x1, x2)
+            self.checkType(x1, self.device_type, (4,))
+            # accelerator -> cpu
+            x3 = torch.rand(4, device=device)
+            x4 = torch.rand(4, device="cpu")
+            torch.ops.aten.shallow_copy_data_(x3, x4)
+            self.checkType(x3, "cpu", (4,))
 
 
 make_propagate_real_tensors_cls(TestFakeTensorDevice)
