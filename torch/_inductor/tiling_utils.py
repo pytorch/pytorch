@@ -307,6 +307,13 @@ def get_pw_red_splits(
     if get_hint(sympy_product(n._body.sizes[0])) != get_hint(
         pointwise_numel * red_numel  # type: ignore[operator]
     ):
+        # A fused member whose pointwise iteration count is neither
+        # pointwise_numel nor pointwise_numel * red_numel (e.g. an epilogue
+        # broadcasting the per-row reduction over an extra axis, landing on
+        # red_numel) cannot split into the group's (pointwise, reduction)
+        # frame. Decline when the caller can fall back, instead of asserting.
+        if none_if_not_divisible:
+            return None
         raise AssertionError(
             "expected pointwise sizes to match pointwise_numel * red_numel"
         )
@@ -597,9 +604,15 @@ def extract_normalized_read_writes(
         if not n_reads and not n_writes:
             continue
 
-        (iter_vars, n_pw_splits), (red_vars, n_red_splits) = get_pw_red_splits(
-            n, pointwise_numel, red_numel
+        maybe_splits = get_pw_red_splits(
+            n, pointwise_numel, red_numel, none_if_not_divisible=True
         )
+        if maybe_splits is None:
+            # A member that cannot split into the group's frame means this
+            # fusion has no readable (pointwise, reduction) shape; report the
+            # analysis as unknown so the caller declines gracefully.
+            return None
+        (iter_vars, n_pw_splits), (red_vars, n_red_splits) = maybe_splits
 
         groups = pw_splits + red_splits
         lengths = (n_pw_splits, (n_red_splits))
