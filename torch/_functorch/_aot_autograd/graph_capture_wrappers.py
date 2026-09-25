@@ -1163,7 +1163,8 @@ def create_functionalized_fn(
                         == MutationType.MUTATED_IN_GRAPH
                     ):
                         fw_args = args[0] if trace_joint else args
-                        flat_outs[i] = fw_args[info.base_idx]
+                        out_idx = i + meta.num_mutated_inp_runtime_indices
+                        flat_outs[out_idx] = fw_args[info.base_idx]
                 return pytree.tree_unflatten(flat_outs, outs_spec), f_outs_descs
 
             return pytree.tree_map(from_fun, f_outs), f_outs_descs
