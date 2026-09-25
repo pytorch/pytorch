@@ -1534,6 +1534,11 @@ Tri ExprArena::eval_fact(const Expr* e, Fact f) {
       // Function._eval_is_commutative; the classes have no facts.
       return f == F::commutative ? fuzzy_and_or(*this, e->args, f, false)
                                  : Tri::Unknown;
+    case Kind::Identity:
+      // _eval_is_real, _eval_is_integer, Function._eval_is_commutative.
+      return f == F::real || f == F::integer || f == F::commutative
+          ? ask(e->args[0], f)
+          : Tri::Unknown;
     case Kind::ModularIndexing:
       if (f == F::nonnegative) {
         // fuzzy_eq(p.is_nonnegative, q.is_nonnegative)

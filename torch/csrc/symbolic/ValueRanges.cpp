@@ -767,6 +767,8 @@ ValueRanges Analysis::interp(const Expr* e) {
     case Kind::BitwiseOr:
     case Kind::BitwiseXor:
       return bitwise(e->kind, args[0], args[1]);
+    case Kind::Identity:
+      return args[0];
     case Kind::FloatTrueDiv:
     case Kind::IntTrueDiv:
       return true_div(e->kind, args[0], args[1]);

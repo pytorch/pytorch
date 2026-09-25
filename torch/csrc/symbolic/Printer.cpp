@@ -202,6 +202,8 @@ class StrPrinter {
         // _print_Function.
         return std::string(function_name(e->kind)) + "(" +
             stringify(e->args, ", ", 0) + ")";
+      case Kind::Identity:
+        return "(" + print(e->args[0]) + ")";
       case Kind::Max:
       case Kind::Min: {
         // _print_LatticeOp.
@@ -273,6 +275,9 @@ class StrPrinter {
         return kBitwiseOr;
       case Kind::BitwiseXor:
         return kBitwiseXor;
+      case Kind::Identity:
+        // Identity.precedence.
+        return 10;
       case Kind::PowByNatural:
         return kMul;
       case Kind::FloatPow:

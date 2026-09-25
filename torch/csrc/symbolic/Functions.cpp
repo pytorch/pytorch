@@ -390,6 +390,8 @@ const char* function_name(Kind k) {
       return "BitwiseFn_bitwise_or";
     case Kind::BitwiseXor:
       return "BitwiseFn_bitwise_xor";
+    case Kind::Identity:
+      return "Identity";
     default:
       throw NativeUnsupported("not a function kind");
   }
@@ -417,6 +419,7 @@ const Expr* ExprArena::function(Kind kind, c10::ArrayRef<const Expr*> args) {
     case Kind::RoundToInt:
     case Kind::ToFloat:
     case Kind::TruncToFloat:
+    case Kind::Identity:
       arity = 1;
       break;
     case Kind::IsNonOverlappingAndDenseIndicator:
@@ -508,6 +511,8 @@ const Expr* ExprArena::function(Kind kind, c10::ArrayRef<const Expr*> args) {
     case Kind::BitwiseOr:
     case Kind::BitwiseXor:
       r = eval_bitwise(kind, args[0], args[1]);
+      break;
+    case Kind::Identity:
       break;
     default:
       throw NativeUnsupported("not a function kind");

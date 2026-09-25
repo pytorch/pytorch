@@ -39,6 +39,7 @@ from torch.utils._sympy.functions import (
     FloatTrueDiv,
     FloorDiv,
     FloorToInt,
+    Identity,
     IntTrueDiv,
     IsNonOverlappingAndDenseIndicator,
     LShift,
@@ -1325,10 +1326,12 @@ class TestNativeFunctions(TestCase):
     ALL_FUNCTIONS["ModularIndexing"] = ModularIndexing
     BITWISE = (BitwiseFn_bitwise_and, BitwiseFn_bitwise_or, BitwiseFn_bitwise_xor)
     ALL_FUNCTIONS.update((f.__name__, f) for f in BITWISE)
+    ALL_FUNCTIONS["Identity"] = Identity
     NODE_TYPES = (Mod, PythonMod, FloorDiv, Max, Min, PowByNatural, FloatPow)
     NODE_TYPES += (FloatTrueDiv, IntTrueDiv, CeilToInt, FloorToInt, TruncToInt)
     NODE_TYPES += (RoundToInt, ToFloat, TruncToFloat, RoundDecimal)
     NODE_TYPES += (IsNonOverlappingAndDenseIndicator, ModularIndexing, *BITWISE)
+    NODE_TYPES += (Identity,)
     PYTHON_ERRORS = (ZeroDivisionError, AssertionError, TypeError, ValueError)
     PYTHON_ERRORS += (OverflowError,)
 
@@ -1840,6 +1843,44 @@ class TestNativeFunctions(TestCase):
                     if isinstance(r, self.BITWISE):
                         nodes.append(r)
         self.assertGreater(len(nodes), 100)
+        answered = unsupported = 0
+        for _ in range(60):
+            t = random_tree(rng, 3, LEAVES + nodes)
+            for sub in subtrees(t):
+                v = sympy.sympify(sympy_eval(sub))
+                if v.has(sympy.zoo, sympy.nan):
+                    continue
+                if self.check_expr(v, rng):
+                    answered += 1
+                else:
+                    unsupported += 1
+        self.assertGreater(answered, 5 * unsupported)
+
+    def test_identity_known(self):
+        for x in [s0, u0, zf, s0 + 1, 2 * u0, -s0, Identity(s0), FloorDiv(u0, 2)]:
+            self.assertEqual(self.check_call("Identity", x), Identity(x))
+        for x in [2, sympy.Rational(1, 2), sympy.Float(2.0), int_oo, sympy.true]:
+            self.assertIsNone(self.check_call("Identity", sympy.sympify(x)))
+        self.assertIsNone(self.check_call("Identity", s0, s1))
+        i = Identity(u0)
+        exprs = [i + 1, 2 * i, -i, i**2, i / s0, 1 / i, s0 - i, i * s0]
+        exprs += [i < 3, sympy.Eq(i, s0), FloorDiv(i, 2), Mod(i, 3), Max(i, s0)]
+        exprs += [Identity(zf) + s0, Identity(s0 + u0) * 3]
+        exprs += [ModularIndexing(i, 1, 4), BitwiseFn_bitwise_and(i, 3)]
+        rng = random.Random(0)
+        for e in exprs:
+            self.assertTrue(self.check_expr(e, rng), str(e))
+        a = torch._C._symbolic._Arena()
+        ids = [a.function("Identity", [a.from_sympy(x)]) for x in [s0, u0, zf]]
+        want = sympy.ordered([Identity(s0), Identity(u0), Identity(zf), s0, FloorDiv(u0, 2)])
+        extra = [a.from_sympy(s0), a.from_sympy(FloorDiv(u0, 2))]
+        got = [a.to_sympy(n) for n in a.ordered(ids + extra)]
+        self.assertEqual(got, list(want))
+
+    @parametrize("seed", range(2))
+    def test_identity_fuzz(self, seed):
+        rng = random.Random(seed)
+        nodes = [Identity(x) for x in [s0, u0, zf, 2 * s0 + 1, u0 - s1, FloorDiv(u0, 2)]]
         answered = unsupported = 0
         for _ in range(60):
             t = random_tree(rng, 3, LEAVES + nodes)
@@ -2592,6 +2633,20 @@ class TestNativeValueRanges(TestCase):
                     ranges[s] = (lo, hi)
                 answered += self.check(e, ranges) is not None
         self.assertGreater(answered, 500)
+
+    def test_identity(self):
+        u1, n = self.u1, self.n
+        exprs = [Identity(u0), Identity(u0) + 1, Identity(u0 + u1) * n, Identity(zf)]
+        rng = random.Random(0)
+        answered = 0
+        for e in exprs:
+            for _ in range(100):
+                ranges = {}
+                for s in sorted(e.free_symbols, key=str):
+                    lo, hi = sorted(rng.sample(self.BOUNDS, 2))
+                    ranges[s] = (lo, hi)
+                answered += self.check(e, ranges) is not None
+        self.assertGreater(answered, 300)
 
     def test_bitwise(self):
         zg = sympy.Symbol("zg", real=True)
