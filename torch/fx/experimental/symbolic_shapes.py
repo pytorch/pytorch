@@ -7787,21 +7787,38 @@ class ShapeEnv:
                 if self.replace(Mod(base, divisor)) in self.divisible:
                     div_replacements[fd] = CleanDiv(base, divisor)
             if div_replacements:
-                clean_expr = safe_expand(expr.xreplace(div_replacements))
-                exact_divisions = {
-                    clean_div: clean_div.args[0] / clean_div.args[1]
-                    for clean_div in div_replacements.values()
-                }
-                new_expr = safe_expand(clean_expr.xreplace(exact_divisions))
+                new_expr = safe_expand(expr.xreplace(div_replacements))
                 new_pows = new_expr.atoms(sympy.Pow)
                 new_rationals = new_expr.atoms(sympy.Rational).difference(
                     new_expr.atoms(sympy.Integer)
                 )
-                # Keep the temporary exact divisions only when they cancel completely.
                 if new_pows.issubset(pows) and new_rationals.issubset(rationals):
                     expr = new_expr
-                else:
-                    expr = clean_expr
+
+        if expr.has(CleanDiv):
+            # Cancel matching factors in the same product, for example
+            # C * CleanDiv(x, C) -> x.
+            def cancel_clean_div(mul: sympy.Expr) -> sympy.Expr:
+                args = list(mul.args)
+                # Each cancellation shrinks args, so there are O(len(args)) iterations.
+                while True:
+                    for clean_div in args:
+                        if not isinstance(clean_div, CleanDiv):
+                            continue
+                        base, divisor = clean_div.args
+                        if divisor in args:
+                            args.remove(clean_div)
+                            args.remove(divisor)
+                            args.append(base)
+                            break
+                    else:
+                        return sympy.Mul(*args)
+
+            expr = expr.replace(
+                lambda node: node.is_Mul
+                and any(isinstance(arg, CleanDiv) for arg in node.args),
+                cancel_clean_div,
+            )
         return expr
 
     # TODO: overload for allow_none literal
