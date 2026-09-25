@@ -10,6 +10,7 @@ import torch
 import torch._dynamo.testing as dynamo_testing
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.test_case import run_tests, TestCase
+from torch._dynamo.utils import common_constant_types
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -1635,6 +1636,21 @@ class TestSimpleNamespace(TestCase):
             torch.compile(fn, backend="eager", fullgraph=True)(x)
         self.assertEqual(torch.compile(fn, backend="eager")(x)[0], fn(x)[0])
 
+    def test_str_subclass_key_in_sourced_namespace_graph_breaks(self):
+        # A namespace built in eager and passed in has a str subclass key in
+        # its instance dict; vars() must graph break instead of crashing.
+        class MyStr(str):
+            __slots__ = ()
+
+        ns = types.SimpleNamespace()
+        ns.__dict__[MyStr("a")] = 1
+
+        def fn(x, ns):
+            return len(vars(ns)), x + 1
+
+        x = torch.randn(3)
+        self.assertEqual(torch.compile(fn, backend="eager")(x, ns)[0], fn(x, ns)[0])
+
     @unittest.skipIf(sys.version_info < (3, 13), "positional argument added in 3.13")
     def test_non_constant_key_graph_breaks(self):
         # Formatting a tensor produces a StringFormatVariable, which is str-typed
@@ -1687,6 +1703,185 @@ class TestSimpleNamespace(TestCase):
         ns_compiled = types.SimpleNamespace(name="cfg", scale=2)
         self.assertEqual(fn(ns_eager, x), opt_fn(ns_compiled, x))
         self.assertEqual(vars(ns_eager), vars(ns_compiled))
+
+
+class TestConstantTypeProperty(TestCase):
+    """Attribute access on a type in common_constant_types.
+
+    Those objects are wrapped as ConstantVariable, so they bypass
+    UserDefinedObjectVariable and resolve attributes through the generic object
+    protocol, where a property has to be guarded on the type that owns it.
+    """
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_property_on_constant_type(self):
+        class Holder:
+            def __init__(self, v):
+                self._v = v
+
+            @property
+            def val(self):
+                return self._v
+
+        holder = Holder(3)
+
+        def fn(x):
+            return x + holder.val
+
+        common_constant_types.add(Holder)
+        try:
+            x = torch.randn(3)
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(opt_fn(x), fn(x))
+        finally:
+            common_constant_types.discard(Holder)
+
+    def test_property_shadowed_by_metaclass_descriptor(self):
+        """The guard has to name the descriptor, not re-look-up the attribute.
+
+        `type(obj).val` runs `type.__getattribute__`, which lets a data
+        descriptor on the metaclass win over the class chain -- so the guard
+        would read the metaclass property's *value* and ask an int for .fget.
+        """
+
+        class Meta(type):
+            @property
+            def val(cls):
+                return 100
+
+        class Holder(metaclass=Meta):
+            def __init__(self, v):
+                self._v = v
+
+            @property
+            def val(self):
+                return self._v
+
+        self.assertEqual(Holder.val, 100)  # the shadowing that breaks the guard
+
+        holder = Holder(3)
+
+        def fn(x):
+            return x + holder.val
+
+        common_constant_types.add(Holder)
+        try:
+            x = torch.randn(3)
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(opt_fn(x), fn(x))
+            # Second call evaluates the guard rather than just building it.
+            self.assertEqual(opt_fn(x), fn(x))
+        finally:
+            common_constant_types.discard(Holder)
+
+    def test_property_inherited_from_base(self):
+        """The owning class is found by MRO walk, not assumed to be type(obj)."""
+
+        class Base:
+            @property
+            def val(self):
+                return self._v
+
+        class Holder(Base):
+            def __init__(self, v):
+                self._v = v
+
+        holder = Holder(3)
+
+        def fn(x):
+            return x + holder.val
+
+        common_constant_types.add(Holder)
+        try:
+            x = torch.randn(3)
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(opt_fn(x), fn(x))
+        finally:
+            common_constant_types.discard(Holder)
+
+    def test_inherited_property_shadowed_after_compile(self):
+        """A class ahead of the owner in the MRO must be guarded, index 0 included.
+
+        The property starts on Base, so the guard names Holder.__mro__[1]. Adding
+        one to Holder afterwards moves the owner to index 0, which only shows up
+        as a recompile if that index was guarded too.
+        """
+
+        class Base:
+            @property
+            def val(self):
+                return self._v
+
+        class Holder(Base):
+            def __init__(self, v):
+                self._v = v
+
+        holder = Holder(3)
+
+        def fn(x):
+            return x + holder.val
+
+        cnts = dynamo_testing.CompileCounter()
+        common_constant_types.add(Holder)
+        try:
+            x = torch.randn(3)
+            opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+            self.assertEqual(opt_fn(x), fn(x))
+            self.assertEqual(cnts.frame_count, 1)
+
+            Holder.val = property(lambda self: self._v + 100)
+            self.assertEqual(opt_fn(x), fn(x))
+            self.assertEqual(cnts.frame_count, 2)
+        finally:
+            common_constant_types.discard(Holder)
+
+    def test_property_on_custom_mro(self):
+        """__mro__[0] is not necessarily the class -- a metaclass can reorder it."""
+
+        class ReversingMeta(type):
+            def mro(cls):
+                return [object, cls]
+
+        class Holder(metaclass=ReversingMeta):
+            @property
+            def val(self):
+                return self._v
+
+        self.assertIsNot(Holder.__mro__[0], Holder)
+
+        # object.__init__ sits ahead of Holder's in this MRO, so no __init__ arg.
+        holder = Holder()
+        holder._v = 3
+
+        def fn(x):
+            return x + holder.val
+
+        common_constant_types.add(Holder)
+        try:
+            x = torch.randn(3)
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(opt_fn(x), fn(x))
+            self.assertEqual(opt_fn(x), fn(x))
+        finally:
+            common_constant_types.discard(Holder)
+
+
+class TestConstantTypePropertyAccelerator(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    def test_property_on_cuda_device_properties(self):
+        # _CudaDeviceProperties is the constant type carrying properties that
+        # shows up in practice.
+        props = torch.cuda.get_device_properties(0)
+
+        def fn(x):
+            return x + props.multi_processor_count
+
+        x = torch.randn(3, device="cuda")
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
 
 
 instantiate_parametrized_tests(TestObjectConstruction)

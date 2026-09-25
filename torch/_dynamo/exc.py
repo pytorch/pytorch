@@ -184,6 +184,15 @@ class ResumePrologueTracingError(TorchDynamoException):
     pass
 
 
+class CompileOnOneRankUnsupported(TorchDynamoException):
+    """Something a rank-portable graph cannot express under compile_on_one_rank.
+
+    Deliberately not a graph break. Breaking out drops the frame back to eager,
+    which silently forfeits the rank-portability the feature was turned on for, so
+    these propagate whether or not graph breaks are allowed.
+    """
+
+
 class RestartAnalysis(TorchDynamoException):
     restart_reason: str | None
 

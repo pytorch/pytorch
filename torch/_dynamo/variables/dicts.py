@@ -1607,6 +1607,17 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
 
         example_value_dict = SideEffectsProxyDict.get_example_value_dict(vt)
 
+        for key in example_value_dict:
+            # DictGetItemSource and ConstantVariable model instance dict keys as
+            # literals, which excludes the str subclasses PyUnicode_Check allows.
+            if not variables.ConstantVariable.is_literal(key):
+                unimplemented(
+                    gb_type="non-literal key in object __dict__",
+                    context=f"key={key!r}, type={type(key)}",
+                    explanation="Dynamo models object __dict__ keys as literal constants.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+
         return {
             key: VariableTracker.build(
                 tx,
