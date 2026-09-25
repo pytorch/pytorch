@@ -609,9 +609,6 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         install_guard(source.make_guard(GuardBuilder.CLOSURE_MATCH))
         return cls(value, source=source)
 
-    def get_value_for_setattr(self) -> object | None:
-        return self.fn
-
     def __init__(
         self,
         fn: types.FunctionType | torch.jit.ScriptFunction,  # type: ignore[type-arg]
@@ -2778,12 +2775,6 @@ class SkipFunctionVariable(VariableTracker):
         self.value = value
         self.reason = reason
 
-    def get_value_for_setattr(self) -> object | None:
-        mod = getattr(self.value, "__module__", None) or ""
-        if mod == "torch" or mod.startswith(("torch.", "torch_")):
-            return None
-        return self.value
-
     def tp_richcompare_impl(self, tx, other, op):
         from .object_protocol import object_richcompare
 
@@ -3830,9 +3821,6 @@ class PolyfilledFunctionVariable(VariableTracker):
         install_guard(source.make_guard(GuardBuilder.CLOSURE_MATCH))
 
         return cls(value, source=source)
-
-    def get_value_for_setattr(self) -> object | None:
-        return self.fn
 
     def __init__(self, fn: _F, **kwargs: Any) -> None:
         super().__init__(**kwargs)

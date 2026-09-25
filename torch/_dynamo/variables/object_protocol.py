@@ -2270,6 +2270,7 @@ def mro_attr_source(
         tx.output.mro_source_cache[cache_key] = source
         return source
 
+
 def _resolve_descriptor_set(
     tx: "InstructionTranslatorBase",
     descriptor: object,

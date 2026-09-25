@@ -37,7 +37,6 @@ from collections.abc import Callable, Iterable, Sequence
 from typing import Any, NoReturn, TYPE_CHECKING
 
 import torch
-from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 from torch.overrides import BaseTorchFunctionMode
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 

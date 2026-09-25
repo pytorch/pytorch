@@ -2125,12 +2125,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """
         return type(self)
 
-    def get_value_for_setattr(self) -> object | None:
-        """Return the wrapped Python object for generic STORE_ATTR mutation,
-        or None to decline.  Only override for VTs with __dict__ and
-        standard __setattr__."""
-        return None
-
     def lookup_instance_dict(
         self, tx: InstructionTranslatorBase, name: str
     ) -> VariableTracker | None:

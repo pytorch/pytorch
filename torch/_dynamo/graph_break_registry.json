@@ -1341,6 +1341,16 @@
       ]
     }
   ],
+  "GB8600": [
+    {
+      "Gb_type": "Class attribute mutation on a torch-owned class",
+      "Context": "class={self.value}, name={name}, value={value}",
+      "Explanation": "Dynamo does not support mutating attributes of classes owned by torch.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0085": [
     {
       "Gb_type": "Non-function or method in subclass of torch.autograd.Function",

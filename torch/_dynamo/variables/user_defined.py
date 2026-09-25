@@ -378,12 +378,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
         # is no way to reflect it in the created MappingProxyVariable.
         self.ban_mutation = False
 
-    def get_value_for_setattr(self) -> object | None:
-        mod = getattr(self.value, "__module__", None) or ""
-        if mod == "torch" or mod.startswith(("torch.", "torch_")):
-            return None
-        return self.value
-
     def tp_setattro_impl(
         self,
         tx: "InstructionTranslatorBase",
@@ -396,6 +390,17 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 context=str(self.value),
                 explanation="Dynamo does not support tracing mutations on a class when its __dict__ is materialized",
                 hints=graph_break_hints.SUPPORTABLE,
+            )
+        mod = getattr(self.value, "__module__", None) or ""
+        if mod == "torch" or mod.startswith(("torch.", "torch_")):
+            # Writing a class attribute of a torch-owned class mutates library
+            # state for every user of it, not just the compiled region.
+            unimplemented(
+                gb_type="Class attribute mutation on a torch-owned class",
+                context=f"class={self.value}, name={name}, value={value}",
+                explanation="Dynamo does not support mutating attributes of "
+                "classes owned by torch.",
+                hints=[*graph_break_hints.SUPPORTABLE],
             )
         return super().tp_setattro_impl(tx, name, value)
 
