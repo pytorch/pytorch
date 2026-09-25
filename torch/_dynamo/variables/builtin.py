@@ -1870,6 +1870,108 @@ class BuiltinVariable(BaseBuiltinVariable):
             )
         return handler(tx, args, kwargs)  # type: ignore[return-value]
 
+    def tp_method_len(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        # type.__len__(instance) → len(instance)
+        # e.g. list.__len__(my_list) → len(my_list)
+        if len(args) != 1 or kwargs:
+            return None
+        return generic_size(tx, args[0])
+
+    def tp_method_iter(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        # type.__iter__(instance) → iter(instance)
+        # e.g., tuple.__iter__(my_tuple) → iter(my_tuple)
+        # For builtin types called on user-defined subclasses, use the base iterator
+        if len(args) != 1 or kwargs:
+            return None
+        return generic_getiter(tx, args[0])
+
+    def tp_method_neg(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        # type.__neg__(instance) → -instance
+        # e.g., int.__neg__(4) → -4
+        if len(args) != 1 or kwargs:
+            return None
+        return pynumber_negative(tx, args[0])
+
+    def tp_method_pos(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        # type.__pos__(instance) → +instance
+        # e.g., int.__pos__(4) → +4
+        if len(args) != 1 or kwargs:
+            return None
+        return pynumber_positive(tx, args[0])
+
+    def tp_method_abs(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        # type.__abs__(instance) → abs(instance)
+        # e.g., int.__abs__(-4) → abs(-4)
+        if len(args) != 1 or kwargs:
+            return None
+        return pynumber_absolute(tx, args[0])
+
+    def tp_method_invert(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        # type.__invert__(instance) → ~instance
+        # e.g., int.__invert__(4) → ~4
+        if len(args) != 1 or kwargs:
+            return None
+        return pynumber_invert(tx, args[0])
+
+    def tp_method_hash(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        # type.__hash__(instance) → hash(instance); only the unhashable-
+        # constant retry path is specialized here, anything else declines to
+        # the generic protocol below.
+        if len(args) != 1 or kwargs:
+            return None
+        arg = args[0]
+        if (
+            isinstance(arg, variables.UserDefinedConstantVariable)
+            and arg._base_vt is not None
+        ):
+            return generic_hash(tx, arg._base_vt)
+        return None
+
+    tp_methods = {
+        "__len__": Method(tp_method_len),
+        "__iter__": Method(tp_method_iter),
+        "__neg__": Method(tp_method_neg),
+        "__pos__": Method(tp_method_pos),
+        "__abs__": Method(tp_method_abs),
+        "__invert__": Method(tp_method_invert),
+        "__hash__": Method(tp_method_hash),
+    }
+
     def call_method(
         self,
         tx: "InstructionTranslatorBase",
@@ -1998,50 +2100,11 @@ class BuiltinVariable(BaseBuiltinVariable):
                 raise_observed_exception(type(e), tx, args=list(e.args))
             return VariableTracker.build(tx, res)
 
-        if name == "__len__" and len(args) == 1 and not kwargs:
-            # type.__len__(instance) → len(instance)
-            # e.g. list.__len__(my_list) → len(my_list)
-            return generic_size(tx, args[0])
-
         if name == "__str__" and len(args) == 1 and not kwargs:
             return super().call_method(tx, name, args, kwargs)
 
         if name == "__repr__" and len(args) == 1 and not kwargs:
             return super().call_method(tx, name, args, kwargs)
-
-        if name == "__iter__" and len(args) == 1 and not kwargs:
-            # type.__iter__(instance) → iter(instance)
-            # e.g., tuple.__iter__(my_tuple) → iter(my_tuple)
-            # For builtin types called on user-defined subclasses, use the base iterator
-            return generic_getiter(tx, args[0])
-
-        if name == "__neg__" and len(args) == 1 and not kwargs:
-            # type.__neg__(instance) → neg(instance)
-            # e.g., int.__neg__(4) → neg(4)
-            return pynumber_negative(tx, args[0])
-
-        if name == "__pos__" and len(args) == 1 and not kwargs:
-            # type.__pos__(instance) → pos(instance)
-            # e.g., int.__pos__(4) → pos(4)
-            return pynumber_positive(tx, args[0])
-
-        if name == "__abs__" and len(args) == 1 and not kwargs:
-            # type.__abs__(instance) → abs(instance)
-            # e.g., int.__abs__(-4) → abs(-4)
-            return pynumber_absolute(tx, args[0])
-
-        if name == "__invert__" and len(args) == 1 and not kwargs:
-            # type.__invert__(instance) → ~instance
-            # e.g., int.__invert__(4) → ~4
-            return pynumber_invert(tx, args[0])
-
-        if name == "__hash__" and len(args) == 1 and not kwargs:
-            arg = args[0]
-            if (
-                isinstance(arg, variables.UserDefinedConstantVariable)
-                and arg._base_vt is not None
-            ):
-                return generic_hash(tx, arg._base_vt)
 
         return super().call_method(tx, name, args, kwargs)
 

@@ -54,6 +54,15 @@ class NbUnaryTests(TestCase):
     def test_int_large(self, op, dunder):
         self.assertEqual(op(2**100), op(2**100))
 
+    # --- unbound type dunder calls (BuiltinVariable tp_methods) ---
+
+    @make_dynamo_test
+    def test_unbound_int_unary_dunders(self):
+        self.assertEqual(int.__neg__(4), -4)
+        self.assertEqual(int.__pos__(4), 4)
+        self.assertEqual(int.__abs__(-4), 4)
+        self.assertEqual(int.__invert__(4), ~4)
+
     # --- float (ConstantVariable) ---
     # invert does not apply to float; these use UNARY_OPS only.
 
