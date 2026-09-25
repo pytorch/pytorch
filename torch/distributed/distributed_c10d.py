@@ -2784,6 +2784,27 @@ def _maybe_attach_flight_recorder(
     _world.pg_flight_recorder_hooks[pg] = FlightRecorderHook.attach(pg, global_ranks)
 
 
+def _validate_device_id(backend: str, device_id: torch.device) -> None:
+    """Validate device_id against the backend's supported devices.
+
+    CPU devices are accepted when the backend supports CPU; the index is
+    irrelevant for CPU (``cpu`` and ``cpu:0`` are equivalent). Accelerator
+    devices must carry a non-None index.
+    """
+    supported_devices = Backend.backend_capability.get(backend, [])
+    if device_id.type == "cpu":
+        if "cpu" not in supported_devices:
+            raise ValueError(
+                f"init_process_group device_id is a CPU device, but the backend "
+                f"'{backend}' does not support CPU"
+            )
+    elif device_id.index is None:
+        raise ValueError(
+            "init_process_group device_id parameter "
+            "must be an accelerator with an index"
+        )
+
+
 def _new_process_group_helper(
     group_size: int,
     group_rank: int | None,
@@ -2815,10 +2836,8 @@ def _new_process_group_helper(
             "created, please use a different group name"
         )
 
-    if device_id is not None and (device_id.index is None or device_id.type == "cpu"):
-        raise ValueError(
-            "init_process_group device_id parameter must be an accelerator with an index"
-        )
+    if device_id is not None:
+        _validate_device_id(backend, device_id)
 
     # Note: _new_process_group_helper is only called from init_process_group, which always provides a timeout value
     _check_valid_timeout(timeout)

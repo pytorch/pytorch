@@ -2150,6 +2150,43 @@ class BackendRegistrationTest(TestCase):
             dist.Backend._plugins = old_plugins
 
 
+class NewProcessGroupHelperDeviceIdTest(TestCase):
+    """Regression tests for device_id validation in _new_process_group_helper."""
+
+    def test_cpu_device_id_allowed_for_gloo_backend(self):
+        """GLOO supports CPU; device_id must not raise during validation.
+
+        ``cpu`` and ``cpu:0`` are equivalent for a CPU device, so both
+        forms must pass validation when the backend supports CPU.
+        """
+        self.assertIsNone(c10d._validate_device_id("gloo", torch.device("cpu:0")))
+        self.assertIsNone(c10d._validate_device_id("gloo", torch.device("cpu")))
+
+    def test_cpu_device_id_rejected_for_nccl_backend(self):
+        """NCCL does not support CPU; cpu:0 device_id must raise."""
+        with self.assertRaisesRegex(
+            ValueError,
+            "init_process_group device_id is a CPU device, but the backend 'nccl' does not support CPU",  # noqa: B950
+        ):
+            c10d._validate_device_id("nccl", torch.device("cpu:0"))
+
+    def test_unindexed_accelerator_device_rejected(self):
+        """Accelerator device without index must still raise regardless of backend."""
+        with self.assertRaisesRegex(
+            ValueError,
+            "init_process_group device_id parameter must be an accelerator with an index",  # noqa: B950
+        ):
+            c10d._validate_device_id("nccl", torch.device("cuda"))
+
+    def test_indexed_accelerator_device_allowed(self):
+        """Accelerator device with index must pass validation."""
+        self.assertIsNone(c10d._validate_device_id("nccl", torch.device("cuda:0")))
+
+    def test_cpu_device_id_allowed_for_ucc_backend(self):
+        """UCC supports CPU; cpu:0 device_id must not raise during validation."""
+        self.assertIsNone(c10d._validate_device_id("ucc", torch.device("cpu:0")))
+
+
 class PythonProcessGroupExtensionTest(MultiProcessTestCase):
     def setUp(self):
         super().setUp()
