@@ -30,6 +30,7 @@ from torch._inductor.codegen.triton import (
     TritonCSEVariable,
     TritonKernel,
     TritonKernelOverrides,
+    TritonScheduling,
     TritonSymbols,
 )
 from torch._inductor.codegen.wrapper import _escape_triton_kernel_source_for_wrapper
@@ -416,6 +417,29 @@ def helper(x):
             compatible = checker.are_block_parameters_compatible(block_params)
         self.assertFalse(compatible)
         self.assertEqual(kernel.tma_min_block_sizes, {})
+
+    def test_mix_order_rejects_incompatible_fixed_xblock(self):
+        class CustomChoices(InductorChoices):
+            def triton_kernel_kwargs(self, kernel_cls, features, groups, kernel_kwargs):
+                return {
+                    **kernel_kwargs,
+                    "fixed_config": FixedTritonConfig({"XBLOCK": 32}),
+                }
+
+        xnumel = sympy.Integer(40961)
+        rnumel = sympy.Integer(129)
+        with (
+            self._graph.set_current_device(torch.device("cpu")),
+            V.set_choices_handler(CustomChoices()),
+            self.assertRaisesRegex(
+                ValueError, "RSPLIT_SIZE=48 is incompatible with fixed XBLOCK=32"
+            ),
+        ):
+            TritonScheduling(None)._generate_kernel_code_for_mix_order_reduction(
+                SIMDKernelFeatures([], xnumel, rnumel),
+                split_size=48,
+                for_benchmark=False,
+            )
 
     def test_reduction_invariant_load_indexing(self):
         self._stack.enter_context(self._graph.set_current_device(torch.device("cuda")))

@@ -3358,6 +3358,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         min_elem_per_thread=0,
         optimize_mask=True,
         fixed_config: FixedTritonConfig | None = None,
+        rsplit_size: int | None = None,
         hint_override: int | None = None,
         is_combo_kernel: bool = False,
         per_subkernel_blocks: bool = False,
@@ -3368,6 +3369,17 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.is_combo_kernel: bool = is_combo_kernel
         self.per_subkernel_blocks: bool = per_subkernel_blocks
         super().__init__(tiling, **kwargs)
+        if rsplit_size is not None:
+            self.rsplit_size = rsplit_size
+            if (
+                self.mix_order_reduction
+                and self.fixed_config
+                and rsplit_size % self.fixed_config["XBLOCK"] != 0
+            ):
+                raise ValueError(
+                    f"RSPLIT_SIZE={rsplit_size} is incompatible with fixed "
+                    f"XBLOCK={self.fixed_config['XBLOCK']}"
+                )
         self.cse = TritonCSE(self.newvar_prefix, self.suffix)
         # Cache of values that can be reused for the prologue.
         self.prologue_cache: dict[str, str] = {}

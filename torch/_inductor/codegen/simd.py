@@ -3343,13 +3343,13 @@ class SIMDScheduling(BaseScheduling):
                 "tiling_scores": None,
                 "mix_order_reduction": True,
                 "override_persistent_reduction": True,
+                "rsplit_size": split_size,
             },
         )[0]
         if not kernel.persistent_reduction:
             raise AssertionError("expected kernel.persistent_reduction")
         if not kernel.mix_order_reduction:
             raise AssertionError("expected kernel.mix_order_reduction")
-        kernel.rsplit_size = split_size
         self.codegen_node_schedule_with_kernel(node_schedule, kernel)
 
         # allocate workspace for this kernel
