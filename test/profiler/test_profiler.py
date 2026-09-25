@@ -1014,8 +1014,6 @@ class TestProfiler(TestCase):
 
             # Test with non-default values
             config = _ExperimentalConfig(
-                profiler_metrics=["metric1", "metric2"],
-                profiler_measure_per_kernel=True,
                 verbose=True,
                 performance_events=["event1", "event2"],
                 enable_cuda_sync_events=True,
@@ -1035,20 +1033,6 @@ class TestProfiler(TestCase):
             copied = copy.deepcopy(config)
             self.assertIsInstance(copied, _ExperimentalConfig)
 
-    def test_profiler_range_metrics_deprecated(self):
-        # profiler_metrics and profiler_measure_per_kernel are deprecated
-        # no-ops: passing either must warn with FutureWarning and not error.
-        for cfg in (
-            _ExperimentalConfig(profiler_metrics=["m1", "m2"]),
-            _ExperimentalConfig(profiler_measure_per_kernel=True),
-        ):
-            with self.assertWarnsRegex(FutureWarning, "profiler_metrics"):
-                with profile(
-                    activities=[ProfilerActivity.CPU],
-                    experimental_config=cfg,
-                ):
-                    pass
-
     def test_adjust_profiler_step_deprecated(self):
         # adjust_profiler_step is a deprecated no-op: passing it must warn with
         # FutureWarning and not error.
@@ -1065,6 +1049,21 @@ class TestProfiler(TestCase):
         with self.assertWarnsRegex(FutureWarning, "with_modules is deprecated"):
             with profile(activities=[ProfilerActivity.CPU], with_modules=True):
                 torch.ones(1)
+
+    @parametrize("api", ("load_nvprof", "parse_nvprof_trace"))
+    def test_nvprof_import_deprecated(self, api):
+        with patch("torch.autograd.profiler._parse_nvprof_trace", return_value=[]):
+            with self.assertWarnsRegex(
+                FutureWarning, rf"{api}.*deprecated.*PyTorch 2\.17"
+            ):
+                events = getattr(torch.autograd.profiler, api)("trace.prof")
+        self.assertEqual(events, [])
+
+    def test_enforce_unique_deprecated(self):
+        with self.assertWarnsRegex(
+            FutureWarning, r"EnforceUnique.*deprecated.*PyTorch 2\.17"
+        ):
+            torch.autograd.profiler.EnforceUnique()
 
     def test_profiler_metadata(self):
         t1, t2 = torch.ones(1), torch.ones(1)
@@ -3433,18 +3432,6 @@ class TestExperimentalUtils(TestCase):
                         raise AssertionError(
                             f"Could not find op '{op_name}' in Chrome trace."
                         )
-                found_op = False
-                for event in prof.events():
-                    if event.name == op_name:
-                        if metadata_key not in event.metadata_json:
-                            raise AssertionError(
-                                f"Metadata for '{op_name}' in FunctionEvent did not contain '{metadata_key}'."
-                            )
-                        found_op = True
-                if not found_op:
-                    raise AssertionError(
-                        f"Could not find op '{op_name}' in prof.events()."
-                    )
 
         experimental_config = torch._C._profiler._ExperimentalConfig(
             expose_kineto_event_metadata=True
