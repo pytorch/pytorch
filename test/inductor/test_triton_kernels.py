@@ -357,7 +357,12 @@ class KernelTests(torch._inductor.test_case.TestCase):
         def fn(x, *, use_value_keyword: bool):
             out = torch.empty_like(x)
             nested_constexpr_kernel[(1,)](
-                Config(x, tl.constexpr(value="double") if use_value_keyword else tl.constexpr("double")),
+                Config(
+                    x,
+                    tl.constexpr(value="double")
+                    if use_value_keyword
+                    else tl.constexpr("double"),
+                ),
                 out,
                 x.numel(),
                 BLOCK_SIZE=16,
@@ -366,13 +371,15 @@ class KernelTests(torch._inductor.test_case.TestCase):
 
         # tl.constexpr(value) capture
         x = torch.arange(16, dtype=torch.float32, device=GPU_TYPE)
-        actual = torch.compile(fn, backend=backend, fullgraph=True)(x, use_value_keyword=False)
+        actual = torch.compile(fn, backend=backend, fullgraph=True)(
+            x, use_value_keyword=False
+        )
         self.assertEqual(actual, x * 2)
 
         # tl.constexpr(value=value) capture
-        actual = torch.compile(
-            fn, backend=backend, fullgraph=True
-        )(x, use_value_keyword=True)
+        actual = torch.compile(fn, backend=backend, fullgraph=True)(
+            x, use_value_keyword=True
+        )
         self.assertEqual(actual, x * 2)
 
         # tl.constexpr from outside the graph
