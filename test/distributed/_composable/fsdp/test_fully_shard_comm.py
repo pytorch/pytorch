@@ -2193,7 +2193,7 @@ class TestFullyShardReduceScatterRecordStream(FSDPTest):
         # A backend can register a device impl of fsdp::record_grad_output_stream at
         # import time. Then the op is not a no-op on that device, so the not-opted-in
         # case is not testable there. Run only the opted-in case on such a device.
-        import torch.distributed.fsdp._fully_shard._fsdp_collectives  # noqa: F401
+        import torch.distributed.fsdp._fully_shard._fsdp_collectives
 
         backend_has_impl = torch._C._dispatch_has_kernel_for_dispatch_key(
             "fsdp::record_grad_output_stream",
@@ -2201,7 +2201,10 @@ class TestFullyShardReduceScatterRecordStream(FSDPTest):
         )
         needs_record_stream = [True] if backend_has_impl else [True, False]
         self.run_subtests(
-            {"needs_record_stream": needs_record_stream, "mixed_precision": [False, True]},
+            {
+                "needs_record_stream": needs_record_stream,
+                "mixed_precision": [False, True],
+            },
             self._test_reduce_scatter_records_consumer_stream,
         )
 
@@ -2209,7 +2212,9 @@ class TestFullyShardReduceScatterRecordStream(FSDPTest):
         self, needs_record_stream: bool, mixed_precision: bool
     ):
         torch.manual_seed(42)
-        model = nn.Sequential(*[nn.Linear(1024, 1024) for _ in range(3)]).to(device_type)
+        model = nn.Sequential(*[nn.Linear(1024, 1024) for _ in range(3)]).to(
+            device_type
+        )
         if mixed_precision:
             model = model.to(torch.bfloat16)
         for param in model.parameters():
