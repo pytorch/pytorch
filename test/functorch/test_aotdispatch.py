@@ -7652,6 +7652,290 @@ def forward(self, primals_1, tangents_1):
         # so the producer op does not appear in the backward graph.
         self.assertNotIn("topk", bw_graph["gm"].code)
 
+    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
+    def test_min_cut_partitioner_no_recompute_through_mutated_buffer(self):
+        """Reads of a mutable buffer must be saved, not recomputed.
+
+        Recompute defers a read to backward time. A buffer read is a snapshot, so
+        deferring it across a mutation changes its value: the backward sees
+        post-update contents and `torch.where` routes gradients down the wrong
+        branch. Covers both ways the mutation reaches the buffer -- inside this
+        graph as a `copy_` epilogue, and from outside it entirely.
+        """
+        import torch._functorch.config as functorch_config
+
+        num_bins, batch = 16, 32
+        # Counts start at zero and each update adds 1, so every touched bin crosses
+        # this within one step: the forward sees False where a recompute sees True.
+        threshold = 0.5
+
+        def gate(counts, boundaries, pred):
+            bin_ids = torch.bucketize(pred, boundaries=boundaries).long()
+            cond = torch.gt(counts[bin_ids], threshold)
+            return bin_ids, torch.where(cond, pred * 0.5, pred)
+
+        class InGraph(torch.nn.Module):
+            """Buffer read by several gathers and mutated once, same forward."""
+
+            def __init__(self, ntasks):
+                super().__init__()
+                self.heads = torch.nn.ModuleList(
+                    [torch.nn.Linear(8, 1) for _ in range(ntasks)]
+                )
+                self.register_buffer(
+                    "counts", torch.zeros(num_bins, dtype=torch.float64)
+                )
+                self.register_buffer(
+                    "boundaries", torch.linspace(0.0, 1.0, num_bins - 1)
+                )
+
+            def forward(self, x, label):
+                total = 0.0
+                bin_ids = pred = prev = None
+                for head in self.heads:
+                    # Later tasks consume earlier ones, so an earlier gather is an
+                    # ancestor of the update. Exempting the update's whole ancestor
+                    # cone would wrongly exempt those gathers.
+                    inp = x if prev is None else x + prev.unsqueeze(-1)
+                    pred = torch.sigmoid(head(inp)).reshape(-1)
+                    bin_ids, out = gate(self.counts, self.boundaries, pred)
+                    total = total + (out - label).pow(2).mean()
+                    prev = out
+                with torch.no_grad():
+                    self.counts.index_add_(
+                        0, bin_ids, torch.ones_like(pred, dtype=torch.float64)
+                    )
+                return total
+
+        class ReadOnly(torch.nn.Module):
+            """Reads the buffer; something outside this graph mutates it."""
+
+            def __init__(self, counts, boundaries):
+                super().__init__()
+                self.head = torch.nn.Linear(8, 1)
+                self.register_buffer("counts", counts)
+                self.register_buffer("boundaries", boundaries)
+
+            def forward(self, x, label):
+                pred = torch.sigmoid(self.head(x)).reshape(-1)
+                _, out = gate(self.counts, self.boundaries, pred)
+                return (out - label).pow(2).mean()
+
+        def gathers_in_backward(mod, x, label, mutate=None):
+            """Grads, plus whether the backward re-reads the buffer."""
+            bw_graph = {}
+
+            def backend(gm, example_inputs):
+                return aot_module_simplified(
+                    gm,
+                    example_inputs,
+                    fw_compiler=lambda g, _: g,
+                    bw_compiler=lambda g, _: bw_graph.setdefault("gm", g),
+                    partition_fn=min_cut_rematerialization_partition,
+                    keep_inference_input_mutations=True,
+                )
+
+            torch._dynamo.reset()
+            loss = torch.compile(mod, backend=backend)(x, label)
+            if mutate is not None:
+                mutate()
+            loss.backward()
+            code = bw_graph["gm"].print_readable(print_output=False)
+            grads = [p.grad.detach().clone() for p in mod.parameters()]
+            return grads, "aten.index.Tensor" in code
+
+        def reference(mod, x, label, mutate=None):
+            loss = mod(x, label)
+            if mutate is not None:
+                mutate()
+            loss.backward()
+            return [p.grad.detach().clone() for p in mod.parameters()]
+
+        # A buffer mutated inside the graph: input_info reports it, so the readers
+        # are known precisely. Several gathers, only the last sharing bin ids with
+        # the update.
+        for ntasks in (2, 4):
+            x = torch.randn(batch, 8)
+            label = torch.rand(batch)
+            torch.manual_seed(0)
+            ref = reference(InGraph(ntasks), x, label)
+            torch.manual_seed(0)
+            with functorch_config.patch(activation_memory_budget=0.05):
+                grads, recomputed = gathers_in_backward(InGraph(ntasks), x, label)
+            self.assertFalse(recomputed, f"backward re-reads the buffer, {ntasks=}")
+            for a, b in zip(ref, grads):
+                self.assertEqual(a, b)
+
+        # A buffer this graph only reads, mutated elsewhere before the backward
+        # runs. Nothing in the graph records that, so it is caught by treating
+        # buffers as mutable rather than by analysing this graph. Budget 0
+        # recomputes everything it is allowed to, which is what defers the read
+        # across the mutation.
+        def make_readonly():
+            torch.manual_seed(0)
+            counts = torch.zeros(num_bins, dtype=torch.float64)
+            return ReadOnly(counts, torch.linspace(0.0, 1.0, num_bins - 1)), counts
+
+        x = torch.randn(batch, 8)
+        label = torch.rand(batch)
+        idx = torch.randint(0, num_bins, (batch,))
+        delta = torch.ones(batch, dtype=torch.float64)
+
+        mod, counts = make_readonly()
+        ref = reference(mod, x, label, lambda: counts.index_add_(0, idx, delta))
+
+        mod, counts = make_readonly()
+        with functorch_config.patch(
+            activation_memory_budget=0.0, ban_recompute_through_buffers=True
+        ):
+            grads, recomputed = gathers_in_backward(
+                mod, x, label, lambda: counts.index_add_(0, idx, delta)
+            )
+        self.assertFalse(recomputed, "backward re-reads a buffer mutated elsewhere")
+        for a, b in zip(ref, grads):
+            self.assertEqual(a, b)
+
+        # The read may reach the buffer through a view. Pinning the view would
+        # pin an alias of the mutated storage, not a snapshot of it, so the
+        # protection has to follow through to the op that materializes data.
+        class ViewRead(torch.nn.Module):
+            def __init__(self, counts):
+                super().__init__()
+                self.register_buffer("counts", counts)
+
+            def forward(self, x):
+                cond = self.counts.view(num_bins) > threshold
+                y = torch.where(cond, x * 0.5, x).sum()
+                self.counts.add_(1)
+                return y
+
+        def view_read_grad(compiled, budget):
+            torch.manual_seed(0)
+            mod = ViewRead(torch.zeros(num_bins, dtype=torch.float64))
+            vx = torch.ones(num_bins, requires_grad=True)
+            if not compiled:
+                mod(vx).backward()
+                return vx.grad
+            with functorch_config.patch(
+                activation_memory_budget=budget,
+                ban_recompute_through_buffers=True,
+            ):
+                torch._dynamo.reset()
+                torch.compile(mod, backend="aot_eager_decomp_partition")(vx).backward()
+            return vx.grad
+
+        for budget in (0.0, 0.05):
+            self.assertEqual(
+                view_read_grad(False, budget),
+                view_read_grad(True, budget),
+                f"view read, {budget=}",
+            )
+
+        # The value written by the epilogue can also feed the forward's own
+        # computation, so exempting it as "just the update" would leave a read of
+        # the mutated input recomputable.
+        class SharedUpdate(torch.nn.Module):
+            def __init__(self, counts):
+                super().__init__()
+                self.register_buffer("counts", counts)
+
+            def forward(self, x):
+                self.counts.add_(1)
+                return torch.where(self.counts > 1.5, x * 0.5, x).sum()
+
+        def shared_update_grad(compiled, budget):
+            torch.manual_seed(0)
+            mod = SharedUpdate(torch.zeros(num_bins, dtype=torch.float64))
+            sx = torch.ones(num_bins, requires_grad=True)
+            if not compiled:
+                mod(sx).backward()
+                return sx.grad
+
+            # keep_inference_input_mutations puts the copy_ epilogue in the
+            # graph, which is what places the update value in the mutation chain.
+            def backend(gm, example_inputs):
+                return aot_module_simplified(
+                    gm,
+                    example_inputs,
+                    fw_compiler=lambda g, _: g,
+                    bw_compiler=lambda g, _: g,
+                    partition_fn=min_cut_rematerialization_partition,
+                    keep_inference_input_mutations=True,
+                )
+
+            with functorch_config.patch(
+                activation_memory_budget=budget,
+                ban_recompute_through_buffers=True,
+            ):
+                torch._dynamo.reset()
+                torch.compile(mod, backend=backend)(sx).backward()
+            return sx.grad
+
+        for budget in (0.0, 0.05):
+            self.assertEqual(
+                shared_update_grad(False, budget),
+                shared_update_grad(True, budget),
+                f"update value also read by the forward, {budget=}",
+            )
+
+        # The read can go through a tuple-producing op. Pinning the tuple node
+        # itself is not expressible as a saved tensor, so the getitem leaves are
+        # what must be pinned.
+        class TupleRead(torch.nn.Module):
+            def __init__(self, counts):
+                super().__init__()
+                self.register_buffer("counts", counts)
+
+            def forward(self, x):
+                cond = self.counts.sort().values > threshold
+                y = torch.where(cond, x * 0.5, x).sum()
+                self.counts.add_(1)
+                return y
+
+        def tuple_read_grad(compiled, budget):
+            torch.manual_seed(0)
+            mod = TupleRead(torch.zeros(num_bins, dtype=torch.float64))
+            tx = torch.ones(num_bins, requires_grad=True)
+            if not compiled:
+                mod(tx).backward()
+                return tx.grad
+
+            def backend(gm, example_inputs):
+                return aot_module_simplified(
+                    gm,
+                    example_inputs,
+                    fw_compiler=lambda g, _: g,
+                    bw_compiler=lambda g, _: g,
+                    partition_fn=min_cut_rematerialization_partition,
+                    keep_inference_input_mutations=True,
+                )
+
+            with functorch_config.patch(
+                activation_memory_budget=budget,
+                ban_recompute_through_buffers=True,
+            ):
+                torch._dynamo.reset()
+                torch.compile(mod, backend=backend)(tx).backward()
+            return tx.grad
+
+        for budget in (0.0, 0.05):
+            self.assertEqual(
+                tuple_read_grad(False, budget),
+                tuple_read_grad(True, budget),
+                f"read through a tuple-producing op, {budget=}",
+            )
+
+        # Without the rule the read is deferred across the mutation, and the
+        # buffer the backward unpacks is at a bumped version.
+        mod, counts = make_readonly()
+        with functorch_config.patch(activation_memory_budget=0.0):
+            with self.assertRaisesRegex(
+                RuntimeError, "modified by an inplace operation"
+            ):
+                gathers_in_backward(
+                    mod, x, label, lambda: counts.index_add_(0, idx, delta)
+                )
+
     def test_disable_functionalization_ignores_effect_token_metadata(self):
         def fn(args):
             (x,) = args

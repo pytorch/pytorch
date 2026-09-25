@@ -1144,6 +1144,7 @@ class CacheableAOTConfig:
     num_params_buffers: int
     aot_id: int
     keep_inference_input_mutations: bool
+    buffer_input_indices: list[int] | None = None
     is_export: bool = False
     no_tangents: bool = False
     dynamic_shapes: bool = False
@@ -1177,6 +1178,9 @@ class AOTConfig:
     dynamic_shapes: bool = False
     aot_autograd_arg_pos_to_source: list[Source] | None = None
     static_input_indices: list[int] | None = None
+    # Flat-input positions holding module buffers. Buffers carry mutable state, so
+    # the partitioner must not recompute reads of them.
+    buffer_input_indices: list[int] | None = None
     inference_compiler: Callable[..., Any] | None = None
     enable_log: bool = True
     # this is always false outside of export.
@@ -1202,6 +1206,7 @@ class AOTConfig:
     def to_cacheable(self) -> CacheableAOTConfig:
         return CacheableAOTConfig(
             num_params_buffers=self.num_params_buffers,
+            buffer_input_indices=self.buffer_input_indices,
             aot_id=self.aot_id,
             keep_inference_input_mutations=self.keep_inference_input_mutations,
             is_export=self.is_export,

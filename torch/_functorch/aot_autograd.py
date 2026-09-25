@@ -1007,6 +1007,21 @@ def prepare_aot_config(
             dynamic_shapes = fake_mode.shape_env is not None
             break
 
+    # Which flat inputs are module buffers. Under inline_inbuilt_nn_modules Dynamo
+    # hands params and buffers over as ordinary graph inputs, so buffers_len above
+    # is 0 and the split has to be recovered from the values: the module attributes
+    # are exactly the static inputs, and the ones that are not Parameters are
+    # buffers. Buffers carry mutable state that another region -- or eager code --
+    # can update between a forward and its backward, so the partitioner must not
+    # recompute reads of them.
+    buffer_input_indices = [
+        i
+        for i in (static_input_indices or [])
+        if i < len(full_args)
+        and isinstance(full_args[i], torch.Tensor)
+        and not isinstance(full_args[i], torch.nn.Parameter)
+    ]
+    buffer_input_indices += range(params_len, params_len + buffers_len)
     aot_config = AOTConfig(
         fw_compiler=None,
         bw_compiler=None,
@@ -1014,6 +1029,7 @@ def prepare_aot_config(
         partition_fn=None,
         decompositions=decompositions,
         num_params_buffers=params_len + buffers_len,
+        buffer_input_indices=buffer_input_indices,
         aot_id=next(AOT_COUNTER),
         keep_inference_input_mutations=keep_inference_input_mutations,
         dynamic_shapes=dynamic_shapes,

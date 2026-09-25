@@ -1686,6 +1686,7 @@ def default_partition(
 
     force_save_effectful_ops(joint_module)
     force_save_bw_mutation_src(joint_module)
+    force_save_fw_mutated_input_readers(joint_module)
 
     if static_lifetime_input_indices is None:
         static_lifetime_input_indices = []
@@ -2423,6 +2424,122 @@ def force_save_bw_mutation_src(joint_module: fx.GraphModule) -> None:
             # We do not want to iterate through all the joint graph,
             # so break at the first non-output, non-copy_ node.
             break
+
+
+def _is_tuple_producer(node: fx.Node) -> bool:
+    return bool(node.users) and all(u.target is operator.getitem for u in node.users)
+
+
+def _tensor_results(node: fx.Node) -> list[fx.Node]:
+    # A tuple-producing op cannot be saved itself; its getitems are the tensors.
+    return list(node.users) if _is_tuple_producer(node) else [node]
+
+
+def _returns_alias(node: fx.Node) -> bool:
+    schema = getattr(node.target, "_schema", None)
+    if schema is None:
+        return False
+    return any(r.alias_info is not None for r in schema.returns)
+
+
+def force_save_fw_mutated_input_readers(joint_module: fx.GraphModule) -> None:
+    # Recomputing a read of an input the forward mutates is not equivalent to
+    # saving that read: the mutation lands before the backward runs, so the
+    # recompute observes the post-mutation value. That yields wrong gradients, or
+    # trips SavedVariable::unpack when the input's bumped version counter is
+    # checked. Force those reads to be saved, which also keeps the mutated input
+    # from having to stay live into the backward at all.
+    mutated_inputs: OrderedSet[fx.Node] = OrderedSet()
+    mutation_values: OrderedSet[fx.Node] = OrderedSet()
+    epilogue_copies: OrderedSet[fx.Node] = OrderedSet()
+
+    # aotdispatch tells us which inputs the forward mutates. This is the
+    # authoritative signal: it also covers configurations where the mutation is
+    # applied from runtime metadata rather than kept in-graph, in which case there
+    # is no copy_ below to find.
+    unsafe_names = OrderedSet(joint_module.meta.get("aot_mutated_input_names") or [])
+    # A buffer read here may be mutated by a different compiled region, or by
+    # eager code, between this forward and its backward. Neither is visible in
+    # this graph, so mutates_data above says nothing about them and the only
+    # sound option is to treat every buffer as mutable.
+    if config.ban_recompute_through_buffers:
+        unsafe_names.update(joint_module.meta.get("aot_buffer_input_names") or [])
+
+    if unsafe_names:
+        for node in joint_module.graph.find_nodes(op="placeholder"):
+            if node.name in unsafe_names:
+                mutated_inputs.add(node)
+
+    for node in reversed(joint_module.graph.nodes):
+        if node.op == "output":
+            continue
+        if node.target is not torch.ops.aten.copy_.default:
+            # Same invariant as force_save_bw_mutation_src: aotdispatch only emits
+            # copy_ at the very end of the joint graph.
+            break
+        if _has_tag_must_be_in_backward(node):
+            continue
+        dst, src = node.args[0], node.args[1]
+        if isinstance(dst, fx.Node) and dst.op == "placeholder":
+            mutated_inputs.add(dst)
+            epilogue_copies.add(node)
+            if isinstance(src, fx.Node):
+                mutation_values.add(src)
+
+    if not mutated_inputs:
+        return
+
+    # Exempt the functionalized in-place chain itself: those nodes read the
+    # pre-mutation input only to produce its new value, and the epilogue consumes
+    # them in the forward. Walk only through nodes that themselves take a mutated
+    # input, never all transitive ancestors -- the mutation's value can depend on
+    # arbitrary earlier computation (e.g. dependent task arches feeding the update),
+    # and exempting that would skip genuine readers of the same input.
+    mutation_chain: OrderedSet[fx.Node] = OrderedSet()
+    stack = list(mutation_values)
+    while stack:
+        node = stack.pop()
+        if node in mutation_chain:
+            continue
+        if not any(inp in mutated_inputs for inp in node.all_input_nodes):
+            continue
+        mutation_chain.add(node)
+        stack.extend(node.all_input_nodes)
+
+    # Producing the new contents does not mean a node is used only for that. A
+    # value feeding the epilogue can equally feed the forward's own computation,
+    # and exempting it there would leave a read of the mutated input recomputable.
+    # Keep only the nodes the epilogue alone consumes.
+    while True:
+        escaping = OrderedSet(
+            n
+            for n in mutation_chain
+            if any(
+                u not in mutation_chain and u not in epilogue_copies for u in n.users
+            )
+        )
+        if not escaping:
+            break
+        mutation_chain = OrderedSet(n for n in mutation_chain if n not in escaping)
+
+    # Saving a node only snapshots a value if the node materializes storage. A
+    # view of a mutated input aliases it, so pinning the view pins a pointer and
+    # the backward still observes the post-mutation contents. Walk through
+    # aliasing ops to the first reads that produce independent data, and pin
+    # those.
+    tainted = OrderedSet(mutated_inputs)
+    stack = list(mutated_inputs)
+    while stack:
+        for user in stack.pop().users:
+            if user.op != "call_function" or user in mutation_chain:
+                continue
+            if _returns_alias(user):
+                if user not in tainted:
+                    tainted.add(user)
+                    stack.append(user)
+            elif not _has_tag_must_be_in_backward(user):
+                for pinned in _tensor_results(user):
+                    pinned.meta["recompute"] = CheckpointPolicy.MUST_SAVE
 
 
 def is_getitem_of_multi_output(node: fx.Node) -> bool:
@@ -3527,7 +3644,16 @@ def choose_saved_values_set(
             ban_if_not_in_allowlist=False,
         )
     if memory_budget == 0:
-        return node_info.inputs
+        # Saving only the inputs means recomputing everything else, but MUST_SAVE
+        # marks values whose recomputation is not value-preserving -- a read of an
+        # input the forward mutates, for one. Those stay saved at any budget.
+        return node_info.inputs + [
+            n
+            for n in joint_graph.nodes
+            if n.meta.get("recompute") == CheckpointPolicy.MUST_SAVE
+            and node_info.is_required_fw(n)
+            and not _is_tuple_producer(n)
+        ]
 
     runtime_optimized_saved_values, _ = solve_min_cut(
         joint_graph,
@@ -4245,6 +4371,7 @@ def min_cut_rematerialization_partition(
 
     force_save_effectful_ops(joint_module)
     force_save_bw_mutation_src(joint_module)
+    force_save_fw_mutated_input_readers(joint_module)
 
     if static_lifetime_input_indices is None:
         static_lifetime_input_indices = []
