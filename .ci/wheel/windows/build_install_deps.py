@@ -1,0 +1,111 @@
+#!/usr/bin/env python3
+"""Install build-time dependencies for a PyTorch Windows wheel build.
+
+Windows analog of `.ci/wheel/linux/build_install_deps.py`. Replaces the
+pip-install + libuv-extract portion of the legacy
+`.ci/pytorch/windows/setup_build.bat`. The vcvarsall / CUDA / XPU env
+configuration lives in the sibling `build_env_setup.py`; both scripts run
+independently and hand env back to a parent bash wrapper via --env-out.
+
+Environment variables:
+    SKIP_SETUP_CLEAN - skip `spin clean` when set (build/ shared across Pythons)
+"""
+
+import argparse
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+
+# This pipeline script lives in .ci/wheel/windows; shared helpers are one
+# level up in .ci/wheel/_common.py.
+_HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(_HERE.parent))
+from _common import download, install_numpy, pip_install, write_env_exports
+
+
+# The Windows CD workspace (scratch downloads, libuv) stays under the general
+# Windows CI dir so it doesn't pollute PYTORCH_ROOT.
+WIN_CI_DIR = _HERE.parents[1] / "pytorch" / "windows"
+# Repo root contains pyproject.toml; spin needs to run from there.
+PYTORCH_ROOT = _HERE.parents[2]
+
+
+# Fixed build-time pip deps from setup_build.bat. Kept hardcoded for now;
+# requirements unification (gh-183913) will eventually centralize these.
+PIP_PACKAGES: list[str] = [
+    "cmake",
+    "pyyaml",
+    "mkl-include",
+    "mkl-static",
+    "boto3",
+    "requests",
+    "ninja",
+    "typing_extensions",
+    "setuptools==78.1.1",
+    "scikit-build-core==1.0.0",
+    "spin==0.17",
+]
+
+
+LIBUV_URL = "https://s3.amazonaws.com/ossci-windows/libuv-1.40.0-h8ffe710_0.tar.bz2"
+
+
+def install_libuv(workdir: Path, python_prefix: Path) -> Path:
+    """Curl + 7z + tar extract libuv into the running Python's prefix.
+
+    Mirrors setup_build.bat lines 24-28. Returns libuv_ROOT.
+    """
+    tarball_bz2 = workdir / "libuv-1.40.0-h8ffe710_0.tar.bz2"
+    tarball = workdir / "libuv-1.40.0-h8ffe710_0.tar"
+    download(LIBUV_URL, tarball_bz2)
+    # 7z and tar are both present on Windows CI runners (7-Zip preinstalled,
+    # tar ships with Windows 10+).
+    subprocess.run(["7z", "x", "-aoa", str(tarball_bz2), f"-o{workdir}"], check=True)
+    python_prefix.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["tar", "-xvf", str(tarball), "-C", str(python_prefix)], check=True)
+    libuv_root = python_prefix / "Library"
+    if not libuv_root.is_dir():
+        sys.exit(
+            f"libuv extraction did not produce {libuv_root}; "
+            "the ossci-windows tarball layout may have changed"
+        )
+    return libuv_root
+
+
+def preinstall_cp315_build_deps() -> list[str]:
+    """Pin Cython < 3.3.0 for cp315 sdist builds. See pytorch/pytorch#194618."""
+    if sys.version_info[:2] != (3, 15):
+        return []
+    pip_install("-q", "cython<3.3.0", "setuptools", "wheel")
+    return ["--no-build-isolation"]
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--env-out", type=Path)
+    args = parser.parse_args()
+
+    # cp315 has no pyyaml wheel, so PIP_PACKAGES still builds an sdist here and
+    # needs the Cython pin to reach it. numpy resolves to a wheel at the current
+    # pin, which makes the flags inert for that install rather than unnecessary
+    # -- pass them anyway so a pin without a cp315 wheel stays guarded.
+    build_flags = preinstall_cp315_build_deps()
+    install_numpy(*build_flags)
+    pip_install("-q", *build_flags, *PIP_PACKAGES)
+
+    if not os.environ.get("SKIP_SETUP_CLEAN"):
+        subprocess.run(
+            [sys.executable, "-m", "spin", "clean"], cwd=PYTORCH_ROOT, check=True
+        )
+
+    libuv_root = install_libuv(WIN_CI_DIR, Path(sys.prefix))
+
+    write_env_exports({"libuv_ROOT": str(libuv_root)}, args.env_out)
+    print(f"libuv_ROOT={libuv_root}")
+    print("build_install_deps complete")
+
+
+if __name__ == "__main__":
+    main()

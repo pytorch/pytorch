@@ -2,6 +2,7 @@
 #include <iostream>
 #include <memory>
 
+#include <c10/util/Exception.h>
 #include <c10/util/Registry.h>
 
 // Note: we use a different namespace to test if the macros defined in
@@ -75,7 +76,7 @@ TEST(RegistryTest, RegistryPriorities) {
 
   // throws because Foo is already registered with default priority
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
-  EXPECT_THROW(RegisterFooDefaultAgain(), std::runtime_error);
+  EXPECT_THROW(RegisterFooDefaultAgain(), c10::Error);
 
 #ifdef __GXX_RTTI
   // not going to register Bar because Foo is registered with Default priority
