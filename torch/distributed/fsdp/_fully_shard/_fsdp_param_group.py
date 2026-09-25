@@ -302,6 +302,8 @@ class FSDPParamGroup:
         # Only for HSDP, if accumulating gradients without all-reduce, save the
         # partial reduce output (only reduce-scattered but not all-reduced)
         self._partial_reduce_output: torch.Tensor | None = None
+        # Whether post-backward work remains for this group.
+        self._post_backward_pending: bool = False
         # Holds the reduce-dtype AR buffer + completion event across
         # layers in HSDP+AR with reduce_dtype != orig_dtype (e.g., bf16
         # reduce + fp32 params). Structural invariant: the live Python
@@ -583,6 +585,7 @@ class FSDPParamGroup:
             )
             self._reshard_after_forward_event = None
         self._partial_reduce_output = None
+        self._post_backward_pending = False
         self._post_forward_indices.clear()
         self._training_state = TrainingState.IDLE
         self._to_sharded()
@@ -665,11 +668,13 @@ class FSDPParamGroup:
                     fsdp_param.accumulate_unsharded_grad_if_needed()
             with record_function(self._with_fqn("FSDP::post_backward_reshard")):
                 if not self.reduce_grads:
+                    self._post_backward_pending = True
                     if self.reshard_after_backward:
                         self.reshard()
                     for fsdp_param in self.fsdp_params:
                         fsdp_param.to_accumulated_grad_if_needed()
                     return
+                self._post_backward_pending = False
                 # Save the autograd-computed gradients before resharding to only
                 # access the unsharded parameters when their data is present
                 fsdp_params_with_grad: list[FSDPParam] = []

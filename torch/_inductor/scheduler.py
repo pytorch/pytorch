@@ -12239,6 +12239,9 @@ class Scheduler:
         signatures = self.get_graph_partition_signature(
             partitions=partitions, skip_cudagraphs=skip_cudagraphs
         )
+        V.graph.has_uncaptured_partition = any(
+            signature.skip_cudagraph for signature in signatures
+        )
         self.compute_graph_partition_maps(signatures)
 
         self._log_graph_partitions(partitions, signatures)

@@ -565,7 +565,15 @@ class _SplitterBase:
             )
         self.acc_nodes = nodes_finder()
 
-        if self.settings.skip_fusion:
+        # Fusion dependency analysis only protects boundaries between supported
+        # and unsupported callable nodes. There can be no such boundary when
+        # every callable node is supported.
+        all_callable_nodes_supported = all(
+            node in self.acc_nodes
+            for node in self.module.graph.nodes
+            if node.op in CALLABLE_NODE_OPS
+        )
+        if self.settings.skip_fusion or all_callable_nodes_supported:
             self.fusions = {}
         else:
             self.fusions = FxNetAccFusionsFinder(module, self.acc_nodes)()

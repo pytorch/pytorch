@@ -3375,6 +3375,15 @@ class InstructionTranslatorBase(
         except Unsupported:
             if not obj.is_python_constant():
                 raise
+            # An eager getattr would run a user-defined __get__ at trace time
+            # and bake its result into the graph.
+            if isinstance(obj, variables.UserDefinedClassVariable) and isinstance(
+                inspect.getattr_static(
+                    type(obj.lookup_cls_mro_attr(attr)), "__get__", None
+                ),
+                types.FunctionType,
+            ):
+                raise
             source = AttrSource(obj.source, attr) if obj.source else None
             result = VariableTracker.build(
                 self, getattr(obj.as_python_constant(), attr), source=source

@@ -178,6 +178,15 @@ class ResumePrologueTracingError(TorchDynamoException):
     pass
 
 
+class CompileOnOneRankUnsupported(TorchDynamoException):
+    """Something a rank-portable graph cannot express under compile_on_one_rank.
+
+    Deliberately not a graph break. Breaking out drops the frame back to eager,
+    which silently forfeits the rank-portability the feature was turned on for, so
+    these propagate whether or not graph breaks are allowed.
+    """
+
+
 class RestartAnalysis(TorchDynamoException):
     restart_reason: str | None
 
@@ -554,11 +563,17 @@ def raise_observed_exception(
     args: list[VariableTracker] | list[str] | None = None,
     kwargs: dict[str, VariableTracker] | None = None,
 ) -> NoReturn:
+    from .variables.base import VariableTracker
     from .variables.builder import SourcelessBuilder
 
     if args:
+        # Callers commonly forward a real exception's .args, whose members are
+        # not all strings (TypeError("msg", 42)). Anything that is not already
+        # a VariableTracker has to be wrapped, or it reaches the VT machinery raw.
         args_ = [
-            SourcelessBuilder.create(tx, arg) if isinstance(arg, str) else arg
+            arg
+            if isinstance(arg, VariableTracker)
+            else SourcelessBuilder.create(tx, arg)
             for arg in args
         ]
     else:
