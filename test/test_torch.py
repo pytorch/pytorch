@@ -1696,6 +1696,58 @@ class TestTorchDeviceType(TestCase):
 
     @onlyCUDA
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    @parametrize("recompute_scale_factor", [False, True])
+    def test_deterministic_interpolate_bilinear_scale_factor(
+        self, device, recompute_scale_factor
+    ):
+        from torch._decomp import decompositions
+
+        scale_factor = (1.7, 2.3)
+        input = torch.randn(1, 2, 4, 5, device=device, requires_grad=True)
+        output_grad = torch.randn(
+            1,
+            2,
+            int(4 * scale_factor[0]),
+            int(5 * scale_factor[1]),
+            device=device,
+        )
+        grad = None
+        decomposition_guard = contextlib.nullcontext()
+        if torch.version.hip is None:
+            decomposition_guard = unittest.mock.patch.object(
+                decompositions,
+                "_upsample_linear_vec",
+                side_effect=AssertionError("CUDA should use the native kernel"),
+            )
+        with DeterministicGuard(True), decomposition_guard:
+            for _ in range(2):
+                input.grad = None
+                output = torch.nn.functional.interpolate(
+                    input,
+                    scale_factor=scale_factor,
+                    mode='bilinear',
+                    align_corners=False,
+                    recompute_scale_factor=recompute_scale_factor,
+                )
+                output.backward(output_grad)
+                if grad is None:
+                    grad = input.grad.detach().clone()
+                else:
+                    self.assertEqual(grad, input.grad, atol=0, rtol=0)
+
+        reference_input = input.detach().cpu().requires_grad_()
+        reference_output = torch.nn.functional.interpolate(
+            reference_input,
+            scale_factor=scale_factor,
+            mode='bilinear',
+            align_corners=False,
+            recompute_scale_factor=recompute_scale_factor,
+        )
+        reference_output.backward(output_grad.cpu())
+        self.assertEqual(input.grad.cpu(), reference_input.grad, atol=1e-5, rtol=1e-5)
+
+    @onlyCUDA
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     @parametrize("channels", [1, 3, 8, 64])
     @parametrize("input_size, output_size, align_corners", [
         ((5, 9), (13, 21), False),
