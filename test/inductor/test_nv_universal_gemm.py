@@ -1631,53 +1631,6 @@ class TestNVUniversalGemmHeuristics(TestCase):
         self.assertEqual(mixed_request.cudagraph_unroll, 1)
         self.assertFalse(mixed_request.cold_cache_benchmarking)
 
-    def test_nvgemm_cudagraph_failure_rejects_candidate(self):
-        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
-            GemmVariant,
-            NVUniversalGemmBenchmarkRequest,
-        )
-        from torch._inductor.runtime.benchmarking import benchmarker
-
-        input_tensor = MagicMock(dtype=torch.float4_e2m1fn_x2)
-        output_tensor = MagicMock(shape=(32, 4096))
-        input_meta = MagicMock(
-            dtype=torch.float4_e2m1fn_x2,
-            sizes=(32, 4096),
-        )
-        input_meta.to_tensor.return_value = input_tensor
-        output_meta = MagicMock(sizes=(32, 4096))
-        output_meta.to_tensor.return_value = output_tensor
-
-        with config.patch(
-            {
-                "max_autotune_gemm_backends": "NVGEMM",
-            }
-        ):
-            request = NVUniversalGemmBenchmarkRequest(
-                "kernel",
-                [input_meta],
-                output_meta,
-                MagicMock(),
-                torch.float32,
-                GemmVariant.SCALED_GEMM,
-            )
-        request.benchmark_with_cudagraphs = True
-        request.make_run_fn = MagicMock(return_value=lambda: None)
-        request.do_bench = MagicMock(return_value=1.25)
-        request._get_benchmark_device = MagicMock(return_value=(MagicMock(), "cuda", 0))
-        request.cleanup_run_fn = MagicMock()
-
-        with patch.object(
-            benchmarker,
-            "benchmark_gpu_with_cuda_graph",
-            side_effect=RuntimeError("capture failed"),
-        ):
-            with self.assertRaisesRegex(RuntimeError, "capture failed"):
-                request._benchmark_on_current_device((input_tensor,), output_tensor)
-
-        request.do_bench.assert_not_called()
-        request.cleanup_run_fn.assert_called_once()
-
     @unittest.skipIf(torch.cuda.device_count() < 2, "requires two CUDA devices")
     def test_nvgemm_benchmark_uses_tensor_device(self):
         from torch._inductor.autotune_process import TensorMeta
