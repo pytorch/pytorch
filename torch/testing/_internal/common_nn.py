@@ -17,7 +17,7 @@ import torch.nn.functional as F
 from torch.nn import _reduction as _Reduction
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import TestCase, to_gpu, freeze_rng_state, is_iterable, \
-    gradcheck, gradgradcheck, set_default_dtype, skipIfTorchDynamo, TEST_WITH_ROCM
+    gradcheck, gradgradcheck, MI300_ARCH, set_default_dtype, skipIfRocmArch, skipIfTorchDynamo, TEST_WITH_ROCM
 from torch.testing._internal.common_cuda import TEST_CUDA, SM90OrLater
 from torch.autograd.gradcheck import _get_numerical_jacobian, _iter_tensors
 from torch.autograd import Variable
@@ -2592,6 +2592,11 @@ def get_new_module_tests():
             desc='multilayer_coder',
             with_tf32=True,
             tf32_precision=0.05 if SM90OrLater else 0.03,
+            # gfx942 runs TF32 on the XF32 hardware path; this K=4 multilayer entry
+            # amplifies the TF32-class per-gemm error to 4e-3..2e-2 relative on every
+            # compare, which no absolute tolerance describes. The _fp32 sibling keeps
+            # the correctness coverage; see https://github.com/pytorch/pytorch/issues/196605.
+            tf32_decorator=skipIfRocmArch(MI300_ARCH),
             default_dtype=torch.double,
         ),
         dict(
@@ -3379,6 +3384,13 @@ class TestBase:
                 else:
                     raise ValueError(f"{self.get_name()}: Specify {name} by a value, a function to generate it, or its size!")
         self._extra_kwargs = kwargs
+        # Lazily drawn args (input, target, constructor args), cached so repeated
+        # reads within one test agree. The instance is shared by every generated
+        # test_nn variant, so ModuleTest/CriterionTest clear this on entry to
+        # __call__ and test_cuda: a sibling's leftover entry skips a draw and shifts
+        # the RNG position of every later draw (the input in __call__, the
+        # parameters in test_cuda), so the in-suite configuration would differ from
+        # the standalone repro. Subclasses with their own entry points do not clear.
         self._arg_cache = {}
 
     def get_name(self):
@@ -3464,6 +3476,7 @@ class ModuleTest(TestBase):
             self.default_dtype = torch.get_default_dtype()
 
     def __call__(self, test_case):
+        self._arg_cache.clear()
         with set_default_dtype(self.default_dtype):
             module = self.constructor(*self.constructor_args)
             input = self._get_input()
@@ -3549,9 +3562,13 @@ class ModuleTest(TestBase):
 
                 test_case.assertEqual(out, output)
                 test_case.assertEqual(grad, d_input, atol=1e-4, rtol=0)
-                test_case.assertEqual(test_case._get_parameters(module)[1], d_param)
+                # Parameter grads can differ by a few ulps between runs when the backward
+                # accumulates atomically (e.g. embedding_dense_backward's fused path since
+                # #172454); use the same bound as the grad-input compare above.
+                test_case.assertEqual(test_case._get_parameters(module)[1], d_param, atol=1e-4, rtol=0)
 
     def test_cuda(self, test_case):
+        self._arg_cache.clear()
         if not TEST_CUDA or not self.should_test_cuda:
             raise unittest.SkipTest('Excluded from CUDA tests')
 
@@ -3885,6 +3902,7 @@ class CriterionTest(InputVariableMixin, TestBase):  # type: ignore[misc]
             self.default_dtype = torch.get_default_dtype()
 
     def __call__(self, test_case):
+        self._arg_cache.clear()
         with set_default_dtype(self.default_dtype):
             module = self.constructor(*self.constructor_args)
             input = self._get_input()
@@ -3922,6 +3940,8 @@ class CriterionTest(InputVariableMixin, TestBase):  # type: ignore[misc]
                 gradgradcheck(apply_fn, inputs, check_batched_grad=self.check_batched_grad)
 
     def test_cuda(self, test_case, dtype, extra_args=None):
+        self._arg_cache.clear()
+
         def convert_dtype(obj, dtype, requires_grad=False):
             if isinstance(obj, torch.Tensor):
                 return obj.detach().to(dtype=dtype).requires_grad_(requires_grad)

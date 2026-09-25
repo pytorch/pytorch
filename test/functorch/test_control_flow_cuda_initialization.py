@@ -3,6 +3,7 @@ import unittest
 
 import torch
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     TEST_CUDA_GRAPH_CONDITIONAL_NODES,
     TestCase,
@@ -14,6 +15,12 @@ from torch.testing._internal.common_utils import (
     "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
 )
 class TestControlFlowInCUDAGraphInitialization(TestCase):
+    # Keep this as a direct TestCase: instantiate_device_type_tests would use
+    # CUDATestBase.setUpClass(), which creates a CUDA primary context before setUp().
+    # These tests require no preexisting context and run in separate subprocesses.
+    # Use classification metadata here; the class-level skip controls CUDA support.
+    hw_classification = HardwareClassification.CUDA
+
     # Duplicated from test_cuda_primary_ctx.py
     CTX_ALREADY_CREATED_ERR_MSG = (
         "Tests defined in TestControlFlowInCUDAGraphInitialization must be run in a process "

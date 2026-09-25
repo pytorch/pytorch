@@ -1642,6 +1642,18 @@ class TestDequeConstruct(torch._dynamo.test_case.TestCase):
         self.assertEqual(d.maxlen, 5)
 
     @make_dynamo_test
+    def test_deque_maxlen_conversion(self):
+        # maxlen is a Py_ssize_t, so a bool arrives as a plain int.
+        d = collections.deque([1], maxlen=True)
+        self.assertEqual(d.maxlen, 1)
+        self.assertIs(type(d.maxlen), int)
+        self.assertEqual(collections.deque([1], maxlen=None).maxlen, None)
+        with self.assertRaises(ValueError):
+            collections.deque([1], maxlen=-1)
+        with self.assertRaises(TypeError):
+            collections.deque([1], maxlen=1.0)
+
+    @make_dynamo_test
     def test_deque_iterable_by_name_and_position_raises_typeerror(self):
         # Must be a catchable TypeError, not a leaked StopIteration.
         with self.assertRaises(TypeError):
