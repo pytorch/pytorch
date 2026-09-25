@@ -537,6 +537,13 @@ class HipblasltGemmOp : public Callable<ParamsT> {
       const void* mat2_scale_ptr = GetBScalePointerFromParams<CT>(params);
       const void* result_scale_ptr = GetDScalePointerFromParams<CT>(params);
       if (mat1_scale_ptr && mat2_scale_ptr) {
+        // Only RowWise sets a scale mode below, so BlockWise1x32 block scales
+        // arrive with no mode set and are not read as e8m0 blocks: these
+        // candidates are numerically wrong for MX FP8 in either swizzle layout.
+        // (MX FP4 never gets here; no TUNABLE_DISPATCH branch matches its
+        // dtype.) A wrong candidate wins silently, since the numerical check is
+        // off by default. Pre-existing; MX FP8 should stay on the Default op,
+        // which sets the mode via cublasLtMatmulScaleMode.
         hipblasLtMatmulDescAttributes_t a_scale_ptr_desc = HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER;
         hipblasLtMatmulDescAttributes_t b_scale_ptr_desc = HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER;
         if (GetAScalingTypeFromParams<CT>(params) == ScalingType::RowWise) {
