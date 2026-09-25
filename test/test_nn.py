@@ -9550,6 +9550,29 @@ class TestNNDeviceType(NNTestCase):
         expected_out = expected_out.to(device=device)
         self.assertEqual(out_t, expected_out)
 
+    @parametrize_test("shape, output_width", [
+        ((0, 2, 4), 12),
+        ((2, 3, 4), 12),
+        ((2, 3, 32768), 65536),
+    ])
+    def test_upsamplingLinear1d_kernel_paths(self, device, shape, output_width):
+        # The CUDA/ROCm implementation picks between an unrolled kernel and the
+        # original one based on ceil_div(output_width, 512), so output widths on
+        # either side of 512 * 128 exercise different kernels. An empty batch dim
+        # (the only empty dim the op accepts) used to launch a zero-block grid.
+        x = torch.randn(shape, device=device, requires_grad=True)
+        x_cpu = x.detach().cpu().requires_grad_()
+
+        out = F.interpolate(x, size=output_width, mode="linear", align_corners=False)
+        out_cpu = F.interpolate(x_cpu, size=output_width, mode="linear", align_corners=False)
+        self.assertEqual(out.shape, (shape[0], shape[1], output_width))
+        self.assertEqual(out.cpu(), out_cpu)
+
+        grad_cpu = torch.randn_like(out_cpu)
+        out.backward(grad_cpu.to(device))
+        out_cpu.backward(grad_cpu)
+        self.assertEqual(x.grad.cpu(), x_cpu.grad)
+
     @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
     @parametrize_test("mode", ["nearest", "nearest-exact"])
