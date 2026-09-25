@@ -61,6 +61,7 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import (
     check_leaked_tensors,
     DeterministicGuard,
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -336,6 +337,7 @@ def create_packed_document_block_mask(
 
 
 class ScheduleTest(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.ACCELERATOR
     world_size = 4
 
     @classmethod
@@ -907,139 +909,6 @@ class ScheduleTest(MultiProcContinuousTest):
             self.config, stage_modules, ref_mod, submod_names, rtol=5e-3, atol=5e-3
         )
 
-    @requires_accelerator_dist_backend(["nccl"])
-    @skip_but_pass_in_sandcastle_if(
-        device_type != "cuda" or not TEST_MULTIACCELERATOR,
-        "CUDA/NCCL flex attention test requires 4+ GPUs",
-    )
-    @skip_if_lt_x_gpu(4)
-    def test_interleaved_1f1b_pre_split_flex_attention(self):
-        stages_per_rank = 2
-        n_stages = stages_per_rank * self.world_size
-        num_microbatches = 8
-        batch = 8
-        seq_len = 64
-        model_dim = 32
-        num_heads = 2
-        ffn_dim = 64
-
-        auto_mod = FlexAttentionTransformer(model_dim, num_heads, ffn_dim, n_stages).to(
-            self.device
-        )
-        pre_split_mod = copy.deepcopy(auto_mod)
-        ref_mod = copy.deepcopy(auto_mod)
-        x = torch.randn(batch, seq_len, model_dim, device=self.device)
-        target = torch.randn_like(x)
-        positions = torch.stack(
-            [
-                torch.arange(seq_len, device=self.device) % (8 * (i % 4 + 1))
-                for i in range(batch)
-            ]
-        )
-        block_mask = create_packed_document_block_mask(positions, num_heads)
-        loss_fn = torch.nn.MSELoss(reduction="sum")
-
-        auto_stages, auto_stage_modules, submod_names = create_multi_stage_pipeline(
-            self.config, auto_mod, stages_per_rank, n_stages
-        )
-        pre_split_stages, pre_split_stage_modules, pre_split_submod_names = (
-            create_multi_stage_pipeline(
-                self.config, pre_split_mod, stages_per_rank, n_stages
-            )
-        )
-        self.assertEqual(pre_split_submod_names, submod_names)
-
-        has_first_stage = any(stage.is_first for stage in auto_stages)
-        has_last_stage = any(stage.is_last for stage in auto_stages)
-        self.assertEqual(
-            has_first_stage,
-            any(stage.is_first for stage in pre_split_stages),
-        )
-        self.assertEqual(
-            has_last_stage,
-            any(stage.is_last for stage in pre_split_stages),
-        )
-
-        arg_mbs = [(x_mb,) for x_mb in torch.tensor_split(x, num_microbatches)]
-        target_mbs = list(torch.tensor_split(target, num_microbatches))
-        position_mbs = torch.tensor_split(positions, num_microbatches)
-        kwarg_mbs = [
-            {"block_mask": create_packed_document_block_mask(positions_mb, num_heads)}
-            for positions_mb in position_mbs
-        ]
-
-        auto_schedule = ScheduleInterleaved1F1B(
-            auto_stages,
-            num_microbatches,
-            loss_fn=loss_fn,
-            scale_grads=False,
-        )
-        pre_split_schedule = ScheduleInterleaved1F1B(
-            pre_split_stages,
-            num_microbatches,
-            loss_fn=loss_fn,
-            scale_grads=False,
-        )
-
-        auto_out = None
-        auto_losses = []
-        pre_split_out = None
-        pre_split_losses = []
-        with DeterministicGuard(True):
-            ref_out, ref_loss = run_reference_model(
-                ref_mod,
-                x,
-                target,
-                loss_fn,
-                num_iterations=1,
-                block_mask=block_mask,
-            )
-
-            zero_gradients(auto_stage_modules)
-            auto_out = auto_schedule.step(
-                *((x,) if has_first_stage else ()),
-                block_mask=block_mask,
-                target=target if has_last_stage else None,
-                losses=auto_losses if has_last_stage else None,
-            )
-
-            dist.barrier()
-
-            zero_gradients(pre_split_stage_modules)
-            pre_split_out = pre_split_schedule.step(
-                arg_mbs=arg_mbs if has_first_stage else None,
-                kwarg_mbs=kwarg_mbs,
-                target_mbs=target_mbs if has_last_stage else None,
-                losses=pre_split_losses if has_last_stage else None,
-            )
-
-            dist.barrier()
-
-        if has_last_stage:
-            self.assertEqual(pre_split_out, auto_out)
-            self.assertEqual(
-                torch.stack(pre_split_losses),
-                torch.stack(auto_losses),
-            )
-            self.assertEqual(auto_out, ref_out)
-            self.assertEqual(sum(auto_losses), ref_loss)
-
-        for auto_stage_module, pre_split_stage_module in zip(
-            auto_stage_modules,
-            pre_split_stage_modules,
-            strict=True,
-        ):
-            for (auto_name, auto_param), (pre_split_name, pre_split_param) in zip(
-                auto_stage_module.named_parameters(),
-                pre_split_stage_module.named_parameters(),
-                strict=True,
-            ):
-                self.assertEqual(auto_name, pre_split_name)
-                self.assertEqual(pre_split_param.grad, auto_param.grad)
-
-        check_gradients(self.config, auto_stage_modules, ref_mod, submod_names)
-        check_gradients(self.config, pre_split_stage_modules, ref_mod, submod_names)
-
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
         not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
@@ -1598,12 +1467,167 @@ class ScheduleTest(MultiProcContinuousTest):
 instantiate_parametrized_tests(ScheduleTest)
 
 
+class ScheduleTestCUDA(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.CUDA
+    world_size = 4
+
+    @classmethod
+    def backend_str(cls) -> str:
+        # Testing with NCCL backend
+        return backend
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device(device_type, self.rank)
+
+    @property
+    def config(self) -> PipelineTestConfig:
+        """Lazily create and return the pipeline test configuration."""
+        return PipelineTestConfig(
+            world_size=self.world_size, device=self.device, rank=self.rank
+        )
+
+    @requires_accelerator_dist_backend(["nccl"])
+    @skip_but_pass_in_sandcastle_if(
+        device_type != "cuda" or not TEST_MULTIACCELERATOR,
+        "CUDA/NCCL flex attention test requires 4+ GPUs",
+    )
+    @skip_if_lt_x_gpu(4)
+    def test_interleaved_1f1b_pre_split_flex_attention(self):
+        stages_per_rank = 2
+        n_stages = stages_per_rank * self.world_size
+        num_microbatches = 8
+        batch = 8
+        seq_len = 64
+        model_dim = 32
+        num_heads = 2
+        ffn_dim = 64
+
+        auto_mod = FlexAttentionTransformer(model_dim, num_heads, ffn_dim, n_stages).to(
+            self.device
+        )
+        pre_split_mod = copy.deepcopy(auto_mod)
+        ref_mod = copy.deepcopy(auto_mod)
+        x = torch.randn(batch, seq_len, model_dim, device=self.device)
+        target = torch.randn_like(x)
+        positions = torch.stack(
+            [
+                torch.arange(seq_len, device=self.device) % (8 * (i % 4 + 1))
+                for i in range(batch)
+            ]
+        )
+        block_mask = create_packed_document_block_mask(positions, num_heads)
+        loss_fn = torch.nn.MSELoss(reduction="sum")
+
+        auto_stages, auto_stage_modules, submod_names = create_multi_stage_pipeline(
+            self.config, auto_mod, stages_per_rank, n_stages
+        )
+        pre_split_stages, pre_split_stage_modules, pre_split_submod_names = (
+            create_multi_stage_pipeline(
+                self.config, pre_split_mod, stages_per_rank, n_stages
+            )
+        )
+        self.assertEqual(pre_split_submod_names, submod_names)
+
+        has_first_stage = any(stage.is_first for stage in auto_stages)
+        has_last_stage = any(stage.is_last for stage in auto_stages)
+        self.assertEqual(
+            has_first_stage,
+            any(stage.is_first for stage in pre_split_stages),
+        )
+        self.assertEqual(
+            has_last_stage,
+            any(stage.is_last for stage in pre_split_stages),
+        )
+
+        arg_mbs = [(x_mb,) for x_mb in torch.tensor_split(x, num_microbatches)]
+        target_mbs = list(torch.tensor_split(target, num_microbatches))
+        position_mbs = torch.tensor_split(positions, num_microbatches)
+        kwarg_mbs = [
+            {"block_mask": create_packed_document_block_mask(positions_mb, num_heads)}
+            for positions_mb in position_mbs
+        ]
+
+        auto_schedule = ScheduleInterleaved1F1B(
+            auto_stages,
+            num_microbatches,
+            loss_fn=loss_fn,
+            scale_grads=False,
+        )
+        pre_split_schedule = ScheduleInterleaved1F1B(
+            pre_split_stages,
+            num_microbatches,
+            loss_fn=loss_fn,
+            scale_grads=False,
+        )
+
+        auto_out = None
+        auto_losses = []
+        pre_split_out = None
+        pre_split_losses = []
+        with DeterministicGuard(True):
+            ref_out, ref_loss = run_reference_model(
+                ref_mod,
+                x,
+                target,
+                loss_fn,
+                num_iterations=1,
+                block_mask=block_mask,
+            )
+
+            zero_gradients(auto_stage_modules)
+            auto_out = auto_schedule.step(
+                *((x,) if has_first_stage else ()),
+                block_mask=block_mask,
+                target=target if has_last_stage else None,
+                losses=auto_losses if has_last_stage else None,
+            )
+
+            dist.barrier()
+
+            zero_gradients(pre_split_stage_modules)
+            pre_split_out = pre_split_schedule.step(
+                arg_mbs=arg_mbs if has_first_stage else None,
+                kwarg_mbs=kwarg_mbs,
+                target_mbs=target_mbs if has_last_stage else None,
+                losses=pre_split_losses if has_last_stage else None,
+            )
+
+            dist.barrier()
+
+        if has_last_stage:
+            self.assertEqual(pre_split_out, auto_out)
+            self.assertEqual(
+                torch.stack(pre_split_losses),
+                torch.stack(auto_losses),
+            )
+            self.assertEqual(auto_out, ref_out)
+            self.assertEqual(sum(auto_losses), ref_loss)
+
+        for auto_stage_module, pre_split_stage_module in zip(
+            auto_stage_modules,
+            pre_split_stage_modules,
+            strict=True,
+        ):
+            for (auto_name, auto_param), (pre_split_name, pre_split_param) in zip(
+                auto_stage_module.named_parameters(),
+                pre_split_stage_module.named_parameters(),
+                strict=True,
+            ):
+                self.assertEqual(auto_name, pre_split_name)
+                self.assertEqual(pre_split_param.grad, auto_param.grad)
+
+        check_gradients(self.config, auto_stage_modules, ref_mod, submod_names)
+        check_gradients(self.config, pre_split_stage_modules, ref_mod, submod_names)
+
+
 class CustomSchedulesTest(MultiProcContinuousTest):
     """
     These schedules are from the ScheduleRegistry and require world_size == 2
     The schedules test weird and unconventional schedules for edge cases
     """
 
+    hw_classification = HardwareClassification.ACCELERATOR
     world_size = 2
 
     @classmethod
@@ -1806,6 +1830,7 @@ class PerEdgeScheduleTest(MultiProcContinuousTest):
     logical-stage placement.
     """
 
+    hw_classification = HardwareClassification.ACCELERATOR
     world_size = 4
 
     @classmethod
