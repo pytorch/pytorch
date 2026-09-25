@@ -2053,10 +2053,9 @@ def set_float32_matmul_precision(precision: str) -> None:
 
     .. note::
 
-        The implementation of "high" precision in AMD Instinct MI300 series devices uses 10
-        mantissa bits but always rounds down instead of rounding to nearest, reducing accuracy
-        slightly and introducing a downward bias. See 
-        :doc:`/notes/numerical_accuracy`#tensorfloat-32-tf32-on-amd-instinct-mi300-devices
+        The implementation of "high" and "medium" precision in AMD Instinct MI300 series
+        devices uses 10 mantissa bits but always rounds down instead of rounding to nearest,
+        reducing accuracy slightly and introducing a downward bias. See :ref:`tf32_on_mi300`.
 
     Args:
         precision(str): can be set to "highest" (default), "high", or "medium" (see above).
