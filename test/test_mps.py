@@ -876,6 +876,137 @@ class TestAvgPool(TestCaseMPS):
         self.assertEqual(bn_mps.cpu(), bn_cpu)
 
 
+class TestFractionalMaxPool(TestCaseMPS):
+    @parametrize("ndim", [2, 3])
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    @parametrize("layout", ["contiguous", "transposed", "sliced", "channels_last", "unbatched", "empty"])
+    @parametrize("single_output", [False, True])
+    def test_fractional_max_pool(self, ndim, dtype, layout, single_output):
+        torch.manual_seed(0)
+        shape = (2, 3) + (9,) * ndim
+        if layout == "unbatched":
+            shape = shape[1:]
+        elif layout == "empty":
+            shape = (0,) + shape[1:]
+        x = torch.randn(shape, dtype=dtype)
+        if layout == "transposed":
+            x = x.transpose(-1, -2)
+        elif layout == "sliced":
+            base = torch.randn((*shape[:-1], 20), dtype=dtype)
+            x = base[..., 1:19:2]
+        elif layout == "channels_last":
+            x = x.contiguous(memory_format=torch.channels_last if ndim == 2 else torch.channels_last_3d)
+        sample_shape = (1, shape[0], ndim) if layout == "unbatched" else (*shape[:2], ndim)
+        # Also exercise noncontiguous samples with a storage offset.
+        sample_base = torch.rand((*sample_shape[:-1], 2 * ndim + 1), dtype=dtype)
+        samples = sample_base[..., 1::2]
+        mps_samples = sample_base.to("mps")[..., 1::2]
+        output_size = (1,) * ndim if single_output else (4,) * ndim
+        op = getattr(F, f"fractional_max_pool{ndim}d")
+        cpu_x = x.detach().requires_grad_()
+        mps_x = base.to("mps")[..., 1:19:2] if layout == "sliced" else x.to("mps")
+        mps_x = mps_x.detach().requires_grad_()
+        kwargs = dict(output_size=output_size, return_indices=True)
+        cpu_out, cpu_idx = op(cpu_x, 3, _random_samples=samples, **kwargs)
+        mps_out, mps_idx = op(mps_x, 3, _random_samples=mps_samples, **kwargs)
+        self.assertEqual(mps_out, cpu_out, atol=0, rtol=0)
+        self.assertEqual(mps_idx, cpu_idx)
+        # Exact integer gradients isolate scatter correctness from low-precision
+        # accumulation order when pooling windows overlap.
+        grad = torch.randint(-2, 3, cpu_out.shape).to(dtype).transpose(-1, -2)
+        cpu_out.backward(grad)
+        mps_out.backward(grad.to("mps"))
+        self.assertEqual(mps_x.grad, cpu_x.grad, atol=0, rtol=0)
+
+    @parametrize("ndim", [2, 3])
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_fractional_max_pool_interval_rounding(self, ndim, dtype):
+        # Nonintegral alpha and samples near a boundary expose intermediate
+        # half/bfloat16 rounding that changes which region is selected.
+        x = torch.arange(37 ** ndim, dtype=torch.float32).reshape((1, 1) + (37,) * ndim).to(dtype)
+        samples = torch.full((1, 1, ndim), 0.99, dtype=dtype)
+        op = getattr(F, f"fractional_max_pool{ndim}d")
+        kwargs = dict(kernel_size=3, output_size=(16,) * ndim, return_indices=True)
+        expected = op(x, _random_samples=samples, **kwargs)
+        actual = op(x.to("mps"), _random_samples=samples.to("mps"), **kwargs)
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+
+    @parametrize("ndim", [2, 3])
+    @parametrize("value", [float("nan"), float("-inf"), 1.0])
+    def test_fractional_max_pool_special_values(self, ndim, value):
+        x = torch.full((1, 2) + (7,) * ndim, value)
+        samples = torch.full((1, 2, ndim), 0.5)
+        op = getattr(F, f"fractional_max_pool{ndim}d")
+        kwargs = dict(kernel_size=3, output_size=3, return_indices=True)
+        self.assertEqual(op(x.to("mps"), _random_samples=samples.to("mps"), **kwargs),
+                         op(x, _random_samples=samples, **kwargs))
+
+    @parametrize("ndim", [2, 3])
+    def test_fractional_max_pool_out(self, ndim):
+        x = torch.randn((2, 3) + (7,) * ndim, device="mps")
+        samples = torch.rand((2, 3, ndim), device="mps")
+        op = getattr(torch.ops.aten, f"fractional_max_pool{ndim}d")
+        backward = getattr(torch.ops.aten, f"fractional_max_pool{ndim}d_backward")
+        kernel, size = (3,) * ndim, (3,) * ndim
+        expected, expected_idx = op(x, kernel, size, samples)
+        out = torch.empty_like(expected).transpose(-1, -2)
+        indices = torch.empty_like(expected_idx).transpose(-1, -2)
+        op.output(x, kernel, size, samples, output=out, indices=indices)
+        self.assertEqual(out, expected)
+        self.assertEqual(indices, expected_idx)
+        grad = torch.randn_like(out).transpose(-1, -2)
+        expected_grad = backward(grad, x, kernel, size, expected_idx)
+        grad_input = torch.empty_like(x).transpose(-1, -2)
+        backward.grad_input(grad, x, kernel, size, indices, grad_input=grad_input)
+        self.assertEqual(grad_input, expected_grad)
+
+    @parametrize("ndim", [2, 3])
+    def test_fractional_max_pool_invalid_samples(self, ndim):
+        x = torch.randn((1, 2) + (7,) * ndim, device="mps")
+        op = getattr(F, f"fractional_max_pool{ndim}d")
+        for samples in (torch.rand(1, 2, ndim + 1, device="mps"),
+                        torch.rand(1, 3, ndim, device="mps"),
+                        torch.rand(1, 2, ndim, device="mps", dtype=torch.float16),
+                        torch.rand(1, 2, ndim)):
+            with self.assertRaises(RuntimeError):
+                op(x, 2, output_size=2, _random_samples=samples)
+
+    @parametrize("ndim", [2, 3])
+    def test_fractional_max_pool_unsupported_dtype(self, ndim):
+        op = getattr(torch.ops.aten, f"fractional_max_pool{ndim}d")
+        for batch, dtype in itertools.product((0, 1), (torch.int32, torch.bool)):
+            x = torch.zeros((batch, 2) + (7,) * ndim, device="mps", dtype=dtype)
+            samples = torch.zeros((batch, 2, ndim), device="mps", dtype=dtype)
+            with self.assertRaisesRegex(NotImplementedError, "supports float32, float16 and bfloat16"):
+                op(x, (2,) * ndim, (2,) * ndim, samples)
+
+    @parametrize("ndim", [2, 3])
+    def test_fractional_max_pool_invalid_backward(self, ndim):
+        x = torch.randn((1, 2) + (7,) * ndim, device="mps")
+        grad = torch.ones((1, 2) + (2,) * ndim, device="mps")
+        indices = torch.zeros_like(grad, dtype=torch.int64)
+        op = getattr(torch.ops.aten, f"fractional_max_pool{ndim}d_backward")
+        for bad_grad, bad_indices in ((grad[0], indices), (grad, indices[0]),
+                                      (grad.half(), indices), (grad, indices.int())):
+            with self.assertRaises(RuntimeError):
+                op(bad_grad, x, (2,) * ndim, (2,) * ndim, bad_indices)
+
+        for invalid_index in (-1, 7 ** ndim):
+            invalid_indices = indices.clone()
+            invalid_indices.flatten()[0] = invalid_index
+            with self.assertRaisesRegex(RuntimeError, "Found an invalid max index"):
+                op(grad, x, (2,) * ndim, (2,) * ndim, invalid_indices)
+
+    @parametrize("ndim", [2, 3])
+    def test_fractional_max_pool_generated_samples(self, ndim):
+        # Exercise the public module's device RNG path as well as explicit samples.
+        x = torch.randn((1, 2) + (7,) * ndim, device="mps", requires_grad=True)
+        out = getattr(nn, f"FractionalMaxPool{ndim}d")(2, output_size=1)(x)
+        self.assertEqual(out.shape, (1, 2) + (1,) * ndim)
+        out.sum().backward()
+        self.assertEqual(x.grad.sum().item(), 2)
+
+
 class TestMPS(TestCaseMPS):
     def ulpAssertAllClose(self, output, reference, n_ulps):
         """
@@ -17696,6 +17827,7 @@ instantiate_parametrized_tests(TestAutocastMPS)
 instantiate_parametrized_tests(MatmulTest)
 instantiate_parametrized_tests(TestBinaryIteratorConformance)
 instantiate_parametrized_tests(TestLogical)
+instantiate_parametrized_tests(TestFractionalMaxPool)
 instantiate_parametrized_tests(TestMPS)
 instantiate_parametrized_tests(TestNNMPS)
 instantiate_parametrized_tests(TestSDPA)
