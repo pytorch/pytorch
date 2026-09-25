@@ -75,9 +75,14 @@ bool is_nvshmem_available() {
 }
 
 std::pair<int64_t, int64_t> nvshmem_signal_op_values() {
+#ifdef __HIP_PLATFORM_AMD__
+  // rocSHMEM uses its own signal-op enum values.
+  return {0, 1};
+#else
   return {
       static_cast<int64_t>(NVSHMEM_SIGNAL_SET),
       static_cast<int64_t>(NVSHMEM_SIGNAL_ADD)};
+#endif
 }
 
 // Initializes the device state in CUmodule so that it’s able to perform NVSHMEM
