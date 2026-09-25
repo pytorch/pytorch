@@ -15,6 +15,7 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import ReinplaceCounters, ReInplaceTrigger
 from torch._guards import detect_fake_mode
 from torch._higher_order_ops.triton_kernel_wrap import (
+    _get_tensor_alias_groups,
     kernel_side_table,
     triton_kernel_wrapper_functional,
 )
@@ -753,10 +754,25 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
     replace_dict: dict[torch.fx.Node, torch.fx.Node] = {}
 
     def reinplace_and_refine_tensors_to_clone(
-        old_tensors_to_clone, kwargs, node_name, trigger
+        old_tensors_to_clone, kwargs, node_name, trigger, tensor_alias_groups=None
     ):
         tensors_to_clone: list[str] = []
         storage_of_reinplaced_args = OrderedSet[int | None]()
+
+        alias_groups: dict[str, tuple[str, ...]] = {}
+        if trigger == ReInplaceTrigger.TRITON_OPS:
+            if tensor_alias_groups is None:
+                # Legacy graphs only reveal current FX node identity, which may
+                # differ from original tensor identity after graph rewrites.
+                tensor_alias_groups = _get_tensor_alias_groups(
+                    kwargs, old_tensors_to_clone
+                )
+            for group in tensor_alias_groups:
+                for arg in group:
+                    alias_groups[arg] = group
+
+        reinplaced_groups: OrderedSet[tuple[str, ...]] = OrderedSet()
+        cloned_groups: OrderedSet[tuple[str, ...]] = OrderedSet()
 
         # Those used to count possibly_missed_reinplacing_opportunities
         missed_nodes = []
@@ -776,7 +792,8 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
 
             mutated_arg = kwargs[arg]
 
-            # Let's say we have:
+            # For auto-functionalization or originally distinct Triton groups,
+            # let's say we have:
             # - op(x, y) that mutates both x and y
             # - new_x, new_y = functional_op(x, y) is the functional variant
             # If we are presented with functional_op(x, x), we must not reinplace
@@ -786,10 +803,20 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             # >>> op(x, y)
             # This also applies if we have views: functional_op(x, x[0])
             # should not reinplace into op(x, x[0]).
-            should_attempt_reinplace = not tensor_with_same_storage_already_reinplaced(
-                mutated_arg
+            # Triton arguments in the same original identity group must be
+            # reinplaced together so their pointers remain identical.
+            group = alias_groups.get(arg, (arg,))
+            should_attempt_reinplace = (
+                group not in cloned_groups
+                and not tensor_with_same_storage_already_reinplaced(mutated_arg)
             )
-            if should_attempt_reinplace and can_inplace(node, mutated_arg):
+            can_reinplace_group = group in reinplaced_groups or (
+                should_attempt_reinplace
+                and all(kwargs[name] is mutated_arg for name in group)
+                and can_inplace(node, mutated_arg)
+            )
+            if can_reinplace_group:
+                reinplaced_groups.add(group)
                 # In general, we probably do not need those optimizations.
                 copy_node = copy_node_for_reinplaced_arg(node, mutated_arg)
                 if copy_node is not None:
@@ -809,6 +836,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 else:
                     storage_of_reinplaced_args.add(get_node_storage(mutated_arg))
             else:
+                cloned_groups.add(group)
                 if should_attempt_reinplace:
                     missed_args.append(arg)
                     missed_nodes.append(mutated_arg)
@@ -1036,10 +1064,18 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 node.kwargs["kwargs"],
                 kernel_name,
                 ReInplaceTrigger.TRITON_OPS,
+                node.kwargs.get("tensor_alias_groups"),
             )
 
             kwargs = dict(node.kwargs)
             kwargs["tensors_to_clone"] = tensors_to_clone
+            if "tensor_alias_groups" in kwargs:
+                cloned = OrderedSet(tensors_to_clone)
+                kwargs["tensor_alias_groups"] = tuple(
+                    remaining
+                    for group in kwargs["tensor_alias_groups"]
+                    if (remaining := tuple(arg for arg in group if arg in cloned))
+                )
             node.kwargs = immutable_dict(kwargs)
             if "eager_input_vals" in node.meta:
                 # We changed the kwargs, so we need to update eager_input_vals
@@ -1047,6 +1083,10 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 args, kwargs = node.meta["eager_input_vals"]
                 new_kwargs = {**kwargs}
                 new_kwargs["tensors_to_clone"] = immutable_list(tensors_to_clone)
+                if "tensor_alias_groups" in new_kwargs:
+                    new_kwargs["tensor_alias_groups"] = node.kwargs[
+                        "tensor_alias_groups"
+                    ]
                 new_kwargs = immutable_dict(new_kwargs)
                 node.meta["eager_input_vals"] = (args, new_kwargs)
         elif (inplaceable_op := inplaceable_foreach_ops.get(node.target)) is not None:

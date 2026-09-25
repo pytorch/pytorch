@@ -6,6 +6,7 @@ import contextlib
 import functools
 import logging
 import os
+import re
 import subprocess
 import sys
 import unittest
@@ -36,7 +37,10 @@ from torch._inductor.utils import (
 from torch._library import capture_triton
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_device_type import largeTensorTest
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    largeTensorTest,
+)
 from torch.testing._internal.common_utils import parametrize, skipIfWindows, skipIfXpu
 from torch.testing._internal.inductor_utils import (
     get_func_call,
@@ -149,6 +153,21 @@ if HAS_GPU:
         y = tl.load(in_ptr1 + offsets, mask=mask)
         output = x + y
         tl.store(out_ptr + offsets, output, mask=mask)
+
+    @triton.jit
+    def _write_through_aliases(out_ptr0, out_ptr1, BLOCK: "tl.constexpr"):
+        offsets = tl.arange(0, BLOCK)
+        tl.store(out_ptr0 + offsets, 1.0)
+        tl.store(out_ptr1 + offsets, tl.load(out_ptr1 + offsets) + 2.0)
+
+    @triton.jit
+    def _write_through_aliases_with_other(
+        other_ptr, out_ptr0, out_ptr1, BLOCK: "tl.constexpr"
+    ):
+        offsets = tl.arange(0, BLOCK)
+        tl.store(other_ptr + offsets, 1.0)
+        tl.store(out_ptr0 + offsets, 2.0)
+        tl.store(out_ptr1 + offsets, 3.0)
 
     @triton.jit
     def _add_kernel_with_interleaved_tma_args(
@@ -500,6 +519,141 @@ class KernelTests(torch._inductor.test_case.TestCase):
         # Make sure it is NOT modified
         self.assertEqual(output, torch.zeros_like(t1))
 
+    def test_triton_functional_symbolic_trace(self):
+        from torch._functorch._aot_autograd.aot_autograd_result import (
+            SerializedGraphModule,
+        )
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        def f(x, y):
+            out = triton_kernel_wrapper_functional(
+                kernel_idx=0,
+                constant_args_idx=0,
+                grid=[(1,)],
+                tma_descriptor_metadata={},
+                kwargs={"out0": x, "out1": y},
+                tensors_to_clone=["out0", "out1"],
+            )
+            return out["out0"], out["out1"]
+
+        gm = torch.fx.symbolic_trace(f)
+        restored = SerializedGraphModule(gm).deserialize()
+
+        hop_nodes = [
+            node
+            for node in restored.graph.nodes
+            if node.target is triton_kernel_wrapper_functional
+        ]
+        self.assertEqual(len(hop_nodes), 1)
+        self.assertNotIn("tensor_alias_groups", hop_nodes[0].kwargs)
+        with FakeTensorMode():
+            x = torch.zeros(4)
+            y = torch.zeros(4)
+
+            distinct = restored(x, y)
+            self.assertEqual(distinct[0].size(), x.size())
+            self.assertEqual(distinct[1].size(), y.size())
+            self.assertIsNot(distinct[0], distinct[1])
+
+            repeated = restored(x, x)
+            self.assertEqual(repeated[0].size(), x.size())
+            self.assertEqual(repeated[1].size(), x.size())
+            self.assertIs(repeated[0], repeated[1])
+
+        def f_with_symbolic_names(x, names):
+            return triton_kernel_wrapper_functional(
+                kernel_idx=0,
+                constant_args_idx=0,
+                grid=[(1,)],
+                tma_descriptor_metadata={},
+                kwargs={"out": x},
+                tensors_to_clone=names,
+            )["out"]
+
+        def f_with_symbolic_name(x, name):
+            return triton_kernel_wrapper_functional(
+                kernel_idx=0,
+                constant_args_idx=0,
+                grid=[(1,)],
+                tma_descriptor_metadata={},
+                kwargs={"out": x},
+                tensors_to_clone=[name],
+            )["out"]
+
+        def f_with_symbolic_kwargs(kwargs):
+            return triton_kernel_wrapper_functional(
+                kernel_idx=0,
+                constant_args_idx=0,
+                grid=[(1,)],
+                tma_descriptor_metadata={},
+                kwargs=kwargs,
+                tensors_to_clone=["out"],
+            )["out"]
+
+        symbolic_names = torch.fx.symbolic_trace(f_with_symbolic_names)
+        restored_symbolic_names = SerializedGraphModule(symbolic_names).deserialize()
+        symbolic_name = torch.fx.symbolic_trace(f_with_symbolic_name)
+        restored_symbolic_name = SerializedGraphModule(symbolic_name).deserialize()
+        symbolic_kwargs = torch.fx.symbolic_trace(f_with_symbolic_kwargs)
+        restored_symbolic_kwargs = SerializedGraphModule(symbolic_kwargs).deserialize()
+        with FakeTensorMode():
+            x = torch.zeros(4)
+            results = (
+                restored_symbolic_names(x, ["out"]),
+                restored_symbolic_name(x, "out"),
+                restored_symbolic_kwargs({"out": x}),
+            )
+            for result in results:
+                self.assertEqual(result.size(), x.size())
+                self.assertIsNot(result, x)
+
+    def test_triton_functional_decompose_without_alias_groups(self):
+        from torch._inductor.fx_passes.post_grad import (
+            decompose_triton_kernel_wrapper_functional,
+        )
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def f(x):
+            return triton_kernel_wrapper_functional(
+                kernel_idx=0,
+                constant_args_idx=0,
+                grid=[(1,)],
+                tma_descriptor_metadata={},
+                kwargs={"out": x},
+                tensors_to_clone=["out"],
+            )["out"]
+
+        gm = make_fx(f, tracing_mode="fake")(torch.zeros(4))
+        for node in gm.graph.nodes:
+            if node.target is triton_kernel_wrapper_functional:
+                # Reproduce the graph form predating tensor_alias_groups.
+                kwargs = dict(node.kwargs)
+                kwargs.pop("tensor_alias_groups", None)
+                node.kwargs = kwargs
+        gm.recompile()
+
+        decompose_triton_kernel_wrapper_functional(gm.graph)
+        gm.recompile()
+
+        self.assertFalse(
+            any(
+                node.target is triton_kernel_wrapper_functional
+                for node in gm.graph.nodes
+            )
+        )
+        self.assertEqual(
+            sum(
+                node.target is triton_kernel_wrapper_mutation for node in gm.graph.nodes
+            ),
+            1,
+        )
+        with FakeTensorMode():
+            x = torch.zeros(4)
+            result = gm(x)
+            self.assertEqual(result.size(), x.size())
+            self.assertIsNot(result, x)
+
     @requires_gpu
     def test_triton_kernel_functionalize(self):
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
@@ -548,7 +702,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
             gm.code.strip(),
             """\
 def forward(self, x_1, output_1):
-    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 3, grid = [(5,)], tma_descriptor_metadata = {}, kwargs = {'in_ptr0': x_1, 'out_ptr': output_1}, tensors_to_clone = ['in_ptr0', 'out_ptr']);  x_1 = output_1 = None
+    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 3, grid = [(5,)], tma_descriptor_metadata = {}, kwargs = {'in_ptr0': x_1, 'out_ptr': output_1}, tensors_to_clone = ['in_ptr0', 'out_ptr'], tensor_alias_groups = (('in_ptr0',), ('out_ptr',)));  x_1 = output_1 = None
     getitem = triton_kernel_wrapper_functional_proxy['in_ptr0'];  getitem = None
     getitem_1 = triton_kernel_wrapper_functional_proxy['out_ptr'];  triton_kernel_wrapper_functional_proxy = None
     return getitem_1""",
@@ -701,9 +855,19 @@ def forward(self, x_1, output_1):
 
             output_code = log_stream.getvalue()
 
-        FileCheck().check("del buf3").check(
-            "dual_output_kernel_with_inline_asm_0.run(x_1, buf0,"
-        ).run(output_code)
+        # Clones must read the final output buffer before any in-place write to it.
+        inplace_calls = list(
+            re.finditer(
+                r"dual_output_kernel_with_inline_asm_\d+\.run\(x_1, (buf\d+), \1,",
+                output_code,
+            )
+        )
+        self.assertGreater(len(inplace_calls), 0)
+        buffer = inplace_calls[-1].group(1)
+        first_write = next(call for call in inplace_calls if call.group(1) == buffer)
+        clone_calls = list(re.finditer(rf"\w*clone\w*\.run\({buffer},", output_code))
+        self.assertGreater(len(clone_calls), 0)
+        self.assertLess(clone_calls[-1].start(), first_write.start())
 
         eager_result = f(t.clone())[0]
         self.assertEqual(eager_result, compiled_result)
@@ -2632,7 +2796,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     add_2 = arg0_1 + 256;  arg0_1 = None
     sub_1 = add_2 - 1;  add_2 = None
     floordiv = sub_1 // 256;  sub_1 = None
-    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(floordiv, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('stable', ([256],)), 'in_desc_ptr1': ('stable', ([256],)), 'out_desc_ptr': ('stable', ([256],))}, kwargs = {'in_desc_ptr0': arg1_1, 'in_desc_ptr1': arg2_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr']);  floordiv = arg1_1 = arg2_1 = zeros_like = None
+    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(floordiv, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('stable', ([256],)), 'in_desc_ptr1': ('stable', ([256],)), 'out_desc_ptr': ('stable', ([256],))}, kwargs = {'in_desc_ptr0': arg1_1, 'in_desc_ptr1': arg2_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr'], tensor_alias_groups = (('out_desc_ptr',),));  floordiv = arg1_1 = arg2_1 = zeros_like = None
     getitem = triton_kernel_wrapper_functional_proxy['out_desc_ptr'];  triton_kernel_wrapper_functional_proxy = None
     return (getitem,)""",
                 )
@@ -2645,7 +2809,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     add_2 = arg0_1 + 256
     sub_1 = add_2 - 1;  add_2 = None
     floordiv = sub_1 // 256;  sub_1 = None
-    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(floordiv, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('experimental', ([arg0_1], [256], 4)), 'in_desc_ptr1': ('experimental', ([arg0_1], [256], 4)), 'out_desc_ptr': ('experimental', ([arg0_1], [256], 4))}, kwargs = {'in_desc_ptr0': arg1_1, 'in_desc_ptr1': arg2_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr']);  floordiv = arg0_1 = arg1_1 = arg2_1 = zeros_like = None
+    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(floordiv, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('experimental', ([arg0_1], [256], 4)), 'in_desc_ptr1': ('experimental', ([arg0_1], [256], 4)), 'out_desc_ptr': ('experimental', ([arg0_1], [256], 4))}, kwargs = {'in_desc_ptr0': arg1_1, 'in_desc_ptr1': arg2_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr'], tensor_alias_groups = (('out_desc_ptr',),));  floordiv = arg0_1 = arg1_1 = arg2_1 = zeros_like = None
     getitem = triton_kernel_wrapper_functional_proxy['out_desc_ptr'];  triton_kernel_wrapper_functional_proxy = None
     return (getitem,)""",
                 )
@@ -2656,7 +2820,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                     """\
 def forward(self, arg0_1, arg1_1):
     zeros_like = torch.ops.aten.zeros_like.default(arg0_1, pin_memory = False)
-    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(2, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('stable', ([256],)), 'in_desc_ptr1': ('stable', ([256],)), 'out_desc_ptr': ('stable', ([256],))}, kwargs = {'in_desc_ptr0': arg0_1, 'in_desc_ptr1': arg1_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr']);  arg0_1 = arg1_1 = zeros_like = None
+    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(2, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('stable', ([256],)), 'in_desc_ptr1': ('stable', ([256],)), 'out_desc_ptr': ('stable', ([256],))}, kwargs = {'in_desc_ptr0': arg0_1, 'in_desc_ptr1': arg1_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr'], tensor_alias_groups = (('out_desc_ptr',),));  arg0_1 = arg1_1 = zeros_like = None
     getitem = triton_kernel_wrapper_functional_proxy['out_desc_ptr'];  triton_kernel_wrapper_functional_proxy = None
     return (getitem,)""",
                 )
@@ -2666,7 +2830,7 @@ def forward(self, arg0_1, arg1_1):
                     """\
 def forward(self, arg0_1, arg1_1):
     zeros_like = torch.ops.aten.zeros_like.default(arg0_1, pin_memory = False)
-    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(2, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('experimental', ([301], [256], 4)), 'in_desc_ptr1': ('experimental', ([301], [256], 4)), 'out_desc_ptr': ('experimental', ([301], [256], 4))}, kwargs = {'in_desc_ptr0': arg0_1, 'in_desc_ptr1': arg1_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr']);  arg0_1 = arg1_1 = zeros_like = None
+    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(2, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('experimental', ([301], [256], 4)), 'in_desc_ptr1': ('experimental', ([301], [256], 4)), 'out_desc_ptr': ('experimental', ([301], [256], 4))}, kwargs = {'in_desc_ptr0': arg0_1, 'in_desc_ptr1': arg1_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr'], tensor_alias_groups = (('out_desc_ptr',),));  arg0_1 = arg1_1 = zeros_like = None
     getitem = triton_kernel_wrapper_functional_proxy['out_desc_ptr'];  triton_kernel_wrapper_functional_proxy = None
     return (getitem,)""",
                 )
@@ -3903,6 +4067,187 @@ def forward(self, arg0_1, arg1_1):
         self.assertIn("stride", ttir_str)
         self.assertNotIn("BLOCK_SIZE", ttir_str)
         self.assertNotIn("maybe_param", ttir_str)
+
+
+@requires_gpu
+class TritonAliasTests(torch._inductor.test_case.TestCase):
+    def test_functional_repeated_alias(self, device):
+        from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
+
+        x = torch.zeros(16, device=device)
+        out = triton_kernel_wrapper_functional(
+            kernel_idx=kernel_side_table.add_kernel(_write_through_aliases),
+            constant_args_idx=kernel_side_table.add_constant_args({"BLOCK": x.numel()}),
+            grid=[lambda meta: (1,)],
+            tma_descriptor_metadata={},
+            kwargs={"out_ptr0": x, "out_ptr1": x},
+            tensors_to_clone=["out_ptr0", "out_ptr1"],
+        )
+
+        self.assertIs(out["out_ptr0"], out["out_ptr1"])
+        self.assertEqual(out["out_ptr0"], torch.full_like(x, 3.0))
+        self.assertEqual(x, torch.zeros_like(x))
+
+    def test_functional_repeated_alias_fake_tensor(self, device):
+        from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        with FakeTensorMode():
+            x = torch.zeros(16, device=device)
+            out = triton_kernel_wrapper_functional(
+                kernel_idx=kernel_side_table.add_kernel(_write_through_aliases),
+                constant_args_idx=kernel_side_table.add_constant_args(
+                    {"BLOCK": x.numel()}
+                ),
+                grid=[lambda meta: (1,)],
+                tma_descriptor_metadata={},
+                kwargs={"out_ptr0": x, "out_ptr1": x},
+                tensors_to_clone=["out_ptr0", "out_ptr1"],
+            )
+
+            self.assertIs(out["out_ptr0"], out["out_ptr1"])
+
+    def test_functional_repeated_alias_functionalize(self, device):
+        from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
+
+        def f(x):
+            out = triton_kernel_wrapper_functional(
+                kernel_idx=kernel_side_table.add_kernel(_write_through_aliases),
+                constant_args_idx=kernel_side_table.add_constant_args(
+                    {"BLOCK": x.numel()}
+                ),
+                grid=[lambda meta: (1,)],
+                tma_descriptor_metadata={},
+                kwargs={"out_ptr0": x, "out_ptr1": x},
+                tensors_to_clone=["out_ptr0", "out_ptr1"],
+            )
+            out["out_ptr0"].add_(10)
+            return out["out_ptr1"]
+
+        x = torch.zeros(16, device=device)
+        expected = torch.full_like(x, 13.0)
+        self.assertEqual(f(x), expected)
+        self.assertEqual(torch.func.functionalize(f)(x), expected)
+
+    def test_repeated_alias_compile(self, device):
+        def f(x):
+            y = x.sin()
+            _write_through_aliases[(1,)](y, y, BLOCK=y.numel())
+            return y
+
+        x = torch.zeros(16, device=device)
+        self.assertEqual(torch.compile(f, fullgraph=True)(x), f(x))
+
+    def test_repeated_alias_reinplace(self, device):
+        from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
+        from torch._inductor.fx_passes.reinplace import reinplace_inplaceable_ops_core
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def f(x):
+            y = x.sin()
+            out = triton_kernel_wrapper_functional(
+                kernel_idx=kernel_side_table.add_kernel(_write_through_aliases),
+                constant_args_idx=kernel_side_table.add_constant_args(
+                    {"BLOCK": y.numel()}
+                ),
+                grid=[(1,)],
+                tma_descriptor_metadata={},
+                kwargs={"out_ptr0": y, "out_ptr1": y},
+                tensors_to_clone=["out_ptr0", "out_ptr1"],
+            )
+            return out["out_ptr0"], out["out_ptr1"]
+
+        gm = make_fx(f, tracing_mode="fake")(torch.zeros(16, device=device))
+        hop = next(
+            node
+            for node in gm.graph.nodes
+            if node.target is triton_kernel_wrapper_functional
+        )
+        self.assertEqual(hop.kwargs["tensor_alias_groups"], (("out_ptr0", "out_ptr1"),))
+
+        reinplace_inplaceable_ops_core(gm.graph)
+        gm.graph.lint()
+        self.assertEqual(hop.kwargs["tensors_to_clone"], [])
+        self.assertEqual(hop.kwargs["tensor_alias_groups"], ())
+
+    @parametrize("blocked_by", ("live_value", "shared_storage"))
+    def test_repeated_alias_reinplace_blocked(self, device, blocked_by):
+        from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
+        from torch._inductor.fx_passes.post_grad import (
+            decompose_triton_kernel_wrapper_functional,
+        )
+        from torch._inductor.fx_passes.reinplace import reinplace_inplaceable_ops_core
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def f(x):
+            y = x.sin()
+            kwargs = {"out_ptr0": y, "out_ptr1": y}
+            kernel = _write_through_aliases
+            if blocked_by == "shared_storage":
+                kwargs = {"other_ptr": y.view_as(y), **kwargs}
+                kernel = _write_through_aliases_with_other
+            out = triton_kernel_wrapper_functional(
+                kernel_idx=kernel_side_table.add_kernel(kernel),
+                constant_args_idx=kernel_side_table.add_constant_args(
+                    {"BLOCK": y.numel()}
+                ),
+                grid=[(1,)],
+                tma_descriptor_metadata={},
+                kwargs=kwargs,
+                tensors_to_clone=list(kwargs),
+            )
+            if blocked_by == "live_value":
+                return out["out_ptr0"], y
+            return out["out_ptr0"], out["out_ptr1"]
+
+        gm = make_fx(f, tracing_mode="fake")(torch.zeros(16, device=device))
+        hop = next(
+            node
+            for node in gm.graph.nodes
+            if node.target is triton_kernel_wrapper_functional
+        )
+        self.assertIn(("out_ptr0", "out_ptr1"), hop.kwargs["tensor_alias_groups"])
+
+        reinplace_inplaceable_ops_core(gm.graph)
+        gm.graph.lint()
+        self.assertEqual(hop.kwargs["tensors_to_clone"], ["out_ptr0", "out_ptr1"])
+        self.assertEqual(hop.kwargs["tensor_alias_groups"], (("out_ptr0", "out_ptr1"),))
+
+        decompose_triton_kernel_wrapper_functional(gm.graph)
+        gm.graph.lint()
+        clone_nodes = [
+            node
+            for node in gm.graph.nodes
+            if node.target is torch.ops.aten.clone.default
+        ]
+        self.assertEqual(len(clone_nodes), 1)
+        mutation = next(
+            node
+            for node in gm.graph.nodes
+            if node.target is triton_kernel_wrapper_mutation
+        )
+        cloned_arg = mutation.kwargs["kwargs"]["out_ptr0"]
+        self.assertIs(cloned_arg, mutation.kwargs["kwargs"]["out_ptr1"])
+        # clone_preserve_strides returns an as_strided view of the clone.
+        while cloned_arg.target is torch.ops.aten.as_strided.default:
+            cloned_arg = cloned_arg.args[0]
+        self.assertIs(cloned_arg, clone_nodes[0])
+
+    @parametrize("op", ("clone", "add", "clone_view"))
+    def test_distinct_arguments_compile(self, device, op):
+        def f(x):
+            y = x.sin()
+            if op == "clone":
+                z = y.clone()
+            elif op == "add":
+                z = y + 0
+            else:
+                z = y.clone().view_as(y)
+            _write_through_aliases[(1,)](y, z, BLOCK=y.numel())
+            return y, z
+
+        x = torch.zeros(16, device=device)
+        self.assertEqual(torch.compile(f, fullgraph=True)(x), f(x))
 
 
 def make_mutation_test(fn):
@@ -7162,6 +7507,9 @@ if HAS_CUDA_AND_TRITON:
         custom_store(out_ptr + offs, x + y, mask=mask)
 
 
+instantiate_device_type_tests(
+    TritonAliasTests, globals(), only_for=GPU_TYPE, allow_xpu=True
+)
 common_utils.instantiate_parametrized_tests(KernelTests)
 common_utils.instantiate_parametrized_tests(CustomOpTests)
 common_utils.instantiate_parametrized_tests(TestUserKernelEpilogueFusion)
