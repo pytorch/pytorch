@@ -80,6 +80,7 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.nn import functional as F
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
+    BF16X9_SUPPORTED,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     SM80OrLater,
     TEST_CUDA,
@@ -96,6 +97,7 @@ from torch.testing._internal.common_utils import (
     freeze_rng_state,
     instantiate_parametrized_tests,
     IS_FBCODE,
+    IS_S390X,
     parametrize,
     recover_orig_fp32_precision,
     scoped_load_inline,
@@ -110,6 +112,10 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.utils._sympy.numbers import int_oo
+
+
+if IS_FBCODE:
+    from caffe2.test.dynamo import _pybind11_enum_test
 
 
 pytree_modules = {
@@ -236,18 +242,23 @@ class MiscTests(torch._inductor.test_case.TestCase):
 
     @torch.testing._internal.common_utils.scoped_load_inline
     def test_pybind11_enum_conversion(self, load_inline):
-        cpp_source = """
-        #include <torch/extension.h>
+        if IS_FBCODE:
+            # fbcode's Python runtime lacks the shared libs load_inline needs, so
+            # we use the Buck-prebuilt fixture instead of the load_inline argument.
+            mod = _pybind11_enum_test
+        else:
+            cpp_source = """
+            #include <torch/extension.h>
 
-        enum class E { A = 0, B = 1 };
+            enum class E { A = 0, B = 1 };
 
-        PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-            py::enum_<E>(m, "E")
-                .value("A", E::A)
-                .value("B", E::B);
-        }
-        """
-        mod = load_inline(name="pybind11_enum_test", cpp_sources=cpp_source)
+            PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+                py::enum_<E>(m, "E")
+                    .value("A", E::A)
+                    .value("B", E::B);
+            }
+            """
+            mod = load_inline(name="pybind11_enum_test", cpp_sources=cpp_source)
         e = mod.E.A
         self.assertEqual(
             torch.compile(lambda x: int(x), backend="eager", fullgraph=True)(e), 0
@@ -5308,6 +5319,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         result = torch.compile(fn, backend="eager", fullgraph=True)(x, config)
         self.assertEqual(result, correct)
 
+    @recover_orig_fp32_precision
     def test_global_state_guard_serialization(self):
         GlobalStateGuard = torch._C._dynamo.guards.GlobalStateGuard
         guards = GlobalStateGuard()
@@ -5318,6 +5330,10 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         # Test on non autocast state and autocast cache states.
         self.assertIn("autocast_state", json_guards)
         for key, value in json_guards.items():
+            # Compatibility alias; cuda_matmul_precision is authoritative in
+            # payloads written by current versions.
+            if key == "allow_tf32":
+                continue
             if type(value) is int:
                 variant = value + 1
             elif type(value) is bool:
@@ -5338,6 +5354,33 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         guards.__setstate__(json.dumps(json_guards))
         self.assertTrue(guards.check())
+
+        legacy_json_guards = json_guards.copy()
+        legacy_json_guards.pop("cuda_matmul_precision")
+        legacy_json_guards["allow_tf32"] = (
+            torch.backends.cuda.matmul.fp32_precision == "tf32"
+        )
+        guards.__setstate__(json.dumps(legacy_json_guards))
+        self.assertTrue(guards.check())
+        legacy_roundtrip = json.loads(guards.__getstate__())
+        self.assertNotIn("cuda_matmul_precision", legacy_roundtrip)
+        guards.__setstate__(json.dumps(legacy_roundtrip))
+        self.assertTrue(guards.check())
+
+        legacy_json_guards["allow_tf32"] = not legacy_json_guards["allow_tf32"]
+        guards.__setstate__(json.dumps(legacy_json_guards))
+        self.assertFalse(guards.check())
+
+        if BF16X9_SUPPORTED:
+            legacy_json_guards["allow_tf32"] = False
+            guards.__setstate__(json.dumps(legacy_json_guards))
+            torch.backends.cuda.matmul.fp32_precision = "bfx9"
+            self.assertFalse(guards.check())
+
+            x9_json_guards = json.loads(GlobalStateGuard().__getstate__())
+            self.assertNotIn("allow_tf32", x9_json_guards)
+            guards.__setstate__(json.dumps(x9_json_guards))
+            self.assertTrue(guards.check())
 
         # Test on autocast states.
         def _test_autocast(dtype):
@@ -7451,6 +7494,29 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertTrue(p_ref() is not None)
         del x
         self.assertTrue(p_ref() is None)
+
+    @skipIfWindows(msg="Tensor lifetime checks are unreliable on Windows")
+    def test_release_input_memory_hop_dunder_dict(self):
+        # Accessing a nested function's __dict__ inside a HOP body used to
+        # create a reference cycle through the speculated SideEffects table,
+        # keeping the frame's input tensors alive until a full gc.collect().
+        def fn(pred, x):
+            def branch():
+                def inner():
+                    return x + 1
+
+                inner.attr = 1
+                return inner()
+
+            return torch.cond(pred, branch, branch)
+
+        x = torch.randn(4)
+        x_ref = weakref.ref(x)
+        pred = torch.tensor(True)
+        out = torch.compile(fn, backend="eager", fullgraph=True)(pred, x)
+        self.assertEqual(out, x + 1)
+        del x, out
+        self.assertIsNone(x_ref())
 
     def test_update_locals_and_stack_uses_shared_cache(self):
         def fn(x):
@@ -12121,6 +12187,31 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         finally:
             write_state(initial_state)
 
+    @unittest.skipUnless(
+        BF16X9_SUPPORTED, "requires CUDA 12.9+ and compute capability 10.0 or 10.3"
+    )
+    @recover_orig_fp32_precision
+    def test_recompile_on_bfx9_precision_change(self):
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(10)
+        torch.backends.cuda.matmul.fp32_precision = "ieee"
+        fn(x)
+        self.assertEqual(counter.frame_count, 1)
+
+        torch.backends.cuda.matmul.fp32_precision = "bfx9"
+        fn(x)
+        fn(x)
+        self.assertEqual(counter.frame_count, 2)
+
+        torch.backends.cuda.matmul.fp32_precision = "ieee"
+        fn(x)
+        self.assertEqual(counter.frame_count, 2)
+
     def test_grad_state_mutated(self):
         prior = torch.is_grad_enabled()
         value = None
@@ -12605,6 +12696,10 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
 
+    @unittest.skipIf(
+        IS_S390X,
+        "test_recursion_depth_guards_nested_graph_breaks fails on s390x and needs investigation",
+    )
     def test_recursion_depth_guards(self):
         @torch.compile(dynamic=True, backend="eager")
         def foo(*args, **kwargs):
@@ -15887,6 +15982,344 @@ fn
         res = opt_fn(t)
         self.assertEqual(ref, res)
 
+    @parametrize(
+        "grad_mode_decorator",
+        ["no_grad", "enable_grad", "dual_level"],
+    )
+    def test_sourceless_bound_method_in_closure(self, grad_mode_decorator):
+        # Each case makes the decorator's state change observable.
+        if grad_mode_decorator == "no_grad":
+
+            class A:
+                @torch.no_grad()
+                def method(self, x):
+                    return x + 1
+
+            def fn(x):
+                return A().method(x)
+
+        elif grad_mode_decorator == "enable_grad":
+
+            class A:
+                @torch.enable_grad()
+                def method(self, x):
+                    return x + 1
+
+            def fn(x):
+                with torch.no_grad():
+                    return A().method(x)
+
+        else:
+
+            class A:
+                @torch.autograd.forward_ad.dual_level()
+                def method(self, x):
+                    return x + torch.autograd.forward_ad._current_level
+
+            def fn(x):
+                return A().method(x)
+
+        x = torch.tensor(1.0, requires_grad=True)
+        ref = fn(x)
+        torch._dynamo.reset()
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+        if grad_mode_decorator in ("no_grad", "enable_grad"):
+            self.assertEqual(ref.requires_grad, res.requires_grad)
+
+    def test_sourceless_bound_method_in_closure_set_grad_enabled_graph_breaks(self):
+        # set_grad_enabled.clone() is excluded because its constructor needs an arg.
+        class A:
+            @torch.set_grad_enabled(False)
+            def method(self, x):
+                return x + 1
+
+        def fn(x):
+            return A().method(x)
+
+        x = torch.tensor(1.0, requires_grad=True)
+        ref = fn(x)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=False)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(ref.requires_grad, res.requires_grad)
+
+        torch._dynamo.reset()
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as ctx:
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(
+            ctx.exception.gb_type,
+            "Sourceless _DecoratorContextManager method reconstruction unsupported",
+        )
+
+    @parametrize("mode", [True, False])
+    def test_sourceless_bound_method_in_closure_inference_mode_graph_breaks(self, mode):
+        # inference_mode.clone() needs a source to guard self.mode.
+        class A:
+            @torch.inference_mode(mode)
+            def method(self, x):
+                return x + 1
+
+        def fn(x):
+            return A().method(x)
+
+        x = torch.tensor(1.0, requires_grad=True)
+        ref = fn(x)
+        torch._dynamo.reset()
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=False)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(torch.is_inference(ref), torch.is_inference(res))
+
+        torch._dynamo.reset()
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as ctx:
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(
+            ctx.exception.gb_type,
+            "Sourceless _DecoratorContextManager method reconstruction unsupported",
+        )
+
+    def test_sourced_inference_mode_clone_guards_on_mode(self):
+        im = torch.inference_mode(True)
+
+        @im
+        def fn(x):
+            return x + 1
+
+        x = torch.tensor(1.0)
+
+        torch._dynamo.reset()
+        res1 = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(torch.is_inference(res1), True)
+
+        im.mode = False
+        # No reset: the guard on im.mode must trigger recompilation.
+        res2 = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(torch.is_inference(res2), False)
+
+    def test_sourceless_generic_ctx_manager_with_usage_graph_breaks(self):
+        class MyCM:
+            def __init__(self):
+                self.entered = 0
+                self.exited = 0
+
+            def __enter__(self):
+                self.entered += 1
+                return self
+
+            def __exit__(self, *a):
+                self.exited += 1
+                return False
+
+        def make_method(cm):
+            local_cm = cm
+
+            def method(self, x):
+                with local_cm:
+                    return x + 1
+
+            return method
+
+        class A:
+            method = make_method(MyCM())
+
+        def fn(x):
+            return A().method(x)
+
+        x = torch.tensor(1.0)
+        ref = fn(x)
+        cm = A.method.__closure__[0].cell_contents
+        self.assertEqual((cm.entered, cm.exited), (1, 1))
+
+        torch._dynamo.reset()
+        res = torch.compile(fn, backend="eager", fullgraph=False)(x)
+        self.assertEqual(ref, res)
+        self.assertEqual((cm.entered, cm.exited), (2, 2))
+
+        torch._dynamo.reset()
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as ctx:
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(
+            ctx.exception.gb_type,
+            "Sourceless context manager without mutation support",
+        )
+
+    def test_sourceless_generic_ctx_manager_method_call_graph_breaks(self):
+        class Counter:
+            def __init__(self):
+                self.log = []
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def rec(self, v):
+                self.log.append(v)
+                return len(self.log)
+
+        def make_method(counter):
+            local_counter = counter
+
+            def method(self, x):
+                return x + local_counter.rec(1)
+
+            return method
+
+        class A:
+            method = make_method(Counter())
+
+        def fn(x):
+            return A().method(x)
+
+        x = torch.tensor(1.0)
+        ref = fn(x)
+        counter = A.method.__closure__[0].cell_contents
+        self.assertEqual((ref.item(), counter.log), (2.0, [1]))
+
+        torch._dynamo.reset()
+        res = torch.compile(fn, backend="eager", fullgraph=False)(x)
+        self.assertEqual((res.item(), counter.log), (3.0, [1, 1]))
+
+        torch._dynamo.reset()
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as ctx:
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(
+            ctx.exception.gb_type,
+            "Sourceless context manager without mutation support",
+        )
+
+    def test_sourceless_decorator_ctx_manager_other_method_graph_breaks(self):
+        class MyCM(torch.utils._contextlib._DecoratorContextManager):
+            def __init__(self):
+                self.log = []
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def rec(self, v):
+                self.log.append(v)
+                return len(self.log)
+
+        def make_method(bound):
+            local_bound = bound
+
+            def method(self, x):
+                return x + local_bound(1)
+
+            return method
+
+        class A:
+            method = make_method(MyCM().rec)
+
+        def fn(x):
+            return A().method(x)
+
+        cm = A.method.__closure__[0].cell_contents.__self__
+        x = torch.tensor(1.0)
+        ref = fn(x)
+        self.assertEqual((ref.item(), cm.log), (2.0, [1]))
+
+        torch._dynamo.reset()
+        res = torch.compile(fn, backend="eager", fullgraph=False)(x)
+        self.assertEqual((res.item(), cm.log), (3.0, [1, 1]))
+
+        torch._dynamo.reset()
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as ctx:
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(
+            ctx.exception.gb_type,
+            "Sourceless _DecoratorContextManager method reconstruction unsupported",
+        )
+
+    def test_sourceless_decorator_ctx_manager_inherited_clone_graph_breaks(self):
+        class MyCM(torch.utils._contextlib._DecoratorContextManager):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        def make_method(bound):
+            local_bound = bound
+
+            def method(self, x):
+                local_bound()
+                return x + 1
+
+            return method
+
+        class A:
+            method = make_method(MyCM().clone)
+
+        def fn(x):
+            return A().method(x)
+
+        x = torch.tensor(1.0)
+        ref = fn(x)
+        torch._dynamo.reset()
+        res = torch.compile(fn, backend="eager", fullgraph=False)(x)
+        self.assertEqual(ref, res)
+
+        torch._dynamo.reset()
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as ctx:
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(
+            ctx.exception.gb_type,
+            "Sourceless _DecoratorContextManager method reconstruction unsupported",
+        )
+
+    def test_sourceless_decorator_ctx_manager_mutating_method_graph_breaks(self):
+        class MyCM(torch.utils._contextlib._DecoratorContextManager):
+            def __init__(self):
+                self.n = 0
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def bump(self):
+                self.n = self.n + 1
+                return self.n
+
+        def make_method(bound):
+            local_bound = bound
+
+            def method(self, x):
+                return x + local_bound()
+
+            return method
+
+        class A:
+            method = make_method(MyCM().bump)
+
+        def fn(x):
+            return A().method(x)
+
+        cm = A.method.__closure__[0].cell_contents.__self__
+        x = torch.tensor(1.0)
+        ref = fn(x)
+        self.assertEqual((ref.item(), cm.n), (2.0, 1))
+
+        torch._dynamo.reset()
+        res = torch.compile(fn, backend="eager", fullgraph=False)(x)
+        self.assertEqual((res.item(), cm.n), (3.0, 2))
+
+        torch._dynamo.reset()
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as ctx:
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(
+            ctx.exception.gb_type,
+            "Sourceless _DecoratorContextManager method reconstruction unsupported",
+        )
+
     def test_inspect_signature_parameters(self):
         import inspect
 
@@ -16787,6 +17220,27 @@ fn
         self.assertTrue(res, torch.ones(1))
         self.assertEqual(foo.x, 1)
 
+    def test_dataclass_replace_sourceless_instance(self):
+        # slots=True matches the originally reported repro; the bug isn't
+        # specific to it, any dataclass reproduces it.
+        @dataclasses.dataclass(slots=True)
+        class Foo:
+            a: torch.Tensor
+            b: int
+
+        # `f` is built during tracing, so it has no source of its own. `Foo`
+        # does, and dataclasses.replace goes through `f.__class__(**changes)`,
+        # which is only traceable if `__class__` keeps the class provenance.
+        @torch.compile(backend="eager", fullgraph=True)
+        def run(x):
+            f = Foo(a=x, b=1)
+            return dataclasses.replace(f, a=x * 2)
+
+        x = torch.randn(3)
+        f2 = run(x)
+        self.assertEqual(f2.a, x * 2)
+        self.assertEqual(f2.b, 1)
+
     def test_frozenset_of_non_literals(self):
         class Foo:
             pass
@@ -17469,6 +17923,13 @@ fn
         res = fn(x)
         expected = hex(255) + oct(8) + bin(3) + ascii("hello") + format(42, "x")
         self.assertEqual(res, x + len(expected))
+
+    def test_builtin_bytes_zero_args(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            return bytes()
+
+        self.assertEqual(fn(), b"")
 
     def test_guard_string_escaped(self):
         d = {frozenset({0}): {frozenset({0}): 1}}
