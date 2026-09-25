@@ -750,6 +750,26 @@ class SubclassSideEffectTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(list(ref), list(res))
         self.assertEqual(list(res), [1, 2])
 
+    @parametrize("cls", [ListSubclass, DequeSubclass], name_fn=lambda cls: cls.__name__)
+    def test_subclass_input_iadd_ignores_rhs_radd(self, cls):
+        # A list/deque subclass inherits nb_inplace_add = list_inplace_concat,
+        # so `+=` must extend in place and never consult the rhs __radd__.
+        class Rhs(cls):
+            def __radd__(self, other):
+                return "radd"
+
+        def fn(lst, x):
+            lst += Rhs([3])
+            return x * len(lst)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        ref, res = cls([1, 2]), cls([1, 2])
+        self.assertEqual(fn(ref, x), opt_fn(res, x))
+        self.assertEqual(list(ref), list(res))
+        self.assertEqual(list(res), [1, 2, 3])
+
     def test_list_subclass_input_read_only(self):
         def fn(lst, x):
             return x * len(lst)

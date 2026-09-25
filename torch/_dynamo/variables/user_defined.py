@@ -132,6 +132,7 @@ from .object_protocol import (
     pynumber_index,
     type_disallows_instantiation,
     type_implements_nb_slot,
+    type_implements_sq_inplace_concat,
 )
 from .sets import FrozensetVariable, SetVariable
 
@@ -2826,6 +2827,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L9494
         if self.inherits_base_slot("__iadd__"):
+            # update_one_slot copies an inherited sq_inplace_concat wrapper into
+            # nb_inplace_add (both use wrap_binaryfunc), so a list/deque
+            # subclass gets nb_inplace_add = list_inplace_concat.
+            if type_implements_sq_inplace_concat(self.python_type()):
+                return super().sq_inplace_concat_impl(tx, other)
             return super().nb_inplace_add_impl(tx, other)
         return self.SLOT1(tx, "__iadd__", other)
 
