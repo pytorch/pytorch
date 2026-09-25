@@ -79,6 +79,7 @@ from .mm_common import (
     _fits_int32_buffer_span,
     _is_static_problem,
     _use_small_mm_pointwise,
+    blackwell_persistent_mm_grid,
     load_kernel_template,
     mm_args,
     mm_grid,
@@ -159,7 +160,7 @@ flydsl_mm_template = FlyDSLTemplate(
 
 blackwell_ws_persistent_tma_mm_template = TritonTemplate(
     name="blackwell_ws_persistent_tma",
-    grid=persistent_mm_grid,
+    grid=blackwell_persistent_mm_grid,
     source=load_kernel_template("triton_blackwell_ws_persistent_tma_mm"),
 )
 
