@@ -7787,15 +7787,38 @@ class ShapeEnv:
                 if self.replace(Mod(base, divisor)) in self.divisible:
                     div_replacements[fd] = CleanDiv(base, divisor)
             if div_replacements:
-                new_expr = expr.xreplace(div_replacements)
-                new_expr = safe_expand(new_expr)
+                new_expr = safe_expand(expr.xreplace(div_replacements))
                 new_pows = new_expr.atoms(sympy.Pow)
                 new_rationals = new_expr.atoms(sympy.Rational).difference(
                     new_expr.atoms(sympy.Integer)
                 )
-                # divisions simplified away
                 if new_pows.issubset(pows) and new_rationals.issubset(rationals):
                     expr = new_expr
+
+        if expr.has(CleanDiv):
+            # Cancel matching factors in the same product, for example
+            # C * CleanDiv(x, C) -> x.
+            def cancel_clean_div(mul: sympy.Expr) -> sympy.Expr:
+                args = list(mul.args)
+                # Each cancellation shrinks args, so there are O(len(args)) iterations.
+                while True:
+                    for clean_div in args:
+                        if not isinstance(clean_div, CleanDiv):
+                            continue
+                        base, divisor = clean_div.args
+                        if divisor in args:
+                            args.remove(clean_div)
+                            args.remove(divisor)
+                            args.append(base)
+                            break
+                    else:
+                        return sympy.Mul(*args)
+
+            expr = expr.replace(
+                lambda node: node.is_Mul
+                and any(isinstance(arg, CleanDiv) for arg in node.args),
+                cancel_clean_div,
+            )
         return expr
 
     # TODO: overload for allow_none literal
