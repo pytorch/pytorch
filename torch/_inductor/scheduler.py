@@ -128,60 +128,19 @@ class IdentityTranslationProof:
     compatible_extents: tuple[tuple[sympy.Expr, sympy.Expr], ...]
     translation: tuple[sympy.Expr, ...]
 
-    @property
-    def matches(self) -> tuple[MemoryDepMatch, ...]:
-        return self.matched_dependencies
 
-
-def _affine_proof_simplify(
-    expr: sympy.Expr, context: SizeVarAllocator | None
-) -> sympy.Expr:
-    return context.simplify(expr) if context is not None else sympy.simplify(expr)
-
-
-def _affine_proof_equal(
-    left: sympy.Expr, right: sympy.Expr, context: SizeVarAllocator | None
-) -> bool:
-    if left == right:
-        return True
-    difference = _affine_proof_simplify(left - right, context)
-    if difference == 0:
-        return True
-    return bool(
-        context is not None and context.statically_known_equals(left, right)
-    )
-
-
-def _affine_proof_geq(
-    left: sympy.Expr, right: sympy.Expr, context: SizeVarAllocator | None
-) -> bool:
-    if left == right:
-        return True
-    difference = _affine_proof_simplify(left - right, context)
-    if difference.is_nonnegative is True:
-        return True
-    return bool(
-        context is not None and context.statically_known_geq(left, right)
-    )
-
-
-def _affine_proof_leq(
-    left: sympy.Expr, right: sympy.Expr, context: SizeVarAllocator | None
-) -> bool:
-    if left == right:
-        return True
-    difference = _affine_proof_simplify(left - right, context)
-    if difference.is_nonpositive is True:
-        return True
-    return bool(
-        context is not None and context.statically_known_leq(left, right)
-    )
-
-
-def _affine_proof_strides(
-    dep: MemoryDep, context: SizeVarAllocator | None
+def affine_proof_strides(
+    dep: MemoryDep, context: SizeVarAllocator
 ) -> tuple[sympy.Expr, ...] | None:
-    """Extract and validate ordinary affine coefficients from an access."""
+    """Extract row-major affine strides from a memory dependency.
+
+    Args:
+        dep: Access dependency to analyze.
+        context: Shape facts used to simplify and validate the access.
+
+    Returns:
+        The affine strides, or None if the access is not affine.
+    """
     zero = {var: sympy.S.Zero for var in dep.var_names}
     offset = sympy_subs(dep.index, zero)
     strides = []
@@ -189,25 +148,32 @@ def _affine_proof_strides(
         one = dict(zero)
         one[var] = sympy.S.One
         strides.append(
-            _affine_proof_simplify(
-                sympy_subs(dep.index, one) - offset,
-                context,
-            )
+            context.simplify(sympy_subs(dep.index, one) - offset)
         )
     reconstructed = offset + sum(
         (stride * var for stride, var in zip(strides, dep.var_names)),
         sympy.S.Zero,
     )
-    if not _affine_proof_equal(reconstructed, dep.index, context):
+    if not context.statically_known_equals(reconstructed, dep.index):
         return None
     return tuple(strides)
 
 
-def _prove_identity_translation_pair(
+def prove_identity_translation_pair(
     producer: MemoryDep,
     consumer: MemoryDep,
-    context: SizeVarAllocator | None,
+    context: SizeVarAllocator,
 ) -> IdentityTranslationProof | None:
+    """Prove an identity-plus-translation relation for two accesses.
+
+    Args:
+        producer: Source access.
+        consumer: Consumer access.
+        context: Shape facts used during the proof.
+
+    Returns:
+        The proof, or None if the relation is invalid.
+    """
     if producer.name != consumer.name:
         return None
     if producer.mode is not None or consumer.mode is not None:
@@ -216,85 +182,71 @@ def _prove_identity_translation_pair(
         return None
     if producer.num_vars == 0 or producer.num_vars != consumer.num_vars:
         return None
-    if len(producer.size) != producer.num_vars or len(consumer.size) != (
-        consumer.num_vars
-    ):
-        return None
-    if len(set(producer.var_names)) != producer.num_vars or len(
-        set(consumer.var_names)
-    ) != consumer.num_vars:
-        return None
 
-    producer_strides = _affine_proof_strides(producer, context)
-    consumer_strides = _affine_proof_strides(consumer, context)
+    producer_strides = affine_proof_strides(producer, context)
+    consumer_strides = affine_proof_strides(consumer, context)
     if producer_strides is None or consumer_strides is None:
         return None
 
+    # Dense row-major strides: each axis steps over all trailing dimensions.
+    # The innermost axis therefore has stride 1.
     expected_strides = tuple(
-        sympy.prod(producer.size[index + 1 :])
-        for index in range(producer.num_vars)
+        sympy_product(producer.size[axis + 1 :])
+        for axis in range(producer.num_vars)
     )
     if any(
-        not _affine_proof_equal(coefficient, expected, context)
+        not context.statically_known_equals(coefficient, expected)
         for coefficient, expected in zip(producer_strides, expected_strides)
-    ) or not _affine_proof_equal(
-        producer_strides[-1], sympy.S.One, context
     ):
         return None
     if any(
-        not _affine_proof_equal(producer_coefficient, consumer_coefficient, context)
+        not context.statically_known_equals(
+            producer_coefficient, consumer_coefficient
+        )
         for producer_coefficient, consumer_coefficient in zip(
             producer_strides, consumer_strides
         )
     ):
         return None
     if any(
-        not _affine_proof_geq(producer_extent, consumer_extent, context)
+        not context.statically_known_geq(producer_extent, consumer_extent)
         for producer_extent, consumer_extent in zip(producer.size, consumer.size)
     ):
         return None
 
-    delta = _affine_proof_simplify(
-        consumer.get_offset() - producer.get_offset(), context
-    )
-    if not _affine_proof_geq(delta, sympy.S.Zero, context):
+    delta = context.simplify(consumer.get_offset() - producer.get_offset())
+    if not context.statically_known_geq(delta, sympy.S.Zero):
         return None
 
     remaining = delta
     translation_reversed: list[sympy.Expr] = []
     for axis in reversed(range(producer.num_vars)):
         stride = producer_strides[axis]
-        if not _affine_proof_geq(stride, sympy.S.One, context):
+        if not context.statically_known_geq(stride, sympy.S.One):
             return None
-        remainder = _affine_proof_simplify(
-            sympy.Mod(remaining, stride), context
-        )
-        if not _affine_proof_equal(remainder, sympy.S.Zero, context):
+        remainder = context.simplify(sympy.Mod(remaining, stride))
+        if not context.statically_known_equals(remainder, sympy.S.Zero):
             return None
-        quotient = _affine_proof_simplify(FloorDiv(remaining, stride), context)
-        digit = _affine_proof_simplify(
-            sympy.Mod(quotient, producer.size[axis]), context
-        )
-        if not _affine_proof_geq(digit, sympy.S.Zero, context):
+        quotient = context.simplify(FloorDiv(remaining, stride))
+        digit = context.simplify(sympy.Mod(quotient, producer.size[axis]))
+        if not context.statically_known_geq(digit, sympy.S.Zero):
             return None
-        if not _affine_proof_leq(
-            consumer.size[axis] + digit, producer.size[axis], context
+        if not context.statically_known_leq(
+            consumer.size[axis] + digit, producer.size[axis]
         ):
             return None
         translation_reversed.append(digit)
-        remaining = _affine_proof_simplify(
-            remaining - digit * stride, context
-        )
+        remaining = context.simplify(remaining - digit * stride)
 
-    if not _affine_proof_equal(remaining, sympy.S.Zero, context):
+    if not context.statically_known_equals(remaining, sympy.S.Zero):
         return None
     translation = tuple(reversed(translation_reversed))
     translated_offset = producer.get_offset() + sum(
         (stride * offset for stride, offset in zip(producer_strides, translation)),
         sympy.S.Zero,
     )
-    if not _affine_proof_equal(
-        translated_offset, consumer.get_offset(), context
+    if not context.statically_known_equals(
+        translated_offset, consumer.get_offset()
     ):
         return None
 
@@ -309,9 +261,18 @@ def prove_identity_translation(
     source_accesses: MemoryDep | typing.Sequence[MemoryDep],
     consumer_access: MemoryDep,
     *,
-    context: SizeVarAllocator | None = None,
+    context: SizeVarAllocator,
 ) -> IdentityTranslationProof | None:
-    """Prove a dense identity-plus-translation source-to-consumer relation."""
+    """Prove a shared identity-plus-translation relation.
+
+    Args:
+        source_accesses: Source accesses to compare with the consumer.
+        consumer_access: Consumer access.
+        context: Shape facts used during the proof.
+
+    Returns:
+        The proof, or None if the accesses do not share one relation.
+    """
     if isinstance(source_accesses, MemoryDep):
         sources = (source_accesses,)
     else:
@@ -321,17 +282,18 @@ def prove_identity_translation(
     if not all(isinstance(source, MemoryDep) for source in sources):
         return None
 
-    proofs = tuple(
-        _prove_identity_translation_pair(source, consumer_access, context)
+    raw_proofs = tuple(
+        prove_identity_translation_pair(source, consumer_access, context)
         for source in sources
     )
-    if any(proof is None for proof in proofs):
+    if any(proof is None for proof in raw_proofs):
         return None
+    proofs = typing.cast(
+        tuple[IdentityTranslationProof, ...], raw_proofs
+    )
     first = proofs[0]
-    assert first is not None
     if any(
-        proof is None
-        or proof.translation != first.translation
+        proof.translation != first.translation
         or proof.compatible_extents != first.compatible_extents
         for proof in proofs[1:]
     ):
@@ -341,7 +303,7 @@ def prove_identity_translation(
         matched_dependencies=tuple(
             match
             for proof in proofs
-            for match in proof.matched_dependencies  # type: ignore[union-attr]
+            for match in proof.matched_dependencies
         ),
     )
 
@@ -1323,6 +1285,7 @@ class NestedReduction:
         """
         if V.graph.sizevars.statically_known_equals(node_numel, 0):
             return None
+
         # TODO: Generalize once other rates have end-to-end legality and codegen coverage.
         for rate in cls.SUB_PARENT_RATES:
             factor, output_lanes = rate
@@ -2711,19 +2674,20 @@ class SubParentAccessRelation:
         source_accesses: MemoryDep | typing.Sequence[MemoryDep],
         consumer_access: MemoryDep,
         *,
-        sizevars: SizeVarAllocator | None = None,
+        sizevars: SizeVarAllocator,
     ) -> "IdentityTranslationProof | None":
-        """Compatibility wrapper for the module-level affine proof."""
+        """Prove a dense identity-plus-translation relation.
+
+        Args:
+            source_accesses: Source accesses to compare with the consumer.
+            consumer_access: Consumer access.
+            sizevars: Shape facts used during the proof.
+
+        Returns:
+            The proof, or None if the relation is invalid.
+        """
         return prove_identity_translation(
             source_accesses, consumer_access, context=sizevars
-        )
-
-    def prove_translation(
-        self, *, sizevars: AffineProofContext | None = None
-    ) -> "IdentityTranslationProof | None":
-        """Prove the relation represented by this access record."""
-        return prove_identity_translation(
-            self.source_accesses, self.consumer_access, context=sizevars
         )
 
 @dataclasses.dataclass(frozen=True)

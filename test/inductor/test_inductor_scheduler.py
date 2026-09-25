@@ -137,11 +137,16 @@ class TestScheduler(TestCase):
         def consumer(index, size=(4, 128), name="normed"):
             return MemoryDep(name, index, (row, feature), size)
 
+        sizevars = SizeVarAllocator()
         zero = SubParentAccessRelation.prove_identity_translation(
-            producer, consumer(192 * row + feature, size=(4, 64))
+            producer,
+            consumer(192 * row + feature, size=(4, 64)),
+            sizevars=sizevars,
         )
         shifted = SubParentAccessRelation.prove_identity_translation(
-            producer, consumer(192 * row + feature + 64)
+            producer,
+            consumer(192 * row + feature + 64),
+            sizevars=sizevars,
         )
         self.assertIsNotNone(zero)
         self.assertIsNotNone(shifted)
@@ -185,7 +190,7 @@ class TestScheduler(TestCase):
             with self.subTest(invalid_consumer=invalid_consumer):
                 self.assertIsNone(
                     SubParentAccessRelation.prove_identity_translation(
-                        producer, invalid_consumer
+                        producer, invalid_consumer, sizevars=sizevars
                     )
                 )
 
@@ -199,6 +204,7 @@ class TestScheduler(TestCase):
             SubParentAccessRelation.prove_identity_translation(
                 (producer, conflicting_writer),
                 consumer(192 * row + feature + 64),
+                sizevars=sizevars,
             )
         )
 
@@ -219,7 +225,6 @@ class TestScheduler(TestCase):
             (row, feature),
             (4, width - 64),
         )
-        sizevars = SizeVarAllocator()
         sizevars.shape_env.var_to_range[width] = ValueRanges(128, 1024)
         self.assertIsNotNone(
             SubParentAccessRelation.prove_identity_translation(
