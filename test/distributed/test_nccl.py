@@ -62,8 +62,8 @@ NCCL_SYMMEM_COMPILED = getattr(
 
 skip_if_rccl_symmem_not_compiled = skip_but_pass_in_sandcastle_if(
     TEST_WITH_ROCM and not NCCL_SYMMEM_COMPILED,
-    "RCCL symmetric memory was disabled at build time: RCCL is older than "
-    "2.30.4 or nccl_device.h failed the host-compile probe",
+    "The RCCL symmetric-memory device API was disabled at build time: RCCL is "
+    "older than 2.30.4 or nccl_device.h failed the host-compile probe",
 )
 skip_if_rccl_lt_2_30_4 = skip_but_pass_in_sandcastle_if(
     TEST_WITH_ROCM and nccl.version() < (2, 30, 4),
@@ -1971,17 +1971,22 @@ class NCCLSymmetricMemoryCapabilityGateTest(MultiProcessTestCase):
                 c10d.destroy_process_group()
 
     @skip_if_lt_x_gpu(2)
-    def test_rendezvous_rejected_without_device_api_support(self) -> None:
-        # Without CUMEM+WIN, RCCL reports deviceApiSupport=0, so rendezvous is
-        # refused independently of graph capture. This is the only test that
-        # reaches comm_has_device_api_support(): the two capture tests above
-        # stop earlier, inside the allocator's capture-allocation gate.
+    def test_host_only_rendezvous_without_device_api_support(self) -> None:
+        # Without CUMEM+WIN, RCCL reports deviceApiSupport=0. Rendezvous still
+        # succeeds host-only, which FSDP relies on, but peer pointers are
+        # refused. This is the only test that reaches
+        # comm_has_device_api_support(): the two capture tests above stop
+        # earlier, inside the allocator's capture-allocation gate.
         self._init_process_group()
         try:
             group_name = c10d.distributed_c10d._get_default_group().group_name
             tensor = symm_mem.empty(4096, dtype=torch.float32, device=self.device)
-            with self.assertRaisesRegex(RuntimeError, "requires device API support"):
-                symm_mem.rendezvous(tensor, group=group_name)
+            handle = symm_mem.rendezvous(tensor, group=group_name)
+            tensor.fill_(self.rank + 1)
+            c10d.all_reduce(tensor)
+            self.assertEqual(tensor, torch.full_like(tensor, 3))
+            with self.assertRaisesRegex(RuntimeError, "require device API support"):
+                _ = handle.buffer_ptrs
         finally:
             if c10d.is_initialized():
                 c10d.destroy_process_group()
