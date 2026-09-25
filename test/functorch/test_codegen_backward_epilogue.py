@@ -16,11 +16,17 @@ from common_utils import capture_codegen_source
 
 import torch
 import torch._functorch.config
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.two_tensor import TwoTensor
 
 
 class TestCodegenBackwardEpilogue(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _capture_codegen_source(self, artifact_name):
         return capture_codegen_source(artifact_name)
 

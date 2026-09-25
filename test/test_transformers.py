@@ -8,6 +8,8 @@ import sys
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.nn.functional import scaled_dot_product_attention
 from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.nn.attention.bias import CausalVariant, causal_lower_right, causal_upper_left
@@ -18,7 +20,16 @@ import math
 import itertools
 import torch.optim as optim
 from torch.backends.cuda import can_use_flash_attention, SDPAParams
-from torch.testing._internal.common_device_type import expectedFailureMPS, instantiate_device_type_tests, onlyCUDA, onlyAccelerator, largeTensorTest
+from torch.testing._internal.common_device_type import (
+    expectedFailureMPS,
+    instantiate_device_type_tests,
+    largeTensorTest,
+    onlyAccelerator,
+    onlyCUDA,
+    onlyOn,
+    skipCUDAIf,
+    skipXPUIf,
+)
 import torch.utils.cpp_extension
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
@@ -60,7 +71,6 @@ from torch.testing._internal.common_cuda import (
     tf32_on_and_off,
     tf32_enabled,
 )
-from torch.testing._internal.common_device_type import skipXPUIf
 from torch.testing._internal.common_xpu import PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU
 
 if TEST_FAIRSEQ:
@@ -1102,7 +1112,7 @@ class TestTransformersAccelerator(NNTestCase):
             with cm:
                 _test(batch_first, training, enable_nested_tensor)
 
-
+    @tf32_off()
     def test_transformer_encoder_layer_fwd_fake(self, device):
         model = torch.nn.TransformerEncoder(
             torch.nn.TransformerEncoderLayer(
@@ -1726,7 +1736,7 @@ class TestSDPAFailureModes(NNTestCase):
     @onlyAccelerator
     @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
     @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION or not isSM8XDevice or not isSM120Device,
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION or not (isSM8XDevice or isSM120Device),
         "Does not support fused SDPA or not SM86+ hardware",
     )
     @parametrize("head_dim", [193, 256])
@@ -1734,8 +1744,8 @@ class TestSDPAFailureModes(NNTestCase):
     def test_flash_backward_failure_sm86plus(self, device, head_dim: int, dropout_p: float):
         dtype = torch.float16
         make_tensor = partial(torch.rand, device=device, dtype=dtype)
-        # See check_requires_grad_and_head_dim_gt192_constraints_on_sm86_89 in
-        # pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.h
+        # See check_requires_grad_and_head_dim_gt192_constraints_on_sm86_89_or_120_121
+        # in aten/src/ATen/native/transformers/cuda/sdp_utils.cpp.
         size = (2, 2, 4, head_dim)
         q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
 
@@ -2592,6 +2602,285 @@ class TestSDPAGeneric(NNTestCase):
         # Should not crash during export with unbacked symbolic mask batch dim
         torch.export.export(model, args=(x,))
 
+    @onlyOn(["cpu", "cuda", "xpu"])
+    def test_sdpa_export_repeat_interleave_unbacked_head_dim(self, device):
+        device_type = torch.device(device).type
+
+        class Model(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.num_heads = 2
+
+            def prepare_qkv(self, query, key, value):
+                query = query.unflatten(2, (self.num_heads, -1)).transpose(1, 2)
+                key = key.unflatten(2, (self.num_heads, -1)).transpose(1, 2)
+                value = value.unflatten(2, (self.num_heads, -1)).transpose(1, 2)
+
+                query_head_dim = torch.tensor(query.size(3), device=query.device)
+                key_head_dim = torch.tensor(key.size(3), device=key.device)
+                value_head_dim = torch.tensor(value.size(3), device=value.device)
+                key = key.repeat_interleave(query_head_dim // key_head_dim, dim=3)
+                value = value.repeat_interleave(
+                    query_head_dim // value_head_dim, dim=3
+                )
+                return query, key, value
+
+            def forward(self, query, key, value):
+                query, key, value = self.prepare_qkv(query, key, value)
+                out = F.scaled_dot_product_attention(
+                    query, key, value, dropout_p=0.0, is_causal=False
+                )
+                return out.transpose(1, 2).flatten(2, 3).type_as(query)
+
+        # XPU Flash checks support bf16/fp16 only; other selectors reach the
+        # relevant shape checks with fp32 on CPU and CUDA.
+        dtype = torch.bfloat16 if device_type == "xpu" else torch.float32
+        model = Model().eval().to(device=device, dtype=dtype)
+        query = torch.randn(1, 3, 16, device=device, dtype=dtype)
+        key = torch.randn(1, 3, 16, device=device, dtype=dtype)
+        value = torch.randn(1, 3, 16, device=device, dtype=dtype)
+        seq_len = torch.export.Dim("seq_len", min=1, max=16)
+
+        ep = torch.export.export(
+            model,
+            args=(query, key, value),
+            dynamic_shapes=({1: seq_len}, {1: seq_len}, {1: seq_len}),
+            # Match the issue's non-strict FakeTensor export path.
+            strict=False,
+        )
+
+        with sdpa_kernel(backends=[SDPBackend.MATH]):
+            self.assertEqual(
+                ep.module()(query, key, value),
+                model(query, key, value),
+            )
+
+        prepare_qkv_graph = make_fx(
+            lambda query, key, value: model.prepare_qkv(query, key, value),
+            tracing_mode="symbolic",
+        )(query, key, value)
+        self.assertEqual(
+            sum(
+                node.target is torch.ops.aten.repeat_interleave.Tensor
+                for node in prepare_qkv_graph.graph.nodes
+            ),
+            2,
+        )
+        prepared_qkv = next(
+            node
+            for node in prepare_qkv_graph.graph.nodes
+            if node.op == "output"
+        ).args[0]
+        self.assertTrue(
+            all(
+                free_unbacked_symbols(node.meta["val"].shape[-1])
+                for node in prepared_qkv[1:]
+            ),
+            msg="both repeat_interleave calls should produce unbacked head dimensions",
+        )
+
+        fused_backends = {
+            "cpu": [SDPBackend.FLASH_ATTENTION],
+            "cuda": [
+                SDPBackend.CUDNN_ATTENTION,
+                SDPBackend.FLASH_ATTENTION,
+                SDPBackend.EFFICIENT_ATTENTION,
+            ],
+            "xpu": [
+                SDPBackend.OVERRIDEABLE,
+                SDPBackend.FLASH_ATTENTION,
+                SDPBackend.EFFICIENT_ATTENTION,
+            ],
+        }[device_type]
+        with sdpa_kernel(fused_backends, set_priority=True):
+            with self.assertRaisesRegex(RuntimeError, "No available kernel"):
+                torch.export.export(
+                    model,
+                    args=(query, key, value),
+                    dynamic_shapes=({1: seq_len}, {1: seq_len}, {1: seq_len}),
+                    strict=False,
+                )
+
+    @onlyOn(["cpu", "cuda", "xpu"])
+    def test_sdpa_export_repeat_interleave_unbacked_num_heads(self, device):
+        device_type = torch.device(device).type
+
+        class Model(nn.Module):
+            def __init__(self, enable_gqa=False):
+                super().__init__()
+                self.enable_gqa = enable_gqa
+
+            def prepare_qkv(self, query, key, value):
+                query_num_heads = torch.tensor(query.size(1), device=query.device)
+                key_num_heads = torch.tensor(key.size(1), device=key.device)
+                value_num_heads = torch.tensor(value.size(1), device=value.device)
+                key = key.repeat_interleave(
+                    query_num_heads // key_num_heads, dim=1
+                )
+                value = value.repeat_interleave(
+                    query_num_heads // value_num_heads, dim=1
+                )
+                return query, key, value
+
+            def forward(self, query, key, value):
+                query, key, value = self.prepare_qkv(query, key, value)
+                return F.scaled_dot_product_attention(
+                    query,
+                    key,
+                    value,
+                    dropout_p=0.0,
+                    is_causal=False,
+                    enable_gqa=self.enable_gqa,
+                )
+
+        dtype = torch.bfloat16 if device_type == "xpu" else torch.float32
+        model = Model().eval().to(device=device, dtype=dtype)
+        query = torch.randn(1, 4, 3, 4, device=device, dtype=dtype)
+        key = torch.randn(1, 2, 3, 4, device=device, dtype=dtype)
+        value = torch.randn(1, 2, 3, 4, device=device, dtype=dtype)
+
+        ep = torch.export.export(
+            model,
+            args=(query, key, value),
+            # Match the issue's non-strict FakeTensor export path.
+            strict=False,
+        )
+
+        with sdpa_kernel(backends=[SDPBackend.MATH]):
+            self.assertEqual(
+                ep.module()(query, key, value),
+                model(query, key, value),
+            )
+
+        gqa_model = Model(enable_gqa=True).eval().to(device=device, dtype=dtype)
+        gqa_ep = torch.export.export(
+            gqa_model,
+            args=(query, key, value),
+            # Match the issue's non-strict FakeTensor export path.
+            strict=False,
+        )
+        with sdpa_kernel(backends=[SDPBackend.MATH]):
+            self.assertEqual(
+                gqa_ep.module()(query, key, value),
+                gqa_model(query, key, value),
+            )
+
+        prepare_qkv_graph = make_fx(
+            lambda query, key, value: model.prepare_qkv(query, key, value),
+            tracing_mode="symbolic",
+        )(query, key, value)
+        self.assertEqual(
+            sum(
+                node.target is torch.ops.aten.repeat_interleave.Tensor
+                for node in prepare_qkv_graph.graph.nodes
+            ),
+            2,
+        )
+        prepared_qkv = next(
+            node
+            for node in prepare_qkv_graph.graph.nodes
+            if node.op == "output"
+        ).args[0]
+        self.assertTrue(
+            all(
+                free_unbacked_symbols(node.meta["val"].shape[1])
+                for node in prepared_qkv[1:]
+            ),
+            msg="both repeat_interleave calls should produce unbacked num_heads",
+        )
+
+        fused_backends = {
+            "cpu": [SDPBackend.FLASH_ATTENTION],
+            "cuda": [
+                SDPBackend.CUDNN_ATTENTION,
+                SDPBackend.FLASH_ATTENTION,
+                SDPBackend.EFFICIENT_ATTENTION,
+            ],
+            "xpu": [
+                SDPBackend.OVERRIDEABLE,
+                SDPBackend.FLASH_ATTENTION,
+                SDPBackend.EFFICIENT_ATTENTION,
+            ],
+        }[device_type]
+        for enable_gqa in (False, True):
+            with self.subTest(enable_gqa=enable_gqa):
+                fused_only_model = Model(enable_gqa=enable_gqa).eval().to(
+                    device=device, dtype=dtype
+                )
+                with sdpa_kernel(fused_backends, set_priority=True):
+                    with self.assertRaisesRegex(RuntimeError, "No available kernel"):
+                        torch.export.export(
+                            fused_only_model,
+                            args=(query, key, value),
+                            strict=False,
+                        )
+
+    @onlyOn(["cuda", "xpu"])
+    @skipCUDAIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
+        "CUDA Flash Attention is not supported",
+    )
+    @skipXPUIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU,
+        "XPU Flash Attention is not supported",
+    )
+    def test_sdpa_export_repeat_interleave_unbacked_causal_seq_len(self, device):
+        class Model(nn.Module):
+            def prepare_qkv(self, query, key, value):
+                query_seq_len = torch.tensor(query.size(2), device=query.device)
+                key_seq_len = torch.tensor(key.size(2), device=key.device)
+                value_seq_len = torch.tensor(value.size(2), device=value.device)
+                key = key.repeat_interleave(
+                    query_seq_len // key_seq_len, dim=2
+                )
+                value = value.repeat_interleave(
+                    query_seq_len // value_seq_len, dim=2
+                )
+                # Let the selector prove that the unbacked sequence lengths
+                # are nonzero before it reaches the causal equality check.
+                torch._check(key.size(2) > 0)
+                torch._check(value.size(2) > 0)
+                return query, key, value
+
+            def forward(self, query, key, value):
+                query, key, value = self.prepare_qkv(query, key, value)
+                return F.scaled_dot_product_attention(
+                    query, key, value, dropout_p=0.0, is_causal=True
+                )
+
+        model = Model().eval().to(device=device, dtype=torch.bfloat16)
+        query = torch.randn(1, 2, 4, 8, device=device, dtype=torch.bfloat16)
+        key = torch.randn(1, 2, 2, 8, device=device, dtype=torch.bfloat16)
+        value = torch.randn(1, 2, 2, 8, device=device, dtype=torch.bfloat16)
+
+        with sdpa_kernel(
+            [SDPBackend.FLASH_ATTENTION, SDPBackend.MATH], set_priority=True
+        ):
+            ep = torch.export.export(
+                model,
+                args=(query, key, value),
+                # Match the issue's non-strict FakeTensor export path.
+                strict=False,
+            )
+
+        with sdpa_kernel(backends=[SDPBackend.MATH]):
+            self.assertEqual(
+                ep.module()(query, key, value),
+                model(query, key, value),
+            )
+
+        with sdpa_kernel(SDPBackend.FLASH_ATTENTION):
+            with self.assertWarnsRegex(
+                UserWarning, "does not support the is_causal flag"
+            ):
+                with self.assertRaisesRegex(RuntimeError, "No available kernel"):
+                    torch.export.export(
+                        model,
+                        args=(query, key, value),
+                        strict=False,
+                    )
+
+
 class TestSDPACPU(NNTestCase):
     """ Used to test CPU only functionality of scaled_dot_product_attention """
     hw_classification = HardwareClassification.CPU
@@ -3295,6 +3584,7 @@ class TestSDPAAccelerator(NNTestCase):
 
         self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1e-3, rtol=1e-2)
 
+    @tf32_off()
     @skipIfRocm
     @skipIfXpu(msg="torch-xpu-ops/issues/4813")
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Memory efficient attention is not supported on this system")
@@ -3329,6 +3619,7 @@ class TestSDPAAccelerator(NNTestCase):
         for actual_grad, expected_grad in zip(actual_grads, expected_grads):
             self.assertEqual(actual_grad, expected_grad, atol=1e-4, rtol=1e-4)
 
+    @tf32_off()
     @skipIfRocm
     @skipIfXpu(msg="torch-xpu-ops/issues/4813")
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Memory efficient attention is not supported on this system")
@@ -3489,6 +3780,7 @@ class TestSDPAAccelerator(NNTestCase):
         for actual_grad, expected_grad in zip(actual_grads, expected_grads):
             self.assertEqual(actual_grad, expected_grad, atol=4e-4, rtol=3e-4)
 
+    @tf32_off()
     @skipIfRocm
     @skipIfXpu(msg="aten::_efficient_attention_forward not supported on XPU")
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Memory efficient attention is not supported on this system")
@@ -3561,7 +3853,7 @@ class TestSDPAAccelerator(NNTestCase):
         for actual_grad, expected_grad in zip(actual_grads, expected_grads):
             self.assertEqual(actual_grad, expected_grad, atol=5e-4, rtol=4e-4)
 
-    @skipIfRocm
+    @skipIfRocm(msg="AOTriton bottom-right causal attention writes NaN into fully masked rows when another process shares the GPU")
     @skipIfXpu(msg="torch-xpu-ops/issues/4813")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
@@ -3634,7 +3926,8 @@ class TestSDPAAccelerator(NNTestCase):
             torch.zeros_like(actual_grads[0][:, :, :fully_masked]),
         )
 
-    @skipIfRocm
+    @tf32_off()
+    @skipIfRocm(msg="ROCm mem-efficient attention does not support window_size")
     @skipIfXpu(msg="NotImplementedError 'aten::_efficient_attention_forward'")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
@@ -3694,7 +3987,6 @@ class TestSDPAAccelerator(NNTestCase):
         for actual_grad, expected_grad in zip(actual_grads, expected_grads):
             self.assertEqual(actual_grad, expected_grad, atol=5e-4, rtol=5e-4)
 
-    @skipIfRocm
     @skipIfXpu(msg="NotImplementedError 'aten::_efficient_attention_forward'")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
@@ -3815,7 +4107,6 @@ class TestSDPAAccelerator(NNTestCase):
             torch.zeros_like(actual_grads[0][:, :fully_masked]),
         )
 
-    @skipIfRocm
     @skipIfXpu(msg="NotImplementedError 'aten::_efficient_attention_backward'")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
@@ -3859,7 +4150,6 @@ class TestSDPAAccelerator(NNTestCase):
                 shared_storage_dqdkdv=True,
             )
 
-    @skipIfRocm
     @skipIfXpu(msg="NotImplementedError 'aten::_efficient_attention_forward'")
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Memory efficient attention is not supported on this system")
     def test_mem_efficient_attention_zero_heads(self, device):
@@ -4558,6 +4848,7 @@ class TestSDPAAccelerator(NNTestCase):
             out = F.scaled_dot_product_attention(query, key, value, mask)
         out.sum().backward()
 
+    @tf32_off()
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     def test_mem_eff_attention_mask_only_requires_grad(self, device):
         torch.manual_seed(0)
@@ -4734,7 +5025,6 @@ class TestSDPAAccelerator(NNTestCase):
         max_diff = (out - out_contig).abs().mean()
         self.assertTrue(max_diff.item() < 1e-7)
 
-    @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     def test_mem_eff_attention_single_query_tail_mask(self, device):
         seq_len, num_heads, head_dim = 289, 16, 512
@@ -4751,7 +5041,6 @@ class TestSDPAAccelerator(NNTestCase):
 
         self.assertEqual(actual, expected, atol=2e-2, rtol=2e-2)
 
-    @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @unittest.skipIf(not SM80OrLater, "bfloat16 requires SM80 or later")
     @parametrize("kv_len,num_heads,is_causal", [(289, 40, False), (400, 16, True)])
@@ -4773,7 +5062,6 @@ class TestSDPAAccelerator(NNTestCase):
 
         self.assertEqual(actual, expected, atol=2e-2, rtol=2e-2)
 
-    @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @unittest.skipIf(not SM80OrLater, "bfloat16 requires SM80 or later")
     def test_mem_eff_attention_dropout_rng_offset_no_wraparound(self, device):
@@ -4789,7 +5077,6 @@ class TestSDPAAccelerator(NNTestCase):
 
         self.assertFalse(torch.equal(out[0, 0], out[0, 1]))
 
-    @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @unittest.skipIf(not SM80OrLater, "bfloat16 requires SM80 or later")
     def test_mem_eff_attention_dropout_single_query_tail(self, device):
@@ -5854,8 +6141,8 @@ class TestSDPAAccelerator(NNTestCase):
                                                head_dim: int, is_causal: bool, dropout_p: float,
                                                dtype: torch.dtype, scale: str, enable_gqa: bool,
                                                n_heads: list[int], sdpa_backend: str):
-        if isSM8XDevice or isSM120Device and head_dim in range(193, 256 + 1):
-            self.skipTest("Flash attention on sm86, sm87, and sm89 for headdim > 192 currently disabled")
+        if (isSM8XDevice or isSM120Device) and head_dim in range(193, 256 + 1):
+            self.skipTest("Flash attention on SM86-SM89 and SM120-SM121 for head_dim > 192 is currently disabled")
         if is_causal and seq_len_q != seq_len_k:
             self.skipTest("Flash V2 does not accept is_casual when seq_len_q != seq_len_k")
         if (TEST_WITH_ROCM or TEST_XPU) and seq_len_q >= 1024 and seq_len_k >= 1024 and batch_size > 1:
@@ -5948,8 +6235,9 @@ class TestSDPAAccelerator(NNTestCase):
 
         upstream_grad = torch.rand_like(out, requires_grad=False)
 
-        # backward for flash attention on sm86, sm87, and sm89 for headdim >= 193 currently disabled
-        if isSM8XDevice or isSM120Device and head_dim in range(193, 256):
+        # Backward for Flash Attention on SM86-SM89 and SM120-SM121 with
+        # head_dim >= 193 is currently disabled.
+        if (isSM8XDevice or isSM120Device) and head_dim in range(193, 256):
             self.assertRaises(RuntimeError, lambda: out.backward(upstream_grad))
             return
 

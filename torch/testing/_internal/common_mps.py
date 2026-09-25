@@ -61,10 +61,12 @@ if torch.backends.mps.is_available():
         # Those ops are not expected to work
         UNIMPLEMENTED_XFAILLIST: dict[str, list | None] = {
             # Failures due to lack of op implementation on MPS backend
+            # No 5-D bicubic sampler on MPS. float32 only: f16/bf16 are skipped below.
+            # TODO: drop this when MPS has 5-D bicubic.
+            "nn.functional.grid_sample": [torch.float32],
             "linalg.eig": None,
             "linalg.eigvals": None,
             "hash_tensor": None,
-            "heaviside": None,
             # "kthvalue": None,
             "linalg.ldl_factor": None,
             "linalg.ldl_factor_ex": None,
@@ -531,6 +533,9 @@ if torch.backends.mps.is_available():
     def mps_ops_grad_modifier(ops: Sequence[OpInfo]) -> Sequence[OpInfo]:
         XFAILLIST_GRAD = {
             # Unimplemented ops
+            # No 5-D bicubic sampler on MPS; the grad leg fails in its forward call.
+            # TODO: drop this when MPS has 5-D bicubic.
+            "nn.functional.grid_sample": [torch.float32],
             "sparse.mmreduce": [torch.float32],  # csr not supported
             "linalg.householder_product": None,
             "linalg.lstsq": [torch.float32],

@@ -1038,6 +1038,21 @@ def get_device_type_test_bases():
 device_type_test_bases = get_device_type_test_bases()
 
 
+def _get_device_type_normalizer() -> Callable[[str], str]:
+    """Returns a function that normalizes a device type name for test filtering.
+
+    Replaces your privateuse1 backend name with 'privateuse1'. This handles the case
+    where PrivateUse1TestBase.device_type has been changed from "privateuse1" to the
+    actual backend name (e.g., "openreg") by setUpClass being called during previous
+    instantiate_device_type_tests calls.
+    """
+    if not _is_privateuse1_backend_available():
+        return lambda x: x
+
+    privateuse1_backend_name = torch._C._get_privateuse1_backend_name()
+    return lambda x: x.replace(privateuse1_backend_name, "privateuse1")
+
+
 def filter_desired_device_types(device_type_test_bases, except_for=None, only_for=None):
     # device type cannot appear in both except_for and only_for
     intersect = set(except_for if except_for else []) & set(
@@ -1048,30 +1063,18 @@ def filter_desired_device_types(device_type_test_bases, except_for=None, only_fo
             f"device ({intersect}) appeared in both except_for and only_for"
         )
 
-    # Replace your privateuse1 backend name with 'privateuse1'
-    # This handles the case where PrivateUse1TestBase.device_type has been
-    # changed from "privateuse1" to the actual backend name (e.g., "openreg")
-    # by setUpClass being called during previous instantiate_device_type_tests calls
-    if _is_privateuse1_backend_available():
-        privateuse1_backend_name = torch._C._get_privateuse1_backend_name()
+    func_replace = _get_device_type_normalizer()
 
-        def func_replace(x: str) -> str:
-            return x.replace(privateuse1_backend_name, "privateuse1")
-
-        except_for = (
-            ([func_replace(x) for x in except_for] if except_for is not None else None)
-            if not isinstance(except_for, str)
-            else func_replace(except_for)
-        )
-        only_for = (
-            ([func_replace(x) for x in only_for] if only_for is not None else None)
-            if not isinstance(only_for, str)
-            else func_replace(only_for)
-        )
-    else:
-
-        def func_replace(x: str) -> str:
-            return x
+    except_for = (
+        ([func_replace(x) for x in except_for] if except_for is not None else None)
+        if not isinstance(except_for, str)
+        else func_replace(except_for)
+    )
+    only_for = (
+        ([func_replace(x) for x in only_for] if only_for is not None else None)
+        if not isinstance(only_for, str)
+        else func_replace(only_for)
+    )
 
     if except_for:
         device_type_test_bases = filter(
@@ -1158,8 +1161,14 @@ def get_desired_device_type_test_bases(
         os.getenv(PYTORCH_TESTING_DEVICE_FOR_CUSTOM_KEY, "")
     )
     if env_custom_only_for:
+        # Replace privateuse1 backend name with 'privateuse1' to ensure
+        # consistent device type filtering
+        func_replace = _get_device_type_normalizer()
+
+        normalized_custom = [func_replace(x) for x in env_custom_only_for]
         desired_device_type_test_bases += filter(
-            lambda x: x.device_type in env_custom_only_for, test_bases
+            lambda x: func_replace(x.device_type) in normalized_custom,
+            test_bases,
         )
         desired_device_type_test_bases = list(set(desired_device_type_test_bases))
 
@@ -1733,6 +1742,70 @@ class skipPRIVATEUSE1If(skipIf):
         super().__init__(dep, reason, device_type=device_type)
 
 
+def _cgroup_available_memory():
+    """Memory still usable inside this process's cgroup, or None if uncapped.
+
+    psutil reports the host's memory. In a container that is not the ceiling the
+    OOM killer enforces, and the two can differ by an order of magnitude: a 41GiB
+    CI pod on a 768GiB node looks like it has hundreds of gigabytes free, so a
+    largeTensorTest asking for 180GB is admitted and then killed mid-test.
+    """
+    # (limit, usage, stat, stat-key prefix), cgroup v2 first then v1. These fixed
+    # paths are this process's own cgroup under a private cgroup namespace, which
+    # is what Kubernetes and Docker on cgroup v2 give us. Under a host namespace
+    # they are the root's, which reads as uncapped, and the host figure stands --
+    # the same answer as before this check existed.
+    for limit_path, usage_path, stat_path, prefix in (
+        (
+            "/sys/fs/cgroup/memory.max",
+            "/sys/fs/cgroup/memory.current",
+            "/sys/fs/cgroup/memory.stat",
+            "",
+        ),
+        (
+            "/sys/fs/cgroup/memory/memory.limit_in_bytes",
+            "/sys/fs/cgroup/memory/memory.usage_in_bytes",
+            "/sys/fs/cgroup/memory/memory.stat",
+            "total_",
+        ),
+    ):
+        try:
+            with open(limit_path) as f:
+                raw = f.read().strip()
+            # v2 spells "no limit" as "max"; v1 uses a value at least as large as
+            # physical memory, which cannot constrain us either way.
+            if raw == "max":
+                return None
+            limit = int(raw)
+            if limit >= psutil.virtual_memory().total:
+                return None
+            with open(usage_path) as f:
+                usage = int(f.read().strip())
+            stat = {}
+            with open(stat_path) as f:
+                for line in f:
+                    key, _, value = line.partition(" ")
+                    stat[key] = int(value)
+        except (OSError, ValueError):
+            continue
+
+        # Page cache counts towards usage but is reclaimed under pressure rather
+        # than triggering a kill, so charging it would understate what is free.
+        # A shard that has read a lot of test data can hold gigabytes of it.
+        cache = stat.get(f"{prefix}inactive_file", 0)
+        return max(limit - max(usage - cache, 0), 0)
+    return None
+
+
+def _available_cpu_memory():
+    """Host memory available, clamped to what this cgroup will actually allow."""
+    available = psutil.virtual_memory().available
+    cgroup_available = _cgroup_available_memory()
+    if cgroup_available is None:
+        return available
+    return min(available, cgroup_available)
+
+
 def _has_sufficient_memory(device, size):
     device_ = torch.device(device)
     device_type = device_.type
@@ -1788,14 +1861,14 @@ def _has_sufficient_memory(device, size):
     if IS_S390X:
         effective_size = effective_size * 2
 
-    if psutil.virtual_memory().available < effective_size:
+    if _available_cpu_memory() < effective_size:
         gc.collect()
         # Sync and cleanup MPS memory before checking available memory
         if device_type == "mps":
             torch.mps.synchronize()
             torch.mps.empty_cache()
 
-    return psutil.virtual_memory().available >= effective_size
+    return _available_cpu_memory() >= effective_size
 
 
 def _parse_size(size):
