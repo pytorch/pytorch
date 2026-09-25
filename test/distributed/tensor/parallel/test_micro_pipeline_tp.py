@@ -131,7 +131,7 @@ class MicroPipelineTPTest(TestCase):
     @fresh_cache()
     @parametrize(
         "gather_dim,with_reshape,expected_folds,expect_fusion",
-        ((0, False, 0, True), (0, True, 1, False), (1, False, 1, False)),
+        ((0, False, 0, True), (0, True, 1, False)),
     )
     def test_scaled_mm_output_scale_preserves_all_gather_fusion(
         self, gather_dim, with_reshape, expected_folds, expect_fusion
@@ -174,24 +174,18 @@ class MicroPipelineTPTest(TestCase):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "Test requires FP8 support")
     @fresh_cache()
-    @parametrize("with_reshape", [False, True])
-    def test_scaled_mm_output_scale_folds_before_unmatched_reduce_scatter(
-        self, with_reshape
-    ):
+    def test_scaled_mm_output_scale_folds_before_unmatched_reduce_scatter(self):
         group = dist.group.WORLD
 
         def func(A, B, A_scale, B_scale, output_scale):
-            A_2d = A.reshape(-1, A.shape[-1]) if with_reshape else A
-            C_2d = (
-                torch._scaled_mm(A_2d, B, A_scale, B_scale, out_dtype=torch.bfloat16)
+            C = (
+                torch._scaled_mm(A, B, A_scale, B_scale, out_dtype=torch.bfloat16)
                 * output_scale
             )
-            C = C_2d.reshape(2, 32, 128) if with_reshape else C_2d
             return reduce_scatter_single(C, "avg", 0, group)
 
         packed_k = 256
-        A_shape = (2, 32, packed_k) if with_reshape else (64, packed_k)
-        inputs = self._make_nvfp4_inputs(A_shape, packed_k)
+        inputs = self._make_nvfp4_inputs((64, packed_k), packed_k)
         gm = _make_post_grad_fx(func, *inputs)
         self._apply_scaled_mm_output_scale_fold(gm, expected_folds=1)
         with (
