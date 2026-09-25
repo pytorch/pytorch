@@ -589,7 +589,6 @@ class ReductionHeuristic(CodegenConfigHeuristics):
     ) -> list[Config]:
         """Generate configs for cooperative reduction (RSPLIT)."""
         from torch._inductor.runtime.hints import TRITON_MAX_RSPLIT
-        from torch._inductor.runtime.runtime_utils import last_power_of_2
 
         # Cooperative reductions currently only support a single reduction dimension.
         if len(size_hints) != 2:

@@ -266,7 +266,7 @@ class CoordescTuner:
         if self.is_mix_order_reduction:
             xblock = config.kwargs["XBLOCK"]
             split_size = config.kwargs["RSPLIT_SIZE"]
-            return xblock <= split_size and split_size % xblock == 0
+            return split_size % xblock == 0
         if self.is_native_matmul:
             r0_block = None
             if "R0_BLOCK" not in config.kwargs:

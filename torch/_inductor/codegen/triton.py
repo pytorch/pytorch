@@ -3215,6 +3215,19 @@ class TMACompatibilityChecker:
                     )
                 )
 
+                if (
+                    self.kernel.mix_order_reduction
+                    and innermost_block_symt == SymT.XBLOCK
+                    and self.kernel.rsplit_size % min_block_size != 0
+                ):
+                    log.debug(
+                        "%s mix-order RSPLIT_SIZE=%d has no XBLOCK divisor satisfying the minimum block size %d",
+                        self.failed_debug_prefix,
+                        self.kernel.rsplit_size,
+                        min_block_size,
+                    )
+                    return False
+
                 # TODO: min block size may be too large / introduce redundancy
                 if min_block_size > self.kernel.max_block(
                     prefix_str[innermost_block_symt]

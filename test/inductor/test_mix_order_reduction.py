@@ -1537,6 +1537,7 @@ class OverFusionTest(TestBase):
 
 
 class MixOrderReductionNumericTest(TestBase):
+    @parametrize("use_tensor_descriptor", (False, True))
     @inductor_config.patch(
         {
             "split_reductions": False,
@@ -1546,14 +1547,22 @@ class MixOrderReductionNumericTest(TestBase):
             "triton.mix_order_reduction_split_size": 18,
         }
     )
-    def test_split_column_reduction_masks_padded_rows(self, device):
+    def test_split_column_reduction_masks_padded_rows(
+        self, device, use_tensor_descriptor
+    ):
         def f(x):
             y = x * 2 + 0.25
             return y.max(dim=-1).values, y.float().sum(dim=0)
 
         x = torch.zeros((40961, 129), dtype=torch.bfloat16, device=device)
         expected = f(x)
-        actual = torch.compile(f)(x)
+        with inductor_config.patch(
+            {
+                "triton.use_tensor_descriptor": use_tensor_descriptor,
+                "assume_aligned_inputs": use_tensor_descriptor,
+            }
+        ):
+            actual = torch.compile(f)(x)
 
         self.assertEqual(actual, expected)
         self.assertEqual(metrics.codegen_mix_order_reduction, 1)
