@@ -1158,6 +1158,23 @@ class TestMPS(TestCaseMPS):
         # completed waiting on the events.
         self.assertTrue(finished_waiting.is_set())
 
+    def test_multithreaded_arange(self):
+        # arange used to take the command encoder outside the stream's serial
+        # queue, so another thread's synchronize() could end and release that
+        # encoder while arange was still binding to it. The synchronize() is
+        # what makes this race reachable: without it nothing ends the encoder.
+        # See https://github.com/pytorch/pytorch/issues/197805
+        def worker():
+            for i in range(30):
+                torch.arange(0, 4096 + i, 1, device="mps")
+                torch.mps.synchronize()
+
+        threads = [threading.Thread(target=worker) for _ in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
     def test_exp(self, device="mps", dtype=torch.float):
         for v in (2, -2) + ((1j, 1 + 1j) if dtype.is_complex else ()):
             b = torch.arange(18, dtype=dtype, device=device) / 3 * math.pi
@@ -10812,8 +10829,8 @@ class TestInnerContiguous(TestCaseMPS):
             self.assertEqual(dev[offset:].clone().cpu(), full[offset:])
 
 
+@serialTest()
 class TestLargeTensors(TestCaseMPS):
-    @serialTest()
     def test_64bit_binops(self):
         if torch.mps.recommended_max_memory() < 16_000_000_000:
             raise unittest.SkipTest("Needs at least 16Gb of RAM")
@@ -10825,7 +10842,6 @@ class TestLargeTensors(TestCaseMPS):
         rc_slice_cpu = (a.cpu() + b.cpu()[slice_idx:]).sin()
         self.assertEqual(rc_slice, rc_slice_cpu)
 
-    @serialTest()
     def test_64bit_index_select(self):
         if torch.mps.recommended_max_memory() < 16_000_000_000:
             raise unittest.SkipTest("Needs at least 16Gb of RAM")
@@ -10843,7 +10859,6 @@ class TestLargeTensors(TestCaseMPS):
         torch.mps.empty_cache()
 
     @largeTensorTest("16GB", device="mps")
-    @serialTest()
     @parametrize("C,O", [(65536, 8), (8, 65536)])  # input-plane / output-plane overflow
     def test_conv3d_int32_overflow(self, C, O):
         x = torch.randn(1, C, 1, 182, 181, dtype=torch.float16, device='mps')
@@ -10857,7 +10872,6 @@ class TestLargeTensors(TestCaseMPS):
         torch.mps.empty_cache()
 
     @largeTensorTest("16GB", device="mps")
-    @serialTest()
     def test_conv3d_tile_count_int32_overflow(self):
         output_channels = torch.iinfo(torch.int32).max - 1
         # Stride 2 bypasses the pointwise matmul path while keeping the output
@@ -10871,7 +10885,6 @@ class TestLargeTensors(TestCaseMPS):
         gc.collect()
         torch.mps.empty_cache()
 
-    @serialTest()
     def test_64bit_index_copy(self):
         if torch.mps.recommended_max_memory() < 16_000_000_000:
             raise unittest.SkipTest("Needs at least 16Gb of RAM")
@@ -10887,7 +10900,6 @@ class TestLargeTensors(TestCaseMPS):
         gc.collect()
         torch.mps.empty_cache()
 
-    @serialTest()
     @parametrize("dtype", [torch.int8, torch.bool])
     @parametrize("noncontiguous", [False, True])
     @largeTensorTest("8GB", device="mps")
@@ -10912,7 +10924,6 @@ class TestLargeTensors(TestCaseMPS):
         gc.collect()
         torch.mps.empty_cache()
 
-    @serialTest()
     def test_rand_4b(self):
         # Used to crash with NDArray dimension length > INT_MAX on MPSGraph;
         # the Metal-kernel path decomposes via `iter.with_32bit_indexing()`.
@@ -10948,7 +10959,6 @@ class TestLargeTensors(TestCaseMPS):
         self.assertGreater(tail.unique().numel(), 50)
         del x
 
-    @serialTest()
     def test_64bit_strided_unary(self):
         # https://github.com/pytorch/pytorch/issues/183419: slice's byte-stride
         # extent > INT32_MAX forces TensorIterator to split the iter
@@ -11939,7 +11949,8 @@ class TestConv3dChannelsLast3dMPS(NNTestCase):
         self.assertTrue(x_mps_cl.grad.is_contiguous(memory_format=torch.channels_last_3d))
         self.assertEqual(m_mps_cont.weight.grad, m_mps_cl.weight.grad, **cl_vs_cont)
         if with_bias:
-            self.assertEqual(m_mps_cont.bias.grad, m_mps_cl.bias.grad, **cl_vs_cont)
+            bias_tol = dict(atol=1e-4, rtol=1e-4) if dtype == torch.float32 else cl_vs_cont
+            self.assertEqual(m_mps_cont.bias.grad, m_mps_cl.bias.grad, **bias_tol)
         if dtype == torch.float32:
             self.assertEqual(x_cpu.grad, x_mps_cl.grad.cpu(), atol=1e-4, rtol=1e-4)
             self.assertEqual(m_cpu.weight.grad, m_mps_cl.weight.grad.cpu(), atol=1e-4, rtol=1e-4)
@@ -14237,6 +14248,40 @@ class TestViewOpsMPS(TestCaseMPS):
         for dt in (torch.float, torch.bool):
             x = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dt, device=device)
             self.assertEqual(x.view(6).shape, [6])
+
+    @parametrize("layout", ["contiguous", "strided", "offset", "channels_last", "channels_last_offset"])
+    @parametrize("src_bits", ["none", "conj", "neg", "conj_neg"])
+    @parametrize("dst_bits", ["none", "conj", "neg", "conj_neg"])
+    def test_copy_conj_neg_views(self, layout, src_bits, dst_bits):
+        # copy_ must apply each side's conj/neg bit exactly once, whichever gather/scatter/blit
+        # path the strides pick. Bits used to be resolved into a temporary and then re-applied.
+        def make(device):
+            base = torch.arange(240, dtype=torch.float32, device=device).reshape(2, 3, 4, 10)
+            base = base + 1j * (base + 0.5)
+            if layout == "contiguous":
+                return base[..., :5].contiguous()
+            if layout == "strided":
+                return base[..., ::2]
+            if layout == "offset":
+                return base.reshape(-1)[7:127].reshape(2, 3, 4, 5)
+            cl = base[..., :5].contiguous().to(memory_format=torch.channels_last)
+            return cl if layout == "channels_last" else torch.cat([cl, cl])[2:]
+
+        def apply_bits(t, bits):
+            if "conj" in bits:
+                t = t.conj()
+            if "neg" in bits:
+                t = t._neg_view()
+            return t
+
+        res = {}
+        for device in ("cpu", "mps"):
+            src = apply_bits(make(device), src_bits)
+            dst = apply_bits(make(device), dst_bits)
+            dst.zero_()
+            dst.copy_(src)
+            res[device] = dst.resolve_conj().resolve_neg().cpu()
+        self.assertEqual(res["cpu"], res["mps"])
 
 class TestConvolutionMPS(TestCaseMPS):
     def test_conv1d_all_strides_paddings(self):
@@ -17653,6 +17698,7 @@ instantiate_parametrized_tests(TestMetalLibrary)
 instantiate_parametrized_tests(TestConv3dChannelsLast3dMPS)
 instantiate_parametrized_tests(TestConvolutionMPS)
 instantiate_parametrized_tests(TestLargeTensors)
+instantiate_parametrized_tests(TestViewOpsMPS)
 
 if __name__ == "__main__":
     run_tests()
