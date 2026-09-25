@@ -92,15 +92,7 @@ inline Tensor rms_norm(
     const std::vector<int64_t>& normalized_shape,
     const Tensor& weight,
     std::optional<double> eps) {
-  // An undefined weight (the `elementwise_affine=false` case) has to be passed
-  // as nullopt rather than as an engaged-but-undefined optional: unlike
-  // `rms_norm_symint`, `rms_norm_composite` gates on `has_value()` alone and
-  // then multiplies by the undefined tensor.
-  return torch::rms_norm(
-      input,
-      normalized_shape,
-      weight.defined() ? std::optional<Tensor>(weight) : std::nullopt,
-      eps);
+  return torch::rms_norm(input, normalized_shape, weight, eps);
 }
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
