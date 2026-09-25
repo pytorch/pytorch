@@ -463,6 +463,8 @@ class GraphLowering(torch.fx.Interpreter):
             sympy.Symbol, tuple[str, Literal["size", "stride"], int]
         ] = {}
         self.partition_maps: list[GraphPartitionMap] | None = None
+        # Whether graph partitioning left any partition outside a CUDA Graph.
+        self.has_uncaptured_partition = False
         self.zero_dim_cpu_tensor_list: OrderedSet[str] = OrderedSet()
         self.device_types: OrderedSet[str] = (
             const_module.device_types if const_module else OrderedSet()
