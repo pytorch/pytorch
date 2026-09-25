@@ -1402,7 +1402,7 @@ Converts :attr:`obj` to a tensor.
 
 1. a tensor
 2. a NumPy array or a NumPy scalar
-3. a DLPack capsule
+3. an object with DLPack support, i.e. it implements the ``__dlpack__`` protocol or is a DLPack capsule
 4. an object that implements Python's buffer protocol
 5. a scalar
 6. a sequence of scalars
@@ -1444,8 +1444,9 @@ current default device, and not share its memory.
     DLPack capsules.
 
 Args:
-    obj (object): a tensor, NumPy array, DLPack Capsule, object that implements Python's
-           buffer protocol, scalar, or sequence of scalars.
+    obj (object): a tensor, NumPy array, an object with DLPack support (a ``__dlpack__``
+           method or a DLPack capsule), an object that implements Python's buffer protocol,
+           scalar, or sequence of scalars.
 
 Keyword args:
     dtype (:class:`torch.dtype`, optional): the datatype of the returned tensor.

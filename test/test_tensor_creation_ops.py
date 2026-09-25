@@ -4333,6 +4333,22 @@ def to_numpy(tensor):
 def to_memview(tensor):
     return memoryview(to_numpy(tensor))
 
+class _DLPackWrapper:
+    """Exposes ``__dlpack__``/``__dlpack_device__`` delegating to a tensor,
+    without being a tensor, numpy array, raw DLPack capsule, or buffer.
+    """
+    def __init__(self, tensor):
+        self._tensor = tensor
+
+    def __dlpack__(self, *args, **kwargs):
+        return self._tensor.__dlpack__(*args, **kwargs)
+
+    def __dlpack_device__(self):
+        return self._tensor.__dlpack_device__()
+
+def to_dlpack_method(tensor):
+    return _DLPackWrapper(tensor)
+
 class TestAsArray(TestCase):
     def _check(self, original, cvt=lambda t: t, is_alias=True, same_dtype=True, same_device=True, **kwargs):
         """Check the output of 'asarray', given its input and assertion information.
@@ -4417,6 +4433,11 @@ class TestAsArray(TestCase):
     def test_alias_from_dlpack(self, device, dtype):
         self._test_alias_with_cvt(to_dlpack, device, dtype)
 
+    @skipMeta
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
+    def test_alias_from_dlpack_method(self, device, dtype):
+        self._test_alias_with_cvt(to_dlpack_method, device, dtype)
+
     @onlyCPU
     @dtypes(*set(numpy_to_torch_dtype_dict.values()))
     def test_alias_from_buffer(self, device, dtype):
@@ -4472,6 +4493,11 @@ class TestAsArray(TestCase):
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
     def test_copy_from_dlpack(self, device, dtype):
         self._test_copy_with_cvt(to_dlpack, device, dtype)
+
+    @skipMeta
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
+    def test_copy_from_dlpack_method(self, device, dtype):
+        self._test_copy_with_cvt(to_dlpack_method, device, dtype)
 
     @onlyCPU
     @dtypes(*set(numpy_to_torch_dtype_dict.values()))
@@ -4644,6 +4670,76 @@ class TestAsArray(TestCase):
         tensor = torch.asarray(original, copy=True, device=device)
         # The storage pointers should not be equal
         self.assertNotEqual(original.data_ptr(), tensor.data_ptr())
+
+    @onlyCPU
+    def test_asarray_from_dlpack_method(self, device):
+        for dtype in (torch.float32, torch.int64, torch.bool):
+            original = make_tensor((5,), dtype=dtype, device=device)
+            wrapper = _DLPackWrapper(original)
+
+            result = torch.asarray(wrapper)
+            self.assertEqual(result.dtype, dtype)
+            self.assertEqual(result, original)
+            # DLPack is zero-copy, so the result aliases the source.
+            self.assertEqual(result.data_ptr(), original.data_ptr())
+            self.assertEqual(
+                torch.asarray(wrapper, copy=False).data_ptr(), original.data_ptr()
+            )
+            # copy=True must produce a fresh allocation.
+            self.assertNotEqual(
+                torch.asarray(wrapper, copy=True).data_ptr(), original.data_ptr()
+            )
+
+    @onlyCPU
+    def test_asarray_dlpack_failure_falls_back(self, device):
+        # If a producer exposes __dlpack__ but its export raises, asarray must
+        # fall back to the buffer/sequence paths instead of propagating the
+        # error (gh-188784 review: MLX/PyArrow-style objects).
+        class _BadDLPackSequence:
+            def __init__(self, data):
+                self._data = data
+
+            def __dlpack__(self, *args, **kwargs):
+                raise RuntimeError("dlpack export failed")
+
+            def __dlpack_device__(self):
+                raise RuntimeError("no dlpack device")
+
+            def __len__(self):
+                return len(self._data)
+
+            def __getitem__(self, index):
+                return self._data[index]
+
+        # __dlpack__ raises -> falls through to the sequence path.
+        result = torch.asarray(_BadDLPackSequence([1.0, 2.0, 3.0]))
+        self.assertEqual(result, torch.tensor([1.0, 2.0, 3.0]))
+
+        # torch.tensor / torch.as_tensor keep propagating the failure.
+        for ctor in (torch.tensor, torch.as_tensor):
+            with self.assertRaisesRegex(RuntimeError, "no dlpack device|dlpack export failed"):
+                ctor(_BadDLPackSequence([1.0, 2.0, 3.0]))
+
+        # __dlpack__ raises but the object is also a buffer -> falls through to
+        # the buffer path (PEP 688 __buffer__, Python >= 3.12).
+        if sys.version_info >= (3, 12):
+            class _BadDLPackBuffer:
+                def __init__(self, array):
+                    self._array = array
+
+                def __dlpack__(self, *args, **kwargs):
+                    raise RuntimeError("dlpack export failed")
+
+                def __dlpack_device__(self):
+                    raise RuntimeError("no dlpack device")
+
+                def __buffer__(self, flags):
+                    return memoryview(self._array)
+
+            arr = np.array([1, 2, 3], dtype=np.int32)
+            result = torch.asarray(_BadDLPackBuffer(arr), dtype=torch.int32)
+            self.assertEqual(result.dtype, torch.int32)
+            self.assertEqual(result, torch.tensor([1, 2, 3], dtype=torch.int32))
 
 
 instantiate_device_type_tests(TestTensorCreation, globals(), allow_xpu=True)
