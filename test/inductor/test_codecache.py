@@ -22,6 +22,7 @@ from unittest import mock
 
 import torch
 from torch._dynamo import reset
+from torch._dynamo.device_interface import DeviceInterface
 from torch._dynamo.package import DynamoCache
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.utils import counters
@@ -83,7 +84,6 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     IS_SANDCASTLE,
     parametrize,
-    TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -120,7 +120,36 @@ torch._dynamo.config.fake_tensor_cache_crosscheck_enabled = True
 STATIC_LAUNCHER_DEVICES = ("cuda", "xpu")
 
 
+@instantiate_parametrized_tests
 class TestCacheKeyStrategy(TestCase):
+    @parametrize(
+        "backend_precision,expected,legacy_calls",
+        (("bfx9", "bfx9", 0), ("tf32", "high", 1)),
+    )
+    def test_precompile_cache_key_handles_bfx9(
+        self, backend_precision, expected, legacy_calls
+    ):
+        from torch._inductor.select_algorithm import create_precompile_key
+
+        choice = types.SimpleNamespace(kernel_hash_key=lambda: "choice")
+        with (
+            mock.patch.object(
+                torch._C,
+                "_get_fp32_precision_getter",
+                return_value=backend_precision,
+            ),
+            mock.patch.object(
+                torch,
+                "get_float32_matmul_precision",
+                return_value="high",
+            ) as legacy_getter,
+        ):
+            self.assertEqual(
+                create_precompile_key("op", "inputs", [choice]),
+                f"op:inputs:{expected}:choice",
+            )
+            self.assertEqual(legacy_getter.call_count, legacy_calls)
+
     def _compact_sha256(self, data: bytes) -> str:
         return (
             base64.b32encode(hashlib.sha256(data).digest())[:51].decode("utf-8").lower()
@@ -221,6 +250,196 @@ class TestCacheKeyStrategy(TestCase):
             },
         )
         self.assertTrue(fake_strategy.sort_keys)
+
+    def test_device_interface_cache_system_info(self):
+        self.assertIsNone(DeviceInterface.get_cache_system_info())
+
+        class FakeDeviceInterface(DeviceInterface):
+            info = None
+            calls = 0
+
+            @staticmethod
+            def is_available() -> bool:
+                return True
+
+            @classmethod
+            def get_cache_system_info(cls):
+                cls.calls += 1
+                return cls.info
+
+        fake_properties = types.SimpleNamespace(name="test-gpu", gcnArchName="test-gcn")
+        CacheBase.get_system.cache_clear()
+        try:
+            with (
+                mock.patch(
+                    "torch._inductor.codecache.SYSTEM_CACHE_KEY_STRATEGY",
+                    wraps=SYSTEM_CACHE_KEY_STRATEGY,
+                ) as fake_strategy,
+                mock.patch("torch._inductor.runtime.triton_compat.HAS_TRITON", False),
+                mock.patch.object(torch.cuda, "current_device", return_value=0),
+                mock.patch.object(
+                    torch.cuda,
+                    "get_device_properties",
+                    return_value=fake_properties,
+                ),
+                mock.patch.object(torch.version, "cuda", "test-cuda"),
+                mock.patch(
+                    "torch._inductor.codecache.get_registered_device_interfaces",
+                    return_value=[
+                        ("fake", FakeDeviceInterface),
+                        ("fake:0", FakeDeviceInterface),
+                    ],
+                ),
+            ):
+                base = CacheBase.get_system()
+                self.assertNotIn(
+                    "device_interfaces",
+                    fake_strategy.key_from_json.call_args.args[0],
+                )
+                self.assertEqual(FakeDeviceInterface.calls, 1)
+
+                FakeDeviceInterface.info = {"runtime": "1"}
+                CacheBase.get_system.cache_clear()
+                first = CacheBase.get_system()
+                self.assertEqual(first["device_interfaces"], {"fake": {"runtime": "1"}})
+                self.assertEqual(FakeDeviceInterface.calls, 2)
+                first_payload = copy.deepcopy(
+                    fake_strategy.key_from_json.call_args.args[0]
+                )
+                self.assertEqual(
+                    first_payload,
+                    {
+                        "device": {"name": "test-gpu"},
+                        "version": {"triton": None, "cuda": "test-cuda"},
+                        "device_interfaces": {"fake": {"runtime": "1"}},
+                    },
+                )
+                FakeDeviceInterface.info = {"runtime": "2"}
+                CacheBase.get_system.cache_clear()
+                second = CacheBase.get_system()
+                self.assertNotEqual(first["hash"], second["hash"])
+                self.assertEqual(
+                    base["hash"],
+                    SYSTEM_CACHE_KEY_STRATEGY.key_from_json(
+                        {
+                            "device": {"name": "test-gpu"},
+                            "version": {"triton": None, "cuda": "test-cuda"},
+                        }
+                    ),
+                )
+        finally:
+            CacheBase.get_system.cache_clear()
+
+    @parametrize(
+        "registered,available,info,expected,warns",
+        (
+            (False, True, None, None, False),
+            (True, True, {"runtime": "1"}, {"fake": {"runtime": "1"}}, False),
+            (True, True, {}, {"fake": {}}, False),
+            (True, False, {"runtime": "1"}, None, False),
+            (True, True, RuntimeError("test failure"), None, True),
+            (True, True, {"v": {1, 2}}, None, True),
+            (True, True, ["runtime", "1"], None, True),
+        ),
+    )
+    def test_device_interface_cache_system_info_without_cuda(
+        self, registered, available, info, expected, warns
+    ):
+        class FakeDeviceInterface(DeviceInterface):
+            calls = 0
+
+            @staticmethod
+            def is_available() -> bool:
+                return available
+
+            @classmethod
+            def get_cache_system_info(cls):
+                cls.calls += 1
+                if isinstance(info, Exception):
+                    raise info
+                return info
+
+        CacheBase.get_system.cache_clear()
+        try:
+            with (
+                mock.patch(
+                    "torch._inductor.codecache.SYSTEM_CACHE_KEY_STRATEGY",
+                    wraps=SYSTEM_CACHE_KEY_STRATEGY,
+                ) as fake_strategy,
+                mock.patch("torch._inductor.runtime.triton_compat.HAS_TRITON", False),
+                mock.patch.object(
+                    torch.cuda, "current_device", side_effect=RuntimeError
+                ),
+                mock.patch(
+                    "torch._inductor.codecache.get_registered_device_interfaces",
+                    return_value=(
+                        [("fake", FakeDeviceInterface)] if registered else []
+                    ),
+                ),
+                mock.patch("torch._inductor.codecache.log") as fake_log,
+            ):
+                system = CacheBase.get_system()
+                expected_payload = {"version": {"triton": None}}
+                if expected is not None:
+                    expected_payload["device_interfaces"] = expected
+                self.assertEqual(
+                    system,
+                    {
+                        **expected_payload,
+                        "hash": SYSTEM_CACHE_KEY_STRATEGY.key_from_json(
+                            expected_payload
+                        ),
+                    },
+                )
+                self.assertEqual(
+                    fake_strategy.key_from_json.call_args.args[0], expected_payload
+                )
+                if warns:
+                    fake_log.warning.assert_called_once()
+                    self.assertIn("fake", fake_log.warning.call_args.args[1])
+                else:
+                    fake_log.warning.assert_not_called()
+                if registered and not available:
+                    self.assertEqual(FakeDeviceInterface.calls, 0)
+        finally:
+            CacheBase.get_system.cache_clear()
+
+    def test_device_interface_cache_system_info_non_dict_metadata(self):
+        class FakeDeviceInterface(DeviceInterface):
+            @staticmethod
+            def is_available() -> bool:
+                return True
+
+            @classmethod
+            def get_cache_system_info(cls):
+                return ["runtime", "1"]
+
+        CacheBase.get_system.cache_clear()
+        try:
+            with (
+                mock.patch(
+                    "torch._inductor.codecache.SYSTEM_CACHE_KEY_STRATEGY",
+                    wraps=SYSTEM_CACHE_KEY_STRATEGY,
+                ) as fake_strategy,
+                mock.patch("torch._inductor.runtime.triton_compat.HAS_TRITON", False),
+                mock.patch.object(
+                    torch.cuda, "current_device", side_effect=RuntimeError
+                ),
+                mock.patch(
+                    "torch._inductor.codecache.get_registered_device_interfaces",
+                    return_value=[("fake", FakeDeviceInterface)],
+                ),
+                mock.patch("torch._inductor.codecache.log") as fake_log,
+            ):
+                system = CacheBase.get_system()
+                expected_payload = {"version": {"triton": None}}
+                self.assertNotIn("device_interfaces", system)
+                self.assertEqual(
+                    fake_strategy.key_from_json.call_args.args[0], expected_payload
+                )
+                self.assertEqual(fake_log.warning.call_count, 1)
+        finally:
+            CacheBase.get_system.cache_clear()
 
     def test_autotune_prepare_key_uses_strategy(self):
         from torch._inductor.runtime.autotune_cache import AutotuneCache
@@ -625,8 +844,6 @@ class TestFxGraphCache(TestCase):
             raise unittest.SkipTest(
                 "Static triton launcher requires cuda/xpu and triton bundling"
             )
-        if use_static_triton_launcher and TEST_WITH_ROCM:
-            raise unittest.SkipTest("Static cuda launcher doesn't work with ROCM")
 
         grad_multiplier = 2 if grad else 1
 
@@ -1129,7 +1346,7 @@ class TestFxGraphCache(TestCase):
             self.assertEqual(counters["dynamo_cache"]["dynamo_cache_miss"], 2)
             self.assertEqual(counters["dynamo_cache"]["dynamo_cache_hit"], 1)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @config.patch(
         {
             "fx_graph_cache": True,
@@ -1145,11 +1362,11 @@ class TestFxGraphCache(TestCase):
         def fn(x):
             return x + 1 * x
 
-        x = torch.randn(3, 2, device="cuda")
+        x = torch.randn(3, 2, device=self.device_type)
 
         with fresh_cache():
             compiled_fn = torch.compile(fn)
-            with torch.amp.autocast(device_type="cuda"):
+            with torch.amp.autocast(device_type=self.device_type):
                 eager_result = fn(x)
                 compiled_result = compiled_fn(x)
             self.assertEqual(eager_result, compiled_result)
@@ -1167,7 +1384,7 @@ class TestFxGraphCache(TestCase):
             self.assertEqual(len(cache_info.precompile_artifacts), 1)
 
             compiled_fn = torch.compile(fn)
-            with torch.amp.autocast(device_type="cuda"):
+            with torch.amp.autocast(device_type=self.device_type):
                 eager_result = fn(x)
                 compiled_result = compiled_fn(x)
             self.assertEqual(eager_result, compiled_result)
@@ -1558,7 +1775,7 @@ class TestFxGraphCache(TestCase):
     @torch._functorch.config.patch({"enable_autograd_cache": False})
     @config.patch("fx_graph_remote_cache", False)
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_no_arguments_tensor_device_guards(self):
         """
         Usually, when there are example inputs, the device index of the inputs
@@ -1570,25 +1787,36 @@ class TestFxGraphCache(TestCase):
 
         @torch.compile
         def f():
-            y = torch.randn(3, device="cuda")
+            y = torch.randn(3, device=self.device_type)
             return (y,)
 
-        with torch.cuda._DeviceGuard(0):
-            torch.cuda.set_device(0)
+        device_guard0 = (
+            torch.xpu._DeviceGuard(0)
+            if self.device_type == "xpu"
+            else torch.cuda._DeviceGuard(0)
+        )
+        with device_guard0:
+            torch.accelerator.set_device_idx(0)
             result = f()
-            self.assertEqual(result[0].device, torch.device("cuda:0"))
+            self.assertEqual(result[0].device, torch.device(f"{self.device_type}:0"))
         self.reset()
+
         # Should not cache hit with device guard
-        with torch.cuda._DeviceGuard(1):
-            torch.cuda.set_device(1)
+        device_guard1 = (
+            torch.xpu._DeviceGuard(1)
+            if self.device_type == "xpu"
+            else torch.cuda._DeviceGuard(1)
+        )
+        with device_guard1:
+            torch.accelerator.set_device_idx(1)
             result = f()
-            self.assertEqual(result[0].device, torch.device("cuda:1"))
+            self.assertEqual(result[0].device, torch.device(f"{self.device_type}:1"))
 
     @config.patch("fx_graph_cache", True)
     @torch._functorch.config.patch({"enable_autograd_cache": False})
     @config.patch("fx_graph_remote_cache", False)
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_tensor_device_guards_cpu_tensor(self):
         """
         CPU tensor arguments should still cache hit
@@ -1598,15 +1826,25 @@ class TestFxGraphCache(TestCase):
         def f(x):
             return x.sin()
 
-        with torch.cuda._DeviceGuard(0):
-            torch.cuda.set_device(0)
+        device_guard0 = (
+            torch.xpu._DeviceGuard(0)
+            if self.device_type == "xpu"
+            else torch.cuda._DeviceGuard(0)
+        )
+        with device_guard0:
+            torch.accelerator.set_device_idx(0)
             result = f(torch.randn(3, device="cpu"))
             self.assertEqual(result.device, torch.device("cpu"))
 
         self.reset()
         # Should not cache hit with device guard
-        with torch.cuda._DeviceGuard(1):
-            torch.cuda.set_device(1)
+        device_guard1 = (
+            torch.xpu._DeviceGuard(1)
+            if self.device_type == "xpu"
+            else torch.cuda._DeviceGuard(1)
+        )
+        with device_guard1:
+            torch.accelerator.set_device_idx(1)
             result = f(torch.randn(3, device="cpu"))
             self.assertEqual(result.device, torch.device("cpu"))
 
@@ -2082,9 +2320,6 @@ class TestFxGraphCache(TestCase):
     @parametrize("bundle_triton", (False, True))
     @parametrize("use_static_triton_launcher", (False, True))
     def test_triton_op(self, bundle_triton, use_static_triton_launcher):
-        if use_static_triton_launcher and TEST_WITH_ROCM:
-            raise unittest.SkipTest("Static cuda launcher doesn't work with ROCM")
-
         libname = "my_cool_namespace"
         opname = "my_triton_operator"
 
@@ -2299,7 +2534,7 @@ class TestFxGraphCache(TestCase):
         self.assertNotEqual(a, b)
 
     @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @unittest.expectedFailure  # TODO: pass in optimize_mem at runtime
     def test_async_compile_cache(self):
         class SimpleFunction(torch.autograd.Function):
@@ -2311,7 +2546,7 @@ class TestFxGraphCache(TestCase):
             def backward(ctx, grad_output):
                 return grad_output * 2
 
-        x = torch.rand([10], requires_grad=True, device="cuda")
+        x = torch.rand([10], requires_grad=True, device=self.device_type)
         counters.clear()
 
         sf = SimpleFunction
@@ -3569,15 +3804,15 @@ class TestFxGraphCacheHashing(TestCase):
         # A region's inductor_config_patches must be part of the cache key,
         # otherwise two regions differing only in their patches would collide
         # and reuse a stale compiled artifact.
-        same1 = self._nested_region_gm({"max_autotune": True})
-        same2 = self._nested_region_gm({"max_autotune": True})
-        different = self._nested_region_gm({"max_autotune": False})
+        same1 = self._nested_region_gm({"fallback_by_default": True})
+        same2 = self._nested_region_gm({"fallback_by_default": True})
+        different = self._nested_region_gm({"fallback_by_default": False})
 
         self.assertEqual(
             FxGraphHashDetails(
                 same1, [], cast(Any, {}), []
             ).nested_inductor_config_patches,
-            (("", (("max_autotune", True),)),),
+            (("", (("fallback_by_default", True),)),),
         )
         self.assertEqual(
             self._fx_graph_cache_key(same1, []),
@@ -3589,40 +3824,16 @@ class TestFxGraphCacheHashing(TestCase):
         )
 
     def test_nested_region_uncacheable_config_bypasses_cache(self):
-        # A callable patch value can't be hashed into the cache key.
-        def custom_pass(graph):
-            return graph
+        # Config annotations are not enforced when a patch is applied, so an
+        # allowed key can still carry a callable value that cannot be cached.
+        def invalid_value():
+            pass
 
         with self.assertRaisesRegex(BypassFxGraphCache, "callable value"):
             CacheabilityValidator(
-                self._nested_region_gm({"post_grad_custom_pre_pass": custom_pass}),
+                self._nested_region_gm({"fallback_by_default": invalid_value}),
                 require_shape_env=False,
             ).validate()
-
-        # A non-callable value under a custom-pass key is uncacheable too.
-        with self.assertRaisesRegex(BypassFxGraphCache, "custom pass"):
-            CacheabilityValidator(
-                self._nested_region_gm({"post_grad_custom_pre_pass": "sentinel"}),
-                require_shape_env=False,
-            ).validate()
-
-        # A callable hidden inside a list value (e.g.
-        # _fuse_ddp_communication_passes) is uncacheable too.
-        with self.assertRaisesRegex(BypassFxGraphCache, "callable value"):
-            CacheabilityValidator(
-                self._nested_region_gm(
-                    {"_fuse_ddp_communication_passes": [custom_pass]}
-                ),
-                require_shape_env=False,
-            ).validate()
-
-        # A list of non-callables stays cacheable.
-        CacheabilityValidator(
-            self._nested_region_gm(
-                {"_fuse_ddp_communication_passes": ["fuse_ddp_with_concat_op"]}
-            ),
-            require_shape_env=False,
-        ).validate()
 
     def _nested_region_bw_gm(self, bw_patches):
         from torch._higher_order_ops.invoke_subgraph import (
@@ -3656,17 +3867,17 @@ class TestFxGraphCacheHashing(TestCase):
         # Backward config replaces (does not merge with) the forward config.
         bw_config = get_backward_nested_region_config(
             get_invoke_subgraph_compile_options(
-                bw_inductor_config_patches={"max_autotune": True}
+                bw_inductor_config_patches={"fallback_by_default": True}
             )
         )
         self.assertEqual(
             bw_config.inductor_config_patches,
-            {"max_autotune": True},
+            {"fallback_by_default": True},
         )
 
-        same1 = self._nested_region_bw_gm({"max_autotune": True})
-        same2 = self._nested_region_bw_gm({"max_autotune": True})
-        different = self._nested_region_bw_gm({"max_autotune": False})
+        same1 = self._nested_region_bw_gm({"fallback_by_default": True})
+        same2 = self._nested_region_bw_gm({"fallback_by_default": True})
+        different = self._nested_region_bw_gm({"fallback_by_default": False})
         self.assertEqual(
             self._fx_graph_cache_key(same1, []),
             self._fx_graph_cache_key(same2, []),
@@ -4852,8 +5063,8 @@ class TestAutotuneCache(TestCase):
         self.assertEqual(cache.puts[0][1], {"entry.best_config": {"ctx": "saved"}})
         self.assertIsNone(graph._compile_context)
 
-    @requires_cuda_and_triton
-    @unittest.skipIf(not SM80OrLater, "Requires SM80+")
+    @requires_gpu_and_triton
+    @unittest.skipIf(not HAS_XPU_AND_TRITON and not SM80OrLater, "Requires SM80+")
     @config.patch({"use_static_triton_launcher": True})
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
@@ -4872,10 +5083,11 @@ class TestAutotuneCache(TestCase):
         def f(x, y, a, b):
             return Model()(x, y, a, b)
 
-        x = torch.randn(100, 100).cuda()
-        y = torch.randn(100, 100).cuda()
-        a = torch.randn(1000, 100).cuda()
-        b = torch.randn(1000, 100).cuda()
+        device = torch.device(GPU_TYPE)
+        x = torch.randn(100, 100, device=device)
+        y = torch.randn(100, 100, device=device)
+        a = torch.randn(1000, 100, device=device)
+        b = torch.randn(1000, 100, device=device)
         f_compiled = torch.compile(f, fullgraph=True)
 
         with PatchCaches():

@@ -65,6 +65,34 @@ class SecondNameChoices(InductorChoices):
         return f"{fused_name}_second"
 
 
+class ForwardFlexChoices(InductorChoices):
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls = 0
+
+    def uuid(self) -> str:
+        return "forward-flex"
+
+    def append_flex_attention_choices(self, choices, *args, **kwargs):
+        self.calls += 1
+        return choices
+
+
+class BackwardFlexChoices(InductorChoices):
+    def __init__(self) -> None:
+        super().__init__()
+        self.mutated_inputs: list[Any] | None = None
+
+    def uuid(self) -> str:
+        return "backward-flex"
+
+    def append_flex_attention_backward_choices(
+        self, choices, *args, mutated_inputs: list[Any], **kwargs
+    ):
+        self.mutated_inputs = mutated_inputs
+        return choices
+
+
 class UUIDChoices(InductorChoices):
     def __init__(self, value: str) -> None:
         super().__init__()
@@ -200,6 +228,60 @@ class ChoicesCompositionTest(TestCase):
             )
         self.assertEqual(second.calls, 0)
         self.assertIn("customize_fused_kernel_name", "\n".join(logs.output))
+
+    def test_flex_attention_forward_override_is_not_used_for_backward(self) -> None:
+        handler = ForwardFlexChoices()
+        forward_choices = [object()]
+        backward_choices = [object()]
+        args = ([], [], [], None, {}, 1, 1)
+
+        self.assertIs(
+            handler.append_flex_attention_choices(forward_choices, *args),
+            forward_choices,
+        )
+        self.assertIs(
+            handler.append_flex_attention_backward_choices(
+                backward_choices,
+                *args,
+                mutated_inputs=[],
+            ),
+            backward_choices,
+        )
+        self.assertEqual(handler.calls, 1)
+
+    def test_flex_attention_hooks_compose_independently(self) -> None:
+        forward = ForwardFlexChoices()
+        backward = BackwardFlexChoices()
+        register_inductor_choices("forward", lambda: forward)
+        register_inductor_choices("backward", lambda: backward)
+        mutated_inputs = [object()]
+        handler = V.choices
+
+        forward_choices = [object()]
+        backward_choices = [object()]
+        args = ([], [], [], None, {}, 1, 1)
+        self.assertIs(
+            handler.append_flex_attention_choices(forward_choices, *args),
+            forward_choices,
+        )
+        self.assertIs(
+            handler.append_flex_attention_backward_choices(
+                backward_choices,
+                *args,
+                mutated_inputs=mutated_inputs,
+            ),
+            backward_choices,
+        )
+
+        self.assertEqual(forward.calls, 1)
+        self.assertIs(backward.mutated_inputs, mutated_inputs)
+
+    def test_flex_attention_backward_mutated_inputs_is_keyword_only(self) -> None:
+        choices = InductorChoices()
+        with self.assertRaises(TypeError):
+            choices.append_flex_attention_backward_choices(
+                [], [], [], [], None, {}, 1, 1, []
+            )
 
     def test_staticmethod_conflict_warns_once(self) -> None:
         register_inductor_choices("false", StaticFalseChoices)
