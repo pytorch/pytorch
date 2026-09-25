@@ -3468,6 +3468,7 @@ class DictBuiltinVariable(BaseBuiltinVariable):
                 return OrderedDictVariable(items, mutation_type=ValueMutationNew())
             elif issubclass(user_cls, OrderedDict):
                 from .builder import SourcelessBuilder
+                from .user_defined import UserDefinedDictVariable
 
                 result = tx.output.side_effects.track_new_user_defined_object(
                     SourcelessBuilder.create(tx, dict),
@@ -3475,6 +3476,10 @@ class DictBuiltinVariable(BaseBuiltinVariable):
                     [],
                     tx=tx,
                 )
+                if not isinstance(result, UserDefinedDictVariable):
+                    raise AssertionError(
+                        f"Expected UserDefinedDictVariable, got {type(result)}"
+                    )
                 result._base_vt = OrderedDictVariable(
                     items, mutation_type=ValueMutationNew()
                 )
