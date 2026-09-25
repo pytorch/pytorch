@@ -74,7 +74,7 @@ from .exc import (
     MissingOperatorWithDecomp,
     MissingOperatorWithoutDecomp,
 )
-from .fx_utils import count_flops_fx
+from .fx_utils import count_flops_fx, get_node_storage
 from .ir import (
     assign_origin_node,
     Constant,
@@ -109,6 +109,7 @@ from .runtime import autotune_cache
 from .runtime.autotune_cache import AutotuneCacheBundler
 from .sizevars import SizeVarAllocator
 from .utils import (
+    convert_shape_to_inductor,
     gather_origins,
     get_cloned_parameter_buffer_name,
     get_donated_idxs,
@@ -147,6 +148,14 @@ perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 
 
 aten = torch.ops.aten
+
+AS_STRIDED_OPS = (
+    aten.as_strided.default,
+    aten.as_strided_.default,
+    aten.as_strided_scatter.default,
+    aten.resize.default,
+    aten.resize_as.default,
+)
 
 _post_grad_graph_counter = itertools.count()
 
@@ -579,6 +588,21 @@ class GraphLowering(torch.fx.Interpreter):
         self._warned_fallback = OrderedSet(["aten.convolution_backward"])
         self.user_visible_output_strides = get_user_visible_output_strides(gm.graph)
         mark_nodes_dislike_padding(gm.graph, self.user_visible_output_strides)
+        # Constrain each storage's first tensor node before a view can freeze
+        # its layout. Later aliases keep their ordinary lowering behavior.
+        as_strided_storages = OrderedSet(
+            get_node_storage(inp)
+            for node in gm.graph.nodes
+            if node.target in AS_STRIDED_OPS
+            for inp in node.all_input_nodes[:1]
+        )
+        as_strided_storages.discard(None)
+        self.as_strided_base_nodes: OrderedSet[torch.fx.Node] = OrderedSet()
+        for node in gm.graph.nodes:
+            storage = get_node_storage(node)
+            if storage in as_strided_storages:
+                self.as_strided_base_nodes.add(node)
+                as_strided_storages.remove(storage)
         self.cache_key: str = ""  # This is the cache key for the compiled artifact
         self.cache_path: str = ""  # This is the path in the filesystem where the compiled artifact is stored
         self.cache_linemap: list[
@@ -1968,6 +1992,7 @@ class GraphLowering(torch.fx.Interpreter):
                 and n in self.nodes_prefer_channels_last
                 and not is_user_visible
                 and not is_input_for_as_strided
+                and not is_as_strided_base
             ):
                 result = ir.ExternKernel.require_stride_order(
                     result,
@@ -2087,21 +2112,25 @@ class GraphLowering(torch.fx.Interpreter):
             # with infallible strides.
             # 2: as_strided ops, we need to make sure its input has same size/stride with
             # eager model to align with eager behavior.
-            as_strided_ops = [
-                torch.ops.aten.as_strided.default,
-                torch.ops.aten.as_strided_.default,
-                torch.ops.aten.as_strided_scatter.default,
-                torch.ops.aten.resize.default,
-                torch.ops.aten.resize_as.default,
-            ]
             is_output = any(user.op == "output" for user in n.users)
             is_user_visible = n in self.user_visible_output_strides
             is_input_for_as_strided = any(
-                user.target in as_strided_ops for user in n.users
+                user.target in AS_STRIDED_OPS for user in n.users
             )
+            is_as_strided_base = n in self.as_strided_base_nodes
 
-            if n.meta.get("inductor_realize_to_strides", False) and isinstance(
-                result, TensorBox
+            if is_as_strided_base and isinstance(result, TensorBox):
+                # Fix the producer's layout before lowering any of its views.
+                result.realize()
+                result = ir.ExternKernel.require_exact_strides(
+                    result,
+                    convert_shape_to_inductor(n.meta["val"].stride()),
+                )
+
+            if (
+                not is_as_strided_base
+                and n.meta.get("inductor_realize_to_strides", False)
+                and isinstance(result, TensorBox)
             ):
                 result.realize()
                 strides = n.meta["val"].stride()
@@ -2117,8 +2146,10 @@ class GraphLowering(torch.fx.Interpreter):
                 # Realize so that outputs are correctly aliased
                 result.realize()
 
-            if (is_output or is_input_for_as_strided) and isinstance(
-                n.meta.get("val"), torch.Tensor
+            if (
+                not is_as_strided_base
+                and (is_output or is_input_for_as_strided)
+                and isinstance(n.meta.get("val"), torch.Tensor)
             ):
                 if is_user_visible:
                     strides = self.user_visible_output_strides.get(n)
@@ -2152,13 +2183,6 @@ class GraphLowering(torch.fx.Interpreter):
                             ir.BaseView,
                         )
                         if is_view and not (is_output and config.strict_output_strides):
-                            if is_input_for_as_strided and isinstance(
-                                result, ir.TensorBox
-                            ):
-                                # as_strided reads its input storage-relative, so realize the
-                                # base and let require_strides reinterpret it rather than
-                                # copying the view into a smaller buffer.
-                                result.realize()
                             result = ir.ExternKernel.require_stride_order(
                                 result,
                                 ir.get_stride_order(strides),
@@ -2216,14 +2240,15 @@ class GraphLowering(torch.fx.Interpreter):
                             ]
                             if torch._C.has_mkl:
                                 need_fixed_layout += [torch.ops.mkl._mkl_linear.default]
-                        if user.target in need_fixed_layout:
+                        if not is_as_strided_base and user.target in need_fixed_layout:
                             result = ir.ExternKernel.require_stride_order(
                                 result,
                                 ir.get_stride_order(n.meta["val"].stride()),
                                 allow_padding=True,
                             )
                         if (
-                            user.target in need_fixed_channels_last_layout
+                            not is_as_strided_base
+                            and user.target in need_fixed_channels_last_layout
                             and n is user.args[0]
                         ):
                             result = ir.ExternKernel.require_stride_order(

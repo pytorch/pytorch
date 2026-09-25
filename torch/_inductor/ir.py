@@ -3586,7 +3586,10 @@ class BaseView(IRNode):
 
     def unwrap_view(self) -> IRNode:
         x: IRNode = self
-        while isinstance(x, BaseView):
+        # Unwrap TensorBoxes containing views, but keep the box around storage.
+        while isinstance(x, BaseView) or (
+            isinstance(x, TensorBox) and isinstance(x.data, BaseView)
+        ):
             x = x.data
         return x
 
@@ -7628,7 +7631,8 @@ class ExternKernel(InputsKernel):
             raise NotImplementedError
 
         return ReinterpretView(
-            data=x.data,
+            # The composed indexer is relative to the unwrapped base.
+            data=x_unwrap_view,
             layout=FixedLayout(
                 device=x.get_device_or_error(),
                 dtype=x.get_dtype(),
