@@ -1523,12 +1523,18 @@ class TestFusibleNodeOverlap(InductorTestCase):
             op="call_function", target=torch.ops.aten.clone.default
         )
 
-        def custom_runtime(node, override_size):
-            if node is clone:
-                return 7.0
-            if node.op == "call_function":
-                return 1.0
-            return None
+        class CustomRuntime:
+            def __call__(self, node, override_size):
+                if node is clone:
+                    return 7.0
+                if node.op == "call_function":
+                    return 1.0
+                return None
+
+            def is_runtime_node(self, node):
+                return node.target is torch.ops.aten.clone.default
+
+        custom_runtime = CustomRuntime()
 
         from torch._inductor.fx_passes.overlap_scheduling import (
             is_compute_node,
@@ -1581,6 +1587,26 @@ class TestFusibleNodeOverlap(InductorTestCase):
             self.assertRaisesRegex(RuntimeError, "runtime nodes differ across ranks"),
         ):
             scheduler._align_compute_nodes_runtime_estimations_across_all_distributed_ranks()
+
+        class CustomRuntimeMiss(CustomRuntime):
+            def __call__(self, node, override_size):
+                if node is clone:
+                    return None
+                return super().__call__(node, override_size)
+
+        miss_scheduler = OverlapScheduler(
+            traced,
+            max_in_flight_gb=5.0,
+            max_compute_pre_fetch=200,
+            collective_bucketing=False,
+            insert_overlap_deps=False,
+            compute_overlap_multipler=1.0,
+            max_coll_distance=200,
+            custom_runtime_estimation=CustomRuntimeMiss(),
+            collective_estimator="analytical",
+        )
+        self.assertIn(clone, miss_scheduler.compute_node_set)
+        self.assertGreater(miss_scheduler.node_estimations[clone], 0)
 
     def test_fusion_regions_hide_collective(self, device):
         """Test that fusion regions can hide collectives when enabled."""
@@ -2407,6 +2433,27 @@ class TestNodeRuntimeEstimationUnit(InductorTestCase):
 
         _log_compute_estimations([add], [1.0], [1.0])
 
+    def test_custom_estimation_bypasses_benchmark_cache(self):
+        from torch._inductor.fx_passes import overlap_scheduling
+
+        with FakeTensorMode():
+            gm = make_fx(torch.mm)(torch.randn(4, 8), torch.randn(8, 16))
+        mm_nodes = gm.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.mm.default
+        )
+        mm = mm_nodes[0]
+
+        with patch.object(
+            overlap_scheduling, "get_cached_node_time", return_value=7.0
+        ) as get_cached:
+            estimate, key = overlap_scheduling.benchmark_node_with_cache_key(
+                mm, lambda node, override_size: 1.25
+            )
+
+        self.assertEqual(estimate, 1.25)
+        self.assertIsNone(key)
+        get_cached.assert_not_called()
+
 
 def _make_pge_trace(
     collectives=None,
@@ -2983,6 +3030,25 @@ class TestProfileGuidedEstimation(TestCase):
                 op="call_function", target=torch.ops.aten.mm.default
             )[0]
             self.assertEqual(estimator(mm), 0.05)
+        finally:
+            os.unlink(path)
+
+    def test_estimator_runtime_node_predicate_ignores_shape(self):
+        matmul = {"shapes": [[4, 8], [8, 16]], "dur": 50.0}
+        trace = _make_pge_trace(matmuls=[matmul])
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(trace, f)
+            path = f.name
+        try:
+            estimator = ProfileGuidedEstimator(path)
+            with FakeTensorMode():
+                gm = make_fx(torch.mm)(torch.randn(8, 8), torch.randn(8, 8))
+            mm = gm.graph.find_nodes(
+                op="call_function", target=torch.ops.aten.mm.default
+            )[0]
+
+            self.assertIsNone(estimator(mm))
+            self.assertTrue(estimator.is_runtime_node(mm))
         finally:
             os.unlink(path)
 

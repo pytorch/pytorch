@@ -6,7 +6,7 @@ import sys
 from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, Protocol, runtime_checkable
 
 import torch
 import torch.fx as fx
@@ -35,6 +35,15 @@ from torch.utils._python_dispatch import _disable_current_modes
 log = logging.getLogger(__name__)
 
 from torch._inductor.pattern_matcher import stable_topological_sort
+
+
+@runtime_checkable
+class _RuntimeEstimatorWithNodePredicate(Protocol):
+    def __call__(self, node: fx.Node, override_size: int | None) -> float | None: ...
+
+    def is_runtime_node(self, node: fx.Node) -> bool:
+        """Return a rank-invariant classification for non-FLOP nodes."""
+        ...
 
 
 def make_all_device_put_sync(gm: torch.fx.GraphModule) -> int:
@@ -265,6 +274,12 @@ def benchmark_node_with_cache_key(
     if not is_compute_node(n):
         raise AssertionError(f"expected a compute node, got {n}")
 
+    # Custom estimates describe the requested model and must not be shadowed by,
+    # or persisted into, the shape-only benchmark cache.
+    custom_est = get_custom_estimation(n, custom_runtime_estimation, None)
+    if custom_est is not None:
+        return custom_est, None
+
     # HOPs can't be benchmarked standalone (args include subgraphs) — use analytical
     from torch._ops import HigherOrderOperator
 
@@ -314,12 +329,6 @@ def benchmark_node_with_cache_key(
 
         if unbacked_tensor:
             return 0, key
-
-        if (
-            est := get_custom_estimation(n, custom_runtime_estimation, None)
-        ) is not None:
-            set_cached_node_time(key, est)
-            return est, key
 
         bench = get_collective_do_bench()
         out = bench(lambda: n.target(*args, **kwargs))  # type: ignore[operator]
@@ -501,10 +510,9 @@ class OverlapScheduler:
         self.wait_to_start: dict[fx.Node, fx.Node] = {}
         self._identify_collectives()
 
-        # Custom estimates for non-FLOP nodes must participate in the same
-        # scheduling timeline as registered compute nodes. Otherwise they can be
-        # moved as zero-cost dependencies and their rank-local estimates are not
-        # aligned before making distributed scheduling decisions.
+        # Estimators can promote non-FLOP nodes into the compute timeline only
+        # through a rank-invariant structural predicate. Exact estimate hits can
+        # vary with rank-local shapes and cannot safely determine membership.
         self.compute_nodes = []
         for node in self.nodes:
             if node in self.collective_info or _schedulable_wait_node(node):
@@ -512,10 +520,11 @@ class OverlapScheduler:
             if is_compute_node(node):
                 self.compute_nodes.append(node)
                 continue
-            if node.op != "call_function" or custom_runtime_estimation is None:
+            if node.op != "call_function" or not isinstance(
+                custom_runtime_estimation, _RuntimeEstimatorWithNodePredicate
+            ):
                 continue
-            custom_est = get_custom_estimation(node, custom_runtime_estimation, None)
-            if custom_est is not None and custom_est > 0:
+            if custom_runtime_estimation.is_runtime_node(node):
                 self.compute_nodes.append(node)
         self.compute_node_set = OrderedSet(self.compute_nodes)
         self.current_compute_index = 0
@@ -1961,7 +1970,9 @@ def schedule_overlap_bucketing(
         max_coll_distance: Maximum pre fetch or bucketing candidates. Mainly intended for compile time
         custom_runtime_estimation: Override runtime estimation for specific nodes. Called as
             custom_runtime_estimation(node, override_size) -> float | None. To pass pre-computed
-            estimations, wrap a dict: lambda node, _: estimations.get(node).
+            estimations, wrap a dict: lambda node, _: estimations.get(node). Callable objects
+            may implement is_runtime_node(node) to promote non-FLOP nodes into the compute
+            timeline; this predicate must be rank-invariant.
         collective_estimator: Method for estimating collective runtime. "analytical" uses bandwidth formulas,
             "benchmark" uses CUDA events with power-of-2 rounding and interpolation.
         compute_estimator: Method for estimating compute (ATen op) runtime. "analytical" uses roofline model

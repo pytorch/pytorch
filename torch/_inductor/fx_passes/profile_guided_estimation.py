@@ -1268,7 +1268,13 @@ class ProfileGuidedEstimator:
             stat = os.stat(path)
             profile_files.append((path, stat.st_mtime_ns, stat.st_size))
         self.profile = _load_profile_data(tuple(profile_files))
+        self._op_names = frozenset(self.profile.get_op_names())
         self._log_profile_vs_analytical_comparison(diagnostics_gm)
+
+    def is_runtime_node(self, node: fx.Node) -> bool:
+        """Return whether PGE can model this operator independent of its shape."""
+        profile_name = _fx_target_to_profile_name(node)
+        return profile_name is not None and profile_name in self._op_names
 
     def _log_profile_vs_analytical_comparison(
         self, diagnostics_gm: torch.fx.GraphModule | None
