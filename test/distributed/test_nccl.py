@@ -3,8 +3,10 @@
 import gc
 import os
 import sys
+import time
 import weakref
 from collections.abc import Callable
+from datetime import timedelta
 from functools import wraps
 from typing import ParamSpec, TypeVar
 from unittest import mock, SkipTest
@@ -1622,7 +1624,9 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
     def device(self) -> torch.device:
         return torch.device("cuda", self.rank)
 
-    def _init_process_group(self, backend_name: str, store_suffix: str) -> None:
+    def _init_process_group(
+        self, backend_name: str, store_suffix: str, **kwargs
+    ) -> None:
         if not PLATFORM_SUPPORTS_SYMM_MEM:
             raise SkipTest("Test requires SymmMem support")
         torch.cuda.set_device(self.device)
@@ -1632,7 +1636,33 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
             rank=self.rank,
             store=c10d.FileStore(self.file_name + store_suffix, self.world_size),
             device_id=self.device,
+            **kwargs,
         )
+
+    def _retained_handle(self):
+        c10d.all_reduce(torch.ones(1, device=self.device))
+        tensor = symm_mem.empty(4096, dtype=torch.float32, device=self.device)
+        handle = symm_mem.rendezvous(tensor, group=c10d.group.WORLD.group_name)
+        torch.cuda.synchronize(self.device)
+        return tensor, handle
+
+    def _hold_back_collectives(self, seconds: float) -> None:
+        # Delays this rank's next collective on the device. A rank that skips
+        # the collective instead would leave its peer blocked in RCCL's
+        # host-side enqueue, so the peer's work would never reach wait().
+        torch.cuda.synchronize(self.device)
+        start = time.monotonic()
+        torch.cuda._sleep(10**7)
+        torch.cuda.synchronize(self.device)
+        seconds_per_cycle = max(time.monotonic() - start, 1e-4) / 10**7
+        torch.cuda._sleep(int(seconds / seconds_per_cycle))
+
+    def _assert_stale(self, handle) -> None:
+        # buffer_ptrs checks liveness without launching through the comm.
+        with self.assertRaisesRegex(
+            RuntimeError, "stale because its RCCL communicator was destroyed"
+        ):
+            _ = handle.buffer_ptrs
 
     @parametrize("backend_name", ["nccl", "nccl-legacy"])
     @skip_if_lt_x_gpu(2)
@@ -1763,12 +1793,11 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
     @parametrize("backend_name", ["nccl", "nccl-legacy"])
     @skip_if_lt_x_gpu(2)
     def test_retained_handle_rejected_after_abort(self, backend_name: str) -> None:
-        # Aborting reaches teardown through abortCommsFromMap rather than
-        # shutdown, which is a separate call site for retiring the
-        # registration. Both backends are covered because only "nccl-legacy"
-        # resolves to stock ProcessGroupNCCL, whose abortCommsFromMap carries
-        # the ROCm retirement call; "nccl" resolves to ProcessGroupNCCL2 and
-        # retires through its own path.
+        # Aborting invalidates the comm through NCCLComm::abort() rather than
+        # destroy(). Both backends are covered because only "nccl-legacy"
+        # resolves to stock ProcessGroupNCCL, which retires the registration
+        # from the comm's pre-invalidate hook; "nccl" resolves to
+        # ProcessGroupNCCL2 and retires through its own path.
         patch_env(self, TORCH_NCCL_ASYNC_ERROR_HANDLING="0")
 
         symm_mem.set_backend("NCCL")
@@ -1798,6 +1827,77 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
             RuntimeError, "stale because its RCCL communicator was destroyed"
         ):
             symm_mem.rendezvous(tensor, group=group_name)
+
+    @skip_if_lt_x_gpu(2)
+    def test_retained_handle_stale_after_wait_timeout_abort(self) -> None:
+        # WorkNCCL::wait() aborts the comm itself when the work failed, before
+        # any process-group teardown runs.
+        patch_env(
+            self, TORCH_NCCL_ASYNC_ERROR_HANDLING="0", TORCH_NCCL_DUMP_ON_TIMEOUT="0"
+        )
+        symm_mem.set_backend("NCCL")
+        self._init_process_group("nccl-legacy", "_wait_abort")
+        _tensor, handle = self._retained_handle()
+        side_store = c10d.FileStore(self.file_name + "_wait_side", self.world_size)
+        if self.rank == 0:
+            self._hold_back_collectives(seconds=10)
+            c10d.all_reduce(torch.ones(1, device=self.device), async_op=True)
+            side_store.wait(["peer_done"], timedelta(seconds=120))
+            c10d.distributed_c10d._abort_process_group()
+            return
+        try:
+            work = c10d.all_reduce(torch.ones(1, device=self.device), async_op=True)
+            with self.assertRaises(c10d.DistBackendError):
+                work.wait(timeout=timedelta(seconds=2))
+            self._assert_stale(handle)
+            c10d.destroy_process_group()
+            self._assert_stale(handle)
+        finally:
+            side_store.set("peer_done", "1")
+
+    @skip_if_lt_x_gpu(2)
+    def test_retained_handle_stale_after_watchdog_abort(self) -> None:
+        # With cleanup enabled, the watchdog aborts the timed-out work's comm
+        # before it aborts the process group's comms.
+        patch_env(
+            self,
+            TORCH_NCCL_ASYNC_ERROR_HANDLING="2",
+            TORCH_NCCL_DUMP_ON_TIMEOUT="0",
+            TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC="100",
+        )
+        symm_mem.set_backend("NCCL")
+        # Only the peer's watchdog may time out: the holding rank's abort waits
+        # for its held-back work, which a short timeout would cut off.
+        self._init_process_group(
+            "nccl-legacy",
+            "_watchdog_abort",
+            timeout=timedelta(seconds=2) if self.rank == 1 else None,
+        )
+        _tensor, handle = self._retained_handle()
+        side_store = c10d.FileStore(self.file_name + "_watchdog_side", self.world_size)
+        if self.rank == 0:
+            self._hold_back_collectives(seconds=10)
+            c10d.all_reduce(torch.ones(1, device=self.device), async_op=True)
+            side_store.wait(["peer_done"], timedelta(seconds=120))
+            c10d.distributed_c10d._abort_process_group()
+            return
+        try:
+            c10d.all_reduce(torch.ones(1, device=self.device), async_op=True)
+            deadline = time.monotonic() + 60
+            while True:
+                try:
+                    _ = handle.buffer_ptrs
+                except RuntimeError as e:
+                    self.assertIn("stale because its RCCL communicator", str(e))
+                    break
+                self.assertLess(
+                    time.monotonic(), deadline, "watchdog never aborted the comm"
+                )
+                time.sleep(0.5)
+            c10d.destroy_process_group()
+            self._assert_stale(handle)
+        finally:
+            side_store.set("peer_done", "1")
 
 
 @requires_cuda_p2p_access()
