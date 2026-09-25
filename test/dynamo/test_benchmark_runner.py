@@ -19,6 +19,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skipIfTorchDynamo,
     TestCase,
 )
 
@@ -73,6 +74,7 @@ class BenchmarkRunnerTests(TestCase):
 
 @instantiate_parametrized_tests
 class TestHuggingFaceLLMPerformance(TestCase):
+    @skipIfTorchDynamo("benchmark runner changes the compiler stance")
     @parametrize("training", [False, True])
     def test_compilation_latency_uses_matched_work(self, training) -> None:
         calls = collections.Counter()
@@ -262,6 +264,7 @@ class TestHuggingFaceLLMTraining(TestCase):
         ):
             return runner, runner.load_model(device, "tiny", batch_size=1)
 
+    @skipIfTorchDynamo("test inspects its own AOTAutograd backend")
     @parametrize("dynamic", [False, True])
     @parametrize("nested_config", [False, True])
     @torch._dynamo.config.patch(suppress_errors=False)
