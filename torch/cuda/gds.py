@@ -119,6 +119,9 @@ class GdsFile:
         >>> src1 = torch.randn(1024, device="cuda")
         >>> src2 = torch.randn(2, 1024, device="cuda")
         >>> file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
+        >>> # save_storage/load_storage are not stream ordered, synchronize
+        >>> # to ensure kernels (torch.randn) are finished.
+        >>> torch.cuda.synchronize()
         >>> file.save_storage(src1.untyped_storage(), offset=0)
         >>> file.save_storage(src2.untyped_storage(), offset=src1.nbytes)
         >>> dest1 = torch.empty(1024, device="cuda")
@@ -172,6 +175,15 @@ class GdsFile:
         ``storage.nbytes()`` of data will be loaded from the file at ``offset``
         into the storage.
 
+        .. note::
+            ``load_storage`` is not ordered with respect to other asynchronous
+            operations (such as kernel launches) previously enqueued in the
+            current stream, as stated in the `cuFile docs
+            <https://docs.nvidia.com/gpudirect-storage/api-reference-guide/index.html#cufile-io-api-functional-specification>`__.
+            This means the user must ensure they synchronize the stream or
+            device in order to guarantee that ``load_storage`` executes after
+            previously enqueued asynchronous operations.
+
         Args:
             storage (Storage): Storage to load data into.
             offset (int, optional): Offset into the file to start loading from. (Default: 0)
@@ -185,6 +197,15 @@ class GdsFile:
 
         This is a wrapper around ``cuFileWrite`` (CUDA) / ``hipFileWrite`` (ROCm).
         All bytes of the storage will be written to the file at ``offset``.
+
+        .. note::
+            ``save_storage`` is not ordered with respect to other asynchronous
+            operations (such as kernel launches) previously enqueued in the
+            current stream, as stated in the `cuFile docs
+            <https://docs.nvidia.com/gpudirect-storage/api-reference-guide/index.html#cufile-io-api-functional-specification>`__.
+            This means the user must ensure they synchronize the stream or
+            device in order to guarantee that ``save_storage`` executes after
+            previously enqueued asynchronous operations.
 
         Args:
             storage (Storage): Storage to save data from.

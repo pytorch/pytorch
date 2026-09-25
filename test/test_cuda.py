@@ -10857,7 +10857,9 @@ class TestGDS(TestCase):
         # local filesystem (ext4/xfs) for the temp file the transfer targets.
         if not torch.cuda.gds.is_available():
             self.skipTest("GDS (cuFile/hipFile) not built into this install")
-        if self._get_tmp_dir_fs_type() not in ("ext4", "xfs"):
+        # hipFile's fallback path can work with filesystems that the fast path does
+        # not support.
+        if self._get_tmp_dir_fs_type() not in ("ext4", "xfs") and not TEST_WITH_ROCM:
             self.skipTest("GPUDirect Storage requires ext4/xfs for local filesystem")
 
     def test_gds_is_available(self):
@@ -10873,6 +10875,10 @@ class TestGDS(TestCase):
         torch.cuda.gds.gds_register_buffer(src2.untyped_storage())
         dest1 = torch.empty(1024, device="cuda")
         dest2 = torch.empty(2, 1024, device="cuda")
+        # cuFileWrite/cuFileRead are host-blocking but are not ordered against
+        # any CUDA stream, so the transfer below would otherwise race with the
+        # kernels that were launched asynchronously to produce the tensors.
+        torch.cuda.synchronize()
         try:
             with TemporaryFileName() as f:
                 file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
@@ -10891,6 +10897,8 @@ class TestGDS(TestCase):
         self._require_gds()
         src = torch.arange(4096, device="cuda", dtype=torch.float32)
         dest = torch.empty_like(src)
+        # The transfer is not stream ordered; drain the producing kernel.
+        torch.cuda.synchronize()
         with TemporaryFileName() as f:
             file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
             file.save_storage(src.untyped_storage())
@@ -10907,6 +10915,7 @@ class TestGDS(TestCase):
             src = torch.randint(0, 128, (4096,), device="cuda", dtype=dtype)
         dest = torch.empty_like(src)
         torch.cuda.gds.gds_register_buffer(src.untyped_storage())
+        torch.cuda.synchronize()
         try:
             with TemporaryFileName() as f:
                 file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
@@ -10920,6 +10929,7 @@ class TestGDS(TestCase):
         # Explicit handle lifecycle plus the guard assertions in GdsFile.
         self._require_gds()
         storage = torch.randn(1024, device="cuda").untyped_storage()
+        torch.cuda.synchronize()
         with TemporaryFileName() as f:
             file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
             # The constructor already registered the handle.
