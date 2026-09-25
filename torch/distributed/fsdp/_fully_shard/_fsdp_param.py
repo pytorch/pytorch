@@ -209,9 +209,12 @@ class FSDPParam:
     _unsharded_inner_tensors: list[torch.Tensor]
     _release_all_gather_outputs_after_post_all_gather: bool
     _orig_param_uid: int
-    # Unset and an explicit grad_dtype matching the parameter dtype have the
-    # same value, but only unset follows dtype conversions. None is an explicit
-    # unrestricted policy, so the override flag cannot be inferred from the dtype.
+    # An unset grad_dtype still requires gradients to match the parameter dtype,
+    # so sharded_grad_dtype stores that dtype as a concrete cast target and the
+    # override flag records whether grad_dtype was set. Unset and an explicit
+    # grad_dtype matching the parameter dtype have the same value, but only
+    # unset follows dtype conversions. None is an explicit unrestricted policy,
+    # so the override flag cannot be inferred from the dtype.
     _has_sharded_grad_dtype_override: bool
     sharded_grad_dtype: torch.dtype | None
 
