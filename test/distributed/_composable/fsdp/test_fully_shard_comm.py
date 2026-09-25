@@ -42,7 +42,11 @@ from torch.distributed.fsdp._fully_shard._fsdp_init import (
     _init_default_fully_shard_mesh,
 )
 from torch.distributed.fsdp._fully_shard._fsdp_param import ShardedState
-from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
+from torch.distributed.fsdp._fully_shard._fsdp_param_group import (
+    AllGatherState,
+    FSDPCommContext,
+    FSDPParamGroup,
+)
 from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import implicit_replication
@@ -56,6 +60,7 @@ from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
     DoubleLinear,
     FSDPTest,
+    FSDPTestContinuous,
     FSDPTestMultiThread,
     MLP,
     patch_post_backward,
@@ -71,6 +76,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchInductor,
     TEST_WITH_ROCM,
     TEST_XPU,
+    TestCase,
     xfailIf,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -80,6 +86,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     TransformerBlock,
 )
 from torch.testing._internal.inductor_utils import skipCUDAIf
+from torch.utils._python_dispatch import TorchDispatchMode
 
 
 c10d_ops = torch.ops.c10d
@@ -92,6 +99,57 @@ from torch.testing._internal.common_fsdp import get_devtype
 
 device_type = torch.device(get_devtype())
 device_module = torch.get_device_module(device_type)
+
+
+class TestFSDPCommContext(TestCase):
+    def test_release_all_gather_state_for_comm_reuse_before_lazy_init(self):
+        comm_ctx = FSDPCommContext()
+        comm_ctx.all_gather_state = AllGatherState(MagicMock(), MagicMock())
+
+        comm_ctx.release_all_gather_state_for_comm_reuse()
+
+        self.assertIsNone(comm_ctx.all_gather_state)
+
+    def test_release_all_gather_state_on_current_stream_before_lazy_init(self):
+        comm_ctx = FSDPCommContext()
+        comm_ctx.all_gather_state = AllGatherState(MagicMock(), MagicMock())
+
+        comm_ctx.release_all_gather_state_on_current_stream()
+
+        self.assertIsNone(comm_ctx.all_gather_state)
+
+    def test_release_all_gather_state_for_comm_reuse_orders_comm_streams(self):
+        comm_ctx = FSDPCommContext()
+        event = MagicMock()
+        comm_ctx.all_gather_copy_in_stream = MagicMock()
+        comm_ctx.all_gather_stream = MagicMock()
+        comm_ctx.all_gather_state = AllGatherState(MagicMock(), event)
+
+        comm_ctx.release_all_gather_state_for_comm_reuse()
+
+        for stream in (
+            comm_ctx.all_gather_copy_in_stream,
+            comm_ctx.all_gather_stream,
+        ):
+            stream.wait_event.assert_called_once_with(event)
+        self.assertIsNone(comm_ctx.all_gather_state)
+
+    def test_release_all_gather_state_on_current_stream(self):
+        comm_ctx = FSDPCommContext()
+        event = MagicMock()
+        current_stream = MagicMock()
+        comm_ctx.device_handle = MagicMock()
+        comm_ctx.device_handle.current_stream.return_value = current_stream
+        comm_ctx.all_gather_copy_in_stream = MagicMock()
+        comm_ctx.all_gather_stream = MagicMock()
+        comm_ctx.all_gather_state = AllGatherState(MagicMock(), event)
+
+        comm_ctx.release_all_gather_state_on_current_stream()
+
+        current_stream.wait_event.assert_called_once_with(event)
+        comm_ctx.all_gather_copy_in_stream.wait_event.assert_not_called()
+        comm_ctx.all_gather_stream.wait_event.assert_not_called()
+        self.assertIsNone(comm_ctx.all_gather_state)
 
 
 class TestFullyShardCollectiveOps(FSDPTestMultiThread):
@@ -234,6 +292,11 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         if type(reshard_after_forward) is not int:
             return
         fsdp_param_group._to_sharded_post_forward()
+        # The post-forward shards were just cloned on the current stream; the
+        # all-gather streams must wait for them, as unshard() does after reshard().
+        current_stream = device_module.current_stream()
+        all_gather_copy_in_stream.wait_stream(current_stream)
+        all_gather_stream.wait_stream(current_stream)
         all_gather(
             fsdp_param_group,
             fsdp_param_group.post_forward_mesh_info.shard_process_group,
@@ -283,7 +346,11 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
 
         # Run the foreach reduce-scatter (including copy-in and view-out)
         torch.manual_seed(42)
-        unsharded_grads = [torch.ones_like(param) * self.rank for param in orig_params]
+        # Keep sequential fp16 sums exactly representable in the threaded PG.
+        unsharded_grads = [
+            torch.ones_like(param) * (self.rank % 8) for param in orig_params
+        ]
+        reduced_grads = [grad.detach().clone() for grad in unsharded_grads]
         group = fsdp_param_group.mesh_info.shard_process_group
         self.assertEqual(group.size(), self.world_size)
         all_reduce_stream = device_module.Stream()
@@ -323,7 +390,6 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             _,
             all_reduce_op,
         ) = _get_gradient_divide_factors(group, None, reduce_scatter_dtype)
-        reduced_grads = [grad.detach().clone() for grad in unsharded_grads]
         for grad in reduced_grads:
             _div_if_needed(grad, predivide_factor)
             dist.all_reduce(
@@ -338,7 +404,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             self.assertEqual(sharded_grad.full_tensor(), reduced_grad)
 
 
-class TestFullyShardCommunication(FSDPTest):
+class TestFullyShardCommunication(FSDPTestContinuous):
     @property
     def world_size(self) -> int:
         return min(4, torch.get_device_module(device_type).device_count())
@@ -1840,7 +1906,6 @@ class TestFullyShardAllocFromPG(FSDPTest):
 @unittest.skipIf(
     not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this platform"
 )
-@skipCUDAIf(TEST_WITH_ROCM, "requires NVIDIA GPUs")
 @skipCUDAIf(not SM90OrLater, "requires sm90+")
 class TestFullyShardSymmMem(MultiProcContinuousTest):
     @classmethod
@@ -2046,10 +2111,33 @@ class TestFullyShardForceSumReduction(FSDPTest):
         self.assertRegex(logs, all_reduce_sum_re)
 
 
-class TestFullyShardReduceOpWorldSize1(FSDPTest):
+@instantiate_parametrized_tests
+class TestFullyShardReduceOpWorldSize1(FSDPTestContinuous):
     @property
     def world_size(self) -> int:
         return 1
+
+    @parametrize("divide_factor", [None, 1.0, 2.0])
+    def test_singleton_copy_division(self, divide_factor):
+        divisions = []
+
+        class RecordDivisions(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                if func == torch.ops.aten.div.Tensor:
+                    divisions.append(func)
+                return func(*args, **(kwargs or {}))
+
+        model = nn.Linear(8, 4, bias=False, device=device_type)
+        fully_shard(model, mesh=init_device_mesh(device_type.type, (1,)))
+        if divide_factor is not None:
+            model.set_gradient_divide_factor(divide_factor)
+        inp = torch.ones(3, 8, device=device_type)
+        loss = model(inp).sum()
+        with RecordDivisions():
+            loss.backward()
+        self.assertEqual(len(divisions), int(divide_factor not in (None, 1)))
+        expected = torch.full_like(inp[:1].expand(4, -1), 3 / (divide_factor or 1))
+        self.assertEqual(model.weight.grad.to_local(), expected)
 
     def test_size1_reduceop(self):
         from torch.distributed.distributed_c10d import ReduceOp

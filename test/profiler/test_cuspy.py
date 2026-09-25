@@ -22,13 +22,7 @@ from unittest.mock import patch
 
 import torch
 from torch._C._profiler import _ExperimentalConfig
-from torch.profiler import (
-    kineto_available,
-    profile,
-    ProfilerActivity,
-    record_function,
-    supported_activities,
-)
+from torch.profiler import profile, ProfilerActivity, record_function
 from torch.profiler._cuspy.observers.observation_window import WindowFinalizerMixin
 from torch.testing._internal.common_cuda import (
     SM100OrLater,
@@ -37,6 +31,7 @@ from torch.testing._internal.common_cuda import (
     TEST_CUPTI as TEST_CUPTI_PYTHON,
     TEST_CUPTI_V13_3,
 )
+from torch.testing._internal.common_profiler import initialize_kineto_with_cuda
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     run_tests,
@@ -47,30 +42,18 @@ from torch.testing._internal.common_utils import (
 
 
 def setUpModule():
-    if (
-        kineto_available()
-        and torch.cuda.is_available()
-        and ProfilerActivity.CUDA in supported_activities()
-    ):
-        # Kineto's process-global profiler cannot currently upgrade from a
-        # CPU-only first initialization to CUDA-capable profiling. Prime it with
-        # CUDA so CPU-only tests do not poison later CUDA profiler tests.
-        x = torch.ones(1, device="cuda")
-        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]):
-            x + x
-            torch.cuda.synchronize()
-        # Priming leaves libkineto holding the single process-wide CUPTI subscriber, so a
-        # later cuspy session can't subscribe (MULTIPLE_SUBSCRIBERS). Release it
-        # via the documented cuptiFinalize hand-off -- Cuspy does not exist yet, so this is
-        # safe; libkineto re-subscribes on its next profile, so kineto tests are
-        # unaffected. See pylibcupti().finalize.
-        if TEST_CUPTI_V13_3:
-            from torch.profiler._cuspy.cupti_python import pylibcupti
+    # Priming leaves libkineto holding the single process-wide CUPTI subscriber, so a
+    # later cuspy session can't subscribe (MULTIPLE_SUBSCRIBERS). Release it
+    # via the documented cuptiFinalize hand-off -- Cuspy does not exist yet, so this is
+    # safe; libkineto re-subscribes on its next profile, so kineto tests are
+    # unaffected. See pylibcupti().finalize.
+    if initialize_kineto_with_cuda() and TEST_CUPTI_V13_3:
+        from torch.profiler._cuspy.cupti_python import pylibcupti
 
-            try:
-                pylibcupti().finalize()
-            except Exception:
-                pass
+        try:
+            pylibcupti().finalize()
+        except Exception:
+            pass
 
 
 def _isolated(test_fn):
@@ -148,6 +131,28 @@ class TestCuspyRecords(TestCase):
         kinds, fields = m._normalize_activities({kernel: {Kernel.START}, memcpy: "all"})
         self.assertEqual(fields[kernel], frozenset({0, int(Kernel.START)}))
         self.assertEqual(fields[memcpy], all_memcpy)
+
+    @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires the cupti python bindings")
+    def test_annotation_column_resolves_source_node_first(self):
+        # A graph's annotations sit under its capture node ids or its exec ones depending on
+        # that capture's annotation_config["key_by"], and one trace can carry both, so the
+        # lookup tries the source (capture) id first and falls back to the exec id. Rows
+        # CUPTI reports no source id for carry 0 and go straight to the exec id.
+        import numpy as np
+
+        from torch.profiler._cuspy.observers.profiler import _resolve_annotation_column
+
+        cap, ex = {"name": "capture_keyed"}, {"name": "exec_keyed"}
+        registry = {10: cap, 21: ex}
+        gnid = np.array([20, 21, 22, 21], dtype=np.int64)
+        src_gnid = np.array([10, 11, 12, 0], dtype=np.int64)
+
+        out = _resolve_annotation_column(registry.get, gnid, src_gnid)
+        self.assertEqual(list(out), [cap, ex, None, ex])
+        # No resolver installed -> no lookups at all.
+        self.assertEqual(
+            list(_resolve_annotation_column(None, gnid, src_gnid)), [None] * 4
+        )
 
     @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires the cupti python bindings")
     def test_configure_and_get_config(self):
@@ -3978,34 +3983,27 @@ cuspy_core.enable_hes_early()
 
     @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
     def test_cuspy_observer_registration_failure_is_graceful(self):
-        # If the per-cycle ProfilerObserver fails to register with Cuspy (an
-        # intermittent CUPTI condition), the profiler must degrade gracefully: with no
-        # observer / trace window, stop_trace and export_chrome_trace skip the trace instead
-        # of asserting and taking down the run.
         from torch.profiler._cuspy import core as cuspy_core
 
         cfg = _ExperimentalConfig(custom_profiler_config='{"backend":"cuspy"}')
-        with patch.object(
-            cuspy_core.Cuspy,
-            "register",
-            side_effect=RuntimeError("simulated observer registration failure"),
+        error = RuntimeError("simulated observer registration failure")
+        with (
+            patch.object(cuspy_core.Cuspy, "register", side_effect=error),
+            self.assertLogs(
+                "torch.profiler._cuspy.observers.base", level="WARNING"
+            ) as logs,
+            TemporaryFileName(mode="w+") as trace_path,
         ):
-            with TemporaryFileName(mode="w+") as trace_path:
-                # Exiting the profiler runs stop_trace -- it must not raise even though the
-                # observer never registered.
-                with profile(
-                    activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-                    experimental_config=cfg,
-                ) as prof:
-                    a = torch.randn(64, 64, device="cuda")
-                    _ = (a @ a).cpu()
-                    torch.cuda.synchronize()
-                # Registration failed -> observer unavailable, no trace window.
-                obs = prof._cuspy_profiler_observer
-                self.assertTrue(obs is None or not obs.available)
-                # Must skip the export rather than assert/crash.
-                prof.export_chrome_trace(trace_path)
-                prof.wait_for_exports()
+            with profile(
+                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                experimental_config=cfg,
+            ) as prof:
+                pass
+            obs = prof._cuspy_profiler_observer
+            self.assertTrue(obs is None or not obs.available)
+            prof.export_chrome_trace(trace_path)
+            prof.wait_for_exports()
+        self.assertIn(str(error), logs.output[0])
 
     @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")

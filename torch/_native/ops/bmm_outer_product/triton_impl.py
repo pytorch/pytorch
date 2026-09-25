@@ -1,3 +1,5 @@
+import functools
+
 import torch
 
 from ... import triton_utils as tu
@@ -37,6 +39,11 @@ def _is_acc_tensor(t: torch.Tensor) -> bool:
     return acc is not None and acc.type == t.device.type
 
 
+@functools.cache
+def _get_warp_size(device_index: int) -> int:
+    return torch.cuda.get_device_properties(device_index).warp_size
+
+
 def _is_hip_grid_safe(a: torch.Tensor, b: torch.Tensor) -> bool:
     """Return whether the outer-product BMM launch is safe on this backend.
 
@@ -57,7 +64,7 @@ def _is_hip_grid_safe(a: torch.Tensor, b: torch.Tensor) -> bool:
     batch, m, _ = a.shape
     n = b.shape[2]
     grid_size, _, _ = _bmm_outer_product_launch_config(batch, m, n)
-    warp_size = torch.cuda.get_device_properties(a.device).warp_size
+    warp_size = _get_warp_size(a.get_device())
     threads_per_program = _TRITON_DEFAULT_NUM_WARPS * warp_size
     return grid_size * threads_per_program <= _HIP_MAX_LAUNCH_WORK_ITEMS
 

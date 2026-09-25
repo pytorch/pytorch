@@ -114,6 +114,7 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     is_traceable_wrapper_subclass_type,
+    TraceableWrapperSubclass,
 )
 from torch.utils.weak import TensorWeakRef
 
@@ -237,6 +238,7 @@ from .functions import (
     LocalGeneratorFunctionVariable,
     MemberDescriptorVariable,
     MethodWrapperVariable,
+    PropertyVariable,
     SysFunctionVariable,
     TritonKernelVariable,
     TritonSetAllocatorVariable,
@@ -330,6 +332,8 @@ from .user_defined import (
     FrozenDataClassVariable,
     InspectVariable,
     IntWrapperVariable,
+    is_generic_ctx_manager_cls,
+    is_reconstructable_decorator_ctx_manager_clone,
     KeyedJaggedTensorVariable,
     MutableMappingVariable,
     SimpleNamespaceVariable,
@@ -461,8 +465,10 @@ def _source_to_access_path(source: Source) -> _AccessPath | None:
         # ``DictGetItemSource(UnspecializedParamBufferSource(_,
         # '_parameters'), 'weight')``. Collapse that pair into a single
         # attr token.
-        if isinstance(cur, DictGetItemSource) and isinstance(
-            cur.base, UnspecializedParamBufferSource
+        if (
+            isinstance(cur, DictGetItemSource)
+            and isinstance(cur.base, UnspecializedParamBufferSource)
+            and isinstance(cur.index, str)
         ):
             path.append(_AttrToken(cur.index))
             cur = cur.base.base
@@ -694,7 +700,7 @@ class GraphArg:
     # stash a strong reference too.
     example_strong_ref: torch.Tensor | torch.SymInt | None = None
 
-    def __setattr__(self, name: str, value: Any) -> None:
+    def __setattr__(self, name: str, value: object) -> None:
         # Use object.__setattr__ to bypass Dynamo's STORE_ATTR interception.
         # This is needed because when PYTORCH_TEST_WITH_DYNAMO=1, even internal
         # GraphArg creation can be traced, and with replay_side_effects=False,
@@ -792,9 +798,7 @@ def _is_dim_dynamic_from_source_dynamism(
     if not isinstance(source, LocalSource) or source.dynamism is None:
         return False
 
-    source_dynamism: dict[str, tuple[bool, ...]] = dict(
-        typing.cast(Any, source.dynamism)
-    )
+    source_dynamism = dict(source.dynamism)
     dim_dynamism = source_dynamism.get(normalized_source_name)
     return dim_dynamism is not None and dim < len(dim_dynamism) and dim_dynamism[dim]
 
@@ -852,7 +856,7 @@ class VariableBuilder:
         if vt.source is None:
             vt.source = self.source
 
-        def _is_deduplicable_sym_variable(value: Any, vt: VariableTracker) -> bool:
+        def _is_deduplicable_sym_variable(value: object, vt: VariableTracker) -> bool:
             # Constants like 0, 1, 2, etc. can be unspecialized as SymNodeVariables sometimes, but we
             # should NOT track them. If we use a single SymNodeVariable instance to track them
             # across multiple uses, then guards created for one usage will incorrectly apply to
@@ -1052,7 +1056,9 @@ class VariableBuilder:
                 ],
             )
 
-        def build_key_value(k: Any, v: Any) -> tuple[VariableTracker, VariableTracker]:
+        def build_key_value(
+            k: object, v: object
+        ) -> tuple[VariableTracker, VariableTracker]:
             key = ConstantVariable.create(k)
             source_key = k
 
@@ -1097,7 +1103,7 @@ class VariableBuilder:
 
         return result
 
-    def _wrap(self, value: Any) -> VariableTracker:
+    def _wrap(self, value: object) -> VariableTracker:
         # import here to avoid circular dependencies
         from torch.utils._triton import (
             has_triton,
@@ -1238,7 +1244,7 @@ class VariableBuilder:
             # We need all the keys to be hashable. We do this within the
             # HashableTracker class in hashable.py
             def build_key_value(
-                i: Any, k: Any, v: Any
+                i: int, k: object, v: object
             ) -> tuple[VariableTracker, VariableTracker]:
                 base = self.get_source()
                 if all_const:
@@ -1336,7 +1342,11 @@ class VariableBuilder:
                 for i, v in enumerate(L)
             ]
             result = set_var_cls(items, source=self.source)
-            return self.tx.output.side_effects.track_object_existing(value, result)
+            # Value mutation, like the literal-set path through wrap_literal:
+            # track_object_existing would give AttributeMutationExisting, which
+            # SideEffects.mutation never flags, so add/discard/|= on a
+            # passed-in set or OrderedSet would silently not reach the caller.
+            return self.tx.output.side_effects.track_mutable(value, result)
         elif istype(value, frozenset) and all(
             (
                 # For DBR quantization, we could get a frozenset of torch funcs.
@@ -1362,6 +1372,8 @@ class VariableBuilder:
             (enum.Enum, torch.DispatchKey, torch._C._functorch.TransformType),
         ) or is_pybind11_enum_member(value):
             self.install_guards(GuardBuilder.ID_MATCH)
+            # _call_impl registers this object with SideEffects after _wrap returns,
+            # so sourced enum members support attribute mutation.
             return UserDefinedObjectVariable(value, source=self.source)
         elif DebuggingVariable.is_reorderable_logging_function(value):
             # Put this above builtin_callable so that print() can be handled
@@ -1394,7 +1406,7 @@ class VariableBuilder:
                     VariableBuilder(self.tx, GetItemSource(args_source, i))(arg)
                 )
 
-            keywords = {}
+            keywords: dict[str, VariableTracker] = {}
             keywords_source = AttrSource(self.get_source(), "keywords")
             for k, v in value.keywords.items():
                 if not ConstantVariable.is_literal(k):
@@ -1969,6 +1981,10 @@ class VariableBuilder:
             return GetSetDescriptorVariable(value)
         elif isinstance(value, types.MemberDescriptorType):
             return MemberDescriptorVariable(value)
+        elif type(value) is property:
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            result = PropertyVariable(value, source=self.source)
+            return self.tx.output.side_effects.track_object_existing(value, result)
         elif isinstance(value, types.MethodWrapperType):
             # Method-wrappers are written in C, and they are not guaranteed to
             # return the same object on attribute lookup. Therefore, we cannot
@@ -2195,7 +2211,7 @@ class VariableBuilder:
             # We need all the keys to be hashable. We do this within the
             # HashableTracker class in hashable.py
             def build_key_value(
-                i: Any, k: Any, v: Any
+                i: int, k: object, v: object
             ) -> tuple[VariableTracker, VariableTracker]:
                 base = self.get_source()
                 source_key = ConstDictKeySource(base, i)
@@ -4765,7 +4781,7 @@ def _automatic_dynamic(
 
     if any(isinstance(s, SymInt) and not is_nested_int(s) for s in e.size()):
 
-        def _classify_symint(s: Any) -> DimDynamic:
+        def _classify_symint(s: object) -> DimDynamic:
             if not isinstance(s, SymInt):
                 return DimDynamic.STATIC
             if not has_guarding_hint(s):
@@ -5121,6 +5137,39 @@ def wrap_to_fake_tensor_and_record(
         )
 
 
+def _coor_check_tensor_device(
+    e: torch.Tensor | TraceableWrapperSubclass, source: Source
+) -> None:
+    """Refuse a tensor on a non-current accelerator under compile-on-one-rank.
+
+    Its index is the tracing rank's, so no guard on it can be rank-portable and the
+    artifact could not be shared. The make_fx backends already refuse such a graph
+    (_coor_check_current_accelerator), but Dynamo builds the tensor guards before any
+    backend runs, so a backend that never traces -- "eager" -- would otherwise reach
+    the guard with a device only the tracing rank has. Refusing here is what lets
+    TENSOR_MATCH decide relative-vs-exact from the device type alone, identically on
+    every rank, instead of recording the decision and replaying it.
+    """
+    from torch.fx.experimental.proxy_tensor import _coor_enabled
+
+    if not _coor_enabled():
+        return
+    device = e.device
+    if device.type in ("cpu", "meta"):
+        return
+    acc = torch.accelerator.current_accelerator()
+    cur = None
+    if acc is not None and device.type == acc.type:
+        cur = torch.device(acc.type, torch.accelerator.current_device_index())
+        if device.index is None or device.index == cur.index:
+            return
+    raise RuntimeError(
+        f"device_as_parameter: {source.name} is on {device}, which is not the "
+        f"current accelerator ({cur or acc}); the traced graph cannot be made "
+        f"device-agnostic for compile-on-one-rank."
+    )
+
+
 def _wrap_to_fake_tensor_and_record_impl(
     e: Any,
     tx: "InstructionTranslatorBase",
@@ -5137,6 +5186,7 @@ def _wrap_to_fake_tensor_and_record_impl(
     ):
         if source is None:
             raise AssertionError("source must not be None for tensor wrapping")
+        _coor_check_tensor_device(e, source)
         static_shapes, _reason = tensor_always_has_static_shape(
             e,
             is_tensor,
@@ -5296,10 +5346,10 @@ class SourcelessBuilder:
 
     @overload
     @staticmethod
-    def create(tx: "InstructionTranslatorBase", value: Any) -> VariableTracker: ...
+    def create(tx: "InstructionTranslatorBase", value: object) -> VariableTracker: ...
 
     @staticmethod
-    def create(tx: "InstructionTranslatorBase", value: Any) -> VariableTracker:
+    def create(tx: "InstructionTranslatorBase", value: object) -> VariableTracker:
         value_type = type(value)
         # type: ignore[attr-defined]
         fast_handler = SourcelessBuilder._type_handlers.get(value_type)
@@ -5314,7 +5364,11 @@ class SourcelessBuilder:
             and not isinstance(value, enum.Enum)
             and not is_pybind11_enum_member(value)
         ):
-            return CustomClassObjectVariable.create(value, value, tx=tx)
+            return CustomClassObjectVariable.create(
+                value,  # pyrefly: ignore[bad-argument-type]  # TODO: create() accepts opaque constants as proxies
+                value,
+                tx=tx,
+            )
         elif is_opaque_symbolic_type(type(value)):
             # This is for handling opaque objects in custom ops
             fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
@@ -5384,11 +5438,42 @@ class SourcelessBuilder:
                 except NotImplementedError:
                     pass  # failthrough to unimplemented branch
             else:
-                # Instance method — look up the VT for __self__ via side effects
+                # Instance method - look up the VT for __self__ via side
+                # effects. Build a sourceless receiver only for allowlisted
+                # clone/class pairs whose clone reconstruction does not read
+                # or mutate it. inference_mode.clone is excluded because it
+                # requires a source for self.mode.
                 obj_vt = tx.output.side_effects.id_to_variable.get(id(value.__self__))
+                if obj_vt is None and isinstance(
+                    value.__self__, torch.utils._contextlib._DecoratorContextManager
+                ):
+                    if is_reconstructable_decorator_ctx_manager_clone(
+                        value.__func__, type(value.__self__)
+                    ) and (
+                        value.__func__
+                        is not torch.autograd.grad_mode.inference_mode.clone
+                    ):
+                        obj_vt = UserDefinedObjectVariable(value.__self__)
+                    else:
+                        unimplemented(
+                            gb_type="Sourceless _DecoratorContextManager method reconstruction unsupported",
+                            context=f"{type(value.__self__)}.{value.__func__.__name__}",
+                            explanation=(
+                                f"{type(value.__self__)} was reached without a "
+                                "source (e.g. via a closure cell) and "
+                                f"{value.__func__.__name__} cannot be "
+                                "reconstructed safely, so "
+                                "Dynamo cannot safely inline it without risking "
+                                "a mutation on an object it can't track."
+                            ),
+                            hints=[*graph_break_hints.SUPPORTABLE],
+                        )
                 if obj_vt is not None:
                     return torch._dynamo.variables.UserMethodVariable(
-                        value.__func__, obj_vt
+                        torch._dynamo.variables.UserFunctionVariable(
+                            value.__func__, source=None
+                        ),
+                        obj_vt,
                     )
         elif isinstance(value, torch.fx.graph_module.GraphModule):
             return SourcelessGraphModuleVariable(value)
@@ -5451,6 +5536,19 @@ class SourcelessBuilder:
             return SliceVariable(items, tx)  # pyrefly: ignore[bad-argument-type]
         elif isinstance(value, torch.nn.parallel.distributed.DistributedDataParallel):
             return UnspecializedNNModuleVariable(value)
+        # A sourceless context manager cannot safely replay mutations.
+        elif is_generic_ctx_manager_cls(type(value)):
+            unimplemented(
+                gb_type="Sourceless context manager without mutation support",
+                context=f"{value_type.__module__}.{value_type.__qualname__}",
+                explanation=(
+                    f"{value_type} was reached without a source (e.g. via a "
+                    "closure cell) and Dynamo cannot safely enter it or call "
+                    "its methods without a way to replay any resulting "
+                    "mutation on the real object."
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
         elif istype(value, object):
             return ObjectVariable(value)
         elif (
@@ -5521,6 +5619,7 @@ class SourcelessBuilder:
         handlers[types.MemberDescriptorType] = (
             lambda tx, value: MemberDescriptorVariable(value)
         )
+        handlers[property] = lambda tx, value: PropertyVariable(value)
         handlers[inspect.Parameter] = lambda tx, value: UserDefinedObjectVariable(
             value, mutation_type=ValueMutationNew()
         )
@@ -5574,7 +5673,7 @@ class SourcelessUserDefinedObjectBuilder:
         raise AssertionError("Use SourcelessUserDefinedObjectBuilder.create()")
 
     @staticmethod
-    def create(tx: "InstructionTranslatorBase", value: Any) -> VariableTracker:
+    def create(tx: "InstructionTranslatorBase", value: object) -> VariableTracker:
         value_type = type(value)
         if issubclass(value_type, MutableMapping):
             return MutableMappingVariable(value, mutation_type=ValueMutationNew())

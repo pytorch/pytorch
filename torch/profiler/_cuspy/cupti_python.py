@@ -38,7 +38,7 @@ except ModuleNotFoundError as exc:
 
 # Generated from the CUPTI ABI header (tools/gen_cupti_stubs.py): the
 # CUpti_ActivityAttribute selectors, so their (ABI-renumbered) ints are never hardcoded.
-from torch.profiler._cuspy._cupti_stubs import ActivityAttr
+from torch.profiler._cuspy._cupti_stubs import ActivityAttr, BUILD_CUPTI_API_VERSION
 
 
 if TYPE_CHECKING:
@@ -56,6 +56,7 @@ LIBCUPTI_SONAME = "libcupti.so.13"
 # CUPTI C-API result/flag constants (cupti_result.h / cupti_activity.h). These
 # are stable ABI values, so they are spelled out rather than resolved.
 CUPTI_SUCCESS = 0
+CUPTI_ACTIVITY_FLAG_FLUSH_FORCED = 1
 
 # CUpti_ActivityAttribute selectors Cuspy sets on its subscription
 # (ActivityAttr.USER_DEFINED_RECORDS / .ENABLE_KERNEL_LATENCY_TIMESTAMPS /
@@ -317,6 +318,23 @@ class _PyLibCupti:
 
     def __init__(self, lib: ctypes.CDLL) -> None:
         self._lib = lib
+        version = self.get_version()
+        if version // 10000 != BUILD_CUPTI_API_VERSION // 10000:
+            raise RuntimeError(
+                f"Cuspy requires CUPTI major version {BUILD_CUPTI_API_VERSION // 10000} "
+                f"(stubs API version {BUILD_CUPTI_API_VERSION}), but loaded "
+                f"{LIBCUPTI_SONAME} reports API version {version}."
+            )
+        if version < BUILD_CUPTI_API_VERSION:
+            logger.warning(
+                "Cuspy loaded %s with CUPTI API version %d, but its stubs were generated "
+                "with CUPTI API version %d. Profiling may fail because the runtime "
+                "does not support all generated fields or attributes. "
+                "Install a matching or newer CUPTI runtime within the same major version.",
+                LIBCUPTI_SONAME,
+                version,
+                BUILD_CUPTI_API_VERSION,
+            )
 
     def _result_string(self, rc: int) -> str:
         result = ctypes.c_char_p()
@@ -407,13 +425,17 @@ class _PyLibCupti:
             ctypes.byref(val),
         )
 
-    def activity_flush_all(self) -> None:
-        """Hand over COMPLETED buffers only (``cuptiActivityFlushAll(0)``). Cuspy
-        never forces in-progress buffers (``CUPTI_ACTIVITY_FLAG_FLUSH_FORCED``): a
-        forced flush consumes a still-running kernel's record (its real completion is
-        then never re-delivered) and racing it against concurrent host activity is the
-        flush race that corrupts the HES heap and freezes the decode worker."""
-        self._check(self._lib.cuptiActivityFlushAll(0), "cuptiActivityFlushAll")
+    def activity_flush_all(self, *, forced: bool = False) -> None:
+        """``cuptiActivityFlushAll``. Plain (``forced=False``, flag 0) hands over buffers
+        whose records are all complete and leaves a buffer holding an in-progress record
+        with CUPTI. ``forced=True`` (``CUPTI_ACTIVITY_FLAG_FLUSH_FORCED``) hands over every
+        buffer, in-progress records included: a still-running kernel comes back with a
+        zero end timestamp and its completion is never re-delivered, so callers must
+        device-sync first. The CUPTI usage guide (User-Defined Activity Records, Usage)
+        makes the forced flush mandatory between disabling a kind and re-enabling it with
+        a different field selection; that is Cuspy's only forced flush."""
+        flag = CUPTI_ACTIVITY_FLAG_FLUSH_FORCED if forced else 0
+        self._check(self._lib.cuptiActivityFlushAll(flag), "cuptiActivityFlushAll")
 
     def activity_get_num_dropped_records(
         self, sub_handle: int, ctx: int, stream_id: int

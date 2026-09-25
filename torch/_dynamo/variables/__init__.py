@@ -59,6 +59,8 @@ from .ctx_manager import (
 from .dicts import (
     ConstDictVariable,
     DictItemsVariable,
+    DictKeysVariable,
+    DictValuesVariable,
     DictViewVariable,
     DunderDictVariable,
     MappingProxyVariable,
@@ -127,6 +129,7 @@ from .lists import (
     ListIteratorVariable,
     ListVariable,
     RangeVariable,
+    SizeVariable,
     SliceVariable,
     TupleIteratorVariable,
     TupleVariable,
@@ -189,6 +192,7 @@ from .tensor import (
     UntypedStorageVariable,
 )
 from .torch import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
+from .torch_function import TensorWithTFOverrideVariable
 from .user_defined import (
     DefaultDictVariable,
     FrozenDataClassVariable,

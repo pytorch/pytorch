@@ -240,6 +240,65 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_except_scalar_type_error(self):
+        def fn(x):
+            try:
+                try:
+                    raise ValueError("v")
+                except 42:  # noqa: B030
+                    pass
+            except TypeError as e:
+                return x.sin(), str(e)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_except_tuple_with_bad_member_type_error(self):
+        # The raised exception deliberately does not match the tuple's valid
+        # member (ValueError), so the bad member (42) is reached regardless
+        # of match order.
+        def fn(x):
+            try:
+                try:
+                    raise RuntimeError("v")
+                except (ValueError, 42):  # noqa: B030
+                    pass
+            except TypeError as e:
+                return x.sin(), str(e)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_except_instance_type_error(self):
+        def fn(x):
+            try:
+                try:
+                    raise ValueError("v")
+                except object():
+                    pass
+            except TypeError as e:
+                return x.sin(), str(e)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_except_string_type_error(self):
+        def fn(x):
+            try:
+                try:
+                    raise ValueError("v")
+                except "string":  # noqa: B030
+                    pass
+            except TypeError as e:
+                return x.sin(), str(e)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
     def test_skiptest_propagates_as_genuine_skip(self):
         # A unittest.SkipTest raised inside a fullgraph-compiled function and
         # left uncaught must propagate as a real SkipTest -- it is test-infra
@@ -1462,6 +1521,50 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(y, t.sin())
         self.assertEqual(s, str(("hello", 42)))
         self.assertEqual(r, "ValueError('hello', 42)")
+
+    @parametrize(
+        "args", [(), ("k",), ("",), ("it's a key",), (42,), (("k", 1),), ("k", 1)]
+    )
+    def test_str_keyerror(self, args):
+        def fn(t):
+            try:
+                raise KeyError(*args)
+            except KeyError as e:
+                return t.sin(), str(e), f"key error: {e}", repr(e), e.args
+
+        t = torch.randn(2)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(t), fn(t))
+
+    @parametrize("key", ["missing", "", "it's a key", 42, ("k", 1)])
+    def test_str_keyerror_dict_lookup(self, key):
+        def fn(t):
+            try:
+                {}[key]
+            except KeyError as e:
+                return t.sin(), str(e), f"key error: {e}", repr(e), e.args
+
+        t = torch.randn(2)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(t), fn(t))
+
+    def test_str_keyerror_custom_key(self):
+        class Key:
+            def __str__(self):
+                return "key str"
+
+            def __repr__(self):
+                return "key repr"
+
+        def fn(t):
+            try:
+                raise KeyError(Key())
+            except KeyError as e:
+                return t.sin(), str(e), f"key error: {e}"
+
+        t = torch.randn(2)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(t), fn(t))
 
     def test_frozen_dataclass_setattr_raises(self):
         @dataclasses.dataclass(frozen=True)

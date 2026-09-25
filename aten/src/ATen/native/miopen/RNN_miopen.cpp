@@ -1025,8 +1025,8 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> miopen_rnn_backward(
     if (output_mask[3]) {
         dw = at::native::miopen_rnn_backward_weight(input, weight, weight_stride0, weight_buf, hx, cx, output, mode, hidden_size, num_layers, batch_first, dropout, train, bidirectional, batch_sizes, dropout_state, reserve, ws);
         if (mode > 1) {
-            for (const auto i : c10::irange(dw.size())) {
-                dw[i] = permute_wei_for_miopen(dw[i], mode);
+            for (auto& dw_elem : dw) {
+                dw_elem = permute_wei_for_miopen(dw_elem, mode);
             }
         }
     }
@@ -1068,11 +1068,6 @@ std::pair<Tensor, hidden_type> _miopen_impl(
     auto [hx, cx] = unpack_hidden(hidden);
     int64_t hidden_size = hx.size(2);
 
-    TORCH_CHECK(_batch_sizes.dim() == 1, "batch_sizes tensor should be 1D");
-    TORCH_CHECK(
-        _batch_sizes.device().is_cpu(),
-        "batch_sizes tensor should be on CPU, but got ",
-        _batch_sizes.device());
     IntArrayRef batch_sizes { _batch_sizes.const_data_ptr<int64_t>(), static_cast<size_t>(_batch_sizes.size(0)) };
 
     Tensor dropout_state = at::empty({0}, input.options());

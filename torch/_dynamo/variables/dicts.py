@@ -490,7 +490,7 @@ class ConstDictVariable(VariableTracker):
         from .iter import DictIterator
 
         if self.source and not is_constant_source(self.source):
-            install_guard(self.make_guard(GuardBuilder.DICT_KEYS_MATCH))
+            self.install_dict_keys_match_guard()
             tx.output.guard_on_key_order.add(self.source)
         return DictIterator(self.items.keys())
 
@@ -1537,6 +1537,14 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
             return {}
         elif isinstance(vt, variables.LocalGeneratorFunctionVariable):
             return SideEffectsProxyDict.get_example_value_dict(vt.vt)
+        elif isinstance(vt, variables.UserMethodVariable):
+            # method_getattro forwards __dict__ to __func__; a bound method has
+            # no __dict__ of its own. Read-only: CPython rejects writes through
+            # a method ("'method' object has no attribute 'x'"), and Dynamo
+            # matches that because UserMethodVariable does not override
+            # get_value_for_setattr, so the VT default declines the store
+            # rather than mutating the function's shared __dict__.
+            return object.__getattribute__(vt.get_function(), "__dict__")
         elif istype(vt, variables.ExceptionVariable):
             # Synthetic exceptions created during tracing have no backing
             # Python object; their __dict__ starts empty and any custom
