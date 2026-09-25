@@ -25,6 +25,20 @@ static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
 
 namespace {
 
+// thread_position_in_grid is 32-bit, so dispatch at most 2^31 threads at a time;
+// bind_base passes each chunk's first element index to the kernel.
+template <typename F>
+void dispatch_1d_chunks(id<MTLComputeCommandEncoder> encoder,
+                        id<MTLComputePipelineState> pso,
+                        int64_t numel,
+                        F bind_base) {
+  constexpr int64_t max_chunk = int64_t(1) << 31;
+  for (int64_t base = 0; base < numel; base += max_chunk) {
+    bind_base(base);
+    mps::mtl_dispatch1DJob(encoder, pso, static_cast<NSUInteger>(std::min(max_chunk, numel - base)));
+  }
+}
+
 void arange_range_fill_mps(const Scalar& start, const Scalar& step, Tensor& result) {
   using namespace mps;
   const auto steps = result.numel();
@@ -51,12 +65,13 @@ void arange_range_fill_mps(const Scalar& start, const Scalar& step, Tensor& resu
         auto encoder = stream->commandEncoder();
         [encoder setComputePipelineState:pso];
         bind_start_step(encoder);
-        if (use32) {
-          mtl_setArgs<2>(encoder, static_cast<int32_t>(stride));
-        } else {
-          mtl_setArgs<2>(encoder, static_cast<int64_t>(stride));
-        }
-        mtl_dispatch1DJob(encoder, pso, static_cast<NSUInteger>(steps));
+        dispatch_1d_chunks(encoder, pso, steps, [&](int64_t base) {
+          if (use32) {
+            mtl_setArgs<2>(encoder, std::array<int32_t, 2>{int32_t(stride), int32_t(base)});
+          } else {
+            mtl_setArgs<2>(encoder, std::array<int64_t, 2>{stride, base});
+          }
+        });
       }
     });
   } else {
@@ -71,7 +86,7 @@ void arange_range_fill_mps(const Scalar& start, const Scalar& step, Tensor& resu
         [encoder setComputePipelineState:pso];
         bind_start_step(encoder);
         mtl_setArgs<2>(encoder, ndim, sizes, strides);
-        mtl_dispatch1DJob(encoder, pso, static_cast<NSUInteger>(steps));
+        dispatch_1d_chunks(encoder, pso, steps, [&](int64_t base) { mtl_setArgs<5>(encoder, base); });
       }
     });
   }
@@ -213,22 +228,18 @@ Tensor& linspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
       @autoreleasepool {
         auto encoder = stream->commandEncoder();
         [encoder setComputePipelineState:pso];
-        if (use32) {
-          std::array<int32_t, 2> p{int32_t(steps), int32_t(stride)};
-          if (use_integral_kernel) {
-            mtl_setArgs(encoder, result, integral_params, p);
-          } else {
-            mtl_setArgs(encoder, result, vals, p);
-          }
+        if (use_integral_kernel) {
+          mtl_setArgs(encoder, result, integral_params);
         } else {
-          std::array<int64_t, 2> p{steps, stride};
-          if (use_integral_kernel) {
-            mtl_setArgs(encoder, result, integral_params, p);
-          } else {
-            mtl_setArgs(encoder, result, vals, p);
-          }
+          mtl_setArgs(encoder, result, vals);
         }
-        mtl_dispatch1DJob(encoder, pso, static_cast<NSUInteger>(steps));
+        dispatch_1d_chunks(encoder, pso, steps, [&](int64_t base) {
+          if (use32) {
+            mtl_setArgs<2>(encoder, std::array<int32_t, 3>{int32_t(steps), int32_t(stride), int32_t(base)});
+          } else {
+            mtl_setArgs<2>(encoder, std::array<int64_t, 3>{steps, stride, base});
+          }
+        });
       }
     });
   } else {
@@ -238,17 +249,18 @@ Tensor& linspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
     // offset_from_thread_index treats dim 0 as innermost; pass reversed.
     const std::vector<int64_t> sizes(result.sizes().rbegin(), result.sizes().rend());
     const std::vector<int64_t> strides(result.strides().rbegin(), result.strides().rend());
-    const auto steps32 = static_cast<uint32_t>(steps);
     dispatch_sync_with_rethrow(stream->queue(), ^() {
       @autoreleasepool {
         auto encoder = stream->commandEncoder();
         [encoder setComputePipelineState:pso];
         if (use_integral_kernel) {
-          mtl_setArgs(encoder, result, integral_params, steps32, ndim, sizes, strides);
+          mtl_setArgs(encoder, result, integral_params);
         } else {
-          mtl_setArgs(encoder, result, vals, steps32, ndim, sizes, strides);
+          mtl_setArgs(encoder, result, vals);
         }
-        mtl_dispatch1DJob(encoder, pso, static_cast<NSUInteger>(steps));
+        mtl_setArgs<3>(encoder, ndim, sizes, strides);
+        dispatch_1d_chunks(
+            encoder, pso, steps, [&](int64_t base) { mtl_setArgs<2>(encoder, std::array<int64_t, 2>{steps, base}); });
       }
     });
   }
@@ -299,14 +311,14 @@ Tensor& logspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
       @autoreleasepool {
         auto encoder = stream->commandEncoder();
         [encoder setComputePipelineState:pso];
-        if (use32) {
-          std::array<int32_t, 2> p{int32_t(steps), int32_t(stride)};
-          mtl_setArgs(encoder, result, vals, p);
-        } else {
-          std::array<int64_t, 2> p{steps, stride};
-          mtl_setArgs(encoder, result, vals, p);
-        }
-        mtl_dispatch1DJob(encoder, pso, static_cast<NSUInteger>(steps));
+        mtl_setArgs(encoder, result, vals);
+        dispatch_1d_chunks(encoder, pso, steps, [&](int64_t base) {
+          if (use32) {
+            mtl_setArgs<2>(encoder, std::array<int32_t, 3>{int32_t(steps), int32_t(stride), int32_t(base)});
+          } else {
+            mtl_setArgs<2>(encoder, std::array<int64_t, 3>{steps, stride, base});
+          }
+        });
       }
     });
   } else {
@@ -314,13 +326,14 @@ Tensor& logspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
     const auto ndim = static_cast<int>(result.dim());
     const std::vector<int64_t> sizes(result.sizes().rbegin(), result.sizes().rend());
     const std::vector<int64_t> strides(result.strides().rbegin(), result.strides().rend());
-    const auto steps32 = static_cast<uint32_t>(steps);
     dispatch_sync_with_rethrow(stream->queue(), ^() {
       @autoreleasepool {
         auto encoder = stream->commandEncoder();
         [encoder setComputePipelineState:pso];
-        mtl_setArgs(encoder, result, vals, steps32, ndim, sizes, strides);
-        mtl_dispatch1DJob(encoder, pso, static_cast<NSUInteger>(steps));
+        mtl_setArgs(encoder, result, vals);
+        mtl_setArgs<3>(encoder, ndim, sizes, strides);
+        dispatch_1d_chunks(
+            encoder, pso, steps, [&](int64_t base) { mtl_setArgs<2>(encoder, std::array<int64_t, 2>{steps, base}); });
       }
     });
   }

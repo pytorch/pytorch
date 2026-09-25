@@ -9126,6 +9126,21 @@ class TestMPS(TestCaseMPS):
 
         self.assertEqual(do_arange(device='mps'), do_arange(device='cpu'))
 
+    # https://github.com/pytorch/pytorch/issues/198473
+    @largeTensorTest("10GB", device="mps")
+    def test_range_factories_more_than_2_32_elements(self):
+        n = 2**32 + 2**20
+        expected = torch.arange(n, dtype=torch.uint8)
+        self.assertEqual(torch.arange(n, dtype=torch.uint8, device="mps").cpu(), expected)
+        out = torch.empty(n // 4, 4, dtype=torch.uint8, device="mps").t()
+        torch.arange(n, out=out)
+        self.assertEqual(out.cpu().flatten(), expected)
+        del out
+
+        expected = torch.linspace(0, 255, n, dtype=torch.uint8)
+        # float32 interpolation may be off by one from CPU's
+        self.assertEqual(torch.linspace(0, 255, n, dtype=torch.uint8, device="mps").cpu(), expected, atol=1, rtol=0)
+
     def test_arange_empty(self):
         out_mps = torch.tensor([], device="mps")
         out_cpu = torch.tensor([], device="cpu")
