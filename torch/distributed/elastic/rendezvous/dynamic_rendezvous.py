@@ -9,6 +9,7 @@ import inspect
 import logging
 import os
 import pickle
+import re
 import socket
 import threading
 import time
@@ -240,6 +241,24 @@ class _NodeDesc:
 
     def __repr__(self) -> str:
         return f"{self.addr}_{self.pid}_{self.local_id}"
+
+
+def _natural_sort_key(node: _NodeDesc) -> tuple:
+    """Return a key that sorts nodes by the natural order of their address.
+
+    Digit runs in the address compare numerically, so that ``node9`` sorts
+    before ``node66`` and rank assignment follows the numeric node order that
+    operators expect. For fleets whose hostnames use equal-width (zero-padded)
+    numbering the resulting order is identical to plain lexicographic order.
+    Ties on the address fall back to the previous ``(addr, pid, local_id)``
+    ordering, so processes on the same host stay grouped exactly as before.
+    """
+    chunks = tuple(
+        (0, int(chunk), "") if chunk.isdecimal() else (1, 0, chunk)
+        for chunk in re.split(r"(\d+)", node.addr)
+        if chunk
+    )
+    return (chunks, node.addr, node.pid, node.local_id)
 
 
 class _NodeDescGenerator:
@@ -829,8 +848,10 @@ class _DistributedRendezvousOpExecutor(_RendezvousOpExecutor):
         state.complete = True
         state.deadline = None
 
-        # Assign the ranks.
-        for rank, node in enumerate(sorted(state.participants)):
+        # Assign the ranks in natural order of the node addresses, so that
+        # ranks follow the numeric node order on clusters whose hostnames or
+        # addresses embed unpadded numbers (see gh-191190).
+        for rank, node in enumerate(sorted(state.participants, key=_natural_sort_key)):
             state.participants[node] = rank
 
     def _mark_rendezvous_closed(self) -> None:
