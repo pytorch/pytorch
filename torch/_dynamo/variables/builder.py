@@ -155,6 +155,7 @@ from ..source import (
     ListGetItemSource,
     ListReverseIteratorBackingListSource,
     LocalSource,
+    MappingProxyMappingSource,
     NNModuleSource,
     NonSerializableSetGetItemSource,
     NumpyTensorSource,
@@ -1068,23 +1069,11 @@ class VariableBuilder:
                 ],
             )
 
-        def build_key_value(
-            k: object, v: object
-        ) -> tuple[VariableTracker, VariableTracker]:
-            key = ConstantVariable.create(k)
-            source_key = k
-
-            source_value = GetItemSource(self.get_source(), source_key)
-            res_value = LazyVariableTracker.create(v, source_value, tx=self.tx)
-
-            return key, res_value
-
-        items = dict(build_key_value(k, v) for k, v in value.items())
-
-        # Create a dict_vt to be used in the mapping proxy variable
-        dict_vt = ConstDictVariable(items, source=None)
-        mapping_type = type(gc.get_referents(value)[0])
-        result = MappingProxyVariable(dict_vt, mapping_type, source=self.source)
+        mapping = gc.get_referents(value)[0]
+        mapping_vt = VariableBuilder(self.tx, MappingProxyMappingSource(self.source))(
+            mapping
+        )
+        result = MappingProxyVariable(mapping_vt, source=self.source)
         return self.tx.output.side_effects.track_mutable(value, result)
 
     @classmethod
@@ -5667,11 +5656,7 @@ class SourcelessBuilder:
         # Sourceless MappingProxyType object can be encountered while tracing
         # type.__dict__["__dict__"].__get__
         handlers[types.MappingProxyType] = lambda tx, value: MappingProxyVariable(
-            ConstDictVariable(
-                {create(tx, k): create(tx, v) for k, v in value.items()},
-                mutation_type=ValueMutationNew(),
-            ),
-            type(gc.get_referents(value)[0]),
+            create(tx, gc.get_referents(value)[0])
         )
         handlers[types.GetSetDescriptorType] = (
             lambda tx, value: GetSetDescriptorVariable(value)
