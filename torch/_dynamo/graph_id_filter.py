@@ -415,6 +415,7 @@ def _create_dynamo_config_router(config_str: str) -> GraphConfigRouter:
             "keyed by frame ID. Some dynamo configs can affect graph breaks, "
             "which may alter the number of frames and shift frame IDs, causing "
             "overrides to target the wrong graphs.",
+            stacklevel=2,
         )
     return router
 

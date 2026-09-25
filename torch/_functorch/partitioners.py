@@ -1670,7 +1670,8 @@ def default_partition(
             # eventually flip the switch to make this a hard error.
             warnings.warn(
                 "Trying to unsafely apply AC to a non-functional graph with the "
-                "default partitioner. Falling back to min-cut partitioner."
+                "default partitioner. Falling back to min-cut partitioner.",
+                stacklevel=2,
             )
             return min_cut_rematerialization_partition(
                 joint_module,

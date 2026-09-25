@@ -136,6 +136,7 @@ def _scaled_dot_product_attention_quantized(
             "_scaled_dot_product_attention_quantized does not support backward pass. "
             "Gradients will not be computed for query, key, or value.",
             UserWarning,
+            stacklevel=2,
         )
     # Directly call the internal flash attention operator which has descale support
     # NOTE: This should be torch._scaled_dot_product_flash_attention, but it does not work with torch.compile

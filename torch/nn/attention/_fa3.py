@@ -143,6 +143,7 @@ def _fa3_common_support_error(
             "_scaled_dot_product_attention_quantized and "
             "provide the descale tensors.",
             UserWarning,
+            stacklevel=2,
         )
     if cum_seq_q is None and query.dim() != 4:
         return "dense query must be 4D"

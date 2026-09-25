@@ -1518,7 +1518,9 @@ def load(
             pickle_module = pickle
 
     if pickle_load_args != {} and weights_only:
-        warnings.warn("pickle_load_args only works if `weights_only=False`.")
+        warnings.warn(
+            "pickle_load_args only works if `weights_only=False`.", stacklevel=2
+        )
 
     # make flipping default BC-compatible
     if mmap is None:
