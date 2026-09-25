@@ -1499,6 +1499,53 @@ class TestSortAndSelectCUDA(TestCase):
                 "Values not equal to random constant",
             )
 
+    @slowTest
+    @largeTensorTest("60GB", "cuda")
+    def test_sort_slice_larger_than_int_max(self, device):
+        """Sorting a dimension longer than INT_MAX.
+
+        The sort path used to reject this outright, and underneath the rejection
+        it sized its batches and filled its initial indices with 32-bit
+        arithmetic that wrapped. int8 keeps the keys cheap; the int64 indices
+        dominate the footprint.
+        """
+        n = 2**31 + 2
+        data = torch.empty(n, device=device, dtype=torch.int8)
+        data.random_()
+
+        values, indices = torch.sort(data)
+
+        self.assertTrue(torch.all(values[1:] >= values[:-1]).item())
+        # the initial indices were an iota filled with a 32-bit counter, so a
+        # wrap shows up as the tail of the permutation never being reached
+        self.assertEqual(indices.min().item(), 0)
+        self.assertEqual(indices.max().item(), n - 1)
+        # spot-check past INT_MAX rather than gathering all n indices
+        tail = slice(n - 1024, n)
+        self.assertEqual(data[indices[tail]], values[tail])
+
+    @slowTest
+    @largeTensorTest("80GB", "cuda")
+    def test_topk_large_k_sorted(self, device):
+        """topk(sorted=True) with k > INT_MAX.
+
+        sorted=True is topk's default, so this is the path a caller lands on
+        without asking for anything unusual. Ordering the selected values goes
+        through the same sort that could not handle more than INT_MAX elements,
+        which made the default fail on inputs topk itself handles fine.
+        """
+        n = 2**31 + 2
+        k = 2**31 + 1
+        data = torch.empty(n, device=device, dtype=torch.int8)
+        data.random_()
+
+        values, indices = torch.topk(data, k, sorted=True)
+
+        self.assertEqual(values.numel(), k)
+        self.assertTrue(torch.all(values[1:] <= values[:-1]).item())
+        tail = slice(k - 1024, k)
+        self.assertEqual(data[indices[tail]], values[tail])
+
 
 instantiate_device_type_tests(TestSortAndSelectCPU, globals(), only_for="cpu")
 instantiate_device_type_tests(TestSortAndSelectDevice, globals())

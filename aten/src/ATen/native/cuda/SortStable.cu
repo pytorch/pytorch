@@ -104,6 +104,16 @@ __global__ void fill_reverse_indices_kernel(
   }
 }
 
+// segmented_sort_large_segments may be handed a slice longer than INT_MAX, so
+// unlike fill_reverse_indices_kernel this indexes in 64 bits. The reverse
+// indices it would compute for a single segment are just 0..numel-1.
+C10_LAUNCH_BOUNDS_1(at::cuda::detail::CUDA_NUM_THREADS)
+__global__ void fill_iota_kernel(int64_t* data, int64_t numel) {
+  CUDA_KERNEL_LOOP_TYPE(idx, numel, int64_t) {
+    data[idx] = idx;
+  }
+}
+
 template <typename scalar_t>
 inline void segmented_sort_large_segments(
     const int64_t nsegments,
@@ -117,11 +127,15 @@ inline void segmented_sort_large_segments(
   auto allocator = at::cuda::getCUDADeviceAllocator();
   auto stream = at::cuda::getCurrentCUDAStream();
   dim3 block = CUDA_NUM_THREADS;
-  dim3 grid = GET_BLOCKS(nsort);
+  // nsort can exceed INT_MAX, so size the grid by hand: GET_BLOCKS would assert
+  // past 2^41, and ROCm limits a launch dimension by work-items rather than by
+  // blocks, so gridDim.x * blockDim.x has to stay below 2^32. The kernel is a
+  // grid-stride loop, so capping the grid only costs iterations.
+  constexpr int64_t max_blocks = (int64_t{1} << 31) / CUDA_NUM_THREADS;
+  const int64_t nblocks = (nsort + CUDA_NUM_THREADS - 1) / CUDA_NUM_THREADS;
+  dim3 grid = static_cast<unsigned int>(std::min(nblocks, max_blocks));
   c10::DeviceArray<int64_t> indices(*allocator, nsort);
-  at::cuda::detail::IntDivider<uint32_t> nsort_divider(nsort);
-  fill_reverse_indices_kernel<<<grid, block, 0, stream>>>(
-      indices.get(), nsort, nsort_divider);
+  fill_iota_kernel<<<grid, block, 0, stream>>>(indices.get(), nsort);
   const int64_t* initial_indices = indices.get();
 
   for ([[maybe_unused]] auto i : c10::irange(nsegments)) {
@@ -236,7 +250,12 @@ void launch_stable_sort_kernel(
   int64_t numel_or_intmax = numel < intmax ? numel : intmax;
   int64_t nsort = self.size(dim);
   int64_t nbatch = (numel_or_intmax / nsort) * nsort;
-  TORCH_CHECK(nbatch > 0, "Cannot sort dimension of length ", nsort);
+  if (nbatch == 0) {
+    // A single slice is already longer than INT_MAX, so no whole number of
+    // slices fits in a batch. segmented_sort_large_segments handles a slice of
+    // any length, so hand it one slice per iteration.
+    nbatch = nsort;
+  }
   int64_t* indices_ptr = indices.mutable_data_ptr<int64_t>();
 
   AT_DISPATCH_ALL_TYPES_AND3(
