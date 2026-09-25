@@ -614,7 +614,20 @@ def sample_inputs_linalg_cholesky_inverse(
         single_pd,
         batch_pd,
     )
-    test_cases = (torch.linalg.cholesky(a, upper=False) for a in inputs)
+    test_cases = [torch.linalg.cholesky(a, upper=False) for a in inputs]
+    if op_info.name == "cholesky_inverse":
+        # Regression sample for https://github.com/pytorch/pytorch/issues/196682.
+        # Distinct singular values give enough spectral spread to expose the
+        # incorrect matrix order in the forward derivative.
+        # Keep it specific to cholesky_inverse: cholesky_solve also reuses this
+        # generator, but its factor derivative fails for non-diagonal inputs.
+        matrix = make_fullrank_matrices_with_distinct_singular_values(
+            S,
+            S,
+            dtype=dtype,
+            device=device,
+        )
+        test_cases.append(torch.linalg.cholesky(matrix @ matrix.mH, upper=False))
     for l in test_cases:
         # generated lower-triangular samples
         l.requires_grad = requires_grad
