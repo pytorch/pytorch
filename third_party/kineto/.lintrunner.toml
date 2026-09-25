@@ -1,0 +1,168 @@
+# Lintrunner configuration for Kineto.
+#
+# These linters are kept in sync with PyTorch (github.com/pytorch/pytorch) so
+# that C++ in Kineto is formatted and checked exactly as it is in PyTorch. The
+# adapter scripts under tools/linter/adapters and the pinned clang-format
+# binary described by s3_init_config.json are copied verbatim from there. When
+# updating, re-sync from PyTorch rather than editing these in place.
+
+[[linter]]
+code = 'CLANGFORMAT'
+include_patterns = [
+    'libkineto/**/*.cpp',
+    'libkineto/**/*.h',
+    'libkineto/**/*.cc',
+    'libkineto/**/*.hpp',
+]
+exclude_patterns = [
+    'libkineto/third_party/**',
+    'libkineto/build/**',
+]
+init_command = [
+    'python3',
+    'tools/linter/adapters/s3_init.py',
+    '--config-json=tools/linter/adapters/s3_init_config.json',
+    '--linter=clang-format',
+    '--dry-run={{DRYRUN}}',
+    '--output-dir=.lintbin',
+    '--output-name=clang-format',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/clangformat_linter.py',
+    '--binary=.lintbin/clang-format',
+    '--',
+    '@{{PATHSFILE}}'
+]
+is_formatter = true
+
+[[linter]]
+code = 'NEWLINE'
+include_patterns = [
+    'libkineto/**/*.cpp',
+    'libkineto/**/*.h',
+    'libkineto/**/*.cc',
+    'libkineto/**/*.hpp',
+    'libkineto/**/*.cmake',
+    'libkineto/**/CMakeLists.txt',
+]
+exclude_patterns = [
+    'libkineto/third_party/**',
+    'libkineto/build/**',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/newlines_linter.py',
+    '--',
+    '@{{PATHSFILE}}',
+]
+is_formatter = true
+
+[[linter]]
+code = 'SPACES'
+include_patterns = [
+    'libkineto/**/*.cpp',
+    'libkineto/**/*.h',
+    'libkineto/**/*.cc',
+    'libkineto/**/*.hpp',
+]
+exclude_patterns = [
+    'libkineto/third_party/**',
+    'libkineto/build/**',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=[[:blank:]]$',
+    '--linter-name=SPACES',
+    '--error-name=trailing spaces',
+    '--replace-pattern=s/[[:blank:]]+$//',
+    """--error-description=\
+        This line has trailing spaces; please remove them.\
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
+code = 'TABS'
+include_patterns = [
+    'libkineto/**/*.cpp',
+    'libkineto/**/*.h',
+    'libkineto/**/*.cc',
+    'libkineto/**/*.hpp',
+]
+exclude_patterns = [
+    'libkineto/third_party/**',
+    'libkineto/build/**',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    # @lint-ignore TXT2
+    '--pattern=	',
+    '--linter-name=TABS',
+    '--error-name=saw some tabs',
+    '--replace-pattern=s/\t/    /',
+    """--error-description=\
+        This line has tabs; please replace them with spaces.\
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
+code = 'RAWTHROW'
+include_patterns = [
+    'libkineto/**/*.cpp',
+    'libkineto/**/*.h',
+    'libkineto/**/*.cc',
+    'libkineto/**/*.hpp',
+]
+exclude_patterns = [
+    'libkineto/third_party/**',
+    'libkineto/build/**',
+    # stress_test is a standalone CUDA/NCCL benchmark harness that CMake never
+    # builds and that is not vendored into PyTorch, so its raw throw is left in
+    # place rather than routed through KINETO_THROW.
+    'libkineto/stress_test/**',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=\bthrow\b',
+    '--allowlist-pattern=@allow-raw-throw',
+    '--linter-name=RAWTHROW',
+    '--error-name=raw throw statement',
+    """--error-description=\
+        Do not use a raw throw in C++. Kineto cannot depend on c10, so raise \
+        exceptions through the KINETO_THROW macro in src/ThrowUtil.h, which \
+        preserves the exception type. For a re-throw (throw;), restructure the \
+        code to avoid try/catch/throw.\
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
+code = 'CMAKE'
+include_patterns = [
+    'libkineto/**/*.cmake',
+    'libkineto/**/*.cmake.in',
+    'libkineto/**/CMakeLists.txt',
+]
+exclude_patterns = [
+    'libkineto/third_party/**',
+    'libkineto/build/**',
+]
+command = [
+    'uv',
+    'run',
+    '--python',
+    '3.10',
+    '--script',
+    'tools/linter/adapters/cmake_linter.py',
+    '--config=.cmakelintrc',
+    '--',
+    '@{{PATHSFILE}}',
+]
