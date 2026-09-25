@@ -916,21 +916,24 @@ class TestGetLfRunnersOutput(TestCase):
         # arc.yaml is never opened when lf is disabled.
         self.assertEqual("", rd.get_lf_runners_output("/nonexistent", lf_enabled=False))
 
-    def test_restrict_runners_false_is_kill_switch(self) -> None:
+    def test_restrict_runners_false_returns_empty_and_logs_info(self) -> None:
         # The kill-switch short-circuits before arc.yaml is opened.
-        self.assertEqual(
-            "",
-            rd.get_lf_runners_output(
+        with self.assertLogs(rd.log, level="INFO") as logs:
+            result = rd.get_lf_runners_output(
                 "/nonexistent", lf_enabled=True, restrict_runners=False
-            ),
-        )
+            )
+        self.assertEqual("", result)
+        self.assertIn("kill-switch is off", logs.output[0])
 
-    def test_mode_all_returns_empty(self) -> None:
+    def test_mode_all_returns_empty_and_logs_info(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             arc_yaml = self._arc_yaml(
                 d, "lf_allowlist:\n  mode: all\n  runners: [l-x86iavx512-8-64]\n"
             )
-            self.assertEqual("", rd.get_lf_runners_output(arc_yaml, lf_enabled=True))
+            with self.assertLogs(rd.log, level="INFO") as logs:
+                result = rd.get_lf_runners_output(arc_yaml, lf_enabled=True)
+            self.assertEqual("", result)
+            self.assertIn("mode is 'all'; unrestricted", logs.output[0])
 
     def test_mode_restricted_returns_sorted_comma_joined_runners(self) -> None:
         with tempfile.TemporaryDirectory() as d:
