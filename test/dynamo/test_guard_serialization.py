@@ -3814,17 +3814,6 @@ class TestGuardSerialization(TestGuardSerializationBase):
             ref, loaded, {"mp": types.MappingProxyType({"a": torch.randn(3, 2)})}, False
         )
 
-    def test_mapping_proxy_wraps_dict(self):
-        def fn(x, mp):
-            return x + 1, repr(mp)
-
-        x = torch.randn(3, 2)
-        mp = types.MappingProxyType({"a": 1})
-        ref, loaded = self._test_serialization("MAPPING_PROXY_WRAPS_DICT", fn, x, mp)
-        self._test_check_fn(ref, loaded, {"x": x, "mp": mp}, True)
-        od_mp = types.MappingProxyType(collections.OrderedDict(a=1))
-        self._test_check_fn(ref, loaded, {"x": x, "mp": od_mp}, False)
-
     def test_dict_keys_match(self):
         def fn(x):
             ret = 1

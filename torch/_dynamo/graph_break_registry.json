@@ -6010,16 +6010,6 @@
       ]
     }
   ],
-  "GB3435": [
-    {
-      "Gb_type": "mapping proxy repr of unmodeled mapping",
-      "Context": "mapping type: {self.mapping_type}, modeled as: {self.dv_dict.python_type()}",
-      "Explanation": "Dynamo does not model the repr/str of the mapping behind this mappingproxy.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
   "GB7786": [
     {
       "Gb_type": "missing_mp_ass_subscript",

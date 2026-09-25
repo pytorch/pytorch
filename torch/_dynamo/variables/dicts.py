@@ -1020,26 +1020,10 @@ class MappingProxyVariable(VariableTracker):
     # PyDictProxy_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/descrobject.c#L1995
     _cpython_type = types.MappingProxyType
 
-    _nonvar_fields = {
-        "mapping_type",
-        *VariableTracker._nonvar_fields,
-    }
-
-    # proxies to the original dict_vt
-    def __init__(
-        self,
-        dv_dict: ConstDictVariable,
-        mapping_type: type | None = None,
-        **kwargs: Any,
-    ) -> None:
+    # proxies to the VariableTracker of the wrapped mapping
+    def __init__(self, dv_dict: VariableTracker, **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        if not isinstance(dv_dict, ConstDictVariable):
-            raise AssertionError(f"Expected ConstDictVariable, got {type(dv_dict)}")
         self.dv_dict = dv_dict
-        # Type of the proxied mapping, which dv_dict may only model as a dict.
-        # None means the type is unknown (e.g. dict view .mapping), so repr/str
-        # graph break.
-        self.mapping_type = mapping_type
 
     def python_type(self) -> type:
         return types.MappingProxyType
@@ -1135,26 +1119,14 @@ class MappingProxyVariable(VariableTracker):
     def mp_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return self.dv_dict.mp_length_impl(tx)
 
-    def _check_mapping_repr(self, tx: "InstructionTranslatorBase") -> None:
-        self._check_mutation_guard(tx)
-        if self.mapping_type is not self.dv_dict.python_type():
-            unimplemented(
-                gb_type="mapping proxy repr of unmodeled mapping",
-                context=f"mapping type: {self.mapping_type}, modeled as: {self.dv_dict.python_type()}",
-                explanation="Dynamo does not model the repr/str of the mapping behind this mappingproxy.",
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
-        if self.source and self.mapping_type is not None:
-            install_guard(self.source.make_guard(GuardBuilder.MAPPING_PROXY_WRAPS_DICT))
-
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        self._check_mapping_repr(tx)
+        self._check_mutation_guard(tx)
         return VariableTracker.build(
             tx, f"mappingproxy({tracked_repr(tx, self.dv_dict)})"
         )
 
     def tp_str_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        self._check_mapping_repr(tx)
+        self._check_mutation_guard(tx)
         return generic_str(tx, self.dv_dict)
 
     def tp_richcompare_impl(
@@ -1204,6 +1176,9 @@ class DictViewVariable(VariableTracker):
         if not isinstance(dv_dict, ConstDictVariable):
             raise AssertionError(f"Expected ConstDictVariable, got {type(dv_dict)}")
         self.dv_dict = dv_dict
+        # Set when dv_dict is the _base_vt of a dict subclass, so .mapping
+        # proxies the subclass rather than its plain-dict storage.
+        self.owner: VariableTracker | None = None
 
     @property
     def view_items(self) -> Any:
@@ -1250,7 +1225,10 @@ class DictViewVariable(VariableTracker):
     # dict. https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L5032-L5040
     tp_getset = {
         "mapping": GetSet(
-            lambda s, _: MappingProxyVariable(s.dv_dict), readonly_setter
+            lambda s, _: MappingProxyVariable(
+                s.dv_dict if s.owner is None else s.owner
+            ),
+            readonly_setter,
         ),
     }
 
