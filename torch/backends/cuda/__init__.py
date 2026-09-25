@@ -24,6 +24,9 @@ __all__ = [
     "SDPAParams",
     "enable_cudnn_sdp",
     "cudnn_sdp_enabled",
+    "enable_cudnn_sdp_python",
+    "cudnn_sdp_python_enabled",
+    "is_cudnn_sdp_python_available",
     "enable_flash_sdp",
     "flash_sdp_enabled",
     "enable_mem_efficient_sdp",
@@ -671,6 +674,57 @@ def enable_cudnn_sdp(enabled: bool):
     Enables or disables cuDNN scaled dot product attention.
     """
     torch._C._set_sdp_use_cudnn(enabled)
+
+
+def is_cudnn_sdp_python_available() -> bool:
+    r"""
+    .. warning:: This flag is beta and subject to change.
+
+    Returns whether the cuDNN frontend Python package is importable, i.e.
+    whether :func:`enable_cudnn_sdp_python` can succeed.
+    """
+    from torch.nn.attention import _cudnn
+
+    return _cudnn.is_available()
+
+
+def cudnn_sdp_python_enabled() -> bool:
+    r"""
+    .. warning:: This flag is beta and subject to change.
+
+    Returns whether cuDNN scaled dot product attention is currently served by
+    the cuDNN frontend Python API rather than the built-in C++ implementation.
+    """
+    from torch.nn.attention import _cudnn
+
+    return _cudnn.is_enabled()
+
+
+def enable_cudnn_sdp_python(enabled: bool):
+    r"""
+    .. warning:: This flag is beta and subject to change.
+
+    Selects which implementation backs cuDNN scaled dot product attention: the
+    cuDNN frontend Python API (``nvidia-cudnn-frontend``) when True, or the
+    built-in C++ implementation when False.
+
+    This chooses an *implementation*, so it is orthogonal to
+    :func:`enable_cudnn_sdp`, which chooses whether the cuDNN *backend* is
+    eligible for selection at all. It is likewise independent of the active
+    flash attention implementation -- the two override disjoint operators, so
+    enabling this does not disturb FA3/FA4.
+
+    Enabling imports the provider package; it is not imported otherwise.
+
+    Setting ``TORCH_CUDNN_SDPA_USE_PYTHON=1`` enables this at import, so an
+    existing script can be switched over without a source change.
+    """
+    from torch.nn.attention import _cudnn
+
+    if enabled:
+        _cudnn.enable()
+    else:
+        _cudnn.disable()
 
 
 @contextlib.contextmanager
