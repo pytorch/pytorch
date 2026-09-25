@@ -88,6 +88,13 @@ def hash_storage_kernel(x):
     return prims.xor_sum((a * x + b).int(), [0])
 
 
+# Devices with a default generator that the on-device hashing kernel can
+# be seeded from.  is_compile_supported alone doesn't guarantee one (e.g.
+# a backend opting in via DeviceInterface), and such devices must take
+# the SHA-1 fallback below instead of the generator table.
+_GENERATOR_DEVICE_TYPES = ("cpu", "cuda", "mps", "xpu")
+
+
 # Returns a hex digest of the data in the storage.  Guaranteed to be
 # SHA-1 if stable_hash=True, otherwise it will be consistent for a single
 # process run but not necessarily across processes.
@@ -96,7 +103,11 @@ def hash_storage(storage: torch.UntypedStorage, *, stable_hash: bool = False) ->
     from torch._dynamo.utils import is_compile_supported
 
     device_type = storage.device.type
-    if stable_hash or not is_compile_supported(device_type):
+    if (
+        stable_hash
+        or device_type not in _GENERATOR_DEVICE_TYPES
+        or not is_compile_supported(device_type)
+    ):
         cpu_storage = storage.cpu()
         # TODO: make storage support buffer protocol so this isn't
         # necessary

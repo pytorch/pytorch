@@ -1,11 +1,14 @@
 # Owner(s): ["oncall: pt2"]
 
+from unittest import mock
+
 import torch
 from torch._prims.debug_prims import load_tensor_reader
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     TemporaryDirectoryName,
     TestCase,
@@ -18,6 +21,8 @@ from torch.utils._content_store import (
 
 
 class TestContentStore(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_basic(self, device):
         # setup test data
         x = torch.randn(4, device=device)
@@ -122,6 +127,62 @@ class TestContentStore(TestCase):
             "x", (4,), (1,), dtype=torch.float32, device=device
         )
         same_meta_as_x(x6)
+
+    def test_stable_hash_forces_sha1_path(self, device):
+        # stable_hash=True forces the SHA-1 slow path regardless of device
+        x = torch.randn(4, device=device)
+        h = hash_storage(x.untyped_storage(), stable_hash=True)
+        self.assertIsInstance(h, str)
+        self.assertEqual(len(h), 40)  # SHA-1 hexdigest is 40 chars
+
+    def test_hash_consistency_same_storage(self, device):
+        # Hashing the same storage twice should give identical results
+        # Without stable_hash this runs the fast path on compile-capable
+        # devices and the SHA-1 fallback elsewhere; both are deterministic.
+        x = torch.randn(8, device=device)
+        h1 = hash_storage(x.untyped_storage())
+        h2 = hash_storage(x.untyped_storage())
+        self.assertEqual(h1, h2)
+
+    def test_hash_different_storages_differ(self, device):
+        # Different storage contents should produce different hashes
+        # Uses stable_hash to avoid the fast path; still verifies distinctness
+        x = torch.randn(4, device=device)
+        y = torch.randn(4, device=device)
+        while torch.equal(x, y):
+            y = torch.randn(4, device=device)
+        hx = hash_storage(x.untyped_storage(), stable_hash=True)
+        hy = hash_storage(y.untyped_storage(), stable_hash=True)
+        self.assertNotEqual(hx, hy)
+
+    def test_hash_storage_needs_padding(self, device):
+        # Storage whose numel is not a multiple of 4 triggers F.pad in the
+        # fast path; verify it still produces a valid hash without stable_hash
+        x = torch.randn(5, device=device)
+        h = hash_storage(x.untyped_storage())
+        self.assertIsInstance(h, str)
+        self.assertEqual(len(h), 40)
+
+    def test_hash_storage_small_storage(self, device):
+        # Smallest possible storage (1 byte) should not error
+        # Use stable_hash to avoid fast path which requires int32 view
+        x = torch.tensor([1], device=device, dtype=torch.uint8)
+        h = hash_storage(x.untyped_storage(), stable_hash=True)
+        self.assertIsInstance(h, str)
+        self.assertEqual(len(h), 40)
+
+    def test_hash_storage_device_without_generator_uses_sha1_fallback(self):
+        # Simulate a backend that opts into is_compile_supported (e.g. via
+        # its DeviceInterface) but has no default generator in
+        # _GENERATOR_DEVICE_TYPES: it must take the SHA-1 fallback instead
+        # of reaching the generator table.
+        storage = torch.empty(4, device="meta").untyped_storage()
+        with mock.patch("torch._dynamo.utils.is_compile_supported", return_value=True):
+            # meta has no data to copy out, so the SHA-1 fallback itself
+            # raises RuntimeError; reaching it (instead of the generator
+            # table's AssertionError) is the behavior under test.
+            with self.assertRaises(RuntimeError):
+                hash_storage(storage)
 
 
 instantiate_device_type_tests(
