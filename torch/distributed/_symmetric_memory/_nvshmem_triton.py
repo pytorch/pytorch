@@ -452,7 +452,8 @@ if has_triton():
         Example:
             ```
             # Transfer data and set completion flag to 1
-            NVSHMEM_SIGNAL_SET = <value from NVSHMEM headers>
+            from torch._C._distributed_c10d import _nvshmem_signal_op_values
+            NVSHMEM_SIGNAL_SET, _ = _nvshmem_signal_op_values()
             nvshmem.putmem_signal_block(
                 dst_ptr, src_ptr, 1024, sig_ptr, 1, NVSHMEM_SIGNAL_SET, target_pe
             )
@@ -517,9 +518,9 @@ if has_triton():
                  - NVSHMEM_CMP_EQ (0): Wait until ivar == cmp_val
                  - NVSHMEM_CMP_NE (1): Wait until ivar != cmp_val
                  - NVSHMEM_CMP_GT (2): Wait until ivar > cmp_val
-                 - NVSHMEM_CMP_LE (3): Wait until ivar <= cmp_val
+                 - NVSHMEM_CMP_GE (3): Wait until ivar >= cmp_val
                  - NVSHMEM_CMP_LT (4): Wait until ivar < cmp_val
-                 - NVSHMEM_CMP_GE (5): Wait until ivar >= cmp_val
+                 - NVSHMEM_CMP_LE (5): Wait until ivar <= cmp_val
             cmp_val: Value to compare against.
 
         Notes:
@@ -574,9 +575,9 @@ if has_triton():
                         - NVSHMEM_CMP_EQ (0): Wait until signal == cmp_val
                         - NVSHMEM_CMP_NE (1): Wait until signal != cmp_val
                         - NVSHMEM_CMP_GT (2): Wait until signal > cmp_val
-                        - NVSHMEM_CMP_LE (3): Wait until signal <= cmp_val
+                        - NVSHMEM_CMP_GE (3): Wait until signal >= cmp_val
                         - NVSHMEM_CMP_LT (4): Wait until signal < cmp_val
-                        - NVSHMEM_CMP_GE (5): Wait until signal >= cmp_val
+                        - NVSHMEM_CMP_LE (5): Wait until signal <= cmp_val
             cmp_val (int64): Value to compare against.
 
         Returns:
@@ -650,7 +651,8 @@ if has_triton():
         Example:
             ```python
             # Atomically set remote signal to 1 to notify completion
-            NVSHMEM_SIGNAL_SET = <value from NVSHMEM headers>
+            from torch._C._distributed_c10d import _nvshmem_signal_op_values
+            NVSHMEM_SIGNAL_SET, _ = _nvshmem_signal_op_values()
             nvshmem.signal_op(remote_signal_ptr, 1, NVSHMEM_SIGNAL_SET, target_pe)
             ```
         """
