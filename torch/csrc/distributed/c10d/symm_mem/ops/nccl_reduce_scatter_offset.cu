@@ -409,12 +409,10 @@ void nccl_reduce_scatter_offset(
   TORCH_CHECK(window != nullptr, "nccl_reduce_scatter_offset: NCCL window is null");
 
   // Drive the same kernel one owned slot per launch, sequentially on the
-  // stream, so at most one destination allocation is written at a time.  A
-  // fused multi-destination launch was reproduced with RCCL 2.30.7 on both
-  // gfx942 and gfx950: the GPU queues reported
-  // HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION while CTAs wrote different
-  // destination allocations.  Row tiles within one slot all write the same
-  // destination allocation, which is safe.
+  // stream, so at most one destination allocation is written at a time: a
+  // fused launch whose CTAs write different destination allocations faults
+  // with a memory aperture violation on RCCL. Row tiles within one slot all
+  // write the same destination allocation, which is safe.
   // TODO: Debug the RCCL multi-destination LSA reduction and narrow or remove
   // this workaround when the fused launch is safe.
   //
