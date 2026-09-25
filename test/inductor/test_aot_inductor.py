@@ -6844,16 +6844,22 @@ class AOTInductorTestsTemplate:
             _, code = run_and_get_cpp_code(
                 AOTIRunnerUtil.compile, Model(), example_inputs
             )
-            # The handle must be the reinterpret expression, not a bare buffer
-            # name: a base-buffer handle would record the wrong shape while
-            # still looking populated to a trace consumer. The IValue variable
-            # carries the shim name, so match it in the same line to pin the
-            # assertion to this kernel rather than any transposed GEMM.
-            FileCheck().check_regex(
-                r"aoti_torch_tensor_to_ivalue\(wrap_with_raii_handle_if_needed\("
-                r"reinterpret_tensor_wrapper.*"
-                r"tmp_aoti_torch_\w*scaled_dot_product\w*_input_0\)"
-            ).run(code)
+            # The handle must carry the logical transposed shape, not the
+            # original base buffer. The non-ArrayRef path records a
+            # reinterpret_tensor_wrapper(...) handle directly, while the
+            # stack-allocation ArrayRef path materializes the transpose into a
+            # temporary bufN first and records that handle instead.
+            expected_input_0 = (
+                r"aoti_torch_tensor_to_ivalue\(buf0, "
+                r"&tmp_aoti_torch_\w*scaled_dot_product\w*_input_0\)"
+                if self.allow_stack_allocation
+                else (
+                    r"aoti_torch_tensor_to_ivalue\("
+                    r"wrap_with_raii_handle_if_needed\(reinterpret_tensor_wrapper.*"
+                    r"tmp_aoti_torch_\w*scaled_dot_product\w*_input_0\)"
+                )
+            )
+            FileCheck().check_regex(expected_input_0).run(code)
             FileCheck().check("RAIIAtenRecordFunctionHandle").run(code)
 
             self.check_model(Model(), example_inputs)
