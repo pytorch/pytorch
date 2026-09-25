@@ -363,6 +363,12 @@ class ExprArena : public c10::intrusive_ptr_target {
   const Expr* eval_floordiv(const Expr* base, const Expr* divisor);
   // PowByNatural.eval; nullptr for None.
   const Expr* eval_pow_by_natural(const Expr* base, const Expr* exp);
+  // sympy.Float(v) of a Python float.
+  const Expr* float_of_double(double v);
+  // FloatTrueDiv.eval and IntTrueDiv.eval of Numbers.
+  const Expr* eval_true_div(Kind kind, const Expr* base, const Expr* divisor);
+  // ToFloat.eval of a Number.
+  const Expr* eval_to_float(const Expr* number);
   // CeilToInt/FloorToInt/TruncToInt/RoundToInt.eval; nullptr for None.
   const Expr* eval_to_int(Kind kind, const Expr* number);
   // IsNonOverlappingAndDenseIndicator.eval; nullptr for None.

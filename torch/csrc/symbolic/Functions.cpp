@@ -28,6 +28,36 @@ bool is_int_oo(const Expr* e) {
   return e->kind == Kind::IntInfinity || e->kind == Kind::NegativeIntInfinity;
 }
 
+bool is_infinite(const Expr* e) {
+  return is_int_oo(e) || e->kind == Kind::Infinity ||
+      e->kind == Kind::NegativeInfinity;
+}
+
+constexpr int64_t kExactDouble = int64_t(1) << 53;
+
+// float() of a Number, correctly rounded like sympy's Rational.__float__.
+double to_double(const Expr* e) {
+  switch (e->kind) {
+    case Kind::Integer:
+      return static_cast<double>(e->p);
+    case Kind::Rational:
+      if (e->q > kExactDouble || e->p > kExactDouble || e->p < -kExactDouble) {
+        throw NativeUnsupported("float of a large Rational");
+      }
+      return static_cast<double>(e->p) / static_cast<double>(e->q);
+    case Kind::Float:
+      return e->float_value();
+    case Kind::IntInfinity:
+    case Kind::Infinity:
+      return std::numeric_limits<double>::infinity();
+    case Kind::NegativeIntInfinity:
+    case Kind::NegativeInfinity:
+      return -std::numeric_limits<double>::infinity();
+    default:
+      throw NativeUnsupported("expected a Number");
+  }
+}
+
 i128 floordiv128(i128 a, i128 b) {
   i128 q = a / b;
   return (a % b != 0 && (a < 0) != (b < 0)) ? q - 1 : q;
@@ -183,7 +213,12 @@ const char* function_name(Kind k) {
 }
 
 const Expr* ExprArena::function(Kind kind, c10::ArrayRef<const Expr*> args) {
-  if (std::any_of(args.begin(), args.end(), [](const Expr* a) {
+  bool all_numbers = std::all_of(
+      args.begin(), args.end(), [](const Expr* a) { return a->is_number(); });
+  bool float_fold = all_numbers &&
+      (kind == Kind::ToFloat || kind == Kind::IntTrueDiv ||
+       kind == Kind::FloatTrueDiv);
+  if (!float_fold && std::any_of(args.begin(), args.end(), [](const Expr* a) {
         return a->has_float;
       })) {
     throw NativeUnsupported("function of a Float");
@@ -235,18 +270,22 @@ const Expr* ExprArena::function(Kind kind, c10::ArrayRef<const Expr*> args) {
       if (ask(args[1], Fact::zero) == Tri::True) {
         throw NativeUnsupported("division by zero");
       }
-      [[fallthrough]];
+      if (all_numbers) {
+        r = eval_true_div(kind, args[0], args[1]);
+      }
+      break;
+    case Kind::ToFloat:
+      if (all_numbers) {
+        r = eval_to_float(args[0]);
+      }
+      break;
     case Kind::FloatPow:
     case Kind::RoundDecimal:
-    case Kind::ToFloat:
     case Kind::TruncToFloat:
       // The folds of numbers return sympy.Floats or oo, or raise for
-      // TruncToFloat(int_oo). The rest (IntTrueDiv of finite non-Integers,
-      // RoundDecimal with a non-Integer ndigits, ToFloat of a Rational) stay
+      // TruncToFloat(int_oo). RoundDecimal with a non-Integer ndigits stays
       // unevaluated, which the port rejects as well.
-      if (std::all_of(args.begin(), args.end(), [](const Expr* a) {
-            return a->is_number();
-          })) {
+      if (all_numbers) {
         throw NativeUnsupported("function of numbers gives a Float");
       }
       break;
@@ -265,9 +304,7 @@ const Expr* ExprArena::function(Kind kind, c10::ArrayRef<const Expr*> args) {
   if (r != nullptr) {
     return r;
   }
-  if (std::all_of(args.begin(), args.end(), [](const Expr* a) {
-        return a->is_number();
-      })) {
+  if (all_numbers) {
     // sympy's is_number would hold for it, which the handlers rely on never
     // happening for non-Numbers.
     throw NativeUnsupported("unevaluated function of numbers");
@@ -453,6 +490,56 @@ const Expr* ExprArena::eval_pow_by_natural(const Expr* base, const Expr* exp) {
   return nullptr;
 }
 
+const Expr* ExprArena::float_of_double(double v) {
+  if (std::isnan(v)) {
+    throw NativeUnsupported("Float of nan");
+  }
+  if (std::isinf(v)) {
+    return v > 0 ? oo_ : neg_oo_;
+  }
+  return float_number(v);
+}
+
+const Expr* ExprArena::eval_true_div(
+    Kind kind,
+    const Expr* base,
+    const Expr* divisor) {
+  if (kind == Kind::FloatTrueDiv || is_infinite(base) || is_infinite(divisor)) {
+    return float_of_double(to_double(base) / to_double(divisor));
+  }
+  if (base->kind != Kind::Integer || divisor->kind != Kind::Integer) {
+    throw NativeUnsupported("IntTrueDiv of non-Integers stays unevaluated");
+  }
+  // int / int is correctly rounded; so is the double division of exact ints.
+  if (base->p > kExactDouble || base->p < -kExactDouble ||
+      divisor->p > kExactDouble || divisor->p < -kExactDouble) {
+    throw NativeUnsupported("IntTrueDiv of large Integers");
+  }
+  return float_number(
+      static_cast<double>(base->p) / static_cast<double>(divisor->p));
+}
+
+const Expr* ExprArena::eval_to_float(const Expr* number) {
+  switch (number->kind) {
+    case Kind::Infinity:
+    case Kind::NegativeInfinity:
+      return number;
+    case Kind::IntInfinity:
+      return oo_;
+    case Kind::NegativeIntInfinity:
+      return neg_oo_;
+    case Kind::Integer:
+      // Float(int) keeps every digit, so it has more than 53 bits of precision
+      // from 10**15 on.
+      if (number->p >= 1000000000000000 || number->p <= -1000000000000000) {
+        throw NativeUnsupported("ToFloat of a large Integer");
+      }
+      return float_number(static_cast<double>(number->p));
+    default:
+      throw NativeUnsupported("ToFloat of a non-Integer stays unevaluated");
+  }
+}
+
 const Expr* ExprArena::eval_to_int(Kind kind, const Expr* number) {
   if (is_int_oo(number)) {
     if (kind == Kind::RoundToInt) {
@@ -480,13 +567,7 @@ const Expr* ExprArena::eval_to_int(Kind kind, const Expr* number) {
   if (!number->is_rational()) {
     return nullptr;
   }
-  // float(number), correctly rounded like sympy's Rational.__float__.
-  constexpr int64_t kExact = int64_t(1) << 53;
-  if (number->kind == Kind::Rational &&
-      (number->q > kExact || number->p > kExact || number->p < -kExact)) {
-    throw NativeUnsupported("float of a large Rational");
-  }
-  double x = static_cast<double>(number->p) / static_cast<double>(number->q);
+  double x = to_double(number);
   double r = 0;
   switch (kind) {
     case Kind::CeilToInt:

@@ -1523,10 +1523,7 @@ class TestNativeFunctions(TestCase):
             ("PowByNatural", 1, -int_oo),
             ("FloatPow", 2, 3),
             ("FloatPow", int_oo, 2),
-            ("FloatTrueDiv", 1, 3),
             ("FloatTrueDiv", s0, 0),
-            ("IntTrueDiv", 6, 3),
-            ("IntTrueDiv", int_oo, 2),
             ("IntTrueDiv", sympy.Rational(1, 2), sympy.Rational(1, 3)),
             ("IntTrueDiv", s0, 0),
             ("CeilDiv", 0, 0),
@@ -1846,6 +1843,33 @@ class TestNativeFunctions(TestCase):
             got = self.check_call(name, *map(sympy.sympify, xs))
             self.assertEqual(got, expected, f"{name}{xs}")
 
+    def test_float_folds(self):
+        F = sympy.Float
+        nums = [0, 1, -3, 7, 2**53, 2**53 + 1, 10**15 - 1, 10**15]
+        nums += [sympy.Rational(1, 3), sympy.Rational(-7, 2), F(0.5), F(-2.25)]
+        nums += [F(0.0), F(1e308), F(1e-300), int_oo, -int_oo, sympy.oo, -sympy.oo]
+        nums = list(map(sympy.sympify, nums))
+        answered = 0
+        for a in nums:
+            answered += self.check_call("ToFloat", a) is not None
+            for b in nums:
+                for name in ("FloatTrueDiv", "IntTrueDiv"):
+                    answered += self.check_call(name, a, b) is not None
+        self.assertGreater(answered, 400)
+        cases = [
+            ("ToFloat", (2,), F(2.0)),
+            ("ToFloat", (int_oo,), sympy.oo),
+            ("IntTrueDiv", (6, 3), F(2.0)),
+            ("IntTrueDiv", (1, 3), F(1 / 3)),
+            ("IntTrueDiv", (-2, int_oo), F(0.0)),
+            ("IntTrueDiv", (int_oo, 2), sympy.oo),
+            ("FloatTrueDiv", (sympy.Rational(1, 3), F(0.5)), F(2 / 3)),
+            ("FloatTrueDiv", (F(1e308), F(1e-10)), sympy.oo),
+        ]
+        for name, xs, expected in cases:
+            got = self.check_call(name, *map(sympy.sympify, xs))
+            self.assertEqual(got, expected, f"{name}{xs}")
+
     def test_to_int_unsupported(self):
         arena = torch._C._symbolic._Arena()
         cases = [
@@ -1853,8 +1877,6 @@ class TestNativeFunctions(TestCase):
             ("RoundToInt", (-int_oo,)),
             ("CeilToInt", (2**63 - 1,)),
             ("CeilToInt", (sympy.Rational(2**60 + 1, 3),)),
-            ("ToFloat", (2,)),
-            ("ToFloat", (int_oo,)),
             ("ToFloat", (sympy.Rational(1, 2),)),
             ("TruncToFloat", (int_oo,)),
             ("TruncToFloat", (sympy.Rational(1, 2),)),
