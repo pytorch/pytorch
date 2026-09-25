@@ -155,11 +155,19 @@ void createCaptureCublasHandle(cublasHandle_t *handle) {
 }
 using CuBlasCapturePoolType = DeviceThreadHandlePool<cublasHandle_t, createCaptureCublasHandle, destroyCublasHandle>;
 
-// Workspaces bound to capture handles, keyed by (capture id, handle). They are
-// freed by releaseCaptureCublasWorkspaces when the capture ends.
+// Workspaces bound to capture handles, keyed by (capture id, handle), and
+// hipBLASLt workspaces handed out by getCUDABlasLtWorkspace under capture,
+// keyed by (capture id, stream). They are freed by
+// releaseCaptureCublasWorkspaces when the capture ends.
 struct CaptureWorkspaces {
   std::mutex mutex;
   std::map<std::pair<c10::CaptureId_t, cublasHandle_t>, at::DataPtr> map;
+  // The last entry is the largest. Earlier, smaller entries stay alive because
+  // kernels captured with them still use them at replay.
+  std::map<
+      std::pair<c10::CaptureId_t, void*>,
+      std::vector<std::pair<at::DataPtr, size_t>>>
+      lt_map;
 };
 
 CaptureWorkspaces& captureWorkspaces() {
@@ -412,7 +420,43 @@ void setWorkspaceForHandle(cublasHandle_t handle, c10::cuda::CUDAStream stream) 
   }
 }
 
+#ifdef USE_ROCM
+static void* getCaptureCUDABlasLtWorkspace(
+    cudaStream_t stream,
+    c10::CaptureId_t capture_id,
+    size_t workspace_size) {
+  auto key = std::make_pair(capture_id, static_cast<void*>(stream));
+  auto& workspaces = captureWorkspaces();
+  {
+    std::lock_guard<std::mutex> lock(workspaces.mutex);
+    auto it = workspaces.lt_map.find(key);
+    if (it != workspaces.lt_map.end() &&
+        it->second.back().second >= workspace_size) {
+      return it->second.back().first.get();
+    }
+  }
+  // Allocated while capturing, so it comes from the capture's private pool.
+  auto new_workspace = allocateCUDABlasWorkspace(workspace_size);
+  std::lock_guard<std::mutex> lock(workspaces.mutex);
+  auto& buffers = workspaces.lt_map[key];
+  if (buffers.empty() || buffers.back().second < workspace_size) {
+    buffers.emplace_back(std::move(new_workspace), workspace_size);
+  }
+  return buffers.back().first.get();
+}
+#endif
+
 void* getCUDABlasLtWorkspace(size_t workspace_size) {
+#ifdef USE_ROCM
+  if (!isCUDABlasWorkspaceCachingEnabled()) {
+    cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
+    if (auto capture_id = c10::cuda::captureIdMayInitCtx(stream)) {
+      // Captured kernels keep this address, so each capture gets its own
+      // buffer instead of the per-stream cached one other graphs share.
+      return getCaptureCUDABlasLtWorkspace(stream, *capture_id, workspace_size);
+    }
+  }
+#endif
 #ifndef USE_ROCM
   if (unified_cublas_and_lt_workspaces()) {
     cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle(/*setup=*/false);
@@ -782,6 +826,7 @@ void prepareCaptureCublasHandles() {
 
 void releaseCaptureCublasWorkspaces(c10::CaptureId_t capture_id) {
   std::vector<std::pair<cublasHandle_t, at::DataPtr>> released;
+  std::vector<at::DataPtr> released_lt;
   {
     auto& workspaces = captureWorkspaces();
     std::lock_guard<std::mutex> lock(workspaces.mutex);
@@ -789,6 +834,16 @@ void releaseCaptureCublasWorkspaces(c10::CaptureId_t capture_id) {
       if (it->first.first == capture_id) {
         released.emplace_back(it->first.second, std::move(it->second));
         it = workspaces.map.erase(it);
+      } else {
+        ++it;
+      }
+    }
+    for (auto it = workspaces.lt_map.begin(); it != workspaces.lt_map.end();) {
+      if (it->first.first == capture_id) {
+        for (auto& buffer : it->second) {
+          released_lt.push_back(std::move(buffer.first));
+        }
+        it = workspaces.lt_map.erase(it);
       } else {
         ++it;
       }
