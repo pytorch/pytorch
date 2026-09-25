@@ -161,5 +161,32 @@ class TorchTensorToFileTest(common_utils.TestCase):
         self.assertEqual(tensor.tobytes(), expected_manual)
 
 
+class SemanticNodeNameTest(common_utils.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_uses_deepest_module_scope_and_generated_suffix(self):
+        self.assertEqual(
+            _core._get_semantic_onnx_node_name(
+                ["", "blocks.0", "blocks.0.proj", "linear"], "node_linear"
+            ),
+            "/blocks/0/proj/linear__node_linear",
+        )
+
+    def test_sanitizes_scope_components(self):
+        self.assertEqual(
+            _core._get_semantic_onnx_node_name(
+                ["", "encoder.block[0]", "encoder.block[0].proj", "linear.default"],
+                "node_linear.default",
+            ),
+            "/encoder/block_0/proj/linear.default__node_linear.default",
+        )
+
+    def test_preserves_generated_name_without_module_scope(self):
+        self.assertEqual(
+            _core._get_semantic_onnx_node_name(["linear"], "node_linear"),
+            "node_linear",
+        )
+
+
 if __name__ == "__main__":
     common_utils.run_tests()
