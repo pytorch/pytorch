@@ -121,7 +121,7 @@ class MemoryDepMatch:
 
 
 @dataclasses.dataclass(frozen=True)
-class IdentityTranslationProof:
+class TranslationProof:
     """Facts proved for one or more dense staged access relations."""
 
     matched_dependencies: tuple[MemoryDepMatch, ...]
@@ -159,12 +159,12 @@ def affine_proof_strides(
     return tuple(strides)
 
 
-def prove_identity_translation_pair(
+def prove_translation_pair(
     producer: MemoryDep,
     consumer: MemoryDep,
     context: SizeVarAllocator,
-) -> IdentityTranslationProof | None:
-    """Prove an identity-plus-translation relation for two accesses.
+) -> TranslationProof | None:
+    """Prove a dense translation relation for two accesses.
 
     Args:
         producer: Source access.
@@ -250,20 +250,20 @@ def prove_identity_translation_pair(
     ):
         return None
 
-    return IdentityTranslationProof(
+    return TranslationProof(
         matched_dependencies=(MemoryDepMatch(producer, consumer),),
         compatible_extents=tuple(zip(producer.size, consumer.size)),
         translation=translation,
     )
 
 
-def prove_identity_translation(
+def prove_translation(
     source_accesses: MemoryDep | typing.Sequence[MemoryDep],
     consumer_access: MemoryDep,
     *,
     context: SizeVarAllocator,
-) -> IdentityTranslationProof | None:
-    """Prove a shared identity-plus-translation relation.
+) -> TranslationProof | None:
+    """Prove a shared dense translation relation.
 
     Args:
         source_accesses: Source accesses to compare with the consumer.
@@ -280,15 +280,15 @@ def prove_identity_translation(
     )
     if not sources:
         return None
-   
+
     raw_proofs = tuple(
-        prove_identity_translation_pair(source, consumer_access, context)
+        prove_translation_pair(source, consumer_access, context)
         for source in sources
     )
     if any(proof is None for proof in raw_proofs):
         return None
     proofs = typing.cast(
-        tuple[IdentityTranslationProof, ...], raw_proofs
+        tuple[TranslationProof, ...], raw_proofs
     )
     first = proofs[0]
     if any(
@@ -2668,14 +2668,14 @@ class SubParentAccessRelation:
             raise AssertionError("sub-parent accesses must share one buffer name")
 
     @classmethod
-    def prove_identity_translation(
+    def prove_translation(
         cls,
         source_accesses: MemoryDep | typing.Sequence[MemoryDep],
         consumer_access: MemoryDep,
         *,
         sizevars: SizeVarAllocator,
-    ) -> "IdentityTranslationProof | None":
-        """Prove a dense identity-plus-translation relation.
+    ) -> "TranslationProof | None":
+        """Prove a dense translation relation.
 
         Args:
             source_accesses: Source accesses to compare with the consumer.
@@ -2685,7 +2685,7 @@ class SubParentAccessRelation:
         Returns:
             The proof, or None if the relation is invalid.
         """
-        return prove_identity_translation(
+        return prove_translation(
             source_accesses, consumer_access, context=sizevars
         )
 

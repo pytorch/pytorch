@@ -122,7 +122,7 @@ def _test_cases(device, dtype):
 
 
 class TestScheduler(TestCase):
-    def test_identity_translation_proof_matrix(self):
+    def test_translation_proof_matrix(self):
         """Keep the Phase 1 proof and rejection matrix in the in-tree suite."""
         row, feature = sympy.symbols(
             "proof_row proof_feature", integer=True, nonnegative=True
@@ -138,12 +138,12 @@ class TestScheduler(TestCase):
             return MemoryDep(name, index, (row, feature), size)
 
         sizevars = SizeVarAllocator()
-        zero = SubParentAccessRelation.prove_identity_translation(
+        zero = SubParentAccessRelation.prove_translation(
             producer,
             consumer(192 * row + feature, size=(4, 64)),
             sizevars=sizevars,
         )
-        shifted = SubParentAccessRelation.prove_identity_translation(
+        shifted = SubParentAccessRelation.prove_translation(
             producer,
             consumer(192 * row + feature + 64),
             sizevars=sizevars,
@@ -189,7 +189,7 @@ class TestScheduler(TestCase):
         for invalid_consumer in rejected:
             with self.subTest(invalid_consumer=invalid_consumer):
                 self.assertIsNone(
-                    SubParentAccessRelation.prove_identity_translation(
+                    SubParentAccessRelation.prove_translation(
                         producer, invalid_consumer, sizevars=sizevars
                     )
                 )
@@ -201,7 +201,7 @@ class TestScheduler(TestCase):
             (4, 192),
         )
         self.assertIsNone(
-            SubParentAccessRelation.prove_identity_translation(
+            SubParentAccessRelation.prove_translation(
                 (producer, conflicting_writer),
                 consumer(192 * row + feature + 64),
                 sizevars=sizevars,
@@ -227,7 +227,7 @@ class TestScheduler(TestCase):
         )
         sizevars.shape_env.var_to_range[width] = ValueRanges(128, 1024)
         self.assertIsNotNone(
-            SubParentAccessRelation.prove_identity_translation(
+            SubParentAccessRelation.prove_translation(
                 symbolic_producer,
                 symbolic_consumer,
                 sizevars=sizevars,
@@ -236,7 +236,7 @@ class TestScheduler(TestCase):
         unprovable_sizevars = SizeVarAllocator()
         unprovable_sizevars.shape_env.var_to_range[width] = ValueRanges(32, 1024)
         self.assertIsNone(
-            SubParentAccessRelation.prove_identity_translation(
+            SubParentAccessRelation.prove_translation(
                 symbolic_producer,
                 symbolic_consumer,
                 sizevars=unprovable_sizevars,
