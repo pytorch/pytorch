@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+import functools
 import gc
 import itertools
 import logging
@@ -44,8 +45,9 @@ from torch._dynamo.exc import BackendCompilerFailed
 from torch._inductor.codegen.cutlass.serialization import (
     get_cutlass_operation_serializer,
 )
-from torch._inductor.utils import clear_caches
+from torch._inductor.utils import clear_caches, is_big_gpu
 from torch.export import Dim
+from torch.utils._triton import has_triton
 from torch.testing._internal.common_utils import random_matrix_with_scaled_reduction_dim
 from torch.testing._internal.logging_utils import log_settings
 from torch.utils import _pytree as pytree
@@ -76,7 +78,6 @@ from torch._inductor.utils import fresh_cache
 from torch.sparse import SparseSemiStructuredTensor, to_sparse_semi_structured
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_FP8,
     SM100OrLater,
     SM120OrLater,
     SM80OrLater,
@@ -84,10 +85,16 @@ from torch.testing._internal.common_cuda import (
     xfailIfSM120OrLater,
     xfailIfSM12X,
 )
-from torch.testing._internal.common_device_type import skipCUDAIf, skipXPUIf
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+    skipCUDAIf,
+    skipXPUIf,
+)
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IN_RE_WORKER,
-    instantiate_parametrized_tests,
     IS_FBCODE,
     parametrize,
 )
@@ -95,18 +102,15 @@ from torch.testing._internal.common_xpu import Xe2_Or_Later
 from torch.testing._internal.inductor_utils import (
     _quantize_rowwise,
     _quantize_tensorwise,
-    GPU_TYPE,
     HAS_CPU,
-    HAS_CUDA_AND_TRITON,
 )
 
 
 # We don't need triton in this test suite.
 HAS_XPU = torch.xpu.is_available()
 HAS_CUDA = torch.cuda.is_available()
-HAS_GPU = HAS_CUDA or HAS_XPU
 
-if HAS_CUDA_AND_TRITON:
+if HAS_CUDA and has_triton():
     torch.cuda.memory._set_allocator_settings("expandable_segments:False")
 
 
@@ -138,8 +142,11 @@ def _get_path_without_sccache() -> str:
     return ":".join(path_envs)
 
 
-def _get_cutlass_dir() -> str:
-    return config.xpu.cutlass_dir if GPU_TYPE == "xpu" else config.cutlass.cutlass_dir
+def _get_cutlass_dir(device) -> str:
+    device_type = torch.device(device).type
+    if device_type == "xpu":
+        return config.xpu.cutlass_dir
+    return config.cutlass.cutlass_dir
 
 
 def _check_if_instances_equal(op1, op2) -> bool:
@@ -184,24 +191,31 @@ evt_bin_ops = parametrize("op", bin_ops_under_test, name_fn=lambda f: f.__name__
 evt_all_shapes = parametrize("shape", itertools.product([512, 1024], repeat=2))
 
 
-def gen_args(op, shape, dtype=torch.float16):
+def gen_args(op, shape, device, dtype=torch.float16):
     if op in bin_ops_under_test:
-        return (torch.rand(*shape, device=f"{GPU_TYPE}:0", dtype=dtype),)
+        return (torch.rand(*shape, device=device, dtype=dtype),)
     else:
         return ()
 
 
-use_evt_config = config.patch(
-    {
-        "max_autotune": True,
-        "max_autotune_gemm_backends": "CUTLASS",
-        "cutlass.cutlass_max_profiling_configs": 1,
-        "benchmark_epilogue_fusion": False,  # EVT doesn't support benchmark fusion yet
-        "cutlass.cutlass_tma_only": GPU_TYPE
-        == "cuda",  # Only CUDA requires TMA for EVT.
-        "cutlass.cutlass_epilogue_fusion_enabled": True,
-    }
-)
+def use_evt_config(fn):
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        device = kwargs.get("device")
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "CUTLASS",
+                "cutlass.cutlass_max_profiling_configs": 1,
+                "benchmark_epilogue_fusion": False,
+                "cutlass.cutlass_tma_only": torch.device(device).type == "cuda",
+                "cutlass.cutlass_epilogue_fusion_enabled": True,
+            }
+        ):
+            return fn(self, *args, **kwargs)
+
+    return wrapper
+
 
 fp8_config = config.patch(
     {
@@ -221,16 +235,93 @@ def select_no_algorithm(*args, **kwargs):
     raise NoValidChoicesError
 
 
-@instantiate_parametrized_tests
-class TestCutlassBackend(TestCase):
-    # device_type of each test case is necessary for skipCUDAIf decorator.
-    device_type = GPU_TYPE
+class TestCutlassBackendGeneric(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_check_paths(self):
+        cutlass_mock_imports_path = os.path.join(
+            os.path.dirname(torch.__file__),
+            "_inductor/codegen/cutlass/lib_extensions/cutlass_mock_imports",
+        )
+        cutlass_mock_cuda_path = os.path.join(cutlass_mock_imports_path, "cuda")
+        cutlass_mock_pydot_path = os.path.join(cutlass_mock_imports_path, "pydot")
+        cutlass_mock_scipy_path = os.path.join(cutlass_mock_imports_path, "scipy")
+        self.assertTrue(os.path.exists(cutlass_mock_imports_path))
+        self.assertTrue(os.path.exists(cutlass_mock_cuda_path))
+        self.assertTrue(os.path.exists(cutlass_mock_pydot_path))
+        self.assertTrue(os.path.exists(cutlass_mock_scipy_path))
+
+    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_get_max_alignment(self):
+        l4 = FixedLayout(
+            torch.device("cpu"), torch.half, size=[1, 2, 4], stride=[0, 4, 1]
+        )
+        m4 = get_max_alignment(l4)
+        self.assertEqual(
+            m4, 4, "Wrong max alignment. Should have been 4. (simple, contiguous case)"
+        )
+
+        l4_2 = FixedLayout(
+            torch.device("cpu"), torch.half, size=[1, 4, 2], stride=[0, 1, 4]
+        )
+        m4_2 = get_max_alignment(l4_2)
+        self.assertEqual(
+            m4_2,
+            4,
+            "Wrong max alignment. Should have been 4. Did not deal with strides correctly",
+        )
+
+        l1 = FixedLayout(
+            torch.device("cpu"), torch.half, size=[2, 4, 2], stride=[23, 1, 4]
+        )
+        m1 = get_max_alignment(l1)
+        self.assertEqual(
+            m1,
+            1,
+            "Wrong max alignment. Should have been 1. Did not take stride into account correctly",
+        )
+
+        l2 = FixedLayout(
+            torch.device("cpu"), torch.half, size=[1, 2, 4], stride=[0, 4, 1], offset=6
+        )
+        m2 = get_max_alignment(l2)
+        self.assertEqual(
+            m2, 2, "Wrong max alignment. Should have been 2. (due to choice of offset)"
+        )
+
+        l8 = FixedLayout(
+            torch.device("cpu"),
+            torch.half,
+            size=[2, 2, 8],
+            stride=[32, 8, 1],
+            offset=24,
+        )
+        m8 = get_max_alignment(l8)
+        self.assertEqual(m8, 8, "Wrong max alignment. Should have been 8.")
+
+        l4 = FixedLayout(
+            torch.device("cpu"),
+            torch.float32,
+            size=[2, 2, 8],
+            stride=[32, 8, 1],
+            offset=24,
+        )
+        m4 = get_max_alignment(l4)
+        self.assertEqual(
+            m4, 4, "Wrong max alignment. Should have been 4 (due to float32 dtype )."
+        )
+
+
+class TestCutlassBackendAccelerator(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def setUp(self):
-        if not HAS_GPU:
-            self.skipTest(f"{GPU_TYPE} and triton are not available")
         if torch.version.hip:
             self.skipTest("CUTLASS backend is not supported on HIP")
+        if not try_import_cutlass():
+            self.skipTest("requires cutlass")
+        if not is_big_gpu():
+            self.skipTest("requires big GPU")
 
         # The new inductor cache refresh mechanism
         # introduced with https://github.com/pytorch/pytorch/pull/122661
@@ -252,19 +343,19 @@ class TestCutlassBackend(TestCase):
     def tearDown(self):
         super().tearDown()
         clear_caches()
-        if GPU_TYPE == "xpu":
+        if self.device_type == "xpu":
             for dll in XPUCodeCache.dll_cache.values():
                 dll.close()
             XPUCodeCache.dll_cache.clear()
             gc.collect()
-            torch.xpu.empty_cache()
+            torch.accelerator.empty_cache()
 
-    def run_evt_test(self, model, op, shape, num_fusions=1):
+    def run_evt_test(self, device, model, op, shape, num_fusions=1):
         M, N = shape
-        a = torch.ones(M, N).to(GPU_TYPE).half()
-        b = torch.ones(N, N).to(GPU_TYPE).half().t()
-        extra_args = gen_args(op, (M, N))
-        model = model.to(GPU_TYPE)
+        a = torch.ones(M, N).to(device).half()
+        b = torch.ones(N, N).to(device).half().t()
+        extra_args = gen_args(op, (M, N), device)
+        model = model.to(device)
 
         result = torch.compile(model)(a, b, extra_args)
         ref_result = model(a, b, extra_args)
@@ -275,24 +366,11 @@ class TestCutlassBackend(TestCase):
         )
         torch.testing.assert_close(result, ref_result)
 
-    def test_check_paths(self):
-        cutlass_mock_imports_path = os.path.join(
-            os.path.dirname(torch.__file__),
-            "_inductor/codegen/cutlass/lib_extensions/cutlass_mock_imports",
-        )
-        cutlass_mock_cuda_path = os.path.join(cutlass_mock_imports_path, "cuda")
-        cutlass_mock_pydot_path = os.path.join(cutlass_mock_imports_path, "pydot")
-        cutlass_mock_scipy_path = os.path.join(cutlass_mock_imports_path, "scipy")
-        self.assertTrue(os.path.exists(cutlass_mock_imports_path))
-        self.assertTrue(os.path.exists(cutlass_mock_cuda_path))
-        self.assertTrue(os.path.exists(cutlass_mock_pydot_path))
-        self.assertTrue(os.path.exists(cutlass_mock_scipy_path))
-
     @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @xfailIfSM120OrLater
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    def test_max_autotune_cutlass_threshold(self):
+    def test_max_autotune_cutlass_threshold(self, device):
         """
         Make sure Cutlass GEMM threshold works as intended.
         """
@@ -300,8 +378,8 @@ class TestCutlassBackend(TestCase):
         def mm(a, b):
             return a @ b
 
-        a = torch.randn(100, 10).to(GPU_TYPE).half()
-        b = torch.randn(100, 10).to(GPU_TYPE).half().t()
+        a = torch.randn(100, 10).to(device).half()
+        b = torch.randn(100, 10).to(device).half().t()
 
         with config.patch(
             {
@@ -326,14 +404,14 @@ class TestCutlassBackend(TestCase):
 
     @skipXPUIf(not Xe2_Or_Later, "")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    def test_import_cutlass(self):
+    def test_import_cutlass(self, device):
         self.assertTrue(try_import_cutlass())
 
         import cutlass_cppgen  # type: ignore[import-not-found]  # noqa: F401
         import cutlass_library  # noqa: F401
 
     @skipXPUIf(not Xe2_Or_Later, "")
-    def test_cutlass_key(self):
+    def test_cutlass_key(self, device):
         self.assertTrue(try_import_cutlass())
         from torch._inductor.codecache import cutlass_key
 
@@ -341,7 +419,7 @@ class TestCutlassBackend(TestCase):
 
     @skipXPUIf(True, "CUDA-specific CUTLASS arch feature set")
     @parametrize("arch", ("103", "107"))
-    def test_sm103_and_sm107_cutlass_ops_skip_int8_umma(self, arch):
+    def test_sm103_and_sm107_cutlass_ops_skip_int8_umma(self, device, arch):
         from torch.utils import _pytree as pytree
 
         self.assertTrue(try_import_cutlass())
@@ -356,7 +434,7 @@ class TestCutlassBackend(TestCase):
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @xfailIfSM120OrLater
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    def test_cutlass_backend_subproc_mm(self):
+    def test_cutlass_backend_subproc_mm(self, device):
         """
         Test autotune_in_subproc works for mm.
 
@@ -366,24 +444,26 @@ class TestCutlassBackend(TestCase):
 
         M, N, K = 4096, 2048, 25728
 
-        cutlass_dir = _get_cutlass_dir()
+        cutlass_dir = _get_cutlass_dir(device)
         self.assertTrue(
             try_import_cutlass(),
-            lambda msg: f"{msg}\n"
-            + (
-                "CUTLASS backend is required by this test but could not be imported. "
-                f"Set {_CUTLASS_DIR_ENV_VAR} to a valid CUTLASS checkout; "
-                f"current cutlass_dir={cutlass_dir!r}."
+            lambda msg: (
+                f"{msg}\n"
+                + (
+                    "CUTLASS backend is required by this test but could not be imported. "
+                    f"Set {_CUTLASS_DIR_ENV_VAR} to a valid CUTLASS checkout; "
+                    f"current cutlass_dir={cutlass_dir!r}."
+                )
             ),
         )
 
         # Scale inputs by 1/sqrt(K) to avoid large accumulation differences
         # between CUTLASS and ATen in half precision.
         a = random_matrix_with_scaled_reduction_dim(
-            M, K, dtype=torch.float16, device=GPU_TYPE, reduction_dim=-1
+            M, K, dtype=torch.float16, device=device, reduction_dim=-1
         )
         b = random_matrix_with_scaled_reduction_dim(
-            N, K, dtype=torch.float16, device=GPU_TYPE, reduction_dim=-1
+            N, K, dtype=torch.float16, device=device, reduction_dim=-1
         ).t()
 
         with config.patch(
@@ -397,7 +477,7 @@ class TestCutlassBackend(TestCase):
         ):
             Y_compiled = torch.compile(torch.mm)(a, b)
             Y = torch.mm(a, b)
-            if GPU_TYPE == "xpu":
+            if torch.device(device).type == "xpu":
                 atol = 1e-3  # default is 1e-5
                 rtol = 1e-3  # default is 1e-3
             else:
@@ -411,7 +491,7 @@ class TestCutlassBackend(TestCase):
     @xfailIfSM120OrLater
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     @parametrize("dtype", (torch.float16, torch.bfloat16))
-    def test_cutlass_backend_subproc_addmm(self, dtype):
+    def test_cutlass_backend_subproc_addmm(self, device, dtype):
         """
         Test autotune_in_subproc works for addmm.
         """
@@ -422,10 +502,10 @@ class TestCutlassBackend(TestCase):
         # magnitude, avoiding large accumulation errors in half precision
         # that would require loose tolerances.
         a = random_matrix_with_scaled_reduction_dim(
-            M, K, dtype=dtype, device=GPU_TYPE, reduction_dim=-1
+            M, K, dtype=dtype, device=device, reduction_dim=-1
         )
         b = random_matrix_with_scaled_reduction_dim(
-            N, K, dtype=dtype, device=GPU_TYPE, reduction_dim=-1
+            N, K, dtype=dtype, device=device, reduction_dim=-1
         ).t()
 
         x_shapes = [
@@ -451,10 +531,10 @@ class TestCutlassBackend(TestCase):
                 torch._dynamo.reset()
                 clear_caches()
 
-                x = torch.randn(x_shape).to(GPU_TYPE).to(dtype)
+                x = torch.randn(x_shape).to(device).to(dtype)
                 Y_compiled = torch.compile(torch.addmm)(x, a, b, alpha=alpha, beta=beta)
                 Y = torch.addmm(x, a, b, alpha=alpha, beta=beta)
-                if GPU_TYPE == "xpu":
+                if torch.device(device).type == "xpu":
                     if dtype == torch.bfloat16:
                         atol = 5e-3
                         rtol = 5e-3
@@ -471,15 +551,15 @@ class TestCutlassBackend(TestCase):
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @xfailIfSM120OrLater
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    def test_cutlass_backend_subproc_bmm(self):
+    def test_cutlass_backend_subproc_bmm(self, device):
         """
         Test autotune_in_subproc works for bmm.
         """
 
         B, M, N, K = 10, 4096, 2048, 25728
 
-        a = torch.randn(B, M, K).to(GPU_TYPE).half()
-        b = torch.randn(B, N, K).to(GPU_TYPE).half().permute(0, 2, 1)
+        a = torch.randn(B, M, K).to(device).half()
+        b = torch.randn(B, N, K).to(device).half().permute(0, 2, 1)
 
         with config.patch(
             {
@@ -499,7 +579,7 @@ class TestCutlassBackend(TestCase):
     @xfailIfSM120OrLater
     @parametrize("dynamic", (False, True))
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    def test_diff_matmul_share_same_kernel(self, dynamic):
+    def test_diff_matmul_share_same_kernel(self, device, dynamic):
         max_autotune_gemm_backends = "CUTLASS"
 
         class MyModel(torch.nn.Module):
@@ -512,9 +592,9 @@ class TestCutlassBackend(TestCase):
                 return ab, ac
 
         model = MyModel()
-        a = torch.randn(128, 16).to(GPU_TYPE).half()
-        b = torch.randn(128, 16).to(GPU_TYPE).half().t()
-        c = torch.randn(512, 16).to(GPU_TYPE).half().t()
+        a = torch.randn(128, 16).to(device).half()
+        b = torch.randn(128, 16).to(device).half().t()
+        c = torch.randn(512, 16).to(device).half().t()
 
         with config.patch(
             {
@@ -543,7 +623,7 @@ class TestCutlassBackend(TestCase):
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @xfailIfSM120OrLater
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    def test_number_mm_precompiles(self):
+    def test_number_mm_precompiles(self, device):
         torch._dynamo.utils.counters.clear()
         max_autotune_gemm_backends = "CUTLASS"
 
@@ -556,9 +636,9 @@ class TestCutlassBackend(TestCase):
                 return ab
 
         model = MyModel()
-        a = torch.randn(128, 16).to(GPU_TYPE).half()
-        b = torch.randn(128, 16).to(GPU_TYPE).half().t()
-        c = torch.randn(512, 16).to(GPU_TYPE).half().t()
+        a = torch.randn(128, 16).to(device).half()
+        b = torch.randn(128, 16).to(device).half().t()
+        c = torch.randn(512, 16).to(device).half().t()
 
         with config.patch(
             {
@@ -601,6 +681,7 @@ class TestCutlassBackend(TestCase):
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_regular_mm(
         self,
+        device,
         dynamic: bool,
         max_autotune_gemm_backends: str = "CUTLASS",
         use_aoti: bool = False,
@@ -623,12 +704,12 @@ class TestCutlassBackend(TestCase):
             def forward(self, a, b):
                 return a @ b
 
-        model = MyModel().to(GPU_TYPE)
+        model = MyModel().to(device)
 
         inputs = [
             (
-                torch.randn(M, K).to(GPU_TYPE).to(dtype),
-                torch.randn(K, N).to(GPU_TYPE).to(dtype),
+                torch.randn(M, K).to(device).to(dtype),
+                torch.randn(K, N).to(device).to(dtype),
             )
             for (M, N, K) in shapes
         ]
@@ -671,6 +752,7 @@ class TestCutlassBackend(TestCase):
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_cpp_wrapper(
         self,
+        device,
         dtype: torch.dtype,
         num_gemms: int,
     ):
@@ -688,10 +770,10 @@ class TestCutlassBackend(TestCase):
                     out = out @ c
                 return out
 
-        model = MyModel().to(GPU_TYPE)
-        a = torch.randn(M, K, device=GPU_TYPE, dtype=dtype)
-        b = torch.randn(K, N, device=GPU_TYPE, dtype=dtype)
-        c = torch.randn(N, N // 2, device=GPU_TYPE, dtype=dtype)
+        model = MyModel().to(device)
+        a = torch.randn(M, K, device=device, dtype=dtype)
+        b = torch.randn(K, N, device=device, dtype=dtype)
+        c = torch.randn(N, N // 2, device=device, dtype=dtype)
         expected = model(a, b, c)
 
         with config.patch(
@@ -720,6 +802,7 @@ class TestCutlassBackend(TestCase):
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_fp8_scaled_mm(
         self,
+        device,
         dynamic: bool,
         max_autotune_gemm_backends: str = "CUTLASS",
         use_aoti: bool = False,
@@ -742,7 +825,6 @@ class TestCutlassBackend(TestCase):
         for shape in shapes:
             M, N, K = shape
             output_dtype = torch.bfloat16
-            device = GPU_TYPE
 
             x = torch.randn(M, K, dtype=output_dtype, device=device)
             w = torch.randn(N, K, dtype=output_dtype, device=device)
@@ -780,7 +862,7 @@ class TestCutlassBackend(TestCase):
             if dynamic
             else None
         )
-        model = MyModel().to(GPU_TYPE)
+        model = MyModel().to(device)
 
         with (
             config.patch(
@@ -805,11 +887,8 @@ class TestCutlassBackend(TestCase):
 
             torch.testing.assert_close(actual, expected, rtol=1e-2, atol=0.05)
 
-    @unittest.skipIf(
-        torch.cuda.is_available() and not PLATFORM_SUPPORTS_FP8,
-        "FP8 is only supported on H100+",
-    )
-    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @requires_capabilities(Capability.dtype.fp8)
+    @skipCUDAIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(
         os.environ,
         # note: It seems necessary to set these here, instead of `config.patch`.
@@ -819,17 +898,15 @@ class TestCutlassBackend(TestCase):
             "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS": "CUTLASS",
         },
     )
-    def test_cutlass_backend_fp8_scaled_mm_mixed_dtypes(self):
+    def test_cutlass_backend_fp8_scaled_mm_mixed_dtypes(self, device):
         """Test that CUTLASS backend works with mixed FP8 dtypes (e4m3fn x e5m2)."""
         m, k, n = 256, 256, 256
 
         # Create mixed FP8 dtypes: e4m3fn x e5m2
-        a8 = torch.randn(m, k, device=GPU_TYPE, dtype=torch.float16).to(
+        a8 = torch.randn(m, k, device=device, dtype=torch.float16).to(
             torch.float8_e4m3fn
         )
-        b8 = torch.randn(k, n, device=GPU_TYPE, dtype=torch.float16).to(
-            torch.float8_e5m2
-        )
+        b8 = torch.randn(k, n, device=device, dtype=torch.float16).to(torch.float8_e5m2)
         # _scaled_mm requires mat2 to be column-major
         b8 = b8.t().contiguous().t()
 
@@ -855,6 +932,7 @@ class TestCutlassBackend(TestCase):
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_addmm(
         self,
+        device,
         dynamic: bool,
         max_autotune_gemm_backends: str = "CUTLASS",
         use_aoti: bool = False,
@@ -863,7 +941,7 @@ class TestCutlassBackend(TestCase):
         """
         Main test for addmm.
         """
-        if dtype == torch.bfloat16 and GPU_TYPE == "cuda":
+        if dtype == torch.bfloat16 and torch.device(device).type == "cuda":
             # Mismatched elements: 4539 / 16384 (27.7%)
             # Greatest absolute difference: 0.125 at index (12, 33) (up to 0.001 allowed)
             # Greatest relative difference: inf at index (15, 7) (up to 0.002 allowed)
@@ -875,7 +953,7 @@ class TestCutlassBackend(TestCase):
             def forward(self, x, a, b):
                 return torch.addmm(x, a, b)
 
-        model = MyModel().to(GPU_TYPE)
+        model = MyModel().to(device)
         # M, N, K
         shapes = [
             (128, 128, 16),
@@ -895,12 +973,12 @@ class TestCutlassBackend(TestCase):
 
             inputs = [
                 (
-                    torch.randn(x_shape(M, N)).to(GPU_TYPE).to(dtype),
+                    torch.randn(x_shape(M, N)).to(device).to(dtype),
                     random_matrix_with_scaled_reduction_dim(
-                        M, K, dtype=dtype, device=GPU_TYPE, reduction_dim=-1
+                        M, K, dtype=dtype, device=device, reduction_dim=-1
                     ),
                     random_matrix_with_scaled_reduction_dim(
-                        N, K, dtype=dtype, device=GPU_TYPE, reduction_dim=-1
+                        N, K, dtype=dtype, device=device, reduction_dim=-1
                     ).t(),
                 )
                 for (M, N, K) in shapes
@@ -944,7 +1022,7 @@ class TestCutlassBackend(TestCase):
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @xfailIfSM120OrLater
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    def test_max_autotune_cutlass_backend_addmm_input_reorder(self):
+    def test_max_autotune_cutlass_backend_addmm_input_reorder(self, device):
         """
         Without input_reorder on the CUTLASS call in tuned_addmm, the CUTLASS
         C kernel's argument order doesn't match the benchmark tensor order,
@@ -977,12 +1055,12 @@ class TestCutlassBackend(TestCase):
         AlgorithmSelectorCache.benchmark_choices = tracking_benchmark_choices
         try:
             M, K, N = 256, 3520, 2048
-            bias = torch.randn(N, device=GPU_TYPE, dtype=torch.bfloat16)
+            bias = torch.randn(N, device=device, dtype=torch.bfloat16)
             x = random_matrix_with_scaled_reduction_dim(
-                M, K, dtype=torch.bfloat16, device=GPU_TYPE, reduction_dim=-1
+                M, K, dtype=torch.bfloat16, device=device, reduction_dim=-1
             )
             w = random_matrix_with_scaled_reduction_dim(
-                K, N, dtype=torch.bfloat16, device=GPU_TYPE, reduction_dim=-2
+                K, N, dtype=torch.bfloat16, device=device, reduction_dim=-2
             )
 
             with config.patch(
@@ -1004,7 +1082,9 @@ class TestCutlassBackend(TestCase):
             )
             self.assertTrue(
                 all(t != float("inf") for t in timings_by_type["cutlass"]),
-                lambda msg: f"{msg}\nCUTLASS benchmark failed: {timings_by_type['cutlass']}",
+                lambda msg: (
+                    f"{msg}\nCUTLASS benchmark failed: {timings_by_type['cutlass']}"
+                ),
             )
         finally:
             AlgorithmSelectorCache.benchmark_choices = original_benchmark_choices
@@ -1019,6 +1099,7 @@ class TestCutlassBackend(TestCase):
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_bmm(
         self,
+        device,
         dynamic: bool,
         use_aoti: bool = False,
         max_autotune_gemm_backends: str = "CUTLASS",
@@ -1033,7 +1114,7 @@ class TestCutlassBackend(TestCase):
             def forward(self, a, b):
                 return torch.bmm(a, b)
 
-        model = MyModel().to(GPU_TYPE)
+        model = MyModel().to(device)
         # B, M, N, K
         shapes = [
             (10, 4096, 2048, 25728),
@@ -1046,18 +1127,18 @@ class TestCutlassBackend(TestCase):
             if use_expand:
                 A = (
                     random_matrix_with_scaled_reduction_dim(
-                        M, K, dtype=dtype, device=GPU_TYPE, reduction_dim=-1
+                        M, K, dtype=dtype, device=device, reduction_dim=-1
                     )
                     .unsqueeze(0)
                     .expand(B, -1, -1)
                 )
             else:
                 A = random_matrix_with_scaled_reduction_dim(
-                    M, K, B, dtype=dtype, device=GPU_TYPE, reduction_dim=-1
+                    M, K, B, dtype=dtype, device=device, reduction_dim=-1
                 )
 
             B_tensor = random_matrix_with_scaled_reduction_dim(
-                N, K, B, dtype=dtype, device=GPU_TYPE, reduction_dim=-1
+                N, K, B, dtype=dtype, device=device, reduction_dim=-1
             ).permute(0, 2, 1)
             inputs.append((A, B_tensor))
         dynamic_shapes = (
@@ -1090,7 +1171,7 @@ class TestCutlassBackend(TestCase):
     @xfailIfSM120OrLater
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_regular_mm_streamk(
-        self, dynamic: bool = False, max_autotune_gemm_backends: str = "CUTLASS"
+        self, device, dynamic: bool = False, max_autotune_gemm_backends: str = "CUTLASS"
     ):
         """
         Make sure autotuning mm in sub processes work without crashes.
@@ -1121,8 +1202,8 @@ class TestCutlassBackend(TestCase):
                     16384,
                 ),
             ):
-                a = torch.randn(M, K).to(GPU_TYPE).half()
-                b = torch.randn(N, K).to(GPU_TYPE).half().t()
+                a = torch.randn(M, K).to(device).half()
+                b = torch.randn(N, K).to(device).half().t()
                 Y_compiled = compiled_model(a, b)
                 Y = torch.mm(a, b)
                 # we need relaxed numerical limits due to the sheer size of the
@@ -1134,6 +1215,7 @@ class TestCutlassBackend(TestCase):
     @xfailIfSM120OrLater
     def test_streamk_with_dynamic(
         self,
+        device,
     ):
         """
         Test streamk with dynamic=True. Streamk should be filtered out.
@@ -1142,8 +1224,8 @@ class TestCutlassBackend(TestCase):
         shape. Without a correct workspace, the kernel will fail at runtime.
         """
 
-        a = torch.randn(128, 16).to(GPU_TYPE).half()
-        b = torch.randn(128, 16).to(GPU_TYPE).half().t()
+        a = torch.randn(128, 16).to(device).half()
+        b = torch.randn(128, 16).to(device).half().t()
 
         with config.patch(
             {
@@ -1160,6 +1242,7 @@ class TestCutlassBackend(TestCase):
     @xfailIfSM120OrLater
     def test_streamk_with_static(
         self,
+        device,
     ):
         """
         Test streamk with dynamic=False. Streamk should work.
@@ -1174,8 +1257,8 @@ class TestCutlassBackend(TestCase):
 
         for shape in shapes:
             M, N, K = shape
-            a = torch.randn(M, K).to(GPU_TYPE).half()
-            b = torch.randn(N, K).to(GPU_TYPE).half().t()
+            a = torch.randn(M, K).to(device).half()
+            b = torch.randn(N, K).to(device).half().t()
 
             with config.patch(
                 {
@@ -1189,6 +1272,7 @@ class TestCutlassBackend(TestCase):
 
     def _test_max_autotune_cutlass_backend_epilogue_fusion(
         self,
+        device,
         dynamic: bool = False,
         max_autotune_gemm_backends: str = "CUTLASS",
         fp16=True,
@@ -1202,11 +1286,11 @@ class TestCutlassBackend(TestCase):
         # it can happen that no Cutlass 3.x op is available
         # that allows fusions
         if batch_size is None:
-            a = torch.randn(256, 32).to(GPU_TYPE)
-            b = torch.randn(256, 32).to(GPU_TYPE).t()
+            a = torch.randn(256, 32).to(device)
+            b = torch.randn(256, 32).to(device).t()
         else:
-            a = torch.randn(batch_size, 256, 32).to(GPU_TYPE)
-            b = torch.randn(batch_size, 256, 32).to(GPU_TYPE).permute(0, 2, 1)
+            a = torch.randn(batch_size, 256, 32).to(device)
+            b = torch.randn(batch_size, 256, 32).to(device).permute(0, 2, 1)
         if fp16:
             a = a.half()
             b = b.half()
@@ -1234,70 +1318,72 @@ class TestCutlassBackend(TestCase):
     @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @xfailIfSM120OrLater
-    def test_max_autotune_cutlass_backend_simple_fusion_fp16_fp32acc(self):
+    def test_max_autotune_cutlass_backend_simple_fusion_fp16_fp32acc(self, device):
         def mm(a, b):
             return (a @ b) * 3.0
 
         self._test_max_autotune_cutlass_backend_epilogue_fusion(
-            fp16=True, expected_fuse_count=0, mm=mm
+            device, fp16=True, expected_fuse_count=0, mm=mm
         )
 
     @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @xfailIfSM120OrLater
-    def test_max_autotune_cutlass_backend_chained_fusion_fp16_fp32acc(self):
+    def test_max_autotune_cutlass_backend_chained_fusion_fp16_fp32acc(self, device):
         def mm(a, b):
             return (a @ b) * 3.3 - 1.234
 
         self._test_max_autotune_cutlass_backend_epilogue_fusion(
-            fp16=True, expected_fuse_count=0, mm=mm
+            device, fp16=True, expected_fuse_count=0, mm=mm
         )
 
     @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @xfailIfSM120OrLater
-    def test_max_autotune_cutlass_backend_relu_fusion_fp16_fp32acc(self):
+    def test_max_autotune_cutlass_backend_relu_fusion_fp16_fp32acc(self, device):
         def mm(a, b):
             return torch.nn.functional.relu((a @ b) * 3.3 - 1.234)
 
         #  The pointwise ops seem to be pre-fused into a single Pointwise
         self._test_max_autotune_cutlass_backend_epilogue_fusion(
-            fp16=True, expected_fuse_count=0, mm=mm
+            device, fp16=True, expected_fuse_count=0, mm=mm
         )
 
     @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @xfailIfSM120OrLater
-    def test_max_autotune_cutlass_backend_relu6_fusion_fp16_fp32acc(self):
+    def test_max_autotune_cutlass_backend_relu6_fusion_fp16_fp32acc(self, device):
         def mm(a, b):
             return torch.clamp(torch.nn.functional.relu(a @ b), max=6.0)
 
         #  The pointwise ops seem to be pre-fused into a single Pointwise
         self._test_max_autotune_cutlass_backend_epilogue_fusion(
-            fp16=True, expected_fuse_count=0, mm=mm
+            device, fp16=True, expected_fuse_count=0, mm=mm
         )
 
     @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @xfailIfSM120OrLater
-    def test_max_autotune_cutlass_backend_no_fusion_dtype_mismatch(self):
+    def test_max_autotune_cutlass_backend_no_fusion_dtype_mismatch(self, device):
         def mm(a, b):
             # this should not be fused, since the output dtype is different from the matmul dtype
             return (a @ b).to(torch.float32) * 0.00001
 
         self._test_max_autotune_cutlass_backend_epilogue_fusion(
-            fp16=True, expected_fuse_count=0, mm=mm
+            device, fp16=True, expected_fuse_count=0, mm=mm
         )
 
     @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @xfailIfSM120OrLater
-    def test_max_autotune_cutlass_backend_shape_dependent_normalization_fusion(self):
+    def test_max_autotune_cutlass_backend_shape_dependent_normalization_fusion(
+        self, device
+    ):
         def mm(a, b):
             return (a @ b) / b.size(1)
 
         self._test_max_autotune_cutlass_backend_epilogue_fusion(
-            fp16=True, expected_fuse_count=0, mm=mm
+            device, fp16=True, expected_fuse_count=0, mm=mm
         )
 
     @skipXPUIf(True, "int_mm not supported on xpu cutlass backend")
@@ -1305,7 +1391,6 @@ class TestCutlassBackend(TestCase):
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @skipCUDAIf(
         torch.version.hip is None
-        and HAS_CUDA
         and torch.cuda.get_device_capability() in ((10, 3), (10, 7)),
         "int_mm not supported on SM103 or SM107",
     )
@@ -1313,7 +1398,7 @@ class TestCutlassBackend(TestCase):
     @parametrize("dynamic", (False,))
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_int_mm(
-        self, dynamic: bool, max_autotune_gemm_backends: str = "CUTLASS"
+        self, device, dynamic: bool, max_autotune_gemm_backends: str = "CUTLASS"
     ):
         """
         Make sure autotuning mm in sub processes work without crashes.
@@ -1328,8 +1413,8 @@ class TestCutlassBackend(TestCase):
         # this combination, so it's excluded from the test).  Also,
         # for CUTLASS alignment requirements, number of columns in
         # both tensors has to be divisible by 16.
-        a = torch.randint(0, 5, (100, 16), dtype=torch.int8).to(GPU_TYPE)
-        b = torch.randint(0, 5, (32, 16), dtype=torch.int8).to(GPU_TYPE).T
+        a = torch.randint(0, 5, (100, 16), dtype=torch.int8).to(device)
+        b = torch.randint(0, 5, (32, 16), dtype=torch.int8).to(device).T
 
         with config.patch(
             {
@@ -1347,7 +1432,7 @@ class TestCutlassBackend(TestCase):
     @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @xfailIfSM120OrLater
-    def test_force_cutlass_backend_aoti_dynamic(self):
+    def test_force_cutlass_backend_aoti_dynamic(self, device):
         class MyModel(torch.nn.Module):
             def forward(self, x, w):
                 return x @ w
@@ -1367,8 +1452,8 @@ class TestCutlassBackend(TestCase):
                 "w": {0: K, 1: N},
             }
 
-            x = torch.randn(M, K).to(GPU_TYPE).half()
-            w = torch.randn(N, K).to(GPU_TYPE).half().t()
+            x = torch.randn(M, K).to(device).half()
+            w = torch.randn(N, K).to(device).half().t()
 
             actual = AOTIRunnerUtil.run(
                 model,
@@ -1382,7 +1467,7 @@ class TestCutlassBackend(TestCase):
     @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @xfailIfSM120OrLater
-    def test_force_cutlass_backend_aoti_cexpr_codegen(self):
+    def test_force_cutlass_backend_aoti_cexpr_codegen(self, device):
         class MyModel(torch.nn.Module):
             def forward(self, x, w):
                 x0, x1 = x.shape
@@ -1407,8 +1492,8 @@ class TestCutlassBackend(TestCase):
                 "w": None,
             }
 
-            x = torch.randn(M, K).to(GPU_TYPE).half()
-            w = torch.randn(N, K).to(GPU_TYPE).half().t()
+            x = torch.randn(M, K).to(device).half()
+            w = torch.randn(N, K).to(device).half().t()
 
             actual = AOTIRunnerUtil.run(
                 model,
@@ -1421,7 +1506,7 @@ class TestCutlassBackend(TestCase):
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     @skipXPUIf(True, "streamk kernels not supported on xpu cutlass backend yet")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
-    def test_aoti_workspace_ptr(self):
+    def test_aoti_workspace_ptr(self, device):
         class MyModel(torch.nn.Module):
             def forward(self, x, w):
                 return x @ w
@@ -1438,8 +1523,8 @@ class TestCutlassBackend(TestCase):
             model = MyModel()
             M, N, K = 200, 5216, 10_432
 
-            x = torch.randn(M, K).to(GPU_TYPE).half()
-            w = torch.randn(N, K).to(GPU_TYPE).half().t()
+            x = torch.randn(M, K).to(device).half()
+            w = torch.randn(N, K).to(device).half().t()
 
             if SM120OrLater:
                 with self.assertRaisesRegex(InductorError, r".*NoValidChoicesError.*"):
@@ -1457,11 +1542,11 @@ class TestCutlassBackend(TestCase):
             torch.testing.assert_close(expected, actual, atol=0.01, rtol=0.01)
 
     # TODO: Enable dynamic test cases when dynamic support is added.
-    @unittest.skipIf(not SM80OrLater or SM90OrLater, "need sm_8x exactly")
+    @skipCUDAIf(not SM80OrLater or SM90OrLater, "need sm_8x exactly")
     @parametrize("dynamic", (False,))
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_sparse_semi_structured_mm(
-        self, dynamic: bool
+        self, device, dynamic: bool
     ):
         """
         Make sure autotuning mm in sub processes work without crashes.
@@ -1473,10 +1558,10 @@ class TestCutlassBackend(TestCase):
             return torch.mm(a, b)
 
         m, n, k = 32, 8, 64
-        mask = torch.tensor([0, 0, 1, 1]).tile(m, k // 4).to(GPU_TYPE).half()
-        a = torch.rand(m, k).to(GPU_TYPE).half() * mask
+        mask = torch.tensor([0, 0, 1, 1]).tile(m, k // 4).to(device).half()
+        a = torch.rand(m, k).to(device).half() * mask
         a_sparse = to_sparse_semi_structured(a)
-        b = torch.rand(k, n).to(GPU_TYPE).half()
+        b = torch.rand(k, n).to(device).half()
 
         with config.patch(
             {
@@ -1516,13 +1601,14 @@ class TestCutlassBackend(TestCase):
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_cutlass_backend_op_denylist(
         self,
+        device,
     ):
         def my_addmm(x, a, b, alpha, beta):
             return torch.addmm(x, a, b, alpha=beta, beta=alpha)
 
-        x = torch.randn((128, 128)).to(GPU_TYPE).half()
-        a = torch.randn(128, 128).to(GPU_TYPE).half()
-        b = torch.randn(128, 128).to(GPU_TYPE).half().t()
+        x = torch.randn((128, 128)).to(device).half()
+        a = torch.randn(128, 128).to(device).half()
+        b = torch.randn(128, 128).to(device).half().t()
 
         with fresh_cache():
             with config.patch(
@@ -1571,13 +1657,14 @@ class TestCutlassBackend(TestCase):
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_cutlass_backend_op_allowlist(
         self,
+        device,
     ):
         def addmm(x, a, b, alpha, beta):
             return torch.addmm(x, a, b, alpha=alpha, beta=beta)
 
-        x = torch.randn((128, 128)).to(GPU_TYPE).half()
-        a = torch.randn(128, 128).to(GPU_TYPE).half()
-        b = torch.randn(128, 128).to(GPU_TYPE).half().t()
+        x = torch.randn((128, 128)).to(device).half()
+        a = torch.randn(128, 128).to(device).half()
+        b = torch.randn(128, 128).to(device).half().t()
         allowlist_regex = "stream_k" if SM100OrLater else "pingpong"
 
         with fresh_cache():
@@ -1627,11 +1714,11 @@ class TestCutlassBackend(TestCase):
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_cutlass_backend_fp8_scaled_mm_fast_accum_filtering(
         self,
+        device,
     ):
         float8_dtype = torch.float8_e4m3fn
         # Only bf16 output type is supported for row-wise scaling, not fp32
         output_dtype: torch.dtype = torch.bfloat16
-        device = GPU_TYPE
         M, K, N = 128, 128, 128  # Matmul Y = X [M, K] x W [N, K]
         x = torch.randn(M, K, dtype=output_dtype, device=device)
         w = torch.randn(N, K, dtype=output_dtype, device=device)
@@ -1720,6 +1807,7 @@ class TestCutlassBackend(TestCase):
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_cutlass_backend_shape_coverage_mm(
         self,
+        device,
     ):
         """
         Checks if cutlass backend produces some ops for a variety of shapes.
@@ -1731,24 +1819,24 @@ class TestCutlassBackend(TestCase):
 
         inputs = [
             (
-                torch.randn(128, 500).to(GPU_TYPE).half(),
-                torch.randn(500, 576).to(GPU_TYPE).half(),
+                torch.randn(128, 500).to(device).half(),
+                torch.randn(500, 576).to(device).half(),
             ),
             (
-                torch.randn(500, 128).to(GPU_TYPE).half(),
-                torch.randn(128, 576).to(GPU_TYPE).half(),
+                torch.randn(500, 128).to(device).half(),
+                torch.randn(128, 576).to(device).half(),
             ),
             (
-                torch.randn(128, 250).to(GPU_TYPE).half(),
-                torch.randn(250, 576).to(GPU_TYPE).half(),
+                torch.randn(128, 250).to(device).half(),
+                torch.randn(250, 576).to(device).half(),
             ),
             (
-                torch.randn(250, 128).to(GPU_TYPE).half(),
-                torch.randn(128, 576).to(GPU_TYPE).half(),
+                torch.randn(250, 128).to(device).half(),
+                torch.randn(128, 576).to(device).half(),
             ),
             (
-                torch.randn(125, 128).to(GPU_TYPE).half(),
-                torch.randn(128, 576).to(GPU_TYPE).half(),
+                torch.randn(125, 128).to(device).half(),
+                torch.randn(128, 576).to(device).half(),
             ),
         ]
 
@@ -1776,7 +1864,9 @@ class TestCutlassBackend(TestCase):
 
                 self.assertTrue(
                     sa.called,
-                    lambda msg: f"{msg}\nautotune_select_algorithm was not called  with shape M={M}, N={N}, K={K}",
+                    lambda msg: (
+                        f"{msg}\nautotune_select_algorithm was not called  with shape M={M}, N={N}, K={K}"
+                    ),
                 )
                 args, _ = sa.call_args
                 op_name, choices, _, __ = args
@@ -1796,84 +1886,24 @@ class TestCutlassBackend(TestCase):
                 self.assertGreater(
                     cuda_template_count,
                     0,
-                    lambda msg: f"{msg}\n"
-                    + (
-                        "No CUTLASSTemplateCaller choices found for matmul with shape "
-                        f"M={M}, N={N}, K={K}"
+                    lambda msg: (
+                        f"{msg}\n"
+                        + (
+                            "No CUTLASSTemplateCaller choices found for matmul with shape "
+                            f"M={M}, N={N}, K={K}"
+                        )
                     ),
                 )
-
-    @skipXPUIf(not Xe2_Or_Later, "")
-    @skipCUDAIf(not SM80OrLater, "need sm_80")
-    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    def test_get_max_alignment(self):
-        l4 = FixedLayout(
-            torch.device("cpu"), torch.half, size=[1, 2, 4], stride=[0, 4, 1]
-        )
-        m4 = get_max_alignment(l4)
-        self.assertEqual(
-            m4, 4, "Wrong max alignment. Should have been 4. (simple, contiguous case)"
-        )
-
-        l4_2 = FixedLayout(
-            torch.device("cpu"), torch.half, size=[1, 4, 2], stride=[0, 1, 4]
-        )
-        m4_2 = get_max_alignment(l4_2)
-        self.assertEqual(
-            m4_2,
-            4,
-            "Wrong max alignment. Should have been 4. Did not deal with strides correctly",
-        )
-
-        l1 = FixedLayout(
-            torch.device("cpu"), torch.half, size=[2, 4, 2], stride=[23, 1, 4]
-        )
-        m1 = get_max_alignment(l1)
-        self.assertEqual(
-            m1,
-            1,
-            "Wrong max alignment. Should have been 1. Did not take stride into account correctly",
-        )
-
-        l2 = FixedLayout(
-            torch.device("cpu"), torch.half, size=[1, 2, 4], stride=[0, 4, 1], offset=6
-        )
-        m2 = get_max_alignment(l2)
-        self.assertEqual(
-            m2, 2, "Wrong max alignment. Should have been 2. (due to choice of offset)"
-        )
-
-        l8 = FixedLayout(
-            torch.device("cpu"),
-            torch.half,
-            size=[2, 2, 8],
-            stride=[32, 8, 1],
-            offset=24,
-        )
-        m8 = get_max_alignment(l8)
-        self.assertEqual(m8, 8, "Wrong max alignment. Should have been 8.")
-
-        l4 = FixedLayout(
-            torch.device("cpu"),
-            torch.float32,
-            size=[2, 2, 8],
-            stride=[32, 8, 1],
-            offset=24,
-        )
-        m4 = get_max_alignment(l4)
-        self.assertEqual(
-            m4, 4, "Wrong max alignment. Should have been 4 (due to float32 dtype )."
-        )
 
     @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @xfailIfSM120OrLater
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    def test_standalone_runner(self):
+    def test_standalone_runner(self, device):
         max_autotune_gemm_backends = "CUTLASS"
 
-        a = torch.randn(128, 16).to(GPU_TYPE).half()
-        b = torch.randn(128, 16).to(GPU_TYPE).half().t()
+        a = torch.randn(128, 16).to(device).half()
+        b = torch.randn(128, 16).to(device).half().t()
 
         with config.patch(
             {
@@ -1892,7 +1922,7 @@ class TestCutlassBackend(TestCase):
 
             # Run compilation, check results just in case, and save
             # CUTLASS-based generated code.
-            with CUTLASSCompileSourceCapturingContext(GPU_TYPE) as ctx:
+            with CUTLASSCompileSourceCapturingContext(torch.device(device).type) as ctx:
                 compiled = torch.compile(torch.mm, dynamic=False)
 
                 expected = torch.mm(a, b)
@@ -1906,7 +1936,7 @@ class TestCutlassBackend(TestCase):
                 raise AssertionError(f"Expected len(sources) >= 1, got {len(sources)}")
 
             # Get names for temporary source and executable files.
-            suffix = ".cpp" if GPU_TYPE == "xpu" else ".cu"
+            suffix = ".cpp" if torch.device(device).type == "xpu" else ".cu"
             cu_file = NamedTemporaryFile("w", suffix=suffix, delete=False)  # noqa: SIM115
             cu_file.close()
             exe_file = NamedTemporaryFile("w", suffix="", delete=False)  # noqa: SIM115
@@ -1919,7 +1949,7 @@ class TestCutlassBackend(TestCase):
             # Get command to compile .cu file, and run the
             # compilation.
             command = cutlass_standalone_runner_compile_command(
-                GPU_TYPE, Path(cu_file.name), Path(exe_file.name)
+                torch.device(device).type, Path(cu_file.name), Path(exe_file.name)
             )
 
             if IS_FBCODE:
@@ -1951,7 +1981,7 @@ class TestCutlassBackend(TestCase):
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @xfailIfSM12X
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    def test_cutlass_backend_integration(self):
+    def test_cutlass_backend_integration(self, device):
         """
         Test if cutlass backend can be autotune with other backends
         """
@@ -1959,8 +1989,8 @@ class TestCutlassBackend(TestCase):
         def mm(a, b):
             return a @ b
 
-        a = torch.randn(128, 16).to(GPU_TYPE).half()
-        b = torch.randn(128, 16).to(GPU_TYPE).half().t()
+        a = torch.randn(128, 16).to(device).half()
+        b = torch.randn(128, 16).to(device).half().t()
 
         with config.patch(
             {
@@ -1995,7 +2025,7 @@ class TestCutlassBackend(TestCase):
     @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @xfailIfSM120OrLater
-    def test_maybe_append_choice_caching(self):
+    def test_maybe_append_choice_caching(self, device):
         """
         Test if maybe_append_choice's caching leads to correct results and
         shorter maybe_append_choice time.
@@ -2009,9 +2039,9 @@ class TestCutlassBackend(TestCase):
                     A = A @ B / 32
                 return A
 
-        model = TestModule().to(GPU_TYPE)
-        A = torch.randn(1024, 1024, dtype=torch.bfloat16, device=GPU_TYPE)
-        B = torch.randn(1024, 1024, dtype=torch.bfloat16, device=GPU_TYPE).t()
+        model = TestModule().to(device)
+        A = torch.randn(1024, 1024, dtype=torch.bfloat16, device=device)
+        B = torch.randn(1024, 1024, dtype=torch.bfloat16, device=device).t()
 
         expected = model(A, B)
 
@@ -2048,7 +2078,7 @@ class TestCutlassBackend(TestCase):
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @xfailIfSM120OrLater
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    def test_multiple_mm(self):
+    def test_multiple_mm(self, device):
         """
         Test multiple matrix multiplications with different shapes in a single nn.Module.
         """
@@ -2061,13 +2091,13 @@ class TestCutlassBackend(TestCase):
                 mm2 = c @ d
                 return mm1, mm2
 
-        model = MultipleMMModel().to(GPU_TYPE)
+        model = MultipleMMModel().to(device)
 
         # Create tensors with different shapes
-        a = torch.randn(128, 64).to(GPU_TYPE).half()
-        b = torch.randn(32, 64).to(GPU_TYPE).half().t()
-        c = torch.randn(256, 128).to(GPU_TYPE).half()
-        d = torch.randn(64, 128).to(GPU_TYPE).half().t()
+        a = torch.randn(128, 64).to(device).half()
+        b = torch.randn(32, 64).to(device).half().t()
+        c = torch.randn(256, 128).to(device).half()
+        d = torch.randn(64, 128).to(device).half().t()
 
         # Track render calls
         from torch._inductor.codegen.cutlass.gemm_template import CUTLASSGemmTemplate
@@ -2109,7 +2139,7 @@ class TestCutlassBackend(TestCase):
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @xfailIfSM120OrLater
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    def test_multiple_mm_with_dynamic_shape(self):
+    def test_multiple_mm_with_dynamic_shape(self, device):
         """
         Test multiple matrix multiplications where one has dynamic shapes.
         """
@@ -2117,8 +2147,8 @@ class TestCutlassBackend(TestCase):
         class MultipleMMDynamicModel(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.c = torch.randn(64, 256).to(GPU_TYPE).half()
-                self.d = torch.randn(128, 256).to(GPU_TYPE).half().t()
+                self.c = torch.randn(64, 256).to(device).half()
+                self.d = torch.randn(128, 256).to(device).half().t()
 
             def forward(self, a, b):
                 # dynamic shape matmul
@@ -2127,11 +2157,11 @@ class TestCutlassBackend(TestCase):
                 mm2 = self.c @ self.d
                 return mm1, mm2
 
-        model = MultipleMMDynamicModel().to(GPU_TYPE)
+        model = MultipleMMDynamicModel().to(device)
 
         # Create tensors with different shapes
-        a = torch.randn(128, 64).to(GPU_TYPE).half()
-        b = torch.randn(32, 64).to(GPU_TYPE).half().t()
+        a = torch.randn(128, 64).to(device).half()
+        b = torch.randn(32, 64).to(device).half().t()
 
         # Track render calls
         from torch._inductor.codegen.cutlass.gemm_template import CUTLASSGemmTemplate
@@ -2173,11 +2203,11 @@ class TestCutlassBackend(TestCase):
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @xfailIfSM120OrLater
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    def test_cutlass_backend_matmul_same_tensor(self):
+    def test_cutlass_backend_matmul_same_tensor(self, device):
         max_autotune_gemm_backends = "CUTLASS"
 
         M = 128
-        A = torch.randn(M, M).to(GPU_TYPE).half()
+        A = torch.randn(M, M).to(device).half()
 
         with config.patch(
             {
@@ -2194,11 +2224,11 @@ class TestCutlassBackend(TestCase):
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @xfailIfSM120OrLater
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    def test_cutlass_backend_matmul_nonzero_offset(self):
+    def test_cutlass_backend_matmul_nonzero_offset(self, device):
         max_autotune_gemm_backends = "CUTLASS"
 
         M = 129
-        A = torch.randn(M, M - 1).to(GPU_TYPE).half()
+        A = torch.randn(M, M - 1).to(device).half()
 
         with config.patch(
             {
@@ -2216,15 +2246,15 @@ class TestCutlassBackend(TestCase):
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @xfailIfSM120OrLater
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    def test_flexible_layout(self):
+    def test_flexible_layout(self, device):
         class TestModel(torch.nn.Module):
             def forward(self, B):
                 A = torch.zeros_like(B)
                 return A @ B.t()
 
         M = 1024
-        B = torch.randn(M, M).to(GPU_TYPE).half()
-        model = TestModel().to(GPU_TYPE)
+        B = torch.randn(M, M).to(device).half()
+        model = TestModel().to(device)
 
         with config.patch(
             {
@@ -2240,15 +2270,15 @@ class TestCutlassBackend(TestCase):
     @xfailIfSM120OrLater
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     @use_evt_config
-    def test_evt_flexible_layout(self):
+    def test_evt_flexible_layout(self, device):
         class TestModel(torch.nn.Module):
             def forward(self, B):
                 A = torch.zeros_like(B)
                 return (A @ B.t()).relu()
 
         M = 1024
-        B = torch.randn(M, M).to(GPU_TYPE).half()
-        model = TestModel().to(GPU_TYPE).half()
+        B = torch.randn(M, M).to(device).half()
+        model = TestModel().to(device).half()
 
         with config.patch(
             {
@@ -2267,7 +2297,7 @@ class TestCutlassBackend(TestCase):
     @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @xfailIfSM120OrLater
-    def test_filtered_ops_cache(self):
+    def test_filtered_ops_cache(self, device):
         class TestModel(torch.nn.Module):
             def forward(self, B):
                 A = torch.zeros_like(B)
@@ -2276,8 +2306,8 @@ class TestCutlassBackend(TestCase):
                 return A
 
         M = 1024
-        B = torch.randn(M, M).to(GPU_TYPE).half()
-        model = TestModel().to(GPU_TYPE)
+        B = torch.randn(M, M).to(device).half()
+        model = TestModel().to(device)
 
         counters.clear()
         with (
@@ -2302,16 +2332,16 @@ class TestCutlassBackend(TestCase):
     @xfailIfSM120OrLater
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     @parametrize("use_aoti", (False, True))
-    def test_compilation_time(self, use_aoti):
+    def test_compilation_time(self, device, use_aoti):
         M = 1024
-        A = torch.randn(M, M).to(GPU_TYPE).half()
-        B = torch.randn(M, M).to(GPU_TYPE).half().t()
+        A = torch.randn(M, M).to(device).half()
+        B = torch.randn(M, M).to(device).half().t()
 
         class MyModel(torch.nn.Module):
             def forward(self, a, b):
                 return a @ b
 
-        model = MyModel().to(GPU_TYPE)
+        model = MyModel().to(device)
         expected = model(A, B)
 
         start_time = time.time()
@@ -2330,7 +2360,7 @@ class TestCutlassBackend(TestCase):
             else:
                 actual = torch.compile(model, fullgraph=True)(A, B)
 
-            if GPU_TYPE == "xpu":
+            if torch.device(device).type == "xpu":
                 atol = 1e-4  # default is 1e-5
                 rtol = 1e-3  # default is 1e-3
                 expected_time = 100
@@ -2347,19 +2377,19 @@ class TestCutlassBackend(TestCase):
     @use_evt_config
     @evt_all_ops
     @evt_all_shapes
-    def test_evt_fusions_basic(self, op, shape):
+    def test_evt_fusions_basic(self, device, op, shape):
         class TestModel(torch.nn.Module):
             def forward(self, a, b, extra_args):
                 res = (a @ b).relu()  # add extra activation to not hit addmm path
                 return op(res, *extra_args)
 
-        self.run_evt_test(TestModel(), op, shape)
+        self.run_evt_test(device, TestModel(), op, shape)
 
     @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @xfailIfSM120OrLater
     @use_evt_config
-    def test_evt_reshaped_external_read_fusion(self):
+    def test_evt_reshaped_external_read_fusion(self, device):
         """
         Regression test: when an epilogue node reads an external buffer whose
         shape is a compatible reshape of the GEMM output (e.g. [128, 128, 128]
@@ -2383,11 +2413,11 @@ class TestCutlassBackend(TestCase):
                 out = out + bias3d  # external read with the reshaped shape
                 return out.relu()
 
-        a = torch.randn(M, K, device=GPU_TYPE, dtype=torch.float16)
-        b = torch.randn(K, N, device=GPU_TYPE, dtype=torch.float16)
-        bias3d = torch.randn(*reshaped, device=GPU_TYPE, dtype=torch.float16)
+        a = torch.randn(M, K, device=device, dtype=torch.float16)
+        b = torch.randn(K, N, device=device, dtype=torch.float16)
+        bias3d = torch.randn(*reshaped, device=device, dtype=torch.float16)
 
-        model = TestModel().to(GPU_TYPE)
+        model = TestModel().to(device)
         ref = model(a, b, bias3d)
         result = torch.compile(model, fullgraph=True)(a, b, bias3d)
         torch.testing.assert_close(result, ref, atol=1e-2, rtol=1e-2)
@@ -2401,7 +2431,7 @@ class TestCutlassBackend(TestCase):
     @xfailIfSM120OrLater
     @use_evt_config
     @evt_bin_ops
-    def test_evt_broadcasting(self, op):
+    def test_evt_broadcasting(self, device, op):
         class TestModel(torch.nn.Module):
             def forward(self, a, b, extra_args):
                 acc = a @ b
@@ -2409,10 +2439,10 @@ class TestCutlassBackend(TestCase):
 
         M = 1024
         N = 512
-        a = torch.ones(M, N).to(GPU_TYPE).half()
-        b = torch.ones(N, N).to(GPU_TYPE).half().t()
-        extra_args = gen_args(op, (M, N))
-        model = TestModel().to(GPU_TYPE)
+        a = torch.ones(M, N).to(device).half()
+        b = torch.ones(N, N).to(device).half().t()
+        extra_args = gen_args(op, (M, N), device)
+        model = TestModel().to(device)
 
         result = torch.compile(model)(a, b, extra_args)
         ref_result = model(a, b, extra_args)
@@ -2428,7 +2458,7 @@ class TestCutlassBackend(TestCase):
     @xfailIfSM120OrLater
     @use_evt_config
     @evt_un_ops
-    def test_evt_activations(self, op):
+    def test_evt_activations(self, device, op):
         class TestModel(torch.nn.Module):
             def forward(self, a, b, extra_args):
                 acc = a @ b
@@ -2436,10 +2466,10 @@ class TestCutlassBackend(TestCase):
 
         M = 1024
         N = 512
-        a = torch.randn(M, N).to(GPU_TYPE).half()
-        b = torch.randn(N, N).to(GPU_TYPE).half().t()
-        extra_args = gen_args(op, (M, N))
-        model = TestModel().to(GPU_TYPE)
+        a = torch.randn(M, N).to(device).half()
+        b = torch.randn(N, N).to(device).half().t()
+        extra_args = gen_args(op, (M, N), device)
+        model = TestModel().to(device)
 
         result = torch.compile(model)(a, b, extra_args)
         ref_result = model(a, b, extra_args)
@@ -2453,7 +2483,7 @@ class TestCutlassBackend(TestCase):
     @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @use_evt_config
-    def test_evt_scalar_constant(self):
+    def test_evt_scalar_constant(self, device):
         # Python scalar literals in the epilogue (e.g. * 0.5, - 1.0) are lowered
         # by the CUTLASS EVT frontend into immediate-constant ("imm_*") nodes.
         # These are not input buffers, so EVT arg rendering must recover the
@@ -2467,9 +2497,9 @@ class TestCutlassBackend(TestCase):
 
         M = 1024
         N = 512
-        a = torch.randn(M, N).to(GPU_TYPE).half()
-        b = torch.randn(N, N).to(GPU_TYPE).half().t()
-        model = TestModel().to(GPU_TYPE)
+        a = torch.randn(M, N).to(device).half()
+        b = torch.randn(N, N).to(device).half().t()
+        model = TestModel().to(device)
 
         result = torch.compile(model)(a, b)
         ref_result = model(a, b)
@@ -2483,7 +2513,7 @@ class TestCutlassBackend(TestCase):
     @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @use_evt_config
-    def test_evt_gelu(self):
+    def test_evt_gelu(self, device):
         # gelu is decomposed by Inductor into x * 0.5 * (1 + erf(x / sqrt(2)));
         # the EVT codegen re-folds this back into the native CUTLASS GELU
         # functor (see _fuse_activations in python_evt.py).
@@ -2493,9 +2523,9 @@ class TestCutlassBackend(TestCase):
 
         M = 1024
         N = 512
-        a = torch.randn(M, N).to(GPU_TYPE).half()
-        b = torch.randn(N, N).to(GPU_TYPE).half().t()
-        model = TestModel().to(GPU_TYPE)
+        a = torch.randn(M, N).to(device).half()
+        b = torch.randn(N, N).to(device).half().t()
+        model = TestModel().to(device)
 
         result = torch.compile(model)(a, b)
         ref_result = model(a, b)
@@ -2509,7 +2539,7 @@ class TestCutlassBackend(TestCase):
     @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @use_evt_config
-    def test_evt_silu_fusion(self):
+    def test_evt_silu_fusion(self, device):
         """Test that SiLU activation can be fused into GEMM epilogue via EVT."""
 
         class TestModel(torch.nn.Module):
@@ -2517,9 +2547,9 @@ class TestCutlassBackend(TestCase):
                 return torch.nn.functional.silu(a @ b)
 
         M, N = 1024, 512
-        a = torch.randn(M, N, device=GPU_TYPE, dtype=torch.float16)
-        b = torch.randn(N, N, device=GPU_TYPE, dtype=torch.float16).t()
-        model = TestModel().to(GPU_TYPE)
+        a = torch.randn(M, N, device=device, dtype=torch.float16)
+        b = torch.randn(N, N, device=device, dtype=torch.float16).t()
+        model = TestModel().to(device)
 
         result = torch.compile(model)(a, b)
         ref_result = model(a, b)
@@ -2533,7 +2563,7 @@ class TestCutlassBackend(TestCase):
     @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @use_evt_config
-    def test_evt_llama_mlp_pattern(self):
+    def test_evt_llama_mlp_pattern(self, device):
         """Test the Llama MLP pattern: silu(x @ gate.T) * (x @ up.T)."""
 
         class LlamaMLP(torch.nn.Module):
@@ -2541,10 +2571,10 @@ class TestCutlassBackend(TestCase):
                 return torch.nn.functional.silu(x @ gate_w.t()) * (x @ up_w.t())
 
         M, K, N = 256, 256, 256
-        x = torch.randn(M, K, device=GPU_TYPE, dtype=torch.float16)
-        gate_w = torch.randn(N, K, device=GPU_TYPE, dtype=torch.float16)
-        up_w = torch.randn(N, K, device=GPU_TYPE, dtype=torch.float16)
-        model = LlamaMLP().to(GPU_TYPE)
+        x = torch.randn(M, K, device=device, dtype=torch.float16)
+        gate_w = torch.randn(N, K, device=device, dtype=torch.float16)
+        up_w = torch.randn(N, K, device=device, dtype=torch.float16)
+        model = LlamaMLP().to(device)
 
         ref_result = model(x, gate_w, up_w)
         result = torch.compile(model)(x, gate_w, up_w)
@@ -2558,7 +2588,7 @@ class TestCutlassBackend(TestCase):
     @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @use_evt_config
-    def test_evt_aux_load_mul(self):
+    def test_evt_aux_load_mul(self, device):
         """Test that multiplying GEMM output with an external buffer uses AuxLoad."""
 
         class TestModel(torch.nn.Module):
@@ -2566,10 +2596,10 @@ class TestCutlassBackend(TestCase):
                 return (a @ b) * aux
 
         M, N, K = 256, 256, 256
-        a = torch.randn(M, K, device=GPU_TYPE, dtype=torch.float16)
-        b = torch.randn(K, N, device=GPU_TYPE, dtype=torch.float16)
-        aux = torch.randn(M, N, device=GPU_TYPE, dtype=torch.float16)
-        model = TestModel().to(GPU_TYPE)
+        a = torch.randn(M, K, device=device, dtype=torch.float16)
+        b = torch.randn(K, N, device=device, dtype=torch.float16)
+        aux = torch.randn(M, N, device=device, dtype=torch.float16)
+        model = TestModel().to(device)
 
         result = torch.compile(model)(a, b, aux)
         ref_result = model(a, b, aux)
@@ -2585,11 +2615,11 @@ class TestCutlassBackend(TestCase):
     @xfailIfSM120OrLater
     @use_evt_config
     @evt_all_ops
-    def test_evt_mixed_dtypes(self, op):
+    def test_evt_mixed_dtypes(self, device, op):
         M = 1024
         N = 256
 
-        fp32_tensor = torch.ones(M, N).to(GPU_TYPE).float()
+        fp32_tensor = torch.ones(M, N).to(device).float()
 
         class TestModel(torch.nn.Module):
             def forward(self, a, b, extra_args):
@@ -2598,10 +2628,10 @@ class TestCutlassBackend(TestCase):
                 out1 = torch.add(out0, fp32_tensor)
                 return out1
 
-        model = TestModel().to(GPU_TYPE)
-        a = torch.ones(M, N).to(GPU_TYPE).half()
-        b = torch.ones(N, N).to(GPU_TYPE).half().t()
-        extra_args = gen_args(op, (M, N), dtype=torch.float16)
+        model = TestModel().to(device)
+        a = torch.ones(M, N).to(device).half()
+        b = torch.ones(N, N).to(device).half().t()
+        extra_args = gen_args(op, (M, N), device, dtype=torch.float16)
 
         # baseline is cutlass kernel + triton
         # matches expected casting behavior
@@ -2628,26 +2658,28 @@ class TestCutlassBackend(TestCase):
     @xfailIfSM120OrLater
     @use_evt_config
     @evt_all_ops
-    def test_evt_multi_op(self, op):
+    def test_evt_multi_op(self, device, op):
         class TestModel(torch.nn.Module):
             def forward(self, a, b, extra_args):
                 acc = a @ b
                 return torch.add(op(acc.relu(), *extra_args).relu(), acc)
 
-        self.run_evt_test(TestModel(), op, (1024, 512))
+        self.run_evt_test(device, TestModel(), op, (1024, 512))
 
     @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @xfailIfSM120OrLater
     @use_evt_config
     @evt_all_ops
-    def test_evt_reuse_matmul_input(self, op):
+    def test_evt_reuse_matmul_input(self, device, op):
         class TestModel(torch.nn.Module):
             def forward(self, a, b, extra_args):
                 acc = a @ b
                 return torch.add(op(acc.relu(), *extra_args).relu(), a)
 
-        self.run_evt_test(TestModel(), op, (1024, 1024))  # shape needs to be square
+        self.run_evt_test(
+            device, TestModel(), op, (1024, 1024)
+        )  # shape needs to be square
 
     @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
@@ -2657,7 +2689,7 @@ class TestCutlassBackend(TestCase):
         "dynamic", (False, True)
     )  # To not drastically increase test time we only test dynamic on this test
     @xfailIfSM120OrLater
-    def test_evt_multi_output(self, op, dynamic):
+    def test_evt_multi_output(self, device, op, dynamic):
         class TestModel(torch.nn.Module):
             def forward(self, a, b, extra_args):
                 acc = a @ b
@@ -2671,10 +2703,10 @@ class TestCutlassBackend(TestCase):
         shapes = [(512, 512)] if not dynamic else [(1024, 64), (128, 256)]
         for i, shape in enumerate(shapes):
             M, N = shape
-            a = torch.ones(M, N).to(GPU_TYPE).half()
-            b = torch.ones(N, N).to(GPU_TYPE).half().t()
-            extra_args = gen_args(op, (M, N))
-            model = TestModel().to(GPU_TYPE)
+            a = torch.ones(M, N).to(device).half()
+            b = torch.ones(N, N).to(device).half().t()
+            extra_args = gen_args(op, (M, N), device)
+            model = TestModel().to(device)
 
             result = torch.compile(model)(a, b, extra_args)
             ref_result = model(a, b, extra_args)
@@ -2691,7 +2723,7 @@ class TestCutlassBackend(TestCase):
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @xfailIfSM120OrLater
     @use_evt_config
-    def test_evt_return_accumulator(self):
+    def test_evt_return_accumulator(self, device):
         op = torch.add
 
         class TestModel(torch.nn.Module):
@@ -2701,10 +2733,10 @@ class TestCutlassBackend(TestCase):
 
         M = 1024
         N = 512
-        a = torch.ones(M, N).to(GPU_TYPE).half()
-        b = torch.ones(N, N).to(GPU_TYPE).half().t()
-        extra_args = gen_args(op, (M, N))
-        model = TestModel().to(GPU_TYPE)
+        a = torch.ones(M, N).to(device).half()
+        b = torch.ones(N, N).to(device).half().t()
+        extra_args = gen_args(op, (M, N), device)
+        model = TestModel().to(device)
 
         result = torch.compile(model)(a, b, extra_args)
         ref_result = model(a, b, extra_args)
@@ -2719,7 +2751,7 @@ class TestCutlassBackend(TestCase):
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @use_evt_config
     @evt_un_ops
-    def test_evt_reshape(self, op):
+    def test_evt_reshape(self, device, op):
         # mm [M, N] -> view [batch, seq, N] -> pointwise op
         class TestModel(torch.nn.Module):
             def forward(self, a, b, extra_args):
@@ -2732,10 +2764,10 @@ class TestCutlassBackend(TestCase):
         N = 512
         # Use batch=2, seq=512 so that M=batch*seq=1024.
         # Use ones (like run_evt_test) to avoid fp16 numerical noise.
-        a = torch.ones(2, 512, N).to(GPU_TYPE).half()
-        b = torch.ones(N, N).to(GPU_TYPE).half().t()
-        extra_args = gen_args(op, (2, 512, N))
-        model = TestModel().to(GPU_TYPE)
+        a = torch.ones(2, 512, N).to(device).half()
+        b = torch.ones(N, N).to(device).half().t()
+        extra_args = gen_args(op, (2, 512, N), device)
+        model = TestModel().to(device)
 
         result = torch.compile(model)(a, b, extra_args)
         ref_result = model(a, b, extra_args)
@@ -2747,13 +2779,13 @@ class TestCutlassBackend(TestCase):
         torch.testing.assert_close(result, ref_result)
 
     def _test_gemm_operation_serialization(
-        self, arch: str, cuda_version: str, min_ops=1000
+        self, device, arch: str, cuda_version: str, min_ops=1000
     ):
         """
         Testing serialization for GEMM operations generated by CUTLASS.
         This should cover GroupedGemmOperation as well.
         """
-        full_ops = _gen_ops_cached(arch, cuda_version, GPU_TYPE)
+        full_ops = _gen_ops_cached(arch, cuda_version, device)
         ops = pytree.tree_flatten(full_ops)[0]
 
         # sanity check
@@ -2777,24 +2809,25 @@ class TestCutlassBackend(TestCase):
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     @parametrize("arch", ("90", "100"))
     @parametrize("cuda_version", ("12.4", "12.8"))
-    def test_gemm_operation_serialization_cuda(self, arch: str, cuda_version: str):
-        self._test_gemm_operation_serialization(arch, cuda_version)
+    def test_gemm_operation_serialization_cuda(
+        self, device, arch: str, cuda_version: str
+    ):
+        self._test_gemm_operation_serialization(device, arch, cuda_version)
 
     @skipXPUIf(not Xe2_Or_Later, "")
     @unittest.skipIf(not HAS_XPU, "XPU not available")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     @parametrize("arch", ("Xe12", "Xe20"))
     @parametrize("xpu_version", ("20250201", "20250301"))
-    def test_gemm_operation_serialization_xpu(self, arch: str, xpu_version: str):
+    def test_gemm_operation_serialization_xpu(
+        self, device, arch: str, xpu_version: str
+    ):
         from torch._inductor.codegen.cutlass.utils import _normalize_xpu_arch
 
         arch = _normalize_xpu_arch(arch)
-        self._test_gemm_operation_serialization(arch, xpu_version, min_ops=40)
+        self._test_gemm_operation_serialization(device, arch, xpu_version, min_ops=40)
 
-    @unittest.skipIf(
-        torch.cuda.is_available() and not PLATFORM_SUPPORTS_FP8,
-        "FP8 is only supported on H100+",
-    )
+    @requires_capabilities(Capability.dtype.fp8)
     @skipXPUIf(True, "XPU SYCL-TLA has not supported fp8 yet")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @fp8_config
@@ -2815,6 +2848,7 @@ class TestCutlassBackend(TestCase):
     @parametrize("input_dtype", (torch.bfloat16, torch.float16))
     def test_fp8_rowwise_scaling(
         self,
+        device,
         float8_dtype: torch.dtype,
         shape: tuple[int, int, int],
         has_bias: bool,
@@ -2823,7 +2857,6 @@ class TestCutlassBackend(TestCase):
     ):
         # Only bf16 output type is supported for row-wise scaling, not fp32
         output_dtype: torch.dtype = torch.bfloat16
-        device = GPU_TYPE
         M, K, N = shape  # Matmul Y = X [M, K] x W [N, K]
         x = torch.randn(M, K, dtype=input_dtype, device=device)
         w = torch.randn(N, K, dtype=input_dtype, device=device)
@@ -2870,10 +2903,7 @@ class TestCutlassBackend(TestCase):
         self.assertEqual(y_compiled.dtype, output_dtype)
         torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
 
-    @unittest.skipIf(
-        torch.cuda.is_available() and not PLATFORM_SUPPORTS_FP8,
-        "FP8 is only supported on H100+",
-    )
+    @requires_capabilities(Capability.dtype.fp8)
     @skipXPUIf(True, "XPU SYCL-TLA has not supported fp8 yet")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @fp8_config
@@ -2893,6 +2923,7 @@ class TestCutlassBackend(TestCase):
     @parametrize("dynamic", (False, True))
     def test_fp8_rowwise_scaling_multiple_linear(
         self,
+        device,
         float8_dtype: torch.dtype,
         shape: tuple[int, int],
         use_fast_accum: bool,
@@ -2906,7 +2937,6 @@ class TestCutlassBackend(TestCase):
             self.skipTest("Accuracy issues when both AOTI and dynamic are enabled")
         # Only bf16 output type is supported for row-wise scaling, not fp32
         output_dtype: torch.dtype = torch.bfloat16
-        device = GPU_TYPE
         M, N = shape  # Matmul Y = X [M, K] x W [N, K]
         x = torch.randn(M, N, dtype=output_dtype, device=device)
         w1 = torch.randn(N, N, dtype=output_dtype, device=device)
@@ -2945,7 +2975,7 @@ class TestCutlassBackend(TestCase):
                 )
                 return y2
 
-        model = TestModule(w1, w2, float8_dtype).to(GPU_TYPE)
+        model = TestModule(w1, w2, float8_dtype).to(device)
 
         dynamic_shapes = (
             {
@@ -2969,10 +2999,7 @@ class TestCutlassBackend(TestCase):
 
         torch.testing.assert_close(expected, actual, rtol=1e-2, atol=0.05)
 
-    @unittest.skipIf(
-        torch.cuda.is_available() and not PLATFORM_SUPPORTS_FP8,
-        "FP8 is only supported on H100+",
-    )
+    @requires_capabilities(Capability.dtype.fp8)
     @skipXPUIf(True, "XPU SYCL-TLA has not supported fp8 yet")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @fp8_config
@@ -2993,13 +3020,13 @@ class TestCutlassBackend(TestCase):
     @parametrize("input_dtype", (torch.bfloat16, torch.float16))
     def test_fp8_tensorwise_scaling(
         self,
+        device,
         float8_dtype: torch.dtype,
         shape: tuple[int, int, int],
         has_bias: bool,
         use_fast_accum: bool,
         input_dtype: torch.dtype,
     ):
-        device = GPU_TYPE
         M, K, N = shape  # Matmul Y = X [M, K] x W [N, K]
         output_dtype = input_dtype
         # input and output dtypes of _scaled_mm do not need to be the same, but
@@ -3055,7 +3082,7 @@ class TestCutlassBackend(TestCase):
     @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @xfailIfSM120OrLater
-    def test_config_number_post_filtering(self) -> None:
+    def test_config_number_post_filtering(self, device) -> None:
         """
         Test if cutlass backend produces the same number of configs after filtering
         regardless of layout and dtype.
@@ -3067,8 +3094,8 @@ class TestCutlassBackend(TestCase):
 
         for layout in layouts:
             for dtype in dtypes:
-                a = torch.randn(128, 128, dtype=dtype).to(GPU_TYPE)
-                b = torch.randn(128, 128, dtype=dtype).to(GPU_TYPE)
+                a = torch.randn(128, 128, dtype=dtype).to(device)
+                b = torch.randn(128, 128, dtype=dtype).to(device)
                 if layout[0] == "c":
                     a = a.t()
                 if layout[1] == "c":
@@ -3099,17 +3126,24 @@ class TestCutlassBackend(TestCase):
         # Check that all config counts are equal
         all_counts = list(config_counts.values())
         # XPU has more configs for bf16 than f16.
-        expected_count = 2 if GPU_TYPE == "xpu" else 1
+        expected_count = 2 if torch.device(device).type == "xpu" else 1
         self.assertTrue(
             len(set(all_counts)) == expected_count,
-            lambda msg: f"{msg}\nConfig counts should be equal across all layout/dtype combinations. "
-            f"Got counts: {config_counts}",
+            lambda msg: (
+                f"{msg}\nConfig counts should be equal across all layout/dtype combinations. "
+                f"Got counts: {config_counts}"
+            ),
         )
 
 
-if __name__ == "__main__":
-    from torch._inductor.utils import is_big_gpu
+instantiate_device_type_tests(
+    TestCutlassBackendAccelerator,
+    globals(),
+    except_for="cpu",
+    allow_xpu=True,
+)
 
-    # Set env to make it work in CI.
-    if HAS_GPU and HAS_CPU and is_big_gpu():
+
+if __name__ == "__main__":
+    if HAS_CPU and has_triton() and is_big_gpu():
         run_tests()
