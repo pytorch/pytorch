@@ -862,14 +862,11 @@ class SideEffects:
             variable_cls = variables.UnspecializedNNModuleVariable
         elif issubclass(user_cls, collections.defaultdict):
             variable_cls = variables.DefaultDictVariable
-        elif issubclass(user_cls, collections.OrderedDict):
-            # OrderedDict-backed store + move_to_end / popitem(last=).
-            variable_cls = variables.UserDefinedOrderedDictVariable
         elif issubclass(user_cls, dict):
+            # Includes collections.OrderedDict and its subclasses; the
+            # UserDefinedDictVariable picks an OrderedDict-backed store.
             variable_cls = variables.UserDefinedDictVariable
-        elif issubclass(user_cls, frozenset):
-            variable_cls = variables.UserDefinedFrozensetVariable
-        elif issubclass(user_cls, set):
+        elif issubclass(user_cls, (set, frozenset)):
             variable_cls = variables.UserDefinedSetVariable
         elif issubclass(user_cls, tuple):
             if is_namedtuple_cls(user_cls):
@@ -1602,8 +1599,7 @@ class SideEffects:
 
 @register_side_effect_replay_handler(
     name="list_mutation",
-    matcher=lambda ctx: isinstance(ctx.var, variables.ListVariable)
-    and not isinstance(ctx.var, variables.UserDefinedObjectVariable),
+    matcher=lambda ctx: isinstance(ctx.var, variables.ListVariable),
     priority=90,
 )
 def _codegen_list_mutation(ctx: SideEffectReplayContext) -> None:
@@ -1627,8 +1623,7 @@ def _codegen_list_mutation(ctx: SideEffectReplayContext) -> None:
 
 @register_side_effect_replay_handler(
     name="deque_mutation",
-    matcher=lambda ctx: isinstance(ctx.var, variables.lists.DequeVariable)
-    and not isinstance(ctx.var, variables.UserDefinedObjectVariable),
+    matcher=lambda ctx: isinstance(ctx.var, variables.lists.DequeVariable),
     priority=80,
 )
 def _codegen_deque_mutation(ctx: SideEffectReplayContext) -> None:
@@ -1680,11 +1675,7 @@ def _codegen_deque_mutation(ctx: SideEffectReplayContext) -> None:
             variables.SetVariable,
             variables.OrderedSetVariable,
         ),
-    )
-    # A UserDefined dict (is-a ConstDictVariable under MI) has both a content and
-    # an attribute compartment; it is replayed by the composite attribute handler
-    # instead.  Set UDOVs keep this content-only path.
-    and not isinstance(ctx.var, variables.UserDefinedDictVariable),
+    ),
     priority=70,
 )
 def _codegen_const_dict_or_set_mutation(ctx: SideEffectReplayContext) -> None:
@@ -1826,11 +1817,8 @@ def _codegen_user_defined_dict_mutation(ctx: SideEffectReplayContext) -> None:
 
     # Reconstruct all items - _manual_dict_setitem clears dict_to first, so we
     # need every key/value, not just the ones that differ from original_items.
-    # _base_vt is a property that returns a fresh view each access, so capture it
-    # once before setting should_reconstruct_all on it.
-    base_vt = var._base_vt
-    base_vt.should_reconstruct_all = True  # type: ignore[attr-defined]
-    cg(base_vt, allow_cache=False)  # Don't codegen via source
+    var._base_vt.should_reconstruct_all = True  # type: ignore[union-attr]
+    cg(var._base_vt, allow_cache=False)  # Don't codegen via source
     cg.extend_output(
         [
             create_instruction("STORE_FAST", argval=varname_map["dict_from"]),
@@ -1848,7 +1836,7 @@ def _codegen_user_defined_dict_mutation(ctx: SideEffectReplayContext) -> None:
         ]
     )
     ctx.log(
-        base_vt  # pyrefly: ignore[bad-argument-type]
+        var._base_vt  # pyrefly: ignore[bad-argument-type]
     )
 
 
