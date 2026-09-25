@@ -1139,7 +1139,7 @@ def forward(self, x_1, output_1):
             grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
             mul2_inplace_kernel[grid](x_slice, n_elements, BLOCK_SIZE=16)
 
-        t = torch.rand(4, 4, device=TRITON_TEST_DEVICE)
+        t = torch.rand(4, 4, device=GPU_TYPE)
         t2 = t.clone()
 
         _, (graph,) = run_and_get_graph_lowering(
@@ -1189,7 +1189,7 @@ def forward(self, x_1, output_1):
             # the copy back to the graph input.
             return x + 1
 
-        t = torch.rand(4, 4, device=TRITON_TEST_DEVICE)
+        t = torch.rand(4, 4, device=GPU_TYPE)
         t2 = t.clone()
 
         result, (graph,) = run_and_get_graph_lowering(
@@ -1264,7 +1264,7 @@ def forward(self, x_1, output_1):
             copied = aten.copy_.default(x, updated)
             return old_value, copied
 
-        original = torch.rand(4, 4, device=TRITON_TEST_DEVICE)
+        original = torch.rand(4, 4, device=GPU_TYPE)
         gm = make_fx(functional_graph, tracing_mode="fake")(original)
 
         expected_input = original.clone()
@@ -1310,7 +1310,7 @@ def forward(self, x_1, output_1):
             mul2_inplace_kernel[grid](x_slice, n_elements, BLOCK_SIZE=16)
             return x.mul_(2)
 
-        eager_input = torch.rand(4, 4, device=TRITON_TEST_DEVICE)
+        eager_input = torch.rand(4, 4, device=GPU_TYPE)
         compiled_input = eager_input.clone()
 
         expected = call_triton_inplace_view(eager_input)
@@ -1358,7 +1358,7 @@ def forward(self, x_1, output_1):
             x.copy_(replacement)
             return value_after_triton
 
-        eager_input = torch.rand(4, 4, device=TRITON_TEST_DEVICE)
+        eager_input = torch.rand(4, 4, device=GPU_TYPE)
         compiled_input = eager_input.clone()
         replacement = torch.rand_like(eager_input)
 
@@ -1399,7 +1399,7 @@ def forward(self, x_1, output_1):
             mul2_inplace_kernel[grid](x_slice, n_elements, BLOCK_SIZE=16)
             mul2_inplace_kernel[grid](x_slice, n_elements, BLOCK_SIZE=16)
 
-        original_input = torch.rand(4, 4, device=TRITON_TEST_DEVICE)
+        original_input = torch.rand(4, 4, device=GPU_TYPE)
         eager_input = original_input.clone()
         compiled_input = eager_input.clone()
 
