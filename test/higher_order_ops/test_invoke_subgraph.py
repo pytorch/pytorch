@@ -5347,18 +5347,19 @@ class TestInvokeSubgraphExport(TestCase):
         self.assertTrue(torch.allclose(ep.module()(x, y), M()(x, y)))
         self.assertEqual(len(list(ep.graph_module.named_modules())), 2)
 
+        identifier = "subgraph_0" if self.strict else "invoke_subgraph_0"
         self.assertExpectedInline(
             empty_line_normalizer(
                 normalize_gm(ep.graph_module.print_readable(print_output=False))
             ),
-            """\
+            f"""\
 class GraphModule(torch.nn.Module):
     def forward(self, x: "f32[8]", y: "f32[8]"):
         repeated_subgraph0 = self.repeated_subgraph0
-        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'subgraph_0', x, y);  repeated_subgraph0 = x = None
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, '{identifier}', x, y);  repeated_subgraph0 = x = None
         getitem: "f32[8]" = invoke_subgraph[0];  invoke_subgraph = None
         repeated_subgraph0_1 = self.repeated_subgraph0
-        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0_1, 'subgraph_0', getitem, y);  repeated_subgraph0_1 = getitem = y = None
+        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0_1, '{identifier}', getitem, y);  repeated_subgraph0_1 = getitem = y = None
         getitem_1: "f32[8]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
         return (getitem_1,)
     class repeated_subgraph0(torch.nn.Module):
@@ -5572,6 +5573,70 @@ class GraphModule(torch.nn.Module):
 
         ep = torch.export.export(M(), (x, y), strict=self.strict)
         self.assertEqual(ep.module()(x, y), M()(x, y))
+
+
+@skipIfTorchDynamo("Not a torch._dynamo test")
+class TestInvokeSubgraphMixedExport(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    def test_mixed_regions_keep_distinct_bodies_and_reuse_matches(self):
+        def make_region(offset, add_sine):
+            @nested_compile_region
+            def region(x, weight):
+                result = x * weight + offset
+                return result + torch.sin(x) if add_sine else result
+
+            return region
+
+        linear_region = make_region(1, False)
+        full_region = make_region(2, True)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weights = torch.nn.ParameterList(
+                    [
+                        torch.nn.Parameter(torch.arange(4.0) + index)
+                        for index in range(5)
+                    ]
+                )
+
+            def forward(self, x):
+                # These repeated calls start independent inner Dynamo graphs. The
+                # export backend must give equivalent linear regions one outer-trace
+                # identity without accidentally making the sine region look linear.
+                for index in range(3):
+                    x = linear_region(x, self.weights[index])
+                for index in range(2):
+                    x = full_region(x, self.weights[index + 3])
+                return x
+
+        model = M()
+        x = torch.ones(4)
+        with torch.no_grad():
+            expected = model(x)
+            ep = torch.export.export(model, (x,), strict=False)
+            actual = ep.module()(x)
+
+        # Correct values prove that two inner compilations cannot both resolve
+        # their local ``subgraph_0`` name to whichever body happened first.
+        self.assertEqual(actual, expected)
+
+        invoke_nodes = [
+            node
+            for node in ep.graph_module.graph.nodes
+            if node.op == "call_function"
+            and node.target is torch.ops.higher_order.invoke_subgraph
+        ]
+        self.assertEqual(len(invoke_nodes), 5)
+        region_names = [node.args[0].target for node in invoke_nodes]
+        # The first three calls reuse the linear body, and the last two reuse a
+        # separate body; no flat inlining or cross-kind deduplication is allowed.
+        self.assertEqual(region_names[:3], [region_names[0]] * 3)
+        self.assertEqual(region_names[3:], [region_names[3]] * 2)
+        self.assertNotEqual(region_names[0], region_names[3])
+        self.assertEqual(len(list(ep.graph_module.named_modules())), 3)
 
 
 class NegativeTesting(TestCase):
