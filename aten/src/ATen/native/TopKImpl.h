@@ -38,7 +38,8 @@ void topk_impl_loop(
   // gather; restricted to partial_sort, because nth_element's swaps
   // scramble idx and remove the sequential-read property this relies on.
   if (tmp_values_stride == 1 && k * 64 <= dim_size) {
-    std::vector<int64_t> idx(dim_size);
+    static thread_local std::vector<int64_t> idx;
+    idx.resize(dim_size);
     for (const auto i : c10::irange(n)) {
       TensorAccessor<scalar_t, 1> mode_values(
           reinterpret_cast<scalar_t*>(data[0] + i * strides[0]),
