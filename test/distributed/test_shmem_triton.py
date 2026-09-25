@@ -447,12 +447,9 @@ class SHMEMTritonTest(MultiProcContinuousTest):
         flag = out_hdl.get_signal_pad(rank, (1,), dtype=torch.int64).fill_(0)
 
         peer = 1 - rank
-        if TEST_WITH_ROCM:
-            NVSHMEM_SIGNAL_SET = 0
-        else:
-            from torch._C._distributed_c10d import _nvshmem_signal_op_values
+        from torch._C._distributed_c10d import _nvshmem_signal_op_values
 
-            NVSHMEM_SIGNAL_SET, _ = _nvshmem_signal_op_values()
+        NVSHMEM_SIGNAL_SET, _ = _nvshmem_signal_op_values()
         SIGNAL_VAL = 1  # Signal completion value
         NVSHMEM_CMP_EQ = 0  # compare equal for signal wait until
 
@@ -511,12 +508,9 @@ class SHMEMTritonTest(MultiProcContinuousTest):
         flag = out_hdl.get_signal_pad(rank, (1,), dtype=torch.int64).fill_(0)
 
         peer = 1 - rank
-        if TEST_WITH_ROCM:
-            NVSHMEM_SIGNAL_ADD = 1
-        else:
-            from torch._C._distributed_c10d import _nvshmem_signal_op_values
+        from torch._C._distributed_c10d import _nvshmem_signal_op_values
 
-            _, NVSHMEM_SIGNAL_ADD = _nvshmem_signal_op_values()
+        _, NVSHMEM_SIGNAL_ADD = _nvshmem_signal_op_values()
         SIGNAL_VAL = 16  # val + NVSHMEM_SIGNAL_ADD
         NVSHMEM_CMP_EQ = 0
 
