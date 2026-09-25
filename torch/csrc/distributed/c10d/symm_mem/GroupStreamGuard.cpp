@@ -98,13 +98,13 @@ void GroupStreamGuard::init_(
       // normal pattern and leaves the caller nothing to act on, so this is a
       // debug log rather than a warning.
       C10D_DEBUG(
-          "symm_mem: signal-pad operation for group \"{}\" switched to a "
+          "symm_mem: serialized operation for group \"{}\" switched to a "
           "stream in a different CUDA graph capture context than the previous "
           "operation; the cross-stream dependency is not inserted for this "
           "switch.",
           group_name);
     } else {
-      // Waits for the previous pad operation only: the event was recorded
+      // Waits for the previous guarded operation only: the event was recorded
       // just after its launch.
       state_->done.block(cur);
     }
