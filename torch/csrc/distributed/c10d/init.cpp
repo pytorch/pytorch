@@ -1183,6 +1183,10 @@ Example:
       ::c10d::nvshmem_extension::nvshmemx_cumodule_init,
       py::arg("module"));
 
+  module.def(
+      "_nvshmem_signal_op_values",
+      ::c10d::nvshmem_extension::nvshmem_signal_op_values);
+
   // Check if NVSHMEM is available on current system.
   module.def(
       "_is_nvshmem_available", ::c10d::nvshmem_extension::is_nvshmem_available);
