@@ -2630,7 +2630,9 @@ class AOTDispatchAutogradCompileSpec:
 class _AutogradSavedState:
     metadata: ViewAndMutationMeta
 
-    def save_from_forward(self, ctx: Any, fw_outs: Sequence[Any]) -> None:
+    def save_from_forward(
+        self, ctx: Any, fw_outs: Sequence[Any], graph_inputs: Sequence[Any]
+    ) -> None:
         tensors_saved_with_vc_check = fw_outs[
             self.metadata.tensors_saved_for_backwards_with_vc_check_slice
         ]
@@ -2651,6 +2653,37 @@ class _AutogradSavedState:
         # See Note [Detaching saved tensors in AOTAutograd]
         num_vc_check = len(tensors_saved_with_vc_check)
         is_graph_input = self.metadata.saved_tensor_is_graph_input
+        input_alias_indices = self.metadata.saved_tensor_input_alias_indices
+
+        if len(input_alias_indices) != len(is_graph_input):
+            raise AssertionError(
+                "expected input alias metadata for every saved tensor, "
+                f"got {len(input_alias_indices)} != {len(is_graph_input)}"
+            )
+
+        if any(idx is not None for idx in input_alias_indices[:num_vc_check]):
+
+            def regenerate_input_alias(idx: int, tensor: torch.Tensor) -> torch.Tensor:
+                input_idx = input_alias_indices[idx]
+                if input_idx is None:
+                    return tensor
+                aliased_input = graph_inputs[input_idx]
+                if not isinstance(aliased_input, torch.Tensor):
+                    raise AssertionError(
+                        "expected the aliased graph input to be a Tensor, "
+                        f"got {type(aliased_input)}"
+                    )
+                return gen_alias_from_base(
+                    aliased_input,
+                    tensor,
+                    tensor.requires_grad,
+                    replay_views=False,
+                )
+
+            tensors_saved_with_vc_check = [
+                regenerate_input_alias(i, x)
+                for i, x in enumerate(tensors_saved_with_vc_check)
+            ]
         tensors_to_save = [
             x if is_graph_input[i] or not x._is_view() else x.detach()
             for i, x in enumerate(tensors_saved_with_vc_check)
@@ -3271,7 +3304,7 @@ def _codegen_compiled_forward(
             buf.writeline("fw_outs = _compiled_fw_(list(args))")
             _codegen_normalize_as_list(buf, "fw_outs", indent_level=1)
 
-        buf.writeline("_save_(ctx, fw_outs)")
+        buf.writeline("_save_(ctx, fw_outs, args)")
         buf.writeline("return _finalize_(ctx, fw_outs)")
 
     return buf.build()

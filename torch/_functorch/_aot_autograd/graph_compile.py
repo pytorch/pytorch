@@ -2056,6 +2056,90 @@ def _categorize_saved_tensors_for_backward(
     num_symints_saved_for_bw = 0
     num_opaque_objects_saved_for_bw = 0
     saved_tensor_is_graph_input: list[bool] = []
+    saved_tensor_input_alias_indices: list[int | None] = []
+
+    input_node_to_idx = {
+        node: idx
+        for idx, node in enumerate(fw_module.graph.find_nodes(op="placeholder"))
+    }
+
+    def aliased_tensor_inputs(node: torch.fx.Node) -> list[torch.fx.Node]:
+        op_node = node
+        return_index = None
+        if (
+            node.target is operator.getitem
+            and isinstance(node.args[0], torch.fx.Node)
+            and isinstance(node.args[0].target, torch._ops.OpOverload)
+            and isinstance(node.args[1], int)
+        ):
+            op_node = node.args[0]
+            return_index = node.args[1]
+
+        if not isinstance(op_node.target, torch._ops.OpOverload):
+            return []
+
+        schema = op_node.target._schema
+        if return_index is None:
+            returns = schema.returns
+        elif len(schema.returns) == 1 and schema.returns[0].type.kind() == "ListType":
+            # For a list-valued return, getitem indexes into the returned list,
+            # not into schema.returns.
+            returns = schema.returns
+        elif -len(schema.returns) <= return_index < len(schema.returns):
+            returns = [schema.returns[return_index]]
+        else:
+            return []
+        return_aliases = set()
+        has_list_element_alias = False
+        for schema_return in returns:
+            if schema_return.alias_info is not None:
+                return_aliases.update(schema_return.alias_info.before_set)
+                # Alias annotations on list elements, such as Tensor(a)[], are
+                # not exposed in AliasInfo's before/after sets.
+                has_list_element_alias |= (
+                    schema_return.type.kind() == "ListType"
+                    and not schema_return.alias_info.before_set
+                    and not schema_return.alias_info.after_set
+                )
+
+        if not return_aliases and not has_list_element_alias:
+            return []
+
+        aliased_inputs = []
+        for idx, schema_arg in enumerate(schema.arguments):
+            if schema_arg.alias_info is None:
+                continue
+            aliases_return = not schema_arg.alias_info.before_set.isdisjoint(
+                return_aliases
+            ) or (has_list_element_alias and "*" in schema_arg.alias_info.after_set)
+            if not aliases_return:
+                continue
+            arg = (
+                op_node.args[idx]
+                if idx < len(op_node.args)
+                else op_node.kwargs.get(schema_arg.name)
+            )
+            if isinstance(arg, torch.fx.Node):
+                aliased_inputs.append(arg)
+        return aliased_inputs
+
+    def input_alias_index(node: torch.fx.Node) -> int | None:
+        input_indices = set()
+        seen = set()
+        stack = [node]
+        while stack:
+            current = stack.pop()
+            if current in seen:
+                continue
+            seen.add(current)
+            if current in input_node_to_idx:
+                input_indices.add(input_node_to_idx[current])
+            else:
+                stack.extend(aliased_tensor_inputs(current))
+        if len(input_indices) == 1:
+            return input_indices.pop()
+        return None
+
     for idx, node in enumerate(fw_outs_saved_for_bw):
         if is_sym_node(node):
             num_symints_saved_for_bw += 1
@@ -2067,7 +2151,10 @@ def _categorize_saved_tensors_for_backward(
                 # and returned from the autograd.Function output, we need to
                 # detach() it to prevent a reference cycle. Record
                 # if the saved_tensor is a graph input here to help.
-                saved_tensor_is_graph_input.append(node.op == "placeholder")
+                is_graph_input = node.op == "placeholder"
+                saved_tensor_is_graph_input.append(is_graph_input)
+                input_alias_idx = None if is_graph_input else input_alias_index(node)
+                saved_tensor_input_alias_indices.append(input_alias_idx)
                 # record dynamic tensor activations
                 dynamic_dims: set[int] = {
                     dim
@@ -2080,6 +2167,7 @@ def _categorize_saved_tensors_for_backward(
                 num_opaque_objects_saved_for_bw += 1
         else:
             saved_tensor_is_graph_input.append(False)
+            saved_tensor_input_alias_indices.append(None)
 
     fw_metadata.num_symints_saved_for_bw = num_symints_saved_for_bw
     fw_metadata.num_opaque_objects_saved_for_bw = num_opaque_objects_saved_for_bw
@@ -2093,10 +2181,18 @@ def _categorize_saved_tensors_for_backward(
             "expected one saved_tensor_is_graph_input entry per saved tensor, "
             f"got {len(saved_tensor_is_graph_input)} != {num_tensors_saved_for_bw}"
         )
+    if len(saved_tensor_input_alias_indices) != num_tensors_saved_for_bw:
+        raise AssertionError(
+            "expected one saved_tensor_input_alias_indices entry per saved tensor, "
+            f"got {len(saved_tensor_input_alias_indices)} "
+            f"!= {num_tensors_saved_for_bw}"
+        )
     fw_metadata.saved_tensor_is_graph_input = saved_tensor_is_graph_input
+    fw_metadata.saved_tensor_input_alias_indices = saved_tensor_input_alias_indices
     inner_meta.num_symints_saved_for_bw = num_symints_saved_for_bw
     inner_meta.num_opaque_objects_saved_for_bw = num_opaque_objects_saved_for_bw
     inner_meta.saved_tensor_is_graph_input = saved_tensor_is_graph_input
+    inner_meta.saved_tensor_input_alias_indices = saved_tensor_input_alias_indices
 
     # See Note [Activations with no version counter checks in eager]
     # Count tensors saved with no version counter check.
