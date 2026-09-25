@@ -12,7 +12,11 @@ from torch.distributed.tensor.placement_types import (
     Replicate,
     Shard,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorContinuousTestBase,
     NUM_DEVICES,
@@ -22,6 +26,8 @@ from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
 class TestDecompSharding(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     world_size = 4
 
     def setUp(self):
@@ -248,9 +254,11 @@ class TestDecompSharding(TestCase):
         self.assertEqual(out.placements, (Replicate(),))
 
 
-class TestDecompShardingWithComms(DTensorContinuousTestBase):
-    world_size = NUM_DEVICES
+class TestDecompShardingWithComms(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
+    world_size = NUM_DEVICES
+    
     @with_comms
     def test_decomp_schema_caches_static_args(self):
         """
