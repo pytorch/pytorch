@@ -105,6 +105,7 @@ from torch._inductor.utils import (
     ALIGN_BYTES,
     clear_on_fresh_cache,
     determine_aoti_mmap_flags,
+    fp32_matmul_precision_key,
     is_linux,
     is_windows,
     parallel_num_threads,
@@ -467,10 +468,7 @@ class PersistentCache(CacheBase):
                     local_cache[op][inputs][choice], and return the benchmark.
                 b. `max_autotune_gemm=False`: don't benchmark the choice, return nothing.
         """
-        precision = torch.backends.cuda.matmul.fp32_precision
-        # bfx9 has no legacy equivalent, and the legacy getter may reject it.
-        if precision != "bfx9":
-            precision = torch.get_float32_matmul_precision()
+        precision = fp32_matmul_precision_key()
         cache_key = f"{inputs}_{hint_override}" if hint_override is not None else inputs
 
         timings = {}
@@ -1819,8 +1817,6 @@ def compiled_fx_graph_hash(
     # cache in this module.
     key = pickler.get_key(details)
     debug_lines = pickler.debug_lines(details)
-    debug_str = "\n".join(debug_lines)
-    log.debug(f"FX graph cache hash details for key {key}:\n{debug_str}")  # noqa: G004
     return key, debug_lines
 
 
@@ -3178,6 +3174,14 @@ end
                                 pass
 
                         del buf_view
+
+                        if torch.accelerator.is_available():
+                            # Constants have just been copied to host, so most of
+                            # the caching allocator's pool is now free-but-reserved
+                            # slack. Hand it back before packaging, which otherwise
+                            # reserves its own allocation on top and sets a new
+                            # high-water mark.
+                            torch.accelerator.empty_cache()
                     else:
                         serialized_weights = b""
             else:

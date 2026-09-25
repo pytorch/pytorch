@@ -14,7 +14,8 @@ from torch.distributed.tensor.placement_types import (
 )
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
+    DTensorContinuousTestBase,
+    NUM_DEVICES,
     with_comms,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
@@ -194,12 +195,13 @@ class TestDecompSharding(TestCase):
         out = aten.index_add.default(input, 0, index, source)
         self.assertEqual(out.placements, (Shard(1),))
 
-        # polar: force replicate
+        # polar: decomposes to cos/sin, which replicate the angle, and a mul and
+        # complex that are linear in the magnitude, so Partial survives.
         check_no_strategy(aten.polar.default)
         x = d_empty(16, device_mesh=mesh, placements=[Partial()])
         y = d_empty(16, device_mesh=mesh, placements=[Partial()])
         out = aten.polar.default(x, y)
-        self.assertEqual(out.placements, (Replicate(),))
+        self.assertEqual(out.placements, (Partial(),))
 
     def test_roll_flip_strategies(self):
         """roll and flip unshard on active dims, keep sharding on others."""
@@ -246,7 +248,9 @@ class TestDecompSharding(TestCase):
         self.assertEqual(out.placements, (Replicate(),))
 
 
-class TestDecompShardingWithComms(DTensorTestBase):
+class TestDecompShardingWithComms(DTensorContinuousTestBase):
+    world_size = NUM_DEVICES
+
     @with_comms
     def test_decomp_schema_caches_static_args(self):
         """

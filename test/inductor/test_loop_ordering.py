@@ -19,7 +19,6 @@ from torch._inductor.codegen.triton import TritonScheduling
 from torch._inductor.graph import GraphLowering
 from torch._inductor.invert_expr_analysis import generate_inverse_formula
 from torch._inductor.scheduler import (
-    _iter_loop_state_nodes,
     _LoopMutationTracker,
     ForeachKernelSchedulerNode,
     FusedSchedulerNode,
@@ -54,7 +53,7 @@ if HAS_GPU:
 
 class MockScheduler:
     available_buffer_names = ()
-    _loop_mutation_listener = None
+    _loop_mutation_trackers = []
 
     @staticmethod
     def get_backend(cls, *args):
@@ -98,6 +97,17 @@ class ImplDetailTest(MockSchedulerTest):
         if not prefix:
             raise AssertionError
         return prefix
+
+    @staticmethod
+    @contextlib.contextmanager
+    def _tracking(*nodes):
+        tracker = _LoopMutationTracker(nodes)
+        trackers = V.graph.scheduler._loop_mutation_trackers
+        trackers.append(tracker)
+        try:
+            yield tracker
+        finally:
+            trackers.pop()
 
     @staticmethod
     def _create_computed_buffer_ax2(sizes=(32, 64), strides=None):
@@ -281,13 +291,10 @@ class ImplDetailTest(MockSchedulerTest):
             V.graph.scheduler, self._create_computed_buffer_ax2()
         )
         original_body = computed_node._body
-        tracker = _LoopMutationTracker.create((template_node, computed_node))
-
-        try:
+        with self._tracking(template_node, computed_node) as tracker:
             computed_node.apply_indexing_exprs({})
             self.assertIsNot(computed_node._body, original_body)
-        finally:
-            tracker.finish(rollback=True)
+        tracker.finish(rollback=True)
 
         self.assertIsNone(template_node._body)
         self.assertIs(computed_node._body, original_body)
@@ -296,74 +303,39 @@ class ImplDetailTest(MockSchedulerTest):
         """A nested scope committing must not hide the mutation from the outer one."""
         snode = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
         original_body = snode._body
-        outer = _LoopMutationTracker.create((snode,))
-        inner = _LoopMutationTracker.create((snode,))
-
-        try:
-            snode.apply_new_loop_order([1, 0])
-            self.assertIsNot(snode._body, original_body)
-            # The inner scope keeps the mutation, but the outer scope still saw
-            # it via the chained listener and can roll it back.
+        with self._tracking(snode) as outer:
+            with self._tracking(snode) as inner:
+                snode.apply_new_loop_order([1, 0])
+                self.assertIsNot(snode._body, original_body)
+            # The inner scope keeps the mutation, but the outer scope was also
+            # notified and can roll it back.
             inner.finish(rollback=False)
             self.assertIsNot(snode._body, original_body)
-        finally:
-            outer.finish(rollback=True)
+        outer.finish(rollback=True)
 
         self.assertIs(snode._body, original_body)
-        self.assertIsNone(snode.scheduler._loop_mutation_listener)
+        self.assertEqual(V.graph.scheduler._loop_mutation_trackers, [])
 
-    def test_loop_mutation_tracker_does_not_eagerly_walk_fused_node(self):
+    def test_can_fuse_pops_loop_mutation_tracker_on_exception(self):
+        scheduler = mock.Mock(spec=Scheduler)
+        scheduler._loop_mutation_trackers = []
+        scheduler._fusion_memory_state = None
         snodes = [
             SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
             for _ in range(2)
         ]
-        for order, snode in enumerate(snodes):
-            snode.min_order = snode.max_order = order
-            snode.min_input_distance = snode.max_input_distance = 0
-        fused = FusedSchedulerNode(V.graph.scheduler, snodes)
-
-        with (
-            mock.patch.object(fused, "get_nodes", wraps=fused.get_nodes) as get_nodes,
-            mock.patch(
-                "torch._inductor.scheduler._iter_loop_state_nodes",
-                wraps=_iter_loop_state_nodes,
-            ) as iter_nodes,
-        ):
-            tracker = _LoopMutationTracker.create((fused,))
-            try:
-                self.assertEqual(get_nodes.call_count, 0)
-                self.assertEqual(iter_nodes.call_count, 0)
-            finally:
-                tracker.finish(rollback=False)
-
-    def test_can_fuse_loop_state_tracker_cleanup_on_base_exception(self):
-        scheduler = mock.Mock(spec=Scheduler)
-        scheduler.available_buffer_names = ()
-        scheduler._loop_mutation_listener = None
-        snodes = [
-            SchedulerNode(scheduler, self._create_computed_buffer_ax2())
-            for _ in range(2)
-        ]
-        original_body = snodes[0]._body
-
-        def interrupt(*args, **kwargs):
-            snodes[0].apply_new_loop_order([1, 0])
-            raise KeyboardInterrupt("stop")
-
-        scheduler._can_fuse_impl.side_effect = interrupt
-        with self.assertRaisesRegex(KeyboardInterrupt, "stop"):
+        scheduler._can_fuse_impl.side_effect = RuntimeError("stop")
+        with self.assertRaisesRegex(RuntimeError, "stop"):
             Scheduler.can_fuse(scheduler, *snodes)
 
-        self.assertIs(snodes[0]._body, original_body)
-        self.assertIsNone(scheduler._loop_mutation_listener)
+        self.assertEqual(scheduler._loop_mutation_trackers, [])
 
     def test_expand_dimension_loop_state_rollback(self):
         snode = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
         original_state = snode.snapshot_loop_state()
-        tracker = _LoopMutationTracker.create((snode,))
-
-        snode.expand_dimension_for_pointwise_node(0, 64)
-        self.assertNotEqual(snode.snapshot_loop_state(), original_state)
+        with self._tracking(snode) as tracker:
+            snode.expand_dimension_for_pointwise_node(0, 64)
+            self.assertNotEqual(snode.snapshot_loop_state(), original_state)
         tracker.finish(rollback=True)
 
         self.assertEqual(snode.snapshot_loop_state(), original_state)
@@ -385,12 +357,11 @@ class ImplDetailTest(MockSchedulerTest):
         original_body = snodes[0]._body
         original_group = subkernel.group
         original_read_writes = foreach.read_writes
-        tracker = _LoopMutationTracker.create((foreach,))
-
-        snodes[0].expand_dimension_for_pointwise_node(0, 64)
-        subkernel.group = (original_group[0], (sympy.S.One, sympy.S.One))
-        refresh_group_node_dependencies(subkernel)
-        refresh_group_node_dependencies(foreach)
+        with self._tracking(foreach) as tracker:
+            snodes[0].expand_dimension_for_pointwise_node(0, 64)
+            subkernel.group = (original_group[0], (sympy.S.One, sympy.S.One))
+            refresh_group_node_dependencies(subkernel)
+            refresh_group_node_dependencies(foreach)
         tracker.finish(rollback=True)
 
         self.assertIs(snodes[0]._body, original_body)

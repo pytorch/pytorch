@@ -72,19 +72,25 @@ from .codegen.triton import (
     TritonScheduling,
     TritonSymbols,
 )
-from .codegen.triton_utils import config_of, equal_1_arg_indices, signature_to_meta
+from .codegen.triton_utils import (
+    config_of,
+    equal_1_arg_indices,
+    signature_to_meta,
+    triton_meta_device_props,
+)
 from .codegen.wrapper import pexpr
 from .exc import CUDACompileError
 from .fx_utils import count_flops_fx
 from .ir import ChoiceCaller, PrimitiveInfoType
 from .ops_handler import StoreMode
-from .runtime.hints import DeviceProperties, TritonMeta
+from .runtime.hints import TritonMeta
 from .runtime.triton_compat import HAS_WARP_SPEC
 from .runtime.triton_heuristics import FixedGrid
 from .utils import (
     ceildiv,
     do_bench_using_profiling,
     FakeIndentedBuffer,
+    fp32_matmul_precision_key,
     get_dtype_size,
     is_gpu,
     Placeholder,
@@ -911,7 +917,7 @@ class TritonTemplateKernel(TritonKernel):
                 argdefs=argdefs,
                 is_template=True,
             ),
-            "device": DeviceProperties.create(self.output_node.get_device()),
+            "device": triton_meta_device_props(self.output_node.get_device()),
             "constants": {},
         }
         # Rendered from a deferred hook, so the body -- including any subgraph
@@ -3878,15 +3884,11 @@ def create_inputs_key(input_nodes) -> str:
 def create_precompile_key(
     name: str, inputs_key: str, choices: list[ChoiceCaller]
 ) -> str:
-    precision = torch.backends.cuda.matmul.fp32_precision
-    # bfx9 has no legacy equivalent, and the legacy getter may reject it.
-    if precision != "bfx9":
-        precision = torch.get_float32_matmul_precision()
     return ":".join(
         [
             name,
             inputs_key,
-            precision,
+            fp32_matmul_precision_key(),
         ]
         + [choice.kernel_hash_key() for choice in choices]
     )
@@ -5445,7 +5447,7 @@ class AlgorithmSelectorCache(PersistentCache):
             except CUDACompileError:
                 if not isinstance(choice, CUTLASSTemplateCaller):
                     log.exception(
-                        "CUDA compilation error during autotuning: \n%s. \nIgnoring this choice."
+                        "CUDA compilation error during autotuning. Ignoring this choice."
                     )
                 timing = float("inf")
             except NotImplementedError:
