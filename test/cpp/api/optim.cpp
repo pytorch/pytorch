@@ -470,6 +470,50 @@ TEST(OptimTest, AddParameter_LBFGS) {
   // REQUIRE this doesn't throw
 }
 
+TEST(OptimTest, AddParameter_Adagrad) {
+  torch::manual_seed(0);
+
+  // Adagrad used to build state only in its constructor, so a parameter added
+  // later tripped an internal assert in step().
+  auto parameter = torch::randn({5, 5});
+  auto appended = parameter.clone();
+  auto in_new_group = parameter.clone();
+
+  // The group's initial_accumulator_value differs from the defaults, so the
+  // assertions below pin which of the two a late-added parameter is seeded
+  // from. lr is set explicitly so they do not also depend on option merging.
+  std::vector<OptimizerParamGroup> param_groups;
+  param_groups.emplace_back(
+      std::vector<torch::Tensor>{parameter},
+      std::make_unique<AdagradOptions>(
+          AdagradOptions(1.0).initial_accumulator_value(0.9)));
+  Adagrad optimizer(
+      param_groups, AdagradOptions(1.0).initial_accumulator_value(0.5));
+
+  optimizer.param_groups()[0].params().push_back(appended);
+  optimizer.add_param_group(OptimizerParamGroup({in_new_group}));
+
+  parameter.mutable_grad() = torch::ones_like(parameter);
+  appended.mutable_grad() = torch::ones_like(appended);
+  in_new_group.mutable_grad() = torch::ones_like(in_new_group);
+
+  ASSERT_NO_THROW(optimizer.step());
+
+  // All three start equal and are seeded identically, so they stay equal.
+  ASSERT_TRUE(parameter.allclose(appended));
+  ASSERT_TRUE(parameter.allclose(in_new_group));
+
+  for (const auto& late : {appended, in_new_group}) {
+    // at(), not operator[]: on a missing key the latter default-inserts null
+    // and this would segfault rather than report a failure.
+    auto& state = static_cast<AdagradParamState&>(
+        *optimizer.state().at(late.unsafeGetTensorImpl()));
+    ASSERT_EQ(state.step(), 1);
+    // sum starts at initial_accumulator_value and accumulates grad * grad.
+    ASSERT_TRUE(state.sum().allclose(torch::full_like(late, 1.5)));
+  }
+}
+
 // Check whether the learning rate of the parameter groups in the optimizer are
 // the same as the expected learning rates given in the epoch:learning rate map
 static void check_lr_change(
