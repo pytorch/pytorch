@@ -2655,23 +2655,24 @@ def skipIfWindowsXPU(func=None, *, msg="test doesn't currently work on the Windo
 requires_cuda_python_bindings = unittest.skipUnless(TEST_CUDA_PYTHON_BINDINGS, "requires cuda-python (cuda.bindings)")
 
 def requires_cuda_p2p_access():
-    cuda_p2p_access_available = (
-        torch.cuda.is_available()
-        and torch.cuda.get_device_capability() >= (8, 0)
-        and torch.cuda.device_count() >= 2
-    )
-    num_devices = torch.cuda.device_count()
+    acc = torch.accelerator.current_accelerator(True)
+    device_module = torch.get_device_module(acc) if acc is not None else None
+    num_devices = device_module.device_count() if device_module is not None else 0
+    p2p_access_available = num_devices >= 2
+    if p2p_access_available and acc.type == "cuda":
+        # SM 8.0+ is a CUDA-specific requirement.
+        p2p_access_available = torch.cuda.get_device_capability() >= (8, 0)
     for i in range(num_devices - 1):
         for j in range(i + 1, num_devices):
-            if not torch.cuda.can_device_access_peer(i, j):
-                cuda_p2p_access_available = False
+            if not device_module.can_device_access_peer(i, j):
+                p2p_access_available = False
                 break
-        if not cuda_p2p_access_available:
+        if not p2p_access_available:
             break
 
     return skip_but_pass_in_sandcastle_if(
-        not cuda_p2p_access_available,
-        "cuda p2p access is not available",
+        not p2p_access_available,
+        "accelerator p2p access is not available",
     )
 
 # Reverts the linalg backend back to default to make sure potential failures in one
