@@ -174,6 +174,7 @@ from .variables.ctx_manager import (
     WithExitFunctionVariable,
 )
 from .variables.dicts import ConstDictVariable
+from .variables.exception import TracebackVariable
 from .variables.functions import (
     BaseUserFunctionVariable,
     CO_VARARGS,
@@ -201,7 +202,6 @@ from .variables.misc import (
     CellVariable,
     NullVariable,
     PythonModuleVariable,
-    TracebackVariable,
     UnknownVariable,
 )
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
@@ -4399,8 +4399,11 @@ class InstructionTranslatorBase(
             # Convert the attribute to a dictionary before assigning it
             # https://github.com/python/cpython/blob/28fb13cb33d569720938258db68956b5f9c9eb40/Objects/funcobject.c#L574-L594
             items = annotations.items
+            ann_items: dict[VariableTracker, VariableTracker] = dict(
+                zip(items[::2], items[1::2], strict=True)
+            )
             ann = ConstDictVariable(
-                dict(zip(items[::2], items[1::2], strict=True)),
+                ann_items,
                 mutation_type=ValueMutationNew(),
             )
             fn.annotations = ann
@@ -4870,7 +4873,7 @@ class InstructionTranslatorBase(
                 )
             kw_names = kw_names.as_python_constant()
         else:
-            kw_names = self.kw_names.value if self.kw_names else ()
+            kw_names = self.kw_names.as_python_constant() if self.kw_names else ()
 
         if inst.arg is None:
             raise AssertionError("expected inst.arg is not None to be true")
@@ -5211,8 +5214,11 @@ class InstructionTranslatorBase(
             # Convert the attribute to a dictionary before assigning it
             # https://github.com/python/cpython/blob/28fb13cb33d569720938258db68956b5f9c9eb40/Objects/funcobject.c#L574-L594
             items = attr.items
+            ann_items: dict[VariableTracker, VariableTracker] = dict(
+                zip(items[::2], items[1::2], strict=True)
+            )
             ann = ConstDictVariable(
-                dict(zip(items[::2], items[1::2], strict=True)),
+                ann_items,
                 mutation_type=ValueMutationNew(),
             )
             fn.annotations = ann
