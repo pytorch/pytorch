@@ -5760,6 +5760,106 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         x = torch.randn(4)
         self.assertEqual(fn(x), opt_fn(x))
 
+    # Reads of an instance __dict__ after an attribute write: these exercise the
+    # mapping view, not the setattr protocol (see test_tp_setattro.py for that).
+
+    def test_dict_getitem_after_attr_write(self):
+        class Foo:
+            def __init__(self, x):
+                self.x = x
+
+        def fn(x):
+            obj = Foo(x)
+            obj.y = 5
+            return obj.__dict__["y"]
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_dict_len_and_keys_after_attr_write(self):
+        class Foo:
+            def __init__(self, x):
+                self.x = x
+
+        def fn(x):
+            obj = Foo(x)
+            obj.y = 5
+            return len(obj.__dict__), sorted(obj.__dict__)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_dict_contains_after_attr_write(self):
+        class Foo:
+            def __init__(self, x):
+                self.x = x
+
+        def fn(x):
+            obj = Foo(x)
+            obj.y = 5
+            return "y" in obj.__dict__, "x" in obj.__dict__
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_attr_read_after_dict_write(self):
+        class Foo:
+            def __init__(self, x):
+                self.x = x
+
+        def fn(x):
+            obj = Foo(x)
+            obj.__dict__["y"] = 5
+            return obj.y
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_simple_namespace_repr_after_write(self):
+        # SimpleNamespace is backed by its __dict__, so repr() reads it too.
+        def fn(x):
+            ns = types.SimpleNamespace()
+            ns.a = 1
+            return repr(ns), sorted(ns.__dict__)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_copy_copy_reads_instance_dict(self):
+        # copy.copy does dst.__dict__.update(src.__dict__), so it only sees x if
+        # the write from __init__ is visible in the mapping view.
+        class Foo:
+            def __init__(self, x):
+                self.x = x
+
+        def fn(x):
+            return copy.copy(Foo(x)).x
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_dict_view_on_graph_input_object(self):
+        # Same view, on an object that enters as an input rather than being built
+        # in the region. Each call gets its own object so the eager run does not
+        # pre-populate the one the compiled run sees.
+        class Foo:
+            def __init__(self, x):
+                self.x = x
+
+        def fn(x, obj):
+            obj.y = 5
+            return sorted(obj.__dict__)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x, Foo(x)), opt_fn(x, Foo(x)))
+
     def test_class_object_dunder_dict(self):
         # A class object's __dict__ is a read-only mappingproxy, not an instance
         # dict; both membership (which installs a dict guard) and item read must

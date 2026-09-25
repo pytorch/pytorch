@@ -857,6 +857,15 @@
   "GB0056": [
     {
       "Gb_type": "Failed to mutate tensor data attribute",
+      "Context": "setattr({self}, data, {value})",
+      "Explanation": "Dynamo only supports mutating `.data` of tensor created outside `torch.compile` region",
+      "Hints": [
+        "Don't mutate `.data` on this tensor, or move ",
+        "the mutation out of `torch.compile` region"
+      ]
+    },
+    {
+      "Gb_type": "Failed to mutate tensor data attribute",
       "Context": "setattr({obj}, {name}, {val})",
       "Explanation": "Dynamo only supports mutating `.data` of tensor created outside `torch.compile` region",
       "Hints": [
@@ -1329,6 +1338,16 @@
       "Explanation": "Dynamo requires the attribute name passed to `super().__delattr__(...)` to be a constant (string).",
       "Hints": [
         "Ensure the attribute name is a string literal or a constant variable."
+      ]
+    }
+  ],
+  "GB8600": [
+    {
+      "Gb_type": "Class attribute mutation on a torch-owned class",
+      "Context": "class={self.value}, name={name}, value={value}",
+      "Explanation": "Dynamo does not support mutating attributes of classes owned by torch.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
@@ -3129,6 +3148,15 @@
   "GB5491": [
     {
       "Gb_type": "Failed to mutate tensor data attribute across devices with different shape/strides",
+      "Context": "setattr({self}, data, {value})",
+      "Explanation": "Dynamo only supports cross-device `.data` mutation when shape and strides match",
+      "Hints": [
+        "Don't mutate `.data` on this tensor, or move ",
+        "the mutation out of `torch.compile` region"
+      ]
+    },
+    {
+      "Gb_type": "Failed to mutate tensor data attribute across devices with different shape/strides",
       "Context": "setattr({obj}, {name}, {val})",
       "Explanation": "Dynamo only supports cross-device `.data` mutation when shape and strides match",
       "Hints": [
@@ -3467,6 +3495,14 @@
   "GB0206": [
     {
       "Gb_type": "setattr() on Tensor.requires_grad",
+      "Context": "setattr({self}, requires_grad, {value})",
+      "Explanation": "setattr() on Tensor.requires_grad not supported. Mutating requires_grad can introduce a new leaf from non-leaf or vice versa in the middle of the graph, which AOTAutograd does not currently know how to handle.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "setattr() on Tensor.requires_grad",
       "Context": "setattr({obj}, {name}, {val})",
       "Explanation": "setattr() on Tensor.requires_grad not supported. Mutating requires_grad can introduce a new leaf from non-leaf or vice versa in the middle of the graph, which AOTAutograd does not currently know how to handle.",
       "Hints": [
@@ -3685,6 +3721,15 @@
     }
   ],
   "GB0220": [
+    {
+      "Gb_type": "Failed to mutate tensor data attribute to different dtype",
+      "Context": "setattr({self}, data, {value})",
+      "Explanation": "Dynamo only supports mutating `.data` of tensor to a new one with the same dtype",
+      "Hints": [
+        "Don't mutate `.data` on this tensor, or move ",
+        "the mutation out of `torch.compile` region"
+      ]
+    },
     {
       "Gb_type": "Failed to mutate tensor data attribute to different dtype",
       "Context": "setattr({obj}, {name}, {val})",
@@ -4241,6 +4286,14 @@
   "GB9860": [
     {
       "Gb_type": "P2POp mutation",
+      "Context": "object={obj}, name={name}, value={value}",
+      "Explanation": "Dynamo does not support mutating torch.distributed.P2POp instances.",
+      "Hints": [
+        "Construct a new torch.distributed.P2POp instead of mutating an existing one inside torch.compile."
+      ]
+    },
+    {
+      "Gb_type": "P2POp mutation",
       "Context": "object={self}, name={name}, value={value}",
       "Explanation": "Dynamo does not support mutating torch.distributed.P2POp instances.",
       "Hints": [
@@ -4517,7 +4570,7 @@
   "GB1392": [
     {
       "Gb_type": "Attribute mutation on a sourced but untracked user-defined object",
-      "Context": "object={self}, name={name_str}, value={value}",
+      "Context": "object={obj}, name={name}, value={value}",
       "Explanation": "Dynamo encountered a sourced user-defined object that supports mutation tracking but was not registered for it.",
       "Hints": [
         "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
@@ -6504,6 +6557,14 @@
     }
   ],
   "GB1940": [
+    {
+      "Gb_type": "Attribute mutation on an untracked user-defined object",
+      "Context": "object={obj}, name={name}, value={value}",
+      "Explanation": "Dynamo cannot replay this mutation after the graph: the object predates tracing but has no source to reload it from.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
     {
       "Gb_type": "Attribute mutation on an untracked user-defined object",
       "Context": "object={self}, name={name_str}, value={value}",

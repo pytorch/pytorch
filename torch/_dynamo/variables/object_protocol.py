@@ -31,6 +31,7 @@ from .. import graph_break_hints, polyfills, variables
 from ..exc import (
     handle_observed_exception,
     ObservedTypeError,
+    raise_attribute_error,
     raise_observed_exception,
     raise_type_error,
     UnhandledDescriptorError,
@@ -50,6 +51,7 @@ from ..utils import specialize_symnode
 from .base import (
     AsPythonConstantNotImplementedError,
     AttrMutationKind,
+    graph_break_on_untracked_vt,
     maybe_get_python_type,
     NO_SUCH_SUBOBJ,
     VariableTracker,
@@ -332,6 +334,12 @@ def type_implements_tp_call(obj_type: type) -> bool:
     """Check whether obj_type implements the tp_call slot."""
     _, _, _, type_slot = _get_cached_slots(obj_type)
     return has_slot(type_slot, PyTypeSlots.TP_CALL)
+
+
+def type_implements_tp_descr_set(obj_type: type) -> bool:
+    """Check whether obj_type implements the tp_descr_set slot."""
+    _, _, _, type_slot = _get_cached_slots(obj_type)
+    return has_slot(type_slot, PyTypeSlots.TP_DESCR_SET)
 
 
 def pyiter_check(obj_type: type) -> bool:
@@ -2262,6 +2270,34 @@ def mro_attr_source(
         tx.output.mro_source_cache[cache_key] = source
         return source
 
+
+def _resolve_descriptor_set(
+    tx: "InstructionTranslatorBase",
+    descriptor: object,
+    obj: VariableTracker,
+    value: VariableTracker | None,
+    source: "Source | None",
+) -> "VariableTracker | None":
+    if isinstance(descriptor, property):
+        prop_vt = variables.PropertyVariable(descriptor, source=source)
+        return prop_vt.tp_descr_set_impl(tx, obj, value)
+    if isinstance(descriptor, types.GetSetDescriptorType):
+        gs_vt = variables.GetSetDescriptorVariable(descriptor, source=source)
+        return gs_vt.tp_descr_set_impl(tx, obj, value)
+    if isinstance(descriptor, types.MemberDescriptorType):
+        md_vt = variables.MemberDescriptorVariable(descriptor, source=source)
+        return md_vt.tp_descr_set_impl(tx, obj, value)
+    _tuplegetter = collections._tuplegetter  # pyrefly: ignore[missing-attribute]
+    if isinstance(descriptor, _tuplegetter):
+        tg_vt = variables.TupleGetterVariable(descriptor, source=source)
+        return tg_vt.tp_descr_set_impl(tx, obj, value)
+    # Any other type with a non-NULL tp_descr_set, e.g. a descriptor class
+    if type_implements_tp_descr_set(type(descriptor)):
+        if source is None:
+            descr_vt: VariableTracker = variables.UserDefinedObjectVariable(descriptor)
+        else:
+            descr_vt = VariableTracker.build(tx, descriptor, source)
+        return descr_vt.tp_descr_set_impl(tx, obj, value)
     return None
 
 
@@ -2485,7 +2521,7 @@ def generic_getattr(
     # tp_getset/tp_members are data descriptors: resolve ahead of the VT's
     # tp_getattro so a tp_getattro_impl override need not repeat the consult.
     getset = obj.lookup_tp_getset_member(name)
-    if getset is not None:
+    if getset is not None and getset.getter is not None:
         result = getset.getter(obj, tx)
         if result is not None:
             return result
@@ -2498,3 +2534,168 @@ def generic_getattr(
         raise
     except NotImplementedError:
         return variables.GetAttrVariable(obj, name, source=source)
+
+
+def object_generic_setattr(
+    tx: "InstructionTranslatorBase",
+    obj: VariableTracker,
+    name: VariableTracker,
+    value: "VariableTracker | None",
+) -> VariableTracker:
+    return object_generic_setattr_str(tx, obj, name.as_python_constant(), value)
+
+
+def object_generic_setattr_str(
+    tx: "InstructionTranslatorBase",
+    obj: VariableTracker,
+    name: str,
+    value: "VariableTracker | None",
+) -> VariableTracker:
+    """Dynamo's PyObject_GenericSetAttr.
+
+    ``value is None`` means delete (CPython passes NULL for __delattr__).
+
+    Steps:
+      1. tp_getset/tp_members -> the type's data descriptors, as modeled
+      2. Data descriptor -> obj.setattr_descriptor(tx, name, value)
+      3. Instance dict
+      4. AttributeError
+    """
+
+    if (
+        torch.distributed.is_available()
+        and isinstance(obj, variables.UserDefinedObjectVariable)
+        and type(obj.value) is torch.distributed.P2POp
+        and (
+            tx.output.side_effects.has_pending_mutation_of_attr(obj, name)
+            or name in obj.value.__dict__
+        )
+    ):
+        unimplemented(
+            gb_type="P2POp mutation",
+            context=f"object={obj}, name={name}, value={value}",
+            explanation="Dynamo does not support mutating torch.distributed.P2POp instances.",
+            hints=[
+                "Construct a new torch.distributed.P2POp instead of mutating an existing one inside torch.compile.",
+            ],
+        )
+
+    getset = obj.lookup_tp_getset_member(name)
+    if getset is not None:
+        if getset.setter is None:
+            raise_attribute_error(
+                tx,
+                f"attribute '{name}' of '{obj.python_type_name()}' objects is not writable",
+            )
+        else:
+            result = getset.setter(obj, tx, value)
+            if result is not None:
+                return result
+
+    # Heap types can have data descriptors that override instance dict
+    py_type = maybe_get_python_type(obj)
+    attr = mro_lookup(py_type, name)
+
+    if attr is not NO_SUCH_SUBOBJ:
+        # The descriptor lives in a class __dict__ along the MRO, so it is
+        # sourced by walking it (as the getattr path does).  AttrSource(
+        # obj.source, name) would instead name the value it computes.
+        descr_source = None
+        if obj.source and isinstance(
+            obj,
+            (variables.UserDefinedObjectVariable, variables.UserDefinedClassVariable),
+        ):
+            descr_source = obj.get_source_by_walking_mro(tx, name)
+
+        result = _resolve_descriptor_set(tx, attr, obj, value, descr_source)
+        if result is not None:
+            return result
+
+    has_dict = py_type.__dictoffset__ != 0 or isinstance(
+        obj, variables.ThreadLocalVariable
+    )
+
+    if has_dict is False:
+        if isinstance(obj, variables.UserDefinedObjectVariable):
+            if obj.tp_setattro_impl is VariableTracker.tp_setattro_impl:
+                raise_attribute_error(
+                    tx,
+                    f"'{obj.python_type_name()}' object has no attribute '{name}' and no __dict__ for setting new attributes",
+                )
+            else:
+                raise_attribute_error(
+                    tx,
+                    f"'{obj.python_type_name()}' object has no attribute '{name}'",
+                )
+        else:
+            raise_attribute_error(
+                tx,
+                f"'{obj.python_type_name()}' object attribute '{name}' is read-only",
+            )
+    else:
+        se = tx.output.side_effects
+        if not se.is_attribute_mutation(obj):
+            if isinstance(obj, variables.UserDefinedObjectVariable):
+                # A user-defined object reaches a write untracked only when it
+                # predates tracing but arrived without a source, so there is no
+                # way to reload it afterwards and replay the write onto it.
+                from ..side_effects import SideEffects
+
+                if SideEffects.cls_supports_mutation_side_effects(type(obj.value)):
+                    if obj.source is not None:
+                        graph_break_on_untracked_vt(obj, name, value)
+                    unimplemented(
+                        gb_type="Attribute mutation on an untracked user-defined object",
+                        context=f"object={obj}, name={name}, value={value}",
+                        explanation="Dynamo cannot replay this mutation after the "
+                        "graph: the object predates tracing but has no source to "
+                        "reload it from.",
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
+            se.track_attribute_mutation_new(obj)
+
+        if value is None:
+            # Can only delete attributes that exists
+            def raise_missing_attr():
+                raise_attribute_error(
+                    tx,
+                    f"'{obj.python_type_name()}' object has no attribute '{name}'",
+                )
+
+            if se.has_pending_mutation_of_attr(obj, name):
+                attr = se.load_attr(obj, name, deleted_ok=True)
+                if isinstance(attr, variables.DeletedVariable):
+                    raise_missing_attr()
+            elif not obj.get_dict_vt(tx).contains(name):
+                raise_missing_attr()
+
+        se.store_attr(
+            obj,
+            name,
+            variables.DeletedVariable() if value is None else value,
+            AttrMutationKind.INSTANCE_DICT,
+        )
+    return ConstantVariable.create(None)
+
+
+def generic_setattr(
+    tx: "InstructionTranslatorBase",
+    obj: VariableTracker,
+    name: VariableTracker,
+    value: "VariableTracker | None",
+) -> VariableTracker:
+    """Dynamo's PyObject_SetAttr / PyObject_DelAttr: assignment dispatch.
+
+    Resolves the name to a str and calls the VT's tp_setattro_impl.  Returns
+    None (the value of a `setattr()` call), not the stored value.
+    """
+    obj = obj.realize()
+    if value is not None:
+        value = value.realize()
+    if not issubclass(name.python_type(), str):
+        raise_type_error(
+            tx,
+            f"attribute name must be string, not '{name.python_type_name()}'",
+        )
+    obj.tp_setattro_impl(tx, name, value)
+    return ConstantVariable.create(None)
