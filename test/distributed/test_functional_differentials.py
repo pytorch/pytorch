@@ -29,6 +29,7 @@ if not dist.is_available():
 DEVICE = "cuda"
 devices = ["cpu"]
 if acc := torch.accelerator.current_accelerator(True):
+    DEVICE = acc.type
     devices += [acc.type]
 
 
@@ -68,7 +69,7 @@ def with_comms(func=None):
     @wraps(func)
     def wrapper(self, *args, **kwargs):
         if (
-            torch.cuda.is_available()
+            torch.accelerator.is_available()
             and torch.accelerator.device_count() < self.world_size
         ):
             sys.exit(TEST_SKIPS[f"multi-device-{self.world_size}"].exit_code)

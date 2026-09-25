@@ -43,6 +43,9 @@ from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.testing._internal.inductor_utils import HAS_GPU
 
 
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
+
 def _make_post_grad_fx(f, *inps):
     gm = make_fx(f, decompositions, tracing_mode="fake")(*inps)
     remove_noop_ops(gm.graph)
@@ -71,7 +74,7 @@ class MicroPipelineTPTest(TestCase):
 
         self.rank = 0
         self.world_size = 2
-        torch.cuda.set_device("cuda:0")
+        torch.accelerator.set_device_index(0)
 
         store = FakeStore()
         dist.init_process_group(
@@ -116,7 +119,7 @@ class MicroPipelineTPTest(TestCase):
             f = f_cat.narrow(1, 0, 32)
             return a, b, c, d, e, f
 
-        inp = torch.rand(64, 32, device="cuda")
+        inp = torch.rand(64, 32, device=device_type)
 
         gm = _make_post_grad_fx(func, inp)
         all_gathers = find_all_gather_patterns(gm.graph)
@@ -186,7 +189,7 @@ class MicroPipelineTPTest(TestCase):
             )
             return a, b, c
 
-        inp = torch.rand(64, 32, device="cuda")
+        inp = torch.rand(64, 32, device=device_type)
 
         gm = make_fx(func)(inp)
         reduce_scatters = find_reduce_scatter_patterns(gm.graph)
@@ -233,7 +236,7 @@ class MicroPipelineTPTest(TestCase):
             e = all_gather_single(d, gather_dim=0, group=group.group_name)
             return a, c, e
 
-        inp = torch.rand(64, 32, device="cuda")
+        inp = torch.rand(64, 32, device=device_type)
 
         gm = make_fx(func)(inp)
         overlappable_collectives = _get_unexposed_collectives(gm.graph)
@@ -268,8 +271,8 @@ class MicroPipelineTPTest(TestCase):
             raise AssertionError(f"Invalid A_dims: {A_dims}")
 
         A_shard_shape[gather_dim] //= self.world_size
-        A_shard = torch.rand(*A_shard_shape, device="cuda")
-        B = torch.rand(32, 16, device="cuda")
+        A_shard = torch.rand(*A_shard_shape, device=device_type)
+        B = torch.rand(32, 16, device=device_type)
 
         with _test_mode():
             compiled = torch.compile(func)
@@ -302,8 +305,8 @@ class MicroPipelineTPTest(TestCase):
         # batch=1: after all_gather, shape[0] == world_size == group_size,
         # so the view optimization in _maybe_view_chunk_cat applies.
         # Shard is [1, 32, 32], all_gather gives [2, 32, 32], view to [1, 64, 32].
-        A_shard = torch.rand(1, 32, 32, device="cuda")
-        B = torch.rand(32, 16, device="cuda")
+        A_shard = torch.rand(1, 32, 32, device=device_type)
+        B = torch.rand(32, 16, device=device_type)
 
         with _test_mode():
             compiled = torch.compile(func)
@@ -328,11 +331,11 @@ class MicroPipelineTPTest(TestCase):
             )
             return A @ B
 
-        A_shard = torch.rand(64, 2048, device="cuda")
+        A_shard = torch.rand(64, 2048, device=device_type)
         torch._dynamo.decorators.mark_unbacked(
             A_shard, 0, hint_override=A_shard.shape[0]
         )
-        B = torch.rand(4096, 16, device="cuda")
+        B = torch.rand(4096, 16, device=device_type)
 
         gm = _make_post_grad_fx(func, A_shard, B)
         with _test_mode():
@@ -358,11 +361,11 @@ class MicroPipelineTPTest(TestCase):
             )
             return A.narrow(1, 0, 4096) @ B
 
-        A_shard = torch.rand(64, 2048, device="cuda")
+        A_shard = torch.rand(64, 2048, device=device_type)
         torch._dynamo.decorators.mark_unbacked(
             A_shard, 0, hint_override=A_shard.shape[0]
         )
-        B = torch.rand(4096, 16, device="cuda")
+        B = torch.rand(4096, 16, device=device_type)
 
         gm = _make_post_grad_fx(func, A_shard, B)
         with _test_mode():
@@ -414,10 +417,10 @@ class MicroPipelineTPTest(TestCase):
             raise AssertionError(f"Invalid A_dims: {A_dims}")
 
         A_shard_shape[gather_dim] //= self.world_size
-        A_shard = torch.rand(*A_shard_shape, device="cuda").to(e4m3_type)
-        B = torch.rand(16, 32, device="cuda").to(e4m3_type).T
-        A_scale = torch.tensor(0.1, device="cuda")
-        B_scale = torch.tensor(0.1, device="cuda")
+        A_shard = torch.rand(*A_shard_shape, device=device_type).to(e4m3_type)
+        B = torch.rand(16, 32, device=device_type).to(e4m3_type).T
+        A_scale = torch.tensor(0.1, device=device_type)
+        B_scale = torch.tensor(0.1, device=device_type)
 
         gm = _make_post_grad_fx(func, A_shard, B, A_scale, B_scale, torch.bfloat16)
         with _test_mode():
@@ -457,12 +460,12 @@ class MicroPipelineTPTest(TestCase):
             return reduce_scatter_single(A @ B, "avg", scatter_dim, group)
 
         if A_dims == 2:
-            A = torch.rand(64, 32, device="cuda")
+            A = torch.rand(64, 32, device=device_type)
         elif A_dims == 3:
-            A = torch.rand(2, 64, 32, device="cuda")
+            A = torch.rand(2, 64, 32, device=device_type)
         else:
             raise AssertionError(f"Invalid A_dims: {A_dims}")
-        B = torch.rand(32, 16, device="cuda")
+        B = torch.rand(32, 16, device=device_type)
 
         with _test_mode():
             compiled = torch.compile(func)
@@ -488,8 +491,8 @@ class MicroPipelineTPTest(TestCase):
             )
             return reduce_scatter_tensor(C, "avg", 0, group)
 
-        A = torch.rand(64, 32, device="cuda")
-        B = torch.rand(32, 16, device="cuda")
+        A = torch.rand(64, 32, device=device_type)
+        B = torch.rand(32, 16, device=device_type)
         torch._dynamo.decorators.mark_unbacked(B, 1, hint_override=B.shape[1])
 
         gm = _make_post_grad_fx(func, A, B)
@@ -527,14 +530,14 @@ class MicroPipelineTPTest(TestCase):
             return reduce_scatter_single(C, "avg", scatter_dim, group)
 
         if A_dims == 2:
-            A = torch.rand(64, 32, device="cuda").to(e4m3_type)
+            A = torch.rand(64, 32, device=device_type).to(e4m3_type)
         elif A_dims == 3:
-            A = torch.rand(2, 64, 32, device="cuda").to(e4m3_type)
+            A = torch.rand(2, 64, 32, device=device_type).to(e4m3_type)
         else:
             raise AssertionError(f"Invalid A_dims: {A_dims}")
-        B = torch.rand(16, 32, device="cuda").to(e4m3_type).T
-        A_scale = torch.tensor(0.1, device="cuda")
-        B_scale = torch.tensor(0.1, device="cuda")
+        B = torch.rand(16, 32, device=device_type).to(e4m3_type).T
+        A_scale = torch.tensor(0.1, device=device_type)
+        B_scale = torch.tensor(0.1, device=device_type)
 
         gm = _make_post_grad_fx(func, A, B, A_scale, B_scale, torch.bfloat16)
         with _test_mode():
@@ -583,14 +586,14 @@ class MicroPipelineTPTest(TestCase):
             C = C.view(*orig_shape[:-1], C.shape[-1])
             return reduce_scatter_single(C, "sum", scatter_dim, group)
 
-        A = torch.rand(2, 16, 32, device="cuda").to(e4m3_type)
-        B = torch.rand(64, 32, device="cuda").to(e4m3_type).T
+        A = torch.rand(2, 16, 32, device=device_type).to(e4m3_type)
+        B = torch.rand(64, 32, device=device_type).to(e4m3_type).T
 
         # A_scale = rowwise scales
-        A_scale = torch.full((2, 16, 1), 0.1, device="cuda")
+        A_scale = torch.full((2, 16, 1), 0.1, device=device_type)
 
         # B_scale = rowwise scales transposed for A @ B^T
-        B_scale = torch.full((1, 64), 0.1, device="cuda")
+        B_scale = torch.full((1, 64), 0.1, device=device_type)
 
         gm = _make_post_grad_fx(
             reshape_mm_reshape, A, B, A_scale, B_scale, torch.bfloat16
@@ -602,7 +605,7 @@ class MicroPipelineTPTest(TestCase):
         self.assertIn("fused_scaled_matmul_reduce_scatter", str(gm.graph))
         self.assertNotIn("reduce_scatter_tensor", str(gm.graph))
 
-        if torch.cuda.get_device_capability() < (8, 9):
+        if device_type == "cuda" and torch.cuda.get_device_capability() < (8, 9):
             return
 
         with _test_mode():
@@ -622,9 +625,9 @@ class MicroPipelineTPTest(TestCase):
     @parametrize("shard_dim", [0, 1])
     @fresh_cache()
     def test_dtensor_seq_par(self, shard_dim: int):
-        model: torch.nn.Module = MLPModule(device="cuda", bias=False)
+        model: torch.nn.Module = MLPModule(device=device_type, bias=False)
         device_mesh = DeviceMesh(
-            "cuda",
+            device_type,
             torch.arange(0, self.world_size),
         )
         parallelize_plan = {
@@ -633,9 +636,9 @@ class MicroPipelineTPTest(TestCase):
         }
         model = parallelize_module(model, device_mesh, parallelize_plan)
         if shard_dim == 0:
-            inp = torch.rand(8, 10, device="cuda")
+            inp = torch.rand(8, 10, device=device_type)
         elif shard_dim == 1:
-            inp = torch.rand(2, 8, 10, device="cuda")
+            inp = torch.rand(2, 8, 10, device=device_type)
         else:
             raise AssertionError("Invalid shard_dim")
 
@@ -657,7 +660,7 @@ class MicroPipelineTP4GPUTest(TestCase):
 
         self.rank = 0
         self.world_size = 4
-        torch.cuda.set_device("cuda:0")
+        torch.accelerator.set_device_index(0)
 
         store = FakeStore()
         dist.init_process_group(
@@ -675,7 +678,7 @@ class MicroPipelineTP4GPUTest(TestCase):
     @torch._inductor.config.patch(shape_padding=False)
     def test_extra_collectives(self):
         device_mesh = DeviceMesh(
-            "cuda",
+            device_type,
             torch.arange(0, self.world_size).view(2, -1),
             mesh_dim_names=("tp", "other"),
         )
@@ -687,9 +690,9 @@ class MicroPipelineTP4GPUTest(TestCase):
             hidden = reduce_scatter_single(full_hidden, "avg", 0, (device_mesh, 1))
             return reduce_scatter_single(hidden @ w2.t(), "avg", 0, (device_mesh, 0))
 
-        inp = torch.rand(8, 10, device="cuda")
-        w1 = torch.rand(7, 10, device="cuda")
-        w2 = torch.rand(10, 7, device="cuda")
+        inp = torch.rand(8, 10, device=device_type)
+        w1 = torch.rand(7, 10, device=device_type)
+        w2 = torch.rand(10, 7, device=device_type)
 
         with _test_mode(group_names={device_mesh["tp"].get_group().group_name}):
             compiled = torch.compile(func)
@@ -716,9 +719,9 @@ class MicroPipelineTP4GPUTest(TestCase):
                 A @ B, "avg", scatter_dim=0, group=group.group_name
             )
 
-        A_shard = torch.rand(32, 32, device="cuda")
-        A = torch.rand(64, 32, device="cuda")
-        B = torch.rand(32, 16, device="cuda")
+        A_shard = torch.rand(32, 32, device=device_type)
+        A = torch.rand(64, 32, device=device_type)
+        B = torch.rand(32, 16, device=device_type)
 
         gm = _make_post_grad_fx(ag_mm, A_shard, B)
         micro_pipeline_tp_pass(gm.graph)
