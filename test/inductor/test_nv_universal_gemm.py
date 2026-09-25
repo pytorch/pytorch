@@ -433,6 +433,7 @@ class TestNVUniversalGemm(TestCase):
     def test_blockscaled_operator_cache_tracks_generation_policy(self):
         from torch._inductor.codegen.nv_universal_gemm import kernel_cache
 
+        policies = (("0", False), ("autotune", False), ("0", True), ("0", False))
         seen = []
 
         class Provider:
@@ -444,30 +445,21 @@ class TestNVUniversalGemm(TestCase):
                 return []
 
         kernel_cache.clear_cache()
-        try:
-            with mock.patch.object(
-                kernel_cache, "_blockscaled_provider_classes", return_value=[Provider]
-            ):
-                kernel_cache._blockscaled_operators("0", False)
-                kernel_cache._blockscaled_operators("autotune", False)
-                kernel_cache._blockscaled_operators("0", True)
-                kernel_cache._blockscaled_operators("0", False)
-        finally:
-            kernel_cache.clear_cache()
+        self.addCleanup(kernel_cache.clear_cache)
+        with mock.patch.object(
+            kernel_cache, "_blockscaled_provider_classes", return_value=[Provider]
+        ):
+            for policy in policies:
+                kernel_cache._blockscaled_operators(*policy)
 
         self.assertEqual(seen, [("0", False), ("autotune", False), ("0", True)])
 
         kernel_cache.clear_cache()
-        try:
-            with mock.patch.object(
-                kernel_cache, "_blockscaled_operators", return_value=()
-            ) as generated:
-                kernel_cache._blockscaled_manifest(100, (), "0", False)
-                kernel_cache._blockscaled_manifest(100, (), "autotune", False)
-                kernel_cache._blockscaled_manifest(100, (), "0", True)
-                kernel_cache._blockscaled_manifest(100, (), "0", False)
-        finally:
-            kernel_cache.clear_cache()
+        with mock.patch.object(
+            kernel_cache, "_blockscaled_operators", return_value=()
+        ) as generated:
+            for prefetch_mode, use_pdl in policies:
+                kernel_cache._blockscaled_manifest(100, (), prefetch_mode, use_pdl)
 
         self.assertEqual(
             [call.args for call in generated.call_args_list],
@@ -1521,34 +1513,20 @@ class TestNVUniversalGemmHeuristics(TestCase):
 
         self.assertEqual(nvgemm_cold_cache_shape(shape), expected)
 
-    def test_nvfp4_profiling_cap_composes_with_general_cap(self):
+    @parametrize(
+        "general_limit,expected_general,expected_nvfp4",
+        ((7, 7, 3), (2, 2, 2), (None, 20, 20)),
+    )
+    def test_nvfp4_profiling_cap_composes_with_general_cap(
+        self, general_limit, expected_general, expected_nvfp4
+    ):
         from torch._inductor.heuristics.template.nv_universal_gemm import (
             nvgemm_max_configs,
         )
 
-        with config.patch(
-            {
-                "nvgemm_max_profiling_configs": 7,
-            }
-        ):
-            self.assertEqual(nvgemm_max_configs(False, 20), 7)
-            self.assertEqual(nvgemm_max_configs(True, 20), 3)
-
-        with config.patch(
-            {
-                "nvgemm_max_profiling_configs": 2,
-            }
-        ):
-            self.assertEqual(nvgemm_max_configs(False, 20), 2)
-            self.assertEqual(nvgemm_max_configs(True, 20), 2)
-
-        with config.patch(
-            {
-                "nvgemm_max_profiling_configs": None,
-            }
-        ):
-            self.assertEqual(nvgemm_max_configs(False, 20), 20)
-            self.assertEqual(nvgemm_max_configs(True, 20), 20)
+        with config.patch(nvgemm_max_profiling_configs=general_limit):
+            self.assertEqual(nvgemm_max_configs(False, 20), expected_general)
+            self.assertEqual(nvgemm_max_configs(True, 20), expected_nvfp4)
 
     @parametrize(
         "force_swap,m,n,dtype,expected",
@@ -2403,41 +2381,37 @@ class TestNVUniversalGemmHeuristics(TestCase):
                 **kwargs,
             )
 
-    def test_fallback_when_heuristics_unavailable(self):
+    @parametrize("fallback_reason", ("disabled", "unextractable"))
+    def test_filter_kernels_fallback(self, fallback_reason):
         heuristics = NVUniversalGemmHeuristics()
-        prefetch = self._create_mock_kernel(128, 128, 64, 1, 1, use_prefetch=True)
-        primary_kernels = [
-            self._create_mock_kernel(128, 128, 64, 1, 1) for _ in range(10)
-        ]
-        kernels = [prefetch, *primary_kernels]
         inputs = self._create_mock_inputs()
+        if fallback_reason == "disabled":
+            prefetch = self._create_mock_kernel(128, 128, 64, 1, 1, use_prefetch=True)
+            expected = [self._create_mock_kernel(128, 128, 64, 1, 1) for _ in range(10)]
+            kernels = [prefetch, *expected]
+            default_count, fallback_count = 3, 7
+            should_run = False
+        else:
+            kernels = [MagicMock() for _ in range(5)]
+            for kernel in kernels:
+                kernel.metadata.design = MagicMock(spec=[])
+            expected = kernels
+            default_count, fallback_count = 2, 4
+            should_run = True
 
-        with patch.object(heuristics, "should_run", return_value=False):
-            default_result = heuristics.filter_kernels(kernels, inputs, count=3)
+        with patch.object(heuristics, "should_run", return_value=should_run):
+            default_result = heuristics.filter_kernels(
+                kernels, inputs, count=default_count
+            )
             result = heuristics.filter_kernels(
-                kernels, inputs, count=3, fallback_count=7
+                kernels,
+                inputs,
+                count=default_count,
+                fallback_count=fallback_count,
             )
 
-        self.assertEqual(default_result, primary_kernels[:3])
-        self.assertEqual(result, primary_kernels[:7])
-
-    def test_fallback_when_no_configs_extracted(self):
-        """Test fallback when kernel configs cannot be extracted."""
-        heuristics = NVUniversalGemmHeuristics()
-
-        kernels = []
-        for _ in range(5):
-            kernel = MagicMock()
-            kernel.metadata.design = MagicMock(spec=[])  # No tile_shape attr
-            kernels.append(kernel)
-
-        inputs = self._create_mock_inputs()
-
-        with patch.object(heuristics, "should_run", return_value=True):
-            result = heuristics.filter_kernels(kernels, inputs, count=2)
-
-        self.assertEqual(len(result), 2)
-        self.assertEqual(result, kernels[:2])
+        self.assertEqual(default_result, expected[:default_count])
+        self.assertEqual(result, expected[:fallback_count])
 
     @parametrize(
         "tile_m,design_use_2cta,impl_use_2cta",
@@ -2518,6 +2492,7 @@ class TestNVUniversalGemmHeuristics(TestCase):
         heuristic_configs = [
             self._heuristic_config(kernel_a, 0.003),
             self._heuristic_config(kernel_b, 0.001),
+            self._heuristic_config(kernel_b, 0.002),
             self._heuristic_config(kernel_c, 0.002),
         ]
 
@@ -2533,16 +2508,6 @@ class TestNVUniversalGemmHeuristics(TestCase):
             ),
             [kernel_b, kernel_c, kernel_a],
         )
-
-    def test_filter_kernels_deduplicates_heuristic_configs(self):
-        kernel = self._create_mock_kernel(128, 128, 64, 1, 1)
-        kernel.metadata.operator_name = "kernel"
-        config = self._heuristic_config(kernel, 0.003)
-        result = self._filter_mock_kernels(
-            [kernel], heuristic_configs=[config, config], count=2
-        )
-
-        self.assertEqual(result, [kernel])
 
     def test_filter_kernels_supplements_large_m_nvfp4_config(self):
         ranked_kernel = self._create_mock_kernel(128, 192, 256, 2, 1)
