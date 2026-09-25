@@ -6719,9 +6719,21 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         # fixed bias-add epilogue; the GEMM operands are the remaining inputs.
         self.bias_node = bias_node
         # Store kernel metadata for code generation since kernels aren't serializeable yet
+        kernel_impl = getattr(kernel, "impl", None)
         self.kernel_metadata = {
             "kernel_name": kernel.metadata.operator_name,
             "min_cc": kernel.designed_for_min_cc,
+            "use_prefetch": getattr(
+                kernel_impl,
+                "use_prefetch",
+                getattr(kernel.metadata.design, "use_prefetch", False),
+            ),
+            "use_pdl": getattr(
+                kernel_impl,
+                "use_pdl",
+                getattr(kernel.metadata.design, "use_pdl", False),
+            ),
+            "output_dtype": layout.dtype,
         }
         # Override the instance attribute set by parent with our method
         # This is necessary because TemplateBuffer stores make_kernel_render as instance attr

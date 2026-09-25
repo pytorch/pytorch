@@ -2229,6 +2229,17 @@ def _use_autotune_backend(backend: str) -> bool:
     ]
 
 
+def _is_only_autotune_backend(backend: str) -> bool:
+    """Return whether ``backend`` is the only configured GEMM autotune backend."""
+    return OrderedSet(
+        [
+            x.strip()
+            for x in config.max_autotune_gemm_backends.upper().split(",")
+            if x.strip()
+        ]
+    ) == OrderedSet([backend.upper()])
+
+
 def _use_conv_autotune_backend(backend: str) -> bool:
     return backend.upper() in [
         x.strip() for x in config.max_autotune_conv_backends.upper().split(",")
