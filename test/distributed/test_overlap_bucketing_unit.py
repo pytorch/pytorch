@@ -27,6 +27,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_distributed import requires_accelerator_dist_backend
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
     parametrize,
     run_tests,
     TestCase,
@@ -1508,6 +1509,79 @@ class TestFusibleNodeOverlap(InductorTestCase):
             "sub"
         ).check("wait_tensor").run(graph_str)
 
+    def test_custom_non_flop_node_is_aligned_and_blocks_prefetch_paths(self, device):
+        def func(a):
+            ag = torch.ops._c10d_functional.all_gather_into_tensor(a, 1, "0")
+            cloned = torch.clone(a)
+            waited = torch.ops._c10d_functional.wait_tensor(ag)
+            return waited + cloned
+
+        with FakeTensorMode():
+            traced = make_fx(func)(torch.ones(4, 4, device=device))
+
+        (clone,) = traced.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.clone.default
+        )
+
+        def custom_runtime(node, override_size):
+            if node is clone:
+                return 7.0
+            if node.op == "call_function":
+                return 1.0
+            return None
+
+        from torch._inductor.fx_passes.overlap_scheduling import (
+            is_compute_node,
+            OverlapScheduler,
+        )
+
+        self.assertFalse(is_compute_node(clone))
+        scheduler = OverlapScheduler(
+            traced,
+            max_in_flight_gb=5.0,
+            max_compute_pre_fetch=200,
+            collective_bucketing=False,
+            insert_overlap_deps=False,
+            compute_overlap_multipler=1.0,
+            max_coll_distance=200,
+            custom_runtime_estimation=custom_runtime,
+            collective_estimator="analytical",
+        )
+
+        self.assertIn(clone, scheduler.compute_node_set)
+        self.assertNotEqual(
+            scheduler._compute_bits & scheduler.node_ancestors.node_bit(clone), 0
+        )
+
+        def gather_remote_estimate(output, local, pg):
+            signatures, estimates = local
+            remote_estimates = list(estimates)
+            remote_estimates[scheduler.compute_nodes.index(clone)] = 3.0
+            remote_estimates[len(scheduler.compute_nodes)] = 0.5
+            output[0] = local
+            output[1] = (signatures, remote_estimates)
+
+        with patch.object(dist, "all_gather_object", gather_remote_estimate):
+            scheduler._align_compute_nodes_runtime_estimations_across_all_distributed_ranks()
+
+        self.assertEqual(scheduler.node_estimations[clone], 3.0)
+        collective = next(iter(scheduler.collective_info))
+        self.assertEqual(scheduler.node_estimations[collective], 0.5)
+        self.assertEqual(scheduler.collective_info[collective].estimated_time_ms, 0.5)
+
+        def gather_mismatched_nodes(output, local, pg):
+            signatures, estimates = local
+            remote_signatures = list(signatures)
+            remote_signatures[0] = ("different_node", "different_target")
+            output[0] = local
+            output[1] = (remote_signatures, estimates)
+
+        with (
+            patch.object(dist, "all_gather_object", gather_mismatched_nodes),
+            self.assertRaisesRegex(RuntimeError, "runtime nodes differ across ranks"),
+        ):
+            scheduler._align_compute_nodes_runtime_estimations_across_all_distributed_ranks()
+
     def test_fusion_regions_hide_collective(self, device):
         """Test that fusion regions can hide collectives when enabled."""
 
@@ -2635,6 +2709,56 @@ class TestProfileGuidedEstimation(TestCase):
         self.assertEqual(profile.arrival_partial_collectives, 1)
         self.assertEqual(profile.arrival_incomplete_collectives, 1)
 
+    @parametrize("with_sequence", [False, True])
+    def test_all_to_allv_preserves_rank_sizes_after_arrival_correction(
+        self, with_sequence
+    ):
+        def trace(rank, in_nelems, out_nelems, start, duration):
+            collective = {
+                "name": "all_to_allv",
+                "dur": duration,
+                "ts": start,
+                "nelems": in_nelems,
+                "out_nelems": out_nelems,
+                "comms_id": 101,
+            }
+            if with_sequence:
+                collective["seq"] = 1
+            return _make_pge_trace(
+                collectives=[collective],
+                rank=rank,
+                group_trace_id="capture",
+                host_name="host",
+                base_time_ns=0,
+            )
+
+        profile = _load_pge_profiles(
+            [
+                trace(0, 1000, 600, 0.0, 110.0),
+                trace(1, 800, 1200, 100.0, 20.0),
+            ]
+        )
+
+        for out_nelems in (600, 1200):
+            estimate, _ = profile.lookup_collective(
+                "all_to_allv",
+                (0, 1),
+                out_nelems,
+                "Float",
+                input_nelems=1000 if out_nelems == 600 else 800,
+            )
+            self.assertEqual(estimate, 0.02)
+        self.assertIsNone(
+            profile.lookup_collective("all_to_allv", (0, 1), 600, "Float")
+        )
+        self.assertIsNone(
+            profile.lookup_collective(
+                "all_to_allv", (0, 1), 600, "Float", input_nelems=800
+            )
+        )
+        self.assertIsNone(profile.lookup_collective("all_to_all", (0, 1), 600, "Float"))
+        self.assertEqual(profile.arrival_corrected_collectives, 1)
+
     def test_collective_lookup_uses_sequence_to_disambiguate_comms_id(self):
         def trace(rank, observations):
             return _make_pge_trace(
@@ -2666,6 +2790,66 @@ class TestProfileGuidedEstimation(TestCase):
         self.assertEqual(estimate, 0.025)
         self.assertEqual(profile.arrival_corrected_collectives, 2)
 
+    def test_collective_lookup_uses_occurrence_to_disambiguate_comms_id(self):
+        def trace(rank, observations):
+            return _make_pge_trace(
+                collectives=[
+                    {
+                        "name": "allreduce",
+                        "dur": duration,
+                        "ts": start,
+                        "nelems": 1000,
+                        "comms_id": 101,
+                    }
+                    for start, duration in observations
+                ],
+                rank=rank,
+                group_trace_id="capture",
+                host_name="host",
+                base_time_ns=0,
+            )
+
+        profile = _load_pge_profiles(
+            [
+                trace(0, [(0.0, 110.0), (200.0, 120.0)]),
+                trace(1, [(300.0, 30.0), (100.0, 20.0)]),
+            ]
+        )
+
+        estimate, _ = profile.lookup_collective("all_reduce", (0, 1), 1000, "Float")
+        self.assertEqual(estimate, 0.025)
+        self.assertEqual(profile.arrival_corrected_collectives, 2)
+
+    def test_collective_lookup_does_not_pair_mismatched_comms_id_occurrences(self):
+        def trace(rank, observations):
+            return _make_pge_trace(
+                collectives=[
+                    {
+                        "name": "allreduce",
+                        "dur": duration,
+                        "ts": start,
+                        "nelems": 1000,
+                        "comms_id": 101,
+                    }
+                    for start, duration in observations
+                ],
+                rank=rank,
+                group_trace_id="capture",
+                host_name="host",
+                base_time_ns=0,
+            )
+
+        profile = _load_pge_profiles(
+            [
+                trace(0, [(0.0, 110.0), (200.0, 120.0)]),
+                trace(1, [(100.0, 20.0)]),
+            ]
+        )
+
+        estimate, _ = profile.lookup_collective("all_reduce", (0, 1), 1000, "Float")
+        self.assertEqual(estimate, 0.11)
+        self.assertEqual(profile.arrival_corrected_collectives, 0)
+
     def test_collective_lookup_preserves_latency_below_profiled_sizes(self):
         profile = _load_pge_profile(
             _make_pge_trace(
@@ -2678,6 +2862,28 @@ class TestProfileGuidedEstimation(TestCase):
 
         estimate, _ = profile.lookup_collective("all_reduce", (0, 1), 100, "Float")
         self.assertEqual(estimate, 0.01)
+
+    def test_collective_bandwidth_does_not_mix_collective_types(self):
+        profile = _load_pge_profile(
+            _make_pge_trace(
+                collectives=[
+                    {"name": "allreduce", "dur": 10.0, "nelems": 1000},
+                    {"name": "_allgather_base", "dur": 8.0, "nelems": 8000},
+                    {
+                        "name": "allreduce",
+                        "dur": 8.0,
+                        "nelems": 8000,
+                        "dtype": "Half",
+                    },
+                ]
+            )
+        )
+
+        estimate, source = profile.lookup_collective(
+            "all_reduce", (0, 1), 3000, "Float"
+        )
+        self.assertEqual(source, "pg_bandwidth")
+        self.assertEqual(estimate, 0.03)
 
     def test_profile_loading_supports_gzip(self):
         trace = _make_pge_trace(
@@ -2753,6 +2959,67 @@ class TestProfileGuidedEstimation(TestCase):
             self.assertEqual(estimator(cast), 0.01)
         finally:
             os.unlink(path)
+
+    def test_estimator_matches_profile_out_variant_metadata(self):
+        trace = _make_pge_trace(
+            matmuls=[
+                {
+                    "shapes": [[4, 8], [8, 16], [4, 16]],
+                    "dur": 50.0,
+                    "dtypes": ["float", "float", "float"],
+                }
+            ]
+        )
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(trace, f)
+            path = f.name
+        try:
+            estimator = ProfileGuidedEstimator(path)
+            with FakeTensorMode():
+                lhs = torch.randn(4, 8)
+                rhs = torch.randn(8, 16)
+                gm = make_fx(torch.mm)(lhs, rhs)
+            mm = gm.graph.find_nodes(
+                op="call_function", target=torch.ops.aten.mm.default
+            )[0]
+            self.assertEqual(estimator(mm), 0.05)
+        finally:
+            os.unlink(path)
+
+    def test_profile_preserves_zero_dimensional_tensor_inputs(self):
+        trace = _make_pge_trace()
+        trace["traceEvents"].extend(
+            [
+                {
+                    "cat": "cpu_op",
+                    "name": "aten::add",
+                    "args": {
+                        "External id": 1000,
+                        "Input Dims": [[4, 4], []],
+                        "Input Strides": [[4, 1], []],
+                        "Input type": ["float", "float"],
+                    },
+                },
+                {
+                    "cat": "kernel",
+                    "dur": 10.0,
+                    "name": "add_kernel",
+                    "args": {"External id": 1000},
+                },
+            ]
+        )
+
+        profile = _load_pge_profile(trace)
+
+        self.assertEqual(
+            profile.lookup_op(
+                "aten::add",
+                ((4, 4), ()),
+                ((4, 1), ()),
+                torch.float32,
+            ),
+            0.01,
+        )
 
     def test_missing_custom_estimate_falls_back_to_roofline(self):
         from torch._inductor.fx_passes.overlap_scheduling import (
@@ -3197,6 +3464,9 @@ instantiate_device_type_tests(
 )
 
 
+instantiate_parametrized_tests(TestProfileGuidedEstimation)
+
+
 @requires_accelerator_dist_backend(["nccl", "xccl"])
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
 class TestProfileGuidedEstimatorIntegration(InductorTestCase):
@@ -3286,6 +3556,75 @@ class TestProfileGuidedEstimatorIntegration(InductorTestCase):
             self.assertTrue(mm_hit, "Estimator should match the mm node")
         finally:
             os.unlink(trace_path)
+
+    def test_estimator_call_on_coalesced_collective(self, device):
+        group_name = dist.distributed_c10d._get_default_group().group_name
+        pg_ranks = tuple(sorted(dist.get_process_group_ranks(dist.group.WORLD)))
+
+        def func(a, b):
+            return torch.ops._c10d_functional.reduce_scatter_tensor_coalesced(
+                [a, b], "sum", len(pg_ranks), group_name
+            )
+
+        with FakeTensorMode():
+            a = torch.randn(4, 4, device=device)
+            b = torch.randn(4, 4, device=device)
+            gm = make_fx(func)(a, b)
+
+        collective = gm.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.reduce_scatter_tensor_coalesced.default,
+        )[0]
+        out_nelems = sum(tensor.numel() for tensor in collective.meta["val"])
+        trace = _make_pge_trace(
+            collectives=[
+                {
+                    "name": "reduce_scatter_tensor_coalesced",
+                    "dur": 200.0,
+                    "nelems": out_nelems * len(pg_ranks),
+                    "out_nelems": out_nelems,
+                    "dtype": "Float",
+                    "ranks": json.dumps(list(pg_ranks)),
+                    "group_size": len(pg_ranks),
+                }
+            ],
+            pg_config={"0": {"ranks": list(pg_ranks), "pg_desc": "default_pg"}},
+        )
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(trace, f)
+            trace_path = f.name
+        try:
+            estimator = ProfileGuidedEstimator(trace_path)
+            self.assertEqual(estimator(collective), 0.2)
+        finally:
+            os.unlink(trace_path)
+
+    def test_all_to_all_variant_is_derived_from_split_sizes(self, device):
+        from torch._inductor.fx_passes.profile_guided_estimation import (
+            _get_collective_info,
+        )
+
+        group_name = dist.distributed_c10d._get_default_group().group_name
+        with FakeTensorMode():
+            tensor = torch.randn(16, device=device)
+            graph = fx.Graph()
+            inp = graph.placeholder("inp")
+            inp.meta["val"] = tensor
+            fixed = graph.call_function(
+                torch.ops._c10d_functional.all_to_all_single.default,
+                (inp, [], [], group_name),
+            )
+            fixed.meta["val"] = tensor
+            variable = graph.call_function(
+                torch.ops._c10d_functional.all_to_all_single.default,
+                (inp, [8, 8], [8, 8], group_name),
+            )
+            variable.meta["val"] = tensor
+            graph.output((fixed, variable))
+
+        self.assertEqual(_get_collective_info(fixed)[0], "all_to_all_single")
+        self.assertEqual(_get_collective_info(variable)[0], "all_to_allv")
 
 
 instantiate_device_type_tests(
