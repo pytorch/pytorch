@@ -97,9 +97,9 @@ def vt_identity_compare(
     # behaves the same way: `obj.m is obj.m` is False in CPython. So is a device
     # read off a tensor: `x.device is x.device` is False there too.
     from .dicts import ConstDictVariable
+    from .exception import ExceptionVariable, TracebackVariable
     from .functions import UserMethodVariable
     from .lists import ListVariable
-    from .misc import ExceptionVariable, TracebackVariable
     from .sets import (
         DictKeySetVariable,
         FrozensetVariable,
