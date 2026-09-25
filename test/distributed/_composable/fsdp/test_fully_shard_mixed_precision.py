@@ -719,6 +719,12 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
                 self.assertEqual(param.grad_dtype, reduce_dtype or grad_dtype)
 
         model.register_forward_pre_hook(check_unsharded_grad_dtype)
+        copy_in_dtypes = []
+
+        def copy_in(grads, buffer, world_size):
+            copy_in_dtypes.append(tuple(grad.dtype for grad in grads))
+            foreach_reduce_scatter_copy_in(grads, buffer, world_size)
+
         for microbatch_idx in range(3):
             sync = microbatch_idx == 2
             model.set_requires_gradient_sync(sync)
@@ -731,6 +737,11 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
                     dist, "reduce_scatter_single", wraps=dist.reduce_scatter_single
                 ) as reduce_scatter,
                 patch.object(dist, "all_reduce", wraps=dist.all_reduce) as all_reduce,
+                patch(
+                    "torch.distributed.fsdp._fully_shard._fsdp_collectives."
+                    "foreach_reduce_scatter_copy_in",
+                    copy_in,
+                ),
             ):
                 model(microbatch_inp).sum().backward()
                 all_gather.assert_called_once()
@@ -739,6 +750,11 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
                 if sync:
                     rs_input = reduce_scatter.call_args.kwargs["input"]
                     self.assertEqual(rs_input.dtype, torch.float32)
+                    # Gradients reach the copy-in in their own dtypes
+                    self.assertEqual(
+                        copy_in_dtypes,
+                        [tuple(reduce_dtype or dtype for dtype in grad_dtypes)],
+                    )
             ref_model(microbatch_inp).sum().backward()
             if not sync:
                 for param, grad_dtype in zip(model.parameters(), grad_dtypes):
