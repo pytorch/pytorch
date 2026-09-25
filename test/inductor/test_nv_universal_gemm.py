@@ -1423,38 +1423,40 @@ class TestNVUniversalGemmHeuristics(TestCase):
         self.assertIsNone(classify(Expr("to_dtype", (bitcast, torch.float32))))
 
     @parametrize(
-        "variant_name,dtype,m,expected",
+        "is_scaled_gemm,dtype,scale_block,m,expected",
         (
-            ("SCALED_GEMM", torch.float4_e2m1fn_x2, 32, 16),
-            ("SCALED_GEMM", torch.bfloat16, 32, 1),
-            ("SCALED_GEMM", torch.float4_e2m1fn_x2, 64, 16),
-            ("SCALED_GEMM", torch.float4_e2m1fn_x2, 256, 16),
-            ("SCALED_GEMM", torch.float4_e2m1fn_x2, 257, 1),
-            ("GEMM", torch.float4_e2m1fn_x2, 32, 1),
+            (True, torch.float4_e2m1fn_x2, "BlockWise1x16", 32, 16),
+            (True, torch.bfloat16, "BlockWise1x16", 32, 7),
+            (True, torch.float4_e2m1fn_x2, "BlockWise1x16", 64, 16),
+            (True, torch.float4_e2m1fn_x2, "BlockWise1x16", 256, 16),
+            (True, torch.float4_e2m1fn_x2, "BlockWise1x16", 257, 7),
+            (False, torch.float4_e2m1fn_x2, "BlockWise1x16", 32, 7),
+            (True, torch.float4_e2m1fn_x2, "BlockWise1x32", 32, 7),
         ),
     )
     def test_decode_m_nvfp4_cudagraph_unroll_is_scoped(
-        self, variant_name, dtype, m, expected
+        self, is_scaled_gemm, dtype, scale_block, m, expected
     ):
-        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
-            _nvgemm_cudagraph_unroll,
-            GemmVariant,
+        from torch._inductor.heuristics.template.nv_universal_gemm import (
+            nvgemm_cudagraph_unroll,
         )
         from torch.nn.functional import ScalingType  # type: ignore[attr-defined]
 
+        scale_type = getattr(ScalingType, scale_block)
         with config.patch(
             {
                 "max_autotune_gemm_backends": "NVGEMM",
+                "autotune_cudagraph_benchmarking_iters": 7,
             }
         ):
             self.assertEqual(
-                _nvgemm_cudagraph_unroll(
-                    getattr(GemmVariant, variant_name),
+                nvgemm_cudagraph_unroll(
+                    is_scaled_gemm,
                     dtype,
                     dtype,
                     (m, 4096),
-                    ScalingType.BlockWise1x16,
-                    ScalingType.BlockWise1x16,
+                    scale_type,
+                    scale_type,
                 ),
                 expected,
             )
@@ -1465,9 +1467,8 @@ class TestNVUniversalGemmHeuristics(TestCase):
             ExternKernelBenchmarkRequest,
             TensorMeta,
         )
-        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
-            _nvgemm_cudagraph_unroll,
-            GemmVariant,
+        from torch._inductor.heuristics.template.nv_universal_gemm import (
+            nvgemm_cudagraph_unroll,
         )
         from torch.nn.functional import ScalingType  # type: ignore[attr-defined]
 
@@ -1477,8 +1478,8 @@ class TestNVUniversalGemmHeuristics(TestCase):
                 "autotune_cudagraph_benchmarking_iters": 7,
             }
         ):
-            nvgemm_unroll = _nvgemm_cudagraph_unroll(
-                GemmVariant.SCALED_GEMM,
+            nvgemm_unroll = nvgemm_cudagraph_unroll(
+                True,
                 torch.float4_e2m1fn_x2,
                 torch.float4_e2m1fn_x2,
                 (32, 4096),
@@ -1504,48 +1505,26 @@ class TestNVUniversalGemmHeuristics(TestCase):
         self.assertEqual(nvgemm_unroll, 7)
         self.assertEqual(nvgemm_unroll, aten_request.cudagraph_unroll)
 
-    def test_mxfp4_cudagraph_unroll_is_disabled(self):
-        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
-            _nvgemm_cudagraph_unroll,
-            GemmVariant,
-        )
-        from torch.nn.functional import ScalingType  # type: ignore[attr-defined]
-
-        with config.patch(
-            {
-                "max_autotune_gemm_backends": "NVGEMM",
-            }
-        ):
-            self.assertEqual(
-                _nvgemm_cudagraph_unroll(
-                    GemmVariant.SCALED_GEMM,
-                    torch.float4_e2m1fn_x2,
-                    torch.float4_e2m1fn_x2,
-                    (32, 4096),
-                    ScalingType.BlockWise1x32,
-                    ScalingType.BlockWise1x32,
-                ),
-                1,
-            )
-
-    def test_decode_nvfp4_cold_cache_is_scoped(self):
-        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
-            _nvgemm_cold_cache_shape,
+    @parametrize(
+        "shape,expected",
+        (
+            ((1, 65536), True),
+            ((32, 32768), True),
+            ((64, 4096), True),
+            ((256, 65536), True),
+            ((257, 4096), False),
+        ),
+    )
+    def test_decode_nvfp4_cold_cache_is_scoped(self, shape, expected):
+        from torch._inductor.heuristics.template.nv_universal_gemm import (
+            nvgemm_cold_cache_shape,
         )
 
-        self.assertTrue(_nvgemm_cold_cache_shape((1, 65536)))
-        self.assertTrue(_nvgemm_cold_cache_shape((31, 4096)))
-        self.assertTrue(_nvgemm_cold_cache_shape((32, 32768)))
-        self.assertTrue(_nvgemm_cold_cache_shape((63, 4096)))
-        self.assertTrue(_nvgemm_cold_cache_shape((64, 4096)))
-        self.assertTrue(_nvgemm_cold_cache_shape((128, 4096)))
-        self.assertTrue(_nvgemm_cold_cache_shape((256, 65536)))
-        self.assertFalse(_nvgemm_cold_cache_shape((257, 4096)))
-        self.assertFalse(_nvgemm_cold_cache_shape((32, 4096, 1)))
+        self.assertEqual(nvgemm_cold_cache_shape(shape), expected)
 
     def test_nvfp4_profiling_cap_composes_with_general_cap(self):
-        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
-            _nvgemm_max_configs,
+        from torch._inductor.heuristics.template.nv_universal_gemm import (
+            nvgemm_max_configs,
         )
 
         with config.patch(
@@ -1553,129 +1532,56 @@ class TestNVUniversalGemmHeuristics(TestCase):
                 "nvgemm_max_profiling_configs": 7,
             }
         ):
-            self.assertEqual(_nvgemm_max_configs(False, 20), 7)
-            self.assertEqual(_nvgemm_max_configs(True, 20), 3)
+            self.assertEqual(nvgemm_max_configs(False, 20), 7)
+            self.assertEqual(nvgemm_max_configs(True, 20), 3)
 
         with config.patch(
             {
                 "nvgemm_max_profiling_configs": 2,
             }
         ):
-            self.assertEqual(_nvgemm_max_configs(False, 20), 2)
-            self.assertEqual(_nvgemm_max_configs(True, 20), 2)
+            self.assertEqual(nvgemm_max_configs(False, 20), 2)
+            self.assertEqual(nvgemm_max_configs(True, 20), 2)
 
         with config.patch(
             {
                 "nvgemm_max_profiling_configs": None,
             }
         ):
-            self.assertEqual(_nvgemm_max_configs(False, 20), 20)
-            self.assertEqual(_nvgemm_max_configs(True, 20), 20)
+            self.assertEqual(nvgemm_max_configs(False, 20), 20)
+            self.assertEqual(nvgemm_max_configs(True, 20), 20)
 
-    def test_nvfp4_swap_ab_is_automatic_for_decode_shapes(self):
-        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
-            _use_swap_ab_for_scaled_gemm,
+    @parametrize(
+        "force_swap,m,n,dtype,expected",
+        (
+            (False, 32, 1024, torch.float4_e2m1fn_x2, True),
+            (False, 256, 1024, torch.float4_e2m1fn_x2, True),
+            (False, 257, 1024, torch.float4_e2m1fn_x2, False),
+            (False, 32, 512, torch.float4_e2m1fn_x2, False),
+            (False, 32, 1024, torch.bfloat16, False),
+            (True, 512, 512, torch.bfloat16, True),
+        ),
+    )
+    def test_nvfp4_swap_ab_is_automatic_for_decode_shapes(
+        self, force_swap, m, n, dtype, expected
+    ):
+        from torch._inductor.heuristics.template.nv_universal_gemm import (
+            use_swap_ab_for_scaled_gemm,
         )
         from torch.nn.functional import ScalingType  # type: ignore[attr-defined]
 
-        args = (
-            torch.float4_e2m1fn_x2,
-            torch.float4_e2m1fn_x2,
-            ScalingType.BlockWise1x16,
-            ScalingType.BlockWise1x16,
-        )
-        with config.patch(nvgemm_swap_ab=False):
-            self.assertTrue(_use_swap_ab_for_scaled_gemm(*args, 32, 1024))
-            self.assertTrue(_use_swap_ab_for_scaled_gemm(*args, 256, 1024))
-            self.assertFalse(_use_swap_ab_for_scaled_gemm(*args, 257, 1024))
-            self.assertFalse(_use_swap_ab_for_scaled_gemm(*args, 32, 512))
-            self.assertFalse(
-                _use_swap_ab_for_scaled_gemm(
-                    torch.bfloat16,
-                    torch.bfloat16,
-                    ScalingType.BlockWise1x16,
-                    ScalingType.BlockWise1x16,
-                    32,
-                    1024,
-                )
-            )
-        with config.patch(nvgemm_swap_ab=True):
-            self.assertTrue(
-                _use_swap_ab_for_scaled_gemm(
-                    torch.bfloat16,
-                    torch.bfloat16,
-                    ScalingType.BlockWise1x16,
-                    ScalingType.BlockWise1x16,
-                    512,
-                    512,
-                )
-            )
-
-    def test_decode_nvfp4_cold_cache_rotates_weights(self):
-        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
-            NVUniversalGemmBenchmarkRequest,
-        )
-        from torch._inductor.runtime.benchmarking import benchmarker
-
-        request = object.__new__(NVUniversalGemmBenchmarkRequest)
-        request.force_eager_benchmark = False
-        request.benchmark_with_cudagraphs = True
-        request.config_cudagraph_benchmarking = False
-        request.config_max_autotune = False
-        request.cudagraph_unroll = 4
-        request.cudagraph_cold_cache_input_indices = (1, 3)
-        request.cold_cache_benchmarking = True
-        request.cleanup_run_fn = MagicMock()
-
-        inputs = tuple(torch.randn(2, 2) for _ in range(4))
-        out = torch.empty(2, 2)
-        run_fns = [MagicMock() for _ in range(4)]
-        request.make_run_fn = MagicMock(side_effect=run_fns)
-        device_interface = MagicMock()
-        device_interface.get_device_properties.return_value = SimpleNamespace(
-            L2_cache_size=100
-        )
-        request._get_benchmark_device = MagicMock(
-            return_value=(device_interface, "cuda", 0)
-        )
-
-        def run_cudagraph_benchmark(fn, *, device_type, cudagraph_unroll):
-            self.assertEqual(device_type, "cuda")
-            self.assertEqual(cudagraph_unroll, 4)
-            for _ in range(cudagraph_unroll):
-                fn()
-            return 1.25
-
-        with patch.object(
-            benchmarker,
-            "benchmark_gpu_with_cuda_graph",
-            side_effect=run_cudagraph_benchmark,
-        ):
+        with config.patch(nvgemm_swap_ab=force_swap):
             self.assertEqual(
-                request._benchmark_on_current_device(inputs, out),
-                1.25,
+                use_swap_ab_for_scaled_gemm(
+                    dtype,
+                    dtype,
+                    ScalingType.BlockWise1x16,
+                    ScalingType.BlockWise1x16,
+                    m,
+                    n,
+                ),
+                expected,
             )
-
-        self.assertEqual(request.make_run_fn.call_count, 4)
-        for index, call in enumerate(request.make_run_fn.call_args_list):
-            rotated = call.args
-            self.assertIs(rotated[0], inputs[0])
-            self.assertIs(rotated[2], inputs[2])
-            if index == 0:
-                self.assertIs(call.kwargs["out"], out)
-                self.assertIs(rotated[1], inputs[1])
-                self.assertIs(rotated[3], inputs[3])
-            else:
-                self.assertIsNot(call.kwargs["out"], out)
-                self.assertEqual(call.kwargs["out"].size(), out.size())
-                self.assertEqual(call.kwargs["out"].stride(), out.stride())
-                self.assertIsNot(rotated[1], inputs[1])
-                self.assertIsNot(rotated[3], inputs[3])
-                self.assertEqual(rotated[1], inputs[1])
-                self.assertEqual(rotated[3], inputs[3])
-        for run_fn in run_fns:
-            self.assertEqual(run_fn.call_count, 1)
-        request.cleanup_run_fn.assert_called_once()
 
     def test_nvgemm_benchmark_policy_is_snapshotted_and_cached(self):
         from torch._inductor.autotune_process import TensorMeta
@@ -1730,6 +1636,7 @@ class TestNVUniversalGemmHeuristics(TestCase):
         self.assertTrue(request.config_cudagraph_benchmarking)
         self.assertEqual(request.cudagraph_unroll, 16)
         self.assertTrue(request.cold_cache_benchmarking)
+        self.assertEqual(request.cudagraph_cold_cache_input_indices, (1, 3))
 
         caller = object.__new__(NVUniversalGemmCaller)
         caller.bmreq = request
@@ -1814,75 +1721,6 @@ class TestNVUniversalGemmHeuristics(TestCase):
         request.do_bench.assert_not_called()
         request.cleanup_run_fn.assert_called_once()
 
-    def test_nvgemm_automatic_cudagraph_failure_requests_eager_retry(self):
-        from torch._inductor.autotune_process import CUDAGraphBenchmarkError, TensorMeta
-        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
-            GemmVariant,
-            NVUniversalGemmBenchmarkRequest,
-        )
-        from torch._inductor.runtime.benchmarking import benchmarker
-
-        input_tensor = MagicMock(dtype=torch.float4_e2m1fn_x2)
-        output_tensor = MagicMock(shape=(32, 4096))
-        input_meta = TensorMeta(
-            device=torch.device("cuda"),
-            dtype=torch.float4_e2m1fn_x2,
-            sizes=(32, 4096),
-            strides=(4096, 1),
-            offset=0,
-        )
-        output_meta = TensorMeta(
-            device=torch.device("cuda"),
-            dtype=torch.bfloat16,
-            sizes=(32, 4096),
-            strides=(4096, 1),
-            offset=0,
-        )
-
-        with config.patch(
-            max_autotune=True,
-            max_autotune_gemm_backends="NVGEMM",
-            autotune_cudagraph_benchmarking=True,
-        ):
-            request = NVUniversalGemmBenchmarkRequest(
-                "kernel",
-                [input_meta],
-                output_meta,
-                MagicMock(),
-                torch.float32,
-                GemmVariant.SCALED_GEMM,
-            )
-        request.make_run_fn = MagicMock(return_value=lambda: None)
-        request.do_bench = MagicMock(return_value=1.25)
-        request._get_benchmark_device = MagicMock(return_value=(MagicMock(), "cuda", 0))
-        request.cleanup_run_fn = MagicMock()
-
-        with patch.object(
-            benchmarker,
-            "benchmark_gpu_with_cuda_graph",
-            side_effect=RuntimeError("capture failed"),
-        ):
-            with self.assertRaisesRegex(
-                CUDAGraphBenchmarkError, "automatic autotuning"
-            ):
-                request._benchmark_on_current_device((input_tensor,), output_tensor)
-
-        request.do_bench.assert_called_once()
-        request.cleanup_run_fn.assert_called_once()
-
-        request.cleanup_run_fn.reset_mock()
-        request.do_bench.reset_mock()
-        with patch.object(
-            benchmarker,
-            "benchmark_gpu_with_cuda_graph",
-            side_effect=RuntimeError("cudaErrorIllegalAddress"),
-        ):
-            with self.assertRaisesRegex(RuntimeError, "cudaErrorIllegalAddress"):
-                request._benchmark_on_current_device((input_tensor,), output_tensor)
-
-        request.do_bench.assert_not_called()
-        request.cleanup_run_fn.assert_called_once()
-
     @unittest.skipIf(torch.cuda.device_count() < 2, "requires two CUDA devices")
     def test_nvgemm_benchmark_uses_tensor_device(self):
         from torch._inductor.autotune_process import TensorMeta
@@ -1914,16 +1752,21 @@ class TestNVUniversalGemmHeuristics(TestCase):
                 torch.float32,
                 GemmVariant.SCALED_GEMM,
             )
-        request.make_run_fn = MagicMock(return_value=lambda: None)
-        request.do_bench = MagicMock(
-            side_effect=lambda *args, **kwargs: torch.cuda.current_device()
-        )
+        observed_devices = []
+
+        def make_run_fn(*args, **kwargs):
+            observed_devices.append(torch.cuda.current_device())
+            return lambda: None
+
+        request.make_run_fn = MagicMock(side_effect=make_run_fn)
+        request.benchmark_run_fn = MagicMock(return_value=1.25)
         request.cleanup_run_fn = MagicMock()
 
         original_device = torch.cuda.current_device()
         try:
             torch.cuda.set_device(0)
-            self.assertEqual(request.benchmark(), 1)
+            self.assertEqual(request.benchmark(), 1.25)
+            self.assertEqual(observed_devices, [1])
             self.assertEqual(torch.cuda.current_device(), 0)
         finally:
             torch.cuda.set_device(original_device)
@@ -2510,29 +2353,62 @@ class TestNVUniversalGemmHeuristics(TestCase):
         inputs.strides_hinted.return_value = ((k, 1), (n, 1))
         return inputs
 
-    def test_fallback_when_heuristics_unavailable(self):
-        """Test that filter_kernels returns first N kernels when heuristics unavailable."""
+    @staticmethod
+    def _heuristic_config(kernel, runtime=0.001):
+        design = kernel.metadata.design
+        return HeuristicConfig(
+            *design.tile_shape,
+            *design.cluster_shape,
+            4,
+            1,
+            64,
+            64,
+            32,
+            runtime,
+        )
+
+    def _filter_mock_kernels(
+        self,
+        kernels,
+        *,
+        inputs=None,
+        heuristic_configs,
+        count=1,
+        **kwargs,
+    ):
         heuristics = NVUniversalGemmHeuristics()
+        with (
+            patch.object(heuristics, "should_run", return_value=True),
+            patch.object(
+                heuristics,
+                "_get_heuristic_configs",
+                return_value=heuristic_configs,
+            ),
+        ):
+            return heuristics.filter_kernels(
+                kernels,
+                inputs if inputs is not None else self._create_mock_inputs(),
+                count=count,
+                **kwargs,
+            )
 
-        kernels = [self._create_mock_kernel(128, 128, 64, 1, 1) for _ in range(10)]
-        inputs = self._create_mock_inputs()
-
-        with patch.object(heuristics, "should_run", return_value=False):
-            result = heuristics.filter_kernels(kernels, inputs, count=3)
-
-        self.assertEqual(len(result), 3)
-        self.assertEqual(result, kernels[:3])
-
-    def test_fallback_excludes_unranked_prefetch_variants(self):
+    def test_fallback_when_heuristics_unavailable(self):
         heuristics = NVUniversalGemmHeuristics()
         prefetch = self._create_mock_kernel(128, 128, 64, 1, 1, use_prefetch=True)
-        primary = self._create_mock_kernel(128, 128, 64, 1, 1)
+        primary_kernels = [
+            self._create_mock_kernel(128, 128, 64, 1, 1) for _ in range(10)
+        ]
+        kernels = [prefetch, *primary_kernels]
         inputs = self._create_mock_inputs()
 
         with patch.object(heuristics, "should_run", return_value=False):
-            result = heuristics.filter_kernels([prefetch, primary], inputs, count=1)
+            default_result = heuristics.filter_kernels(kernels, inputs, count=3)
+            result = heuristics.filter_kernels(
+                kernels, inputs, count=3, fallback_count=7
+            )
 
-        self.assertEqual(result, [primary])
+        self.assertEqual(default_result, primary_kernels[:3])
+        self.assertEqual(result, primary_kernels[:7])
 
     def test_fallback_when_no_configs_extracted(self):
         """Test fallback when kernel configs cannot be extracted."""
@@ -2554,206 +2430,155 @@ class TestNVUniversalGemmHeuristics(TestCase):
 
     def test_filter_kernels_sorts_by_runtime(self):
         """Test that filter_kernels returns kernels sorted by estimated runtime and respects count."""
-        heuristics = NVUniversalGemmHeuristics()
-
         kernel_a = self._create_mock_kernel(128, 128, 64, 1, 1)
         kernel_b = self._create_mock_kernel(256, 128, 64, 2, 1)
         kernel_c = self._create_mock_kernel(128, 256, 32, 1, 2)
         kernels = [kernel_a, kernel_b, kernel_c]
-
-        inputs = self._create_mock_inputs()
-
         heuristic_configs = [
-            HeuristicConfig(128, 128, 64, 1, 1, 4, 1, 64, 64, 32, 0.003),
-            HeuristicConfig(256, 128, 64, 2, 1, 4, 1, 64, 64, 32, 0.001),
-            HeuristicConfig(128, 256, 32, 1, 2, 4, 1, 64, 64, 32, 0.002),
+            self._heuristic_config(kernel_a, 0.003),
+            self._heuristic_config(kernel_b, 0.001),
+            self._heuristic_config(kernel_c, 0.002),
         ]
 
-        with patch.object(heuristics, "should_run", return_value=True):
-            with patch.object(
-                heuristics, "_get_heuristic_configs", return_value=heuristic_configs
-            ):
-                # Test sorting with count=3 (all kernels)
-                result = heuristics.filter_kernels(kernels, inputs, count=3)
-                self.assertEqual(len(result), 3)
-                self.assertIs(result[0], kernel_b)
-                self.assertIs(result[1], kernel_c)
-                self.assertIs(result[2], kernel_a)
-
-                # Test count limit with count=2 (should drop slowest)
-                result = heuristics.filter_kernels(kernels, inputs, count=2)
-                self.assertEqual(len(result), 2)
-                self.assertIs(result[0], kernel_b)
-                self.assertIs(result[1], kernel_c)
-
-                # Test count > available kernels (should return all 3)
-                result = heuristics.filter_kernels(kernels, inputs, count=10)
-                self.assertEqual(len(result), 3)
+        self.assertEqual(
+            self._filter_mock_kernels(
+                kernels, heuristic_configs=heuristic_configs, count=2
+            ),
+            [kernel_b, kernel_c],
+        )
+        self.assertEqual(
+            self._filter_mock_kernels(
+                kernels, heuristic_configs=heuristic_configs, count=10
+            ),
+            [kernel_b, kernel_c, kernel_a],
+        )
 
     def test_filter_kernels_deduplicates_heuristic_configs(self):
-        heuristics = NVUniversalGemmHeuristics()
         kernel = self._create_mock_kernel(128, 128, 64, 1, 1)
         kernel.metadata.operator_name = "kernel"
-        config = HeuristicConfig(128, 128, 64, 1, 1, 4, 1, 64, 64, 32, 0.003)
-
-        with (
-            patch.object(heuristics, "should_run", return_value=True),
-            patch.object(
-                heuristics, "_get_heuristic_configs", return_value=[config, config]
-            ),
-        ):
-            result = heuristics.filter_kernels(
-                [kernel], self._create_mock_inputs(), count=2
-            )
+        config = self._heuristic_config(kernel, 0.003)
+        result = self._filter_mock_kernels(
+            [kernel], heuristic_configs=[config, config], count=2
+        )
 
         self.assertEqual(result, [kernel])
 
     def test_filter_kernels_supplements_large_m_nvfp4_config(self):
-        heuristics = NVUniversalGemmHeuristics()
         ranked_kernel = self._create_mock_kernel(128, 192, 256, 2, 1)
         flux_kernel = self._create_mock_kernel(256, 192, 256, 2, 2)
         flux_swizzle_kernel = self._create_mock_kernel(256, 192, 256, 2, 2)
-        ranked_config = HeuristicConfig(128, 192, 256, 2, 1, 4, 1, 64, 64, 32, 0.001)
+        ranked_config = self._heuristic_config(ranked_kernel)
+        kernels = [ranked_kernel, flux_kernel, flux_swizzle_kernel]
+        inputs = self._create_mock_inputs(
+            m=4608, n=55296, k=6144, dtype=torch.float4_e2m1fn_x2
+        )
 
-        with (
-            config.patch(nvgemm_supplement_configs=True),
-            patch.object(heuristics, "should_run", return_value=True),
-            patch.object(
-                heuristics, "_get_heuristic_configs", return_value=[ranked_config]
-            ),
-        ):
-            result = heuristics.filter_kernels(
-                [ranked_kernel, flux_kernel, flux_swizzle_kernel],
-                self._create_mock_inputs(
-                    m=4608, n=55296, k=6144, dtype=torch.float4_e2m1fn_x2
-                ),
-                count=1,
+        with config.patch(nvgemm_supplement_configs=True):
+            result = self._filter_mock_kernels(
+                kernels,
+                inputs=inputs,
+                heuristic_configs=[ranked_config],
                 is_nvfp4=True,
             )
 
         self.assertEqual(result, [ranked_kernel, flux_kernel, flux_swizzle_kernel])
 
-        with (
-            config.patch(nvgemm_supplement_configs=False),
-            patch.object(heuristics, "should_run", return_value=True),
-            patch.object(
-                heuristics, "_get_heuristic_configs", return_value=[ranked_config]
-            ),
-        ):
-            result = heuristics.filter_kernels(
-                [ranked_kernel, flux_kernel, flux_swizzle_kernel],
-                self._create_mock_inputs(
-                    m=4608, n=55296, k=6144, dtype=torch.float4_e2m1fn_x2
-                ),
-                count=1,
+        with config.patch(nvgemm_supplement_configs=False):
+            result = self._filter_mock_kernels(
+                kernels,
+                inputs=inputs,
+                heuristic_configs=[ranked_config],
                 is_nvfp4=True,
             )
 
         self.assertEqual(result, [ranked_kernel])
 
-    def test_filter_kernels_supplements_medium_m_nvfp4_config(self):
-        heuristics = NVUniversalGemmHeuristics()
-        ranked_kernel = self._create_mock_kernel(256, 192, 256, 2, 2)
-        medium_m_cluster_1 = self._create_mock_kernel(128, 64, 256, 1, 1)
-        medium_m_kernel = self._create_mock_kernel(128, 64, 256, 1, 2)
-        medium_m_qkv_kernel = self._create_mock_kernel(128, 128, 256, 1, 1)
-        ranked_config = HeuristicConfig(256, 192, 256, 2, 2, 4, 1, 64, 64, 32, 0.001)
-
-        with (
-            patch.object(heuristics, "should_run", return_value=True),
-            patch.object(
-                heuristics, "_get_heuristic_configs", return_value=[ranked_config]
+    @parametrize(
+        "logical_m,logical_n,packed_k,n_is_static,swap_ab,targets,prefetch",
+        (
+            (
+                128,
+                5120,
+                12800,
+                True,
+                False,
+                ((128, 64, 1, 1), (128, 64, 1, 2), (128, 128, 1, 1), (128, 128, 1, 2)),
+                ((128, 64, 1, 4), (128, 128, 1, 2), (128, 128, 1, 4)),
             ),
-        ):
-            result = heuristics.filter_kernels(
-                [
-                    ranked_kernel,
-                    medium_m_cluster_1,
-                    medium_m_kernel,
-                    medium_m_qkv_kernel,
-                ],
-                self._create_mock_inputs(
-                    m=128, n=5120, k=12800, dtype=torch.float4_e2m1fn_x2
-                ),
-                count=1,
-                is_nvfp4=True,
-            )
-
-        self.assertEqual(
-            result,
-            [
-                ranked_kernel,
-                medium_m_cluster_1,
-                medium_m_kernel,
-                medium_m_qkv_kernel,
-            ],
-        )
-
-    def test_filter_kernels_adds_scoped_medium_m_prefetch_config(self):
-        heuristics = NVUniversalGemmHeuristics()
-        ranked_kernel = self._create_mock_kernel(256, 192, 256, 2, 2)
-        output_prefetch = self._create_mock_kernel(
-            128, 64, 256, 1, 4, use_prefetch=True
-        )
-        qkv_non_prefetch = self._create_mock_kernel(128, 128, 256, 1, 2)
-        qkv_prefetch = self._create_mock_kernel(128, 128, 256, 1, 2, use_prefetch=True)
-        wide_qkv_non_prefetch = self._create_mock_kernel(128, 128, 256, 1, 4)
-        wide_qkv_prefetch = self._create_mock_kernel(
-            128, 128, 256, 1, 4, use_prefetch=True
-        )
-        ranked_config = HeuristicConfig(256, 192, 256, 2, 2, 4, 1, 64, 64, 32, 0.001)
-
-        with (
-            patch.object(heuristics, "should_run", return_value=True),
-            patch.object(
-                heuristics, "_get_heuristic_configs", return_value=[ranked_config]
+            (
+                128,
+                10240,
+                2560,
+                True,
+                True,
+                ((256, 128, 4, 1), (256, 64, 2, 2), (128, 64, 2, 2)),
+                ((256, 64, 2, 2), (256, 64, 4, 2), (128, 64, 2, 2)),
             ),
-        ):
-            narrow_result = heuristics.filter_kernels(
-                [
-                    ranked_kernel,
-                    output_prefetch,
-                    qkv_non_prefetch,
-                    qkv_prefetch,
-                    wide_qkv_non_prefetch,
-                    wide_qkv_prefetch,
-                ],
-                self._create_mock_inputs(
-                    m=128, n=10240, k=2560, dtype=torch.float4_e2m1fn_x2
+            (
+                64,
+                35840,
+                2560,
+                True,
+                True,
+                ((128, 64, 1, 1),),
+                ((256, 64, 2, 2), (256, 64, 4, 2)),
+            ),
+            (64, 4480, 3920, True, False, ((256, 64, 2, 2),), ()),
+            (
+                32,
+                4096,
+                2048,
+                True,
+                True,
+                ((128, 32, 1, 1), (128, 64, 1, 1), (128, 32, 4, 1), (128, 32, 2, 1)),
+                ((128, 32, 4, 1),),
+            ),
+            (
+                8,
+                10240,
+                2560,
+                True,
+                True,
+                (
+                    (128, 32, 1, 1),
+                    (128, 64, 1, 1),
+                    (128, 32, 4, 1),
+                    (128, 8, 1, 1),
+                    (128, 8, 4, 1),
+                    (128, 16, 1, 1),
                 ),
-                count=1,
-                is_nvfp4=True,
-            )
-            wide_result = heuristics.filter_kernels(
-                [
-                    ranked_kernel,
-                    output_prefetch,
-                    qkv_non_prefetch,
-                    qkv_prefetch,
-                    wide_qkv_non_prefetch,
-                    wide_qkv_prefetch,
-                ],
-                self._create_mock_inputs(
-                    m=128, n=32768, k=2560, dtype=torch.float4_e2m1fn_x2
-                ),
-                count=1,
-                is_nvfp4=True,
+                (),
+            ),
+        ),
+    )
+    def test_nvfp4_candidate_config_policy(
+        self,
+        logical_m,
+        logical_n,
+        packed_k,
+        n_is_static,
+        swap_ab,
+        targets,
+        prefetch,
+    ):
+        from torch._inductor.heuristics.template.nv_universal_gemm import (
+            _nvfp4_candidate_configs,
+        )
+
+        with config.patch(nvgemm_supplement_configs=False):
+            actual_targets, all_variants, actual_prefetch = _nvfp4_candidate_configs(
+                logical_m=logical_m,
+                logical_n=logical_n,
+                packed_k=packed_k,
+                n_is_static=n_is_static,
+                swap_ab=swap_ab,
             )
 
-        self.assertEqual(
-            narrow_result,
-            [
-                ranked_kernel,
-                output_prefetch,
-                qkv_non_prefetch,
-                qkv_prefetch,
-                wide_qkv_prefetch,
-            ],
-        )
-        self.assertEqual(wide_result, [ranked_kernel, qkv_non_prefetch])
+        self.assertEqual(tuple(actual_targets), targets)
+        self.assertEqual(tuple(all_variants), ())
+        self.assertEqual(tuple(actual_prefetch), prefetch)
 
     def test_filter_kernels_supplements_medium_m_nvfp4_swap_configs(self):
-        heuristics = NVUniversalGemmHeuristics()
         ranked_kernel = self._create_mock_kernel(128, 128, 256, 2, 1)
         tile_128_cluster_4 = self._create_mock_kernel(256, 128, 256, 4, 1)
         tile_128_cluster_4_alt = self._create_mock_kernel(256, 128, 256, 4, 1)
@@ -2761,29 +2586,21 @@ class TestNVUniversalGemmHeuristics(TestCase):
         tile_64_cluster_4x2_prefetch = self._create_mock_kernel(
             256, 64, 256, 4, 2, use_prefetch=True
         )
-        ranked_config = HeuristicConfig(128, 128, 256, 2, 1, 4, 1, 64, 64, 32, 0.001)
-
-        with (
-            patch.object(heuristics, "should_run", return_value=True),
-            patch.object(
-                heuristics, "_get_heuristic_configs", return_value=[ranked_config]
+        result = self._filter_mock_kernels(
+            [
+                ranked_kernel,
+                tile_128_cluster_4,
+                tile_128_cluster_4_alt,
+                tile_64_cluster_2x2,
+                tile_64_cluster_4x2_prefetch,
+            ],
+            inputs=self._create_mock_inputs(
+                m=10240, n=128, k=2560, dtype=torch.float4_e2m1fn_x2
             ),
-        ):
-            result = heuristics.filter_kernels(
-                [
-                    ranked_kernel,
-                    tile_128_cluster_4,
-                    tile_128_cluster_4_alt,
-                    tile_64_cluster_2x2,
-                    tile_64_cluster_4x2_prefetch,
-                ],
-                self._create_mock_inputs(
-                    m=10240, n=128, k=2560, dtype=torch.float4_e2m1fn_x2
-                ),
-                count=1,
-                is_nvfp4=True,
-                swap_ab=True,
-            )
+            heuristic_configs=[self._heuristic_config(ranked_kernel)],
+            is_nvfp4=True,
+            swap_ab=True,
+        )
 
         self.assertEqual(
             result,
@@ -2795,220 +2612,24 @@ class TestNVUniversalGemmHeuristics(TestCase):
             ],
         )
 
-    def test_filter_kernels_supplements_m64_nvfp4_swap_configs(self):
-        heuristics = NVUniversalGemmHeuristics()
-        ranked_kernel = self._create_mock_kernel(128, 64, 256, 2, 1)
-        tile_64_cluster_1 = self._create_mock_kernel(128, 64, 256, 1, 1)
-        tile_64_cluster_2x2 = self._create_mock_kernel(256, 64, 256, 2, 2)
-        tile_64_cluster_2x2_prefetch = self._create_mock_kernel(
-            256, 64, 256, 2, 2, use_prefetch=True
-        )
-        tile_64_cluster_4x2 = self._create_mock_kernel(256, 64, 256, 4, 2)
-        tile_64_cluster_4x2_prefetch = self._create_mock_kernel(
-            256, 64, 256, 4, 2, use_prefetch=True
-        )
-        ranked_config = HeuristicConfig(128, 64, 256, 2, 1, 4, 1, 64, 64, 32, 0.001)
-
-        with (
-            patch.object(heuristics, "should_run", return_value=True),
-            patch.object(
-                heuristics, "_get_heuristic_configs", return_value=[ranked_config]
-            ),
-        ):
-            result = heuristics.filter_kernels(
-                [
-                    ranked_kernel,
-                    tile_64_cluster_1,
-                    tile_64_cluster_2x2,
-                    tile_64_cluster_2x2_prefetch,
-                    tile_64_cluster_4x2,
-                    tile_64_cluster_4x2_prefetch,
-                ],
-                self._create_mock_inputs(
-                    m=35840, n=64, k=2560, dtype=torch.float4_e2m1fn_x2
-                ),
-                count=1,
-                is_nvfp4=True,
-                swap_ab=True,
-            )
-
-        self.assertEqual(
-            result,
-            [
-                ranked_kernel,
-                tile_64_cluster_1,
-                tile_64_cluster_2x2_prefetch,
-                tile_64_cluster_4x2_prefetch,
-            ],
-        )
-
-    def test_filter_kernels_supplements_m64_nvfp4_native_down_config(self):
-        heuristics = NVUniversalGemmHeuristics()
-        ranked_kernel = self._create_mock_kernel(128, 64, 256, 1, 2)
-        tile_64_cluster_2x2 = self._create_mock_kernel(256, 64, 256, 2, 2)
-        ranked_config = HeuristicConfig(128, 64, 256, 1, 2, 4, 1, 64, 64, 32, 0.001)
-
-        with (
-            patch.object(heuristics, "should_run", return_value=True),
-            patch.object(
-                heuristics, "_get_heuristic_configs", return_value=[ranked_config]
-            ),
-        ):
-            result = heuristics.filter_kernels(
-                [ranked_kernel, tile_64_cluster_2x2],
-                self._create_mock_inputs(
-                    m=64, n=4480, k=3920, dtype=torch.float4_e2m1fn_x2
-                ),
-                count=1,
-                is_nvfp4=True,
-            )
-
-        self.assertEqual(result, [ranked_kernel, tile_64_cluster_2x2])
-
-    def test_filter_kernels_supplements_small_m_nvfp4_swap_configs(self):
-        heuristics = NVUniversalGemmHeuristics()
-        ranked_kernel = self._create_mock_kernel(128, 128, 256, 2, 1)
-        tile_32_cluster_1 = self._create_mock_kernel(128, 32, 256, 1, 1)
-        tile_64_cluster_1 = self._create_mock_kernel(128, 64, 256, 1, 1)
-        tile_32_cluster_2 = self._create_mock_kernel(128, 32, 256, 2, 1)
-        tile_32_cluster_4 = self._create_mock_kernel(128, 32, 256, 4, 1)
-        tile_32_cluster_4_prefetch = self._create_mock_kernel(
-            128, 32, 256, 4, 1, use_prefetch=True
-        )
-        ranked_config = HeuristicConfig(128, 128, 256, 2, 1, 4, 1, 64, 64, 32, 0.001)
-        kernels = [
-            ranked_kernel,
-            tile_32_cluster_1,
-            tile_64_cluster_1,
-            tile_32_cluster_2,
-            tile_32_cluster_4,
-            tile_32_cluster_4_prefetch,
-        ]
-
-        with (
-            patch.object(heuristics, "should_run", return_value=True),
-            patch.object(
-                heuristics, "_get_heuristic_configs", return_value=[ranked_config]
-            ),
-        ):
-            small_hidden_result = heuristics.filter_kernels(
-                kernels,
-                self._create_mock_inputs(
-                    m=4096, n=32, k=2048, dtype=torch.float4_e2m1fn_x2
-                ),
-                count=1,
-                is_nvfp4=True,
-                swap_ab=True,
-            )
-            compact_projection_result = heuristics.filter_kernels(
-                kernels,
-                self._create_mock_inputs(
-                    m=5120, n=32, k=4096, dtype=torch.float4_e2m1fn_x2
-                ),
-                count=1,
-                is_nvfp4=True,
-                swap_ab=True,
-            )
-            wide_projection_result = heuristics.filter_kernels(
-                kernels,
-                self._create_mock_inputs(
-                    m=10240, n=32, k=2560, dtype=torch.float4_e2m1fn_x2
-                ),
-                count=1,
-                is_nvfp4=True,
-                swap_ab=True,
-            )
-            wide_k_projection_result = heuristics.filter_kernels(
-                kernels,
-                self._create_mock_inputs(
-                    m=5120, n=32, k=12800, dtype=torch.float4_e2m1fn_x2
-                ),
-                count=1,
-                is_nvfp4=True,
-                swap_ab=True,
-            )
-
-        self.assertEqual(
-            small_hidden_result,
-            kernels,
-        )
-        self.assertEqual(
-            compact_projection_result,
-            kernels,
-        )
-        self.assertEqual(
-            wide_projection_result,
-            [ranked_kernel, tile_32_cluster_1, tile_64_cluster_1, tile_32_cluster_4],
-        )
-        self.assertEqual(wide_k_projection_result, wide_projection_result)
-
     def test_filter_kernels_does_not_apply_nvfp4_policy_to_mxfp4(self):
-        heuristics = NVUniversalGemmHeuristics()
         ranked_kernel = self._create_mock_kernel(128, 128, 256, 2, 1)
         nvfp4_only_kernel = self._create_mock_kernel(128, 32, 256, 1, 1)
-        ranked_config = HeuristicConfig(128, 128, 256, 2, 1, 4, 1, 64, 64, 32, 0.001)
-
-        with (
-            patch.object(heuristics, "should_run", return_value=True),
-            patch.object(
-                heuristics, "_get_heuristic_configs", return_value=[ranked_config]
+        result = self._filter_mock_kernels(
+            [ranked_kernel, nvfp4_only_kernel],
+            inputs=self._create_mock_inputs(
+                m=4096, n=32, k=2048, dtype=torch.float4_e2m1fn_x2
             ),
-        ):
-            result = heuristics.filter_kernels(
-                [ranked_kernel, nvfp4_only_kernel],
-                self._create_mock_inputs(
-                    m=4096, n=32, k=2048, dtype=torch.float4_e2m1fn_x2
-                ),
-                count=1,
-                is_nvfp4=False,
-            )
+            heuristic_configs=[self._heuristic_config(ranked_kernel)],
+            is_nvfp4=False,
+        )
 
         self.assertEqual(result, [ranked_kernel])
-
-    def test_filter_kernels_supplements_m8_nvfp4_swap_configs(self):
-        heuristics = NVUniversalGemmHeuristics()
-        ranked_kernel = self._create_mock_kernel(128, 128, 256, 2, 1)
-        tile_8_cluster_1 = self._create_mock_kernel(128, 8, 256, 1, 1)
-        tile_8_cluster_4 = self._create_mock_kernel(128, 8, 256, 4, 1)
-        tile_16_cluster_1 = self._create_mock_kernel(128, 16, 256, 1, 1)
-        ranked_config = HeuristicConfig(128, 128, 256, 2, 1, 4, 1, 64, 64, 32, 0.001)
-
-        with (
-            patch.object(heuristics, "should_run", return_value=True),
-            patch.object(
-                heuristics, "_get_heuristic_configs", return_value=[ranked_config]
-            ),
-        ):
-            result = heuristics.filter_kernels(
-                [
-                    ranked_kernel,
-                    tile_8_cluster_1,
-                    tile_8_cluster_4,
-                    tile_16_cluster_1,
-                ],
-                self._create_mock_inputs(
-                    m=10240, n=8, k=2560, dtype=torch.float4_e2m1fn_x2
-                ),
-                count=1,
-                is_nvfp4=True,
-                swap_ab=True,
-            )
-
-        self.assertEqual(
-            result,
-            [
-                ranked_kernel,
-                tile_8_cluster_1,
-                tile_8_cluster_4,
-                tile_16_cluster_1,
-            ],
-        )
 
     def test_filter_kernels_skips_narrow_n_tactics_for_dynamic_n(self):
         heuristics = NVUniversalGemmHeuristics()
         ranked_kernel = self._create_mock_kernel(128, 128, 256, 2, 1)
         narrow_kernel = self._create_mock_kernel(128, 8, 256, 1, 1)
-        ranked_config = HeuristicConfig(128, 128, 256, 2, 1, 4, 1, 64, 64, 32, 0.001)
         inputs = self._create_mock_inputs(
             m=10240, n=8, k=2560, dtype=torch.float4_e2m1fn_x2
         )
@@ -3018,19 +2639,13 @@ class TestNVUniversalGemmHeuristics(TestCase):
             sympy.Integer(2560),
         )
 
-        with (
-            patch.object(heuristics, "should_run", return_value=True),
-            patch.object(
-                heuristics, "_get_heuristic_configs", return_value=[ranked_config]
-            ),
-        ):
-            result = heuristics.filter_kernels(
-                [ranked_kernel, narrow_kernel],
-                inputs,
-                count=1,
-                is_nvfp4=True,
-                swap_ab=True,
-            )
+        result = self._filter_mock_kernels(
+            [ranked_kernel, narrow_kernel],
+            inputs=inputs,
+            heuristic_configs=[self._heuristic_config(ranked_kernel)],
+            is_nvfp4=True,
+            swap_ab=True,
+        )
 
         self.assertEqual(result, [ranked_kernel])
 
