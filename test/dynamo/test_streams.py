@@ -23,6 +23,7 @@ from torch._dynamo.testing import extract_graph, remove_trailing_space
 from torch._dynamo.variables.user_defined import UserDefinedClassVariable
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_LINUX,
     IS_MACOS,
     IS_WINDOWS,
@@ -52,6 +53,8 @@ def strip_annotation_desc(gm_str: str) -> str:
 
 
 class TestStreamsGeneric(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @unittest.skip("Needs graph break support with annotation context")
     def test_stream_enter_exit_graph_break(self):
         pass
@@ -469,6 +472,8 @@ class TestStreamsGeneric(torch._dynamo.test_case.TestCase):
 
 @requires_accelerator
 class TestStreams(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -2781,6 +2786,7 @@ instantiate_device_type_tests(
 
 @requires_cuda
 class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.CUDA
     @torch.compiler.config.patch(compile_on_one_rank=True)
     def test_synchronize_preserves_indexless_device_under_coor(self) -> None:
         def f(x):
@@ -3077,6 +3083,8 @@ class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
 
 @requires_xpu
 class TestStreamsXPUSpecific(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.XPU
+
     def test_dynamo_registry_no_dangling_weakref(self):
         reset_user_object_tracking()
 
@@ -3164,6 +3172,154 @@ class TestStreamsXPUSpecific(torch._dynamo.test_case.TestCase):
         self.assertEqual(actual_s1, expected_s1)
         self.assertEqual(actual_s2, expected_s2)
         self.assertEqual(actual_default, default_s.sycl_queue)
+
+
+class TestStreamsSyncDeallocDeviceGate(torch._dynamo.test_case.TestCase):
+    """CPU-only tests for the device gating of _maybe_emit_sync_dealloc.
+
+    The gate must be capability-based (via the same torch.accelerator channel
+    the emission itself uses), not a device-name whitelist: devices without
+    stream support skip the emission instead of crashing the compile, and
+    stream-capable accelerators outside the old device tuple get the emission.
+    """
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_del_cpu_tensor_no_sync_dealloc(self):
+        # Regression anchor: deleting a CPU tensor never emits
+        # streams::sync_dealloc, regardless of the gating mechanism.
+        from torch._dynamo.testing import extract_graph
+
+        def f(x):
+            y = x * 2
+            del y
+            return x + 1
+
+        inp = (torch.randn(4),)
+        (
+            _,
+            _,
+            fw_graphs,
+            _,
+        ) = extract_graph(f, *inp)
+        self.assertEqual(len(fw_graphs), 1)
+        graph_str = fw_graphs[0].code
+        self.assertNotIn("sync_dealloc", graph_str)
+        self.assertNotIn("record_event", graph_str)
+
+    def test_del_meta_tensor_skips_gracefully(self):
+        # meta tensors are outside the old whitelist; the capability check
+        # against the current accelerator must skip them without crashing
+        # (accelerator/meta type mismatch on an accelerator box, no
+        # accelerator on a CPU-only box).
+        from torch._dynamo.testing import extract_graph
+
+        def f(x):
+            y = x * 2
+            del y
+            return x + 1
+
+        inp = (torch.empty(4, device="meta"),)
+        (
+            _,
+            _,
+            fw_graphs,
+            _,
+        ) = extract_graph(f, *inp)
+        self.assertEqual(len(fw_graphs), 1)
+        graph_str = fw_graphs[0].code
+        self.assertNotIn("sync_dealloc", graph_str)
+        self.assertNotIn("record_event", graph_str)
+
+    def test_sync_dealloc_emitted_for_unlisted_stream_capable_device(self):
+        # A stream-capable device outside the old whitelist (e.g. an
+        # out-of-tree accelerator) must get the emission. Drives the
+        # production method with a minimal fake translator whose output
+        # graph is a real torch.fx.Graph.
+        from unittest import mock
+
+        from torch._dynamo.symbolic_convert import InstructionTranslatorBase
+        from torch._dynamo.variables import streams as streams_module
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        alloc_user = graph.call_function(torch.mul, (x, x))
+        last_user = graph.call_function(torch.sin, (alloc_user,))
+        graph.output(last_user)
+        # alloc node carries no stream meta; the last user runs on another stream
+        last_user.meta["custom"] = {"stream": 7}
+
+        emitted: list[tuple[object, tuple]] = []
+
+        def fake_create_proxy(kind, target, args, kwargs):
+            node = graph.call_function(target, args, kwargs)
+            emitted.append((target, args))
+            return node
+
+        fake_tx = mock.Mock()
+        fake_tx.output.graph = graph
+        fake_tx.output.create_proxy.side_effect = fake_create_proxy
+
+        tensor = mock.Mock()
+        tensor.device = torch.device("privateuseone", 0)
+        tensor.proxy.node = alloc_user
+        tensor.as_proxy.return_value = "proxy"
+
+        mp_acc = mock.patch.object(
+            torch.accelerator,
+            "current_accelerator",
+            return_value=torch.device("privateuseone", 0),
+        )
+        mp_stream = mock.patch.object(
+            streams_module, "get_current_stream", side_effect=[3]
+        )
+        mp_event = mock.patch.object(streams_module, "new_event", return_value=0)
+        with mp_acc, mp_stream, mp_event:
+            InstructionTranslatorBase._maybe_emit_sync_dealloc(fake_tx, tensor)
+
+        self.assertEqual(
+            emitted,
+            [
+                (torch.ops.streams.record_event, (0, 7)),
+                (torch.ops.streams.sync_dealloc, (0, 3, "proxy")),
+            ],
+        )
+
+    def test_get_current_stream_failure_propagates(self):
+        # Failure-mode contract: get_current_stream failures on a supported
+        # device propagate instead of being swallowed into a silent skip
+        # (pins the gate design: no exception-based capability probing).
+        from unittest import mock
+
+        from torch._dynamo.symbolic_convert import InstructionTranslatorBase
+        from torch._dynamo.variables import streams as streams_module
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        alloc_user = graph.call_function(torch.mul, (x, x))
+        last_user = graph.call_function(torch.sin, (alloc_user,))
+        graph.output(last_user)
+        last_user.meta["custom"] = {"stream": 7}
+
+        fake_tx = mock.Mock()
+        fake_tx.output.graph = graph
+
+        tensor = mock.Mock()
+        tensor.device = torch.device("privateuseone", 0)
+        tensor.proxy.node = alloc_user
+
+        mp_acc = mock.patch.object(
+            torch.accelerator,
+            "current_accelerator",
+            return_value=torch.device("privateuseone", 0),
+        )
+        mp_stream = mock.patch.object(
+            streams_module,
+            "get_current_stream",
+            side_effect=TypeError("stream boom"),
+        )
+        with mp_acc, mp_stream, self.assertRaisesRegex(TypeError, "stream boom"):
+            InstructionTranslatorBase._maybe_emit_sync_dealloc(fake_tx, tensor)
 
 
 if __name__ == "__main__":
