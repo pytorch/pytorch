@@ -1121,7 +1121,6 @@ class TestFP8Lowering(TestCase):
     @parametrize("keyword_args", [False, True])
     def test_scaled_mm_v2_constructs_layouts(self, device, rowwise, keyword_args):
         m, k, n = 32, 64, 32
-        # gfx94x hipBLASLt rejects float8_e4m3fn; it implements the fnuz variant.
         dtype_float8 = _fix_fp8_dtype_for_rocm(torch.float8_e4m3fn, device)
         a = torch.randn(m, k, device=device).to(dtype_float8)
         b = torch.randn(k, n, device=device).to(dtype_float8)
@@ -1198,7 +1197,6 @@ class TestFP8Lowering(TestCase):
             )
 
         compiled = torch.compile(fn, fullgraph=True, dynamic=True)
-        # gfx94x hipBLASLt rejects float8_e4m3fn; it implements the fnuz variant.
         dtype_float8 = _fix_fp8_dtype_for_rocm(torch.float8_e4m3fn, device)
         for m in (32, 64):
             a = torch.randn(m, 64, device=device).to(dtype_float8)
