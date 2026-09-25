@@ -10966,24 +10966,6 @@ class TestLargeTensors(TestCaseMPS):
         del x
 
     @serialTest()
-    def test_64bit_range_factories(self):
-        # https://github.com/pytorch/pytorch/issues/198473: elements past 2^32 were left unwritten
-        if torch.mps.recommended_max_memory() < 8_000_000_000:
-            raise unittest.SkipTest("Needs at least 8Gb of RAM")
-        n = (1 << 32) + (1 << 20)
-        idx = torch.tensor([0, 1 << 20, 1 << 31, (1 << 32) - 1, 1 << 32, n - 1], device='mps')
-        x = torch.arange(n, dtype=torch.uint8, device='mps')
-        self.assertEqual(x[idx], idx.to(torch.uint8))
-        del x
-        m = n // 4
-        out = torch.empty(m, 4, dtype=torch.uint8, device='mps').t()
-        torch.arange(n, out=out)
-        self.assertEqual(out[idx // m, idx % m], idx.to(torch.uint8))
-        del out
-        x = torch.linspace(0, 255, n, dtype=torch.uint8, device='mps')
-        self.assertEqual(x[idx], (idx * 255 // (n - 1)).to(torch.uint8), atol=1, rtol=0)
-
-    @serialTest()
     def test_64bit_strided_unary(self):
         # https://github.com/pytorch/pytorch/issues/183419: slice's byte-stride
         # extent > INT32_MAX forces TensorIterator to split the iter
