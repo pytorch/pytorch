@@ -1528,10 +1528,18 @@ Tri ExprArena::eval_fact(const Expr* e, Fact f) {
         return ask(e->args[1], sign) == Tri::True ? Tri::True : Tri::Unknown;
       }
       return Tri::Unknown;
+    case Kind::Where:
+      if (f == F::integer || f == F::nonnegative || f == F::positive) {
+        return ask(e->args[1], f) == Tri::True &&
+                ask(e->args[2], f) == Tri::True
+            ? Tri::True
+            : Tri::Unknown;
+      }
+      [[fallthrough]];
     case Kind::BitwiseAnd:
     case Kind::BitwiseOr:
     case Kind::BitwiseXor:
-      // Function._eval_is_commutative; the classes have no facts.
+      // Function._eval_is_commutative; BitwiseFn has no other facts.
       return f == F::commutative ? fuzzy_and_or(*this, e->args, f, false)
                                  : Tri::Unknown;
     case Kind::Identity:

@@ -55,6 +55,7 @@ from torch.utils._sympy.functions import (
     ToFloat,
     TruncToFloat,
     TruncToInt,
+    Where,
 )
 from torch.utils._sympy.interp import sympy_interp
 from torch.utils._sympy.numbers import int_oo
@@ -1327,11 +1328,12 @@ class TestNativeFunctions(TestCase):
     BITWISE = (BitwiseFn_bitwise_and, BitwiseFn_bitwise_or, BitwiseFn_bitwise_xor)
     ALL_FUNCTIONS.update((f.__name__, f) for f in BITWISE)
     ALL_FUNCTIONS["Identity"] = Identity
+    ALL_FUNCTIONS["Where"] = Where
     NODE_TYPES = (Mod, PythonMod, FloorDiv, Max, Min, PowByNatural, FloatPow)
     NODE_TYPES += (FloatTrueDiv, IntTrueDiv, CeilToInt, FloorToInt, TruncToInt)
     NODE_TYPES += (RoundToInt, ToFloat, TruncToFloat, RoundDecimal)
     NODE_TYPES += (IsNonOverlappingAndDenseIndicator, ModularIndexing, *BITWISE)
-    NODE_TYPES += (Identity,)
+    NODE_TYPES += (Identity, Where)
     PYTHON_ERRORS = (ZeroDivisionError, AssertionError, TypeError, ValueError)
     PYTHON_ERRORS += (OverflowError,)
 
@@ -1881,6 +1883,70 @@ class TestNativeFunctions(TestCase):
     def test_identity_fuzz(self, seed):
         rng = random.Random(seed)
         nodes = [Identity(x) for x in [s0, u0, zf, 2 * s0 + 1, u0 - s1, FloorDiv(u0, 2)]]
+        answered = unsupported = 0
+        for _ in range(60):
+            t = random_tree(rng, 3, LEAVES + nodes)
+            for sub in subtrees(t):
+                v = sympy.sympify(sympy_eval(sub))
+                if v.has(sympy.zoo, sympy.nan):
+                    continue
+                if self.check_expr(v, rng):
+                    answered += 1
+                else:
+                    unsupported += 1
+        self.assertGreater(answered, 5 * unsupported)
+
+    def test_where_known(self):
+        n = sympy.Symbol("n", integer=True, nonnegative=True)
+        p = sympy.Symbol("p", positive=True)
+        y = sympy.Symbol("y", real=True)
+        t, f = sympy.true, sympy.false
+        cases = [
+            ((t, s0, 2), s0),
+            ((f, s0, 2), 2),
+            ((t, u0 > 1, 2), None),
+            ((sympy.Eq(u0, 1), s0, 2), Where(sympy.Eq(u0, 1), s0, 2)),
+            ((u0 > 1, n, u0), Where(u0 > 1, n, u0)),
+            ((sympy.And(u0 > 1, s0 < 5), p, 3), Where(sympy.And(u0 > 1, s0 < 5), p, 3)),
+            ((sympy.Or(u0 > 1, s0 < 5), zf, 2.5), None),
+            ((s1, s0, 2), Where(s1, s0, 2)),
+            ((sympy.Integer(1), s0, 2), Where(1, s0, 2)),
+            ((sympy.Integer(1), 3, 2), None),
+            ((u0 > 1, y, 2), None),
+            ((u0 > 1, zf, 2), Where(u0 > 1, zf, 2)),
+            ((sympy.Not(sympy.And(u0 > 1, s0 < 5)), y, p), None),
+            ((sympy.Not(sympy.And(u0 > 1, s0 < 5)), n, p), Where(sympy.Not(sympy.And(u0 > 1, s0 < 5)), n, p)),
+            ((u0 > 1, sympy.Eq(u0, 1), t), None),
+        ]
+        for args, expected in cases:
+            got = self.check_call("Where", *map(sympy.sympify, args))
+            self.assertEqual(got, expected, f"Where{args}")
+        w = Where(sympy.Eq(u0, 1), s0, 2)
+        exprs = [w + 1, 2 * w, -w, w**2, w / s0, s0 - w, w < 3, FloorDiv(w, 2), Max(w, s0)]
+        exprs += [Where(s1 > 2, Where(u0 < 0, n, 1), u0), Where(sympy.Or(u0 > 1, s0 < 5), n, 3)]
+        exprs += [Where(s1, u0, 2) * Where(u0 > 1, n, p), Identity(w), Mod(w, 3)]
+        rng = random.Random(0)
+        for e in exprs:
+            self.assertTrue(self.check_expr(e, rng), str(e))
+
+    @parametrize("seed", range(2))
+    def test_where_fuzz(self, seed):
+        rng = random.Random(seed)
+        n = sympy.Symbol("n", integer=True, nonnegative=True)
+        p = sympy.Symbol("p", positive=True)
+        conds = [sympy.true, sympy.false, sympy.Eq(u0, 1), s0 > 2, sympy.Ne(u0, n)]
+        conds += [sympy.And(u0 > 1, s0 > 2), sympy.Or(u0 > 1, s0 > 2), s1, u0 - 1]
+        conds += [sympy.Not(sympy.And(u0 > 1, s0 > 2)), sympy.Integer(0)]
+        branches = [s0, u0, n, p, zf, 2 * s0 + 1, FloorDiv(u0, 2), sympy.Integer(-3)]
+        branches += [sympy.Integer(0), sympy.Rational(1, 2), sympy.Float(2.0), int_oo]
+        nodes = []
+        for c in conds:
+            for a in branches:
+                for b in branches:
+                    r = self.check_call("Where", c, a, b)
+                    if isinstance(r, Where):
+                        nodes.append(r)
+        self.assertGreater(len(nodes), 150)
         answered = unsupported = 0
         for _ in range(60):
             t = random_tree(rng, 3, LEAVES + nodes)
@@ -2647,6 +2713,23 @@ class TestNativeValueRanges(TestCase):
                     ranges[s] = (lo, hi)
                 answered += self.check(e, ranges) is not None
         self.assertGreater(answered, 300)
+
+    def test_where(self):
+        u1, n = self.u1, self.n
+        c = sympy.Symbol("c", integer=True)
+        exprs = [Where(u0 > u1, u0, u1), Where(sympy.Eq(u0, 2), n, 5), Where(c, u0, 1)]
+        exprs += [Where(sympy.And(u0 > 1, u1 < 3), u0 * n, u1) + 1]
+        exprs += [Where(sympy.Or(u0 > 1, sympy.Eq(u1, 3)), u0, -2)]
+        rng = random.Random(0)
+        answered = 0
+        for e in exprs:
+            for _ in range(100):
+                ranges = {}
+                for s in sorted(e.free_symbols, key=str):
+                    lo, hi = sorted(rng.sample(self.BOUNDS, 2))
+                    ranges[s] = (lo, hi)
+                answered += self.check(e, ranges) is not None
+        self.assertGreater(answered, 250)
 
     def test_bitwise(self):
         zg = sympy.Symbol("zg", real=True)

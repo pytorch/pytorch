@@ -54,6 +54,16 @@ bool contains(const ValueRanges& r, const Expr* x) {
   return !lt(x, r.lower) && !lt(r.upper, x);
 }
 
+// sympy.Min/Max of two Numbers, which break ties between different number
+// types by type.
+const Expr* sympy_min_max(Kind kind, const Expr* p, const Expr* q) {
+  int c = compare_numbers(p, q);
+  if (c == 0 && p != q) {
+    throw NativeUnsupported("Min/Max of equal numbers of different types");
+  }
+  return (kind == Kind::Min) == (c < 0) ? p : q;
+}
+
 // Python's min(a, b) and max(a, b).
 const Expr* min_num(const Expr* a, const Expr* b) {
   return lt(b, a) ? b : a;
@@ -167,6 +177,10 @@ class Analysis {
   ValueRanges pow_by_natural(const ValueRanges& x, const ValueRanges& y);
   ValueRanges min_or_max(Kind kind, const ValueRanges& x, const ValueRanges& y);
   ValueRanges bitwise(Kind kind, ValueRanges x, ValueRanges y);
+  ValueRanges where(
+      const ValueRanges& a,
+      const ValueRanges& b,
+      const ValueRanges& c);
   ValueRanges true_div(Kind kind, const ValueRanges& x, const ValueRanges& y);
   const Expr* floor_or_ceiling(Kind kind, const Expr* x);
 
@@ -608,15 +622,31 @@ ValueRanges Analysis::min_or_max(
   if (x.is_bool()) {
     return kind == Kind::Min ? and_(x, y) : or_(x, y);
   }
-  // sympy.Min/Max break ties between different number types by type.
-  auto pick = [kind](const Expr* p, const Expr* q) {
-    int c = compare_numbers(p, q);
-    if (c == 0 && p != q) {
-      throw NativeUnsupported("Min/Max of equal numbers of different types");
-    }
-    return (kind == Kind::Min) == (c < 0) ? p : q;
-  };
-  return make_value_range(a_, pick(x.lower, y.lower), pick(x.upper, y.upper));
+  return make_value_range(
+      a_,
+      sympy_min_max(kind, x.lower, y.lower),
+      sympy_min_max(kind, x.upper, y.upper));
+}
+
+ValueRanges Analysis::where(
+    const ValueRanges& a,
+    const ValueRanges& b,
+    const ValueRanges& c) {
+  // a.boolify() raises unless a is bool or unknown().
+  if (!a.is_bool() && !(a.lower == a_.neg_oo() && a.upper == a_.oo())) {
+    throw NativeUnsupported("where of a non-bool condition range");
+  }
+  if (b.is_bool() != c.is_bool()) {
+    throw NativeUnsupported("where of a bool and a numeric range");
+  }
+  if (b.is_bool()) {
+    return {
+        a_.logical_and({b.lower, c.lower}), a_.logical_or({b.upper, c.upper})};
+  }
+  return make_value_range(
+      a_,
+      sympy_min_max(Kind::Min, b.lower, c.lower),
+      sympy_min_max(Kind::Max, b.upper, c.upper));
 }
 
 // bitwise_and, bitwise_or and bitwise_xor.
@@ -769,6 +799,8 @@ ValueRanges Analysis::interp(const Expr* e) {
       return bitwise(e->kind, args[0], args[1]);
     case Kind::Identity:
       return args[0];
+    case Kind::Where:
+      return where(args[0], args[1], args[2]);
     case Kind::FloatTrueDiv:
     case Kind::IntTrueDiv:
       return true_div(e->kind, args[0], args[1]);

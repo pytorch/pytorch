@@ -199,6 +199,7 @@ class StrPrinter {
       case Kind::BitwiseAnd:
       case Kind::BitwiseOr:
       case Kind::BitwiseXor:
+      case Kind::Where:
         // _print_Function.
         return std::string(function_name(e->kind)) + "(" +
             stringify(e->args, ", ", 0) + ")";
@@ -267,6 +268,7 @@ class StrPrinter {
       case Kind::FloatTrueDiv:
       case Kind::IntTrueDiv:
       case Kind::ModularIndexing:
+      case Kind::Where:
         // The classes' precedence attribute.
         return 35;
       case Kind::BitwiseAnd:

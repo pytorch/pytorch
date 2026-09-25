@@ -392,6 +392,8 @@ const char* function_name(Kind k) {
       return "BitwiseFn_bitwise_xor";
     case Kind::Identity:
       return "Identity";
+    case Kind::Where:
+      return "Where";
     default:
       throw NativeUnsupported("not a function kind");
   }
@@ -426,6 +428,7 @@ const Expr* ExprArena::function(Kind kind, c10::ArrayRef<const Expr*> args) {
       arity = args.size();
       break;
     case Kind::ModularIndexing:
+    case Kind::Where:
       arity = 3;
       break;
     default:
@@ -439,7 +442,9 @@ const Expr* ExprArena::function(Kind kind, c10::ArrayRef<const Expr*> args) {
   bool bitwise = kind >= Kind::BitwiseAnd && kind <= Kind::BitwiseXor;
   bool has_boolean = std::any_of(
       args.begin(), args.end(), [](const Expr* a) { return a->is_boolean(); });
-  if (has_boolean && !bitwise) {
+  bool where_condition =
+      kind == Kind::Where && !args[1]->is_boolean() && !args[2]->is_boolean();
+  if (has_boolean && !bitwise && !where_condition) {
     throw NativeUnsupported("Boolean argument to a function");
   }
   const Expr* r = nullptr;
@@ -514,6 +519,9 @@ const Expr* ExprArena::function(Kind kind, c10::ArrayRef<const Expr*> args) {
       break;
     case Kind::Identity:
       break;
+    case Kind::Where:
+      r = args[0] == true_ ? args[1] : args[0] == false_ ? args[2] : nullptr;
+      break;
     default:
       throw NativeUnsupported("not a function kind");
   }
@@ -525,12 +533,18 @@ const Expr* ExprArena::function(Kind kind, c10::ArrayRef<const Expr*> args) {
     // happening for non-Numbers.
     throw NativeUnsupported("unevaluated function of numbers");
   }
-  if (has_boolean) {
+  if (has_boolean && kind != Kind::Where) {
     // Its is_commutative would be None (Booleans have none), which Add and
     // Mul do not handle.
     throw NativeUnsupported("unevaluated function of a Boolean");
   }
-  return intern(kind, 0, 0, args);
+  r = intern(kind, 0, 0, args);
+  // Where's facts can still deduce commutative from its branches. A rejected
+  // node stays interned, which is harmless.
+  if (has_boolean && ask(r, Fact::commutative) != Tri::True) {
+    throw NativeUnsupported("unevaluated function of a Boolean");
+  }
+  return r;
 }
 
 const Expr* ExprArena::eval_bitwise(Kind kind, const Expr* a, const Expr* b) {

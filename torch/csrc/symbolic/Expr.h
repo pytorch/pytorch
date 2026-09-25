@@ -63,6 +63,7 @@ enum class Kind : uint8_t {
   BitwiseOr,
   BitwiseXor,
   Identity,
+  Where,
   // Boolean kinds: sympy Booleans that are not Exprs.
   BooleanTrue,
   BooleanFalse,

@@ -50,7 +50,8 @@ constexpr Kind kFunctionKinds[] = {
     Kind::BitwiseAnd,
     Kind::BitwiseOr,
     Kind::BitwiseXor,
-    Kind::Identity};
+    Kind::Identity,
+    Kind::Where};
 
 // Python-side state for an ExprArena: the sympy Symbol objects that native
 // symbols came from and a conversion cache (conversion is pure per Expr).
@@ -439,7 +440,8 @@ py::object PyArena::to_sympy(const Expr* e) {
     case Kind::BitwiseAnd:
     case Kind::BitwiseOr:
     case Kind::BitwiseXor:
-    case Kind::Identity: {
+    case Kind::Identity:
+    case Kind::Where: {
       py::tuple args(e->args.size());
       for (size_t i = 0; i < e->args.size(); ++i) {
         args[i] = to_sympy(e->args[i]);
@@ -524,6 +526,7 @@ const char* kind_name(Kind k) {
     case Kind::BitwiseOr:
     case Kind::BitwiseXor:
     case Kind::Identity:
+    case Kind::Where:
       return function_name(k);
   }
   return "?";
