@@ -894,7 +894,7 @@
   result: self_t.index_fill(dim, index, value_t)
 
 - name: index_put(Tensor self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor
-  self: "accumulate ? grad : grad.index_put(indices, zeros_like(values), false)"
+  self: "accumulate ? grad : grad.index_put(indices, grad.new_zeros_symint(values.sym_sizes(), values.options()), false)"
   values: grad.index(indices)
   result: self_t.index_put(indices, values_t, accumulate)
 
@@ -1591,17 +1591,17 @@
   result: auto_linear
 
 - name: slice_scatter(Tensor self, Tensor src, int dim=0, SymInt? start=None, SymInt? end=None, SymInt step=1) -> Tensor
-  self: slice_scatter_symint(grad, zeros_like(src), dim, start, end, step)
+  self: slice_scatter_symint(grad, grad.new_zeros_symint(src.sym_sizes(), src.options()), dim, start, end, step)
   src: grad.slice_symint(dim, start, end, step)
   result: auto_linear
 
 - name: select_scatter(Tensor self, Tensor src, int dim, SymInt index) -> Tensor
-  self: select_scatter_symint(grad, zeros_like(src), dim, index)
+  self: select_scatter_symint(grad, grad.new_zeros_symint(src.sym_sizes(), src.options()), dim, index)
   src: grad.select_symint(dim, index)
   result: auto_linear
 
 - name: diagonal_scatter(Tensor self, Tensor src, int offset=0, int dim1=0, int dim2=1) -> Tensor
-  self: diagonal_scatter(grad, zeros_like(src), offset, dim1, dim2)
+  self: diagonal_scatter(grad, grad.new_zeros_symint(src.sym_sizes(), src.options()), offset, dim1, dim2)
   src: grad.diagonal(offset, dim1, dim2)
   result: auto_linear
 
