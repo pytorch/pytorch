@@ -1623,6 +1623,19 @@ class BuiltinVariable(BaseBuiltinVariable):
             raise_observed_exception(TypeError, tx)
         return self._call_frame_locals_snapshot(tx)
 
+    def call_globals(
+        self,
+        tx: "InstructionTranslatorBase",
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
+    ) -> VariableTracker:
+        if args or kwargs:
+            raise_observed_exception(TypeError, tx)
+        from .builder import VariableBuilder
+
+        globals_name = tx.output.install_global_by_id("___unnamed_scope", tx.f_globals)
+        return VariableBuilder(tx, GlobalSource(globals_name))(tx.f_globals)
+
     @staticmethod
     def _call_frame_locals_snapshot(tx: "InstructionTranslatorBase") -> VariableTracker:
         from .builder import VariableBuilder
@@ -3832,7 +3845,13 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
         name_var: VariableTracker,
         val: VariableTracker,
     ) -> VariableTracker | None:
-        if isinstance(
+        if (
+            isinstance(obj, variables.BaseUserFunctionVariable)
+            and obj.python_type() is types.FunctionType
+            and name_var.is_constant_match("__globals__")
+        ):
+            raise_observed_exception(AttributeError, tx, args=["readonly attribute"])
+        elif isinstance(
             obj,
             (
                 variables.DefaultDictVariable,

@@ -2318,6 +2318,18 @@ partial_fn = functools.partial(fn, scale=2)
         x = torch.randn(4)
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_globals_builtin_returns_function_namespace(self):
+        def fn(x):
+            return x + 1, globals()
+
+        counter = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(2)
+        result = opt_fn(x)
+        self.assertEqual(result[0], fn(x)[0])
+        self.assertIs(result[1], fn.__globals__)
+        self.assertEqual(counter.frame_count, 1)
+
     def test_instance_dunder_class(self):
         # A user-defined instance's __class__ under compile.
         class A:
