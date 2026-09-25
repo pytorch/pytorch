@@ -1748,6 +1748,7 @@ class CompilationMetrics:
     aotautograd_remote_cache_miss_count: int | None = 0
     aotautograd_local_cache_hit_count: int | None = 0
     aotautograd_local_cache_miss_count: int | None = 0
+    accelerator_version: str | None = None
     cuda_version: str | None = None
     triton_version: str | None = None
     feature_usage: dict[str, bool] | None = None
@@ -2068,6 +2069,51 @@ def _functorch_config_for_logging() -> str | None:
         return "Functorch Config is not JSON serializable"
 
 
+@functools.cache
+def _get_backend_package_version(device_type: str) -> str | None:
+    """
+    Version of the installed "torch-<device_type>" distribution (e.g.
+    "torch-npu" for npu), if any. This is a generic derivation from the
+    device type - no vendor-specific names appear on this code path, and
+    the torch-<device_type> naming convention is what the PrivateUse1
+    custom-backend documentation recommends for out-of-tree adapter
+    packages. Backends not following it simply degrade to None.
+    Process-static, so caching is safe. Display-path only: any failure
+    degrades to None.
+    """
+    try:
+        import importlib.metadata
+
+        return importlib.metadata.version(f"torch-{device_type}")
+    except Exception:
+        return None
+
+
+def _get_accelerator_version() -> str | None:
+    """
+    Version string of the current accelerator's backend, resolved as:
+    torch.{device_type}.__version__ when exposed, then the installed
+    torch-{device_type} package version (e.g. torch-npu; torch.npu does
+    not expose __version__), then torch.version.cuda for CUDA builds
+    (torch.cuda has no module __version__, and torch.version.cuda is None
+    on every other build, so the fallback is inert elsewhere). Display-path
+    only: any failure degrades to None.
+    """
+    try:
+        accelerator = torch.accelerator.current_accelerator(check_available=True)
+        if accelerator is None:
+            return None
+        mod = getattr(torch, accelerator.type, None)
+        version = getattr(mod, "__version__", None)
+        if version is None:
+            version = _get_backend_package_version(accelerator.type)
+        if version is None:
+            version = torch.version.cuda
+        return str(version) if version is not None else None
+    except Exception:
+        return None
+
+
 def record_compilation_metrics(
     start_time_ns: int,
     end_time_ns: int,
@@ -2109,6 +2155,7 @@ def record_compilation_metrics(
         "inductor_config": _scrubbed_inductor_config_for_logging(),
         "compiler_config": _compiler_config_for_logging(),
         "cuda_version": torch.version.cuda,
+        "accelerator_version": _get_accelerator_version(),
         "triton_version": triton.__version__ if has_triton() else "",
         "remote_cache_version": remote_cache_version,
         "inductor_fx_remote_cache_backend_type": inductor_fx_remote_cache_backend_type,
@@ -2816,6 +2863,31 @@ def skip_frame_if_in_functorch_mode(val: torch.Tensor) -> None:
         )
 
 
+def _iter_device_rng_modules() -> Iterator[types.ModuleType]:
+    """
+    Yield device modules that (a) are registered with Dynamo's device
+    interface registry, (b) are currently available, and (c) expose the
+    RNG state save/restore API (get_rng_state/set_rng_state). Index-keyed
+    registry entries (e.g. "cuda:0") are skipped so each device type is
+    yielded at most once. Probing happens at call time only - no import
+    time side effects.
+    """
+    from .device_interface import get_registered_device_interfaces
+
+    for name, _ in get_registered_device_interfaces():
+        if ":" in name:
+            continue
+        mod = getattr(torch, name, None)
+        if (
+            mod is not None
+            and hasattr(mod, "is_available")
+            and hasattr(mod, "get_rng_state")
+            and hasattr(mod, "set_rng_state")
+            and mod.is_available()
+        ):
+            yield mod
+
+
 @contextmanager
 def preserve_rng_state() -> Generator[None, None, None]:
     disable_functorch = torch._C._DisableFuncTorch
@@ -2823,19 +2895,17 @@ def preserve_rng_state() -> Generator[None, None, None]:
     with disable_current_modes(), disable_functorch():
         rng_state = torch.clone(torch.random.get_rng_state())
         skip_frame_if_in_functorch_mode(rng_state)
-        if torch.cuda.is_available():
-            cuda_rng_state = torch.clone(torch.cuda.get_rng_state())
-        if torch.xpu.is_available():
-            xpu_rng_state = torch.clone(torch.xpu.get_rng_state())
+        device_rng_states = [
+            (mod, torch.clone(mod.get_rng_state()))
+            for mod in _iter_device_rng_modules()
+        ]
     try:
         yield
     finally:
         with torch.utils._python_dispatch._disable_current_modes():
             torch.random.set_rng_state(rng_state)
-            if torch.cuda.is_available():
-                torch.cuda.set_rng_state(cuda_rng_state)  # type: ignore[possibly-undefined]
-            if torch.xpu.is_available():
-                torch.xpu.set_rng_state(xpu_rng_state)  # type: ignore[possibly-undefined]
+            for mod, state in device_rng_states:
+                mod.set_rng_state(state)
 
 
 def is_jit_model(
@@ -2958,8 +3028,10 @@ def namedtuple_fields(cls: type) -> tuple[str, ...]:
 def checkpoint_params(gm: torch.fx.GraphModule) -> Callable[[], None]:
     with torch.no_grad():
         rng_state = torch.clone(torch.random.get_rng_state())
-        if torch.cuda.is_available():
-            cuda_rng_state = torch.clone(torch.cuda.get_rng_state())
+        device_rng_states = [
+            (mod, torch.clone(mod.get_rng_state()))
+            for mod in _iter_device_rng_modules()
+        ]
         saved_state = [
             (param, param._version, torch.clone(param))
             # pyrefly: ignore [bad-argument-type]
@@ -2969,8 +3041,8 @@ def checkpoint_params(gm: torch.fx.GraphModule) -> Callable[[], None]:
     def restore() -> None:
         with torch.no_grad():
             torch.random.set_rng_state(rng_state)
-            if torch.cuda.is_available():
-                torch.cuda.set_rng_state(cuda_rng_state)
+            for mod, state in device_rng_states:
+                mod.set_rng_state(state)
             for param, version, original_value in saved_state:
                 if param._version != version:
                     param.copy_(original_value)
@@ -2995,10 +3067,6 @@ def timed(
         synchronize()
     t1 = time.perf_counter()
     return result, t1 - t0  # type: ignore[possibly-undefined]
-
-
-def check_is_cuda(gm: torch.fx.GraphModule, example_inputs: Iterable[Any]) -> bool:
-    return all(x.is_cuda for x in itertools.chain(example_inputs, gm.parameters(True)))
 
 
 @lru_cache(32)
@@ -5493,23 +5561,6 @@ def get_static_address_type(t: Any) -> StaticInputType | None:
         return getattr(t, "_dynamo_static_input_type", None)
 
     return None
-
-
-def is_rng_state_getter_or_setter(value: object) -> bool:
-    getters = (
-        # The following two functions are not identical, so don't remove anyone!
-        torch._C.Generator.get_state,
-        torch.default_generator.get_state,
-        torch.get_rng_state,
-        torch.cuda.get_rng_state,
-    )
-    setters = (
-        torch._C.Generator.set_state,
-        torch.default_generator.set_state,
-        torch.set_rng_state,
-        torch.cuda.set_rng_state,
-    )
-    return value in (*setters, *getters)
 
 
 def is_tensor_base_attr_getter(value: object) -> bool:

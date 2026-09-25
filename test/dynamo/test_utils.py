@@ -6,6 +6,7 @@ import os
 import pprint
 import sys
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 from unittest.mock import patch
 
@@ -14,6 +15,7 @@ import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
 import torch.compiler.config as compiler_config
 from torch._dynamo import utils
+from torch._dynamo.device_interface import device_interfaces, DeviceInterface
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -777,6 +779,7 @@ class TestDynamoTimed(TestCase):
             e.functorch_config = None
             e.compiler_config = None
             e.cuda_version = None
+            e.accelerator_version = None
             e.triton_version = None
             e.python_version = None
             e.pytorch_version = None
@@ -799,7 +802,8 @@ class TestDynamoTimed(TestCase):
             pprint.pformat(raw),
             filter_expected(
                 """\
-{'accumulated_cache_size': 0,
+{'accelerator_version': None,
+ 'accumulated_cache_size': 0,
  'aot_autograd_cumulative_compile_time_us': 0,
  'aotautograd_local_cache_hit_count': 0,
  'aotautograd_local_cache_miss_count': 0,
@@ -893,7 +897,8 @@ class TestDynamoTimed(TestCase):
  'triton_version': None}"""
                 if _IS_WINDOWS
                 else """\
-{'accumulated_cache_size': 0,
+{'accelerator_version': None,
+ 'accumulated_cache_size': 0,
  'aot_autograd_cumulative_compile_time_us': 0,
  'aotautograd_local_cache_hit_count': 0,
  'aotautograd_local_cache_miss_count': 0,
@@ -1001,7 +1006,8 @@ class TestDynamoTimed(TestCase):
             pprint.pformat(raw),
             (
                 """\
-{'accumulated_cache_size': None,
+{'accelerator_version': None,
+ 'accumulated_cache_size': None,
  'aot_autograd_cumulative_compile_time_us': None,
  'aotautograd_local_cache_hit_count': 0,
  'aotautograd_local_cache_miss_count': 0,
@@ -1095,7 +1101,8 @@ class TestDynamoTimed(TestCase):
  'triton_version': None}"""
                 if _IS_WINDOWS
                 else """\
-{'accumulated_cache_size': None,
+{'accelerator_version': None,
+ 'accumulated_cache_size': None,
  'aot_autograd_cumulative_compile_time_us': None,
  'aotautograd_local_cache_hit_count': 0,
  'aotautograd_local_cache_miss_count': 0,
@@ -1396,6 +1403,199 @@ class TestTimedSync(TestCase):
 
 
 instantiate_device_type_tests(TestTimedSync, globals(), allow_xpu=True)
+
+
+class _FakeDeviceRng:
+    """Stands in for a ``torch.{device_type}`` module with RNG save/restore.
+
+    Mirrors the duck-typed surface preserve_rng_state/checkpoint_params
+    rely on: is_available() plus (optionally) get_rng_state/set_rng_state.
+    """
+
+    def __init__(self, available: bool, with_rng: bool = True) -> None:
+        self.available = available
+        self.calls = []
+        self.state = torch.zeros(1)
+        if with_rng:
+            self.get_rng_state = self._get
+            self.set_rng_state = self._set
+
+    def is_available(self) -> bool:
+        return self.available
+
+    def device_count(self) -> int:
+        return 1
+
+    def _get(self):
+        self.calls.append("get")
+        return self.state
+
+    def _set(self, state) -> None:
+        self.calls.append("set")
+        self.state = state
+
+
+class TestDeviceRngSaveRestore(TestCase):
+    """
+    preserve_rng_state and checkpoint_params must save/restore the RNG
+    state of every registered, available device module exposing RNG APIs,
+    not just CUDA. checkpoint_params' only in-tree caller is
+    WrapperBackend.__call__ (config.verify_correctness).
+    """
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_checkpoint_params_restores_cpu_rng_and_mutated_params(self):
+        model = torch.nn.Linear(3, 3)
+        torch.manual_seed(1234)
+        cpu_state = torch.random.get_rng_state()
+        weight_before = model.weight.detach().clone()
+
+        restore = utils.checkpoint_params(model)
+        # Simulate the compiler consuming RNG and mutating a param in place.
+        torch.manual_seed(9999)
+        self.assertFalse(torch.equal(torch.random.get_rng_state(), cpu_state))
+        with torch.no_grad():
+            model.weight.add_(1.0)
+
+        restore()
+        self.assertTrue(torch.equal(torch.random.get_rng_state(), cpu_state))
+        self.assertTrue(torch.equal(model.weight.detach(), weight_before))
+
+    def test_checkpoint_params_registered_backend_rng(self):
+        # Simulates an out-of-tree backend (e.g. npu) that is registered
+        # with the registry and exposes torch.{device_type} RNG APIs.
+        fake = _FakeDeviceRng(available=True)
+        registry = [("fakeacc", DeviceInterface)]
+        with (
+            mock.patch(
+                "torch._dynamo.device_interface.get_registered_device_interfaces",
+                return_value=registry,
+            ),
+            mock.patch.object(torch, "fakeacc", fake, create=True),
+        ):
+            restore = utils.checkpoint_params(torch.nn.Linear(2, 2))
+            self.assertIn("get", fake.calls)
+            restore()
+            self.assertIn("set", fake.calls)
+
+    def test_checkpoint_params_indexed_registry_keys_are_skipped(self):
+        # Backends may register index-keyed entries (e.g. "npu:0"); each
+        # device type must be yielded at most once.
+        fake = _FakeDeviceRng(available=True)
+        registry = [("fakeacc", DeviceInterface), ("fakeacc:0", DeviceInterface)]
+        with (
+            mock.patch(
+                "torch._dynamo.device_interface.get_registered_device_interfaces",
+                return_value=registry,
+            ),
+            mock.patch.object(torch, "fakeacc", fake, create=True),
+        ):
+            mods = list(utils._iter_device_rng_modules())
+        self.assertEqual(len(mods), 1)
+        self.assertIs(mods[0], fake)
+        self.assertEqual(fake.calls, [])  # enumeration alone must not consume RNG
+
+    def test_checkpoint_params_unavailable_or_incomplete_modules_skipped(self):
+        unavailable = _FakeDeviceRng(available=False)
+        no_rng_api = _FakeDeviceRng(available=True, with_rng=False)
+        registry = [("fakeacc2", DeviceInterface), ("fakeacc3", DeviceInterface)]
+        with (
+            mock.patch(
+                "torch._dynamo.device_interface.get_registered_device_interfaces",
+                return_value=registry,
+            ),
+            mock.patch.object(torch, "fakeacc2", unavailable, create=True),
+            mock.patch.object(torch, "fakeacc3", no_rng_api, create=True),
+        ):
+            restore = utils.checkpoint_params(torch.nn.Linear(2, 2))
+            self.assertEqual(unavailable.calls, [])
+            self.assertEqual(no_rng_api.calls, [])
+            restore()
+            self.assertEqual(unavailable.calls, [])
+            self.assertEqual(no_rng_api.calls, [])
+
+    def test_checkpoint_params_cuda_path_is_hooked_first(self):
+        # The in-tree cuda path keeps its position: registry order puts
+        # cuda first, so save/restore calls land before any other device's.
+        fake = _FakeDeviceRng(available=True)
+        # init_device_reg() runs under the patched torch.cuda and registers
+        # a cuda:0 entry derived from the fake; clean it up afterwards.
+        self.addCleanup(device_interfaces.pop, "cuda:0", None)
+        with mock.patch.object(torch, "cuda", fake):
+            restore = utils.checkpoint_params(torch.nn.Linear(2, 2))
+            self.assertEqual(fake.calls, ["get"])
+            restore()
+            self.assertEqual(fake.calls, ["get", "set"])
+
+    def test_preserve_rng_state_registered_backend_rng(self):
+        # Same registry path as checkpoint_params: an out-of-tree backend's
+        # RNG state must be saved/restored around the with-block.
+        fake = _FakeDeviceRng(available=True)
+        register = [("fakeacc", DeviceInterface)]
+        with (
+            mock.patch(
+                "torch._dynamo.device_interface.get_registered_device_interfaces",
+                return_value=register,
+            ),
+            mock.patch.object(torch, "fakeacc", fake, create=True),
+        ):
+            with utils.preserve_rng_state():
+                self.assertEqual(fake.calls, ["get"])
+            self.assertEqual(fake.calls, ["get", "set"])
+
+    def test_preserve_rng_state_cuda_path_is_hooked_first(self):
+        fake = _FakeDeviceRng(available=True)
+        # init_device_reg() runs under the patched torch.cuda and registers
+        # a cuda:0 entry derived from the fake; clean it up afterwards.
+        self.addCleanup(device_interfaces.pop, "cuda:0", None)
+        with mock.patch.object(torch, "cuda", fake):
+            with utils.preserve_rng_state():
+                self.assertEqual(fake.calls, ["get"])
+            self.assertEqual(fake.calls, ["get", "set"])
+
+
+class TestAcceleratorVersion(TestCase):
+    """
+    CompilationMetrics.accelerator_version resolution: torch.{device_type}
+    __version__ first, then the torch-<device_type> distribution version
+    (e.g. torch-npu, which exposes no torch.npu.__version__), then
+    torch.version.cuda for CUDA builds.
+    """
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_no_accelerator_returns_none(self):
+        with mock.patch.object(
+            torch.accelerator, "current_accelerator", return_value=None
+        ):
+            self.assertIsNone(utils._get_accelerator_version())
+
+    def test_backend_module_version_wins(self):
+        fake_mod = SimpleNamespace(__version__="2.13.0+git")
+        with mock.patch.object(
+            torch.accelerator,
+            "current_accelerator",
+            return_value=SimpleNamespace(type="fakeacc"),
+        ):
+            with mock.patch.object(torch, "fakeacc", fake_mod, create=True):
+                self.assertEqual(utils._get_accelerator_version(), "2.13.0+git")
+
+    def test_cuda_falls_back_to_torch_version_cuda(self):
+        # torch.cuda exposes no module __version__; the CUDA build records
+        # torch.version.cuda. The torch-<device_type> package metadata is
+        # consulted first ("torch-cuda" is not an installed distribution).
+        utils._get_backend_package_version.cache_clear()
+        with (
+            mock.patch.object(
+                torch.accelerator,
+                "current_accelerator",
+                return_value=SimpleNamespace(type="cuda"),
+            ),
+            mock.patch.object(torch, "cuda", SimpleNamespace(), create=True),
+            mock.patch.object(torch.version, "cuda", "12.4"),
+        ):
+            self.assertEqual(utils._get_accelerator_version(), "12.4")
 
 
 class TestInductorConfigParsingForLogging(TestCase):
