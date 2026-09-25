@@ -113,14 +113,6 @@ def _real_dep_names(deps: OrderedSet[Dep]) -> OrderedSet[str]:
 
 
 @dataclasses.dataclass(frozen=True)
-class MemoryDepMatch:
-    """An exact producer write and consumer read relation."""
-
-    write: MemoryDep
-    read: MemoryDep
-
-
-@dataclasses.dataclass(frozen=True)
 class TranslationProof:
     """Facts proved for one or more dense staged access relations."""
 
@@ -2655,9 +2647,6 @@ class SubParentAccessRelation:
     consumer_access: MemoryDep
     parent_lane: int | None
     requires_live_source: bool
-    # Coordinate translation in the relation's common row-major frame.  This
-    # is intentionally just recorded here in Phase 1; scheduling and codegen
-    # do not consume it yet.
     translation: tuple[sympy.Expr, ...] = ()
 
     def __post_init__(self) -> None:
@@ -2688,6 +2677,15 @@ class SubParentAccessRelation:
         return prove_translation(
             source_accesses, consumer_access, context=sizevars
         )
+
+
+@dataclasses.dataclass(frozen=True)
+class MemoryDepMatch:
+    """An exact producer write and consumer read relation."""
+
+    write: MemoryDep
+    read: MemoryDep
+
 
 @dataclasses.dataclass(frozen=True)
 class SubParentEpilogueCandidate:
