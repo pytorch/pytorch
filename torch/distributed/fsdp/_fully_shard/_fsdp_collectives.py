@@ -1,3 +1,4 @@
+import functools
 import math
 from collections.abc import Callable, Sequence
 from itertools import chain, groupby
@@ -12,11 +13,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_api import AllGather, ReduceScatt
 from torch.distributed.tensor import DTensor
 
 from ._fsdp_api import _ReduceOp
-from ._fsdp_common import (
-    _get_dim0_padded_size,
-    _raise_assert_with_print,
-    _to_dtype_if_needed,
-)
+from ._fsdp_common import _get_dim0_padded_size, _to_dtype_if_needed
 from ._fsdp_param import FSDPParam, ShardedState
 
 
@@ -582,7 +579,7 @@ def foreach_reduce(
     reduce_scatter_stream: torch.Stream,
     reduce_scatter_comm: ReduceScatter,
     orig_dtype: torch.dtype | None,  # Unused; kept for backward compatibility.
-    reduce_dtype: torch.dtype | None,  # Raw mp_policy.reduce_dtype; no default applied.
+    reduce_dtype: torch.dtype | None,
     device: torch.device,
     gradient_divide_factor: float | None,
     all_reduce_group: dist.ProcessGroup | None,  # HSDP or replication
@@ -609,15 +606,14 @@ def foreach_reduce(
     """
 
     grad_dtypes = {grad.dtype for grad in unsharded_grads}
-    if len(grad_dtypes) != 1:
-        # Check this at runtime since it could be a real runtime error if e.g.
-        # fp8 weights do not produce the correct higher precision gradients
-        _raise_assert_with_print(
-            f"FSDP reduce-scatter expects uniform gradient dtype but got {grad_dtypes}"
-        )
-    # reduce_dtype differs from unsharded_grads[0].dtype only
-    # when reduce_dtype is None; unsharded_grads[0].dtype is always concrete.
-    reduce_dtype = reduce_dtype or unsharded_grads[0].dtype
+    # grad_dtype policies may differ within a group, but a collective has one
+    # dtype and chunk_cat requires one input dtype
+    reduce_dtype = reduce_dtype or functools.reduce(torch.promote_types, grad_dtypes)
+    if len(grad_dtypes) > 1:
+        # Same per-gradient casts autograd would run with reduce_dtype set to
+        # this dtype, deferred here so unsharded gradients keep their grad_dtype
+        # (e.g. bf16) during backward
+        unsharded_grads[:] = [grad.to(reduce_dtype) for grad in unsharded_grads]
     (predivide_factor, postdivide_factor, reduce_scatter_op, all_reduce_op) = (
         _get_gradient_divide_factors(
             reduce_scatter_group,

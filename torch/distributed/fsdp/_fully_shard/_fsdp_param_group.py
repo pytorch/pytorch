@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import contextlib
+import functools
 import logging
 from typing import Any, cast, Literal, NamedTuple, TYPE_CHECKING
 from typing_extensions import TypeVarTuple, Unpack
@@ -707,6 +708,9 @@ class FSDPParamGroup:
                 else:
                     all_reduce_stream = self.comm_ctx.all_reduce_stream
 
+                reduce_dtype = self._reduce_dtype or functools.reduce(
+                    torch.promote_types, {grad.dtype for grad in unsharded_grads}
+                )
                 partial_sizes = (
                     [p.padded_sharded_param_size.numel() for p in fsdp_params_with_grad]
                     if isinstance(self.mesh_info, DDPMeshInfo)
@@ -717,9 +721,7 @@ class FSDPParamGroup:
                     # Allocate on the RS stream so reuse is ordered after consumption.
                     with self.device_handle.stream(self.comm_ctx.reduce_scatter_stream):
                         partial_input = self._prepare_partial_reduce_output(
-                            fsdp_params_with_grad,
-                            partial_sizes,
-                            self._reduce_dtype or unsharded_grads[0].dtype,
+                            fsdp_params_with_grad, partial_sizes, reduce_dtype
                         )
                 (
                     reduce_scatter_input,
@@ -741,7 +743,7 @@ class FSDPParamGroup:
                     self.comm_ctx.reduce_scatter_stream,
                     self._reduce_scatter_comm,
                     self._orig_dtype,
-                    self._reduce_dtype,
+                    reduce_dtype,
                     self.device,
                     self.gradient_divide_factor,
                     (

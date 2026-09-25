@@ -35,9 +35,9 @@ class MixedPrecisionPolicy:
             follows the parameter's ``grad_dtype`` configured before the first
             forward: unset uses the original parameter dtype;
             explicit ``None`` accepts any incoming gradient dtype. This fallback
-            is independent of ``param_dtype``. Actual gradients in a communication
-            group must share a dtype or reduction raises an error; setting
-            ``reduce_dtype`` ensures this. Reduced shards retain the input
+            is independent of ``param_dtype``. Gradients with different dtypes
+            in one communication group are reduced in their promoted dtype
+            (e.g. fp32 for bf16 and fp32). Reduced shards retain the input
             ``grad_dtype`` policy. (Default: ``None``)
         output_dtype (Optional[torch.dtype]): This specifies the dtype for
             casting floating-point forward outputs. This can be used to

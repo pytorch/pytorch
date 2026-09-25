@@ -714,22 +714,6 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
 
         inp = torch.arange(16, device=device_type, dtype=torch.bfloat16).reshape(2, 8)
         inp = inp / 16 + self.rank / 8
-        if reduce_dtype is None:
-            with (
-                patch.object(
-                    dist, "all_gather_single", wraps=dist.all_gather_single
-                ) as all_gather,
-                patch.object(
-                    dist, "reduce_scatter_single", wraps=dist.reduce_scatter_single
-                ) as reduce_scatter,
-                patch.object(dist, "all_reduce", wraps=dist.all_reduce) as all_reduce,
-            ):
-                with self.assertRaisesRegex(AssertionError, "uniform gradient dtype"):
-                    model(inp).sum().backward()
-                all_gather.assert_called_once()
-                reduce_scatter.assert_not_called()
-                all_reduce.assert_not_called()
-            return
 
         def check_unsharded_grad_dtype(module: nn.Module, _inputs):
             for param, grad_dtype in zip(module.parameters(), grad_dtypes):
@@ -753,6 +737,9 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
                 all_gather.assert_called_once()
                 self.assertEqual(reduce_scatter.call_count, int(sync))
                 self.assertEqual(all_reduce.call_count, int(sync and use_hsdp))
+                if sync:
+                    rs_input = reduce_scatter.call_args.kwargs["input"]
+                    self.assertEqual(rs_input.dtype, torch.float32)
             ref_model(microbatch_inp).sum().backward()
             if not sync:
                 for param, grad_dtype in zip(model.parameters(), grad_dtypes):
@@ -767,7 +754,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
                     self.assertIsInstance(param.grad, DTensor)
                     self.assertEqual(param.grad.dtype, grad_dtype)
                     self.assertEqual(param.grad.placements, param.placements)
-                    expected_grad = ref_param.grad.clone()
+                    expected_grad = ref_param.grad.to(torch.float32, copy=True)
                     dist.all_reduce(expected_grad)
                     if not sum_reduction:
                         expected_grad.div_(self.world_size)
@@ -789,7 +776,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
     @parametrize("use_no_sync", [False, True])
     @parametrize("reduce_dtype", [None, torch.float32])
     @parametrize("second_grad_dtype", [None, torch.float32])
-    def test_grad_dtype_none_requires_uniform_gradients(
+    def test_grad_dtype_none_reduces_in_promoted_dtype(
         self,
         use_hsdp: bool,
         use_no_sync: bool,
@@ -846,19 +833,12 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
                 all_reduce.assert_not_called()
             model.set_requires_gradient_sync(True)
             model.set_is_last_backward(True)
-            loss = model()
-            if reduce_dtype is None and second_grad_dtype is None:
-                with self.assertRaisesRegex(AssertionError, "uniform gradient dtype"):
-                    loss.backward()
-                reduce_scatter.assert_not_called()
-                all_reduce.assert_not_called()
-            else:
-                loss.backward()
-                reduce_scatter.assert_called_once()
-                self.assertEqual(all_reduce.call_count, int(use_hsdp))
-                model.reshard()
-                for param in model.parameters():
-                    self.assertEqual(param.grad.dtype, torch.float32)
+            model().backward()
+            reduce_scatter.assert_called_once()
+            self.assertEqual(all_reduce.call_count, int(use_hsdp))
+            model.reshard()
+            for param in model.parameters():
+                self.assertEqual(param.grad.dtype, torch.float32)
             all_gather.assert_called_once()
 
     @skip_if_lt_x_gpu(2)
