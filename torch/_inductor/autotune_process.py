@@ -443,10 +443,6 @@ class TuningProcessPool(TuningPoolBase):
             )
             # Set to INF so this choice will be ignored
             return float("inf")
-        except CUDAGraphBenchmarkError as e:
-            # Return the marker after all pool work completes so the parent can
-            # retry the entire candidate set with one consistent eager policy.
-            return e  # pyrefly: ignore[bad-return]
         except Exception as process_exception:
             warnings.warn(
                 f"Failed to benchmark choice '{choice}'. It will be ignored. "
@@ -591,69 +587,6 @@ class TensorMeta:
         )
 
 
-class CUDAGraphBenchmarkError(RuntimeError):
-    """Signal that an automatic CUDA-graph benchmark needs an eager retry."""
-
-
-class StickyCUDABenchmarkError(RuntimeError):
-    """Signal that an autotune worker's CUDA context cannot be reused."""
-
-
-class PoisonedAutotuneWorkerError(StickyCUDABenchmarkError):
-    """Signal that this task was skipped after another task poisoned the worker."""
-
-
-_autotune_worker_cuda_poisoned = False
-
-
-def _is_sticky_cuda_error(error: BaseException) -> bool:
-    """Whether a CUDA failure requires recreating the tuning process."""
-    error_msg = str(error)
-    error_msg_lower = error_msg.lower()
-    return any(
-        name in error_msg
-        for name in (
-            "cudaErrorIllegalAddress",
-            "cudaErrorLaunchTimeout",
-            "cudaErrorAssert",
-            "cudaErrorHardwareStackError",
-            "cudaErrorIllegalInstruction",
-            "cudaErrorMisalignedAddress",
-            "cudaErrorInvalidAddressSpace",
-            "cudaErrorInvalidPc",
-            "cudaErrorLaunchFailure",
-            "cudaErrorTensorMemoryLeak",
-            "cudaErrorMpsClientTerminated",
-            "cudaErrorECCUncorrectable",
-            "cudaErrorContained",
-            "cudaErrorContextIsDestroyed",
-            "cudaErrorExternalDevice",
-        )
-    ) or any(
-        marker in error_msg_lower
-        for marker in (
-            "illegal memory access",
-            "launch timed out",
-            "device-side assert",
-            "hardware stack error",
-            "illegal instruction",
-            "misaligned address",
-            "invalid address space",
-            "invalid program counter",
-            "unspecified launch failure",
-            "tensor memory leak",
-            "mps client terminated",
-            "mps client has been terminated",
-            "uncorrectable ecc error",
-            "contained by the gpu",
-            "context has been destroyed",
-            "context is destroyed",
-            "external device error",
-            "error in a device outside of cuda",
-        )
-    )
-
-
 @dataclasses.dataclass
 class BenchmarkRequest:
     """
@@ -724,19 +657,13 @@ class BenchmarkRequest:
         )
         self.cudagraph_unroll = max(1, config.autotune_cudagraph_benchmarking_iters)
         self.cudagraph_cold_cache_input_indices: tuple[int, ...] = ()
-        # The algorithm selector may retry an automatically graphed candidate
-        # set eagerly after one capture fails. This is a transient benchmark
-        # policy and is intentionally not part of serialized cache identity.
-        self.force_eager_benchmark = False
 
     @contextlib.contextmanager
     def apply_benchmark_config(self):
         """Restore the parent process's benchmark policy around this request."""
         with config.patch(
             max_autotune=self.config_max_autotune,
-            autotune_cudagraph_benchmarking=(
-                self.config_cudagraph_benchmarking and not self.force_eager_benchmark
-            ),
+            autotune_cudagraph_benchmarking=self.config_cudagraph_benchmarking,
         ):
             yield
 
@@ -770,25 +697,12 @@ class BenchmarkRequest:
         *input_tensors: torch.Tensor,
         out: torch.Tensor | None = None,
     ) -> float:
-        use_cudagraphs = not self.force_eager_benchmark and (
+        use_cudagraphs = (
             self.benchmark_with_cudagraphs or self.config_cudagraph_benchmarking
         )
         with self.apply_benchmark_config():
             if use_cudagraphs:
-                try:
-                    return self.do_bench_with_cudagraphs(fn, *input_tensors, out=out)
-                except RuntimeError as e:
-                    if self.benchmark_with_cudagraphs or _is_sticky_cuda_error(e):
-                        raise
-                    # CUDA graph construction and the kernel invocation can both
-                    # raise RuntimeError.  Only request a coordinated eager retry
-                    # when the same callable succeeds eagerly; otherwise preserve
-                    # the per-choice kernel failure for the normal error handling.
-                    with config.patch(autotune_cudagraph_benchmarking=False):
-                        self.do_bench(fn, *input_tensors, out=out)
-                    raise CUDAGraphBenchmarkError(
-                        "CUDA graph capture failed during automatic autotuning"
-                    ) from e
+                return self.do_bench_with_cudagraphs(fn, *input_tensors, out=out)
             return self.do_bench(fn, *input_tensors, out=out)
 
     def benchmark(
@@ -1307,13 +1221,12 @@ class ExternKernelBenchmarkRequest(BenchmarkRequest):
                     out_new, tuple(out.size()), tuple(out.stride())
                 )
                 out.copy_(out_new)  # for correctness checking
-            use_cudagraphs = self.benchmark_with_cudagraphs or (
-                self.config_cudagraph_benchmarking and not self.force_eager_benchmark
+            use_cudagraphs = (
+                self.benchmark_with_cudagraphs or self.config_cudagraph_benchmarking
             )
             if (
                 config.profile_bandwidth_with_do_bench_using_profiling
                 and not use_cudagraphs
-                and not self.config_cudagraph_benchmarking
             ):
                 return do_bench_using_profiling(lambda: algo(*input_tensors))
             return self.benchmark_run_fn(
@@ -1767,18 +1680,7 @@ def benchmark_in_sub_process(
 
     Uses subprocess pool in process mode, thread pool in thread mode.
     """
-    results = get_tuning_pool().benchmark(choices)
-    failure = next(
-        (
-            result
-            for result in results.values()
-            if isinstance(result, CUDAGraphBenchmarkError)
-        ),
-        None,
-    )
-    if failure is not None:
-        raise failure
-    return results  # type: ignore[return-value]
+    return get_tuning_pool().benchmark(choices)
 
 
 class AutotuneProcessPool:
