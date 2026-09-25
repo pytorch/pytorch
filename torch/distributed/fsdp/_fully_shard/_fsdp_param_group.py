@@ -865,7 +865,9 @@ class FSDPParamGroup:
             grad = param.unsharded_grad_data
             if grad_pending_all_reduce is not None:
                 # An unrestricted gradient policy may produce a new dtype;
-                # preserve higher-precision pending reductions.
+                # preserve higher-precision pending reductions. With restricted
+                # policies this only casts in mixed-dtype groups, replacing the
+                # cast foreach_reduce would otherwise do.
                 grad = grad.to(
                     torch.promote_types(grad.dtype, grad_pending_all_reduce.dtype)
                 )
@@ -902,6 +904,8 @@ class FSDPParamGroup:
 
         # Preserve parameter identities when the next microbatch changes the
         # packed layout, zero-filling entries with no previous contribution.
+        # Per-parameter copies are fine: the layout only changes when a parameter
+        # first gets a gradient partway through accumulation.
         repacked_output = (
             torch.zeros(sum(sizes), dtype=dtype, device=output.device)
             if output is not None
