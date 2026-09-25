@@ -469,8 +469,23 @@ struct CachingHostAllocatorImpl {
     if (!allocated_during_capture) {
       // Event recording must be done outside the mutex to avoid potential
       // deadlocks (e.g., when Python GIL is involved)
-      for (auto stream : streams) {
-        record_stream(events, stream);
+      //
+      // free() is reached from ~StorageImpl, so a throw here would cross a
+      // noexcept destructor and terminate. Leaving event_count_ elevated
+      // retires the block permanently, as the capture path below also does.
+      try {
+        for (auto stream : streams) {
+          record_stream(events, stream);
+        }
+      } catch ([[maybe_unused]] const std::exception& e) {
+        TORCH_WARN_ONCE(
+            "Failed to record an event while freeing a pinned host block; "
+            "the block will not be reused: ",
+            e.what());
+      } catch (...) {
+        TORCH_WARN_ONCE(
+            "Failed to record an event while freeing a pinned host block; "
+            "the block will not be reused");
       }
     }
 
