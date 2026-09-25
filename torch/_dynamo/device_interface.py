@@ -186,6 +186,25 @@ class DeviceInterface:
         raise NotImplementedError
 
     @staticmethod
+    def get_compile_command() -> Any:
+        raise NotImplementedError
+
+    @staticmethod
+    def get_code_cache() -> Any:
+        raise NotImplementedError
+
+    @staticmethod
+    def support_debug_trace() -> bool:
+        """
+        Returns True if the device is not xpu.
+        """
+        return True
+
+    @staticmethod
+    def get_config() -> Any:
+        raise NotImplementedError
+
+    @staticmethod
     def is_triton_capable(device: torch.types.Device = None) -> bool:
         """
         Returns True if the device has Triton support, False otherwise, even if
@@ -343,6 +362,8 @@ class CudaInterface(DeviceInterface):
     exchange_device = staticmethod(torch.cuda._exchange_device)  # type: ignore[arg-type, has-type]
     maybe_exchange_device = staticmethod(torch.cuda._maybe_exchange_device)  # type: ignore[arg-type, has-type]
     memory_allocated = staticmethod(torch.cuda.memory_allocated)
+    get_compile_command = staticmethod(torch._inductor.codegen.cuda.compile_utils.cuda_compile_command)
+    get_code_cache = torch._inductor.codecache.CUDACodeCache
     is_bf16_supported = staticmethod(torch.cuda.is_bf16_supported)  # type: ignore[arg-type]
 
     # Can be mock patched by @patch decorator.
@@ -385,6 +406,11 @@ class CudaInterface(DeviceInterface):
                 raise TritonUnavailableError("triton not built with the 'amd' backend")
         elif "nvidia" not in triton.backends.backends:
             raise TritonUnavailableError("triton not built with the 'nvidia' backend")
+        
+    @staticmethod
+    def get_config() -> Any:
+        from ...config import cutlass as inductor_cutlass_config
+        return inductor_cutlass_config
 
 
 get_mtia_stream: Callable[[int], int] | None
@@ -562,6 +588,12 @@ class XpuInterface(DeviceInterface):
     exchange_device = staticmethod(torch.xpu._exchange_device)  # type: ignore[arg-type, has-type]
     maybe_exchange_device = staticmethod(torch.xpu._maybe_exchange_device)  # type: ignore[arg-type, has-type]
     memory_allocated = staticmethod(torch.xpu.memory_allocated)
+    get_compile_command = staticmethod(torch._inductor.codegen.xpu.compile_utils.xpu_compile_command)
+    get_code_cache = staticmethod(torch._inductor.codecache.XPUCodeCache)
+
+    @staticmethod
+    def support_debug_trace() -> bool:
+        return False
 
     # Can be mock patched by @patch decorator.
     @staticmethod
@@ -595,6 +627,10 @@ class XpuInterface(DeviceInterface):
         if "intel" not in triton.backends.backends:
             raise TritonUnavailableError("triton not built with the 'intel' backend")
 
+    @staticmethod
+    def get_config() -> Any:
+        from ... import config
+        return config
 
 @dataclass
 class CpuDeviceProperties:

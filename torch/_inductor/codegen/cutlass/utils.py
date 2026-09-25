@@ -247,11 +247,9 @@ def toolkit_version(device_type: str) -> str:
 
 def get_device_cutlass_config(device_type: str):
     """Get device-specific CUTLASS config (xpu/cuda overrides general cutlass config)."""
-    if device_type == "xpu":
-        return config.xpu
-    from ...config import cutlass as inductor_cutlass_config
-
-    return inductor_cutlass_config
+    from torch._dynamo.device_interface import get_interface_for_device
+    iface = get_interface_for_device(device_type)
+    return iface.get_config()
 
 
 @dataclass
@@ -574,12 +572,10 @@ class CUTLASSCompileSourceCapturingContext:
     def __enter__(self, *args, **kwargs):
         import unittest.mock as mock
 
-        import torch._inductor.codecache
-
+        from torch._dynamo.device_interface import get_interface_for_device
+        iface = get_interface_for_device(self.device_type)
         codecache_cls = (
-            torch._inductor.codecache.XPUCodeCache
-            if self.device_type == "xpu"
-            else torch._inductor.codecache.CUDACodeCache
+            iface.get_code_cache
         )
         _compile_method_orig = codecache_cls.compile
 
@@ -605,12 +601,12 @@ def cutlass_standalone_runner_compile_command(
     # Passes the correct preprocessor define to nvcc to ensure the standalone runner is enabled.
 
     extra_args = ["-DGENERATE_STANDALONE_RUNNER=1"]
-    if device_type != "xpu":
+    from torch._dynamo.device_interface import get_interface_for_device
+    iface = get_interface_for_device(device_type)
+    if iface.support_debug_trace():
         extra_args.append("-DCUTLASS_DEBUG_TRACE_LEVEL=1")
     cutlass_compile_command = (
-        torch._inductor.codegen.xpu.compile_utils.xpu_compile_command
-        if device_type == "xpu"
-        else torch._inductor.codegen.cuda.compile_utils.cuda_compile_command
+        iface.get_compile_command
     )
     compile_command = cutlass_compile_command(
         [str(srcpath)], str(exepath), "exe", extra_args=extra_args
