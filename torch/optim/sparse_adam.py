@@ -39,7 +39,6 @@ class SparseAdam(Optimizer):
         super().__init__(params, defaults)
 
         sparse_params = []
-        complex_params = []
         for index, param_group in enumerate(self.param_groups):
             if not isinstance(param_group, dict):
                 raise AssertionError(
@@ -49,15 +48,9 @@ class SparseAdam(Optimizer):
             for d_index, d_param in enumerate(param_group["params"]):
                 if d_param.is_sparse:
                     sparse_params.append([index, d_index])
-                if d_param.is_complex():
-                    complex_params.append([index, d_index])
         if sparse_params:
             raise ValueError(
                 f"Sparse params at indices {sparse_params}: SparseAdam requires dense parameter tensors"
-            )
-        if complex_params:
-            raise ValueError(
-                f"Complex params at indices {complex_params}: SparseAdam does not support complex parameters"
             )
 
     @torch.no_grad()
