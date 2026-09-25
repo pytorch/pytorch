@@ -76,10 +76,28 @@ def ensure_patched(cls: Any) -> None:
 
 
 @dataclass(slots=True)
-class _GenerationTracker:
+class _GenerationTrackerSingleton:
     dynamic_classes: ExactWeakKeyDictionary = ExactWeakKeyDictionary()
     generation: int = 0
     generation_values: ExactWeakKeyDictionary = ExactWeakKeyDictionary()
+
+    def __post_init__(self):
+        # do a one-time patch of torch.fx.Module to use the declared singleton.
+        init = Module.__init__
+
+        def patched_init(self: Module, *args: Any, **kwargs: Any) -> None:
+            init(self, *args, **kwargs)
+            GenerationTracker.tag(self)
+
+        Module.__init__ = patched_init  # type: ignore[method-assign]
+
+        setstate = Module.__setstate__
+
+        def patched_setstate(self: Module, state: Any) -> None:
+            setstate(self, state)
+            GenerationTracker.tag(self)
+
+        Module.__setstate__ = patched_setstate  # type: ignore[method-assign]
 
     def tag(self, obj: Any) -> None:
         self.generation_values[obj] = self.generation
@@ -104,7 +122,7 @@ class _GenerationTracker:
         self.generation_values = ExactWeakKeyDictionary()
 
 
-GenerationTracker = _GenerationTracker()
+GenerationTracker = _GenerationTrackerSingleton()
 
 
 def is_dynamic_nn_module(obj: Any, is_export: bool) -> bool:
@@ -130,35 +148,3 @@ def is_dynamic_nn_module(obj: Any, is_export: bool) -> bool:
         obj
     )
     return dyn
-
-
-def install_generation_tagging_init() -> None:
-    """
-    Monkey patch torch.nn.Module.__init__ and torch.nn.Module.__setstate__
-    so we can detect nn.Module instances created dynamically inside forward methods.
-    """
-
-    # try/except benchmarks faster than hasattr when we expect the attribute to be
-    # present nearly always (which should be true here on every call except the first).
-    try:
-        Module.___has_generation_tag_patch  # type: ignore[missing-attribute]
-    except AttributeError:
-        init = Module.__init__
-
-        def patched_init(self: Module, *args: Any, **kwargs: Any) -> None:
-            init(self, *args, **kwargs)
-            GenerationTracker.tag(self)
-
-        Module.__init__ = patched_init  # type: ignore[method-assign]
-
-        setstate = Module.__setstate__
-
-        def patched_setstate(self: Module, state: Any) -> None:
-            setstate(self, state)
-            GenerationTracker.tag(self)
-
-        Module.__setstate__ = patched_setstate  # type: ignore[method-assign]
-
-        Module.___has_generation_tag_patch = True  # type: ignore[attr-defined]
-
-    GenerationTracker.generation += 1
