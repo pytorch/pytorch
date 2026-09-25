@@ -2,7 +2,6 @@
 #include <ATen/core/PythonOpRegistrationTrampoline.h>
 #include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/THP.h>
-#include <torch/csrc/autograd/generated/VariableType.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_dispatch.h>
 
@@ -303,17 +302,14 @@ void ConcretePyInterpreterVTable::dispatch(
   py::handle torch_api_function_overload = getTorchApiFunction(op);
 
   // Find overloaded tensors
-  for (const auto idx : c10::irange(arguments.size())) {
-    const auto& ivalue = arguments[idx];
+  for (const auto& ivalue : arguments) {
     if (ivalue.isTensor()) {
       const auto& tensor = ivalue.toTensor();
       if (isPythonTensor(tensor)) {
         append_overloaded_tensor(&overloaded_args, py::cast(tensor).ptr());
       }
     } else if (ivalue.isList()) {
-      const auto& list = ivalue.toListRef();
-      for (const auto jdx : c10::irange(list.size())) {
-        const auto& nv = list[jdx];
+      for (const auto& nv : ivalue.toListRef()) {
         if (nv.isTensor()) {
           const auto& tensor = nv.toTensor();
           if (isPythonTensor(tensor)) {

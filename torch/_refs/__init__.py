@@ -694,7 +694,7 @@ def is_complex(input: TensorLikeType):
 
 
 @register_decomposition(aten.conj_physical)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def conj_physical(input: TensorLikeType):
     if not utils.is_complex_dtype(input.dtype):
         return input
@@ -943,7 +943,7 @@ def logsumexp(
 
 
 @register_decomposition(aten.nan_to_num)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def nan_to_num(
     a: TensorLikeType,
     nan: NumberType | None = 0.0,
@@ -955,6 +955,11 @@ def nan_to_num(
 
     if utils.is_boolean_dtype(a.dtype) or utils.is_integer_dtype(a.dtype):
         return a.clone()
+
+    if utils.is_complex_dtype(a.dtype):
+        real = nan_to_num(torch.real(a), nan, posinf, neginf)
+        imag = nan_to_num(torch.imag(a), nan, posinf, neginf)
+        return torch.complex(real, imag)
 
     if nan is None:
         nan = 0.0
@@ -1539,7 +1544,7 @@ def fmod(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
 
 
 @register_decomposition(aten.frexp)
-@out_wrapper("mantissa", "exponent")
+@out_wrapper("mantissa", "exponent", exact_dtype=True)
 def frexp(self: TensorLikeType) -> tuple[TensorLikeType, TensorLikeType]:
     return torch.return_types.frexp(prims.frexp(self))
 
@@ -4467,7 +4472,7 @@ def unbind(t: TensorLikeType, dim: int = 0) -> TensorSequenceType:
         )
 
 
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def index_copy(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
     return x.clone(memory_format=torch.contiguous_format).index_copy_(
         dim, index, tensor
@@ -4552,7 +4557,7 @@ def _index_fill(
         return out
 
 
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def index_add(
     x: TensorLike,
     dim: int,
@@ -4571,7 +4576,7 @@ def index_add(
 
 
 @register_decomposition(aten.index_select)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def index_select(x: TensorLike, dim: int, index: TensorLike):
     dim = utils.canonicalize_dims(x.ndim, dim)
     torch._check(
@@ -6250,7 +6255,14 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
         # `masked_fill` allows cpu scalar to be moved to cuda, xpu and hpu but not otherwise.
         is_cpu_scalar = (
             a.device.type
-            in ["cuda", "xpu", "mps", torch._C._get_privateuse1_backend_name(), "hpu"]
+            in [
+                "cuda",
+                "xpu",
+                "mps",
+                torch._C._get_privateuse1_backend_name(),
+                "hpu",
+                "mtia",
+            ]
             and value.device.type == "cpu"
         )
         torch._check(
@@ -6379,7 +6391,7 @@ rpow = _make_r_binary_op(pow)
 
 
 @register_decomposition(aten.triu)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def triu(a: TensorLikeType, diagonal: int = 0) -> TensorLikeType:
     torch._check(
         a.ndim >= 2, lambda: "triu: input tensor must have at least 2 dimensions"
@@ -6396,7 +6408,7 @@ def triu(a: TensorLikeType, diagonal: int = 0) -> TensorLikeType:
 
 
 @register_decomposition(aten.tril)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def tril(a: TensorLikeType, diagonal: int = 0) -> TensorLikeType:
     torch._check(
         a.ndim >= 2, lambda: "tril: input tensor must have at least 2 dimensions"

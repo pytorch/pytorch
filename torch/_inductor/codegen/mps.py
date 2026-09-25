@@ -13,6 +13,7 @@ import sympy
 from sympy.printing.precedence import PRECEDENCE
 
 import torch
+from torch._utils_internal import get_file_path
 from torch.utils._cpp_embed_headers import _embed_headers
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import Min
@@ -308,6 +309,11 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     # pyrefly: ignore [bad-override]
+    def logical_xor(a: CSEVariable, b: CSEVariable) -> str:
+        return f"{a} != {b}"
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
     def isnan(x: CSEVariable) -> str:
         return f"metal::isnan({x})"
 
@@ -398,8 +404,28 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     # pyrefly: ignore [bad-override]
+    def sinh(x: CSEVariable) -> str:
+        return f"metal::precise::sinh({x})"
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def cosh(x: CSEVariable) -> str:
+        return f"metal::precise::cosh({x})"
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
     def atanh(x: CSEVariable) -> str:
         return f"metal::precise::atanh({x})"
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def asinh(x: CSEVariable) -> str:
+        return f"metal::precise::asinh({x})"
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def acosh(x: CSEVariable) -> str:
+        return f"metal::precise::acosh({x})"
 
     @staticmethod
     def floordiv(a: CSEVariable, b: CSEVariable) -> str:
@@ -422,6 +448,38 @@ class MetalOverrides(OpOverrides):
         typecast_a = f"static_cast<decltype({a}+{b})>({a})"
         typecast_b = f"static_cast<decltype({a}+{b})>({b})"
         return f"metal::fmod({typecast_a}, {typecast_b})"
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def copysign(a: CSEVariable, b: CSEVariable) -> str:
+        typecast_a = f"static_cast<decltype({a}+{b})>({a})"
+        typecast_b = f"static_cast<decltype({a}+{b})>({b})"
+        return f"metal::copysign({typecast_a}, {typecast_b})"
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def hypot(a: CSEVariable, b: CSEVariable) -> str:
+        return f"c10::metal::hypot(metal::fabs({a}), metal::fabs({b}))"
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def ldexp(x: CSEVariable, n: CSEVariable) -> str:
+        return f"metal::ldexp({x}, static_cast<int>({n}))"
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def frexp(x: CSEVariable) -> tuple[CSEVariable, CSEVariable]:
+        cache_keys = f"frexp({x})[0]", f"frexp({x})[1]"
+        cached = [V.kernel.cse.try_get(key) for key in cache_keys]
+        if cached[0] is not None and cached[1] is not None:
+            return cached[0], cached[1]
+        mantissa = V.kernel.cse.newvar(dtype=x.dtype)
+        exponent = V.kernel.cse.newvar(dtype=torch.int32)
+        V.kernel.compute.writeline(f"int {exponent};")
+        V.kernel.compute.writeline(f"auto {mantissa} = metal::frexp({x}, {exponent});")
+        for key, var in zip(cache_keys, (mantissa, exponent)):
+            V.kernel.cse.put(key, var)
+        return mantissa, exponent
 
     @staticmethod
     # pyrefly: ignore [bad-override]
@@ -533,6 +591,7 @@ class MetalOverrides(OpOverrides):
             "chebyshev_polynomial_w",
             "hermite_polynomial_h",
             "hermite_polynomial_he",
+            "laguerre_polynomial_l",
             "shifted_chebyshev_polynomial_t",
             "shifted_chebyshev_polynomial_u",
             "shifted_chebyshev_polynomial_v",
@@ -557,6 +616,13 @@ class MetalKernel(SIMDKernel):
     newvar_prefix = "auto "
     max_threadgroup_size = 1024
     simd_group_size = 32
+    # Device that generated kernels are launched on. Subclasses reusing the
+    # Metal-style call plumbing for another device can override this instead of
+    # copying call_kernel(). A retarget is not usable on its own yet: the
+    # non-triton branch of PythonWrapperCodegen._generate_kernel_call_helper()
+    # raises "device ... nyi" for device types other than cpu/cuda/xpu/mps, so
+    # subclasses need the wrapper-side follow-up noted in the PR description.
+    device_type = "mps"
     pexpr = PythonPrinter().doprint
     cexpr = CppPrinter().doprint
     sexpr = MetalExprPrinter().doprint
@@ -984,7 +1050,7 @@ class MetalKernel(SIMDKernel):
                 ]
                 header_contents = _embed_headers(
                     headers,
-                    [Path(__file__).parent.parent.parent / "include"],
+                    [Path(get_file_path("torch")) / "include"],
                     OrderedSet(),  # type: ignore[arg-type]
                 )
                 code.writeline(header_contents)
@@ -1157,7 +1223,7 @@ class MetalKernel(SIMDKernel):
         wrapper.generate_kernel_call(
             name,
             args,
-            device=torch.device("mps"),
+            device=torch.device(self.device_type),
             triton=False,
             arg_types=arg_types,
         )

@@ -2,7 +2,7 @@ add_loop_eager,compile_time_instruction_count,3862000000,0.1
 
 
 
-add_loop_eager_dynamic,compile_time_instruction_count,5468000000,0.1
+add_loop_eager_dynamic,compile_time_instruction_count,4927000000,0.1
 
 
 
@@ -10,7 +10,7 @@ add_loop_inductor,compile_time_instruction_count,28860000000,0.1
 
 
 
-add_loop_inductor_dynamic_gpu,compile_time_instruction_count,37180000000,0.1
+add_loop_inductor_dynamic_gpu,compile_time_instruction_count,33650000000,0.1
 
 
 
@@ -135,3 +135,7 @@ autograd_function_apply_13_in_2_out_no_save,instruction_count,31627,0.1
 
 
 runtime_overhead_eager_cpu,instruction_count,193900,0.1
+
+
+
+unbind_split_flip_cat_iter40_batch128,instruction_count,260700000000,0.1

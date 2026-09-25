@@ -44,6 +44,16 @@ from typing_extensions import (
 )
 
 
+# Re-executing this file (retrying a failed import, or `reload`) would corrupt the C++ global state the first run set up.
+if getattr(sys, "_torch_import_started", False):
+    raise ImportError(
+        "`torch` can only be initialized once per process, so this module cannot "
+        "be imported again: neither via `importlib.reload(torch)`, nor by "
+        "re-importing after a failed `import torch`."
+    )
+sys._torch_import_started = True  # type: ignore[attr-defined]
+
+
 # As a bunch of torch.packages internally still have this check
 # we need to keep this. @todo: Remove tests that rely on this check as
 # they are likely stale.
@@ -362,7 +372,6 @@ def _preload_cuda_deps(err: OSError | None = None, required: bool = True) -> Non
         ("cuda_runtime", "libcudart.so.*[0-9]"),
         ("cuda_cupti", "libcupti.so.*[0-9]"),
         ("cufft", "libcufft.so.*[0-9]"),
-        ("curand", "libcurand.so.*[0-9]"),
         ("nvjitlink", "libnvJitLink.so.*[0-9]"),
         ("cusparse", "libcusparse.so.*[0-9]"),
         ("cusparselt", "libcusparseLt.so.*[0-9]"),
@@ -397,28 +406,15 @@ def _load_global_deps() -> None:
     # Determine the file extension based on the platform
     lib_ext = ".dylib" if platform.system() == "Darwin" else ".so"
     lib_name = f"libtorch_global_deps{lib_ext}"
-    here = os.path.abspath(__file__)
-    global_deps_lib_path = os.path.join(os.path.dirname(here), "lib", lib_name)
-
-    # In scikit-build-core editable installs with redirect mode, native libs are
-    # installed to the dist package location rather than relative to __file__.
+    # get_file_path follows the compiled extension, which under a redirect-mode
+    # editable install lives beside the installed distribution, not __file__.
+    global_deps_lib_path = get_file_path("torch", "lib", lib_name)
     if not os.path.exists(global_deps_lib_path):
-        try:
-            from importlib.metadata import distribution
-
-            installed = distribution("torch").locate_file(
-                os.path.join("torch", "lib", lib_name)
-            )
-            # The importlib metadata SimplePath protocol was missing the exists
-            # method in older versions; however, the actual Path implementation
-            # has it and newer versions of importlib metadata have added it to
-            # the protocol, making the following ignore unnecessary from
-            # importlib_metadata 7.0.1 and Python 3.13 onwards.
-            # pyrefly: ignore[missing-attribute]
-            if installed.exists():
-                global_deps_lib_path = str(installed)
-        except Exception:
-            pass
+        # Handing a missing path to CDLL would surface as an unrelated dlopen
+        # failure through the CUDA-dependency retry below.
+        raise OSError(
+            f"{global_deps_lib_path} is missing; torch is not fully installed"
+        )
 
     try:
         ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
@@ -1837,7 +1833,19 @@ def use_deterministic_algorithms(
           tensor is given
         * :func:`torch.median` with indices output when called on a CUDA tensor
         * :func:`torch.nn.functional.grid_sample` when attempting to differentiate a CUDA tensor
-        * :func:`torch.Tensor.scatter_reduce` when ``reduce='prod'`` and called on CUDA tensor
+        * :func:`torch.Tensor.scatter_reduce` when called on CUDA or MPS tensor
+        * :func:`torch.Tensor.index_put` with ``accumulate=True`` when called on
+          an MPS tensor with floating or complex dtype
+        * :func:`torch.Tensor.index_reduce` with ``reduce='prod'\'mean'``
+          when called on an MPS tensor with floating or complex dtype
+        * :func:`torch.kthvalue` when called on an MPS tensor
+        * :class:`torch.nn.Embedding` when attempting to differentiate an MPS tensor
+        * :class:`torch.nn.EmbeddingBag` when attempting to differentiate an MPS tensor
+        * :func:`torch.nn.functional.grid_sample` when attempting to differentiate an MPS tensor
+        * :func:`torch.nn.MaxPool2d`, :func:`torch.nn.MaxPool3d`, and :func:`torch.nn.AvgPool3d`
+          when attempting to differentiate an MPS tensor
+        * :func:`torch.nn.functional.interpolate` when attempting to differentiate an MPS tensor
+          in some cases
         * :func:`torch.Tensor.resize_` when called with a quantized tensor
 
     In addition, several operations fill uninitialized memory when this setting
@@ -2691,15 +2699,20 @@ from torch.autograd import (  # usort: skip
     set_grad_enabled as set_grad_enabled,
 )
 
-from torch import (
+from torch import (  # usort: skip
     __config__ as __config__,
     __future__ as __future__,
     _awaits as _awaits,
     accelerator as accelerator,
     autograd as autograd,
     backends as backends,
+    # Device modules must be imported before other modules (e.g., multiprocessing)
+    # that need to access their classes at import time.
     cpu as cpu,
     cuda as cuda,
+    mps as mps,
+    mtia as mtia,
+    xpu as xpu,
     distributed as distributed,
     distributions as distributions,
     fft as fft,
@@ -2708,8 +2721,6 @@ from torch import (
     hub as hub,
     jit as jit,
     linalg as linalg,
-    mps as mps,
-    mtia as mtia,
     multiprocessing as multiprocessing,
     nested as nested,
     nn as nn,
@@ -2722,7 +2733,6 @@ from torch import (
     types as types,
     utils as utils,
     version as version,
-    xpu as xpu,
 )
 from torch.signal import windows as windows
 
@@ -2871,23 +2881,36 @@ class _TorchCompileInductorWrapper:
             return
 
         from torch._inductor import config
-
-        current_config: dict[str, _Any] = config.get_config_copy()
+        from torch._inductor.codegen.common import (
+            get_compile_option_owner,
+            init_backend_registration,
+        )
 
         for key, val in options.items():
             attr_name = key.replace("-", "_")
-            if attr_name not in current_config:
-                raise RuntimeError(
-                    f"Unexpected optimization option {key}, known options are {list(current_config.keys())}"
+            if attr_name in config._config:  # type: ignore[attr-defined]
+                # core inductor keys take precedence over device namespaces
+                owner_config, target_key = config, attr_name
+            else:
+                # a deferred privateuse1 backend may not have registered yet
+                init_backend_registration()
+                owner_config, target_key = get_compile_option_owner(attr_name) or (
+                    config,
+                    attr_name,
                 )
-            attr_type = config.get_type(attr_name)  # type: ignore[attr-defined]
+            if target_key not in owner_config._config:  # type: ignore[attr-defined]
+                raise RuntimeError(
+                    f"Unexpected optimization option {key}, known options are "
+                    f"{list(config.get_config_copy())}"
+                )
+            attr_type = owner_config.get_type(target_key)  # type: ignore[attr-defined]
             # Subscriptable generic types don't support isinstance so skip the type
             # check. There doesn't seem to be a good way of checking membership without
             # 3rd party libraries.
             if _get_origin(attr_type) is None:
                 if not isinstance(val, attr_type):
                     val_type_str = type(val).__name__
-                    expected_type_str = type(current_config[attr_name]).__name__
+                    expected_type_str = type(getattr(owner_config, target_key)).__name__
                     raise RuntimeError(
                         f"Unexpected type of attr {key}, got {val_type_str} should be {expected_type_str}"
                     )
@@ -2973,6 +2996,7 @@ class _TorchCompileWrapper:
         mode: str | None,
         options: dict[str, _Any] | None,
         dynamic: builtins.bool | None,
+        name: str | None = None,
     ) -> None:
         from torch._dynamo.backends.registry import lookup_backend
 
@@ -2983,6 +3007,7 @@ class _TorchCompileWrapper:
         else:
             self.compiler_name = str(backend)
         self.dynamic = dynamic
+        self.name = name
         self.compiler_fn = lookup_backend(backend)
         self.kwargs: dict[str, _Any] = {}
         # only pass the args if they non-empty
@@ -2990,6 +3015,8 @@ class _TorchCompileWrapper:
             self.kwargs["mode"] = mode
         if options:
             self.kwargs["options"] = options
+        if name:
+            self.kwargs["name"] = name
 
     def __eq__(self, other: object) -> builtins.bool:
         return (
@@ -2997,6 +3024,7 @@ class _TorchCompileWrapper:
             and self.compiler_fn == other.compiler_fn
             and self.kwargs == other.kwargs
             and self.dynamic == other.dynamic
+            and self.name == other.name
         )
 
     def __call__(self, model_: _Any, inputs_: _Any) -> _Any:
@@ -3186,8 +3214,8 @@ def compile(
     import sysconfig
 
     _C._log_api_usage_once("torch.compile")
-    if sys.version_info >= (3, 15):
-        raise RuntimeError("torch.compile is not supported on Python 3.15+")
+    if sys.version_info >= (3, 16):
+        raise RuntimeError("torch.compile is not supported on Python 3.16+")
     elif sysconfig.get_config_var("Py_GIL_DISABLED") == 1 and sys.version_info < (
         3,
         13,
@@ -3283,7 +3311,7 @@ def compile(
         else:
             backend = _TorchCompileInductorWrapper(mode, options, dynamic, name)
     else:
-        backend = _TorchCompileWrapper(backend, mode, options, dynamic)
+        backend = _TorchCompileWrapper(backend, mode, options, dynamic, name)
 
     return torch._dynamo.optimize(
         backend=backend,

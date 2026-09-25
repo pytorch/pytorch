@@ -2,9 +2,9 @@ sphinx==7.2.6
 #Description: This is used to generate PyTorch docs
 #Pinned versions: 7.2.6
 
-pytorch_sphinx_theme2==0.4.11
+pytorch_sphinx_theme2==0.4.13
 #Description: This is needed to generate PyTorch docs
-#Pinned versions: 0.4.11
+#Pinned versions: 0.4.13
 
 sphinxcontrib.katex==0.9.11
 #Description: This is used to generate PyTorch docs
@@ -23,10 +23,13 @@ sphinx-reredirects==0.1.4
 #Description: This is used to generate redirects for PyTorch docs
 #Pinned versions: 0.1.4
 
-matplotlib==3.5.3 ; python_version < "3.13"
-matplotlib==3.6.3 ; python_version >= "3.13"
+matplotlib==3.5.3 ; python_version < "3.11"
+matplotlib==3.6.3 ; python_version >= "3.11"
 #Description: This is used to generate PyTorch docs
-#Pinned versions: 3.6.3 if python > 3.12. Otherwise 3.5.3.
+#Pinned versions: 3.6.3 if python >= 3.11. Otherwise 3.5.3.
+#3.5.3 predates CPython 3.11 and ships no cp311 wheel, so a 3.11 image gets no
+#matplotlib and docs_test fails in build_activation_images.py. 3.6.3 is the
+#first release with one.
 
 tensorboard==2.13.0 ; python_version < "3.13"
 tensorboard==2.18.0 ; python_version >= "3.13"

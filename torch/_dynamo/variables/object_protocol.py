@@ -10,6 +10,7 @@ etc.) live in their respective VT files.
 import abc
 import collections
 import enum
+import operator
 import sys
 import types
 import typing
@@ -35,7 +36,17 @@ from ..exc import (
     UnhandledDescriptorError,
     unimplemented,
 )
-from ..source import AttrSource, Source
+from ..guards import GuardBuilder, install_guard
+from ..source import (
+    AttrSource,
+    DictGetItemSource,
+    GetItemSource,
+    Source,
+    TypeDictSource,
+    TypeMROSource,
+    TypeSource,
+)
+from ..utils import specialize_symnode
 from .base import (
     AsPythonConstantNotImplementedError,
     AttrMutationKind,
@@ -82,10 +93,20 @@ def vt_identity_compare(
     # Objects created during tracing: VT identity = Python identity. Exception
     # instances are mutable objects built during tracing, so two distinct VTs
     # (already known not to be `left is right`) are distinct Python objects.
+    # A bound method is materialized afresh by every attribute access, so it
+    # behaves the same way: `obj.m is obj.m` is False in CPython. So is a device
+    # read off a tensor: `x.device is x.device` is False there too.
     from .dicts import ConstDictVariable
+    from .functions import UserMethodVariable
     from .lists import ListVariable
     from .misc import ExceptionVariable, TracebackVariable
-    from .sets import FrozensetVariable, SetVariable
+    from .sets import (
+        DictKeySetVariable,
+        FrozensetVariable,
+        OrderedSetVariable,
+        SetVariable,
+    )
+    from .tensor import CurrentDeviceVariable
 
     if isinstance(
         left,
@@ -94,8 +115,12 @@ def vt_identity_compare(
             ListVariable,
             SetVariable,
             FrozensetVariable,
+            DictKeySetVariable,
+            OrderedSetVariable,
             TracebackVariable,
             ExceptionVariable,
+            UserMethodVariable,
+            CurrentDeviceVariable,
         ),
     ):
         return ConstantVariable.create(False)
@@ -324,6 +349,12 @@ def pysequence_check(obj_type: type) -> bool:
     return type_implements_sq_item(obj_type)
 
 
+def pylong_check(obj_type: type) -> bool:
+    """Implements PyLong_Check semantics for VariableTracker objects."""
+    # ref: https://github.com/python/cpython/blob/v3.13.0/Include/longobject.h#L12-L13
+    return issubclass(obj_type, int)
+
+
 def pyindex_check(obj_type: type) -> bool:
     """Implements _PyIndex_Check semantics for VariableTracker objects."""
     # ref: https://github.com/python/cpython/blob/3.13/Include/internal/pycore_abstract.h#L11-L17
@@ -440,7 +471,9 @@ def generic_repr(
         obj_id = id(obj)
         if obj_id in _repr_running:
             sentinel = {list: "[...]", dict: "{...}", collections.deque: "[...]"}
-            return ConstantVariable.create(sentinel.get(obj_type, "..."))
+            if obj_type in sentinel:
+                return ConstantVariable.create(sentinel[obj_type])
+            return ConstantVariable.create(obj.repr_recursive_sentinel())
         _repr_running.add(obj_id)
         try:
             result = obj.tp_repr_impl(tx)
@@ -795,6 +828,49 @@ def pynumber_float(
     )
 
 
+def pyfloat_as_double_macro(obj: VariableTracker) -> float:
+    """Mirrors PyFloat_AS_DOUBLE without redispatching __float__.
+
+    https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Include/cpython/floatobject.h#L15-L18
+    """
+    return float.__float__(obj.as_python_constant())
+
+
+def pyfloat_as_double(
+    tx: "InstructionTranslatorBase", obj: VariableTracker
+) -> VariableTracker:
+    """Mirrors PyFloat_AsDouble.
+
+    https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Objects/floatobject.c#L282-L339
+
+    CPython warns when __float__ returns a strict float subclass; Dynamo
+    currently accepts the value without modeling that warning.
+    """
+    if issubclass(obj.python_type(), float):
+        result = obj
+    elif obj.tp_as_number.nb_float is not None:
+        result = obj.nb_float_impl(tx)
+        if result.python_type() is not float:
+            # Outer gate mirrors PyFloat_CheckExact; strict subclasses still fall through.
+            if not issubclass(result.python_type(), float):
+                if sys.version_info >= (3, 15):
+                    err_msg = f"{obj.python_qualified_name()}.__float__() must return a float, not {result.python_qualified_name()}"
+                else:
+                    err_msg = f"{obj.python_type_name()}.__float__ returned non-float (type {result.python_type_name()})"
+                raise_type_error(tx, err_msg)
+    elif obj.tp_as_number.nb_index is not None:
+        index = pynumber_index(tx, obj)
+        if index.is_python_constant():
+            return ConstantVariable.create(pylong_as_double(tx, index))
+        return index.nb_float_impl(tx)
+    else:
+        raise_type_error(tx, f"must be real number, not {obj.python_type_name()}")
+
+    if result.is_python_constant():
+        return ConstantVariable.create(pyfloat_as_double_macro(result))
+    return result
+
+
 def getindex(
     tx: "InstructionTranslatorBase",
     obj: VariableTracker,
@@ -811,6 +887,20 @@ def getindex(
     return i
 
 
+def pylong_as_double(tx: "InstructionTranslatorBase", obj: VariableTracker) -> float:
+    """Mirrors PyLong_AsDouble.
+
+    https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Objects/longobject.c#L3512-L3543
+    """
+    if not issubclass(obj.python_type(), int):
+        raise_type_error(tx, "an integer is required")
+    try:
+        # Read the int payload without dispatching subclass overrides.
+        return int.__float__(obj.as_python_constant())
+    except OverflowError as exc:
+        raise_observed_exception(OverflowError, tx, args=list(exc.args))
+
+
 def pylong_as_ssize_t(tx: "InstructionTranslatorBase", obj: VariableTracker) -> int:
     """Mirrors PyLong_AsSsize_t: requires an int (or subclass).
     values outside the Py_ssize_t range raise OverflowError.
@@ -819,16 +909,18 @@ def pylong_as_ssize_t(tx: "InstructionTranslatorBase", obj: VariableTracker) -> 
     """
     # Starting on Python 3.16, this will explicitly require an integer instance
     # https://docs.python.org/3/deprecations/index.html#pending-removal-in-python-3-16
-    if not issubclass(obj.python_type(), int):
+    if not pylong_check(obj.python_type()):
         raise_type_error(tx, "an integer is required")
-    val = obj.as_python_constant()
+    # A Py_ssize_t holds no symbol, so a backed SymInt has to specialize here.
+    val = specialize_symnode(obj).as_python_constant()
     if not -sys.maxsize - 1 <= val <= sys.maxsize:
         raise_observed_exception(
             OverflowError,
             tx,
             args=["Python int too large to convert to C ssize_t"],
         )
-    return val
+    # A C ssize_t, so a bool or an int subclass comes back as a plain int.
+    return int(val)
 
 
 def pynumber_as_ssize_t(
@@ -874,6 +966,13 @@ def pynumber_index(
 ) -> "VariableTracker":
     """Mirrors PyNumber_Index (index(x) dispatch)."""
 
+    # An int or subclass never sees its own __index__, then normalizes to an
+    # exact int. A SymInt is not constant: nb_index is where it specializes.
+    # https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1417-L1419
+    # https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1456-L1464
+    if obj.is_python_constant() and pylong_check(obj.python_type()):
+        return ConstantVariable.create(operator.index(obj.as_python_constant()))
+
     if obj.tp_as_number.nb_index is None:
         raise_type_error(
             tx,
@@ -882,11 +981,12 @@ def pynumber_index(
 
     result = obj.nb_index_impl(tx)
 
-    if not issubclass(result.python_type(), int):
-        raise_type_error(
-            tx,
-            f"__index__ returned non-int (type {result.python_type_name()})",
-        )
+    if not pylong_check(result.python_type()):
+        if sys.version_info >= (3, 15):
+            err_msg = f"{obj.python_qualified_name()}.__index__() must return an int, not {result.python_qualified_name()}"
+        else:
+            err_msg = f"__index__ returned non-int (type {result.python_type_name()})"
+        raise_type_error(tx, err_msg)
 
     return result
 
@@ -2099,12 +2199,79 @@ def mro_lookup(py_type: type, name: str) -> object:
     return NO_SUCH_SUBOBJ
 
 
+def _mro_entry_source(klass: type, klass_source: Source, idx: int) -> Source:
+    """Source for ``klass.__mro__[idx]``.
+
+    Entry 0 is spelled as the class itself when it is the class, which it is for
+    every MRO CPython computes. A metaclass overriding ``mro()`` can put
+    something else there, so check rather than assume.
+    """
+    if not idx and klass.__mro__[0] is klass:
+        return klass_source
+    return GetItemSource(TypeMROSource(klass_source), idx)
+
+
+def mro_attr_source(
+    tx: "InstructionTranslatorBase",
+    klass: type,
+    klass_source: Source,
+    name: str,
+) -> "DictGetItemSource | None":
+    """Source naming the raw descriptor *name* resolves to in ``klass.__mro__``.
+
+    Reading the attribute back as ``klass_source.name`` would go through
+    ``type.__getattribute__``, where a data descriptor on the metaclass wins over
+    the class chain -- a different object than `mro_lookup` returned. Index the
+    owning class's ``__dict__`` instead.
+
+    Returns None if *name* is absent from the whole MRO; callers decide whether
+    that is an error.
+    """
+    mro = klass.__mro__
+    for idx, base in enumerate(mro):
+        if name not in base.__dict__:
+            continue
+
+        # Guard the classes we walked past, so the owner stays the owner if one
+        # of them later gains *name*. Deduplicated by (id(klass), name): the
+        # caller's TYPE_MATCH pins the MRO, so an id always means the same class.
+        for absent_idx in range(idx):
+            absent_key = (id(mro[absent_idx]), name)
+            if absent_key in tx.output.guarded_mro_absent_keys:
+                continue
+            tx.output.guarded_mro_absent_keys.add(absent_key)
+            install_guard(
+                TypeDictSource(
+                    _mro_entry_source(klass, klass_source, absent_idx)
+                ).make_guard(partial(GuardBuilder.DICT_NOT_CONTAINS, key=name))
+            )
+
+        # Reuse the source when the same owner is reached again for the same
+        # name, even from a differently-sourced object, so it does not collect
+        # duplicate guards or an OBJECT_ALIASING guard. Keyed on the owner, not
+        # the descriptor: a descriptor shared by unrelated classes needs a
+        # source through each one.
+        cache_key = (id(base), name)
+        cached = tx.output.mro_source_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        source = DictGetItemSource(
+            TypeDictSource(_mro_entry_source(klass, klass_source, idx)), name
+        )
+        tx.output.mro_source_cache[cache_key] = source
+        return source
+
+    return None
+
+
 def _resolve_descriptor_get(
     tx: "InstructionTranslatorBase",
     type_attr: object,
     obj: VariableTracker,
     class_vt: VariableTracker,
     source: "Source | None",
+    name: str,
 ) -> "VariableTracker | None":
     """Invoke tp_descr_get on a type attribute if it's a descriptor.
 
@@ -2115,7 +2282,15 @@ def _resolve_descriptor_get(
     import types as _types
 
     if isinstance(type_attr, property):
-        prop_vt = variables.PropertyVariable(type_attr, source=source)
+        # The property object lives on the type, not the instance: anchoring it at
+        # obj.source would make PropertyVariable's fget source read the *result* of
+        # the getter and then ask an int for .fget.
+        prop_source = (
+            mro_attr_source(tx, obj.python_type(), TypeSource(obj.source), name)
+            if obj.source
+            else None
+        )
+        prop_vt = variables.PropertyVariable(type_attr, source=prop_source)
         return prop_vt.tp_descr_get_impl(tx, obj, class_vt)
     if isinstance(type_attr, _types.MemberDescriptorType):
         md_vt = variables.MemberDescriptorVariable(type_attr, source=source)
@@ -2147,7 +2322,13 @@ def _resolve_descriptor_get(
         )
         return md_vt.tp_descr_get_impl(tx, obj, class_vt)
     if isinstance(type_attr, _types.FunctionType):
-        return variables.UserMethodVariable(type_attr, obj, source=source)
+        return variables.UserMethodVariable(
+            variables.UserFunctionVariable(
+                type_attr, source=source and AttrSource(source, "__func__")
+            ),
+            obj,
+            source=source,
+        )
 
     return None
 
@@ -2208,7 +2389,7 @@ def object_generic_getattr(
     # Step 2: Data descriptor takes priority over instance dict.
     if type_attr is not NO_SUCH_SUBOBJ and is_data_descriptor(type_attr):
         class_vt = VariableTracker.build(tx, py_type)
-        result = _resolve_descriptor_get(tx, type_attr, obj, class_vt, source)
+        result = _resolve_descriptor_get(tx, type_attr, obj, class_vt, source, name)
         if result is not None:
             return result
         raise _UnhandledDescriptorError(
@@ -2236,7 +2417,7 @@ def object_generic_getattr(
             return variables.CallMethodVariable(obj, name, source=source)
 
         class_vt = VariableTracker.build(tx, py_type)
-        result = _resolve_descriptor_get(tx, type_attr, obj, class_vt, source)
+        result = _resolve_descriptor_get(tx, type_attr, obj, class_vt, source, name)
         if result is not None:
             return result
         raise _UnhandledDescriptorError(

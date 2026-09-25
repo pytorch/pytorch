@@ -1,0 +1,88 @@
+diff --git a/test/cpython/v3_13/test_yield_from.py b/test/cpython/v3_13/test_yield_from.py
+index b5ed4d32f3d329f0154990b62916ce51fead196c..5a4f234003f7ac15a7813ac8b4873f6e976ba773 100644
+--- a/test/cpython/v3_13/test_yield_from.py
++++ b/test/cpython/v3_13/test_yield_from.py
+@@ -1,3 +1,57 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_yield_from.py
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import run_tests
++
++__TestCase = CPythonTestCase
++
++
++# redirect import statements
++import sys
++import importlib.abc
++
++redirect_imports = (
++    "test.mapping_tests",
++    "test.typinganndata",
++    "test.test_grammar",
++    "test.test_math",
++    "test.test_iter",
++    "test.typinganndata.ann_module",
++)
++
++class RedirectImportFinder(importlib.abc.MetaPathFinder):
++    def find_spec(self, fullname, path, target=None):
++        # Check if the import is the problematic one
++        if fullname in redirect_imports:
++            try:
++                # Attempt to import the standalone module
++                name = fullname.removeprefix("test.")
++                r = importlib.import_module(name)
++                # Redirect the module in sys.modules
++                sys.modules[fullname] = r
++                # Return a module spec from the found module
++                return importlib.util.find_spec(name)
++            except ImportError:
++                return None
++        return None
++
++# Add the custom finder to sys.meta_path
++sys.meta_path.insert(0, RedirectImportFinder())
++
++
++# ======= END DYNAMO PATCH =======
++
+ # -*- coding: utf-8 -*-
+ 
+ """
+@@ -13,7 +67,7 @@ import inspect
+ from test.support import captured_stderr, disable_gc, gc_collect
+ from test import support
+ 
+-class TestPEP380Operation(unittest.TestCase):
++class TestPEP380Operation(CPythonTestCase):
+     """
+     Test semantics.
+     """
+@@ -1054,7 +1108,7 @@ class TestPEP380Operation(unittest.TestCase):
+         g.send((1, 2, 3, 4))
+         self.assertEqual(v, (1, 2, 3, 4))
+ 
+-class TestInterestingEdgeCases(unittest.TestCase):
++class TestInterestingEdgeCases(CPythonTestCase):
+ 
+     def assert_stop_iteration(self, iterator):
+         with self.assertRaises(StopIteration) as caught:
+@@ -1582,5 +1636,5 @@ class TestInterestingEdgeCases(unittest.TestCase):
+             self.assert_stop_iteration(g)
+ 
+ 
+-if __name__ == '__main__':
+-    unittest.main()
++if __name__ == "__main__":
++    run_tests()

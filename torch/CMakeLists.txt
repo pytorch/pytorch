@@ -41,7 +41,7 @@ append_filelist("libtorch_python_core_sources" TORCH_PYTHON_SRCS)
 # NB: This has to match the condition under which the JIT test directory
 #     is included (at the time of writing that's in caffe2/CMakeLists.txt).
 if(BUILD_TEST)
-    add_definitions(-DBUILDING_TESTS)
+    add_compile_definitions(BUILDING_TESTS)
     list(APPEND TORCH_PYTHON_SRCS
       ${TORCH_ROOT}/test/cpp/jit/torch_python_test.cpp
       )
@@ -270,9 +270,11 @@ if(USE_DISTRIBUTED)
     endif()
     # Disable certain warnings for GCC-9.X
     if(CMAKE_COMPILER_IS_GNUCXX)
-      set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/autograd/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
-      set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/rpc/testing/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
-      set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/c10d/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
+      set_source_files_properties(
+        ${TORCH_SRC_DIR}/csrc/distributed/autograd/init.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/testing/init.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/init.cpp
+        PROPERTIES COMPILE_OPTIONS -Wno-cast-function-type)
     endif()
     # NCCL is a private dependency of libtorch, but libtorch_python includes
     # some private headers of libtorch, which in turn include NCCL. As a hacky
@@ -304,7 +306,9 @@ endif()
 
 add_library(torch_python SHARED ${TORCH_PYTHON_SRCS})
 torch_compile_options(torch_python)  # see cmake/public/utils.cmake
-torch_optimize_layout_if_enabled(torch_python)
+torch_optimize_layout_if_enabled(
+  torch_python
+  "libtorch_python-${Python_SOABI}.yaml")
 if(APPLE)
   target_compile_options(torch_python PRIVATE
       $<$<COMPILE_LANGUAGE:CXX>: -fvisibility=default>)
@@ -369,7 +373,7 @@ if(BUILD_LIBTORCHLESS)
   set(EXPERIMENTAL_SINGLE_THREAD_POOL "0" CACHE STRING
   "Experimental option to use a single thread pool for inter- and intra-op parallelism")
   if("${EXPERIMENTAL_SINGLE_THREAD_POOL}")
-    target_compile_definitions(torch_python PRIVATE "-DAT_EXPERIMENTAL_SINGLE_THREAD_POOL=1")
+    target_compile_definitions(torch_python PRIVATE AT_EXPERIMENTAL_SINGLE_THREAD_POOL=1)
   endif()
 
 endif()
@@ -393,29 +397,31 @@ set_source_files_properties(
 
 # Disable certain warnings for GCC-9.X
 if(CMAKE_COMPILER_IS_GNUCXX)
-  set_source_files_properties(${TORCH_SRC_DIR}/csrc/Module.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
-  set_source_files_properties(${TORCH_SRC_DIR}/csrc/autograd/python_variable.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
+  set_source_files_properties(
+    ${TORCH_SRC_DIR}/csrc/Module.cpp
+    ${TORCH_SRC_DIR}/csrc/autograd/python_variable.cpp
+    PROPERTIES COMPILE_OPTIONS -Wno-cast-function-type)
 endif()
 
 # Preserve CUDA_GENCODE flags
 if(USE_CUDA)
   torch_cuda_get_nvcc_gencode_flag(_ARCH_FLAGS)
-  set_source_files_properties(${TORCH_SRC_DIR}/csrc/cuda/Module.cpp PROPERTIES COMPILE_FLAGS "-DCUDA_ARCH_FLAGS=\"${_ARCH_FLAGS_readable}\"")
+  set_source_files_properties(${TORCH_SRC_DIR}/csrc/cuda/Module.cpp PROPERTIES COMPILE_DEFINITIONS "CUDA_ARCH_FLAGS=${_ARCH_FLAGS_readable}")
 endif()
 
 # Preserve HIP arch flags
 if(USE_ROCM)
   string(REPLACE ";" " " PYTORCH_ROCM_ARCH_readable "${PYTORCH_ROCM_ARCH}")
-  set_source_files_properties(${TORCH_SRC_DIR}/csrc/cuda/Module.cpp PROPERTIES COMPILE_FLAGS "-DCUDA_ARCH_FLAGS=\"${PYTORCH_ROCM_ARCH_readable}\"")
+  set_source_files_properties(${TORCH_SRC_DIR}/csrc/cuda/Module.cpp PROPERTIES COMPILE_DEFINITIONS "CUDA_ARCH_FLAGS=${PYTORCH_ROCM_ARCH_readable}")
 endif()
 
 # Preserve XPU arch flags
 if(USE_XPU)
   string(REPLACE "," " " _ARCH_FLAGS_readable "${TORCH_XPU_ARCH_LIST}")
-  set_source_files_properties(${TORCH_SRC_DIR}/csrc/xpu/Module.cpp PROPERTIES COMPILE_FLAGS "-DXPU_ARCH_FLAGS=\"${_ARCH_FLAGS_readable}\"")
+  set_source_files_properties(${TORCH_SRC_DIR}/csrc/xpu/Module.cpp PROPERTIES COMPILE_DEFINITIONS "XPU_ARCH_FLAGS=${_ARCH_FLAGS_readable}")
 endif()
 
-target_compile_definitions(torch_python PRIVATE "-DTHP_BUILD_MAIN_LIB")
+target_compile_definitions(torch_python PRIVATE THP_BUILD_MAIN_LIB)
 
 target_link_libraries(torch_python PRIVATE ${TORCH_LIB} ${TORCH_PYTHON_LINK_LIBRARIES})
 
@@ -431,16 +437,16 @@ if(USE_UCC)
 endif()
 
 if(BUILD_ONEDNN_GRAPH)
-  target_compile_definitions(torch_python PRIVATE "-DBUILD_ONEDNN_GRAPH")
+  target_compile_definitions(torch_python PRIVATE BUILD_ONEDNN_GRAPH)
   if(NOT BUILD_LIBTORCHLESS)
-    target_compile_definitions(torch_cpu PRIVATE "-DBUILD_ONEDNN_GRAPH")
+    target_compile_definitions(torch_cpu PRIVATE BUILD_ONEDNN_GRAPH)
   endif()
 endif()
 
 if(${CMAKE_BUILD_TYPE} STREQUAL "RelWithAssert")
-   # Workaround numerous decret-without-a-gil warnings from JIT
+   # Workaround numerous decref-without-a-gil warnings from JIT
    # see https://github.com/pytorch/pytorch/issues/130073
-   target_compile_definitions(torch_python PRIVATE "-DPYBIND11_NO_ASSERT_GIL_HELD_INCREF_DECREF")
+   target_compile_definitions(torch_python PRIVATE PYBIND11_NO_ASSERT_GIL_HELD_INCREF_DECREF)
 endif()
 
 if(NOT TORCH_PYTHON_LINK_FLAGS STREQUAL "")
@@ -467,15 +473,13 @@ if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
       C_VISIBILITY_PRESET "default"
     )
   endif()
-  # Install at the install prefix root, which maps to torch/ in the wheel
-  # via wheel.install-dir = "torch". The import library (Windows _C.lib) goes
-  # alongside the other import libs in torch/lib/, matching the layout that
-  # setup.py used before _C moved to CMake.
-  install(TARGETS _C
-    RUNTIME DESTINATION "."
-    LIBRARY DESTINATION "."
-    ARCHIVE DESTINATION "lib"
-  )
+  # The extension module belongs to the Python package.
+  if(SKBUILD)
+    install(TARGETS _C
+      RUNTIME DESTINATION "${SKBUILD_PLATLIB_DIR}/torch"
+      LIBRARY DESTINATION "${SKBUILD_PLATLIB_DIR}/torch"
+    )
+  endif()
 
   # ---[ NCCL EP extension (torch._nccl_ep)
   # Optional standalone extension holding the NCCL EP bindings, imported lazily
@@ -515,7 +519,11 @@ if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
     if(NOT WIN32)
       set_target_properties(_nccl_ep PROPERTIES C_VISIBILITY_PRESET "default")
     endif()
-    install(TARGETS _nccl_ep RUNTIME DESTINATION "." LIBRARY DESTINATION ".")
+    if(SKBUILD)
+      install(TARGETS _nccl_ep
+        RUNTIME DESTINATION "${SKBUILD_PLATLIB_DIR}/torch"
+        LIBRARY DESTINATION "${SKBUILD_PLATLIB_DIR}/torch")
+    endif()
   endif()
 endif()
 
@@ -546,14 +554,18 @@ add_custom_target(
 add_dependencies(torch_python gen_torch_version)
 # version.py is gitignored (generated), so scikit-build-core won't include it
 # via Python package collection. Install it explicitly via cmake instead.
-install(FILES "${TORCH_SRC_DIR}/version.py" DESTINATION ".")
+if(SKBUILD)
+  install(FILES "${TORCH_SRC_DIR}/version.py"
+          DESTINATION "${SKBUILD_PLATLIB_DIR}/torch")
+endif()
 
 # _rocm_init.py is gitignored (injected by ROCm build scripts to bootstrap
 # torch/__init__.py). See https://github.com/ROCm/TheRock/blob/main/docs/packaging/python_packaging.md
 # scikit-build-core won't include it via Python package collection. Install it
 # explicitly via cmake instead.
-if(USE_ROCM AND EXISTS "${TORCH_SRC_DIR}/_rocm_init.py")
-  install(FILES "${TORCH_SRC_DIR}/_rocm_init.py" DESTINATION ".")
+if(SKBUILD AND USE_ROCM AND EXISTS "${TORCH_SRC_DIR}/_rocm_init.py")
+  install(FILES "${TORCH_SRC_DIR}/_rocm_init.py"
+          DESTINATION "${SKBUILD_PLATLIB_DIR}/torch")
 endif()
 
 # Skip building this library under MacOS, since it is currently failing to build on Mac

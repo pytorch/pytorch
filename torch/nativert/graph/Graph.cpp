@@ -53,10 +53,11 @@ size_t expectImpl(std::string_view source, char expected, size_t curPos) {
   }
   TORCH_CHECK(
       expected == source[curPos],
-      "Parser error: expected '{}' at position {}, but found '{}'.",
-      expected,
-      curPos,
-      source[curPos]);
+      fmt::format(
+          "Parser error: expected '{}' at position {}, but found '{}'.",
+          expected,
+          curPos,
+          source[curPos]));
   curPos++;
   return curPos;
 }
@@ -466,17 +467,14 @@ Value* Graph::createConstantSymIntValue(int value) {
 }
 
 Value* Graph::getValue(std::string_view name) const {
-  // TODO: can eliminate this string copy by enabling heterogeneous lookup for
-  // the container
-  return values_.at(std::string(name)).get();
+  auto it = values_.find(name);
+  TORCH_CHECK_INDEX(it != values_.end(), "Unknown value: ", name);
+  return it->second.get();
 }
 
 Value* Graph::tryGetValue(std::string_view name) const {
-  // TODO: can eliminate this string copy by enabling heterogeneous lookup for
-  // the container
-  const auto key = std::string(name);
-  if (values_.contains(key)) {
-    return values_.at(key).get();
+  if (auto it = values_.find(name); it != values_.end()) {
+    return it->second.get();
   }
   return nullptr;
 }
@@ -594,9 +592,10 @@ void Graph::lint() const {
   for (const auto& node : nodes()) {
     TORCH_CHECK(node.owningGraph() == this);
   }
-  // Check that every list type is either produced by a prim.ListPack or
-  // immediately consumed by a prim.ListUnpack. We make use of this invariant
-  // to retrieve list elements in `getListElements`.
+  // Check that every used list type is either produced by a prim.ListPack or
+  // immediately consumed by a prim.ListUnpack. An unused list output is valid
+  // for a reachable multi-output operator: cleanupDeadNodes cannot remove one
+  // output without removing the producer and its other, live outputs.
   for (const auto& [_, value] : values_) {
     if (value->type().kind() != Type::Kind::TensorList) {
       continue;
@@ -604,9 +603,10 @@ void Graph::lint() const {
     const bool producedByListPack =
         value->producer(/* resolve_folded = */ true)->target() ==
         "prim.ListPack";
+    const bool unused = value->users().empty();
     const bool consumedByListUnpack = value->users().size() == 1 &&
         value->users()[0]->target() == "prim.ListUnpack";
-    TORCH_CHECK(producedByListPack || consumedByListUnpack);
+    TORCH_CHECK(unused || producedByListPack || consumedByListUnpack);
   }
 
   auto getNames = [](const auto& values) {
@@ -820,7 +820,7 @@ void Graph::removeNode(Node* n) {
 void Graph::removeValue(Value* value) {
   // TODO: assuming not removing from constantSymIntValues_
   TORCH_CHECK(value->users().empty(), "Cannot erase a value with users.");
-  auto it = values_.find(std::string(value->name()));
+  auto it = values_.find(value->name());
   TORCH_CHECK(
       it != values_.end(),
       "Attempted to erase a value not in graph ",
@@ -973,6 +973,11 @@ std::vector<const Value*> Value::getListElements() const {
     for (const auto& tv : p->inputs()) {
       ret.push_back(tv.value);
     }
+  } else if (users().empty()) {
+    // A non-ListPack value has explicit element Values only when a ListUnpack
+    // consumes it. An unused list therefore has no structural elements to
+    // return.
+    return ret;
   } else {
     TORCH_CHECK(users().size() == 1);
     const auto listUnpack = users()[0];
