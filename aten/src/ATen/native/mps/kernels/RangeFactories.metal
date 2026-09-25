@@ -52,7 +52,7 @@ template <typename T, typename I>
 kernel void linspace(
     device T* out [[buffer(0)]],
     constant array<float, 3>& v [[buffer(1)]],
-    constant array<I, 3>& p [[buffer(2)]],
+    constant vec<I, 3>& p [[buffer(2)]],
     uint index [[thread_position_in_grid]]) {
   const I i = p[2] + static_cast<I>(index);
   out[i * p[1]] = c10::metal::cast_to<T>(linspace_value(i, v, p[0]));
@@ -62,7 +62,7 @@ template <typename T, typename I>
 kernel void linspace_integral(
     device T* out [[buffer(0)]],
     constant array<ulong, 4>& params [[buffer(1)]],
-    constant array<I, 3>& p [[buffer(2)]],
+    constant vec<I, 3>& p [[buffer(2)]],
     uint index [[thread_position_in_grid]]) {
   const I i = p[2] + static_cast<I>(index);
   out[i * p[1]] = integral_linspace_value<T>(i, params, p[0]);
@@ -114,7 +114,7 @@ template <typename T, typename I>
 kernel void logspace(
     device T* out [[buffer(0)]],
     constant array<float, 4>& v [[buffer(1)]],
-    constant array<I, 3>& p [[buffer(2)]],
+    constant vec<I, 3>& p [[buffer(2)]],
     uint index [[thread_position_in_grid]]) {
   const I i = p[2] + static_cast<I>(index);
   out[i * p[1]] = c10::metal::cast_to<T>(logspace_value(i, v, p[0]));
@@ -168,13 +168,13 @@ kernel void arange_strided(
   linspace<DTYPE, int>(                                          \
       device DTYPE * out [[buffer(0)]],                          \
       constant array<float, 3> & v [[buffer(1)]],                \
-      constant array<int, 3> & p [[buffer(2)]],                  \
+      constant int3 & p [[buffer(2)]],                           \
       uint index [[thread_position_in_grid]]);                   \
   template [[host_name("linspace_" #DTYPE "_i64")]] kernel void  \
   linspace<DTYPE, long>(                                         \
       device DTYPE * out [[buffer(0)]],                          \
       constant array<float, 3> & v [[buffer(1)]],                \
-      constant array<long, 3> & p [[buffer(2)]],                 \
+      constant long3 & p [[buffer(2)]],                          \
       uint index [[thread_position_in_grid]]);                   \
   template [[host_name("linspace_strided_" #DTYPE)]] kernel void \
   linspace_strided<DTYPE>(                                       \
@@ -191,13 +191,13 @@ kernel void arange_strided(
   linspace_integral<DTYPE, int>(                                          \
       device DTYPE * out [[buffer(0)]],                                   \
       constant array<ulong, 4> & params [[buffer(1)]],                    \
-      constant array<int, 3> & p [[buffer(2)]],                           \
+      constant int3 & p [[buffer(2)]],                                    \
       uint index [[thread_position_in_grid]]);                            \
   template [[host_name("linspace_integral_" #DTYPE "_i64")]] kernel void  \
   linspace_integral<DTYPE, long>(                                         \
       device DTYPE * out [[buffer(0)]],                                   \
       constant array<ulong, 4> & params [[buffer(1)]],                    \
-      constant array<long, 3> & p [[buffer(2)]],                          \
+      constant long3 & p [[buffer(2)]],                                   \
       uint index [[thread_position_in_grid]]);                            \
   template [[host_name("linspace_integral_strided_" #DTYPE)]] kernel void \
   linspace_integral_strided<DTYPE>(                                       \
@@ -214,13 +214,13 @@ kernel void arange_strided(
   logspace<DTYPE, int>(                                          \
       device DTYPE * out [[buffer(0)]],                          \
       constant array<float, 4> & v [[buffer(1)]],                \
-      constant array<int, 3> & p [[buffer(2)]],                  \
+      constant int3 & p [[buffer(2)]],                           \
       uint index [[thread_position_in_grid]]);                   \
   template [[host_name("logspace_" #DTYPE "_i64")]] kernel void  \
   logspace<DTYPE, long>(                                         \
       device DTYPE * out [[buffer(0)]],                          \
       constant array<float, 4> & v [[buffer(1)]],                \
-      constant array<long, 3> & p [[buffer(2)]],                 \
+      constant long3 & p [[buffer(2)]],                          \
       uint index [[thread_position_in_grid]]);                   \
   template [[host_name("logspace_strided_" #DTYPE)]] kernel void \
   logspace_strided<DTYPE>(                                       \
