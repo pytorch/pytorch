@@ -3985,6 +3985,8 @@ class DynamoTritonHOPifier(TritonHOPifier):
         var = var.realize()
         if isinstance(var, TritonConstexprVariable):
             var = var.constexpr_value.realize()
+        # Graph inputs can use UserDefinedTupleVariable for a plain tuple;
+        # reject arbitrary tuple subclasses here.
         return (
             (type(var) is UserDefinedTupleVariable and var.tuple_cls is tuple)
             or type(var) is NamedTupleVariable
@@ -4090,8 +4092,6 @@ class DynamoTritonHOPifier(TritonHOPifier):
             ):
                 tma_descriptor_metadata[flat_key] = var.to_metadata()
                 combined_args[flat_key] = var.get_tensor()
-            # TODO(mwizak): add support for more python constants
-            # for symnodes.. need to think about how this is correct
             elif var.is_python_constant() or var.is_tensor() or var.is_symnode_like():
                 combined_args[flat_key] = var
             else:

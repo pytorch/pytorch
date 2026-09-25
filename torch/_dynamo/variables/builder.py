@@ -1825,9 +1825,13 @@ class VariableBuilder:
             return SymNodeVariable(sym_node_proxy, tracing_symint)
 
         elif value is TritonConstexpr:
+            # A tl.constexpr(...) call during tracing reaches the class before
+            # any Python instance exists.
             self.install_guards(GuardBuilder.ID_MATCH)
             return TritonConstexprClassVariable(value, source=self.source)
         elif isinstance(value, TritonConstexpr):
+            # An existing instance needs its payload tracked at the attribute
+            # source so changes to the payload invalidate its guards.
             self.install_guards(GuardBuilder.TYPE_MATCH)
             value_source = AttrSource(self.get_source(), "value")
             constexpr_value = VariableBuilder(self.tx, value_source)(value.value)

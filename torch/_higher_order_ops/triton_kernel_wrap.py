@@ -222,11 +222,9 @@ def reconstruct_tensor_descriptor_from_metadata(
 # Aggregate Arguments
 
 
-# Aggregate specs are represented using only FX-native tuple literals. In
-# particular, dataclass instances passed to an FX tracer are represented as
-# call_function nodes that reconstruct the dataclass, while tuples are
-# recursively stored as node arguments. Keep this metadata as tuples so it
-# remains metadata when a Triton HOP is retraced by an Inductor graph pass.
+# Aggregate specs are represented using only FX-native tuple literals. Tuple
+# types are recursively stored as node arguments. Keep this metadata as tuples
+# so it remains metadata when a Triton HOP is retraced by an Inductor graph pass.
 #
 # LeafSpec:       ("leaf", flat_key, is_constexpr)
 # TupleSpec:      ("tuple", tuple[children], is_constexpr)
