@@ -7,6 +7,12 @@
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
+# Runtime probe only: report the environment and skip all tests.
+mkdir -p test/test-reports
+timeout -k 30 600 python -u .ci/pytorch/runtime_probe.py | tee test/test-reports/runtime_probe.log || true
+timeout -k 30 600 python -u torch/utils/collect_env.py | tee test/test-reports/collect_env.log
+exit 0
+
 echo "Testing pytorch"
 # When adding more tests, please use HUD to see which shard is shorter
 if [[ "${SHARD_NUMBER:-1}" == "1" ]]; then

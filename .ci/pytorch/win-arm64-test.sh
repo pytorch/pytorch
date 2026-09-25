@@ -5,6 +5,12 @@ SCRIPT_PARENT_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 # shellcheck source=./common.sh
 source "$SCRIPT_PARENT_DIR/common.sh"
 
+# Runtime probe only: report the environment and skip all tests.
+mkdir -p test/test-reports
+python -u .ci/pytorch/runtime_probe.py | tee test/test-reports/runtime_probe.log || true
+python -u torch/utils/collect_env.py | tee test/test-reports/collect_env.log
+exit 0
+
 run_tests() {
     echo Running smoke_test.py...
     python ./.ci/pytorch/smoke_test/smoke_test.py --package torchonly

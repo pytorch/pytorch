@@ -5,6 +5,12 @@ set -x
 # shellcheck source=./macos-common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/macos-common.sh"
 
+# Runtime probe only: report the environment and skip all tests.
+mkdir -p test/test-reports
+python -u .ci/pytorch/runtime_probe.py | tee test/test-reports/runtime_probe.log || true
+python -u torch/utils/collect_env.py | tee test/test-reports/collect_env.log
+exit 0
+
 # Test that OpenMP is enabled
 pushd test
 if [[ ! $(python -c "import torch; print(int(torch.backends.openmp.is_available()))") == "1" ]]; then

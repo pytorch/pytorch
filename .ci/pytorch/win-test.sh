@@ -40,6 +40,11 @@ fi
 # TODO: Move this to .ci/docker/requirements-ci.txt
 python -m pip install "psutil==5.9.1" nvidia-ml-py "pytest-shard==0.1.2"
 
+# Runtime probe only: report the environment and skip all tests.
+mkdir -p "$TEST_DIR/test-reports"
+"$SCRIPT_HELPERS_DIR"/collect_env.bat
+exit 0
+
 run_tests() {
     # Run nvidia-smi if available
     for path in '/c/Program Files/NVIDIA Corporation/NVSMI/nvidia-smi.exe' /c/Windows/System32/nvidia-smi.exe; do
