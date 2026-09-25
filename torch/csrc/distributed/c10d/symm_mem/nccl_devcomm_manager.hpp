@@ -273,10 +273,13 @@ class TORCH_API NCCLDevCommManager {
     }
 #endif
 #ifdef USE_ROCM
+    bool device_api_support = false;
+#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
     ncclCommProperties_t comm_props = NCCL_COMM_PROPERTIES_INITIALIZER;
-    const bool device_api_support =
+    device_api_support =
         ncclCommQueryProperties(comm, &comm_props) == ncclSuccess &&
         comm_props.deviceApiSupport;
+#endif
     group_to_device_api_support_[group_name] = device_api_support;
 
     bool capture_allocation_support = false;
