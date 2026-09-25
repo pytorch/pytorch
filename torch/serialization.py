@@ -102,6 +102,7 @@ class _SerializationLocal(threading.local):
         self.map_location: MAP_LOCATION | None = None
         self.skip_data: bool = False
         self.materialize_fake_tensors: bool = False
+        self.sparse_tensors_to_validate: list[torch.Tensor] = []
 
 
 _serialization_tls = _SerializationLocal()
