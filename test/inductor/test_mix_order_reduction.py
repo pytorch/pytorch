@@ -1543,7 +1543,7 @@ class MixOrderReductionNumericTest(TestBase):
             "triton.cooperative_reductions": False,
             "triton.force_cooperative_reductions": False,
             "triton.mix_order_reduction": True,
-            "triton.mix_order_reduction_split_size": 17,
+            "triton.mix_order_reduction_split_size": 18,
         }
     )
     def test_split_column_reduction_masks_padded_rows(self, device):
