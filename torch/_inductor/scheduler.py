@@ -73,6 +73,7 @@ from .ir import (
 )
 from .loop_body import LoopBody
 from .memory import MemoryPlanningInfoForBuffer, MemoryPlanningInfoForNode
+from .optimize_loop_body import eliminate_redundant_lowp_round_trips
 from .runtime.hints import DeviceProperties, ReductionHint
 from .runtime.runtime_utils import green_text, is_power_of_2, red_text
 from .sizevars import SimplifyIndexing
@@ -3804,6 +3805,8 @@ class SchedulerNode(BaseSchedulerNode):
             recompute_sizes_body_func=recompute_sizes_body_func,
         )
         self._body = body  # type: ignore[assignment]
+        if isinstance(body, LoopBody):
+            eliminate_redundant_lowp_round_trips(body)
 
         device = self.node.get_device_or_error()
         group_fn = self.scheduler.get_backend(device).group_fn
