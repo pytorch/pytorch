@@ -437,9 +437,7 @@ class TestSortAndSelectDevice(TestCase):
                 for largest in (True, False):
                     values, indices = t.topk(k, largest=largest)
                     ref, _ = t.sort(descending=largest, stable=True)
-                    self.assertEqual(
-                        values, ref[:k], atol=0, rtol=0, equal_nan=True
-                    )
+                    self.assertEqual(values, ref[:k], atol=0, rtol=0, equal_nan=True)
                     self.assertEqual(
                         t.gather(0, indices), values, atol=0, rtol=0, equal_nan=True
                     )
