@@ -171,6 +171,7 @@ from .source import (
     ListGetItemSource,
     ListReverseIteratorBackingListSource,
     LocalSource,
+    MappingProxyMappingSource,
     NamedTupleFieldsSource,
     NNModuleSource,
     NonSerializableSetGetItemSource,
@@ -338,12 +339,9 @@ def _native_method_matches(value: object, expected: NativeMethodMetadata) -> boo
     )
 
 
-def _mapping_proxy_wraps_dict(value: object) -> bool:
+def _mapping_proxy_mapping(value: object) -> object:
     # A mappingproxy's only GC referent is the mapping it wraps.
-    return (
-        type(value) is types.MappingProxyType
-        and type(gc.get_referents(value)[0]) is dict
-    )
+    return gc.get_referents(value)[0]
 
 
 def _cow_tensor_matches(value: object, expected: object) -> bool:
@@ -972,7 +970,6 @@ def _get_closure_vars() -> dict[str, object]:
             "___get_torch_function_mode_stack_at": get_torch_function_mode_stack_at,
             "___get_current_stream": get_current_stream,
             "___cow_tensor_matches": _cow_tensor_matches,
-            "___mapping_proxy_wraps_dict": _mapping_proxy_wraps_dict,
             "__math_isnan": math.isnan,
             "__numpy_isnan": None if np is None else np.isnan,
             "inf": float("inf"),
@@ -2251,6 +2248,15 @@ class GuardBuilder(GuardBuilderBase):
                 raise AssertionError("base_guard_manager must not be None")
             out = base_guard_manager.lambda_manager(
                 python_lambda=lambda x: x._type().qualified_name(),
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, MappingProxyMappingSource):
+            if not base_guard_manager:  # to make mypy happy
+                raise AssertionError("base_guard_manager must not be None")
+            out = base_guard_manager.lambda_manager(
+                python_lambda=_mapping_proxy_mapping,
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
@@ -3738,20 +3744,6 @@ class GuardBuilder(GuardBuilderBase):
             _get_closure_vars() | {"___check_order": guard_fn},
         )
         self._set_guard_export_info(guard, code)
-
-    @register_guard_check_spec(
-        get_metadata_fn=lambda guard, value: None,
-        eval_fn=lambda value, metadata: _mapping_proxy_wraps_dict(value),
-    )
-    def MAPPING_PROXY_WRAPS_DICT(self, guard: Guard) -> None:
-        """Guard that a types.MappingProxyType object wraps an exact dict"""
-        code = f"___mapping_proxy_wraps_dict({self.arg_ref(guard)})"
-        self._set_guard_export_info(guard, [code])
-        self.get_guard_manager(guard).add_lambda_guard(
-            _mapping_proxy_wraps_dict,
-            get_verbose_code_parts(code, guard),
-            guard.user_stack,
-        )
 
     @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: list(dict.keys(value)),
