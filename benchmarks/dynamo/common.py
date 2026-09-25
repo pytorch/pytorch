@@ -2948,7 +2948,8 @@ class BenchmarkRunner:
     ):
         measure_iters = 5
         stabilization_iters = 0
-        if getattr(self, "hf_llm", False):
+        use_generate = getattr(self, "hf_llm", False) and not self.args.training
+        if use_generate:
             # If we're benchmarking an llm, we want to use the generate function
             self.model_iter_fn = self.generate
             measure_iters = 1
@@ -3061,7 +3062,7 @@ class BenchmarkRunner:
             ):
                 optimized_model_iter_fn = optimize_ctx
             else:
-                if getattr(self, "hf_llm", False):
+                if use_generate:
                     # If it's an llm, we want to optimize model.forward, and use
                     # the generate function
                     model.forward = optimize_ctx(model.forward)
@@ -3150,7 +3151,7 @@ class BenchmarkRunner:
                     f"{ok:3}/{total:3} +{frames_third_pass} frames {compilation_time:3.0f}s"
                 )
 
-            experiment_kwargs["hf_llm"] = getattr(self, "hf_llm", False)
+            experiment_kwargs["hf_llm"] = use_generate
 
             results.append(
                 experiment(
