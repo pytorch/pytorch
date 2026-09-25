@@ -18139,6 +18139,33 @@ fn
         self.assertEqual(res[9], float.fromhex("0x1.ffffp10"))
         self.assertEqual(res[10], "0x1.8000000000000p+0")
 
+    def test_builtin_numeric_unbound_method_constant_fold(self):
+        def fn():
+            out = [
+                complex.__radd__(3j, 4.0),
+                float.__rsub__(3.0, 1),
+                float.__sub__(3.0, 1),
+                float.__rpow__(2.0, 3),
+                float.__radd__(3.0, "x"),
+                int.__radd__(3, 4),
+                int.__rsub__(3, 10),
+                int.__radd__(3, 4.5),
+                int.__pow__(3, 4, 5),
+                int.__repr__(True),
+                float.__round__(2.567, 1),
+            ]
+            try:
+                float.__rtruediv__(0.0, 1)
+            except ZeroDivisionError as e:
+                out.append(str(e))
+            try:
+                int.__add__("a", 1)
+            except TypeError as e:
+                out.append(str(e))
+            return out
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
     def test_builtin_constant_fold_str_conversions(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x):

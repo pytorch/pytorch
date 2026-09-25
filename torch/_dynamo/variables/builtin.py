@@ -1938,12 +1938,23 @@ class BuiltinVariable(BaseBuiltinVariable):
                 if isinstance(args[0], ConstantVariable):
                     return args[0].call_method(tx, name, args[1:], kwargs)
 
-        if self.fn is float and len(args) >= 1:
-            # Only delegate to ConstantVariable, not other types that happen to be constants
-            if isinstance(args[0], ConstantVariable):
-                return VariableTracker.build(
-                    tx, getattr(float, name)(args[0].as_python_constant())
+        if (
+            self.fn in (int, float, complex)
+            and args
+            and all(isinstance(a, ConstantVariable) for a in args)
+            and all(isinstance(v, ConstantVariable) for v in kwargs.values())
+        ):
+            # Unbound method on constants, e.g. float.__rsub__(3.0, 1). Only
+            # delegate for ConstantVariable, not other types that happen to be
+            # constants.
+            try:
+                res = getattr(self.fn, name)(
+                    *(a.as_python_constant() for a in args),
+                    **{k: v.as_python_constant() for k, v in kwargs.items()},
                 )
+            except Exception as e:
+                raise_observed_exception(type(e), tx, args=list(e.args))
+            return VariableTracker.build(tx, res)
 
         if name == "__len__" and len(args) == 1 and not kwargs:
             # type.__len__(instance) → len(instance)
