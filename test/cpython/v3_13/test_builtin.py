@@ -2543,17 +2543,19 @@ class PtyTests(CPythonTestCase):
 class TestSorted(CPythonTestCase):
 
     def test_basic(self):
+        from random import Random
+        rng = Random(0)
         data = list(range(100))
         copy = data[:]
-        random.shuffle(copy)
+        rng.shuffle(copy)
         self.assertEqual(data, sorted(copy))
         self.assertNotEqual(data, copy)
 
         data.reverse()
-        random.shuffle(copy)
+        rng.shuffle(copy)
         self.assertEqual(data, sorted(copy, key=lambda x: -x))
         self.assertNotEqual(data, copy)
-        random.shuffle(copy)
+        rng.shuffle(copy)
         self.assertEqual(data, sorted(copy, reverse=True))
         self.assertNotEqual(data, copy)
 

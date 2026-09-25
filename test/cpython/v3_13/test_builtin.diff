@@ -1,5 +1,5 @@
 diff --git a/test/cpython/v3_13/test_builtin.py b/test/cpython/v3_13/test_builtin.py
-index 12a1c48732fab1d449f775dd6a8d68b7c22a3f7f..b335bdc3895878e0a2ae4d0551e6b599cd7bdadb 100644
+index 12a1c48732fab1d449f775dd6a8d68b7c22a3f7f..28ec233e6ca7d5ac25584a89da806f96cee1d4dc 100644
 --- a/test/cpython/v3_13/test_builtin.py
 +++ b/test/cpython/v3_13/test_builtin.py
 @@ -1,3 +1,24 @@
@@ -348,7 +348,7 @@ index 12a1c48732fab1d449f775dd6a8d68b7c22a3f7f..b335bdc3895878e0a2ae4d0551e6b599
      """Tests that use a pseudo terminal to guarantee stdin and stdout are
      terminals in the test environment"""
  
-@@ -2489,7 +2540,7 @@ class PtyTests(unittest.TestCase):
+@@ -2489,20 +2540,22 @@ class PtyTests(unittest.TestCase):
          )
          self.assertSequenceEqual(lines, expected)
  
@@ -356,8 +356,26 @@ index 12a1c48732fab1d449f775dd6a8d68b7c22a3f7f..b335bdc3895878e0a2ae4d0551e6b599
 +class TestSorted(CPythonTestCase):
  
      def test_basic(self):
++        from random import Random
++        rng = Random(0)
          data = list(range(100))
-@@ -2532,7 +2583,7 @@ class TestSorted(unittest.TestCase):
+         copy = data[:]
+-        random.shuffle(copy)
++        rng.shuffle(copy)
+         self.assertEqual(data, sorted(copy))
+         self.assertNotEqual(data, copy)
+ 
+         data.reverse()
+-        random.shuffle(copy)
++        rng.shuffle(copy)
+         self.assertEqual(data, sorted(copy, key=lambda x: -x))
+         self.assertNotEqual(data, copy)
+-        random.shuffle(copy)
++        rng.shuffle(copy)
+         self.assertEqual(data, sorted(copy, reverse=True))
+         self.assertNotEqual(data, copy)
+ 
+@@ -2532,7 +2585,7 @@ class TestSorted(unittest.TestCase):
          self.assertRaises(TypeError, sorted, data, None, lambda x,y: 0)
  
  
@@ -366,7 +384,7 @@ index 12a1c48732fab1d449f775dd6a8d68b7c22a3f7f..b335bdc3895878e0a2ae4d0551e6b599
  
      def test_cleanup(self):
          # Issue #19255: builtins are still available at shutdown
-@@ -2567,7 +2618,7 @@ class ShutdownTest(unittest.TestCase):
+@@ -2567,7 +2620,7 @@ class ShutdownTest(unittest.TestCase):
  
  
  @cpython_only
@@ -375,7 +393,7 @@ index 12a1c48732fab1d449f775dd6a8d68b7c22a3f7f..b335bdc3895878e0a2ae4d0551e6b599
  
      if sys.maxsize < (1 << 32):
          IMMORTAL_REFCOUNT = (1 << 30) - 1
-@@ -2595,7 +2646,7 @@ class ImmortalTests(unittest.TestCase):
+@@ -2595,7 +2648,7 @@ class ImmortalTests(unittest.TestCase):
              self.assert_immortal(immortal)
  
  
@@ -384,7 +402,7 @@ index 12a1c48732fab1d449f775dd6a8d68b7c22a3f7f..b335bdc3895878e0a2ae4d0551e6b599
      def test_new_type(self):
          A = type('A', (), {})
          self.assertEqual(A.__name__, 'A')
-@@ -2772,10 +2823,5 @@ class TestType(unittest.TestCase):
+@@ -2772,10 +2825,5 @@ class TestType(unittest.TestCase):
          self.assertEqual(list(C.__dict__.items())[:2], [('b', 2), ('a', 1)])
  
  

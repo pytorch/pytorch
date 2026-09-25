@@ -1,5 +1,5 @@
 diff --git a/test/cpython/v3_13/test_dict.py b/test/cpython/v3_13/test_dict.py
-index 4729132c5a5f84edf9df7ed47bdb96c2d85aced2..951643ba598ab07a476c4f2e9e1b670d7c43f1a2 100644
+index 4729132c5a5f84edf9df7ed47bdb96c2d85aced2..4d1ce3344fc1c394e4938038a00c712e6da670ae 100644
 --- a/test/cpython/v3_13/test_dict.py
 +++ b/test/cpython/v3_13/test_dict.py
 @@ -1,3 +1,61 @@
@@ -73,7 +73,22 @@ index 4729132c5a5f84edf9df7ed47bdb96c2d85aced2..951643ba598ab07a476c4f2e9e1b670d
  
      def test_invalid_keyword_arguments(self):
          class Custom(dict):
-@@ -215,6 +273,7 @@ class DictTest(unittest.TestCase):
+@@ -30,10 +88,12 @@ class DictTest(unittest.TestCase):
+     def test_literal_constructor(self):
+         # check literal constructor for different sized dicts
+         # (to exercise the BUILD_MAP oparg).
++        from random import Random
++        rng = Random(0)
+         for n in (0, 1, 6, 256, 400):
+-            items = [(''.join(random.sample(string.ascii_letters, 8)), i)
++            items = [(''.join(rng.sample(string.ascii_letters, 8)), i)
+                      for i in range(n)]
+-            random.shuffle(items)
++            rng.shuffle(items)
+             formatted_items = ('{!r}: {:d}'.format(k, v) for k, v in items)
+             dictliteral = '{' + ', '.join(formatted_items) + '}'
+             self.assertEqual(eval(dictliteral), dict(items))
+@@ -215,6 +275,7 @@ class DictTest(unittest.TestCase):
          class Exc(Exception): pass
  
          d.clear()
@@ -81,7 +96,7 @@ index 4729132c5a5f84edf9df7ed47bdb96c2d85aced2..951643ba598ab07a476c4f2e9e1b670d
          class FailingUserDict:
              def keys(self):
                  raise Exc
-@@ -255,6 +314,7 @@ class DictTest(unittest.TestCase):
+@@ -255,6 +316,7 @@ class DictTest(unittest.TestCase):
                  raise Exc
          self.assertRaises(Exc, d.update, FailingUserDict())
  
@@ -89,7 +104,7 @@ index 4729132c5a5f84edf9df7ed47bdb96c2d85aced2..951643ba598ab07a476c4f2e9e1b670d
          class badseq(object):
              def __iter__(self):
                  return self
-@@ -416,6 +476,7 @@ class DictTest(unittest.TestCase):
+@@ -416,6 +478,7 @@ class DictTest(unittest.TestCase):
          self.assertEqual(len(d['key']), 2)
          self.assertRaises(TypeError, d.setdefault)
  
@@ -97,7 +112,7 @@ index 4729132c5a5f84edf9df7ed47bdb96c2d85aced2..951643ba598ab07a476c4f2e9e1b670d
          class Exc(Exception): pass
  
          class BadHash(object):
-@@ -477,7 +538,7 @@ class DictTest(unittest.TestCase):
+@@ -477,7 +540,7 @@ class DictTest(unittest.TestCase):
          for copymode in -1, +1:
              # -1: b has same structure as a
              # +1: b is a.copy()
@@ -106,7 +121,7 @@ index 4729132c5a5f84edf9df7ed47bdb96c2d85aced2..951643ba598ab07a476c4f2e9e1b670d
                  size = 2**log2size
                  a = {}
                  b = {}
-@@ -567,6 +628,10 @@ class DictTest(unittest.TestCase):
+@@ -567,6 +630,10 @@ class DictTest(unittest.TestCase):
                  del d[0]
                  d[0] = 0
  
@@ -117,7 +132,7 @@ index 4729132c5a5f84edf9df7ed47bdb96c2d85aced2..951643ba598ab07a476c4f2e9e1b670d
      def test_mutating_lookup(self):
          # changing dict during a lookup (issue #14417)
          class NastyKey:
-@@ -833,7 +898,8 @@ class DictTest(unittest.TestCase):
+@@ -833,7 +900,8 @@ class DictTest(unittest.TestCase):
                       'd.pop(x2)',
                       'd.update({x2: 2})']:
              with self.assertRaises(CustomException):
@@ -127,7 +142,7 @@ index 4729132c5a5f84edf9df7ed47bdb96c2d85aced2..951643ba598ab07a476c4f2e9e1b670d
  
      def test_resize1(self):
          # Dict resizing bug, found by Jack Jansen in 2.2 CVS development.
-@@ -851,6 +917,10 @@ class DictTest(unittest.TestCase):
+@@ -851,6 +919,10 @@ class DictTest(unittest.TestCase):
          for i in range(5, 9):  # i==8 was the problem
              d[i] = i
  
@@ -138,7 +153,7 @@ index 4729132c5a5f84edf9df7ed47bdb96c2d85aced2..951643ba598ab07a476c4f2e9e1b670d
      def test_resize2(self):
          # Another dict resizing bug (SF bug #1456209).
          # This caused Segmentation faults or Illegal instructions.
-@@ -938,6 +1008,7 @@ class DictTest(unittest.TestCase):
+@@ -938,6 +1010,7 @@ class DictTest(unittest.TestCase):
      @support.cpython_only
      def test_track_dynamic(self):
          # Test GC-optimization of dynamically-created dicts
@@ -146,7 +161,7 @@ index 4729132c5a5f84edf9df7ed47bdb96c2d85aced2..951643ba598ab07a476c4f2e9e1b670d
          class MyObject(object):
              pass
          x, y, z, w, o = 1.5, "a", (1, object()), [], MyObject()
-@@ -1006,18 +1077,6 @@ class DictTest(unittest.TestCase):
+@@ -1006,18 +1079,6 @@ class DictTest(unittest.TestCase):
              pass
          self._tracked(MyDict())
  
@@ -165,7 +180,7 @@ index 4729132c5a5f84edf9df7ed47bdb96c2d85aced2..951643ba598ab07a476c4f2e9e1b670d
      def make_shared_key_dict(self, n):
          class C:
              pass
-@@ -1293,6 +1352,10 @@ class DictTest(unittest.TestCase):
+@@ -1293,6 +1354,10 @@ class DictTest(unittest.TestCase):
                  d.popitem()
          self.check_reentrant_insertion(mutate)
  
@@ -176,7 +191,7 @@ index 4729132c5a5f84edf9df7ed47bdb96c2d85aced2..951643ba598ab07a476c4f2e9e1b670d
      def test_merge_and_mutate(self):
          class X:
              def __hash__(self):
-@@ -1314,6 +1377,10 @@ class DictTest(unittest.TestCase):
+@@ -1314,6 +1379,10 @@ class DictTest(unittest.TestCase):
          support.check_free_after_iterating(self, lambda d: iter(d.values()), dict)
          support.check_free_after_iterating(self, lambda d: iter(d.items()), dict)
  
@@ -187,7 +202,7 @@ index 4729132c5a5f84edf9df7ed47bdb96c2d85aced2..951643ba598ab07a476c4f2e9e1b670d
      def test_equal_operator_modifying_operand(self):
          # test fix for seg fault reported in bpo-27945 part 3.
          class X():
-@@ -1341,6 +1408,10 @@ class DictTest(unittest.TestCase):
+@@ -1341,6 +1410,10 @@ class DictTest(unittest.TestCase):
          dict_d = {0: set()}
          self.assertTrue(dict_c == dict_d)
  
@@ -198,7 +213,7 @@ index 4729132c5a5f84edf9df7ed47bdb96c2d85aced2..951643ba598ab07a476c4f2e9e1b670d
      def test_fromkeys_operator_modifying_dict_operand(self):
          # test fix for seg fault reported in issue 27945 part 4a.
          class X(int):
-@@ -1359,6 +1430,10 @@ class DictTest(unittest.TestCase):
+@@ -1359,6 +1432,10 @@ class DictTest(unittest.TestCase):
          except RuntimeError:  # implementation defined
              pass
  
@@ -209,7 +224,7 @@ index 4729132c5a5f84edf9df7ed47bdb96c2d85aced2..951643ba598ab07a476c4f2e9e1b670d
      def test_fromkeys_operator_modifying_set_operand(self):
          # test fix for seg fault reported in issue 27945 part 4b.
          class X(int):
-@@ -1377,6 +1452,10 @@ class DictTest(unittest.TestCase):
+@@ -1377,6 +1454,10 @@ class DictTest(unittest.TestCase):
          except RuntimeError:  # implementation defined
              pass
  
@@ -220,7 +235,7 @@ index 4729132c5a5f84edf9df7ed47bdb96c2d85aced2..951643ba598ab07a476c4f2e9e1b670d
      def test_dictitems_contains_use_after_free(self):
          class X:
              def __eq__(self, other):
-@@ -1386,6 +1465,10 @@ class DictTest(unittest.TestCase):
+@@ -1386,6 +1467,10 @@ class DictTest(unittest.TestCase):
          d = {0: set()}
          (0, X()) in d.items()
  
@@ -231,7 +246,7 @@ index 4729132c5a5f84edf9df7ed47bdb96c2d85aced2..951643ba598ab07a476c4f2e9e1b670d
      def test_dict_contain_use_after_free(self):
          # bpo-40489
          class S(str):
-@@ -1399,6 +1482,10 @@ class DictTest(unittest.TestCase):
+@@ -1399,6 +1484,10 @@ class DictTest(unittest.TestCase):
          d = {S(): 'value'}
          self.assertFalse('test' in d)
  
@@ -242,7 +257,7 @@ index 4729132c5a5f84edf9df7ed47bdb96c2d85aced2..951643ba598ab07a476c4f2e9e1b670d
      def test_init_use_after_free(self):
          class X:
              def __hash__(self):
-@@ -1408,6 +1495,10 @@ class DictTest(unittest.TestCase):
+@@ -1408,6 +1497,10 @@ class DictTest(unittest.TestCase):
          pair = [X(), 123]
          dict([pair])
  
@@ -253,7 +268,7 @@ index 4729132c5a5f84edf9df7ed47bdb96c2d85aced2..951643ba598ab07a476c4f2e9e1b670d
      def test_oob_indexing_dictiter_iternextitem(self):
          class X(int):
              def __del__(self):
-@@ -1622,7 +1713,7 @@ class DictTest(unittest.TestCase):
+@@ -1622,7 +1715,7 @@ class DictTest(unittest.TestCase):
                  self.assertGreaterEqual(eq_count, 1)
  
  
@@ -262,7 +277,7 @@ index 4729132c5a5f84edf9df7ed47bdb96c2d85aced2..951643ba598ab07a476c4f2e9e1b670d
  
      # Test _PyDict_GetItem_KnownHash()
      @support.cpython_only
-@@ -1666,4 +1757,4 @@ class SubclassMappingTests(mapping_tests.BasicTestMappingProtocol):
+@@ -1666,4 +1759,4 @@ class SubclassMappingTests(mapping_tests.BasicTestMappingProtocol):
  
  
  if __name__ == "__main__":
