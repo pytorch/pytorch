@@ -582,7 +582,7 @@ else:
                 ranks_match_default = ranks == pg_ranks_by_dim.flatten().tolist()
                 if not preserve_rank_order or ranks_match_default:
                     if (
-                        torch.cuda.is_available()
+                        torch.accelerator.is_available()
                         and get_backend(default_group) == "gloo"
                     ):
                         dim_group = new_group(

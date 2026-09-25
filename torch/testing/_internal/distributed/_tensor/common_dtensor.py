@@ -853,7 +853,7 @@ class DTensorTestBase(DTensorTestMixin, MultiProcessTestCase):
         #  test_dtensor.py  -- DTensorMeshTest.test_dtensor_device_mesh_device_conversion
         if device_id is None:
             device_id = (
-                torch.cuda.current_device() if self.device_type == "cuda" else self.rank
+                torch.accelerator.current_device_index() if self.device_type != "cpu" else self.rank
             )
 
         if self.device_type == "cpu":
@@ -864,8 +864,10 @@ class DTensorTestBase(DTensorTestMixin, MultiProcessTestCase):
             # enforce barrier() to use CPU when `self.device_type` is CPU and other
             # accelerator is also available.
             dist.barrier()
-        else:
+        elif dist.get_backend() in ACCELERATOR_DIST_BACKENDS:
             dist.barrier(device_ids=[device_id])
+        else:
+            dist.barrier()
 
         dist.destroy_process_group()
 
