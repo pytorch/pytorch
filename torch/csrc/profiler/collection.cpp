@@ -1264,26 +1264,35 @@ class TransferEvents {
     for (const auto* activity : trace_activities_) {
       auto e = toResult(activity);
       if (e) {
-        const auto expose_metadata =
-            config_.get().experimental_config.expose_kineto_event_metadata;
+        // Flow data for Kineto events is already set during
+        // resultFromActivity(). TorchOp events need it copied here because
+        // their Result is created during RecordFunction callbacks, before
+        // flow data exists on the GenericTraceActivity.
         e->visit(c10::overloaded(
             [&](ExtraFields<EventType::TorchOp>& i) {
-              // Kineto event flow is set during resultFromActivity(). TorchOp
-              // events are created before flow data exists on the activity.
               i.flow = {
                   /*id=*/static_cast<uint32_t>(activity->flowId()),
                   /*type=*/static_cast<uint32_t>(activity->flowType()),
                   /*start=*/activity->flowStart()};
-              if (expose_metadata) {
-                i.metadata_json_ = activity->metadataJson();
-              }
             },
-            [&](ExtraFields<EventType::Kineto>& i) {
-              if (expose_metadata) {
+            [](auto&) {}));
+        if (config_.get().experimental_config.expose_kineto_event_metadata) {
+          e->visit(c10::overloaded(
+              [&](ExtraFields<EventType::TorchOp>& i) {
                 i.metadata_json_ = activity->metadataJson();
-                if (!i.metadata_json_.empty()) {
+              },
+              [&](ExtraFields<EventType::Kineto>& i) {
+                i.metadata_json_ = activity->metadataJson();
+              },
+              [](auto&) { return; }));
+          // Parse metadataJson() into extra_meta_ so events() exposes
+          // Kineto metadata as typed fields without export_chrome_trace().
+          e->visit(c10::overloaded(
+              [&](ExtraFields<EventType::Kineto>& i) {
+                auto json_str = activity->metadataJson();
+                if (!json_str.empty()) {
                   auto j = nlohmann::json::parse(
-                      "{" + i.metadata_json_ + "}", nullptr, false);
+                      "{" + json_str + "}", nullptr, false);
                   if (!j.is_discarded()) {
                     for (auto& [key, val] : j.items()) {
                       i.extra_meta_.emplace(
@@ -1293,12 +1302,17 @@ class TransferEvents {
                     }
                   }
                 }
+              },
+              [](auto&) {}));
+          // Populate the data exposed as FunctionEvent.metadata.
+          e->visit(c10::overloaded(
+              [&](ExtraFields<EventType::Kineto>& i) {
                 IValueMetadataVisitor visitor;
                 activity->visitTypedMetadata(visitor);
                 i.typed_metadata_ = std::move(visitor).metadata();
-              }
-            },
-            [](auto&) {}));
+              },
+              [](auto&) { return; }));
+        }
         const auto* linked_activity = activity->linkedActivity();
         if (linked_activity) {
           e->visit(c10::overloaded(
