@@ -4543,6 +4543,8 @@ class ShapeEnv:
             raise AssertionError(
                 f"Expected orig_s to have free unbacked symbols: {orig_s}"
             )
+        previous_binding = self.unbacked_renamings.get(orig_s)
+        new_binding = self.unbacked_renamings.get(new_s, new_s)
         dest = self.replacements.get(orig_s)
         if dest is not None and free_unbacked_symbols(dest):
             # Re-exporting or re-lowering can register the same data-dependent binding
@@ -4560,9 +4562,22 @@ class ShapeEnv:
                 dest,
             )
         self._set_replacement(orig_s, new_s, "rename_unbacked_to")
-        self.unbacked_renamings[orig_s] = new_s
+        self.unbacked_renamings[orig_s] = new_binding
         if dest is not None:
             self._unify_unbacked_aliases(new_s, dest)
+
+        if previous_binding is not None and previous_binding != new_binding:
+            # FX graph changes can cause later fake propagation to allocate fresh
+            # unbacked symbols. The old symbol may already resolve to another
+            # unbacked symbol (for example, u6 -> u1 -> u0), so record the terminal
+            # to keep binding lookup consistent with symbolic simplification.
+            # For example, when adding u1 -> u0:
+            #   before unbacked_renamings: u3 -> u1, u5 -> u1, u6 -> u1
+            #   after unbacked_renamings: u3 -> u0, u5 -> u0, u6 -> u0, u1 -> u0
+            for alias, binding in self.unbacked_renamings.items():
+                if binding == new_binding:
+                    self.unbacked_renamings[alias] = previous_binding
+            self.unbacked_renamings[new_binding] = previous_binding
 
     def _unify_unbacked_aliases(self, new_s: sympy.Symbol, dest: sympy.Expr) -> None:
         """Unify unbacked aliases under one terminal, preferring a backed one.
