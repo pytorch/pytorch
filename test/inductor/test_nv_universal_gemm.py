@@ -426,7 +426,7 @@ class TestNVUniversalGemm(TestCase):
             compiled = torch.compile(scaled_mm)
             result, (code,) = run_and_get_code(compiled, a, b, scale_a, scale_b, alpha)
             torch.testing.assert_close(
-                result, expected, equal_nan=True, atol=1.0, rtol=2e-2
+                result, expected, equal_nan=True, atol=0, rtol=0
             )
 
             graph = torch.cuda.CUDAGraph()
@@ -437,7 +437,7 @@ class TestNVUniversalGemm(TestCase):
             torch.cuda.synchronize()
 
         torch.testing.assert_close(
-            graph_result, expected, equal_nan=True, atol=1.0, rtol=2e-2
+            graph_result, expected, equal_nan=True, atol=0, rtol=0
         )
         self.assertIn("swap_ab=True", code)
         self.assertIn("output_scale=", code)
@@ -539,7 +539,7 @@ class TestNVUniversalGemm(TestCase):
             assume_supported_args=True,
         )
         torch.cuda.synchronize()
-        torch.testing.assert_close(out, expected, equal_nan=True, atol=1.0, rtol=2e-2)
+        torch.testing.assert_close(out, expected, equal_nan=True, atol=0, rtol=0)
 
         oversized_args, _, _ = make_args(tile_n + 8)
         status = kernel.supports(oversized_args)
@@ -598,7 +598,7 @@ class TestNVUniversalGemm(TestCase):
 
         for actual, reference in zip(result, expected):
             torch.testing.assert_close(
-                actual, reference, equal_nan=True, atol=1.0, rtol=2e-2
+                actual, reference, equal_nan=True, atol=0, rtol=0
             )
         self.assertEqual(counters["inductor"]["scaled_mm_output_scale_fused"], 1)
         self.assertIn("output_scale=", code)
@@ -847,7 +847,7 @@ class TestNVUniversalGemm(TestCase):
             self.assertEqual(actual.dtype, torch.float32)
             self.assertEqual(actual.shape, expected.shape)
         torch.testing.assert_close(
-            actual, expected, equal_nan=True, atol=1.0, rtol=2e-2
+            actual, expected, equal_nan=True, atol=0, rtol=0
         )
         self.assertEqual(counters["inductor"]["scaled_mm_output_scale_fused"], 0)
 
@@ -3798,13 +3798,13 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         result, code, epilogue_fused = self._compile_and_check(
             fn, a, b, scale_a, scale_b, output_scale
         )
-        torch.testing.assert_close(
-            result,
-            fn(a, b, scale_a, scale_b, output_scale),
-            equal_nan=True,
-            atol=1.0,
-            rtol=2e-2,
-        )
+        reference = fn(a, b, scale_a, scale_b, output_scale)
+        if nonpointwise_consumer:
+            torch.testing.assert_close(
+                result, reference, equal_nan=True, atol=0, rtol=0
+            )
+        else:
+            torch.testing.assert_close(result, reference, equal_nan=True)
         expected_folds = int(nonpointwise_consumer)
         self.assertEqual(
             counters["inductor"]["scaled_mm_output_scale_fused"], expected_folds
