@@ -2903,60 +2903,7 @@ class CppBuilder:
                 """
             )
 
-        if device_type == "cuda" and torch.version.hip is not None:
-            from torch._inductor.rocm_multiarch_utils import get_rocm_target_archs
-
-            hip_offload_flags = "\n                                ".join(
-                f"--offload-arch={arch}" for arch in get_rocm_target_archs()
-            )
-            contents += textwrap.dedent(
-                f"""
-                find_program(OBJCOPY_EXECUTABLE objcopy)
-                if(NOT OBJCOPY_EXECUTABLE)
-                    message(FATAL_ERROR "objcopy not found. Cannot embed hsaco as object file")
-                endif()
-
-                set(KERNEL_TARGETS "")
-                set(KERNEL_OBJECT_FILES "")
-                # Records PYTORCH_ROCM_ARCH / current GPU gfx for standalone
-                # LLVM IR rebuilds. Kernel hsaco is produced by inductor, then
-                # embedded below the same way XPU embeds SPV.
-                set(HIP_OFFLOAD_ARCH_FLAGS
-                                {hip_offload_flags}
-                )
-                function(embed_gpu_kernel KERNEL_NAME HSACO_FILE)
-                    set(OBJECT_BASENAME ${{KERNEL_NAME}}.hsaco.o)
-                    set(OBJECT_FILE ${{CMAKE_CURRENT_BINARY_DIR}}/${{OBJECT_BASENAME}})
-
-                    set(SYMBOL_START __${{KERNEL_NAME}}_start)
-                    set(SYMBOL_END __${{KERNEL_NAME}}_end)
-                    set(SYMBOL_SIZE __${{KERNEL_NAME}}_size)
-                    string(REGEX REPLACE "[^a-zA-Z0-9]" "_" MANGLED_BASENAME ${{HSACO_FILE}})
-                    set(OBJCOPY_START_SYM _binary_${{MANGLED_BASENAME}}_start)
-                    set(OBJCOPY_END_SYM _binary_${{MANGLED_BASENAME}}_end)
-                    set(OBJCOPY_SIZE_SYM _binary_${{MANGLED_BASENAME}}_size)
-
-                    add_custom_command(
-                        OUTPUT ${{OBJECT_FILE}}
-                        COMMAND ${{CMAKE_LINKER}} -r -b binary -z noexecstack -o ${{OBJECT_FILE}} ${{HSACO_FILE}}
-                        COMMAND ${{OBJCOPY_EXECUTABLE}} --rename-section .data=.rodata,alloc,load,readonly,data,contents
-                                ${{OBJECT_FILE}}
-                        COMMAND ${{OBJCOPY_EXECUTABLE}}
-                                --redefine-sym ${{OBJCOPY_START_SYM}}=${{SYMBOL_START}}
-                                --redefine-sym ${{OBJCOPY_END_SYM}}=${{SYMBOL_END}}
-                                --redefine-sym ${{OBJCOPY_SIZE_SYM}}=${{SYMBOL_SIZE}}
-                                ${{OBJECT_FILE}}
-                        DEPENDS ${{HSACO_FILE}}
-                    )
-                    add_custom_target(build_kernel_object_${{KERNEL_NAME}} DEPENDS ${{OBJECT_FILE}})
-
-                    set(KERNEL_TARGETS ${{KERNEL_TARGETS}} build_kernel_object_${{KERNEL_NAME}} PARENT_SCOPE)
-                    set(KERNEL_OBJECT_FILES ${{KERNEL_OBJECT_FILES}} ${{OBJECT_FILE}} PARENT_SCOPE)
-                endfunction()
-
-                """
-            )
-        elif device_type == "cuda" and torch.version.hip is None:
+        if device_type == "cuda" and torch.version.hip is None:
             from torch._inductor.codegen.cuda import compile_utils
 
             cuda_arch = compile_utils._aoti_cuda_target_arch()

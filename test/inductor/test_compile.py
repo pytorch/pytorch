@@ -470,6 +470,7 @@ class TestStandaloneInductor(TestCase):
         self.assertNotIn("arch=compute_100a,code=sm_100a", cmd)
 
     @mock.patch.dict(os.environ, {"PYTORCH_ROCM_ARCH": "gfx900,gfx90a,gfx942"})
+    # Keeps get_rocm_target_archs() from appending the live GPU arch.
     @mock.patch("torch.cuda.is_available", return_value=False)
     @mock.patch.dict(os.environ, {"TORCH_CUDA_ARCH_LIST": "7.0;8.0;8.6;9.0"})
     @mock.patch(
@@ -488,18 +489,20 @@ class TestStandaloneInductor(TestCase):
                 output_dir=tmp_dir,
                 BuildOption=build_option,
             )
-            cuda_arch_patch = {"cuda.arch": "80"} if torch.version.hip is None else {}
-            with config.patch(cuda_arch_patch):
+            with config.patch({"cuda.arch": "80"}):
                 cpp_builder.save_compile_cmd_to_cmake(cmake_path, "cuda")
             with open(cmake_path) as f:
                 cmake_contents = f.read()
 
         if torch.version.hip is not None:
-            self.assertNotIn("-gencode", cmake_contents)
+            from torch._inductor.rocm_multiarch_utils import get_rocm_target_archs
+
+            # ROCm links a prebuilt multi-arch bundle built for get_rocm_target_archs(),
+            # so the generated CMake project carries no GPU toolchain.
             self.assertNotIn("enable_language(CUDA)", cmake_contents)
-            self.assertIn("--offload-arch=gfx900", cmake_contents)
-            self.assertIn("--offload-arch=gfx90a", cmake_contents)
-            self.assertIn("--offload-arch=gfx942", cmake_contents)
+            self.assertNotIn("-gencode", cmake_contents)
+            self.assertNotIn("embed_gpu_kernel", cmake_contents)
+            self.assertEqual(get_rocm_target_archs(), ["gfx900", "gfx90a", "gfx942"])
         else:
             self.assertNotIn("compute_70", cmake_contents)
             self.assertNotIn("compute_100a", cmake_contents)
@@ -552,44 +555,30 @@ class TestStandaloneInductor(TestCase):
         )
 
         if is_rocm:
-            with (
-                config.patch({"aot_inductor.emit_multi_arch_kernel": True}),
-                mock.patch.object(
-                    CachingAutotuner,
-                    "_precompile_config",
-                ) as precompile_config,
-                mock.patch(
-                    "torch._inductor.codecache.CudaKernelParamCache.set"
-                ) as cache_set,
+            for multi_arch, asm_key, expected_asm_type in (
+                (True, "llir", "ll"),
+                (False, "amdgcn", "amdgcn"),
             ):
-                autotuner.save_gpu_kernel("stream", launcher)
-
-            precompile_config.assert_not_called()
-            _, params, binary, bin_type, asm, asm_type = cache_set.call_args.args
-            self.assertIsNone(params["cuda_arch"])
-            self.assertEqual(binary, b"current hsaco")
-            self.assertEqual(bin_type, "hsaco")
-            self.assertEqual(asm, "current llvm ir")
-            self.assertEqual(asm_type, "ll")
-
-            with (
-                config.patch({"aot_inductor.emit_multi_arch_kernel": False}),
-                mock.patch.object(
-                    CachingAutotuner,
-                    "_precompile_config",
-                ) as precompile_config,
-                mock.patch(
-                    "torch._inductor.codecache.CudaKernelParamCache.set"
-                ) as cache_set,
-            ):
-                autotuner.save_gpu_kernel("stream", launcher)
-
-            precompile_config.assert_not_called()
-            _, params, binary, bin_type, asm, asm_type = cache_set.call_args.args
-            self.assertEqual(binary, b"current hsaco")
-            self.assertEqual(bin_type, "hsaco")
-            self.assertEqual(asm, "current amdgcn")
-            self.assertEqual(asm_type, "amdgcn")
+                with (
+                    self.subTest(emit_multi_arch_kernel=multi_arch),
+                    config.patch({"aot_inductor.emit_multi_arch_kernel": multi_arch}),
+                    mock.patch.object(
+                        CachingAutotuner, "_precompile_config"
+                    ) as precompile_config,
+                    mock.patch(
+                        "torch._inductor.codecache.CudaKernelParamCache.set"
+                    ) as cache_set,
+                ):
+                    autotuner.save_gpu_kernel("stream", launcher)
+                    precompile_config.assert_not_called()
+                    _, params, binary, bin_type, asm, asm_type = (
+                        cache_set.call_args.args
+                    )
+                    self.assertIsNone(params["cuda_arch"])
+                    self.assertEqual(binary, b"current hsaco")
+                    self.assertEqual(bin_type, "hsaco")
+                    self.assertEqual(asm, current_asm[asm_key])
+                    self.assertEqual(asm_type, expected_asm_type)
             return
 
         with (
