@@ -465,6 +465,7 @@ enum class ReductionKernel {
   OuterSmallDim, // inner > 1 and short dim (<= 256): one thread reduces a whole column
   Narrow, // contiguous Outer with inner < 32: one threadgroup reduces all inner columns at once
   Flat, // large full reduction (single output): pass 1 over contiguous slices
+  FlatStrided, // Flat over a non-contiguous input that collapses to [rows, run]
   ArgCombine // argmax/argmin pass 2: merges segments, first occurrence wins
 };
 
@@ -485,7 +486,51 @@ struct ReductionPlan {
   ReductionLayout layout;
   uint32_t num_segments = 1;
   uint32_t lanes = c10::metal::simdgroup_size;
+  // FlatStrided only: [rows, chunk_len, chunks_per_row, 0] and
+  // [row_stride, element_stride, 0, 0]; see reduction_flat_strided.
+  std::array<uint32_t, 4> flat_sizes{};
+  std::array<uint32_t, 4> flat_strides{};
 };
+
+// Full reduction over a non-contiguous input without copying it first. Usable
+// when the dims collapse to at most two blocks, [rows, run], so every element
+// is a multiply-add off a per-row base. Anything more fragmented returns
+// nullopt and keeps the .contiguous() + Flat path.
+static std::optional<ReductionPlan> select_flat_strided(const Tensor& input, uint32_t num_groups) {
+  c10::DimVector sizes(input.sizes().begin(), input.sizes().end());
+  c10::DimVector strides(input.strides().begin(), input.strides().end());
+  const auto ndim = at::collapse_dims(sizes.data(), strides.data(), input.dim()).second;
+  if (ndim < 1 || ndim > 2) {
+    return std::nullopt;
+  }
+  const bool has_rows = ndim == 2;
+  const auto rows = has_rows ? safe_downcast<uint32_t, int64_t>(sizes[0]) : 1u;
+  const auto run = safe_downcast<uint32_t, int64_t>(sizes[ndim - 1]);
+  // Split long runs so rows * chunks can occupy every threadgroup a few times
+  // over. Only exact divisors, so the kernel needs no ragged tail.
+  constexpr uint32_t MIN_CHUNK = 1024;
+  uint32_t chunks = 1;
+  if (rows < num_groups * 4 && run >= 2 * MIN_CHUNK) {
+    chunks = std::min(at::ceil_div(num_groups * 4, rows), run / MIN_CHUNK);
+    while (chunks > 1 && run % chunks != 0) {
+      chunks--;
+    }
+  }
+  // A single run that could not be split would serialise on one threadgroup;
+  // the copy is cheaper than that.
+  if (rows * chunks < num_groups) {
+    return std::nullopt;
+  }
+  ReductionPlan plan{.kernel = ReductionKernel::FlatStrided,
+                     .layout = ReductionLayout::contiguous(1, safe_downcast<uint32_t, int64_t>(input.numel()), 1),
+                     .num_segments = num_groups};
+  plan.flat_sizes = {rows, run / chunks, chunks, 0};
+  plan.flat_strides = {has_rows ? safe_downcast<uint32_t, int64_t>(strides[0]) : 0u,
+                       safe_downcast<uint32_t, int64_t>(strides[ndim - 1]),
+                       0,
+                       0};
+  return plan;
+}
 
 static std::optional<ReductionLayout> outer_reduction_layout(const Tensor& input, int64_t reduced_dim) {
   c10::DimVector sizes(input.sizes().begin(), input.sizes().end());
@@ -602,6 +647,18 @@ static ReductionPlan select_reduction_plan(const Tensor& input, const Tensor& ou
   // collapses the num_groups partials into the final scalar.
   if (num_outputs == 1 && !is_arg) {
     auto num_groups = std::min(512u, at::ceil_div(reduction_size, MAX_THREADGROUP_SIZE * SUM_NCHAINS));
+    // The strided kernel grid-strides over rows, so unlike Flat it does not
+    // need num_groups to divide the element count. It is also budgeted for
+    // fewer elements per threadgroup: Flat's contiguous quad loads keep a few
+    // threadgroups busy, but a strided walk over short rows is latency-bound,
+    // and at Flat's budget a 16K-element view would run on two threadgroups.
+    if (!input.is_contiguous() && num_groups > 1 && canUse32BitIndexMath(input)) {
+      constexpr uint32_t STRIDED_ELEMS_PER_GROUP = 256 * SUM_NCHAINS;
+      const auto strided_groups = std::min(512u, at::ceil_div(reduction_size, STRIDED_ELEMS_PER_GROUP));
+      if (auto strided = select_flat_strided(input, strided_groups)) {
+        return *strided;
+      }
+    }
     while (num_groups > 1 && reduction_size % num_groups != 0) {
       num_groups--;
     }
@@ -644,7 +701,7 @@ static ReductionPlan reduction_combine_plan(const ReductionPlan& plan, bool is_a
   auto kernel = plan.kernel;
   if (kernel == ReductionKernel::InnermostChunk) {
     kernel = ReductionKernel::Innermost;
-  } else if (kernel == ReductionKernel::Flat) {
+  } else if (kernel == ReductionKernel::Flat || kernel == ReductionKernel::FlatStrided) {
     kernel = ReductionKernel::Generic;
   }
   return {.kernel = kernel,
@@ -667,6 +724,8 @@ static const char* reduction_kernel_suffix(ReductionKernel kernel) {
       return "_narrow";
     case ReductionKernel::Flat:
       return "_flat";
+    case ReductionKernel::FlatStrided:
+      return "_flat_strided";
     case ReductionKernel::ArgCombine:
       return "_combine";
   }
@@ -777,6 +836,13 @@ static void encode_reduction(MPSStream* stream,
       constexpr uint32_t TPG = 256;
       const std::array<uint32_t, 2> sizes{plan.num_segments, layout.dim_size / plan.num_segments};
       mtl_setArgs(encoder, input, output, sizes);
+      grid = MTLSizeMake(plan.num_segments * TPG, 1, 1);
+      group = MTLSizeMake(TPG, 1, 1);
+      break;
+    }
+    case ReductionKernel::FlatStrided: {
+      constexpr uint32_t TPG = 256;
+      mtl_setArgs(encoder, input, output, plan.flat_sizes, plan.flat_strides);
       grid = MTLSizeMake(plan.num_segments * TPG, 1, 1);
       group = MTLSizeMake(TPG, 1, 1);
       break;
