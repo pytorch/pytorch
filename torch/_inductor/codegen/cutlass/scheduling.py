@@ -33,9 +33,17 @@ log = logging.getLogger(__name__)
 
 
 class WhyNoFuseNames(WhyNoFuse):
+    name1: str
+    name2: str
+
     def __init__(self, name1: str, name2: str) -> None:
         self.name1 = name1
         self.name2 = name2
+
+    def __str__(self) -> str:
+        return f"cannot fuse {self.name1} with {self.name2}: " + (
+            self.reason % self.args
+        )
 
 
 class CUTLASSScheduling(BaseScheduling):
