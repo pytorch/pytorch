@@ -5816,6 +5816,10 @@ class TestTorchDeviceType(TestCase):
                 s1.scale(torch.full((1,), 4.0, dtype=torch.float32, device=device))
                 if "cuda" == device.type:
                     self.assertTrue(isinstance(s1._scale, torch.cuda.FloatTensor))
+                elif "xpu" == device.type:
+                    self.assertTrue(isinstance(s1._scale, torch.Tensor))
+                    self.assertTrue(s1._scale.dtype == torch.float32)
+                    self.assertEqual(s1._scale.device, device)
                 else:
                     self.assertTrue(isinstance(s1._scale, torch.FloatTensor))
 
