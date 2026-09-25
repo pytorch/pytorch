@@ -2283,7 +2283,8 @@ class InstructionTranslatorBase(
         from .variables.streams import get_current_stream, new_event
 
         device = var.device
-        if device is None or device.type not in ("cuda", "mtia", "xpu"):
+        acc = torch.accelerator.current_accelerator()
+        if device is None or acc is None or device.type != acc.type:
             return
 
         node = var.proxy.node
@@ -3373,6 +3374,15 @@ class InstructionTranslatorBase(
             result = generic_getattr(self, obj, attr)
         except Unsupported:
             if not obj.is_python_constant():
+                raise
+            # An eager getattr would run a user-defined __get__ at trace time
+            # and bake its result into the graph.
+            if isinstance(obj, variables.UserDefinedClassVariable) and isinstance(
+                inspect.getattr_static(
+                    type(obj.lookup_cls_mro_attr(attr)), "__get__", None
+                ),
+                types.FunctionType,
+            ):
                 raise
             source = AttrSource(obj.source, attr) if obj.source else None
             result = VariableTracker.build(

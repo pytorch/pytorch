@@ -1340,6 +1340,17 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                     loss.backward()
 
                 # Run the DDP model with local optimizer
+                # NOTE: The reference model needs the same warmup iterations so
+                # that it has also rebuilt its DDP buckets before the compared
+                # iterations. Otherwise its first compared iteration all-reduces
+                # every gradient as one bucket instead of the rebuilt buckets
+                # used by `ddp_model_overlap`, and a different all-reduce message
+                # layout gives a different floating-point reduction order once
+                # there are more than two ranks.
+                for input in inputs[:num_warmup_inputs]:
+                    output = ddp_model_local(input)
+                    loss = output.sum()
+                    loss.backward()
                 for input in inputs:
                     local_optim.zero_grad()
                     output = ddp_model_local(input)

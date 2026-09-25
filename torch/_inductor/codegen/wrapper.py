@@ -14,7 +14,7 @@ import re
 import secrets
 import sys
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from enum import Enum
 from itertools import chain, count
 from typing import Any, Literal, Protocol, TYPE_CHECKING
@@ -70,8 +70,10 @@ from ..utils import (
     get_constexpr_repr_children,
     get_dtype_size,
     get_importable_constexpr_types,
+    GPU_ALIGN_BYTES,
     IndentedBuffer,
     is_codegen_graph_partition_subgraph,
+    is_gpu,
     is_using_cudagraph_partition,
     LineContext,
     make_codegen_buffer,
@@ -114,6 +116,186 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 pexpr = PythonPrinter().doprint
+
+
+def _constant_offload_targets(
+    device: torch.device,
+) -> tuple[list[tuple[Any, int]], int]:
+    """Unique storages backing the graph constants on `device`.
+
+    Deduped by data pointer: constants are deduplicated by value, so several
+    names can share one storage and offloading per name would copy the same
+    bytes repeatedly. Constants can span devices (see
+    GraphLowering.constant_name), so only one device's are taken.
+
+    Non-resizable storages are excluded. resize_ raises on them even for a
+    zero-size resize, and discovering that mid-free would leave earlier
+    constants already freed.
+    """
+    targets: list[tuple[Any, int]] = []
+    seen: OrderedSet[int] = OrderedSet()
+    for tensor in V.graph.constants.values():
+        if not isinstance(tensor, torch.Tensor) or tensor.device != device:
+            continue
+        storage = tensor.untyped_storage()
+        ptr, nbytes = storage.data_ptr(), storage.nbytes()
+        if ptr == 0 or nbytes == 0 or ptr in seen or not storage.resizable():
+            continue
+        seen.add(ptr)
+        targets.append((storage, nbytes))
+    return targets, sum(nbytes for _, nbytes in targets)
+
+
+@contextlib.contextmanager
+def _constants_offloaded_to_disk() -> Iterator[None]:
+    """Free the graph constants from device memory across the autotune block.
+
+    The block benchmarks kernels against freshly generated random tensors and
+    reads only size/stride/dtype/device off the constants, so their bytes are
+    not needed while it runs. They are parked in an mmap'd file rather than
+    anonymous host memory: file-backed pages are clean page cache the kernel can
+    evict and re-read, where anonymous pages are reclaimable only to swap and
+    have been observed to drive an OOM kill on an already memory-heavy lowering.
+    """
+    state = None
+
+    # autotune_at_compile_time is reachable from plain JIT compile too, but the
+    # reasoning here -- that constant values are only needed until AOTI
+    # serialization reads them back -- is specific to AOT, as is the config this
+    # is gated on. Constants can span devices; spill only the one being lowered
+    # for, so the capacity the fraction is measured against matches what is freed.
+    # Read `current_device` rather than get_current_device_or_throw(): it is set
+    # only while codegen'ing a device-specific kernel, so a graph can reach here
+    # with none set -- the cpp_wrapper path does. That means there is nothing to
+    # offload, not that something is wrong.
+    device = V.graph.current_device
+    if (
+        device is not None
+        and device.type != "cpu"
+        and V.graph.aot_mode
+        # The constant-folding subgraph has no kernels to autotune and no
+        # allocator growth to relieve, so spilling it is pure wall clock.
+        and not V.graph.is_const_graph
+    ):
+        targets, total = _constant_offload_targets(device)
+        fraction = config.aot_inductor.autotune_offload_constants_min_device_fraction
+        if targets and total >= fraction * torch.accelerator.get_memory_info(device)[1]:
+            state = _spill_constants(targets, total)
+
+    try:
+        yield
+    finally:
+        # Captured before the restore's own handler, which would otherwise
+        # overwrite what sys.exc_info() reports.
+        block_failed = sys.exc_info()[0] is not None
+        if state is not None:
+            try:
+                _restore_constants(*state)
+            except Exception as exc:
+                # The spill file is the only copy of these bytes, and a partial
+                # restore leaves some constants at size zero -- codegen would then
+                # emit silently wrong results rather than fail. Nothing can
+                # recover that, so surface it as a clear fatal error instead of
+                # letting a bare exception escape the finally block.
+                log.exception(
+                    "Failed to restore %d offloaded constant storages to device",
+                    len(state[0]),
+                )
+                # Raising here when the block itself already failed would
+                # bury the original cause. A partial restore is still fatal, but
+                # the in-flight exception is the one worth surfacing.
+                if not block_failed:
+                    raise RuntimeError(
+                        "Graph constants could not be restored to device after "
+                        "the autotune offload; the graph is no longer usable"
+                    ) from exc
+
+
+def _spill_constants(
+    targets: list[tuple[Any, int]], total: int
+) -> tuple[list[tuple[Any, int]], list[int], Any] | None:
+    """Copy constants into an mmap'd file and free their device storage.
+
+    Returns None if the copy could not be completed, in which case no device
+    storage has been freed and lowering proceeds unchanged.
+
+    The free loop is deliberately outside that handler. Once a storage has been
+    resized away the spill file is the only copy, so a failure there has to
+    restore rather than report -- returning None would leave the caller with no
+    state to restore from.
+    """
+    # Not tempfile.gettempdir(): /tmp is tmpfs on many hosts, which would make
+    # the mapping anonymous RAM and defeat the point of spilling to disk.
+    path = os.path.join(
+        cache_dir(), f"inductor_const_spill_{os.getpid()}_{id(V.graph)}"
+    )
+    backing = None
+    offsets = []
+    try:
+        with dynamo_timed("offload_constants_spill", log_pt2_compile_event=True):
+            backing = torch.UntypedStorage.from_file(path, shared=True, nbytes=total)
+            # Unlink while the mapping holds the inode. The bytes stay readable
+            # and the space is reclaimed on process exit by any route, including
+            # the SIGKILL under which cleanup code would never run.
+            os.unlink(path)
+            offset = 0
+            # Copy everything before freeing anything, so a failure here leaves
+            # every constant intact on device.
+            for storage, nbytes in targets:
+                backing[offset : offset + nbytes].copy_(storage)
+                offsets.append(offset)
+                offset += nbytes
+    except (OSError, RuntimeError):
+        log.warning(
+            "Could not spill %.1f GiB of constants to %s; "
+            "continuing without the autotune offload",
+            total / 2**30,
+            path,
+            exc_info=True,
+        )
+        backing = None
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+        return None
+
+    freed = 0
+    try:
+        for storage, _ in targets:
+            storage.resize_(0)
+            freed += 1
+        torch.accelerator.empty_cache()
+    except Exception:
+        log.exception(
+            "Failed to free constant %d of %d after spilling; restoring",
+            freed,
+            len(targets),
+        )
+        _restore_constants(targets[:freed], offsets[:freed], backing)
+        raise
+
+    # Warning rather than info: this is an automatic, default-on behaviour that
+    # materially changes peak memory and adds wall clock, and the inductor logger
+    # sits at WARNING in the lowering harness, so info would be invisible to
+    # anyone debugging a run. Fires at most once per graph, and only for models
+    # large enough to clear the threshold.
+    log.warning(
+        "Offloaded %d constant storages (%.1f GiB) to disk for autotuning",
+        len(targets),
+        total / 2**30,
+    )
+    return (targets, offsets, backing)
+
+
+def _restore_constants(
+    targets: list[tuple[Any, int]], offsets: list[int], backing: Any
+) -> None:
+    with dynamo_timed("offload_constants_restore", log_pt2_compile_event=True):
+        for (storage, nbytes), offset in zip(targets, offsets):
+            storage.resize_(nbytes)
+            storage.copy_(backing[offset : offset + nbytes])
+    del backing
 
 
 def _rewrite_symbol_solution_for_int_codegen(expr: sympy.Expr) -> sympy.Expr:
@@ -589,6 +771,43 @@ class EnterSubgraphLine(WrapperLine):
 
 
 @dataclasses.dataclass
+class EnterKernelProfileScopeLine(WrapperLine):
+    """Opens the `{` of a kernel profiling block.
+
+    The block is a real C++ scope, so everything a kernel call declares inside
+    it dies at the closing brace. Every memo that decides whether a
+    declaration is emitted has to be scoped with it, or a later line outside
+    the block names a variable that no longer exists: the buffer reuse pool
+    (a workspace freed inside would be handed to an allocation outside as
+    `auto new = std::move(inner)`), the precomputed-size memo, and the int
+    array cache.
+    """
+
+    wrapper: PythonWrapperCodegen
+
+    def __post_init__(self) -> None:
+        self.wrapper.push_computed_sizes(self.wrapper.computed_sizes)
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        self.wrapper.push_kernel_profile_scope_state()
+        code.writeline("{")
+
+
+@dataclasses.dataclass
+class ExitKernelProfileScopeLine(WrapperLine):
+    """Closes the `{` that EnterKernelProfileScopeLine opened."""
+
+    wrapper: PythonWrapperCodegen
+
+    def __post_init__(self) -> None:
+        self.wrapper.computed_sizes = self.wrapper.pop_computed_sizes()
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        self.wrapper.pop_kernel_profile_scope_state()
+        code.writeline("}")
+
+
+@dataclasses.dataclass
 class SwitchLine(WrapperLine):
     wrapper: PythonWrapperCodegen
     node: ir.Switch
@@ -738,8 +957,17 @@ def kernel_profile_enabled() -> bool:
     through an include that only these platforms emit. Callers that build
     profiling metadata must use this rather than the config flag alone:
     `_get_profiling_args` emits codegen for ReinterpretView arguments, so
-    building metadata the shim then declines to emit would leak a handle."""
-    return config.cpp.enable_kernel_profile and sys.platform in ("linux", "win32")
+    building metadata the shim then declines to emit would leak a handle.
+
+    `config.memory_planning` disables it: every record sits in a `{}` block,
+    and those blocks are a boundary only to memory_plan_reuse. MemoryPlanner
+    runs in its place and does not see them, so a pool first created inside one
+    would be declared there and named by a line after it."""
+    return (
+        config.cpp.enable_kernel_profile
+        and sys.platform in ("linux", "win32")
+        and not config.memory_planning
+    )
 
 
 def _profiling_arg_entry(value: Any) -> str | None:
@@ -1234,7 +1462,7 @@ class AllocateLine(MemoryPlanningLine):
         device = self.node.get_device()
         if not (device is not None and device.index is not None):
             raise AssertionError(
-                f"Comm buffer requires a valid CUDA device with index, got {device}"
+                f"Comm buffer requires a valid accelerator device with index, got {device}"
             )
         dtype = self.node.get_dtype()
         shape = tuple(self.node.get_size())
@@ -1249,9 +1477,12 @@ class AllocateLine(MemoryPlanningLine):
             # [device-as-parameter] under compile-on-one-rank the comm buffer must follow
             # the running rank's device, not the compile-time index.
             if _coor_enabled():
-                device_arg = f'torch.device("cuda", {V.graph.device_ops.current_device_idx_expr()})'
+                device_arg = (
+                    f'torch.device("{device.type}", '
+                    f"{V.graph.device_ops.current_device_idx_expr()})"
+                )
             else:
-                device_arg = f'torch.device("cuda:{device.index}")'
+                device_arg = f'torch.device("{device.type}:{device.index}")'
             line = (
                 f"{name} = empty_strided_p2p("
                 f"{self.wrapper.codegen_shape_tuple(shape)}, "
@@ -1462,10 +1693,23 @@ class IndexPutFallbackLine(WrapperLine):
             idx.codegen_reference() if idx else self.wrapper.none_str
             for idx in self.indices
         ]
-
-        self.wrapper._generate_index_put_fallback(
-            node.get_kernel_name(), x, indices, values, *node.codegen_const_args()
+        # index_put_ takes (self, indices, values, accumulate), but the index
+        # list is spread across inputs and the wrapper hook passes it as a
+        # flattened array, so the profiling metadata is built here rather than
+        # from the node's inputs. Each entry gets its own expression instead of
+        # reusing the one passed to the kernel: a reinterpret view's expression
+        # owns the handle it names, so the same one used in two statements
+        # would be freed by the first.
+        profiling_args = self.wrapper.make_profiling_args(
+            [node.inputs[0], *self.indices, node.inputs[1], None]
         )
+
+        with self.wrapper.profiled_kernel_scope(
+            node.get_kernel_name(), node, profiling_args
+        ):
+            self.wrapper._generate_index_put_fallback(
+                node.get_kernel_name(), x, indices, values, *node.codegen_const_args()
+            )
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
         return converter._generate_index_put_fallback
@@ -1486,16 +1730,35 @@ class ScatterFallbackLine(WrapperLine):
             (x, index) = (t.codegen_reference() for t in node.inputs)
             src = node.constant_args[1]
         device = d.type if (d := node.get_device()) else V.graph.device_type
-        self.wrapper._generate_scatter_fallback(
-            x,
-            [x, node.constant_args[0], index, src],
-            node.cpp_kernel_name,
-            node.python_kernel_name,
-            node.src_is_tensor,
-            node.kwargs["reduce"],
-            node.codegen_kwargs(),
-            device,
+        kwargs = node.codegen_kwargs()
+        # scatter keeps `dim` in constant_args between its tensors, so the
+        # profiling metadata is built here, in the schema order the wrapper
+        # hook passes: (self, dim, index, src) followed by one entry per
+        # argument codegen_kwargs emits. `src` is a scalar for the value
+        # overloads.
+        profiling_args = self.wrapper.make_profiling_args(
+            [
+                node.inputs[0],
+                None,
+                node.inputs[1],
+                node.inputs[2] if node.src_is_tensor else None,
+                *([None] * len(kwargs)),
+            ]
         )
+        # Record the shim the hook actually calls, not the ATen symbol the node
+        # carries: a trace consumer keys on the emitted name.
+        record_name = self.wrapper.scatter_fallback_kernel_name(node.get_kernel_name())
+        with self.wrapper.profiled_kernel_scope(record_name, node, profiling_args):
+            self.wrapper._generate_scatter_fallback(
+                x,
+                [x, node.constant_args[0], index, src],
+                node.cpp_kernel_name,
+                node.python_kernel_name,
+                node.src_is_tensor,
+                node.kwargs["reduce"],
+                kwargs,
+                device,
+            )
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
         return converter._generate_scatter_fallback
@@ -1701,6 +1964,11 @@ class PythonWrapperCodegen(CodeGen):
         # its own braces -- does not register; anything emitting a numel inside
         # one has to maintain the depth too.
         self.kernel_profile_scope_depth: int = 0
+        # Index in self.lines of the `{` opening the outermost profiling block
+        # currently being collected, or None when there is none. A declaration
+        # that has to stay visible after the block closes is inserted there,
+        # which puts it in front of the brace, instead of appended.
+        self.kernel_profile_scope_hoist_index: int | None = None
         self.lines: list[Line] = []
         self.declare = ""
         self.declare_maybe_reference = ""
@@ -2128,8 +2396,27 @@ class PythonWrapperCodegen(CodeGen):
     def codegen_input_size_and_nan_asserts(self) -> None:
         if config.size_asserts:
             self.codegen_input_size_asserts()
+        if config.alignment_asserts_inputs:
+            self.codegen_input_alignment_asserts()
         if config.nan_asserts:
             self.codegen_input_nan_asserts()
+
+    def codegen_input_alignment_asserts(self) -> None:
+        # Partition prefixes are generated after their kernels.
+        body = self.lines
+        self.lines = []
+        inputs = self.get_graph_inputs()
+        for name, buf in V.graph.graph_inputs.items():
+            if (
+                name not in inputs
+                or name in V.graph.unaligned_buffers
+                or not isinstance(buf, ir.TensorBox)
+            ):
+                continue
+            device = buf.get_device()
+            if device is not None and is_gpu(device.type):
+                self.write_assert_alignment(name, GPU_ALIGN_BYTES, "input")
+        self.lines.extend(body)
 
     # Input size/stride assertions are deferred from the top of call() to just
     # before the first kernel that uses each input. This avoids a block of N
@@ -2327,6 +2614,30 @@ class PythonWrapperCodegen(CodeGen):
 
     def pop_codegened_graph(self):
         return self.codegened_graph_stack.pop()
+
+    def push_kernel_profile_scope_state(self):
+        """Save the declaration memos a profiling block is about to shadow.
+
+        Nothing to save for the Python wrapper, which has no block scope.
+        """
+
+    def pop_kernel_profile_scope_state(self):
+        """Restore what push_kernel_profile_scope_state saved."""
+
+    def writeline_outside_kernel_profile_scope(self, line):
+        """Emit a declaration that has to outlive every open profiling block,
+        such as a workspace allocated once per graph and never freed.
+
+        The line is hoisted in front of the outermost block, not the enclosing
+        one, so this is only correct for something whose lifetime is the whole
+        graph. A block-local declaration hoisted this way would be lifted too
+        far."""
+        index = self.kernel_profile_scope_hoist_index
+        if index is None:
+            self.writeline(line)
+        else:
+            self.lines.insert(index, line)
+            self.kernel_profile_scope_hoist_index = index + 1
 
     def push_computed_sizes(self, computed_sizes):
         from copy import deepcopy
@@ -2659,6 +2970,16 @@ class PythonWrapperCodegen(CodeGen):
     def generate_scatter_fallback(self, node: ir.ScatterFallback):
         self.writeline(ScatterFallbackLine(self, node))
 
+    def scatter_fallback_kernel_name(self, kernel_name: str) -> str:
+        """The name the scatter fallback is emitted under, given the name the
+        wrapper resolves the node to.
+
+        The Python wrapper calls the ATen op under that name; CppWrapperCpu
+        calls the `_out` variant of the C shim symbol, which is what its
+        RecordFunction has to say.
+        """
+        return kernel_name
+
     def _generate_scatter_fallback(
         self,
         output,
@@ -2908,10 +3229,11 @@ class PythonWrapperCodegen(CodeGen):
             payload_fn=lambda: tuning_code,
         )
         # Execute the code to autotune kernels
-        try:
-            exec(tuning_code, scope)
-        except Exception as e:
-            raise RuntimeError(f"Failed to run autotuning code block: {e}") from e
+        with _constants_offloaded_to_disk():
+            try:
+                exec(tuning_code, scope)
+            except Exception as e:
+                raise RuntimeError(f"Failed to run autotuning code block: {e}") from e
 
     def memory_plan(self):
         from .memory_planning import MemoryPlanner
@@ -2949,6 +3271,15 @@ class PythonWrapperCodegen(CodeGen):
                 past_planning_states.append(planning_states.pop())
                 if config.allow_buffer_reuse:
                     self.estimate_peak = peak_estimate_stack.pop()
+            elif isinstance(line, EnterKernelProfileScopeLine):
+                # A buffer freed inside the block must not be offered to an
+                # allocation after it, and one freed before it must not be
+                # reused inside: either way the ReuseLine declares its new name
+                # on the wrong side of a brace. The state is the same graph's,
+                # so estimate_peak is left alone.
+                planning_states.append(MemoryPlanningState())
+            elif isinstance(line, ExitKernelProfileScopeLine):
+                past_planning_states.append(planning_states.pop())
         past_planning_states.append(planning_states.pop())
         if len(planning_states) != 0:
             raise AssertionError(
@@ -4109,8 +4440,12 @@ class PythonWrapperCodegen(CodeGen):
                 # expand existing allocation
                 prior.node = WorkspaceArg.maximum(prior.node, ws)
             else:
-                self.writeline(line)
-                self.writeline(self.make_zero_buffer(name))
+                # Allocated once at first use and never freed, so it has to be
+                # declared outside any profiling block: the first kernel to
+                # need it may sit inside one, and every later kernel that
+                # names it sits in a different block.
+                self.writeline_outside_kernel_profile_scope(line)
+                self.writeline_outside_kernel_profile_scope(self.make_zero_buffer(name))
                 self.allocated_workspaces[name] = line
         else:
             raise AssertionError(ws.zero_mode)
@@ -5333,8 +5668,87 @@ class PythonWrapperCodegen(CodeGen):
 
         A profiling block is a C++ construct, so this does nothing for the
         Python wrapper; CppWrapperCpu overrides it to emit the real block.
+        There, `enabled` left as None means "read the config", which is not the
+        same as False: a caller that also records a RecordFunction passes
+        kernel_profile_enabled() so the block opens on the same condition as
+        the handle.
         """
         yield
+
+    def write_record_function_handle(
+        self,
+        kernel_name: str,
+        profiling_args: Sequence[str | None] | None = None,
+    ):
+        return
+
+    def records_profiling_args(self) -> bool:
+        """Whether write_record_function_handle consumes argument metadata.
+
+        Building that metadata is not free: a reinterpret view mints a tensor
+        handle whose only owner is the expression handed back, so a wrapper
+        that discards the list leaks the handle. Such a wrapper says so here
+        instead, and nothing is built for it.
+        """
+        return False
+
+    def make_profiling_args(self, values: Sequence[Any]) -> list[str | None] | None:
+        """Profiling metadata for a caller whose wrapper hook reorders the
+        kernel's arguments, so `_get_profiling_args` cannot derive it.
+
+        Values are the IR nodes in the order the hook passes them, with None
+        for each non-tensor. Returns None when nothing would record the result,
+        which is what keeps a reinterpret view from emitting an owner-less
+        handle.
+        """
+        if not (self.records_profiling_args() and kernel_profile_enabled()):
+            return None
+        return _profiling_arg_entries(values)
+
+    @contextlib.contextmanager
+    def profiled_kernel_scope(
+        self,
+        kernel_name: str,
+        node_schedule: Sequence[BaseSchedulerNode] | ExternKernel,
+        profiling_args: Sequence[str | None] | None = None,
+    ):
+        """A kernel_profile_scope that also records a
+        RAIIAtenRecordFunctionHandle for the kernel.
+
+        The record function only exists on the platforms
+        kernel_profile_enabled() accepts, so that is the gate, and it is passed
+        down so the surrounding block opens on the same condition.
+
+        A caller whose codegen reorders the kernel's arguments passes
+        profiling_args itself; otherwise the metadata is derived from
+        node_schedule."""
+        enabled = kernel_profile_enabled()
+        with self.kernel_profile_scope(kernel_name, node_schedule, enabled=enabled):
+            if enabled:
+                # Deriving the metadata emits codegen for ReinterpretView
+                # arguments, so it is skipped for a wrapper that records none.
+                if not self.records_profiling_args():
+                    profiling_args = None
+                elif profiling_args is None:
+                    profiling_args = self._get_extern_kernel_profiling_args(
+                        node_schedule
+                    )
+                self.write_record_function_handle(kernel_name, profiling_args)
+            yield
+
+    @staticmethod
+    def _get_extern_kernel_profiling_args(
+        node_schedule: Sequence[BaseSchedulerNode] | ExternKernel,
+    ) -> list[str | None] | None:
+        """Profiling metadata for an ExternKernel codegen'd through a dedicated
+        wrapper hook instead of the C shim helper.
+
+        This covers the kernels whose argument order the shared builder already
+        reproduces; the ones that reorder their arguments on the way to the
+        shim supply their own metadata."""
+        if not isinstance(node_schedule, ir.ExternKernel):
+            return None
+        return _get_profiling_args(node_schedule)
 
 
 class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
