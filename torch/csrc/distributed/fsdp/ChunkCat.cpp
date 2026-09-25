@@ -10,15 +10,17 @@ namespace {
 void chunk_cat_mixed_dtype_ad_inplace_or_view(
     c10::DispatchKeySet ks,
     at::TensorList tensors,
+    int64_t dim,
     int64_t num_chunks,
     at::Tensor& out) {
-  static auto op = c10::Dispatcher::singleton()
-                       .findSchemaOrThrow("fsdp::chunk_cat_mixed_dtype", "")
-                       .typed<void(at::TensorList, int64_t, at::Tensor&)>();
+  static auto op =
+      c10::Dispatcher::singleton()
+          .findSchemaOrThrow("fsdp::chunk_cat_mixed_dtype", "")
+          .typed<void(at::TensorList, int64_t, int64_t, at::Tensor&)>();
   {
     at::AutoDispatchBelowADInplaceOrView guard;
     op.redispatch(
-        ks & c10::after_ADInplaceOrView_keyset, tensors, num_chunks, out);
+        ks & c10::after_ADInplaceOrView_keyset, tensors, dim, num_chunks, out);
   }
   torch::autograd::impl::bump_version(out);
 }
@@ -27,13 +29,14 @@ void chunk_cat_mixed_dtype_ad_inplace_or_view(
 
 void chunk_cat_mixed_dtype(
     at::TensorList tensors,
+    int64_t dim,
     int64_t num_chunks,
     at::Tensor& out) {
   // _chunk_cat takes same-dtype inputs as is and casts during its copy-in
   if (std::all_of(tensors.begin(), tensors.end(), [&](const at::Tensor& t) {
         return t.scalar_type() == tensors[0].scalar_type();
       })) {
-    at::_chunk_cat_out(out, tensors, 0, num_chunks);
+    at::_chunk_cat_out(out, tensors, dim, num_chunks);
     return;
   }
   std::vector<at::Tensor> inputs;
@@ -47,13 +50,13 @@ void chunk_cat_mixed_dtype(
         out.scalar_type());
     inputs.push_back(tensor.to(out.scalar_type()));
   }
-  at::_chunk_cat_out(out, inputs, 0, num_chunks);
+  at::_chunk_cat_out(out, inputs, dim, num_chunks);
 }
 
 TORCH_LIBRARY_FRAGMENT(fsdp, m) {
-  // Like fsdp::chunk_cat with dim=0, but inputs may have different dtypes.
+  // Like fsdp::chunk_cat, but inputs may have different dtypes.
   m.def(
-      "chunk_cat_mixed_dtype(Tensor[] tensors, int num_chunks, *, Tensor(a!) out) -> ()");
+      "chunk_cat_mixed_dtype(Tensor[] tensors, int dim, int num_chunks, *, Tensor(a!) out) -> ()");
 }
 
 TORCH_LIBRARY_IMPL(fsdp, CompositeExplicitAutograd, m) {

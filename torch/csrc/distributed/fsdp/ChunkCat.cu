@@ -232,14 +232,16 @@ void launch_chunk_cat(
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
-// Same-dtype groups take the composite, which forwards them to _chunk_cat. In
-// mixed groups, inputs already in out's dtype are copied by one launch and bf16
-// inputs into an fp32 out are cast by a second one. The output layout doesn't
-// depend on input dtypes, so both launches share one metadata upload and differ
-// only in their block_idx_to_tensor_idx ranges.
+// Same-dtype groups take the composite, which forwards them to _chunk_cat.
+// dim != 0, which FSDP doesn't use, also takes the composite. In mixed groups,
+// inputs already in out's dtype are copied by one launch and bf16 inputs into
+// an fp32 out are cast by a second one. The output layout doesn't depend on
+// input dtypes, so both launches share one metadata upload and differ only in
+// their block_idx_to_tensor_idx ranges.
 // start_block_idx_per_tensor_chunk is relative to each tensor's launch.
 void chunk_cat_mixed_dtype_cuda(
     at::TensorList tensors,
+    int64_t dim,
     int64_t num_chunks,
     at::Tensor& out) {
   const auto out_dtype = out.scalar_type();
@@ -247,7 +249,7 @@ void chunk_cat_mixed_dtype_cuda(
       std::any_of(tensors.begin(), tensors.end(), [&](const at::Tensor& t) {
         return t.scalar_type() != tensors[0].scalar_type();
       });
-  const bool use_fused_kernel = mixed_dtypes && num_chunks >= 1 &&
+  const bool use_fused_kernel = mixed_dtypes && dim == 0 && num_chunks >= 1 &&
       out.is_contiguous() &&
       std::all_of(tensors.begin(), tensors.end(), [&](const at::Tensor& t) {
         return t.dim() > 0 && t.numel() > 0 && t.device() == out.device() &&
@@ -256,7 +258,7 @@ void chunk_cat_mixed_dtype_cuda(
              (t.scalar_type() == at::kBFloat16 && out_dtype == at::kFloat));
       });
   if (!use_fused_kernel) {
-    chunk_cat_mixed_dtype(tensors, num_chunks, out);
+    chunk_cat_mixed_dtype(tensors, dim, num_chunks, out);
     return;
   }
   c10::cuda::CUDAGuard device_guard(out.device());
