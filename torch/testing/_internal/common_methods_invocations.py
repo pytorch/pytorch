@@ -3316,6 +3316,19 @@ def sample_inputs_histc(op_info, device, dtype, requires_grad, **kwargs):
         for bins in [1, 3, 10]:
             yield SampleInput(make_arg(size), bins=bins, min=min, max=max)
 
+    # Exercises implementations that switch algorithms for large bin counts.
+    yield SampleInput(make_arg((S,)), bins=8193, min=0, max=10)
+
+    if dtype.is_floating_point:
+        # Values just outside a narrow range must not produce an invalid bin.
+        narrow_range = torch.tensor(
+            [0.0, 5e-6, 1e-5, 1.2e-5],
+            device=device,
+            dtype=dtype,
+            requires_grad=requires_grad,
+        )
+        yield SampleInput(narrow_range, bins=1000, min=0.0, max=1e-5)
+
 def sample_inputs_bincount(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
@@ -13158,7 +13171,6 @@ op_db: list[OpInfo] = [
                    ref=np.ceil,
                    dtypes=all_types_and(torch.half, torch.bfloat16),
                    dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32, torch.int8),
-                   dtypesIfMPS=all_types_and(torch.half, torch.bfloat16, torch.bool),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
                    skips=(
@@ -14001,7 +14013,6 @@ op_db: list[OpInfo] = [
                    ref=np.floor,
                    dtypes=all_types_and(torch.half, torch.bfloat16),
                    dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32, torch.int8),
-                   dtypesIfMPS=all_types_and(torch.half, torch.bfloat16, torch.bool),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
                    skips=(
@@ -15078,12 +15089,6 @@ op_db: list[OpInfo] = [
                         DecorateInfo(unittest.skip("Skipped!"),
                                      'TestBinaryUfuncsDevice',
                                      'test_reference_numerics_extremal_values'),
-                        # NotImplementedError: The operator 'aten::heaviside.out' is not currently implemented for the MPS device
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager', device_type='mps'),
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
                     )),
     BinaryUfuncInfo('lcm',
                     ref=np.lcm,
@@ -18987,7 +18992,6 @@ op_db: list[OpInfo] = [
                    aliases=('fix', ),
                    ref=np.trunc,
                    dtypes=all_types_and(torch.half, torch.bfloat16),
-                   dtypesIfMPS=all_types_and(torch.half, torch.bfloat16, torch.bool),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
                    supports_sparse=True,
@@ -19037,8 +19041,8 @@ op_db: list[OpInfo] = [
                    )),
     UnaryUfuncInfo('nan_to_num',
                    ref=np.nan_to_num,
-                   dtypes=all_types_and(torch.half, torch.bool, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and(torch.half, torch.bool, torch.bfloat16),
+                   dtypes=all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
                    supports_sparse=True,
@@ -20642,12 +20646,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
            sample_inputs_func=sample_inputs_histc,
            supports_out=True,
            supports_autograd=False,
-           skips=(
-               # CUDA histc returns a float tensor but does not correctly warn when passed an integral out tensor
-               # "AssertionError: RuntimeError not raised : Expected RuntimeError when doing an unsafe cast
-               # from a result of dtype torch.float32 into an out= with dtype torch.long"
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type=('cuda', 'xpu')),
-           )),
+    ),
     OpInfo('bincount',
            dtypes=integral_types_and(),
            sample_inputs_func=sample_inputs_bincount,
@@ -25449,9 +25448,6 @@ python_ref_db = [
             DecorateInfo(unittest.skip("Skipped!"),
                          'TestBinaryUfuncsDevice',
                          'test_reference_numerics_extremal_values'),
-            # NotImplementedError: The operator 'aten::heaviside.out' is not currently implemented for the MPS device
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='mps'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps'),
         ),
     ),
     ElementwiseBinaryPythonRefInfo(

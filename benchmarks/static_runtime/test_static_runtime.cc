@@ -3084,6 +3084,10 @@ namespace {
 
 void maybe_throw(bool should_throw) {
   if (should_throw) {
+    // The ModelCrash* tests below assert EXPECT_THROW(..., std::runtime_error)
+    // on what escapes the runtime. c10::Error derives from std::exception, not
+    // std::runtime_error, so TORCH_CHECK here would stop matching.
+    // @allow-raw-throw: tests below match on std::runtime_error
     throw std::runtime_error("test exception");
   }
 }

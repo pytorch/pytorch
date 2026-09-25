@@ -52,6 +52,7 @@ from torch._C._distributed_c10d import ErrorType, OpType, WorkResult
 from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_cuda import _get_torch_rocm_version
 from torch.testing._internal.common_distributed import (
+    core_dumps_disabled,
     get_required_world_size,
     get_timeout,
     init_multigpu_helper,
@@ -439,18 +440,15 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
     def setUp(self):
         super().setUp()
 
-        # These tests are expected to throw SIGABRT(6);
-        # But if we are in Sandcastle, `skip_but_pass_in_sandcastle` would return 0.
+        # These tests are expected to exit with SIGABRT(6): the device-side
+        # assert is surfaced as an error by the runtime, the test catches it
+        # and exits 6. That holds on ROCm too, as long as the child has core
+        # dumps off - see core_dumps_disabled() in test_nan_assert.
         #
-        # CUDA: Uses native __trap() instruction → CUDA runtime catches it →
-        #       clean exit(6) → exit code 6
-        # ROCm: No native trap instruction, uses assert(0) (NanCheck.cu:24-27) →
-        #       calls abort() → OS sends SIGABRT signal → process killed by signal →
-        #       exit code -6
+        # But if we are in Sandcastle, `skip_but_pass_in_sandcastle` would return 0.
         TEST_NAN_ASSERT_RETURN = (
             0
             if (IS_SANDCASTLE and not TEST_MULTIACCELERATOR)
-            else (-signal.SIGABRT if torch.version.hip else signal.SIGABRT)
         )
         self.special_return_code_checks = {
             self.test_nan_assert_float16.__wrapped__: TEST_NAN_ASSERT_RETURN,
@@ -722,12 +720,13 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # pg.all_gather_single(output, nan_tensor)
 
         backend._set_enable_nan_check(True)
-        try:
-            pg.all_gather_single(output, nan_tensor)
-        except Exception:
-            sys.exit(signal.SIGABRT)
+        with core_dumps_disabled():
+            try:
+                pg.all_gather_single(output, nan_tensor)
+            except Exception:
+                sys.exit(signal.SIGABRT)
 
-        dist.destroy_process_group()
+            dist.destroy_process_group()
 
         # reset env
         os.environ[f"{BACKEND_ENV_PREFIX}_NAN_CHECK"] = "0"
@@ -1192,6 +1191,9 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         with self.assertWarnsRegex(FutureWarning, "_set_pg_timeout"):
             c10d.distributed_c10d._set_pg_timeout(timedelta(seconds=99), pg)
         self._check_nccl_timeout(timedelta(seconds=99))
+        # Tear down explicitly so the nccl2 watchdog is stopped before
+        # interpreter shutdown unloads CUDA (avoids a teardown race).
+        dist.destroy_process_group()
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
@@ -1243,6 +1245,9 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             w = pg.allreduce(torch.rand(10).to(f"{device_type}:{self.rank}"))
             self.assertEqual(w.timeout, timedelta(seconds=8))
             w.wait()
+        # Tear down explicitly so the nccl2 watchdog is stopped before
+        # interpreter shutdown unloads CUDA (avoids a teardown race).
+        dist.destroy_process_group()
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(

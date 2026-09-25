@@ -65,6 +65,7 @@ from torch.testing._internal.common_utils import (
     IS_CI,
     IS_FBCODE,
     is_iterable_of_tensors,
+    IS_S390X,
     IS_SANDCASTLE,
     MACOS_VERSION,
     noncontiguous_like,
@@ -147,7 +148,6 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("diag"),
     xfail("geqrf"),
     xfail("heaviside"),
-    xfail("histc"),
     xfail("isin"),
     xfail("kthvalue"),
     xfail("lerp"),
@@ -815,6 +815,11 @@ class TestCommon(TestCase):
     @with_tf32_off
     @onlyNativeDeviceTypesAnd(["hpu"])
     @suppress_warnings
+    @skipOps(
+        {skip("grid_sampler_2d", device_type="cpu", dtypes=(torch.float32,))}
+        if IS_S390X
+        else set()
+    )
     @ops(op_db, allowed_dtypes=(torch.float32, torch.long, torch.complex64))
     def test_noncontiguous_samples(self, device, dtype, op):
         test_grad = dtype in op.supported_backward_dtypes(torch.device(device).type)
