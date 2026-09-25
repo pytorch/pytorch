@@ -2319,7 +2319,22 @@ class BuiltinVariable(BaseBuiltinVariable):
                 raise_type_error(
                     tx, f"type {arg.python_type_name()} doesn't define __round__ method"
                 )
-            return round_method.call_function(tx, list(args), kwargs)
+            # Mirror CPython's builtin_round_impl: __round__() when ndigits is
+            # None, otherwise __round__(ndigits) positionally.
+            num_given = 1 + len(args) + len(kwargs)
+            if num_given > 2:
+                raise_type_error(
+                    tx, f"round() takes at most 2 arguments ({num_given} given)"
+                )
+            for name in kwargs:
+                if name != "ndigits":
+                    raise_type_error(
+                        tx, f"round() got an unexpected keyword argument '{name}'"
+                    )
+            ndigits = args[0] if args else kwargs.get("ndigits")
+            if ndigits is None or ndigits.is_constant_none():
+                return round_method.call_function(tx, [], {})
+            return round_method.call_function(tx, [ndigits], {})
 
         # Call arg.__round__()
         round_method = SourcelessBuilder.create(tx, getattr).call_function(
