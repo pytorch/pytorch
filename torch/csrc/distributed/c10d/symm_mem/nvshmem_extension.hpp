@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <utility>
 #include <c10/macros/Macros.h>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 
@@ -17,6 +18,9 @@ namespace c10d::nvshmem_extension {
 
 // Check if NVSHMEM is available
 TORCH_API bool is_nvshmem_available();
+
+// Return signal operation values from the NVSHMEM headers used to build PyTorch.
+TORCH_API std::pair<int64_t, int64_t> nvshmem_signal_op_values();
 
 // Initializes the device state in CUmodule so that it’s able to perform NVSHMEM
 // operations.
