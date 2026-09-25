@@ -1,5 +1,6 @@
 # Owner(s): ["module: c10d"]
 import unittest
+from unittest import mock
 
 import torch
 import torch.distributed as dist
@@ -11,8 +12,16 @@ from torch._inductor.fx_passes.micro_pipeline_tp import (
     find_reduce_scatter_patterns,
     micro_pipeline_tp_pass,
 )
-from torch._inductor.fx_passes.post_grad import remove_noop_ops, view_to_reshape
-from torch._inductor.utils import fresh_cache, run_and_get_triton_code
+from torch._inductor.fx_passes.post_grad import (
+    pass_patterns,
+    remove_noop_ops,
+    view_to_reshape,
+)
+from torch._inductor.utils import (
+    FOLDED_SCALED_MM_OUTPUT_SCALE,
+    fresh_cache,
+    run_and_get_triton_code,
+)
 from torch.distributed._functional_collectives import (
     all_gather_single,
     all_gather_tensor,
@@ -83,6 +92,110 @@ class MicroPipelineTPTest(TestCase):
 
     def tearDown(self):
         dist.destroy_process_group()
+
+    def _apply_scaled_mm_output_scale_fold(
+        self, gm: torch.fx.GraphModule, expected_folds: int = 0
+    ) -> None:
+        with torch._inductor.config.patch(
+            max_autotune=True,
+            max_autotune_gemm_backends="NVGEMM",
+        ):
+            pass_patterns[1].apply(gm.graph)
+        marked = [
+            node
+            for node in gm.graph.nodes
+            if node.target is torch.ops.aten._scaled_mm.default
+            and node.meta.get(FOLDED_SCALED_MM_OUTPUT_SCALE, False)
+        ]
+        self.assertEqual(len(marked), expected_folds)
+
+    @staticmethod
+    def _make_nvfp4_inputs(a_shape, packed_k):
+        A = torch.randint(0, 256, a_shape, device="cuda", dtype=torch.uint8).view(
+            torch.float4_e2m1fn_x2
+        )
+        B = (
+            torch.randint(0, 256, (128, packed_k), device="cuda", dtype=torch.uint8)
+            .view(torch.float4_e2m1fn_x2)
+            .T
+        )
+        scale_numel = 128 * (packed_k // 8)
+        scales = tuple(
+            torch.ones(scale_numel, device="cuda", dtype=torch.float8_e4m3fn)
+            for _ in range(2)
+        )
+        return A, B, *scales, torch.tensor(2.0, device="cuda")
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "Test requires FP8 support")
+    @fresh_cache()
+    @parametrize(
+        "with_reshape,expected_folds,expect_fusion",
+        ((False, 0, True), (True, 1, False)),
+    )
+    def test_scaled_mm_output_scale_preserves_all_gather_fusion(
+        self, with_reshape, expected_folds, expect_fusion
+    ):
+        group = dist.group.WORLD
+
+        def func(A_shard, B, A_scale, B_scale, output_scale):
+            A = _fp8_all_gather(A_shard, 0, group.group_name)
+            if with_reshape:
+                A = A.reshape(-1, A.shape[-1])
+            result = (
+                torch._scaled_mm(A, B, A_scale, B_scale, out_dtype=torch.bfloat16)
+                * output_scale
+            )
+            return result.reshape(4, 16, 128) if with_reshape else result
+
+        packed_k = 256
+        A_shard_shape = (2, 16, packed_k) if with_reshape else (32, packed_k)
+        inputs = self._make_nvfp4_inputs(A_shard_shape, packed_k)
+        gm = _make_post_grad_fx(func, *inputs)
+        self._apply_scaled_mm_output_scale_fold(gm, expected_folds=expected_folds)
+        with (
+            _test_mode(),
+            mock.patch.object(dist, "is_nccl_available", return_value=True),
+        ):
+            micro_pipeline_tp_pass(gm.graph)
+
+        if not expect_fusion:
+            # The existing collective pattern does not cross the explicit
+            # multiply and reshape.
+            self.assertNotIn("fused_all_gather_scaled_matmul", str(gm.graph))
+            self.assertIn("all_gather_into_tensor", str(gm.graph))
+        else:
+            self.assertIn("fused_all_gather_scaled_matmul", str(gm.graph))
+            self.assertNotIn("all_gather_into_tensor", str(gm.graph))
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "Test requires FP8 support")
+    @fresh_cache()
+    def test_scaled_mm_output_scale_folds_before_unmatched_reduce_scatter(self):
+        group = dist.group.WORLD
+
+        def func(A, B, A_scale, B_scale, output_scale):
+            C = (
+                torch._scaled_mm(A, B, A_scale, B_scale, out_dtype=torch.bfloat16)
+                * output_scale
+            )
+            return reduce_scatter_single(C, "avg", 0, group)
+
+        packed_k = 256
+        inputs = self._make_nvfp4_inputs((64, packed_k), packed_k)
+        gm = _make_post_grad_fx(func, *inputs)
+        self._apply_scaled_mm_output_scale_fold(gm, expected_folds=1)
+        with (
+            _test_mode(),
+            mock.patch.object(dist, "is_nccl_available", return_value=True),
+        ):
+            micro_pipeline_tp_pass(gm.graph)
+
+        # The explicit multiply prevents the current reduce-scatter pattern
+        # from matching, so it is safe to use the private NVGEMM output-scale
+        # contract without preempting an available collective fusion.
+        self.assertNotIn("fused_scaled_matmul_reduce_scatter", str(gm.graph))
+        self.assertIn("reduce_scatter_tensor", str(gm.graph))
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
