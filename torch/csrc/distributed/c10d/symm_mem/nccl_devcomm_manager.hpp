@@ -259,19 +259,14 @@ class TORCH_API NCCLDevCommManager {
     // replacement invalidates every one of them. Drop them here or
     // `get_devcomm` would hand a kernel a devcomm tied to a comm this registry
     // no longer owns, and `~NCCLDevCommManager` would pass the successor's comm
-    // to `ncclDevCommDestroy` alongside a predecessor-built devcomm.
+    // to `ncclDevCommDestroy` alongside a predecessor-built devcomm. The erase
+    // skips `ncclDevCommDestroy` for the reason given at `unregister_comm`.
     //
-    // The erase skips `ncclDevCommDestroy` for the reason given at
-    // `unregister_comm`: whatever the devcomm holds is reclaimed when the
-    // predecessor comm is itself destroyed. On the replacement path that
-    // destroy is someone else's to make, so this is a precondition on the
-    // producer rather than something this registry guarantees.
-    //
-    // Identity here is the pointer alone, so a successor handed a recycled
-    // `ncclComm_t` address is indistinguishable from a re-registration of the
-    // same comm and skips the eviction. Reaching that requires the predecessor
-    // to have been destroyed without retiring its entry, which the producers in
-    // this tree do not do.
+    // Identity is the pointer alone, so a successor at a recycled `ncclComm_t`
+    // address looks like a re-registration and skips the eviction. On ROCm,
+    // ProcessGroupNCCL retires before its comm is invalidated, which rules that
+    // out for it; on CUDA it keeps the entry of a destroyed comm, so a
+    // successor created after destroy_process_group can reach this case.
     if (registered_comm != group_to_comm_.end() &&
         registered_comm->second != comm) {
       devcomm_registry_.erase(group_name);
@@ -323,19 +318,14 @@ class TORCH_API NCCLDevCommManager {
   // nothing is registered. Does not destroy the host comm; lifetime stays
   // with the producer.
   //
-  // Neither overload calls `ncclDevCommDestroy` on the entries it drops. That
-  // would be a collective call (it deregisters the devcomm's resource window),
-  // so it cannot run on the unilateral abort path. It is also unnecessary:
-  // destroying the host comm runs ncclDevrFinalize, which drains windows whose
-  // owning devcomm was never explicitly destroyed, and abort reaches that same
-  // drain as destroy does (commReclaim -> commCleanup -> commFree). The other
-  // half of ncclDevCommDestroy, the GIN contexts, is a no-op here because
-  // these devcomms are built with ginConnectionType NCCL_GIN_CONNECTION_NONE
-  // and so are never given any. That last part is conditional: the flag is
-  // per-comm, so a comm that enabled GIN elsewhere (multi-node symmetric
-  // kernels) attaches contexts to devcomms that never requested them, and comm
-  // teardown does not reclaim those. Single-node symmetric memory, which is
-  // what this path supports, cannot reach it.
+  // Neither overload calls `ncclDevCommDestroy` on the entries it drops: it is
+  // collective (it deregisters the devcomm's resource window), so it cannot run
+  // on the unilateral abort path. Comm teardown, on abort as on destroy,
+  // reclaims those windows instead: RCCL's commFree always runs
+  // ncclDevrFinalize, and NCCL's runs it for every comm with symmetric support,
+  // which ncclDevCommCreate requires. GIN contexts are not reclaimed that way.
+  // These devcomms request none, but a comm that enabled GIN elsewhere attaches
+  // contexts to them anyway, so this holds for single-node symmetric memory.
   //
   // This key-only form is retained for CUDA callers. ROCm teardown uses the
   // identity-safe overload below.
@@ -373,11 +363,9 @@ class TORCH_API NCCLDevCommManager {
 
 #ifdef USE_ROCM
   // Same as above, but identified by the generation the caller was handed when
-  // it registered. `ncclComm_t` addresses are recycled -- the predecessor is
-  // destroyed before the successor is created, so the allocator routinely hands
-  // the successor the predecessor's address -- and the pointer-only overload
-  // cannot tell the two apart. A delayed predecessor teardown would then erase
-  // a live successor's entry.
+  // it registered. A successor can be handed the predecessor's freed
+  // `ncclComm_t` address, which the pointer-only overload cannot tell apart,
+  // so a delayed predecessor teardown would erase the successor's entry.
   void unregister_comm(
       const std::string& group_name,
       ncclComm_t comm,
@@ -413,12 +401,11 @@ class TORCH_API NCCLDevCommManager {
       // communicator. This is important to ensure no kernels are still using
       // the device communicator when we destroy it.
       C10_CUDA_CHECK(cudaDeviceSynchronize());
-      // Fallback path. Producers retire their registry entry before the
-      // communicator it was built from is invalidated, so in an orderly
-      // teardown nothing survives to here; see `unregister_comm` for why that
-      // early erase does not need `ncclDevCommDestroy`. Whatever does reach
-      // here still has a live host comm to destroy through, which is what the
-      // `group_to_comm_` lookup below establishes.
+      // Fallback path; see `unregister_comm` for why an earlier erase does not
+      // need `ncclDevCommDestroy`. Producers that retire before invalidating
+      // their comm leave nothing here, but on CUDA stock ProcessGroupNCCL keeps
+      // the entries of destroyed comms, so a comm reaching here may already be
+      // destroyed.
       for (auto& [group_name, group_map] : devcomm_registry_) {
         // Find the host communicator for the group.
         // Device communicators need the host communicator for destruction.
