@@ -26,6 +26,7 @@ from torch._dynamo.testing import same
 from torch._dynamo.utils import dict_items
 from torch.fx.experimental.proxy_tensor import _ModuleStackTracer
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     make_dynamo_test,
     munge_exc,
@@ -71,6 +72,8 @@ _ALIASED_INSTANCE_DICT: Any = None
 
 
 class DictTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_dict_subclass_instantiation(self):
         def fn(x):
             sd = SimpleDict(x=5)
@@ -2579,7 +2582,13 @@ class DictTests(torch._dynamo.test_case.TestCase):
         graph = fx.Graph()
         x = graph.placeholder("x")
 
-        pure_call = graph.call_function(torch.relu, (x,))
+        # Reorderable call_function nodes must carry a tensor or symbolic
+        # example_value/val, as Dynamo attaches to every data-producing node.
+        def pure(node):
+            node.meta["example_value"] = torch.empty(0)
+            return node
+
+        pure_call = pure(graph.call_function(torch.relu, (x,)))
         self.assertTrue(_is_safe_to_reorder(pure_call))
 
         inplace_method = graph.call_method("add_", (x, x))
@@ -2592,10 +2601,10 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertFalse(_is_safe_to_reorder(iadd_node))
 
         # operator.invert is pure despite starting with "i"
-        invert_node = graph.call_function(operator.invert, (x,))
+        invert_node = pure(graph.call_function(operator.invert, (x,)))
         self.assertTrue(_is_safe_to_reorder(invert_node))
 
-        index_node = graph.call_function(operator.index, (x,))
+        index_node = pure(graph.call_function(operator.index, (x,)))
         self.assertTrue(_is_safe_to_reorder(index_node))
 
         # out= kwarg makes a node unsafe
@@ -2610,11 +2619,38 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertFalse(_is_safe_to_reorder(no_input_node))
 
         # _add_batch_dim / _remove_batch_dim are barriers
-        add_batch = graph.call_function(torch._add_batch_dim, (x, x, x))
+        add_batch = pure(graph.call_function(torch._add_batch_dim, (x, x, x)))
         self.assertFalse(_is_safe_to_reorder(add_batch))
 
-        remove_batch = graph.call_function(torch._remove_batch_dim, (x, x, x, x))
+        remove_batch = pure(graph.call_function(torch._remove_batch_dim, (x, x, x, x)))
         self.assertFalse(_is_safe_to_reorder(remove_batch))
+
+        # State functions that consume the token produced by their enter node
+        # (so the no-node-arguments heuristic misses them) are barriers:
+        # inference_mode via _side_effectful_functions, arbitrary ones (e.g.
+        # _sdpa_kernel, _maybe_exchange_device) via the lack of a tensor or
+        # symbolic example_value/val.
+        enter_node = graph.call_function(
+            torch.autograd.grad_mode._enter_inference_mode, (True,)
+        )
+        self.assertFalse(_is_safe_to_reorder(enter_node))
+        exit_node = graph.call_function(
+            torch.autograd.grad_mode._exit_inference_mode, (enter_node,)
+        )
+        self.assertFalse(_is_safe_to_reorder(exit_node))
+
+        def _fake_exit_fn(token):
+            pass
+
+        token_consumer = graph.call_function(_fake_exit_fn, (no_input_node,))
+        self.assertFalse(_is_safe_to_reorder(token_consumer))
+        self.assertTrue(_is_safe_to_reorder(pure(token_consumer)))
+
+        # HOPs are exempt from the value heuristic: graph passes (e.g. graph
+        # deduplication) create invoke_subgraph nodes without example_value/val.
+        hop = torch.ops.higher_order.invoke_subgraph
+        hop_node = graph.call_function(hop, (x, "subgraph_0", x))
+        self.assertTrue(_is_safe_to_reorder(hop_node))
 
     # NB: not a staticmethod -- see the note in test_repros.py; the generated
     # subclasses rebind copied staticmethods as instance methods.
@@ -3218,6 +3254,8 @@ instantiate_parametrized_tests(DictTests)
 
 
 class DictGuardTests(LoggingTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     thetype = dict
 
     @make_logging_test(recompiles=True)
@@ -3354,6 +3392,8 @@ class DictGuardTests(LoggingTestCase):
 
 
 class DictMethodsTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     thetype = dict
 
     # Methods:
@@ -3903,10 +3943,14 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 
 
 class DictSubclassMethodsTests(DictMethodsTests):
+    hw_classification = HardwareClassification.GENERIC
+
     thetype = SimpleDict
 
 
 class OrderedDictMethodsTests(DictMethodsTests):
+    hw_classification = HardwareClassification.GENERIC
+
     thetype = OrderedDict
 
     # Methods:
@@ -3976,6 +4020,8 @@ class OrderedDictMethodsTests(DictMethodsTests):
 
 
 class OrderedDictSubclassOverload(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         self._prev_trace_unittest = torch._dynamo.config.enable_trace_unittest
         torch._dynamo.config.enable_trace_unittest = True
@@ -4012,6 +4058,8 @@ class OrderedDictSubclassOverload(torch._dynamo.test_case.TestCase):
 
 class DunderDictVariableTests(torch._dynamo.test_case.TestCase):
     """Tests for DunderDictVariable (object.__dict__ handling in Dynamo)"""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_dunder_dict_items_includes_mutations(self):
         """Test that __dict__.items() includes both original and mutated keys"""
@@ -4283,6 +4331,41 @@ class DunderDictVariableTests(torch._dynamo.test_case.TestCase):
         got, d = fn()
         self.assertEqual(got, (10, 20, 30))
         self.assertEqual(d, {1: 10, (3, 4): 30})
+
+    def test_dunder_dict_iteration_no_recompile_on_mutation(self):
+        # DunderDictVariable.install_dict_keys_match_guard() is a deliberate
+        # no-op: __dict__ mutations are already tracked via side effects, so
+        # guarding on its keys would cause needless recompiles. tp_iter_impl
+        # must route through that overridable hook (not install the guard
+        # directly) so plain `for k in obj.__dict__` iteration respects it too.
+        class Foo:
+            pass
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(obj, x):
+            total = 0
+            for _ in obj.__dict__:
+                total += 1
+            return x + total
+
+        f = Foo()
+        f.a, f.b = 1, 2
+        x = torch.zeros(1)
+        self.assertEqual(fn(f, x), x + 2)
+        self.assertEqual(cnts.frame_count, 1)
+
+        # Mutating __dict__'s shape between calls must not trigger a
+        # recompile: DunderDictVariable deliberately suppresses
+        # DICT_KEYS_MATCH, so the guard tree must stay unaffected by this.
+        f.c = 3
+        fn(f, x)
+        self.assertEqual(cnts.frame_count, 1)
+
+        f.d, f.e = 4, 5
+        fn(f, x)
+        self.assertEqual(cnts.frame_count, 1)
 
 
 if __name__ == "__main__":

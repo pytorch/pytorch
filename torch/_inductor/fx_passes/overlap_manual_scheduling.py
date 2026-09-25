@@ -127,32 +127,10 @@ def _move_wait_users_after_latest_inputs(
             ):
                 initial_users.add(user)
 
-    pending = sorted(initial_users, key=lambda n: node_positions[n])
-    queued = OrderedSet(pending)
-    while pending:
-        node = pending.pop(0)
-        queued.discard(node)
+    if initial_users:
+        from torch._dynamo.graph_deduplication import _stable_topological_sort
 
-        node_positions = {n: i for i, n in enumerate(graph.nodes)}
-        if node not in node_positions:
-            continue
-
-        input_nodes = [inp for inp in node.all_input_nodes if inp in node_positions]
-        if not input_nodes:
-            continue
-
-        latest_input = max(input_nodes, key=lambda n: node_positions[n])
-        if node_positions[node] >= node_positions[latest_input]:
-            continue
-
-        # Replacing old waits can leave existing consumers before the new bucket
-        # outputs. Pull each affected consumer after its latest input.
-        latest_input.append(node)
-        node_positions = {n: i for i, n in enumerate(graph.nodes)}
-        for user in node.users:
-            if user in node_positions and user.op != "output" and user not in queued:
-                queued.add(user)
-                pending.append(user)
+        _stable_topological_sort(graph, {})
 
 
 def _move_overlap_nodes(
@@ -216,7 +194,14 @@ class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
         # instance so metadata doesn't leak across separate invocations.
         self.bucketed_node_types: dict[fx.Node, str] = {}
 
-    def _bucket_group(self, coll_nodes: list[fx.Node]) -> None:
+    def _bucket_group(
+        self, coll_nodes: list[fx.Node]
+    ) -> tuple[dict[fx.Node, fx.Node], dict[fx.Node, list[fx.Node]]]:
+        """Bucket one group and return metadata for deferred wait-user repair.
+
+        The graph may not be topologically ordered until the caller repairs the
+        accumulated replacements.
+        """
         if len(coll_nodes) <= 0:
             raise AssertionError("bucketed coll_nodes should have nonzero node")
 
@@ -265,7 +250,6 @@ class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
             insert_before=next_node,
             mode=self.bucket_mode,
         )
-        _move_wait_users_after_latest_inputs(self.graph, replacements, replaced_users)
 
         logger.debug(f"bucketing nodes: {coll_nodes} into {new_nodes}")  # noqa: G004
 
@@ -294,6 +278,8 @@ class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
                 self.node_to_wait_map[n] = new_wait
             elif n is new_start:
                 self.bucketed_node_types[n] = node_type
+
+        return replacements, replaced_users
 
     def _split_independent_collectives(
         self, coll_nodes: OrderedSet[fx.Node], scope_nodes: list[fx.Node]
@@ -369,8 +355,18 @@ class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
         for key, key_nodes in grouped_collectives.items():
             sub_buckets.extend(self._split_independent_collectives(key_nodes, nodes))
 
+        replacements: dict[fx.Node, fx.Node] = {}
+        replaced_users: dict[fx.Node, list[fx.Node]] = {}
         for sub_bucket in sub_buckets:
-            self._bucket_group(sub_bucket)
+            group_replacements, group_replaced_users = self._bucket_group(sub_bucket)
+            replacements.update(group_replacements)
+            replaced_users.update(group_replaced_users)
+
+        # Repair after all groups so the full-graph sort runs at most once.
+        if replacements:
+            _move_wait_users_after_latest_inputs(
+                self.graph, replacements, replaced_users
+            )
 
 
 class ManualOverlapScheduler(OverlapScheduler):
