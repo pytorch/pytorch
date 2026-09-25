@@ -692,8 +692,10 @@ def extract_tensor_metadata_for_cache_key(t: Tensor) -> TensorMetadata:
 def _is_pinned_for_cache_key(t: Tensor) -> bool:
     """
     Probe a constant's pinned-ness for the FX-graph cache key. Falls back to
-    False for tensor types that cannot answer (e.g. meta or sparse), where
-    treating the constant as pageable matches historical key behavior.
+    False if the tensor type cannot answer; this reproduces the historical
+    (pin-blind) key, so the worst case is a redundant entry rather than a
+    broken compile. All standard types answer without raising, making this
+    pure defense for exotic subclasses.
     """
     try:
         return bool(t.is_pinned())
