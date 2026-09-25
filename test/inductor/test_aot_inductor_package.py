@@ -29,16 +29,8 @@ from torch.export.pt2_archive._package import (
     load_pt2,
     load_weights_to_pt2_contents,
 )
-from torch.testing._internal.common_cuda import (
-    _get_torch_cuda_version,
-    requires_triton_ptxas_compat,
-    TRITON_PTXAS_VERSION,
-)
-from torch.testing._internal.common_utils import (
-    HardwareClassification,
-    IS_FBCODE,
-    TEST_CUDA,
-)
+from torch.testing._internal.common_cuda import requires_triton_ptxas_compat
+from torch.testing._internal.common_utils import HardwareClassification, IS_FBCODE
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.utils import _pytree as pytree
 
@@ -495,10 +487,7 @@ model(torch.ones(2))
         self.check_model(Model(), example_inputs)
 
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
-    @unittest.skipIf(
-        TEST_CUDA and _get_torch_cuda_version() < TRITON_PTXAS_VERSION,
-        "Test is only supported on CUDA {}.{}+".format(*TRITON_PTXAS_VERSION),
-    )
+    @requires_triton_ptxas_compat
     def test_compile_after_package(self):
         self.check_package_cpp_only()
 
