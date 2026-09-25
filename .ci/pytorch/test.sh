@@ -577,6 +577,10 @@ test_h100_distributed() {
 _run_fabric_handle_tests() {
   # symmetric memory test
   time python test/run_test.py --include distributed/test_symmetric_memory.py  $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  # The same file on the NVSHMEM backend. TORCH_SYMMMEM is read once per
+  # process, so this needs its own invocation. Scoped to the stream
+  # serialization tests; the rest of the file does not pass on NVSHMEM yet.
+  time TORCH_SYMMMEM=NVSHMEM python test/run_test.py --include distributed/test_symmetric_memory.py -k test_stream_serialization $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include distributed/test_nvshmem.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include distributed/test_shmem_triton.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include distributed/test_nccl.py -k NCCLSymmetricMemoryTest $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
