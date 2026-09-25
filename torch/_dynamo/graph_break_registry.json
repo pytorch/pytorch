@@ -2173,6 +2173,17 @@
       ]
     }
   ],
+  "GB5821": [
+    {
+      "Gb_type": "register_post_accumulate_grad_hook on an intermediate tensor",
+      "Context": "str(self)",
+      "Explanation": "Dynamo cannot preserve post-accumulate hook semantics for an intermediate tensor without compiled autograd.",
+      "Hints": [
+        "Move the hook registration outside the compiled region.",
+        "Use compiled autograd if the hook must be registered inside it."
+      ]
+    }
+  ],
   "GB0139": [
     {
       "Gb_type": "Unsupported autograd.Function context method",
@@ -2335,6 +2346,18 @@
       "Context": "source: {self.source}",
       "Explanation": "Dynamo determined that a graph break should occur when calling `{self.source.name}`. Reason: {self.msg}",
       "Hints": []
+    }
+  ],
+  "GB5210": [
+    {
+      "Gb_type": "Constant fold with a rank-relative device",
+      "Context": "fqn(self.value)",
+      "Explanation": "`{fqn(self.value)}` was called with the current device, whose index is only known at runtime under compile_on_one_rank, so the result cannot be folded into the graph.",
+      "Hints": [
+        "This graph break is expected under compile_on_one_rank.",
+        "The resumed eager call observes the running rank's device.",
+        "Pass an explicit device if the value is the same on every rank."
+      ]
     }
   ],
   "GB9672": [
@@ -3307,6 +3330,16 @@
       "Gb_type": "Unresolved GetAttrVariable comparison",
       "Context": "richcompare_impl {self} {op}",
       "Explanation": "Cannot compare {self} because the attribute could not be resolved to a concrete value.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB6602": [
+    {
+      "Gb_type": "setattr() on Tensor.data with different shape",
+      "Context": "setattr({obj}, {name}, {val})",
+      "Explanation": "Dynamo does not trace shape-changing `.data` mutations on differentiable tensors. AOTAutograd assumes graph input metadata is stable while building the backward graph.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
@@ -5972,6 +6005,16 @@
       "Gb_type": "missing_mp_ass_subscript",
       "Context": "mp_ass_subscript_impl not defined for {self.python_type_name()}",
       "Explanation": "Dynamo does not yet support item assignment on '{self.python_type_name()}'.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB9182": [
+    {
+      "Gb_type": "setattr() on Parameter.data with different shape",
+      "Context": "setattr({obj}, {name}, {val})",
+      "Explanation": "Dynamo does not trace shape-changing `.data` mutations on differentiable parameters. AOTAutograd assumes graph input metadata is stable while building the backward graph.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
