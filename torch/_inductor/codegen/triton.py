@@ -3878,6 +3878,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             and len(self.numels) == self.num_reduction_dims + 1
             and self.fixed_config
             and self.fixed_config["XBLOCK"] == 1
+            and not self.mix_order_reduction
         )
 
     @property

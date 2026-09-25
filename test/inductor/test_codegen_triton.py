@@ -456,6 +456,35 @@ def helper(x):
                 for_benchmark=False,
             )
 
+    @parametrize(
+        "fixed_config",
+        (
+            {"XBLOCK": 1, "RSPLIT_SIZE": 18, "NUM_STAGES": 1},
+            {"XBLOCK": 2, "NUM_STAGES": 1},
+        ),
+    )
+    def test_mix_order_normalizes_fixed_config(self, fixed_config):
+        class CustomChoices(InductorChoices):
+            def triton_kernel_kwargs(self, kernel_cls, features, groups, kernel_kwargs):
+                return {
+                    **kernel_kwargs,
+                    "fixed_config": FixedTritonConfig(fixed_config),
+                }
+
+        xnumel = sympy.Integer(40961)
+        rnumel = sympy.Integer(129)
+        with (
+            self._graph.set_current_device(torch.device("cpu")),
+            V.set_choices_handler(CustomChoices()),
+        ):
+            kernel = TritonScheduling(None)._create_kernel_for_mix_order_reduction(
+                SIMDKernelFeatures([], xnumel, rnumel),
+                split_size=18,
+            )
+
+        self.assertFalse(kernel.no_x_dim)
+        self.assertEqual(kernel.fixed_config["RSPLIT_SIZE"], 18)
+
     def test_reduction_invariant_load_indexing(self):
         self._stack.enter_context(self._graph.set_current_device(torch.device("cuda")))
         xnumel = sympy.Integer(65)
