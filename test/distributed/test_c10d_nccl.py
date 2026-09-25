@@ -448,7 +448,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # But if we are in Sandcastle, `skip_but_pass_in_sandcastle` would return 0.
         TEST_NAN_ASSERT_RETURN = (
             0
-            if (IS_SANDCASTLE and not TEST_MULTIACCELERATOR)
+            if (IS_SANDCASTLE and not TEST_MULTIACCELERATOR) else signal.SIGABRT
         )
         self.special_return_code_checks = {
             self.test_nan_assert_float16.__wrapped__: TEST_NAN_ASSERT_RETURN,
