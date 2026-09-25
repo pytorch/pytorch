@@ -57,7 +57,6 @@ from functorch.experimental import control_flow
 from torch._decomp import decomposition_table
 from torch._dynamo.testing import normalize_gm
 from torch._dynamo.utils import counters
-from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
 from torch._functorch.aot_autograd import (
     _aot_export_function,
     aot_export_joint_simple,
@@ -73,6 +72,7 @@ from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor.codecache import compiled_fx_graph_hash
 from torch._inductor.custom_graph_pass import CustomPartitionerFn
 from torch._inductor.output_code import MockFXGraphCacheOutput
+from torch._inductor.utils import fresh_cache
 from torch._subclasses.fake_tensor import DynamicOutputShapeException, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT,
@@ -991,6 +991,32 @@ def forward(self, primals_1):
             out_ref = f(*inp)
             out_test = f_compiled(*inp)
             self.assertEqual(out_ref, out_test)
+
+    def test_sparse_csr_creation(self):
+        def f(v):
+            crow = torch.tensor([0, 2, 4])
+            col = torch.tensor([0, 1, 0, 1])
+            a = torch.sparse_csr_tensor(crow, col, v, size=(2, 2))
+            return a.to_dense() * 2
+
+        f_compiled = aot_function(f, nop)
+        inp = torch.randn(4)
+        self.assertEqual(f(inp), f_compiled(inp))
+
+    def test_sparse_csr_creation_requires_grad_errors(self):
+        # AOTAutograd without dynamo gives bogus 0-sized grad, see #196450
+        def f(v):
+            crow = torch.tensor([0, 2, 4])
+            col = torch.tensor([0, 1, 0, 1])
+            a = torch.sparse_csr_tensor(crow, col, v, size=(2, 2))
+            return a.to_dense().sum()
+
+        f_compiled = aot_function(f, nop)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"invalid gradient at index 0 - got \[0\] but expected shape compatible with \[4\]",
+        ):
+            f_compiled(torch.randn(4, requires_grad=True))
 
     # https://github.com/pytorch/pytorch/issues/93363
     def test_mutates_input_noncontiguous(self):
@@ -2118,7 +2144,15 @@ def forward(self, primals_1):
         inp_clone = inp.clone()
         out_ref = f3(inp_ref_clone)
         out_test = f3_compiled(inp_clone)
-        self.assertTrue(all("UnbindBackward" in str(o.grad_fn) for o in out_test[:3]))
+        # Regeneration rebuilds each unbind output as a select, so the grad_fn
+        # is a SelectBackward. What has to survive is autograd's refusal to let
+        # us mutate an output of a multi-output view, which rides on
+        # CreationMeta rather than on the grad_fn.
+        for o in out_test[:3]:
+            with self.assertRaisesRegex(
+                RuntimeError, "output of a function that returns multiple views"
+            ):
+                o.mul_(2)
 
         # The last output is not from a multi-output view, so autograd will let us mutate it.
         out_ref[-1].mul_(2)
@@ -4105,6 +4139,57 @@ def forward(self, tangents_1):
 
         self.assertEqual(out_ref, out_test)
         self.assertEqual(a, a2)
+
+    # See https://github.com/pytorch/pytorch/issues/191449
+    def test_dupe_arg_with_no_grad_alias_of_output(self):
+        # Duplicating and mutating an input routes metadata through
+        # AOTDedupeWrapper, which remaps base_idx through add_dupe_map. Only
+        # alias_of_input / is_input hold an input index there; a no-grad alias
+        # of a user output holds a user-output index and must be left alone.
+        # The leading outputs push that index past the input count, so remapping
+        # it used to raise IndexError.
+        def f(x, y):
+            y.mul_(2)
+            a, b, c = x + 1, x + 2, x + 3
+            d = x + 4 + y
+            return a, b, c, d, d.view(-1)
+
+        f_compiled = aot_function(f, nop)
+        x = torch.ones(4)
+        out_ref = f(x, x)
+
+        x2 = torch.ones(4)
+        out_test = f_compiled(x2, x2)
+
+        self.assertEqual(out_ref, out_test)
+        self.assertEqual(x, x2)
+        # Eager returns two distinct objects sharing storage, so the compiled
+        # function must too, or an eager resize_() on the alias corrupts d.
+        self.assertIsNot(out_test[3], out_test[4])
+        self.assertEqual(out_test[3].data_ptr(), out_test[4].data_ptr())
+
+    # See https://github.com/pytorch/pytorch/issues/191449
+    def test_synthetic_base_with_no_grad_alias_of_output(self):
+        # Overlapping aliased inputs plus a mutation build synthetic bases,
+        # which remap base_idx through synthetic_base_info. As with dedup, only
+        # alias_of_input / is_input hold an input index there.
+        def f(x, y):
+            y.mul_(2)
+            a, b, c = x + 1, x + 2, x + 3
+            d = x + 4 + y
+            return a, b, c, d, d.view(-1)
+
+        f_compiled = aot_function(f, nop)
+        base = torch.ones(8)
+        out_ref = f(base[0:6], base[2:8])
+
+        base2 = torch.ones(8)
+        out_test = f_compiled(base2[0:6], base2[2:8])
+
+        self.assertEqual(out_ref, out_test)
+        self.assertEqual(base, base2)
+        self.assertIsNot(out_test[3], out_test[4])
+        self.assertEqual(out_test[3].data_ptr(), out_test[4].data_ptr())
 
     @patch("torch._functorch.aot_autograd.AOT_COUNTER", new_callable=itertools.count)
     @patch("torch._functorch.config.debug_assert", True)
@@ -7307,6 +7392,74 @@ def forward(self, primals_1, tangents_1):
                     lambda msg: f"{msg}\nQuantized placeholder {quant_placeholder.name} should have minimal direct users",
                 )
 
+    def test_size_of_device_valued_node(self):
+        """_size_of should treat a device-valued node as zero bytes, not raise.
+
+        _size_of dispatches on the type of node.meta["val"] and raises
+        "Unknown metadata type" for anything it does not recognize. A torch.device
+        is metadata rather than data, so it occupies no activation memory and should
+        size as 0.
+
+        This is reachable from a real compile: the partitioner sizes a node's fx.Node
+        arguments (the ban_if_reduction check in min_cut_rematerialization_partition),
+        so a device passed as an operand to a factory op gets sized. Today that
+        surfaces as a BackendCompilerFailed out of inductor rather than as anything
+        actionable.
+        """
+        import torch.fx as fx
+        from torch._functorch.partitioners import _size_of
+
+        graph = fx.Graph()
+        node = graph.placeholder("dev")
+        node.meta["val"] = torch.device("cuda:0")
+        self.assertEqual(_size_of(node), 0)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_min_cut_partitions_device_valued_node(self):
+        """A device-valued node must be placeable, not just sizeable.
+
+        Sizing it as zero (test_size_of_device_valued_node) only gets past the first
+        gate. solve_min_cut still has to put the node somewhere, and it has no tensor
+        to weigh: get_node_weight gives a non-tensor output infinite weight, and the
+        op is not in the recomputable allowlist, so it can be neither saved across the
+        boundary nor recomputed in the backward.
+
+        Reaching that needs two things at once, which is why a device-valued node on
+        its own does not show it:
+          - a current_device() node, from any device= operand, and
+          - a cheap cast of a parameter, which min-cut elects to recompute in the
+            backward rather than save, dragging the device node across with it.
+        Drop either -- make the parameter already bf16, or the cast dtype-only -- and
+        min-cut keeps the device node in the forward and never has to classify it.
+
+        Mixed-precision casting of a parameter is the ordinary way a real model hits
+        this. Note the default partitioner config is the one that fails;
+        aggressive_recomputation=True happens to route around it.
+        """
+        from functorch.compile import min_cut_rematerialization_partition
+        from torch._dynamo.backends.common import aot_autograd
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.nn.Parameter(torch.randn(64, 64, device="cuda"))
+
+            def forward(self, x):
+                w = self.w.to(device="cuda", dtype=torch.bfloat16)
+                return (x @ w).relu().sum()
+
+        backend = aot_autograd(
+            fw_compiler=lambda gm, _: gm.forward,
+            bw_compiler=lambda gm, _: gm.forward,
+            partition_fn=min_cut_rematerialization_partition,
+        )
+        torch._dynamo.reset()
+        model = M().cuda()
+        x = torch.randn(64, 64, device="cuda", dtype=torch.bfloat16, requires_grad=True)
+        with torch.compiler.config.patch(compile_on_one_rank=True):
+            torch.compile(model, backend=backend, fullgraph=True)(x).backward()
+        self.assertIsNotNone(x.grad)
+
     @unittest.skipIf(not USE_NETWORKX, "networkx not available")
     def test_min_cut_partitioner_unbounded_error_message(self):
         """Test that NetworkXUnbounded errors produce user-friendly error messages."""
@@ -7314,7 +7467,7 @@ def forward(self, primals_1, tangents_1):
 
         import networkx as nx
 
-        from torch._functorch.partitioners import _find_infinite_capacity_path
+        from torch._functorch.partitioners import _find_infinite_capacity_path, INT_INF
 
         # Test 1: Verify _find_infinite_capacity_path finds a path with edge reasons
         nx_graph = nx.DiGraph()
@@ -7345,6 +7498,9 @@ def forward(self, primals_1, tangents_1):
         self.assertEqual(path[-1][1], "sink")  # last edge ends at sink
         self.assertIn("must be computed in backward", path[-1][2])
 
+        del nx_graph["source"]["node1_in"]["capacity"]
+        self.assertIsNotNone(_find_infinite_capacity_path(nx_graph))
+
         # Test 2: Verify path not found when there's no infinite capacity path
         nx_graph2 = nx.DiGraph()
         nx_graph2.add_edge(
@@ -7362,6 +7518,10 @@ def forward(self, primals_1, tangents_1):
 
         path2 = _find_infinite_capacity_path(nx_graph2)
         self.assertIsNone(path2)
+
+        # INT_INF is a large finite penalty, so the specialized solver can cut it.
+        nx_graph2["node1_in"]["node1_out"]["capacity"] = INT_INF
+        self.assertIsNone(_find_infinite_capacity_path(nx_graph2))
 
         # Test 3: Verify data dependency edges have reasons
         nx_graph3 = nx.DiGraph()
@@ -7757,6 +7917,76 @@ def forward(self, primals_1, tangents_1):
             )
         finally:
             handle.destroy()
+
+    @parametrize("unlift_effect_tokens", [False, True])
+    def test_static_input_indices_after_effect_token_removal(
+        self, unlift_effect_tokens
+    ):
+        from torch._dynamo.backends.common import aot_autograd
+        from torch._higher_order_ops.effects import _register_effectful_op
+        from torch._library.effects import EffectType
+
+        @torch.library.custom_op(
+            "test::effectful_static_indices_unlift", mutates_args=()
+        )
+        def log(x: torch.Tensor) -> None:
+            pass
+
+        @log.register_fake
+        def _(x):
+            pass
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.randn(3))
+                self.register_buffer("bias", torch.randn(5))
+
+            def forward(self, x):
+                log(x)
+                return x.sum() + self.weight.sum() + self.bias.sum()
+
+        captured = []
+
+        def compiler(gm, example_inputs):
+            metadata = torch._guards.TracingContext.get().fw_metadata
+            if metadata is None:
+                raise AssertionError("Expected forward metadata in compiler")
+            captured.append(
+                (
+                    list(metadata.static_input_indices),
+                    [tuple(x.shape) for x in example_inputs],
+                    len(metadata.tokens),
+                )
+            )
+            return make_boxed_func(gm.forward)
+
+        handle = _register_effectful_op(log, EffectType.ORDERED)
+        torch._dynamo.reset()
+        try:
+            with (
+                torch.no_grad(),
+                torch._functorch.config.patch(
+                    unlift_effect_tokens=unlift_effect_tokens,
+                    enable_autograd_cache=False,
+                ),
+            ):
+                compiled = torch.compile(
+                    Model(),
+                    backend=aot_autograd(fw_compiler=compiler),
+                    fullgraph=True,
+                    dynamic=False,
+                )
+                compiled(torch.randn(7))
+        finally:
+            handle.destroy()
+            torch._dynamo.reset()
+
+        self.assertEqual(len(captured), 1)
+        indices, shapes, num_tokens = captured[0]
+        self.assertEqual(num_tokens, int(not unlift_effect_tokens))
+        self.assertTrue(all(0 <= i < len(shapes) for i in indices))
+        self.assertEqual(sorted(shapes[i] for i in indices), [(3,), (5,)])
 
     def _make_effectful_op(self, name):
         @torch.library.custom_op(f"test::{name}", mutates_args=())
@@ -10010,6 +10240,40 @@ def forward(self, primals_1, tangents_1):
             ],
             [0, 1, 2],
         )
+
+    def test_collect_metadata_no_grad_no_op_view_of_user_output(self):
+        # https://github.com/pytorch/pytorch/issues/191449
+        # Without gradients, a no-op view of another user output must still be
+        # classified as an alias so the runtime wrapper regenerates a distinct
+        # tensor object; otherwise the backend may return one object for both
+        # outputs, while eager returns distinct objects.
+        from torch._functorch._aot_autograd.collect_metadata_analysis import (
+            run_functionalized_fw_and_collect_metadata,
+        )
+        from torch._functorch._aot_autograd.descriptors import PlainAOTInput
+        from torch._functorch._aot_autograd.schemas import OutputType
+
+        def f(x):
+            base = x + 1
+            return [base.view(-1), base]
+
+        fake_mode = FakeTensorMode()
+        arg = fake_mode.from_tensor(torch.ones(1))
+
+        metadata = run_functionalized_fw_and_collect_metadata(
+            f,
+            flat_args_descs=[PlainAOTInput(0)],
+            keep_input_mutations=True,
+            static_input_indices=[],
+        )(arg)
+
+        self.assertEqual(
+            metadata.output_info[0].output_type,
+            OutputType.alias_of_intermediate_base_is_user_output,
+        )
+        self.assertEqual(metadata.output_info[0].base_idx, 1)
+        self.assertEqual(metadata.output_info[1].output_type, OutputType.non_alias)
+        self.assertEqual(metadata.num_intermediate_bases, 0)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
@@ -12622,6 +12886,7 @@ class TestEagerFusionModuleInfo(AOTTestCase):
 
 
 instantiate_parametrized_tests(TestAOTAutograd)
+instantiate_parametrized_tests(TestPartitioning)
 instantiate_parametrized_tests(TestAOTModuleSimplified)
 only_for = "cpu"
 instantiate_device_type_tests(
@@ -12965,11 +13230,14 @@ class TestAOTAutogradWithCache(TestAOTAutogradWithDynamo):
         make_inputs_subclasses: bool = False,
     ):
         self.inductor_cache = MockFXGraphCache()
-        AOTAutogradCache.clear()
-        with patch(
+        mock_fx_graph_cache = patch(
             "torch._inductor.codecache.FxGraphCache.load_with_key",
             new=self.inductor_cache.load_with_key,
-        ):
+        )
+        # fresh_cache() rather than AOTAutogradCache.clear(): clear() rmtree's the
+        # cache root shared by every process of this user, so under a parallel
+        # runner it deletes entries other workers are mid-read/mid-write on.
+        with fresh_cache(), mock_fx_graph_cache:
             return super().verify_aot_autograd(
                 f,
                 inp_,

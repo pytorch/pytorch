@@ -8,6 +8,7 @@
 #include <ATen/Functions.h>
 #include <c10/cuda/CUDAAllocatorConfig.h>
 #include <c10/cuda/CUDAFunctions.h>
+#include <c10/cuda/CUDAGuard.h>
 
 #include <cstddef>
 #include <optional>
@@ -150,6 +151,11 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*={0,0}*/, cudaStreamCaptureMode 
   // that are not allowed once stream capture is active.
   if (at::globalContext().blasPreferredBackend() == at::BlasBackend::Cublaslt) {
     (void)at::cuda::getCurrentCUDABlasLtHandle();
+    // The line above only covers this thread. Backward inside the capture
+    // region runs its gemms from an autograd worker thread, whose first
+    // hipblaslt use on the capture stream would create a handle mid-capture;
+    // stock a spare in the shared pool for it to reserve instead.
+    at::cuda::ensureCublasLtHandlesAvailable(1);
   }
 #endif
 
@@ -383,8 +389,9 @@ void CUDAGraph::reset() {
       capturing_to_pool_ = false;
     }
 
-    // Clean up cuBLAS workspaces allocated on the capture stream, otherwise live allocations prevent
-    // private pool cleanup
+    // Clean up cached cuBLAS workspaces allocated on the capture stream;
+    // otherwise live allocations prevent private pool cleanup. CUDA's default
+    // eager workspace mode does not populate this cache.
     clearCublasWorkspacesForStream(capture_stream_.stream());
 
     // notifyCaptureDestroy may throw. How should we handle this?
@@ -434,8 +441,11 @@ CUDAGraph::~CUDAGraph() {
 #if defined(USE_ROCM)
   if (capture_dev_ != UNDEFINED_DEVICE) // check if capture_dev_ contains the real device id
   {
-    AT_CUDA_CHECK(cudaSetDevice(capture_dev_));
-    AT_CUDA_CHECK(cudaDeviceSynchronize());
+    // Guarded, and warning instead of throwing, for the reason reset() gives above:
+    // this runs from the destructor, on whatever thread drops the last reference, so
+    // it must restore that thread's current device and must not throw.
+    c10::cuda::CUDAGuard device_guard(capture_dev_);
+    C10_CUDA_CHECK_WARN(cudaDeviceSynchronize());
   }
 #endif
 }

@@ -22,13 +22,13 @@ import torch.backends.mkldnn
 from torch.utils import mkldnn as mkldnn_utils
 from torch.testing._internal.common_utils import TestCase, \
     run_tests, TemporaryFileName, gradcheck, gradgradcheck, IS_WINDOWS, \
-    skipIfTorchDynamo, xfailIfTorchDynamo, recover_orig_fp32_precision
+    skipIfTorchDynamo, xfailIfTorchDynamo, recover_orig_fp32_precision, \
+    parametrize, instantiate_parametrized_tests, HardwareClassification
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    dtypes,
+    onlyAccelerator,
 )
 from torch.testing._internal.common_mkldnn import reduced_f32_on_and_off
-
 # batched grad doesn't support mkldnn
 gradcheck = functools.partial(gradcheck, check_batched_grad=False)
 gradgradcheck = functools.partial(gradgradcheck, check_batched_grad=False)
@@ -39,6 +39,8 @@ types = [torch.float, torch.bfloat16, torch.half]
 # Comment the line below to find out the CI machines having MKL-DNN build disabled
 @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled")
 class TestMkldnn(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_conversion(self):
         for cpu_tensor in [torch.randn((1, 2, 3, 4),
                                        dtype=torch.float, device=torch.device('cpu')),
@@ -163,24 +165,6 @@ class TestMkldnn(TestCase):
                                "copy_mkldnn_: between mkldnn layout and dense Tensors is not implemented! "
                                "Found self type = Mkldnntorch.FloatTensor and src type = torch.FloatTensor",
                                lambda: mkldnn_x.copy_(x))
-
-    def test_unsupported(self):
-        # unsupported types and unsupported types with gpu
-        for dtype in [torch.double, torch.uint8, torch.int8,
-                      torch.short, torch.int, torch.long]:
-            with self.assertRaises(RuntimeError):
-                torch.randn(1, 2, 3, 4, dtype=dtype, device=torch.device('cpu')).to_mkldnn()
-            if torch.cuda.is_available():
-                with self.assertRaises(RuntimeError):
-                    torch.randn(1, 2, 3, 4, dtype=dtype, device=torch.device('cuda')).to_mkldnn()
-        # supported type with gpu
-        if torch.cuda.is_available():
-            with self.assertRaises(RuntimeError):
-                torch.randn(1, 2, 3, 4, dtype=torch.float, device=torch.device('cuda')).to_mkldnn()
-        # some factory functions
-        for creator in [torch.ones, torch.randn, torch.rand]:
-            with self.assertRaises(RuntimeError):
-                creator(1, 2, 3, 4, dtype=torch.float, device=torch.device('cpu'), layout=torch._mkldnn)
 
     def test_mkldnn_conv_shapecheck(self):
         input = torch.full((1, 1, 1, 24,), 1, dtype=torch.float32)
@@ -388,17 +372,17 @@ class TestMkldnn(TestCase):
                 y_lower = conv_lower(x_lower).float()
                 self.assertEqual(y, y_lower, atol=5e-2, rtol=5e-3)
 
-    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
     def test_conv_deconv_1d_lower_precision(self, dtype):
         self._test_conv_deconv_lower_precision_base(1, torch.nn.Conv1d, dtype=dtype)
         self._test_conv_deconv_lower_precision_base(1, torch.nn.ConvTranspose1d, dtype=dtype)
 
-    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
     def test_conv_deconv_2d_lower_precision(self, dtype):
         self._test_conv_deconv_lower_precision_base(2, torch.nn.Conv2d, dtype=dtype)
         self._test_conv_deconv_lower_precision_base(2, torch.nn.ConvTranspose2d, dtype=dtype)
 
-    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
     def test_conv_deconv_3d_lower_precision(self, dtype):
         self._test_conv_deconv_lower_precision_base(3, torch.nn.Conv3d, dtype=dtype)
         self._test_conv_deconv_lower_precision_base(3, torch.nn.ConvTranspose3d, dtype=dtype)
@@ -459,7 +443,7 @@ class TestMkldnn(TestCase):
         self._test_conv_deconv_nhwc_base(torch.nn.Conv3d, torch.contiguous_format, dtype=torch.float32)
         self._test_conv_deconv_nhwc_base(torch.nn.Conv3d, torch.channels_last_3d, dtype=torch.float32)
 
-    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
     def test_conv_nhwc_lower_precision(self, dtype):
         # when torch.ops.mkldnn._is_mkldnn_bf16_supported() or torch.ops.mkldnn._is_mkldnn_fp16_supported()
         # returns false, bf16/fp16 CPU conv will fall back to thnn impl
@@ -487,7 +471,6 @@ class TestMkldnn(TestCase):
             self._test_conv_deconv_nhwc_base(torch.nn.Conv3d, torch.contiguous_format, dtype=dtype, prec=prec)
             self._test_conv_deconv_nhwc_base(torch.nn.Conv3d, torch.channels_last_3d, dtype=dtype, prec=prec)
 
-
     @reduced_f32_on_and_off()
     def test_conv_transpose_nhwc_fp32(self):
         self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose2d, torch.contiguous_format, dtype=torch.float32)
@@ -495,7 +478,7 @@ class TestMkldnn(TestCase):
         self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose3d, torch.contiguous_format, dtype=torch.float32)
         self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose3d, torch.channels_last_3d, dtype=torch.float32)
 
-    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
     def test_conv_transpose_nhwc_lower_precision(self, dtype):
         # when torch.ops.mkldnn._is_mkldnn_bf16_supported() or torch.ops.mkldnn._is_mkldnn_fp16_supported()
         # returns false, bf16/fp16 CPU conv will fall back to thnn impl
@@ -808,7 +791,6 @@ class TestMkldnn(TestCase):
         for D, H, W in [(64, 64, 64), (35, 39, 35), (16, 19, 20), [7, 8, 9]]:
             x = torch.randn(N, C, D, H, W, dtype=torch.float32) * 10
             self._test_max_pool_base(dim=3, input=x)
-
 
     @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
     def _test_max_pool_bf16_base(self, dim, input):
@@ -1360,7 +1342,7 @@ class TestMkldnn(TestCase):
             if bias:
                 self.assertEqual(linear.bias.grad, mkldnn_linear.bias.grad)
 
-    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
     def test_linear_lowp(self, dtype):
         in_features = torch.randint(3, 10, (1,)).item()
         out_features = torch.randint(3, 100, (1,)).item()
@@ -1635,7 +1617,7 @@ class TestMkldnn(TestCase):
                         cn2.sum().backward(retain_graph=True)
                         self.assertEqual(c1.grad, c2.grad, rtol=rtol, atol=atol)
 
-    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
     def test_matmul_lower_precision(self, dtype):
         support_check = {
             torch.bfloat16: torch.ops.mkldnn._is_mkldnn_bf16_supported,
@@ -1674,7 +1656,7 @@ class TestMkldnn(TestCase):
             ]:
                 common(self, shape1, shape2, op, dtype)
 
-    def test_mkldnn_setflags_nowarn(self, device):
+    def test_mkldnn_setflags_nowarn(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/149829
         with warnings.catch_warnings(record=True) as w:
             rc = torch.backends.mkldnn.set_flags()
@@ -1684,14 +1666,15 @@ class TestMkldnn(TestCase):
         # Above should trigger no warnings regardless of configuration
         self.assertEqual(len(w), 0)
 
-    def test_mkldnn_error_on_zero_stride(self, device):
+    def test_mkldnn_error_on_zero_stride(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/149274
         x = torch.rand(1, 2, 3, 3).to_mkldnn()
         with self.assertRaises(ValueError):
             torch.mkldnn_max_pool2d(x, kernel_size=3, stride=0)
 
-    def test_mkldnn_scaled_mm(self, device) -> None:
+    def test_mkldnn_scaled_mm(self) -> None:
         # test with input scale, weight scale and output_scale
+        device = "cpu"
         M, N, K = 2, 13, 16
         x = torch.randn((M, K), device=device) / K
         y = torch.randn((N, K), device=device).t() / K
@@ -1718,7 +1701,6 @@ class TestMkldnn(TestCase):
             if out_dtype is not None:
                 self.assertEqual(out_dtype, out.dtype)
             self.assertEqual(out_emulated.float(), out.float(), atol=5e-2, rtol=5e-2)
-
 
     @recover_orig_fp32_precision
     def test_mlkdnn_get_set(self):
@@ -1771,8 +1753,39 @@ class TestMkldnn(TestCase):
             with torch.backends.flags(fp32_precision="tf32"):
                 self.assertEqual(torch.backends.mkldnn.matmul.fp32_precision, "tf32")
 
+    def test_unsupported(self):
+        # unsupported types and unsupported types with gpu
+        for dtype in [torch.double, torch.uint8, torch.int8,
+                      torch.short, torch.int, torch.long]:
+            with self.assertRaises(RuntimeError):
+                torch.randn(1, 2, 3, 4, dtype=dtype, device=torch.device('cpu')).to_mkldnn()
 
-instantiate_device_type_tests(TestMkldnn, globals(), only_for=('cpu',))
+        # some factory functions
+        for creator in [torch.ones, torch.randn, torch.rand]:
+            with self.assertRaises(RuntimeError):
+                creator(1, 2, 3, 4, dtype=torch.float, device=torch.device('cpu'), layout=torch._mkldnn)
+
+
+@unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled")
+class TestMkldnnDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyAccelerator
+    def test_unsupported(self, device):
+        # unsupported types and unsupported types with gpu
+        for dtype in [torch.double, torch.uint8, torch.int8,
+                      torch.short, torch.int, torch.long]:
+            with self.assertRaises(RuntimeError):
+                torch.randn(1, 2, 3, 4, dtype=dtype, device=torch.device(device)).to_mkldnn()
+
+        # supported type with gpu
+        with self.assertRaises(RuntimeError):
+            torch.randn(1, 2, 3, 4, dtype=torch.float, device=torch.device(device)).to_mkldnn()
+
+
+instantiate_parametrized_tests(TestMkldnn)
+instantiate_device_type_tests(TestMkldnnDevice, globals(), allow_xpu=True)
+
 
 if __name__ == '__main__':
     run_tests()

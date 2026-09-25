@@ -201,7 +201,8 @@ class CUTLASSScheduling(BaseScheduling):
         )
         with debug_printer_manager:
             self.codegen_comment(node_schedule, kernel_name)
-            kernel.call_kernel(kernel_name, ctb)
+            with V.graph.wrapper_code.kernel_profile_scope(kernel_name, node_schedule):
+                kernel.call_kernel(kernel_name, ctb)
 
         V.graph.removed_buffers |= kernel.removed_buffers
         self.free_buffers_in_scheduler()
@@ -341,11 +342,12 @@ size: {cutlass_template_buffer.get_size()}"
         try:
             from torch._inductor.codegen.cutlass.python_evt import CutlassEVTCodegen
 
-            read_names, _, _, _ = CutlassEVTCodegen.ir_to_evt_python_code(
+            epilogue = CutlassEVTCodegen.ir_to_evt_python_code(
                 cutlass_template_buffer.get_name(),
                 existing_epilogue_nodes + list(node_to_fuse.get_nodes()),
                 OrderedSet(),
             )
+            read_names = epilogue.reads
 
         except NotImplementedError as e:
             not_implemented_op = str(e)
