@@ -2855,12 +2855,8 @@ class GuardBuilder(GuardBuilderBase):
             f"torch._functorch.aot_autograd.utils.top_saved_tensors_hooks ids == {guard_hooks_ids}"
         ]
         self._set_guard_export_info(guard, code)
-
-        def fn(x: object) -> bool:
-            return guard_hooks_ids == hooks_ids_fn(get_hooks())
-
-        self.guard_manager.root.add_lambda_guard(
-            fn, get_verbose_code_parts(code, guard), guard.user_stack
+        self.guard_manager.root.add_autograd_saved_tensors_hooks_guard(
+            torch.fx.GraphModule, get_verbose_code_parts(code, guard), guard.user_stack
         )
 
     @register_guard_check_spec(
