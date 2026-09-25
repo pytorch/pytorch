@@ -155,11 +155,14 @@ flex_decoding_template = TritonTemplate(
 )
 
 
-def get_split_k(B: int, H: int, Mk: int) -> int:
-    if torch.xpu.is_available():
-        num_SM = torch.xpu.get_device_properties("xpu").gpu_subslice_count
-    else:
-        num_SM = torch.cuda.get_device_properties("cuda").multi_processor_count
+def get_split_k(B: int, H: int, Mk: int, /, *, device: torch.device) -> int:
+    # num_SM is sourced from the kernel's target device via its DeviceInterface
+    # capability (device routing, not ambient xpu/cuda detection); lazy import
+    # keeps the dynamo dependency off this module's load path.
+    from torch._dynamo import device_interface
+
+    interface = device_interface.get_interface_for_device(device)
+    num_SM = interface.get_multi_processor_count(device)
     bh = max(B * H, 1)  # NOTE: Handle B*h=0 case
     if not isinstance(bh, (int, sympy.Integer)):
         raise AssertionError("B and H must be concrete integers")
@@ -280,7 +283,10 @@ def create_flex_decoding_kernel(*args, **kwargs):
     # TODO: fix autotuning.
 
     kernel_options.setdefault("SM_SCALE", scale)
-    kernel_options.setdefault("SPLIT_KV", get_split_k(B, Hkv, seq_len_kv))
+    device = query.get_device()
+    kernel_options.setdefault(
+        "SPLIT_KV", get_split_k(B, Hkv, seq_len_kv, device=device)
+    )
     MAX_SPLIT_KV = kernel_options["SPLIT_KV"]
 
     # create config dependent intermediate buffers
