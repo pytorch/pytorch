@@ -1374,6 +1374,25 @@ inline void convert(const int64_t* src, double* dst, int64_t n) {
   }
 }
 
+// Define this specialization to match c10::convert, as defined in TypeCast.h
+template <>
+struct VecConvert<uint8_t, 1, float, 1> {
+  static inline VectorizedN<uint8_t, 1> apply(
+      const VectorizedN<float, 1>& src) {
+    constexpr int count = std::min(
+        VectorizedN<uint8_t, 1>::size(), VectorizedN<float, 1>::size());
+    __at_align__ float src_buf[VectorizedN<uint8_t, 1>::size()];
+    src.store(src_buf);
+    __at_align__ uint8_t dst_buf[VectorizedN<float, 1>::size()];
+
+    for (int i = 0; i < count; i++) {
+      dst_buf[i] = static_cast<uint8_t>(static_cast<int64_t>(src_buf[i]));
+    }
+
+    return VectorizedN<uint8_t, 1>::loadu(dst_buf, count);
+  }
+};
+
 #define DEFINE_REINTERPRET_CAST_FUNCS(Fst, Cst)     \
   template <>                                       \
   C10_ALWAYS_INLINE Vectorized<Cst> cast<Cst, Fst>( \
