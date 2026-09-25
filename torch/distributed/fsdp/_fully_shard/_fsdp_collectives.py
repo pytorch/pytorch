@@ -578,7 +578,6 @@ def foreach_reduce(
     reduce_scatter_group: dist.ProcessGroup,
     reduce_scatter_stream: torch.Stream,
     reduce_scatter_comm: ReduceScatter,
-    orig_dtype: torch.dtype | None,  # Unused; kept for backward compatibility.
     reduce_dtype: torch.dtype | None,
     device: torch.device,
     gradient_divide_factor: float | None,

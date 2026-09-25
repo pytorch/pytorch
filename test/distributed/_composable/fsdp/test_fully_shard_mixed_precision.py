@@ -297,7 +297,6 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
         fsdp_param_group = fully_shard.state(model)._fsdp_param_group
         if fsdp_param_group is None:
             raise AssertionError("Expected root FSDP parameter group")
-        self.assertEqual(fsdp_param_group._orig_dtype, torch.float32)
         self.assertEqual(fsdp_param_group._reduce_dtype, torch.float32)
 
         model.reshard()

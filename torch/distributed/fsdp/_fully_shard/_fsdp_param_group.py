@@ -154,7 +154,6 @@ class AllReduceState(NamedTuple):
 class FSDPParamGroup:
     """This class represents a parameter group to communicate together."""
 
-    _orig_dtype: torch.dtype | None
     _reduce_dtype: torch.dtype | None
 
     def __init__(
@@ -303,7 +302,6 @@ class FSDPParamGroup:
                 f"FSDP expects uniform reduce dtype but got {reduce_dtypes}"
             )
         dtype_sets_are_uniform = len(orig_dtypes) == 1 and len(reduce_dtypes) == 1
-        self._orig_dtype = next(iter(orig_dtypes)) if dtype_sets_are_uniform else None
         self._reduce_dtype = (
             next(iter(reduce_dtypes)) if dtype_sets_are_uniform else None
         )
@@ -742,7 +740,6 @@ class FSDPParamGroup:
                     ),
                     self.comm_ctx.reduce_scatter_stream,
                     self._reduce_scatter_comm,
-                    self._orig_dtype,
                     reduce_dtype,
                     self.device,
                     self.gradient_divide_factor,
