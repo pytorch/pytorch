@@ -214,7 +214,7 @@ void nccl_reduce_scatter_offset(
     // Cache the device communicator.
     devcomm_opt = manager.register_devcomm(group_name, devcomm, kDevcommKey);
   }
-  ncclDevComm devcomm = *devcomm_opt;
+  ncclDevComm devcomm = devcomm_opt->get();
 
   const int my_rank = devcomm.rank;
   const int group_size = devcomm.nRanks;
