@@ -199,7 +199,6 @@ case "$tag" in
     GCC_VERSION=11
     KATEX=yes
     DOCS=yes
-    ONNX=yes
     ;;
   pytorch-linux-jammy-py3.11-clang21)
     ANACONDA_PYTHON_VERSION=3.11
@@ -209,6 +208,7 @@ case "$tag" in
     DOCS=yes
     ONNX=yes
     TVM=yes
+    ONNX=yes
     ;;
   pytorch-linux-jammy-py3.12-clang21)
     ANACONDA_PYTHON_VERSION=3.12
