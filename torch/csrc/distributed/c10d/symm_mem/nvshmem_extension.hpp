@@ -4,6 +4,12 @@
 #include <c10/macros/Macros.h>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 
+#ifdef USE_ROCM
+#include <rocshmem/rocshmem.hpp>
+#else
+#include <nvshmem.h>
+#endif
+
 #define NVSHMEM_CHECK(stmt, msg)                                             \
   do {                                                                       \
     int result = (stmt);                                                     \
@@ -19,7 +25,6 @@ namespace c10d::nvshmem_extension {
 TORCH_API bool is_nvshmem_available();
 
 #ifdef USE_ROCM
-#include <rocshmem/rocshmem.hpp>
 using ShmemSignalOp = rocshmem::ROCSHMEM_SIGNAL_OPS;
 using ShmemCompareOp = rocshmem::rocshmem_cmps;
 constexpr auto kShmemSignalSet = rocshmem::ROCSHMEM_SIGNAL_SET;
@@ -31,7 +36,6 @@ constexpr auto kShmemCmpGe = rocshmem::ROCSHMEM_CMP_GE;
 constexpr auto kShmemCmpLt = rocshmem::ROCSHMEM_CMP_LT;
 constexpr auto kShmemCmpLe = rocshmem::ROCSHMEM_CMP_LE;
 #else
-#include <nvshmem.h>
 using ShmemSignalOp = nvshmemx_signal_op_t;
 using ShmemCompareOp = nvshmemx_cmp_type_t;
 constexpr auto kShmemSignalSet = NVSHMEM_SIGNAL_SET;
