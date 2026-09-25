@@ -2361,6 +2361,26 @@ class BuiltinVariable(BaseBuiltinVariable):
         )
         return round_method.call_function(tx, list(args), kwargs)
 
+    def call_property(
+        self,
+        tx: "InstructionTranslatorBase",
+        /,
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
+    ) -> VariableTracker | None:
+        try:
+            property(*([None] * len(args)), **dict.fromkeys(kwargs))
+        except TypeError as exc:
+            raise_type_error(tx, str(exc))
+
+        names = ("fget", "fset", "fdel", "doc")
+        bound: dict[str, VariableTracker] = {
+            name: ConstantVariable.create(None) for name in names
+        }
+        bound.update(zip(names, args))
+        bound.update(kwargs)
+        return variables.PropertyVariable.from_constructor(tx, **bound)
+
     def call_range(
         self,
         tx: "InstructionTranslatorBase",

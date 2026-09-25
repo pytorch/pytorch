@@ -5872,6 +5872,125 @@ class GraphModule(torch.nn.Module):
 
         self.assertEqual(result, torch.sin(x))
 
+    @parametrize(
+        "case",
+        (
+            "full_positional",
+            "kwargs_only",
+            "non_function_fget",
+            "single_positional",
+            "empty",
+            "mixed",
+            "explicit_none_doc",
+        ),
+    )
+    def test_property_constructor(self, case):
+        def fn(x):
+            def getter(obj):
+                """getter doc"""
+                return obj.value
+
+            expected_getter = getter
+            if case == "full_positional":
+                p = property(getter, None, None, "explicit doc")
+            elif case == "kwargs_only":
+                p = property(fget=getter, fset=None, fdel=None, doc="explicit doc")
+            elif case == "non_function_fget":
+                expected_getter = 123
+                p = property(123)
+            elif case == "single_positional":
+                p = property(getter)
+            elif case == "empty":
+                expected_getter = None
+                p = property()
+            elif case == "mixed":
+                p = property(getter, doc="explicit doc")
+            else:
+                p = property(getter, doc=None)
+
+            return (
+                x + 1,
+                p.fget is expected_getter,
+                p.fset,
+                p.fdel,
+                p.__doc__,
+            )
+
+        x = torch.ones(1)
+        expected = fn(x)
+        self.assertTrue(expected[1])
+        torch._dynamo.reset()
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+
+    @parametrize("case", ("duplicate", "unknown_keyword", "too_many", "tx_keyword"))
+    def test_property_constructor_invalid_arguments(self, case):
+        def fn(x):
+            try:
+                if case == "duplicate":
+                    property(None, fget=None)
+                elif case == "unknown_keyword":
+                    property(unknown=None)
+                elif case == "too_many":
+                    property(None, None, None, None, None)
+                else:
+                    property(tx=None)
+            except TypeError as exc:
+                return x + 1, str(exc)
+            return x + 1, None
+
+        x = torch.ones(1)
+        expected = fn(x)
+        self.assertIsInstance(expected[1], str)
+        torch._dynamo.reset()
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+
+    def test_property_constructor_getter_without_doc(self):
+        class NoDoc:
+            @property
+            def __doc__(self):
+                raise AttributeError
+
+        def fn(x):
+            getter = NoDoc()
+            p = property(getter)
+            return x + 1, p.fget is getter, p.__doc__
+
+        x = torch.ones(1)
+        expected = fn(x)
+        self.assertEqual(expected, (x + 1, True, None))
+
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+
+    @parametrize("attribute", ("__name__", "__isabstractmethod__"))
+    def test_property_constructor_callable_getter_metadata(self, attribute):
+        if attribute == "__name__" and sys.version_info < (3, 13):
+            self.skipTest("property.__name__ requires Python 3.13")
+
+        class Getter:
+            __isabstractmethod__ = True
+
+            def __init__(self):
+                self.__name__ = "value"
+
+            def __call__(self, obj):
+                return obj.value
+
+        def fn(x):
+            getter = Getter()
+            p = property(getter)
+            return x + 1, getattr(p, attribute)
+
+        x = torch.ones(1)
+        expected_value = "value" if attribute == "__name__" else True
+        expected = fn(x)
+        self.assertEqual(expected, (x + 1, expected_value))
+
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+
     def test_property_descriptor_on_instance(self):
         class Foo:
             def __init__(self, x):
