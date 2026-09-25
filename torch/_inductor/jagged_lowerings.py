@@ -8,6 +8,20 @@ from .ir import Pointwise, TensorBox
 from .virtualized import ops
 
 
+# Out-of-tree backends (e.g. PrivateUse1 devices) register after torch is
+# imported; they opt in through the register function below.
+_jagged_pointwise_devices: set[str] = {"cuda"}
+
+
+def register_jagged_pointwise_lowering_device(device_type: str) -> None:
+    """Register a device that supports the fused jagged pointwise lowering."""
+    _jagged_pointwise_devices.add(device_type)
+
+
+def _supports_jagged_pointwise_lowering(device: torch.device) -> bool:
+    return device.type in _jagged_pointwise_devices
+
+
 # pyre-ignore[2,3]
 def dense_idx_to_jagged_idx(batch_idx, seq_idx, offsets_loader, jagged_len):
     # jagged_len + 1 is used as the upper bound,
@@ -126,7 +140,7 @@ def register_jagged_ops():
         # only handle the common case of a single jagged dimension
         if (
             len(jagged_offsets) != 1
-            or device.type != "cuda"
+            or not _supports_jagged_pointwise_lowering(device)
             or device != jagged_offsets[0].get_device()
             or len(jagged_values_size) != 2
             or len(jagged_offsets[0].get_size()) != 1
@@ -196,7 +210,7 @@ def register_jagged_ops():
         # only handle the common case of a single jagged dimension
         if (
             len(jagged_offsets) != 1
-            or device.type != "cuda"
+            or not _supports_jagged_pointwise_lowering(device)
             or device != jagged_offsets[0].get_device()
             or len(jagged_offsets[0].get_size()) != 1
             or len(dense_size) != 3
