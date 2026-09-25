@@ -393,8 +393,8 @@ def arange(
     if stop is None:
         if start is None:
             raise TypeError
-        # XXX: this breaks if start is passed as a kwarg:
-        # arange(start=4) should raise (no stop) but doesn't
+        # One positional value is stop: arange(4) == arange(0, 4).
+        # arange(start=4) is rejected in _funcs.py before this remapping.
         start, stop = 0, start
     if start is None:
         start = 0
