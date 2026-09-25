@@ -27,6 +27,7 @@ from torch._dynamo.exc import (
 from torch._dynamo.variables.base import SourceLocation
 from torch.testing._internal.common_device_type import skipIf
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_FBCODE,
     munge_exc,
     skipIfWindows,
@@ -67,6 +68,8 @@ def _format_multiline_source_location() -> str:
 
 
 class ExcTests(LoggingTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     maxDiff = None
 
     @torch._dynamo.config.patch(suppress_errors=True)
