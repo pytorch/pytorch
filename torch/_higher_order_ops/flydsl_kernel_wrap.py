@@ -676,9 +676,7 @@ def _storage_extent_bytes(arg: Tensor) -> tuple[Any, Any] | None:
     if guard_or_false(arg.numel() == 0):
         return None
     start = arg.storage_offset() * arg.element_size()
-    span = sum(
-        (size - 1) * stride for size, stride in zip(arg.size(), arg.stride())
-    )
+    span = sum((size - 1) * stride for size, stride in zip(arg.size(), arg.stride()))
     return start, start + (span + 1) * arg.element_size()
 
 

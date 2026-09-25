@@ -52,12 +52,7 @@ from torch.testing._internal.common_distributed import (
     requires_accelerator_dist_backend,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_utils import (
-    MI350_ARCH,
-    skipIfRocmArch,
-    skipIfTorchInductor,
-    skipIfXpu,
-)
+from torch.testing._internal.common_utils import skipIfTorchInductor, skipIfXpu
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
@@ -1102,7 +1097,6 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             outputs = fsdp_m(inputs)
             self.assertTrue(same(correct_outputs, outputs))
 
-    @skipIfRocmArch(MI350_ARCH)  # regression in ROCm 7.2
     @config.patch(enable_compiler_collectives=True)
     @skip_if_lt_x_gpu(1)
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
@@ -1829,7 +1823,6 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         outputs = ddp_m(inputs)
         self.assertTrue(same(correct_outputs, outputs))
 
-    @skipIfRocmArch(MI350_ARCH)  # regression in ROCm 7.2
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(config, "optimize_ddp", False)
     def test_ddp_baseline_inductor(self):
@@ -2114,7 +2107,6 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         model(hidden_states)
         torch.accelerator.synchronize()
 
-    @skipIfRocmArch(MI350_ARCH)  # regression in ROCm 7.2
     @patch.object(config, "optimize_ddp", True)
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_graph_split_inductor(self):

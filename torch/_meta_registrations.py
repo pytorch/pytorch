@@ -2792,6 +2792,21 @@ def calc_conv_nd_return_shape(
         else:
             output_padding_list = output_padding
 
+    # Validate output_padding < stride or dilation in each dim (mirrors C++
+    # NaiveConvolutionTransposeNd check).
+    if is_transposed and output_padding_list:
+        torch._check(
+            all(
+                op < s or op < d
+                for op, s, d in zip(output_padding_list, stride, dilation, strict=True)
+            ),
+            lambda: (
+                f"output padding must be smaller than either stride or dilation, "
+                f"but got output_padding={output_padding_list}, "
+                f"stride={stride}, dilation={dilation}"
+            ),
+        )
+
     # Validate kernel size fits within padded input (mirrors C++ check_shape_forward
     # in aten/src/ATen/native/Convolution.cpp).
     if not is_transposed:
@@ -2935,6 +2950,17 @@ def meta_conv(
         groups,
         output_padding if is_transposed else None,
     )
+
+    if is_transposed and bias is not None:
+        expected = weight.shape[1] * groups
+        torch._check(
+            bias.ndim == 1 and bias.shape[0] == expected,
+            lambda: (
+                f"Given transposed=1, weight of size {list(weight.shape)}, "
+                f"expected bias to be 1-dimensional with {expected} elements, "
+                f"but got bias of size {list(bias.shape)} instead"
+            ),
+        )
 
     from torch.fx.experimental.symbolic_shapes import guard_or_false
 
@@ -4446,13 +4472,18 @@ def meta__dyn_quant_pack_4bit_weight(
         weights.dtype is torch.uint8,
         lambda: f"expected w to be uint8, got {weights.dtype}",
     )
-    if torch.backends.kleidiai.is_available() and (
-        (block_size == in_features and scales_zeros.dtype == torch.float)
-        or (
-            block_size < in_features
-            and block_size % 32 == 0
-            and in_features % block_size == 0
-            and scales_zeros.dtype == torch.bfloat16
+    # Mirror can_use_kleidiai
+    if (
+        torch.backends.kleidiai.is_available()
+        and torch.cpu.get_capabilities().get("dot")
+        and (
+            (block_size == in_features and scales_zeros.dtype == torch.float)
+            or (
+                block_size < in_features
+                and block_size % 32 == 0
+                and in_features % block_size == 0
+                and scales_zeros.dtype == torch.bfloat16
+            )
         )
     ):
         packed_weight_size = get_kai_packed_weight_size(
@@ -5926,12 +5957,13 @@ def check_grid_sampler_3d(input: Tensor, grid: Tensor, interpolation_mode: int):
             f" and grid with sizes {grid.shape}"
         ),
     )
+    # Only CPU and CUDA sample 5D bicubic; the trace refuses it elsewhere, as eager
+    # does. device_hint: a FakeTensor reports meta while a meta kernel runs.
     torch._check(
-        not (
-            input.ndim == 5
-            and interpolation_mode == GridSamplerInterpolation.BICUBIC.value
-        ),
-        lambda: "grid_sampler(): bicubic interpolation only supports 4D input",
+        interpolation_mode != GridSamplerInterpolation.BICUBIC.value
+        or device_hint(input) in ("cpu", "cuda"),
+        lambda: "grid_sampler(): bicubic interpolation with 5D input is not supported "
+        f"on {device_hint(input)}",
     )
 
 
@@ -7326,6 +7358,12 @@ def _check_scaled_mm_sizes(
                 expected_a_size = num_k_blocks * m
                 expected_b_size = num_k_blocks * n
             else:
+                # v1 has no swizzle argument, so it accepts only this layout,
+                # matching `blockwise_1x32_numel` in cuda/ScaledBlas.cpp. At
+                # shapes where the padding coincides (e.g. m=128, _k=256) a
+                # gfx950 32x8-tiled buffer has the same element count and is
+                # accepted here but read as unswizzled; such callers must use
+                # `_scaled_mm_v2` with an explicit swizzle.
                 padded_num_k_blocks = ceil_div(num_k_blocks, 4) * 4
 
                 expected_a_size = (
@@ -7463,8 +7501,8 @@ def meta_scaled_mm_v2(
     contraction_dim: list[int] | None = None,
     use_fast_accum: bool = False,
 ):
-    # Shape inference only; per-recipe scale validation lives in the C++
-    # TORCH_META_FUNC (validate_scaled_mm_v2_inputs) and runs in eager. This
+    # Per-recipe scale validation lives in the C++ TORCH_META_FUNC
+    # (validate_scaled_mm_v2_inputs) and runs in eager. This
     # Python meta exists because the structured C++ meta sizes its output via
     # IntArrayRef, which specializes symbolic dims under fake-tensor tracing
     # (breaking mark_dynamic and unbacked symints). Same pattern as meta_mm.
@@ -7472,19 +7510,19 @@ def meta_scaled_mm_v2(
         self.dim() == 2 and mat2.dim() == 2,
         lambda: f"Inputs must be 2D but got self.dim()={self.dim()} and mat2.dim()={mat2.dim()}",
     )
-    if contraction_dim:
-        torch._check(
-            self.size(contraction_dim[0]) == mat2.size(contraction_dim[1]),
-            lambda: (
-                f"mat_a and mat_b shapes cannot be multiplied ({self.shape} and {mat2.shape}) "
-                f"with contraction dims mat_a: {contraction_dim[0]}, mat_b: {contraction_dim[1]}"
-            ),
-        )
-    else:
-        torch._check(
-            self.size(1) == mat2.size(0),
-            lambda: f"mat_a and mat_b shapes cannot be multiplied ({self.shape} and {mat2.shape})",
-        )
+    torch._check(
+        not contraction_dim
+        or (
+            len(contraction_dim) == 2
+            and contraction_dim[0] in (1, -1)
+            and contraction_dim[1] in (0, -2)
+        ),
+        lambda: "torch._scaled_mm_v2 only supports contraction_dim=(1, 0)",
+    )
+    torch._check(
+        self.size(1) == mat2.size(0),
+        lambda: f"mat_a and mat_b shapes cannot be multiplied ({self.shape} and {mat2.shape})",
+    )
     torch._check(
         bias is None or bias.numel() == mat2.size(1),
         lambda: f"Bias must be size {mat2.size(1)} but got {bias.numel()}",  # type: ignore[union-attr]
@@ -8135,12 +8173,29 @@ def linear_backward(input_, grad_output_, weight_, output_mask):
 
 @register_meta(aten.pixel_shuffle.default)
 def meta_pixel_shuffle(self, upscale_factor):
+    # Guard the factor before it is squared and used as a divisor. Eager rejects
+    # a non-positive factor in native_functions; without the same check here the
+    # divisibility test below raises ZeroDivisionError for upscale_factor=0.
+    torch._check(
+        upscale_factor > 0,
+        lambda: f"pixel_shuffle expects a positive upscale_factor, but got {upscale_factor}",
+    )
+    # Eager guards the square against int64 overflow with TORCH_CHECK_VALUE, i.e. a
+    # ValueError, and phrases the bound as a division so the product is never formed.
+    # Mirror both: a torch._check here would raise RuntimeError and swap one
+    # eager/meta divergence for another.
+    torch._check_value(
+        upscale_factor <= torch.iinfo(torch.int64).max // upscale_factor,
+        lambda: f"upscale factor is too large, (upscale_factor)^2 overflowed: "
+        f"upscale_factor={upscale_factor}",
+    )
+    upscale_factor_squared = upscale_factor * upscale_factor
     torch._check(
         len(self.shape) > 2,
         lambda: f"Invalid input shape for pixel_shuffle: {self.shape}",
     )
     torch._check(
-        self.shape[-3] % (upscale_factor * upscale_factor) == 0,
+        self.shape[-3] % upscale_factor_squared == 0,
         lambda: f"Invalid input shape for pixel_shuffle: {self.shape} with upscale_factor = {upscale_factor}",
     )
 
@@ -8161,7 +8216,7 @@ def meta_pixel_shuffle(self, upscale_factor):
             return fmt
         return torch.contiguous_format
 
-    C = self.shape[-3] // (upscale_factor * upscale_factor)
+    C = self.shape[-3] // upscale_factor_squared
     Hr = self.shape[-2] * upscale_factor
     Wr = self.shape[-1] * upscale_factor
     out_shape = (*self.shape[:-3], C, Hr, Wr)
@@ -8250,7 +8305,7 @@ def meta_bucketize_scalar(
 
 
 @register_meta([aten.histc])
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def meta_histc(input, bins=100, min=0, max=0):
     fn_name = "histc()"
     if device_hint(input) == "cpu":
@@ -9348,6 +9403,9 @@ def activate_meta():
                 "aten::rot90",  # requires_grad mismatch! test_ops.py -k test_fake_crossref_backward_amp_rot90_cuda_float32
                 "aten::as_strided_scatter",  # requires_grad mismatch, test_ops.py -k test_fake_crossref_backward_no_amp_as_strided_scatter_cuda_float32
                 "aten::stack",  # use the symint-aware C++ meta kernel (stack_meta)
+                "aten::arange",  # use the symint-aware C++ meta kernel (arange_meta)
+                "aten::arange.start",
+                "aten::arange.start_step",
             }
         ):
             pass

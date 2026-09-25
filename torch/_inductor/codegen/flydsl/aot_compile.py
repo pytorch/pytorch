@@ -38,7 +38,50 @@ _C_SYMBOL = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _GPU_MODULE_INIT = "flydsl_gpu_module_init"
 _GPU_MODULE_LOAD_TO_DEVICE = "flydsl_gpu_module_load_to_device"
 _ELF_SONAME = re.compile(r"\(SONAME\).*\[([^]]+)\]")
-_LDD_LIBRARY = re.compile(r"^\s*(\S+)\s+=>\s+(\S+)\s+\(")
+_LDD_LIBRARY = re.compile(r"^\s*(\S+)\s+=>\s+(.+?)\s+\(")
+_LDD_NOT_FOUND = re.compile(r"^\s*(\S+)\s+=>\s+not found\s*$")
+
+
+class _FlyDSL03Adapter:
+    """Temporary compatibility adapter for FlyDSL 0.3.x private APIs.
+
+    PyTorch CI validates this adapter against its pinned FlyDSL release. Remove
+    it once FlyDSL provides a public AOT compilation and export API.
+    """
+
+    @staticmethod
+    def _private(owner: Any, name: str) -> Any:
+        value = getattr(owner, name, None)
+        if value is None:
+            raise RuntimeError(
+                "PyTorch's FlyDSL AOT adapter requires the FlyDSL 0.3.x "
+                f"private API {name!r}; install a validated FlyDSL version"
+            )
+        return value
+
+    @classmethod
+    def prepare_launcher(cls, launcher: Any) -> tuple[Any, bool]:
+        cls._private(launcher, "_ensure_sig")()
+        return (
+            cls._private(launcher, "_sig"),
+            cls._private(launcher, "_has_self_param"),
+        )
+
+    @classmethod
+    def create_mlir_context(cls) -> Any:
+        return cls._private(jit_function, "_create_mlir_context")()
+
+    @classmethod
+    def ensure_stream_arg(cls, jit_args: list[Any]) -> bool:
+        return cls._private(jit_function, "_ensure_stream_arg")(jit_args)
+
+    @classmethod
+    def use_external_binary_codegen(cls) -> bool:
+        return cls._private(jit_function, "_use_external_binary_codegen")()
+
+    @classmethod
+    def resolve_runtime_libs(cls) -> list[str]:
+        return cls._private(jit_executor, "_resolve_runtime_libs")()
 
 
 def _ctype_metadata(ctype: type, *, name: str | None = None) -> dict[str, Any]:
@@ -204,7 +247,8 @@ def _rename_export_symbols(module: Any, entry: str, symbol: str) -> None:
             return ir.WalkResult.ADVANCE
         is_definition = op.name in ("llvm.mlir.global", "gpu.binary")
         if op.name == "llvm.func":
-            is_definition = bool(op.opview.operation.regions)
+            regions = op.opview.operation.regions
+            is_definition = bool(regions and regions[0].blocks)
         if not is_definition:
             return ir.WalkResult.ADVANCE
         old_name = attrs["sym_name"].value
@@ -298,8 +342,14 @@ def _runtime_library_dependencies(path: Path) -> dict[str, Path]:
     )
     dependencies = {}
     for line in result.stdout.splitlines():
+        missing = _LDD_NOT_FOUND.match(line)
+        if missing is not None:
+            raise RuntimeError(
+                f"FlyDSL runtime library {path} has unresolved dependency "
+                f"{missing.group(1)}"
+            )
         match = _LDD_LIBRARY.match(line)
-        if match is not None and match.group(2) != "not":
+        if match is not None:
             dependencies[match.group(1)] = Path(match.group(2)).resolve()
     return dependencies
 
@@ -377,8 +427,8 @@ class CompiledAOTLauncher:
                 f"object output directory does not exist: {object_path.parent}"
             )
 
-        runtime_libraries = jit_executor._resolve_runtime_libs()
-        ctx = jit_function._create_mlir_context()
+        runtime_libraries = _FlyDSL03Adapter.resolve_runtime_libs()
+        ctx = _FlyDSL03Adapter.create_mlir_context()
         with ctx:
             module = ir.Module.parse(self._ir_text)
             _rename_export_symbols(module, self._entry, function_name)
@@ -414,13 +464,12 @@ def compile_aot(launcher: Any, *args, **kwargs) -> CompiledAOTLauncher:
             f"flyc.compile_aot() expects a @flyc.jit function, got {type(launcher).__name__}"
         )
 
-    launcher._ensure_sig()
+    sig, has_self_param = _FlyDSL03Adapter.prepare_launcher(launcher)
     bound_self = None
-    if launcher._has_self_param:
+    if has_self_param:
         if not args:
             raise TypeError(f"{launcher.func.__name__}() missing 'self' argument")
         bound_self, args = args[0], args[1:]
-    sig = launcher._sig
     bound = sig.bind(*args, **kwargs)
     bound.apply_defaults()
 
@@ -429,11 +478,11 @@ def compile_aot(launcher: Any, *args, **kwargs) -> CompiledAOTLauncher:
         if launcher.compile_hints
         else nullcontext()
     )
-    with jit_function._create_mlir_context() as ctx, hints:
+    with _FlyDSL03Adapter.create_mlir_context() as ctx, hints:
         param_names, jit_args, dsl_types, constexpr_values = (
             jit_argument.convert_to_jit_arguments(sig, bound)
         )
-        has_user_stream = jit_function._ensure_stream_arg(jit_args)
+        has_user_stream = _FlyDSL03Adapter.ensure_stream_arg(jit_args)
         ir_types = protocol.get_ir_types(jit_args)
         loc = kernel_function.func_def_location(launcher.func, ctx)
         module = ir.Module.create(loc=loc)
@@ -500,7 +549,7 @@ def compile_aot(launcher: Any, *args, **kwargs) -> CompiledAOTLauncher:
             raise RuntimeError(
                 "FlyDSL AOT export does not support Python post-load processors"
             )
-        if link_libs and jit_function._use_external_binary_codegen():
+        if link_libs and _FlyDSL03Adapter.use_external_binary_codegen():
             raise RuntimeError(
                 "FlyDSL external codegen does not support extern-linked AOT launchers"
             )
