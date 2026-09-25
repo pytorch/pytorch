@@ -20,6 +20,7 @@ from torch.testing._internal.common_dtype import (
     all_types_and_complex_and,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_JETSON,
     parametrize,
@@ -55,6 +56,8 @@ class TensorDLPackWrapper:
 
 
 class TestTorchDlPack(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # These tests exercise the parts of the DLPack protocol that don't depend on
     # where the tensor lives: export rejections, stride handling and the NumPy
     # producer path.
@@ -170,6 +173,8 @@ class TestTorchDlPack(TestCase):
 
 
 class TestTorchDlPackDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     exact_dtype = True
 
     @skipMeta
@@ -852,6 +857,8 @@ class TestTorchDlPackDevice(TestCase):
 
 
 class TestTorchDlPackCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     # DLPack stream exchange is only specified for CUDA and ROCm; the sentinel
     # stream values below have no meaning on any other backend.
 
@@ -989,6 +996,8 @@ instantiate_device_type_tests(TestTorchDlPackCUDA, globals(), only_for="cuda")
     "ReadOnlyTensorWrapper is eager-only; __dlpack__ unsupported in dynamo"
 )
 class TestReadOnlyDLPack(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # These tests exercise the read-only DLPack export path and the
     # ReadOnlyTensorWrapper subclass. The behavior (const_data_ptr export, the
     # READ_ONLY flag, copy-on-write preservation, op rejection) is device
