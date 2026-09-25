@@ -1833,17 +1833,22 @@
 
 - func: cosine_embedding_loss(Tensor input1, Tensor input2, Tensor target, float margin=0.0, int reduction=Mean) -> Tensor
 
-- func: count_nonzero.dim_IntList(Tensor self, int[] dim) -> Tensor
-  variants: function, method
+- func: count_nonzero.dim_IntList_out(Tensor self, int[] dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  structured: True
   dispatch:
-    CPU: count_nonzero_cpu
-    CUDA: count_nonzero_cuda
-    MPS: count_nonzero_mps
-    XPU: count_nonzero_xpu
-  autogen: count_nonzero.dim_IntList_out
+    CPU: count_nonzero_out_cpu
+    CUDA: count_nonzero_out_cuda
+    MPS: count_nonzero_out_mps
+    # XPU: count_nonzero_out_xpu  # todo needs to be implemented
   tags: reduction
 
-- func: count_nonzero(Tensor self, int? dim=None) -> Tensor
+- func: count_nonzero.dim_IntList(Tensor self, int[] dim, *, ScalarType? dtype=None) -> Tensor
+  variants: function, method
+  structured_delegate: count_nonzero.dim_IntList_out
+  tags: reduction
+
+- func: count_nonzero(Tensor self, int? dim=None, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: count_nonzero

@@ -1092,12 +1092,13 @@ Tensor prod_mps(const Tensor& self, std::optional<ScalarType> opt_dtype) {
   return output_t;
 }
 
-Tensor count_nonzero_mps(const Tensor& self, IntArrayRef dims) {
-  Tensor result = create_reduction_result(self, dims, /*keepdim=*/false, ScalarType::Long);
+TORCH_IMPL_FUNC(count_nonzero_out_mps)
+(const Tensor& self, IntArrayRef dims, std::optional<c10::ScalarType> opt_dtype, const Tensor& output_t) {
+  auto out_type = opt_dtype.value_or(c10::ScalarType::Long);
+  TORCH_CHECK(out_type == c10::ScalarType::Long, "count_nonzero in MPS only supports int64 output, but got ", out_type);
   auto iter =
-      make_reduction("count_nonzero_mps", result, self, dims, /*keepdim=*/false, self.scalar_type(), ScalarType::Long);
+      make_reduction("count_nonzero_out_mps", output_t, self, dims, /*keepdim=*/false, self.scalar_type(), out_type);
   count_nonzero_kernel_mps(iter);
-  return result;
 }
 
 static Tensor std_var_mps(const Tensor& self,

@@ -1288,7 +1288,7 @@ Args:
 add_docstr_all(
     "count_nonzero",
     r"""
-count_nonzero(dim=None) -> Tensor
+count_nonzero(dim=None, dtype=None) -> Tensor
 
 See :func:`torch.count_nonzero`
 """,

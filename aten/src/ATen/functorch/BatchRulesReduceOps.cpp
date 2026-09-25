@@ -77,11 +77,11 @@ static Tensor any_decomp(const Tensor& self) {
 }
 
 static Tensor count_nonzero_decomp(
-  const Tensor& self, std::optional<int64_t> dim) {
+  const Tensor& self, std::optional<int64_t> dim, std::optional<ScalarType> opt_dtype) {
 if (dim.has_value()) {
-  return at::count_nonzero(self, IntArrayRef{*dim});
+  return at::count_nonzero(self, IntArrayRef{*dim}, opt_dtype);
 }
-return at::count_nonzero(self, range(0, self.dim()));
+return at::count_nonzero(self, range(0, self.dim()), opt_dtype);
 }
 
 enum class ReductionCase:uint8_t { DimArray, Dim };

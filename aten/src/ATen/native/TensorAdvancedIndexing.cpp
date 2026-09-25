@@ -70,6 +70,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/Copy.h>
+#include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/ScatterGatherChecks.h>
 #include <ATen/native/TensorAdvancedIndexingUtils.h>
@@ -553,6 +554,19 @@ TORCH_PRECOMPUTE_META_FUNC2(index, Tensor)
   return TORCH_PRECOMPUTE_STRUCT2(index, Tensor)()
       .set_sizes(std::move(info.indexed_sizes))
       .set_strides(std::move(info.indexed_strides));
+}
+
+TORCH_META_FUNC2(count_nonzero, dim_IntList)
+(const Tensor& self, IntArrayRef dim, std::optional<ScalarType> dtype) {
+  auto out_dtype = dtype.value_or(ScalarType::Long);
+  TORCH_CHECK(
+      c10::isIntegralType(out_dtype, /*includeBool*/ false) ||
+          c10::isFloatingType(out_dtype),
+      "count_nonzero: Expected out tensor to have integral or floating type "
+      "but got scalar type ",
+      out_dtype);
+
+  resize_reduction(*this, self, dim, /*keepdim=*/false, out_dtype);
 }
 
 } // namespace at::meta
@@ -2825,21 +2839,30 @@ static int64_t count_nonzero_impl(TensorIteratorBase& iter, Range range) {
   return num_nonzero;
 }
 
-Tensor count_nonzero_cuda(const Tensor& self, IntArrayRef dims) {
+TORCH_IMPL_FUNC(count_nonzero_out_cuda)(
+    const Tensor& self,
+    IntArrayRef dims,
+    std::optional<ScalarType> opt_dtype,
+    const Tensor& result) {
   auto reduce = self;
   if (reduce.scalar_type() != kBool) {
     reduce = reduce != 0;
   }
-  return reduce.sum(dims);
+  at::sum_out(const_cast<Tensor&>(result), reduce, dims);
 }
 
-Tensor count_nonzero_cpu(const Tensor& self, IntArrayRef dims) {
+TORCH_IMPL_FUNC(count_nonzero_out_cpu)(
+    const Tensor& self,
+    IntArrayRef dims,
+    std::optional<ScalarType> opt_dtype,
+    const Tensor& result) {
   if (!dims.empty()) {
     auto reduce = self;
     if (reduce.scalar_type() != kBool) {
       reduce = reduce != 0;
     }
-    return reduce.sum(dims);
+    at::sum_out(const_cast<Tensor&>(result), reduce, dims);
+    return;
   }
 
   // Optimized all-reduce
@@ -2871,16 +2894,21 @@ Tensor count_nonzero_cpu(const Tensor& self, IntArrayRef dims) {
   for (const auto i : c10::irange(1, num_threads)) {
     thread_count_nonzero[0] += thread_count_nonzero[i];
   }
-  auto out = at::empty({}, self.options().dtype(kLong));
-  *out.mutable_data_ptr<int64_t>() = thread_count_nonzero[0];
-  return out;
+  AT_DISPATCH_ALL_TYPES_AND2(
+      kHalf, kBFloat16, result.scalar_type(), "nonzero_count_cpu", [&] {
+        *result.mutable_data_ptr<scalar_t>() =
+            static_cast<scalar_t>(thread_count_nonzero[0]);
+      });
 }
 
-Tensor count_nonzero(const Tensor& self, std::optional<int64_t> dim) {
+Tensor count_nonzero(
+    const Tensor& self,
+    std::optional<int64_t> dim,
+    std::optional<ScalarType> opt_dtype) {
   if (dim) {
-    return at::count_nonzero(self, IntArrayRef{*dim});
+    return at::count_nonzero(self, IntArrayRef{*dim}, opt_dtype);
   }
-  return at::count_nonzero(self, IntArrayRef{});
+  return at::count_nonzero(self, IntArrayRef{}, opt_dtype);
 }
 
 Tensor& nonzero_out_cpu(const Tensor& self, Tensor& result) {

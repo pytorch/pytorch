@@ -21,7 +21,7 @@ from torchgen.utils import mapMaybe
 # get_ns_grouped_kernels; only distinct CUDA-family kernel names need listing.
 _CPU_DLL_CUDA_KERNELS = frozenset(
     {
-        "count_nonzero_cuda",
+        "count_nonzero_out_cuda",
         "log_sigmoid_backward_cuda",
         "log_sigmoid_backward_cuda_out",
         "triton_multi_head_attention",

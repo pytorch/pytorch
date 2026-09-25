@@ -508,10 +508,10 @@
   self: grad * self.sinh().conj()
   result: auto_element_wise
 
-- name: count_nonzero.dim_IntList(Tensor self, int[] dim) -> Tensor
+- name: count_nonzero.dim_IntList(Tensor self, int[] dim, *, ScalarType? dtype=None) -> Tensor
   output_differentiability: [False]
 
-- name: count_nonzero(Tensor self, int? dim=None) -> Tensor
+- name: count_nonzero(Tensor self, int? dim=None, *, ScalarType? dtype=None) -> Tensor
   output_differentiability: [False]
 
 - name: linalg_cross(Tensor self, Tensor other, *, int dim=-1) -> Tensor
