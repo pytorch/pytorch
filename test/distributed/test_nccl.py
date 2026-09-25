@@ -672,12 +672,16 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         torch.cuda.set_device(self.rank)
         c10d.all_reduce(torch.ones(1, device=self.device))
 
-        patch_env(self, TORCH_NCCL_SYMM_MEM_DISABLE_CAPTURE_ALLOC="1")
-        graph = torch.cuda.CUDAGraph()
-        capture_stream = torch.cuda.Stream(device=self.device)
-        with self.assertRaisesRegex(RuntimeError, "requires RCCL 2.30.7"):
-            with torch.cuda.graph(graph, stream=capture_stream):
-                symm_mem.empty(1_000_003, device=self.device)
+        # Continuous-test workers do not run per-test cleanups, so restore the
+        # variable on exit rather than through patch_env.
+        with mock.patch.dict(
+            os.environ, {"TORCH_NCCL_SYMM_MEM_DISABLE_CAPTURE_ALLOC": "1"}
+        ):
+            graph = torch.cuda.CUDAGraph()
+            capture_stream = torch.cuda.Stream(device=self.device)
+            with self.assertRaisesRegex(RuntimeError, "requires RCCL 2.30.7"):
+                with torch.cuda.graph(graph, stream=capture_stream):
+                    symm_mem.empty(1_000_003, device=self.device)
 
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @requires_nccl_version(
