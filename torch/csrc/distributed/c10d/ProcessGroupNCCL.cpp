@@ -42,6 +42,19 @@ using FlightRecorderCUDA = FlightRecorder<at::cuda::CUDAEvent>;
 
 namespace {
 
+void retainCapturedEvent(
+    cudaGraph_t graph,
+    const std::shared_ptr<at::cuda::CUDAEvent>& event) {
+  // These events come from CUDAEventCache: releasing them only returns them to
+  // the cache. CUDA user-object destructors must not call CUDA APIs.
+  c10::cuda::retainGraphUserObject(
+      graph,
+      std::make_unique<std::shared_ptr<at::cuda::CUDAEvent>>(event),
+      [](void* data) {
+        delete static_cast<std::shared_ptr<at::cuda::CUDAEvent>*>(data);
+      });
+}
+
 // NCCL op mapping
 const std::map<ReduceOp::RedOpType, ncclRedOp_t> ncclOp = {
     {ReduceOp::MIN, ncclMin},
@@ -598,6 +611,8 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(const WorkNCCL& w)
       device_(w.device_),
       ncclStartEvent_(w.ncclStartEvent_),
       ncclEndEvent_(w.ncclEndEvent_),
+      capturedEndEvent_(w.capturedEndEvent_),
+      captureId_(w.captureId_),
       ncclComm_(w.ncclComm_),
       blockingWait_(w.blockingWait_),
       opTimeout_(w.opTimeout_),
@@ -705,7 +720,7 @@ bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecutionInternal() const {
 #if defined(USE_ROCM) && ROCM_VERSION < 70201
   if (!queryEventWithRocmWatchdogCaptureWorkaround(ncclEndEvent_)) {
 #else
-  if (!ncclEndEvent_->query()) {
+  if (!(capturedEndEvent_ ? capturedEndEvent_ : ncclEndEvent_)->query()) {
 #endif
     return false;
   }
@@ -825,10 +840,67 @@ void ProcessGroupNCCL::WorkNCCL::synchronize() {
   }
 }
 
+void ProcessGroupNCCL::WorkNCCL::recordEndEvent(
+    const at::cuda::CUDAStream& stream,
+    bool asyncOp,
+    c10::cuda::CaptureStatus captureStatus) {
+  ncclEndEvent_->record(stream);
+  if (asyncOp && captureStatus == c10::cuda::CaptureStatus::Active) {
+#ifdef USE_ROCM
+    captureId_ = c10::cuda::captureInfoMayInitCtx(stream).id;
+#else
+    capturedEndEvent_ =
+        CUDAEventCache::get(device_.index())->create(false, true);
+    const cudaGraphNode_t* dependencies = nullptr;
+    size_t count = 0;
+    auto info = c10::cuda::captureInfoMayInitCtx(stream, &dependencies, &count);
+    captureId_ = info.id;
+    retainCapturedEvent(info.graph, capturedEndEvent_);
+    capturedEndEvent_->create(stream.device_index());
+    const at::cuda::CUDAGuard guard(stream.device_index());
+
+    cudaGraphNode_t node{};
+    C10_CUDA_CHECK(cudaGraphAddEventRecordNode(
+        &node, info.graph, dependencies, count, capturedEndEvent_->event()));
+    const auto* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      (*interp)->trace_gpu_event_record(
+          c10::kCUDA,
+          reinterpret_cast<uintptr_t>(capturedEndEvent_->event()),
+          reinterpret_cast<uintptr_t>(stream.stream()));
+    }
+    // Replacing the captured frontier with a directly added node exempts it
+    // from capture's join requirement, without delaying the NCCL launch or
+    // making independent work on the origin stream wait for NCCL to finish.
+    c10::cuda::setCaptureDependencies(stream, &node, 1);
+#endif
+  }
+}
+
 void ProcessGroupNCCL::WorkNCCL::synchronizeStream() {
   auto currentStream = at::cuda::getCurrentCUDAStream(device_.index());
   // Block the current stream on the NCCL stream
-  ncclEndEvent_->block(currentStream);
+  if (captureId_) {
+    auto info = c10::cuda::captureInfoMayInitCtx(currentStream);
+    if (info.status == c10::cuda::CaptureStatus::Active &&
+        info.id == *captureId_) {
+      ncclEndEvent_->block(currentStream);
+    } else {
+#ifdef USE_ROCM
+      TORCH_CHECK_NOT_IMPLEMENTED(
+          false,
+          "Waiting on captured collective work outside its original capture "
+          "is not supported on ROCm.");
+#else
+      if (info.status == c10::cuda::CaptureStatus::Active) {
+        retainCapturedEvent(info.graph, capturedEndEvent_);
+      }
+      capturedEndEvent_->block(currentStream);
+#endif
+    }
+  } else {
+    ncclEndEvent_->block(currentStream);
+  }
   // Unstage the stashed tensors so that CachingAllocator can recycle them
   // THIS MUST HAPPEN AFTER THE BLOCKING CALL ABOVE
   stashed_for_allocator_safety_->unstash();
@@ -3689,7 +3761,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
   }
 
   // Record end after ncclGroupEnd
-  work->ncclEndEvent_->record(ncclStream);
+  work->recordEndEvent(ncclStream, coalescedAsync_, capture_status);
 
   if (enqueue) {
     workEnqueue(work);
@@ -3900,7 +3972,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
 
   // End event should only be recorded after the ncclGroupEnd()
   if (!coalescing_state_) {
-    work->ncclEndEvent_->record(ncclStream);
+    work->recordEndEvent(ncclStream, asyncOp, capture_status);
   }
   work->ncclComm_ = ncclComm;
 
@@ -4076,7 +4148,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
     }
   }
 
-  work->ncclEndEvent_->record(ncclStream);
+  work->recordEndEvent(ncclStream, asyncOp, capture_status);
   work->ncclComm_ = ncclComm;
 
   {
