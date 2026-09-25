@@ -59,6 +59,9 @@ enum class Kind : uint8_t {
   TruncToFloat,
   IsNonOverlappingAndDenseIndicator,
   ModularIndexing,
+  BitwiseAnd,
+  BitwiseOr,
+  BitwiseXor,
   // Boolean kinds: sympy Booleans that are not Exprs.
   BooleanTrue,
   BooleanFalse,
@@ -378,6 +381,8 @@ class ExprArena : public c10::intrusive_ptr_target {
   const Expr* eval_is_non_overlapping_and_dense(c10::ArrayRef<const Expr*> args);
   // ModularIndexing.eval; nullptr for None.
   const Expr* eval_modular_indexing(const Expr* base, const Expr* divisor, const Expr* modulus);
+  // BitwiseFn_bitwise_and/or/xor.eval; nullptr for None.
+  const Expr* eval_bitwise(Kind kind, const Expr* a, const Expr* b);
   const Expr* new_symbol(const std::string& name, const FactKB& kb);
   const Expr* as_boolean(const Expr* e);
   // The tail of LatticeOp.__new__.

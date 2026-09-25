@@ -384,6 +384,12 @@ const char* function_name(Kind k) {
       return "IsNonOverlappingAndDenseIndicator";
     case Kind::ModularIndexing:
       return "ModularIndexing";
+    case Kind::BitwiseAnd:
+      return "BitwiseFn_bitwise_and";
+    case Kind::BitwiseOr:
+      return "BitwiseFn_bitwise_or";
+    case Kind::BitwiseXor:
+      return "BitwiseFn_bitwise_xor";
     default:
       throw NativeUnsupported("not a function kind");
   }
@@ -427,10 +433,11 @@ const Expr* ExprArena::function(Kind kind, c10::ArrayRef<const Expr*> args) {
         std::string(function_name(kind)) + " takes exactly " +
         std::to_string(arity) + " arguments");
   }
-  for (const Expr* a : args) {
-    if (a->is_boolean()) {
-      throw NativeUnsupported("Boolean argument to a function");
-    }
+  bool bitwise = kind >= Kind::BitwiseAnd && kind <= Kind::BitwiseXor;
+  bool has_boolean = std::any_of(
+      args.begin(), args.end(), [](const Expr* a) { return a->is_boolean(); });
+  if (has_boolean && !bitwise) {
+    throw NativeUnsupported("Boolean argument to a function");
   }
   const Expr* r = nullptr;
   switch (kind) {
@@ -497,6 +504,11 @@ const Expr* ExprArena::function(Kind kind, c10::ArrayRef<const Expr*> args) {
     case Kind::ModularIndexing:
       r = eval_modular_indexing(args[0], args[1], args[2]);
       break;
+    case Kind::BitwiseAnd:
+    case Kind::BitwiseOr:
+    case Kind::BitwiseXor:
+      r = eval_bitwise(kind, args[0], args[1]);
+      break;
     default:
       throw NativeUnsupported("not a function kind");
   }
@@ -508,7 +520,58 @@ const Expr* ExprArena::function(Kind kind, c10::ArrayRef<const Expr*> args) {
     // happening for non-Numbers.
     throw NativeUnsupported("unevaluated function of numbers");
   }
+  if (has_boolean) {
+    // Its is_commutative would be None (Booleans have none), which Add and
+    // Mul do not handle.
+    throw NativeUnsupported("unevaluated function of a Boolean");
+  }
   return intern(kind, 0, 0, args);
+}
+
+const Expr* ExprArena::eval_bitwise(Kind kind, const Expr* a, const Expr* b) {
+  // is_Boolean holds for BooleanAtoms and BooleanFunctions, not Relationals.
+  auto is_boolean = [](const Expr* e) {
+    return e->is_boolean() && !e->is_relational();
+  };
+  if (is_boolean(a) && is_boolean(b)) {
+    if (kind == Kind::BitwiseAnd) {
+      return logical_and({a, b});
+    }
+    if (kind == Kind::BitwiseOr) {
+      return logical_or({a, b});
+    }
+    // Xor(a, b) without Relationals.
+    if (a == b) {
+      return false_;
+    }
+    if (a == false_ || a == true_) {
+      std::swap(a, b);
+    }
+    if (b == false_) {
+      return a;
+    }
+    if (b == true_) {
+      return logical_not(a);
+    }
+    throw NativeUnsupported("Xor of two BooleanFunctions");
+  }
+  // bool() of a BooleanFunction is object truthiness.
+  auto to_int = [&](const Expr* e) {
+    return is_boolean(e) ? integer(e == false_ ? 0 : 1) : e;
+  };
+  a = to_int(a);
+  b = to_int(b);
+  if (a->kind != Kind::Integer || b->kind != Kind::Integer) {
+    return nullptr;
+  }
+  switch (kind) {
+    case Kind::BitwiseAnd:
+      return integer(a->p & b->p);
+    case Kind::BitwiseOr:
+      return integer(a->p | b->p);
+    default:
+      return integer(a->p ^ b->p);
+  }
 }
 
 const Expr* ExprArena::eval_mod(Kind kind, const Expr* p, const Expr* q) {

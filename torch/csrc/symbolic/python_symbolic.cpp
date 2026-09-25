@@ -46,7 +46,10 @@ constexpr Kind kFunctionKinds[] = {
     Kind::ToFloat,
     Kind::TruncToFloat,
     Kind::IsNonOverlappingAndDenseIndicator,
-    Kind::ModularIndexing};
+    Kind::ModularIndexing,
+    Kind::BitwiseAnd,
+    Kind::BitwiseOr,
+    Kind::BitwiseXor};
 
 // Python-side state for an ExprArena: the sympy Symbol objects that native
 // symbols came from and a conversion cache (conversion is pure per Expr).
@@ -431,7 +434,10 @@ py::object PyArena::to_sympy(const Expr* e) {
     case Kind::ToFloat:
     case Kind::TruncToFloat:
     case Kind::IsNonOverlappingAndDenseIndicator:
-    case Kind::ModularIndexing: {
+    case Kind::ModularIndexing:
+    case Kind::BitwiseAnd:
+    case Kind::BitwiseOr:
+    case Kind::BitwiseXor: {
       py::tuple args(e->args.size());
       for (size_t i = 0; i < e->args.size(); ++i) {
         args[i] = to_sympy(e->args[i]);
@@ -512,6 +518,9 @@ const char* kind_name(Kind k) {
     case Kind::TruncToFloat:
     case Kind::IsNonOverlappingAndDenseIndicator:
     case Kind::ModularIndexing:
+    case Kind::BitwiseAnd:
+    case Kind::BitwiseOr:
+    case Kind::BitwiseXor:
       return function_name(k);
   }
   return "?";

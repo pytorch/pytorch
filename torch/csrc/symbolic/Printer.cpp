@@ -16,6 +16,7 @@ enum Precedence : int {
   kAnd = 30,
   kRelational = 35,
   kBitwiseOr = 36,
+  kBitwiseXor = 37,
   kBitwiseAnd = 38,
   kAdd = 40,
   kMul = 50,
@@ -195,6 +196,9 @@ class StrPrinter {
       case Kind::TruncToFloat:
       case Kind::IsNonOverlappingAndDenseIndicator:
       case Kind::ModularIndexing:
+      case Kind::BitwiseAnd:
+      case Kind::BitwiseOr:
+      case Kind::BitwiseXor:
         // _print_Function.
         return std::string(function_name(e->kind)) + "(" +
             stringify(e->args, ", ", 0) + ")";
@@ -263,6 +267,12 @@ class StrPrinter {
       case Kind::ModularIndexing:
         // The classes' precedence attribute.
         return 35;
+      case Kind::BitwiseAnd:
+        return kBitwiseAnd;
+      case Kind::BitwiseOr:
+        return kBitwiseOr;
+      case Kind::BitwiseXor:
+        return kBitwiseXor;
       case Kind::PowByNatural:
         return kMul;
       case Kind::FloatPow:

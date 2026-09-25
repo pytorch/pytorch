@@ -29,6 +29,9 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.utils._sympy.functions import (
+    BitwiseFn_bitwise_and,
+    BitwiseFn_bitwise_or,
+    BitwiseFn_bitwise_xor,
     CeilDiv,
     CeilToInt,
     CleanDiv,
@@ -1320,10 +1323,12 @@ class TestNativeFunctions(TestCase):
         IsNonOverlappingAndDenseIndicator
     )
     ALL_FUNCTIONS["ModularIndexing"] = ModularIndexing
+    BITWISE = (BitwiseFn_bitwise_and, BitwiseFn_bitwise_or, BitwiseFn_bitwise_xor)
+    ALL_FUNCTIONS.update((f.__name__, f) for f in BITWISE)
     NODE_TYPES = (Mod, PythonMod, FloorDiv, Max, Min, PowByNatural, FloatPow)
     NODE_TYPES += (FloatTrueDiv, IntTrueDiv, CeilToInt, FloorToInt, TruncToInt)
     NODE_TYPES += (RoundToInt, ToFloat, TruncToFloat, RoundDecimal)
-    NODE_TYPES += (IsNonOverlappingAndDenseIndicator, ModularIndexing)
+    NODE_TYPES += (IsNonOverlappingAndDenseIndicator, ModularIndexing, *BITWISE)
     PYTHON_ERRORS = (ZeroDivisionError, AssertionError, TypeError, ValueError)
     PYTHON_ERRORS += (OverflowError,)
 
@@ -1756,6 +1761,87 @@ class TestNativeFunctions(TestCase):
         self.assertGreater(len(nodes), 20)
         answered = unsupported = 0
         for _ in range(40):
+            t = random_tree(rng, 3, LEAVES + nodes)
+            for sub in subtrees(t):
+                v = sympy.sympify(sympy_eval(sub))
+                if v.has(sympy.zoo, sympy.nan):
+                    continue
+                if self.check_expr(v, rng):
+                    answered += 1
+                else:
+                    unsupported += 1
+        self.assertGreater(answered, 5 * unsupported)
+
+    def test_bitwise_known(self):
+        And, Or, Xor = self.BITWISE
+        t, f, eq = sympy.true, sympy.false, sympy.Eq(u0, 1)
+        both = sympy.And(u0 > 1, s0 > 2)
+        either = sympy.Or(u0 > 1, s0 > 2)
+        cases = [
+            (And, (5, 3), 1),
+            (Or, (5, 3), 7),
+            (Xor, (5, 3), 6),
+            (And, (-5, 3), 3),
+            (Or, (-5, 3), -5),
+            (Xor, (-5, 3), -8),
+            (And, (2**63 - 1, -(2**63)), 0),
+            (Xor, (2**63 - 1, -(2**63)), -1),
+            (And, (t, f), f),
+            (Or, (t, f), t),
+            (Xor, (t, t), f),
+            (Xor, (f, t), t),
+            (And, (t, 3), 1),
+            (Or, (f, 3), 3),
+            (Xor, (3, t), 2),
+            (And, (both, 3), 1),
+            (Xor, (3, either), 2),
+            (Xor, (sympy.Not(both), 3), 2),
+            (And, (both, t), both),
+            (And, (either, f), f),
+            (Or, (both, t), t),
+            (Or, (either, f), either),
+            (Xor, (both, t), sympy.Not(both)),
+            (Xor, (f, either), either),
+            (Xor, (both, both), f),
+            (And, (both, either), sympy.And(both, either)),
+            (Or, (both, sympy.Not(both)), sympy.Or(both, sympy.Not(both))),
+            (Xor, (both, either), None),
+            (And, (u0, s0), And(u0, s0)),
+            (Or, (u0 + 1, 3), Or(u0 + 1, 3)),
+            (Xor, (2 * s0, -1), Xor(2 * s0, -1)),
+            (And, (eq, t), None),
+            (And, (eq, 3), None),
+            (Or, (t, u0), None),
+            (Xor, (both, u0), None),
+            (And, (sympy.Rational(1, 2), 3), None),
+            (Or, (sympy.Float(2.0), 3), None),
+            (Xor, (int_oo, 3), None),
+            (And, (sympy.oo, t), None),
+        ]
+        for fn, args, expected in cases:
+            got = self.check_call(fn.__name__, *map(sympy.sympify, args))
+            self.assertEqual(got, expected, f"{fn.__name__}{args}")
+
+    @parametrize("seed", range(2))
+    def test_bitwise_fuzz(self, seed):
+        rng = random.Random(seed)
+        n = sympy.Symbol("n", integer=True, nonnegative=True)
+        both = sympy.And(u0 > 1, s0 > 2)
+        atoms = [s0, u0, n, zf, 2 * s0 + 1, u0 - n, FloorDiv(u0, 2)]
+        atoms += [*map(sympy.Integer, [-(2**63), -9, -5, -1, 0, 1, 2, 3, 12])]
+        atoms += [sympy.Integer(2**63 - 1), sympy.Rational(1, 2), sympy.Float(3.0)]
+        atoms += [int_oo, -sympy.oo, sympy.true, sympy.false, sympy.Eq(u0, 1)]
+        atoms += [both, sympy.Or(u0 > 1, s0 > 2), sympy.Not(both)]
+        nodes = []
+        for fn in self.BITWISE:
+            for a in atoms:
+                for b in atoms:
+                    r = self.check_call(fn.__name__, a, b)
+                    if isinstance(r, self.BITWISE):
+                        nodes.append(r)
+        self.assertGreater(len(nodes), 100)
+        answered = unsupported = 0
+        for _ in range(60):
             t = random_tree(rng, 3, LEAVES + nodes)
             for sub in subtrees(t):
                 v = sympy.sympify(sympy_eval(sub))
@@ -2506,6 +2592,27 @@ class TestNativeValueRanges(TestCase):
                     ranges[s] = (lo, hi)
                 answered += self.check(e, ranges) is not None
         self.assertGreater(answered, 500)
+
+    def test_bitwise(self):
+        zg = sympy.Symbol("zg", real=True)
+        t, f = sympy.true, sympy.false
+        nums = [-(2**63), -9, -3, -1, 0, 1, 2, 5, 2**63 - 1, sympy.Rational(-7, 2)]
+        nums += [sympy.Rational(-(2**63), 3)]
+        nums += [sympy.Rational(1, 2), -0.5, -1e-300, 0.0, 2.5, 1e20]
+        nums = [*map(sympy.sympify, nums), int_oo, -int_oo, sympy.oo, -sympy.oo]
+        pairs = [(lo, hi) for lo in nums for hi in nums if lo <= hi]
+        bools = [(f, f), (f, t), (t, t)]
+        pairs += bools
+        rng = random.Random(0)
+        answered = 0
+        for fn in TestNativeFunctions.BITWISE:
+            for x in pairs:
+                for y in bools + rng.sample(pairs, 30):
+                    answered += self.check(fn(zf, zg), {zf: x, zg: y}) is not None
+        self.assertGreater(answered, 80 * len(pairs))
+        r = sympy.Rational(-(2**63), 3)
+        e = BitwiseFn_bitwise_and(zf, zg)
+        self.assertEqual(self.check(e, {zf: (r, 0), zg: (r, 0)}), ValueRanges(-(2**62), 0))
 
     def test_float_int_handlers_known(self):
         half, oo, zg = sympy.Rational(1, 2), sympy.oo, sympy.Symbol("zg", real=True)

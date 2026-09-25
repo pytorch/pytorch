@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <limits>
 
@@ -60,6 +61,30 @@ const Expr* min_num(const Expr* a, const Expr* b) {
 
 const Expr* max_num(const Expr* a, const Expr* b) {
   return lt(a, b) ? b : a;
+}
+
+// int(x) of a finite Number.
+int64_t py_int(const Expr* x) {
+  switch (x->kind) {
+    case Kind::Integer:
+      return x->p;
+    case Kind::Rational:
+      return x->p / x->q;
+    case Kind::Float: {
+      double t = std::trunc(x->float_value());
+      if (!(std::fabs(t) < 0x1p63)) {
+        throw NativeUnsupported("int of a large Float");
+      }
+      return static_cast<int64_t>(t);
+    }
+    default:
+      throw NativeUnsupported("int of an infinity");
+  }
+}
+
+int bit_length(int64_t n) {
+  uint64_t m = n < 0 ? -static_cast<uint64_t>(n) : n;
+  return 64 - std::countl_zero(m);
 }
 
 void require_int(const ValueRanges& r) {
@@ -141,6 +166,7 @@ class Analysis {
   ValueRanges python_mod(const ValueRanges& x, const ValueRanges& y);
   ValueRanges pow_by_natural(const ValueRanges& x, const ValueRanges& y);
   ValueRanges min_or_max(Kind kind, const ValueRanges& x, const ValueRanges& y);
+  ValueRanges bitwise(Kind kind, ValueRanges x, ValueRanges y);
   ValueRanges true_div(Kind kind, const ValueRanges& x, const ValueRanges& y);
   const Expr* floor_or_ceiling(Kind kind, const Expr* x);
 
@@ -593,6 +619,67 @@ ValueRanges Analysis::min_or_max(
   return make_value_range(a_, pick(x.lower, y.lower), pick(x.upper, y.upper));
 }
 
+// bitwise_and, bitwise_or and bitwise_xor.
+ValueRanges Analysis::bitwise(Kind kind, ValueRanges x, ValueRanges y) {
+  if (x.is_bool() && y.is_bool()) {
+    if (kind == Kind::BitwiseAnd) {
+      return and_(x, y);
+    }
+    if (kind == Kind::BitwiseOr) {
+      return or_(x, y);
+    }
+    bool has_false = false;
+    bool has_true = false;
+    for (const Expr* p : {x.lower, x.upper}) {
+      for (const Expr* q : {y.lower, y.upper}) {
+        (p == q ? has_false : has_true) = true;
+      }
+    }
+    return {a_.boolean(!has_false), a_.boolean(has_true)};
+  }
+  if (x.is_bool()) {
+    x = bool_to_int(x);
+  }
+  if (y.is_bool()) {
+    y = bool_to_int(y);
+  }
+  switch (kind) {
+    case Kind::BitwiseAnd: {
+      const Expr* lower = min_num(x.lower, y.lower);
+      // A lower bound of -oo or -int_oo also gives 0.
+      if (lt(lower, zero()) && !is_infinite(lower)) {
+        // -(1 << int(-lower - 1).bit_length())
+        int64_t n = lower->kind == Kind::Integer ? ~lower->p
+            : lower->kind == Kind::Rational
+            ? static_cast<int64_t>((-i128(lower->p) - lower->q) / lower->q)
+            : py_int(a_.sub(a_.neg(lower), one()));
+        lower = a_.integer(static_cast<int64_t>(-(i128(1) << bit_length(n))));
+      } else {
+        lower = zero();
+      }
+      return make_value_range(a_, lower, max_num(x.upper, y.upper));
+    }
+    case Kind::BitwiseOr: {
+      const Expr* upper = max_num(x.upper, y.upper);
+      if (lt(zero(), upper) && !is_infinite(upper)) {
+        // (1 << int(upper).bit_length()) - 1
+        upper = a_.integer(
+            static_cast<int64_t>((i128(1) << bit_length(py_int(upper))) - 1));
+      } else if (lt(upper, zero())) {
+        upper = a_.integer(-1);
+      }
+      return make_value_range(a_, min_num(x.lower, y.lower), upper);
+    }
+    default:
+      if (x.is_singleton() && y.is_singleton() &&
+          x.lower->kind == Kind::Integer && y.lower->kind == Kind::Integer) {
+        const Expr* v = a_.integer(x.lower->p ^ y.lower->p);
+        return {v, v};
+      }
+      return unknown_int();
+  }
+}
+
 ValueRanges Analysis::interp(const Expr* e) {
   switch (e->kind) {
     case Kind::Integer:
@@ -676,6 +763,10 @@ ValueRanges Analysis::interp(const Expr* e) {
       return unknown_int();
     case Kind::ModularIndexing:
       return mod(floordiv(args[0], args[1]), args[2]);
+    case Kind::BitwiseAnd:
+    case Kind::BitwiseOr:
+    case Kind::BitwiseXor:
+      return bitwise(e->kind, args[0], args[1]);
     case Kind::FloatTrueDiv:
     case Kind::IntTrueDiv:
       return true_div(e->kind, args[0], args[1]);
