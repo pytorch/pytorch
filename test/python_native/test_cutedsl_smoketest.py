@@ -14,7 +14,12 @@ import unittest
 
 import torch
 from torch.testing._internal.common_cuda import SM80OrLater, TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, skipIfNoCuteDSL, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    skipIfNoCuteDSL,
+    TestCase,
+)
 from torch.utils.dlpack import ReadOnlyTensorWrapper
 
 
@@ -674,6 +679,8 @@ def _build_cta_norm():
 @skipIfNoCuteDSL
 @unittest.skipIf(not TEST_CUDA, "CUDA required")
 class TestCuteDSLSmoketest(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     """Smoke tests that compile, run, and verify cuteDSL kernels.
 
     Run before bumping cuteDSL version pins in torch/_native/cutedsl_utils.py.
@@ -808,6 +815,8 @@ class TestCuteDSLSmoketest(TestCase):
 @skipIfNoCuteDSL
 @unittest.skipIf(not TEST_CUDA, "CUDA required")
 class TestCuteDSLReadOnlyWrapper(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     """ReadOnlyTensorWrapper interop with cuteDSL.
 
     The tvm-ffi exchange path is the supported route: it goes through the const
