@@ -1669,14 +1669,26 @@ def _codegen_deque_mutation(ctx: SideEffectReplayContext) -> None:
 @register_side_effect_replay_handler(
     name="const_dict_or_set_mutation",
     matcher=lambda ctx: isinstance(
-        ctx.var, (variables.ConstDictVariable, variables.SetVariable)
+        ctx.var,
+        (
+            variables.ConstDictVariable,
+            variables.SetVariable,
+            variables.OrderedSetVariable,
+        ),
     ),
     priority=70,
 )
 def _codegen_const_dict_or_set_mutation(ctx: SideEffectReplayContext) -> None:
     cg = ctx.codegen
     var = ctx.var
-    if not isinstance(var, (variables.ConstDictVariable, variables.SetVariable)):
+    if not isinstance(
+        var,
+        (
+            variables.ConstDictVariable,
+            variables.SetVariable,
+            variables.OrderedSetVariable,
+        ),
+    ):
         raise AssertionError(type(var))
     # Reconstruct works as follow:
     # (1) Skip codegen if there are no new items

@@ -3,6 +3,7 @@
 # All rights reserved.
 
 import ctypes
+import subprocess
 import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
@@ -28,6 +29,8 @@ if HAS_FLYDSL:
         _argument_abi,
         _bundle_runtime_libraries,
         _publish_runtime_library,
+        _rename_export_symbols,
+        _runtime_library_dependencies,
         compile_aot,
         CompiledAOTLauncher,
     )
@@ -113,6 +116,70 @@ class FlyDSLAOTCompilerTest(TestCase):
                 output,
                 "flydsl_test_launcher",
             )
+
+    def test_export_does_not_rename_external_llvm_declarations(self):
+        with ir.Context() as ctx:
+            ctx.load_all_available_dialects()
+            module = ir.Module.parse(
+                """
+                module {
+                  llvm.func @external()
+                  llvm.func @launcher() {
+                    llvm.call @external() : () -> ()
+                    llvm.return
+                  }
+                }
+                """
+            )
+            _rename_export_symbols(module, "launcher", "flydsl_test_launcher")
+            module_text = str(module)
+
+        self.assertIn("llvm.func @external()", module_text)
+        self.assertIn("llvm.call @external()", module_text)
+        self.assertNotIn("flydsl_test_launcher__external", module_text)
+
+    def test_runtime_dependencies_support_paths_with_spaces(self):
+        completed = subprocess.CompletedProcess(
+            args=["ldd"],
+            returncode=0,
+            stdout=("libfly.so => /tmp/flydsl distribution/libfly.so (0x1234)\n"),
+            stderr="",
+        )
+        with (
+            mock.patch(
+                "torch._inductor.codegen.flydsl.aot_compile.shutil.which",
+                return_value="/usr/bin/ldd",
+            ),
+            mock.patch(
+                "torch._inductor.codegen.flydsl.aot_compile.subprocess.run",
+                return_value=completed,
+            ),
+        ):
+            dependencies = _runtime_library_dependencies(Path("runtime.so"))
+
+        self.assertEqual(
+            Path("/tmp/flydsl distribution/libfly.so"), dependencies["libfly.so"]
+        )
+
+    def test_runtime_dependencies_reject_missing_library(self):
+        completed = subprocess.CompletedProcess(
+            args=["ldd"],
+            returncode=0,
+            stdout="libmissing.so => not found\n",
+            stderr="",
+        )
+        with (
+            mock.patch(
+                "torch._inductor.codegen.flydsl.aot_compile.shutil.which",
+                return_value="/usr/bin/ldd",
+            ),
+            mock.patch(
+                "torch._inductor.codegen.flydsl.aot_compile.subprocess.run",
+                return_value=completed,
+            ),
+            self.assertRaisesRegex(RuntimeError, "libmissing.so"),
+        ):
+            _runtime_library_dependencies(Path("runtime.so"))
 
     def test_runtime_bundle_includes_sonames_and_flydsl_dependencies(self):
         with (

@@ -2,11 +2,12 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 
-import io
 import inspect
+import io
 import unittest
 from collections.abc import Callable
 from dataclasses import replace
+from typing import cast
 from unittest import mock
 
 import torch
@@ -20,8 +21,8 @@ from torch._higher_order_ops.flydsl_kernel_wrap import (
     split_flydsl_launcher_arguments,
     TraceableFlyDSLLauncher,
 )
-from torch._inductor.codegen.flydsl.flydsl_utils import runtime_available
 from torch._inductor.codecache import BypassFxGraphCache, CacheabilityValidator
+from torch._inductor.codegen.flydsl.flydsl_utils import runtime_available
 from torch._library.utils import get_layout_constraint_tag
 from torch.export.graph_signature import OutputKind
 from torch.fx.passes.canonicalize import (
@@ -199,9 +200,10 @@ class FlyDSLCaptureTest(TestCase):
         )
 
         self.assertEqual(("out", "inp"), tuple(registration.signature.parameters))
-        stream_parameter = registration.stream_parameter
-        self.assertIsNotNone(stream_parameter)
-        assert stream_parameter is not None
+        self.assertIsNotNone(registration.stream_parameter)
+        stream_parameter = cast(
+            tuple[int, inspect.Parameter], registration.stream_parameter
+        )
         self.assertEqual(2, stream_parameter[0])
         self.assertEqual("stream", stream_parameter[1].name)
         with self.assertRaisesRegex(TypeError, "unexpected keyword argument 'stream'"):
@@ -231,11 +233,12 @@ class FlyDSLCaptureTest(TestCase):
             ("OUT", "INP"),
         )
 
-        stream_parameter = registration.stream_parameter
-        self.assertIsNotNone(stream_parameter)
-        assert stream_parameter is not None
+        self.assertIsNotNone(registration.stream_parameter)
+        stream_parameter = cast(
+            tuple[int, inspect.Parameter], registration.stream_parameter
+        )
         self.assertEqual(
-            [(('OUT', stream_parameter[1].default, 'INP'), {})],
+            [(("OUT", stream_parameter[1].default, "INP"), {})],
             calls,
         )
 
@@ -564,7 +567,9 @@ class FlyDSLCaptureTest(TestCase):
         )
 
         self.assertIs(owner, registration.bound_self)
-        self.assertEqual(("out", "inp", "rows"), tuple(registration.signature.parameters))
+        self.assertEqual(
+            ("out", "inp", "rows"), tuple(registration.signature.parameters)
+        )
         self.assertEqual((0,), registration.mutated_arg_indices)
         self.assertEqual([((owner, "OUT", "INP"), {"rows": 8})], calls)
 
@@ -632,7 +637,9 @@ class FlyDSLCaptureTest(TestCase):
 
         canonicalize_graph(graph, canonical_key, _is_safe_to_reorder)
 
-        call_targets = [node.target for node in graph.nodes if node.op == "call_function"]
+        call_targets = [
+            node.target for node in graph.nodes if node.op == "call_function"
+        ]
         self.assertEqual(
             [flydsl_kernel_wrapper_mutation, torch.ops.aten.add.Tensor],
             call_targets,
@@ -704,9 +711,7 @@ class FlyDSLCaptureTest(TestCase):
                 ):
                     torch.export.save(exported, legacy_artifact)
                 legacy_artifact.seek(0)
-                with self.assertRaisesRegex(
-                    RuntimeError, "error when deserializing"
-                ):
+                with self.assertRaisesRegex(RuntimeError, "error when deserializing"):
                     torch.export.load(legacy_artifact)
 
     def test_hop_reports_tensor_subclass_once(self):
