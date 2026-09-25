@@ -3,7 +3,6 @@
 
 import threading
 import unittest
-from types import SimpleNamespace
 from unittest import mock
 from unittest.mock import MagicMock, patch
 
