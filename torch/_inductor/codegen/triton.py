@@ -54,7 +54,6 @@ from ..runtime import triton_heuristics
 from ..runtime.benchmarking import benchmarker
 from ..runtime.hints import (
     AutotuneHint,
-    DeviceProperties,
     get_warp_size,
     native_matmul_persistent_rblock,
     ReductionHint,
@@ -77,6 +76,8 @@ from ..stream_utils import (
     get_raw_stream_name,
 )
 from ..utils import (
+    _descriptor_shape_fits_in_int32,
+    _TDM_SUPPORTED_DTYPES,
     _TMA_SUPPORTED_DTYPES,
     cache_on_self,
     DelayReplaceLine,
@@ -96,6 +97,7 @@ from ..utils import (
     triton_type,
     triton_version_uses_attrs_dict,
     upcast_compute_type,
+    use_gfx1250_descriptor_codegen,
 )
 from ..virtualized import _ops as ops, ReductionType, StoreMode, V
 from ..wrapper_benchmark import get_kernel_category_by_source_code
@@ -136,6 +138,7 @@ from .triton_utils import (
     select_tile_hint,
     should_unwrap_unspec_arg,
     signature_to_meta,
+    triton_meta_device_props,
     use_block_ptr_enabled,
     use_uint8_triton_storage_for_cuda_float8_e4m3fn,
 )
@@ -1402,9 +1405,10 @@ class TritonOverrides(OpOverrides):
         else:
             out_dtype = triton_store_type(dtype)
 
+        # Triton cannot cast integers to any fp8 type directly, so go through float32.
         if (
             src_dtype is not None
-            and dtype in fp8_dtypes
+            and dtype in TRITON_FLOAT8_DTYPES
             and (src_dtype == torch.bool or is_integer_dtype(src_dtype))
         ):
             return f"{x}.to(tl.float32).to({out_dtype})"
@@ -2543,8 +2547,9 @@ class TritonKernelOverrides(TritonOverrides):
     def value_expr(cls, expr, dtype):
         """
         Like :meth:`index_expr`, but honors ``dtype`` by setting the kernel
-        index dtype before emitting, and casting the result if needed.
+        index dtype before emitting, with floating-point compute promotion.
         """
+        dtype = upcast_compute_type(dtype)
         real_index_dtype = V.kernel._index_dtype
         V.kernel._index_dtype = (
             dtype if dtype in (torch.int32, torch.int64) else torch.int64
@@ -2945,9 +2950,28 @@ class TMACompatibilityChecker:
     force: bool
     # Inductor buffer name being loaded from / stored to.
     buffer_name: str | None = None
+    # Compilation- and device-scoped; see _gfx1250_capable.
+    _gfx1250_cache: tuple[torch.device, bool] | None = dataclasses.field(
+        default=None, init=False, repr=False, compare=False
+    )
 
     def __post_init__(self):
         self.failed_debug_prefix = "Cannot use TMA descriptor for load / store since: "
+
+    def _gfx1250_capable(self, device: torch.device) -> bool:
+        """Cache the gfx1250 descriptor probe for this checker only.
+
+        ``_gfx1250_device_prereqs`` is deliberately not memoized process-wide, so
+        a transient device-property failure cannot disable TDM everywhere.
+        Re-probes on a device change rather than assuming one checker cannot
+        span devices.
+        """
+        cached = self._gfx1250_cache
+        if cached is not None and cached[0] == device:
+            return cached[1]
+        capable = use_gfx1250_descriptor_codegen(device)
+        self._gfx1250_cache = (device, capable)
+        return capable
 
     # Also see Note: TMA API Restrictions for the below
     def can_use_tma(
@@ -2956,7 +2980,8 @@ class TMACompatibilityChecker:
         if self.force:
             return True
 
-        device_type = V.graph.get_current_device_or_throw().type
+        device = V.graph.get_current_device_or_throw()
+        device_type = device.type
         if device_type == "cpu":
             if not (
                 config.triton.use_tensor_descriptor
@@ -2973,7 +2998,17 @@ class TMACompatibilityChecker:
             # constraints below do not apply.
             return True
 
-        if not (
+        # Probe gfx1250 first: ROCm devices also have device_type == "cuda".
+        # The cached result avoids an uncached CUDA capability query below.
+        # Capability skips the conjunct below, including use_tensor_descriptor
+        # and has_triton_stable_tma_api(). That is safe because
+        # use_gfx1250_descriptor_codegen establishes the same ground itself, not
+        # because those checks would have failed: it requires
+        # use_tensor_descriptor and assume_aligned_inputs, and its device probe
+        # requires ROCm >= 7.14, gfx1250, and has_triton_amd_tdm_device, which
+        # imports the same triton.language.make_tensor_descriptor.
+        gfx1250_capable = self._gfx1250_capable(device)
+        if not gfx1250_capable and not (
             (
                 (
                     device_type == "cuda"
@@ -2986,8 +3021,10 @@ class TMACompatibilityChecker:
             and has_triton_stable_tma_api()
         ):
             log.debug(
-                "%s Requires triton>=3.4.0, a CUDA device with cc>=9.0,"
-                " use_tensor_descriptor=True, and assume_aligned_inputs=True",
+                "%s Requires use_tensor_descriptor=True and a supported backend: "
+                "CUDA cc>=9.0 with the stable descriptor API (upstream triton>=3.4.0) "
+                "and assume_aligned_inputs=True; XPU with the stable descriptor API; "
+                "or TDM-capable gfx1250 with ROCm>=7.14 and assume_aligned_inputs=True",
                 self.failed_debug_prefix,
             )
             return False
@@ -3004,11 +3041,15 @@ class TMACompatibilityChecker:
             )
             return False
 
-        if self.dtype not in _TMA_SUPPORTED_DTYPES:
+        supported_dtypes = (
+            _TDM_SUPPORTED_DTYPES if gfx1250_capable else _TMA_SUPPORTED_DTYPES
+        )
+        if self.dtype not in supported_dtypes:
             log.debug(
-                "%s dtype %s has no CUtensorMapDataType mapping.",
+                "%s dtype %s is not in %s.",
                 self.failed_debug_prefix,
                 self.dtype,
+                supported_dtypes,
             )
             return False
 
@@ -3024,7 +3065,8 @@ class TMACompatibilityChecker:
         If force, we allow relying on symbolic hints equivalent
         to what we check for Triton templates.
         """
-        device_type = V.graph.get_current_device_or_throw().type
+        device = V.graph.get_current_device_or_throw()
+        device_type = device.type
         if self.force:
             strides = [
                 V.graph.sizevars.replace_backed_symbols_with_hints(st)
@@ -3036,6 +3078,48 @@ class TMACompatibilityChecker:
         else:
             strides = block_params.strides
             constant_offset_expr = sympy.sympify(constant_offset)
+
+        # Scope these shared descriptor constraints to the new gfx1250 path
+        # to preserve CUDA/XPU eligibility. Rank 1-5 is a Triton descriptor
+        # API limit, also enforced by the dense path's _is_tma_compatible.
+        # Without force, symbolic int32 bounds must already be provable; an
+        # in-range hint alone is not enough.
+        if self._gfx1250_capable(device):
+            # Resolve backed shape hints only where the TDM range check uses them.
+            # Without force, still expand precomputed sizes: BlockDescriptorOptions
+            # .create rewrites a composite extent such as s0*s1 into an opaque ps0
+            # that has no ShapeEnv range, so the bound below would fail to prove
+            # even when both factors are bounded. The force path already expands
+            # these inside replace_backed_symbols_with_hints.
+            shape = (
+                [
+                    V.graph.sizevars.replace_backed_symbols_with_hints(sz)
+                    for sz in block_params.shape
+                ]
+                if self.force
+                else [
+                    (
+                        V.graph.sizevars.remove_precomputed_replacements(sz)
+                        if isinstance(sz, sympy.Expr)
+                        else sz
+                    )
+                    for sz in block_params.shape
+                ]
+            )
+            if not 1 <= len(shape) <= 5:
+                log.debug(
+                    "%s TDM descriptors require rank between 1 and 5. Shape is: %s",
+                    self.failed_debug_prefix,
+                    shape,
+                )
+                return False
+            if not _descriptor_shape_fits_in_int32(shape):
+                log.debug(
+                    "%s TDM descriptor dimensions must fit in int32. Shape is: %s",
+                    self.failed_debug_prefix,
+                    shape,
+                )
+                return False
 
         # The TMA API requires that the innermost stride is 1
         # and that the outer strides are 16 byte aligned
@@ -7751,26 +7835,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         triton_meta_signature = signature_to_meta(
             signature, size_dtype=self.index_dtype, argdefs=argdefs
         )
-        from torch.fx.experimental.proxy_tensor import _coor_enabled
-
-        props_device = V.graph.get_current_device_or_throw()
-        if _coor_enabled():
-            # compile-on-one-rank: drop the rank-specific index so this kernel's triton_meta
-            # (hence its cache key and the generated code) is byte-identical across ranks;
-            # the launcher resolves the real device at load time.
-            # NB: torch.device("cuda").index is None, not 0 -- that None is what reaches
-            # DeviceProperties.create below. It is not merely cosmetic for the cache key:
-            # index=None is the sentinel _resolve_load_device and make_launcher
-            # (triton_heuristics.py) use to set kernel.device_agnostic, which enables the
-            # per-device module/function handles. Keeping the index here would still give
-            # byte-identical source on every rank while silently disabling those handles --
-            # a wrong-device bug that a byte-identity check would not catch.
-            props_device = torch.device(props_device.type)
         triton_meta: TritonMeta = cast(
             TritonMeta,
             {
                 "signature": triton_meta_signature,
-                "device": DeviceProperties.create(props_device),
+                "device": triton_meta_device_props(
+                    V.graph.get_current_device_or_throw()
+                ),
                 "constants": {},
                 "native_matmul": (
                     torch._inductor.config.triton.native_matmul
@@ -8644,6 +8715,11 @@ class TritonScheduling(SIMDScheduling):
 
         compile_wrapper = IndentedBuffer()
 
+        # The wrapper literal below is the dedented, stripped source; the eager
+        # submission must be the same bytes so CompiledTritonKernels (keyed on the
+        # exact string) hits at wrapper time instead of compiling the kernel twice
+        # and overwriting the same cache file.
+        src_code = "\n" + textwrap.dedent(src_code).strip() + "\n"
         if async_compile.use_process_pool():
             # The process pool is warm, we can shell out to workers right away. This
             # allows us to save the result in async_compile.CompiledTritonKernels,

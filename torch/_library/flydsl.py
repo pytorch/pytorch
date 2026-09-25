@@ -169,9 +169,7 @@ def wrap_flydsl(
         if not parameters:
             raise TypeError("Bound FlyDSL JIT methods must declare a receiver")
         if parameters[0].name != "self":
-            raise TypeError(
-                "Bound FlyDSL JIT methods must name their receiver 'self'"
-            )
+            raise TypeError("Bound FlyDSL JIT methods must name their receiver 'self'")
         signature = signature.replace(parameters=parameters[1:])
     if any(
         parameter.kind

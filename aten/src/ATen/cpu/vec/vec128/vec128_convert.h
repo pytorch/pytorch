@@ -408,6 +408,43 @@ struct VecConvert<uint8_t, 1, float, src_n> {
 };
 
 template <>
+struct VecConvert<double, 2, float, 1> {
+  static inline VectorizedN<double, 2> apply(const VectorizedN<float, 1>& src) {
+    const float32x4_t f32 = src[0];
+    VectorizedN<double, 2> result;
+    result[0] = vcvt_f64_f32(vget_low_f32(f32));
+    result[1] = vcvt_high_f64_f32(f32);
+    return result;
+  }
+};
+
+// Half register to full register.
+template <>
+struct VecConvert<double, 1, float, 1> {
+  static inline VectorizedN<double, 1> apply(const VectorizedN<float, 1>& src) {
+    return Vectorized<double>(vcvt_f64_f32(vget_low_f32(src[0])));
+  }
+};
+
+template <>
+struct VecConvert<float, 1, double, 2> {
+  static inline VectorizedN<float, 1> apply(const VectorizedN<double, 2>& src) {
+    return Vectorized<float>(vcvt_high_f32_f64(vcvt_f32_f64(src[0]), src[1]));
+  }
+};
+
+// Full register to half register.
+template <>
+struct VecConvert<float, 1, double, 1> {
+  static inline VectorizedN<float, 1> apply(const VectorizedN<double, 1>& src) {
+    // Lanes past the source are zeroed, matching the VectorizedN::loadu(buf,
+    // count) that the generic fallback ends with.
+    return Vectorized<float>(
+        vcombine_f32(vcvt_f32_f64(src[0]), vdup_n_f32(0.0f)));
+  }
+};
+
+template <>
 struct VecConvert<float, 2, BFloat16, 1> {
   static inline VectorizedN<float, 2> apply(
       const VectorizedN<BFloat16, 1>& src) {
