@@ -318,7 +318,7 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
                 int rank,
                 uint32_t* blockSize,
                 uint64_t* shape,
-                uint64_t* stride
+                int64_t* stride
             ) {
                 uint32_t elementStrides[5] = {1, 1, 1, 1, 1};
                 uint32_t blockSizeInt[5];
@@ -337,7 +337,8 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
 
                 // Reorder and calculate strides
                 for (int i = 0; i + 1 < rank; ++i) {
-                    stridesLL[rank - i - 2] = elemSize * stride[i];
+                    stridesLL[rank - i - 2] =
+                        elemSize * static_cast<uint64_t>(stride[i]);
                 }
                 stridesLL[rank - 1] =
                     shapeInt[rank - 1] * (rank == 1 ? elemSize : stridesLL[rank - 2]);
@@ -383,11 +384,74 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
                     CU_TENSOR_MAP_L2_PROMOTION_L2_128B, CU_TENSOR_MAP_FLOAT_OOB_FILL_NONE));
             }
 
+            [[maybe_unused]] static void initTMADescriptorWithMetadata(
+                CUtensorMap* m,
+                void* globalAddress,
+                int elemSize,
+                int elemType,
+                int rank,
+                uint32_t* blockSize,
+                uint64_t* shape,
+                int64_t* stride,
+                int swizzle,
+                int fp4Padded
+            ) {
+                if (rank < 1 || rank > 5) {
+                    throw std::runtime_error("TMA descriptor rank must be between 1 and 5");
+                }
+
+                uint32_t elementStrides[5] = {1, 1, 1, 1, 1};
+                uint32_t blockSizeInt[5] = {0, 0, 0, 0, 0};
+                uint64_t shapeInt[5] = {0, 0, 0, 0, 0};
+                uint64_t stridesLL[5] = {0, 0, 0, 0, 0};
+
+                for (int i = 0; i < rank; ++i) {
+                    blockSizeInt[rank - i - 1] = blockSize[i];
+                    uint64_t dim = shape[i];
+                    if (fp4Padded && i == rank - 1) {
+                        dim *= 2;
+                    }
+                    shapeInt[rank - i - 1] = dim;
+                }
+
+                for (int i = 0; i + 1 < rank; ++i) {
+                    stridesLL[rank - i - 2] =
+                        elemSize * static_cast<uint64_t>(stride[i]);
+                }
+                stridesLL[rank - 1] =
+                    shapeInt[rank - 1] * (rank == 1 ? elemSize : stridesLL[rank - 2]);
+
+                CUDA_DRIVER_CHECK(cuTensorMapEncodeTiled(
+                    m, static_cast<CUtensorMapDataType>(elemType), rank, globalAddress,
+                    shapeInt, stridesLL, blockSizeInt, elementStrides,
+                    CU_TENSOR_MAP_INTERLEAVE_NONE,
+                    static_cast<CUtensorMapSwizzle>(swizzle),
+                    CU_TENSOR_MAP_L2_PROMOTION_L2_128B,
+                    CU_TENSOR_MAP_FLOAT_OOB_FILL_NONE));
+
+                int driverVersion = -1;
+                cuDriverGetVersion(&driverVersion);
+                if (driverVersion <= 13010) {
+                    int64_t maxByteIndex = 0;
+                    for (int i = 0; i < rank; ++i) {
+                        int64_t bytesStride =
+                            i == 0 ? elemSize : static_cast<int64_t>(stridesLL[i - 1]);
+                        maxByteIndex +=
+                            (static_cast<int64_t>(shapeInt[i]) - 1) * bytesStride;
+                    }
+                    if (maxByteIndex + 1 < 128 * 1024) {
+                        reinterpret_cast<uint64_t*>(m)[1] &= ~(1ULL << 21);
+                    }
+                }
+            }
+
             struct StableTMADescriptor {
                 CUtensorMap m;
+                void* global_address;
                 uint32_t block_shape[5];
+                int32_t kernel_shape[5];
                 uint64_t global_shape[5];
-                uint64_t strides[5];
+                int64_t strides[5];
             };
             #endif
         """
@@ -403,6 +467,9 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
 
     def cpp_device_ptr(self) -> str:
         return "CUdeviceptr"
+
+    def aten_device_type(self) -> str:
+        return "at::kCUDA"
 
     def cpp_scratch(
         self, idx: int, workspace: TritonScratchWorkspace, prefix: str | None = None

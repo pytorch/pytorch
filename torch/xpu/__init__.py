@@ -1158,15 +1158,16 @@ def _get_zes_engine_handle(device: Device = None) -> c_void_p:
 
     # See Note [telemetry handle selection]
     engine_count = c_uint32(0)
-    _zes_check(
-        pyzes.zesDeviceEnumEngineGroups(device_handle, byref(engine_count), None),
-        "Can't get Level Zero Sysman engine group count.",
-    )
-    # TODO: zesDeviceEnumEngineGroups does not return ZE_RESULT_ERROR_INSUFFICIENT_PERMISSIONS on privilege errors;
+    # TODO: zesDeviceEnumEngineGroups does not return ZE_RESULT_ERROR_INSUFFICIENT_PERMISSIONS on privilege errors on Xe;
     # instead it succeeds with count=0. Treat that as an error with a helpful hint about elevated privileges.
-    if engine_count.value == 0:
+    rc = pyzes.zesDeviceEnumEngineGroups(device_handle, byref(engine_count), None)
+    if rc == pyzes.ZE_RESULT_ERROR_INSUFFICIENT_PERMISSIONS or engine_count.value == 0:
         raise RuntimeError(
             "No Level Zero Sysman engine groups found. The GPU may not support engine monitoring, or try running with elevated privileges (e.g. sudo)."
+        )
+    if rc != pyzes.ZE_RESULT_SUCCESS:
+        raise RuntimeError(
+            f"Can't get Level Zero Sysman engine group count. (rc={rc})."
         )
     engine_handles = (pyzes.zes_engine_handle_t * engine_count.value)()
     _zes_check(

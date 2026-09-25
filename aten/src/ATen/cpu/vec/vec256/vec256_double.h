@@ -297,6 +297,26 @@ class Vectorized<double> {
   Vectorized<double> pow(const Vectorized<double>& b) const {
     return Vectorized<double>(Sleef_powd4_u10(values, b));
   }
+  double reduce_add() const {
+    auto v = values;
+    // 128-bit shuffle
+    auto v1 = _mm256_permute2f128_pd(v, v, 0x1);
+    v = _mm256_add_pd(v, v1);
+    // 64-bit shuffle
+    v1 = _mm256_permute_pd(v, 0x5);
+    v = _mm256_add_pd(v, v1);
+    return _mm256_cvtsd_f64(v);
+  }
+  double reduce_max() const {
+    auto v = values;
+    // 128-bit shuffle
+    auto v1 = _mm256_permute2f128_pd(v, v, 0x1);
+    v = _mm256_max_pd(v, v1);
+    // 64-bit shuffle
+    v1 = _mm256_permute_pd(v, 0x5);
+    v = _mm256_max_pd(v, v1);
+    return _mm256_cvtsd_f64(v);
+  }
   // Comparison using the _CMP_**_OQ predicate.
   //   `O`: get false if an operand is NaN
   //   `Q`: do not raise if an operand is NaN

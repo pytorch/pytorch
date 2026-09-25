@@ -13,6 +13,7 @@ import sympy
 
 import torch
 from torch._inductor.virtualized import V
+from torch._logging import warning_once
 from torch.nn.attention.flex_attention import _Backend
 from torch.utils._sympy.functions import FloorDiv
 
@@ -127,19 +128,26 @@ def flex_attention_grid(batch_size, q_heads, num_queries, d_model, meta, *, cdiv
     return (cdiv(num_queries, meta["BLOCK_M"]), batch_size, q_heads)
 
 
-def get_float32_precision():
-    if (
-        (
-            torch.backends.cuda.matmul.fp32_precision == "ieee"
-            if torch.backends.cuda.matmul.fp32_precision != "none"
-            else torch.get_float32_matmul_precision() == "highest"
+def set_float32_precision(kernel_options: dict[str, Any], dtype: torch.dtype) -> None:
+    precision = torch.backends.cuda.matmul.fp32_precision
+    if precision == "none":
+        precision = (
+            "ieee" if torch.get_float32_matmul_precision() == "highest" else "tf32"
         )
-        or torch.version.hip
-        or torch.mtia.is_available()
-    ):
-        return "'ieee'"
-    else:
-        return "'tf32'"
+    if dtype == torch.float32 and precision == "bfx9":
+        # See Note [BF16x9 precision] in torch/_inductor/utils.py.
+        warning_once(
+            log,
+            "FP32 FlexAttention does not support bfx9 precision; using IEEE precision instead.",
+        )
+        kernel_options["FLOAT32_PRECISION"] = "'ieee'"
+        return
+    precision = (
+        "ieee"
+        if precision == "ieee" or torch.version.hip or torch.mtia.is_available()
+        else "tf32"
+    )
+    kernel_options.setdefault("FLOAT32_PRECISION", repr(precision))
 
 
 flex_attention_template = TritonTemplate(
@@ -273,7 +281,7 @@ def flex_attention(
         k: V.graph.sizevars.guard_int(v) if isinstance(v, sympy.Symbol) else v
         for k, v in kernel_options.items()
     }
-    kernel_options.setdefault("FLOAT32_PRECISION", get_float32_precision())
+    set_float32_precision(kernel_options, query.get_dtype())
     enable_gqa = V.graph.sizevars.evaluate_expr(
         sympy.Ne(query.get_size()[1], key.get_size()[1]),
     )
@@ -817,7 +825,7 @@ def flex_attention_backward(*args, **kwargs):
         k: V.graph.sizevars.guard_int(v) if isinstance(v, sympy.Symbol) else v
         for k, v in kernel_options.items()
     }
-    kernel_options.setdefault("FLOAT32_PRECISION", get_float32_precision())
+    set_float32_precision(kernel_options, query.get_dtype())
     kernel_options.setdefault("PRESCALE_QK", False)
     kernel_options.setdefault("ROWS_GUARANTEED_SAFE", False)
     kernel_options.setdefault("BLOCKS_ARE_CONTIGUOUS", False)
@@ -999,6 +1007,35 @@ def flex_attention_backward(*args, **kwargs):
     invalid_block_options: dict[str, Any] | None = None
 
     original_kernel_options = kernel_options.copy()
+    bwd_input_nodes = [
+        query,
+        key,
+        value,
+        logsumexp,
+        delta,
+        grad_out,
+        grad_query,
+        broadcasted_grad_value,
+        kv_num_blocks,
+        kv_indices,
+        q_num_blocks,
+        q_indices,
+        full_kv_num_blocks,
+        full_kv_indices,
+        full_q_num_blocks,
+        full_q_indices,
+    ]
+    bwd_subgraphs = [
+        fw_subgraph_buffer,
+        joint_outputs.grad_input,
+        mask_graph_buffer,
+        joint_outputs.captured_grads_compute,
+    ]
+    bwd_mutated_inputs = [
+        grad_query,
+        broadcasted_grad_value,
+        *joint_outputs.mutated_grads,
+    ]
 
     for conf in configs:
         # Performance tuning
@@ -1084,39 +1121,25 @@ def flex_attention_backward(*args, **kwargs):
 
         flex_attention_backward_template.maybe_append_choice(
             choices=choices,
-            input_nodes=[
-                query,
-                key,
-                value,
-                logsumexp,
-                delta,
-                grad_out,
-                grad_query,
-                broadcasted_grad_value,
-                kv_num_blocks,
-                kv_indices,
-                q_num_blocks,
-                q_indices,
-                full_kv_num_blocks,
-                full_kv_indices,
-                full_q_num_blocks,
-                full_q_indices,
-            ],
+            input_nodes=bwd_input_nodes,
             layout=layout_broadcasted_k,  # We use store_output only for grad_key
-            subgraphs=[
-                fw_subgraph_buffer,
-                joint_outputs.grad_input,
-                mask_graph_buffer,
-                joint_outputs.captured_grads_compute,
-            ],
-            mutated_inputs=[
-                grad_query,
-                broadcasted_grad_value,
-                *joint_outputs.mutated_grads,
-            ],
+            subgraphs=bwd_subgraphs,
+            mutated_inputs=bwd_mutated_inputs,
             call_sizes=query.get_size() + key.get_size()[1:3],
             **cur_kernel_options,
         )
+
+    choices = V.choices.append_flex_attention_backward_choices(
+        choices,
+        configs,
+        list(bwd_input_nodes),
+        list(bwd_subgraphs),
+        layout_broadcasted_k,
+        original_kernel_options,
+        SPARSE_Q_BLOCK_SIZE,
+        SPARSE_KV_BLOCK_SIZE,
+        mutated_inputs=list(bwd_mutated_inputs),
+    )
 
     if not choices and invalid_block_options is not None:
         raise_flex_kernel_options_error(
@@ -1131,24 +1154,7 @@ def flex_attention_backward(*args, **kwargs):
     mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers)
 
     inputs_for_autotuning = (
-        [
-            query,
-            key,
-            value,
-            logsumexp,
-            delta,
-            grad_out,
-            grad_query,
-            broadcasted_grad_value,
-            kv_num_blocks,
-            kv_indices,
-            q_num_blocks,
-            q_indices,
-            full_kv_num_blocks,
-            full_kv_indices,
-            full_q_num_blocks,
-            full_q_indices,
-        ]
+        bwd_input_nodes
         + list(score_mod_other_buffers)
         + list(mask_mod_other_buffers)
         + joint_outputs.mutated_grads
