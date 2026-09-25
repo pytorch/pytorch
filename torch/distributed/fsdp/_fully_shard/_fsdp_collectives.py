@@ -1,4 +1,3 @@
-import functools
 import math
 from collections.abc import Callable, Sequence
 from itertools import chain, groupby
@@ -578,7 +577,7 @@ def foreach_reduce(
     reduce_scatter_group: dist.ProcessGroup,
     reduce_scatter_stream: torch.Stream,
     reduce_scatter_comm: ReduceScatter,
-    reduce_dtype: torch.dtype | None,
+    reduce_dtype: torch.dtype,
     device: torch.device,
     gradient_divide_factor: float | None,
     all_reduce_group: dist.ProcessGroup | None,  # HSDP or replication
@@ -607,7 +606,6 @@ def foreach_reduce(
     grad_dtypes = {grad.dtype for grad in unsharded_grads}
     # grad_dtype policies may differ within a group, but a collective has one
     # dtype and chunk_cat requires one input dtype
-    reduce_dtype = reduce_dtype or functools.reduce(torch.promote_types, grad_dtypes)
     if len(grad_dtypes) > 1:
         # Same per-gradient casts autograd would run with reduce_dtype set to
         # this dtype, deferred here so unsharded gradients keep their grad_dtype
