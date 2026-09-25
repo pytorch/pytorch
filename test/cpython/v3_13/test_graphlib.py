@@ -44,8 +44,6 @@ class TestTopologicalSort(CPythonTestCase):
         for group in expected:
             tsgroup = {next(it) for element in group}
             self.assertEqual(set(group), tsgroup)
-        # Exhaust the generator so Dynamo does not need to close a suspended yield from.
-        self.assertEqual(list(it), [])
 
     def _assert_cycle(self, graph, cycle):
         ts = graphlib.TopologicalSorter()
@@ -243,7 +241,6 @@ class TestTopologicalSort(CPythonTestCase):
 
         self.assertEqual(list(get_groups(ts)), list(get_groups(ts2)))
 
-    @unittest.skip("Requires a subprocess, which Dynamo cannot trace")
     def test_static_order_does_not_change_with_the_hash_seed(self):
         def check_order_with_hash_seed(seed):
             code = """if 1:
