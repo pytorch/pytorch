@@ -2650,6 +2650,56 @@ class TestFloorDiv(TestCase):
             self.assertEqual(shape_env.simplify(expr), result)
             self.assertEqual(shape_env.evaluate_expr(expr), result)
 
+    def test_clean_div_simplify(self):
+        shape_env = ShapeEnv()
+        x, y = sympy.symbols("x y", integer=True)
+        divisor, other_divisor = sympy.symbols("C D", integer=True, positive=True)
+
+        self.assertEqual(shape_env.simplify(2 * CleanDiv(x, 2)), x)
+        self.assertEqual(
+            shape_env.simplify(3 * CleanDiv(x, 2)),
+            3 * CleanDiv(x, 2),
+        )
+        self.assertEqual(
+            shape_env.simplify(
+                divisor * CleanDiv(divisor * CleanDiv(x, divisor), divisor)
+            ),
+            x,
+        )
+        self.assertEqual(
+            shape_env.simplify(
+                divisor
+                * CleanDiv(x, divisor)
+                * other_divisor
+                * CleanDiv(y, other_divisor)
+            ),
+            x * y,
+        )
+
+    @skipIfTorchDynamo("directly exercises ShapeEnv guard registration")
+    def test_floordiv_simplify_with_divisibility_guard(self):
+        shape_env = ShapeEnv()
+        x = create_symint(shape_env, 4, duck=False)
+        equality = x == 2 * (x // 2)
+
+        self.assertFalse(statically_known_true(equality))
+        torch._check(x % 2 == 0)
+        self.assertTrue(statically_known_true(equality))
+        self.assertEqual(
+            shape_env.simplify((3 * (x // 2)).node.expr),
+            3 * CleanDiv(x.node.expr, 2),
+        )
+
+    @skipIfTorchDynamo("directly exercises ShapeEnv runtime assertions")
+    def test_floordiv_simplify_with_unbacked_runtime_assert(self):
+        shape_env = ShapeEnv()
+        x = shape_env.create_unbacked_symint()
+        equality = x == 2 * (x // 2)
+
+        self.assertFalse(statically_known_true(equality))
+        torch._check(x % 2 == 0)
+        self.assertFalse(statically_known_true(equality))
+
     def test_floordiv_assumptions(self):
         cases = (
             sympy.Symbol("i1", integer=True),

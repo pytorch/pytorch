@@ -985,6 +985,10 @@ fallback_random = False
 # align random/dropout as eager mode(aten) behavior, maintaining fused possibility and faster gpu kernel
 align_random_eager = False
 
+# Use tl.rand4x/randn4x for 1D CUDA Triton random. Disabled pending
+# https://github.com/pytorch/pytorch/issues/198333
+use_rand4x = os.environ.get("TORCHINDUCTOR_USE_RAND4X") == "1"
+
 # fallback embedding_bag_byte_unpack to eager
 fallback_embedding_bag_byte_unpack = False
 
@@ -1058,13 +1062,34 @@ score_fusion_memory_threshold = 10
 fusion_memory_timeline_peak_memory_increase_gb: float | None = None
 fusion_memory_timeline_peak_memory_pct_threshold: float | None = None
 
-# For Triton Templates, select fastest of best template + epilogue vs best template + separate epilogue kernel
-benchmark_epilogue_fusion = (
-    os.environ.get("TORCHINDUCTOR_BENCHMARK_EPILOGUE_FUSION", "1") == "1"
+# Benchmark template choices with legal prologue or epilogue fusion by deferring
+# choice selection from lowering to scheduling, where fused and unfused
+# alternatives can be compared. pipeline_max_autotune_gemm may independently
+# defer selection without benchmarking fusion when this option is disabled.
+benchmark_template_fusion: bool = (
+    os.environ.get(
+        "TORCHINDUCTOR_BENCHMARK_TEMPLATE_FUSION",
+        os.environ.get("TORCHINDUCTOR_BENCHMARK_EPILOGUE_FUSION", "1"),
+    )
+    == "1"
 )
 
-# Take how many of the top triton kernels to benchmark epilogue
-max_epilogue_benchmarked_choices = 1
+# Deprecated compatibility alias for benchmark_template_fusion.
+benchmark_epilogue_fusion: bool = Config(
+    alias="torch._inductor.config.benchmark_template_fusion",
+    deprecated=True,
+    deprecation_message="use benchmark_template_fusion instead",
+)
+
+# Maximum number of top template choices to benchmark with fusion.
+max_template_fusion_benchmarked_choices: int = 1
+
+# Deprecated compatibility alias for max_template_fusion_benchmarked_choices.
+max_epilogue_benchmarked_choices: int = Config(
+    alias="torch._inductor.config.max_template_fusion_benchmarked_choices",
+    deprecated=True,
+    deprecation_message="use max_template_fusion_benchmarked_choices instead",
+)
 
 # how many nodes to allow into a single fusion
 max_fusion_size = 64
