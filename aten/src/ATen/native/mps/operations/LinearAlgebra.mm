@@ -1476,9 +1476,12 @@ static Tensor& tiled_bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2
         uint64_t resElemSize = result.element_size();
         MPSDataType dtype = getMPSDataType(batch1);
 
-        uint64_t elemInMatrix = resRows * resCols;
+        uint64_t elemInMatrixRes = resRows * resCols;
+        uint64_t elemInMatrixA = aRows * aCols;
+        uint64_t elemInMatrixB = bRows * bCols;
+        uint64_t maxElemInMatrix = std::max({elemInMatrixRes, elemInMatrixA, elemInMatrixB});
         // if largest supported batch size is zero, we need to split up the computation more
-        uint64_t largestSupportedBatchSize = floor(pow(2, 32) / elemInMatrix);
+        uint64_t largestSupportedBatchSize = floor(pow(2, 32) / maxElemInMatrix);
         bool tileEachMatmul = largestSupportedBatchSize == 0;
         uint64_t batchSize = largestSupportedBatchSize > 0 ? std::min(largestSupportedBatchSize, originalBatchSize) : 1;
         uint64_t lastBatchSize = originalBatchSize % batchSize;
@@ -1638,11 +1641,15 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
     }
   }
 
-  // Call tiled implementation if the number of elements exceeds 2^32
+  // Call tiled implementation if the number of elements in any tensor exceeds 2^32
   uint64_t resultSize = batch1.size(0) * batch1.size(1) * batch2.size(2);
-  if (resultSize > pow(2, 32)) {
-    // Tiled path uses MPSNDArray directly, so resolve conjugate views upfront
-    result = tiled_bmm_out_mps_impl(batch1.resolve_conj(), batch2.resolve_conj(), result);
+  uint64_t aSize = batch1.numel();
+  uint64_t bSize = batch2.numel();
+  if (resultSize > pow(2, 32) || aSize > pow(2, 32) || bSize > pow(2, 32)) {
+    // Tiled path uses raw MPSNDArray directly from buffers, so we must resolve conjugate views
+    // and explicitly enforce contiguous memory layouts to prevent silent math corruption
+    // on transposed or sliced views (which also breaks the backward pass).
+    result = tiled_bmm_out_mps_impl(batch1.resolve_conj().contiguous(), batch2.resolve_conj().contiguous(), result);
     return result;
   }
 
