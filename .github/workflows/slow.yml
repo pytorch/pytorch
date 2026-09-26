@@ -195,7 +195,6 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      runner: linux.c7i.4xlarge
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.11-clang21-asan
       docker-image-name: ci-image:pytorch-linux-jammy-py3.11-clang21
