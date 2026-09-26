@@ -800,7 +800,7 @@ class _LocalOffsetBasedRNGTracker:
                 # _collect_accelerator_rng_states collects the state of the
                 # current accelerator (whatever backend registered it through
                 # torch.accelerator), so any non-cpu device type — cuda, xpu,
-                # hpu, npu, ... — must be served from that dict keyed by
+                # hpu, privateuse1, ... — must be served from that dict keyed by
                 # device index; only cpu uses the cpu state.
                 if self._device.type == "cpu":
                     any_rank_device_state = any_rank_cpu
