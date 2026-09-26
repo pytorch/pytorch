@@ -63,12 +63,63 @@ class GuardFn(Protocol):
     def __call__(self, f_locals: dict[str, object]) -> bool: ...
 
 
+class SpeculationTicket(Protocol):
+    """A backend-owned, transactionally isolated frame invocation.
+
+    The launched work must remain unobservable until ``commit``. ``abort`` must
+    drain or otherwise order its cleanup before the normal frame can execute.
+    ``commit`` must return the original Python frame's exact result, including
+    output reconstruction and any deferred side effects, rather than the raw
+    backend graph output. Neither operation may invoke user code, and both must
+    be safe to call exactly once.
+    """
+
+    def commit(self) -> object: ...
+
+    def abort(self) -> None: ...
+
+
+class BytecodeSpeculationTicket(Protocol):
+    """A speculative invocation consumed by Dynamo's cached bytecode.
+
+    ``commit_to_cached_code`` arms the backend callable installed in the cached
+    bytecode. Its next invocation must consume the speculative backend result
+    instead of launching the artifact again. ``finish`` verifies that the
+    cached bytecode consumed the result and releases any remaining state.
+    """
+
+    def commit_to_cached_code(self) -> None: ...
+
+    def finish(self) -> None: ...
+
+    def abort(self) -> None: ...
+
+
+class SpeculationDescriptor(Protocol):
+    """Private backend contract for launching before Dynamo guard evaluation.
+
+    ``launch`` must synchronously validate every condition required for safe
+    execution, including backend-internal specialization not represented by
+    the Dynamo cache entry. The returned ticket owns all inputs and private
+    outputs needed until either ``commit`` or ``abort`` completes. It must not
+    mutate frame locals, invoke user code, or modify Dynamo's cache. It must
+    either return a ticket or clean up all work and effects before raising.
+    Implementations must reject overlapping launches unless their state is
+    concurrency-safe.
+    """
+
+    def launch(
+        self, f_locals: dict[str, object]
+    ) -> SpeculationTicket | BytecodeSpeculationTicket | None: ...
+
+
 @dataclasses.dataclass
 class GuardedCode:
     code: types.CodeType
     guard_manager: GuardFn
     compile_id: CompileId
     trace_annotation: str = "Unknown"
+    speculation_descriptor: SpeculationDescriptor | None = None
 
 
 @dataclasses.dataclass

@@ -1986,6 +1986,7 @@ def _compile(
             check_fn.guard_manager,  # type: ignore[arg-type]
             compile_id,
             annotation_str,
+            output.speculation_descriptor,
         )
 
         if not output.is_empty_graph() and hooks.guard_export_fn is not None:

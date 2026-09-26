@@ -1003,6 +1003,7 @@ class _CompileFxKwargs(TypedDict, total=False):
     boxed_forward_device_index: BoxedDeviceIndex | None
     fx_wrapper: bool
     get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]]
+    speculative_guard_eval_eligible: bool
 
 
 class _CompileFxCallable(Protocol):
@@ -1028,6 +1029,7 @@ def compile_fx_inner(
     kwargs.setdefault("cpp_wrapper", False)
     kwargs.setdefault("fx_wrapper", False)
     kwargs.setdefault("is_inference", False)
+    kwargs.setdefault("speculative_guard_eval_eligible", False)
     kwargs.setdefault("boxed_forward_device_index", None)
     kwargs.setdefault("layout_opt", None)
     kwargs.setdefault("extern_node_serializer", None)
@@ -2934,6 +2936,16 @@ def compile_fx_forward(
     # original strides
     _recursive_record_user_visible_output_idxs(gm)
 
+    speculative_guard_eval_eligible = False
+    if is_inference:
+        from .speculative_guard import is_speculative_guard_safe
+
+        context = torch._guards.TracingContext.try_get()
+        speculative_guard_eval_eligible = bool(
+            context is not None
+            and is_speculative_guard_safe(gm, context.fw_metadata)
+        )
+
     with cudagraph_annotation_context(compiler_config_extra.cudagraphs):
         result = inner_compile(
             gm,
@@ -2943,6 +2955,7 @@ def compile_fx_forward(
             graph_id=compiler_config_extra.graph_id,
             is_inference=is_inference,
             boxed_forward_device_index=compiler_config_extra.forward_device_index,
+            speculative_guard_eval_eligible=speculative_guard_eval_eligible,
         )
 
         if (
@@ -3346,6 +3359,12 @@ def _compile_fx_main(
             raise AssertionError("config._raise_error_for_testing is set")
 
         num_example_inputs = len(example_inputs_)
+        speculation_input_sources = tuple(
+            getattr(node, "_dynamo_source", None)
+            for node in model_.graph.nodes
+            if node.op == "placeholder"
+        )
+        speculation_forward_graphs: list[OutputCode] = []
 
         compiler_config_extra = create_compiler_config_extra(model_)
 
@@ -3368,7 +3387,7 @@ def _compile_fx_main(
                     num_orig_model_outputs = get_num_model_outputs(model_)
                 else:
                     num_orig_model_outputs = get_num_model_outputs(gm)
-                return compile_fx_forward(
+                result = compile_fx_forward(
                     gm,
                     example_inputs,
                     num_orig_model_outputs=num_orig_model_outputs,
@@ -3377,6 +3396,9 @@ def _compile_fx_main(
                     inner_compile=inner_compile,
                     is_inference=is_inference,
                 )
+                if is_inference:
+                    speculation_forward_graphs.append(result)
+                return result
 
         fw_compiler: Callable[[GraphModule, Sequence[InputType]], OutputCode] = (
             functools.partial(fw_compiler_base, is_inference=False)
@@ -3509,7 +3531,7 @@ def _compile_fx_main(
             ),
         ):
             try:
-                return dynamo_common.aot_autograd(
+                compiled_fn = dynamo_common.aot_autograd(
                     fw_compiler=fw_compiler,
                     bw_compiler=bw_compiler,
                     inference_compiler=inference_compiler,
@@ -3521,6 +3543,26 @@ def _compile_fx_main(
                     pre_grad_passes=run_pre_grad_passes,
                     compile_region_name=compile_region_name,
                 )(model_, example_inputs_)
+                if (
+                    dynamo_config.speculative_guard_eval
+                    and len(speculation_forward_graphs) <= 1
+                ):
+                    from .speculative_guard import (
+                        maybe_wrap_speculative_guard_callable,
+                    )
+
+                    compiled_graph: object = compiled_fn
+                    if speculation_forward_graphs:
+                        output = speculation_forward_graphs[0]
+                        if isinstance(output, CompiledFxGraph):
+                            compiled_graph = output
+                    compiled_fn = maybe_wrap_speculative_guard_callable(
+                        compiled_fn,
+                        speculation_input_sources,
+                        example_inputs_,
+                        compiled_graph,
+                    )
+                return compiled_fn
             except ShortenTraceback as e:
                 # We will also shorten the traceback inside dynamo.
                 # This is only useful if inductor is called directly with an FX graph.

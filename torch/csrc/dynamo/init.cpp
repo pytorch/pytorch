@@ -470,6 +470,8 @@ void initDynamoBindings(PyObject* torch) {
       .def_readonly("trace_annotation", &CacheEntry::trace_annotation)
       .def_readonly("backend", &CacheEntry::backend)
       .def_readonly(
+          "speculation_descriptor", &CacheEntry::speculation_descriptor)
+      .def_readonly(
           "isolate_recompiles_id", &CacheEntry::_isolate_recompiles_id)
       .def(
           "update_diff_guard_root_manager",

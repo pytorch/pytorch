@@ -1592,6 +1592,22 @@ class SideEffects:
             or self.tensor_hooks
         )
 
+    def has_pending_external_side_effects(self) -> bool:
+        if (
+            self.tensor_hooks
+            or self.save_for_backward
+            or self.ca_final_callbacks_var is not None
+        ):
+            return True
+        return any(
+            (
+                isinstance(var.mutation_type, ValueMutationExisting)
+                and var.mutation_type.is_modified
+            )
+            or self.has_pending_mutation(var)
+            for var in self.id_to_variable.values()
+        )
+
     def clear(self) -> None:
         self.keepalive.clear()
         self.id_to_variable.clear()

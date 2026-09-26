@@ -54,6 +54,8 @@ typedef struct VISIBILITY_HIDDEN CacheEntry {
   void* diff_guard_root_mgr{nullptr};
   // backend used to create this cache entry
   py::object backend;
+  // Optional backend-owned interface for launching before guard evaluation.
+  py::object speculation_descriptor;
   // Reference to owning ExtraState
   ExtraState* _owner{nullptr};
   // Reference to this CacheEntry's location in owner's linked list

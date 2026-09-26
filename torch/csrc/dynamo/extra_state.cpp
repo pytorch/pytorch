@@ -62,6 +62,10 @@ void ExtraState::invalidate(
 
   CHECK(cache_entry->_owner == this);
   CHECK(cache_entry == &*cache_entry->_owner_loc);
+  if (!cache_entry->speculation_descriptor.is_none()) {
+    CHECK(this->speculation_entry_count > 0);
+    this->speculation_entry_count--;
+  }
   cache_entry->invalidate(std::move(deleted_guard_manager));
   // Move the cache entry to the end of the list because these will always
   // return False.
@@ -277,7 +281,11 @@ void lookup(
     int64_t isolate_recompiles_id,
     PyObject** maybe_cached_code,
     const char** trace_annotation,
-    bool is_skip_guard_eval_unsafe) {
+    bool is_skip_guard_eval_unsafe,
+    PyObject** matched_guard_manager) {
+  if (matched_guard_manager != nullptr) {
+    *matched_guard_manager = nullptr;
+  }
   CacheEntry* found = nullptr;
   bool guard_error = false;
 
@@ -321,9 +329,44 @@ void lookup(
     }
     *maybe_cached_code = found->code.ptr();
     *trace_annotation = found->trace_annotation.c_str();
+    if (matched_guard_manager != nullptr) {
+      *matched_guard_manager = Py_NewRef(found->guard_manager.ptr());
+    }
     return;
   }
   *maybe_cached_code = py::none().ptr();
+}
+
+CacheEntry* get_speculation_candidate(
+    ExtraState* extra_state,
+    PyObject* backend,
+    int64_t isolate_recompiles_id) {
+  if (extra_state->speculation_entry_count == 0 || Py_IsFalse(backend) ||
+      !extra_state->precompile_entries.empty()) {
+    return nullptr;
+  }
+
+  int64_t ids_to_search[] = {isolate_recompiles_id, -1};
+  int num_ids = (isolate_recompiles_id >= 0) ? 2 : 1;
+  for (int i = 0; i < num_ids; i++) {
+    auto it = extra_state->cache_entry_map.find(ids_to_search[i]);
+    if (it == extra_state->cache_entry_map.end()) {
+      continue;
+    }
+    for (CacheEntry& cache_entry : it->second) {
+      if (!backend_match(cache_entry.backend.ptr(), backend) ||
+          !PyCode_Check(cache_entry.code.ptr())) {
+        continue;
+      }
+      if (cache_entry_has_no_guards(
+              cache_entry, /*is_skip_guard_eval_unsafe=*/false) ||
+          cache_entry.speculation_descriptor.is_none()) {
+        return nullptr;
+      }
+      return &cache_entry;
+    }
+  }
+  return nullptr;
 }
 
 bool try_lookup_without_guard_eval(
@@ -394,6 +437,9 @@ CacheEntry* create_cache_entry(
   new_iter->_owner_loc = new_iter;
   new_iter->_isolate_recompiles_id = id;
   extra_state->total_cache_entry_count++;
+  if (!new_iter->speculation_descriptor.is_none()) {
+    extra_state->speculation_entry_count++;
+  }
   // Set guard_manager references to extra_state and CacheEntry
   // Warning: lifetime is controlled by C++!
   py::handle guard_manager = py::handle(guarded_code).attr("guard_manager");

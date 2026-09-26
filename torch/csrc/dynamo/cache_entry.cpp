@@ -8,6 +8,7 @@ CacheEntry::CacheEntry(const py::handle& guarded_code, PyObject* backend)
   this->guard_manager = guarded_code.attr("guard_manager");
   this->code = guarded_code.attr("code");
   this->compile_id = guarded_code.attr("compile_id");
+  this->speculation_descriptor = guarded_code.attr("speculation_descriptor");
   py::object trace_annotation = guarded_code.attr("trace_annotation");
   const char* trace_annotation_str = PyUnicode_AsUTF8(trace_annotation.ptr());
   if (trace_annotation) {
@@ -43,6 +44,7 @@ void CacheEntry::invalidate(py::object deleted_guard_manager) {
   this->diff_guard_root_mgr = nullptr;
   this->trace_annotation = "Invalidated";
   this->backend = py::none();
+  this->speculation_descriptor = py::none();
 }
 
 void CacheEntry::update_diff_guard_root_manager() {

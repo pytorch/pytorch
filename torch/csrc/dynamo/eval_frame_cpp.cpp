@@ -208,6 +208,12 @@ py::list _get_frame_value_stack_with_depth(
 
 static constexpr const char* cache_lookup_profiler_str =
     "TorchDynamo Cache Lookup";
+static constexpr const char* speculative_launch_profiler_str =
+    "TorchDynamo Speculative Launch";
+static constexpr const char* speculative_commit_profiler_str =
+    "TorchDynamo Speculative Commit";
+static constexpr const char* speculative_abort_profiler_str =
+    "TorchDynamo Speculative Abort";
 
 // Cache the random module to avoid calling py::module_::import("random") at
 // arbitrary points during execution. torch.package overrides the import
@@ -534,6 +540,40 @@ PyObject* dynamo__custom_eval_frame(
 
   PyObject* maybe_cached_code = nullptr;
   std::unique_ptr<FrameLocalsMapping> locals;
+  bool has_speculative_candidate = false;
+  PyObject* matched_guard_manager = nullptr;
+  py::object speculative_guard_manager;
+  py::object matched_guard_manager_ref;
+  py::object speculation_ticket;
+
+  auto abort_speculation = [&]() {
+    if (!speculation_ticket || speculation_ticket.is_none()) {
+      return;
+    }
+
+    PyObject* exc_type = nullptr;
+    PyObject* exc_value = nullptr;
+    PyObject* exc_traceback = nullptr;
+    PyErr_Fetch(&exc_type, &exc_value, &exc_traceback);
+    _PytorchRecordFunctionState* rf =
+        _pytorch_record_function_enter(speculative_abort_profiler_str);
+    try {
+      speculation_ticket.attr("abort")();
+      speculation_ticket = py::none();
+    } catch (py::error_already_set& e) {
+      _pytorch_record_function_exit(rf);
+      e.restore();
+      if (exc_type != nullptr) {
+        PyErr_WriteUnraisable(speculation_ticket.ptr());
+        PyErr_Restore(exc_type, exc_value, exc_traceback);
+      }
+      return;
+    }
+    _pytorch_record_function_exit(rf);
+    speculation_ticket = py::object();
+    PyErr_Restore(exc_type, exc_value, exc_traceback);
+  };
+
   if (!try_lookup_without_guard_eval(
           extra,
           backend,
@@ -542,18 +582,69 @@ PyObject* dynamo__custom_eval_frame(
           &trace_annotation,
           is_skip_guard_eval_unsafe)) {
     locals = std::make_unique<FrameLocalsMapping>(frame);
+    if (!is_skip_guard_eval_unsafe && extra->speculation_entry_count > 0) {
+      CacheEntry* speculative_candidate =
+          get_speculation_candidate(extra, backend, isolate_recompiles_id);
+      if (speculative_candidate != nullptr &&
+          !breakpoint_code_objects.contains(
+              (PyCodeObject*)speculative_candidate->code.ptr()) &&
+          bytecode_debugger_callback_obj == nullptr) {
+        has_speculative_candidate = true;
+        py::object speculation_descriptor =
+            speculative_candidate->speculation_descriptor;
+        speculative_guard_manager = speculative_candidate->guard_manager;
+        _PytorchRecordFunctionState* rf =
+            _pytorch_record_function_enter(speculative_launch_profiler_str);
+        try {
+          PyObject* copied_locals = PyDict_Copy((PyObject*)locals->to_dict());
+          if (copied_locals == nullptr) {
+            throw py::error_already_set();
+          }
+          py::dict f_locals = py::reinterpret_steal<py::dict>(copied_locals);
+          speculation_ticket = speculation_descriptor.attr("launch")(f_locals);
+        } catch (py::error_already_set& e) {
+          _pytorch_record_function_exit(rf);
+          eval_frame_callback_set(callback.ptr());
+          fail();
+          e.restore();
+          return eval_result;
+        }
+        _pytorch_record_function_exit(rf);
+        extra = get_extra_state(F_CODE(frame));
+        if (extra == nullptr) {
+          extra = init_and_set_extra_state(F_CODE(frame));
+        }
+      }
+    }
     _PytorchRecordFunctionState* rf =
         _pytorch_record_function_enter(cache_lookup_profiler_str);
-    lookup(
-        extra,
-        locals.get(),
-        backend,
-        isolate_recompiles_id,
-        &maybe_cached_code,
-        &trace_annotation,
-        is_skip_guard_eval_unsafe);
+    try {
+      lookup(
+          extra,
+          locals.get(),
+          backend,
+          isolate_recompiles_id,
+          &maybe_cached_code,
+          &trace_annotation,
+          is_skip_guard_eval_unsafe,
+          has_speculative_candidate ? &matched_guard_manager : nullptr);
+      if (matched_guard_manager != nullptr) {
+        matched_guard_manager_ref =
+            py::reinterpret_steal<py::object>(matched_guard_manager);
+      }
+    } catch (py::error_already_set& e) {
+      _pytorch_record_function_exit(rf);
+      e.restore();
+      abort_speculation();
+      eval_frame_callback_set(callback.ptr());
+      fail();
+      return eval_result;
+    }
     _pytorch_record_function_exit(rf);
   }
+
+  bool speculative_candidate_matched = matched_guard_manager_ref &&
+      matched_guard_manager_ref.is(speculative_guard_manager);
 
   // A callback of Py_False indicates "run only" mode, the cache is checked,
   // but we never compile.
@@ -565,6 +656,8 @@ PyObject* dynamo__custom_eval_frame(
 
   if (maybe_cached_code == nullptr) {
     // guard eval failed, keep propagating
+    abort_speculation();
+    eval_frame_callback_set(callback.ptr());
     fail();
     return eval_result;
   }
@@ -577,11 +670,81 @@ PyObject* dynamo__custom_eval_frame(
       extra->cache_entry_map.count(isolate_recompiles_id) > 0 ||
       extra->cache_entry_map.count(-1) > 0;
   if (guard_complete_hook != nullptr && has_relevant_entries) {
-    py::handle guard_complete_hook_handle(guard_complete_hook);
-    // False means force compilation (someone cache missed)
-    py::object res = guard_complete_hook_handle(!Py_IsNone(maybe_cached_code));
-    if (!py::cast<bool>(res)) {
-      maybe_cached_code = Py_None; // NB: non-owning
+    try {
+      py::handle guard_complete_hook_handle(guard_complete_hook);
+      // False means force compilation (someone cache missed)
+      py::object res =
+          guard_complete_hook_handle(!Py_IsNone(maybe_cached_code));
+      if (!py::cast<bool>(res)) {
+        maybe_cached_code = Py_None; // NB: non-owning
+      }
+    } catch (py::error_already_set& e) {
+      e.restore();
+      abort_speculation();
+      eval_frame_callback_set(callback.ptr());
+      fail();
+      return eval_result;
+    }
+  }
+
+  if (speculation_ticket && !speculation_ticket.is_none()) {
+    if (!Py_IsNone(maybe_cached_code) && speculative_candidate_matched) {
+      _PytorchRecordFunctionState* rf =
+          _pytorch_record_function_enter(speculative_commit_profiler_str);
+      bool commit_to_cached_code = false;
+      try {
+        commit_to_cached_code =
+            py::hasattr(speculation_ticket, "commit_to_cached_code");
+        if (commit_to_cached_code) {
+          speculation_ticket.attr("commit_to_cached_code")();
+        } else {
+          py::object result = speculation_ticket.attr("commit")();
+          _pytorch_record_function_exit(rf);
+          if (fullgraph_compiled_frame_count >= 0) {
+            fullgraph_compiled_frame_count++;
+          }
+          eval_frame_callback_set(callback.ptr());
+          clear_old_frame_if_python_312_plus(tstate, frame);
+          return result.release().ptr();
+        }
+        _pytorch_record_function_exit(rf);
+      } catch (py::error_already_set& e) {
+        _pytorch_record_function_exit(rf);
+        e.restore();
+        abort_speculation();
+        eval_frame_callback_set(callback.ptr());
+        fail();
+        return eval_result;
+      }
+
+      cached_code = (PyCodeObject*)maybe_cached_code;
+      eval_custom();
+
+      PyObject* exc_type = nullptr;
+      PyObject* exc_value = nullptr;
+      PyObject* exc_traceback = nullptr;
+      PyErr_Fetch(&exc_type, &exc_value, &exc_traceback);
+      try {
+        speculation_ticket.attr("finish")();
+        speculation_ticket = py::object();
+      } catch (py::error_already_set& e) {
+        e.restore();
+        if (exc_type != nullptr) {
+          PyErr_WriteUnraisable(speculation_ticket.ptr());
+        } else {
+          Py_XDECREF(eval_result);
+          eval_result = nullptr;
+          return eval_result;
+        }
+      }
+      PyErr_Restore(exc_type, exc_value, exc_traceback);
+      return eval_result;
+    }
+    abort_speculation();
+    if (PyErr_Occurred()) {
+      eval_frame_callback_set(callback.ptr());
+      fail();
+      return eval_result;
     }
   }
 

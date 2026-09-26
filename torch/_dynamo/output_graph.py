@@ -1002,6 +1002,7 @@ class OutputGraph(OutputGraphCommon):
 
         self.attr_source_cache: dict[tuple[Source, str], AttrSource] = {}
         self._cached_replayed_side_effect_source_refs: tuple[str, ...] | None = None
+        self.speculation_descriptor: object | None = None
 
     def track_generator(self, gen: "LocalGeneratorObjectVariable") -> None:
         self.local_generators.append(gen)
@@ -3052,6 +3053,12 @@ class OutputGraph(OutputGraphCommon):
             if self.package is not None:
                 self.package.add_backend_id(name, compiled_fn)
 
+            speculation_descriptor = None
+            if config.speculative_guard_eval:
+                speculation_descriptor = inspect.getattr_static(
+                    compiled_fn, "_torchdynamo_speculation_descriptor", None
+                )
+
             # If __torch_function__ subclass dispatch was inlined during
             # tracing, wrap the compiled graph to disable __torch_function__
             # at runtime, preventing double dispatch (the C++ dispatcher
@@ -3073,6 +3080,16 @@ class OutputGraph(OutputGraphCommon):
             counters["stats"]["unique_graphs"] += 1
             if old_fake_mode.shape_env is None:
                 raise AssertionError("old_fake_mode.shape_env must not be None")
+            if (
+                speculation_descriptor is not None
+                and tx.one_graph
+                and not self.export
+                and self.package is None
+                and not self.torch_function_subclass_inlined
+                and not self.side_effects.has_pending_external_side_effects()
+                and not self.backward_state
+            ):
+                self.speculation_descriptor = speculation_descriptor
             if specializations := old_fake_mode.shape_env.specializations:
                 specialization_guards = []
                 specialization_cache: dict[Specialization, Callable[[Any], Any]] = {}

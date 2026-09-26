@@ -68,6 +68,7 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   // Total cache entries across all compile scopes (for O(1)
   // has_any_cache_entries)
   size_t total_cache_entry_count{0};
+  size_t speculation_entry_count{0};
   // Frame state to detect dynamic shape dims
   py::dict frame_state;
   // Actions to apply to all frames with this code object (non-isolated)
@@ -199,7 +200,16 @@ void lookup(
     int64_t isolate_recompiles_id,
     PyObject** maybe_cached_code,
     const char** trace_annotation,
-    bool is_skip_guard_eval_unsafe);
+    bool is_skip_guard_eval_unsafe,
+    PyObject** matched_guard_manager);
+
+// Return the first backend-compatible entry when it explicitly supports
+// speculative guard evaluation. Returns nullptr when normal lookup ordering
+// cannot be preserved.
+CacheEntry* get_speculation_candidate(
+    ExtraState* extra_state,
+    PyObject* backend,
+    int64_t isolate_recompiles_id);
 
 // Try to resolve a cache lookup without materializing frame locals or running
 // guard managers. Returns true when the lookup is complete (hit or miss), and

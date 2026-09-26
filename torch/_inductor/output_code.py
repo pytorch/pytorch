@@ -557,6 +557,7 @@ class CompiledFxGraph(OutputCode):
     compile_region_name: str | None
     fx_kwargs: _CompileFxKwargs
     inputs_to_check: Sequence[int]
+    speculative_guard_eval_eligible: bool = False
 
     _boxed_call: bool | None = None
     _triton_bundle: TritonBundle | None = None
@@ -743,6 +744,14 @@ class CompiledFxGraph(OutputCode):
         self.compile_region_name = compile_region_name
         self.inputs_to_check = inputs_to_check
         self.fx_kwargs = fx_kwargs
+        eligible = fx_kwargs.get("speculative_guard_eval_eligible", False)
+        if eligible:
+            from .speculative_guard import (
+                is_scheduler_graph_speculative_guard_safe,
+            )
+
+            eligible = is_scheduler_graph_speculative_guard_safe(graph)
+        self.speculative_guard_eval_eligible = eligible
         self._set_compile_context_for_autotune_cache()
 
         # aot autograd needs to know to pass in inputs as a list
