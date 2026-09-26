@@ -55,6 +55,7 @@ from torch.testing._internal.common_xpu import Xe2_Or_Later
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     MI350_ARCH,
+    NAVI4_ARCH,
     parametrize,
     random_matrix_with_scaled_reduction_dim,
     run_tests,
@@ -2513,7 +2514,7 @@ class TestFP8Matmul(TestCase):
         not torch.version.hip and _get_torch_cuda_version() < (12, 9),
         "cuBLAS blockwise scaling added in CUDA 12.9",
     )
-    @runOnRocmArch(MI350_ARCH)
+    @runOnRocmArch(MI350_ARCH + NAVI4_ARCH)
     @parametrize("output_dtype", [torch.bfloat16, ])
     @parametrize("lhs_block,rhs_block", [(1, 1), (128, 1), (1, 128)])
     @parametrize("M,N,K", [(256, 256, 256), (256, 256, 512)])
