@@ -69,7 +69,7 @@ jobs:
       allow-reuse-old-whl: false
       test-matrix: |
         { include: [
-          { config: "native_aot", shard: 1, num_shards: 1, runner: "linux.aws.h100" },
+          { config: "native_aot", shard: 1, num_shards: 1, runner: "mt-l-x86iamx-22-225-h100" },
         ]}
       python-version: "3.11"
       compiler: gcc11

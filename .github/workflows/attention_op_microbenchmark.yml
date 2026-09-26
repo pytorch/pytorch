@@ -36,15 +36,15 @@ jobs:
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runner: linux.12xlarge.memory
+      runner: "l-x86iavx512-8-64"
       build-environment: linux-jammy-cuda13.0-py3.11-gcc11-sm80
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       cuda-arch-list: '8.0 9.0'
       test-matrix: |
         { include: [
-          { config: "attention_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
-          { config: "attention_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.h100" },
+          { config: "attention_microbenchmark_test", shard: 1, num_shards: 1, runner: "mt-l-x86iavx512-11-125-a100" },
+          { config: "attention_microbenchmark_test", shard: 1, num_shards: 1, runner: "mt-l-x86iamx-22-225-h100" },
         ]}
       python-version: "3.11"
       compiler: gcc11
@@ -75,7 +75,7 @@ jobs:
     needs: get-label-type
     with:
       runner_prefix: "mt-"
-      runner: linux.r7i.4xlarge
+      runner: "l-x86iavx512-8-64"
       build-environment: linux-jammy-cuda13.0-py3.12-gcc11-sm100
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}

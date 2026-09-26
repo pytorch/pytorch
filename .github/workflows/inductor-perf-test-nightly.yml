@@ -86,32 +86,32 @@ jobs:
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       # Every bit to make perf run faster helps
-      runner: linux.12xlarge.memory
+      runner: "l-x86iavx512-8-64"
       build-environment: linux-jammy-cuda13.0-py3.11-gcc11-sm80
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       cuda-arch-list: '8.0'
       test-matrix: |
         { include: [
-          { config: "inductor_huggingface_perf", shard: 1, num_shards: 5, runner: "linux.aws.a100" },
-          { config: "inductor_huggingface_perf", shard: 2, num_shards: 5, runner: "linux.aws.a100" },
-          { config: "inductor_huggingface_perf", shard: 3, num_shards: 5, runner: "linux.aws.a100" },
-          { config: "inductor_huggingface_perf", shard: 4, num_shards: 5, runner: "linux.aws.a100" },
-          { config: "inductor_huggingface_perf", shard: 5, num_shards: 5, runner: "linux.aws.a100" },
-          { config: "inductor_timm_perf", shard: 1, num_shards: 6, runner: "linux.aws.a100" },
-          { config: "inductor_timm_perf", shard: 2, num_shards: 6, runner: "linux.aws.a100" },
-          { config: "inductor_timm_perf", shard: 3, num_shards: 6, runner: "linux.aws.a100" },
-          { config: "inductor_timm_perf", shard: 4, num_shards: 6, runner: "linux.aws.a100" },
-          { config: "inductor_timm_perf", shard: 5, num_shards: 6, runner: "linux.aws.a100" },
-          { config: "inductor_timm_perf", shard: 6, num_shards: 6, runner: "linux.aws.a100" },
-          { config: "inductor_torchbench_perf", shard: 1, num_shards: 6, runner: "linux.aws.a100" },
-          { config: "inductor_torchbench_perf", shard: 2, num_shards: 6, runner: "linux.aws.a100" },
-          { config: "inductor_torchbench_perf", shard: 3, num_shards: 6, runner: "linux.aws.a100" },
-          { config: "inductor_torchbench_perf", shard: 4, num_shards: 6, runner: "linux.aws.a100" },
-          { config: "inductor_torchbench_perf", shard: 5, num_shards: 6, runner: "linux.aws.a100" },
-          { config: "inductor_torchbench_perf", shard: 6, num_shards: 6, runner: "linux.aws.a100" },
-          { config: "cachebench", shard: 1, num_shards: 2, runner: "linux.aws.a100" },
-          { config: "cachebench", shard: 2, num_shards: 2, runner: "linux.aws.a100" },
+          { config: "inductor_huggingface_perf", shard: 1, num_shards: 5, runner: "mt-l-x86iavx512-11-125-a100" },
+          { config: "inductor_huggingface_perf", shard: 2, num_shards: 5, runner: "mt-l-x86iavx512-11-125-a100" },
+          { config: "inductor_huggingface_perf", shard: 3, num_shards: 5, runner: "mt-l-x86iavx512-11-125-a100" },
+          { config: "inductor_huggingface_perf", shard: 4, num_shards: 5, runner: "mt-l-x86iavx512-11-125-a100" },
+          { config: "inductor_huggingface_perf", shard: 5, num_shards: 5, runner: "mt-l-x86iavx512-11-125-a100" },
+          { config: "inductor_timm_perf", shard: 1, num_shards: 6, runner: "mt-l-x86iavx512-11-125-a100" },
+          { config: "inductor_timm_perf", shard: 2, num_shards: 6, runner: "mt-l-x86iavx512-11-125-a100" },
+          { config: "inductor_timm_perf", shard: 3, num_shards: 6, runner: "mt-l-x86iavx512-11-125-a100" },
+          { config: "inductor_timm_perf", shard: 4, num_shards: 6, runner: "mt-l-x86iavx512-11-125-a100" },
+          { config: "inductor_timm_perf", shard: 5, num_shards: 6, runner: "mt-l-x86iavx512-11-125-a100" },
+          { config: "inductor_timm_perf", shard: 6, num_shards: 6, runner: "mt-l-x86iavx512-11-125-a100" },
+          { config: "inductor_torchbench_perf", shard: 1, num_shards: 6, runner: "mt-l-x86iavx512-11-125-a100" },
+          { config: "inductor_torchbench_perf", shard: 2, num_shards: 6, runner: "mt-l-x86iavx512-11-125-a100" },
+          { config: "inductor_torchbench_perf", shard: 3, num_shards: 6, runner: "mt-l-x86iavx512-11-125-a100" },
+          { config: "inductor_torchbench_perf", shard: 4, num_shards: 6, runner: "mt-l-x86iavx512-11-125-a100" },
+          { config: "inductor_torchbench_perf", shard: 5, num_shards: 6, runner: "mt-l-x86iavx512-11-125-a100" },
+          { config: "inductor_torchbench_perf", shard: 6, num_shards: 6, runner: "mt-l-x86iavx512-11-125-a100" },
+          { config: "cachebench", shard: 1, num_shards: 2, runner: "mt-l-x86iavx512-11-125-a100" },
+          { config: "cachebench", shard: 2, num_shards: 2, runner: "mt-l-x86iavx512-11-125-a100" },
         ]}
       selected-test-configs: ${{ inputs.benchmark_configs }}
       build-additional-packages: "vision audio fbgemm torchao"
