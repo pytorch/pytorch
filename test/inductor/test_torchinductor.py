@@ -138,7 +138,6 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_SLOW,
     TEST_WITH_TORCHINDUCTOR,
     xfailIf,
-    xfailIfS390X,
 )
 from torch.testing._internal.logging_utils import logs_to_string
 from torch.utils import _pytree as pytree
@@ -2363,7 +2362,6 @@ class CommonTemplate:
 
         self.common(fn, (torch.rand(1024), torch.randint(50, (50,))))
 
-    @xfailIfS390X
     @config.patch(debug_index_asserts=False)
     @config.patch("cpp.enable_tiling_heuristics", False)
     def test_neg_index(self):
@@ -6899,6 +6897,18 @@ for dtype in (torch.int32, torch.int64):
             (torch.randn(2, 4, 4, 4),),
         )
 
+    # halide/mps take the non-logical-index path in _pool_argmax_inner_fn, so the
+    # window offsets are still physical there; halide additionally fails to schedule
+    # the fallback argmax for this shape.
+    @skip_if_halide
+    @skip_if_mps
+    def test_adaptive_max_pool2d_transposed_indices(self):
+        # transposed input, indices must be logical and not physical offsets
+        def fn(x):
+            return aten.adaptive_max_pool2d(x, (2, 2))
+
+        self.common(fn, (torch.randn(2, 4, 12, 12).transpose(2, 3),))
+
     @xfail_if_mps_unimplemented
     def test_fractional_max_pool2d1(self):
         def fn(x, samples):
@@ -6953,6 +6963,18 @@ for dtype in (torch.int32, torch.int64):
 
         self.common(
             fn, (torch.randn(2, 4, 6, 6), torch.rand(2, 4, 2)), check_lowp=False
+        )
+
+    @xfail_if_mps_unimplemented
+    def test_fractional_max_pool2d_transposed_indices(self):
+        # transposed input, indices must be logical and not physical offsets
+        def fn(x, samples):
+            return aten.fractional_max_pool2d(x, (6, 5), (3, 3), samples)
+
+        self.common(
+            fn,
+            (torch.randn(2, 4, 36, 36).transpose(2, 3), torch.rand(2, 4, 2)),
+            check_lowp=False,
         )
 
     def test_multi_threading(self):
@@ -7256,6 +7278,21 @@ for dtype in (torch.int32, torch.int64):
             fn,
             (torch.randn([2, 2, 3, 6]),),
         )
+
+    # same as test_adaptive_max_pool2d_transposed_indices: halide/mps take the
+    # non-logical-index path in _pool_argmax_inner_fn and still return physical
+    # window offsets.
+    @skip_if_halide
+    @skip_if_mps
+    def test_max_pool2d_transposed_indices(self):
+        # transposed input, indices must be logical and not physical offsets
+        def fn(x):
+            return (
+                aten.max_pool2d_with_indices(x, [6, 6]),
+                aten.max_pool2d_with_indices(x, [3, 2], [2, 1], [1, 1], [1, 2]),
+            )
+
+        self.common(fn, (torch.randn([2, 4, 12, 12]).transpose(2, 3),))
 
     def test_avg_pool2d1(self):
         def fn(x):
@@ -12001,6 +12038,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         b = torch.empty(0)
         self.common(fn, [a, b])
 
+    # pad_mm picks padded vs unpadded bmm by timing sub-0.1 ms calls, and a padded
+    # pick adds a second kernel, so this test pins shape padding off rather than
+    # letting a timing decision change the kernel count. See #145189.
+    @config.patch(shape_padding=False)
     @with_tf32_off
     def test_slice_scatter_reinplace(self):
         class M(nn.Module):
@@ -13608,10 +13649,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             self.assertEqual(fw_code.count("halide_helpers.rand"), 1)
             self.assertEqual(bw_code.count("halide_helpers.rand"), 0)
         elif self.device == "cuda" and not torch._inductor.config.align_random_eager:
-            self.assertEqual(fw_code.count("triton_helpers.rand4x"), 1)
-            self.assertEqual(fw_code.count("tl.rand"), 0)
-            self.assertEqual(bw_code.count("triton_helpers.rand4x"), 0)
-            self.assertEqual(bw_code.count("tl.rand"), 0)
+            rand = "triton_helpers.rand4x" if config.use_rand4x else "tl.rand("
+            self.assertEqual(fw_code.count(rand), 1)
+            self.assertEqual(bw_code.count(rand), 0)
         elif (
             is_triton_cpu_backend(self.device)
             and not torch._inductor.config.align_random_eager
@@ -13667,10 +13707,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             # the triton signature specializes on 1 vs non-1, you might get 1
             # or 2 kernels. In newer versions of triton, there's no specialization
             # so we get only 1 kernel.
-            self.assertEqual(fw_code.count("triton_helpers.rand4x"), 2)
-            self.assertEqual(fw_code.count("tl.rand"), 0)
-            self.assertEqual(bw_code.count("triton_helpers.rand4x"), 0)
-            self.assertEqual(bw_code.count("tl.rand"), 0)
+            rand = "triton_helpers.rand4x" if config.use_rand4x else "tl.rand("
+            self.assertEqual(fw_code.count(rand), 2)
+            self.assertEqual(bw_code.count(rand), 0)
             self.assertEqual(
                 torch._inductor.metrics.generated_kernel_count,
                 4 if not config.triton.native_matmul else 6,
@@ -13682,6 +13721,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             )
 
     @xfail_if_mps  # Only works for Triton on CUDA
+    @config.patch(use_rand4x=True)
     def test_randn_uses_randn4x(self):
         if self.device != "cuda":
             raise unittest.SkipTest("Only valid for CUDA!")
@@ -13697,6 +13737,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(code.count("tl.randn"), 0)
 
     @xfail_if_mps  # Only works for Triton on CUDA
+    @config.patch(use_rand4x=True)
     def test_rand4x_falls_back_in_reduction(self):
         if self.device != "cuda":
             raise unittest.SkipTest("Only valid for CUDA!")
@@ -13711,7 +13752,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(code.count("tl.rand("), 1)
 
     @xfail_if_mps  # Only works for Triton on CUDA
-    @config.patch(align_random_eager=True)
+    @config.patch(align_random_eager=True, use_rand4x=True)
     def test_align_random_eager_skips_rand4x(self):
         if self.device != "cuda":
             raise unittest.SkipTest("Only valid for CUDA!")
@@ -15524,7 +15565,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     # To support this behavior, we need to allow const-propping tensors that store symint data.
     # For now, dynamo will explicitly graph break when it encounters user code with this behavior.
     @expectedFailureCodegenDynamic
-    @xfailIfS390X
     @skip_if_gpu_halide  # accuracy error
     def test_AllenaiLongformerBase_repro(self):
         def fn(query, scores, window_overlap):

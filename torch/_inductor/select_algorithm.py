@@ -72,13 +72,18 @@ from .codegen.triton import (
     TritonScheduling,
     TritonSymbols,
 )
-from .codegen.triton_utils import config_of, equal_1_arg_indices, signature_to_meta
+from .codegen.triton_utils import (
+    config_of,
+    equal_1_arg_indices,
+    signature_to_meta,
+    triton_meta_device_props,
+)
 from .codegen.wrapper import pexpr
 from .exc import CUDACompileError
 from .fx_utils import count_flops_fx
 from .ir import ChoiceCaller, PrimitiveInfoType
 from .ops_handler import StoreMode
-from .runtime.hints import DeviceProperties, TritonMeta
+from .runtime.hints import TritonMeta
 from .runtime.triton_compat import HAS_WARP_SPEC
 from .runtime.triton_heuristics import FixedGrid
 from .utils import (
@@ -912,7 +917,7 @@ class TritonTemplateKernel(TritonKernel):
                 argdefs=argdefs,
                 is_template=True,
             ),
-            "device": DeviceProperties.create(self.output_node.get_device()),
+            "device": triton_meta_device_props(self.output_node.get_device()),
             "constants": {},
         }
         # Rendered from a deferred hook, so the body -- including any subgraph
@@ -4202,9 +4207,9 @@ class AlgorithmSelectorCache(PersistentCache):
 
         if return_multi_template and (config.max_autotune or config.max_autotune_gemm):
             if use_pipelined_autotuning():
-                if config.benchmark_epilogue_fusion:
+                if config.benchmark_template_fusion:
                     raise AssertionError(
-                        "Benchmarking epilogues will cause gpu contention with pipelined autotuning"
+                        "Benchmarking template fusion will cause gpu contention with pipelined autotuning"
                     )
                 extern_kernels = [
                     c for c in choices if AlgorithmSelectorCache._is_extern(c)
@@ -5442,7 +5447,7 @@ class AlgorithmSelectorCache(PersistentCache):
             except CUDACompileError:
                 if not isinstance(choice, CUTLASSTemplateCaller):
                     log.exception(
-                        "CUDA compilation error during autotuning: \n%s. \nIgnoring this choice."
+                        "CUDA compilation error during autotuning. Ignoring this choice."
                     )
                 timing = float("inf")
             except NotImplementedError:
@@ -6231,7 +6236,7 @@ def autotune_select_algorithm(*args, **kwargs):
 
     if "return_multi_template" not in kwargs:
         kwargs["return_multi_template"] = (
-            torch._inductor.config.benchmark_epilogue_fusion
+            torch._inductor.config.benchmark_template_fusion
             or torch._inductor.config.pipeline_max_autotune_gemm
         )
 

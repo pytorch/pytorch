@@ -28,7 +28,7 @@ from torch.testing._internal.common_dtype import (
     highest_precision_float,
 )
 from torch.testing._internal.common_device_type import (
-    onlyCPU, onlyCUDA, onlyNativeDeviceTypes, disablecuDNN,
+    onlyCPU, onlyCUDA, onlyNativeDeviceTypes, onlyOn, disablecuDNN,
     skipCUDAIfNoCusolver, skipCPUIfNoLapack, skipCPUIfNoFFT, skipCUDAIf, precisionOverride,
     skipCPUIfNoMklSparse, toleranceOverride, tol, skipXPU, e4m3_type, e5m2_type, E4M3_MAX_POS, E5M2_MAX_POS,
     skipCUDAIfNoMagmaAndNoLinalgsolver,
@@ -45,11 +45,11 @@ from torch.testing._internal.common_quantized import (
 from torch.testing._internal.common_utils import (
     getRocmVersion,
     make_fullrank_matrices_with_distinct_singular_values,
-    TEST_WITH_ROCM, IS_FBCODE, IS_LINUX, IS_WINDOWS, IS_MACOS, MACOS_VERSION, TEST_SCIPY,
+    TEST_WITH_ROCM, IS_FBCODE, IS_LINUX, IS_WINDOWS, IS_MACOS, MACOS_VERSION, IS_APPLE_M1, TEST_SCIPY,
     torch_to_numpy_dtype_dict, numpy_to_torch_dtype, TEST_WITH_ASAN,
     GRADCHECK_NONDET_TOL, slowTest, TEST_WITH_SLOW,
     TEST_WITH_TORCHINDUCTOR, skipIfNoTritonDSL, skipIfNoCuteDSL, skipIfRocm, TEST_XPU,
-    TEST_CUDA, skipIfNoFlyDSL
+    TEST_CUDA, skipIfNoFlyDSL, skipIfRocmArch, MI200_ARCH
 )
 from torch.testing._utils import wrapper_set_seed
 
@@ -3315,6 +3315,19 @@ def sample_inputs_histc(op_info, device, dtype, requires_grad, **kwargs):
         # construct sample inputs with a few different bins values
         for bins in [1, 3, 10]:
             yield SampleInput(make_arg(size), bins=bins, min=min, max=max)
+
+    # Exercises implementations that switch algorithms for large bin counts.
+    yield SampleInput(make_arg((S,)), bins=8193, min=0, max=10)
+
+    if dtype.is_floating_point:
+        # Values just outside a narrow range must not produce an invalid bin.
+        narrow_range = torch.tensor(
+            [0.0, 5e-6, 1e-5, 1.2e-5],
+            device=device,
+            dtype=dtype,
+            requires_grad=requires_grad,
+        )
+        yield SampleInput(narrow_range, bins=1000, min=0.0, max=1e-5)
 
 def sample_inputs_bincount(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -13158,7 +13171,6 @@ op_db: list[OpInfo] = [
                    ref=np.ceil,
                    dtypes=all_types_and(torch.half, torch.bfloat16),
                    dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32, torch.int8),
-                   dtypesIfMPS=all_types_and(torch.half, torch.bfloat16, torch.bool),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
                    skips=(
@@ -14001,7 +14013,6 @@ op_db: list[OpInfo] = [
                    ref=np.floor,
                    dtypes=all_types_and(torch.half, torch.bfloat16),
                    dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32, torch.int8),
-                   dtypesIfMPS=all_types_and(torch.half, torch.bfloat16, torch.bool),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
                    skips=(
@@ -15078,12 +15089,6 @@ op_db: list[OpInfo] = [
                         DecorateInfo(unittest.skip("Skipped!"),
                                      'TestBinaryUfuncsDevice',
                                      'test_reference_numerics_extremal_values'),
-                        # NotImplementedError: The operator 'aten::heaviside.out' is not currently implemented for the MPS device
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager', device_type='mps'),
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
                     )),
     BinaryUfuncInfo('lcm',
                     ref=np.lcm,
@@ -15951,6 +15956,10 @@ op_db: list[OpInfo] = [
                             dtypes=(torch.int64,)),
                # RuntimeError: Convolution is supported only for Floating types
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+               # MIOpen's fp16 bwd-data solver ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC is inaccurate on gfx90a
+               # https://github.com/ROCm/rocm-libraries/issues/12322
+               DecorateInfo(skipIfRocmArch(MI200_ARCH), 'TestCommon', 'test_complex_half_reference_testing',
+                            device_type='cuda', dtypes=(torch.chalf,)),
                DecorateInfo(
                    unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
                    device_type='mps', dtypes=(torch.int64,)
@@ -16378,10 +16387,16 @@ op_db: list[OpInfo] = [
     OpInfo('constant_pad_nd',
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half, torch.float8_e4m3fn),
            sample_inputs_func=sample_inputs_constant_pad_nd,
            supports_out=False,
            skips=(
+               # SchemaCheckMode uses allclose, which does not support float8.
+               DecorateInfo(unittest.expectedFailure, 'TestSchemaCheckModeOpInfo', 'test_schema_correctness',
+                            dtypes=(torch.float8_e4m3fn,)),
+               # FP8 comparisons do not support the nonzero tolerances used by NNC.
+               DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness',
+                            dtypes=(torch.float8_e4m3fn,)),
                # bool can't be passed to Scalar arguments in JIT tracer because
                # BoolType is not a subtype of ScalarType.
                DecorateInfo(
@@ -16395,9 +16410,17 @@ op_db: list[OpInfo] = [
            gradcheck_fast_mode=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half, torch.float8_e4m3fn),
            sample_inputs_func=partial(sample_inputs_nn_pad, mode='constant'),
-           supports_out=False),
+           supports_out=False,
+           skips=(
+               # SchemaCheckMode uses allclose, which does not support float8.
+               DecorateInfo(unittest.expectedFailure, 'TestSchemaCheckModeOpInfo', 'test_schema_correctness',
+                            dtypes=(torch.float8_e4m3fn,)),
+               # FP8 comparisons do not support the nonzero tolerances used by NNC.
+               DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness',
+                            dtypes=(torch.float8_e4m3fn,)),
+           )),
     OpInfo('nn.functional.pad',
            variant_test_name='reflect',
            supports_forward_ad=True,
@@ -17288,10 +17311,11 @@ op_db: list[OpInfo] = [
         # the disable-test bot and flaky-test aggregator. Sample inputs ignore
         # it and use e4m3_type / e5m2_type instead.
         dtypesIfCUDA=empty_types() + (torch.float8_e4m3fn,),
+        dtypesIfMPS=custom_types(torch.float8_e4m3fn),
         supports_out=True,
         supports_forward_ad=False,
         supports_autograd=False,
-        decorators=[onlyCUDA, skipCUDAIf(not PLATFORM_SUPPORTS_FP8, 'Requires FP8 support')],
+        decorators=[onlyOn(["cuda", "mps"]), skipCUDAIf(not PLATFORM_SUPPORTS_FP8, 'Requires FP8 support')],
         skips=(
             # Sample inputs isn't really parametrized on dtype
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),
@@ -17467,10 +17491,8 @@ op_db: list[OpInfo] = [
         check_batched_forward_grad=False,
         # TODO: Skip because it produces a CUDA illegal memory access for some reason
         skip_cow_input_backward=True,
-        # FIXME: mask_type == 2 (LowerRight)
         decorators=[
             skipCUDAIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "This platform doesn't support efficient attention"),
-            skipCUDAIf(TEST_WITH_ROCM, "Efficient attention on ROCM doesn't support custom_mask_type==2"),
             skipXPU],
         skips=(
             # Checking the scaler value of the philox seed and offset
@@ -18968,7 +18990,6 @@ op_db: list[OpInfo] = [
                    aliases=('fix', ),
                    ref=np.trunc,
                    dtypes=all_types_and(torch.half, torch.bfloat16),
-                   dtypesIfMPS=all_types_and(torch.half, torch.bfloat16, torch.bool),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
                    supports_sparse=True,
@@ -19018,8 +19039,8 @@ op_db: list[OpInfo] = [
                    )),
     UnaryUfuncInfo('nan_to_num',
                    ref=np.nan_to_num,
-                   dtypes=all_types_and(torch.half, torch.bool, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and(torch.half, torch.bool, torch.bfloat16),
+                   dtypes=all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
                    supports_sparse=True,
@@ -20623,12 +20644,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
            sample_inputs_func=sample_inputs_histc,
            supports_out=True,
            supports_autograd=False,
-           skips=(
-               # CUDA histc returns a float tensor but does not correctly warn when passed an integral out tensor
-               # "AssertionError: RuntimeError not raised : Expected RuntimeError when doing an unsafe cast
-               # from a result of dtype torch.float32 into an out= with dtype torch.long"
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type=('cuda', 'xpu')),
-           )),
+    ),
     OpInfo('bincount',
            dtypes=integral_types_and(),
            sample_inputs_func=sample_inputs_bincount,
@@ -22973,10 +22989,11 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
         dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
-        # MPS: int64 amin requires macOS 15+ (ulong atomic_min intrinsic).
+        # MPS: int64 amin needs the ulong atomic_min intrinsic: macOS 15+, and
+        # not Apple7 (M1), which does not have it at any macOS version.
         dtypesIfMPS=(
             _dispatch_dtypes(t for t in all_types_and(torch.float16, torch.bfloat16, torch.bool) if t != torch.int64)
-            if MACOS_VERSION < 15.0
+            if MACOS_VERSION < 15.0 or IS_APPLE_M1
             else all_types_and(torch.float16, torch.bfloat16, torch.bool)
         ),
         supports_forward_ad=True,
@@ -22990,10 +23007,11 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
         dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
-        # MPS: int64 amax requires macOS 15+ (ulong atomic_max intrinsic).
+        # MPS: int64 amax needs the ulong atomic_max intrinsic: macOS 15+, and
+        # not Apple7 (M1), which does not have it at any macOS version.
         dtypesIfMPS=(
             _dispatch_dtypes(t for t in all_types_and(torch.float16, torch.bfloat16, torch.bool) if t != torch.int64)
-            if MACOS_VERSION < 15.0
+            if MACOS_VERSION < 15.0 or IS_APPLE_M1
             else all_types_and(torch.float16, torch.bfloat16, torch.bool)
         ),
         supports_forward_ad=True,
@@ -25430,9 +25448,6 @@ python_ref_db = [
             DecorateInfo(unittest.skip("Skipped!"),
                          'TestBinaryUfuncsDevice',
                          'test_reference_numerics_extremal_values'),
-            # NotImplementedError: The operator 'aten::heaviside.out' is not currently implemented for the MPS device
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='mps'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps'),
         ),
     ),
     ElementwiseBinaryPythonRefInfo(

@@ -1746,8 +1746,15 @@ TEST_ONEDNN = torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_availab
 TEST_ACL = torch.backends.mkldnn.is_available() and torch.ops.mkldnn._is_mkldnn_acl_supported()
 TEST_MPS = torch.backends.mps.is_available()
 MACOS_VERSION = float('.'.join(platform.mac_ver()[0].split('.')[:2]) or -1)
+
+# The CI fleet runs M1 (Apple7, 16 GB) and M2 Pro (Apple8, 32 GB) on the same
+# macOS release, so MACOS_VERSION on its own no longer tells the two apart.
+# Tests that need the memory or the Metal feature set have to say so.
+# Covers M1 Pro/Max/Ultra too: all are Apple7 and share the feature set.
+IS_APPLE_M1 = LazyVal(lambda: TEST_MPS and torch.backends.mps.get_name().startswith("Apple M1"))  # type: ignore[call-arg]
 TEST_XPU = torch.xpu.is_available()
 TEST_HPU = bool(hasattr(torch, "hpu") and torch.hpu.is_available())
+TEST_MTIA = LazyVal(lambda: hasattr(torch, "mtia") and torch.mtia.is_available())  # type: ignore[call-arg]
 TEST_CUDA = torch.cuda.is_available()
 TEST_ACCELERATOR = LazyVal(lambda: torch.accelerator.is_available())  # type: ignore[call-arg]
 TEST_MULTIACCELERATOR = LazyVal(lambda: torch.accelerator.device_count() > 1)  # type: ignore[call-arg]
@@ -2918,6 +2925,37 @@ def skipIfCachingAllocatorDisabled(fn):
         and not torch._C._cuda_cudaCachingAllocator_is_enabled(),
         "requires the CUDA/HIP caching allocator (current allocator is uncached)",
     )(fn)
+
+def requires_multigpu(fn):
+    """Marks a test that needs more than one GPU.
+
+    Attaches the pytest marker the distributed CI configs partition on, so the
+    test lands in the multi-GPU run rather than the single-GPU one where it
+    could only ever skip, and skips it wherever fewer than two GPUs are visible.
+
+    The marker is attached only when pytest is importable: files using this also
+    run under an internal test runner that has no pytest, where the skip alone
+    is the whole behaviour.
+    """
+    reason = "requires >= 2 GPUs"
+    skip = torch.cuda.device_count() < 2
+
+    if isinstance(fn, type):
+        if has_pytest:
+            fn = pytest.mark.multigpu(fn)
+        return unittest.skipIf(skip, reason)(fn)
+
+    # Isolate decorator metadata when parameter variants share the original
+    # test function.
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        return fn(*args, **kwargs)
+
+    if has_pytest:
+        wrapper = pytest.mark.multigpu(wrapper)
+
+    return unittest.skipIf(skip, reason)(wrapper)
+
 
 def periodic(fn):
     """Marks a test that CI runs only in periodic test mode.
