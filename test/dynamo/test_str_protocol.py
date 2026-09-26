@@ -89,6 +89,32 @@ class TpStrTests(TestCase):
         assert object.__str__([1, 2, 3]) == "[1, 2, 3]"  # noqa: S101
 
 
+class FormatTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_builtin_format(self):
+        def fn():
+            return format(1.25, ".1f"), format(123, "04d"), str.format("{:04d}", 42)
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    def test_bound_numeric_format(self):
+        def fn():
+            return (1.25).__format__(".1f"), (123).__format__("04d")
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    def test_builtin_format_invalid_spec(self):
+        def fn():
+            try:
+                format(1.5, "Q")
+            except ValueError as e:
+                return str(e)
+            return "no error"
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+
 class TpStrUserDefinedTests(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
