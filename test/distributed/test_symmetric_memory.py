@@ -2523,6 +2523,89 @@ class SymmetricMemoryTestCudaGraph(MultiProcContinuousTest):
         with _enable_multicast_for_test(self, self.device.index):
             self._run_low_contention_all_gather_ce_multicast_cuda_graph()
 
+    # ---- CUDA graph capture -------------------------------------------------
+    #
+    # Allocation and the first rendezvous of a buffer synchronize the stream,
+    # which is not permitted during capture, so the CUDA backend refuses both
+    # with an actionable error instead of failing inside the driver. Once a
+    # buffer has been rendezvoused and the collective has run once eagerly,
+    # capturing it and replaying must match eager results on every replay.
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_alloc_and_first_rendezvous_during_capture_raise(self) -> None:
+        self._init_process()
+        if symm_mem.get_backend(self.device) != "CUDA":
+            self.skipTest("the capture guard is implemented in the CUDA backend")
+        group_name = dist.group.WORLD.group_name
+        msg = "capturing a graph"
+
+        with self.assertRaisesRegex(RuntimeError, msg):
+            with torch.cuda.graph(torch.cuda.CUDAGraph()):
+                symm_mem.empty(64, dtype=torch.float32, device=self.device)
+
+        t = symm_mem.empty(64, dtype=torch.float32, device=self.device)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            with torch.cuda.graph(torch.cuda.CUDAGraph()):
+                # Not rendezvoused yet: the op rendezvouses lazily, and that
+                # first rendezvous must be refused.
+                torch.ops.symm_mem.one_shot_all_reduce(t, "sum", group_name)
+
+        # Both refusals must leave the process and the buffer usable.
+        t.fill_(float(self.rank))
+        symm_mem.rendezvous(t, group=group_name)
+        res = torch.ops.symm_mem.one_shot_all_reduce(t, "sum", group_name)
+        self.assertEqual(res, torch.full_like(res, float(sum(range(self.world_size)))))
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_collective_cuda_graph_replay(self) -> None:
+        """Warm up a collective eagerly on a rendezvoused buffer, capture it,
+        replay several times and check the last replay. Inside the graph the
+        buffer is refilled with rank + step and step is incremented, so every
+        replay reduces different values and a skipped or stale replay is
+        detected. Rank 0 is delayed so replay also exercises the in-kernel
+        peer synchronization."""
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+        numel = 1920
+        replays = 4
+
+        t = symm_mem.empty(numel, dtype=torch.float32, device=self.device)
+        symm_mem_hdl = symm_mem.rendezvous(t, group=group_name)
+        step = torch.zeros((), dtype=torch.float32, device=self.device)
+
+        def fill_and_run() -> torch.Tensor:
+            t.fill_(float(self.rank)).add_(step)
+            step.add_(1.0)
+            if self.rank == 0:
+                torch.cuda._sleep(20_000_000)
+            return torch.ops.symm_mem.one_shot_all_reduce(t, "sum", group_name)
+
+        warmup = fill_and_run()
+        torch.cuda.synchronize()
+
+        graph = torch.cuda.CUDAGraph()
+        observed = torch.empty_like(warmup)
+        with torch.cuda.graph(graph):
+            observed.copy_(fill_and_run())
+
+        for _ in range(replays):
+            graph.replay()
+        torch.cuda.synchronize()
+
+        # Capture does not execute, so step counts the warm-up plus replays,
+        # and the last replay reduced rank + replays on every rank.
+        self.assertEqual(step.item(), 1.0 + replays)
+        expected = float(sum(range(self.world_size)) + replays * self.world_size)
+        self.assertEqual(observed, torch.full_like(observed, expected))
+        # Every replay must leave the signal pad back at zero.
+        self.assertTrue(symm_mem_hdl.get_signal_pad(self.rank).eq(0).all().item())
+
 
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()

@@ -161,6 +161,18 @@ class CUDAAllocator : public DeviceAllocator {
   // registration, or inductor cudagraph_trees warmup).
   virtual void markCaptureBegin(c10::DeviceIndex /*device*/) {}
   virtual void markCaptureEnd(c10::DeviceIndex /*device*/) {}
+  // Whether the current stream on `device` is inside a CUDA graph capture.
+  // The native allocator answers from the capture count kept by
+  // markCaptureBegin/markCaptureEnd and only queries the driver while a
+  // capture is active on that device, so eager callers pay no driver call.
+  // Allocators that do not track captures fall back to the driver query.
+  // The default stream's handle is nullptr, which the driver resolves
+  // against the current device, so `device` is selected for the query.
+  virtual bool isCaptureContext(c10::DeviceIndex device) {
+    c10::DeviceGuard guard(c10::Device(c10::DeviceType::CUDA, device));
+    return c10::cuda::currentStreamCaptureStatusMayInitCtx() !=
+        CaptureStatus::None;
+  }
   virtual void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) = 0;
   virtual int getPoolUseCount(
       c10::DeviceIndex /*device*/,
@@ -440,6 +452,10 @@ inline void markCaptureBegin(c10::DeviceIndex device) {
 
 inline void markCaptureEnd(c10::DeviceIndex device) {
   get()->markCaptureEnd(device);
+}
+
+inline bool isCaptureContext(c10::DeviceIndex device) {
+  return get()->isCaptureContext(device);
 }
 
 inline void recordHistory(
