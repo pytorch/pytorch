@@ -34,8 +34,13 @@ from torch._inductor.utils import run_and_get_code
 from torch._ops import OpOverload
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.immutable_collections import immutable_dict
+from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.testing import FileCheck
-from torch.testing._internal.common_cuda import blas_library_context, TEST_MULTIGPU
+from torch.testing._internal.common_cuda import (
+    blas_library_context,
+    PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    TEST_MULTIGPU,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_ARM64,
@@ -5287,6 +5292,35 @@ if HAS_CUDA_AND_TRITON:
                 self.assertEqual(eager_out, compiled_out)
 
             # index_put reads CPU indices, so it runs between two graphs.
+            self.assertEqual(self.get_manager().new_graph_id().id, 2)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "needs flash attention")
+        def test_graph_partition_sdpa_dropout_not_split(self):
+            # Flash attention returns RNG state that its backward reads. Its meta
+            # kernel creates those tensors on the meta device, and FakeTensorMode
+            # gives them the inputs' device. If they came out on the CPU, the
+            # cross-device rule would split attention out of both CUDA graphs.
+            def f(q, k, v):
+                attn = torch.nn.functional.scaled_dot_product_attention
+                out = attn(q * 2, k, v, dropout_p=0.1)
+                return (out * 2).float().sum()
+
+            def make_input():
+                x = torch.randn(2, 4, 128, 64, device="cuda", dtype=torch.half)
+                return x.requires_grad_()
+
+            compiled_f = torch.compile(f, mode="reduce-overhead", fullgraph=True)
+
+            log_stream, ctx = logs_to_string("torch._inductor.scheduler", "cudagraphs")
+            with ctx(), sdpa_kernel(SDPBackend.FLASH_ATTENTION):
+                for _ in range(3):
+                    compiled_f(make_input(), make_input(), make_input()).backward()
+
+            logs = log_stream.getvalue()
+            partitions = re.findall(r"Created \d+ graph partitions: .*", logs)
+            whole = "Created 1 graph partitions: 1 cudagraphable, 0 non-cudagraphable"
+            self.assertEqual(partitions, [whole] * 2)
             self.assertEqual(self.get_manager().new_graph_id().id, 2)
 
         @torch._inductor.config.patch("graph_partition", True)
