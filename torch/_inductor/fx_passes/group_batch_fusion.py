@@ -529,9 +529,11 @@ class BatchLinearLHSFusion(BatchFusion):
         ) and is_linear_node_can_be_fused(node):
             # Splitting a wide GEMM returns non-contiguous views. Avoid changing
             # observable layout or passing those views to opaque custom operators.
-            # The guard walks through view-producing users (including split /
-            # chunk / indexing via getitem) to find any consumer that can
-            # observe the layout or requires contiguity.
+            # Any aliasing or conversion user of the unmaterialized output
+            # rejects; once contiguous() materializes it, the walk follows
+            # possible aliases and rejects layout observers, graph output, and
+            # opaque ops that may compare aliases with another input derived
+            # from the same projection.
             if _has_layout_sensitive_user(node):
                 return None
             input = get_arg_value(node, 0, "input")
@@ -645,6 +647,11 @@ class BatchLinearLHSFusion(BatchFusion):
 
 
 @functools.lru_cache(None)
+def _aten_op_overloads(name):
+    packet = getattr(torch.ops.aten, name, None)
+    return tuple(packet.op_overloads()) if packet is not None else ()
+
+
 def _layout_target_overloads(target):
     if isinstance(target, torch._ops.OpOverload):
         return (target,)
@@ -653,28 +660,49 @@ def _layout_target_overloads(target):
     if isinstance(target, str):
         if not hasattr(torch.Tensor, target):
             return ()
-        name = target
-    else:
-        # Resolve genuine torch builtins by identity, not a callable's name.
-        name = torch.jit._builtins._find_builtin(target)
-        if name is None or not name.startswith("aten::"):
-            return ()
-        name = name.removeprefix("aten::")
-    packet = getattr(torch.ops.aten, name, None)
-    return tuple(packet.op_overloads()) if packet is not None else ()
+        return _aten_op_overloads(target)
+    # Resolve genuine torch builtins by identity, not a callable's name.
+    name = torch.jit._builtins._find_builtin(target)
+    if name is None or not name.startswith("aten::"):
+        return ()
+    return _aten_op_overloads(name.removeprefix("aten::"))
 
 
 def _layout_user_overloads(user):
     target = user.target
-    # Functional wrappers have a Python-only inplace argument.
+    args = user.args
+    kwargs = dict(user.kwargs)
+    # Functional wrappers may carry arguments absent from their ATen schemas.
     if target in (torch.nn.functional.relu, torch.nn.functional.silu):
         if get_arg_value(user, 1, "inplace") not in (None, False):
             return ()
+        args = args[:1]
+        kwargs.pop("inplace", None)
         target = (
             torch.ops.aten.relu
             if target is torch.nn.functional.relu
             else torch.ops.aten.silu
         )
+    elif target is torch.nn.functional.softmax:
+        if get_arg_value(user, 1, "dim") is None:
+            return ()
+        args = (*args[:2], *args[3:])
+        kwargs.pop("_stacklevel", None)
+        target = torch.ops.aten.softmax
+    elif target is torch.nn.functional.layer_norm:
+        target = torch.ops.aten.layer_norm
+    elif target is torch.nn.functional.dropout:
+        if get_arg_value(user, 3, "inplace") not in (None, False):
+            return ()
+        args = args[:3]
+        kwargs.pop("inplace", None)
+        if "training" in kwargs:
+            kwargs["train"] = kwargs.pop("training")
+        if len(args) < 2:
+            kwargs.setdefault("p", 0.5)
+        if len(args) < 3:
+            kwargs.setdefault("train", True)
+        target = torch.ops.aten.dropout
     elif target in (operator.add, operator.sub, operator.mul, operator.truediv):
         target = {
             operator.add: torch.ops.aten.add,
@@ -686,16 +714,18 @@ def _layout_user_overloads(user):
     for op in _layout_target_overloads(target):
         schema = op._schema
         positional = [arg for arg in schema.arguments if not arg.kwarg_only]
-        if len(user.args) > len(positional):
+        if len(args) > len(positional):
             continue
-        supplied = OrderedSet(arg.name for arg in positional[: len(user.args)])
-        kwargs = dict(user.kwargs)
+        supplied = OrderedSet(arg.name for arg in positional[: len(args)])
+        candidate_kwargs = dict(kwargs)
         # Python torch functions accept input= for a schema's self argument.
-        if "input" in kwargs and any(arg.name == "self" for arg in schema.arguments):
-            kwargs["self"] = kwargs.pop("input")
-        if supplied.intersection(kwargs):
+        if "input" in candidate_kwargs and any(
+            arg.name == "self" for arg in schema.arguments
+        ):
+            candidate_kwargs["self"] = candidate_kwargs.pop("input")
+        if supplied.intersection(candidate_kwargs):
             continue
-        supplied.update(kwargs)
+        supplied.update(candidate_kwargs)
         if supplied.difference(arg.name for arg in schema.arguments):
             continue
         if any(
@@ -783,8 +813,12 @@ _LAYOUT_INDEPENDENT_OPS = OrderedSet(
 
 
 def _has_layout_sensitive_user(node: torch.fx.Node) -> bool:
-    # Follow possible aliases even after contiguous() normalizes the layout:
-    # eager contiguous() may return self while the fused slice needs a copy.
+    # The unmaterialized output rejects every aliasing, conversion,
+    # observing, or opaque user outright; only layout-independent
+    # consumers applied directly to it continue, and contiguous()
+    # materializes it. After that the walk follows possible aliases even
+    # though the layout was normalized: eager contiguous() may return self
+    # while the fused slice needs a copy.
     queue = [(node, True)]
     seen = OrderedSet(queue)
     while queue:
@@ -795,16 +829,19 @@ def _has_layout_sensitive_user(node: torch.fx.Node) -> bool:
             if user.op not in ("call_method", "call_function"):
                 return True
             exposed = layout_exposed
-            if user.target is operator.getitem or (
-                user.op == "call_method" and user.target in _CONVERSION_METHODS
-            ):
-                pass
-            else:
+            if layout_exposed:
+                if current is not node:
+                    # Reached through an alias of the unmaterialized output.
+                    return True
+                if user.target is operator.getitem or (
+                    user.op == "call_method" and user.target in _CONVERSION_METHODS
+                ):
+                    return True
                 ops = _layout_user_overloads(user)
                 if not ops or any(op._schema.is_mutable for op in ops):
                     return True
                 names = OrderedSet(op.overloadpacket.__name__ for op in ops)
-                if layout_exposed and any(
+                if any(
                     op.namespace != "aten"
                     or get_layout_constraint_tag(op, with_default=False)
                     in (
@@ -824,41 +861,76 @@ def _has_layout_sensitive_user(node: torch.fx.Node) -> bool:
                     value = node.meta.get("example_value", node.meta.get("val"))
                     # All matched projections have positive width. With more
                     # than one row a direct fused slice must materialize here.
-                    if (
-                        current is node
-                        and value is not None
-                        and statically_known_true(value.shape[0] > 1)
-                    ):
+                    if value is not None and statically_known_true(value.shape[0] > 1):
                         exposed = False
-                elif names.intersection(_CRASH_VIEW_OPS | _LAYOUT_OBSERVING_OPS):
-                    if layout_exposed:
-                        return True
-                elif any(
-                    op.is_view or torch.Tag.maybe_aliasing_or_mutating in op.tags
-                    for op in ops
-                ) or names.intersection(
-                    _PROPAGATE_VIEW_OPS | OrderedSet(["type_as", "to", "clone"])
+                elif (
+                    names.intersection(_CRASH_VIEW_OPS | _LAYOUT_OBSERVING_OPS)
+                    or any(
+                        op.is_view or torch.Tag.maybe_aliasing_or_mutating in op.tags
+                        for op in ops
+                    )
+                    or names.intersection(
+                        _PROPAGATE_VIEW_OPS | OrderedSet(["type_as", "to", "clone"])
+                    )
                 ):
-                    pass
+                    return True
                 elif any(torch.Tag.pointwise in op.tags for op in ops) or all(
-                    (not layout_exposed and op.namespace != "aten")
-                    or op.overloadpacket.__name__ in _LAYOUT_INDEPENDENT_OPS
-                    for op in ops
+                    op.overloadpacket.__name__ in _LAYOUT_INDEPENDENT_OPS for op in ops
                 ):
-                    # A reshape may switch from a view to a copy, changing
-                    # stride order even after a pointwise op or clone.
-                    if layout_exposed and current is not node:
-                        return True
-                    # Opaque consumers can compare aliases across multiple
-                    # contiguous paths, even with nonmutating schemas.
-                    if (
-                        any(op.namespace != "aten" for op in ops)
-                        and len(user.all_input_nodes) != 1
-                    ):
-                        return True
+                    # Applied directly to the output, these cannot expose
+                    # the fused strides: the walk ends here.
                     continue
                 else:
                     return True
+            else:
+                if user.target is operator.getitem or (
+                    user.op == "call_method" and user.target in _CONVERSION_METHODS
+                ):
+                    pass
+                else:
+                    ops = _layout_user_overloads(user)
+                    if not ops or any(op._schema.is_mutable for op in ops):
+                        return True
+                    names = OrderedSet(op.overloadpacket.__name__ for op in ops)
+                    if any(op.namespace != "aten" for op in ops):
+                        # Another input derived from this projection may compare
+                        # aliases across paths materialized by contiguous().
+                        for other in user.all_input_nodes:
+                            if other is current:
+                                continue
+                            pending = [other]
+                            visited = OrderedSet()
+                            while pending:
+                                candidate = pending.pop()
+                                if candidate is node:
+                                    return True
+                                if candidate not in visited:
+                                    visited.add(candidate)
+                                    pending.extend(candidate.all_input_nodes)
+                    if names == OrderedSet(["contiguous"]):
+                        if get_arg_value(user, 1, "memory_format") not in (
+                            None,
+                            torch.contiguous_format,
+                        ):
+                            return True
+                    elif names.intersection(
+                        _CRASH_VIEW_OPS
+                        | _LAYOUT_OBSERVING_OPS
+                        | _PROPAGATE_VIEW_OPS
+                        | OrderedSet(["type_as", "to", "clone"])
+                    ) or any(
+                        op.is_view or torch.Tag.maybe_aliasing_or_mutating in op.tags
+                        for op in ops
+                    ):
+                        pass
+                    elif any(torch.Tag.pointwise in op.tags for op in ops) or all(
+                        (op.namespace != "aten")
+                        or op.overloadpacket.__name__ in _LAYOUT_INDEPENDENT_OPS
+                        for op in ops
+                    ):
+                        continue
+                    else:
+                        return True
             state = (user, exposed)
             if state not in seen:
                 seen.add(state)
