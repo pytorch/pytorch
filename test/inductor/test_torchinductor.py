@@ -3556,6 +3556,32 @@ class CommonTemplate:
         a = torch.rand(())
         self.common(fn, (a,))
 
+    @parametrize("dtype", (torch.uint8, torch.int32, torch.int64, torch.bool))
+    @parametrize("shape", ((), (4,)))
+    @parametrize("dynamic", (False, True))
+    def test_logcumsumexp_unsupported_dtype(self, dtype, shape, dynamic):
+        # https://github.com/pytorch/pytorch/issues/197807
+        # logcumsumexp only supports floating point and complex dtypes. Compiled
+        # code must reject the others at trace time, like eager does.
+        def fn(x):
+            return x.logcumsumexp(0)
+
+        def fn_out(x, out):
+            return torch.logcumsumexp(x, 0, out=out)
+
+        torch._dynamo.reset()
+        x = torch.zeros(shape, dtype=dtype, device=self.device)
+        out = torch.empty_like(x)
+
+        with self.assertRaises(NotImplementedError):
+            fn(x)
+        with self.assertRaises(NotImplementedError):
+            torch.compile(fn, dynamic=dynamic)(x)
+        with self.assertRaises(NotImplementedError):
+            fn_out(x, out)
+        with self.assertRaises(NotImplementedError):
+            torch.compile(fn_out, dynamic=dynamic)(x, out)
+
     def test_clamp(self):
         def fn(a, b):
             return (a.clamp(-0.1, 0.1), b.clamp(0), torch.clamp(a + b, max=0))
