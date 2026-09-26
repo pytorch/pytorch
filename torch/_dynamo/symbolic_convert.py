@@ -2390,11 +2390,27 @@ class InstructionTranslatorBase(
                 raise AssertionError("expected type(val) is bool to be true")
             self.is_tracing_resume_prologue = val
 
+    def _raise_unbound_local_error(self, name: str) -> NoReturn:
+        raise_observed_exception(
+            UnboundLocalError,
+            self,
+            args=[
+                f"cannot access local variable '{name}' where it is not associated with a value"
+            ],
+        )
+
     def DELETE_FAST(self, inst: Instruction) -> None:
-        var = self.symbolic_locals.get(inst.argval)
+        name = inst.argval
+        var = self.symbolic_locals.get(name)
+        if var is None or istype(var, NullVariable):
+            self._raise_unbound_local_error(name)
         if isinstance(var, TensorVariable):
             self._maybe_emit_sync_dealloc(var)
-        del self.symbolic_locals[inst.argval]
+        if sys.version_info >= (3, 12):
+            # LOAD_FAST_CHECK handles NULL locals on Python 3.12 and newer.
+            self.symbolic_locals[name] = NullVariable()
+        else:
+            del self.symbolic_locals[name]
 
     def _maybe_emit_sync_dealloc(self, var: TensorVariable) -> None:
         from .variables.streams import get_current_stream, new_event
@@ -5077,13 +5093,9 @@ class InstructionTranslatorBase(
                 self._comprehension_depth -= 1
 
     def LOAD_FAST_CHECK(self, inst: Instruction) -> None:
-        if istype(self.symbolic_locals.get(inst.argval, None), NullVariable):
-            unimplemented(
-                gb_type="LOAD_FAST_CHECK on uninitialized variable",
-                context=inst.argval,
-                explanation=f"Attempted to load uninitialized local variable {inst.argval}",
-                hints=[*graph_break_hints.USER_ERROR],
-            )
+        name = inst.argval
+        if istype(self.symbolic_locals.get(name), NullVariable):
+            self._raise_unbound_local_error(name)
         self.LOAD_FAST(inst)
 
     def LOAD_FAST_AND_CLEAR(self, inst: Instruction) -> None:
