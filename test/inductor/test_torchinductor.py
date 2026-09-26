@@ -20118,6 +20118,44 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(y, ey)
         self.assertEqual(base, ebase)
 
+    # https://github.com/pytorch/pytorch/issues/197893
+    @parametrize("requires_grad", (False, True))
+    def test_preserve_output_aliasing_noop_optimization(self, requires_grad):
+        def fn(x):
+            return x + 0, x * 1, torch.sin(x)
+
+        eager_input = torch.randn(8, device=self.device, requires_grad=requires_grad)
+        compiled_input = eager_input.detach().clone().requires_grad_(requires_grad)
+        eager_outputs = fn(eager_input)
+        compiled_outputs = torch.compile(fn, fullgraph=True)(compiled_input)
+
+        self.assertEqual(compiled_outputs, eager_outputs)
+        for inputs, outputs in (
+            ((eager_input,), eager_outputs),
+            ((compiled_input,), compiled_outputs),
+        ):
+            for input_tensor, output in itertools.product(inputs, outputs):
+                self.assertFalse(torch._C._is_alias_of(input_tensor, output))
+            for left, right in itertools.combinations(outputs, 2):
+                self.assertFalse(torch._C._is_alias_of(left, right))
+
+    def test_preserve_output_aliasing_kernel_free(self):
+        def fn(x):
+            return x + 0
+
+        x = torch.randn(8, device=self.device)
+        output = torch.compile(fn, fullgraph=True)(x)
+        self.assertEqual(output, fn(x))
+        self.assertFalse(torch._C._is_alias_of(x, output))
+
+    def test_preserve_output_output_aliasing_noop_optimization(self):
+        def fn(x):
+            y = torch.sin(x)
+            return y, y + 0
+
+        outputs = torch.compile(fn, fullgraph=True)(torch.randn(8, device=self.device))
+        self.assertFalse(torch._C._is_alias_of(*outputs))
+
     # end of class CommonTemplate - add new tests here
 
 

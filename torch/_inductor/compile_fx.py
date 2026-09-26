@@ -131,6 +131,7 @@ from .fx_passes.post_grad import (
     view_to_reshape,
 )
 from .fx_passes.pre_grad import pre_grad_passes
+from .fx_utils import get_node_storage
 from .graph import GraphLowering
 from .ir import get_device_type, IRNode
 from .triton_bundler import TritonBundler
@@ -432,6 +433,80 @@ def record_original_output_strides(gm: GraphModule) -> None:
             # pyrefly: ignore [bad-argument-type]
             output_strides.append(None)
     output_node.meta["original_output_strides"] = output_strides
+
+
+def get_output_aliases(gm: GraphModule) -> dict[str, tuple[tuple[int, int], ...]]:
+    output = output_node(gm)
+    inputs = list(gm.graph.find_nodes(op="placeholder"))
+    outputs = pytree.arg_tree_leaves(*output.args)
+    input_storages = [get_node_storage(node) for node in inputs]
+    output_storages = [
+        get_node_storage(node) if isinstance(node, torch.fx.Node) else None
+        for node in outputs
+    ]
+
+    input_output_aliases: list[tuple[int, int]] = []
+    output_output_aliases: list[tuple[int, int]] = []
+    for output_idx, output_storage in enumerate(output_storages):
+        if output_storage is None:
+            continue
+        input_output_aliases.extend(
+            (input_idx, output_idx)
+            for input_idx, input_storage in enumerate(input_storages)
+            if input_storage == output_storage
+        )
+        output_output_aliases.extend(
+            (other_output_idx, output_idx)
+            for other_output_idx in range(output_idx)
+            if output_storages[other_output_idx] == output_storage
+        )
+
+    return {
+        "input_output": tuple(input_output_aliases),
+        "output_output": tuple(output_output_aliases),
+    }
+
+
+def record_original_output_aliases(gm: GraphModule) -> None:
+    output = output_node(gm)
+    if "original_output_aliases" not in output.meta:
+        output.meta["original_output_aliases"] = get_output_aliases(gm)
+
+
+def has_new_user_visible_output_aliases(gm: GraphModule) -> bool:
+    output = output_node(gm)
+    original_aliases = output.meta.get("original_output_aliases")
+    visible_outputs = frozenset(output.meta.get("user_visible_output_idxs", ()))
+    if original_aliases is None or not visible_outputs:
+        return False
+
+    current_aliases = get_output_aliases(gm)
+    for alias_type in ("input_output", "output_output"):
+        original = OrderedSet(
+            pair
+            for pair in original_aliases[alias_type]
+            if pair[1] in visible_outputs
+            and (alias_type == "input_output" or pair[0] in visible_outputs)
+        )
+        current = OrderedSet(
+            pair
+            for pair in current_aliases[alias_type]
+            if pair[1] in visible_outputs
+            and (alias_type == "input_output" or pair[0] in visible_outputs)
+        )
+        if current - original:
+            return True
+    return False
+
+
+def _recursive_record_original_output_aliases(gm: GraphModule) -> None:
+    for node in gm.graph.find_nodes(
+        op="call_function", target=torch.ops.higher_order.invoke_subgraph
+    ):
+        subgraph = getattr(gm, node.args[0].target)
+        _recursive_record_original_output_aliases(subgraph)
+
+    record_original_output_aliases(gm)
 
 
 def _recursive_record_original_output_strides(gm: GraphModule) -> None:
@@ -1140,6 +1215,7 @@ def _compile_fx_inner(
 
     if (
         dynamo_utils.count_calls(gm.graph) == 0
+        and not has_new_user_visible_output_aliases(gm)
         and not aot_mode
         and not torch._functorch.config.bundled_autograd_cache
     ):
@@ -2680,6 +2756,10 @@ def partition_fn(
     partitioner_fn_override: Callable[..., Any] | None = None,
     **kwargs: object,
 ) -> tuple[GraphModule, GraphModule]:
+    # In training, record aliases before joint graph passes can change them.
+    _recursive_record_original_output_aliases(gm)
+    original_output_aliases = output_node(gm).meta["original_output_aliases"]
+
     cuda_context = get_cuda_device_context(gm)
     with cuda_context:
         # We can skip the invoke_subgraph because the
@@ -2697,18 +2777,17 @@ def partition_fn(
     )
 
     if partitioner_fn_override is not None:
-        return partitioner_fn_override(
+        partition_result = partitioner_fn_override(
             gm,
             joint_inputs,
             static_lifetime_input_indices=static_lifetime_input_indices,
             **kwargs,
         )
-
-    if config.custom_partitioner_fn is None:
+    elif config.custom_partitioner_fn is None:
         with dynamo_utils.dynamo_timed(
             "min_cut_rematerialization_partition", log_pt2_compile_event=True
         ):
-            return min_cut_rematerialization_partition(
+            partition_result = min_cut_rematerialization_partition(
                 gm,
                 joint_inputs,
                 compiler="inductor",
@@ -2726,13 +2805,18 @@ def partition_fn(
             config.custom_partitioner_fn.__class__.__name__,
             log_pt2_compile_event=True,
         ):
-            return config.custom_partitioner_fn(
+            partition_result = config.custom_partitioner_fn(
                 gm,
                 joint_inputs,
                 compiler="inductor",
                 static_lifetime_input_indices=static_lifetime_input_indices,
                 **kwargs,
             )
+
+    fw_module, bw_module = partition_result
+    # Partitioning creates a new output node, so restore the recorded metadata.
+    output_node(fw_module).meta["original_output_aliases"] = original_output_aliases
+    return fw_module, bw_module
 
 
 def get_num_model_outputs(model: GraphModule) -> int:
@@ -2876,6 +2960,8 @@ def compile_fx_forward(
         # pad_mm (run as part of joint_graph_passes) can introduce views with
         # padded strides that would be incorrectly captured as "original".
         _recursive_record_original_output_strides(gm)
+        # In inference, record aliases before joint graph passes can change them.
+        _recursive_record_original_output_aliases(gm)
 
         inputs_devices = get_inputs_devices(example_inputs, gm)
         gm = _recursive_joint_graph_passes(gm, input_device=next(iter(inputs_devices)))
@@ -2897,9 +2983,10 @@ def compile_fx_forward(
 
     model_outputs_node = output_node(gm)
     clone_live_user_outputs = _cudagraph_trees_clone_live_user_outputs()
+    keep_output_aliases = "original_output_aliases" in model_outputs_node.meta
     model_outputs = None
     user_visible_output_idxs: list[int] = []
-    if config.keep_output_stride or clone_live_user_outputs:
+    if config.keep_output_stride or clone_live_user_outputs or keep_output_aliases:
         model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
         num_model_outputs = len(model_outputs)
 
@@ -2946,7 +3033,7 @@ def compile_fx_forward(
             if isinstance(model_outputs[idx], torch.fx.Node)
         ]
 
-    if config.keep_output_stride or clone_live_user_outputs:
+    if config.keep_output_stride or clone_live_user_outputs or keep_output_aliases:
         model_outputs_node.meta["user_visible_output_idxs"] = user_visible_output_idxs
     else:
         model_outputs_node.meta["user_visible_output_idxs"] = []
