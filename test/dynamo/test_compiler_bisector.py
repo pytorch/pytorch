@@ -12,8 +12,10 @@ from torch._inductor.compiler_bisector import CompilerBisector
 from torch._inductor.custom_graph_pass import CustomGraphPass
 from torch._inductor.test_case import TestCase
 from torch.library import _scoped_library, Library
-from torch.testing._internal.common_utils import requires_cuda
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification, requires_cuda
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.utils._triton import has_triton
 
 
 aten = torch.ops.aten
@@ -135,43 +137,6 @@ class TestCompilerBisector(TestCase):
         self.assertEqual(out.subsystem, "pre_grad_passes")
         self.assertEqual(out.bisect_number, 3)
         self.assertTrue("pre_grad_custom_pass" in out.debug_info)
-
-    def test_joint_graph(self):
-        from torch._inductor import config
-
-        class CustomPostPass(CustomGraphPass):
-            def __call__(self, graph: torch.fx.Graph):
-                nodes = graph.find_nodes(
-                    op="call_function", target=torch.ops.aten.add.Tensor
-                )
-                if len(nodes) != 1:
-                    raise AssertionError(f"Expected 1 node, got {len(nodes)}")
-                args = list(nodes[0].args)
-                args[1] = 2
-                nodes[0].args = tuple(args)
-
-            def uuid(self):
-                return hash("TestCompilerBisector.test_joint_graph.pass_class")
-
-        def foo(x):
-            return x + 1
-
-        def test_fn():
-            torch._dynamo.reset()
-
-            inp = torch.rand([10], device=GPU_TYPE)
-
-            out = foo(inp)
-            out_c = torch.compile(foo)(inp)  # noqa: UNSPECIFIED_BACKEND
-
-            return torch.allclose(out, out_c)
-
-        with config.patch(joint_custom_post_pass=CustomPostPass()):
-            out = CompilerBisector.do_bisect(test_fn)
-        self.assertEqual(out.backend, "inductor")
-        self.assertEqual(out.subsystem, "joint_graph_passes")
-        self.assertEqual(out.bisect_number, 4)
-        self.assertTrue("joint_custom_post_pass" in out.debug_info)
 
     def test_rng(self):
         def foo():
@@ -411,6 +376,53 @@ class TestCompilerBisector(TestCase):
             "Debug info: <OpOverload(op='aten.exponential', overload='default')>"
         )
         self.assertIn(expected_result, output.stdout)
+
+
+class TestCompilerBisectorDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @unittest.skipIf(not has_triton(), "requires Triton")
+    def test_joint_graph(self, device):
+        from torch._inductor import config
+
+        class CustomPostPass(CustomGraphPass):
+            def __call__(self, graph: torch.fx.Graph):
+                nodes = graph.find_nodes(
+                    op="call_function", target=torch.ops.aten.add.Tensor
+                )
+                if len(nodes) != 1:
+                    raise AssertionError(f"Expected 1 node, got {len(nodes)}")
+                args = list(nodes[0].args)
+                args[1] = 2
+                nodes[0].args = tuple(args)
+
+            def uuid(self):
+                return hash("TestCompilerBisector.test_joint_graph.pass_class")
+
+        def foo(x):
+            return x + 1
+
+        def test_fn():
+            torch._dynamo.reset()
+
+            inp = torch.rand([10], device=device)
+
+            out = foo(inp)
+            out_c = torch.compile(foo)(inp)  # noqa: UNSPECIFIED_BACKEND
+
+            return torch.allclose(out, out_c)
+
+        with config.patch(joint_custom_post_pass=CustomPostPass()):
+            out = CompilerBisector.do_bisect(test_fn)
+        self.assertEqual(out.backend, "inductor")
+        self.assertEqual(out.subsystem, "joint_graph_passes")
+        self.assertEqual(out.bisect_number, 4)
+        self.assertTrue("joint_custom_post_pass" in out.debug_info)
+
+
+instantiate_device_type_tests(
+    TestCompilerBisectorDevice, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 if __name__ == "__main__":
