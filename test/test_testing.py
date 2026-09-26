@@ -31,13 +31,17 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA, TEST_WITH_CROSSREF, TEST_WITH_PERIODIC, TEST_WITH_ROCM, decorateIf, periodic, skipIfTorchDynamo, skipIfXpu,
     getRocmVersion, TemporaryFileName, sanitize_pytest_xml,
 )
-from torch.testing._internal.common_cuda import _get_torch_rocm_version, has_device_side_assert
+from torch.testing._internal.common_cuda import (
+    _get_torch_rocm_version,
+    has_device_side_assert,
+    PLATFORM_SUPPORTS_FUSED_ATTENTION,
+)
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
      get_device_type_test_bases, instantiate_device_type_tests, onlyCPU, onlyCUDA, onlyNativeDeviceTypes,
      deviceCountAtLeast, ops, expectedFailureMeta, OpDTypes)
 from torch.testing._internal.common_methods_invocations import op_db
-from torch.testing._internal import opinfo
+from torch.testing._internal import common_device_type, opinfo
 from torch.testing._internal.common_dtype import all_types_and_complex_and, floating_types
 from torch.testing._internal.common_modules import modules, module_db, ModuleInfo
 from torch.testing._internal.opinfo.core import SampleInput, DecorateInfo, OpInfo
@@ -555,6 +559,80 @@ if __name__ == '__main__':
 
 
 instantiate_device_type_tests(TestTesting, globals())
+
+
+class TestFusedAttentionCapability(TestCase):
+    def test_identifier(self):
+        self.assertEqual(
+            common_device_type.Capability.attention.fused_attention,
+            "attention.fused_attention",
+        )
+
+    def test_builtin_device_registrations(self):
+        capability = common_device_type.Capability.attention.fused_attention
+        expected = {
+            common_device_type.CPUTestBase: True,
+            common_device_type.CUDATestBase: bool(PLATFORM_SUPPORTS_FUSED_ATTENTION),
+            common_device_type.MPSTestBase: False,
+            common_device_type.XPUTestBase: True,
+            common_device_type.HPUTestBase: False,
+            common_device_type.LazyTestBase: False,
+        }
+
+        for test_base, expected_value in expected.items():
+            with self.subTest(device_type=test_base.device_type):
+                self.assertEqual(
+                    test_base.get_capabilities()[capability],
+                    expected_value,
+                )
+
+        self.assertNotIn(
+            capability, common_device_type.PrivateUse1TestBase.get_capabilities()
+        )
+
+
+class TestCapabilityGating(TestCase):
+    @common_device_type.requires_capabilities(
+        common_device_type.Capability.attention.flash_attention
+    )
+    def test_supported(self, device):
+        self.assertEqual(torch.device(device).type, self.device_type)
+
+    @common_device_type.requires_capabilities(
+        common_device_type.Capability.attention.mem_efficient_attention
+    )
+    def test_unsupported(self, device):
+        self.fail("mem_efficient_attention should be skipped on CPU")
+
+    def test_missing(self, device):
+        missing = "attention.missing"
+
+        @common_device_type.requires_capabilities(missing)
+        def gated_test(_):
+            self.fail("missing capabilities should fail before the test runs")
+
+        with self.assertRaisesRegex(
+            AssertionError,
+            r"has not declared capabilities: attention\.missing",
+        ):
+            gated_test(self)
+
+
+instantiate_device_type_tests(TestCapabilityGating, globals(), only_for="cpu")
+
+
+class TestFusedAttentionCapabilityDevice(TestCase):
+    @common_device_type.requires_capabilities(
+        common_device_type.Capability.attention.fused_attention
+    )
+    def test_fused_attention_supported(self, device):
+        self.assertEqual(torch.device(device).type, self.device_type)
+
+instantiate_device_type_tests(
+    TestFusedAttentionCapabilityDevice,
+    globals(),
+    only_for=("cpu", "cuda"),
+)
 
 
 class TestFrameworkUtils(TestCase):
