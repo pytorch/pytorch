@@ -6,6 +6,7 @@ import os
 import sys
 
 import torch
+import torch.nn.functional as F
 from torch import nn
 
 
@@ -264,6 +265,100 @@ class EfficientConvBNEvalTemplate(TestCase):
             test_conv_bn_eval(
                 test_class, use_bias, module, sync_bn, decompose_nn_module
             )
+
+    @tf32_on_and_off(0.003)
+    @inductor_config.patch({"efficient_conv_bn_eval_fx_passes": True})
+    def test_conv_bn_eval_kwarg_conv_args(self):
+        """Regression test for gh-196165.
+
+        F.conv2d may pass bias, stride and padding by keyword.  The
+        conv-bn fusion used to read the conv node positionally, dropping
+        the keyword arguments and silently computing with the defaults.
+        """
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.randn(4, 3, 3, 3))
+                self.bias = torch.nn.Parameter(torch.randn(4))
+                self.register_buffer("running_mean", torch.randn(4))
+                self.register_buffer("running_var", torch.rand(4) + 1.0)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                conv = F.conv2d(
+                    x,
+                    self.weight,
+                    bias=self.bias,
+                    stride=2,
+                    padding=1,
+                )
+                return F.batch_norm(conv, self.running_mean, self.running_var)
+
+        torch.manual_seed(1703)
+        model = Model().eval().to(self.device)
+        x = torch.randn(2, 3, 16, 16).to(self.device)
+        with torch.no_grad():
+            expected = model(x)
+            compiled = torch.compile(model, backend="inductor")(x)
+
+        self.assertEqual(compiled, expected)
+
+    @tf32_on_and_off(0.003)
+    @inductor_config.patch({"efficient_conv_bn_eval_fx_passes": True})
+    def test_conv_bn_eval_kwarg_input_weight(self):
+        """gh-196165: conv input and weight may themselves be passed by
+        keyword, leaving no positional args to read."""
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.randn(4, 3, 3, 3))
+                self.register_buffer("running_mean", torch.randn(4))
+                self.register_buffer("running_var", torch.rand(4) + 1.0)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                conv = torch.conv2d(input=x, weight=self.weight, stride=2, padding=1)
+                return F.batch_norm(conv, self.running_mean, self.running_var)
+
+        torch.manual_seed(1703)
+        model = Model().eval().to(self.device)
+        x = torch.randn(2, 3, 16, 16).to(self.device)
+        with torch.no_grad():
+            expected = model(x)
+            compiled = torch.compile(model, backend="inductor")(x)
+
+        self.assertEqual(compiled, expected)
+
+    @tf32_on_and_off(0.003)
+    @inductor_config.patch({"efficient_conv_bn_eval_fx_passes": True})
+    def test_conv_transpose_bn_eval_kwarg_conv_args(self):
+        """gh-196165: keyword conv args on the transposed-conv path."""
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.randn(3, 4, 3, 3))
+                self.register_buffer("running_mean", torch.randn(4))
+                self.register_buffer("running_var", torch.rand(4) + 1.0)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                conv = F.conv_transpose2d(
+                    x,
+                    self.weight,
+                    stride=2,
+                    padding=1,
+                    output_padding=1,
+                )
+                return F.batch_norm(conv, self.running_mean, self.running_var)
+
+        torch.manual_seed(1703)
+        model = Model().eval().to(self.device)
+        x = torch.randn(2, 3, 8, 8).to(self.device)
+        with torch.no_grad():
+            expected = model(x)
+            compiled = torch.compile(model, backend="inductor")(x)
+
+        self.assertEqual(compiled, expected)
 
 
 if HAS_CPU and not torch.backends.mps.is_available():
