@@ -298,6 +298,11 @@ class DefaultLoadPlanner(LoadPlanner):
     flatten_state_dict: Handle state_dict with nested dicts
     flatten_sharded_tensors: For FSDP in 2D parallel mode
     allow_partial_load: If False, will raise a runtime error if a key is present in state_dict, but not in the checkpoint.
+    allow_unsafe_types: If True, allows loading into a state_dict with a
+        narrower dtype (e.g., float32 checkpoint into a bfloat16 template) by 
+        silently truncating precision. If False, raises a RuntimeError for narrowing 
+        casts. Widening casts (e.g., bfloat16 to float32) are always allowed 
+        regardless of this flag.
     """
 
     original_state_dict: STATE_DICT_TYPE
@@ -308,12 +313,14 @@ class DefaultLoadPlanner(LoadPlanner):
         flatten_state_dict: bool = True,
         flatten_sharded_tensors: bool = True,
         allow_partial_load: bool = False,
+        allow_unsafe_types: bool = True,
     ) -> None:
         self.flatten_state_dict = flatten_state_dict
         self.flatten_sharded_tensors = flatten_sharded_tensors
         self.original_state_dict = {}
         self.mappings = {}
         self.allow_partial_load = allow_partial_load
+        self.allow_unsafe_types = allow_unsafe_types
 
     def set_up_planner(
         self,
