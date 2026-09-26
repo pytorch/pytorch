@@ -1181,12 +1181,13 @@ static void registerCudaDeviceProperties(PyObject* module) {
           "shared_memory_per_multiprocessor",
           &cudaDeviceProp::sharedMemPerMultiprocessor)
 
-#ifndef USE_ROCM
-      // NVIDIA-only properties
+// HIP carries this limit as hipDeviceProp_t::sharedMemPerBlockOptin, part of
+// the R0600 struct layout since ROCm 6.0.
+#if !defined(USE_ROCM) || ROCM_VERSION >= 60000
       .def_readonly(
           "shared_memory_per_block_optin",
           &cudaDeviceProp::sharedMemPerBlockOptin)
-#endif
+#endif // !defined(USE_ROCM) || ROCM_VERSION >= 60000
 
       .def_readonly(
           "regs_per_multiprocessor", &cudaDeviceProp::regsPerMultiprocessor)
