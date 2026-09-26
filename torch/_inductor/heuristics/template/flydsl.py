@@ -265,7 +265,8 @@ def get_gemm_configs(
         baseline = _BASELINE_CONFIG[mxfp_format] if mxfp_format else FlyDSLGemmConfig()
         configs = [c for c in configs if c == baseline]
     elif min(m, n, k) >= 4096:
-        # Measured large-GEMM policy; k is logical (unpacked for MXFP4).
+        # Measured BF16/FP16/MXFP policy, including EXHAUSTIVE.
+        # k is logical (unpacked for MXFP4).
         configs = [
             c
             for c in configs

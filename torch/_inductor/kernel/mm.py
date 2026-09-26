@@ -231,7 +231,7 @@ def scaled_mm_v2_choice(
     )
 
 
-aten__scaled_mm_v2 = ExternKernelChoice(
+aten__fp8_mm_v2 = ExternKernelChoice(
     scaled_mm_v2_choice,
     name="_scaled_mm_v2",
     kernel_creator=functools.partial(
@@ -293,6 +293,8 @@ def get_flydsl_mm_template_kwargs(
     has_bias=False,
 ) -> list[dict[str, Any]]:
     """Return shape-compatible FlyDSL GEMM template configurations."""
+    # scaled_mm_v2_constraint forces MXFP to TN before lowering; non-TN layout
+    # handling is shared with dense mm, but currently unreachable for MXFP.
     from ..heuristics.template.flydsl import (
         get_gemm_configs,
         is_gemm_config_valid_for_shape,
@@ -1606,7 +1608,7 @@ def tuned_scaled_mm_v2(
             if use_aten_gemm_kernels() and aten_mxfp_ok:
                 mxfp_choices.insert(
                     0,
-                    aten__scaled_mm_v2.bind(
+                    aten__fp8_mm_v2.bind(
                         mxfp_nodes,
                         mxfp_layout,
                         recipe_a=recipe_a[0],
@@ -1746,7 +1748,7 @@ def tuned_scaled_mm_v2(
             scale_option_a in main_loop_scaling_types
             or scale_option_b in main_loop_scaling_types
         ):
-            choice = aten__scaled_mm_v2
+            choice = aten__fp8_mm_v2
             extern_kwargs.update(recipe_a=recipe_a[0], recipe_b=recipe_b[0])
         else:
             choice = aten__fp8_mm

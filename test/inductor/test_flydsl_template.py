@@ -496,11 +496,14 @@ class TestFlyDSLTemplate(TestCase):
         )
 
     @unittest.skipUnless(flydsl_utils.runtime_available(), "FlyDSL unavailable")
-    def test_gemm_config_validation(self):
+    @parametrize("exhaustive", (False, True))
+    def test_gemm_config_validation(self, exhaustive):
         from torch._inductor.heuristics.template import flydsl as h
         from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
             gemm_gfx950 as gemm,
         )
+
+        search_space = "EXHAUSTIVE" if exhaustive else "DEFAULT"
 
         def check(tile, dtype, error=None):
             cfg = asdict(h.FlyDSLGemmConfig(*tile))
@@ -531,13 +534,15 @@ class TestFlyDSLTemplate(TestCase):
                     h._BASELINE_CONFIG[fmt] if fmt else h.FlyDSLGemmConfig()
                 )
                 for enabled in (False, True):
-                    with inductor_config.patch(flydsl_enable_autotuning=enabled):
+                    with inductor_config.patch(
+                        flydsl_enable_autotuning=enabled,
+                        max_autotune_gemm_search_space=search_space,
+                    ):
                         for k in (2048, 4096, 8192):
                             configs = h.get_gemm_configs(8192, 8192, k, fmt)
                             self.assertTrue(configs)
-                            self.assertEqual(
-                                baseline in configs, not enabled or k < 4096
-                            )
+                            pruned = enabled and k >= 4096
+                            self.assertEqual(baseline in configs, not pruned)
                             if not enabled:
                                 self.assertEqual(configs, [baseline])
             for tile, error in cases:
