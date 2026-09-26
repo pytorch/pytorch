@@ -260,31 +260,14 @@ def max_clock_rate(device: int | None = None):
             finally:
                 pynvml.nvmlShutdown()
     else:
-        # Manually set max-clock speeds on ROCm until equivalent nvmsi
-        # functionality in triton.testing or via pyamdsmi enablement. Required
-        # for test_snode_runtime unit tests.
         device = torch.cuda.current_device() if device is None else device
-        gcn_arch = str(
-            torch.cuda.get_device_properties(device).gcnArchName.split(":", 1)[0]
-        )
-        if "gfx94" in gcn_arch:
-            return 1700
-        elif "gfx90a" in gcn_arch:
-            return 1700
-        elif "gfx908" in gcn_arch:
-            return 1502
-        elif "gfx12" in gcn_arch:
-            return 1700
-        elif "gfx11" in gcn_arch:
-            return 1700
-        elif "gfx103" in gcn_arch:
-            return 1967
-        elif "gfx101" in gcn_arch:
-            return 1144
-        elif "gfx95" in gcn_arch:
-            return 1700  # TODO: placeholder, get actual value
-        else:
-            return 1100
+        # clock_rate is in kHz, and its binding reads the current device
+        # rather than the one the properties describe.
+        with torch.cuda.device(device):
+            clock_rate = torch.cuda.get_device_properties(device).clock_rate
+        if not clock_rate:
+            log.warning("HIP reported no clock rate for device %s", device)
+        return clock_rate // 1000
 
 
 def get_mast_job_name_version() -> tuple[str, int] | None:
