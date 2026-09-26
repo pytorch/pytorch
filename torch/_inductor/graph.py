@@ -3047,6 +3047,15 @@ class GraphLowering(torch.fx.Interpreter):
             self.wrapper_code.push_codegened_graph(self)
             self.scheduler.codegen()
 
+            # candidate_tilings memoises on a SchedulerNode. That node reaches
+            # the whole GraphModule via ComputedBuffer.origins -> fx Node ->
+            # Graph, so a retained entry pins every parameter of the compiled
+            # model. The keys are graph-specific and can never be reused by a
+            # later graph, so nothing is lost by dropping them here.
+            from .codegen.simd import SIMDScheduling
+
+            SIMDScheduling.candidate_tilings.cache_clear()
+
             log.debug(
                 "Finished codegen for all nodes. The list of kernel names available: %s",
                 V.graph.all_codegen_kernel_names,
