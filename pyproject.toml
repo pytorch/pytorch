@@ -461,6 +461,7 @@ nccl4py = "torch.distributed.nccl4py_backend:_register_nccl4py_backend"
 
 [project.entry-points."torch.distributed.transports"]
 nixl = "torch.distributed._transport.nixl:NIXLTransport"
+ibverbs = "torch.distributed._transport._rdma4py:IBVerbsTransport"
 tcp = "torch.distributed._transport._tcp:TCPTransport"
 torchcomms = "torch.distributed._transport._torchcomms:TorchCommsTransport"
 ucxx = "torch.distributed._transport._ucxx:UCXXTransport"
