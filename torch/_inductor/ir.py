@@ -12328,12 +12328,8 @@ class _WaitKernel(_CollectiveKernel):
             self.op_overload is torch.ops._c10d_functional.wait_tensors.default
             and V.graph.cpp_wrapper
         ):
-            from .exc import CppWrapperCodegenError
-
-            raise CppWrapperCodegenError(
-                "_c10d_functional.wait_tensors is not supported with "
-                "C++ wrapper/AOTInductor"
-            )
+            super().codegen(wrapper)
+            return
         wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
         wrapper.generate_extern_kernel_alloc(self)
 

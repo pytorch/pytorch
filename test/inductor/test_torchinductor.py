@@ -66,6 +66,7 @@ from torch._inductor.codegen.common import DataTypePropagation, OptimizationCont
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import (
     add_scheduler_init_hook,
+    fresh_cache,
     run_and_get_code,
     run_and_get_cpp_code,
     run_and_get_kernels,
@@ -96,6 +97,7 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_device_type import (
     e4m3_type,
     expectedFailureXPU,
+    instantiate_device_type_tests,
     largeTensorTest,
 )
 from torch.testing._internal.common_dtype import (
@@ -154,7 +156,7 @@ importlib.import_module("filelock")
 from torch._inductor import config, cpu_vec_isa, test_operators
 from torch._inductor.compile_fx import compile_fx, compile_fx_inner, FxCompileMode
 from torch._inductor.utils import has_torchvision_roi_align
-from torch.testing._internal.common_utils import slowTest
+from torch.testing._internal.common_utils import slowTest, TestCase as TorchTestCase
 from torch.testing._internal.inductor_utils import (  # noqa: F401
     clone_preserve_strides_offset,
     GPU_TYPE,
@@ -12080,6 +12082,333 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         else:
             assertGeneratedKernelCountEqual(self, 1)
 
+    def test_slice_scatter_reinplace_result_escapes(self):
+        # https://github.com/pytorch/pytorch/issues/195451
+        # Reinplacing the scatter onto its input makes the two the same tensor.
+        # The copy_ back hides that from the rest of the graph, but a returned
+        # result would alias the input, where the functional scatter hands back
+        # a fresh tensor. Mutating the result would then corrupt the input.
+        def returns_result(x, src):
+            updated = torch.slice_scatter(x, src, 0, 0, 1)
+            x.copy_(updated)
+            return updated
+
+        def returns_view_of_result(x, src):
+            updated = torch.slice_scatter(x, src, 0, 0, 1)
+            x.copy_(updated)
+            return updated[1:]
+
+        def returns_split_of_result(x, src):
+            updated = torch.slice_scatter(x, src, 0, 0, 1)
+            x.copy_(updated)
+            a, b = updated.split(2, dim=0)
+            return a, b
+
+        for fn in (returns_result, returns_view_of_result, returns_split_of_result):
+            with self.subTest(fn=fn.__name__):
+
+                def run(compiled_fn, fn=fn):
+                    x = torch.arange(4.0, device=self.device)
+                    src = torch.full((1,), 10.0, device=self.device)
+                    outs = compiled_fn(x, src)
+                    outs = outs if isinstance(outs, tuple) else (outs,)
+                    for out in outs:
+                        out.add_(100)
+                    return x, outs
+
+                x_eager, outs_eager = run(fn)
+                x_compiled, outs_compiled = run(torch.compile(fn, fullgraph=True))
+                self.assertEqual(x_eager, x_compiled)
+                self.assertEqual(outs_eager, outs_compiled)
+
+        # get_attr inputs (e.g. a module buffer) hit the same aliasing hazard as
+        # placeholders. Note: AOTAutograd lifts buffers used by the traced graph
+        # into explicit placeholder inputs, so this scatter's inp is expected to
+        # be a placeholder by the time reinplace runs, exercising the same arm
+        # as returns_result above rather than the get_attr one; the guard's
+        # get_attr branch covers graphs (e.g. from export) where the buffer
+        # survives as a get_attr node. Either way, eager/compiled parity is what
+        # matters here.
+        with self.subTest(fn="returns_result_buffer"):
+            device = self.device
+
+            class BufferModule(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.register_buffer("buf", torch.arange(4.0, device=device))
+
+                def forward(self, src):
+                    updated = torch.slice_scatter(self.buf, src, 0, 0, 1)
+                    self.buf.copy_(updated)
+                    return updated
+
+            def run_buffer(mod):
+                src = torch.full((1,), 10.0, device=device)
+                out = mod(src)
+                out.add_(100)
+                return mod.buf.clone(), out
+
+            buf_eager, out_eager = run_buffer(BufferModule())
+            buf_compiled, out_compiled = run_buffer(
+                torch.compile(BufferModule(), fullgraph=True)
+            )
+            self.assertEqual(buf_eager, buf_compiled)
+            self.assertEqual(out_eager, out_compiled)
+
+        # The scatter result can be copied back into more than one input; each
+        # copy-back target must stay independent of the (mutated) returned result.
+        with self.subTest(fn="returns_result_multi_target"):
+
+            def multi_target(x, y, src):
+                updated = torch.slice_scatter(x, src, 0, 0, 1)
+                x.copy_(updated)
+                y.copy_(updated)
+                return updated
+
+            def run_multi(compiled_fn):
+                x = torch.arange(4.0, device=self.device)
+                y = torch.zeros(4, device=self.device)
+                src = torch.full((1,), 10.0, device=self.device)
+                out = compiled_fn(x, y, src)
+                out.add_(100)
+                return x, y, out
+
+            x_eager, y_eager, out_eager = run_multi(multi_target)
+            x_compiled, y_compiled, out_compiled = run_multi(
+                torch.compile(multi_target, fullgraph=True)
+            )
+            self.assertEqual(x_eager, x_compiled)
+            self.assertEqual(y_eager, y_compiled)
+            self.assertEqual(out_eager, out_compiled)
+
+    def test_reinplace_result_escapes_via_input_alias(self):
+        # https://github.com/pytorch/pytorch/pull/195484
+        # The scatter input can reach the graph input through a view chain or
+        # through an op the pass already reinplaced onto the input, and the
+        # result can reach the output through an op the pass reinplaces later.
+        # A returned result must not become an alias of the input in any case.
+        def view_of_input(x, weight, src):
+            view = x.permute(1, 0)
+            before = view @ weight
+            updated = torch.slice_scatter(view, src, 0, 0, 1)
+            x.copy_(updated.permute(1, 0))
+            return before, updated
+
+        def reinplaced_chain(x, diag, idx, val):
+            a = torch.diagonal_scatter(x, diag)
+            b = torch.index_put(a, (idx,), val)
+            x.copy_(b)
+            return b
+
+        def reinplaced_then_scatter(x, idx, val, diag):
+            a = torch.index_put(x, (idx,), val)
+            b = torch.diagonal_scatter(a, diag)
+            x.copy_(b)
+            return b
+
+        device = self.device
+        cases = [
+            (
+                view_of_input,
+                lambda: (
+                    torch.arange(24.0, device=device).reshape(4, 6),
+                    torch.arange(12.0, device=device).reshape(4, 3),
+                    torch.full((1, 4), 10.0, device=device),
+                ),
+            ),
+            (
+                reinplaced_chain,
+                lambda: (
+                    torch.arange(16.0, device=device).reshape(4, 4),
+                    torch.full((4,), -1.0, device=device),
+                    torch.tensor([0, 2], device=device),
+                    torch.full((2, 4), 10.0, device=device),
+                ),
+            ),
+            (
+                reinplaced_then_scatter,
+                lambda: (
+                    torch.arange(16.0, device=device).reshape(4, 4),
+                    torch.tensor([0, 2], device=device),
+                    torch.full((2, 4), 10.0, device=device),
+                    torch.full((4,), -1.0, device=device),
+                ),
+            ),
+        ]
+        for fn, make_inputs in cases:
+            with self.subTest(fn=fn.__name__):
+                eager_args = make_inputs()
+                compiled_args = make_inputs()
+                outs_eager = fn(*eager_args)
+                outs_compiled = torch.compile(fn, fullgraph=True)(*compiled_args)
+                self.assertEqual(outs_eager, outs_compiled)
+                x = compiled_args[0]
+                self.assertEqual(eager_args[0], x)
+                outs = (
+                    outs_compiled
+                    if isinstance(outs_compiled, tuple)
+                    else (outs_compiled,)
+                )
+                x_after_call = x.clone()
+                for out in outs:
+                    self.assertIsNot(out, x)
+                    self.assertNotEqual(
+                        out.untyped_storage().data_ptr(),
+                        x.untyped_storage().data_ptr(),
+                    )
+                    out.add_(100)
+                self.assertEqual(x, x_after_call)
+
+    @config.patch(implicit_fallbacks=True)
+    def test_reinplace_result_escapes_via_auto_functionalized(self):
+        # https://github.com/pytorch/pytorch/pull/195484
+        # auto_functionalized{,_v2} is a second way this pass drops a clone: a
+        # mutable argument the pass leaves out of only_clone_these_tensors is
+        # mutated in place, so the output holding its new value aliases it.
+        # A scatter on either side of such an op must not let that turn the
+        # returned result into an alias of the graph input.
+        device = self.device
+
+        def scatter_then_mutate(x, diag):
+            updated = torch.diagonal_scatter(x, diag)
+            torch.ops.mylib.inc_(updated)
+            x.copy_(updated)
+            return updated
+
+        def mutate_then_scatter(x, diag):
+            torch.ops.mylib.inc_(x)
+            updated = torch.diagonal_scatter(x, diag)
+            x.copy_(updated)
+            return updated
+
+        def mutate_view_then_scatter(x, diag):
+            view = x.view_as(x)
+            torch.ops.mylib.inc_(view)
+            updated = torch.diagonal_scatter(view, diag)
+            x.copy_(updated)
+            return updated
+
+        def make_inputs():
+            return (
+                torch.arange(16.0, device=device).reshape(4, 4),
+                torch.full((4,), -1.0, device=device),
+            )
+
+        def inc_(x):
+            x.add_(1.0)
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as m:
+            m.define("inc_(Tensor(a!) x) -> ()")
+            m.impl("inc_", inc_, "CompositeExplicitAutograd")
+            torch.library.register_fake("mylib::inc_", lambda x: None, lib=m)
+
+            for v2 in (False, True):
+                for fn in (
+                    scatter_then_mutate,
+                    mutate_then_scatter,
+                    mutate_view_then_scatter,
+                ):
+                    with self.subTest(fn=fn.__name__, auto_functionalized_v2=v2):
+                        eager_args = make_inputs()
+                        out_eager = fn(*eager_args)
+
+                        compiled_args = make_inputs()
+                        with config.patch(enable_auto_functionalized_v2=v2):
+                            torch._dynamo.reset()
+                            out = torch.compile(fn, fullgraph=True)(*compiled_args)
+
+                        x = compiled_args[0]
+                        self.assertEqual(out_eager, out)
+                        self.assertEqual(eager_args[0], x)
+                        self.assertIsNot(out, x)
+                        self.assertNotEqual(
+                            out.untyped_storage().data_ptr(),
+                            x.untyped_storage().data_ptr(),
+                        )
+                        x_after_call = x.clone()
+                        out.add_(100)
+                        self.assertEqual(x, x_after_call)
+
+    @config.patch(implicit_fallbacks=True)
+    def test_reinplace_result_escapes_via_inplace_op_return(self):
+        device = self.device
+
+        def fn(x, diag):
+            updated = torch.diagonal_scatter(x, diag)
+            result = torch.ops.reinplace_return.inc_(updated.T)
+            x.copy_(result.T)
+            return result
+
+        def make_inputs():
+            return (
+                torch.arange(16.0, device=device).reshape(4, 4),
+                torch.full((4,), -1.0, device=device),
+            )
+
+        def inc_(x):
+            return x.add_(1.0)
+
+        with torch.library._scoped_library("reinplace_return", "FRAGMENT") as lib:
+            lib.define("inc_(Tensor(a!) x) -> Tensor(a!)", tags=[torch.Tag.inplace])
+            lib.impl("inc_", inc_, "CompositeExplicitAutograd")
+            torch.library.register_fake("reinplace_return::inc_", lambda x: x, lib=lib)
+
+            eager_args = make_inputs()
+            out_eager = fn(*eager_args)
+
+            compiled_args = make_inputs()
+            torch._dynamo.reset()
+            out = torch.compile(fn, fullgraph=True)(*compiled_args)
+
+            x = compiled_args[0]
+            self.assertEqual(out_eager, out)
+            self.assertEqual(eager_args[0], x)
+            self.assertNotEqual(
+                out.untyped_storage().data_ptr(),
+                x.untyped_storage().data_ptr(),
+            )
+            x_after_call = x.clone()
+            out.add_(100)
+            self.assertEqual(x, x_after_call)
+
+    def test_scatter_reinplace_not_blocked_by_functional_user(self):
+        # https://github.com/pytorch/pytorch/pull/195484
+        # The scatter's escape check reads the graph this pass has already
+        # rewritten, so an index_put that was *not* reinplaced (its result has
+        # to stay live for the return) is not mistaken for an alias of the
+        # scatter. Reinplacing the scatter is safe here and saves a kernel and
+        # a full-size buffer over refusing on the possibility.
+        def fn(x, diag, idx, val):
+            a = torch.diagonal_scatter(x, diag)
+            b = torch.index_put(a, (idx,), val)
+            x.copy_(a)
+            return b
+
+        def make_inputs():
+            return (
+                torch.arange(16.0, device=self.device).reshape(4, 4),
+                torch.full((4,), -1.0, device=self.device),
+                torch.tensor([0, 2], device=self.device),
+                torch.full((2, 4), 10.0, device=self.device),
+            )
+
+        eager_args = make_inputs()
+        out_eager = fn(*eager_args)
+
+        compiled_args = make_inputs()
+        torch._dynamo.reset()
+        torch._inductor.metrics.reset()
+        out = torch.compile(fn, fullgraph=True)(*compiled_args)
+
+        self.assertEqual(out_eager, out)
+        self.assertEqual(eager_args[0], compiled_args[0])
+        self.assertNotEqual(
+            out.untyped_storage().data_ptr(),
+            compiled_args[0].untyped_storage().data_ptr(),
+        )
+        # diagonal copy_, index_put, copy_ back into x -- no extra clone kernel
+        assertGeneratedKernelCountEqual(self, 3)
+
     def test_slice_scatter_dtype_consistency(self):
         # Test dtype consistency of slice_scatter
         def fn(x, y):
@@ -20116,6 +20445,218 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(base, ebase)
 
     # end of class CommonTemplate - add new tests here
+
+
+class TestScatterReinplacing(TorchTestCase):
+    def setUp(self):
+        super().setUp()
+        torch._dynamo.reset()
+        torch._inductor.metrics.reset()
+        self.addCleanup(torch._dynamo.reset)
+        stack = contextlib.ExitStack()
+        self.addCleanup(stack.close)
+        stack.enter_context(fresh_cache())
+        stack.enter_context(
+            config.patch(
+                {
+                    "debug": True,
+                    "debug_index_asserts": True,
+                    "cpp.min_chunk_size": 1,
+                    "triton.autotune_pointwise": False,
+                    "implicit_fallbacks": False,
+                    "generate_intermediate_hooks": True,
+                    "test_configs.runtime_triton_dtype_assert": True,
+                    "test_configs.runtime_triton_shape_assert": True,
+                }
+            )
+        )
+
+    @unittest.skipUnless(torch.distributed.is_available(), "requires distributed")
+    @parametrize(
+        "wrapper_op",
+        (
+            "view",
+            "split",
+            "wait_tensor",
+            "wait_tensors",
+            "split_getitem",
+            "wait_tensors_getitem",
+        ),
+    )
+    @parametrize("return_alias", (False, True))
+    @parametrize("wrapper_depth", (1, 2))
+    def test_control_deps_output_aliases(
+        self, device, wrapper_op, return_alias, wrapper_depth
+    ):
+        from torch._guards import detect_fake_mode
+        from torch._inductor.fx_passes.control_dependencies import (
+            preserve_node_ordering,
+        )
+        from torch._inductor.fx_passes.reinplace import reinplace_inplaceable_ops
+        from torch._inductor.fx_utils import FakeTensorUpdater
+        from torch._inductor.virtualized import V
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch.utils._ordered_set import OrderedSet
+
+        targets = {
+            "view": aten.view.default,
+            "split": aten.split.Tensor,
+            "wait_tensor": torch.ops._c10d_functional.wait_tensor.default,
+            "wait_tensors": torch.ops._c10d_functional.wait_tensors.default,
+            "split_getitem": operator.getitem,
+            "wait_tensors_getitem": operator.getitem,
+        }
+
+        def fn(x, diag):
+            independent = x + 1
+            updated = torch.diagonal_scatter(x, diag)
+            value = updated if return_alias else independent
+            if wrapper_op == "view":
+                out = value.view(16)
+            elif wrapper_op.startswith("split"):
+                out = value.split(2)[1]
+            elif wrapper_op == "wait_tensor":
+                out = torch.ops._c10d_functional.wait_tensor.default(value)
+            else:
+                out = torch.ops._c10d_functional.wait_tensors.default(
+                    [independent, updated]
+                )[int(return_alias)]
+            x.copy_(updated)
+            return out
+
+        x = torch.arange(16.0, device=device).reshape(4, 4)
+        diag = torch.full((4,), -1.0, device=device)
+        expected_x = x.clone()
+        expected = fn(expected_x, diag)
+        gm = make_fx(fn, tracing_mode="fake")(x, diag)
+        if wrapper_op.endswith("getitem"):
+            wrapped = next(iter(gm.graph.find_nodes(op="output"))).args[0]
+        else:
+            wrapped = next(n for n in gm.graph.nodes if n.target is targets[wrapper_op])
+        updated = next(
+            n for n in gm.graph.nodes if n.target is aten.diagonal_scatter.default
+        )
+        for _ in range(wrapper_depth):
+            name = wrapped.name
+            preserve_node_ordering(gm.graph, {wrapped: OrderedSet([updated])})
+            wrapped = next(n for n in gm.graph.nodes if n.name == name)
+
+        fake_mode = detect_fake_mode([n.meta.get("val") for n in gm.graph.nodes])
+        with V.set_fake_mode(fake_mode):
+            reinplace_inplaceable_ops(FakeTensorUpdater(gm), gm.graph)
+        gm.graph.lint()
+        gm.recompile()
+        actual_x = x.clone()
+        actual = gm(actual_x, diag)
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_x, expected_x)
+        self.assertNotEqual(
+            actual.untyped_storage().data_ptr(), actual_x.untyped_storage().data_ptr()
+        )
+        actual.add_(100)
+        self.assertEqual(actual_x, expected_x)
+        self.assertEqual(
+            any(n.target is aten.clone for n in gm.graph.nodes), return_alias
+        )
+
+    @unittest.skipUnless(torch.distributed.is_available(), "requires distributed")
+    @parametrize("wrapper_op", ("wait_tensor", "wait_tensors", "getitem"))
+    def test_control_deps_input_aliases(self, device, wrapper_op):
+        from torch._guards import detect_fake_mode
+        from torch._inductor.fx_passes.control_dependencies import (
+            preserve_node_ordering,
+        )
+        from torch._inductor.fx_passes.reinplace import reinplace_inplaceable_ops
+        from torch._inductor.fx_utils import FakeTensorUpdater
+        from torch._inductor.virtualized import V
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch.utils._ordered_set import OrderedSet
+
+        def fn(x, diag, idx, value):
+            before = torch.index_put(x, (idx,), value)
+            if wrapper_op != "wait_tensor":
+                waited = torch.ops._c10d_functional.wait_tensors.default([before])[0]
+            else:
+                waited = torch.ops._c10d_functional.wait_tensor.default(before)
+            updated = torch.diagonal_scatter(waited, diag)
+            x.copy_(updated)
+            return updated
+
+        args = (
+            torch.arange(16.0, device=device).reshape(4, 4),
+            torch.full((4,), -1.0, device=device),
+            torch.tensor([0], device=device),
+            torch.full((1, 4), 10.0, device=device),
+        )
+        expected_args = tuple(arg.clone() for arg in args)
+        expected = fn(*expected_args)
+        gm = make_fx(fn, tracing_mode="fake")(*args)
+        target = {
+            "wait_tensor": torch.ops._c10d_functional.wait_tensor.default,
+            "wait_tensors": torch.ops._c10d_functional.wait_tensors.default,
+            "getitem": operator.getitem,
+        }[wrapper_op]
+        wrapped = next(n for n in gm.graph.nodes if n.target is target)
+        dep = next(n for n in gm.graph.nodes if n.op == "placeholder")
+        preserve_node_ordering(gm.graph, {wrapped: OrderedSet([dep])})
+        fake_mode = detect_fake_mode([n.meta.get("val") for n in gm.graph.nodes])
+        with V.set_fake_mode(fake_mode):
+            reinplace_inplaceable_ops(FakeTensorUpdater(gm), gm.graph)
+        gm.graph.lint()
+        gm.recompile()
+        actual = gm(*args)
+        self.assertEqual(actual, expected)
+        self.assertEqual(args[0], expected_args[0])
+        self.assertIn(aten.index_put_.default, [n.target for n in gm.graph.nodes])
+        self.assertNotEqual(
+            actual.untyped_storage().data_ptr(), args[0].untyped_storage().data_ptr()
+        )
+        actual.add_(100)
+        self.assertEqual(args[0], expected_args[0])
+
+    @unittest.skipUnless(torch.distributed.is_available(), "requires distributed")
+    @parametrize("view_count", (1, 2))
+    @parametrize("return_alias", (False, True))
+    def test_reconverging_wait_aliases(self, device, view_count, return_alias):
+        def fn(x, diag):
+            independent = x + 1
+            updated = torch.diagonal_scatter(x, diag)
+            first = updated.transpose(0, 1)
+            second = first if view_count == 1 else first[:2]
+            waited = torch.ops._c10d_functional.wait_tensors.default(
+                [updated, second, independent]
+            )
+            x.copy_(updated)
+            return waited[1 if return_alias else 2]
+
+        def make_inputs():
+            return (
+                torch.arange(16.0, device=device).reshape(4, 4),
+                torch.full((4,), -1.0, device=device),
+            )
+
+        eager_args = make_inputs()
+        expected = fn(*eager_args)
+        compiled_args = make_inputs()
+        out = torch.compile(fn, fullgraph=True)(*compiled_args)
+
+        x = compiled_args[0]
+        self.assertEqual(out, expected)
+        self.assertEqual(x, eager_args[0])
+        self.assertNotEqual(
+            out.untyped_storage().data_ptr(), x.untyped_storage().data_ptr()
+        )
+        x_after_call = x.clone()
+        out.add_(100)
+        self.assertEqual(x, x_after_call)
+        if not return_alias:
+            # The independent add and diagonal update need no scatter clone.
+            assertGeneratedKernelCountEqual(self, 2)
+
+
+instantiate_device_type_tests(
+    TestScatterReinplacing, globals(), only_for=("cpu", "cuda")
+)
 
 
 @dataclasses.dataclass
