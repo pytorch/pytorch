@@ -159,6 +159,11 @@ test_failures = {
     #
     # Failed to find dynamic for loop variable:
     #
+    # The shapes of this repro are static after repeat(), so the dynamic
+    # variant has no dynamic loop variable to assert on.
+    "test_as_strided_view_of_unrealized_producer_dynamic_shapes": TestFailure(
+        ("cpu",), is_skip=True
+    ),
     "test_complex_conv2d_conj_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     "test_conv1d_with_permute_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     "test_triton_argmin_argmax_transpose_logical_index_dynamic_shapes": TestFailure(
