@@ -60,22 +60,22 @@ jobs:
       cuda-arch-list: '7.5 8.6 8.9'
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
-          { config: "default", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
-          { config: "default", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
-          { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
-          { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
-          { config: "distributed", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu" },
-          { config: "distributed", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu" },
-          { config: "distributed", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu" },
-          { config: "nogpu_AVX512", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "nogpu_AVX512", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "nogpu_AVX512", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "nogpu_NO_AVX2", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "nogpu_NO_AVX2", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "jit_legacy", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
-          { config: "multigpu", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.12xlarge.nvidia.gpu", owners: ["oncall:distributed"] },
-          { config: "multigpu", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.12xlarge.nvidia.gpu", owners: ["oncall:distributed"] },
+          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4" },
+          { config: "default", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4" },
+          { config: "default", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4" },
+          { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4" },
+          { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4" },
+          { config: "distributed", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-45-172-t4-4" },
+          { config: "distributed", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-45-172-t4-4" },
+          { config: "distributed", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-45-172-t4-4" },
+          { config: "nogpu_AVX512", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128" },
+          { config: "nogpu_AVX512", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128" },
+          { config: "nogpu_AVX512", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128" },
+          { config: "nogpu_NO_AVX2", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128" },
+          { config: "nogpu_NO_AVX2", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128" },
+          { config: "jit_legacy", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-a10g" },
+          { config: "multigpu", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-45-167-a10g-4", owners: ["oncall:distributed"] },
+          { config: "multigpu", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-45-167-a10g-4", owners: ["oncall:distributed"] },
         ]}
       python-version: "3.11"
       compiler: gcc11
@@ -218,31 +218,31 @@ jobs:
       cuda-arch-list: '7.5 8.9'
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
-          { config: "default", shard: 2, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
-          { config: "default", shard: 3, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
-          { config: "default", shard: 4, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
-          { config: "default", shard: 5, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
-          { config: "default", shard: 6, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
-          { config: "default", shard: 7, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
-          { config: "default", shard: 8, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
-          { config: "default", shard: 9, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
-          { config: "default", shard: 10, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
-          { config: "default", shard: 11, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
-          { config: "default", shard: 12, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
-          { config: "default", shard: 13, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
-          { config: "default", shard: 14, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
-          { config: "distributed", shard: 1, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu" },
-          { config: "distributed", shard: 2, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu" },
-          { config: "distributed", shard: 3, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu" },
-          { config: "distributed", shard: 4, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu" },
-          { config: "distributed", shard: 5, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu" },
-          { config: "distributed", shard: 6, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu" },
-          { config: "distributed", shard: 7, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu" },
-          { config: "distributed", shard: 8, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu" },
-          { config: "distributed", shard: 9, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu" },
-          { config: "distributed", shard: 10, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu" },
-          { config: "jit_legacy", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 1, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4" },
+          { config: "default", shard: 2, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4" },
+          { config: "default", shard: 3, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4" },
+          { config: "default", shard: 4, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4" },
+          { config: "default", shard: 5, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4" },
+          { config: "default", shard: 6, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4" },
+          { config: "default", shard: 7, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4" },
+          { config: "default", shard: 8, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4" },
+          { config: "default", shard: 9, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4" },
+          { config: "default", shard: 10, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4" },
+          { config: "default", shard: 11, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4" },
+          { config: "default", shard: 12, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4" },
+          { config: "default", shard: 13, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4" },
+          { config: "default", shard: 14, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4" },
+          { config: "distributed", shard: 1, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-45-172-t4-4" },
+          { config: "distributed", shard: 2, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-45-172-t4-4" },
+          { config: "distributed", shard: 3, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-45-172-t4-4" },
+          { config: "distributed", shard: 4, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-45-172-t4-4" },
+          { config: "distributed", shard: 5, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-45-172-t4-4" },
+          { config: "distributed", shard: 6, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-45-172-t4-4" },
+          { config: "distributed", shard: 7, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-45-172-t4-4" },
+          { config: "distributed", shard: 8, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-45-172-t4-4" },
+          { config: "distributed", shard: 9, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-45-172-t4-4" },
+          { config: "distributed", shard: 10, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-45-172-t4-4" },
+          { config: "jit_legacy", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-29-115-t4" },
         ]}
       python-version: "3.11"
       compiler: gcc11
@@ -335,13 +335,13 @@ jobs:
       cuda-arch-list: 8.9
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu", owners: ["oncall:debug-build"] },
-          { config: "default", shard: 2, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu", owners: ["oncall:debug-build"] },
-          { config: "default", shard: 3, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu", owners: ["oncall:debug-build"] },
-          { config: "default", shard: 4, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu", owners: ["oncall:debug-build"] },
-          { config: "default", shard: 5, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu", owners: ["oncall:debug-build"] },
-          { config: "default", shard: 6, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu", owners: ["oncall:debug-build"] },
-          { config: "default", shard: 7, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu", owners: ["oncall:debug-build"] },
+          { config: "default", shard: 1, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4", owners: ["oncall:debug-build"] },
+          { config: "default", shard: 2, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4", owners: ["oncall:debug-build"] },
+          { config: "default", shard: 3, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4", owners: ["oncall:debug-build"] },
+          { config: "default", shard: 4, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4", owners: ["oncall:debug-build"] },
+          { config: "default", shard: 5, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4", owners: ["oncall:debug-build"] },
+          { config: "default", shard: 6, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4", owners: ["oncall:debug-build"] },
+          { config: "default", shard: 7, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4", owners: ["oncall:debug-build"] },
         ]}
       python-version: "3.11"
       compiler: gcc11
@@ -375,14 +375,14 @@ jobs:
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
-          { config: "distributed", shard: 1, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx", owners: ["oncall:distributed", "oncall:debug-build"] },
-          { config: "distributed", shard: 2, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx", owners: ["oncall:distributed", "oncall:debug-build"] },
-          { config: "distributed", shard: 3, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx", owners: ["oncall:distributed", "oncall:debug-build"] },
-          { config: "distributed", shard: 4, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx", owners: ["oncall:distributed", "oncall:debug-build"] },
-          { config: "distributed", shard: 5, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx", owners: ["oncall:distributed", "oncall:debug-build"] },
-          { config: "distributed", shard: 6, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx", owners: ["oncall:distributed", "oncall:debug-build"] },
-          { config: "distributed", shard: 7, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx", owners: ["oncall:distributed", "oncall:debug-build"] },
-          { config: "distributed", shard: 8, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx", owners: ["oncall:distributed", "oncall:debug-build"] },
+          { config: "distributed", shard: 1, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iamx-8-64", owners: ["oncall:distributed", "oncall:debug-build"] },
+          { config: "distributed", shard: 2, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iamx-8-64", owners: ["oncall:distributed", "oncall:debug-build"] },
+          { config: "distributed", shard: 3, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iamx-8-64", owners: ["oncall:distributed", "oncall:debug-build"] },
+          { config: "distributed", shard: 4, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iamx-8-64", owners: ["oncall:distributed", "oncall:debug-build"] },
+          { config: "distributed", shard: 5, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iamx-8-64", owners: ["oncall:distributed", "oncall:debug-build"] },
+          { config: "distributed", shard: 6, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iamx-8-64", owners: ["oncall:distributed", "oncall:debug-build"] },
+          { config: "distributed", shard: 7, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iamx-8-64", owners: ["oncall:distributed", "oncall:debug-build"] },
+          { config: "distributed", shard: 8, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iamx-8-64", owners: ["oncall:distributed", "oncall:debug-build"] },
         ]}
       python-version: "3.11"
       compiler: gcc11
@@ -415,14 +415,14 @@ jobs:
       cuda-arch-list: 8.6
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu", owners: ["module:slowgradcheck"] },
-          { config: "default", shard: 2, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu", owners: ["module:slowgradcheck"] },
-          { config: "default", shard: 3, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu", owners: ["module:slowgradcheck"] },
-          { config: "default", shard: 4, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu", owners: ["module:slowgradcheck"] },
-          { config: "default", shard: 5, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu", owners: ["module:slowgradcheck"] },
-          { config: "default", shard: 6, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu", owners: ["module:slowgradcheck"] },
-          { config: "default", shard: 7, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu", owners: ["module:slowgradcheck"] },
-          { config: "default", shard: 8, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu", owners: ["module:slowgradcheck"] },
+          { config: "default", shard: 1, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-a10g", owners: ["module:slowgradcheck"] },
+          { config: "default", shard: 2, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-a10g", owners: ["module:slowgradcheck"] },
+          { config: "default", shard: 3, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-a10g", owners: ["module:slowgradcheck"] },
+          { config: "default", shard: 4, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-a10g", owners: ["module:slowgradcheck"] },
+          { config: "default", shard: 5, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-a10g", owners: ["module:slowgradcheck"] },
+          { config: "default", shard: 6, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-a10g", owners: ["module:slowgradcheck"] },
+          { config: "default", shard: 7, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-a10g", owners: ["module:slowgradcheck"] },
+          { config: "default", shard: 8, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-a10g", owners: ["module:slowgradcheck"] },
         ]}
       python-version: "3.11"
       compiler: gcc11
@@ -458,22 +458,22 @@ jobs:
       cuda-arch-list: '7.5 8.6 8.9'
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
-          { config: "default", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
-          { config: "default", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
-          { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
-          { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
-          { config: "distributed", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu" },
-          { config: "distributed", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu" },
-          { config: "distributed", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu" },
-          { config: "nogpu_AVX512", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "nogpu_AVX512", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "nogpu_AVX512", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "nogpu_NO_AVX2", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "nogpu_NO_AVX2", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "jit_legacy", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
-          { config: "multigpu", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.12xlarge.nvidia.gpu", owners: ["oncall:distributed"] },
-          { config: "multigpu", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.12xlarge.nvidia.gpu", owners: ["oncall:distributed"] },
+          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4" },
+          { config: "default", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4" },
+          { config: "default", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4" },
+          { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4" },
+          { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4" },
+          { config: "distributed", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-45-172-t4-4" },
+          { config: "distributed", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-45-172-t4-4" },
+          { config: "distributed", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-45-172-t4-4" },
+          { config: "nogpu_AVX512", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128" },
+          { config: "nogpu_AVX512", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128" },
+          { config: "nogpu_AVX512", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128" },
+          { config: "nogpu_NO_AVX2", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128" },
+          { config: "nogpu_NO_AVX2", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128" },
+          { config: "jit_legacy", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-a10g" },
+          { config: "multigpu", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-45-167-a10g-4", owners: ["oncall:distributed"] },
+          { config: "multigpu", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-45-167-a10g-4", owners: ["oncall:distributed"] },
         ]}
       python-version: "3.11"
       compiler: gcc11
@@ -508,13 +508,13 @@ jobs:
       cuda-arch-list: 8.9
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu", owners: ["oncall:debug-build"] },
-          { config: "default", shard: 2, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu", owners: ["oncall:debug-build"] },
-          { config: "default", shard: 3, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu", owners: ["oncall:debug-build"] },
-          { config: "default", shard: 4, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu", owners: ["oncall:debug-build"] },
-          { config: "default", shard: 5, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu", owners: ["oncall:debug-build"] },
-          { config: "default", shard: 6, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu", owners: ["oncall:debug-build"] },
-          { config: "default", shard: 7, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu", owners: ["oncall:debug-build"] },
+          { config: "default", shard: 1, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4", owners: ["oncall:debug-build"] },
+          { config: "default", shard: 2, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4", owners: ["oncall:debug-build"] },
+          { config: "default", shard: 3, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4", owners: ["oncall:debug-build"] },
+          { config: "default", shard: 4, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4", owners: ["oncall:debug-build"] },
+          { config: "default", shard: 5, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4", owners: ["oncall:debug-build"] },
+          { config: "default", shard: 6, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4", owners: ["oncall:debug-build"] },
+          { config: "default", shard: 7, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4", owners: ["oncall:debug-build"] },
         ]}
       python-version: "3.11"
       compiler: gcc11
@@ -549,14 +549,14 @@ jobs:
       cuda-arch-list: 8.6
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu", owners: ["module:slowgradcheck"] },
-          { config: "default", shard: 2, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu", owners: ["module:slowgradcheck"] },
-          { config: "default", shard: 3, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu", owners: ["module:slowgradcheck"] },
-          { config: "default", shard: 4, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu", owners: ["module:slowgradcheck"] },
-          { config: "default", shard: 5, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu", owners: ["module:slowgradcheck"] },
-          { config: "default", shard: 6, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu", owners: ["module:slowgradcheck"] },
-          { config: "default", shard: 7, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu", owners: ["module:slowgradcheck"] },
-          { config: "default", shard: 8, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu", owners: ["module:slowgradcheck"] },
+          { config: "default", shard: 1, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-a10g", owners: ["module:slowgradcheck"] },
+          { config: "default", shard: 2, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-a10g", owners: ["module:slowgradcheck"] },
+          { config: "default", shard: 3, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-a10g", owners: ["module:slowgradcheck"] },
+          { config: "default", shard: 4, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-a10g", owners: ["module:slowgradcheck"] },
+          { config: "default", shard: 5, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-a10g", owners: ["module:slowgradcheck"] },
+          { config: "default", shard: 6, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-a10g", owners: ["module:slowgradcheck"] },
+          { config: "default", shard: 7, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-a10g", owners: ["module:slowgradcheck"] },
+          { config: "default", shard: 8, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-a10g", owners: ["module:slowgradcheck"] },
         ]}
       python-version: "3.11"
       compiler: gcc11
