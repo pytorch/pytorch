@@ -434,8 +434,8 @@ if has_triton():
                              Must be 8-byte aligned symmetric memory.
             signal (int64): Value to be used in the signal operation.
             sig_op (int32): Signal operation type. Common values:
-                           - NVSHMEM_SIGNAL_SET (0): Atomic set operation
-                           - NVSHMEM_SIGNAL_ADD (5): Atomic add operation
+                           - NVSHMEM_SIGNAL_SET: Atomic set operation
+                           - NVSHMEM_SIGNAL_ADD: Atomic add operation
             pe (int32): PE number of the remote PE (0 ≤ pe < nvshmem_n_pes()).
 
         Returns:
@@ -452,7 +452,8 @@ if has_triton():
         Example:
             ```
             # Transfer data and set completion flag to 1
-            NVSHMEM_SIGNAL_SET = 0
+            from torch._C._distributed_c10d import _ShmemSignalOp
+            NVSHMEM_SIGNAL_SET = int(_ShmemSignalOp.SET)
             nvshmem.putmem_signal_block(
                 dst_ptr, src_ptr, 1024, sig_ptr, 1, NVSHMEM_SIGNAL_SET, target_pe
             )
@@ -514,12 +515,12 @@ if has_triton():
         Args:
             ivar_tensor: Tensor to monitor (typically int64/uint64) in symmetric memory.
             cmp: Comparison operator. Common values:
-                 - NVSHMEM_CMP_EQ (0): Wait until ivar == cmp_val
-                 - NVSHMEM_CMP_NE (1): Wait until ivar != cmp_val
-                 - NVSHMEM_CMP_GT (2): Wait until ivar > cmp_val
-                 - NVSHMEM_CMP_GE (3): Wait until ivar >= cmp_val
-                 - NVSHMEM_CMP_LT (4): Wait until ivar < cmp_val
-                 - NVSHMEM_CMP_LE (5): Wait until ivar <= cmp_val
+                 - NVSHMEM_CMP_EQ: Wait until ivar == cmp_val
+                 - NVSHMEM_CMP_NE: Wait until ivar != cmp_val
+                 - NVSHMEM_CMP_GT: Wait until ivar > cmp_val
+                 - NVSHMEM_CMP_GE: Wait until ivar >= cmp_val
+                 - NVSHMEM_CMP_LT: Wait until ivar < cmp_val
+                 - NVSHMEM_CMP_LE: Wait until ivar <= cmp_val
             cmp_val: Value to compare against.
 
         Notes:
@@ -530,7 +531,8 @@ if has_triton():
         Example:
             ```
             # Wait until flag tensor becomes 1 (set by another PE)
-            NVSHMEM_CMP_EQ = 0
+            from torch._C._distributed_c10d import _ShmemCompareOp
+            NVSHMEM_CMP_EQ = int(_ShmemCompareOp.EQ)
             nvshmem.wait_until_tensor(flag_tensor, NVSHMEM_CMP_EQ, 1)
             ```
         """
@@ -571,12 +573,12 @@ if has_triton():
             signal (tensor): Symmetric signal tensor with remote PE.
                              Must be 8-byte aligned symmetric memory.
             cmp (int32): Comparison operator. Common values:
-                        - NVSHMEM_CMP_EQ (0): Wait until signal == cmp_val
-                        - NVSHMEM_CMP_NE (1): Wait until signal != cmp_val
-                        - NVSHMEM_CMP_GT (2): Wait until signal > cmp_val
-                        - NVSHMEM_CMP_GE (3): Wait until signal >= cmp_val
-                        - NVSHMEM_CMP_LT (4): Wait until signal < cmp_val
-                        - NVSHMEM_CMP_LE (5): Wait until signal <= cmp_val
+                        - NVSHMEM_CMP_EQ: Wait until signal == cmp_val
+                        - NVSHMEM_CMP_NE: Wait until signal != cmp_val
+                        - NVSHMEM_CMP_GT: Wait until signal > cmp_val
+                        - NVSHMEM_CMP_GE: Wait until signal >= cmp_val
+                        - NVSHMEM_CMP_LT: Wait until signal < cmp_val
+                        - NVSHMEM_CMP_LE: Wait until signal <= cmp_val
             cmp_val (int64): Value to compare against.
 
         Returns:
@@ -592,7 +594,8 @@ if has_triton():
         Example:
             ```
             # Wait for signal to be set to completion value
-            NVSHMEM_CMP_EQ = 0
+            from torch._C._distributed_c10d import _ShmemCompareOp
+            NVSHMEM_CMP_EQ = int(_ShmemCompareOp.EQ)
             nvshmem.signal_wait_until(signal_ptr, NVSHMEM_CMP_EQ, 42)
             ```
         """
@@ -632,8 +635,8 @@ if has_triton():
                              Must be 8-byte aligned symmetric memory.
             signal (int64): Value to be used in the signal operation.
             sig_op (int32): Signal operation type. Common values:
-                           - NVSHMEM_SIGNAL_SET (0): Atomically set sig_addr = signal
-                           - NVSHMEM_SIGNAL_ADD (5): Atomically set sig_addr += signal
+                           - NVSHMEM_SIGNAL_SET: Atomically set sig_addr = signal
+                           - NVSHMEM_SIGNAL_ADD: Atomically set sig_addr += signal
             pe (int32): PE number of the remote PE (0 ≤ pe < nvshmem_n_pes()).
             _semantic: Optional semantic information for Triton compilation.
 
@@ -650,7 +653,8 @@ if has_triton():
         Example:
             ```python
             # Atomically set remote signal to 1 to notify completion
-            NVSHMEM_SIGNAL_SET = 0
+            from torch._C._distributed_c10d import _ShmemSignalOp
+            NVSHMEM_SIGNAL_SET = int(_ShmemSignalOp.SET)
             nvshmem.signal_op(remote_signal_ptr, 1, NVSHMEM_SIGNAL_SET, target_pe)
             ```
         """

@@ -1183,6 +1183,28 @@ Example:
       ::c10d::nvshmem_extension::nvshmemx_cumodule_init,
       py::arg("module"));
 
+  const auto signal_ops =
+      ::c10d::nvshmem_extension::shmem_signal_op_values();
+  py::dict signal_op_members;
+  signal_op_members["SET"] = signal_ops[0];
+  signal_op_members["ADD"] = signal_ops[1];
+  module.attr("_ShmemSignalOp") =
+      py::module_::import("enum").attr("IntEnum")(
+          "_ShmemSignalOp", signal_op_members);
+
+  const auto compare_ops =
+      ::c10d::nvshmem_extension::shmem_compare_op_values();
+  py::dict compare_op_members;
+  compare_op_members["EQ"] = compare_ops[0];
+  compare_op_members["NE"] = compare_ops[1];
+  compare_op_members["GT"] = compare_ops[2];
+  compare_op_members["GE"] = compare_ops[3];
+  compare_op_members["LT"] = compare_ops[4];
+  compare_op_members["LE"] = compare_ops[5];
+  module.attr("_ShmemCompareOp") =
+      py::module_::import("enum").attr("IntEnum")(
+          "_ShmemCompareOp", compare_op_members);
+
   // Check if NVSHMEM is available on current system.
   module.def(
       "_is_nvshmem_available", ::c10d::nvshmem_extension::is_nvshmem_available);
