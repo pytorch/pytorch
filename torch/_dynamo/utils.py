@@ -1390,6 +1390,7 @@ def _unpack_fast_types() -> tuple[type, ...]:
         variables.FakeItemVariable,
         variables.FrozensetVariable,
         variables.ListIteratorVariable,
+        variables.ListReverseIteratorVariable,
         variables.ListVariable,
         variables.MappingProxyVariable,
         variables.NNModuleHooksDictVariable,
@@ -3208,6 +3209,8 @@ range_iterator: type[Iterator[Any]] = type(iter(range(0)))
 tuple_iterator_len = tuple_iterator.__length_hint__  # type: ignore[attr-defined]
 deque_iterator = type(iter(collections.deque()))
 deque_rev_iterator = type(reversed(collections.deque()))
+list_reverseiterator = type(reversed([]))
+list_reverseiterator_len = list_reverseiterator.__length_hint__  # type: ignore[attr-defined]
 object_new = object.__new__
 dict_new = dict.__new__
 dict_methods = {
@@ -3303,6 +3306,15 @@ def product(it: Iterable[T]) -> int:
 def tuple_iterator_getitem(it: Any, index: int) -> Any:
     _, (obj,), start = it.__reduce__()
     return obj[start + index]
+
+
+def list_reverseiterator_backing_list(it: Any) -> list[Any]:
+    return it.__reduce__()[1][0]
+
+
+def list_reverseiterator_setstate(it: Any, it_index: int) -> Any:
+    it.__setstate__(it_index)
+    return it
 
 
 def dataclass_fields(cls: Any) -> Any:

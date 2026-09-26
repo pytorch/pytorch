@@ -186,6 +186,7 @@ from .variables.lists import (
     DequeIteratorVariable,
     DequeReverseIteratorVariable,
     ListIteratorVariable,
+    ListReverseIteratorVariable,
     ListVariable,
     SliceVariable,
     TupleIteratorVariable,
@@ -6606,6 +6607,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
             TupleIteratorVariable,
             DequeIteratorVariable,
             DequeReverseIteratorVariable,
+            ListReverseIteratorVariable,
         )
         if not isinstance(tos, iter_vts):
             self.pop()

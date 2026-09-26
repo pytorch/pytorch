@@ -155,6 +155,7 @@ from .source import (
     GradSource,
     ImportSource,
     ListGetItemSource,
+    ListReverseIteratorBackingListSource,
     LocalSource,
     NamedTupleFieldsSource,
     NNModuleSource,
@@ -197,6 +198,8 @@ from .utils import (
     istype,
     key_is_id,
     key_to_id,
+    list_reverseiterator_backing_list,
+    list_reverseiterator_len,
     normalize_count_iter,
     normalize_range_iter,
     orig_code_map,
@@ -893,6 +896,8 @@ def _get_closure_vars() -> dict[str, object]:
             "___normalize_count_iter": normalize_count_iter,
             "___normalize_range_iter": normalize_range_iter,
             "___tuple_iterator_getitem": tuple_iterator_getitem,
+            "___list_reverseiterator_len": list_reverseiterator_len,
+            "___list_reverseiterator_backing_list": list_reverseiterator_backing_list,
             "___set_getitem": set_getitem,
             "___dataclass_fields": dataclass_fields,
             "___namedtuple_fields": lambda x: x._fields,
@@ -2187,6 +2192,15 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
+        elif istype(source, ListReverseIteratorBackingListSource):
+            if not base_guard_manager:  # to make mypy happy
+                raise AssertionError("base_guard_manager must not be None")
+            out = base_guard_manager.lambda_manager(
+                python_lambda=list_reverseiterator_backing_list,
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
         elif isinstance(source, ConstDictKeySource):
             if not isinstance(base_guard_manager, DictGuardManager):
                 raise AssertionError(
@@ -3332,6 +3346,31 @@ class GuardBuilder(GuardBuilderBase):
             )
 
         code = [f"___normalize_count_iter({ref}) == {normalized_count_iter}"]
+        self._set_guard_export_info(guard, code)
+        self.get_guard_manager(guard).add_lambda_guard(
+            guard_fn, get_verbose_code_parts(code, guard), guard.user_stack
+        )
+
+    @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: (
+            type(value),
+            list_reverseiterator_len(value),
+        ),
+        eval_fn=lambda value, metadata: (
+            type(value) is metadata[0]
+            and list_reverseiterator_len(value) == metadata[1]
+        ),
+    )
+    def LIST_REVERSEITERATOR_LEN(self, guard: Guard) -> None:
+        ref = self.arg_ref(guard)
+        value = self.get(guard)
+        it_type = type(value)
+        length = list_reverseiterator_len(value)
+
+        def guard_fn(x: object) -> bool:
+            return type(x) is it_type and list_reverseiterator_len(x) == length
+
+        code = [f"___list_reverseiterator_len({ref}) == {length}"]
         self._set_guard_export_info(guard, code)
         self.get_guard_manager(guard).add_lambda_guard(
             guard_fn, get_verbose_code_parts(code, guard), guard.user_stack

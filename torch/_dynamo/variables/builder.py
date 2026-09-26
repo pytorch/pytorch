@@ -152,6 +152,7 @@ from ..source import (
     is_from_optimizer_source,
     is_from_unspecialized_nn_module_source,
     ListGetItemSource,
+    ListReverseIteratorBackingListSource,
     LocalSource,
     NNModuleSource,
     NonSerializableSetGetItemSource,
@@ -192,6 +193,9 @@ from ..utils import (
     is_utils_checkpoint,
     is_wrapper_or_member_descriptor,
     istype,
+    list_reverseiterator,
+    list_reverseiterator_backing_list,
+    list_reverseiterator_len,
     namedtuple_fields,
     odict_values,
     proxy_args_kwargs,
@@ -255,6 +259,7 @@ from .lists import (
     BaseListVariable,
     DequeVariable,
     ListIteratorVariable,
+    ListReverseIteratorVariable,
     ListVariable,
     RangeVariable,
     SizeVariable,
@@ -972,6 +977,7 @@ class VariableBuilder:
             ),
             (itertools.count, cls.wrap_itertools_count),
             (tuple_iterator, cls.wrap_tuple_iterator),
+            (list_reverseiterator, cls.wrap_list_reverseiterator),
             (range_iterator, cls.wrap_range_iterator),
             ((slice, range), cls.wrap_slice_range),
             (tuple(common_constant_types), cls.wrap_literal),
@@ -2588,6 +2594,26 @@ class VariableBuilder:
             for i in range(tuple_iterator_len(value))
         ]
         result = TupleIteratorVariable(output, source=self.source)
+        return self.tx.output.side_effects.track_mutable(value, result)
+
+    def wrap_list_reverseiterator(self, value: Any) -> VariableTracker:
+        self.install_guards(GuardBuilder.LIST_REVERSEITERATOR_LEN)
+        length = list_reverseiterator_len(value)
+        backing_list = list_reverseiterator_backing_list(value)
+        backing_source = ListReverseIteratorBackingListSource(self.get_source())
+        backing_vt = VariableBuilder(self.tx, backing_source)(backing_list)
+        source_seq = (
+            backing_vt._base_vt
+            if isinstance(backing_vt, UserDefinedListVariable)
+            else backing_vt
+        )
+        if source_seq is None:
+            raise AssertionError("_base_vt must not be None")
+        result = ListReverseIteratorVariable(
+            source_seq=source_seq,
+            it_index=length - 1,
+            source=self.source,
+        )
         return self.tx.output.side_effects.track_mutable(value, result)
 
     def wrap_range_iterator(self, value: range_iterator) -> VariableTracker:

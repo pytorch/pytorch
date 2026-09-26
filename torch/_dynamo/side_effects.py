@@ -2103,7 +2103,12 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
     name="list_iterator_mutation",
     # Lazy: builder imports side_effects while variables/ is still initializing.
     matcher=lambda ctx: isinstance(
-        ctx.var, (variables.ListIteratorVariable, variables.TupleIteratorVariable)
+        ctx.var,
+        (
+            variables.ListIteratorVariable,
+            variables.TupleIteratorVariable,
+            variables.ListReverseIteratorVariable,
+        ),
     ),
     priority=30,
 )
@@ -2111,7 +2116,12 @@ def _codegen_list_iterator_mutation(ctx: SideEffectReplayContext) -> None:
     cg = ctx.codegen
     var = ctx.var
     if not isinstance(
-        var, (variables.ListIteratorVariable, variables.TupleIteratorVariable)
+        var,
+        (
+            variables.ListIteratorVariable,
+            variables.TupleIteratorVariable,
+            variables.ListReverseIteratorVariable,
+        ),
     ):
         raise AssertionError(type(var))
     for _ in range(var.index):
