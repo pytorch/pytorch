@@ -97,6 +97,29 @@ device_type = (
 )
 
 
+# Keep this flat-named and module-level: FX codegen emits a wrap("<name>")
+# preamble for is_wrapped nodes, and a dotted name like "torch.sin" registers
+# in the process-global torch.fx._symbolic_trace._wrapped_fns_to_patch against
+# a globals dict that cannot resolve it, killing every later symbolic_trace.
+def _module_scoped_hash_target(x):
+    return x + 1
+
+
+_OPAQUE_SCALE = [2.0]
+
+
+# Module-level so the cache key can round-trip this callable by import path.
+# A local function's "<locals>" qualname would fail before the stale-hit path.
+@torch._dynamo.allow_in_graph
+def _opaque_scaled(x):
+    return x * _OPAQUE_SCALE[0]
+
+
+@torch._dynamo.allow_in_graph
+def _opaque_unsupported_function(grad):
+    return grad * 2
+
+
 class CustomPreGradPassRemoveIdentMuls(CustomGraphPass):
     """
     Pre-grad pass that removes redundant identity multiplications (1 * x).
@@ -3690,6 +3713,11 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         if inputs is None:
             inputs = [torch.ones(3)]
         _, fx_g, example_inputs = self._get_dynamo_output(f, *inputs)
+        return self._gen_cache_key_from_gm(
+            fx_g, example_inputs, config, act_input_paths
+        )
+
+    def _gen_cache_key_from_gm(self, fx_g, example_inputs, config, act_input_paths=()):
         shape_env = ShapeEnv()
         ctx = TracingContext(FakeTensorMode(shape_env=shape_env))
         # Needs a shape env for FxGraphCache.check_can_cache to pass.
@@ -3703,6 +3731,19 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
                     None,
                     act_input_paths=act_input_paths,
                 )
+
+    def _make_wrapped_gm(self, target, cache_hash, example):
+        """cache_hash=None leaves user_cache_hash unset."""
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        x.meta["example_value"] = example
+        result = graph.call_function(target, (x,))
+        result.meta["example_value"] = example
+        result.meta["is_wrapped"] = True
+        if cache_hash is not None:
+            result.meta["user_cache_hash"] = cache_hash
+        graph.output(result)
+        return GraphModule(torch.nn.Module(), graph)
 
     @functorch_config.patch({"bypass_autograd_cache_key": True})
     def test_fallback_nonce_cache_dirs_are_unique(self):
@@ -3910,6 +3951,203 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             c2 = self.gen_cache_key(fn, config)
         self.assertNotEqual(c1, c2)
 
+    def test_wrapped_user_cache_hash_in_key(self):
+        def make_graph(cache_hash, nested):
+            example = torch.ones(3)
+            inner = self._make_wrapped_gm(
+                _opaque_unsupported_function, cache_hash, example
+            )
+            if not nested:
+                return inner, [example]
+
+            root = torch.nn.Module()
+            root.body = inner
+            outer_graph = torch.fx.Graph()
+            x = outer_graph.placeholder("x")
+            x.meta["example_value"] = example
+            result = outer_graph.call_module("body", (x,))
+            result.meta["example_value"] = example
+            outer_graph.output(result)
+            return GraphModule(root, outer_graph), [example]
+
+        config = self.default_config()
+        for nested in (False, True):
+            with self.subTest(nested=nested):
+                gm, inputs = make_graph("hash_a", nested)
+                key_a, _ = self._gen_cache_key_from_gm(gm, inputs, config)
+                gm, inputs = make_graph("hash_a", nested)
+                same_key, _ = self._gen_cache_key_from_gm(gm, inputs, config)
+                gm, inputs = make_graph("hash_b", nested)
+                different_key, _ = self._gen_cache_key_from_gm(gm, inputs, config)
+
+                self.assertEqual(key_a, same_key)
+                self.assertNotEqual(key_a, different_key)
+
+                gm, inputs = make_graph(None, nested)
+                with self.assertRaises(BypassAOTAutogradCache) as cm:
+                    self._gen_cache_key_from_gm(gm, inputs, config)
+                message = str(cm.exception)
+                self.assertRegex(
+                    message,
+                    r"Unsupported call_function target .*_opaque_unsupported_function",
+                )
+                if nested:
+                    self.assertRegex(message, r"\nSubgraph: body\Z")
+                else:
+                    self.assertNotIn("Subgraph:", message)
+
+    def test_nested_check_failure_names_subgraph(self):
+        # The original exception is re-raised with its type intact; only a
+        # message that str() renders verbatim gains the Subgraph line.
+        example = torch.ones(3)
+        root = torch.nn.Module()
+        root.body = self._make_wrapped_gm(_opaque_unsupported_function, None, example)
+        graph = torch.fx.Graph()
+        graph.output(graph.call_module("body", (graph.placeholder("x"),)))
+        gm = GraphModule(root, graph)
+
+        for exc, message in (
+            (AssertionError("bad"), "bad\nSubgraph: body"),
+            (OSError(2, "missing"), "[Errno 2] missing"),
+            (KeyError("k"), "'k'"),
+        ):
+
+            def fail(node, exc=exc):
+                if node.graph is gm.body.graph:
+                    raise exc
+
+            with self.subTest(type(exc).__name__):
+                with (
+                    patch.object(autograd_cache, "check_node_safe", side_effect=fail),
+                    self.assertRaises(type(exc)) as cm,
+                ):
+                    check_cacheable(gm)
+                self.assertIs(cm.exception, exc)
+                self.assertEqual(str(cm.exception), message)
+
+    def test_wrapped_user_cache_hash_must_be_str(self):
+        # A non-string hash is a producer bug, not key material: tensors reduce
+        # to metadata only, silently under-keying. The multi-element tensor also
+        # pins type-checking before truthiness, where bool() would raise.
+        example = torch.ones(3)
+        target = _opaque_unsupported_function
+        for bad_hash in (123, torch.ones(2)):
+            with self.subTest(bad_hash=type(bad_hash).__name__):
+                gm = self._make_wrapped_gm(target, bad_hash, example)
+                (node,) = gm.graph.find_nodes(op="call_function", target=target)
+                with self.assertRaisesRegex(
+                    AssertionError, f"user_cache_hash on {node.name} must be a str"
+                ):
+                    check_cacheable(gm)
+
+    def test_wrapped_user_cache_hash_empty_falls_through(self):
+        example = torch.ones(3)
+
+        with self.assertRaisesRegex(
+            BypassAOTAutogradCache,
+            r"Unsupported call_function target .*_opaque_unsupported_function",
+        ):
+            check_cacheable(
+                self._make_wrapped_gm(_opaque_unsupported_function, "", example)
+            )
+
+        # Empty/absent hashes fall through, so the target must be cacheable.
+        target = _module_scoped_hash_target
+        marked_cacheable = {f"{target.__module__}.{target.__name__}": "v1"}
+        config = self.default_config()
+        with inductor_config.patch(
+            "unsafe_marked_cacheable_functions", marked_cacheable
+        ):
+            empty_key, _ = self._gen_cache_key_from_gm(
+                self._make_wrapped_gm(target, "", example), [example], config
+            )
+            absent_key, _ = self._gen_cache_key_from_gm(
+                self._make_wrapped_gm(target, None, example), [example], config
+            )
+            # Equality alone would pass if collection skipped this cacheable
+            # target.
+            hashed_key, _ = self._gen_cache_key_from_gm(
+                self._make_wrapped_gm(target, "nonempty_hash", example),
+                [example],
+                config,
+            )
+        self.assertEqual(empty_key, absent_key)
+        self.assertNotEqual(hashed_key, absent_key)
+
+    def test_wrapped_user_cache_hash_is_module_scoped(self):
+        # Node meta is not serialized, so a collector that dropped the module
+        # path would return ["shared_hash"] for both graphs and collide here.
+        #
+        # Both children must be is_wrapped: FX emits a wrap() preamble per
+        # is_wrapped node into the generated code, so marking only the hashed
+        # child would split the keys by codegen alone and pass vacuously.
+        #
+        # Marking the target cacheable lets the unhashed child pass
+        # check_node_safe.
+        target = _module_scoped_hash_target
+        marked_cacheable = {f"{target.__module__}.{target.__name__}": "v1"}
+
+        def make_graph(hashed_child):
+            example = torch.ones(3)
+            root = torch.nn.Module()
+            for child in ("body_a", "body_b"):
+                cache_hash = "shared_hash" if child == hashed_child else None
+                setattr(root, child, self._make_wrapped_gm(target, cache_hash, example))
+
+            outer_graph = torch.fx.Graph()
+            x = outer_graph.placeholder("x")
+            x.meta["example_value"] = example
+            a = outer_graph.call_module("body_a", (x,))
+            a.meta["example_value"] = example
+            b = outer_graph.call_module("body_b", (a,))
+            b.meta["example_value"] = example
+            outer_graph.output(b)
+            return GraphModule(root, outer_graph), [example]
+
+        config = self.default_config()
+        with inductor_config.patch(
+            "unsafe_marked_cacheable_functions", marked_cacheable
+        ):
+            key_a, _ = self._gen_cache_key_from_gm(*make_graph("body_a"), config)
+            key_b, _ = self._gen_cache_key_from_gm(*make_graph("body_b"), config)
+        self.assertNotEqual(key_a, key_b)
+
+    def test_checkpoint_wrapped_user_cache_hash_in_key(self):
+        def body(x):
+            return _opaque_unsupported_function(x)
+
+        def fn(x):
+            return checkpoint(body, x, use_reentrant=False)
+
+        _, gm, inputs = self._get_dynamo_output(fn, torch.ones(3, requires_grad=True))
+        target_nodes = [
+            (module_name, node)
+            for module_name, module in gm.named_modules()
+            if isinstance(module, GraphModule)
+            for node in module.graph.nodes
+            if node.target is _opaque_unsupported_function
+        ]
+        self.assertEqual(len(target_nodes), 1)
+        module_name, target_node = target_nodes[0]
+        self.assertNotEqual(module_name, "")
+
+        # Supply the user cache metadata after Dynamo attaches the real HOP body.
+        target_node.meta["is_wrapped"] = True
+        target_node.meta["user_cache_hash"] = "hash_a"
+        config = self.default_config()
+        key_a, _ = self._gen_cache_key_from_gm(gm, inputs, config)
+
+        target_node.meta["user_cache_hash"] = "hash_b"
+        key_b, _ = self._gen_cache_key_from_gm(gm, inputs, config)
+        self.assertNotEqual(key_a, key_b)
+
+        target_node.meta.pop("user_cache_hash")
+        with self.assertRaisesRegex(
+            BypassAOTAutogradCache,
+            r"Unsupported call_function target .*_opaque_unsupported_function",
+        ):
+            self._gen_cache_key_from_gm(gm, inputs, config)
+
     def test_incompatible_function(self):
         @torch._dynamo.allow_in_graph
         class AllowInGraphFunc(torch.autograd.Function):
@@ -3925,6 +4163,58 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         self.assertRaises(
             BypassAOTAutogradCache, lambda: self.gen_cache_key(fn, config)
         )
+
+    def test_incompatible_nested_graph_module(self):
+        example = torch.ones(3)
+
+        inner_graph = torch.fx.Graph()
+        inner_x = inner_graph.placeholder("x")
+        inner_x.meta["example_value"] = example
+        inner_result = inner_graph.call_function(
+            _opaque_unsupported_function, (inner_x,)
+        )
+        inner_result.meta["example_value"] = example
+        inner_graph.output(inner_result)
+        inner = GraphModule(torch.nn.Module(), inner_graph)
+
+        root = torch.nn.Module()
+        root.body = inner
+        outer_graph = torch.fx.Graph()
+        outer_x = outer_graph.placeholder("x")
+        outer_x.meta["example_value"] = example
+        outer_result = outer_graph.call_module("body", (outer_x,))
+        outer_result.meta["example_value"] = example
+        outer_graph.output(outer_result)
+        outer = GraphModule(root, outer_graph)
+
+        with self.assertRaisesRegex(
+            BypassAOTAutogradCache,
+            r"(?s)Unsupported call_function target .*_opaque_unsupported_function.*"
+            r"Subgraph: body",
+        ):
+            check_cacheable(outer)
+
+    @functorch_config.patch({"autograd_cache_allow_custom_autograd_functions": True})
+    def test_custom_autograd_function_with_incompatible_nested_function(self):
+        class MyAutogradFunction(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return _opaque_unsupported_function(grad_output)
+
+        def fn(x):
+            return MyAutogradFunction.apply(x)
+
+        config = self.default_config()
+        with self.assertRaisesRegex(
+            BypassAOTAutogradCache,
+            r"(?s)Unsupported call_function target .*_opaque_unsupported_function.*"
+            r"Subgraph: bwd_body_\d+",
+        ):
+            self.gen_cache_key(fn, config, inputs=[torch.ones(3, requires_grad=True)])
 
     def test_private_namespace(self):
         # TODO: anyone who monkeypatches a **public** function into torch namespace with @allow_in_graph
@@ -5039,6 +5329,48 @@ class HOPCacheTests(CacheKeyEquivalenceMixin, torch._dynamo.test_case.TestCase):
 
             self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+
+    # NB: no strict_autograd_cache here. The fix makes the first call bypass,
+    # and strict mode turns a bypass into a hard error.
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_checkpoint_body_opaque_callable_not_stale(self):
+        """A cached checkpoint body must not outlive behavior its key cannot see.
+
+        Dynamo leaves _opaque_scaled opaque, while AOT traces through it. The
+        cache key records its stable import path, not its body or referenced
+        state; changing _OPAQUE_SCALE models a deployment changing behavior at
+        that path. Assert the gradient and cache participation, not a particular
+        outcome: any way of avoiding the stale result is acceptable.
+        """
+
+        def grad_of_compiled():
+            torch._dynamo.reset()
+            x = torch.ones(4, requires_grad=True)
+            compiled = torch.compile(
+                lambda x: checkpoint(_opaque_scaled, x, use_reentrant=False),
+                backend="inductor",
+                fullgraph=True,
+            )
+            return torch.autograd.grad(compiled(x).sum(), x)[0]
+
+        original_scale = _OPAQUE_SCALE[0]
+        try:
+            _OPAQUE_SCALE[0] = 2.0
+            with fresh_cache():
+                self.assertEqual(grad_of_compiled(), torch.full((4,), 2.0))
+                _OPAQUE_SCALE[0] = 3.0
+                self.assertEqual(grad_of_compiled(), torch.full((4,), 3.0))
+                stats = counters["aot_autograd"]
+                self.assertEqual(
+                    stats["autograd_cache_hit"]
+                    + stats["autograd_cache_miss"]
+                    + stats["autograd_cache_bypass"],
+                    2,
+                )
+        finally:
+            _OPAQUE_SCALE[0] = original_scale
 
 
 @instantiate_parametrized_tests

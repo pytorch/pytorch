@@ -219,6 +219,28 @@ def sync_cache_decision_cross_ranks(local_hit: bool) -> bool:
     return False
 
 
+def _validated_user_cache_hash(node: Node) -> str | None:
+    """Return the user_cache_hash that authorizes caching this wrapped node.
+
+    Admission (check_node_safe) and key collection
+    (_collect_wrapped_user_cache_hashes) must apply the same rule: a missing
+    or empty hash returns None so the node falls through to the ordinary
+    cacheability checks. A non-string hash is a producer bug rather than an
+    uncacheable graph, since it has no stable reduction in the cache key (e.g.
+    tensors reduce to metadata only), so it raises instead of bypassing.
+    """
+    if not node.meta or not node.meta.get("is_wrapped", False):
+        return None
+    cache_hash = node.meta.get("user_cache_hash")
+    if cache_hash is None:
+        return None
+    if not isinstance(cache_hash, str):
+        raise AssertionError(
+            f"user_cache_hash on {node.name} must be a str, got {type(cache_hash).__name__}"
+        )
+    return cache_hash or None
+
+
 def check_node_safe(node: Node) -> None:
     """
     Checks that the node only uses supported operators. We are starting with very
@@ -318,7 +340,7 @@ def check_node_safe(node: Node) -> None:
             # This is fx.wrap function
             # By default we BypassAOTAutogradCache for unknown functions,
             # But if user explicitly specified cache hash - allow caching it.
-            if node.meta.get("user_cache_hash", None):
+            if _validated_user_cache_hash(node) is not None:
                 return
         if isinstance(node.target, str):
             raise AssertionError(
@@ -364,17 +386,25 @@ def check_node_safe(node: Node) -> None:
         # that dynamo assumes are safe to trace. If dynamo assumes they are safely to blindly trace, then
         # they should be safe to cache as well.
         # (2) in the steady-state (some time in H2?) we shouldn't see these anymore, once inline builtin nn modules by default
-        # (3) We do not allow user made nn modules in the graph today, only function calls.
+        # (3) Dynamo does not allow user-made nn modules in the graph today.
+        # Registered GraphModule children are validated separately below.
         pass
     else:
         raise BypassAOTAutogradCache(f"Unsupported node op {node.op}")
 
 
+def _iter_named_graph_modules(
+    gm: torch.fx.GraphModule,
+) -> Generator[tuple[str, torch.fx.GraphModule], None, None]:
+    for name, module in gm.named_modules():
+        if isinstance(module, torch.fx.GraphModule):
+            yield name, module
+
+
 def check_cacheable(gm: torch.fx.GraphModule) -> None:
     """
-    Checks that the graph module only uses supported operators
+    Checks that the graph module and its subgraphs only use supported operators.
     """
-    nodes = gm.graph.nodes
     if torch._inductor.config.freezing:
         raise BypassAOTAutogradCache("Cannot cache a graph with freezing enabled")
 
@@ -388,17 +418,24 @@ def check_cacheable(gm: torch.fx.GraphModule) -> None:
         raise BypassAOTAutogradCache(
             "Won't cache a graph with fakify_first_call enabled"
         )
-    for node in nodes:
-        check_node_safe(node)
-
-    # Saved tensors hooks are globally set subgraphs,
-    # that are not used explicitly in the main graph.
-    # They are inlined in aot_autograd graphs.
-    # Subgraphs are only used for caching logic.
-    if hasattr(gm, "saved_tensors_hooks_pack_0"):
-        check_cacheable(gm.saved_tensors_hooks_pack_0)  # type: ignore[arg-type]
-        # We have guarantee of unpack subgraph existence if pack subgraph exists
-        check_cacheable(gm.saved_tensors_hooks_unpack_0)  # type: ignore[arg-type]
+    # Validate every registered nested GraphModule, including HOP bodies and
+    # saved-tensor-hook subgraphs attached without graph nodes.
+    for module_name, module in _iter_named_graph_modules(gm):
+        try:
+            for node in module.graph.nodes:
+                check_node_safe(node)
+        except Exception as e:
+            # Keep the exception's type: record_bypass uses it to tell bypasses
+            # from hard errors. Only rewrite a message that str(e) renders
+            # verbatim; OSError, KeyError and multi-arg exceptions don't.
+            if (
+                module_name
+                and type(e).__str__ is BaseException.__str__
+                and len(e.args) <= 1
+                and all(isinstance(arg, str) for arg in e.args)
+            ):
+                e.args = (f"{e.args[0] if e.args else ''}\nSubgraph: {module_name}",)
+            raise
 
 
 def _get_context_fn_cache_hash(context_fn: Callable[..., Any]) -> str | None:
@@ -423,14 +460,6 @@ def _get_context_fn_cache_hash(context_fn: Callable[..., Any]) -> str | None:
     return None
 
 
-def _iter_graph_modules(
-    gm: torch.fx.GraphModule,
-) -> Generator[torch.fx.GraphModule, None, None]:
-    for module in gm.modules():
-        if isinstance(module, torch.fx.GraphModule):
-            yield module
-
-
 def _collect_context_fn_hashes(gm: torch.fx.GraphModule) -> list[str]:
     """
     Collect cache hashes from all context_fn used in SAC HOPs within the graph module.
@@ -439,7 +468,7 @@ def _collect_context_fn_hashes(gm: torch.fx.GraphModule) -> list[str]:
     lacks a cache_hash attribute.
     """
     hashes = []
-    for module in _iter_graph_modules(gm):
+    for _, module in _iter_named_graph_modules(gm):
         context_fn = module.meta.get("_checkpoint_context_fn")
         if context_fn is not None:
             cache_hash = _get_context_fn_cache_hash(context_fn)
@@ -456,30 +485,19 @@ def _collect_context_fn_hashes(gm: torch.fx.GraphModule) -> list[str]:
     return hashes
 
 
-def _collect_wrapped_user_cache_hashes(gm: torch.fx.GraphModule) -> list[str]:
-    wrapped_user_cache_hashes = []
-    for node in gm.graph.nodes:
-        if node.meta and node.meta.get("is_wrapped", False):
-            wrapped_user_cache_hashes.append(node.meta["user_cache_hash"])
-    return wrapped_user_cache_hashes
-
-
-def _collect_saved_tensors_hooks_fx_wrap_cache_hashes(
+def _collect_wrapped_user_cache_hashes(
     gm: torch.fx.GraphModule,
-) -> tuple[list[str], list[str]]:
-    if not hasattr(gm, "saved_tensors_hooks_pack_0"):
-        return ([], [])
-
-    return (
-        _collect_wrapped_user_cache_hashes(
-            # pyrefly: ignore[bad-argument-type]
-            gm.saved_tensors_hooks_pack_0
-        ),
-        _collect_wrapped_user_cache_hashes(
-            # pyrefly: ignore[bad-argument-type]
-            gm.saved_tensors_hooks_unpack_0
-        ),
-    )
+) -> list[tuple[str, list[str]]]:
+    hashes_by_module = []
+    for module_name, module in _iter_named_graph_modules(gm):
+        hashes: list[str] = []
+        for node in module.graph.nodes:
+            cache_hash = _validated_user_cache_hash(node)
+            if cache_hash is not None:
+                hashes.append(cache_hash)
+        if hashes:
+            hashes_by_module.append((module_name, hashes))
+    return hashes_by_module
 
 
 def _get_custom_estimator_solver_uuids(
@@ -563,7 +581,7 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
             raise AssertionError("Triton is not available")
 
         triton_kernels = []
-        for module in _iter_graph_modules(gm):
+        for _, module in _iter_named_graph_modules(gm):
             for node in module.graph.nodes:
                 triton_kernels.extend(self._iter_triton_kernels_from_node(node))
 
@@ -598,9 +616,7 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
         self.aot_config = aot_config
         self.act_input_paths = tuple(act_input_paths)
         self._record_runtime_state(gm)
-        self.saved_tensors_hooks_fx_wrap_cache_hashes = (
-            _collect_saved_tensors_hooks_fx_wrap_cache_hashes(gm)
-        )
+        self.wrapped_user_cache_hashes = _collect_wrapped_user_cache_hashes(gm)
         self.sac_context_fn_hashes = _collect_context_fn_hashes(gm)
 
         # node.meta is stripped by GraphModule.__reduce__, so preserve the
