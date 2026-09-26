@@ -196,7 +196,8 @@ kernel void segment_reduce_backward(
     result = product;
   }
   if (R == SegmentReduction::Prod &&
-      ((!Parallel && sizeof(T) < sizeof(float)) || result == 0 || isnan(result))) {
+      ((!Parallel && sizeof(T) < sizeof(float)) || result == 0 ||
+       isnan(result))) {
     if (Parallel && tid % width != 0) {
       return;
     }
@@ -299,46 +300,46 @@ kernel void segment_reduce_backward(
       uint,                                                       \
       uint)
 
-#define REGISTER_SEGMENT_BACKWARD_PARALLEL(T, I, R)                      \
+#define REGISTER_SEGMENT_BACKWARD_PARALLEL(T, I, R)                     \
   template [[host_name("segment_backward_parallel_" #T "_" #I "_" #R)]] \
   kernel void segment_reduce_backward<T, I, SegmentReduction::R, true>( \
-      constant T*,                                                     \
-      constant T*,                                                     \
-      constant T*,                                                     \
-      device T*,                                                       \
-      constant I*,                                                     \
-      constant uint*,                                                  \
-      constant SegmentReduceParams&,                                   \
-      constant ulong&,                                                 \
-      device float*,                                                   \
-      uint,                                                            \
-      uint,                                                            \
+      constant T*,                                                      \
+      constant T*,                                                      \
+      constant T*,                                                      \
+      device T*,                                                        \
+      constant I*,                                                      \
+      constant uint*,                                                   \
+      constant SegmentReduceParams&,                                    \
+      constant ulong&,                                                  \
+      device float*,                                                    \
+      uint,                                                             \
+      uint,                                                             \
       uint)
 
-#define REGISTER_SEGMENT_REDUCTIONS(T, I)        \
-  REGISTER_SEGMENT(T, I, Max);                   \
-  REGISTER_SEGMENT(T, I, Mean);                  \
-  REGISTER_SEGMENT(T, I, Min);                   \
-  REGISTER_SEGMENT(T, I, Sum);                   \
-  REGISTER_SEGMENT(T, I, Prod);                  \
+#define REGISTER_SEGMENT_REDUCTIONS(T, I)         \
+  REGISTER_SEGMENT(T, I, Max);                    \
+  REGISTER_SEGMENT(T, I, Mean);                   \
+  REGISTER_SEGMENT(T, I, Min);                    \
+  REGISTER_SEGMENT(T, I, Sum);                    \
+  REGISTER_SEGMENT(T, I, Prod);                   \
   REGISTER_SEGMENT_BACKWARD_PARALLEL(T, I, Max);  \
   REGISTER_SEGMENT_BACKWARD_PARALLEL(T, I, Mean); \
   REGISTER_SEGMENT_BACKWARD_PARALLEL(T, I, Min);  \
   REGISTER_SEGMENT_BACKWARD_PARALLEL(T, I, Sum)
 
-#define REGISTER_SEGMENT_INDEX(I)                    \
-  template [[host_name("segment_validate_" #I)]]     \
-  kernel void segment_validate<I>(                   \
-      constant I*,                                   \
-      device uint*,                                  \
-      constant SegmentReduceParams&,                 \
-      device ErrorMessages*,                         \
-      constant ulong&,                               \
-      uint);                                         \
-  REGISTER_SEGMENT_REDUCTIONS(float, I);             \
-  REGISTER_SEGMENT_REDUCTIONS(half, I);              \
-  REGISTER_SEGMENT_REDUCTIONS(bfloat, I);            \
-  REGISTER_SEGMENT_BACKWARD_PARALLEL(half, I, Prod);  \
+#define REGISTER_SEGMENT_INDEX(I)                      \
+  template [[host_name("segment_validate_" #I)]]       \
+  kernel void segment_validate<I>(                     \
+      constant I*,                                     \
+      device uint*,                                    \
+      constant SegmentReduceParams&,                   \
+      device ErrorMessages*,                           \
+      constant ulong&,                                 \
+      uint);                                           \
+  REGISTER_SEGMENT_REDUCTIONS(float, I);               \
+  REGISTER_SEGMENT_REDUCTIONS(half, I);                \
+  REGISTER_SEGMENT_REDUCTIONS(bfloat, I);              \
+  REGISTER_SEGMENT_BACKWARD_PARALLEL(half, I, Prod);   \
   REGISTER_SEGMENT_BACKWARD_PARALLEL(bfloat, I, Prod); \
   REGISTER_SEGMENT_BACKWARD_PARALLEL(float, I, Prod)
 
