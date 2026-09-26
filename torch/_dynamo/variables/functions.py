@@ -5049,15 +5049,21 @@ class ClassMethodVariable(VariableTracker):
             if owner.source
             else None
         )
-        return UserMethodVariable(
-            UserFunctionVariable(
+        # Only the descriptor's own __func__ source earns the code guard that
+        # pins __code__ - see the matching note in
+        # UserDefinedObjectVariable.resolve_type_attr. Reaching the function
+        # through the owner instead hangs a GetAttrGuardAccessor off the class's
+        # guard node, which the tag-safety pass does not accept there.
+        if func_source is not None:
+            im_func = UserFunctionVariable.create_with_source(
+                self.descriptor.__func__, func_source
+            )
+        else:
+            im_func = UserFunctionVariable(
                 self.descriptor.__func__,
-                source=func_source
-                or (bound_source and AttrSource(bound_source, "__func__")),
-            ),
-            owner,
-            source=bound_source,
-        )
+                source=bound_source and AttrSource(bound_source, "__func__"),
+            )
+        return UserMethodVariable(im_func, owner, source=bound_source)
 
 
 class MemberDescriptorVariable(DescriptorVariable):

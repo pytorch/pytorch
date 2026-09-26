@@ -20,7 +20,11 @@ from torch._dynamo.source import (
     ListGetItemSource,
     LocalSource,
 )
-from torch.testing._internal.common_utils import HardwareClassification
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
+)
 
 
 class RecompileTests(torch._dynamo.test_case.TestCase):
@@ -990,6 +994,99 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
             torch._dynamo.reset()
             self.assertEqual(count_recompiles(out_fn), 2)
 
+    @parametrize("mutation", ("code", "rebind"))
+    @parametrize("inherited", (False, True))
+    def test_class_function_attr_mutation_recompiles(self, inherited, mutation):
+        # A function living on the class (not the instance __dict__) resolves to
+        # a bound method. Both replacing its code object in place and rebinding
+        # the class attribute change what eager runs, so both must invalidate
+        # the compiled code. `inherited` moves the function off mro[0], which
+        # sources it through type.__mro__[1].__dict__ instead.
+        def two(self, x):
+            return x * 2.0
+
+        def nine(self, x):
+            return x * 9.0
+
+        class Base:
+            m = two
+
+        class Derived(Base):
+            pass
+
+        model = Derived() if inherited else Base()
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(lambda x: model.m(x), backend=cnt, fullgraph=True)
+
+        x = torch.arange(1.0, 4.0)
+        self.assertEqual(opt_fn(x), x * 2.0)
+        self.assertEqual(cnt.frame_count, 1)
+
+        # Always mutate Base, the class the function actually lives on;
+        # rebinding on Derived would instead be caught by the MRO shadowing
+        # guards rather than by the code guard under test.
+        if mutation == "code":
+            Base.m.__code__ = nine.__code__
+        else:
+            Base.m = nine
+
+        self.assertEqual(opt_fn(x), x * 9.0)
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(opt_fn(x), x * 9.0)
+        self.assertEqual(cnt.frame_count, 2)
+
+    @parametrize("access", ("instance", "class"))
+    @parametrize("inherited", (False, True))
+    def test_classmethod_code_mutation_recompiles(self, inherited, access):
+        def two(cls, x):
+            return x * 2.0
+
+        def nine(cls, x):
+            return x * 9.0
+
+        class Base:
+            c = classmethod(two)
+
+        class Derived(Base):
+            pass
+
+        owner = Derived if inherited else Base
+        cnt = torch._dynamo.testing.CompileCounter()
+        if access == "instance":
+            model = owner()
+            opt_fn = torch.compile(lambda x: model.c(x), backend=cnt, fullgraph=True)
+        else:
+            opt_fn = torch.compile(lambda x: owner.c(x), backend=cnt, fullgraph=True)
+
+        x = torch.arange(1.0, 4.0)
+        self.assertEqual(opt_fn(x), x * 2.0)
+        self.assertEqual(cnt.frame_count, 1)
+
+        Base.c.__func__.__code__ = nine.__code__
+
+        self.assertEqual(opt_fn(x), x * 9.0)
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(opt_fn(x), x * 9.0)
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_unmutated_method_does_not_recompile(self):
+        # The code guard must not fire on unrelated calls: a second instance of
+        # the same class shares one code object and must hit the same entry.
+        class Model:
+            def m(self, x):
+                return x * 2.0
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(obj, x):
+            return obj.m(x)
+
+        x = torch.arange(1.0, 4.0)
+        fn(Model(), x)
+        fn(Model(), x)
+        self.assertEqual(cnt.frame_count, 1)
+
 
 class FloatGuardBitwiseTests(torch._dynamo.test_case.TestCase):
     # Float constant guards must be value-identity (bitwise), not IEEE eq:
@@ -1065,6 +1162,8 @@ class FloatGuardBitwiseTests(torch._dynamo.test_case.TestCase):
         f(x, complex(7.0, float("nan")))
         self.assertEqual(cnt.frame_count, 2)
 
+
+instantiate_parametrized_tests(RecompileTests)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

@@ -3874,11 +3874,19 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             fn_source = var_source or (
                 self.source and AttrSource(TypeSource(self.source), name)
             )
-            return variables.UserMethodVariable(
-                variables.UserFunctionVariable(type_attr, source=fn_source),
-                self,
-                source=source,
-            )
+            # Only the cls.__dict__ source earns the code guard that pins
+            # __code__; without it, replacing `cls.method.__code__` in place or
+            # rebinding `cls.method` keeps running the graph traced from the old
+            # body. The TypeSource fallback reaches the function as a plain
+            # attribute of the type, and a GetAttrGuardAccessor there is not one
+            # the tag-safety pass accepts off a type's guard node.
+            if var_source is not None:
+                im_func = variables.UserFunctionVariable.create_with_source(
+                    type_attr, var_source
+                )
+            else:
+                im_func = variables.UserFunctionVariable(type_attr, source=fn_source)
+            return variables.UserMethodVariable(im_func, self, source=source)
         # Check for a Python-level __get__ (non-data descriptor with traceable __get__).
         get_fn = inspect.getattr_static(type(type_attr), "__get__", None)
         if isinstance(get_fn, types.FunctionType):
