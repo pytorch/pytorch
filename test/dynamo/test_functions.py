@@ -5967,6 +5967,29 @@ class GraphModule(torch.nn.Module):
 
         self.assertTrue(fn())
 
+    @parametrize("method", ("__add__", "__getitem__"))
+    def test_closure_captured_method_descriptor_is_guarded(self, method):
+        def make(op):
+            def fn(x, y):
+                return op(x, y)
+
+            return fn
+
+        op = getattr(torch.Tensor, method)
+        cnt = torch._dynamo.testing.CompileCounter()
+        first = torch.compile(make(op), backend=cnt, fullgraph=True)
+        mul = torch.compile(make(torch.Tensor.__mul__), backend=cnt, fullgraph=True)
+        x = torch.tensor([6.0, 3.0])
+        y = 1
+        self.assertEqual(first(x, y), op(x, y))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(mul(x, y), x * y)
+        self.assertEqual(cnt.frame_count, 2)
+        same_op = torch.compile(make(op), backend=cnt, fullgraph=True)
+        self.assertEqual(same_op(x, y), op(x, y))
+        self.assertEqual(first(x, y), op(x, y))
+        self.assertEqual(cnt.frame_count, 2)
+
     def test_method_vt_not_a_function_vt(self):
         """Methods must not subclass UserFunctionVariable (CPython parity).
 

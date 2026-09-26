@@ -4068,6 +4068,19 @@ class TestGuardSerialization(TestGuardSerializationBase):
         finally:
             builtins_dict["getattr"] = getattr_original
 
+    @parametrize("method", ("__add__", "__getitem__"))
+    def test_builtin_match_tensor_descriptor(self, method):
+        def fn(x, y, op):
+            return op(x, y)
+
+        x = torch.tensor([6.0, 3.0])
+        op = getattr(torch.Tensor, method)
+        ref, loaded = self._test_serialization("BUILTIN_MATCH", fn, x, 1, op)
+        self._test_check_fn(ref, loaded, {"x": x, "y": 1, "op": op}, True)
+        self._test_check_fn(
+            ref, loaded, {"x": x, "y": 1, "op": torch.Tensor.__mul__}, False
+        )
+
     def test_skipped_objects(self):
         def foo():
             pass
