@@ -603,17 +603,6 @@ def foreach_reduce(
     autograd, so clearing the list frees the gradients.
     """
 
-    grad_dtypes = {grad.dtype for grad in unsharded_grads}
-    # grad_dtype policies may differ within a group, but a collective has one
-    # dtype and chunk_cat requires one input dtype
-    if len(grad_dtypes) > 1:
-        # Same per-gradient casts autograd would run with reduce_dtype set to
-        # this dtype, deferred here so unsharded gradients keep their grad_dtype
-        # (e.g. bf16) during backward
-        # TODO: these casts allocate temporaries that chunk_cat then copies. If
-        # _chunk_cat.out accepted mixed input dtypes, its generic path would cast
-        # during the copy-in instead (~2x faster, lower peak memory)
-        unsharded_grads[:] = [grad.to(reduce_dtype) for grad in unsharded_grads]
     (predivide_factor, postdivide_factor, reduce_scatter_op, all_reduce_op) = (
         _get_gradient_divide_factors(
             reduce_scatter_group,
@@ -855,7 +844,13 @@ def foreach_reduce_scatter_copy_in(
     world_size: int,
 ) -> None:
     reduce_scatter_input = reduce_scatter_input.view(world_size, -1)
-    torch.ops.fsdp.chunk_cat(
+    # With reduce_dtype set, gradients share it. Otherwise each follows its
+    # parameter's grad_dtype policy (default: the parameter's dtype), so a group
+    # can mix dtypes, e.g. bf16 weights with fp32 norms. Uniform groups run the
+    # same _chunk_cat kernels as fsdp.chunk_cat, at the same cost. On CUDA, mixed
+    # bf16/fp32 groups run that kernel once per input dtype, casting during the
+    # copy-in; other mixes cast each gradient first.
+    torch.ops.fsdp.chunk_cat_mixed_dtype(
         unsharded_grads, dim=0, num_chunks=world_size, out=reduce_scatter_input
     )
 
