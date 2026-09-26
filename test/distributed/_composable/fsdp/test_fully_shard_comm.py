@@ -54,6 +54,7 @@ from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA, TEST_MUL
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     PLATFORM_SUPPORTS_SYMM_MEM,
+    requires_nccl_version,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_fsdp import (
@@ -1906,6 +1907,7 @@ class TestFullyShardAllocFromPG(FSDPTest):
 @unittest.skipIf(
     not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this platform"
 )
+@requires_nccl_version((2, 28), "Need NCCL 2.28+ for CE collectives")
 @skipCUDAIf(not SM90OrLater, "requires sm90+")
 class TestFullyShardSymmMem(MultiProcContinuousTest):
     @classmethod

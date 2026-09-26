@@ -47,7 +47,7 @@ Dtype ToDtype(ScalarType type) {
     case ScalarType::Undefined:
       return kHandle;
     default:
-      throw unsupported_dtype();
+      TORCH_CHECK(false, "UNSUPPORTED DTYPE");
   }
 }
 
@@ -81,8 +81,8 @@ int Dtype::byte_size() const {
     TYPE_CASE(c10::qint8, QInt8);
 #undef TYPE_CASE
     default:
-      throw std::runtime_error(
-          "invalid scalar type; " + std::to_string(scalar_type_));
+      TORCH_CHECK(
+          false, "invalid scalar type; " + std::to_string(scalar_type_));
   }
   return static_cast<int>(scalar_size * lanes());
 }
@@ -113,7 +113,7 @@ std::string Dtype::ToCppString() const {
     case ScalarType::QUInt8:
       return "quint8";
     default:
-      throw unsupported_dtype();
+      TORCH_CHECK(false, "UNSUPPORTED DTYPE");
   }
 }
 
