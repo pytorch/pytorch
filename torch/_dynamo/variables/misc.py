@@ -1556,8 +1556,10 @@ class AutogradFunctionVariable(VariableTracker):
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         source = AttrSource(self.source, name) if self.source is not None else None
+
         if name == "apply":
-            return GetAttrVariable(self, name, py_type=types.MethodType, source=source)
+            return CallMethodVariable(self, name, source=source)
+
         if source is None:
             return GetAttrVariable(self, name)
 
@@ -1914,19 +1916,6 @@ class GetAttrVariable(VariableTracker):
             )
         return hash(val), False
 
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> "ConstantVariable":
-        if (
-            isinstance(self.obj, AutogradFunctionVariable)
-            and self.name == "apply"
-            and getattr(self.obj.fn_cls, "generate_vmap_rule", False)
-        ):
-            return variables.ConstantVariable.create(
-                hasattr(self.obj.fn_cls.apply, name)
-            )
-        return super().call_obj_hasattr(tx, name)
-
     def const_getattr(self, tx: "InstructionTranslatorBase", name: str) -> Any:
         if not isinstance(self.obj, variables.NNModuleVariable):
             raise NotImplementedError
@@ -2032,6 +2021,19 @@ class CallMethodVariable(VariableTracker):
         from .object_protocol import object_richcompare
 
         return object_richcompare(self, tx, other, op)
+
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> "ConstantVariable":
+        if (
+            isinstance(self.obj, AutogradFunctionVariable)
+            and self.method_name == "apply"
+            and getattr(self.obj.fn_cls, "generate_vmap_rule", False)
+        ):
+            return variables.ConstantVariable.create(
+                hasattr(self.obj.fn_cls.apply, name)
+            )
+        return super().call_obj_hasattr(tx, name)
 
     def call_function(
         self,
