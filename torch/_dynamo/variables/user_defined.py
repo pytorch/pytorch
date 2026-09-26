@@ -3850,16 +3850,18 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             )
             return md_vt.tp_descr_get_impl(tx, self, class_vt)
         elif is_lru_cache_wrapped_function(type_attr):
-            return variables.WrapperUserMethodVariable(
-                type_attr, "__wrapped__", self, source=source
+            fn_vt = variables.WrapperUserFunctionVariable(
+                type_attr, "__wrapped__", source=source
             )
+            return variables.WrapperUserMethodVariable(fn_vt, self, source=source)
         elif isinstance(type_attr, types.FunctionType):
             if inspect.getattr_static(type_attr, "_torchdynamo_inline", False):
                 if can_use_mro_source:
                     source = self.get_source_by_walking_mro(tx, name)
-                return variables.WrapperUserMethodVariable(
-                    type_attr, "_torchdynamo_inline", self, source=source
+                fn_vt = variables.WrapperUserFunctionVariable(
+                    type_attr, "_torchdynamo_inline", source=source
                 )
+                return variables.WrapperUserMethodVariable(fn_vt, self, source=source)
             # Function on the type MRO + not in instance dict → bound method.
             var_source = None
             if can_use_mro_source:
