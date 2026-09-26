@@ -30,6 +30,10 @@ class NeverEqualForListRemove:
         return False
 
 
+class DequeSubclassForRemove(collections.deque):
+    pass
+
+
 class IndexForListPop:
     def __index__(self):
         return 1
@@ -636,6 +640,134 @@ class IndexNotFoundTests(torch._dynamo.test_case.TestCase):
         def fn(x):
             try:
                 collections.deque([NeverEqualForListRemove()]).index("z")
+            except ValueError as e:
+                return str(e)
+
+        self._check(fn)
+
+
+class RemoveTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    # list and deque share BaseListVariable.list_remove, which must delete in
+    # place rather than call the public pop (deque.pop takes no index, see
+    # https://github.com/pytorch/pytorch/issues/198682). deque wraps it to bump
+    # the iterator mutation counter. The ValueError text differs from index():
+    # list never reprs the value, deque does until 3.14.
+    def _check(self, fn):
+        x = torch.ones(2)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x), fn(x))
+
+    def test_deque(self):
+        def fn(x):
+            d = collections.deque([1, 2, 2, 3])
+            d.remove(2)
+            return x + 1, list(d)
+
+        self._check(fn)
+
+    def test_deque_input(self):
+        def fn(x, d):
+            d.remove(2)
+            return x + 1, list(d)
+
+        x = torch.ones(2)
+        d1 = collections.deque([1, 2, 3, 2])
+        d2 = d1.copy()
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x, d2), fn(x, d1))
+        self.assertEqual(d1, d2)
+
+    def test_deque_not_found(self):
+        def fn(x):
+            d = collections.deque([1, 2, 3])
+            try:
+                d.remove("z")
+            except ValueError as e:
+                return str(e), list(d)
+
+        self._check(fn)
+
+    def test_deque_not_found_nonconst(self):
+        def fn(x):
+            d = collections.deque([NeverEqualForListRemove()])
+            try:
+                d.remove("z")
+            except ValueError as e:
+                return str(e), len(d)
+
+        self._check(fn)
+
+    def test_deque_nonconst(self):
+        # Opaque items take the polyfills.index path; identity matches first.
+        def fn(x):
+            d = collections.deque([NeverEqualForListRemove(), x, x + 1])
+            d.remove(x)
+            return len(d), d[1]
+
+        self._check(fn)
+
+    def test_deque_subclass(self):
+        def fn(x):
+            d = DequeSubclassForRemove([1, 2, 3])
+            d.remove(2)
+            try:
+                d.remove("z")
+            except ValueError as e:
+                return x + 1, list(d), str(e)
+
+        self._check(fn)
+
+    def test_deque_iterator_sees_mutation(self):
+        def fn(x):
+            d = collections.deque([1, 2, 3])
+            it = iter(d)
+            first = next(it)
+            d.remove(2)
+            try:
+                return first, next(it)
+            except RuntimeError as e:
+                return first, str(e)
+
+        self._check(fn)
+
+    def test_deque_maxlen(self):
+        def fn(x):
+            d = collections.deque([1, 2, 3], maxlen=3)
+            d.remove(2)
+            d.append(4)
+            d.append(5)
+            return x + 1, list(d), d.maxlen
+
+        self._check(fn)
+
+    def test_deque_wrong_arity(self):
+        def fn(x):
+            d = collections.deque([1, 2, 3])
+            msgs = []
+            for args in [(), (1, 2)]:
+                try:
+                    d.remove(*args)
+                except TypeError as e:
+                    msgs.append(str(e))
+            return msgs, list(d)
+
+        self._check(fn)
+
+    def test_list_not_found(self):
+        def fn(x):
+            try:
+                [1, 2, 3].remove("z")
+            except ValueError as e:
+                return str(e)
+
+        self._check(fn)
+
+    def test_list_not_found_nonconst(self):
+        def fn(x):
+            try:
+                [NeverEqualForListRemove()].remove("z")
             except ValueError as e:
                 return str(e)
 

@@ -128,6 +128,9 @@ class BaseListVariable(VariableTracker):
     # CPython's ValueError text for a failed .index(); tuple (and so namedtuple
     # and torch.Size) ignores the value while list/deque repr it.
     _index_not_found_msg = "tuple.index(x): x not in tuple"
+    # CPython's ValueError text for a failed .remove(); list never reprs the
+    # value, deque does before 3.14 (see DequeVariable).
+    _remove_not_found_msg = "list.remove(x): x not in list"
 
     @staticmethod
     def cls_for_instance(obj: object) -> type["BaseListVariable"]:
@@ -464,13 +467,13 @@ class BaseListVariable(VariableTracker):
 
         return ConstantVariable.create(cmp_op(len(left), len(right)))
 
-    def list_index(
+    def _index_or_raise(
         self,
         tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
+        not_found_msg: str,
     ) -> VariableTracker:
-        check_positional(tx, "index", len(args), 1, 3)
         try:
             # Speedup trace times for constant data structures
             items = [item.as_python_constant() for item in self.items]
@@ -482,17 +485,23 @@ class BaseListVariable(VariableTracker):
                 )
             except ValueError:
                 raise_observed_exception(
-                    ValueError,
-                    tx,
-                    args=[self._index_not_found_msg.format(const_args[0])],
+                    ValueError, tx, args=[not_found_msg.format(const_args[0])]
                 )
         except AsPythonConstantNotImplementedError:
-            not_found_msg = ConstantVariable.create(self._index_not_found_msg)
             return tx.inline_user_function_return(
                 VariableTracker.build(tx, polyfills.index),
                 [self] + list(args),
-                {**kwargs, "not_found_msg": not_found_msg},
+                {**kwargs, "not_found_msg": ConstantVariable.create(not_found_msg)},
             )
+
+    def list_index(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        check_positional(tx, "index", len(args), 1, 3)
+        return self._index_or_raise(tx, args, kwargs, self._index_not_found_msg)
 
     def list_count(
         self,
@@ -659,8 +668,11 @@ class BaseListVariable(VariableTracker):
     ) -> VariableTracker | None:
         if not self.is_mutable():
             return None
-        idx = self.call_method(tx, "index", args, kwargs)
-        self.call_method(tx, "pop", [idx], {})
+        # list_remove deletes in place (list_ass_slice) rather than calling the
+        # public pop, whose arity differs per type (deque.pop takes no index).
+        idx = self._index_or_raise(tx, args, kwargs, self._remove_not_found_msg)
+        tx.output.side_effects.mutation(self)
+        del self.items[idx.as_python_constant()]
         return ConstantVariable.create(None)
 
     def list_sort(
@@ -1412,6 +1424,11 @@ class DequeVariable(BaseListVariable):
         if sys.version_info >= (3, 14)
         else "{!r} is not in deque"
     )
+    _remove_not_found_msg = (
+        "deque.remove(x): x not in deque"
+        if sys.version_info >= (3, 14)
+        else "{!r} is not in deque"
+    )
 
     _nonvar_fields = {
         "state",
@@ -1846,6 +1863,19 @@ class DequeVariable(BaseListVariable):
         self.state += 1
         return result
 
+    def remove(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        # deque_remove deletes through deque_del_item, which bumps state.
+        result = BaseListVariable.list_remove(self, tx, args, kwargs)
+        if result is None:
+            return None
+        self.state += 1
+        return result
+
     def deque_reversed(
         self,
         tx: "InstructionTranslatorBase",
@@ -1944,7 +1974,7 @@ class DequeVariable(BaseListVariable):
         "clear": Method(clear),
         "rotate": Method(_rotate),
         "reverse": Method(BaseListVariable.list_reverse),
-        "remove": Method(BaseListVariable.list_remove),
+        "remove": Method(remove),
         "copy": Method(copy),
         "__copy__": Method(copy),
         "__reversed__": Method(deque_reversed),
