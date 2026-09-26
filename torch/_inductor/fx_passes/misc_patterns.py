@@ -60,6 +60,32 @@ def _misc_patterns_init(input_device: torch.device | None = None):
         skip_duplicates=True,
     )
 
+    def randperm_index_add_full_pattern(x, y):
+        index = torch.randperm(x.shape[0], device=x.device)
+        return torch.index_add(x, dim=0, source=y, index=index), index
+
+    def randperm_index_add_full_replacement(x, y):
+        index = torch.randperm(x.shape[0], device=x.device)
+        return (
+            torch.ops.aten._unsafe_index_put(
+                x, (index,), aten._unsafe_index(x, (index,)) + y, accumulate=False
+            ),
+            index,
+        )
+
+    register_replacement(
+        # pyrefly: ignore [bad-argument-type]
+        randperm_index_add_full_pattern,
+        # pyrefly: ignore [bad-argument-type]
+        randperm_index_add_full_replacement,
+        [torch.empty(4, 8, device=device), torch.empty(4, 8, device=device)],
+        # pyrefly: ignore [bad-argument-type]
+        fwd_only,
+        # pyrefly: ignore [bad-argument-type]
+        [post_grad_patterns, joint_graph_patterns],
+        skip_duplicates=True,
+    )
+
     def randperm_index_full_pattern(x):
         index = torch.randperm(x.shape[0], device=x.device)
         return torch.ops.aten.index(x, (index,)), index
