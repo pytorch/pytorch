@@ -38,7 +38,6 @@ jobs:
       build-environment: linux-noble-riscv64-py3.12-gcc14
       docker-image-name: ci-image:pytorch-linux-noble-riscv64-py3.12-gcc14-cross-build
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
-      runner: "l-x86iavx512-8-64"
       python-version: "3.12"
       compiler: gcc14
       cuda-version: cpu
