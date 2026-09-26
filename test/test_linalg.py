@@ -11851,6 +11851,13 @@ class TestGroupedMM(TestCase):
         subtest(((64, 64), (4, 32, 64), [16, 32, 48, 64], True), name="2d_3d_regular"),
         subtest(((64, 64), (4, 32, 64), [32, 32, 48, 64], False), name="2d_3d_zero_size"),
         subtest(((48, 19), (4, 67, 19), [17, 30, 38, 48], True), name="2d_3d_ragged"),
+        subtest(((1, 19), (4, 67, 19), [0, 0, 1, 1], True), name="2d_3d_gemv"),
+        subtest(
+            ((8, 535), (16, 67, 535), [0, 1, 1, 2, 3, 3, 4, 5, 5, 5, 6, 6, 7, 7, 8, 8], True),
+            name="2d_3d_sparse_decode", decorators=[toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-5)})]),
+        subtest(((8, 32), (8, 17, 32), [0, 8, 8, 8, 8, 8, 8, 8], True), name="2d_3d_skewed_decode"),
+        subtest(((8, 19), (8, 67, 19), [0, 2, 2, 3, 3, 3, 3, 3], True), name="2d_3d_decode_unused_rows"),
+        subtest(((32, 64), (32, 32, 64), [0] * 24 + [0, 0, 8, 12, 12, 16, 24, 32], True), name="2d_3d_batched_decode"),
         subtest(((4, 16, 64), (4, 32, 64), None, True), name="3d_3d"),
         subtest(((4, 16, 64), (128, 64), [32, 64, 96, 128], True), name="3d_2d_regular"),
         subtest(((4, 16, 64), (128, 64), [64, 64, 96, 128], False), name="3d_2d_zero_size"),
@@ -11896,18 +11903,25 @@ class TestGroupedMM(TestCase):
     @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @serialTest()
     @largeTensorTest("6GB")
-    @largeMPSBufferTest((2**31 + 8) * torch.float16.itemsize)
+    @largeMPSBufferTest((2**31 + 64) * torch.float16.itemsize)
     @dtypes(torch.float16)
-    def test_grouped_mm_u64_indexing(self, device, dtype):
+    @parametrize("mode", ["k", "rows"])
+    def test_grouped_mm_u64_indexing(self, device, dtype, mode):
         # Exercises MPS's combined extent/stride guard and 64-bit indexing. Strides fit int32,
         # but accessed offsets exceed it; the size-one stride test never accesses distant storage.
         stride = 2**30
-        storage = torch.empty(2 * stride + 8, device=device, dtype=dtype)
+        storage = torch.empty(2 * stride + 64, device=device, dtype=dtype)
         for row in range(3):
-            storage[row * stride:row * stride + 8].normal_()
-        a = self._make_grouped_mm_matrix((1, 3), False, device, dtype)
-        b = storage.as_strided((8, 3), (1, stride))
-        offs = torch.tensor([1, 3], device=device, dtype=torch.int32)
+            storage[row * stride:row * stride + 64].normal_()
+        if mode == "rows":
+            a = self._make_grouped_mm_matrix((2, 8), True, device, dtype)
+            b = storage.as_strided((2, 8, 8), (2 * stride, 8, 1))
+            offsets = [1, 2]
+        else:
+            a = self._make_grouped_mm_matrix((1, 3), False, device, dtype)
+            b = storage.as_strided((8, 3), (1, stride))
+            offsets = [1, 3]
+        offs = torch.tensor(offsets, device=device, dtype=torch.int32)
         self.grouped_mm_helper(a, b, offs, backward=False)
 
 instantiate_device_type_tests(TestLinalg, globals())

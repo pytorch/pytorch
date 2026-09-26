@@ -4,6 +4,9 @@
 
 C10_METAL_CONSTEXPR uint32_t kGroupedMMTileN = 64;
 C10_METAL_CONSTEXPR uint32_t kGroupedMMTileK = 16;
+C10_METAL_CONSTEXPR uint32_t kGroupedMMGemvMaxRows = 32;
+C10_METAL_CONSTEXPR uint32_t kGroupedMMGemvSimdgroups = 16;
+C10_METAL_CONSTEXPR uint32_t kGroupedMMGemvLaneChunk = 16;
 
 // Tuned on M5 Pro: the 256-wide MPP tile wants eight SIMD groups, narrower
 // tiles two or four depending on their row count.
