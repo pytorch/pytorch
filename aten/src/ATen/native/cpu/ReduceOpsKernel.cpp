@@ -86,8 +86,9 @@ void cumsum_cpu_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
       scalar_t* result_data, auto result_dim_stride,
       const scalar_t* self_data, auto self_dim_stride, scalar_t init_val) {
         // NOLINTNEXTLINE(bugprone-signed-char-misuse)
-        auto cum_number = (at::acc_type<scalar_t, false>)init_val;
-        for (const auto i : c10::irange(self_dim_size)) {
+        auto cum_number = (at::acc_type<scalar_t, false>)self_data[0];
+        result_data[0] = (scalar_t)cum_number;
+        for (const auto i : c10::irange(1, self_dim_size)) {
           cum_number += self_data[i * self_dim_stride];
           result_data[i * result_dim_stride] = (scalar_t)cum_number;
         }
