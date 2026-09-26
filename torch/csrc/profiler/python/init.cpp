@@ -583,7 +583,7 @@ void initPythonBindings(PyObject* module) {
           "inputs",
           [](const torch_op_t& op) {
             py::list out;
-            for (const auto& input : op.inputs_) {
+            for (const auto& input : op.inputs_.shapes) {
               std::visit(
                   c10::overloaded(
                       [&](const c10::IValue& v) {
