@@ -188,14 +188,17 @@ jobs:
             "")
               runner_config="m8g"
               runner_type="metal-24xl"
+              runner_pod="mt-l-barm64g4-94-344"
               ;;
             "m8g")
               runner_config="m8g"
               runner_type="metal-24xl"
+              runner_pod="mt-l-barm64g4-94-344"
               ;;
             "m7g")
               runner_config="m7g"
               runner_type="metal"
+              runner_pod="mt-l-barm64g3-62-226"
               ;;
             *)
               echo "Unsupported runner_config: ${{ inputs.runner_config }}"
@@ -203,7 +206,8 @@ jobs:
               ;;
           esac
 
-          runner_label="linux.arm64.${runner_config}.${runner_type}"
+          # the pod itself, not an EC2 label that something downstream has to translate
+          runner_label="${runner_pod}"
           {
             echo "runner-config=${runner_config}"
             echo "runner-type=${runner_type}"
