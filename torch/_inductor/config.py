@@ -1371,8 +1371,14 @@ partitioned_scatter_min_contention_ratio: float = 4.0
 # 1.5 GB is conservative for MI300 (206 GB total); tune down to allow more partitions.
 partitioned_scatter_non_model_floor_bytes: int = 1_500_000_000
 
+# Accumulate the partial sums in fp32 when the scatter dtype is a narrower float,
+# rounding once in the reduce
+partitioned_scatter_fp32_accumulation: bool = (
+    os.environ.get("TORCHINDUCTOR_PARTITIONED_SCATTER_FP32_ACCUMULATION", "1") == "1"
+)
+
 # Bypass the heuristic skip gates (min_index_size, min_contention_ratio, and the
-# diminishing-returns cap on num_partitions). Correctness gates and the hard memory
+# traffic cap on num_partitions). Correctness gates and the hard memory
 # budget are still enforced. Useful for benchmarking or skewed-index workloads where
 # static estimates undercount real contention.
 # Enable via: TORCHINDUCTOR_PARTITIONED_SCATTER_FORCE=1
