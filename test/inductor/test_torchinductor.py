@@ -9384,6 +9384,32 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         expected = fn(inp.clone())
         self.assertEqual(res, expected)
 
+    def test_cat_input_mutated_after_cat(self):
+        # The concat may compute an input straight into its own storage, which
+        # is only valid if that input is not mutated in place afterwards.
+        def fn_index(x, idx, src):
+            a = x + 1
+            c = torch.cat([a, x * 2])
+            a.index_put_((idx,), src)
+            return c, a
+
+        def fn_view_index(x, idx, src):
+            a = x + 1
+            c = torch.cat([a, x * 2])
+            a.t().index_put_((idx,), src)
+            return c, a
+
+        def fn_mask(x, idx, src):
+            a = x + 1
+            c = torch.cat([a, x * 2])
+            a.index_put_((a > 1.5,), src[0, 0])
+            return c, a
+
+        x = torch.randn(8, 8)
+        idx = torch.arange(4)
+        for fn in (fn_index, fn_view_index, fn_mask):
+            self.common(fn, (x, idx, torch.ones(4, 8)))
+
     def test_stack(self):
         def fn(a, b):
             return torch.stack(
@@ -11507,6 +11533,36 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 True,
             ),
         )
+
+    def test_index_put_as_masked_fill_mask_reads_target_view(self):
+        # https://github.com/pytorch/pytorch/issues/198533
+        # The mask reads the mutated tensor through a transposed view, which
+        # must observe the value before the mutation. bmm realizes y so the
+        # hazard does not depend on realization heuristics.
+        def fn(x, accumulate):
+            y = torch.bmm(x, x)
+            mask = y.roll(-1, -2) == y.transpose(-1, -2)
+            value = torch.tensor(7.0, device=x.device, dtype=x.dtype)
+            y.index_put_((mask,), value, accumulate=accumulate)
+            return y
+
+        x = (torch.arange(100) % 3).float().view(4, 5, 5)
+        self.common(fn, (x, False))
+        self.common(fn, (x, True))
+
+    def test_index_put_after_extern_kernel_reads_target_view(self):
+        # The extern kernel and the mask consume a transposed view of the
+        # tensor that is mutated in place afterwards.
+        def fn(x, w):
+            y = x + 1
+            m = torch.mm(y.transpose(0, 1), w)
+            mask = y.transpose(0, 1) > 2
+            value = torch.tensor(7.0, device=x.device, dtype=x.dtype)
+            y.index_put_((mask,), value)
+            return m, y
+
+        x = (torch.arange(25) % 3).float().view(5, 5)
+        self.common(fn, (x, torch.eye(5)))
 
     def test_index_put_fallback1(self):
         def fn(a, b, c, d):

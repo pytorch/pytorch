@@ -7754,13 +7754,13 @@ def mutate_to(changed, val, unsafe_alias=False):
         if not (isinstance(val, ir.StorageBox)):
             raise AssertionError("expected: isinstance(val, ir.StorageBox)")
 
-    if isinstance(changed_data, ir.StorageBox) and not (
-        changed_data.is_input_buffer()
-        # In AOTI, module parameters and buffers are not lifted as graph inputs
-        or changed_data.is_module_buffer()
-        or isinstance(changed_data.data, ir.NopKernel)
+    # Realized storage may already be referenced by name (ReinterpretView loaders,
+    # extern kernel inputs) and those names are resolved only at codegen, so
+    # swinging the StorageBox would retarget earlier reads to the new value.
+    # Only unrealized storage can safely take the fast path.
+    if isinstance(changed_data, ir.StorageBox) and not IRNode.is_realized_node(
+        changed_data.data
     ):
-        # Fast path, just swing the data pointer
         val.realize()
         changed_data.data = val.data
         return changed

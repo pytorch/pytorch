@@ -22,6 +22,7 @@ import torch
 import torch.fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch._inductor.fx_passes.control_dependencies import control_deps
+from torch._library.utils import zip_schema
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.symbolic_shapes import (
     compute_unbacked_bindings,
@@ -826,6 +827,43 @@ def get_node_storage(node: torch.fx.Node) -> int | None:
     if not torch._C._has_storage(node.meta["val"]):
         return None
     return get_storage(node.meta["val"])
+
+
+def get_mutated_input_nodes(node: torch.fx.Node) -> list[torch.fx.Node]:
+    """Tensor input nodes that node writes in place."""
+    target: object = node.target
+    args = node.args
+    if target is torch.ops.higher_order.with_effects:
+        target, args = args[1], args[2:]
+    if target is torch.ops.higher_order.triton_kernel_wrapper_mutation:
+        written = [node.kwargs["kwargs"]]
+    elif isinstance(target, torch._ops.OpOverload) and target._schema.is_mutable:
+        written = [
+            arg
+            for schema_arg, arg in zip_schema(target._schema, args, node.kwargs)
+            if schema_arg.alias_info is not None and schema_arg.alias_info.is_write
+        ]
+    else:
+        return []
+    return [x for x in pytree.tree_leaves(written) if isinstance(x, torch.fx.Node)]
+
+
+def get_mutated_storages(gm: torch.fx.GraphModule) -> OrderedSet[int]:
+    """
+    Fake storages written in place by any node of gm. control_deps subgraphs
+    are included since their placeholders carry the outer nodes' fake values.
+    """
+    storages: OrderedSet[int] = OrderedSet()
+    for node in gm.graph.nodes:
+        subgraph_attr = node.args[1] if node.target is control_deps else None
+        if isinstance(subgraph_attr, torch.fx.Node) and subgraph_attr.op == "get_attr":
+            subgraph = getattr(gm, cast(str, subgraph_attr.target))
+            storages |= get_mutated_storages(subgraph)
+        for written in get_mutated_input_nodes(node):
+            storage = get_node_storage(written)
+            if storage is not None:
+                storages.add(storage)
+    return storages
 
 
 def get_fake(x: Any, gm: torch.fx.GraphModule | None) -> Any:
