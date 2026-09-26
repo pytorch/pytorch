@@ -137,6 +137,34 @@ class TestReinplacingPassCorrectness(InductorTestCase):
 
         self._test(f)
 
+    def test_dont_reinplace_into_input_overwritten_later(self):
+        # The scatter/clone result must stay a fresh tensor when the input it
+        # would be reinplaced into is overwritten by an unrelated value later
+        # and the result is still observed afterwards (here: returned).
+        def f(x, src):
+            y = torch.slice_scatter(x, src, 0, 1, 3)
+            x.zero_()
+            return y
+
+        def g(x):
+            y = torch.diagonal_scatter(x, x.diagonal())
+            x.fill_(2.0)
+            return y
+
+        def h(x):
+            x.index_fill_(1, torch.tensor([1], device=device), 4.0)
+            y = x.clone()
+            x.clamp_(-4.0, 4.0)
+            return y
+
+        x = torch.arange(-12.0, 12.0, device=device).reshape(4, 6)
+        src = torch.ones(2, 6, device=device)
+        for fn, args in ((f, (x, src)), (g, (x,)), (h, (x,))):
+            eager_args = tuple(a.clone() for a in args)
+            compiled_args = tuple(a.clone() for a in args)
+            self.assertEqual(fn(*eager_args), torch.compile(fn)(*compiled_args))
+            self.assertEqual(eager_args, compiled_args)
+
     def test_dont_reinplace_scatter_from_overlapping_view(self):
         # https://github.com/pytorch/pytorch/issues/197829
         def f(x):
