@@ -4964,6 +4964,28 @@ class TestVmapOperatorsOpInfo(TestCase):
 
         check_vmap_fallback(self, test, Tensor.fill_)
 
+    def test_cpu_logical_scalar_with_device_tensor(self, device):
+        # A CPU tensor that is 0-dim per example can be mixed with tensors on
+        # another device, just like a CPU 0-dim tensor in eager.
+        # https://github.com/pytorch/pytorch/issues/151591
+        B = 2
+        x = torch.rand(B, 4, device=device) + 0.5
+        s = torch.rand(B) + 0.5
+        cond = torch.rand(B, 4, device=device) > 0.5
+
+        for op in (torch.add, torch.mul, torch.pow, torch.maximum, torch.eq):
+            self.vmap_outplace_test(op, (x, s), {}, (0, 0))
+            self.vmap_outplace_test(op, (s, x), {}, (0, 0))
+            self.vmap_outplace_test(op, (x[0], s), {}, (None, 0))
+
+        self.vmap_outplace_test(torch.where, (cond, x, s), {}, (0, 0, 0))
+        self.vmap_outplace_test(torch.where, (cond, s, x), {}, (0, 0, 0))
+        self.vmap_outplace_test(torch.where, (s > 1.0, x, x), {}, (0, 0, 0))
+        self.vmap_outplace_test(torch.lerp, (x, x, s), {}, (0, 0, 0))
+        self.vmap_outplace_test(torch.addcmul, (x, x, s), {}, (0, 0, 0))
+        self.vmap_inplace_test(Tensor.mul_, (x, s), {}, (0, 0))
+        self.vmap_inplace_test(Tensor.add_, (x, s), {}, (0, 0))
+
     @parametrize(
         "op,msg,extra_positional_args,extra_kwargs",
         [

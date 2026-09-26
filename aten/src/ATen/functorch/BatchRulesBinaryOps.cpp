@@ -106,6 +106,7 @@ static void binary_pointwise_inplace_batch_rule(
 
   auto tensor_ = moveBatchDimToFront(tensor, tensor_batch_dim);
   auto other_ = moveBatchDimToFront(other, other_batch_dim);
+  other_ = move_cpu_logical_scalar_to_device(other_, other_batch_dim, tensor_.device());
 
   // If the dimensions aren't aligned, we need to line them up.
   // Tensor[B, 3] + Tensor[2, 5, 3] -> Tensor[B, 1, 1, 3] + Tensor[2, 5, 3]
@@ -115,17 +116,6 @@ static void binary_pointwise_inplace_batch_rule(
   other_ = maybePadToLogicalRank(other_, other_batch_dim, max_logical_rank);
 
   (tensor_.*Meth)(other_, std::forward<ExtraArgs>(extra_args)...);
-}
-
-static Tensor move_cpu_logical_scalar_to_device(
-    const Tensor& tensor,
-    std::optional<int64_t> tensor_batch_dim,
-    const Tensor& other) {
-  if (tensor.device() != other.device() && tensor.device().is_cpu() &&
-      rankWithoutBatchDim(tensor, tensor_batch_dim) == 0) {
-    return tensor.to(other.device());
-  }
-  return tensor;
 }
 
 template <typename F, F Func>
@@ -139,8 +129,8 @@ static std::tuple<Tensor, std::optional<int64_t>> comparison_pointwise_batch_rul
 
   auto tensor_ = moveBatchDimToFront(tensor, tensor_batch_dim);
   auto other_ = moveBatchDimToFront(other, other_batch_dim);
-  tensor_ = move_cpu_logical_scalar_to_device(tensor_, tensor_batch_dim, other_);
-  other_ = move_cpu_logical_scalar_to_device(other_, other_batch_dim, tensor_);
+  tensor_ = move_cpu_logical_scalar_to_device(tensor_, tensor_batch_dim, other_.device());
+  other_ = move_cpu_logical_scalar_to_device(other_, other_batch_dim, tensor_.device());
 
   // If the dimensions aren't aligned, we need to line them up.
   // Tensor[B, 3] + Tensor[2, 5, 3] -> Tensor[B, 1, 1, 3] + Tensor[2, 5, 3]
@@ -164,6 +154,19 @@ static std::tuple<Tensor, std::optional<int64_t>> where_self_batch_rule(
   auto condition_ = moveBatchDimToFront(condition, condition_bdim);
   auto self_ = moveBatchDimToFront(self, self_bdim);
   auto other_ = moveBatchDimToFront(other, other_bdim);
+
+  std::optional<c10::Device> non_cpu_device;
+  for (const auto& t : {condition_, self_, other_}) {
+    if (!t.device().is_cpu()) {
+      non_cpu_device = t.device();
+      break;
+    }
+  }
+  if (non_cpu_device) {
+    condition_ = move_cpu_logical_scalar_to_device(condition_, condition_bdim, *non_cpu_device);
+    self_ = move_cpu_logical_scalar_to_device(self_, self_bdim, *non_cpu_device);
+    other_ = move_cpu_logical_scalar_to_device(other_, other_bdim, *non_cpu_device);
+  }
 
   condition_ = maybePadToLogicalRank(condition_, condition_bdim, max_logical_rank);
   self_ = maybePadToLogicalRank(self_, self_bdim, max_logical_rank);
