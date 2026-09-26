@@ -2992,6 +2992,19 @@ class VariableBuilder:
         if value in self.tx.output.side_effects:
             raise AssertionError("Tensor is already tracked in side effects")
 
+        # Checked before the register_attr_or_module fast paths below, which
+        # would otherwise bake the null-storage tensor into the graph.
+        if value._is_zerotensor():
+            unimplemented(
+                gb_type="Attempted to wrap a ZeroTensor input",
+                context="",
+                explanation="torch.compile does not support ZeroTensor inputs "
+                "(e.g. the gradient of torch.sgn); the ZeroTensor property is "
+                "lost when the input is converted to a fake tensor, so compiled "
+                "kernels would read its null storage.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+
         is_static_input = get_static_address_type(value) is not None
 
         # When a shapes_spec is provided for this tensor, we must skip the

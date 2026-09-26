@@ -4685,6 +4685,16 @@
       ]
     }
   ],
+  "GB4726": [
+    {
+      "Gb_type": "Attempted to wrap a ZeroTensor input",
+      "Context": "",
+      "Explanation": "torch.compile does not support ZeroTensor inputs (e.g. the gradient of torch.sgn); the ZeroTensor property is lost when the input is converted to a fake tensor, so compiled kernels would read its null storage.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB2473": [
     {
       "Gb_type": "torch.cuda.use_mem_pool graph break",
