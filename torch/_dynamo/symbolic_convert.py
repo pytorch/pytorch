@@ -193,6 +193,7 @@ from .variables.lists import (
 )
 from .variables.misc import (
     CellVariable,
+    FrameVariable,
     NullVariable,
     PythonModuleVariable,
     TracebackVariable,
@@ -2726,7 +2727,9 @@ class InstructionTranslatorBase(
             raise AssertionError(
                 "expected isinstance( tb, (ConstantVariable, TracebackVariable) ) to be true"
             )  # make pyrefly happy
-        new_tb = TracebackVariable.from_frame_summary(frame_summary, tb)
+        new_tb = TracebackVariable.from_frame_summary(
+            frame_summary, tb, self.frame_variable
+        )
         exc.call_method(
             self,  # type: ignore[bad-argument-type]
             "__setattr__",
@@ -2849,6 +2852,9 @@ class InstructionTranslatorBase(
                 )
             if inst.argval:
                 # RERAISE 1
+                lasti = self.stack[-inst.argval].as_python_constant()
+                lasti_inst = next(i for i in self.instructions if i.offset == lasti)
+                self.reraise_lasti = (inst, lasti_inst)
                 _ = self.pop()
                 self.exn_vt_stack.set_raised_exception(val)
             else:
@@ -2978,7 +2984,7 @@ class InstructionTranslatorBase(
                 # 2) if 'lasti' is true, then push the offset that the exception was raised at
                 if exn_tab_entry.lasti:
                     self.push(
-                        VariableTracker.build(self, self.current_instruction.offset)
+                        VariableTracker.build(self, self.lasti_instruction().offset)
                     )
 
                 # 3) push the exception to the stack
@@ -2991,9 +2997,11 @@ class InstructionTranslatorBase(
                 # instruction translator. We use special exception for this.
                 self.stack.clear()
 
-                # attach traceback to the exception and set it as current exception
+                # As in CPython, the caller adds its own traceback entry
+                # when the exception surfaces at its call site.
                 curr_exc = self.exn_vt_stack.get_raised_exception()
-                self._attach_traceback_to_exception(curr_exc)
+                if self.parent is not None:
+                    self.parent._attach_traceback_to_exception(curr_exc)
 
                 if type(self) is InstructionTranslator:
                     bubble_exception_to_interpreter()
@@ -5224,6 +5232,17 @@ class InstructionTranslatorBase(
             )
         )
 
+    @functools.cached_property
+    def frame_variable(self) -> FrameVariable:
+        return FrameVariable(self)
+
+    def lasti_instruction(self) -> Instruction:
+        # Mirrors CPython's _PyInterpreterFrame_LASTI: the current instruction,
+        # unless `RERAISE oparg` just reset it to the lasti popped off the stack.
+        if self.reraise_lasti and self.reraise_lasti[0] is self.current_instruction:
+            return self.reraise_lasti[1]
+        return self.current_instruction
+
     def frame_summary(self) -> traceback.FrameSummary:
         positions = self.current_instruction.positions
         # colno/end_colno kwargs were added to FrameSummary in 3.11
@@ -5505,6 +5524,8 @@ class InstructionTranslatorBase(
         self.active_generic_context_managers: list[GenericContextWrappingVariable] = []
         self.skip_one_hop_torch_function_depth: int = 0
         self.lineno = -1
+        # (RERAISE inst, instruction its oparg restored the frame's lasti to)
+        self.reraise_lasti: tuple[Instruction, Instruction] | None = None
         self.kw_names = None
         self.accept_prefix_inst = True
         self.prefix_insts = []

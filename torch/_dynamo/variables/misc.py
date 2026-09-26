@@ -509,11 +509,54 @@ class FrameSummaryVariable(VariableTracker):
     }
 
 
+class FrameVariable(VariableTracker):
+    """A frame object of a frame traced by `tx`, as reached via `tb_frame`."""
+
+    _nonvar_fields = {"tx", *VariableTracker._nonvar_fields}
+
+    def __init__(self, tx: "InstructionTranslatorBase", **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.tx = tx
+
+    def python_type(self) -> type[types.FrameType]:
+        return types.FrameType
+
+    def _get_f_lineno(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        inst = self.tx.lasti_instruction()
+        if sys.version_info < (3, 11) or inst.positions is None:
+            unimplemented(
+                gb_type="frame.f_lineno not supported",
+                context=f"{self} accessing 'f_lineno'",
+                explanation="Dynamo cannot recover the line number of this frame.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        return ConstantVariable.create(inst.positions.lineno)
+
+    def tp_getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        if self.lookup_tp_getset_member(name) is None:
+            unimplemented(
+                gb_type="Unsupported frame attribute",
+                context=f"{self} accessing '{name}'",
+                explanation="Dynamo only models f_lineno and f_code of frame objects.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        return super().tp_getattro_impl(tx, name)
+
+    # ref: CPython Objects/frameobject.c frame_getsetlist
+    tp_getset = {
+        "f_lineno": GetSet(_get_f_lineno, unmodeled_setter),
+        "f_code": GetSet(getset_build(lambda s: s.tx.f_code), readonly_setter),
+    }
+
+
 class TracebackVariable(VariableTracker):
     def __init__(
         self,
         frame_summary: FrameSummaryVariable,
         tb_next: Union["TracebackVariable", ConstantVariable],
+        frame: FrameVariable,
         **kwargs: Any,
     ) -> None:
         # The traceback holds four attributes:
@@ -528,14 +571,16 @@ class TracebackVariable(VariableTracker):
         if tb_next is None:
             raise AssertionError("tb_next must not be None")
         self.tb_next = tb_next
+        self.frame = frame
 
     @classmethod
     def from_frame_summary(
         cls,
         frame_summary: traceback.FrameSummary,
         tb_next: Union["TracebackVariable", ConstantVariable],
+        frame: FrameVariable,
     ) -> "TracebackVariable":
-        return cls(FrameSummaryVariable(frame_summary), tb_next=tb_next)
+        return cls(FrameSummaryVariable(frame_summary), tb_next=tb_next, frame=frame)
 
     @staticmethod
     def is_valid_traceback(obj: VariableTracker) -> bool:
@@ -612,9 +657,11 @@ class TracebackVariable(VariableTracker):
         "frame_summary": GetSet(lambda s, _: s.frame_summary, readonly_setter),
     }
 
-    # ref: CPython Objects/traceback.c tb_memberlist, where tb_lasti is
-    # READONLY. Dynamo graph breaks on read rather than modelling the value.
+    # ref: CPython Objects/traceback.c tb_memberlist, where tb_frame and
+    # tb_lasti are READONLY. Dynamo graph breaks on a tb_lasti read rather than
+    # modelling the value.
     tp_members = {
+        "tb_frame": Member(lambda s, _: s.frame, readonly_setter),
         "tb_lasti": Member(_get_tb_lasti, readonly_setter),
     }
 
