@@ -83,6 +83,7 @@ from .utils import (
     cmp,
     decompose_index,
     device_need_guard,
+    fx_node_crosses_devices,
     get_current_backend,
     get_device_tflops,
     get_dtype_size,
@@ -11713,8 +11714,14 @@ class Scheduler:
         if not node.is_gpu():
             return f"{node.get_device()} ops"
 
-        if isinstance(node.node, ir.DeviceCopy):
-            return "DeviceCopy ops"
+        # Decided on the FX node so that MultiOutput children, which share their
+        # parent's fx_node, are split together with it.
+        if isinstance(ir_node, ir.DeviceCopy) or (
+            isinstance(ir_node, ir.ExternKernel)
+            and (fx_node := getattr(ir_node, "fx_node", None)) is not None
+            and fx_node_crosses_devices(fx_node)
+        ):
+            return "cross-device ops"
 
         if isinstance(node.node, ir.Switch):
             return "Switch ops"
