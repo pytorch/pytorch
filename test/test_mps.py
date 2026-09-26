@@ -16797,6 +16797,12 @@ class TestConsistency(TestCaseMPS):
                 atol, rtol = 5e-5, 2.5e-2
             if op.name in ("special.bessel_y0", "special.bessel_y1", "special.modified_bessel_i1") and dtype == torch.float16:
                 atol, rtol = 5e-4, 2e-3
+            # d/dy ndtri(y) = sqrt(2pi) * exp(ndtri(y)^2 / 2), so a rounding difference
+            # in the forward result is amplified by ndtri(y)^2 in the gradient: ~1e-5
+            # relative at y = 1e-20 in float32, far more after half-precision rounding.
+            if op.name == "special.ndtri":
+                half = dtype in (torch.float16, torch.bfloat16)
+                atol, rtol = (5e-4, 5e-3) if half else (1e-5, 2e-5)
             if op.name == "polar" and dtype == torch.float16:
                 # `d(real)/d(abs) = cos(angle)` near pi/2 collapses to ~0 in
                 # fp16; one unlucky seeded angle can produce ~0.1 absolute
