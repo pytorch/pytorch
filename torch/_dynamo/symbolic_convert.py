@@ -46,7 +46,7 @@ import types
 import unittest
 import weakref
 from collections import defaultdict, deque
-from typing import Any, cast, NoReturn, TYPE_CHECKING, TypeAlias, TypeVar
+from typing import Any, cast, Generic, NoReturn, TYPE_CHECKING, TypeAlias, TypeVar
 from typing_extensions import TypeIs
 
 import torch
@@ -5001,6 +5001,10 @@ class InstructionTranslatorBase(
             v = self.pop().as_python_constant()
             tv = variables.TypingVariable(TypeVar(v))
             self.push(tv)
+        elif inst.argval == 10:
+            # INTRINSIC_SUBSCRIPT_GENERIC
+            generic = variables.TypingVariable(Generic)
+            self.push(generic.mp_subscript_impl(self, self.pop()))
         else:
             unimplemented(
                 gb_type="Missing CALL_INTRINSIC_1 handler",

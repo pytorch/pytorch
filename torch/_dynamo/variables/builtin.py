@@ -3832,6 +3832,13 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
         name_var: VariableTracker,
         val: VariableTracker,
     ) -> VariableTracker | None:
+        if (
+            isinstance(obj, variables.UserDefinedClassVariable)
+            and obj.source is None
+            and name_var.is_constant_match("__type_params__")
+            and type.__dict__.get("__type_params__") is not None
+        ):
+            return obj.call_method(tx, "__setattr__", [name_var, val], {})
         if isinstance(
             obj,
             (

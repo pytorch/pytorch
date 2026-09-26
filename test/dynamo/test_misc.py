@@ -17873,6 +17873,13 @@ fn
 
         Foo.test_default_update(self)
 
+    @unittest.skipIf(sys.version_info < (3, 12), "Python 3.12+")
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_CALL_INTRINSIC_subscript_generic(self):
+        from torch.testing._internal.py312_intrinsics import Foo
+
+        Foo.test_subscript_generic(self)
+
     @unittest.skipIf(sys.version_info < (3, 11), "Python 3.11+")
     def test_RAISE_VARARGS_0(self):
         def foo():

@@ -5384,6 +5384,8 @@ class SourcelessBuilder:
             return UserDefinedObjectVariable(value)
         elif ConstantVariable.is_literal(value):
             return ConstantVariable.create(value)
+        elif is_typing(value):
+            return TypingVariable(value)
         elif callable(value) and trace_rules.lookup_callable(value) is not None:
             if trace_rules.is_callable_allowed(value):
                 tx.output.has_user_defined_allowed_in_graph = True

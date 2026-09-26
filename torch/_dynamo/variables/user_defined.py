@@ -115,6 +115,7 @@ from .base import (
     MutationType,
     NO_SUCH_SUBOBJ,
     readonly_setter,
+    store_attr_mutation,
     ValueMutationNew,
     VariableTracker,
 )
@@ -719,7 +720,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
         # __name__, __qualname__, __doc__, __module__,
         # __abstractmethods__, etc. — all C-level getset descriptors on type.
         resolved = type.__getattribute__(self.value, name)
-        if source:
+        if source or (
+            name == "__type_params__"
+            and meta_attr is type.__dict__.get("__type_params__")
+        ):
             return VariableTracker.build(tx, resolved, source)
         from . import ConstantVariable
 
@@ -1228,6 +1232,24 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 explanation="Dynamo does not support tracing mutations on a class when its __dict__ is materialized",
                 hints=graph_break_hints.SUPPORTABLE,
             )
+        elif (
+            name in ("__setattr__", "__delattr__")
+            and not kwargs
+            and len(args) == (2 if name == "__setattr__" else 1)
+            and args[0].is_constant_match("__type_params__")
+            and type.__dict__.get("__type_params__") is not None
+            and self.lookup_metaclass_attr("__type_params__")
+            is type.__dict__["__type_params__"]
+            and inspect.getattr_static(type(self.value), name) is getattr(type, name)
+        ):
+            if name == "__delattr__":
+                raise_type_error(
+                    tx,
+                    "cannot delete '__type_params__' attribute of immutable type "
+                    f"'{self.value.__name__}'",
+                )
+            store_attr_mutation(tx, self, "__type_params__", args[1])
+            return variables.ConstantVariable.create(None)
 
         # Unbound C method call on a builtin iterator type: the pure-Python
         # Lib/operator.py::length_hint resolves `type(obj).__length_hint__` and

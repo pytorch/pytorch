@@ -1,3 +1,5 @@
+import typing
+
 import torch
 
 
@@ -27,3 +29,27 @@ class Foo:
 
         x = torch.randn(2)
         fn(x)
+
+    def test_subscript_generic(self):
+        def fn(x):
+            class A[T]:
+                pass
+
+            (type_param,) = A.__type_params__
+            A.__type_params__ = "whatever"
+            delete_error = None
+            try:
+                del A.__type_params__
+            except TypeError as exc:
+                delete_error = str(exc)
+            return (
+                x.sin(),
+                isinstance(type_param, typing.TypeVar),
+                type_param.__name__,
+                A.__type_params__,
+                delete_error,
+            )
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
