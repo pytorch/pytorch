@@ -782,6 +782,17 @@ enable_dynamo_decompositions = True
 # See https://github.com/pytorch/pytorch/issues/157452 for more context
 graph_break_on_nn_param_ctor = True
 
+# If True (default), a tensor factory called with `requires_grad=True` inside the
+# compiled region (e.g. `torch.zeros(3, requires_grad=True)`) graph breaks. If
+# False, Dynamo traces it as `factory(...)` followed by `requires_grad_()` on the
+# intermediate, i.e. the same handling as an explicit `requires_grad_()` call on
+# a graph intermediate: the tensor must be consumed inside the compiled region
+# (returning it still requiring grad is a graph break) and non-differentiable
+# dtypes raise the eager error. Off by default until the code paths it newly
+# exposes to tracing are cleaned up (nnpack fake kernel, checkpoint
+# `context_fn` closures, fake CUDA tensors on CPU-only builds).
+graph_break_on_factory_requires_grad = True
+
 # If True, enable calling torch.compile inside __torch_dispatch__ handlers.
 # When enabled:
 # 1. __torch_dispatch__ methods are automatically wrapped with torch._dynamo.disable

@@ -3877,32 +3877,89 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             if tx.fake_mode and tx.fake_mode.shape_env:
                 ctx = tx.fake_mode.shape_env.ignore_fresh_unbacked_symbols
 
+        # `factory(..., requires_grad=True)`, e.g. `torch.ones(10, requires_grad=True)`.
+        # The Python bindings implement the kwarg as `factory(...)` followed by
+        # `set_requires_grad(True)`. With `graph_break_on_factory_requires_grad`
+        # off, trace it the same way: `factory(...)` plus `requires_grad_()` on
+        # the resulting source-less intermediate, which then gets the same
+        # leaked-output check as an explicit `requires_grad_()` call (see
+        # TensorVariable.method_requires_grad_). Only real torch functions take
+        # this path: a user `@allow_in_graph` callable may give a `requires_grad`
+        # parameter a different meaning, so it keeps the graph break below.
+        requires_grad_kwarg = kwargs.get("requires_grad")
+        trace_requires_grad = False
+        if (
+            requires_grad_kwarg is not None
+            and not config.graph_break_on_factory_requires_grad
+        ):
+            from ..trace_rules import is_callable_allowed
+
+            trace_requires_grad = (
+                requires_grad_kwarg.is_python_constant()
+                and requires_grad_kwarg.as_python_constant() is True
+                and not is_callable_allowed(self.value)
+            )
+        proxy_kwargs = kwargs
+        if trace_requires_grad:
+            proxy_kwargs = {k: v for k, v in kwargs.items() if k != "requires_grad"}
+
         with ctx():
             tensor_variable = wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_function",
                     fn_,
-                    *proxy_args_kwargs(args, kwargs),
+                    *proxy_args_kwargs(args, proxy_kwargs),
                 ),
             )
 
-        # Handle e.g., `torch.ones(10, requires_grad=True)`
-        if (
-            tensor_variable.is_tensor()
-            and "requires_grad" in kwargs
-            and kwargs["requires_grad"].as_python_constant()
-        ):
-            unimplemented(
-                gb_type="Attempted to use tensor creation function with requires_grad=True",
-                context=f"fn={self.value}, args={args}, kwargs={kwargs}",
-                explanation="Dynamo does not support this.",
-                hints=[
-                    "Create the tensor outside the compiled region.",
-                    "Do not set `requires_grad=True`.",
-                    *graph_break_hints.SUPPORTABLE,
-                ],
+        if requires_grad_kwarg is not None:
+            from .tensor import TensorVariable
+
+            result_dtype = (
+                tensor_variable.dtype
+                if isinstance(tensor_variable, TensorVariable)
+                else None
             )
+            if trace_requires_grad and result_dtype is not None:
+                if result_dtype.is_floating_point or result_dtype.is_complex:
+                    # Go through call_method so a `__torch_function__` override
+                    # of `Tensor.requires_grad_` is dispatched like in eager.
+                    tensor_variable.call_method(tx, "requires_grad_", [], {})
+                else:
+                    # Eager rejects requires_grad=True on integer / bool
+                    # factories; raise the same error into the traced program.
+                    raise_observed_exception(
+                        RuntimeError,
+                        tx,
+                        args=[
+                            "Only Tensors of floating point and complex dtype can require gradients"
+                        ],
+                    )
+            elif trace_requires_grad or (
+                isinstance(tensor_variable, TensorVariable)
+                and (
+                    not requires_grad_kwarg.is_python_constant()
+                    or requires_grad_kwarg.as_python_constant()
+                )
+            ):
+                # Every other requires_grad=True call keeps the graph break:
+                # the default config, `@allow_in_graph` callables, a value
+                # Dynamo could not constant-fold, and a stripped kwarg that
+                # could not be compensated for (the emitted node is discarded
+                # with the break, so nothing is silently dropped). Non-bool
+                # values never get here: the factory's arg parser rejects them
+                # in the fake call already.
+                unimplemented(
+                    gb_type="Attempted to use tensor creation function with requires_grad=True",
+                    context=f"fn={self.value}, args={args}, kwargs={kwargs}",
+                    explanation="Dynamo does not support this.",
+                    hints=[
+                        "Create the tensor outside the compiled region.",
+                        "Do not set `requires_grad=True`.",
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
+                )
 
         # Handle e.g., `torch.add(a, b, out=result)`
         if saved_out_shapes is not None:
