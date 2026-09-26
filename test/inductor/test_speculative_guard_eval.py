@@ -6,6 +6,7 @@ import weakref
 import torch
 from torch._dynamo.utils import counters
 from torch._functorch import config as functorch_config
+from torch._inductor.compile_fx import compile_fx
 from torch._inductor.speculative_guard import _is_zero_dropout_attention
 from torch._inductor.utils import fresh_cache
 from torch.testing._internal.common_device_type import (
@@ -26,6 +27,20 @@ class InductorSpeculativeGuardEvalTests(TestCase):
             (query, key, value, dropout_p, False, False),
         )
         self.assertEqual(_is_zero_dropout_attention(node), expected)
+
+    @torch._dynamo.config.patch(speculative_guard_eval=True)
+    @torch._inductor.config.patch(
+        {"compile_threads": 1, "force_disable_caches": True}
+    )
+    def test_nested_inputs_compile_with_speculation_enabled(self, device):
+        def fn(inputs):
+            return (inputs[0] + inputs[1],)
+
+        x = torch.randn(8, device=device)
+        y = torch.randn(8, device=device)
+        gm = torch.fx.symbolic_trace(fn)
+        compiled = compile_fx(gm, [[x, y]])
+        self.assertEqual(compiled([x, y]), fn([x, y]))
 
     @torch._dynamo.config.patch(speculative_guard_eval=True)
     @torch._inductor.config.patch(

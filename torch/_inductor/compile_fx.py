@@ -3359,11 +3359,13 @@ def _compile_fx_main(
             raise AssertionError("config._raise_error_for_testing is set")
 
         num_example_inputs = len(example_inputs_)
-        speculation_input_sources = tuple(
-            getattr(node, "_dynamo_source", None)
-            for node in model_.graph.nodes
-            if node.op == "placeholder"
-        )
+        speculation_input_sources: tuple[object, ...] = ()
+        if dynamo_config.speculative_guard_eval and isinstance(model_, GraphModule):
+            speculation_input_sources = tuple(
+                getattr(node, "_dynamo_source", None)
+                for node in model_.graph.nodes
+                if node.op == "placeholder"
+            )
         speculation_forward_graphs: list[OutputCode] = []
 
         compiler_config_extra = create_compiler_config_extra(model_)
@@ -3396,7 +3398,7 @@ def _compile_fx_main(
                     inner_compile=inner_compile,
                     is_inference=is_inference,
                 )
-                if is_inference:
+                if is_inference and dynamo_config.speculative_guard_eval:
                     speculation_forward_graphs.append(result)
                 return result
 

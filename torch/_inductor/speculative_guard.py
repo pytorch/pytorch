@@ -16,6 +16,7 @@ from torch._dynamo.source import (
     UnspecializedParamBufferSource,
 )
 from torch._guards import Source
+from torch.utils._ordered_set import OrderedSet
 
 from .codegen.common import custom_backend_passes
 
@@ -407,11 +408,13 @@ def maybe_wrap_speculative_guard_callable(
     example_inputs: Sequence[object],
     compiled_graph: object | None,
 ) -> Callable[..., object]:
+    device_types = OrderedSet(getattr(compiled_graph, "device_types", ()))
     if (
         compiled_graph is None
         or not getattr(compiled_graph, "speculative_guard_eval_eligible", False)
         or not getattr(compiled_graph, "fx_kwargs", {}).get("is_inference", False)
-        or set(getattr(compiled_graph, "device_types", ())) != {"cuda"}
+        or len(device_types) != 1
+        or "cuda" not in device_types
         or len(getattr(compiled_graph, "device_idxs", ())) != 1
         or getattr(compiled_graph, "mutated_input_idxs", ())
         or getattr(compiled_graph, "cudagraph_info", None) is not None
