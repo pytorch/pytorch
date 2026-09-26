@@ -1215,6 +1215,21 @@ static Tensor& addbmm_or_baddbmm_out_mps_impl(const Tensor& input,
   TORCH_CHECK(supportedFloatingOrComplexType(batch1) || c10::isIntegralType(batch1.scalar_type(), true),
               "MPS device does not support addbmm or baddbmm for this input type");
 
+  // Reject what the reference rejects; MPSGraph would abort rather than raise. baddbmm is already
+  // covered by its meta function.
+  TORCH_CHECK(batch1.scalar_type() == batch2.scalar_type(),
+              "self and mat2 must have the same dtype, but got ",
+              batch1.scalar_type(),
+              " and ",
+              batch2.scalar_type());
+  TORCH_CHECK(input.scalar_type() == batch1.scalar_type(),
+              "Input dtypes must be the same, got: input ",
+              input.scalar_type(),
+              ", batch1: ",
+              batch1.scalar_type(),
+              ", batch2: ",
+              batch2.scalar_type());
+
   TORCH_CHECK(batch1.dim() == 3, "batch1 must be a 3D tensor");
   TORCH_CHECK(batch2.dim() == 3, "batch2 must be a 3D tensor");
   TORCH_CHECK(batch1.size(0) == batch2.size(0),
