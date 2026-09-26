@@ -1215,6 +1215,21 @@ static Tensor& addbmm_or_baddbmm_out_mps_impl(const Tensor& input,
   TORCH_CHECK(supportedFloatingOrComplexType(batch1) || c10::isIntegralType(batch1.scalar_type(), true),
               "MPS device does not support addbmm or baddbmm for this input type");
 
+  // Reject what the reference rejects; MPSGraph would abort rather than raise. baddbmm is already
+  // covered by its meta function.
+  TORCH_CHECK(batch1.scalar_type() == batch2.scalar_type(),
+              "self and mat2 must have the same dtype, but got ",
+              batch1.scalar_type(),
+              " and ",
+              batch2.scalar_type());
+  TORCH_CHECK(input.scalar_type() == batch1.scalar_type(),
+              "Input dtypes must be the same, got: input ",
+              input.scalar_type(),
+              ", batch1: ",
+              batch1.scalar_type(),
+              ", batch2: ",
+              batch2.scalar_type());
+
   TORCH_CHECK(batch1.dim() == 3, "batch1 must be a 3D tensor");
   TORCH_CHECK(batch2.dim() == 3, "batch2 must be a 3D tensor");
   TORCH_CHECK(batch1.size(0) == batch2.size(0),
@@ -2508,7 +2523,9 @@ static void lstsq_kernel_mps(const Tensor& a,
 } // namespace mps
 
 Tensor addr_mps(const Tensor& self, const Tensor& vec1, const Tensor& vec2, const Scalar& beta, const Scalar& alpha) {
-  Tensor result = at::empty({0}, self.options());
+  // The reference builds a TensorIterator, so the result takes the promoted dtype, not self's.
+  const auto dtype = c10::promoteTypes(c10::promoteTypes(self.scalar_type(), vec1.scalar_type()), vec2.scalar_type());
+  Tensor result = at::empty({0}, self.options().dtype(dtype));
   addr_out_mps(self, vec1, vec2, beta, alpha, result);
   return result;
 }
@@ -2570,12 +2587,17 @@ Tensor& addr_out_mps(const Tensor& self,
   };
 
   @autoreleasepool {
-    std::string key = "addr_out_mps_impl" + getTensorsStringKey({vec1, vec2, *self_}) + ":" +
+    std::string key = "addr_out_mps_impl" + getTensorsStringKey({vec1, vec2, *self_, result}) + ":" +
         std::to_string(beta.toDouble()) + ":" + std::to_string(alpha.toDouble());
+    // The reference promotes and computes at `result`'s (already promoted) dtype.
+    const auto computeType = getMPSDataType(result.scalar_type());
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* t1 = mps::mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(vec1), inputShape);
-      MPSGraphTensor* t2 = mps::mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(vec2), otherShape);
-      MPSGraphTensor* selfTensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, *self_);
+      auto vec1Placeholder = mps::mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(vec1), inputShape);
+      auto vec2Placeholder = mps::mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(vec2), otherShape);
+      auto selfPlaceholder = mps::mpsGraphRankedPlaceHolder(mpsGraph, *self_);
+      auto t1 = castMPSTensor(mpsGraph, vec1Placeholder, computeType);
+      auto t2 = castMPSTensor(mpsGraph, vec2Placeholder, computeType);
+      auto selfTensor = castMPSTensor(mpsGraph, selfPlaceholder, computeType);
 
       // Intermediate as placeholder
       MPSGraphTensor* productTensor = [mpsGraph matrixMultiplicationWithPrimaryTensor:t1
@@ -2583,10 +2605,8 @@ Tensor& addr_out_mps(const Tensor& self,
                                                                                  name:@"MM/(vec1Xvec2)"];
 
       // Intermediates for beta and alpha
-      MPSGraphTensor* betaTensor = [mpsGraph constantWithScalar:beta.toDouble()
-                                                       dataType:getMPSScalarType((*self_).scalar_type())];
-      MPSGraphTensor* alphaTensor = [mpsGraph constantWithScalar:alpha.toDouble()
-                                                        dataType:getMPSScalarType(vec1.scalar_type())];
+      MPSGraphTensor* betaTensor = [mpsGraph constantWithScalar:beta.toDouble() dataType:computeType];
+      MPSGraphTensor* alphaTensor = [mpsGraph constantWithScalar:alpha.toDouble() dataType:computeType];
 
       // Intermediates for multiplying by beta and alpha
       MPSGraphTensor* productTimesAlphaTensor = [mpsGraph multiplicationWithPrimaryTensor:productTensor
@@ -2606,9 +2626,9 @@ Tensor& addr_out_mps(const Tensor& self,
                                                       name:@"MM/beta*input+alpha*(vec1@vec2)"];
       }
 
-      newCachedGraph->vec1Tensor_ = t1;
-      newCachedGraph->vec2Tensor_ = t2;
-      newCachedGraph->selfTensor_ = selfTensor;
+      newCachedGraph->vec1Tensor_ = vec1Placeholder;
+      newCachedGraph->vec2Tensor_ = vec2Placeholder;
+      newCachedGraph->selfTensor_ = selfPlaceholder;
       newCachedGraph->resultTensor_ = resultTensor;
     });
 
