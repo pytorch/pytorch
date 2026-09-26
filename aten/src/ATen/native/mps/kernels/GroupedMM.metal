@@ -26,8 +26,9 @@ inline uint32_t grouped_mm_offset(int32_t offset, uint32_t limit) {
 // One SIMD group computes one output element. Find the expert on-device so
 // sparse routing needs neither a CPU sync nor threadgroups for empty experts.
 template <typename T, typename idx_t>
-[[max_total_threads_per_threadgroup(kGroupedMMGemvSimdgroups * simdgroup_size)]]
-kernel void grouped_mm_gemv(
+[[max_total_threads_per_threadgroup(
+    kGroupedMMFewRowsSimdgroups * simdgroup_size)]]
+kernel void grouped_mm_few_rows(
     device const T* mat_a [[buffer(0)]],
     device const T* mat_b [[buffer(1)]],
     device const int32_t* offsets [[buffer(2)]],
@@ -37,7 +38,7 @@ kernel void grouped_mm_gemv(
     uint simd_group [[simdgroup_index_in_threadgroup]],
     uint simd_lane [[thread_index_in_simdgroup]]) {
   const uint32_t row = tgid.y;
-  const uint32_t col = tgid.x * kGroupedMMGemvSimdgroups + simd_group;
+  const uint32_t col = tgid.x * kGroupedMMFewRowsSimdgroups + simd_group;
   if (col >= params.n) {
     return;
   }
@@ -60,7 +61,7 @@ kernel void grouped_mm_gemv(
   mat_a += row * params.a_stride_m;
   mat_b += group * params.batch_stride + col * params.b_stride_n;
   float4 accum = 0;
-  constexpr auto chunk = kGroupedMMGemvLaneChunk;
+  constexpr auto chunk = kGroupedMMFewRowsLaneChunk;
   for (idx_t base = simd_lane * chunk; base < params.k;
        base += simdgroup_size * chunk) {
     const idx_t end = min(base + chunk, static_cast<idx_t>(params.k));
@@ -82,25 +83,26 @@ kernel void grouped_mm_gemv(
   }
 }
 
-#define INSTANTIATE_GROUPED_MM_GEMV(DTYPE, IDX_T, IDX_NAME)                   \
-  template [[host_name("grouped_mm_gemv_" #DTYPE "_" #IDX_NAME)]] kernel void \
-  grouped_mm_gemv<DTYPE, IDX_T>(                                              \
-      device const DTYPE*,                                                    \
-      device const DTYPE*,                                                    \
-      device const int32_t*,                                                  \
-      device DTYPE*,                                                          \
-      constant GroupedMMParams<IDX_T>&,                                       \
-      uint3,                                                                  \
-      uint,                                                                   \
-      uint)
+#define INSTANTIATE_GROUPED_MM_FEW_ROWS(DTYPE, IDX_T, IDX_NAME)              \
+  template                                                                   \
+      [[host_name("grouped_mm_few_rows_" #DTYPE "_" #IDX_NAME)]] kernel void \
+      grouped_mm_few_rows<DTYPE, IDX_T>(                                     \
+          device const DTYPE*,                                               \
+          device const DTYPE*,                                               \
+          device const int32_t*,                                             \
+          device DTYPE*,                                                     \
+          constant GroupedMMParams<IDX_T>&,                                  \
+          uint3,                                                             \
+          uint,                                                              \
+          uint)
 
-#define INSTANTIATE_GROUPED_MM_GEMV_DTYPE(DTYPE)     \
-  INSTANTIATE_GROUPED_MM_GEMV(DTYPE, uint32_t, u32); \
-  INSTANTIATE_GROUPED_MM_GEMV(DTYPE, uint64_t, u64)
+#define INSTANTIATE_GROUPED_MM_FEW_ROWS_DTYPE(DTYPE)     \
+  INSTANTIATE_GROUPED_MM_FEW_ROWS(DTYPE, uint32_t, u32); \
+  INSTANTIATE_GROUPED_MM_FEW_ROWS(DTYPE, uint64_t, u64)
 
-INSTANTIATE_GROUPED_MM_GEMV_DTYPE(float);
-INSTANTIATE_GROUPED_MM_GEMV_DTYPE(half);
-INSTANTIATE_GROUPED_MM_GEMV_DTYPE(bfloat);
+INSTANTIATE_GROUPED_MM_FEW_ROWS_DTYPE(float);
+INSTANTIATE_GROUPED_MM_FEW_ROWS_DTYPE(half);
+INSTANTIATE_GROUPED_MM_FEW_ROWS_DTYPE(bfloat);
 
 // Maps a flat tile index along the jagged dimension (rows or columns, capped
 // at limit) to its (group, first index, valid count) triple by walking the
