@@ -21,7 +21,7 @@ jobs:
     needs: check-ci
     if: github.repository_owner == 'pytorch'
     name: Test check_binary.sh for Linux CPU
-    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
+    uses: pytorch/test-infra/.github/workflows/linux_job_v3.yml@main
     with:
       docker-image: python:3.11
       docker-build-dir: "skip-docker-build"
@@ -37,7 +37,7 @@ jobs:
     needs: check-ci
     if: github.repository_owner == 'pytorch'
     name: Test check_binary.sh for Linux CUDA
-    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
+    uses: pytorch/test-infra/.github/workflows/linux_job_v3.yml@main
     with:
       runner: mt-l-x86iavx512-29-115-t4
       docker-image: python:3.11
