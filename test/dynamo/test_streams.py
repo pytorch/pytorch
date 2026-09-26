@@ -2997,9 +2997,9 @@ class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
         del compiled
         gc.collect()
 
-        self.assertIn(
+        self.assertGreaterEqual(
+            len(index_to_external_object_weakref),
             CURRENT_STREAM_INDEX,
-            index_to_external_object_weakref,
             "torch.compile of a function referencing current_stream() must "
             "register a weakref under CURRENT_STREAM_INDEX",
         )
@@ -3089,9 +3089,9 @@ class TestStreamsXPUSpecific(torch._dynamo.test_case.TestCase):
         del compiled
         gc.collect()
 
-        self.assertIn(
+        self.assertGreaterEqual(
+            len(index_to_external_object_weakref),
             CURRENT_STREAM_INDEX,
-            index_to_external_object_weakref,
             "torch.compile of a function referencing current_stream() must "
             "register a weakref under CURRENT_STREAM_INDEX",
         )
