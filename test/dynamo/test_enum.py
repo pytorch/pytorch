@@ -717,6 +717,74 @@ class EnumTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_enum_member_reassign_raises(self):
+        for enum_cls in (enum.Enum, enum.IntEnum, enum.Flag):
+
+            class Color(enum_cls):
+                RED = 1
+                GREEN = 2
+
+            def fn(cls, x):
+                try:
+                    cls.RED = 3
+                except AttributeError as e:
+                    msg1 = str(e)
+                try:
+                    setattr(cls, "GREEN", 4)  # noqa: B010
+                except AttributeError as e:
+                    msg2 = str(e)
+                return x + cls.RED.value + cls.GREEN.value, msg1, msg2
+
+            x = torch.ones(2)
+            ref = fn(Color, x)
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(opt_fn(Color, x), ref)
+            msgs = ("cannot reassign member 'RED'", "cannot reassign member 'GREEN'")
+            self.assertEqual(ref[1:], msgs)
+            self.assertEqual((Color.RED.value, Color.GREEN.value), (1, 2))
+
+    def test_enum_nonmember_setattr(self):
+        class Color(enum.Enum):
+            RED = 1
+
+        def fn(cls, x):
+            cls.scale = 2
+            return x * cls.scale
+
+        x = torch.ones(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(Color, x), x * 2)
+        self.assertEqual(Color.__dict__["scale"], 2)
+
+    def test_metaclass_setattr_hook(self):
+        class Meta(type):
+            def __setattr__(cls, name, value):
+                if name == "frozen":
+                    raise AttributeError(f"cannot set {name}")
+                super().__setattr__(name, value * 10)
+
+        def make_cls():
+            class Foo(metaclass=Meta):
+                pass
+
+            return Foo
+
+        def fn(cls, x):
+            cls.a = 2
+            try:
+                cls.frozen = 1
+            except AttributeError as e:
+                return x + cls.a, str(e)
+            return x, "missed"
+
+        x = torch.ones(2)
+        ref_cls, res_cls = make_cls(), make_cls()
+        ref = fn(ref_cls, x)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(res_cls, x)
+        self.assertEqual(res, ref)
+        self.assertEqual(res_cls.a, ref_cls.a)
+        self.assertFalse(hasattr(res_cls, "frozen"))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

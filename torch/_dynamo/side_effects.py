@@ -2088,6 +2088,20 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
             cg(value)
             ctx.suffixes.append([*create_call_method(3), create_instruction("POP_TOP")])
             side_effect_occurred = True
+        elif (
+            isinstance(var, variables.UserDefinedClassVariable)
+            and inspect.getattr_static(type(var.value), "__setattr__")
+            is not type.__setattr__
+        ):
+            # The metaclass __setattr__ already ran during tracing, so replay
+            # the store with type.__setattr__ to avoid running it twice.
+            cg.load_import_from("builtins", "type")
+            cg.load_method("__setattr__")
+            cg(var.source)  # type: ignore[attr-defined]
+            cg(variables.ConstantVariable(name))
+            cg(value)
+            ctx.suffixes.append([*create_call_method(3), create_instruction("POP_TOP")])
+            side_effect_occurred = True
         else:
             cg.tx.output.update_co_names(name)
             cg(value)
