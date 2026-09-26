@@ -2167,6 +2167,10 @@ class triton:
     # exceeds this limit
     cudagraph_dynamic_shape_warn_limit: int | None = 8
 
+    # Stop re-recording new cudagraphs after this many distinct dynamic shapes.
+    # Shapes already recorded keep replaying; further new shapes run eager.
+    cudagraph_dynamic_shape_rerecord_limit: int | None = None
+
     # synchronize after cudagraph invocation
     force_cudagraph_sync = False
 

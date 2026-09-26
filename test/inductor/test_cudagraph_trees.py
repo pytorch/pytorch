@@ -4983,6 +4983,54 @@ if HAS_CUDA_AND_TRITON:
 
             self.assertEqual(self.get_manager().new_graph_id().id, 2)
 
+        @torch._inductor.config.patch(
+            "triton.cudagraph_dynamic_shape_rerecord_limit", 2
+        )
+        def test_dynamic_shape_rerecord_limit_stops_recording_new_shapes(self):
+            class Mod(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.linear = torch.nn.Linear(3, 3, device="cuda")
+
+                def forward(self, x: torch.Tensor) -> torch.Tensor:
+                    return self.linear(x)
+
+            mod = Mod()
+            # dynamic=True keeps every batch size on one compiled graph, so all
+            # four shapes share the fn_cache the limit is counted against.
+            compiled = torch.compile(mod, mode="reduce-overhead", dynamic=True)
+
+            inps = [
+                torch.rand((batch_size, 3), device="cuda")
+                for batch_size in (10, 20, 30, 40)
+            ]
+            # warning_once caches globally on its args; clear it so this test
+            # does not depend on what ran before it.
+            torch._logging._internal.warning_once.cache_clear()
+            log_stream, ctx = logs_to_string(
+                "torch._inductor.cudagraph_trees", "cudagraphs"
+            )
+            with ctx():
+                for inp in inps:
+                    for _ in range(3):
+                        out = compiled(inp).clone()
+                    # Shapes past the limit run eager, and must still be correct.
+                    self.assertEqual(out, mod(inp))
+
+                # An already-recorded shape keeps replaying its graph rather than
+                # falling back to eager or re-recording.
+                for _ in range(3):
+                    compiled(inps[0])
+
+            # Only the first two distinct shapes recorded a cudagraph.
+            self.assertEqual(self.get_manager().new_graph_id().id, 2)
+
+            FileCheck().check(
+                "Skipping cudagraph re-recording for new dynamic shapes: hit the "
+                "cudagraph_dynamic_shape_rerecord_limit of 2 distinct recorded "
+                "shapes."
+            ).run(log_stream.getvalue())
+
         @torch._inductor.config.patch("triton.cudagraph_dynamic_shape_warn_limit", 1)
         def test_skip_if_dynamic_shape_limit_reached1(self):
             class Mod(torch.nn.Module):
