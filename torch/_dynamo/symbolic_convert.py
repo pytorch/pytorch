@@ -2255,7 +2255,16 @@ class InstructionTranslatorBase(
             raise AssertionError(
                 "expected inst.argval in self.cell_and_freevars() to be true"
             )
-        cell = self._cellvar(inst.argval)
+        name = inst.argval
+        cell = self._cellvar(name)
+        if isinstance(cell, CellVariable) and cell._current_contents(self) is None:
+            # format_exc_unbound: an empty free var cell raises NameError, an
+            # empty cell var UnboundLocalError.
+            if name in self.f_code.co_freevars:
+                msg = f"cannot access free variable '{name}' where it is not associated with a value in enclosing scope"
+                raise_observed_exception(NameError, self, args=[msg])
+            msg = f"cannot access local variable '{name}' where it is not associated with a value"
+            raise_observed_exception(UnboundLocalError, self, args=[msg])
         contents_var = self.output.side_effects.load_cell(cell)
         self.push(contents_var)
 
@@ -3433,7 +3442,7 @@ class InstructionTranslatorBase(
         # side effects. We intentionally avoid tp_getattro_impl here because it
         # can trigger __getattr__, add graph nodes, or cause graph breaks.
         if self.output.side_effects.has_pending_mutation_of_attr(obj, name):
-            attr_var = self.output.side_effects.load_attr(obj, name)
+            attr_var = self.output.side_effects.load_attr(obj, name, deleted_ok=True)
             if isinstance(attr_var, TensorVariable):
                 self._maybe_emit_sync_dealloc(attr_var)
 

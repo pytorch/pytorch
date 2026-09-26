@@ -1181,6 +1181,65 @@ class CellVariable(VariableTracker):
             return None
         return contents
 
+    def _get_cell_contents(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        contents = self._current_contents(tx)
+        if contents is None:
+            raise_value_error(tx, "Cell is empty")
+        return contents
+
+    def _set_cell_contents(
+        self, tx: "InstructionTranslatorBase", value: VariableTracker | None
+    ) -> None:
+        # cell_set_contents: deleting an already-empty cell is not an error.
+        stored = DeletedVariable() if value is None else value
+        tx.output.side_effects.store_cell(self, stored)
+
+    tp_getset = {
+        "cell_contents": GetSet(_get_cell_contents, _set_cell_contents),
+    }
+
+    def _hasattr_check_side_effects(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> ConstantVariable | None:
+        # Defer to the cell_contents getter: hasattr() on an empty cell raises
+        # ValueError rather than returning False.
+        return None
+
+    def tp_getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        # cell has no __dict__, so anything not on the type does not exist.
+        if not hasattr(types.CellType, name):
+            raise_observed_exception(
+                AttributeError, tx, args=[f"'cell' object has no attribute '{name}'"]
+            )
+        return super().tp_getattro_impl(tx, name)
+
+    def call_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # cell has no __dict__, so cell_contents is the only writable attribute.
+        nargs = {"__setattr__": 2, "__delattr__": 1}.get(name)
+        if nargs == len(args) and not kwargs and args[0].is_python_constant():
+            attr_name = args[0].as_python_constant()
+            getset = self.lookup_tp_getset_member(attr_name)
+            if getset is None:
+                raise_observed_exception(
+                    AttributeError,
+                    tx,
+                    args=[
+                        f"'cell' object has no attribute '{attr_name}' "
+                        "and no __dict__ for setting new attributes"
+                    ],
+                )
+            getset.setter(self, tx, args[1] if nargs == 2 else None)
+            return ConstantVariable.create(None)
+        return super().call_method(tx, name, args, kwargs)
+
     def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:

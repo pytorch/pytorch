@@ -2904,6 +2904,83 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(got, expected)
         self.assertEqual(dict(counters["graph_break"]), {})
 
+    def test_cell_new(self):
+        def fn(x):
+            full = types.CellType(x)
+            full.cell_contents = full.cell_contents + 1
+            empty = types.CellType()
+            errors = []
+            for thunk in (
+                lambda: empty.cell_contents,
+                lambda: hasattr(empty, "cell_contents"),
+                lambda: types.CellType(1, 2),
+                lambda: types.CellType(contents=1),
+                lambda: full.foo,
+            ):
+                try:
+                    thunk()
+                except (ValueError, TypeError, AttributeError) as e:
+                    errors.append((type(e), str(e)))
+            return full.cell_contents * 2, full, empty, errors
+
+        x = torch.ones(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        ref_out, ref_full, ref_empty, ref_errors = fn(x)
+        out, full, empty, errors = opt_fn(x)
+        self.assertEqual(out, ref_out)
+        self.assertEqual(errors, ref_errors)
+        self.assertIs(type(full), types.CellType)
+        self.assertEqual(full.cell_contents, ref_full.cell_contents)
+        with self.assertRaisesRegex(ValueError, "Cell is empty"):
+            empty.cell_contents
+
+    def test_cell_set_and_delete_contents(self):
+        def fn(x):
+            a = x
+            b = 1
+
+            def f():
+                return a
+
+            def g():
+                nonlocal a
+                del a
+                return a
+
+            cell = f.__closure__[0]
+            cell.cell_contents = x + 1
+            res = [f() * 2, a * 3]
+            del cell.cell_contents
+            del cell.cell_contents
+            try:
+                cell.cell_contents
+            except ValueError as e:
+                res.append((type(e), str(e)))
+            try:
+                a
+            except UnboundLocalError as e:
+                res.append((type(e), str(e)))
+            cell.cell_contents = x
+            try:
+                g()
+            except NameError as e:
+                res.append((type(e), str(e)))
+            new = types.CellType(b)
+            del new.cell_contents
+            new.cell_contents = b + 1
+            try:
+                new.foo = 1
+            except AttributeError as e:
+                res.append((type(e), str(e)))
+            return res, new
+
+        x = torch.ones(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        ref_res, ref_new = fn(x)
+        res, new = opt_fn(x)
+        self.assertEqual(res, ref_res)
+        self.assertEqual(new.cell_contents, ref_new.cell_contents)
+
     def test_return_nested_function(self):
         out = None
 
