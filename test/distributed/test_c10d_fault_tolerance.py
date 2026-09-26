@@ -21,8 +21,8 @@ from torch.testing._internal.common_distributed import MultiProcessTestCase
 from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
     run_tests,
+    skipIfRocmVersionLessThan,
     TEST_CUDA,
-    TEST_WITH_ROCM,
     TestCase,
 )
 
@@ -354,6 +354,8 @@ class AbstractFaultToleranceTest:
         self._store_barrier("ft_reused_uuid_rejected")
         self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
 
+    # ROCM-30165 fixed in 10.1
+    @skipIfRocmVersionLessThan((10, 1))
     def test_reconfigure_timeout_is_retryable(self):
         if self.backend_name != "nccl2":
             self.skipTest("nonblocking NCCL initialization behavior")
@@ -391,11 +393,6 @@ def _make_fault_tolerance_test_class(backend):
         cls = unittest.skipIf(
             not TEST_CUDA or torch.cuda.device_count() < 3,
             "fault tolerance CUDA tests require at least 3 GPUs",
-        )(cls)
-    if backend.name == "nccl2":
-        cls = unittest.skipIf(
-            TEST_WITH_ROCM,
-            "nccl2 reconfigure is not supported with RCCL",
         )(cls)
     return cls
 
