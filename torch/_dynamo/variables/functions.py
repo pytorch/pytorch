@@ -46,6 +46,7 @@ from weakref import WeakKeyDictionary
 
 import torch
 from torch._dynamo.exc import get_stack_above_dynamo
+from torch._dynamo.utils import namedtuple_fields
 from torch._guards import Source
 from torch.utils._pytree import is_namedtuple_class
 
@@ -90,6 +91,7 @@ from ..utils import (
     is_wrapper_or_member_descriptor,
     istype,
     make_cell,
+    raise_args_mismatch,
     unpack_iterable,
 )
 from .base import (
@@ -113,7 +115,10 @@ from .constant import ConstantVariable
 from .user_defined import (
     is_reconstructable_decorator_ctx_manager_clone,
     maybe_reconstruct_decorator_ctx_manager_clone,
+    NamedTupleVariable,
+    UserDefinedClassVariable,
     UserDefinedObjectVariable,
+    UserDefinedTupleVariable,
 )
 
 
@@ -3828,11 +3833,66 @@ class SysFunctionVariable(VariableTracker):
 
 
 from torch._higher_order_ops.triton_kernel_wrap import (
+    AggregateSpec,
+    AggregateTypeMetadata,
+    create_leaf_spec,
+    create_named_tuple_spec,
+    create_structural_named_tuple_name,
     create_tma_experimental_metadata,
     create_tma_stable_metadata,
+    create_tuple_spec,
+    NamedTupleSpec,
     TMADescriptorMetadata,
+    triton_version_supports_udtk_aggregates,
     TritonHOPifier,
+    TupleSpec,
+    UDTK_AGGREGATE_VERSION_ERROR,
 )
+
+
+class TritonConstexprVariable(VariableTracker):
+    """Tracks the payload of an explicit ``tl.constexpr(...)`` value."""
+
+    def __init__(self, constexpr_value: VariableTracker, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.constexpr_value = constexpr_value
+
+    def as_python_constant(self) -> Any:
+        return self.constexpr_value.as_python_constant()
+
+    def python_type(self) -> type:
+        import triton.language as tl
+
+        return tl.constexpr
+
+
+class TritonConstexprClassVariable(UserDefinedClassVariable):
+    """Constructs a ``TritonConstexprVariable`` without tracing the wrapper."""
+
+    def call_function(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if len(args) == 1 and not kwargs:
+            constexpr_value = args[0]
+        elif not args and kwargs.keys() == {"value"}:
+            constexpr_value = kwargs["value"]
+        else:
+            raise_args_mismatch(
+                tx,
+                "constexpr",
+                "one positional argument or the 'value' keyword argument",
+                f"{len(args)} positional arguments and keywords {sorted(kwargs)!r}",
+            )
+
+        # Triton does not repeatedly wrap an argument in tl.constexpr when it is
+        # already constexpr.
+        if isinstance(constexpr_value, TritonConstexprVariable):
+            return constexpr_value
+
+        return TritonConstexprVariable(constexpr_value)
 
 
 class DynamoTritonHOPifier(TritonHOPifier):
@@ -3951,6 +4011,142 @@ class DynamoTritonHOPifier(TritonHOPifier):
             kernel_source=variable.kernel_source,
         )
 
+    @staticmethod
+    def _is_supported_aggregate_type(var: VariableTracker) -> bool:
+        # Note: this function must be kept in sync with
+        # _flatten_aggregate_and_collect_metadata
+        from .lists import TupleVariable
+
+        var = var.realize()
+        if isinstance(var, TritonConstexprVariable):
+            var = var.constexpr_value.realize()
+        # Graph inputs can use UserDefinedTupleVariable for a plain tuple;
+        # reject arbitrary tuple subclasses here.
+        return (
+            (type(var) is UserDefinedTupleVariable and var.tuple_cls is tuple)
+            or type(var) is NamedTupleVariable
+            or type(var) is TupleVariable
+        )
+
+    def _flatten_aggregate_and_collect_metadata(
+        self,
+        param_name: str,
+        param_value: VariableTracker,
+        kernel_variable: "TritonKernelVariable",
+        combined_args: dict[str, Any],
+        tma_descriptor_metadata: TMADescriptorMetadata,
+        *,
+        is_constexpr: bool,
+    ) -> TupleSpec | NamedTupleSpec:
+        """Flatten a supported aggregate and record its reconstruction metadata.
+
+        Symbolic leaves below a constexpr node are specialized so their guards
+        cover the complete constexpr subtree.
+        """
+        from triton.runtime.autotuner import Autotuner
+
+        from .lists import TupleVariable
+        from .tensor import SymNodeVariable
+
+        if isinstance(kernel := kernel_variable.kernel, Autotuner) and (
+            param_name in kernel.restore_value or param_name in kernel.reset_to_zero
+        ):
+            self.raise_unsupported(
+                "Triton does not support aggregate types in `restore_value` "
+                f"or `reset_to_zero` autotune arguments. Argument {param_name} is "
+                "an aggregate and you provided: "
+                f"{kernel.reset_to_zero=}, {kernel.restore_value=}."
+            )
+
+        flat_vars_counter = 0
+
+        def get_next_flat_key() -> str:
+            nonlocal flat_vars_counter
+            # `flat_key` really shouldn't be in `combined_args`, but guard against that
+            # anyway
+            while True:
+                flat_key = f"__triton_{param_name}_{flat_vars_counter}"
+                flat_vars_counter += 1
+                if flat_key not in combined_args:
+                    return flat_key
+
+        def validate_and_flatten(
+            var: VariableTracker, *, within_constexpr: bool
+        ) -> AggregateSpec:
+            var = var.realize()
+            is_constexpr = isinstance(var, TritonConstexprVariable)
+            within_constexpr = within_constexpr or is_constexpr
+
+            # unwrap constexpr, `is_constexpr` in the aggregate / leaf spec
+            # will allow the argument to be wrapped when the kernel is called
+            if is_constexpr:
+                var = var.constexpr_value.realize()
+
+            if type(var) is NamedTupleVariable:
+                fields = tuple(namedtuple_fields(var.tuple_cls))
+                children = tuple(
+                    validate_and_flatten(child, within_constexpr=within_constexpr)
+                    for child in var.items
+                )
+                # Heuristics and early config pruning have already run, so the
+                # original class identity and name are no longer required. Use a
+                # structural name that cannot clash with another field layout
+                # in the generated wrapper.
+                return create_named_tuple_spec(
+                    create_structural_named_tuple_name(var.tuple_cls.__name__, fields),
+                    fields,
+                    children,
+                    is_constexpr=is_constexpr,
+                )
+            if (
+                type(var) is UserDefinedTupleVariable and var.tuple_cls is tuple
+            ) or type(var) is TupleVariable:
+                return create_tuple_spec(
+                    tuple(
+                        validate_and_flatten(child, within_constexpr=within_constexpr)
+                        for child in var.items
+                    ),
+                    is_constexpr=is_constexpr,
+                )
+
+            if within_constexpr:
+                if isinstance(var, SymNodeVariable):
+                    # See [Note: Specialize tl.constexpr args in user-defined triton kernels]
+                    var = kernel_variable.specialize_symbolic(var)
+                if not var.is_python_constant():
+                    self.raise_unsupported(
+                        "All leaves of a Triton tuple or NamedTuple that are "
+                        f"tl.constexpr must be Python constants, but got {var!r} "
+                        f"in argument {param_name!r}."
+                    )
+
+            flat_key = get_next_flat_key()
+            if isinstance(
+                var,
+                (TMADescriptorExperimentalVariable, TMADescriptorStableVariable),
+            ):
+                tma_descriptor_metadata[flat_key] = var.to_metadata()
+                combined_args[flat_key] = var.get_tensor()
+            elif var.is_python_constant() or var.is_tensor() or var.is_symnode_like():
+                combined_args[flat_key] = var
+            else:
+                self.raise_unsupported(
+                    "Unsupported leaf in Triton tuple or NamedTuple argument "
+                    f"{param_name!r}: {var!r}."
+                )
+            return create_leaf_spec(
+                flat_key,
+                # triton treats `None` args as constexpr, even in aggregate types
+                is_constexpr=is_constexpr or var.is_constant_none(),
+            )
+
+        metadata = validate_and_flatten(param_value, within_constexpr=is_constexpr)
+        if metadata[0] == "leaf":
+            raise AssertionError(
+                f"Expected aggregate metadata for {param_name!r}, got {metadata!r}"
+            )
+        return metadata
+
     def call_HOP(
         self,
         variable: "TritonKernelVariable",
@@ -3958,6 +4154,7 @@ class DynamoTritonHOPifier(TritonHOPifier):
         combined_args: dict[str, Any],
         launch_kwargs: tuple[str, ...],
         kernel_arg_names: set[str],
+        constexpr_arg_names: set[str],
         tx: "InstructionTranslatorBase",
     ) -> ConstantVariable | None:
         from .dicts import ConstDictVariable
@@ -3969,13 +4166,30 @@ class DynamoTritonHOPifier(TritonHOPifier):
         # TMA descriptor-related metadata to a separate argument,
         # so that we can reconstruct the TMA descriptors downstream
         tma_descriptor_metadata: TMADescriptorMetadata = {}
-        for k in list(combined_args.keys()):
+        aggregate_type_metadata: AggregateTypeMetadata = {}
+
+        for k in list(combined_args.keys() & kernel_arg_names):
             v = combined_args[k]
             if isinstance(
                 v, (TMADescriptorExperimentalVariable, TMADescriptorStableVariable)
             ):
                 tma_descriptor_metadata[k] = v.to_metadata()
                 combined_args[k] = v.get_tensor()
+            elif self._is_supported_aggregate_type(v):
+                if not triton_version_supports_udtk_aggregates():
+                    self.raise_unsupported(UDTK_AGGREGATE_VERSION_ERROR)
+                aggregate_type_metadata[k] = (
+                    self._flatten_aggregate_and_collect_metadata(
+                        k,
+                        v,
+                        variable,
+                        combined_args,
+                        tma_descriptor_metadata,
+                        is_constexpr=k in constexpr_arg_names,
+                    )
+                )
+                # Remove the aggregate arg as it has been flattened
+                combined_args.pop(k)
 
         combined_args_vt = {
             VariableTracker.build(tx, k): v for k, v in combined_args.items()
@@ -4027,18 +4241,20 @@ class DynamoTritonHOPifier(TritonHOPifier):
 
         constant_args_idx = kernel_side_table.add_constant_args(constant_args)
         meta = ConstDictVariable(non_constant_args)
+        hop_kwargs: dict[str, Any] = {
+            "kernel_idx": variable.kernel_idx,
+            "constant_args_idx": constant_args_idx,
+            "grid": grids,
+            "tma_descriptor_metadata": tma_descriptor_metadata,
+            "kwargs": meta.as_proxy(),
+            "aggregate_type_metadata": aggregate_type_metadata,
+            "launch_kwargs": launch_kwargs,
+        }
         tx.output.create_proxy(
             "call_function",
             triton_kernel_wrapper_mutation,
             (),
-            {
-                "kernel_idx": variable.kernel_idx,
-                "constant_args_idx": constant_args_idx,
-                "grid": grids,
-                "tma_descriptor_metadata": tma_descriptor_metadata,
-                "kwargs": meta.as_proxy(),
-                "launch_kwargs": launch_kwargs,
-            },
+            hop_kwargs,
         )
 
         return VariableTracker.build(
