@@ -997,6 +997,18 @@ class ForeachTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
 
+    def test_inplace_reads_self_elsewhere(self):
+        # https://github.com/pytorch/pytorch/issues/198033
+        # x + x.flip(0) can't be written straight into x
+        def fn(x, y):
+            torch._foreach_add_([x, y], [x.flip(0), y.roll(1, 0)])
+            return x, y
+
+        x, y = torch.rand(16, 16), torch.rand(8, 8)
+        expected = fn(x.clone(), y.clone())
+        actual = torch.compile(fn)(x.clone(), y.clone())
+        self.assertEqual(actual, expected)
+
     @requires_gpu
     @torch._inductor.config.patch("combo_kernel_allow_mixed_sizes", 1)
     def test_2d_block_no_mixed_sizes_no_mask(self):

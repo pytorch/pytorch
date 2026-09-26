@@ -8525,6 +8525,15 @@ for dtype in (torch.int32, torch.int64):
         y = torch.randn(20, 1024 * 1024)
         self.common(f, (x, y), atol=1e-3, rtol=1e-3)
 
+    def test_inplace_copy_of_reshaped_transpose(self):
+        # The copy back into x must not inline a view of a computation that
+        # reads x at other positions.
+        def f(x):
+            x.copy_((x.transpose(0, 1) + 1.0).reshape(x.shape))
+            return x
+
+        self.common(f, (torch.randn(8, 4, 16),))
+
     def test_gather_scatter(self):
         def fn(node_feat, edge_index):
             src_node_feat = node_feat[edge_index[0]]

@@ -5243,6 +5243,44 @@ class MutationLayoutSHOULDREMOVE(Layout):
             raise AssertionError("Expected isinstance(layout, Layout)")
         return layout
 
+    @staticmethod
+    def _reads_only_where_it_writes(
+        src: IRNode, dst: IRNode, unsafe_alias: bool
+    ) -> bool:
+        """
+        Whether writing src into dst reads dst only at the element being
+        written: x + y does, x + x.flip(0) does not. With unsafe_alias the
+        kernel that computes src writes dst itself, so its own reads count;
+        otherwise the copy reads src through its loader, which inlines src when
+        it is not a buffer of its own (a view of an unrealized computation).
+        """
+        target = src
+        if unsafe_alias:
+            loops = src.data if isinstance(src, StorageBox) else src
+            if isinstance(loops, ComputedBuffer):
+                loops = loops.data
+            if not isinstance(loops, Pointwise):
+                return False
+            target = loops
+        name = dst.get_name()
+        try:
+            with patch.object(FlexibleLayout, "allow_indexing", True):
+                loader, indexer = target.make_loader(), dst.make_indexer()
+
+                def body(index: Sequence[Expr]) -> OpsValue:
+                    return ops.store(name, indexer(index), loader(index))
+
+                read_writes = extract_read_writes(body, target.get_size())
+        except NotImplementedError:
+            # No index to compare with: keep the copy that unsafe_alias skips.
+            return not unsafe_alias
+        (write,) = read_writes.writes
+        return all(
+            isinstance(read, dependencies.MemoryDep) and read.index == write.index
+            for read in read_writes.reads
+            if read.name == name
+        )
+
     @classmethod
     def realize_into(
         cls, src: IRNode, dst: IRNode, unsafe_alias: bool = False
@@ -5263,6 +5301,22 @@ class MutationLayoutSHOULDREMOVE(Layout):
         # dst would effect users of src. However if there are no more users of
         # dst, we can alias src to dst.
         src.realize_hint()
+
+        if not cls._reads_only_where_it_writes(src, dst, unsafe_alias):
+            if unsafe_alias:
+                # Compute src into a buffer of its own, then copy that into dst.
+                src.realize()
+            else:
+                # The copy below would inline src and read dst while writing it.
+                tmp = Pointwise.create(
+                    device=src.get_device(),
+                    dtype=src.get_dtype(),
+                    inner_fn=src.make_loader(),
+                    ranges=list(src.get_size()),
+                )
+                tmp.realize()
+                src = tmp.data
+            unsafe_alias = False
 
         if not unsafe_alias:
             node = Pointwise.create(
