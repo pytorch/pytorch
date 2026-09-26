@@ -583,11 +583,20 @@ inline Tensor handleDimInMultiDimIndexing(
       } else {
         result = result.unsqueeze(*dim_ptr);
         if (scalar_type == at::kBool) {
-          impl::recordTensorIndex(
-              impl::boolToIndexingTensor(
-                  result, tensor.item<bool>() != 0, original_tensor_device),
-              outIndices,
-              dim_ptr);
+          // Keep the original bool mask (unsqueezed to line up with the
+          // dimension we just inserted) instead of eagerly resolving it to a
+          // plain Long select-index via `.item()`. Converting to a Long
+          // index here causes `x[mask] = value` (0-dim `x`, 0-dim `mask`) to
+          // lose the masked_fill_ dtype-promotion fast path that
+          // identically-shaped N-dim bool masks get, since
+          // canDispatchToMaskedFill only recognizes Bool/Byte-typed indices.
+          // See GitHub issue #150017. (The deprecated uint8/Byte mask case
+          // below keeps the old conversion: masked_fill_'s tensor-mask
+          // overload only accepts Bool, so a Byte mask can't take this same
+          // shortcut.)
+          TORCH_INTERNAL_ASSERT(
+              tensor.dim() == 0 && tensor.scalar_type() == at::kBool);
+          impl::recordTensorIndex(tensor.unsqueeze(0), outIndices, dim_ptr);
         } else {
           impl::recordTensorIndex(
               impl::boolToIndexingTensor(
