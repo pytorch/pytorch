@@ -1555,6 +1555,15 @@ class TestLinalg(TestCase):
         test(-1, [0, 1], False, True)
         test(-1, [0, 0], False, True)
 
+    def test_vector_norm_compile_empty_batch_negative_dim(self):
+        x = torch.empty(0, 5)
+
+        def vector_norm(input):
+            return torch.linalg.vector_norm(input, ord=float("inf"), dim=-1)
+
+        result = torch.compile(vector_norm, backend="eager")(x)
+        self.assertEqual(result.shape, torch.Size([0]))
+
     def test_vector_norm_dim_tuple_arg(self, device):
         test_cases = [
             # input size, dim, error, error message
