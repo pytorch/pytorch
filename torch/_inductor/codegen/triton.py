@@ -2395,12 +2395,18 @@ class TritonOverrides(OpOverrides):
         b_zero = ops.eq(b, zero)
         b = ops.where(b_zero, one, b)
         b_neg = ops.lt(b, zero)
+        # 0 - a overflows when a is the minimum value. When both are negative,
+        # divide a - b instead, which can't overflow, and add 1:
+        # floor(a / b) == floor((a - b) / b) + 1.
+        shift = ops.logical_and(b_neg, ops.lt(a, zero))
+        a = ops.where(shift, ops.sub(a, b), a)
         a = ops.where(b_neg, ops.sub(zero, a), a)
         b = ops.where(b_neg, ops.sub(zero, b), b)
         a_neg = ops.lt(a, zero)
         a = ops.where(a_neg, ops.bitwise_not(a), a)
         quot = ops.truncdiv(a, b)
         quot = ops.where(a_neg, ops.bitwise_not(quot), quot)
+        quot = ops.where(shift, ops.add(quot, one), quot)
         return ops.where(b_zero, zero, quot)
 
     @staticmethod

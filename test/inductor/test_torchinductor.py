@@ -4343,6 +4343,30 @@ class CommonTemplate:
             b_neg = torch.full_like(a, -divisor)
             self.common(fn, (a, b_neg))
 
+    @skip_if_halide  # floordiv goes through floats, inexact for large values
+    def test_floordiv_int_min_negative_divisor(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/198545
+        def fn(a, b):
+            return a // b
+
+        for dtype in [torch.int32, torch.int64]:
+            info = torch.iinfo(dtype)
+            a = torch.tensor(
+                [info.min, info.min, info.min, info.min, info.min + 1, 5, -5, 0],
+                dtype=dtype,
+                device=self.device,
+            )
+            self.common(lambda x: x // -3, (a,))
+            for divisor in [-2, -3, -7, info.min]:
+                b = torch.full_like(a, divisor)
+                self.common(fn, (a, b))
+            b = torch.tensor(
+                [-2, -5, info.min, -(2**30), info.min, info.min, info.min, -1],
+                dtype=dtype,
+                device=self.device,
+            )
+            self.common(fn, (a, b))
+
     def test_floordiv_int_min_neg_one_cpu(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/184406
         if not is_cpp_backend(self.device):
