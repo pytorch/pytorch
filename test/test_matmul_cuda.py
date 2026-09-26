@@ -47,6 +47,8 @@ from torch.testing._internal.common_utils import (
     IS_JETSON,
     IS_WINDOWS,
     MI200_ARCH,
+    NAVI3_5_ARCH,
+    NAVI3_ARCH,
     NAVI_ARCH,
     getRocmVersion,
     isRocmArchAnyOf,
@@ -615,8 +617,11 @@ class TestMatmulCuda(InductorTestCase):
 
 
     @onlyCUDA
-    # Fails with triton 3.7
-    @skipIfRocmArch(NAVI_ARCH)
+    # Fails with triton 3.7 on RDNA3/RDNA3.5 with the cublaslt backend
+    @decorateIf(
+        skipIfRocmArch(NAVI3_ARCH + NAVI3_5_ARCH),
+        lambda params: params["backend"] == "cublaslt",
+    )
     @dtypes(torch.float16)
     # m == 4 chooses OUTPUT_TYPE reduction on H200
     # m == 8 chooses OUTPUT_TYPE reduction on A100
