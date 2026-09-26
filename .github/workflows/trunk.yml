@@ -81,7 +81,6 @@ jobs:
       - job-filter
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runner: "l-x86iavx512-8-64"
       build-environment: linux-jammy-cuda12.6-py3.11-gcc11-sm90-build-only
       docker-image-name: ci-image:pytorch-linux-jammy-cuda12.6-cudnn9-py3.11-gcc11
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
@@ -105,7 +104,6 @@ jobs:
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       build-generates-artifacts: false
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runner: "l-x86iavx512-8-64"
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
@@ -449,7 +447,6 @@ jobs:
       - job-filter
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runner: "l-x86iavx512-8-64"
       build-environment: linux-jammy-py3.11-gcc11-full-debug-build-only
       docker-image-name: ci-image:pytorch-linux-jammy-py3.11-clang21
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}

@@ -39,7 +39,6 @@ jobs:
     needs: get-default-label-prefix
     with:
       runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
-      runner: "l-x86iavx512-8-64"
       build-environment: linux-jammy-cuda13.0-py3.11-gcc11-sm86
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks
       ci-docker-hash: ${{ needs.get-default-label-prefix.outputs.ci-docker-hash }}
@@ -124,7 +123,6 @@ jobs:
       - get-default-label-prefix
     with:
       runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
-      runner: "l-x86iavx512-8-64"
       build-environment: linux-jammy-cuda13.0-py3.11-gcc11-sm80
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks
       ci-docker-hash: ${{ needs.get-default-label-prefix.outputs.ci-docker-hash }}
