@@ -7109,12 +7109,9 @@ add_docstr(
     r"""
 argmax(input) -> LongTensor
 
-Returns the indices of the maximum value of all elements in the :attr:`input` tensor.
+Returns the index of the maximum value of all elements in the :attr:`input` tensor.
 
-This is the second value returned by :meth:`torch.max`. See its
-documentation for the exact semantics of this method.
-
-.. note:: If there are multiple maximal values then the indices of the first maximal value are returned.
+.. note:: If there are multiple maximal values then the index of the first maximal value is returned.
 
 Args:
     {input}
@@ -7123,12 +7120,12 @@ Example::
 
     >>> a = torch.randn(4, 4)
     >>> a
-    tensor([[ 1.3398,  0.2663, -0.2686,  0.2450],
-            [-0.7401, -0.8805, -0.3402, -1.1936],
-            [ 0.4907, -1.3948, -1.0691, -0.3132],
-            [-1.6092,  0.5419, -0.2993,  0.3195]])
+    tensor([[-0.4744,  0.8398, -1.1793, -0.3001],
+            [-1.0409, -0.4657,  0.3653,  0.2816],
+            [ 0.9173,  1.7992, -0.8146,  0.0678],
+            [ 0.1377, -0.5385, -1.4703,  0.3242]])
     >>> torch.argmax(a)
-    tensor(0)
+    tensor(9)
 
 .. function:: argmax(input, dim, keepdim=False) -> LongTensor
    :noindex:
@@ -7140,7 +7137,8 @@ documentation for the exact semantics of this method.
 
 Args:
     {input}
-    {opt_dim} If ``None``, the argmax of the flattened input is returned.
+    dim (int, optional): the dimension to reduce.
+        If ``None``, the argmax of the flattened input is returned.
     {opt_keepdim}
 
 Example::
@@ -7797,16 +7795,18 @@ add_docstr(
     r"""
 argmin(input, dim=None, keepdim=False) -> LongTensor
 
-Returns the indices of the minimum value(s) of the flattened tensor or along a dimension
+Returns the index of the minimum value of the flattened tensor when :attr:`dim` is
+not given, or the indices of the minimum values along the given dimension otherwise.
 
-This is the second value returned by :meth:`torch.min`. See its
-documentation for the exact semantics of this method.
+When :attr:`dim` is provided, this is the second value returned by :meth:`torch.min`.
+See its documentation for the exact semantics of this method.
 
-.. note:: If there are multiple minimal values then the indices of the first minimal value are returned.
+.. note:: If there are multiple minimal values then the index of the first minimal value is returned.
 
 Args:
     {input}
-    {opt_dim} If ``None``, the argmin of the flattened input is returned.
+    dim (int, optional): the dimension to reduce.
+        If ``None``, the argmin of the flattened input is returned.
     {opt_keepdim}
 
 Example::
