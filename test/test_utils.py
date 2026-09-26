@@ -684,6 +684,58 @@ class TestHipify(TestCase):
     def test_import_hipify(self):
         from torch.utils.hipify import hipify_python  # noqa: F401
 
+    @unittest.skipIf(IS_WINDOWS, "Creating symlinks may require privileges on Windows")
+    def test_hipify_keeps_symlinked_source_under_build_dir(self):
+        # A .cu source symlinked into the build dir must be hipified *in place*
+        # under the build dir. Resolving the symlink (e.g. realpath-ing sources)
+        # relocates the generated .hip into the real source tree, which then
+        # yields a "../real/foo.hip" path relative to the build dir and breaks the
+        # "paths relative to the setup.py directory" invariant in CUDAExtension.
+        # This reproduces on any platform; no ROCm hardware is required.
+        from torch.utils.hipify import hipify_python
+
+        with tempfile.TemporaryDirectory() as tmp:
+            build_dir = os.path.join(tmp, "build")
+            real_dir = os.path.join(tmp, "real")
+            os.makedirs(build_dir)
+            os.makedirs(real_dir)
+
+            real_source = os.path.join(real_dir, "kernel.cu")
+            with open(real_source, "w") as f:
+                f.write(
+                    "#include <cuda_runtime.h>\n"
+                    "__global__ void my_kernel() {}\n"
+                    "void launch() { cudaDeviceSynchronize(); }\n"
+                )
+
+            linked_source = os.path.join(build_dir, "kernel.cu")
+            os.symlink(real_source, linked_source)
+
+            result = hipify_python.hipify(
+                project_directory=build_dir,
+                output_directory=build_dir,
+                includes=[os.path.join(build_dir, "*")],
+                extra_files=[linked_source],
+                hipify_extra_files_only=True,
+                is_pytorch_extension=True,
+            )
+
+            key = os.path.abspath(linked_source)
+            self.assertIn(key, result)
+            hipified_path = result[key].hipified_path
+            self.assertIsNotNone(
+                hipified_path,
+                "symlinked .cu source under the build dir was silently skipped by hipify",
+            )
+            # The generated file must stay under the build dir rather than follow
+            # the symlink into the real source tree.
+            self.assertEqual(
+                os.path.commonpath([os.path.abspath(hipified_path), build_dir]),
+                build_dir,
+            )
+            self.assertTrue(hipified_path.endswith(".hip"))
+            self.assertFalse(os.path.exists(os.path.join(real_dir, "kernel.hip")))
+
 
 class TestHipifyTrie(TestCase):
     def setUp(self):
