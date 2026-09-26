@@ -1810,6 +1810,8 @@ def use_deterministic_algorithms(
         * :func:`torch.Tensor.scatter` when `src` type is Tensor and called on CUDA tensor
         * :func:`torch.Tensor.scatter_reduce` when ``reduce='sum'`` or ``reduce='mean'`` and called on CUDA tensor
         * :class:`torch.nn.MaxPool3d` when attempting to differentiate a CUDA tensor
+        * :func:`torch.nn.functional.interpolate` with ``mode='bilinear'`` and ``antialias=False``
+          when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.Embedding` when attempting to differentiate a CUDA tensor
 
     The following normally-nondeterministic operations will throw a
@@ -1828,7 +1830,6 @@ def use_deterministic_algorithms(
           and one of the following modes is used:
 
           - ``linear``
-          - ``bilinear``
           - ``bicubic``
           - ``trilinear``
 
