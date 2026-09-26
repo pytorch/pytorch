@@ -8,6 +8,8 @@ compiled backends to get the best of both worlds: usability and performance. Thi
 seamlessly optimize PyTorch programs, including those using modern Python features.
 """
 
+import sys
+
 import torch
 
 from . import (
@@ -189,10 +191,9 @@ def reset() -> None:
 
         FakeTensorMode.cache_clear()
 
-        if torch.cuda.is_initialized():
-            from torch._inductor.cudagraph_trees import reset_cudagraph_trees
-
-            reset_cudagraph_trees()
+        cudagraph_trees = sys.modules.get("torch._inductor.cudagraph_trees")
+        if cudagraph_trees is not None:
+            cudagraph_trees.reset_cudagraph_trees()
 
 
 def reset_code_caches() -> None:
