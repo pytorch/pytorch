@@ -1304,7 +1304,7 @@ std::
         const Vectorized<T>& src,
         T const* base_addr,
         const Vectorized<int_same_size_t<T>>& vindex,
-        Vectorized<T>& mask) {
+        const Vectorized<T>& mask) {
   static constexpr int size = Vectorized<T>::size();
   std::array<T, size> src_arr{};
   // use int type so we can logical and
@@ -1321,7 +1321,6 @@ std::
       buffer[i] = src_arr[i];
     }
   }
-  mask = Vectorized<T>(static_cast<T>(0)); // "zero out" mask
   return Vectorized<T>::loadu(buffer.data());
 }
 

@@ -206,9 +206,12 @@ namespace {
         auto mask = at::vec::cast<VT>(ivec::loadu(mask_bits));
         at::vec::mask_gather<sizeof(VT)>(
             vec(-1), base, ivec::loadu(index), mask).store(actual);
+        CACHE_ALIGN VT mask_after[size];
+        mask.store(mask_after);
         for (const auto i : c10::irange(size)) {
             const VT expected = mask_bits[i] < 0 ? base[i] : VT(-1);
             ASSERT_EQ(expected, actual[i]);
+            ASSERT_EQ(mask_bits[i], c10::bit_cast<int_t>(mask_after[i]));
         }
     }
     TYPED_TEST(SignManipulation, Absolute) {

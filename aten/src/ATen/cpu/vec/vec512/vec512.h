@@ -84,7 +84,7 @@ std::
         const Vectorized<double>& src,
         const double* base_addr,
         const Vectorized<int64_t>& vindex,
-        Vectorized<double>& mask) {
+        const Vectorized<double>& mask) {
   auto mask_ = _mm512_movepi64_mask(_mm512_castpd_si512(mask.values));
   return _mm512_mask_i64gather_pd(src, mask_, vindex, base_addr, scale);
 }
@@ -95,7 +95,7 @@ std::
         const Vectorized<float>& src,
         const float* base_addr,
         const Vectorized<int32_t>& vindex,
-        Vectorized<float>& mask) {
+        const Vectorized<float>& mask) {
   auto mask_ = _mm512_movepi32_mask(_mm512_castps_si512(mask.values));
   return _mm512_mask_i32gather_ps(src, mask_, vindex, base_addr, scale);
 }
