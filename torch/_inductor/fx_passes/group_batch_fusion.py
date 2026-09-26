@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import collections
+import functools
 import logging
 import operator
 from collections import OrderedDict
@@ -8,9 +9,10 @@ from typing import Any
 
 import torch
 from torch._dynamo.utils import counters, is_node_meta_valid
+from torch._library.utils import get_layout_constraint_tag
 from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import FakeTensor
-from torch.fx.experimental.symbolic_shapes import free_symbols
+from torch.fx.experimental.symbolic_shapes import free_symbols, statically_known_true
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.utils._ordered_set import OrderedSet
 
@@ -525,9 +527,21 @@ class BatchLinearLHSFusion(BatchFusion):
         if CallFunctionVarArgs([torch.nn.functional.linear, torch._C._nn.linear]).match(
             node
         ) and is_linear_node_can_be_fused(node):
+            # Splitting a wide GEMM returns non-contiguous views. Avoid changing
+            # observable layout or passing those views to opaque custom operators.
+            # Any aliasing or conversion user of the unmaterialized output
+            # rejects; once contiguous() materializes it, the walk follows
+            # possible aliases and rejects layout observers, graph output, and
+            # opaque ops that may compare aliases with another input derived
+            # from the same projection.
+            if _has_layout_sensitive_user(node):
+                return None
             input = get_arg_value(node, 0, "input")
             weight = get_arg_value(node, 1, "weight")
             bias = get_arg_value(node, 2, "bias")
+            weight_tensor = weight.meta["example_value"]
+            if not statically_known_true(weight_tensor.shape[0] > 0):
+                return None
             # Skip fusion when weight is a tensor subclass that can't handle aten.cat.
             # fuse() calls torch.cat on the weight example_values, which fails for
             # subclasses lacking aten.cat dispatch.  Probe it here so subclasses that
@@ -544,6 +558,14 @@ class BatchLinearLHSFusion(BatchFusion):
             bias_tensor = None
             if bias is not None:
                 bias_tensor = bias.meta.get("val", bias.meta.get("example_value"))
+                if (
+                    bias_tensor is None
+                    or bias_tensor.ndim != 1
+                    or not statically_known_true(
+                        bias_tensor.shape[0] == weight_tensor.shape[0]
+                    )
+                ):
+                    return None
             bias_dim = None if bias_tensor is None else bias_tensor.ndim  # type: ignore[union-attr]
             group_key = ("batch_linear_lhs", bias_dim, input)
         else:
@@ -622,6 +644,298 @@ class BatchLinearLHSFusion(BatchFusion):
             new_node.meta.update(node.meta)
             graph.erase_node(node)  # type: ignore[operator]
         counters["inductor"]["batch_linear_lhs"] += 1
+
+
+@functools.lru_cache(None)
+def _aten_op_overloads(name):
+    packet = getattr(torch.ops.aten, name, None)
+    return tuple(packet.op_overloads()) if packet is not None else ()
+
+
+def _layout_target_overloads(target):
+    if isinstance(target, torch._ops.OpOverload):
+        return (target,)
+    if isinstance(target, torch._ops.OpOverloadPacket):
+        return tuple(target.op_overloads())
+    if isinstance(target, str):
+        if not hasattr(torch.Tensor, target):
+            return ()
+        return _aten_op_overloads(target)
+    # Resolve genuine torch builtins by identity, not a callable's name.
+    name = torch.jit._builtins._find_builtin(target)
+    if name is None or not name.startswith("aten::"):
+        return ()
+    return _aten_op_overloads(name.removeprefix("aten::"))
+
+
+def _layout_user_overloads(user):
+    target = user.target
+    args = user.args
+    kwargs = dict(user.kwargs)
+    # Functional wrappers may carry arguments absent from their ATen schemas.
+    if target in (torch.nn.functional.relu, torch.nn.functional.silu):
+        if get_arg_value(user, 1, "inplace") not in (None, False):
+            return ()
+        args = args[:1]
+        kwargs.pop("inplace", None)
+        target = (
+            torch.ops.aten.relu
+            if target is torch.nn.functional.relu
+            else torch.ops.aten.silu
+        )
+    elif target is torch.nn.functional.softmax:
+        if get_arg_value(user, 1, "dim") is None:
+            return ()
+        args = (*args[:2], *args[3:])
+        kwargs.pop("_stacklevel", None)
+        target = torch.ops.aten.softmax
+    elif target is torch.nn.functional.layer_norm:
+        target = torch.ops.aten.layer_norm
+    elif target is torch.nn.functional.dropout:
+        if get_arg_value(user, 3, "inplace") not in (None, False):
+            return ()
+        args = args[:3]
+        kwargs.pop("inplace", None)
+        if "training" in kwargs:
+            kwargs["train"] = kwargs.pop("training")
+        if len(args) < 2:
+            kwargs.setdefault("p", 0.5)
+        if len(args) < 3:
+            kwargs.setdefault("train", True)
+        target = torch.ops.aten.dropout
+    elif target in (operator.add, operator.sub, operator.mul, operator.truediv):
+        target = {
+            operator.add: torch.ops.aten.add,
+            operator.sub: torch.ops.aten.sub,
+            operator.mul: torch.ops.aten.mul,
+            operator.truediv: torch.ops.aten.div,
+        }[target]
+    candidates = []
+    for op in _layout_target_overloads(target):
+        schema = op._schema
+        positional = [arg for arg in schema.arguments if not arg.kwarg_only]
+        if len(args) > len(positional):
+            continue
+        supplied = OrderedSet(arg.name for arg in positional[: len(args)])
+        candidate_kwargs = dict(kwargs)
+        # Python torch functions accept input= for a schema's self argument.
+        if "input" in candidate_kwargs and any(
+            arg.name == "self" for arg in schema.arguments
+        ):
+            candidate_kwargs["self"] = candidate_kwargs.pop("input")
+        if supplied.intersection(candidate_kwargs):
+            continue
+        supplied.update(candidate_kwargs)
+        if supplied.difference(arg.name for arg in schema.arguments):
+            continue
+        if any(
+            arg.name not in supplied and not arg.has_default_value()
+            for arg in schema.arguments
+        ):
+            continue
+        candidates.append(op)
+    return candidates
+
+
+# These ops require a compatible input layout or can reinterpret the fused
+# storage differently. This is op semantics, not alias info, so it cannot be
+# derived only from OpOverload.is_view.
+_CRASH_VIEW_OPS = OrderedSet(
+    [
+        "view",
+        "_unsafe_view",
+        "view_as",
+        "view_as_complex",
+        "as_strided",
+        "as_strided_copy",
+        "_reshape_alias",
+    ]
+)
+
+# The unsafe split variants return aliases despite omitting alias annotations.
+_PROPAGATE_VIEW_OPS = OrderedSet(
+    ["unsafe_chunk", "unsafe_split", "unsafe_split_with_sizes"]
+)
+
+_LAYOUT_OBSERVING_OPS = OrderedSet(
+    [
+        "stride",
+        "sym_stride",
+        "storage_offset",
+        "sym_storage_offset",
+        "is_contiguous",
+        "sym_is_contiguous",
+        "_has_same_storage_numel",
+        "is_set_to",
+    ]
+)
+
+# These methods can return self despite not having a matching view schema.
+_CONVERSION_METHODS = OrderedSet(
+    [
+        "float",
+        "double",
+        "half",
+        "bfloat16",
+        "long",
+        "int",
+        "short",
+        "char",
+        "byte",
+        "bool",
+        "type",
+        "type_as",
+        "to",
+        "cpu",
+        "cuda",
+        "xpu",
+    ]
+)
+
+# Non-aliasing schema alone does not establish layout independence (e.g.
+# as_strided_copy). Only known layout-independent consumers terminate the walk.
+_LAYOUT_INDEPENDENT_OPS = OrderedSet(
+    [
+        "cat",
+        "stack",
+        "mm",
+        "bmm",
+        "matmul",
+        "linear",
+        "sum",
+        "mean",
+        "softmax",
+        "_softmax",
+        "layer_norm",
+        "native_layer_norm",
+    ]
+)
+
+
+def _has_layout_sensitive_user(node: torch.fx.Node) -> bool:
+    # The unmaterialized output rejects every aliasing, conversion,
+    # observing, or opaque user outright; only layout-independent
+    # consumers applied directly to it continue, and contiguous()
+    # materializes it. After that the walk follows possible aliases even
+    # though the layout was normalized: eager contiguous() may return self
+    # while the fused slice needs a copy.
+    queue = [(node, True)]
+    seen = OrderedSet(queue)
+    while queue:
+        current, layout_exposed = queue.pop()
+        for user in current.users:
+            if user.op == "output":
+                return True
+            if user.op not in ("call_method", "call_function"):
+                return True
+            exposed = layout_exposed
+            if layout_exposed:
+                if current is not node:
+                    # Reached through an alias of the unmaterialized output.
+                    return True
+                if user.target is operator.getitem or (
+                    user.op == "call_method" and user.target in _CONVERSION_METHODS
+                ):
+                    return True
+                ops = _layout_user_overloads(user)
+                if not ops or any(op._schema.is_mutable for op in ops):
+                    return True
+                names = OrderedSet(op.overloadpacket.__name__ for op in ops)
+                if any(
+                    op.namespace != "aten"
+                    or get_layout_constraint_tag(op, with_default=False)
+                    in (
+                        torch.Tag.needs_exact_strides,
+                        torch.Tag.needs_contiguous_strides,
+                        torch.Tag.needs_fixed_stride_order,
+                    )
+                    for op in ops
+                ):
+                    return True
+                if names == OrderedSet(["contiguous"]):
+                    if get_arg_value(user, 1, "memory_format") not in (
+                        None,
+                        torch.contiguous_format,
+                    ):
+                        return True
+                    value = node.meta.get("example_value", node.meta.get("val"))
+                    # All matched projections have positive width. With more
+                    # than one row a direct fused slice must materialize here.
+                    if value is not None and statically_known_true(value.shape[0] > 1):
+                        exposed = False
+                elif (
+                    names.intersection(_CRASH_VIEW_OPS | _LAYOUT_OBSERVING_OPS)
+                    or any(
+                        op.is_view or torch.Tag.maybe_aliasing_or_mutating in op.tags
+                        for op in ops
+                    )
+                    or names.intersection(
+                        _PROPAGATE_VIEW_OPS | OrderedSet(["type_as", "to", "clone"])
+                    )
+                ):
+                    return True
+                elif any(torch.Tag.pointwise in op.tags for op in ops) or all(
+                    op.overloadpacket.__name__ in _LAYOUT_INDEPENDENT_OPS for op in ops
+                ):
+                    # Applied directly to the output, these cannot expose
+                    # the fused strides: the walk ends here.
+                    continue
+                else:
+                    return True
+            else:
+                if user.target is operator.getitem or (
+                    user.op == "call_method" and user.target in _CONVERSION_METHODS
+                ):
+                    pass
+                else:
+                    ops = _layout_user_overloads(user)
+                    if not ops or any(op._schema.is_mutable for op in ops):
+                        return True
+                    names = OrderedSet(op.overloadpacket.__name__ for op in ops)
+                    if any(op.namespace != "aten" for op in ops):
+                        # Another input derived from this projection may compare
+                        # aliases across paths materialized by contiguous().
+                        for other in user.all_input_nodes:
+                            if other is current:
+                                continue
+                            pending = [other]
+                            visited = OrderedSet()
+                            while pending:
+                                candidate = pending.pop()
+                                if candidate is node:
+                                    return True
+                                if candidate not in visited:
+                                    visited.add(candidate)
+                                    pending.extend(candidate.all_input_nodes)
+                    if names == OrderedSet(["contiguous"]):
+                        if get_arg_value(user, 1, "memory_format") not in (
+                            None,
+                            torch.contiguous_format,
+                        ):
+                            return True
+                    elif names.intersection(
+                        _CRASH_VIEW_OPS
+                        | _LAYOUT_OBSERVING_OPS
+                        | _PROPAGATE_VIEW_OPS
+                        | OrderedSet(["type_as", "to", "clone"])
+                    ) or any(
+                        op.is_view or torch.Tag.maybe_aliasing_or_mutating in op.tags
+                        for op in ops
+                    ):
+                        pass
+                    elif any(torch.Tag.pointwise in op.tags for op in ops) or all(
+                        (op.namespace != "aten")
+                        or op.overloadpacket.__name__ in _LAYOUT_INDEPENDENT_OPS
+                        for op in ops
+                    ):
+                        continue
+                    else:
+                        return True
+            state = (user, exposed)
+            if state not in seen:
+                seen.add(state)
+                queue.append(state)
+    return False
 
 
 # Poor person's check for if a node in the graph mutates its input.
