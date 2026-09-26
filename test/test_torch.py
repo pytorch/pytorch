@@ -3865,6 +3865,7 @@ class TestTorchDeviceType(TestCase):
     # FIXME: find a test suite for the masked scatter operator
     #   test_scatter_gather_ops or test_masked_ops?
     @onlyAccelerator
+    @largeTensorTest('10GB', device='cpu')
     @largeTensorTest('30GB')
     def test_masked_scatter_large_tensor(self, device):
         t_cpu = torch.empty(2**31 + 1, dtype=torch.bool).random_()
