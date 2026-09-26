@@ -812,7 +812,9 @@ def exclusive_scan_decoupled_lookback_64(scratch_base, block_value, index, combi
         while flag == 0:
             flag = tl.atomic_add(scratch_base + 3 * test_target + 0, 0, sem="acquire")
 
-        value_u64 = tl.load(scratch_base + 3 * test_target + flag.to(tl.int32))
+        value_u64 = tl.atomic_add(
+            scratch_base + 3 * test_target + flag.to(tl.int32), 0, sem="relaxed"
+        )
         value = value_u64.to(block_value.dtype, bitcast=True)
         if prefix_valid:
             exclusive_prefix = combine_fn(value, exclusive_prefix)
