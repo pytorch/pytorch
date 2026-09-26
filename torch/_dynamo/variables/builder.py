@@ -2574,7 +2574,18 @@ class VariableBuilder:
             for vt in output:
                 vt.realize()
         # type: ignore[arg-type]
-        result = BaseListVariable.cls_for_instance(value)(output, source=self.source)
+        options: dict[str, Any] = {"source": self.source}
+        if type(value) is collections.deque:
+            try:
+                install_guard(
+                    AttrSource(self.source, "maxlen").make_guard(
+                        GuardBuilder.EQUALS_MATCH
+                    )
+                )
+            except NotImplementedError:
+                pass
+            options["maxlen"] = ConstantVariable.create(value.maxlen)
+        result = BaseListVariable.cls_for_instance(value)(output, **options)
         if istype(value, (list, collections.deque)):
             return self.tx.output.side_effects.track_mutable(value, result)
         return result

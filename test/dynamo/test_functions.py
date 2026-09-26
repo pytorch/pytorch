@@ -840,6 +840,81 @@ partial_fn = functools.partial(fn, scale=2)
             pairs.append(torch.ones(size))
         return pairs
 
+    def test_itertools_pairwise_acquires_iterator_at_construction(self):
+        class OneShotIterator:
+            def __init__(self, values):
+                self.values = values
+                self.index = 0
+                self.iter_calls = 0
+                self.next_calls = 0
+
+            def __iter__(self):
+                self.iter_calls += 1
+                return self
+
+            def __next__(self):
+                self.next_calls += 1
+                if self.index == len(self.values):
+                    raise StopIteration
+                value = self.values[self.index]
+                self.index += 1
+                return value
+
+        def fn(value):
+            pairs = itertools.pairwise(value)
+            calls_at_construction = value.iter_calls, value.next_calls
+            result = list(pairs)
+            return calls_at_construction, value.iter_calls, value.next_calls, result
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        for values, expected_next_calls, expected_pairs in (
+            ((), 1, []),
+            ((1,), 2, []),
+            ((1, 2, 3), 4, [(1, 2), (2, 3)]),
+        ):
+            eager_result = fn(OneShotIterator(values))
+            self.assertEqual(
+                eager_result,
+                ((1, 0), 1, expected_next_calls, expected_pairs),
+            )
+
+            compiled_result = compiled_fn(OneShotIterator(values))
+            self.assertEqual(compiled_result, eager_result)
+
+        def sourceless_fn(values):
+            value = OneShotIterator(values)
+            pairs = itertools.pairwise(value)
+            calls_at_construction = value.iter_calls, value.next_calls
+            result = list(pairs)
+            return calls_at_construction, value.iter_calls, value.next_calls, result
+
+        compiled_sourceless_fn = torch.compile(
+            sourceless_fn, backend="eager", fullgraph=True
+        )
+        self.assertEqual(
+            compiled_sourceless_fn((1, 2, 3)),
+            ((1, 0), 1, 4, [(1, 2), (2, 3)]),
+        )
+
+    def test_itertools_pairwise_propagates_iter_exception_at_construction(self):
+        class RaisingIterable:
+            def __iter__(self):
+                raise RuntimeError("iterator unavailable")
+
+        def fn(value):
+            try:
+                itertools.pairwise(value)
+            except RuntimeError as exc:
+                return str(exc)
+            return "no exception"
+
+        eager_result = fn(RaisingIterable())
+        self.assertEqual(eager_result, "iterator unavailable")
+        compiled_result = torch.compile(fn, backend="eager", fullgraph=True)(
+            RaisingIterable()
+        )
+        self.assertEqual(compiled_result, eager_result)
+
     def test_itertools_compress(self):
         def fn():
             return itertools.compress("ABCDEF", [1, 0, 1, 0, 1, 1])

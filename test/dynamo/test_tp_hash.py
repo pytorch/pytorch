@@ -2,10 +2,50 @@
 """Tests for hash_impl: unified hash() / __hash__ protocol in Dynamo."""
 
 import sys
+from collections.abc import Set as AbstractSet
 
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
+
+
+class CountingSet(AbstractSet):
+    def __init__(self, values):
+        self.values = values
+        self.len_calls = 0
+
+    def __contains__(self, value):
+        return value in self.values
+
+    def __iter__(self):
+        return iter(self.values)
+
+    def __len__(self):
+        self.len_calls += 1
+        return len(self.values)
+
+
+class CountingFrozenSet(frozenset):
+    def __init__(self, values):
+        self.len_calls = 0
+
+    def __len__(self):
+        self.len_calls += 1
+        return super().__len__()
+
+
+class RaisingLenSet(CountingSet):
+    def __len__(self):
+        raise RuntimeError("length unavailable")
+
+
+class ReservedSetHash:
+    def __hash__(self):
+        if sys.hash_info.width == 32:
+            return -680933032
+        if sys.hash_info.width == 64:
+            return -2152790587108803315
+        raise AssertionError(f"unsupported hash width: {sys.hash_info.width}")
 
 
 class TpHashTests(torch._dynamo.test_case.TestCase):
@@ -716,6 +756,67 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(result, expected)
 
     # --- FakeIdVariable propagation through containers ---
+
+    def test_collections_abc_set_hash(self):
+        def fn(values):
+            frozen = frozenset(values)
+            return AbstractSet._hash(frozen) == hash(frozen)
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertTrue(compiled_fn((1, "two", None)))
+        self.assertTrue(compiled_fn(()))
+
+    def test_collections_abc_set_hash_with_sourceless_object(self):
+        def fn(_):
+            frozen = frozenset((object(),))
+            return AbstractSet._hash(frozen) == hash(frozen)
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
+        self.assertTrue(result)
+
+    def test_collections_abc_set_hash_preserves_custom_set_protocol(self):
+        def fn(value):
+            return AbstractSet._hash(value), value.len_calls
+
+        eager_value = CountingSet((1, 1, 2))
+        expected = fn(eager_value)
+        self.assertEqual(expected[1], 1)
+
+        compiled_value = CountingSet((1, 1, 2))
+        result = torch.compile(fn, backend="eager", fullgraph=True)(compiled_value)
+        self.assertEqual(result, expected)
+
+    def test_collections_abc_set_hash_preserves_frozenset_subclass_protocol(self):
+        def fn(value):
+            return AbstractSet._hash(value), value.len_calls
+
+        eager_value = CountingFrozenSet((1, 2))
+        expected = fn(eager_value)
+        self.assertEqual(expected[1], 1)
+
+        compiled_value = CountingFrozenSet((1, 2))
+        result = torch.compile(fn, backend="eager", fullgraph=True)(compiled_value)
+        self.assertEqual(result, expected)
+
+    def test_collections_abc_set_hash_preserves_len_exception(self):
+        def fn(value):
+            return AbstractSet._hash(value)
+
+        with self.assertRaisesRegex(RuntimeError, "length unavailable"):
+            fn(RaisingLenSet((1, 2)))
+        with self.assertRaisesRegex(RuntimeError, "length unavailable"):
+            torch.compile(fn, backend="eager", fullgraph=True)(RaisingLenSet((1, 2)))
+
+    def test_collections_abc_set_hash_remaps_reserved_hash(self):
+        def fn(value):
+            return AbstractSet._hash(value)
+
+        eager_value = CountingSet((ReservedSetHash(),))
+        self.assertEqual(fn(eager_value), 590923713)
+
+        compiled_value = CountingSet((ReservedSetHash(),))
+        result = torch.compile(fn, backend="eager", fullgraph=True)(compiled_value)
+        self.assertEqual(result, 590923713)
 
     def test_hash_tuple_with_sourceless_object_graph_breaks_on_return(self):
         """hash(tuple) containing a sourceless object can't be returned."""

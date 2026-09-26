@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 # See also the TYPE_CHECKING block in torch/_dynamo/polyfills/__init__.py
 POLYFILLED_MODULE_NAMES: tuple[str, ...] = (
     "_collections",
+    "_collections_abc",
     "builtins",
     "copy",
     "functools",

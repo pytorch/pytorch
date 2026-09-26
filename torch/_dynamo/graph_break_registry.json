@@ -6724,5 +6724,25 @@
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
+  ],
+  "GB8304": [
+    {
+      "Gb_type": "deque iterator reconstruction",
+      "Context": "reconstructing a live deque iterator",
+      "Explanation": "Dynamo cannot reconstruct a live deque iterator without losing its mutation checks.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB6683": [
+    {
+      "Gb_type": "deque subclass reduction",
+      "Context": "copying {self.python_type_name()}",
+      "Explanation": "Dynamo does not support reducing deque subclasses.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
   ]
 }
