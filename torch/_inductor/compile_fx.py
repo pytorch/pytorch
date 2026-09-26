@@ -3035,6 +3035,11 @@ def compile_fx_backward(
             for i in candidate_idxs
             if placeholders[i].meta.get("is_static_input", True)
         ]
+
+        # Record AOT output strides before fake_tensor_prop in compile_fx_inner,
+        # which can already be channels-last for convolution_backward (#197514).
+        _recursive_record_original_output_strides(gm)
+
         with (
             (
                 config.patch(get_cpp_wrapper_config())
