@@ -6588,6 +6588,10 @@ class AOTInductorTestsTemplate:
         }
         self.check_model(model, example_inputs, dynamic_shapes=dynamic_shapes)
 
+    @unittest.skipIf(
+        os.environ.get("TORCHINDUCTOR_LITE_MODE") == "1",
+        "lite mode routes addmm through the proxy executor instead of a generated kernel",
+    )
     @unittest.skipIf(config.triton.native_matmul, "matmul is generated")
     def test_aoti_debug_printer_codegen(self):
         # basic addmm model to test codegen for aoti intermediate debug printer
@@ -7608,6 +7612,10 @@ class AOTInductorTestsTemplate:
                     count,
                 ).run(code)
 
+    @unittest.skipIf(
+        os.environ.get("TORCHINDUCTOR_LITE_MODE") == "1",
+        "lite mode routes these ops through the proxy executor instead of a generated kernel",
+    )
     def test_aoti_debug_printer_cpp_kernel(self):
         if self.device != "cpu":
             raise unittest.SkipTest("cpu test case only")
