@@ -4587,6 +4587,21 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
     ) -> "VariableTracker":
         return self._base_vt.call_method(tx, "with_traceback", args, kwargs)  # type: ignore[missing-attribute]
 
+    def add_note(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        if sys.version_info < (3, 11):
+            return None
+        if self._maybe_get_baseclass_method("add_note") is not BaseException.add_note:
+            return None
+
+        from .misc import add_exception_note
+
+        return add_exception_note(self, tx, args, kwargs)
+
     def call_method(
         self,
         tx: "InstructionTranslatorBase",
@@ -4624,6 +4639,8 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
     tp_methods = {
         "with_traceback": Method(_with_traceback),
     }
+    if sys.version_info >= (3, 11):
+        tp_methods["add_note"] = Method(add_note)
 
     tp_getset = {
         "args": GetSet(

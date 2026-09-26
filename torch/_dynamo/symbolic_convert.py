@@ -3550,7 +3550,7 @@ class InstructionTranslatorBase(
         # side effects. We intentionally avoid tp_getattro_impl here because it
         # can trigger __getattr__, add graph nodes, or cause graph breaks.
         if self.output.side_effects.has_pending_mutation_of_attr(obj, name):
-            attr_var = self.output.side_effects.load_attr(obj, name)
+            attr_var = self.output.side_effects.load_attr(obj, name, deleted_ok=True)
             if isinstance(attr_var, TensorVariable):
                 self._maybe_emit_sync_dealloc(attr_var)
 

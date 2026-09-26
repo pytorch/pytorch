@@ -46,6 +46,33 @@ class MyException(OSError):
     pass
 
 
+class NoteSubclass(str):
+    __slots__ = ()
+
+
+class NotesSubclass(list):
+    pass
+
+
+class OverrideNotes(list):
+    def append(self, note):
+        super().append(f"override:{note}")
+
+
+class CustomAddNoteError(ValueError):
+    pass
+
+
+class CustomAddNoteOverrideError(ValueError):
+    def add_note(self, note):
+        self.__notes__ = [f"override:{note}"]
+
+
+class CustomAddNoteSuperError(ValueError):
+    def add_note(self, note):
+        super().add_note(note)
+
+
 # The writable BaseException attributes live on the wrapped ExceptionVariable
 # rather than in the instance __dict__, so both the in-region read and the
 # object escaping the compiled region need explicit handling.
@@ -1840,6 +1867,346 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         e = RuntimeError("boom")
         e.foo = 42
         assert e.foo == 42  # noqa: S101
+
+    @unittest.skipIf(
+        sys.version_info < (3, 11),
+        "BaseException.add_note requires Python 3.11+",
+    )
+    @parametrize("exc_type", [BaseException, Exception, ValueError])
+    def test_exception_add_note(self, exc_type):
+        def fn():
+            e = exc_type("example")
+            initially_absent = not hasattr(e, "__notes__")
+            result = e.add_note("first")
+            first = tuple(e.__notes__)
+
+            try:
+                e.add_note(42)
+            except TypeError as error:
+                invalid_note_error = str(error)
+            else:
+                invalid_note_error = "no error"
+            after_invalid_note = tuple(e.__notes__)
+
+            e.add_note("second")
+            repeated = tuple(e.__notes__)
+            alias = e.__notes__
+            alias.append("third")
+            aliased = tuple(e.__notes__)
+
+            del e.__notes__
+            absent_after_delete = not hasattr(e, "__notes__")
+            e.add_note("fresh")
+            recreated = tuple(e.__notes__)
+            del e.__notes__
+            absent_after_recreated_delete = not hasattr(e, "__notes__")
+
+            e.__notes__ = 42
+            try:
+                e.add_note("will not work")
+            except TypeError as error:
+                invalid_notes_error = str(error)
+            else:
+                invalid_notes_error = "no error"
+
+            return (
+                initially_absent,
+                result,
+                first,
+                invalid_note_error,
+                after_invalid_note,
+                repeated,
+                aliased,
+                absent_after_delete,
+                recreated,
+                absent_after_recreated_delete,
+                invalid_notes_error,
+                e.__notes__,
+            )
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    @unittest.skipIf(
+        sys.version_info < (3, 11),
+        "BaseException.add_note requires Python 3.11+",
+    )
+    @parametrize("call", ["no_args", "two_args", "keyword"])
+    def test_exception_add_note_invalid_call(self, call):
+        def fn():
+            e = ValueError("example")
+            try:
+                if call == "no_args":
+                    e.add_note()
+                elif call == "two_args":
+                    e.add_note("first", "second")
+                else:
+                    e.add_note(note="first")
+            except TypeError as error:
+                return str(error)
+            return "no error"
+
+        actual = torch.compile(fn, backend="eager", fullgraph=True)()
+        expected = fn()
+        self.assertNotEqual(actual, "no error")
+        self.assertEqual(actual.split(".", 1)[1], expected.split(".", 1)[1])
+
+    @unittest.skipIf(
+        sys.version_info < (3, 11),
+        "BaseException.add_note requires Python 3.11+",
+    )
+    def test_exception_add_note_invalid_first_note(self):
+        def fn():
+            e = ValueError("example")
+            try:
+                e.add_note(42)
+            except TypeError as error:
+                return str(error), hasattr(e, "__notes__")
+            return "no error", hasattr(e, "__notes__")
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    @unittest.skipIf(
+        sys.version_info < (3, 11),
+        "BaseException.add_note requires Python 3.11+",
+    )
+    def test_exception_add_note_subclasses(self):
+        def fn():
+            e = ValueError("example")
+            note = NoteSubclass("first")
+            e.add_note(note)
+            first = e.__notes__[0]
+
+            notes = NotesSubclass(["existing"])
+            e.__notes__ = notes
+            e.add_note("second")
+            return (
+                first,
+                isinstance(first, NoteSubclass),
+                tuple(e.__notes__),
+                isinstance(e.__notes__, NotesSubclass),
+                e.__notes__ is notes,
+            )
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    @unittest.skipIf(
+        sys.version_info < (3, 11),
+        "BaseException.add_note requires Python 3.11+",
+    )
+    def test_exception_add_note_list_subclass_append_override(self):
+        def fn():
+            e = ValueError("x")
+            notes = OverrideNotes(["old"])
+            alias = notes
+            e.__notes__ = notes
+            e.add_note("first")
+            e.add_note("second")
+            return e, notes, alias
+
+        e, notes, alias = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(notes, ["old", "first", "second"])
+        self.assertIs(type(notes), OverrideNotes)
+        self.assertIs(e.__notes__, notes)
+        self.assertIs(alias, notes)
+
+    @unittest.skipIf(
+        sys.version_info < (3, 11),
+        "BaseException.add_note requires Python 3.11+",
+    )
+    def test_exception_add_note_sourced_list_subclass(self):
+        def fn(notes):
+            e = ValueError("x")
+            alias = notes
+            e.__notes__ = notes
+            e.add_note("n")
+            return e, notes, alias
+
+        expected_input = OverrideNotes(["old"])
+        expected_e, expected_notes, expected_alias = fn(expected_input)
+
+        notes_input = OverrideNotes(["old"])
+        e, notes, alias = torch.compile(fn, backend="eager", fullgraph=True)(
+            notes_input
+        )
+        self.assertEqual(notes, expected_notes)
+        self.assertIs(type(notes), OverrideNotes)
+        self.assertIs(e.__notes__, notes_input)
+        self.assertIs(notes, notes_input)
+        self.assertIs(alias, notes_input)
+        self.assertIs(expected_e.__notes__, expected_notes)
+        self.assertIs(expected_alias, expected_notes)
+
+    @unittest.skipIf(
+        sys.version_info < (3, 11),
+        "BaseException.add_note requires Python 3.11+",
+    )
+    def test_exception_add_note_existing_exception_unsupported(self):
+        def fn(e):
+            e.add_note("n")
+            return e.__notes__
+
+        fullgraph_exception = ValueError("x")
+        with self.assertRaisesRegex(Unsupported, "Unsupported method call"):
+            torch.compile(fn, backend="eager", fullgraph=True)(fullgraph_exception)
+        self.assertFalse(hasattr(fullgraph_exception, "__notes__"))
+
+        fallback_exception = ValueError("x")
+        result = torch.compile(fn, backend="eager")(fallback_exception)
+        self.assertEqual(result, ["n"])
+        self.assertEqual(fallback_exception.__notes__, ["n"])
+
+    @unittest.skipIf(
+        sys.version_info < (3, 11),
+        "BaseException.add_note requires Python 3.11+",
+    )
+    def test_exception_add_note_user_defined_inherited(self):
+        def fn():
+            e = CustomAddNoteError("x")
+            e.add_note("n")
+            return e.__notes__
+
+        self.assertEqual(fn(), ["n"])
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), ["n"])
+
+    @unittest.skipIf(
+        sys.version_info < (3, 11),
+        "BaseException.add_note requires Python 3.11+",
+    )
+    def test_exception_add_note_user_defined_override(self):
+        def fn():
+            e = CustomAddNoteOverrideError("x")
+            e.add_note("n")
+            return e.__notes__
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    @unittest.skipIf(
+        sys.version_info < (3, 11),
+        "BaseException.add_note requires Python 3.11+",
+    )
+    def test_exception_add_note_user_defined_super(self):
+        def fn():
+            e = CustomAddNoteSuperError("x")
+            e.add_note("n")
+            return e.__notes__
+
+        self.assertEqual(fn(), ["n"])
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), ["n"])
+        self.assertEqual(torch.compile(fn, backend="eager")(), fn())
+
+    @unittest.skipIf(
+        sys.version_info < (3, 11),
+        "BaseException.add_note requires Python 3.11+",
+    )
+    def test_exception_add_note_user_defined_escape_alias(self):
+        def fn():
+            e = CustomAddNoteError("x")
+            notes = OverrideNotes(["old"])
+            e.__notes__ = notes
+            e.add_note("first")
+            e.add_note("second")
+            return e, notes
+
+        e, notes = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertIs(type(e), CustomAddNoteError)
+        self.assertIs(type(notes), OverrideNotes)
+        self.assertIs(e.__notes__, notes)
+        self.assertEqual(notes, ["old", "first", "second"])
+
+    @unittest.skipIf(
+        sys.version_info < (3, 11),
+        "BaseException.add_note requires Python 3.11+",
+    )
+    def test_exception_add_note_user_defined_delete_recreate(self):
+        def fn():
+            e = CustomAddNoteError("x")
+            e.add_note("first")
+            del e.__notes__
+            e.add_note("fresh")
+            return e.__notes__
+
+        self.assertEqual(fn(), ["fresh"])
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(), ["fresh"]
+        )
+
+    @unittest.skipIf(
+        sys.version_info < (3, 11),
+        "BaseException.add_note requires Python 3.11+",
+    )
+    def test_exception_add_note_user_defined_non_fullgraph_escape(self):
+        def fn():
+            e = CustomAddNoteError("x")
+            e.add_note("n")
+            return e
+
+        e = torch.compile(fn, backend="eager")()
+        self.assertIs(type(e), CustomAddNoteError)
+        self.assertEqual(e.__notes__, ["n"])
+
+    def test_exception_delattr_errors(self):
+        def fn():
+            errors = []
+            e = ValueError("example")
+            e.custom = 1
+            del e.custom
+            errors.append(("custom_absent", str(not hasattr(e, "custom"))))
+            try:
+                del e.custom
+            except AttributeError as error:
+                errors.append((type(error).__name__, str(error)))
+            else:
+                errors.append(("", "no error"))
+
+            e = ValueError("example")
+            e.custom = 1
+            del e.custom
+            e.custom = 2
+            del e.custom
+            errors.append(("custom_redeleted", str(not hasattr(e, "custom"))))
+
+            for attr in ("__notes__",):
+                e = ValueError("example")
+                try:
+                    delattr(e, attr)
+                except (AttributeError, TypeError) as error:
+                    errors.append((type(error).__name__, str(error)))
+                else:
+                    errors.append(("", "no error"))
+            return errors
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    def test_exception_delattr_tensor_attribute(self):
+        def fn(x):
+            e = ValueError("example")
+            e.custom = x.sin()
+            result = e.custom + 1
+            del e.custom
+            return result, hasattr(e, "custom")
+
+        x = torch.randn(4)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    @unittest.skipIf(
+        sys.version_info < (3, 11),
+        "BaseException.add_note requires Python 3.11+",
+    )
+    @parametrize("exc_type", [BaseException, Exception, ValueError])
+    def test_exception_add_note_side_effect_replayed(self, exc_type):
+        def fn(x):
+            e = exc_type("example")
+            result = e.add_note("first")
+            notes = e.__notes__
+            notes.append("second")
+            return e, notes, result, x + 1
+
+        x = torch.randn(4)
+        e, notes, result, y = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(e.__notes__, ["first", "second"])
+        self.assertIs(e.__notes__, notes)
+        self.assertIsNone(result)
+        self.assertEqual(y, x + 1)
 
     @make_dynamo_test
     def test_exception_set_args_from_iterable(self):
