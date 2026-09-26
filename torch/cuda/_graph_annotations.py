@@ -44,9 +44,10 @@ from __future__ import annotations
 
 import gzip
 import importlib.metadata
-import json
+import pickle
 import threading
 import warnings
+from collections import defaultdict
 from collections.abc import Mapping
 from contextlib import contextmanager
 from logging import getLogger
@@ -56,6 +57,7 @@ from typing_extensions import deprecated
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
+    from pathlib import Path
 
 import torch
 from torch.cuda._utils import (
@@ -1105,7 +1107,7 @@ def remap_to_exec_graph(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
     matches the live exec id (e.g. replay after instantiate) this is a no-op.
     """
     capture_graph_id = torch_cuda_graph._capture_graph_id
-    if capture_graph_id is None:
+    if not _kernel_annotations or capture_graph_id is None:
         return
 
     exec_graph_id = _check_cuda_bindings(
@@ -1352,6 +1354,16 @@ def _reset_kernel_annotations() -> None:
     _pending_scopes.clear()
 
 
+def save_kernel_annotations(path: str | Path) -> None:
+    """Save the current kernel annotations to a pickle file.
+
+    The file can be passed directly to the Chrome trace annotator
+    (``torch.cuda._annotate_cuda_graph_trace``).
+    """
+    with open(path, "wb") as f:
+        pickle.dump(dict(get_kernel_annotations()), f)
+
+
 @deprecated(
     "`torch.cuda.graph_annotations.clear_kernel_annotations` is deprecated. The registry "
     "bounds itself: annotations are rekeyed to the exec graph on instantiate and dropped "
@@ -1389,6 +1401,63 @@ def remove_kernel_annotations(graph_ids: Iterable[int]) -> None:
     with _REGISTRY_LOCK:
         for graph_id in graph_ids:
             _GRAPH_ANNOTATIONS.pop(graph_id, None)
+
+
+def register_fqn_annotation_hooks(
+    model: torch.nn.Module,
+) -> None:
+    """Register forward hooks that annotate CUDA graph kernels with module FQNs.
+
+    For use with standalone CUDA graphs (without Inductor).  Each module's
+    forward pass is wrapped with ``mark_kernels(fqn)`` during graph capture so
+    that kernel nodes are annotated with their layer name.  Nested modules
+    produce overlapping scopes; ``resolve_pending_annotations`` picks the
+    innermost annotation for each kernel node.
+
+    The FQN format matches the Inductor convention: ``L.<module_path>`` where
+    the root module is ``L`` and submodules use dotted paths, e.g.
+    ``L.networks.0.conv``.
+
+    Must be called before ``torch.cuda.graph()`` capture.  The hooks only fire
+    during Python forward passes, not during graph replay, so no cleanup is
+    needed after capture.
+
+    Args:
+        model: The ``nn.Module`` to annotate.
+
+    Example::
+
+        from torch.cuda._graph_annotations import (
+            register_fqn_annotation_hooks,
+            clear_kernel_annotations,
+        )
+
+        clear_kernel_annotations()
+        register_fqn_annotation_hooks(model)
+
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g, enable_annotations=True):
+            output = model(x)
+    """
+    # Stack per module to handle re-entrant calls (e.g. same module used twice).
+    active_cms: dict[int, list[Any]] = defaultdict(list)
+
+    for name, module in model.named_modules():
+        fqn = f"L.{name}" if name else "L"
+
+        def pre_hook(mod: Any, _input: Any, fqn: str = fqn) -> None:
+            cm = mark_kernels({"module_name": fqn})
+            active_cms[id(mod)].append(cm)
+            cm.__enter__()
+
+        def post_hook(mod: Any, _input: Any, _output: Any) -> None:
+            stack = active_cms.get(id(mod))
+            if stack:
+                cm = stack.pop()
+                cm.__exit__(None, None, None)
+
+        module.register_forward_pre_hook(pre_hook)
+        module.register_forward_hook(post_hook)
 
 
 # Counter-based stream ID registry. IDs start at 60 (above the highest
