@@ -95,7 +95,12 @@ def main() -> None:
         if "runner" not in entry:
             continue
         clean = strip_prefix(entry["runner"].strip(), args.prefix)
+        # Workflows are moving to naming the ARC runner directly, so a label
+        # that is already an ARC name needs no translation. Leave it as the
+        # workflow wrote it, prefix included.
         if clean not in mapping:
+            if clean.startswith(("l-", "w-", "m-")):
+                continue
             print(f"error: no ARC runner found for '{clean}'", file=sys.stderr)
             sys.exit(1)
         mapped = mapping[clean]

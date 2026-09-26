@@ -70,7 +70,7 @@ jobs:
       # torchtitan_h100_integration disabled pending runner availability
       test-matrix: |
         { include: [
-          { config: "torchtitan_features_integration", shard: 1, num_shards: 1, runner: "linux.g5.48xlarge.nvidia.gpu" }
+          { config: "torchtitan_features_integration", shard: 1, num_shards: 1, runner: "mt-l-x86aavx2-189-704-a10g-8" }
         ]}
       python-version: "3.12"
       compiler: gcc11
