@@ -104,7 +104,6 @@ jobs:
       # or newer GPUs, so it doesn't benefit much from existing compiler cache
       # from trunk. Also use a memory-intensive runner here because memory is
       # usually the bottleneck
-      runner: linux.12xlarge.memory
       build-environment: linux-jammy-cuda13.0-py3.11-gcc11-sm90
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
