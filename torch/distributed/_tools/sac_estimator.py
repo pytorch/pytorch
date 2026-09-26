@@ -589,6 +589,16 @@ class SACEstimator(TorchDispatchMode):
         # recomputation time to total runtime incurred.
         delta = 1e-2
         tradeoff_curve = OrderedDict()
+        if sac_runtime == 0 or sac_memory == 0:
+            return SACTradeOffStats(
+                n_segments=0,
+                slopes=[],
+                intercepts=[],
+                fit_breaks=[],
+                tradeoff_curve=tradeoff_curve,
+                sac_memory=sac_memory,
+                sac_runtime=sac_runtime,
+            )
         # 4. Initialize the trade-off curve with the stats of already chosen recomputed_ops
         tradeoff_curve[(discarded_mem / sac_memory) + delta] = (
             recomp_runtime / sac_runtime
