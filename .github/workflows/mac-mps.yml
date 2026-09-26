@@ -26,13 +26,18 @@ jobs:
     with:
       sync-tag: macos-py3-arm64-build
       build-environment: macos-py3-arm64
-      runner-type: macos-m1-stable
+      runner-type: macos-m1-15
       build-generates-artifacts: true
       # To match the one pre-installed in the m1 runners
       python-version: 3.12.7
       test-matrix: |
         { include: [
-          { config: "test_mps", shard: 1, num_shards: 1, runner: "macos-m1-14" },
+          { config: "test_mps", shard: 1, num_shards: 1, runner: "macos-m1-15" },
+          # Reproduces the trunk.yml failures: same config and sharding as
+          # macos-py3-arm64 / test (default, N, 3), pinned to Sequoia.
+          { config: "default", shard: 1, num_shards: 3, runner: "macos-m1-15" },
+          { config: "default", shard: 2, num_shards: 3, runner: "macos-m1-15" },
+          { config: "default", shard: 3, num_shards: 3, runner: "macos-m1-15" },
           { config: "test_mps", shard: 1, num_shards: 1, runner: "macos-m2-15" },
           { config: "test_mps", shard: 1, num_shards: 1, runner: "macos-m2-26" },
         ]}
