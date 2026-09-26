@@ -6141,7 +6141,11 @@ class TestSDPAAccelerator(NNTestCase):
                                                head_dim: int, is_causal: bool, dropout_p: float,
                                                dtype: torch.dtype, scale: str, enable_gqa: bool,
                                                n_heads: list[int], sdpa_backend: str):
-        if (isSM8XDevice or isSM120Device) and head_dim in range(193, 256 + 1):
+        if (
+            not TEST_WITH_ROCM
+            and (isSM8XDevice or isSM120Device)
+            and head_dim in range(193, 256 + 1)
+        ):
             self.skipTest("Flash attention on SM86-SM89 and SM120-SM121 for head_dim > 192 is currently disabled")
         if is_causal and seq_len_q != seq_len_k:
             self.skipTest("Flash V2 does not accept is_casual when seq_len_q != seq_len_k")
@@ -6237,7 +6241,11 @@ class TestSDPAAccelerator(NNTestCase):
 
         # Backward for Flash Attention on SM86-SM89 and SM120-SM121 with
         # head_dim >= 193 is currently disabled.
-        if (isSM8XDevice or isSM120Device) and head_dim in range(193, 256):
+        if (
+            not TEST_WITH_ROCM
+            and (isSM8XDevice or isSM120Device)
+            and head_dim in range(193, 256)
+        ):
             self.assertRaises(RuntimeError, lambda: out.backward(upstream_grad))
             return
 
