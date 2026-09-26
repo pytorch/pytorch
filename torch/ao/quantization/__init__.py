@@ -146,20 +146,6 @@ __all__ = [
     "script_qconfig_dict",
     "swap_module",
     "weight_observer_range_neg_127_to_127",
-    # from torchao, should be merged with torchao
-    # in the future
-    "AffineQuantizedObserverBase",
-    "Granularity",
-    "MappingType",
-    "PerAxis",
-    "PerBlock",
-    "PerGroup",
-    "PerRow",
-    "PerTensor",
-    "PerToken",
-    "TorchAODType",
-    "ZeroPointDomain",
-    "get_block_size",
 ]
 
 
