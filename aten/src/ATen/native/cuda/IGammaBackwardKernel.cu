@@ -15,6 +15,6 @@ void igamma_grad_a_kernel_cuda(TensorIteratorBase& iter) {
   });
 }
 
-REGISTER_DISPATCH(igamma_grad_a_stub, &igamma_grad_a_kernel_cuda)
+REGISTER_DISPATCH(_igamma_grad_a_stub, &igamma_grad_a_kernel_cuda)
 
 } // namespace at::native

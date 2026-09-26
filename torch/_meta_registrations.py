@@ -9150,6 +9150,8 @@ def _register_inplace_meta(fn):
     return _fn
 
 
+# TensorIterator's C++ Meta kernel rejects symbolic sizes. Keep the Python
+# implementation for FakeTensor and dynamic-shape tracing.
 @register_meta(aten._igamma_grad_a)
 @out_wrapper()
 def meta_igamma_grad_a(self, other):

@@ -411,7 +411,7 @@ DEFINE_DISPATCH(logaddexp2_stub);
 DEFINE_DISPATCH(gcd_stub);
 DEFINE_DISPATCH(lcm_stub);
 DEFINE_DISPATCH(hypot_stub);
-DEFINE_DISPATCH(igamma_grad_a_stub);
+DEFINE_DISPATCH(_igamma_grad_a_stub);
 DEFINE_DISPATCH(igamma_stub);
 DEFINE_DISPATCH(igammac_stub);
 DEFINE_DISPATCH(nextafter_stub);
@@ -549,7 +549,7 @@ CREATE_BINARY_TORCH_IMPL_FUNC(logaddexp2_out, logaddexp2_stub)
 CREATE_BINARY_TORCH_IMPL_FUNC(gcd_out, gcd_stub)
 CREATE_BINARY_TORCH_IMPL_FUNC(lcm_out, lcm_stub)
 CREATE_BINARY_TORCH_IMPL_FUNC(hypot_out, hypot_stub)
-CREATE_BINARY_TORCH_IMPL_FUNC(_igamma_grad_a_out, igamma_grad_a_stub)
+CREATE_BINARY_TORCH_IMPL_FUNC(_igamma_grad_a_out, _igamma_grad_a_stub)
 CREATE_BINARY_TORCH_IMPL_FUNC(igamma_out, igamma_stub)
 CREATE_BINARY_TORCH_IMPL_FUNC(igammac_out, igammac_stub)
 CREATE_BINARY_TORCH_IMPL_FUNC(nextafter_out, nextafter_stub)

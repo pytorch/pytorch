@@ -11992,7 +11992,7 @@ def sample_inputs_abs(op_info, device, dtype, requires_grad, op_kwargs=None, **k
 # Operator database (sorted alphabetically)
 _igamma_backward_skips = tuple(
     DecorateInfo(
-        unittest.skip("Shape gradients are implemented on CPU and CUDA"),
+        unittest.expectedFailure,
         cls,
         test,
         device_type=device,
@@ -17884,21 +17884,21 @@ op_db: list[OpInfo] = [
         supports_rhs_python_scalar=False,
         supports_autograd=True,
         supports_gradgrad=False,
-        supports_forward_ad=False,
+        supports_forward_ad=True,
         supports_fwgrad_bwgrad=False,
         skips=(
             # The JIT alias test passes an unsupported RHS Python scalar.
             DecorateInfo(unittest.expectedFailure, "TestJit", "test_jit_alias_remapping"),
             DecorateInfo(
-                unittest.skip("Shape gradients do not support gradgrad"),
+                unittest.expectedFailure,
                 "TestBwdGradients", "test_inplace_gradgrad",
             ),
             DecorateInfo(
-                unittest.skip("Forward and higher-order shape differentiation are unsupported"),
+                unittest.expectedFailure,
                 "TestOperators", "test_jvpvjp",
             ),
             DecorateInfo(
-                unittest.skip("Forward and higher-order shape differentiation are unsupported"),
+                unittest.expectedFailure,
                 "TestOperators", "test_vmapjvpvjp",
             ),
             *_igamma_backward_skips,
@@ -17917,21 +17917,21 @@ op_db: list[OpInfo] = [
         supports_rhs_python_scalar=False,
         supports_autograd=True,
         supports_gradgrad=False,
-        supports_forward_ad=False,
+        supports_forward_ad=True,
         supports_fwgrad_bwgrad=False,
         skips=(
             # The JIT alias test passes an unsupported RHS Python scalar.
             DecorateInfo(unittest.expectedFailure, "TestJit", "test_jit_alias_remapping"),
             DecorateInfo(
-                unittest.skip("Shape gradients do not support gradgrad"),
+                unittest.expectedFailure,
                 "TestBwdGradients", "test_inplace_gradgrad",
             ),
             DecorateInfo(
-                unittest.skip("Forward and higher-order shape differentiation are unsupported"),
+                unittest.expectedFailure,
                 "TestOperators", "test_jvpvjp",
             ),
             DecorateInfo(
-                unittest.skip("Forward and higher-order shape differentiation are unsupported"),
+                unittest.expectedFailure,
                 "TestOperators", "test_vmapjvpvjp",
             ),
             *_igamma_backward_skips,

@@ -906,9 +906,10 @@ Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`
 and float inputs.
 
 .. note::
-    A first-order backward pass with respect to :attr:`input` is supported on
+    First-order differentiation with respect to :attr:`input` is supported on
     CPU and CUDA for positive :attr:`input`. Differentiating that gradient
-    again is not supported. Its value is ``nan`` when :attr:`input` is zero.
+    again is not supported. Its value is ``nan`` when :attr:`input` is zero
+    or when the numerical approximation does not converge.
 
 """
     + r"""
@@ -956,9 +957,10 @@ Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`
 and float inputs.
 
 .. note::
-    A first-order backward pass with respect to :attr:`input` is supported on
+    First-order differentiation with respect to :attr:`input` is supported on
     CPU and CUDA for positive :attr:`input`. Differentiating that gradient
-    again is not supported. Its value is ``nan`` when :attr:`input` is zero.
+    again is not supported. Its value is ``nan`` when :attr:`input` is zero
+    or when the numerical approximation does not converge.
 
 """
     + r"""

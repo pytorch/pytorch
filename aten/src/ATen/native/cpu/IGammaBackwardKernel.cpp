@@ -19,6 +19,6 @@ void igamma_grad_a_kernel(TensorIteratorBase& iter) {
 
 } // namespace
 
-REGISTER_DISPATCH(igamma_grad_a_stub, &igamma_grad_a_kernel)
+REGISTER_DISPATCH(_igamma_grad_a_stub, &igamma_grad_a_kernel)
 
 } // namespace at::native

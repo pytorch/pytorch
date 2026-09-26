@@ -4980,6 +4980,205 @@ class TestBinaryUfuncsDevice(TestCase):
         self.assertEqual(x * 2.5, x * torch.tensor(2.5, device=device, dtype=dtype))
 
 
+# Positive dQ/da at fixed x, from high-precision derivatives and tail quadrature.
+_SHAPE_GRADIENT_REFERENCES = (
+    (0.5, 0.25, 0.797947316783223),
+    (1.0, 0.5, 0.48945757610237844),
+    (2.0, 2.0, 0.29400469074623087),
+    (4.0, 8.0, 0.04135992394465418),
+    (1.0, 2.0, 0.2208254262118595),
+    (2.0, 3.0, 0.19742541957920248),
+    (20.0, 20.0, 0.08957920553912253),
+    (100.0, 100.0, 0.03992749785778605),
+    (10000.0, 10000.0, 0.003989456049453668),
+    (1.0e6, 1.0e6, 0.0003989423136466252),
+    (1.0e6, 963000.0, 6.19478434175564e-309),
+    (5.0e-324, 1.0, 0.21938393439552029),
+    (5e-324, 700.0, 1.406518766234033e-307),
+    (2.2250738585072014e-308, 700.0, 1.406518766234033e-307),
+    (1e-300, 700.0, 1.406518766234033e-307),
+    (1e-100, 700.0, 1.406518766234033e-307),
+    (1e-12, 700.0, 1.4065187662540891e-307),
+    (100000.0, 88681.53608571063, 9.859676543780684e-305),
+    (100000.0, 112241.75393242914, 9.859676543783857e-305),
+    (100000.0, 112241.75393242916, 9.859676543768208e-305),
+)
+
+
+def _x_gradient(a, x):
+    return math.exp((a - 1) * math.log(x) - x - math.lgamma(a))
+
+
+class TestIGammaAutogradDevice(TestCase):
+    @dtypes(torch.float64)
+    @parametrize("op_name", ("igamma", "igammac"))
+    def test_shape_gradient_references(self, device, dtype, op_name):
+        op = getattr(torch, op_name)
+        shape_sign = -1 if op_name == "igamma" else 1
+
+        for a_value, x_value, dqda in _SHAPE_GRADIENT_REFERENCES:
+            with self.subTest(a=a_value, x=x_value):
+                a = torch.tensor(
+                    a_value, device=device, dtype=dtype, requires_grad=True
+                )
+                x = torch.tensor(x_value, device=device, dtype=dtype)
+                op(a, x).backward()
+                expected_shape = shape_sign * dqda
+                if abs(expected_shape) < math.exp(-700.0):
+                    self.assertLessEqual(
+                        abs(a.grad.item() - expected_shape),
+                        4 * math.ulp(expected_shape),
+                    )
+                else:
+                    self.assertEqual(a.grad, expected_shape, rtol=5e-13, atol=0)
+
+    @dtypes(torch.float64)
+    @parametrize("op_name", ("igamma", "igammac"))
+    @parametrize("inplace", (False, True))
+    @parametrize("second_input", ("shape", "other"))
+    def test_shape_gradient_second_derivative_and_helper_are_not_implemented(
+        self, device, dtype, op_name, inplace, second_input
+    ):
+        a = torch.tensor(2.0, device=device, dtype=dtype, requires_grad=True)
+        x = torch.tensor(3.0, device=device, dtype=dtype, requires_grad=True)
+        output = (
+            getattr(a.clone(), op_name + "_")(x)
+            if inplace
+            else getattr(torch, op_name)(a, x)
+        )
+        da = torch.autograd.grad(output, a, create_graph=True)[0]
+        with self.assertRaisesRegex(
+            NotImplementedError, "derivative for .* is not implemented"
+        ):
+            torch.autograd.grad(da, a if second_input == "shape" else x)
+
+        for input_index in (0, 1):
+            helper_a = a.detach().clone().requires_grad_()
+            helper_x = x.detach().clone().requires_grad_()
+            with self.subTest(input_index=input_index):
+                with self.assertRaisesRegex(
+                    NotImplementedError, "derivative for .* is not implemented"
+                ):
+                    torch.autograd.grad(
+                        torch._igamma_grad_a(helper_a, helper_x),
+                        (helper_a, helper_x)[input_index],
+                    )
+
+    @dtypes(torch.float64)
+    @parametrize("op_name", ("igamma", "igammac"))
+    def test_x_second_derivative_is_preserved(self, device, dtype, op_name):
+        op = getattr(torch, op_name)
+        x_sign = 1 if op_name == "igamma" else -1
+        a = torch.tensor(2.0, device=device, dtype=dtype, requires_grad=True)
+        x = torch.tensor(3.0, device=device, dtype=dtype, requires_grad=True)
+        dx = torch.autograd.grad(op(a, x), x, create_graph=True)[0]
+        dxx = torch.autograd.grad(dx, x)[0]
+        expected = x_sign * _x_gradient(2.0, 3.0) * ((2.0 - 1) / 3.0 - 1)
+        self.assertEqual(dxx, expected, rtol=2e-12, atol=0)
+
+    @dtypes(torch.float64)
+    @parametrize("op_name", ("igamma", "igammac"))
+    @parametrize("tangents", ("shape", "other", "both"))
+    @parametrize("inplace", (False, True))
+    def test_first_order_forward_ad(self, device, dtype, op_name, tangents, inplace):
+        a = torch.tensor(2.0, device=device, dtype=dtype)
+        x = torch.tensor(3.0, device=device, dtype=dtype)
+        expected = 0.0
+        if tangents in ("shape", "both"):
+            expected -= 2 * 0.19742541957920248
+        if tangents in ("other", "both"):
+            expected -= 3 * _x_gradient(2.0, 3.0)
+        if op_name == "igammac":
+            expected = -expected
+        with fwAD.dual_level():
+            dual_a = (
+                fwAD.make_dual(a, torch.full_like(a, 2))
+                if tangents in ("shape", "both")
+                else a
+            )
+            dual_x = (
+                fwAD.make_dual(x, torch.full_like(x, -3))
+                if tangents in ("other", "both")
+                else x
+            )
+            if inplace:
+                output = getattr(dual_a.clone(), op_name + "_")(dual_x)
+            else:
+                output = getattr(torch, op_name)(dual_a, dual_x)
+            self.assertEqual(
+                fwAD.unpack_dual(output).tangent, expected, rtol=5e-13, atol=0
+            )
+
+    @onlyOn("cpu")
+    @dtypes(torch.float64)
+    def test_shape_gradient_symbolic_metadata(self, device, dtype):
+        from torch._dispatch.python import enable_python_dispatcher
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        # The native TensorIterator Meta kernel cannot handle symbolic sizes.
+        mode = FakeTensorMode(shape_env=ShapeEnv())
+        a = mode.from_tensor(torch.full((2, 1), 2.0, dtype=dtype), static_shapes=False)
+        x = mode.from_tensor(torch.full((1, 3), 3.0, dtype=dtype), static_shapes=False)
+        with mode, enable_python_dispatcher():
+            result = torch._igamma_grad_a(a, x)
+        self.assertEqual(result.shape, (2, 3))
+        self.assertEqual(result.dtype, dtype)
+        self.assertTrue(any(isinstance(size, torch.SymInt) for size in result.shape))
+
+    @dtypesIfCPU(torch.bfloat16, torch.float16, torch.float32, torch.float64)
+    @dtypes(torch.float32, torch.float64)
+    @parametrize("op_name", ("igamma", "igammac"))
+    def test_small_shape_gradient_references(self, device, dtype, op_name):
+        # 80-digit mpmath derivatives at exactly representable inputs. These
+        # cover small-shape series and continued-fraction paths in each dtype.
+        a = torch.full((3,), 2**-10, device=device, dtype=dtype, requires_grad=True)
+        x = torch.tensor([0.5, 1.0, 2.0], device=device, dtype=dtype)
+        getattr(torch, op_name)(a, x).sum().backward()
+        expected = torch.tensor(
+            [0.5603456921330562, 0.2198222138273119, 0.04904976233230907],
+            device=device,
+            dtype=dtype,
+        )
+        if op_name == "igamma":
+            expected = -expected
+        tolerance = {
+            torch.float64: 5e-13,
+            torch.float32: 1e-6,
+            torch.float16: 1e-3,
+            torch.bfloat16: 8e-3,
+        }[dtype]
+        self.assertEqual(a.grad, expected, rtol=tolerance, atol=0)
+
+
+class TestIGammaOtherOnlyAD(TestCase):
+    @dtypes(torch.float32)
+    @parametrize("op_name", ("igamma", "igammac"))
+    def test_other_only_differentiation(self, device, dtype, op_name):
+        from torch.utils._python_dispatch import TorchDispatchMode
+
+        class RejectShapeHelper(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                if func is torch.ops.aten._igamma_grad_a.default:
+                    raise AssertionError(
+                        "x-only differentiation invoked the shape helper"
+                    )
+                return func(*args, **(kwargs or {}))
+
+        a = torch.tensor(2.0, device=device, dtype=dtype)
+        x = torch.tensor(3.0, device=device, dtype=dtype, requires_grad=True)
+        expected = (1 if op_name == "igamma" else -1) * _x_gradient(2.0, 3.0)
+        with RejectShapeHelper():
+            dx = torch.autograd.grad(getattr(torch, op_name)(a, x), x)[0]
+            self.assertEqual(dx, expected, rtol=1e-5, atol=0)
+            with fwAD.dual_level():
+                dual_x = fwAD.make_dual(x.detach(), torch.ones_like(x))
+                output = getattr(torch, op_name)(a, dual_x)
+                self.assertEqual(
+                    fwAD.unpack_dual(output).tangent, expected, rtol=1e-5, atol=0
+                )
+
+
 class TestChebyshevNanPropagation(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -5140,6 +5339,16 @@ generate_not_implemented_tests(TestBinaryUfuncsDevice)
 
 instantiate_device_type_tests(
     TestChebyshevNanPropagation, globals(), only_for=("cpu", "cuda")
+)
+instantiate_device_type_tests(
+    TestIGammaAutogradDevice, globals(), only_for=("cpu", "cuda")
+)
+instantiate_device_type_tests(
+    TestIGammaOtherOnlyAD,
+    globals(),
+    only_for=("cpu", "cuda", "mps", "xpu"),
+    allow_mps=True,
+    allow_xpu=True,
 )
 instantiate_device_type_tests(TestBinaryUfuncsDevice, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestBinaryUfuncsCUDA, globals(), only_for="cuda")
