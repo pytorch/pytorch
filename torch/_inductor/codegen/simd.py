@@ -2134,7 +2134,7 @@ class _GroupedReductionLayout:
         *,
         parent_shape: tuple[sympy.Expr, sympy.Expr],
         child_shape: tuple[sympy.Expr, sympy.Expr],
-        translation: tuple[sympy.Expr, ...],
+        translation: tuple[sympy.Expr, sympy.Expr],
         output_lanes: int,
         output_lane: int,
         factor: int,
@@ -2152,9 +2152,7 @@ class _GroupedReductionLayout:
             parent_shape[0], child_shape[0]
         ):
             raise AssertionError("translated projection changed the parent row extent")
-        if len(translation) != 2 or not V.graph.sizevars.statically_known_equals(
-            translation[0], 0
-        ):
+        if not V.graph.sizevars.statically_known_equals(translation[0], 0):
             raise AssertionError("translated projection changed the parent row")
         if output_lanes <= 0 or not 0 <= output_lane < output_lanes:
             raise AssertionError("invalid translated output-lane metadata")
