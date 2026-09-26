@@ -2859,11 +2859,29 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             )
             return VariableTracker.build(tx, module, new_source)
 
+        # PrivateUse1 backends (e.g. npu) register after torch import; probe
+        # once for the stream/synchronize/exchange_device handlers below. This
+        # function is cached on first compile, so backends must register their
+        # device module before the first compile.
+        privateuse1_backend_name = torch._C._get_privateuse1_backend_name()
+        privateuse1_backend_mod = (
+            getattr(torch, privateuse1_backend_name, None)
+            if privateuse1_backend_name != "privateuseone"
+            else None
+        )
+
+        extra_current_stream_fns = []
+        if privateuse1_backend_mod is not None:
+            extra_fn = getattr(privateuse1_backend_mod, "current_stream", None)
+            if callable(extra_fn):
+                extra_current_stream_fns.append(extra_fn)
+
         @register(
             torch.accelerator.current_stream,
             torch.cuda.current_stream,
             torch.mtia.current_stream,
             torch.xpu.current_stream,
+            *extra_current_stream_fns,
         )
         def handle_current_stream(
             self,
@@ -2918,14 +2936,14 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             torch.mps.synchronize: "mps",
             torch.cpu.synchronize: "cpu",
         }
+        if privateuse1_backend_mod is not None:
+            sync_fn = getattr(privateuse1_backend_mod, "synchronize", None)
+            if callable(sync_fn):
+                _synchronize_fn_to_device_type[sync_fn] = privateuse1_backend_name
 
         @register(
             torch.accelerator.synchronize,
-            torch.cuda.synchronize,
-            torch.mtia.synchronize,
-            torch.xpu.synchronize,
-            torch.mps.synchronize,
-            torch.cpu.synchronize,
+            *_synchronize_fn_to_device_type.keys(),
         )
         def handle_synchronize(
             self,
@@ -3224,6 +3242,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             args: list[VariableTracker],
             kwargs: dict[str, VariableTracker],
             fn: Callable[[int], int | None],
+            device_type: str = "cuda",
         ) -> VariableTracker:
             if len(args) != 1 or kwargs:
                 raise_type_error(
@@ -3233,7 +3252,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             torch_source = ImportSource("torch")
             install_guard(torch_source.make_guard(GuardBuilder.ID_MATCH))
             current_device_source = CallFunctionNoArgsSource(
-                AttrSource(AttrSource(torch_source, "cuda"), "current_device")
+                AttrSource(AttrSource(torch_source, device_type), "current_device")
             )
             install_guard(current_device_source.make_guard(GuardBuilder.EQUALS_MATCH))
             arg = args[0].as_python_constant()
@@ -3244,7 +3263,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 (arg,),
                 {},
             )
-            tx.output.add_cleanup_hook(lambda: torch.cuda.set_device(prev))
+            device_mod = torch.get_device_module(device_type)
+            tx.output.add_cleanup_hook(lambda: device_mod.set_device(prev))
             return VariableTracker.build(tx, prev)
 
         @register(torch.cuda._exchange_device)
@@ -3268,6 +3288,29 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             return exchange_device_helper(
                 tx, list(args), kwargs, torch.cuda._maybe_exchange_device
             )
+
+        def _make_exchange_device_handler(
+            fn: Callable[[int], int | None], device_type: str
+        ) -> Callable[..., Any]:
+            def _handle_backend_exchange_device(
+                self,
+                tx: "InstructionTranslatorBase",
+                *args: VariableTracker,
+                **kwargs: VariableTracker,
+            ) -> VariableTracker:
+                return exchange_device_helper(tx, list(args), kwargs, fn, device_type)
+
+            return _handle_backend_exchange_device
+
+        if privateuse1_backend_mod is not None:
+            # exchange_device_helper additionally requires the backend to
+            # provide current_device / set_device (guard source + cleanup hook).
+            for fn_name in ("_exchange_device", "_maybe_exchange_device"):
+                backend_fn = getattr(privateuse1_backend_mod, fn_name, None)
+                if callable(backend_fn):
+                    handlers[backend_fn] = _make_exchange_device_handler(
+                        backend_fn, privateuse1_backend_name
+                    )
 
         @register(torch._dynamo.decorators.override_optimization_hint)
         def handle_override_optimization_hint(
