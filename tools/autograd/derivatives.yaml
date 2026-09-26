@@ -1469,6 +1469,22 @@
   other: -grad * self.div(other, /*rounding_mode=*/"floor")
   result: self_t - other_t * self_p.div(other_p, /*rounding_mode=*/"floor")
 
+- name: divmod.Tensor(Tensor self, Tensor other) -> (Tensor quotient, Tensor remainder)
+  output_differentiability: [False, True]
+  self: grad_remainder
+  other: -grad_remainder * quotient
+  remainder: self_t - other_t * quotient
+
+- name: divmod.Scalar(Tensor self, Scalar other) -> (Tensor quotient, Tensor remainder)
+  output_differentiability: [False, True]
+  self: grad_remainder
+  remainder: self_t
+
+- name: divmod.Scalar_Tensor(Scalar self, Tensor other) -> (Tensor quotient, Tensor remainder)
+  output_differentiability: [False, True]
+  other: -grad_remainder * quotient
+  remainder: -other_t * quotient
+
 - name: renorm(Tensor self, Scalar p, int dim, Scalar maxnorm) -> Tensor
   self: renorm_backward(grad, self, p, dim, maxnorm)
   result: renorm_jvp(self_p, self_t, p, dim, maxnorm)
