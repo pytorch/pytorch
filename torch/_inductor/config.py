@@ -578,6 +578,11 @@ max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
 incremental_autotune: bool | None = get_tristate_env(
     "TORCHINDUCTOR_INCREMENTAL_AUTOTUNE", default=False
 )
+# Per-state dispatch budget for incremental autotuning; 0 disables the cap.
+# A torch.compile option overrides this default for every generated kernel.
+incremental_autotune_max_dispatches = int(
+    os.getenv("TORCHINDUCTOR_INCREMENTAL_AUTOTUNE_MAX_DISPATCHES", 0)
+)
 
 inductor_default_autotune_warmup = int(
     os.getenv("TORCHINDUCTOR_DEFAULT_AUTOTUNE_WARMUP", 25)
