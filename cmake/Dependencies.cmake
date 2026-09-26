@@ -1157,7 +1157,7 @@ if(USE_ROCM)
 
     # Math libraries
     list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
-      roc::hipblas roc::rocblas hip::hipfft hip::hiprand roc::hipsparse roc::hipsolver roc::hipblaslt roc::rocsolver)
+      roc::hipblas roc::rocblas hip::hipfft roc::rocfft hip::hiprand roc::hipsparse roc::hipsolver roc::hipblaslt roc::rocsolver)
     # hipsparselt is an optional component that will eventually be enabled by default.
     if(hipsparselt_FOUND)
       list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
@@ -1175,6 +1175,9 @@ if(USE_ROCM)
     if(USE_CUFILE AND NOT hipfile_FOUND)
       caffe2_update_option(USE_CUFILE OFF)
     endif()
+
+    # ---[ rocFFT JIT callbacks
+    include(${CMAKE_CURRENT_LIST_DIR}/RocFFTCallbacks.cmake)
 
     # ---[ Kernel asserts
     # Kernel asserts is disabled for ROCm by default.

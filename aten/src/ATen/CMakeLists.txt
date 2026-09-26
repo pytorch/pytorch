@@ -699,6 +699,10 @@ if(USE_ROCM)
     add_dependencies(ck_gemm torch_cpu)
   endif()
 
+  if(USE_ROCFFT_CALLBACKS)
+    rocfft_callbacks_add_rules()
+  endif()
+
   # TODO: Codegen separate files for HIP and use those (s/cuda_generated_sources/hip_generated_sources)
   list(APPEND all_hip_cpp
     ${native_nested_hip_cpp}

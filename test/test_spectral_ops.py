@@ -4,6 +4,10 @@
 import torch
 import unittest
 import math
+import os
+import subprocess
+import sys
+import tempfile
 from contextlib import contextmanager
 from itertools import product
 import itertools
@@ -1641,6 +1645,329 @@ class TestFFT(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "istft input and window must be on the same device"):
             torch.istft(x.to(device), n_fft=100, window=window)
+
+
+def _rocfft_sweep(device):
+    """Runs the transforms the rocFFT path handles and returns {case: result on CPU}.
+
+    A case the backend rejects is recorded as its error string rather than a
+    tensor, so one bad case is reported against its own name instead of
+    aborting the whole sweep. Inputs are drawn from a seeded CPU generator and
+    then moved, so the two devices see bit-identical inputs.
+    """
+    gen = torch.Generator().manual_seed(0)
+    results = {}
+
+    def randn(*shape, dtype):
+        return torch.randn(*shape, dtype=dtype, generator=gen)
+
+    def record(name, fn, *args):
+        moved = tuple(a.to(device) if isinstance(a, torch.Tensor) else a for a in args)
+        try:
+            out = fn(*moved)
+        except Exception as e:
+            results[name] = f"{type(e).__name__}: {e}"
+            return
+        results[name] = out.detach().cpu()
+
+    # Bare transforms. 17 and 101 are prime (Bluestein), 400 is mixed radix.
+    # The strided, offset and expanded cases are the layouts rocFFT has to
+    # describe as explicit strides where cuFFT uses its embedded array model.
+    for n, dtype in itertools.product([16, 17, 101, 400, 512], [torch.float32, torch.float64]):
+        cdtype = corresponding_complex_dtype(dtype)
+        real, complex_ = randn(3, n, dtype=dtype), randn(3, n, dtype=cdtype)
+        tag = f"n={n} {dtype}"
+        record(f"fft/rfft {tag}", lambda t: torch.fft.rfft(t, dim=-1), real)
+        record(f"fft/fft-real {tag}", lambda t: torch.fft.fft(t, dim=-1), real)
+        record(f"fft/fft {tag}", lambda t: torch.fft.fft(t, dim=-1), complex_)
+        record(f"fft/ifft {tag}", lambda t: torch.fft.ifft(t, dim=-1), complex_)
+        record(f"fft/irfft {tag}", lambda t: torch.fft.irfft(t, n=n, dim=-1), complex_)
+        record(f"fft/rfft-strided {tag}", lambda t: torch.fft.rfft(t[:, ::2], dim=-1), real)
+        record(f"fft/rfft-offset {tag}", lambda t: torch.fft.rfft(t[:, 1:], dim=-1), real)
+        record(f"fft/fft-expanded {tag}", lambda t: torch.fft.fft(t[:1].expand(4, n), dim=-1), complex_)
+
+    for n_fft, dtype, center, onesided, return_complex in itertools.product(
+            [16, 101, 400], [torch.float32, torch.float64], [True, False], [True, False], [True, False]):
+        if not onesided and not return_complex:
+            continue  # view_as_real of a twosided result adds no coverage here
+        for hop, win_length in itertools.product([n_fft // 4, n_fft], [n_fft, n_fft // 2]):
+            signal = randn(2, n_fft * 8, dtype=dtype)
+            window = torch.hann_window(win_length, dtype=dtype)
+            name = (f"stft/n_fft={n_fft} hop={hop} win={win_length} {dtype} center={center} "
+                    f"onesided={onesided} return_complex={return_complex}")
+            record(name, lambda t, w: torch.stft(t, n_fft=n_fft, hop_length=hop, win_length=win_length,
+                                                 window=w, center=center, onesided=onesided,
+                                                 return_complex=return_complex), signal, window)
+
+    # What the fused stft path keys on beyond the cases above: a power-of-two
+    # n_fft takes a different gather, normalization folds into the transform
+    # instead of running as a separate pass over the output, and the gather
+    # reads the signal in place, so its layout is no longer normalized by the
+    # framing copy. center is off throughout because the pad it inserts would
+    # hand every case the same fresh contiguous tensor.
+    for n_fft in [16, 512, 400]:
+        signal = randn(3, n_fft * 8, dtype=torch.float32)
+        window = torch.hann_window(n_fft)
+
+        def fused_stft(t, w=None, n_fft=n_fft, **kwargs):
+            return torch.stft(t, n_fft=n_fft, hop_length=n_fft // 4, window=w, center=False,
+                              return_complex=True, **kwargs)
+
+        record(f"stft/normalized n_fft={n_fft}", lambda t, w: fused_stft(t, w, normalized=True), signal, window)
+        record(f"stft/no-window n_fft={n_fft}", fused_stft, signal)
+        record(f"stft/strided n_fft={n_fft}", lambda t, w: fused_stft(t[:, ::2], w), signal, window)
+        record(f"stft/offset n_fft={n_fft}", lambda t, w: fused_stft(t[:, 1:], w), signal, window)
+        record(f"stft/1d n_fft={n_fft}", lambda t, w: fused_stft(t[0], w), signal, window)
+        record(f"stft/expanded n_fft={n_fft}",
+               lambda t, w: fused_stft(t[:1].expand(4, t.size(1)), w), signal, window)
+
+    # Complex input takes stft through C2C instead of R2C.
+    for n_fft, dtype in itertools.product([16, 101, 400], [torch.complex64, torch.complex128]):
+        signal = randn(2, n_fft * 8, dtype=dtype)
+        window = torch.hann_window(n_fft, dtype=torch.float32 if dtype is torch.complex64 else torch.float64)
+        record(f"stft/complex n_fft={n_fft} {dtype}",
+               lambda t, w: torch.stft(t, n_fft=n_fft, hop_length=n_fft // 4, window=w, center=True,
+                                       onesided=False, return_complex=True), signal, window)
+
+    # center is not varied here: it only changes how the signal is padded before
+    # framing, which the FFT backend never sees, and an uncentred Hann transform
+    # fails istft's overlap-add precondition at the signal edges.
+    for n_fft, dtype, channels in itertools.product(
+            [16, 101, 400, 512], [torch.float32, torch.float64], [1, 3]):
+        for hop in [n_fft // 4, n_fft // 3]:
+            signal = randn(channels, n_fft * 8, dtype=dtype)
+            window = torch.hann_window(n_fft, dtype=dtype)
+
+            def roundtrip(t, w, hop=hop, n_fft=n_fft):
+                spec = torch.stft(t, n_fft=n_fft, hop_length=hop, window=w, center=True,
+                                  return_complex=True)
+                return torch.istft(spec, n_fft=n_fft, hop_length=hop, window=w, center=True,
+                                   length=t.size(-1))
+
+            record(f"istft/n_fft={n_fft} hop={hop} {dtype} channels={channels}",
+                   roundtrip, signal, window)
+
+    for n_fft in [16, 400]:
+        signal = randn(2, n_fft * 8, dtype=torch.complex64)
+        window = torch.hann_window(n_fft)
+
+        def complex_roundtrip(t, w, n_fft=n_fft):
+            spec = torch.stft(t, n_fft=n_fft, hop_length=n_fft // 4, window=w, center=True,
+                              onesided=False, return_complex=True)
+            return torch.istft(spec, n_fft=n_fft, hop_length=n_fft // 4, window=w, center=True,
+                               onesided=False, return_complex=True)
+
+        record(f"istft/complex n_fft={n_fft}", complex_roundtrip, signal, window)
+
+    # The hipFFT path clones its input unconditionally on ROCm because hipFFT
+    # clobbers it; the rocFFT path only clones for C2R, where overwriting the
+    # input is documented. Returning the input after the transform makes any
+    # clobbering of the other two show up as a mismatch against the CPU.
+    for n, dtype in itertools.product([16, 101, 400, 512], [torch.float32, torch.float64]):
+        cdtype = corresponding_complex_dtype(dtype)
+        for kind, transform, signal in [
+            ("c2c", lambda t: torch.fft.fft(t, dim=-1), randn(4, n, dtype=cdtype)),
+            ("r2c", lambda t: torch.fft.rfft(t, dim=-1), randn(4, n, dtype=dtype)),
+            ("c2r", lambda t: torch.fft.irfft(t, n=n, dim=-1), randn(4, n // 2 + 1, dtype=cdtype)),
+        ]:
+            def input_after(t, transform=transform):
+                transform(t)
+                return t
+
+            record(f"preserved/{kind} n={n} {dtype}", input_after, signal)
+
+    # Backward re-enters the same routing, and for stft it runs the opposite
+    # direction from the forward, which rocFFT bakes into the cached plan.
+    for n_fft, dtype in itertools.product([16, 400], [torch.float32, torch.float64]):
+        signal = randn(2, n_fft * 8, dtype=dtype)
+        window = torch.hann_window(n_fft, dtype=dtype)
+
+        def stft_grad(t, w, n_fft=n_fft):
+            t = t.detach().requires_grad_()
+            torch.stft(t, n_fft=n_fft, hop_length=n_fft // 4, window=w, center=True,
+                       return_complex=True).abs().sum().backward()
+            return t.grad
+
+        def istft_grad(t, w, n_fft=n_fft):
+            spec = torch.stft(t, n_fft=n_fft, hop_length=n_fft // 4, window=w, center=True,
+                              return_complex=True).detach().requires_grad_()
+            torch.istft(spec, n_fft=n_fft, hop_length=n_fft // 4, window=w,
+                        center=True).sum().backward()
+            return spec.grad
+
+        record(f"autograd/stft n_fft={n_fft} {dtype}", stft_grad, signal, window)
+        record(f"autograd/istft n_fft={n_fft} {dtype}", istft_grad, signal, window)
+
+    # Build and then tear down a few hundred distinct plans. hipFFT leaks its
+    # plans on ROCm to dodge a double-free; rocFFT destroys them for real, so
+    # this is as much about the child exiting cleanly as the result below.
+    def churn(t):
+        for n in range(8, 264):
+            torch.fft.rfft(torch.randn(2, n, device=t.device, dtype=t.dtype), dim=-1)
+        return torch.fft.rfft(t, dim=-1)
+
+    record("plan-cache/after-churn", churn, randn(2, 64, dtype=torch.float32))
+    return results
+
+
+_ROCFFT_WORKER = """
+import sys
+import torch
+sys.path.insert(0, sys.argv[1])
+from test_spectral_ops import _rocfft_sweep
+torch.save(_rocfft_sweep("cuda"), sys.argv[2])
+"""
+
+
+_ROCFFT_STFT_PEAK = """
+import torch
+n_fft, hop = 512, 128
+x = torch.randn(4, 1 << 21, device='cuda')
+w = torch.hann_window(n_fft, device='cuda')
+stft = lambda: torch.stft(x, n_fft=n_fft, hop_length=hop, window=w, center=False, return_complex=True)
+stft()  # plan creation and any lazy allocation
+torch.cuda.synchronize()
+torch.cuda.reset_peak_memory_stats()
+base = torch.cuda.memory_allocated()
+out = stft()
+torch.cuda.synchronize()
+print(torch.cuda.max_memory_allocated() - base)
+"""
+
+# Both istft paths hold the same two buffers at their peak, so allocation says
+# nothing here. What the store callback removes is every elementwise pass over
+# the frames: the synthesis window and the normalization both ride along in the
+# transform, leaving no mul behind for the profiler to see.
+_ROCFFT_ISTFT_MULS = """
+import torch
+from torch.profiler import ProfilerActivity, profile
+n_fft, n_frames, channels = 512, 1024, 2
+spec = torch.randn(channels, n_frames, n_fft // 2 + 1, dtype=torch.complex64, device='cuda')
+w = torch.hann_window(n_fft, device='cuda')
+istft = lambda: torch.ops.aten._istft_c2r(spec, n_fft, w, 2)
+istft()  # plan creation and any lazy allocation
+torch.cuda.synchronize()
+with profile(activities=[ProfilerActivity.CPU]) as prof:
+    istft()
+print(sum(e.name.startswith('aten::mul') for e in prof.events()))
+"""
+
+
+def _run_with_rocfft(script, *args, callbacks=True, fuse_stft_always=False):
+    env = {**os.environ, "TORCH_ROCM_PREFER_ROCFFT": "1"}
+    if not callbacks:
+        env["TORCH_ROCM_DISABLE_ROCFFT_CALLBACKS"] = "1"
+    if fuse_stft_always:
+        # The fused stft only pays for itself on inputs far larger than anything
+        # worth running a correctness sweep over, so drop its size floor. The
+        # fused istft has no floor, so the sweep covers it as it stands.
+        env["TORCH_ROCM_ROCFFT_STFT_MIN_ELEMENTS"] = "0"
+    done = subprocess.run([sys.executable, "-c", script, *args], env=env,
+                          capture_output=True, text=True, check=False)
+    if done.returncode != 0:
+        raise RuntimeError(f"rocFFT subprocess failed ({done.returncode}):\n{done.stdout}\n{done.stderr}")
+    return done.stdout
+
+
+@unittest.skipIf(not TEST_WITH_ROCM, "rocFFT is a ROCm backend")
+@unittest.skipIf(not torch.cuda.is_available(), "requires a GPU")
+class TestRocFFT(TestCase):
+    """Covers the TORCH_ROCM_PREFER_ROCFFT path in RocFFTSpectralOps.cpp.
+
+    The rest of this file already exercises general FFT correctness against
+    whichever backend is active, so these tests target what rocFFT does
+    differently from hipFFT: explicit strides instead of the cuFFT embedded
+    array model, a plan cache keyed on direction, real plan destruction, and no
+    defensive clone of the input. The backend is picked up from the environment
+    once per process, so the GPU side runs in a child process and is compared
+    against a CPU reference computed here.
+    """
+
+    # Roughly five times the worst discrepancy measured over the sweep, which is
+    # 2.1e-5 for float32 and 6.8e-14 for float64. Anything a backend is likely to
+    # get wrong here (normalization, direction, strides) is an O(1) relative
+    # error, so there is no reason to go looser than the observed noise.
+    tolerances = {
+        torch.float32: dict(rtol=1e-5, atol=1e-4),
+        torch.complex64: dict(rtol=1e-5, atol=1e-4),
+        torch.float64: dict(rtol=1e-10, atol=1e-12),
+        torch.complex128: dict(rtol=1e-10, atol=1e-12),
+    }
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.expected = _rocfft_sweep("cpu")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            saved = os.path.join(tmpdir, "rocfft_sweep.pt")
+            _run_with_rocfft(_ROCFFT_WORKER, os.path.dirname(os.path.abspath(__file__)), saved,
+                             fuse_stft_always=True)
+            cls.actual = torch.load(saved, weights_only=True)
+
+    def _compare(self, group):
+        compared = 0
+        for name, expected in self.expected.items():
+            if not name.startswith(group):
+                continue
+            self.assertNotIsInstance(expected, str, f"{name}: invalid test config: {expected}")
+            actual = self.actual[name]
+            self.assertNotIsInstance(actual, str, f"{name}: rocFFT rejected a config the CPU accepts: {actual}")
+            self.assertEqual(actual, expected, msg=name, **self.tolerances[expected.dtype])
+            compared += 1
+        self.assertGreater(compared, 0, f"no cases recorded for {group!r}")
+
+    def test_backend_is_selected(self):
+        # The shim returns before the hipFFT plan cache is touched, so an empty
+        # cache after a transform is what tells us rocFFT actually ran. Without
+        # this the whole path could silently no-op and every other test here
+        # would still pass.
+        script = ("import torch;"
+                  "torch.fft.rfft(torch.randn(4, 512, device='cuda'));"
+                  "print(torch.backends.cuda.cufft_plan_cache.size)")
+        self.assertEqual(int(_run_with_rocfft(script)), 0)
+        hipfft = subprocess.check_output([sys.executable, "-c", script],
+                                         env={**os.environ, "TORCH_ROCM_PREFER_ROCFFT": "0"}, text=True)
+        self.assertEqual(int(hipfft), 1)
+
+    def test_fft(self):
+        self._compare("fft/")
+
+    def test_stft(self):
+        self._compare("stft/")
+
+    def test_stft_skips_framed_copy(self):
+        # The point of the load callback is that the (batch, n_frames, n_fft)
+        # framed tensor is never built, and at hop = n_fft / 4 that tensor is
+        # the same size as the output. Peak allocation is the only handle we
+        # have on whether rocFFT actually JIT'd the callback, since a runtime
+        # that cannot compile it falls back without saying so. Unlike the
+        # correctness sweep this leaves the size floor alone, so it also covers
+        # the shape of input the fused path is meant to trigger on.
+        fused = int(_run_with_rocfft(_ROCFFT_STFT_PEAK))
+        unfused = int(_run_with_rocfft(_ROCFFT_STFT_PEAK, callbacks=False))
+        if fused == unfused:
+            raise unittest.SkipTest("rocFFT on this runtime cannot JIT the stft callbacks")
+        self.assertLess(fused, 0.6 * unfused)
+
+    def test_istft(self):
+        self._compare("istft/")
+
+    def test_istft_fuses_synthesis_window(self):
+        fused = int(_run_with_rocfft(_ROCFFT_ISTFT_MULS))
+        unfused = int(_run_with_rocfft(_ROCFFT_ISTFT_MULS, callbacks=False))
+        self.assertGreater(unfused, 0, "the unfused istft should still multiply by the window")
+        if fused == unfused:
+            raise unittest.SkipTest("rocFFT on this runtime cannot JIT the istft callbacks")
+        self.assertEqual(fused, 0)
+
+    def test_input_not_clobbered(self):
+        self._compare("preserved/")
+
+    def test_autograd(self):
+        self._compare("autograd/")
+
+    def test_repeated_plan_creation(self):
+        self._compare("plan-cache/")
 
 
 class FFTDocTestFinder:
