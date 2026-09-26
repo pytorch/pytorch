@@ -68,7 +68,7 @@ def _remote_forward(
     if device.type == "cpu":
         return module.forward({args}, {kwargs})
 
-    # If the module is on a non-CPU device (e.g., cuda, xpu, npu, ...),
+    # If the module is on a non-CPU device (e.g., cuda, xpu, or a privateuse1 backend),
     # move any CPU tensor in args or kwargs to the same device.
     # Since torch script does not support generator expression,
     # have to use concatenation instead of

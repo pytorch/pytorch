@@ -87,7 +87,7 @@ class TestInstantiator(TestCase):
     def test_template_device_branch_is_device_generic(self):
         # The moving template must gate on ``device.type == "cpu"`` (early
         # return for cpu) instead of ``device.type != "cuda"``, so that
-        # tensors are moved for any non-cpu device (cuda, xpu, npu, ...)
+        # tensors are moved for any non-cpu device (cuda, xpu, or a privateuse1 backend)
         # registered by a backend, not just cuda.
         generated_module = instantiator.instantiate_scriptable_remote_module_template(
             MyModuleInterface, enable_moving_cpu_tensors_to_cuda=True
