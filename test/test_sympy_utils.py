@@ -12,8 +12,12 @@ import sympy
 import torch
 import torch.fx as fx
 from sympy.core.relational import is_ge, is_gt, is_le, is_lt
-from torch.testing._internal.common_device_type import skipIf
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipIf,
+)
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -620,6 +624,8 @@ class TestValueRanges(TestCase):
 
 
 class TestSympyInterp(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize(
         "fn", UNARY_OPS + BINARY_OPS + UNARY_BOOL_OPS + BINARY_BOOL_OPS + COMPARE_OPS
     )
@@ -738,10 +744,15 @@ class TestSympyInterp(TestCase):
                     gm(*args),
                 )
 
+
+class TestSympyInterpDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+
     @parametrize(
         "fn", UNARY_OPS + BINARY_OPS + UNARY_BOOL_OPS + BINARY_BOOL_OPS + COMPARE_OPS
     )
-    def test_tensor_interp(self, fn):
+    def test_tensor_interp(self, device, fn):
         # Skip operations not implemented or not applicable for tensors
         if fn in ("div", "truncdiv", "int_truediv", "mod", "round_decimal"):
             return
@@ -776,7 +787,9 @@ class TestSympyInterp(TestCase):
             with self.subTest(args=args):
                 tensor_args = [
                     torch.tensor(
-                        a, dtype=torch.double if isinstance(a, float) else torch.int64
+                        a,
+                        dtype=torch.double if isinstance(a, float) else torch.int64,
+                        device=device,
                     )
                     for a in args
                 ]
@@ -1322,6 +1335,7 @@ class TestCCodePrinting(TestCase):
 
 instantiate_parametrized_tests(TestValueRanges)
 instantiate_parametrized_tests(TestSympyInterp)
+instantiate_device_type_tests(TestSympyInterpDevice, globals(), allow_xpu=True)
 instantiate_parametrized_tests(TestSympySolve)
 
 
