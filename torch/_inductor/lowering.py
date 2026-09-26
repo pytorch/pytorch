@@ -7619,6 +7619,18 @@ def var_mean_helper_(x, *, axis, correction, keepdim, return_mean):
     out_dtype = x.get_dtype()
     compute_dtype = get_computation_dtype(out_dtype)
     x = to_dtype(x, compute_dtype, copy=False)
+    axis = _validate_reduction_axis(x, axis)
+    rnumel = sympy_product(x.get_size()[i] for i in axis)
+    if isinstance(rnumel, sympy.Integer) and rnumel == 0:
+        # Empty reduction: eager produces nan for both mean and var, but the
+        # welford reduction's mean identity is 0. Emit the nans directly.
+        size = _make_reduction_inner(
+            x, axis=axis, keepdims=keepdim, dtype=None, override_return_dtype=None
+        )["size"]
+        nan = full(size, float("nan"), dtype=compute_dtype, device=x.get_device())
+        nan = to_dtype(nan, out_dtype, copy=False)
+        return (nan, nan) if return_mean else (nan,)
+
     kwargs = dict(
         x=x,
         axis=axis,
