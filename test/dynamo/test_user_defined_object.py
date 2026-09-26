@@ -1249,6 +1249,22 @@ class TestUserDefinedSetitem(TestCase):
 class TestObjectConstruction(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    def test_init_must_return_none(self):
+        class Foo:
+            def __init__(self):
+                return 10  # noqa: PLE0101
+
+        def fn():
+            try:
+                Foo()
+            except TypeError as exc:
+                return str(exc)
+            return "constructor succeeded"
+
+        expected = "__init__() should return None, not 'int'"
+        self.assertEqual(fn(), expected)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), expected)
+
     def test_privateuse1_tensor_class_without_tensor_classes_registration(self):
         from torch._dynamo.variables.user_defined import UserDefinedClassVariable
 
