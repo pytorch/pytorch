@@ -644,6 +644,24 @@ class LoopOrderingTest(TestCase):
         self.assertEqual(2, metrics.generated_kernel_count)
         self.assertEqual(0, metrics.num_loop_reordering)
 
+    def test_no_reorder_across_mutation(self):
+        """
+        x.copy_(x.transpose(-1, -2) * 1.0): the weak dep between the read of x
+        and the copy back into x is pruned because the indices match in the
+        original loop order. Reordering the reader's loops afterwards would fuse
+        a transposed read of x with the write of x.
+        """
+
+        def f(x):
+            x.copy_(x.transpose(-1, -2) * 1.0)
+            return x
+
+        x = torch.rand(80000, 5, 5, device=GPU_TYPE)
+        expect = f(x.clone())
+        actual = torch.compile(f)(x.clone())
+        self.assertEqual(expect, actual)
+        self.assertEqual(0, metrics.num_loop_reordering)
+
     def test_keep_fake_dep(self):
         """
         In this model, there are fake dependencies (StarDep) between Scatter

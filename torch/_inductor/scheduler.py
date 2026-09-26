@@ -9635,6 +9635,24 @@ class Scheduler:
         fusion_log.info("Shared memory after inversion: %d", score)
         return score
 
+    def _mutates_what_other_reads(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> bool:
+        def real_name(name: str) -> str:
+            return self.mutation_real_name.get(name, name)
+
+        for writer, reader in ((node1, node2), (node2, node1)):
+            mutated = OrderedSet(
+                real_name(dep.name)
+                for dep in writer.read_writes.writes
+                if dep.name in self.mutation_real_name
+            )
+            if mutated and any(
+                real_name(dep.name) in mutated for dep in reader.read_writes.reads
+            ):
+                return True
+        return False
+
     def shared_data_after_reordering_loop(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> int:
@@ -9652,6 +9670,14 @@ class Scheduler:
         # TODO Don't do loop reordering/reindexing for CPU for now.
         # Should debug more why it does not work for CPU codegen
         if any(n.is_cpu() for n in [node1, node2]):
+            return -1
+
+        # Reordering the loops of a node changes which element of a buffer it
+        # reads at each iteration. When the other node mutates that buffer, the
+        # weak dep that ordered the read before the mutation may already have been
+        # pruned because the indices matched in the old order, and the fused kernel
+        # would read elements it has already overwritten.
+        if self._mutates_what_other_reads(node1, node2):
             return -1
 
         # in some rare case, a template can be passed in.
