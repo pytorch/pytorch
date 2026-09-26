@@ -98,7 +98,7 @@ std::tuple<Tensor, Tensor, size_t, std::vector<int64_t>> ctc_loss_allocate_outpu
       TORCH_CHECK(target_lengths[i] >= 0,
                   "Expected target_lengths to have value at least ", 0, ", but got value ", target_lengths[i],
                   " (while checking arguments for ", c, ")");
-      tg_batch_offsets[i] = pos;
+      tg_batch_offsets[i] = pos * static_cast<int64_t>(targets.stride(0));
       pos += target_lengths[i];
       if (max_target_length < target_lengths[i])
          max_target_length = target_lengths[i];
@@ -131,16 +131,6 @@ std::tuple<Tensor, Tensor, size_t, std::vector<int64_t>> ctc_loss_allocate_outpu
     TORCH_CHECK(input_lengths[b] <= max_input_length,
              "Expected input_lengths to have value at most ", max_input_length, ", but got value ", input_lengths[b],
              " (while checking arguments for ", c, ")");
-  }
-
-  // Target values are used as indices into log_probs by the kernels below, so
-  // validate every target entry that is actually read.
-  // Only CPU target tensors have host-readable data; meta tensors have none and
-  // accelerator tensors must not be dereferenced from the host.
-  if (targets.device().is_cpu()) {
-    using target_t = std::conditional_t<target_scalar_type == kInt, int, int64_t>;
-    check_target_values<target_t>(targets, target_lengths, num_labels, tg_batch_offsets,
-                                  static_cast<int64_t>(tg_target_stride), c);
   }
 
   Tensor log_alpha = at::empty({batch_size, log_probs.size(0), 2*max_target_length+1}, log_probs.options());
@@ -177,6 +167,13 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
     std::tie(neg_log_likelihood, log_alpha, tg_target_stride, tg_batch_offsets) =
         ctc_loss_allocate_outputs<scalar_t, kInt>(
             log_probs, targets, input_lengths, target_lengths, BLANK);
+  }
+
+  // Validate the target values the kernels below read; the shared allocator
+  // must stay metadata-only so meta invocations never depend on data.
+  if (targets.device().is_cpu()) {
+    check_target_values<target_t>(targets, target_lengths, log_probs.size(2), tg_batch_offsets,
+                                  static_cast<int64_t>(tg_target_stride), "ctc_loss_cpu");
   }
 
   int64_t batch_size = log_probs.size(1);
@@ -272,11 +269,19 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
   int64_t num_labels = log_probs.size(2);
   Tensor grad = at::full_like(log_probs, neginf, LEGACY_CONTIGUOUS_MEMORY_FORMAT); // at this point, this is log of empty sum
 
-  // The admin bits. The length lists are size-checked by the CPU entry point
-  // and their values are trusted from the forward, but target values are
-  // revalidated below: autograd can reach the backward with a saved targets
-  // tensor mutated after the forward (e.g. through .data, which does not bump
-  // the version counter) and direct callers of the op bypass the forward.
+  // The admin bits. The length lists are size-checked by the CPU entry point;
+  // the indexing metadata is validated here before any target storage is read
+  // because direct callers of the op bypass the forward's checks and autograd
+  // can reach the backward with a saved targets tensor mutated after the
+  // forward (e.g. through .data, which does not bump the version counter).
+  TORCH_CHECK(targets.dim() == 1 || targets.dim() == 2,
+              "targets must be 1 or 2 dimensional (while checking arguments for ctc_loss_backward_cpu)");
+  for (const auto b : c10::irange(batch_size)) {
+    TORCH_CHECK(target_lengths[b] >= 0,
+                "Expected target_lengths to have value at least ", 0, ", but got value ", target_lengths[b],
+                " (while checking arguments for ctc_loss_backward_cpu)");
+  }
+
   int64_t tg_target_stride = 0;
   int64_t max_target_length = 0;
   std::vector<int64_t> tg_batch_offsets(batch_size);
@@ -285,17 +290,26 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
     int64_t pos = 0;
     max_target_length = 0;
     for (const auto i : c10::irange(batch_size)) {
-      tg_batch_offsets[i] = pos;
+      tg_batch_offsets[i] = pos * static_cast<int64_t>(targets.stride(0));
       pos += target_lengths[i];
       if (max_target_length < target_lengths[i])
         max_target_length = target_lengths[i];
     }
     tg_target_stride = targets.stride(0);
+    TORCH_CHECK(pos == targets.size(0),
+                "Expected tensor to have size ", pos, " at dimension 0, but got size ", targets.size(0),
+                " for targets (while checking arguments for ctc_loss_backward_cpu)");
   }
   else { // batch x max_target_length
     // dim is 2
+    TORCH_CHECK(batch_size <= targets.size(0),
+                "Expected tensor to have size at least ", batch_size, " at dimension 0, but got size ", targets.size(0),
+                " for targets (while checking arguments for ctc_loss_backward_cpu)");
     int64_t tg_batch_stride = targets.stride(0);
     for (const auto i : c10::irange(batch_size)) {
+      TORCH_CHECK(target_lengths[i] <= targets.size(1),
+                  "Expected tensor to have size at least ", target_lengths[i], " at dimension 1, but got size ",
+                  targets.size(1), " for targets (while checking arguments for ctc_loss_backward_cpu)");
       tg_batch_offsets[i] = i * tg_batch_stride;
     }
     tg_target_stride = targets.stride(1);
