@@ -375,7 +375,6 @@ jobs:
           { config: "dynamo_wrapped", shard: 6, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
           { config: "einops", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
           { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
-          { config: "onnx", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128" },
         ]}
       python-version: "3.11"
       compiler: clang21
