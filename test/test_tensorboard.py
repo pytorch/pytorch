@@ -432,11 +432,11 @@ class TestTensorBoardSummary(BaseTestCase):
         )
 
     def test_list_input(self):
-        with self.assertRaises(Exception):
+        with self.assertRaises(NotImplementedError):
             summary.histogram("dummy", [1, 3, 4, 5, 6], "tensorflow")
 
     def test_empty_input(self):
-        with self.assertRaises(Exception):
+        with self.assertRaises(ValueError):
             summary.histogram("dummy", np.ndarray(0), "tensorflow")
 
     def test_image_with_boxes(self):
