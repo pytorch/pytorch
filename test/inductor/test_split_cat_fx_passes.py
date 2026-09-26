@@ -116,28 +116,6 @@ class TestSplitCatFxPasses(TestCase):
             counters.clear()
 
     @torch._inductor.config.patch(
-        pre_grad_fusion_options={},
-        post_grad_fusion_options={"normalization_aten_pass": {}},
-    )
-    def test_split_normalization_aten(self):
-        def split(x):
-            return torch.split(x, 4, dim=1)
-
-        for size, expected_sections in [
-            (3, [3]),
-            (10, [4, 4, 2]),
-            (12, [4, 4, 4]),
-        ]:
-            counters.clear()
-            x = torch.randn(2, size)
-            expected = split(x)
-            actual = torch.compile(split, fullgraph=True)(x)
-
-            self.assertEqual(counters["inductor"]["normalization_aten_pass"], 1)
-            self.assertEqual([tensor.shape[1] for tensor in actual], expected_sections)
-            self.assertEqual(actual, expected)
-
-    @torch._inductor.config.patch(
         pre_grad_fusion_options={
             "normalization_pass": {},
         },

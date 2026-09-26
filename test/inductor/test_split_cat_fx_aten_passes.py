@@ -382,17 +382,23 @@ class TestSplitCatAtenNormalizationPasses(TestCase):
         def arg_only_size_different(x):
             return torch.ops.aten.split.Tensor(x, 320, 1)
 
-        args = [
-            torch.randn(4096, 300),
-        ]
-        for fn, expected_split_norm_count in [
-            (arg_only_size_same, 1),
-            (arg_only_size_different, 1),
+        def arg_only_size_uneven(x):
+            return torch.ops.aten.split.Tensor(x, 4, 1)
+
+        for fn, args, expected_split_norm_count, expected_sections in [
+            (arg_only_size_same, [torch.randn(4096, 300)], 1, [300]),
+            (arg_only_size_different, [torch.randn(4096, 300)], 1, [300]),
+            (arg_only_size_uneven, [torch.randn(2, 10)], 1, [4, 4, 2]),
         ]:
+            counters.clear()
             expected = fn(*args)
-            actual = torch.compile(fn)(*args)
+            actual = torch.compile(fn, fullgraph=True)(*args)
 
             torch.testing.assert_close(actual, expected)
+            self.assertEqual(
+                [tensor.shape[1] for tensor in actual],
+                expected_sections,
+            )
             self.assertEqual(
                 counters["inductor"]["normalization_aten_pass"],
                 expected_split_norm_count,

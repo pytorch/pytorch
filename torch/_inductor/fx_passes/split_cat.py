@@ -1722,8 +1722,8 @@ def normalize_split_default_aten(match: Match, *args, **kwargs):
         return
     if split_dim < 0:  # Normalize split dim
         split_dim += split_input.meta["val"].dim()
-    split_section_list = split_sections
-    new_args = (split_input, split_section_list)
+    # split.Tensor truncates the final section when needed.
+    new_args = (split_input, split_sections)
     new_kwargs = {"dim": split_dim}
     if (
         split_node.args == new_args
