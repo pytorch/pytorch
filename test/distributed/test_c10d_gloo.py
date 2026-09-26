@@ -262,6 +262,51 @@ class RendezvousEnvTest(TestCase):
             for var in ("WORLD_SIZE", "MASTER_ADDR", "MASTER_PORT", "RANK"):
                 os.environ.pop(var, None)
 
+    @requires_gloo()
+    @retry_on_connect_failures
+    def test_device_id_cpu(self):
+        try:
+            os.environ["WORLD_SIZE"] = "1"
+            os.environ["MASTER_ADDR"] = "127.0.0.1"
+            os.environ["MASTER_PORT"] = str(common.find_free_port())
+            os.environ["RANK"] = "0"
+
+            c10d.init_process_group(
+                backend="gloo", init_method="env://", device_id=torch.device("cpu:0")
+            )
+
+            self.assertTrue(c10d.is_initialized())
+
+            c10d.destroy_process_group()
+
+        finally:
+            if c10d.is_initialized():
+                c10d.destroy_process_group()
+            for var in ("WORLD_SIZE", "MASTER_ADDR", "MASTER_PORT", "RANK"):
+                os.environ.pop(var, None)
+
+    @requires_gloo()
+    @retry_on_connect_failures
+    def test_device_id_cpu_no_index(self):
+        try:
+            os.environ["WORLD_SIZE"] = "1"
+            os.environ["MASTER_ADDR"] = "127.0.0.1"
+            os.environ["MASTER_PORT"] = str(common.find_free_port())
+            os.environ["RANK"] = "0"
+
+            with self.assertRaisesRegex(
+                ValueError, "must be a device with a valid index"
+            ):
+                c10d.init_process_group(
+                    backend="gloo", init_method="env://", device_id=torch.device("cpu")
+                )
+
+        finally:
+            if c10d.is_initialized():
+                c10d.destroy_process_group()
+            for var in ("WORLD_SIZE", "MASTER_ADDR", "MASTER_PORT", "RANK"):
+                os.environ.pop(var, None)
+
 
 class TimeoutTest(test_c10d_common.AbstractTimeoutTest, TestCase):
     @requires_gloo()
