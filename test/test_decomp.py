@@ -1238,6 +1238,49 @@ class DecompOneOffTests(TestCase):
         self.assertEqual(exp, exp_ref)
         self.assertFalse(exp.isinf().any())
 
+    # Regression test for https://github.com/pytorch/pytorch/issues/197105:
+    # Inductor's lerp.Tensor decomposition computed `end - start` on the raw
+    # inputs before type promotion, so bool start/end with a 0-d float weight
+    # raised "Subtraction, the `-` operator, with two bool tensors is not
+    # supported" while eager returns a floating result of the weight's dtype.
+    # NOTE: the lerp.Scalar overload (Python-float weight) builds its eager
+    # iterator from start/end alone, so bool inputs fail eagerly there too and
+    # are intentionally not covered here.
+    @onlyNativeDeviceTypes
+    def test_lerp_bool_input(self, device):
+        def f(start, end, weight):
+            return torch.lerp(start, end, weight)
+
+        start = torch.randint(0, 2, (3, 4), device=device).bool()
+        end = torch.randint(0, 2, (3, 4), device=device).bool()
+
+        # 0-d float weight: eager promotes bool inputs to the weight's dtype.
+        for weight_dtype in (torch.float32, torch.float16):
+            weight = torch.tensor(0.3, device=device, dtype=weight_dtype)
+            expected = f(start, end, weight)
+            self.assertEqual(expected.dtype, weight_dtype)
+            compiled = torch.compile(f, dynamic=False)(start, end, weight)
+            self.assertEqual(compiled.dtype, expected.dtype)
+            self.assertEqual(compiled, expected)
+
+        # Integer start/end with a 0-d float weight follow the same path.
+        start_int = torch.randint(0, 10, (3, 4), device=device)
+        end_int = torch.randint(0, 10, (3, 4), device=device)
+        weight = torch.tensor(0.3, device=device)
+        expected_int = f(start_int, end_int, weight)
+        compiled_int = torch.compile(f, dynamic=False)(start_int, end_int, weight)
+        self.assertEqual(compiled_int.dtype, expected_int.dtype)
+        self.assertEqual(compiled_int, expected_int)
+
+        # Regular float path (dual-formula branch with weight > 0.5).
+        s = torch.randn(3, 4, device=device, dtype=torch.float16)
+        e = torch.randn(3, 4, device=device, dtype=torch.float16)
+        weight_half = torch.tensor(0.9, device=device, dtype=torch.float16)
+        expected_half = f(s, e, weight_half)
+        compiled_half = torch.compile(f, dynamic=False)(s, e, weight_half)
+        self.assertEqual(compiled_half.dtype, torch.float16)
+        self.assertEqual(compiled_half, expected_half)
+
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfCrossRef
     @onlyCUDA
