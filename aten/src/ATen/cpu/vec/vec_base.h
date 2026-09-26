@@ -1315,7 +1315,7 @@ std::
   vindex.store(index_arr.data());
   std::array<T, size> buffer{};
   for (const auto i : c10::irange(size)) {
-    if (mask_arr[i] & 0x01) { // check highest bit
+    if (mask_arr[i] < 0) { // check the sign bit
       buffer[i] = base_addr[index_arr[i] * scale / sizeof(T)];
     } else {
       buffer[i] = src_arr[i];

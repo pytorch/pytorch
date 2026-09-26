@@ -5,6 +5,8 @@ namespace {
     template <typename T>
     class Memory : public ::testing::Test {};
     template <typename T>
+    class Gather : public ::testing::Test {};
+    template <typename T>
     class Arithmetic : public ::testing::Test {};
     template <typename T>
     class Comparison : public ::testing::Test {};
@@ -92,6 +94,7 @@ namespace {
     using ComplexTypes = ::testing::Types<vcomplex, vcomplexDbl>;
     using ReducedFloatTestedTypes = ::testing::Types<vBFloat16, vHalf>;
     TYPED_TEST_SUITE(Memory, ALLTestedTypes);
+    TYPED_TEST_SUITE(Gather, RealFloatTestedTypes);
     TYPED_TEST_SUITE(Arithmetic, FloatIntTestedTypes);
     TYPED_TEST_SUITE(Comparison, RealFloatIntReducedFloatTestedTypes);
     TYPED_TEST_SUITE(Bitwise, FloatIntTestedTypes);
@@ -177,6 +180,35 @@ namespace {
             }
             // clear storage
             std::memset(storage, 0, sizeof storage);
+        }
+    }
+    TYPED_TEST(Gather, MaskGatherUsesSignBit) {
+        using vec = TypeParam;
+        using VT = ValueType<vec>;
+        using int_t = at::vec::int_same_size_t<VT>;
+        using ivec = at::vec::Vectorized<int_t>;
+        constexpr auto size = vec::size();
+        CACHE_ALIGN VT base[size];
+        CACHE_ALIGN VT actual[size];
+        CACHE_ALIGN int_t index[size];
+        CACHE_ALIGN int_t mask_bits[size];
+        constexpr int_t masks[] = {
+            0,
+            1,
+            std::numeric_limits<int_t>::min(),
+            -1,
+        };
+        for (const auto i : c10::irange(size)) {
+            base[i] = static_cast<VT>(i + 1);
+            index[i] = static_cast<int_t>(i);
+            mask_bits[i] = masks[i % std::size(masks)];
+        }
+        auto mask = at::vec::cast<VT>(ivec::loadu(mask_bits));
+        at::vec::mask_gather<sizeof(VT)>(
+            vec(-1), base, ivec::loadu(index), mask).store(actual);
+        for (const auto i : c10::irange(size)) {
+            const VT expected = mask_bits[i] < 0 ? base[i] : VT(-1);
+            ASSERT_EQ(expected, actual[i]);
         }
     }
     TYPED_TEST(SignManipulation, Absolute) {
