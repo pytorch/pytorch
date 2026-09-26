@@ -7734,7 +7734,10 @@ class TestCudaAllocator(TestCase):
                     )
                     if k in os.environ
                 }
-            return {}
+            else:
+                return {
+                    k: os.environ[k] for k in ("LD_LIBRARY_PATH",) if k in os.environ
+                }
 
         def check_output(script: str) -> str:
             kwargs = {"env": subprocess_env(), "text": True}
