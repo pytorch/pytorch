@@ -725,8 +725,15 @@ class FSDPParamGroup:
                 )
                 partial_input = None
                 if partial_sizes:
+                    rs_stream = self.comm_ctx.reduce_scatter_stream
+                    if self._partial_reduce_output is not None:
+                        # The cast/repack below allocates on the RS stream before
+                        # foreach_reduce orders it after the compute stream. Wait
+                        # now so it cannot reuse a block another stream still uses,
+                        # e.g. an all-reduce buffer released by finalize_backward.
+                        rs_stream.wait_stream(self.device_handle.current_stream())
                     # Allocate on the RS stream so reuse is ordered after consumption.
-                    with self.device_handle.stream(self.comm_ctx.reduce_scatter_stream):
+                    with self.device_handle.stream(rs_stream):
                         partial_input = self._prepare_partial_reduce_output(
                             fsdp_params_with_grad, partial_sizes, reduce_dtype
                         )

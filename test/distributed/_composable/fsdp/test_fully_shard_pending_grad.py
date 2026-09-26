@@ -2,6 +2,7 @@
 
 import copy
 import unittest
+from unittest import mock
 
 import torch
 import torch.distributed as dist
@@ -23,7 +24,11 @@ from torch.distributed.tensor.parallel import ColwiseParallel, parallelize_modul
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, get_devtype
-from torch.testing._internal.common_utils import parametrize, run_tests
+from torch.testing._internal.common_utils import (
+    get_cycles_per_ms,
+    parametrize,
+    run_tests,
+)
 
 
 if dist._is_spmd_types_available():
@@ -422,6 +427,53 @@ class TestFullyShardPendingGrad(FSDPTest):
                 model.weight.grad.full_tensor(),
                 torch.full((2, 1), 6.0 if step == 2 else 2.0, device=device),
             )
+
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(
+        not hasattr(torch.get_device_module(get_devtype()), "_sleep"),
+        "Sleep is not supported on this device",
+    )
+    def test_partial_repack_after_slow_all_reduce(self, device):
+        # No input requires grad, so both post-backwards run in the final
+        # callback. layer's finalize_backward releases its fp32 all-reduce
+        # buffer (its bf16 sharded grads are casts), then aux repacks its
+        # pending partial because aux.second first gets a gradient. The repack
+        # must not reuse that buffer while the slowed all-reduce still uses it.
+        class Model(nn.Module):
+            def __init__(self, device, dim):
+                super().__init__()
+                self.layer = TwoLinear(device, dim, dim)
+                self.aux = TwoLinear(device, dim, dim)
+
+            def forward(self, inp, use_layer):
+                output = self.aux(inp, use_second=use_layer)
+                return output + self.layer(inp) if use_layer else output
+
+        device = torch.device(device).type
+        model = Model(device, dim=32).to(torch.bfloat16)
+        mesh = init_device_mesh(
+            device, (self.world_size, 1), mesh_dim_names=("replicate", "shard")
+        )
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16, reduce_dtype=torch.float32
+        )
+        for module in (model.layer, model.aux, model):
+            fully_shard(module, mesh=mesh, mp_policy=mp_policy)
+        orig_all_reduce = dist.all_reduce
+
+        def slow_all_reduce(*args, **kwargs):
+            torch.get_device_module(device)._sleep(int(200 * get_cycles_per_ms(device)))
+            return orig_all_reduce(*args, **kwargs)
+
+        with mock.patch.object(dist, "all_reduce", slow_all_reduce):
+            for use_layer, value in ((False, 2.0), (True, 3.0)):
+                model.set_requires_all_reduce(use_layer)
+                inp = torch.full((1, 32), value, device=device, dtype=torch.bfloat16)
+                model(inp, use_layer).sum().backward()
+        for module, expected in ((model.layer, (3, 3)), (model.aux, (5, 3))):
+            for param, value in zip(module.parameters(), expected):
+                actual = param.grad.full_tensor()
+                self.assertEqual(actual, torch.full_like(actual, value))
 
 
 class TestFullyShardPendingGradHSDP(FSDPTest):
