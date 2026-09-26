@@ -959,12 +959,13 @@ class FSDPParam:
             )
         )
 
-    def to_sharded(self) -> None:
+    def to_sharded(self, *, free_unsharded: bool = True) -> None:
         self._setattr_on_modules(self.sharded_param)
-        self.free_unsharded_param()
+        if free_unsharded:
+            self.free_unsharded_param()
         self.sharded_state = ShardedState.SHARDED
 
-    def to_sharded_post_forward(self) -> None:
+    def to_sharded_post_forward(self, *, free_unsharded: bool = True) -> None:
         if self.is_dtensor:
             raise NotImplementedError(
                 "Resharding to smaller mesh is not supported for DTensor parameters yet"
@@ -1000,7 +1001,8 @@ class FSDPParam:
             requires_grad=self.sharded_param.requires_grad,
         )
         self._setattr_on_modules(self._sharded_post_forward_param)
-        self.free_unsharded_param()
+        if free_unsharded:
+            self.free_unsharded_param()
         self.sharded_state = ShardedState.SHARDED_POST_FORWARD
 
     def to_unsharded(self) -> None:

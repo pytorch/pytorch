@@ -544,17 +544,17 @@ class FSDPParamGroup:
         self._all_gather_result = None  # free unless saved in `all_gather_state`
 
     @_disable_functorch_if_active
-    def reshard(self):
+    def reshard(self, *, free_unsharded: bool = True, force: bool = False):
         if self._training_state == TrainingState.FORWARD:
-            if not self._reshard_after_forward:
+            if not self._reshard_after_forward and not force:
                 return
             if self._use_post_forward_mesh:
-                self._to_sharded_post_forward()
+                self._to_sharded_post_forward(free_unsharded=free_unsharded)
                 self._reshard_after_forward_event = self.device_handle.Event()
                 if self._reshard_after_forward_event is not None:
                     self._reshard_after_forward_event.record()
                 return
-        self._to_sharded()
+        self._to_sharded(free_unsharded=free_unsharded)
 
     def _reset_iter_state(self) -> None:
         # See FSDPState._reset_iter_state for semantics. Waits on any
@@ -915,16 +915,16 @@ class FSDPParamGroup:
             target_fsdp_param_group.unshard(async_op)
 
     # Utilities #
-    def _to_sharded(self):
+    def _to_sharded(self, *, free_unsharded: bool = True):
         if not self.is_sharded:
             for fsdp_param in self.fsdp_params:
-                fsdp_param.to_sharded()
+                fsdp_param.to_sharded(free_unsharded=free_unsharded)
             self._sharded_state = ShardedState.SHARDED
 
-    def _to_sharded_post_forward(self):
+    def _to_sharded_post_forward(self, *, free_unsharded: bool = True):
         if not self.is_sharded_post_forward:
             for fsdp_param in self.fsdp_params:
-                fsdp_param.to_sharded_post_forward()
+                fsdp_param.to_sharded_post_forward(free_unsharded=free_unsharded)
             self._sharded_state = ShardedState.SHARDED_POST_FORWARD
 
     def _to_unsharded(self):
