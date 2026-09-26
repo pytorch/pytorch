@@ -54,7 +54,9 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_xpu import Xe2_Or_Later
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
+    isRocmArchAnyOf,
     MI350_ARCH,
+    NAVI_ARCH,
     parametrize,
     random_matrix_with_scaled_reduction_dim,
     run_tests,
@@ -3563,7 +3565,9 @@ class TestFP8Matmul(TestCase):
             )
 
     @onlyAccelerator
-    @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MX_GEMM and not isRocmArchAnyOf(NAVI_ARCH), mx_skip_msg
+    )
     @unittest.skipIf(not torch.version.hip, "The MX scale layout is fixed by arch and ROCm version only on ROCm")
     def test_rocm_mx_swizzle_size_error_names_arch(self, device) -> None:
         # This size check runs before the kernel's arch gate, so on an arch
