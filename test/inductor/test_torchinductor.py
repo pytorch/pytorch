@@ -10997,6 +10997,24 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @config.patch({"triton.cudagraphs": True})
     @dynamo_config.patch(automatic_dynamic_shapes=True)
+    def test_input_mutation_after_dtype_view_consumer(self):
+        # y is a pointwise function of a dtype view of the input (a fallback
+        # aten.view.dtype kernel whose output aliases the input). The in-place
+        # update of y followed by a mutation of x used to make Inductor
+        # materialize y *after* the mutation, i.e. from the mutated x.
+        def fn(x):
+            y = x.view(torch.int32) * 2
+            y.sub_(-4)
+            x[:, 2:5] = 2
+            return y.view(torch.int64)
+
+        x = torch.arange(-12, 12, dtype=torch.int64, device=self.device).reshape(4, 6)
+        ref_x, opt_x = x.clone(), x.clone()
+        ref = fn(ref_x)
+        res = torch.compile(fn)(opt_x)
+        self.assertEqual(ref, res)
+        self.assertEqual(ref_x, opt_x)
+
     def test_input_mutation1(self):
         def fn(a):
             b = a + 1
