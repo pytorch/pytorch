@@ -9,7 +9,7 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.test_operators import realize
 from torch._inductor.utils import fresh_cache, is_big_gpu, run_and_get_code
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import slowTest
+from torch.testing._internal.common_utils import HardwareClassification, slowTest
 from torch.testing._internal.inductor_utils import (
     get_func_call,
     GPU_TYPE,
@@ -202,12 +202,16 @@ class BenchmarkFusionTestTemplate:
 if HAS_GPU_AND_TRITON:
 
     class BenchmarkFusionGpuTest(TestCase):
+        hw_classification = HardwareClassification.ACCELERATOR
+
         common = check_model_gpu
         device = GPU_TYPE
 
     copy_tests(BenchmarkFusionTestTemplate, BenchmarkFusionGpuTest, GPU_TYPE)
 
     class BenchmarkingTest(TestCase):
+        hw_classification = HardwareClassification.ACCELERATOR
+
         @unittest.skipIf(
             getattr(torch, GPU_TYPE).device_count() < 2,
             "The test need at least 2 devices",
@@ -243,6 +247,8 @@ if HAS_GPU_AND_TRITON:
                 self.assertTrue(hit_count > 0)
 
     class BenchmarkMultiTemplateFusionGpuTest(InductorTestCase):
+        hw_classification = HardwareClassification.ACCELERATOR
+
         @classmethod
         def setUpClass(cls):
             super().setUpClass()
@@ -349,6 +355,8 @@ if HAS_GPU_AND_TRITON:
 if HAS_CPU and not torch.backends.mps.is_available():
 
     class BenchmarkFusionCpuTest(TestCase):
+        hw_classification = HardwareClassification.CPU
+
         common = check_model
         device = "cpu"
 
