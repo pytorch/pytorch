@@ -3108,6 +3108,31 @@ class TestDTensorCompileE2E(DTensorTestBase):
                 self.assertEqual(dt_chunk.full_tensor(), tensor_chunk)
 
     @with_comms
+    @parametrize(
+        "input_placement,expected_output_placement",
+        [
+            (Replicate(), Replicate()),
+            (Shard(0), Replicate()),
+            (Shard(1), Shard(0)),
+        ],
+    )
+    def test_unbind_with_symint_size(self, input_placement, expected_output_placement):
+        mesh = self.build_device_mesh()
+        global_tensor = torch.randn(8, 8, device=self.device_type)
+        input_dt = distribute_tensor(global_tensor, mesh, [input_placement])
+
+        def unbind_fn(x):
+            return torch.unbind(x, dim=0)
+
+        expected = unbind_fn(global_tensor)
+        result = torch.compile(unbind_fn, dynamic=True)(input_dt)
+
+        self.assertEqual(len(result), len(expected))
+        for dt_slice, tensor_slice in zip(result, expected):
+            self.assertEqual(dt_slice.placements, (expected_output_placement,))
+            self.assertEqual(dt_slice.full_tensor(), tensor_slice)
+
+    @with_comms
     def test_dtensor_processgroup_backward(self):
         """Test that ProcessGroups are correctly handled in backward graph."""
         from torch._functorch.aot_autograd import aot_function

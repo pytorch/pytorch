@@ -1,7 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 
-import itertools
 import unittest
 
 import torch
@@ -35,6 +34,9 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     op_strategy_context,
     with_comms,
 )
+
+
+funcol = torch.ops.c10d_functional
 
 
 class DistTensorOpsTest(DTensorContinuousTestBase):
@@ -1482,32 +1484,82 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
 
     def test_unbind(self):
         device_mesh = self.build_device_mesh()
-        shard_dims = [0, 1]
-        unbind_dims = [0, 1]
-        local_tensor = torch.randn(4, 8, requires_grad=True)
-        for shard_dim, unbind_dim in itertools.product(shard_dims, unbind_dims):
+        cases = [
+            # (shape, shard_dim, unbind_dim)
+            ((4, 8), 0, 1),
+            ((4, 8), 1, 0),
+            ((4, 8), 0, 0),
+            ((4, 8), 1, 1),
+            ((4, 8), 0, -1),
+            ((4, 4, 8), 0, 1),
+            ((4, 4, 8), 2, 1),
+            ((4, 4, 8), 1, 1),
+            ((4, 4, 8), 0, -1),
+        ]
+        for shape, shard_dim, unbind_dim in cases:
+            local_tensor = torch.randn(*shape, requires_grad=True)
             dist_tensor = distribute_tensor(
                 local_tensor, device_mesh, (Shard(shard_dim),)
             )
-
-            if shard_dim == unbind_dim:
-                with self.assertRaisesRegex(
-                    RuntimeError, "Sharding propagation failed"
-                ):
-                    dist_tensor.unbind(dim=unbind_dim)
-            else:
+            norm_dim = unbind_dim if unbind_dim >= 0 else unbind_dim + len(shape)
+            with CommDebugMode() as comm_mode:
                 unbinded_dist_tensors = dist_tensor.unbind(dim=unbind_dim)
-                new_shard_dim = shard_dim if shard_dim < unbind_dim else shard_dim - 1
+            self.assertEqual(len(unbinded_dist_tensors), shape[norm_dim])
+            if shard_dim == norm_dim:
+                # sharded unbind dim redistributes the input to Replicate
+                self.assertEqual(comm_mode.get_total_counts(), 1)
+                self.assertEqual(
+                    comm_mode.get_comm_counts()[funcol.all_gather_into_tensor], 1
+                )
+                for elem in unbinded_dist_tensors:
+                    self.assertEqual(elem.placements, (Replicate(),))
+            else:
+                # sharding is preserved without communication
+                self.assertEqual(comm_mode.get_total_counts(), 0)
+                new_shard_dim = shard_dim if shard_dim < norm_dim else shard_dim - 1
                 self.assertTrue(
                     all(
                         elem.placements[0].is_shard(dim=new_shard_dim)
                         for elem in unbinded_dist_tensors
                     )
                 )
-                for x, y in zip(
-                    unbinded_dist_tensors, local_tensor.unbind(dim=unbind_dim)
-                ):
-                    self.assertEqual(x.full_tensor(), y)
+            for x, y in zip(unbinded_dist_tensors, local_tensor.unbind(dim=unbind_dim)):
+                self.assertEqual(x.full_tensor(), y)
+
+        # replicated input stays replicated without communication
+        local_tensor = torch.randn(4, 8)
+        dist_tensor = distribute_tensor(local_tensor, device_mesh, (Replicate(),))
+        with CommDebugMode() as comm_mode:
+            unbinded_dist_tensors = dist_tensor.unbind(dim=0)
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+        for elem in unbinded_dist_tensors:
+            self.assertEqual(elem.placements, (Replicate(),))
+
+    def test_unbind_on_partial(self):
+        self.run_subtests(
+            {
+                "reduce_op": ["sum", "avg", "min", "max"],
+                "unbind_dim": [0, -1],
+            },
+            self._test_unbind_on_partial,
+        )
+
+    def _test_unbind_on_partial(self, reduce_op: str, unbind_dim: int):
+        self.init_manual_seed_for_rank()
+        mesh = self.build_device_mesh()
+
+        partial_tensor = torch.randn(8, 8, device=self.device_type)
+        partial_dt = DTensor.from_local(
+            local_tensor=partial_tensor,
+            device_mesh=mesh,
+            placements=[Partial(reduce_op=reduce_op)],
+        )
+        with CommDebugMode() as comm_mode:
+            unbinded = torch.unbind(partial_dt, dim=unbind_dim)
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+        for elem in unbinded:
+            self.assertEqual(elem.placements, (Partial(reduce_op),))
+        self._test_op_on_dtensor(torch.unbind, partial_dt, dim=unbind_dim)
 
     @with_comms
     def test_select_scatter(self):

@@ -42,6 +42,9 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 from torch.utils import _pytree as pytree
 
 
+funcol = torch.ops.c10d_functional
+
+
 class TestViewOps(DTensorContinuousTestBase):
     world_size = 6
 
@@ -2399,11 +2402,10 @@ class TestViewOps(DTensorContinuousTestBase):
             self.assertEqual(r.full_tensor(), e)
 
     def test_flatten_then_unbind_on_strided_shard_dim(self):
-        """Verify _StridedShard is detected by unbind on the shard dim.
+        """Unbinding on a _StridedShard dim redistributes to Replicate.
 
-        gen_unbind_strategy uses is_tensor_dim_sharded which calls is_shard(),
-        missing _StridedShard. Unbinding on a _StridedShard dim should raise
-        RuntimeError (same as unbinding on a regular Shard dim).
+        No sharding rule covers the unbind dim, so the single-dim infra
+        redistributes the input to Replicate instead of raising.
         """
         mesh = init_device_mesh(self.device_type, (self.world_size,))
         shape = (2, self.world_size * 2, 3)
@@ -2414,9 +2416,15 @@ class TestViewOps(DTensorContinuousTestBase):
         self.assertIsInstance(dt_flat.placements[0], _StridedShard)
         self.assertEqual(dt_flat.placements[0].dim, 0)
 
-        # unbind on the _StridedShard dim (dim 0) — should raise
-        with self.assertRaises(RuntimeError):
-            torch.unbind(dt_flat, dim=0)
+        with CommDebugMode() as comm_mode:
+            results = torch.unbind(dt_flat, dim=0)
+        expected = torch.unbind(full.flatten(0, 1), dim=0)
+        self.assertEqual(comm_mode.get_total_counts(), 1)
+        self.assertEqual(comm_mode.get_comm_counts()[funcol.all_gather_into_tensor], 1)
+        self.assertEqual(len(results), len(expected))
+        for r, e in zip(results, expected):
+            self.assertEqual(r.placements, (Replicate(),))
+            self.assertEqual(r.full_tensor(), e)
 
     def test_flatten_then_add_strided_shard_inputs(self):
         """Verify _StridedShard is treated as shard in placement merge.
