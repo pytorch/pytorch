@@ -22,7 +22,7 @@ struct UnpackPivotsParams {
   uint32_t dim_size;
 };
 
-// General batched triangular solve: one independent RHS vector per thread.
+// Parameters for batched triangular solves.
 // Solves op(A) X = B (left) or X op(A) = B (right), where op applies an
 // optional transpose and/or conjugation.
 struct TriangularSolveParams {
@@ -34,6 +34,10 @@ struct TriangularSolveParams {
   bool conj; // op conjugates A (adjoint when combined with transpose)
   bool unit; // unit (implicit 1) diagonal
 };
+
+C10_METAL_CONSTEXPR uint32_t kTriangularSolveTileSize = 8;
+C10_METAL_CONSTEXPR uint32_t kTriangularSolveMppRows = 16;
+C10_METAL_CONSTEXPR uint32_t kTriangularSolveMppCols = 32;
 
 template <unsigned N = c10::metal::max_ndim>
 struct GeqrfParams {

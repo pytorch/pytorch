@@ -893,8 +893,10 @@ class IValueMetadataVisitor final : public libkineto::ITypedMetadataVisitor {
   }
 
   void visitValue(
-      const libkineto::MetadataField<libkineto::RawJson>& /*field*/,
-      const libkineto::RawJson& /*value*/) override {}
+      const libkineto::MetadataField<libkineto::RawJson>& field,
+      const libkineto::RawJson& value) override {
+    addValue(field.name, c10::IValue(value.value));
+  }
 
   void visitValue(
       const libkineto::MetadataField<uint64_t>& field,
