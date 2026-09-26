@@ -748,6 +748,9 @@ package = 'torch'
 "Documentation" = [
   ".spin/cmds.py:docs",
 ]
+"Test" = [
+  ".spin/cmds.py:test",
+]
 "Type" = [
     ".spin/cmds.py:pyrefly",
 ]

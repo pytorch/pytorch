@@ -612,6 +612,57 @@ def install():
     _native_aot_stage2()
 
 
+@click.command(context_settings={"ignore_unknown_options": True})
+@click.option(
+    "--ci",
+    is_flag=True,
+    help="Run through test/run_test.py, the orchestrator CI uses, instead of pytest.",
+)
+@click.argument("args", nargs=-1, type=click.UNPROCESSED)
+@click.pass_context
+def test(ctx, ci, args):
+    """Run tests.
+
+    `spin test ARGS` is `python -m pytest ARGS` from the repository root, so
+    test files, `-k` expressions and any pytest option pass through unchanged.
+    `spin test --ci ARGS` is `python test/run_test.py ARGS` instead: the
+    orchestrator CI uses, with suite selection by name, sharding, the
+    distributed and cpp_extension handlers, retries and the CI pytest
+    plugins. Examples:
+
+    \b
+        spin test test/test_nn.py                  # one file
+        spin test test/test_nn.py -k Linear -x     # pytest -k, stop at first failure
+        spin test test/test_nn.py --lf             # rerun the last failures
+        spin test --ci -i test_nn test_torch       # suites by name, as CI runs them
+        spin test --ci --core                      # the core suites only
+        spin test --ci                             # the runner's help, which lists the suites
+
+    Without arguments this prints this help; the full suite takes hours.
+    Needs an importable torch (`spin develop`). The runner checks for its
+    pytest plugins itself and names the requirements file that provides them.
+    """
+    if not args and not ci:
+        click.echo(ctx.get_help())
+        return
+    # Both runners import torch while collecting, so a missing build would
+    # surface as a bare traceback; run_test.py even needs it for --help.
+    probe = subprocess.run(
+        [sys.executable, "-c", "import torch"], capture_output=True, text=True
+    )
+    if probe.returncode != 0:
+        last = probe.stderr.strip().splitlines()[-1:]
+        raise click.ClickException(
+            "torch is not importable in this environment; build it first with "
+            "`spin develop`.\n" + "\n".join(last)
+        )
+    if ci:
+        cmd = [sys.executable, "test/run_test.py", *(args or ("--help",))]
+    else:
+        cmd = [sys.executable, "-m", "pytest", *args]
+    spin.util.run(cmd)
+
+
 PYREFLY_LINTER_SCRIPT = CWD / "tools" / "linter" / "adapters" / "pyrefly_linter.py"
 PYREFLY_CONFIG = CWD / "pyrefly.toml"
 
