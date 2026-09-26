@@ -49,17 +49,40 @@ class Partition:
 
 
 class _DependencyViewer:
-    def __init__(self, graph_module: GraphModule) -> None:
-        self.downstreams = collections.defaultdict(set)
+    """Lightweight, on-demand graph traversal helpers.
 
-        for node in reversed(graph_module.graph.nodes):
-            for output_node in node.users:
-                # add output_node and output_node's downstream dependency
-                self.downstreams[node].add(output_node)
-                self.downstreams[node].update(self.downstreams[output_node])
+    We intentionally avoid caching full transitive closures here to keep memory
+    bounded on large graphs; see `propose_partitions` for the overall
+    complexity trade-offs.
+    """
 
-    def downstreams_of(self, node: Node) -> set[Node]:
-        return self.downstreams[node]
+    @staticmethod
+    def downstreams_of(node: Node) -> set[Node]:
+        visited: set[Node] = set()
+        stack: list[Node] = list(node.users)
+
+        while stack:
+            current = stack.pop()
+            if current in visited:
+                continue
+            visited.add(current)
+            stack.extend(current.users)
+
+        return visited
+
+    @staticmethod
+    def upstreams_of(node: Node) -> set[Node]:
+        visited: set[Node] = set()
+        stack: list[Node] = list(node.all_input_nodes)
+
+        while stack:
+            current = stack.pop()
+            if current in visited:
+                continue
+            visited.add(current)
+            stack.extend(current.all_input_nodes)
+
+        return visited
 
 
 class CapabilityBasedPartitioner:
@@ -82,27 +105,22 @@ class CapabilityBasedPartitioner:
             else []
         )
         self.skip_horizontal_fusion = skip_horizontal_fusion
-        self.dependency_viewer = _DependencyViewer(graph_module)
 
     def _is_node_supported(self, node: Node) -> bool:
         return self.operator_support.is_node_supported(
             dict(self.graph_module.named_modules()), node
         )
 
-    def propose_partitions(self) -> list[Partition]:
+    def _propose_partitions_skip_horizontal_fusion(self) -> dict[int, Partition]:
         # partition_map is a mapping from partition id to a set of partition id's.
         # The value set contains all the partition ids that can be reached by doing a
         # DFS starting from the partition id in the key.
         partition_map: dict[int, set[int]] = collections.defaultdict(set)
 
-        # assumptions: nodes in candidate list is sorted in topological order
         assignment: dict[Node, int] = {}  # mapping from node to partition_id
         partitions_by_id: dict[
             int, Partition
         ] = {}  # mapping from partition_id to partition
-        nodes_order: dict[
-            Node, int
-        ] = {}  # mapping from nodes to reversed topological order
         partitions_order: dict[
             int, int
         ] = {}  # mapping from partition_id to minimum topo order of nodes in partition
@@ -118,7 +136,7 @@ class CapabilityBasedPartitioner:
             downstream_partition_ids: set[int] = set()
             for user_node in user_nodes:
                 for path_node in itertools.chain(
-                    (user_node,), self.dependency_viewer.downstreams_of(user_node)
+                    (user_node,), _DependencyViewer.downstreams_of(user_node)
                 ):
                     target_id = assignment.get(path_node)
                     if target_id is None:
@@ -142,7 +160,7 @@ class CapabilityBasedPartitioner:
                     visited_partition_ids = set()
 
                     for path_node in itertools.chain(
-                        (user_node,), self.dependency_viewer.downstreams_of(user_node)
+                        (user_node,), _DependencyViewer.downstreams_of(user_node)
                     ):
                         # If any of the nodes in the dfs path of this node are in the merged_nodes
                         # list then there is a cycle in the graph.
@@ -223,7 +241,7 @@ class CapabilityBasedPartitioner:
                 partitions_by_id[assignment[node]].remove_node(node)
 
             if id is None:
-                assignment.pop(node)
+                assignment.pop(node, None)
             elif id not in partitions_by_id:
                 assignment[node] = id
                 if node_order is None:
@@ -237,7 +255,7 @@ class CapabilityBasedPartitioner:
                 assignment[node] = id
                 partitions_by_id[id].add_node(node, node_order)
 
-        logger.debug("Proposing partitions...")
+        logger.debug("Proposing partitions with horizontal fusion disabled...")
 
         for node_order, node in enumerate(reversed(self.graph_module.graph.nodes)):
             # use Dict as an ordered set to ensure deterministic partitioning result, don't care value
@@ -253,23 +271,15 @@ class CapabilityBasedPartitioner:
             # independent consumer partitions around an unsupported node.
             if self._is_node_supported(node) and node not in assignment:
                 partition_id = next(new_partition_id)
-                nodes_order[node] = partition_id
                 partitions_order[partition_id] = partition_id
                 merge_single_node(node, node_order, partition_id)
                 merge_candidates[partition_id] = None
                 created_partition = True
 
-            if self.skip_horizontal_fusion:
-                if created_partition:
-                    for user in node.users:
-                        if user in assignment:
-                            merge_candidates[assignment[user]] = None
-            else:
-                # merge all possible partitions
-                for partition_id, _ in sorted(
-                    partitions_order.items(), key=operator.itemgetter(1)
-                ):
-                    merge_candidates[partition_id] = None
+            if created_partition:
+                for user in node.users:
+                    if user in assignment:
+                        merge_candidates[assignment[user]] = None
 
             merge_candidates_list = list(merge_candidates.keys())
             if len(merge_candidates_list) > 1:
@@ -292,7 +302,7 @@ class CapabilityBasedPartitioner:
         # (e.g., getitem_619 = getitem_618[0] where getitem_618 = with_effects_167[1])
         logger.debug("Reassigning getitem nodes to its producer node's partition...")
         while True:
-            nodes_reassignment: dict[Node, int] = {}
+            nodes_reassignment: dict[Node, int | None] = {}
             for node in self.graph_module.graph.nodes:
                 is_tuple_output = True
                 for user in node.users:
@@ -316,6 +326,265 @@ class CapabilityBasedPartitioner:
 
             for node, id in nodes_reassignment.items():
                 merge_single_node(node, None, id)
+
+        return partitions_by_id
+
+    def _finalize_partitions(
+        self, partitions_by_id: dict[int, Partition]
+    ) -> list[Partition]:
+        # filter out single node partitions
+        if not self.allows_single_node_partition:
+            logger.debug("Filtering out single node partitions...")
+            default_non_compute_ops = {"torch.ops.aten.view", "_operator.getitem"}
+            non_compute_ops = default_non_compute_ops.union(set(self.non_compute_ops))
+            partitions_to_remove: list[int] = []
+            for id, partition in partitions_by_id.items():
+                compute_node_count = 0
+                for node in partition.nodes:
+                    if node.op == "call_function":
+                        if not callable(node.target):
+                            raise AssertionError(
+                                f"Expected callable target, got {type(node.target)}"
+                            )
+                        if _get_qualified_name(node.target) not in non_compute_ops:
+                            compute_node_count += 1
+                        if (
+                            _get_qualified_name(node.target)
+                            in self.allowed_single_node_partition_ops
+                        ):
+                            compute_node_count += 1
+                if compute_node_count <= 1:
+                    partitions_to_remove.append(id)
+            for id in partitions_to_remove:
+                del partitions_by_id[id]
+
+        logger.debug("Partitions proposed:")
+        for id, partition in partitions_by_id.items():
+            logger.debug(
+                "partition #%s: %s", id, [node.name for node in partition.nodes]
+            )
+
+        return [
+            partition for partition in partitions_by_id.values() if partition.size() > 0
+        ]
+
+    def propose_partitions(self) -> list[Partition]:
+        """Group supported nodes into cycle-free partitions.
+
+        Legacy algorithm:
+        - Cached each node's full downstream reachability.
+        - Scanned supported nodes in reverse topological order and created a
+          single-node partition for each one.
+        - Repeatedly merged active partitions, rejecting merges that introduced
+          dependency cycles.
+
+        Current algorithm:
+        - Avoids the full reachability cache while preserving legacy partition
+          contents, IDs, partition order, and node order.
+        - A fast path when no unsupported node can occur between supported
+          nodes. It places all supported nodes in one partition.
+        - A general path that builds partitions in reverse topological order.
+          Unsupported nodes block their upstream nodes when including them
+          would create a dependency cycle.
+
+        Complexity:
+        - Assumes |E| ~= 2 * |V|
+        - V is the number of graph nodes.
+        - U is the number of unsupported nodes.
+        - P is the number of partitions built before filtering.
+        - Legacy default path: O(V^3) worst-case time and O(V^2) auxiliary
+          space.
+        - Current fast path: O(V) time and O(V) auxiliary space.
+        - Current general path: O(P * U * V) worst-case time and O(V) auxiliary
+          space. This becomes O(V^3) when P and U are both O(V).
+        - skip_horizontal_fusion=True uses the legacy direct-user merge path.
+        """
+        if self.skip_horizontal_fusion:
+            return self._finalize_partitions(
+                self._propose_partitions_skip_horizontal_fusion()
+            )
+
+        assignment: dict[Node, int] = {}  # mapping from node to partition_id
+        # mapping from partition_id to partition
+        partitions_by_id: dict[int, Partition] = {}
+        supported_map: dict[Node, bool] = {}
+        nodes: list[Node] = list(self.graph_module.graph.nodes)
+
+        needs_cycle_detection = False
+        for node in reversed(nodes):
+            is_supported = self._is_node_supported(node)
+            supported_map[node] = is_supported
+            if not needs_cycle_detection and not is_supported:
+                needs_cycle_detection = (
+                    len(node.all_input_nodes) > 0 and len(node.users) > 0
+                )
+        creation_ids = {
+            node: creation_id
+            for creation_id, node in enumerate(
+                node for node in reversed(nodes) if supported_map[node]
+            )
+        }
+
+        def legacy_partition_id(partition_nodes: Iterable[Node]) -> int:
+            """Return the ID retained by the legacy singleton-first merges."""
+            first_id: int | None = None
+            second_id: int | None = None
+            for node in partition_nodes:
+                creation_id = creation_ids[node]
+                if first_id is None or creation_id < first_id:
+                    second_id = first_id
+                    first_id = creation_id
+                elif second_id is None or creation_id < second_id:
+                    second_id = creation_id
+            return second_id if second_id is not None else (first_id or 0)
+
+        def reassign_getitem_to_partition(node: Node, target_id: int | None) -> None:
+            """Reassign a getitem node using the legacy None order."""
+            if target_id is None:
+                if node in assignment:
+                    partitions_by_id[assignment[node]].remove_node(node)
+                    assignment.pop(node)
+                return
+
+            current_id = assignment.get(node)
+            if current_id == target_id:
+                return
+
+            if current_id is not None:
+                partition = partitions_by_id.get(current_id)
+                if partition is not None and node in partition.nodes:
+                    partition.remove_node(node)
+                    if partition.size() == 0:
+                        partitions_by_id.pop(current_id, None)
+
+            if target_id not in partitions_by_id:
+                partitions_by_id[target_id] = Partition(id=target_id)
+            partitions_by_id[target_id].add_node(node)
+            assignment[node] = target_id
+
+        legacy_partition_ids: dict[int, int] = {}
+        if not needs_cycle_detection:
+            logger.debug("Proposing partitions with fast path (no cycles possible)...")
+            nodes_in_partition: list[Node] = []
+            node_orders: list[int] = []
+            node_count = len(nodes)
+            # Preserve graph order while retaining the legacy reverse-topological ranks.
+            for node_index, node in enumerate(nodes):
+                if supported_map[node]:
+                    nodes_in_partition.append(node)
+                    node_orders.append(node_count - node_index - 1)
+
+            partition_id = legacy_partition_id(nodes_in_partition)
+            assignment.update(dict.fromkeys(nodes_in_partition, partition_id))
+            partitions_by_id = {
+                partition_id: Partition(
+                    id=partition_id,
+                    nodes=nodes_in_partition,
+                    node_orders=node_orders,
+                )
+            }
+
+        else:
+
+            def greedy_partition(partition_id: int, start_index: int) -> None:
+                """Greedily pull supported upstream nodes while steering around
+                unsupported ops that already feed the current partition.
+
+                Blocklist grows when an unsupported node would flow into the
+                current partition; its upstreams are skipped for this build.
+                """
+                blocklist: set[Node] = set()
+                current_partition = Partition(id=partition_id)
+                partitions_by_id[partition_id] = current_partition
+
+                for idx in range(start_index, len(nodes)):
+                    node_idx = len(nodes) - 1 - idx
+                    candidate_node = nodes[node_idx]
+                    # Neither condition is a topological stopping point across sibling branches.
+                    if candidate_node in assignment or candidate_node in blocklist:
+                        continue
+                    if not supported_map[candidate_node]:
+                        if (
+                            _DependencyViewer.downstreams_of(candidate_node)
+                            & current_partition.nodes.keys()
+                        ):
+                            blocklist.update(
+                                _DependencyViewer.upstreams_of(candidate_node)
+                            )
+                        continue
+                    assignment[candidate_node] = partition_id
+                    current_partition.add_node(candidate_node, idx)
+
+            logger.debug(
+                "Proposing partitions with general path (cycle detection enabled)..."
+            )
+
+            partition_id = 0
+            for i, node in enumerate(reversed(nodes)):
+                if node in assignment:
+                    continue
+                if not supported_map[node]:
+                    continue
+                partition_id += 1
+                greedy_partition(partition_id, i)
+
+            legacy_partition_ids = {
+                current_id: legacy_partition_id(partition.nodes)
+                for current_id, partition in partitions_by_id.items()
+            }
+
+            # sort partition nodes based on descending node order
+            for partition in partitions_by_id.values():
+                partition.nodes = dict(
+                    sorted(
+                        partition.nodes.items(),
+                        key=operator.itemgetter(1),
+                        reverse=True,
+                    )
+                )
+
+        # post processing to re-assign "getitem" nodes into upstream partition
+        # Run iteratively until no more changes, to handle nested getitem chains
+        # (e.g., getitem_619 = getitem_618[0] where getitem_618 = with_effects_167[1])
+        logger.debug("Reassigning getitem nodes to its producer node's partition...")
+        while True:
+            nodes_reassignment: dict[Node, int | None] = {}
+            for node in self.graph_module.graph.nodes:
+                is_tuple_output = True
+                for user in node.users:
+                    if (
+                        user.op != "call_function"
+                        or _get_qualified_name(user.target) != "_operator.getitem"
+                    ):  # type: ignore[arg-type]
+                        is_tuple_output = False
+                        break
+
+                # node has tuple outputs, re-assign all following getitem node into node's partition
+                if is_tuple_output:
+                    id = assignment.get(node)  # type: ignore[arg-type]
+                    for user in node.users:
+                        if assignment.get(user) != id:  # type: ignore[arg-type]
+                            nodes_reassignment[user] = id  # type: ignore[assignment]
+
+            # no more re-assignments
+            if not nodes_reassignment:
+                break
+
+            for node, id in nodes_reassignment.items():
+                reassign_getitem_to_partition(node, id)
+
+        if needs_cycle_detection:
+            partitions_by_id = dict(
+                sorted(
+                    (
+                        legacy_partition_ids[current_id],
+                        partition,
+                    )
+                    for current_id, partition in partitions_by_id.items()
+                )
+            )
+            for partition_id, partition in partitions_by_id.items():
+                partition.id = partition_id
 
         # filter out single node partitions
         if not self.allows_single_node_partition:
