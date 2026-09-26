@@ -486,10 +486,11 @@ class BaseBuiltinVariable(VariableTracker):
         # to super().
         fn = self.as_python_constant()
         source = self.source and AttrSource(self.source, name)
-        attr = getattr(fn, name, None)
-        return variables.GetAttrVariable(
-            self, name, py_type=type(attr) if attr is not None else None, source=source
-        )
+        try:
+            attr = getattr(fn, name)
+        except AttributeError:
+            raise_observed_exception(AttributeError, tx)
+        return variables.GetAttrVariable(self, name, py_type=type(attr), source=source)
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
@@ -2995,10 +2996,11 @@ class BuiltinVariable(BaseBuiltinVariable):
                 raise_observed_exception(AttributeError, tx)
             if not callable(value):
                 return VariableTracker.build(tx, value, source)
-        attr = getattr(self.fn, name, None)
-        return variables.GetAttrVariable(
-            self, name, py_type=type(attr) if attr is not None else None, source=source
-        )
+        try:
+            attr = getattr(self.fn, name)
+        except AttributeError:
+            raise_observed_exception(AttributeError, tx)
+        return variables.GetAttrVariable(self, name, py_type=type(attr), source=source)
 
     def call_delattr(
         self,
