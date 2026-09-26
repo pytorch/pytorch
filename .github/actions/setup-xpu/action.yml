@@ -31,6 +31,57 @@ runs:
       run: |
         timeout 30 xpu-smi discovery || true
 
+    - name: Runner health check GPU
+      if: always()
+      shell: bash
+      run: |
+        if ! discovery=$(timeout 30 xpu-smi discovery -j); then
+          echo "Error: Failed to discover GPUs on the runner"
+          exit 1
+        fi
+
+        device_ids=$(jq -r '.. | objects | .device_id? // empty' <<< "$discovery" | sort -nu)
+
+        if [[ ${#device_ids[@]} -eq 0 ]]; then
+          echo "Error: Failed to detect any GPUs on the runner"
+          exit 1
+        fi
+
+        for device_id in "${device_ids[@]}"; do
+          if ! info=$(timeout 30 xpu-smi discovery -d "$device_id" -j); then
+            echo "Error: Failed to query GPU $device_id"
+            exit 1
+          fi
+
+          device_name=$(jq -r '.device_name // empty' <<< "$info")
+          device_state=$(jq -r '.device_state // empty' <<< "$info")
+          gfx_firmware_status=$(jq -r '.gfx_firmware_status // empty' <<< "$info")
+
+          if [[ -z "$device_name" ]]; then
+            echo "Error: Failed to detect GPU $device_id"
+            exit 1
+          fi
+
+          # Newer xpu-smi versions expose device_state, while older/LTS
+          # versions may only expose gfx_firmware_status.
+          if [[ -n "$device_state" ]]; then
+            if [[ "$device_state" != "normal" ]]; then
+              echo "Error: GPU $device_id is not in normal state: $device_state"
+              exit 1
+            fi
+          elif [[ -n "$gfx_firmware_status" ]]; then
+            if [[ "$gfx_firmware_status" != "normal" ]]; then
+              echo "Error: GPU $device_id GFX firmware is not in normal state: $gfx_firmware_status"
+              exit 1
+            fi
+          else
+            echo "Error: Unable to determine health state of GPU $device_id"
+            exit 1
+          fi
+
+          echo "GPU $device_id is healthy: $device_name"
+        done
+
     - name: Runner health check GPU count
       if: always()
       shell: bash
