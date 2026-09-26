@@ -32,7 +32,7 @@ class _FakeBackendDevices(list):
     """
     Device types supported by the fake backend.
 
-    Third-party accelerators (e.g. npu) register themselves through
+    Third-party accelerators register themselves through
     torch.accelerator, but this module may be imported before (or even during)
     the import of the backend module — e.g. the backend autoloads through
     ``torch._import_device_backends`` and its import chain pulls in test infra
