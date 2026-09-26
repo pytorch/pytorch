@@ -94,6 +94,11 @@ class TestMemoryTracker(TestCase):
         self.assertEqual(len(tracker.memories_allocated), tracker._op_index)
         self.assertEqual(len(tracker.memories_active), tracker._op_index)
         self.assertEqual(len(tracker.memories_reserved), tracker._op_index)
+        # The stats must come from a real allocator: with live activations,
+        # nonzero allocated memory should be observed at some operator.
+        self.assertTrue(
+            any(mem > 0 for (_, mem) in tracker.memories_allocated.values())
+        )
         self.assertTrue(len(tracker._markers) == 2)
         self.assertTrue(tracker._cur_module_name != "")
         self.assertTrue(hasattr(tracker, "_num_alloc_retries"))
