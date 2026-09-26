@@ -215,7 +215,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
         scalar_accumulators = AutotuneHint.SCALAR_ACCUMULATORS in inductor_meta.get(
             "autotune_hints", ()
         )
-        MAX_R0_BLOCK = 1024 if device_major is not None and device_major >= 10 else 2048
+        MAX_R0_BLOCK = self._max_r0_block(device_major)
         if size_hints["x"] >= 1024 and loads_and_red >= 10:
             MAX_R0_BLOCK = 1024
             register_intensive = True
@@ -525,6 +525,11 @@ class ReductionHeuristic(CodegenConfigHeuristics):
     # Hook methods for device-specific overrides
     # ------------------------------------------------------------------
 
+    def _max_r0_block(self, device_major: int | None) -> int:
+        """Architecture cap on R0_BLOCK, before workload-specific limits."""
+        # SM100+ (B200/GB200) needs the smaller cap.
+        return 1024 if device_major is not None and device_major >= 10 else 2048
+
     def _get_outer_config(
         self,
         make_config,
@@ -728,6 +733,10 @@ class ReductionHeuristic(CodegenConfigHeuristics):
 @register_codegen_heuristic("reduction", "hip", register=torch.version.hip is not None)
 class ROCmReductionHeuristic(ReductionHeuristic):
     """Reduction configs for ROCm/HIP devices."""
+
+    def _max_r0_block(self, device_major: int | None) -> int:
+        # gfx major is not an NVIDIA SM version, so keep the default cap.
+        return 2048
 
     def _get_outer_config(
         self,

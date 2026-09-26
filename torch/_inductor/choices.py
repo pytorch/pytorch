@@ -563,7 +563,8 @@ class InductorChoices:
         # Chosen GB200 thresholds: 32768 for xnumel < num_sm, otherwise 40960.
         # Reducing these thresholds further did not improve scenario (2), but
         # hurts scenario (1).
-        if props.major is not None and props.major >= 10:
+        # On ROCm major is the gfx major, not an NVIDIA SM version.
+        if props.type == "cuda" and props.major is not None and props.major >= 10:
             if xnumel < num_sm:
                 return 32768
             return 40960
