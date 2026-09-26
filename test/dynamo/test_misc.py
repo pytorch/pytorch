@@ -1709,6 +1709,18 @@ graph():
         self.assertEqual(opt_fn(x), fn(x))
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_builtin_eval_literal_bool_expr(self):
+        def fn():
+            return (
+                eval("1, 0 or 1"),
+                eval("0 and 1, 2 or 3"),
+                eval("1 or (1 / 0)"),
+                eval("0 and (1 / 0)"),
+            )
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(), fn())
+
     def test_builtin_eval_rejects_non_constant_expr(self):
         def fn(x):
             return x + eval("len([1])")
