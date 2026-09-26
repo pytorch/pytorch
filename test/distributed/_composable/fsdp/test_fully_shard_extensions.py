@@ -623,5 +623,209 @@ class TestFullyShardAllGatherExtensionsMultiThread(
         self.assertEqual(tls.mesh.size(), shard_size)
 
 
+class TestFullyShardAllGatherExtensionsWorldSize1(
+    TestFullyShardAllGatherExtensionsCommon, FSDPTestMultiThread
+):
+    @property
+    def world_size(self) -> int:
+        return 1
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device(device_type)
+
+    @skip_if_lt_x_gpu(1, allow_cpu=True)
+    def test_all_gather_extensions_train_parity(self):
+        for pre_all_gather_version in (1, 2):
+            with self._patch_two_tensor_fsdp_all_gather(pre_all_gather_version):
+                self.run_subtests(
+                    {"reshard_after_forward": [True, False]},
+                    self._test_train_parity,
+                )
+
+    def _test_train_parity(self, reshard_after_forward: bool):
+        torch.manual_seed(42)
+        model = self._init_two_tensor_mlp()
+        ref_model = copy.deepcopy(model).to(device_type)
+        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2, foreach=True)
+        for mlp in model:
+            fully_shard(mlp, reshard_after_forward=reshard_after_forward)
+        fully_shard(model, reshard_after_forward=reshard_after_forward)
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=True)
+        check_sharded_parity(self, ref_model, model)
+
+        torch.manual_seed(42 + self.rank + 1)
+        inp = torch.randn((2, 8), device=device_type)
+        for iter_idx in range(3):
+            # The reference gradients need no all-reduce at world size 1
+            losses: list[torch.Tensor] = []
+            for _model in (ref_model, model):
+                losses.append(_model(inp).sum())
+                losses[-1].backward()
+            self.assertEqual(losses[0], losses[1])
+            check_sharded_parity(self, ref_model, model)
+            for _optim in (ref_optim, optim):
+                _optim.step()
+                _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
+            check_sharded_parity(self, ref_model, model)
+
+    @skip_if_lt_x_gpu(1, allow_cpu=True)
+    def test_all_gather_extensions_meta_init_mixed_precision(self):
+        for pre_all_gather_version in (1, 2):
+            with self._patch_two_tensor_fsdp_all_gather(pre_all_gather_version):
+                self.run_subtests(
+                    {"reshard_after_forward": [True, False]},
+                    self._test_meta_init_mixed_precision,
+                )
+
+    def _test_meta_init_mixed_precision(self, reshard_after_forward: bool):
+        with torch.device("meta"):
+            model = self._init_two_tensor_mlp()
+        fully_shard_fn = functools.partial(
+            fully_shard,
+            reshard_after_forward=reshard_after_forward,
+            mp_policy=MixedPrecisionPolicy(param_dtype=torch.bfloat16),
+        )
+        for mlp in model:
+            fully_shard_fn(mlp)
+        fully_shard_fn(model)
+        model.to_empty(device=self.device)
+        for param in model.parameters():
+            nn.init.trunc_normal_(param)
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=True)
+
+        torch.manual_seed(42 + self.rank + 1)
+        inp = torch.randn((2, 8), device=device_type)
+        for _ in range(2):
+            model(inp).sum().backward()
+            optim.step()
+            optim.zero_grad()
+
+    @skip_if_lt_x_gpu(1, allow_cpu=True)
+    def test_post_all_gather_receives_all_inputs(self):
+        for pre_all_gather_version in (1, 2):
+            with self._patch_two_tensor_fsdp_all_gather(pre_all_gather_version):
+                self.run_subtests(
+                    {"reshard_after_forward": [True, False]},
+                    self._test_post_all_gather_receives_all_inputs,
+                )
+
+    def _test_post_all_gather_receives_all_inputs(self, reshard_after_forward: bool):
+        test_case = self
+        num_post_all_gather_calls = 0
+
+        def recording_post_all_gather(
+            self,
+            all_gather_outputs: tuple[torch.Tensor, ...],
+            metadata: Any,
+            param_dtype: torch.dtype,
+            *,
+            out: torch.Tensor | None = None,
+        ) -> tuple[torch.Tensor, tuple[torch.Tensor, ...]] | None:
+            nonlocal num_post_all_gather_calls
+            num_post_all_gather_calls += 1
+            # Check the count before delegating since the delegate destructures
+            # its argument and would raise a less specific unpacking error
+            test_case.assertEqual(len(all_gather_outputs), 2)
+            a, b = all_gather_outputs
+            test_case.assertEqual(a, self.a)
+            test_case.assertEqual(b, self.b)
+            return two_tensor_fsdp_post_all_gather(
+                self, all_gather_outputs, metadata, param_dtype, out=out
+            )
+
+        TwoTensor.fsdp_post_all_gather = recording_post_all_gather
+        torch.manual_seed(42)
+        model = self._init_two_tensor_mlp()
+        for mlp in model:
+            fully_shard(mlp, reshard_after_forward=reshard_after_forward)
+        fully_shard(model, reshard_after_forward=reshard_after_forward)
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=True)
+
+        # Two iterations so that the repeat-unshard `out=` branch of
+        # `fsdp_post_all_gather` runs in addition to the first unshard
+        torch.manual_seed(42 + self.rank + 1)
+        inp = torch.randn((2, 8), device=device_type)
+        for _ in range(2):
+            model(inp).sum().backward()
+            optim.step()
+            optim.zero_grad()
+        self.assertGreater(num_post_all_gather_calls, 0)
+
+    @skip_if_lt_x_gpu(1, allow_cpu=True)
+    def test_post_all_gather_mixed_dtype_and_numel(self):
+        self.run_subtests(
+            {"reshard_after_forward": [True, False]},
+            self._test_post_all_gather_mixed_dtype_and_numel,
+        )
+
+    def _test_post_all_gather_mixed_dtype_and_numel(self, reshard_after_forward: bool):
+        test_case = self
+        num_post_all_gather_calls = 0
+
+        # Define a pre/post-all-gather pair shaped like a quantization
+        # extension: the all-gather inputs differ from each other in both dtype
+        # and numel, unlike `TwoTensor`'s two same-shape halves
+        def fsdp_pre_all_gather(
+            self,
+            mesh: DeviceMesh,
+            outer_size: torch.Size,
+            outer_stride: tuple[int, ...],
+            module: nn.Module,
+            mp_policy: MixedPrecisionPolicy,
+        ) -> tuple[tuple[torch.Tensor, ...], Any]:
+            scale = self.abs().amax().reshape(1).to(torch.float32)
+            data = (self / scale * 127).to(torch.int8)
+            return (data, scale), None
+
+        @torch.no_grad()
+        def fsdp_post_all_gather(
+            self,
+            all_gather_outputs: tuple[torch.Tensor, ...],
+            metadata: Any,
+            param_dtype: torch.dtype,
+            *,
+            out: torch.Tensor | None = None,
+        ) -> tuple[torch.Tensor, tuple[torch.Tensor, ...]] | None:
+            nonlocal num_post_all_gather_calls
+            num_post_all_gather_calls += 1
+            test_case.assertEqual(len(all_gather_outputs), 2)
+            data, scale = all_gather_outputs
+            test_case.assertEqual(data.dtype, torch.int8)
+            test_case.assertEqual(scale.dtype, torch.float32)
+            test_case.assertEqual(scale.numel(), 1)
+            test_case.assertEqual(data.numel(), self.numel())
+            dequantized = data.to(param_dtype) * scale.to(param_dtype) / 127
+            if out is not None:
+                with _unsafe_preserve_version_counter(out):
+                    out.copy_(dequantized)
+                return
+            return dequantized, (dequantized,)
+
+        torch.manual_seed(42)
+        model = nn.Sequential(*[MLP(8, bias=False) for _ in range(2)])
+        for mlp in model:
+            fully_shard(mlp, reshard_after_forward=reshard_after_forward)
+        fully_shard(model, reshard_after_forward=reshard_after_forward)
+        for param_name, param in model.named_parameters():
+            if "weight" in param_name:
+                local_param = param._local_tensor
+                local_param.fsdp_pre_all_gather = fsdp_pre_all_gather.__get__(
+                    local_param
+                )
+                local_param.fsdp_post_all_gather = fsdp_post_all_gather.__get__(
+                    local_param
+                )
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=True)
+
+        torch.manual_seed(42 + self.rank + 1)
+        inp = torch.randn((2, 8), device=device_type)
+        for _ in range(2):
+            model(inp).sum().backward()
+            optim.step()
+            optim.zero_grad()
+        self.assertGreater(num_post_all_gather_calls, 0)
+
+
 if __name__ == "__main__":
     run_tests()

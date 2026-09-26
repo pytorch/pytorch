@@ -47,7 +47,7 @@ from ._fsdp_common import (
     ShardPlacementFnResult,
     TrainingState,
 )
-from ._fsdp_param import alloc_storage, FSDPParam, ParamModuleInfo, ShardedState
+from ._fsdp_param import FSDPParam, ParamModuleInfo, ShardedState
 
 
 if TYPE_CHECKING:
@@ -486,31 +486,35 @@ class FSDPParamGroup:
         else:
             world_size = 1
         if world_size == 1:
-            # directly initialize unsharded parameters from sharded parameters
-
+            # No collective to run: copy each all-gather input directly into
+            # its all-gather output, which foreach_all_gather_copy_out does
+            # otherwise
             for fsdp_param in self.fsdp_params:
-                # Use all_gather_inputs which already handles conversion to param_dtype
-                # This is consistent with the world_size > 1 path
-                all_gather_input = fsdp_param.all_gather_inputs[0]
-
-                # Make sure the all_gather_outputs has proper storage size before using it
-                # First ensure we have at least one tensor in all_gather_outputs
+                # `all_gather_inputs` re-runs the pre-all-gather extension hook
+                # on every access, so bind it once
+                all_gather_inputs = fsdp_param.all_gather_inputs
                 fsdp_param.init_all_gather_outputs(
-                    [all_gather_input.numel()],
-                    [all_gather_input.dtype],
+                    [t.numel() for t in all_gather_inputs],
+                    [t.dtype for t in all_gather_inputs],
                     world_size,
                     self.device,
                 )
-
-                tensor = fsdp_param.all_gather_outputs[0]
-                alloc_storage(tensor)
-
+                fsdp_param.alloc_all_gather_outputs()
+                all_gather_outputs = fsdp_param.all_gather_outputs
+                non_inference_outputs = [
+                    t for t in all_gather_outputs if not t.is_inference()
+                ]
                 with (
-                    torch.autograd._unsafe_preserve_version_counter(tensor)
-                    if not tensor.is_inference()
+                    torch.autograd._unsafe_preserve_version_counter(
+                        tuple(non_inference_outputs)
+                    )
+                    if non_inference_outputs
                     else contextlib.nullcontext()
                 ):
-                    tensor.copy_(all_gather_input)
+                    for all_gather_output, all_gather_input in zip(
+                        all_gather_outputs, all_gather_inputs, strict=True
+                    ):
+                        all_gather_output.copy_(all_gather_input)
 
         else:
             with record_function(self._with_fqn("FSDP::all_gather_copy_out")):

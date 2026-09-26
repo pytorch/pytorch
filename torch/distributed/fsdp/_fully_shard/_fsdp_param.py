@@ -955,7 +955,9 @@ class FSDPParam:
         return tuple(
             t.view(-1, *s[1:])
             for t, s in zip(
-                self.all_gather_outputs, self._extensions_data.all_gather_input_sizes
+                self.all_gather_outputs,
+                self._extensions_data.all_gather_input_sizes,
+                strict=True,
             )
         )
 
