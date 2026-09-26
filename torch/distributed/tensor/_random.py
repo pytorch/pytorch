@@ -51,7 +51,7 @@ def register_rng_tracker(device_type: str, tracker_cls: type["_RNGStateTracker"]
     ``register_graphsafe_rng_dispatch`` in ``torch/_prims/rng_prims.py``.
 
     Args:
-        device_type (str): The device type the tracker handles (e.g. ``"npu"``).
+        device_type (str): The device type the tracker handles (e.g. ``"cuda"``, ``"xpu"``, or a vendor backend name).
         tracker_cls (type): The tracker class to register.
 
     Returns:
