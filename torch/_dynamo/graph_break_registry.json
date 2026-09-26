@@ -2173,6 +2173,17 @@
       ]
     }
   ],
+  "GB5821": [
+    {
+      "Gb_type": "register_post_accumulate_grad_hook on an intermediate tensor",
+      "Context": "str(self)",
+      "Explanation": "Dynamo cannot preserve post-accumulate hook semantics for an intermediate tensor without compiled autograd.",
+      "Hints": [
+        "Move the hook registration outside the compiled region.",
+        "Use compiled autograd if the hook must be registered inside it."
+      ]
+    }
+  ],
   "GB0139": [
     {
       "Gb_type": "Unsupported autograd.Function context method",
@@ -2335,6 +2346,18 @@
       "Context": "source: {self.source}",
       "Explanation": "Dynamo determined that a graph break should occur when calling `{self.source.name}`. Reason: {self.msg}",
       "Hints": []
+    }
+  ],
+  "GB5210": [
+    {
+      "Gb_type": "Constant fold with a rank-relative device",
+      "Context": "fqn(self.value)",
+      "Explanation": "`{fqn(self.value)}` was called with the current device, whose index is only known at runtime under compile_on_one_rank, so the result cannot be folded into the graph.",
+      "Hints": [
+        "This graph break is expected under compile_on_one_rank.",
+        "The resumed eager call observes the running rank's device.",
+        "Pass an explicit device if the value is the same on every rank."
+      ]
     }
   ],
   "GB9672": [
@@ -2785,6 +2808,16 @@
       "Explanation": "Dynamo doesn't support writing to immutable/sourceless cell variables.",
       "Hints": [
         "This graph break may be difficult to debug. Please report an issue to PyTorch for assistance."
+      ]
+    }
+  ],
+  "GB1583": [
+    {
+      "Gb_type": "builtin isinstance() with classinfo that does not support issubclass()",
+      "Context": "isinstance({arg}, {isinstance_type})",
+      "Explanation": "issubclass({arg_type}, {member}) raised TypeError: {e}. Dynamo emulates isinstance() with issubclass() for this argument and cannot determine the result.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
@@ -3312,6 +3345,16 @@
       ]
     }
   ],
+  "GB6602": [
+    {
+      "Gb_type": "setattr() on Tensor.data with different shape",
+      "Context": "setattr({obj}, {name}, {val})",
+      "Explanation": "Dynamo does not trace shape-changing `.data` mutations on differentiable tensors. AOTAutograd assumes graph input metadata is stable while building the backward graph.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB9352": [
     {
       "Gb_type": "Data-dependent uint64 torch.Size element in torch._C._infer_size",
@@ -3814,6 +3857,26 @@
       "Explanation": "Attempted to call `torch.from_numpy` with config `torch._dynamo.config.trace_numpy` set to `False`.",
       "Hints": [
         "Change `torch._dynamo.config.trace_numpy` to `True`."
+      ]
+    }
+  ],
+  "GB1350": [
+    {
+      "Gb_type": "length_hint with a non-constant result",
+      "Context": "length_hint {obj} returned {hint}",
+      "Explanation": "Dynamo cannot verify the type and range of a non-constant __length_hint__ result.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0507": [
+    {
+      "Gb_type": "length_hint with a non-constant default",
+      "Context": "length_hint default {args[1]}",
+      "Explanation": "Dynamo cannot convert a non-constant default to an integer index.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
@@ -4458,6 +4521,16 @@
       "Explanation": "Dynamo does not yet model this C-level descriptor deleter for user-defined objects.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB1392": [
+    {
+      "Gb_type": "Attribute mutation on a sourced but untracked user-defined object",
+      "Context": "object={self}, name={name_str}, value={value}",
+      "Explanation": "Dynamo encountered a sourced user-defined object that supports mutation tracking but was not registered for it.",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
       ]
     }
   ],
@@ -5947,6 +6020,16 @@
       ]
     }
   ],
+  "GB9182": [
+    {
+      "Gb_type": "setattr() on Parameter.data with different shape",
+      "Context": "setattr({obj}, {name}, {val})",
+      "Explanation": "Dynamo does not trace shape-changing `.data` mutations on differentiable parameters. AOTAutograd assumes graph input metadata is stable while building the backward graph.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB4198": [
     {
       "Gb_type": "Attempted to copy.deepcopy a tensor",
@@ -6426,6 +6509,16 @@
       "Explanation": "Dynamo does not know the equality comparison of the underlying python object for {self}",
       "Hints": [
         "Consider using a different type of object as the dictionary key instead of {self.python_type()}.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB1940": [
+    {
+      "Gb_type": "Attribute mutation on an untracked user-defined object",
+      "Context": "object={self}, name={name_str}, value={value}",
+      "Explanation": "Dynamo cannot safely apply this attribute mutation because the object is not tracked for mutation.",
+      "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }

@@ -1604,7 +1604,7 @@ class TestMaxAutotune(TestCase):
     @config.patch(
         {
             "max_autotune_gemm_backends": "TRITON",
-            "benchmark_epilogue_fusion": False,
+            "benchmark_template_fusion": False,
         }
     )
     def test_cat_max_autotune_triton(self):
@@ -1764,7 +1764,7 @@ class TestMaxAutotune(TestCase):
         b = torch.zeros([16, 16], device=GPU_TYPE)
         with (
             patch.object(AlgorithmSelectorCache, "lookup", mock_lookup),
-            config.patch(benchmark_epilogue_fusion=multi_template),
+            config.patch(benchmark_template_fusion=multi_template),
         ):
             with self.assertRaises(BackendCompilerFailed) as context:
                 torch.compile(lambda a, b: a.matmul(b))(a, b)
@@ -3711,7 +3711,7 @@ class TestMaxAutotune(TestCase):
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "Triton",
                 "epilogue_fusion": True,
-                "benchmark_epilogue_fusion": False,
+                "benchmark_template_fusion": False,
             }
         ):
             if use_addmm:
@@ -3759,7 +3759,7 @@ class TestMaxAutotune(TestCase):
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "Triton",
                 "epilogue_fusion": False,
-                "benchmark_epilogue_fusion": False,
+                "benchmark_template_fusion": False,
             }
         ):
             if use_addmm:
@@ -3801,7 +3801,7 @@ class TestMaxAutotune(TestCase):
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "Triton",
                 "epilogue_fusion": True,
-                "benchmark_epilogue_fusion": False,
+                "benchmark_template_fusion": False,
             }
         ):
             if use_addmm:
@@ -4988,7 +4988,7 @@ class TestPrologueFusion(TestCase):
                 {
                     "max_autotune": True,
                     "prologue_fusion": True,
-                    "benchmark_epilogue_fusion": False,
+                    "benchmark_template_fusion": False,
                     "shape_padding": False,
                     "max_autotune_gemm_backends": "TRITON",
                     "test_configs.max_mm_configs": 4,  # significantly speeds up tests
@@ -5147,8 +5147,8 @@ class TestPrologueFusion(TestCase):
     @config.patch(
         {
             "max_autotune_gemm_backends": "Triton",
-            "benchmark_epilogue_fusion": True,
-            "max_epilogue_benchmarked_choices": 3,
+            "benchmark_template_fusion": True,
+            "max_template_fusion_benchmarked_choices": 3,
         }
     )
     @parametrize("use_async_compile", (True, False))
@@ -5201,8 +5201,8 @@ class TestPrologueFusion(TestCase):
     @config.patch(
         {
             "max_autotune_gemm_backends": "Triton",
-            "benchmark_epilogue_fusion": True,
-            "max_epilogue_benchmarked_choices": 3,
+            "benchmark_template_fusion": True,
+            "max_template_fusion_benchmarked_choices": 3,
         }
     )
     @parametrize("use_async_compile", (True, False))
@@ -5215,11 +5215,31 @@ class TestPrologueFusion(TestCase):
             torch._inductor.async_compile.AsyncCompile.wait_pool_ready()
 
         x = torch.rand([128, 128], dtype=torch.float16, device=GPU_TYPE)
-        out, code = run_and_get_code(torch.compile(test_multiple_fusions), x)
-        FileCheck().check(get_func_call()).check_count(
-            get_kernel_launch(), 1, exactly=True
-        ).run(code[0])
-        self.assertEqual(out, test_multiple_fusions(x), atol=0.05, rtol=0.05)
+
+        # Mock benchmarks as in test_pending_fusions_multiple: at 128x128 every
+        # kernel is launch bound and the fusion decisions ride on a ~2 us margin.
+        benchmark_patches = (
+            mock.patch.object(
+                Scheduler,
+                "benchmark_fused_nodes",
+                return_value=(1.0, ""),
+            ),
+            mock.patch.object(
+                Scheduler,
+                "benchmark_codegened_module",
+                return_value=(0.5, ""),
+            ),
+        )
+
+        with contextlib.ExitStack() as stack:
+            for patcher in benchmark_patches:
+                stack.enter_context(patcher)
+
+            out, code = run_and_get_code(torch.compile(test_multiple_fusions), x)
+            FileCheck().check(get_func_call()).check_count(
+                get_kernel_launch(), 1, exactly=True
+            ).run(code[0])
+            self.assertEqual(out, test_multiple_fusions(x), atol=0.05, rtol=0.05)
 
     @parametrize("sizes", ((64, 128, 256), (128, 128, 128), (63, 120, 250)))
     @parametrize("use_async_compile", (True, False))
@@ -5349,7 +5369,7 @@ class TestPrologueFusion(TestCase):
         if use_async_compile:
             torch._inductor.async_compile.AsyncCompile.wait_pool_ready()
 
-        with config.patch(benchmark_epilogue_fusion=benchmark_fusion):
+        with config.patch(benchmark_template_fusion=benchmark_fusion):
             x = torch.rand([M, K], dtype=torch.float, device=GPU_TYPE)
 
             out, code = run_and_get_code(torch.compile(foo), x)
@@ -5386,7 +5406,7 @@ class TestPrologueFusion(TestCase):
     @config.patch(
         {
             "max_autotune": True,
-            "benchmark_epilogue_fusion": True,
+            "benchmark_template_fusion": True,
             "epilogue_fusion": True,
             "prologue_fusion": True,
         }
@@ -5521,7 +5541,7 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
                 {
                     "max_autotune": True,
                     "autotune_fallback_to_aten": False,
-                    "benchmark_epilogue_fusion": False,
+                    "benchmark_template_fusion": False,
                     "prologue_fusion": False,
                 }
             )
@@ -5713,9 +5733,9 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
                 return fut, mod
 
             # Different paths:
-            # benchmark_epilogue_fusion: True -> always multi_template
+            # benchmark_template_fusion: True -> always multi_template
             # causes benchmarking always
-            # benchmark_epilogue_fusion: False -> TritonTemplateBuffer
+            # benchmark_template_fusion: False -> TritonTemplateBuffer
             # returns speedup_from_fusion automatically as True
             # What we want: force multi template -> no benchmarking with safety
             try:
@@ -7107,7 +7127,7 @@ class TestMaxAutotuneAsyncPipelined(TestMaxAutotune, TestEpilogueFusionStaticAna
         cls._async_config = config.patch(
             {
                 "pipeline_max_autotune_gemm": True,
-                "benchmark_epilogue_fusion": False,
+                "benchmark_template_fusion": False,
                 "test_configs.max_mm_configs": 1,
             }
         )
