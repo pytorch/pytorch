@@ -65,6 +65,7 @@ from torch._inductor.codecache import XPUCodeCache
 from torch._inductor.codegen.cutlass.kernel import CUTLASSTemplateCaller
 from torch._inductor.codegen.cutlass.utils import (
     _gen_ops_cached,
+    _normalize_cuda_arch,
     get_max_alignment,
     try_import_cutlass,
 )
@@ -351,6 +352,17 @@ class TestCutlassBackend(TestCase):
         int8_ops = [op for op in cutlass_ops if "s8_s8_s32" in op.configuration_name()]
         self.assertGreater(len(cutlass_ops), 0)
         self.assertEqual(int8_ops, [])
+
+    @skipXPUIf(True, "CUDA-specific CUTLASS arch feature set")
+    def test_sm121_reuses_sm120_generator(self):
+        from torch.utils import _pytree as pytree
+
+        self.assertTrue(try_import_cutlass())
+        self.assertEqual(_normalize_cuda_arch("sm_121"), "121")
+
+        ops = pytree.tree_flatten(_gen_ops_cached("121", "13.3", "cuda"))[0]
+        cutlass_ops = [op for op in ops if hasattr(op, "configuration_name")]
+        self.assertGreater(len(cutlass_ops), 0)
 
     @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
