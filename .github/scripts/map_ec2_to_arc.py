@@ -96,6 +96,8 @@ def main() -> None:
             continue
         clean = strip_prefix(entry["runner"].strip(), args.prefix)
         if clean not in mapping:
+            if clean.startswith("l-"):
+                continue
             print(f"error: no ARC runner found for '{clean}'", file=sys.stderr)
             sys.exit(1)
         mapped = mapping[clean]

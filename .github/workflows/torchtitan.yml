@@ -65,7 +65,7 @@ jobs:
       docker-image-name: ci-image:pytorch-linux-jammy-cuda${{ needs.get-cuda-version.outputs.stable-cuda }}-cudnn9-py3.12-gcc11
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       cuda-arch-list: '8.0 8.9 9.0 10.0'
-      runner: linux.24xlarge.memory
+      runner: "l-x86iavx512-8-64"
       build-additional-packages: "torchao torchcomms"
       # torchtitan_h100_integration disabled pending runner availability
       test-matrix: |
