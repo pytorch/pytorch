@@ -27,10 +27,11 @@ to exercise the swapped_mn M<->N mask remap. Not covered: addbmm and other
 batched-add variants, and scaled GEMM beyond the FP8 tensorwise shape.
 
 Platform note: this suite targets ROCm, but OSS CI shards it onto NVIDIA too
-(the fbcode BUCK exclusion does not apply there). On NVIDIA `setUpClass` turns
-on the TunableOp numerical check so the tuner cannot select a candidate that
-disagrees with the untuned kernel by more than the tolerance the assertions
-use.
+(the fbcode BUCK exclusion does not apply there). On NVIDIA the shared
+`_TunableOpGpuTestBase.setUpClass` turns on the TunableOp numerical check so
+the tuner cannot select a candidate that disagrees with the untuned kernel by
+more than the tolerance the assertions use, and `tearDownClass` resets it so
+the process-global setting cannot leak into a class that never enabled it.
 """
 
 # pyre-strict
@@ -39,6 +40,7 @@ import os
 import shutil
 import tempfile
 import unittest
+import warnings
 from collections.abc import Callable
 from typing import cast, TypeAlias
 
@@ -48,13 +50,23 @@ import torch
 import torch.cuda.tunable
 from torch._inductor import config as inductor_config
 from torch._inductor.kernel_inputs import MMKernelInputs
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_ROCM, TestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TEST_WITH_ROCM,
+    TestCase,
+)
 
 
 DEVICE: str = "cuda"
 DTYPE: torch.dtype = torch.bfloat16
 GEMM_ATOL: float = 1e-2
 GEMM_RTOL: float = 1e-2
+# FP8 accumulates in a narrower format than bf16, so the scaled-GEMM round
+# trips need a looser bound than GEMM_ATOL/GEMM_RTOL.
+FP8_GEMM_ATOL: float = 5e-2
+FP8_GEMM_RTOL: float = 5e-2
 _TunableResultEntry: TypeAlias = tuple[str, str, str, float]
 
 
@@ -125,16 +137,6 @@ def _has_concrete_entry(op_substr: str, m: int, n: int, k: int) -> bool:
     one of (m, n, k) as `_N_` substrings AND no `*` wildcard token."""
     for entry in _entries_for(op_substr, str(m), str(n), str(k)):
         if "*" not in entry[1]:
-            return True
-    return False
-
-
-def _has_wildcard_entry(op_substr: str) -> bool:
-    """True if get_results() has any wildcard (asterisk-bearing) entry for
-    the given op."""
-    for entry in _get_tunable_results():
-        op_sig, params_sig, _, _ = entry
-        if op_substr in op_sig and "*" in params_sig:
             return True
     return False
 
@@ -265,12 +267,50 @@ def _untuned_has(lines: list[str], op_substr: str, m: int, n: int, k: int) -> bo
     return False
 
 
-class DynamicTunableOpsTest(TestCase):
-    """Verification of the full tuning enable/disable x dynamic-dim matrix.
+def _run_without_tunable_fallback_warning(
+    test: TestCase, op: Callable[[], torch.Tensor]
+) -> torch.Tensor:
+    """Run `op` and assert no "falling back to the non-tunable kernel" warning,
+    i.e. the wildcard-selected solution was accepted for the new shape.
 
-    Each test clears the process-global TuningResultsManager in setUp so
-    concrete and wildcard entries cannot leak between tests.
+    Only the accepted side of the backend compatibility check is covered. The
+    rejection branch cannot be forced from Python: which backend a wildcard
+    entry carries is not controllable, and varying anything other than the
+    dynamic dim misses the wildcard entirely and takes the both-miss path.
+    Covering it needs a C++ test calling RocblasGemmOp::Call with a solution
+    index known to be invalid for the shape, so Tensile's canSolve rejects
+    it."""
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        out = op()
+    fallback_warnings = [
+        warning
+        for warning in caught
+        if "falling back to the non-tunable kernel" in str(warning.message)
+    ]
+    test.assertEqual(fallback_warnings, [])
+    return out
+
+
+class _TunableOpGpuTestBase(TestCase):
+    """Shared setup for every GPU-backed class in this file.
+
+    Deriving this per class is what let the NVIDIA numerical-check setup go
+    missing from three of them: the setting is process-global and nothing
+    reset it, so classes that never enabled it still ran under the value a
+    lexically earlier class had left behind. That protection vanished under
+    `-k` filtering or CI's rerun-a-single-test-in-a-new-process path, which
+    is exactly when a flake gets re-run. `tearDownClass` now resets it so the
+    leak cannot paper over a missing `setUpClass` again.
+
+    Subclasses vary only via `_tmpdir_prefix` and
+    `_wildcard_fallback_in_setup`.
     """
+
+    _tmpdir_prefix: str = "tunable_ops_test_"
+    # LegacyConcreteOnlyTunableOpsTest asserts pre-feature behavior and wants
+    # the fallback off; every other class exercises it.
+    _wildcard_fallback_in_setup: bool = True
 
     _tmpdir: str = ""
     _tmp_results_path: str = ""
@@ -282,7 +322,7 @@ class DynamicTunableOpsTest(TestCase):
         # Redirect TunableOp persistence to a fresh per-process tempfile so
         # this run never appends to (or lazily loads) the shared default
         # "tunableop_results.csv".
-        cls._tmpdir = tempfile.mkdtemp(prefix="dynamic_tunable_ops_test_")
+        cls._tmpdir = tempfile.mkdtemp(prefix=cls._tmpdir_prefix)
         cls._tmp_results_path = os.path.join(cls._tmpdir, "tunable_results.csv")
         torch.cuda.tunable.set_filename(cls._tmp_results_path, False)
         # TunableOp's numerical check is off by default, so on NVIDIA the
@@ -297,19 +337,41 @@ class DynamicTunableOpsTest(TestCase):
 
     @classmethod
     def tearDownClass(cls) -> None:
+        cls._release_class_state()
+
+    @classmethod
+    def _release_class_state(cls) -> None:
+        """Undo `setUpClass`. Split out because a subclass `setUpClass` that
+        raises SkipTest *after* calling `super().setUpClass()` must run this
+        itself -- unittest does not call `tearDownClass` when `setUpClass`
+        raises, so the numerical-check setting would leak forward exactly the
+        way this base class exists to prevent."""
+        if not TEST_WITH_ROCM:
+            torch.cuda.tunable.set_numerical_check_tolerances(False)
         if cls._tmpdir:
             shutil.rmtree(cls._tmpdir, ignore_errors=True)
+            cls._tmpdir = ""
 
     def setUp(self) -> None:
         torch.cuda.tunable.enable(False)
         torch.cuda.tunable.tuning_enable(False)
         torch.cuda.tunable._clear_all()
-        torch.cuda.tunable.wildcard_fallback_enable(True)
+        torch.cuda.tunable.wildcard_fallback_enable(self._wildcard_fallback_in_setup)
 
     def tearDown(self) -> None:
         torch.cuda.tunable.enable(False)
         torch.cuda.tunable.tuning_enable(False)
         torch.cuda.tunable.wildcard_fallback_enable(False)
+
+
+class DynamicTunableOpsTest(_TunableOpGpuTestBase):
+    """Verification of the full tuning enable/disable x dynamic-dim matrix.
+
+    Each test clears the process-global TuningResultsManager in setUp so
+    concrete and wildcard entries cannot leak between tests.
+    """
+
+    _tmpdir_prefix: str = "dynamic_tunable_ops_test_"
 
     # -- Tuning enabled --------------------------------------------------
 
@@ -523,7 +585,9 @@ class DynamicTunableOpsTest(TestCase):
         # the wildcard seeded in Phase A and dispatches via it.
         torch.cuda.tunable.enable(True)
         torch.cuda.tunable.tuning_enable(False)
-        out = torch.addmm(bias_x, mat1_x, mat2_x)
+        out = _run_without_tunable_fallback_warning(
+            self, lambda: torch.addmm(bias_x, mat1_x, mat2_x)
+        )
 
         self.assertFalse(
             _has_concrete_entry("GemmAndBiasTunableOp", m_test, n, k),
@@ -615,7 +679,9 @@ class DynamicTunableOpsTest(TestCase):
         # Runtime: tunable enabled, tuning disabled, no mask.
         torch.cuda.tunable.enable(True)
         torch.cuda.tunable.tuning_enable(False)
-        out = torch.mm(mat1_x, mat2_x)
+        out = _run_without_tunable_fallback_warning(
+            self, lambda: torch.mm(mat1_x, mat2_x)
+        )
 
         self.assertFalse(
             _has_concrete_entry("GemmTunableOp", m_test, n, k),
@@ -661,7 +727,7 @@ class DynamicTunableOpsTest(TestCase):
         # Runtime: tunable enabled, tuning disabled, no mask.
         torch.cuda.tunable.enable(True)
         torch.cuda.tunable.tuning_enable(False)
-        out = torch.bmm(b1_x, b2_x)
+        out = _run_without_tunable_fallback_warning(self, lambda: torch.bmm(b1_x, b2_x))
 
         self.assertFalse(
             _has_concrete_entry("GemmStridedBatchedTunableOp", m_test, n, k),
@@ -816,7 +882,9 @@ class DynamicTunableOpsTest(TestCase):
 
         torch.cuda.tunable.enable(True)
         torch.cuda.tunable.tuning_enable(False)
-        out = torch.baddbmm(bias_x, b1_x, b2_x)
+        out = _run_without_tunable_fallback_warning(
+            self, lambda: torch.baddbmm(bias_x, b1_x, b2_x)
+        )
 
         self.assertEqual(
             out,
@@ -861,42 +929,146 @@ class DynamicTunableOpsTest(TestCase):
 # correctly for every layout.
 
 
-class LayoutCoverageWildcardTest(TestCase):
+class _LayoutCoverageWildcardTestBase(_TunableOpGpuTestBase):
+    """Shared tune-then-fallback round trip behind the mm and bmm layout
+    matrices. Holds no `test_*` methods of its own, so the loader finds
+    nothing to run here.
+
+    Concrete classes supply the op hooks (`_op_substr`, `_make_operands`,
+    `_run_op`) and their own parametrized entry point."""
+
+    # Set by the concrete class.
+    _op_substr: str = ""
+    _TUNE_SEED_BASE: int = 0
+    _TEST_SEED_BASE: int = 0
+
+    # Order fixes the seed-offset numbering below; do not reorder.
+    _DYNAMIC_DIMS: tuple[str, ...] = ("M", "K", "N")
+
+    @classmethod
+    def _seed_offset(cls, transa: bool, transb: bool, dynamic: str) -> int:
+        """Reproduce the offsets these cases used to hard-code (0, 4, ... 44).
+        `base_m` is derived from it, so it must stay injective over
+        (transa, transb, dynamic) to keep every variant on its own shape."""
+        return 4 * (
+            cls._DYNAMIC_DIMS.index(dynamic) * 4 + int(transa) * 2 + int(transb)
+        )
+
+    def _make_operands(
+        self, m: int, n: int, k: int, transa: bool, transb: bool, seed: int
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        raise NotImplementedError
+
+    def _run_op(self, a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+        raise NotImplementedError
+
+    def _round_trip_for_layout(self, transa: bool, transb: bool, dynamic: str) -> None:
+        """Run the tune-then-fallback round trip for one layout, taking the
+        `dynamic` dim (one of "M"/"N"/"K") as symbolic. Tuning and runtime
+        shapes differ only in that dim."""
+        seed_offset = self._seed_offset(transa, transb, dynamic)
+        base_m, n, k = 41 + seed_offset, 257, 251
+        delta = 12
+        tuned = {"m": base_m, "n": n, "k": k}
+        test = dict(tuned)
+        test[dynamic.lower()] += delta
+
+        a_t, b_t = self._make_operands(
+            tuned["m"],
+            tuned["n"],
+            tuned["k"],
+            transa,
+            transb,
+            seed=self._TUNE_SEED_BASE + seed_offset,
+        )
+        a_x, b_x = self._make_operands(
+            test["m"],
+            test["n"],
+            test["k"],
+            transa,
+            transb,
+            seed=self._TEST_SEED_BASE + seed_offset,
+        )
+
+        # Reference (tunable disabled).
+        torch.cuda.tunable.enable(False)
+        torch.cuda.tunable.tuning_enable(False)
+        ref = self._run_op(a_x, b_x)
+
+        # Phase A: tune at the tuned shape with the chosen dim dynamic ->
+        # wildcard persisted.
+        torch.cuda.tunable.enable(True)
+        torch.cuda.tunable.tuning_enable(True)
+        with torch.cuda.tunable.dynamic_dims_mask(**{dynamic: True}):
+            self._run_op(a_t, b_t)
+        # Assert on the dims that are NOT dynamic for this variant. The
+        # dynamic one is precisely what gets persisted as `*`, so asserting on
+        # it could never match. Pinning the two static dims is strictly
+        # stronger than a bare op-wide presence check: if the implementation
+        # wildcarded the wrong dim, the dim expected to stay concrete goes
+        # missing and this fires. `setUp` clears the results manager, so no
+        # sibling variant's entries are present to satisfy it by accident.
+        static_dims = [v for key, v in tuned.items() if key != dynamic.lower()]
+        self.assertTrue(
+            _has_wildcard_with_dims(self._op_substr, *static_dims),
+            f"expected {self._op_substr} wildcard entry with concrete dims "
+            f"{static_dims} after tuning layout (transa={transa}, "
+            f"transb={transb}, dynamic={dynamic})",
+        )
+        # White-box: the persisted wildcard must wildcard the correct
+        # leading dims for its transpose flags. This is what catches an
+        # inverted lda/ldb/ldc -> dim mapping (e.g. a broken UsesMForLda),
+        # which a mere presence check silently tolerates because a
+        # mis-wildcarded key still contains a '*'.
+        _assert_ld_wildcarding_consistent(self, self._op_substr)
+
+        # Phase C: runtime, no mask, shape differs only in the dynamic dim
+        # -> expected to dispatch via the wildcard fallback. Gated on the
+        # observable proxies (no new concrete entry, output matches the
+        # tunable-disabled reference); the persistence-side white-box check
+        # above is the real gate on the wildcarding logic.
+        before = len(_get_tunable_results())
+        torch.cuda.tunable.enable(True)
+        torch.cuda.tunable.tuning_enable(False)
+        out = self._run_op(a_x, b_x)
+        after = len(_get_tunable_results())
+        self.assertEqual(
+            before,
+            after,
+            f"layout (transa={transa}, transb={transb}, dynamic={dynamic}): "
+            f"runtime dispatch with tuning disabled must not add a new entry",
+        )
+        self.assertEqual(
+            out,
+            ref,
+            atol=GEMM_ATOL,
+            rtol=GEMM_RTOL,
+            msg=f"layout (transa={transa}, transb={transb}, dynamic={dynamic}): "
+            f"wildcard-fallback dispatch output must match tunable-disabled "
+            f"reference",
+        )
+
+
+@instantiate_parametrized_tests
+class LayoutCoverageWildcardTest(_LayoutCoverageWildcardTestBase):
     """The dynamic-mask + wildcard-fallback contract across all four
     (transa, transb) layouts, with M/N/K dynamic in turn.
 
     The K-dynamic cases are what cover lda: mm's row-major dispatch swaps
     inductor (M, N) into BLAS (n, m), so an M-dynamic call lands on BLAS-n and
     never touches lda, while K is not swapped and forces lda to be wildcarded
-    exactly when transa == 'T'."""
+    exactly when transa == 'T'.
 
-    @classmethod
-    def setUpClass(cls) -> None:
-        if not torch.cuda.is_available():
-            raise unittest.SkipTest("cuda not available")
-        cls._tmpdir = tempfile.mkdtemp(prefix="layout_coverage_test_")
-        cls._tmp_results_path = os.path.join(cls._tmpdir, "tunable_results.csv")
-        torch.cuda.tunable.set_filename(cls._tmp_results_path, False)
+    N-dynamic is the mirror case: the same swap lands the dynamic bit on
+    BLAS-m and forces ldc (and lda for transa == 'N') to wildcard."""
 
-    @classmethod
-    def tearDownClass(cls) -> None:
-        if cls._tmpdir:
-            shutil.rmtree(cls._tmpdir, ignore_errors=True)
+    _tmpdir_prefix: str = "layout_coverage_test_"
+    _op_substr: str = "GemmTunableOp"
+    _TUNE_SEED_BASE: int = 100
+    _TEST_SEED_BASE: int = 200
 
-    def setUp(self) -> None:
-        torch.cuda.tunable.enable(False)
-        torch.cuda.tunable.tuning_enable(False)
-        torch.cuda.tunable._clear_all()
-        torch.cuda.tunable.wildcard_fallback_enable(True)
-
-    def tearDown(self) -> None:
-        torch.cuda.tunable.enable(False)
-        torch.cuda.tunable.tuning_enable(False)
-        torch.cuda.tunable.wildcard_fallback_enable(False)
-
-    @staticmethod
-    def _make_layout(
-        m: int, k: int, n: int, transa: bool, transb: bool, seed: int
+    def _make_operands(
+        self, m: int, n: int, k: int, transa: bool, transb: bool, seed: int
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Build (mat1, mat2) for `mm(mat1, mat2)` so the BLAS dispatch
         picks the requested (transa, transb) layout. We synthesize the
@@ -915,140 +1087,19 @@ class LayoutCoverageWildcardTest(TestCase):
             mat2 = torch.randn(n, k, dtype=DTYPE, device=DEVICE).t()
         return mat1, mat2
 
-    def _round_trip_for_layout(
-        self, transa: bool, transb: bool, seed_offset: int, dynamic: str = "M"
-    ) -> None:
-        """Run the tune-then-fallback round trip for one layout, taking the
-        `dynamic` dim (one of "M"/"N"/"K") as symbolic. Tuning and runtime
-        shapes differ only in that dim."""
-        base_m, n, k = 41 + seed_offset, 257, 251
-        delta = 12
-        tuned = {"m": base_m, "n": n, "k": k}
-        test = {"m": base_m, "n": n, "k": k}
-        test[dynamic.lower()] += delta
+    def _run_op(self, a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+        return torch.mm(a, b)
 
-        mat1_t, mat2_t = self._make_layout(
-            tuned["m"], tuned["k"], tuned["n"], transa, transb, seed=100 + seed_offset
-        )
-        mat1_x, mat2_x = self._make_layout(
-            test["m"], test["k"], test["n"], transa, transb, seed=200 + seed_offset
-        )
-
-        # Reference (tunable disabled).
-        torch.cuda.tunable.enable(False)
-        torch.cuda.tunable.tuning_enable(False)
-        ref = torch.mm(mat1_x, mat2_x)
-
-        # Phase A: tune at the tuned shape with the chosen dim dynamic ->
-        # wildcard persisted.
-        torch.cuda.tunable.enable(True)
-        torch.cuda.tunable.tuning_enable(True)
-        with torch.cuda.tunable.dynamic_dims_mask(**{dynamic: True}):
-            torch.mm(mat1_t, mat2_t)
-        # Op-wide `_has_wildcard_entry` (not the shape-specific
-        # `_has_wildcard_with_dims` used elsewhere) is deliberate here: every
-        # layout variant in this class shares the same (n, k), so a
-        # shape-specific check could not tell them apart. The per-entry
-        # `_assert_ld_wildcarding_consistent` below is the real gate.
-        self.assertTrue(
-            _has_wildcard_entry("GemmTunableOp"),
-            f"expected GemmTunableOp wildcard entry after tuning "
-            f"layout (transa={transa}, transb={transb}, dynamic={dynamic})",
-        )
-        # White-box: the persisted wildcard must wildcard the correct
-        # leading dims for its transpose flags. This is what catches an
-        # inverted lda/ldb/ldc -> dim mapping (e.g. a broken UsesMForLda),
-        # which _has_wildcard_entry alone silently tolerates because a
-        # mis-wildcarded key still contains a '*'.
-        _assert_ld_wildcarding_consistent(self, "GemmTunableOp")
-
-        # Phase C: runtime, no mask, shape differs only in the dynamic dim
-        # -> expected to dispatch via the wildcard fallback. Gated on the
-        # observable proxies (no new concrete entry, output matches the
-        # tunable-disabled reference); the persistence-side white-box check
-        # above is the real gate on the wildcarding logic.
-        before = len(_get_tunable_results())
-        torch.cuda.tunable.enable(True)
-        torch.cuda.tunable.tuning_enable(False)
-        out = torch.mm(mat1_x, mat2_x)
-        after = len(_get_tunable_results())
-        self.assertEqual(
-            before,
-            after,
-            f"layout (transa={transa}, transb={transb}, dynamic={dynamic}): "
-            f"runtime dispatch with tuning disabled must not add a new entry",
-        )
-        self.assertEqual(
-            out,
-            ref,
-            atol=1e-2,
-            rtol=1e-2,
-            msg=f"layout (transa={transa}, transb={transb}, dynamic={dynamic}): "
-            f"wildcard-fallback dispatch output must match tunable-disabled "
-            f"reference",
-        )
-
-    def test_layout_NN(self) -> None:
-        """No transpose on either operand."""
-        self._round_trip_for_layout(transa=False, transb=False, seed_offset=0)
-
-    def test_layout_NT(self) -> None:
-        """mat1 contiguous, mat2 transposed."""
-        self._round_trip_for_layout(transa=False, transb=True, seed_offset=4)
-
-    def test_layout_TN(self) -> None:
-        """mat1 transposed, mat2 contiguous."""
-        self._round_trip_for_layout(transa=True, transb=False, seed_offset=8)
-
-    def test_layout_TT(self) -> None:
-        """Both operands transposed."""
-        self._round_trip_for_layout(transa=True, transb=True, seed_offset=12)
-
-    def test_layout_NN_dynamic_k(self) -> None:
-        """K dynamic (not swapped by the mm remap) exercises lda/ldb."""
-        self._round_trip_for_layout(
-            transa=False, transb=False, seed_offset=16, dynamic="K"
-        )
-
-    def test_layout_NT_dynamic_k(self) -> None:
-        self._round_trip_for_layout(
-            transa=False, transb=True, seed_offset=20, dynamic="K"
-        )
-
-    def test_layout_TN_dynamic_k(self) -> None:
-        """transa == 'T' + K dynamic forces lda to be wildcarded; the
-        inverted UsesMForLda leaves it concrete and this test fails."""
-        self._round_trip_for_layout(
-            transa=True, transb=False, seed_offset=24, dynamic="K"
-        )
-
-    def test_layout_TT_dynamic_k(self) -> None:
-        self._round_trip_for_layout(
-            transa=True, transb=True, seed_offset=28, dynamic="K"
-        )
-
-    def test_layout_NN_dynamic_n(self) -> None:
-        """N dynamic. For torch.mm the row-major dispatch swaps inductor
-        (M, N) into BLAS (n, m), so an N-dynamic call lands the dynamic bit
-        on BLAS-m and forces ldc (and lda for transa == 'N') to wildcard."""
-        self._round_trip_for_layout(
-            transa=False, transb=False, seed_offset=32, dynamic="N"
-        )
-
-    def test_layout_NT_dynamic_n(self) -> None:
-        self._round_trip_for_layout(
-            transa=False, transb=True, seed_offset=36, dynamic="N"
-        )
-
-    def test_layout_TN_dynamic_n(self) -> None:
-        self._round_trip_for_layout(
-            transa=True, transb=False, seed_offset=40, dynamic="N"
-        )
-
-    def test_layout_TT_dynamic_n(self) -> None:
-        self._round_trip_for_layout(
-            transa=True, transb=True, seed_offset=44, dynamic="N"
-        )
+    # Defined here rather than on the base on purpose:
+    # instantiate_parametrized_tests walks dir(cls) -- which sees inherited
+    # attributes -- and then delattr()s the generic method, which raises
+    # AttributeError for anything that lives on a base class instead of in
+    # this class's own __dict__.
+    @parametrize("transa", [False, True])
+    @parametrize("transb", [False, True])
+    @parametrize("dynamic", ["M", "K", "N"])
+    def test_layout(self, transa: bool, transb: bool, dynamic: str) -> None:
+        self._round_trip_for_layout(transa, transb, dynamic)
 
 
 # --- Layout coverage for the batched path (bmm / baddbmm) ---
@@ -1077,38 +1128,24 @@ class LayoutCoverageWildcardTest(TestCase):
 #     covered by the round-trip tests in DynamicTunableOpsTest).
 
 
-class BmmLayoutCoverageWildcardTest(TestCase):
+@instantiate_parametrized_tests
+class BmmLayoutCoverageWildcardTest(_LayoutCoverageWildcardTestBase):
     """Batched analog of LayoutCoverageWildcardTest. bmm derives its
     transpose flags and M<->N remap in baddbmm_out_cuda_impl, a separate path
-    from the mm/addmm launchers."""
+    from the mm/addmm launchers.
 
-    @classmethod
-    def setUpClass(cls) -> None:
-        if not torch.cuda.is_available():
-            raise unittest.SkipTest("cuda not available")
-        cls._tmpdir = tempfile.mkdtemp(prefix="bmm_layout_coverage_test_")
-        cls._tmp_results_path = os.path.join(cls._tmpdir, "tunable_results.csv")
-        torch.cuda.tunable.set_filename(cls._tmp_results_path, False)
+    Shapes are kept disjoint from the mm layout tests via a distinct op
+    (GemmStridedBatchedTunableOp) and seed range; see the module-level
+    isolation note (the in-memory results table is process-global)."""
 
-    @classmethod
-    def tearDownClass(cls) -> None:
-        if cls._tmpdir:
-            shutil.rmtree(cls._tmpdir, ignore_errors=True)
+    _tmpdir_prefix: str = "bmm_layout_coverage_test_"
+    _op_substr: str = "GemmStridedBatchedTunableOp"
+    _TUNE_SEED_BASE: int = 300
+    _TEST_SEED_BASE: int = 400
+    _BATCH: int = 8
 
-    def setUp(self) -> None:
-        torch.cuda.tunable.enable(False)
-        torch.cuda.tunable.tuning_enable(False)
-        torch.cuda.tunable._clear_all()
-        torch.cuda.tunable.wildcard_fallback_enable(True)
-
-    def tearDown(self) -> None:
-        torch.cuda.tunable.enable(False)
-        torch.cuda.tunable.tuning_enable(False)
-        torch.cuda.tunable.wildcard_fallback_enable(False)
-
-    @staticmethod
-    def _make_layout(
-        b: int, m: int, k: int, n: int, transa: bool, transb: bool, seed: int
+    def _make_operands(
+        self, m: int, n: int, k: int, transa: bool, transb: bool, seed: int
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Build (batch1, batch2) for `bmm(batch1, batch2)` so the batched
         BLAS dispatch picks the requested (transa, transb) layout. As in the
@@ -1116,6 +1153,7 @@ class BmmLayoutCoverageWildcardTest(TestCase):
         then transposed on its last two dims so it is non-contiguous without a
         contiguous() copy."""
         torch.manual_seed(seed)
+        b = self._BATCH
         if not transa:
             batch1 = torch.randn(b, m, k, dtype=DTYPE, device=DEVICE)
         else:
@@ -1126,146 +1164,16 @@ class BmmLayoutCoverageWildcardTest(TestCase):
             batch2 = torch.randn(b, n, k, dtype=DTYPE, device=DEVICE).transpose(-2, -1)
         return batch1, batch2
 
-    def _round_trip_for_layout(
-        self, transa: bool, transb: bool, seed_offset: int, dynamic: str = "M"
-    ) -> None:
-        """Tune-then-fallback round trip for one batched layout, taking the
-        `dynamic` dim (one of "M"/"N"/"K") symbolic. Tuning and runtime shapes
-        differ only in that dim. Shapes are kept disjoint from the mm layout
-        tests via a distinct op (GemmStridedBatchedTunableOp) and seed range;
-        see the module-level isolation note (the in-memory results table is
-        process-global)."""
-        b = 8
-        base_m, n, k = 41 + seed_offset, 257, 251
-        delta = 12
-        tuned = {"m": base_m, "n": n, "k": k}
-        test = {"m": base_m, "n": n, "k": k}
-        test[dynamic.lower()] += delta
+    def _run_op(self, a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+        return torch.bmm(a, b)
 
-        b1_t, b2_t = self._make_layout(
-            b,
-            tuned["m"],
-            tuned["k"],
-            tuned["n"],
-            transa,
-            transb,
-            seed=300 + seed_offset,
-        )
-        b1_x, b2_x = self._make_layout(
-            b, test["m"], test["k"], test["n"], transa, transb, seed=400 + seed_offset
-        )
-
-        # Reference (tunable disabled).
-        torch.cuda.tunable.enable(False)
-        torch.cuda.tunable.tuning_enable(False)
-        ref = torch.bmm(b1_x, b2_x)
-
-        # Phase A: tune at the tuned shape with the chosen dim dynamic ->
-        # wildcard persisted.
-        torch.cuda.tunable.enable(True)
-        torch.cuda.tunable.tuning_enable(True)
-        with torch.cuda.tunable.dynamic_dims_mask(**{dynamic: True}):
-            torch.bmm(b1_t, b2_t)
-        # Op-wide `_has_wildcard_entry` (not the shape-specific
-        # `_has_wildcard_with_dims`) is deliberate here: every layout variant in
-        # this class shares the same (n, k), so a shape-specific check could not
-        # tell them apart. `_assert_ld_wildcarding_consistent` below is the real
-        # per-entry gate.
-        self.assertTrue(
-            _has_wildcard_entry("GemmStridedBatchedTunableOp"),
-            f"expected GemmStridedBatchedTunableOp wildcard entry after tuning "
-            f"layout (transa={transa}, transb={transb}, dynamic={dynamic})",
-        )
-        # White-box: the batched path shares ShouldWildcardLda/Ldb/Ldc via
-        # GemmStridedBatchedParams, so a broken ld->dim mapping surfaces here
-        # just as it does for mm.
-        _assert_ld_wildcarding_consistent(self, "GemmStridedBatchedTunableOp")
-
-        # Phase C: runtime, no mask, shape differs only in the dynamic dim.
-        # Gated on the observable proxies (no new concrete entry, output
-        # matches reference); the white-box check above is the real gate on
-        # the wildcarding logic.
-        before = len(_get_tunable_results())
-        torch.cuda.tunable.enable(True)
-        torch.cuda.tunable.tuning_enable(False)
-        out = torch.bmm(b1_x, b2_x)
-        after = len(_get_tunable_results())
-        self.assertEqual(
-            before,
-            after,
-            f"layout (transa={transa}, transb={transb}, dynamic={dynamic}): "
-            f"runtime dispatch with tuning disabled must not add a new entry",
-        )
-        self.assertEqual(
-            out,
-            ref,
-            atol=1e-2,
-            rtol=1e-2,
-            msg=f"layout (transa={transa}, transb={transb}, dynamic={dynamic}): "
-            f"wildcard-fallback dispatch output must match tunable-disabled "
-            f"reference",
-        )
-
-    def test_bmm_layout_NN(self) -> None:
-        """No transpose on either operand."""
-        self._round_trip_for_layout(transa=False, transb=False, seed_offset=0)
-
-    def test_bmm_layout_NT(self) -> None:
-        """batch1 contiguous, batch2 transposed."""
-        self._round_trip_for_layout(transa=False, transb=True, seed_offset=4)
-
-    def test_bmm_layout_TN(self) -> None:
-        """batch1 transposed, batch2 contiguous."""
-        self._round_trip_for_layout(transa=True, transb=False, seed_offset=8)
-
-    def test_bmm_layout_TT(self) -> None:
-        """Both operands transposed."""
-        self._round_trip_for_layout(transa=True, transb=True, seed_offset=12)
-
-    def test_bmm_layout_NN_dynamic_k(self) -> None:
-        """K dynamic exercises lda/ldb on the batched path."""
-        self._round_trip_for_layout(
-            transa=False, transb=False, seed_offset=16, dynamic="K"
-        )
-
-    def test_bmm_layout_NT_dynamic_k(self) -> None:
-        self._round_trip_for_layout(
-            transa=False, transb=True, seed_offset=20, dynamic="K"
-        )
-
-    def test_bmm_layout_TN_dynamic_k(self) -> None:
-        """transa == 'T' + K dynamic forces lda to be wildcarded on the
-        batched path too."""
-        self._round_trip_for_layout(
-            transa=True, transb=False, seed_offset=24, dynamic="K"
-        )
-
-    def test_bmm_layout_TT_dynamic_k(self) -> None:
-        self._round_trip_for_layout(
-            transa=True, transb=True, seed_offset=28, dynamic="K"
-        )
-
-    def test_bmm_layout_NN_dynamic_n(self) -> None:
-        """N dynamic exercises the batched M<->N remap independent of the
-        shared swapped_mn field."""
-        self._round_trip_for_layout(
-            transa=False, transb=False, seed_offset=32, dynamic="N"
-        )
-
-    def test_bmm_layout_NT_dynamic_n(self) -> None:
-        self._round_trip_for_layout(
-            transa=False, transb=True, seed_offset=36, dynamic="N"
-        )
-
-    def test_bmm_layout_TN_dynamic_n(self) -> None:
-        self._round_trip_for_layout(
-            transa=True, transb=False, seed_offset=40, dynamic="N"
-        )
-
-    def test_bmm_layout_TT_dynamic_n(self) -> None:
-        self._round_trip_for_layout(
-            transa=True, transb=True, seed_offset=44, dynamic="N"
-        )
+    # Must live in this class's own __dict__ -- see the note on the mm
+    # counterpart.
+    @parametrize("transa", [False, True])
+    @parametrize("transb", [False, True])
+    @parametrize("dynamic", ["M", "K", "N"])
+    def test_bmm_layout(self, transa: bool, transb: bool, dynamic: str) -> None:
+        self._round_trip_for_layout(transa, transb, dynamic)
 
 
 # --- ScaledGemmTunableOp coverage (FP8 _scaled_mm) -----------------------
@@ -1288,39 +1196,47 @@ class BmmLayoutCoverageWildcardTest(TestCase):
     "tunable_op_enabled is hardcoded false (ScaledBlas.cpp) so no "
     "ScaledGemmTunableOp entry is ever produced",
 )
-class ScaledGemmTunableOpFP8Test(TestCase):
+class ScaledGemmTunableOpFP8Test(_TunableOpGpuTestBase):
     """Verify the dynamic-mask + wildcard-fallback contract for
     `torch._scaled_mm` with tensorwise FP8 scaling, matching the
     `node_replacement_dict` setup that triggers
-    `ScaledGemmTunableOp` for large Linear layers."""
+    `ScaledGemmTunableOp` for large Linear layers.
+
+    Support is established once in `setUpClass`, so every assertion below is
+    a hard assertion: past that gate a failure is a regression, not an
+    unsupported configuration."""
+
+    _tmpdir_prefix: str = "scaled_gemm_test_"
 
     @classmethod
     def setUpClass(cls) -> None:
-        if not torch.cuda.is_available():
-            raise unittest.SkipTest("cuda not available")
-        # FP8 e4m3fn requires a recent enough device; skip on older
-        # hardware that doesn't expose the dtype.
-        if not hasattr(torch, "float8_e4m3fn"):
-            raise unittest.SkipTest("torch.float8_e4m3fn not available")
-        cls._tmpdir = tempfile.mkdtemp(prefix="scaled_gemm_test_")
-        cls._tmp_results_path = os.path.join(cls._tmpdir, "tunable_results.csv")
-        torch.cuda.tunable.set_filename(cls._tmp_results_path, False)
+        super().setUpClass()
+        reason = cls._scaled_mm_unsupported_reason()
+        if reason is not None:
+            cls._release_class_state()
+            raise unittest.SkipTest(reason)
 
     @classmethod
-    def tearDownClass(cls) -> None:
-        if cls._tmpdir:
-            shutil.rmtree(cls._tmpdir, ignore_errors=True)
+    def _scaled_mm_unsupported_reason(cls) -> str | None:
+        """Why FP8 `_scaled_mm` is unusable here, or None if it works.
 
-    def setUp(self) -> None:
+        Establishing support once, up front, is what lets the tests hard-assert:
+        catching RuntimeError around the call under test made a genuine
+        regression indistinguishable from an unsupported arch and silently
+        turned it into a skip. Capability rejection
+        (HIPBLAS_STATUS_NOT_SUPPORTED) is arch/dtype-level rather than
+        shape-level, so one small aligned GEMM is representative of the larger
+        shapes the tests actually use."""
+        if not hasattr(torch, "float8_e4m3fn"):
+            return "torch.float8_e4m3fn not available"
         torch.cuda.tunable.enable(False)
         torch.cuda.tunable.tuning_enable(False)
-        torch.cuda.tunable._clear_all()
-        torch.cuda.tunable.wildcard_fallback_enable(True)
-
-    def tearDown(self) -> None:
-        torch.cuda.tunable.enable(False)
-        torch.cuda.tunable.tuning_enable(False)
-        torch.cuda.tunable.wildcard_fallback_enable(False)
+        a, b, scale_a, scale_b = cls._scaled_mm_inputs(256, 256, 256, seed=29)
+        try:
+            torch._scaled_mm(a, b, scale_a, scale_b, out_dtype=torch.bfloat16)
+        except RuntimeError as e:
+            return f"_scaled_mm not supported in this configuration: {e}"
+        return None
 
     @staticmethod
     def _scaled_mm_inputs(
@@ -1391,14 +1307,7 @@ class ScaledGemmTunableOpFP8Test(TestCase):
 
         torch.cuda.tunable.enable(False)
         torch.cuda.tunable.tuning_enable(False)
-        try:
-            ref = self._run_scaled_mm(a_x, b_x, sa_x, sb_x)
-        except RuntimeError as e:
-            # _scaled_mm may not be supported on this device/dtype combo
-            # (e.g. unsupported gfx arch). Skip rather than fail.
-            raise unittest.SkipTest(
-                f"_scaled_mm not supported in this configuration: {e}"
-            ) from e
+        ref = self._run_scaled_mm(a_x, b_x, sa_x, sb_x)
 
         # Phase A: tune at m_tuned with M dynamic.
         torch.cuda.tunable.enable(True)
@@ -1406,19 +1315,19 @@ class ScaledGemmTunableOpFP8Test(TestCase):
         with torch.cuda.tunable.dynamic_dims_mask(M=True):
             self._run_scaled_mm(a_t, b_t, sa_t, sb_t)
 
-        # We don't strictly require a wildcard entry to exist -- some
-        # FP8 paths may take a non-tunable shortcut. But if any
-        # ScaledGemmTunableOp entry is present it should be the one we
-        # tuned. Check for "any" Scaled entry as a sanity gate.
         scaled_entries = [
             e for e in _get_tunable_results() if "ScaledGemmTunableOp" in e[0]
         ]
-        if not scaled_entries:
-            raise unittest.SkipTest(
-                "no ScaledGemmTunableOp entries persisted; "
-                "_scaled_mm may have skipped the tunable path on this "
-                "configuration"
-            )
+        # "_scaled_mm stopped reaching the tunable path" is the primary
+        # regression this test exists to catch, so it is an assertion rather
+        # than the skip it used to be.
+        self.assertGreaterEqual(
+            len(scaled_entries),
+            1,
+            "tuning _scaled_mm with M dynamic must persist at least one "
+            "ScaledGemmTunableOp entry; none present means the dispatch no "
+            "longer reaches ScaledGemmTunableOp::operator()",
+        )
         wildcard_present = any("*" in e[1] for e in scaled_entries)
         self.assertTrue(
             wildcard_present,
@@ -1427,19 +1336,20 @@ class ScaledGemmTunableOpFP8Test(TestCase):
         )
 
         # Phase C: runtime, no mask, different M -> wildcard fallback
-        # (or aten fallback) must produce correct output.
+        # and pass backend compatibility validation.
         torch.cuda.tunable.enable(True)
         torch.cuda.tunable.tuning_enable(False)
-        out = self._run_scaled_mm(a_x, b_x, sa_x, sb_x)
+        out = _run_without_tunable_fallback_warning(
+            self, lambda: self._run_scaled_mm(a_x, b_x, sa_x, sb_x)
+        )
 
         self.assertEqual(
             out,
             ref,
-            atol=5e-2,
-            rtol=5e-2,
+            atol=FP8_GEMM_ATOL,
+            rtol=FP8_GEMM_RTOL,
             msg="ScaledGemmTunableOp dispatch output should match "
-            "tunable-disabled reference (either via wildcard fallback "
-            "or via non-tunable aten fallback)",
+            "tunable-disabled reference via wildcard fallback",
         )
 
     def test_scaled_gemm_both_miss_falls_back_safely(self) -> None:
@@ -1453,12 +1363,7 @@ class ScaledGemmTunableOpFP8Test(TestCase):
 
         torch.cuda.tunable.enable(False)
         torch.cuda.tunable.tuning_enable(False)
-        try:
-            ref = self._run_scaled_mm(a, b, sa, sb)
-        except RuntimeError as e:
-            raise unittest.SkipTest(
-                f"_scaled_mm not supported in this configuration: {e}"
-            ) from e
+        ref = self._run_scaled_mm(a, b, sa, sb)
 
         # No entries primed for this shape. Tunable enabled, tuning disabled:
         # concrete miss + wildcard miss must fall back safely.
@@ -1469,8 +1374,8 @@ class ScaledGemmTunableOpFP8Test(TestCase):
         self.assertEqual(
             out,
             ref,
-            atol=5e-2,
-            rtol=5e-2,
+            atol=FP8_GEMM_ATOL,
+            rtol=FP8_GEMM_RTOL,
             msg="scaled both-miss fallback output should match "
             "tunable-disabled reference",
         )
@@ -1478,45 +1383,25 @@ class ScaledGemmTunableOpFP8Test(TestCase):
 
 # --- Legacy "non-dynamic" behavior (BEFORE the wildcard feature) --------
 # These tests assert what TunableOp does when no `dynamic_dims_mask`
-# is ever pushed (the pre-feature world): only concrete-key entries
-# get persisted at compile-time tuning, and runtime concrete-miss
-# queries fall through to the non-tunable aten path. These are the
-# canonical "before" behavior gates -- they document and lock in what
-# the system reverts to when `cuda.autotune_tunableop_dynamic_dims_
-# wildcard=False` (the kill-switch for the dynamic-tunable-ops
-# feature).
+# is ever pushed: only concrete-key entries get persisted at
+# compile-time tuning, and runtime concrete-miss queries fall through
+# to the non-tunable aten path.
+#
+# This is the AOTI-runtime path -- a caller that never pushes a mask --
+# NOT the inductor kill-switch. Those are different mechanisms:
+# `cuda.autotune_tunableop_dynamic_dims_wildcard=False` makes
+# `MMKernelInputs.dynamic_dim_mask` return all-False during lowering
+# (kernel_inputs.py), which these tests never reach because they call
+# torch.mm / torch.addmm directly. The kill-switch itself is covered by
+# `DynamicDimMaskOperandSelectionTest.test_feature_flag_off_returns_all_false`.
 
 
-class LegacyConcreteOnlyTunableOpsTest(TestCase):
+class LegacyConcreteOnlyTunableOpsTest(_TunableOpGpuTestBase):
     """Pre-feature behavior: with no `dynamic_dims_mask` pushed, only concrete
     entries persist and a runtime concrete miss falls through safely."""
 
-    @classmethod
-    def setUpClass(cls) -> None:
-        if not torch.cuda.is_available():
-            raise unittest.SkipTest("cuda not available")
-        cls._tmpdir = tempfile.mkdtemp(prefix="legacy_concrete_only_test_")
-        cls._tmp_results_path = os.path.join(cls._tmpdir, "tunable_results.csv")
-        torch.cuda.tunable.set_filename(cls._tmp_results_path, False)
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        if cls._tmpdir:
-            shutil.rmtree(cls._tmpdir, ignore_errors=True)
-
-    def setUp(self) -> None:
-        torch.cuda.tunable.enable(False)
-        torch.cuda.tunable.tuning_enable(False)
-        torch.cuda.tunable._clear_all()
-        torch.cuda.tunable.wildcard_fallback_enable(False)
-
-    def tearDown(self) -> None:
-        torch.cuda.tunable.enable(False)
-        torch.cuda.tunable.tuning_enable(False)
-        torch.cuda.tunable.wildcard_fallback_enable(False)
-
-    def _entries_for_op(self, op_substr: str) -> list[_TunableResultEntry]:
-        return [e for e in _get_tunable_results() if op_substr in e[0]]
+    _tmpdir_prefix: str = "legacy_concrete_only_test_"
+    _wildcard_fallback_in_setup: bool = False
 
     def test_addmm_tuning_no_mask_persists_concrete_only(self) -> None:
         """Tuning enabled, NO `dynamic_dims_mask` context.
@@ -1528,22 +1413,9 @@ class LegacyConcreteOnlyTunableOpsTest(TestCase):
         torch.cuda.tunable.tuning_enable(True)
         torch.addmm(bias, mat1, mat2)  # NO mask context
 
-        entries = self._entries_for_op("GemmAndBiasTunableOp")
-        # The persisted entries must NOT contain a wildcard.
-        for op_sig, params_sig, _, _ in entries:
-            self.assertNotIn(
-                "*",
-                params_sig,
-                f"legacy mode (no mask) must not persist wildcards; "
-                f"got {op_sig},{params_sig}",
-            )
-        # At least one concrete entry must exist for our shape.
-        concrete_match = [
-            e for e in entries if all(f"_{d}_" in ("_" + e[1] + "_") for d in (m, n, k))
-        ]
-        self.assertGreaterEqual(
-            len(concrete_match),
-            1,
+        self._assert_no_wildcards("GemmAndBiasTunableOp")
+        self.assertTrue(
+            _has_concrete_entry("GemmAndBiasTunableOp", m, n, k),
             f"expected concrete entry covering ({m},{n},{k}) after tuning",
         )
 
@@ -1556,13 +1428,11 @@ class LegacyConcreteOnlyTunableOpsTest(TestCase):
         torch.cuda.tunable.tuning_enable(True)
         torch.mm(mat1, mat2)  # NO mask
 
-        for op_sig, params_sig, _, _ in self._entries_for_op("GemmTunableOp"):
-            self.assertNotIn(
-                "*",
-                params_sig,
-                f"legacy mode (no mask) must not persist wildcards; "
-                f"got {op_sig},{params_sig}",
-            )
+        self._assert_no_wildcards("GemmTunableOp")
+        self.assertTrue(
+            _has_concrete_entry("GemmTunableOp", m, n, k),
+            f"expected concrete entry covering ({m},{n},{k}) after tuning",
+        )
 
     def test_bmm_tuning_no_mask_persists_concrete_only(self) -> None:
         """torch.bmm tuning without mask: only StridedBatched concrete."""
@@ -1573,9 +1443,19 @@ class LegacyConcreteOnlyTunableOpsTest(TestCase):
         torch.cuda.tunable.tuning_enable(True)
         torch.bmm(b1, b2)  # NO mask
 
-        for op_sig, params_sig, _, _ in self._entries_for_op(
-            "GemmStridedBatchedTunableOp"
-        ):
+        self._assert_no_wildcards("GemmStridedBatchedTunableOp")
+        self.assertTrue(
+            _has_concrete_entry("GemmStridedBatchedTunableOp", m, n, k),
+            f"expected concrete entry covering ({m},{n},{k}) after tuning",
+        )
+
+    def _assert_no_wildcards(self, op_substr: str) -> None:
+        """No persisted entry for `op_substr` may carry a wildcard token.
+
+        Paired with a positive `_has_concrete_entry` assertion at every call
+        site: on its own this passes vacuously when tuning persists nothing,
+        which is the regression it is meant to catch."""
+        for op_sig, params_sig, _, _ in _entries_for(op_substr):
             self.assertNotIn(
                 "*",
                 params_sig,
@@ -1611,8 +1491,8 @@ class LegacyConcreteOnlyTunableOpsTest(TestCase):
         self.assertEqual(
             out,
             ref,
-            atol=1e-2,
-            rtol=1e-2,
+            atol=GEMM_ATOL,
+            rtol=GEMM_RTOL,
             msg="fallback dispatch result should match tunable-disabled reference",
         )
 
@@ -1650,8 +1530,8 @@ class LegacyConcreteOnlyTunableOpsTest(TestCase):
         self.assertEqual(
             out,
             ref,
-            atol=1e-2,
-            rtol=1e-2,
+            atol=GEMM_ATOL,
+            rtol=GEMM_RTOL,
             msg="concrete-hit dispatch result should match reference",
         )
 
@@ -1665,7 +1545,7 @@ class LegacyConcreteOnlyTunableOpsTest(TestCase):
 # shapes a wildcard is approximating.
 
 
-class RecordUntunedConcreteMissTest(TestCase):
+class RecordUntunedConcreteMissTest(_TunableOpGpuTestBase):
     """PYTORCH_TUNABLEOP_RECORD_UNTUNED collection on a runtime concrete miss,
     for every GEMM category, whether or not a wildcard then serves the call. A
     concrete hit records nothing.
@@ -1674,34 +1554,15 @@ class RecordUntunedConcreteMissTest(TestCase):
     PYTORCH_TUNABLEOP_UNTUNED_FILENAME; record_untuned_enable(False) flushes
     and closes that file and clears the C++ dedup set."""
 
-    _tmpdir: str = ""
-    _tmp_results_path: str = ""
-
-    @classmethod
-    def setUpClass(cls) -> None:
-        if not torch.cuda.is_available():
-            raise unittest.SkipTest("cuda not available")
-        cls._tmpdir = tempfile.mkdtemp(prefix="record_untuned_test_")
-        cls._tmp_results_path = os.path.join(cls._tmpdir, "tunable_results.csv")
-        torch.cuda.tunable.set_filename(cls._tmp_results_path, False)
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        if cls._tmpdir:
-            shutil.rmtree(cls._tmpdir, ignore_errors=True)
+    _tmpdir_prefix: str = "record_untuned_test_"
 
     def setUp(self) -> None:
-        torch.cuda.tunable.enable(False)
-        torch.cuda.tunable.tuning_enable(False)
         torch.cuda.tunable.record_untuned_enable(False)
-        torch.cuda.tunable._clear_all()
-        torch.cuda.tunable.wildcard_fallback_enable(True)
+        super().setUp()
 
     def tearDown(self) -> None:
         torch.cuda.tunable.record_untuned_enable(False)
-        torch.cuda.tunable.enable(False)
-        torch.cuda.tunable.tuning_enable(False)
-        torch.cuda.tunable.wildcard_fallback_enable(False)
+        super().tearDown()
 
     def _record_untuned_run(self, stem: str, run_op: Callable[[], object]) -> list[str]:
         """Run `run_op` at runtime (TunableOp enabled, tuning disabled) with
@@ -1782,22 +1643,15 @@ class RecordUntunedConcreteMissTest(TestCase):
         "is ever recorded",
     )
     def test_scaled_mm_concrete_miss_records_untuned(self) -> None:
-        if not hasattr(torch, "float8_e4m3fn"):
-            raise unittest.SkipTest("torch.float8_e4m3fn not available")
+        # Same up-front support gate ScaledGemmTunableOpFP8Test uses, so an
+        # unsupported arch skips on an explicit precondition rather than on a
+        # RuntimeError swallowed from the call under test.
+        reason = ScaledGemmTunableOpFP8Test._scaled_mm_unsupported_reason()
+        if reason is not None:
+            raise unittest.SkipTest(reason)
         # Use distinct aligned N and K to verify the helper's K-by-N layout.
         m, n, k = 2560, 1408, 1536
         a, b, sa, sb = ScaledGemmTunableOpFP8Test._scaled_mm_inputs(m, n, k, seed=74)
-
-        # Confirm _scaled_mm is usable here before asserting on the tunable
-        # path (mirrors the skips in ScaledGemmTunableOpFP8Test).
-        torch.cuda.tunable.enable(False)
-        torch.cuda.tunable.tuning_enable(False)
-        try:
-            torch._scaled_mm(a, b, sa, sb, out_dtype=torch.bfloat16)
-        except RuntimeError as e:
-            raise unittest.SkipTest(
-                f"_scaled_mm not supported in this configuration: {e}"
-            ) from e
 
         self._assert_records_concrete_miss(
             "ScaledGemmTunableOp",
@@ -1884,6 +1738,10 @@ class DynamicDimMaskOperandSelectionTest(TestCase):
     is ``[mat_a, mat_b, scale_a, scale_b, (bias)]``, so trailing reads would
     mask the scales), and ``"scaled_mm"`` is recognized as a 2D matmul."""
 
+    @staticmethod
+    def _sym(name: str) -> sympy.Symbol:
+        return sympy.Symbol(name, positive=True, integer=True)
+
     def _scaled_mm_inputs(self, with_bias: bool) -> MMKernelInputs:
         """Scaled-mm-style inputs where the real operands (indices 0, 1)
         have a dynamic M only, while the trailing scale/bias tensors carry a
@@ -1932,6 +1790,66 @@ class DynamicDimMaskOperandSelectionTest(TestCase):
         ki = MMKernelInputs([mat1, mat2])
         self.assertEqual(ki.dynamic_dim_mask("mm"), (False, True, False, False))
 
+    # -- Both halves of dyn_k = _dyn(k1) or _dyn(k2) ---------------------
+    # k1 is mat1's trailing dim, k2 is mat2's leading one; a mask derived from
+    # only one of them still passes every fixture that has K static on both.
+
+    def test_dynamic_k_on_mat1_only(self) -> None:
+        s_k = self._sym("s_k")
+        ki = MMKernelInputs([_SizeOnlyNode((128, s_k)), _SizeOnlyNode((512, 256))])
+        self.assertEqual(ki.dynamic_dim_mask("mm"), (False, False, True, False))
+
+    def test_dynamic_k_on_mat2_only(self) -> None:
+        s_k = self._sym("s_k")
+        ki = MMKernelInputs([_SizeOnlyNode((128, 512)), _SizeOnlyNode((s_k, 256))])
+        self.assertEqual(ki.dynamic_dim_mask("mm"), (False, False, True, False))
+
+    def test_addmm_default_indices_read_the_matmul_operands(self) -> None:
+        """addmm's inputs are [bias, mat1, mat2], so the default
+        mat1_idx=-2 / mat2_idx=-1 must land on mat1/mat2 and skip the bias."""
+        s_m = self._sym("s_m")
+        nodes: list[object] = [
+            _SizeOnlyNode((256,)),  # bias
+            _SizeOnlyNode((s_m, 512)),  # (M_dyn, K)
+            _SizeOnlyNode((512, 256)),  # (K, N)
+        ]
+        ki = MMKernelInputs(nodes)
+        self.assertEqual(ki.dynamic_dim_mask("addmm"), (True, False, False, False))
+
+    # -- Batched branch -------------------------------------------------
+    # The bmm/baddbmm branch was never entered, so the fourth mask element
+    # (dyn_batch) had no coverage at all despite BmmLayoutCoverageWildcardTest
+    # depending on batched wildcarding.
+
+    @staticmethod
+    def _bmm_inputs(
+        b1: object, m: object, k1: object, b2: object, k2: object, n: object
+    ) -> MMKernelInputs:
+        return MMKernelInputs([_SizeOnlyNode((b1, m, k1)), _SizeOnlyNode((b2, k2, n))])
+
+    def test_bmm_dynamic_batch_on_mat1(self) -> None:
+        ki = self._bmm_inputs(self._sym("s_b"), 128, 512, 8, 512, 256)
+        self.assertEqual(ki.dynamic_dim_mask("bmm"), (False, False, False, True))
+
+    def test_bmm_dynamic_batch_on_mat2(self) -> None:
+        ki = self._bmm_inputs(8, 128, 512, self._sym("s_b"), 512, 256)
+        self.assertEqual(ki.dynamic_dim_mask("bmm"), (False, False, False, True))
+
+    def test_bmm_dynamic_m_and_n(self) -> None:
+        ki = self._bmm_inputs(8, self._sym("s_m"), 512, 8, 512, self._sym("s_n"))
+        self.assertEqual(ki.dynamic_dim_mask("bmm"), (True, True, False, False))
+
+    def test_baddbmm_default_indices_read_the_matmul_operands(self) -> None:
+        """baddbmm's inputs are [bias, batch1, batch2] and the bias is itself
+        3D, so reading the wrong operands is not caught by rank alone."""
+        nodes: list[object] = [
+            _SizeOnlyNode((8, 128, 256)),  # bias
+            _SizeOnlyNode((8, 128, 512)),  # (B, M, K)
+            _SizeOnlyNode((8, self._sym("s_k"), 256)),  # (B, K_dyn, N)
+        ]
+        ki = MMKernelInputs(nodes)
+        self.assertEqual(ki.dynamic_dim_mask("baddbmm"), (False, False, True, False))
+
     def test_feature_flag_off_returns_all_false(self) -> None:
         with inductor_config.patch(
             {"cuda.autotune_tunableop_dynamic_dims_wildcard": False}
@@ -1940,6 +1858,141 @@ class DynamicDimMaskOperandSelectionTest(TestCase):
             self.assertEqual(
                 ki.dynamic_dim_mask("scaled_mm"), (False, False, False, False)
             )
+
+
+class WildcardFallbackGateTest(TestCase):
+    """Coverage for the `wildcard_fallback_enable` setter, which is all that
+    is observable -- see the module-level observability caveat.
+
+    Opt-in behavior lives in `LegacyConcreteOnlyTunableOpsTest`. The
+    off-by-default initial value cannot be asserted in-process: earlier suites
+    have already written the process-global flag, and the getter
+    short-circuits on a cached PYTORCH_TUNABLEOP_WILDCARD_FALLBACK=1."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        if not torch.cuda.is_available():
+            raise unittest.SkipTest("cuda not available")
+
+    def tearDown(self) -> None:
+        torch.cuda.tunable.enable(False)
+        torch.cuda.tunable.tuning_enable(False)
+        torch.cuda.tunable.wildcard_fallback_enable(False)
+
+    @unittest.skipIf(
+        os.environ.get("PYTORCH_TUNABLEOP_WILDCARD_FALLBACK") == "1",
+        "env var forces IsWildcardFallbackEnabled() true, so the off half "
+        "of the round trip cannot be observed",
+    )
+    def test_gate_round_trips(self) -> None:
+        """`wildcard_fallback_enable` is the flag `TunableOp::operator()`
+        reads before consulting `LookupWildcardFallback`, so the setter and
+        getter must agree in both directions."""
+        torch.cuda.tunable.wildcard_fallback_enable(True)
+        self.assertTrue(torch.cuda.tunable.wildcard_fallback_is_enabled())
+
+        torch.cuda.tunable.wildcard_fallback_enable(False)
+        self.assertFalse(torch.cuda.tunable.wildcard_fallback_is_enabled())
+
+
+class TestDynamicDimsMaskAPI(TestCase):
+    """Tests for the push/pop dynamic_dims_mask API and context manager."""
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA required")
+    def test_context_manager_push_pop(self) -> None:
+        with torch.cuda.tunable.dynamic_dims_mask(M=True, K=True):
+            mask = torch.cuda.tunable._pack_dynamic_dims_mask(
+                M=True, N=False, K=True, BATCH=False
+            )
+            self.assertNotEqual(mask, 0)
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA required")
+    def test_nested_context_managers(self) -> None:
+        with torch.cuda.tunable.dynamic_dims_mask(M=True):
+            with torch.cuda.tunable.dynamic_dims_mask(N=True):
+                pass
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA required")
+    def test_double_pop_raises(self) -> None:
+        handle = torch._C._cuda_tunableop_push_dynamic_dims_mask(0x1)
+        torch._C._cuda_tunableop_pop_dynamic_dims_mask(handle)
+        with self.assertRaises(RuntimeError):
+            torch._C._cuda_tunableop_pop_dynamic_dims_mask(handle)
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA required")
+    def test_invalid_mask_raises(self) -> None:
+        with self.assertRaises(RuntimeError):
+            torch._C._cuda_tunableop_push_dynamic_dims_mask(0x10)
+
+
+class ClearAllTest(_TunableOpGpuTestBase):
+    """Coverage for the testing-only `torch.cuda.tunable._clear_all()`.
+
+    Each test starts with an empty in-memory TuningResultsManager.
+    """
+
+    _tmpdir_prefix: str = "clear_all_test_"
+
+    def test_clear_all_drops_concrete_and_wildcard_entries(self) -> None:
+        m, n, k = 61, 2069, 1031
+        bias, mat1, mat2 = _addmm(m, n, k, seed=91)
+
+        # Tune with M dynamic so both a concrete and a wildcard entry land.
+        torch.cuda.tunable.enable(True)
+        torch.cuda.tunable.tuning_enable(True)
+        with torch.cuda.tunable.dynamic_dims_mask(M=True):
+            torch.addmm(bias, mat1, mat2)
+
+        self.assertTrue(
+            _has_concrete_entry("GemmAndBiasTunableOp", m, n, k),
+            "expected a concrete entry after tuning",
+        )
+        self.assertTrue(
+            _has_wildcard_with_dims("GemmAndBiasTunableOp", n, k),
+            "expected a wildcard entry after tuning with M dynamic",
+        )
+
+        torch.cuda.tunable._clear_all()
+
+        self.assertTrue(
+            torch.cuda.tunable.wildcard_fallback_is_enabled(),
+            "_clear_all() must preserve wildcard fallback enablement",
+        )
+        self.assertEqual(
+            torch.cuda.tunable.get_results(),
+            (),
+            "_clear_all() must leave the in-memory results empty",
+        )
+        self.assertFalse(
+            _has_concrete_entry("GemmAndBiasTunableOp", m, n, k),
+            "_clear_all() must drop the concrete entry",
+        )
+        self.assertFalse(
+            _has_wildcard_with_dims("GemmAndBiasTunableOp", n, k),
+            "_clear_all() must drop the wildcard entry",
+        )
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm required")
+    def test_shape_can_be_retuned_after_clear_all(self) -> None:
+        """The point of the reset: the same shape is tunable again afterwards,
+        so tests no longer have to pick globally disjoint (m, n, k)."""
+        m, n, k = 67, 2081, 1033
+        bias, mat1, mat2 = _addmm(m, n, k, seed=92)
+
+        torch.cuda.tunable.enable(True)
+        torch.cuda.tunable.tuning_enable(True)
+        torch.addmm(bias, mat1, mat2)
+        self.assertTrue(_has_concrete_entry("GemmAndBiasTunableOp", m, n, k))
+
+        torch.cuda.tunable._clear_all()
+        self.assertFalse(_has_concrete_entry("GemmAndBiasTunableOp", m, n, k))
+
+        # Re-tuning the very same shape repopulates the entry.
+        torch.addmm(bias, mat1, mat2)
+        self.assertTrue(
+            _has_concrete_entry("GemmAndBiasTunableOp", m, n, k),
+            "the same shape must be tunable again after _clear_all()",
+        )
 
 
 if __name__ == "__main__":
