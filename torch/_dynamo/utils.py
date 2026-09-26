@@ -91,7 +91,10 @@ from torch.fx._utils import _format_graph_code, lazy_format_graph_code
 from torch.monitor import _WaitCounter
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+from torch.utils._python_dispatch import (
+    is_traceable_wrapper_subclass,
+    TorchDispatchMode,
+)
 from torch.utils._triton import has_triton, has_triton_package
 from torch.utils.hooks import RemovableHandle
 
@@ -4204,6 +4207,48 @@ def _custom_op_fake_impl_pending(tx: InstructionTranslatorBase, target: Any) -> 
     return side_effects.has_pending_mutation_of_attr(vt, "_abstract_fn")
 
 
+def get_storage_tensors(tensor: torch.Tensor) -> list[torch.Tensor]:
+    from torch._subclasses.fake_tensor import get_plain_tensors
+
+    result = []
+    for plain in get_plain_tensors(tensor, out=[]):
+        if not isinstance(plain, torch.Tensor):
+            continue
+        if torch._C._functorch.is_batchedtensor(plain):
+            result.extend(get_storage_tensors(torch._C._functorch.get_unwrapped(plain)))
+        elif plain.layout == torch.sparse_coo:
+            result.extend((plain._indices(), plain._values()))
+        elif plain.layout in (torch.sparse_csr, torch.sparse_bsr):
+            result.extend((plain.crow_indices(), plain.col_indices(), plain.values()))
+        elif plain.layout in (torch.sparse_csc, torch.sparse_bsc):
+            result.extend((plain.ccol_indices(), plain.row_indices(), plain.values()))
+        else:
+            result.append(plain)
+    return result
+
+
+class _RecordWhileLoopWrites(TorchDispatchMode):
+    def __init__(self, node: torch.fx.Node) -> None:
+        super().__init__()
+        self.writes = node.meta.setdefault("dynamo_mutated_tensors", [])
+
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        kwargs = kwargs or {}
+        targets = []
+        for index, argument in enumerate(func._schema.arguments):
+            if argument.alias_info is None or not argument.alias_info.is_write:
+                continue
+            value = args[index] if index < len(args) else kwargs.get(argument.name)
+            for tensor in pytree.tree_leaves(value):
+                if isinstance(tensor, torch.Tensor):
+                    targets.extend(get_storage_tensors(tensor))
+        # Preserve geometry even if a later operation changes tensor metadata.
+        self.writes.extend(tensor.detach() for tensor in targets)
+        result = func(*args, **kwargs)
+        self.writes.extend(tensor.detach() for tensor in targets)
+        return result
+
+
 def get_fake_value(
     node: torch.fx.Node,
     tx: InstructionTranslatorBase,
@@ -4300,7 +4345,23 @@ def _get_fake_value_impl(
     try:
         from torch._dynamo.eval_frame import _use_eager_on_nested_compile
 
-        with fake_mode, enable_python_dispatcher(), _use_eager_on_nested_compile():
+        record_writes: AbstractContextManager[object] = contextlib.nullcontext(None)
+        # Nested HOP writes are recovered at their call sites, not through ATen schemas.
+        if not isinstance(node.target, torch._ops.HigherOrderOperator) and any(
+            target
+            in (
+                torch.ops.higher_order.while_loop,
+                torch.ops.higher_order.while_loop_stack_output,
+            )
+            for _, target in tx.output.current_tracer.source_fn_stack
+        ):
+            record_writes = _RecordWhileLoopWrites(node)
+        with (
+            fake_mode,
+            enable_python_dispatcher(),
+            _use_eager_on_nested_compile(),
+            record_writes,
+        ):
             ret_val = wrap_fake_exception(
                 lambda: run_node(tx.output, node, args, kwargs, nnmodule)
             )
