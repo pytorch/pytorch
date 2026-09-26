@@ -5611,6 +5611,58 @@ class GraphModule(torch.nn.Module):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_function_name_reflects_rename(self):
+        # __name__/__qualname__ live on the function object, not its code object,
+        # so a rename has to show up wherever the traced value is used. An
+        # lru_cache wrapper keeps its name in __dict__ and must stay guarded too.
+        def helper():
+            pass
+
+        @functools.lru_cache
+        def cached():
+            pass
+
+        def fn(x):
+            names = helper.__name__ + helper.__qualname__ + cached.__name__
+            return x + len(names), names
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.zeros(1)
+        self.assertEqual(opt_fn(x), fn(x))
+        cached.__name__ = "renamed_cached"
+        self.assertEqual(opt_fn(x), fn(x))
+        helper.__name__ = "renamed"
+        helper.__qualname__ = "Outer.renamed"
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_function_qualname(self):
+        class K:
+            def m(self):
+                pass
+
+        def fn(x):
+            def inner():
+                pass
+
+            return x + len(inner.__qualname__), inner.__qualname__ + K.m.__qualname__
+
+        x = torch.zeros(1)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_function_name_descriptor_sees_rename(self):
+        # The descriptor calls the getter directly, bypassing generic getattr,
+        # so the getter itself has to see an in-region rename.
+        def fn(x):
+            def inner():
+                pass
+
+            inner.__name__ = "renamed"
+            return x + len(types.FunctionType.__dict__["__name__"].__get__(inner))
+
+        x = torch.zeros(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
     def test_wraps_on_lru_cache_copies_annotations(self):
         # functools.wraps should copy __annotations__ from an lru_cache-wrapped fn.
         @functools.lru_cache

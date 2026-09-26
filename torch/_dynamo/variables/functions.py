@@ -93,12 +93,16 @@ from ..utils import (
     unpack_iterable,
 )
 from .base import (
+    _wrap_delattr,
+    _wrap_setattr,
     AsPythonConstantNotImplementedError,
     AttributeMutationNew,
     GetSet,
     getset_build,
     getset_load_or_build,
     getset_set,
+    load_pending_mutation,
+    maybe_get_python_type,
     Member,
     Method,
     NO_SUCH_SUBOBJ,
@@ -500,7 +504,8 @@ class BaseUserFunctionVariable(VariableTracker):
         self, tx: "InstructionTranslatorBase", name: str
     ) -> "VariableTracker | None":
         """Read func slot *name* off the real function object behind this VT, or
-        None when there is none (the caller then supplies the empty slot value).
+        None when there is none (the caller then falls back to what the VT itself
+        knows: an empty slot value, or the code object's name).
 
         UserFunctionVariable overrides this to reflect on the function it wraps;
         a synthesized function carries its filled slots as fields instead.
@@ -571,27 +576,35 @@ class BaseUserFunctionVariable(VariableTracker):
         return c if c is not None else ConstantVariable.create(None)
 
     def _get_name(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        return ConstantVariable.create(self.get_name())
+        # func_get_name reads the function object, which a rename takes out of
+        # sync with co_name, so reflect on the real function when there is one.
+        pending = load_pending_mutation(tx, self, "__name__")
+        if pending is not None:
+            return pending
+        name = self.read_func_slot(tx, "__name__")
+        if name is not None:
+            return name
+        # Wrapper VTs (lru_cache, torch.compile'd functions) have no function to
+        # reflect on, but get_name() reads the wrapper object itself; keep the
+        # source so the name stays guarded.
+        source = self.source and AttrSource(self.source, "__name__")
+        return VariableTracker.build(tx, self.get_name(), source)
+
+    def _get_qualname(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        pending = load_pending_mutation(tx, self, "__qualname__")
+        if pending is not None:
+            return pending
+        qualname = self.read_func_slot(tx, "__qualname__")
+        if qualname is not None:
+            return qualname
+        source = self.source and AttrSource(self.source, "__qualname__")
+        return VariableTracker.build(tx, self.get_qualname(), source)
 
     tp_getset = {
         "__defaults__": GetSet(_get_defaults, unmodeled_setter),
         "__kwdefaults__": GetSet(_get_kwdefaults, unmodeled_setter),
-        "__name__": GetSet(
-            getset_load_or_build(
-                lambda s: s.get_name(),
-                "__name__",
-                source=lambda s: s.source and AttrSource(s.source, "__name__"),
-            ),
-            _set_name,
-        ),
-        "__qualname__": GetSet(
-            getset_load_or_build(
-                lambda s: s.get_qualname(),
-                "__qualname__",
-                source=lambda s: s.source and AttrSource(s.source, "__qualname__"),
-            ),
-            _set_qualname,
-        ),
+        "__name__": GetSet(_get_name, _set_name),
+        "__qualname__": GetSet(_get_qualname, _set_qualname),
         "__code__": GetSet(
             getset_load_or_build(
                 lambda s: s.get_code(),
@@ -896,12 +909,11 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def read_func_slot(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
-        # Reads self.fn directly, bypassing side effects: callers (_get_defaults
-        # etc.) only reach here when the corresponding VT field (self.defaults,
-        # self.closure, ...) is still None, i.e. that slot has never been
-        # mutated. A mutation always sets the field directly (see
-        # _set_annotations et al.), so once set this path is never taken again
-        # for that slot.
+        # Reads self.fn directly, bypassing side effects: callers only reach here
+        # while the slot is unmutated on this VT. Most mutations set the VT field
+        # directly (self.defaults, self.closure, ... via _set_annotations et al.);
+        # __name__/__qualname__ writes are pending side effects, which
+        # _get_name/_get_qualname check before falling back to this.
         return VariableTracker.build(
             tx, getattr(self.fn, name), self.source and AttrSource(self.source, name)
         )
@@ -1327,17 +1339,32 @@ class LocalGeneratorObjectVariable(VariableTracker):
     # PyGen_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/genobject.c#L814
     _cpython_type = types.GeneratorType
 
+    # gi_name/gi_qualname hold the function's names as lazy constants. Keeping
+    # them out of traversal stops a graph break from realizing them into guards
+    # on names nothing reads.
+    _nonvar_fields = {
+        "gi_name",
+        "gi_qualname",
+        *VariableTracker._nonvar_fields,
+    }
+
     def __init__(
         self,
         code: types.CodeType,
         f_globals: dict[str, Any],
         inline_tracer: "InliningGeneratorInstructionTranslator",
+        gi_name: VariableTracker | None,
+        gi_qualname: VariableTracker | None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self.code = code
         self.f_globals = f_globals
         self.inline_tracer = inline_tracer
+        # make_gen copies gi_name/gi_qualname off the function at creation time,
+        # so renaming the function afterwards leaves this generator untouched.
+        self.gi_name = gi_name
+        self.gi_qualname = gi_qualname
         self.remaining_items: list[VariableTracker] = []
         inline_tracer.output.track_generator(self)
 
@@ -1349,6 +1376,73 @@ class LocalGeneratorObjectVariable(VariableTracker):
 
     def get_name(self) -> str:
         return self.get_code().co_name
+
+    def clear_name_snapshot(self, tx: "InstructionTranslatorBase") -> None:
+        self.gi_name = self.gi_qualname = None
+        # Generic getattr consults pending writes before the getset getter.
+        side_effects = tx.output.side_effects
+        pending = side_effects.store_attr_mutations.get(self)
+        if pending is not None:
+            for name in ("__name__", "__qualname__"):
+                if name in pending:
+                    del pending[name]
+                    del side_effects.attr_mutation_kinds[self][name]
+
+    def _is_modeled(self) -> bool:
+        if self.gi_name is None or self.gi_qualname is None:
+            unimplemented(
+                gb_type="Generator name from a polyfill",
+                context=str(self),
+                explanation="A polyfill's generator may represent a different iterator. "
+                "Its implementation's name cannot determine the original object's attributes.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+                skip_frame=True,
+            )
+        # Sourced generators can be rebuilt as plain iterators at graph breaks.
+        # Internal helpers called directly (without PolyfilledFunctionVariable)
+        # also implement non-generator iterators, such as itertools.repeat.
+        module = self.f_globals.get("__name__", "")
+        return self.source is None and not module.startswith(polyfills.__name__)
+
+    def _get_name(self, tx: "InstructionTranslatorBase") -> VariableTracker | None:
+        if not self._is_modeled():
+            return None
+        pending = load_pending_mutation(tx, self, "__name__")
+        return pending if pending is not None else self.gi_name
+
+    def _get_qualname(self, tx: "InstructionTranslatorBase") -> VariableTracker | None:
+        if not self._is_modeled():
+            return None
+        pending = load_pending_mutation(tx, self, "__qualname__")
+        return pending if pending is not None else self.gi_qualname
+
+    def _set_name(
+        self,
+        tx: "InstructionTranslatorBase",
+        value: "VariableTracker | None",
+    ) -> None:
+        if not self._is_modeled():
+            unmodeled_setter(self, tx, value)
+        # gen_set_name rejects deletion (value is None) and non-str alike.
+        if value is None or not issubclass(maybe_get_python_type(value), str):
+            raise_type_error(tx, "__name__ must be set to a string object")
+        store_attr_mutation(tx, self, "__name__", value)
+
+    def _set_qualname(
+        self,
+        tx: "InstructionTranslatorBase",
+        value: "VariableTracker | None",
+    ) -> None:
+        if not self._is_modeled():
+            unmodeled_setter(self, tx, value)
+        if value is None or not issubclass(maybe_get_python_type(value), str):
+            raise_type_error(tx, "__qualname__ must be set to a string object")
+        store_attr_mutation(tx, self, "__qualname__", value)
+
+    tp_getset = {
+        "__name__": GetSet(_get_name, _set_name),
+        "__qualname__": GetSet(_get_qualname, _set_qualname),
+    }
 
     def get_function(self) -> Never:
         raise NotImplementedError("get_function")
@@ -1431,6 +1525,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
 
         tracer.frame_state = FrameState.FRAME_EXECUTING
 
+        num_generators = len(tx.output.local_generators)
         try:
             # Hierarchically, tx can be seen as the parent of the inline tracer
             # created on call_function. Any exception needs to be propagated to tx
@@ -1494,6 +1589,12 @@ class LocalGeneratorObjectVariable(VariableTracker):
             if not tx.one_graph and not tx.error_on_graph_break:
                 e.msg += "\n\nSkipping frame due to graph break in a generator's next() call."
             raise
+        finally:
+            if self.gi_name is None:
+                # A suspended polyfill can create more implementation generators
+                # when resumed, including generators it yields to the caller.
+                for gen in tx.output.local_generators[num_generators:]:
+                    gen.clear_name_snapshot(tx)
 
     def gen_send_ex(
         self,
@@ -1694,10 +1795,79 @@ class LocalGeneratorObjectVariable(VariableTracker):
 
         return throw_here()
 
+    def _setattro(
+        self,
+        tx: "InstructionTranslatorBase",
+        name_var: VariableTracker,
+        value: VariableTracker | None = None,
+    ) -> VariableTracker:
+        # tp_setattro for a store (value) or a delete (None). Generators have no
+        # instance __dict__, so a name outside tp_getset is an AttributeError,
+        # worded as CPython does for what the type lookup finds: a read-only
+        # member (gi_code on 3.10) or getset (gi_running), anything else the
+        # type defines (send, __doc__), or nothing.
+        if not issubclass(maybe_get_python_type(name_var), str):
+            kind = name_var.python_type_name()
+            raise_type_error(tx, f"attribute name must be string, not '{kind}'")
+        attr = name_var.as_python_constant()
+        getset = self.lookup_tp_getset_member(attr)
+        if getset is not None:
+            getset.setter(self, tx, value)
+            return ConstantVariable.create(None)
+        from .object_protocol import mro_lookup
+
+        py_type = self.python_type()
+        descr = mro_lookup(py_type, attr)
+        if isinstance(descr, types.MemberDescriptorType):
+            raise_attribute_error(tx, "readonly attribute")
+        if isinstance(descr, types.GetSetDescriptorType):
+            raise_attribute_error(
+                tx,
+                f"attribute '{attr}' of '{py_type.__name__}' objects is not writable",
+            )
+        if descr is not NO_SUCH_SUBOBJ:
+            raise_attribute_error(
+                tx, f"'{py_type.__name__}' object attribute '{attr}' is read-only"
+            )
+        # 3.13 started appending this hint for types without a __dict__.
+        hint = (
+            " and no __dict__ for setting new attributes"
+            if sys.version_info >= (3, 13)
+            else ""
+        )
+        raise_attribute_error(
+            tx, f"'{py_type.__name__}' object has no attribute '{attr}'{hint}"
+        )
+
+    def gen_setattr(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        if not self._is_modeled():
+            return None
+        return _wrap_setattr(self, tx, type(self)._setattro, args, kwargs)
+
+    def gen_delattr(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        if not self._is_modeled():
+            return None
+        return _wrap_delattr(self, tx, type(self)._setattro, args, kwargs)
+
+    # __setattr__/__delattr__ go through tp_methods rather than a call_method
+    # override, which would turn every method attribute of a generator into a
+    # CallMethodVariable (see object_generic_getattr).
     tp_methods = {
         "send": Method(gen_send),
         "close": Method(gen_close),
         "throw": Method(gen_throw),
+        "__setattr__": Method(gen_setattr),
+        "__delattr__": Method(gen_delattr),
     }
 
 
@@ -1798,11 +1968,16 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
 
         if sys.version_info >= (3, 11):
             inline_tracer.inline_call_()
-        # calling a generator returns a generator object
+        from .object_protocol import generic_getattr
+
+        # calling a generator returns a generator object, whose gi_name and
+        # gi_qualname make_gen copies off the function object
         return self.generator_cls(
             code,
             f_globals,
             inline_tracer,  # type: ignore[arg-type]
+            gi_name=generic_getattr(tx, self.vt, "__name__"),
+            gi_qualname=generic_getattr(tx, self.vt, "__qualname__"),
             source=self.source,
         )
 
@@ -2285,6 +2460,11 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
     def get_code(self) -> types.CodeType:
         return self.code.as_python_constant()
+
+    def get_qualname(self) -> str:
+        # MAKE_FUNCTION's qualname; before 3.11 the code object has no
+        # co_qualname to recover it from.
+        return self.fn_name.as_python_constant()
 
     def python_type(self) -> type[types.FunctionType]:
         return types.FunctionType
@@ -3745,11 +3925,19 @@ class PolyfilledFunctionVariable(VariableTracker):
             )
 
         traceable_function_variable = VariableTracker.build(tx, self.traceable_fn)
-        return tx.inline_user_function_return(
-            traceable_function_variable,
-            list(args),
-            dict(kwargs),
-        )
+        num_generators = len(tx.output.local_generators)
+        try:
+            return tx.inline_user_function_return(
+                traceable_function_variable,
+                list(args),
+                dict(kwargs),
+            )
+        finally:
+            # These generators implement the polyfill, but the original function
+            # may return a different iterator type. Existing arguments keep their
+            # identity; newly created generators have no reliable name snapshot.
+            for gen in tx.output.local_generators[num_generators:]:
+                gen.clear_name_snapshot(tx)
 
     def call_method(
         self,

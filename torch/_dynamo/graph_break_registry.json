@@ -4308,6 +4308,16 @@
       ]
     }
   ],
+  "GB3851": [
+    {
+      "Gb_type": "Generator name from a polyfill",
+      "Context": "str(self)",
+      "Explanation": "A polyfill's generator may represent a different iterator. Its implementation's name cannot determine the original object's attributes.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0257": [
     {
       "Gb_type": "TypedDict with optional keys",
