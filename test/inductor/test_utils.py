@@ -66,6 +66,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xfailIfNoAcceleratorTriton,
 )
+from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.utils import _triton as triton_utils
 from torch.utils._sympy.functions import Identity
 
@@ -527,7 +528,10 @@ class TestUtils(TestCase):
             self.assertEqual(flops, expected)
 
     @xfailIfNoAcceleratorTriton
-    @unittest.skipIf(not torch.cuda.is_available(), "skip if no device")
+    @unittest.skipIf(
+        not torch.cuda.is_available() and not torch.xpu.is_available(),
+        "skip if no device",
+    )
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     def test_get_device_tflops(self, dtype):
         ret = get_device_tflops(dtype)
@@ -940,14 +944,18 @@ class TestFP4Support(TestCase):
         self.assertEqual(t.shape, (4, 8))
         self.assertEqual(t.stride(), (8, 1))
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
-    def test_rand_strided_fp4_cuda(self):
+    @unittest.skipIf(
+        not torch.cuda.is_available() and not torch.xpu.is_available(), "requires GPU"
+    )
+    def test_rand_strided_fp4_gpu(self):
         from torch._dynamo.testing import rand_strided
 
-        t = rand_strided((16, 32), (32, 1), dtype=torch.float4_e2m1fn_x2, device="cuda")
+        t = rand_strided(
+            (16, 32), (32, 1), dtype=torch.float4_e2m1fn_x2, device=GPU_TYPE
+        )
         self.assertEqual(t.dtype, torch.float4_e2m1fn_x2)
         self.assertEqual(t.shape, (16, 32))
-        self.assertTrue(t.is_cuda)
+        self.assertTrue(t.is_cuda or t.is_xpu)
 
 
 class TestTritonTypeMapping(TestCase):
@@ -1983,7 +1991,7 @@ class TestDeviceClassification(TestCase):
         # MPS is GPU-class but exposes no Stream, so it takes no stream guard.
         self.assertFalse(device_need_guard("mps"))
         self.assertFalse(is_gpu("cpu"))
-        self.assertFalse(is_gpu("cuda:0"))
+        self.assertFalse(is_gpu(f"{GPU_TYPE}:0"))
 
 
 @instantiate_parametrized_tests
