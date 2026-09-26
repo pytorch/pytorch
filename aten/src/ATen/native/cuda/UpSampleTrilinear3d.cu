@@ -20,6 +20,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/empty.h>
 #include <ATen/ops/upsample_trilinear3d_native.h>
 #include <ATen/ops/upsample_trilinear3d_backward_native.h>
 #endif
@@ -66,6 +67,22 @@ __device__ __forceinline__ void compute_output_range(
 
   min_output = max(0, static_cast<int>(ceil(lo)));
   max_output = min(output_size - 1, static_cast<int>(floor(hi)));
+}
+
+template <typename accscalar_t>
+__device__ __forceinline__ accscalar_t compute_linear_axis_weight(
+    const int input_pos,
+    const int input_base,
+    const int input_step,
+    const accscalar_t input_lambda) {
+  accscalar_t weight = 0;
+  if (input_pos == input_base) {
+    weight += static_cast<accscalar_t>(1) - input_lambda;
+  }
+  if (input_pos == input_base + input_step) {
+    weight += input_lambda;
+  }
+  return weight;
 }
 
 template <typename scalar_t, typename accscalar_t>
@@ -131,38 +148,13 @@ __device__ __forceinline__ void upsample_trilinear3d_backward_gather(
         const accscalar_t input_w_lambda = input_wr - input_w_base;
         const accscalar_t input_w0_lambda = static_cast<accscalar_t>(1) - input_w_lambda;
 
-        accscalar_t weight = 0;
-        if (input_d == input_d_base && input_h == input_h_base && input_w == input_w_base) {
-          weight += input_d0_lambda * input_h0_lambda * input_w0_lambda;
-        }
-        if (input_d == input_d_base && input_h == input_h_base &&
-            input_w == input_w_base + input_wp) {
-          weight += input_d0_lambda * input_h0_lambda * input_w_lambda;
-        }
-        if (input_d == input_d_base && input_h == input_h_base + input_hp &&
-            input_w == input_w_base) {
-          weight += input_d0_lambda * input_h_lambda * input_w0_lambda;
-        }
-        if (input_d == input_d_base && input_h == input_h_base + input_hp &&
-            input_w == input_w_base + input_wp) {
-          weight += input_d0_lambda * input_h_lambda * input_w_lambda;
-        }
-        if (input_d == input_d_base + input_dp && input_h == input_h_base &&
-            input_w == input_w_base) {
-          weight += input_d_lambda * input_h0_lambda * input_w0_lambda;
-        }
-        if (input_d == input_d_base + input_dp && input_h == input_h_base &&
-            input_w == input_w_base + input_wp) {
-          weight += input_d_lambda * input_h0_lambda * input_w_lambda;
-        }
-        if (input_d == input_d_base + input_dp && input_h == input_h_base + input_hp &&
-            input_w == input_w_base) {
-          weight += input_d_lambda * input_h_lambda * input_w0_lambda;
-        }
-        if (input_d == input_d_base + input_dp && input_h == input_h_base + input_hp &&
-            input_w == input_w_base + input_wp) {
-          weight += input_d_lambda * input_h_lambda * input_w_lambda;
-        }
+        const accscalar_t d_weight = compute_linear_axis_weight(
+            input_d, input_d_base, input_dp, input_d_lambda);
+        const accscalar_t h_weight = compute_linear_axis_weight(
+            input_h, input_h_base, input_hp, input_h_lambda);
+        const accscalar_t w_weight = compute_linear_axis_weight(
+            input_w, input_w_base, input_wp, input_w_lambda);
+        const accscalar_t weight = d_weight * h_weight * w_weight;
 
         if (weight > 0) {
           const size_t output_index =
@@ -281,38 +273,13 @@ __device__ __forceinline__ void upsample_trilinear3d_backward_gather_ndhwc(
         const accscalar_t input_w_lambda = input_wr - input_w_base;
         const accscalar_t input_w0_lambda = static_cast<accscalar_t>(1) - input_w_lambda;
 
-        accscalar_t weight = 0;
-        if (input_d == input_d_base && input_h == input_h_base && input_w == input_w_base) {
-          weight += input_d0_lambda * input_h0_lambda * input_w0_lambda;
-        }
-        if (input_d == input_d_base && input_h == input_h_base &&
-            input_w == input_w_base + input_wp) {
-          weight += input_d0_lambda * input_h0_lambda * input_w_lambda;
-        }
-        if (input_d == input_d_base && input_h == input_h_base + input_hp &&
-            input_w == input_w_base) {
-          weight += input_d0_lambda * input_h_lambda * input_w0_lambda;
-        }
-        if (input_d == input_d_base && input_h == input_h_base + input_hp &&
-            input_w == input_w_base + input_wp) {
-          weight += input_d0_lambda * input_h_lambda * input_w_lambda;
-        }
-        if (input_d == input_d_base + input_dp && input_h == input_h_base &&
-            input_w == input_w_base) {
-          weight += input_d_lambda * input_h0_lambda * input_w0_lambda;
-        }
-        if (input_d == input_d_base + input_dp && input_h == input_h_base &&
-            input_w == input_w_base + input_wp) {
-          weight += input_d_lambda * input_h0_lambda * input_w_lambda;
-        }
-        if (input_d == input_d_base + input_dp && input_h == input_h_base + input_hp &&
-            input_w == input_w_base) {
-          weight += input_d_lambda * input_h_lambda * input_w0_lambda;
-        }
-        if (input_d == input_d_base + input_dp && input_h == input_h_base + input_hp &&
-            input_w == input_w_base + input_wp) {
-          weight += input_d_lambda * input_h_lambda * input_w_lambda;
-        }
+        const accscalar_t d_weight = compute_linear_axis_weight(
+            input_d, input_d_base, input_dp, input_d_lambda);
+        const accscalar_t h_weight = compute_linear_axis_weight(
+            input_h, input_h_base, input_hp, input_h_lambda);
+        const accscalar_t w_weight = compute_linear_axis_weight(
+            input_w, input_w_base, input_wp, input_w_lambda);
+        const accscalar_t weight = d_weight * h_weight * w_weight;
 
         if (weight > 0) {
           const size_t output_index =
@@ -746,7 +713,8 @@ static void upsample_trilinear3d_backward_out_cuda_template_deterministic(
     return;
   }
 
-  if (grad_output_.sizes() == grad_input_.sizes()) {
+  if (input_depth == output_depth && input_height == output_height &&
+      input_width == output_width) {
     grad_input_.copy_(grad_output_);
     return;
   }
@@ -781,11 +749,11 @@ static void upsample_trilinear3d_backward_out_cuda_template_deterministic(
                   grad_input_.const_data_ptr<scalar_t>())) >= vector_size &&
               memory::can_vectorize_up_to<scalar_t>(reinterpret_cast<const char*>(
                   grad_output.const_data_ptr<scalar_t>())) >= vector_size;
-          const size_t num_kernels = static_cast<size_t>(nbatch) * channels *
+          const size_t num_input_elements = static_cast<size_t>(nbatch) * channels *
               input_depth * input_height * input_width;
           const size_t work_items = vectorized
-              ? num_kernels / vector_size
-              : num_kernels;
+              ? num_input_elements / vector_size
+              : num_input_elements;
           const size_t num_blocks = std::min(
               ceil_div(work_items, static_cast<size_t>(num_threads)),
               static_cast<size_t>(
@@ -832,16 +800,18 @@ static void upsample_trilinear3d_backward_out_cuda_template_deterministic(
 #endif
 
         Tensor grad_output = grad_output_.contiguous();
-        Tensor grad_input = grad_input_.contiguous();
-        const size_t num_kernels = static_cast<size_t>(nbatch) * channels *
+        Tensor grad_input = grad_input_.is_contiguous()
+            ? grad_input_
+            : at::empty(grad_input_.sizes(), grad_input_.options());
+        const size_t num_input_elements = static_cast<size_t>(nbatch) * channels *
             input_depth * input_height * input_width;
         const size_t num_blocks = std::min(
-            ceil_div(num_kernels, static_cast<size_t>(num_threads)),
+            ceil_div(num_input_elements, static_cast<size_t>(num_threads)),
             static_cast<size_t>(
                 at::cuda::getCurrentDeviceProperties()->maxGridSize[0]));
         upsample_trilinear3d_backward_gather_out_frame<scalar_t, accscalar_t>
             <<<num_blocks, num_threads, 0, stream>>>(
-                num_kernels,
+                num_input_elements,
                 input_depth,
                 input_height,
                 input_width,

@@ -5305,10 +5305,11 @@ def interpolate(  # noqa: F811
             raise AssertionError("align_corners is unexpectedly None")
         # Two levels are necessary to prevent TorchScript from touching
         # are_deterministic_algorithms_enabled.
-        # Keep the existing fallback for HIP; CUDA uses the native gather kernel.
+        # Keep the existing fallback for HIP and other non-CPU backends.
         if not torch.jit.is_scripting():
             if (
-                torch.version.hip is not None
+                not input.is_cpu
+                and (not input.is_cuda or torch.version.hip is not None)
                 and torch.are_deterministic_algorithms_enabled()
             ):
                 # Use slow decomp whose backward will be in terms of index_put
