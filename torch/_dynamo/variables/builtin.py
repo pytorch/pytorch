@@ -1740,6 +1740,13 @@ class BuiltinVariable(BaseBuiltinVariable):
                     raise_type_error(
                         tx, f"getitem expected 2 arguments, got {len(args)}"
                     )
+                if isinstance(args[0], TensorVariable):
+                    args = [  # type: ignore[assignment]
+                        args[0],
+                        args[0]._lower_unspecialized_list_index(
+                            tx, "__getitem__", args[1]
+                        ),
+                    ]
                 if isinstance(args[1], SymNodeVariable):
                     # Standard indexing will force specialization due to
                     # __index__.  Rewrite as a regular torch op which will
@@ -2718,6 +2725,16 @@ class BuiltinVariable(BaseBuiltinVariable):
                 hints=[*graph_break_hints.DYNAMO_BUG],
             )
         isinstance_type = isinstance_type_var.as_python_constant()
+        if (
+            isinstance(arg, variables.UnspecializedPythonVariable)
+            and arg.source is not None
+            and arg.raw_value is not None
+            and not _uses_custom_classinfo_check(isinstance_type)
+        ):
+            # A Python scalar wrapped from a source is traced as a 0-d tensor
+            # but keeps its (guarded) Python type. Derived values are excluded:
+            # their type can depend on the operand values (int ** -1).
+            return VariableTracker.build(tx, isinstance(arg.raw_value, isinstance_type))
         # An AsyncCollectiveTensor (ACT) input's tensor-class guard is relaxed
         # (see VariableBuilder.wrap_tensor): the cache entry does not discriminate
         # ACT from the resolved plain Tensor. isinstance() observes the class and
@@ -3011,6 +3028,13 @@ class BuiltinVariable(BaseBuiltinVariable):
     def call_type(
         self, tx: "InstructionTranslatorBase", obj: VariableTracker
     ) -> VariableTracker:
+        if (
+            isinstance(obj, variables.UnspecializedPythonVariable)
+            and obj.source is not None
+            and obj.raw_value is not None
+        ):
+            # See call_isinstance.
+            return VariableTracker.build(tx, type(obj.raw_value))
         try:
             py_type = obj.python_type()
         except NotImplementedError as error:

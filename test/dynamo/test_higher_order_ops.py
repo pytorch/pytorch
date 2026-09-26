@@ -2,6 +2,7 @@
 import enum
 import functools
 import pprint
+import random
 import re
 import unittest
 import warnings
@@ -34,6 +35,7 @@ from torch.testing._internal.common_device_type import (
     ops,
 )
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
     IS_LINUX,
     munge_exc,
     parametrize,
@@ -143,6 +145,7 @@ def default_args_generator(seed_value):
         yield new_args
 
 
+@instantiate_parametrized_tests
 class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
     def _assert_wrap_fallback(self, func, args, setup=lambda: None):
         counters.clear()
@@ -202,6 +205,42 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         # We always return/check the graph from the first run if return_graph = True
         if return_graph:
             return normalize_gm(graph.print_readable(print_output=False))
+
+    @parametrize("name", ["seed", "shuffle", "sample"])
+    def test_global_random_state_change_in_wrap_is_rejected(self, name):
+        def inner(x):
+            if name == "seed":
+                random.seed(1)
+            elif name == "shuffle":
+                random.shuffle([1, 2, 3])
+            else:
+                random.sample(range(5), 2)
+            return x.clone()
+
+        def fn(x):
+            return wrap(inner, x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "HOP: Unsafe side effect"
+        ):
+            opt_fn(torch.ones(1))
+
+    def test_global_random_draw_in_wrap(self):
+        # A draw is replayed in the prologue, outside the body, so it is allowed,
+        # also after a draw outside the body.
+        def fn(x):
+            x = x + random.random()
+            return wrap(lambda y: y + random.random() + random.randint(0, 9), x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(1)
+        opt_fn(x)
+        for seed in range(3):
+            random.seed(seed)
+            expected = fn(x)
+            random.seed(seed)
+            self.assertEqual(opt_fn(x), expected)
 
     def test_error_message_sane(self):
         foo = []
