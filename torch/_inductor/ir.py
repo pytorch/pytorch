@@ -107,6 +107,7 @@ from .dependencies import (
     SymbolUsageCollectorOpsHandler,
     var_builder,
 )
+from .fx_utils import get_node_storage
 from .loop_body import LoopBody
 from .ops_handler import OpCounterCSE, OpCountResult, ReductionType, StoreMode
 from .runtime.benchmarking import benchmarker
@@ -7007,6 +7008,11 @@ class ConcatKernel(NopKernel):
             inputs=[],
         )
         kernel = StorageBox(concat_kernel)
+        # An input computed straight into the concat storage would leak any
+        # in-place mutation of that input into the concat result.
+        nodes = V.graph.current_node.all_input_nodes
+        mutated = V.graph.mutated_storages
+        allow_alias = not any(get_node_storage(n) in mutated for n in nodes)
         op_names = []
         for i, inp in enumerate(inputs):
             if not isinstance(inp, (BaseView, MutableBox)):
@@ -7016,6 +7022,7 @@ class ConcatKernel(NopKernel):
                 SliceView.create(
                     kernel, dim, offsets_start[i], offsets_end[i], clamp=False
                 ),
+                allow_alias=allow_alias,
             )
             if not isinstance(input_buffer, Buffer):
                 raise AssertionError(type(input_buffer))
@@ -7095,7 +7102,7 @@ class ConcatKernel(NopKernel):
         return NopKernel.get_free_symbol_uses(self, unbacked_only)
 
     @classmethod
-    def realize_into(cls, src: IRNode, dst: IRNode) -> IRNode:
+    def realize_into(cls, src: IRNode, dst: IRNode, allow_alias: bool = True) -> IRNode:
         # Attempt to turn this into a ReinterpretView rather than assert.
         # This has concessions around layout, as as_storage_and_layout
         # can cause us to go from flexible to fixed layout.
@@ -7107,9 +7114,9 @@ class ConcatKernel(NopKernel):
             raise AssertionError(type(dst))
         if isinstance(src, TensorBox):
             # unwrap a TensorBox
-            return cls.realize_into(src.data, dst)
+            return cls.realize_into(src.data, dst, allow_alias)
 
-        if isinstance(src, StorageBox):
+        if isinstance(src, StorageBox) and allow_alias:
             src.realize()
             # ExternKernelAlloc has specific requirements for output layout, should create a copy
             if not hasattr(src.data, "layout"):

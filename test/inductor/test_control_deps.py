@@ -232,6 +232,88 @@ class TestControlDeps(InductorTestCase):
             expected = fn(a, b, c)
             torch.testing.assert_close(result, expected)
 
+    @requires_gpu()
+    def test_control_deps_cat_input_mutated_after_cat(self):
+        # The wrapped cat may compute an input straight into its own storage,
+        # which is only valid if that input is not mutated in place afterwards.
+        def fn(a, b, idx, src):
+            x = a + 1
+            cat_result = torch.cat([x, b * 2], dim=0)
+            x.index_put_((idx,), src)
+            return cat_result, x
+
+        def add_control_deps(graph):
+            from torch.utils._ordered_set import OrderedSet
+
+            cat_nodes = graph.find_nodes(
+                op="call_function", target=torch.ops.aten.cat.default
+            )
+            if len(cat_nodes) != 1:
+                raise AssertionError(f"Expected 1 cat node, got {len(cat_nodes)}")
+            add_nodes = graph.find_nodes(
+                op="call_function", target=torch.ops.aten.add.Tensor
+            )
+            deps_map = {cat_nodes[0]: OrderedSet([add_nodes[0]])}
+            torch._inductor.fx_passes.control_dependencies.preserve_node_ordering(
+                graph, deps_map
+            )
+            return graph
+
+        with torch._inductor.config.patch(
+            post_grad_custom_post_pass=add_control_deps,
+        ):
+            a = torch.rand([128, 64], device=GPU_TYPE)
+            b = torch.rand([128, 64], device=GPU_TYPE)
+            idx = torch.arange(64, device=GPU_TYPE)
+            src = torch.ones([64, 64], device=GPU_TYPE)
+
+            result = torch.compile(fn)(a, b, idx, src)
+            expected = fn(a, b, idx, src)
+            torch.testing.assert_close(result, expected)
+
+    @requires_gpu()
+    def test_control_deps_wraps_inplace_op_mutating_cat_input(self):
+        # The bucketing passes wrap ops that are already in place. Such a
+        # mutation must still stop the cat from computing its input in place.
+        def fn(a, b, idx, src):
+            x = a + 1
+            cat_result = torch.cat([x, b * 2], dim=0)
+            x.index_put_((idx,), src)
+            return cat_result, x
+
+        def add_control_deps(graph):
+            from torch._inductor.fx_passes.reinplace import (
+                reinplace_inplaceable_ops_core,
+            )
+            from torch.utils._ordered_set import OrderedSet
+
+            reinplace_inplaceable_ops_core(graph)
+            index_put_nodes = graph.find_nodes(
+                op="call_function", target=torch.ops.aten.index_put_.default
+            )
+            if len(index_put_nodes) != 1:
+                raise AssertionError(f"Expected 1 index_put_, got {index_put_nodes}")
+            cat_nodes = graph.find_nodes(
+                op="call_function", target=torch.ops.aten.cat.default
+            )
+            deps_map = {index_put_nodes[0]: OrderedSet([cat_nodes[0]])}
+            torch._inductor.fx_passes.control_dependencies.preserve_node_ordering(
+                graph, deps_map
+            )
+            return graph
+
+        with torch._inductor.config.patch(
+            post_grad_custom_post_pass=add_control_deps,
+        ):
+            a = torch.rand([128, 64], device=GPU_TYPE)
+            b = torch.rand([128, 64], device=GPU_TYPE)
+            idx = torch.arange(64, device=GPU_TYPE)
+            src = torch.ones([64, 64], device=GPU_TYPE)
+
+            result = torch.compile(fn)(a, b, idx, src)
+            expected = fn(a, b, idx, src)
+            torch.testing.assert_close(result, expected)
+
     @config.patch(enable_auto_functionalized_v2=True)
     def test_control_deps_with_auto_functionalized_v2(self):
         with torch.library._scoped_library("control_deps_auto_func", "FRAGMENT") as lib:
