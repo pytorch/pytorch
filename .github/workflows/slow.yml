@@ -58,9 +58,9 @@ jobs:
       cuda-arch-list: 8.6
       test-matrix: |
         { include: [
-          { config: "slow", shard: 1, num_shards: 3, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "slow", shard: 2, num_shards: 3, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "slow", shard: 3, num_shards: 3, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "slow", shard: 1, num_shards: 3, runner: "mt-l-x86aavx2-11-41-a10g" },
+          { config: "slow", shard: 2, num_shards: 3, runner: "mt-l-x86aavx2-11-41-a10g" },
+          { config: "slow", shard: 3, num_shards: 3, runner: "mt-l-x86aavx2-11-41-a10g" },
         ]}
       python-version: "3.11"
       compiler: gcc11
@@ -95,9 +95,9 @@ jobs:
       cuda-arch-list: 8.6
       test-matrix: |
         { include: [
-          { config: "slow", shard: 1, num_shards: 3, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "slow", shard: 2, num_shards: 3, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "slow", shard: 3, num_shards: 3, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "slow", shard: 1, num_shards: 3, runner: "mt-l-x86aavx2-11-41-a10g" },
+          { config: "slow", shard: 2, num_shards: 3, runner: "mt-l-x86aavx2-11-41-a10g" },
+          { config: "slow", shard: 3, num_shards: 3, runner: "mt-l-x86aavx2-11-41-a10g" },
         ]}
       python-version: "3.11"
       compiler: gcc11
@@ -132,9 +132,9 @@ jobs:
       cuda-arch-list: 8.6
       test-matrix: |
         { include: [
-          { config: "slow", shard: 1, num_shards: 3, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "slow", shard: 2, num_shards: 3, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "slow", shard: 3, num_shards: 3, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "slow", shard: 1, num_shards: 3, runner: "mt-l-x86aavx2-11-41-a10g" },
+          { config: "slow", shard: 2, num_shards: 3, runner: "mt-l-x86aavx2-11-41-a10g" },
+          { config: "slow", shard: 3, num_shards: 3, runner: "mt-l-x86aavx2-11-41-a10g" },
         ]}
       python-version: "3.11"
       compiler: gcc11
@@ -168,8 +168,8 @@ jobs:
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
-          { config: "slow", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
-          { config: "slow", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
+          { config: "slow", shard: 1, num_shards: 2, runner: "mt-l-x86iavx512-8-64" },
+          { config: "slow", shard: 2, num_shards: 2, runner: "mt-l-x86iavx512-8-64" },
         ]}
       python-version: "3.11"
       compiler: clang21
@@ -195,16 +195,15 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      runner: linux.c7i.4xlarge
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.11-clang21-asan
       docker-image-name: ci-image:pytorch-linux-jammy-py3.11-clang21
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
-          { config: "slow", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "slow", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "slow", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "slow", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128" },
+          { config: "slow", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128" },
+          { config: "slow", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128" },
         ]}
       sync-tag: asan-build
       python-version: "3.11"

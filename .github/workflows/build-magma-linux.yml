@@ -35,7 +35,7 @@ jobs:
   build-linux-magma:
     needs: check-ci
     if: github.repository_owner == 'pytorch'
-    runs-on: linux.2xlarge
+    runs-on: mt-l-x86iavx512-8-64
     permissions:
       id-token: write
     strategy:

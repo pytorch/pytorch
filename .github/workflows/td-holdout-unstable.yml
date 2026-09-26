@@ -60,24 +60,24 @@ jobs:
       ignore-test-config-labels: true
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 2, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 3, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 4, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 5, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 6, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 7, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 8, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 9, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 10, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "distributed", shard: 1, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
-          { config: "distributed", shard: 2, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
-          { config: "distributed", shard: 3, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
-          { config: "distributed", shard: 4, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
-          { config: "distributed", shard: 5, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
-          { config: "distributed", shard: 6, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
-          { config: "distributed", shard: 7, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
-          { config: "distributed", shard: 8, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
+          { config: "default", shard: 1, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128" },
+          { config: "default", shard: 2, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128" },
+          { config: "default", shard: 3, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128" },
+          { config: "default", shard: 4, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128" },
+          { config: "default", shard: 5, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128" },
+          { config: "default", shard: 6, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128" },
+          { config: "default", shard: 7, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128" },
+          { config: "default", shard: 8, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128" },
+          { config: "default", shard: 9, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128" },
+          { config: "default", shard: 10, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128" },
+          { config: "distributed", shard: 1, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iamx-8-64" },
+          { config: "distributed", shard: 2, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iamx-8-64" },
+          { config: "distributed", shard: 3, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iamx-8-64" },
+          { config: "distributed", shard: 4, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iamx-8-64" },
+          { config: "distributed", shard: 5, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iamx-8-64" },
+          { config: "distributed", shard: 6, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iamx-8-64" },
+          { config: "distributed", shard: 7, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iamx-8-64" },
+          { config: "distributed", shard: 8, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iamx-8-64" },
         ]}
       python-version: "3.11"
       compiler: gcc11
@@ -113,12 +113,12 @@ jobs:
       ignore-test-config-labels: true
       test-matrix: |
         { include: [
-          { config: "dynamo_wrapped", shard: 1, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "dynamo_wrapped", shard: 2, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "dynamo_wrapped", shard: 3, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "dynamo_wrapped", shard: 4, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "dynamo_wrapped", shard: 5, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "dynamo_wrapped", shard: 6, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "dynamo_wrapped", shard: 1, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
+          { config: "dynamo_wrapped", shard: 2, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
+          { config: "dynamo_wrapped", shard: 3, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
+          { config: "dynamo_wrapped", shard: 4, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
+          { config: "dynamo_wrapped", shard: 5, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
+          { config: "dynamo_wrapped", shard: 6, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
         ]}
       python-version: "3.11"
       compiler: clang21
