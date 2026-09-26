@@ -279,11 +279,12 @@ def test_already_arc_label_passes_through():
 
 def test_unknown_non_arc_label_still_fails():
     """A typo must not be mistaken for a direct ARC name."""
-    matrix = """{ include: [
-      { config: "default", shard: 1, num_shards: 1, runner: "mt-linux.nonexistent" },
-    ]}"""
-    result = run(matrix, prefix="mt-")
-    check(result.returncode != 0, "expected a failure for an unmapped EC2 label")
+    for runner in ("mt-linux.nonexistent", "mt-m-x86iavx512-8-64"):
+        matrix = f"""{{ include: [
+          {{ config: "default", shard: 1, num_shards: 1, runner: "{runner}" }},
+        ]}}"""
+        result = run(matrix, prefix="mt-")
+        check(result.returncode != 0, f"expected a failure for {runner}")
 
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

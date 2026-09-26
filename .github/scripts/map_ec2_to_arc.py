@@ -101,7 +101,7 @@ def main() -> None:
         # arc.yaml's identity entries below, which deliberately drop the prefix
         # because the runners they cover (ROCm, XPU, B200) are never prefixed.
         if clean not in mapping:
-            if clean.startswith(("l-", "w-", "m-")):
+            if clean.startswith("l-"):
                 continue
             print(f"error: no ARC runner found for '{clean}'", file=sys.stderr)
             sys.exit(1)
