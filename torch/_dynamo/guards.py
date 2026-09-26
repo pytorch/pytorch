@@ -24,6 +24,7 @@ import contextlib
 import dataclasses
 import enum
 import functools
+import gc
 import importlib
 import inspect
 import io
@@ -156,6 +157,7 @@ from .source import (
     ImportSource,
     ListGetItemSource,
     LocalSource,
+    MappingProxyMappingSource,
     NamedTupleFieldsSource,
     NNModuleSource,
     NonSerializableSetGetItemSource,
@@ -259,6 +261,11 @@ def _try_is_cow_tensor(value: object) -> bool | object:
     if torch._C._dispatch_keys(value).has(torch._C.DispatchKey.Python):
         return _COW_TENSOR_UNSUPPORTED
     return torch._C._is_cow_tensor(value)  # pyrefly: ignore[missing-attribute]
+
+
+def _mapping_proxy_mapping(value: object) -> object:
+    # A mappingproxy's only GC referent is the mapping it wraps.
+    return gc.get_referents(value)[0]
 
 
 def _cow_tensor_matches(value: object, expected: object) -> bool:
@@ -2129,6 +2136,15 @@ class GuardBuilder(GuardBuilderBase):
                 raise AssertionError("base_guard_manager must not be None")
             out = base_guard_manager.lambda_manager(
                 python_lambda=lambda x: x._type().qualified_name(),
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, MappingProxyMappingSource):
+            if not base_guard_manager:  # to make mypy happy
+                raise AssertionError("base_guard_manager must not be None")
+            out = base_guard_manager.lambda_manager(
+                python_lambda=_mapping_proxy_mapping,
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,

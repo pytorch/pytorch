@@ -1835,11 +1835,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
         elif self.value is types.MappingProxyType and len(args) == 1:
             # types.MappingProxyType is a read-only proxy of the dict. If the
             # original dict changes, the changes are reflected in proxy as well.
-            dict_arg = args[0]
-            if isinstance(dict_arg, variables.UserDefinedDictVariable):
-                dict_arg = dict_arg._base_vt
-            if isinstance(dict_arg, ConstDictVariable):
-                return variables.MappingProxyVariable(dict_arg)
+            if isinstance(
+                args[0], (ConstDictVariable, variables.UserDefinedDictVariable)
+            ):
+                return variables.MappingProxyVariable(args[0])
         elif SideEffects.cls_supports_mutation_side_effects(self.value) and (
             self.source or torch._dynamo.config.enable_trace_load_build_class
         ):
@@ -4896,6 +4895,21 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
         self._base_methods = dict_methods
         if self._base_vt is None:
             raise AssertionError("_base_vt must not be None after initialization")
+
+    def call_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        result = super().call_method(tx, name, args, kwargs)
+        if (
+            isinstance(result, variables.DictViewVariable)
+            and result.dv_dict is self._base_vt
+        ):
+            result.owner = self
+        return result
 
     def len(self) -> int:
         # Used by nn_module.py to short-circuit the nn.Module forward method

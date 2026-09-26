@@ -41,6 +41,7 @@ from ..source import (
     DictGetItemSource,
     is_constant_source,
     is_from_local_source,
+    TypeDictSource,
 )
 from ..utils import (
     _item_debug_repr,
@@ -70,6 +71,7 @@ from .object_protocol import (
     _is_method_type,
     generic_getitem,
     generic_richcompare_bool,
+    generic_str,
     mro_lookup,
 )
 
@@ -1018,11 +1020,9 @@ class MappingProxyVariable(VariableTracker):
     # PyDictProxy_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/descrobject.c#L1995
     _cpython_type = types.MappingProxyType
 
-    # proxies to the original dict_vt
-    def __init__(self, dv_dict: ConstDictVariable, **kwargs: Any) -> None:
+    # proxies to the VariableTracker of the wrapped mapping
+    def __init__(self, dv_dict: VariableTracker, **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        if not isinstance(dv_dict, ConstDictVariable):
-            raise AssertionError(f"Expected ConstDictVariable, got {type(dv_dict)}")
         self.dv_dict = dv_dict
 
     def python_type(self) -> type:
@@ -1119,6 +1119,16 @@ class MappingProxyVariable(VariableTracker):
     def mp_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return self.dv_dict.mp_length_impl(tx)
 
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        self._check_mutation_guard(tx)
+        return VariableTracker.build(
+            tx, f"mappingproxy({tracked_repr(tx, self.dv_dict)})"
+        )
+
+    def tp_str_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        self._check_mutation_guard(tx)
+        return generic_str(tx, self.dv_dict)
+
     def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
@@ -1166,6 +1176,9 @@ class DictViewVariable(VariableTracker):
         if not isinstance(dv_dict, ConstDictVariable):
             raise AssertionError(f"Expected ConstDictVariable, got {type(dv_dict)}")
         self.dv_dict = dv_dict
+        # Set when dv_dict is the _base_vt of a dict subclass, so .mapping
+        # proxies the subclass rather than its plain-dict storage.
+        self.owner: VariableTracker | None = None
 
     @property
     def view_items(self) -> Any:
@@ -1212,7 +1225,10 @@ class DictViewVariable(VariableTracker):
     # dict. https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L5032-L5040
     tp_getset = {
         "mapping": GetSet(
-            lambda s, _: MappingProxyVariable(s.dv_dict), readonly_setter
+            lambda s, _: MappingProxyVariable(
+                s.dv_dict if s.owner is None else s.owner
+            ),
+            readonly_setter,
         ),
     }
 
@@ -1606,13 +1622,16 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
             # contents explicitly.
 
         example_value_dict = SideEffectsProxyDict.get_example_value_dict(vt)
+        dict_source = vt.source and AttrSource(vt.source, "__dict__")
+        if vt.source and issubclass(vt.python_type(), type):
+            # A class __dict__ is a mappingproxy; guard its items through tp_dict.
+            dict_source = TypeDictSource(vt.source)
 
         return {
             key: VariableTracker.build(
                 tx,
                 value,
-                source=vt.source
-                and DictGetItemSource(AttrSource(vt.source, "__dict__"), key),
+                source=dict_source and DictGetItemSource(dict_source, key),
             )
             for key, value in example_value_dict.items()
         }

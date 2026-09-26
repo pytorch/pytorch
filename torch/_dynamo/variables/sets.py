@@ -27,7 +27,7 @@ from .. import variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import raise_observed_exception, raise_type_error
 from ..guards import GuardBuilder, install_guard
-from ..source import is_constant_source, is_from_local_source
+from ..source import AttrSource, is_constant_source, is_from_local_source
 from ..utils import (
     _item_debug_repr,
     cmp_name_to_op_mapping,
@@ -38,7 +38,14 @@ from ..utils import (
     tracked_repr,
     unpack_iterable,
 )
-from .base import Member, Method, readonly_setter, ValueMutationNew, VariableTracker
+from .base import (
+    GetSet,
+    Member,
+    Method,
+    readonly_setter,
+    ValueMutationNew,
+    VariableTracker,
+)
 from .constant import ConstantVariable
 from .hashable import HashableTracker, is_hashable
 
@@ -1303,6 +1310,16 @@ class DictKeySetVariable(BaseSetVariable):
         # dictview_repr in Objects/dictobject.c: the type name around a list repr.
         items = ", ".join(tracked_repr(tx, k.vt) for k in self.items)
         return VariableTracker.build(tx, f"dict_keys([{items}])")
+
+    def _get_mapping(self, tx: "InstructionTranslatorBase") -> VariableTracker | None:
+        # as_python_constant() only rebuilds the keys, so read the real owning
+        # mapping from the source instead.
+        if self.source is None:
+            return None
+        source = AttrSource(self.source, "mapping")
+        return VariableTracker.build(tx, tx.output.resolve_source_value(source), source)
+
+    tp_getset = {"mapping": GetSet(_get_mapping, readonly_setter)}
 
     def is_hashable(self) -> bool:
         return False
