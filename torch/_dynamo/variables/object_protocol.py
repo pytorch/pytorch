@@ -98,7 +98,7 @@ def vt_identity_compare(
     # read off a tensor: `x.device is x.device` is False there too.
     from .dicts import ConstDictVariable
     from .functions import UserMethodVariable
-    from .lists import ListVariable
+    from .lists import ListVariable, TupleVariable
     from .misc import ExceptionVariable, TracebackVariable
     from .sets import (
         DictKeySetVariable,
@@ -114,6 +114,7 @@ def vt_identity_compare(
             ConstDictVariable,
             ListVariable,
             SetVariable,
+            TupleVariable,
             FrozensetVariable,
             DictKeySetVariable,
             OrderedSetVariable,
@@ -2460,11 +2461,19 @@ def generic_getattr(
 
     # Side effects: check for pending attribute mutations.
     if tx.output.side_effects.has_pending_mutation_of_attr(obj, name):
-        if not isinstance(obj, variables.UserDefinedObjectVariable):
-            return tx.output.side_effects.load_attr(obj, name)
-        if tx.output.side_effects.has_pending_mutation_of_attr(
+        instance_dict_mutation = tx.output.side_effects.has_pending_mutation_of_attr(
             obj, name, AttrMutationKind.INSTANCE_DICT
-        ):
+        )
+        if not isinstance(obj, variables.UserDefinedObjectVariable):
+            # A pending instance-__dict__ mutation must not shadow a data
+            # descriptor (tp_getset/tp_members). e.g. func.__dict__['__name__']
+            # = x (via functools.update_wrapper copying type.__dict__) does not
+            # change func.__name__, since __name__ is a getset data descriptor.
+            if not (
+                instance_dict_mutation and obj.lookup_tp_getset_member(name) is not None
+            ):
+                return tx.output.side_effects.load_attr(obj, name)
+        elif instance_dict_mutation:
             value = tx.output.side_effects.load_attr(obj, name, deleted_ok=True)
             type_attr = obj.lookup_class_mro_attr(name)
             if not isinstance(value, variables.DeletedVariable) and (

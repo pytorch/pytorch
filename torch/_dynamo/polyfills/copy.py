@@ -35,6 +35,11 @@ def reduce_ex_user_defined_object(obj: T, protocol: int, /) -> tuple:  # type: i
 
     cls = type(obj)
 
+    # Mirror object.__reduce_ex__ (Objects/typeobject.c): if the type overrides
+    # __reduce__, defer to it rather than building the copyreg newobj reduction.
+    if getattr(cls, "__reduce__", None) is not object.__reduce__:
+        return obj.__reduce__()  # type: ignore[attr-defined]
+
     args: tuple  # type: ignore[type-arg]
     kwargs: dict  # type: ignore[type-arg]
     if hasattr(cls, "__getnewargs_ex__"):
