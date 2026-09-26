@@ -889,6 +889,10 @@ void all_to_all_vdev_2d_offset(
   C10_CUDA_CHECK(hipStreamSynchronize(stream));
 }
 
+void release_nvshmem_team_pool(const std::string& group_name) {
+  TeamManager::release_group_if_initialized(group_name);
+}
+
 } // namespace c10d::nvshmem_extension
 
 TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
