@@ -4683,7 +4683,8 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
 
     def tp_str_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         # ref: BaseException_str in https://github.com/python/cpython/blob/3.13/Objects/exceptions.c#L118-L129
-        if type(self.value).__str__ is not BaseException.__str__:
+        # C-level __str__ inherited from a builtin exception is modeled by exc_vt.
+        if not isinstance(type(self.value).__str__, types.WrapperDescriptorType):
             return super().tp_str_impl(tx)
         return self.exc_vt.tp_str_impl(tx)
 
