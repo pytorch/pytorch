@@ -13,9 +13,9 @@ requires = [
     # `python -m torchgen.gen`, and torchgen/utils.py uses `Self` /
     # `assert_never`). Currently also pulled in transitively through
     # scikit-build-core, but list it explicitly as a direct build-time
-    # dep. The CI Docker image ships 4.12.2 on Python <3.14, so do not
+    # dep. The CI Docker image ships 4.13.2 on Python <3.14, so do not
     # raise the lower bound without bumping CI.
-    "typing-extensions>=4.10.0",
+    "typing-extensions>=4.13.0",
     # Dependency chain: NNPACK -> PeachPy -> six. PeachPy emits NNPACK's hot
     # assembly loops at build time and does `import six`. NNPACK is on by
     # default (USE_NNPACK=ON); isolated PEP 517 builds need six available.
