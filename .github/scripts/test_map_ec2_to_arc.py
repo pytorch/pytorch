@@ -266,15 +266,19 @@ def test_h100_multi_gpu_variants_force_mt():
         f"unexpected runners: {runners}",
     )
 
+
 def test_already_arc_label_passes_through():
     """A workflow that names the ARC runner directly needs no translation."""
-    matrix = """{ include: [
-      { config: "default", shard: 1, num_shards: 1, runner: "mt-l-x86aavx2-11-41-a10g" },
-    ]}"""
-    result = run(matrix, prefix="mt-")
-    check(result.returncode == 0, result.stderr)
-    output = parse_output(result.stdout)
-    check([e["runner"] for e in output["include"]] == ["mt-l-x86aavx2-11-41-a10g"])
+    for prefix in ("mt-", "lf-"):
+        # the mt- pin has to survive a build running on the lf fleet, where the
+        # prefix being stripped does not match the one on the label
+        matrix = """{ include: [
+          { config: "default", shard: 1, num_shards: 1, runner: "mt-l-x86aavx2-11-41-a10g" },
+        ]}"""
+        result = run(matrix, prefix=prefix)
+        check(result.returncode == 0, result.stderr)
+        output = parse_output(result.stdout)
+        check([e["runner"] for e in output["include"]] == ["mt-l-x86aavx2-11-41-a10g"])
 
 
 def test_unknown_non_arc_label_still_fails():
@@ -285,6 +289,7 @@ def test_unknown_non_arc_label_still_fails():
         ]}}"""
         result = run(matrix, prefix="mt-")
         check(result.returncode != 0, f"expected a failure for {runner}")
+
 
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
