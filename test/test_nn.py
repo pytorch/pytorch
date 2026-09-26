@@ -9640,6 +9640,29 @@ class TestNNDeviceType(NNTestCase):
 
                 self.assertEqual(a_cuda.grad, a_cpu.grad)
 
+    @onlyCUDA
+    @skipCUDAIf(
+        not TEST_WITH_ROCM, "regression concerns the HIP per-dimension grid limit"
+    )
+    @largeTensorTest("12GB")
+    def test_upsamplingNearest2d_backward_hip_grid_limit(self, device):
+        # 2**32 input elements put gridDim.x * blockDim.x past UINT32_MAX;
+        # downsampling keeps grad_output small so only grad_input is large.
+        input_size = (1, 1, 65536, 65536)
+        output_size = (1024, 1024)
+
+        grad_output = torch.ones((1, 1, *output_size), device=device, dtype=torch.half)
+        grad_input = torch.ops.aten.upsample_nearest2d_backward(
+            grad_output, output_size, input_size
+        )
+
+        # scale is 1024/65536, so every 64th row and column takes one element.
+        self.assertEqual(grad_input.shape, input_size)
+        self.assertEqual(grad_input.sum(dtype=torch.float32).item(), 1024 * 1024)
+        self.assertEqual(grad_input[0, 0, 0, 0].item(), 1)
+        self.assertEqual(grad_input[0, 0, 1, 0].item(), 0)
+        self.assertEqual(grad_input[0, 0, 64, 64].item(), 1)
+
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
     @parametrize_test("isize, osize", [(20, 11), (10, 15)])
     def test_upsamplingNearest2d_correctness(self, device, memory_format, isize, osize):
