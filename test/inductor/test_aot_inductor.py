@@ -4283,7 +4283,6 @@ class AOTInductorTestsTemplate:
         self.assertIs(type(actual), type(expected))
         self.assertEqual(actual, expected)
 
-    @skipIfRocmArch(NAVI_ARCH)  # regression on ROCm 7.2
     def test_repeated_calling(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
