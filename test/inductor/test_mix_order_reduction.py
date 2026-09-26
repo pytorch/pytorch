@@ -1611,27 +1611,16 @@ class MixOrderReductionHeuristicTest(TestBase):
     """
 
     def test_uses_tma_tracks_emitted_descriptors(self):
-        from torch._inductor.virtualized import V
-
-        graph = mock.Mock(
-            removed_buffers=utils.OrderedSet(),
-            inplaced_to_remove=utils.OrderedSet(),
-        )
-        with V.set_graph_handler(graph):
-            for source in (None, "host", "device"):
-                with self.subTest(source=source):
-                    kernel = object.__new__(TritonKernel)
-                    host_descriptors = {}
-                    if source == "host":
-                        host_descriptors["arg"] = mock.sentinel.descriptor
-                    kernel.host_tma_descriptor_args = host_descriptors
-                    kernel.removed_buffers = utils.OrderedSet()
-                    kernel.inplaced_to_remove = utils.OrderedSet()
-                    kernel._device_tma_buffers = utils.OrderedSet(
-                        ["output"] if source == "device" else []
-                    )
-                    self.assertEqual(kernel.uses_tma, source is not None)
-                    self.assertEqual(kernel.uses_device_tma, source == "device")
+        for source in (None, "host", "device"):
+            with self.subTest(source=source):
+                kernel = object.__new__(TritonKernel)
+                host_descriptors = {}
+                if source == "host":
+                    host_descriptors["arg"] = mock.sentinel.descriptor
+                kernel.host_tma_descriptor_args = host_descriptors
+                kernel._emitted_device_tma = source == "device"
+                self.assertEqual(kernel.uses_tma, source is not None)
+                self.assertEqual(kernel.uses_device_tma, source == "device")
 
     def _gen_num_stages(
         self, *, tma, allow_multi_stages, device_tma=False, rsplit_size=256, rnumel=256
