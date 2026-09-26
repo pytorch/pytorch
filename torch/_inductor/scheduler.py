@@ -5637,6 +5637,36 @@ def filter_graph_level_symbols(
     )
 
 
+def _ir_has_dynamic_inputs(ir_node: ir.IRNode) -> bool:
+    # A MultiOutputLayout parent (e.g. median(x, dim=0)) has no layout of its
+    # own, so recurse through it to keep its MultiOutput consumers in the same
+    # partition as the parent instead of splitting the tuple across the boundary.
+    if not isinstance(ir_node, ir.InputsKernel):
+        return False
+    for inp in ir_node.inputs:
+        if isinstance(inp, ir.IRNode):
+            if get_layout_symints(inp):
+                return True
+            if isinstance(
+                inp.maybe_get_output_spec(), ir.MultiOutputLayout
+            ) and _ir_has_dynamic_inputs(inp):
+                return True
+    return False
+
+
+def _has_dynamic_input_shapes(node: BaseSchedulerNode) -> bool:
+    # get_scheduler_node_symbol_uses only sees a node's own ops and output
+    # layouts. An ExternKernel that consumes a dynamic input but produces a
+    # static output (e.g. median -> scalar) reports no symbols, so inspect its
+    # input layouts directly.
+    if isinstance(node, FusedSchedulerNode):
+        return any(_has_dynamic_input_shapes(snode) for snode in node.snodes)
+    ir_node = node.node
+    if not isinstance(ir_node, ir.InputsKernel):
+        return False
+    return _ir_has_dynamic_inputs(ir_node)
+
+
 def _is_epilogue_fusion_enabled(template_node: BaseSchedulerNode) -> bool:
     """Check per-template flag, fall back to global config."""
     tb = template_node.get_template_node()
@@ -11731,6 +11761,8 @@ class Scheduler:
         # Partition around nodes with dynamic shapes when cudagraph_skip_dynamic_graphs is enabled
         if config.triton.cudagraph_skip_dynamic_graphs:
             if filter_graph_level_symbols(get_scheduler_node_symbol_uses(node)):
+                return "dynamic shape ops"
+            if _has_dynamic_input_shapes(node):
                 return "dynamic shape ops"
 
         return None

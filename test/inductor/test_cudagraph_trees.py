@@ -855,6 +855,35 @@ if HAS_CUDA_AND_TRITON:
 
             self.assertEqual(fn(x, y), torch.nn.functional.pad(x, (4, -4)))
 
+        @parametrize("dim", (None, 0))
+        @torch._inductor.config.patch("triton.cudagraph_skip_dynamic_graphs", True)
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_skip_extern_with_dynamic_input_static_output(self, dim):
+            # median on a dynamic tensor produces a static output; it must be
+            # partitioned out. The dim=0 variant returns a MultiOutputLayout
+            # tuple whose consumers must be partitioned out with it.
+            def eager(rows, weight):
+                m = torch.median(rows) if dim is None else torch.median(rows, dim)[0]
+                return m.sum() * (weight @ weight).relu()
+
+            foo = torch.compile(eager, mode="reduce-overhead", fullgraph=True)
+
+            scheduler_log_stream, scheduler_ctx = logs_to_string(
+                "torch._inductor.scheduler", "cudagraphs"
+            )
+            weight = torch.randn(64, 64, device="cuda")
+            with scheduler_ctx():
+                for n in (10, 13, 16):
+                    rows = torch.randn(n, 64, device="cuda")
+                    torch._dynamo.mark_dynamic(rows, 0)
+                    self.assertEqual(foo(rows, weight), eager(rows, weight))
+
+            FileCheck().check(
+                "Created 2 graph partitions: 1 cudagraphable, 1 non-cudagraphable"
+            ).check("reason=dynamic shape ops").check("ir=FallbackKernel").run(
+                scheduler_log_stream.getvalue()
+            )
+
         @parametrize("backend", ("inductor", "cudagraphs"))
         @torch._dynamo.config.patch("cudagraph_backend_keep_input_mutation", True)
         @torch._dynamo.config.patch("cudagraph_backend_support_input_mutation", True)
