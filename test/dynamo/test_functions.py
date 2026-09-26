@@ -7560,6 +7560,116 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(result, expected)
 
+    def test_locally_defined_class_closure_mutation(self):
+        # Regression test for gh-197896
+        def make(kind):
+            state = {"n": 0} if kind.startswith("dict") else []
+
+            class Helper:
+                def touch(self):
+                    if kind == "dict +=":
+                        state["n"] += 1
+                    elif kind == "dict setitem":
+                        state["k"] = 1
+                    elif kind == "list append":
+                        state.append(1)
+                    elif kind == "list +=":
+                        state.extend([1])
+
+            def f(x):
+                Helper().touch()
+                return x + 1
+
+            return f, state
+
+        for kind, expected_state in [
+            ("dict +=", {"n": 2}),
+            ("dict setitem", {"n": 0, "k": 1}),
+            ("list append", [1, 1]),
+            ("list +=", [1, 1]),
+        ]:
+            f, state = make(kind)
+            g = torch.compile(f, backend="eager", fullgraph=True)
+            out1 = g(torch.ones(1))
+            out2 = g(torch.ones(1))
+            self.assertEqual(out1, torch.tensor([2.0]))
+            self.assertEqual(out2, torch.tensor([2.0]))
+            self.assertEqual(state, expected_state)
+
+        # Locally defined context manager instantiated inside compiled function
+        log = []
+
+        class CM:
+            def __enter__(self):
+                log.append("enter")
+                return self
+
+            def __exit__(self, *a):
+                log.append("exit")
+                return False
+
+        def f_cm(x):
+            with CM():
+                y = x + 1
+            return y * 2
+
+        g_cm = torch.compile(f_cm, backend="eager", fullgraph=True)
+        res = g_cm(torch.ones(2))
+        self.assertEqual(res, torch.full((2,), 4.0))
+        self.assertEqual(log, ["enter", "exit"])
+
+        # Class defined inside the compiled function mutating enclosing closure state
+        inner_log = []
+
+        def f_inner(x):
+            class InnerHelper:
+                def touch(self):
+                    inner_log.append("touched")
+
+            InnerHelper().touch()
+            return x + 1
+
+        with torch._dynamo.config.patch(enable_trace_load_build_class=True):
+            g_inner = torch.compile(f_inner, backend="eager", fullgraph=True)
+            g_inner(torch.ones(1))
+            g_inner(torch.ones(1))
+        self.assertEqual(inner_log, ["touched", "touched"])
+
+        # Locally defined class @property mutating a captured dict
+        prop_state = {"n": 0}
+
+        class PropHelper:
+            @property
+            def val(self):
+                prop_state["n"] += 1
+                return 2
+
+        def f_prop(x):
+            return x + PropHelper().val
+
+        g_prop = torch.compile(f_prop, backend="eager", fullgraph=True)
+        self.assertEqual(g_prop(torch.ones(1)), torch.tensor([3.0]))
+        self.assertEqual(g_prop(torch.ones(1)), torch.tensor([3.0]))
+        self.assertEqual(prop_state, {"n": 2})
+
+        # Class defined inside the compiled function mutating a nonlocal variable
+        n = 0
+
+        def f_nonlocal(x):
+            class InnerNonlocal:
+                def touch(self):
+                    nonlocal n
+                    n += 1
+
+            InnerNonlocal().touch()
+            return x + 1
+
+        with torch._dynamo.config.patch(enable_trace_load_build_class=True):
+            g_nonlocal = torch.compile(f_nonlocal, backend="eager")
+            self.assertEqual(g_nonlocal(torch.ones(1)), torch.tensor([2.0]))
+            self.assertEqual(g_nonlocal(torch.ones(1)), torch.tensor([2.0]))
+        self.assertEqual(n, 2)
+
 
 instantiate_parametrized_tests(FunctionTests)
 instantiate_parametrized_tests(DefaultsTests)

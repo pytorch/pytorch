@@ -2361,7 +2361,12 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
                 try:
                     value = cell_contents.as_python_constant()
-                    cells.append(make_cell(value))
+                    cell = make_cell(value)
+                    if allow_sourced_cells and cell_contents.source is not None:
+                        tx.output.side_effects.track_cell_existing(
+                            None, cell, cell_contents
+                        )
+                    cells.append(cell)
                     continue
                 except (NotImplementedError, Unsupported):
                     if not allow_sourced_cells:
