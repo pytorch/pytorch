@@ -265,6 +265,9 @@ manual_torch_name_rule_map: dict[
     "torch.Tensor#__init__": SkipFunctionVariable,
     "torch.Tensor#split": TorchInGraphFunctionVariable,
     "torch.cuda.set_device": SkipFunctionVariable,
+    # Deprecated wrapper; warnings.warn inside it graph-breaks, which would run the
+    # wrapped set_device_index eagerly without reaching the compile_on_one_rank check.
+    "torch.accelerator.set_device_idx": SkipFunctionVariable,
     "torch.cuda.current_device": TorchInGraphFunctionVariable,
     "torch.autograd.grad": TorchInGraphFunctionVariable,
     "torch.autograd.grad_mode._enter_inference_mode": TorchInGraphFunctionVariable,
@@ -708,6 +711,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._dispatch_tls_set_dispatch_key_excluded",
         "torch._C._dispatch_tls_set_dispatch_key_included",
         "torch._C._dist_autograd_init",
+        "torch._C._dynamo.utils.get_current_stream",
         "torch._C._dump_local_tls_set",
         "torch._C._dump_upgraders_map",
         "torch._C._enable_mobile_interface_call_export",
