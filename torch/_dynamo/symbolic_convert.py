@@ -60,6 +60,7 @@ from torch._dynamo.exc import (
 )
 from torch._guards import InlinedCodeCache, tracing, TracingContext
 from torch._logging.structured import dump_file
+from torch.fx._lazy_graph_module import _LazyGraphModule
 from torch.fx.experimental.symbolic_shapes import guard_bool
 from torch.utils._functools import cache_method
 
@@ -2254,7 +2255,9 @@ class InstructionTranslatorBase(
                     self.output.side_effects.log_side_effects_summary()
 
                 if hasattr(e, "msg") and "Data-dependent" in e.msg:
-                    readable_graph = torch.fx.GraphModule(
+                    # The partial graph may have no executable body yet. Print it
+                    # without compiling it and masking the original exception.
+                    readable_graph = _LazyGraphModule(
                         self.output.nn_modules, self.output.graph
                     ).print_readable(
                         print_output=False, include_stride=True, include_device=True
