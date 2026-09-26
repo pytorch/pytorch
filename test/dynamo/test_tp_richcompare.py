@@ -2,6 +2,7 @@
 """Tests for tp_richcompare_impl: unified comparison protocol in Dynamo."""
 
 import operator
+from abc import ABCMeta
 
 import torch
 import torch._dynamo
@@ -367,6 +368,49 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
                 return "b_eq"
 
         self._assert_all_cmp_equals(B(), A(), error_ops=self._ORDERING_OPS)
+
+    def test_virtual_subclass_has_no_comparison_priority(self):
+        class Base(metaclass=ABCMeta):  # noqa: B024
+            def __eq__(self, other):
+                return "base"
+
+        class Virtual:
+            def __eq__(self, other):
+                return "virtual"
+
+        Base.register(Virtual)
+        self.assertTrue(issubclass(Virtual, Base))
+
+        def fn():
+            return Base() == Virtual()
+
+        expected = fn()
+        actual = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(expected, "base")
+        self.assertEqual(actual, expected)
+
+    def test_subclass_priority_uses_actual_mro(self):
+        class SpoofedMeta(type):
+            def __getattribute__(cls, name):
+                if name == "__mro__":
+                    return (cls, object)
+                return super().__getattribute__(name)
+
+        class Base:
+            def __eq__(self, other):
+                return "base"
+
+        class Child(Base, metaclass=SpoofedMeta):
+            def __eq__(self, other):
+                return "child"
+
+        def fn():
+            return Base() == Child()
+
+        expected = fn()
+        actual = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(expected, "child")
+        self.assertEqual(actual, expected)
 
     # =====================================================================
     # Identity fallback
