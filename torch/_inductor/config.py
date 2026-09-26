@@ -2256,6 +2256,11 @@ class triton:
     # this should only be disabled for debugging/testing
     autotune_pointwise = True
 
+    # Declare `ks*` size arguments int32 (instead of int64) for kernels in a proven class, where Inductor's
+    # symbolic state establishes the proof's premises (see codegen/triton_size_arg_narrowing.py). Unlike
+    # `assume_32bit_indexing`, this is not a global assumption: every other kernel is unchanged.
+    narrow_proven_size_args = False
+
     # max autotune gemm with cublasLt
     autotune_cublasLt = True
 

@@ -7914,6 +7914,19 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             )
         ]
 
+        if config.triton.narrow_proven_size_args and not config.assume_32bit_indexing:
+            from .triton_size_arg_narrowing import proven_int32_size_args
+
+            for arg_name in proven_int32_size_args(
+                self,
+                [arg.name for arg in argdefs],
+                triton_meta["signature"],
+                self._get_heuristic(),
+                self._get_grid_type().__name__,
+                self.body.getvalue(),
+            ):
+                triton_meta["signature"][arg_name] = "i32"
+
         for helper in self.helper_functions:
             code.writeline("")
             code.splice(helper)
