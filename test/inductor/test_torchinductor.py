@@ -20221,6 +20221,23 @@ if RUN_CPU:
             _, code_vec = run_and_get_cpp_code(opt_f, x_vec)
             FileCheck().check_not(".abs()").run(code_vec)
 
+        def test_bmm_integer_dtype_m1_n1(self):
+            # Verify the compiled result for integer bmm when M==1 or N==1,
+            # checking both dtype and values.
+            def f(a, b):
+                return torch.bmm(a, b)
+
+            m1 = torch.randint(-1000, 1000, (5, 1, 10), dtype=torch.int32)
+            m2 = torch.randint(-1000, 1000, (5, 2, 10), dtype=torch.int32)
+            rhs_n5 = torch.randint(-1000, 1000, (5, 10, 5), dtype=torch.int32)
+            rhs_n1 = torch.randint(-1000, 1000, (5, 10, 1), dtype=torch.int32)
+
+            for a, b in ((m1, rhs_n5), (m2, rhs_n1)):
+                expected = f(a, b)
+                actual = torch.compile(f)(a, b)
+                self.assertEqual(expected.dtype, actual.dtype)
+                self.assertEqual(expected, actual)
+
     copy_tests(CommonTemplate, CpuTests, "cpu")
 
 if RUN_GPU or HAS_MPS:

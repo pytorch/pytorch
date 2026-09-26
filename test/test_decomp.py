@@ -1178,6 +1178,43 @@ instantiate_device_type_tests(TestDecomp, globals())
 
 
 class DecompOneOffTests(TestCase):
+    @onlyCPU
+    def test_matmul_should_fold_viewable_layout(self, device):
+        from torch._decomp.decompositions import matmul, should_fold
+
+        for shape, stride, can_fold in (
+            ((4, 1, 8), (16, 4, 1), True),
+            ((4, 1, 8), (8, 32, 1), True),
+            ((1, 4, 8), (8, 8, 1), True),
+            ((4, 3, 8), (100, 8, 1), False),
+        ):
+            x = torch.empty_strided(shape, stride, device=device).normal_()
+            y = torch.randn((8, 5), device=device)
+
+            self.assertEqual(should_fold(x, y, False), can_fold)
+            if not can_fold:
+                continue
+
+            result = matmul(x, y)
+            expected = (
+                x.reshape(-1, x.shape[-1]).mm(y).reshape(*x.shape[:-1], y.shape[-1])
+            )
+            self.assertEqual(result, expected)
+
+    @onlyCPU
+    def test_matmul_should_fold_uses_transposed_rhs_layout(self, device):
+        from torch._decomp.decompositions import should_fold
+
+        lhs = torch.randn((8,), device=device)
+        rhs = torch.randn((2, 8, 5), device=device)
+
+        # The contiguous RHS is not viewable after mT when folding to (10, 8).
+        folded_rhs = rhs.mT.reshape(10, 8)
+        self.assertNotEqual(
+            folded_rhs.untyped_storage().data_ptr(), rhs.untyped_storage().data_ptr()
+        )
+        self.assertFalse(should_fold(lhs, rhs, False))
+
     @onlyNativeDeviceTypes
     @skipIfCrossRef
     def test_polar_decomposition_is_functional(self, device):
