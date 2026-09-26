@@ -436,6 +436,11 @@ IF(USE_MSLK)
 
     # Now, create the library and provide the sources at the same time
     add_library(mslk OBJECT ${mslk_all_sources})
+    torch_compile_options(mslk)
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+      target_compile_options(mslk PRIVATE
+        $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-Wno-error=unused-but-set-variable>)
+    endif()
 
     set_target_properties(mslk PROPERTIES POSITION_INDEPENDENT_CODE ON)
 

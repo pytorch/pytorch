@@ -46,6 +46,11 @@ on:
         default: "linux.c7i.2xlarge"
         description: |
           Label of the runner this job should run on.
+      max-jobs:
+        required: false
+        type: string
+        default: ""
+        description: Maximum number of parallel build jobs.
       flash-attention-large-memory-build:
         required: false
         type: boolean
@@ -247,6 +252,7 @@ jobs:
           OUR_GITHUB_JOB_ID: ${{ steps.setup-linux.outputs.job-id }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
           BUILD_ADDITIONAL_PACKAGES: ${{ inputs.build-additional-packages }}
+          MAX_JOBS: ${{ inputs.max-jobs }}
           SKIP_SCCACHE_INITIALIZATION: 1
         shell: bash
         run: |
