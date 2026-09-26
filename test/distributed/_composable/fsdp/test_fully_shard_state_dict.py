@@ -16,7 +16,7 @@ from torch.distributed.tensor.parallel import (
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
-    FSDPTest,
+    FSDPTestContinuous,
     FSDPTestMultiThread,
     get_devtype,
     MLP,
@@ -32,7 +32,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 device_type = torch.device(get_devtype())
 
 
-class TestFullyShardStateDictMultiProcess(FSDPTest):
+class TestFullyShardStateDictMultiProcess(FSDPTestContinuous):
     @property
     def world_size(self) -> int:
         return min(8, torch.get_device_module(device_type).device_count())

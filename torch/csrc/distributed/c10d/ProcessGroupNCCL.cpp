@@ -1357,8 +1357,10 @@ c10::intrusive_ptr<Backend> ProcessGroupNCCL::split(
   // only participate in one group.
   // This value must be non-negative int32 and all ranks are.
   ncclOpts->split_color = *std::min_element(ranks.cbegin(), ranks.cend());
+  // eagerConnectSingleDevice() initializes the child from ncclCommSplit before
+  // returning, so split does not need a separate Store connection.
   auto pg = c10::make_intrusive<ProcessGroupNCCL>(
-      store->clone(), groupRank, ranks.size(), ncclOpts);
+      store, groupRank, ranks.size(), ncclOpts);
 #ifdef NCCL_COMM_DESCRIPTION
   // We need to set the desc here so that when eager init the nccl, we can
   // propagate desc to the nccl comm.
@@ -1375,6 +1377,9 @@ c10::intrusive_ptr<Backend> ProcessGroupNCCL::merge(
     const int& size) {
   auto ncclOpts = c10::dynamic_intrusive_pointer_cast<Options>(opts);
   TORCH_CHECK(ncclOpts != nullptr, "opts not a ProcessGroupNCCL::Options.");
+  // Unlike split(), merge returns an uninitialized child. Its first collective
+  // may block in broadcastUniqueNCCLID() while holding the Store connection,
+  // so preserve an independent connection.
   auto pg = c10::make_intrusive<ProcessGroupNCCL>(
       store->clone(), rank, size, ncclOpts);
   return c10::static_intrusive_pointer_cast<Backend>(pg);
@@ -5084,18 +5089,19 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
             at::Tensor& output,
             ncclComm_t comm,
             at::cuda::CUDAStream& stream) {
-          // TODO: remove once upstream NCCL is fixed
-          // https://github.com/pytorch/pytorch/issues/168092
+          auto ncclFunc = ncclReduceScatter;
+#if NCCL_VERSION_CODE < NCCL_VERSION(2, 29, 7)
+          // Work around single-rank reduce-scatter corruption (#168092).
+          // All-reduce is equivalent for one rank, including PreMulSum.
           if (this->getSize() == 1) {
-            at::cuda::CUDAStreamGuard guard(stream);
-            output.flatten().copy_(input.flatten(), true);
-            return ncclSuccess;
+            ncclFunc = ncclAllReduce;
           }
+#endif
 
           const auto ncclDataType = getNcclDataType(input.scalar_type());
           const auto ncclReduceOp =
               getNcclReduceOp(opts.reduceOp, input, ncclDataType, comm);
-          return ncclReduceScatter(
+          return ncclFunc(
               input.data_ptr(),
               output.data_ptr(),
               output.numel(),
@@ -5201,18 +5207,18 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter_single(
           at::Tensor& output,
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
-        // TODO: remove once upstream NCCL is fixed
-        // https://github.com/pytorch/pytorch/issues/168092
+        auto ncclFunc = ncclReduceScatter;
+#if NCCL_VERSION_CODE < NCCL_VERSION(2, 29, 7)
+        // All-reduce avoids #168092 while preserving PreMulSum for one rank.
         if (this->getSize() == 1) {
-          at::cuda::CUDAStreamGuard guard(stream);
-          output.flatten().copy_(input.flatten(), true);
-          return ncclSuccess;
+          ncclFunc = ncclAllReduce;
         }
+#endif
 
         auto ncclDataType = getNcclDataType(input.scalar_type());
         auto ncclReduceOp =
             getNcclReduceOp(opts.reduceOp, input, ncclDataType, comm);
-        return ncclReduceScatter(
+        return ncclFunc(
             input.data_ptr(),
             output.data_ptr(),
             output.numel(),
@@ -5261,18 +5267,18 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter_single_coalesced(
           at::Tensor& output,
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
-        // TODO: remove once upstream NCCL is fixed
-        // https://github.com/pytorch/pytorch/issues/168092
+        auto ncclFunc = ncclReduceScatter;
+#if NCCL_VERSION_CODE < NCCL_VERSION(2, 29, 7)
+        // All-reduce avoids #168092 while preserving PreMulSum for one rank.
         if (this->getSize() == 1) {
-          at::cuda::CUDAStreamGuard guard(stream);
-          output.flatten().copy_(input.flatten(), true);
-          return ncclSuccess;
+          ncclFunc = ncclAllReduce;
         }
+#endif
 
         auto ncclDataType = getNcclDataType(input.scalar_type());
         auto ncclReduceOp =
             getNcclReduceOp(opts.reduceOp, input, ncclDataType, comm);
-        return ncclReduceScatter(
+        return ncclFunc(
             input.data_ptr(),
             output.data_ptr(),
             output.numel(),

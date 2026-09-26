@@ -37,12 +37,7 @@ from torch._library import capture_triton
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_device_type import largeTensorTest
-from torch.testing._internal.common_utils import (
-    parametrize,
-    skipIfRocm,
-    skipIfWindows,
-    skipIfXpu,
-)
+from torch.testing._internal.common_utils import parametrize, skipIfWindows, skipIfXpu
 from torch.testing._internal.inductor_utils import (
     get_func_call,
     GPU_TYPE,
@@ -58,9 +53,16 @@ from torch.testing._internal.logging_utils import log_settings, logs_to_string
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import *  # noqa: F403
 from torch.utils._triton import (
+    has_triton_cuda_tma_device,
     has_triton_experimental_host_tma,
     has_triton_package,
     has_triton_tensor_descriptor_host_tma,
+)
+
+
+requires_cuda_tma = unittest.skipIf(
+    GPU_TYPE == "cuda" and not has_triton_cuda_tma_device(),
+    "requires CUDA TMA device support",
 )
 
 
@@ -2467,6 +2469,7 @@ def forward(self, x_1, output_1):
         self.assertEqual(eager_out, expected_out)
         self.assertEqual(compiled_out, expected_out)
 
+    @requires_cuda_tma
     @requires_gpu
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("tma_version", ["new", "old"])
@@ -2566,6 +2569,7 @@ def forward(self, x_1, output_1):
         self.assertEqual(out2, x + y + 1)
         self.assertEqual(out3, z**2)
 
+    @requires_cuda_tma
     @requires_gpu
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("tma_version", ["new", "old"])
@@ -2667,6 +2671,7 @@ def forward(self, arg0_1, arg1_1):
     return (getitem,)""",
                 )
 
+    @requires_cuda_tma
     @requires_gpu
     @common_utils.parametrize("after_data_ptr", [False, True])
     @common_utils.parametrize("after_create_desc", [False, True])
@@ -2724,6 +2729,7 @@ def forward(self, arg0_1, arg1_1):
         self.assertEqual(eager_out, expected_out)
         self.assertEqual(compiled_out, expected_out)
 
+    @requires_cuda_tma
     @requires_gpu
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
@@ -2792,6 +2798,7 @@ def forward(self, arg0_1, arg1_1):
         self.assertEqual(eager_out, expected_out)
         self.assertEqual(compiled_out, expected_out)
 
+    @requires_cuda_tma
     @requires_gpu
     @common_utils.parametrize("tma_version", ["new", "old"])
     def test_tma_descriptor_dedup(self, tma_version):
@@ -2895,6 +2902,7 @@ def forward(self, arg0_1, arg1_1):
         self.assertIsInstance(wrapped[1], TensorDescriptor)
         self.assertIsInstance(wrapped[2], TensorDescriptor)
 
+    @requires_cuda_tma
     @requires_gpu
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("backend", ["eager", "aot_eager"])
@@ -3429,7 +3437,6 @@ def forward(self, arg0_1, arg1_1):
         self.assertEqual(compiled_out, eager_out)
 
     # TODO enable this test case on XPU.
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180126")
     @requires_gpu_and_triton
     @parametrize("cfg", ["normal", "cpp_wrapper"])
     def test_triton_kernel_dtype_view(self, cfg):
@@ -5322,6 +5329,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         self.assertNotIn(libname, code)
         self.assertNotIn(opname, code)
 
+    @requires_cuda_tma
     @requires_gpu
     @common_utils.parametrize("backend", ["aot_eager", "inductor", "aoti"])
     def test_host_tma_descriptor_in_triton_op(self, backend):
@@ -5400,6 +5408,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             compiled_out = compiled(x, y)
         self.assertEqual(compiled_out, expected)
 
+    @requires_cuda_tma
     @requires_gpu
     @common_utils.parametrize("backend", ["inductor", "aoti"])
     def test_host_tma_descriptor_wide_block_interleaved_args(self, backend):

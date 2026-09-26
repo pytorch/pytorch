@@ -53,13 +53,12 @@ from torch._vendor.quack.autotuner import AutotuneConfig, Autotuner
 from torch._vendor.quack.cute_dsl_utils import get_device_capacity
 from torch._vendor.quack.gemm_config import (
     blockscaled_config_ok,
-    canonicalize_config_constraints,
     config_supports,
     cta_tile_shape_m,
     get_all_configs,
 )
 
-__all__ = ["tuned_mod_gemm", "sink_arg_shapes", "TunedModGemm"]
+__all__ = ["tuned_mod_gemm", "sink_arg_shapes", "TunedModGemm", "ModProblem", "legal_mod_configs", "mod_b_kn"]
 
 
 class TunedModGemm(NamedTuple):
@@ -72,9 +71,17 @@ def _cdiv(a, b):
     return (a + b - 1) // b
 
 
-def _config_space(mod, device, config_constraints=()):
-    """Coarse per-arch config list for this mod, filtered by requested fields."""
-    constraints = canonicalize_config_constraints(config_constraints)
+def mod_b_kn(device, concat_layout):
+    """Whether an EpiMod call reads B as (K, N): SM90+ and no concat layout.
+
+    concat reads B (k, n) through per-call views, so it vetoes the b_kn
+    trace-time relabel (the interleave lives in mod.gemm).
+    """
+    return get_device_capacity(device)[0] >= 9 and not concat_layout
+
+
+def _config_space(mod, device):
+    """Coarse per-arch config list for this mod (before per-call pruning)."""
     cap = get_device_capacity(device)[0]
     hint = "gated" if mod.mode in ("acc_pair", "packed_cd_b16x2") else None
     cfgs = [
@@ -86,11 +93,9 @@ def _config_space(mod, device, config_constraints=()):
         and not (c.swap_ab and not mod.supports_swap_ab())
         and not c.use_tma_gather  # gather_A untested through the fn frontend
         and (c.split_k is None or c.split_k == 1)  # split-K is default-epilogue-only
-        and all(getattr(c, name) == value for name, value in constraints)
     ]
     if not cfgs:
-        detail = f" matching config_constraints={dict(constraints)!r}" if constraints else ""
-        raise ValueError(f"no GemmConfigs{detail} for device capacity {cap}")
+        raise ValueError(f"no GemmConfigs for device capacity {cap}")
     return cfgs
 
 
@@ -113,19 +118,12 @@ def _sink_slice(buf, shape):
     return buf[tuple(slice(0, s) for s in shape)]
 
 
-def sink_arg_shapes(
-    mod,
-    m,
-    n_gemm,
-    l=None,
-    device="cuda",
-    num_seqs=None,
-    config_constraints=None,
-):
-    """Return worst-case sink-buffer shapes over the matching config sweep."""
-    cfgs = _config_space(
-        mod, torch.device(device), canonicalize_config_constraints(config_constraints)
-    )
+def sink_arg_shapes(mod, m, n_gemm, l=None, device="cuda", num_seqs=None):
+    """Worst-case (over the tuning sweep) buffer shapes for the mod's reduce
+    sinks, keyed by sink name. Allocate these f32 and pass them in epi_args;
+    the tuner slices per config and TunedModGemm.sinks returns the live view.
+    ``num_seqs`` (varlen_m): dim==1 sinks size per-sequence tile-prefix rows."""
+    cfgs = _config_space(mod, torch.device(device))
     min_tile_n = min(c.tile_n for c in cfgs)
     # blockscaled=False halves whenever the config could run 2-CTA — the
     # smallest possible per-CTA tile, so the buffer upper-bounds both modes.
@@ -170,22 +168,66 @@ def _slice_sinks(mod, epi_args, config, lead, n_gemm, blockscaled=False, num_seq
     return views
 
 
-def _prune_for_mod(mod, transform_a, configs, named_args, *, config_constraints=(), **kwargs):
-    kwargs = named_args | kwargs
-    A, B = kwargs["A"], kwargs["B"]
-    n_full = transform_a.padded_n(B) if transform_a is not None else None
-    cap = get_device_capacity(A.device)[0]
-    A_idx = kwargs.get("A_idx")
-    m_gemm, n_gemm = _gemm_mn(A, B, kwargs.get("b_kn", False))
-    if A_idx is not None:
-        m_gemm = A_idx.shape[0]
+class ModProblem(NamedTuple):
+    """The call metadata EpiMod config pruning reads.
+
+    ``from_args`` extracts it from the tensor argument map; callers that only
+    know shapes (compile-time selection) build it directly.
+    """
+
+    device: torch.device
+    m: int
+    n: int
+    lead: tuple = ()  # (l, m) or (m,), matching EpiMod._lead_shape; read with sink_shapes
+    b_kn: bool = False
+    varlen_m: bool = False
+    gather_A: bool = False
+    blockscaled: bool = False
+    concat: bool = False
+    n_full: int | None = None  # transform_a padded N
+    sink_shapes: dict = {}  # sink name -> caller buffer shape
+
+    @classmethod
+    def from_args(cls, mod, transform_a, named_args):
+        A, B = named_args["A"], named_args["B"]
+        A_idx = named_args.get("A_idx")
+        m_gemm, n_gemm = _gemm_mn(A, B, named_args.get("b_kn", False))
+        if A_idx is not None:
+            m_gemm = A_idx.shape[0]
+        sink_shapes = {
+            name: tuple(named_args[name].shape)
+            for name, op in mod.sinks.items()
+            if getattr(op, "sink_alloc_shape", None) is not None and named_args.get(name) is not None
+        }
+        return cls(
+            device=A.device,
+            m=m_gemm,
+            n=n_gemm,
+            lead=_lead(A, A_idx, m_gemm),
+            b_kn=named_args.get("b_kn", False),
+            varlen_m=named_args.get("cu_seqlens_m") is not None,
+            gather_A=A_idx is not None,
+            blockscaled=named_args.get("SFA") is not None,
+            concat=bool(named_args.get("concat_layout")),
+            n_full=transform_a.padded_n(B) if transform_a is not None else None,
+            sink_shapes=sink_shapes,
+        )
+
+
+def _prune_for_mod(mod, transform_a, configs, named_args, **kwargs):
+    return prune_mod_configs(
+        mod, transform_a, configs, ModProblem.from_args(mod, transform_a, named_args | kwargs)
+    )
+
+
+def prune_mod_configs(mod, transform_a, configs, problem):
+    """Keep the ``configs`` (AutotuneConfig) legal for ``mod`` on ``problem``."""
+    cap = get_device_capacity(problem.device)[0]
+    m_gemm, n_gemm, n_full = problem.m, problem.n, problem.n_full
     has_out = bool(mod.outputs)
     survivors = []
-    b_kn_call = kwargs.get("b_kn", False)
-    varlen_m = kwargs.get("cu_seqlens_m") is not None
-    varlen_or_gather = varlen_m or A_idx is not None
-    blockscaled = kwargs.get("SFA") is not None
-    has_concat = bool(kwargs.get("concat_layout"))
+    varlen_or_gather = problem.varlen_m or problem.gather_A
+    blockscaled = problem.blockscaled
     epi_ops = tuple(
         dict.fromkeys(
             (
@@ -200,7 +242,7 @@ def _prune_for_mod(mod, transform_a, configs, named_args, *, config_constraints=
         c = conf.kwargs["config"]
         if c.device_capacity != cap:
             continue
-        if not config_supports(c, gather_A=A_idx is not None, varlen_m=varlen_m):
+        if not config_supports(c, gather_A=problem.gather_A, varlen_m=problem.varlen_m):
             continue
         if transform_a is not None:
             if not transform_a.config_ok(c):
@@ -222,10 +264,10 @@ def _prune_for_mod(mod, transform_a, configs, named_args, *, config_constraints=
         if blockscaled and not blockscaled_config_ok(c):
             continue
         if c.swap_ab and (
-            not b_kn_call
+            not problem.b_kn
             or n_gemm % 8
             or varlen_or_gather
-            or has_concat
+            or problem.concat
             or not mod.supports_swap_ab()
         ):
             continue
@@ -241,34 +283,25 @@ def _prune_for_mod(mod, transform_a, configs, named_args, *, config_constraints=
                 ragged = n_gemm % c.tile_n if getattr(op, "dim", 0) == 0 else m_gemm % cta_tile_m
                 if ragged:
                     ok = False
-            buf = kwargs.get(name)
+            buf_shape = problem.sink_shapes.get(name)
             alloc = getattr(op, "sink_alloc_shape", None)
-            if buf is not None and alloc is not None:
-                need = alloc(_lead(A, A_idx, m_gemm), n_gemm, cta_tile_m, c.tile_n)
-                if any(b < s for b, s in zip(buf.shape, need)):
+            if buf_shape is not None and alloc is not None:
+                need = alloc(problem.lead, n_gemm, cta_tile_m, c.tile_n)
+                if any(b < s for b, s in zip(buf_shape, need)):
                     ok = False  # caller's partial buffer too small for this tiling
         if ok:
             survivors.append(conf)
     if not survivors:
         raw_configs = tuple(conf.kwargs["config"] for conf in configs)
-        diagnostic_configs = (
-            tuple(_config_space(mod, A.device)) if config_constraints else raw_configs
-        )
         unsupported_ops = [
             op
             for op in epi_ops
             if (supports := getattr(op, "supports_config", None)) is not None
-            and not any(supports(config) for config in diagnostic_configs)
+            and not any(supports(config) for config in raw_configs)
         ]
         if len(unsupported_ops) == 1 and hasattr(unsupported_ops[0], "config_support_error"):
             raise ValueError(
-                "no supported GemmConfig: "
-                f"{unsupported_ops[0].config_support_error(diagnostic_configs)}"
-            )
-        if config_constraints:
-            raise ValueError(
-                "no supported GemmConfig matches "
-                f"config_constraints={dict(config_constraints)!r} for this call"
+                f"no supported GemmConfig: {unsupported_ops[0].config_support_error(raw_configs)}"
             )
         raise ValueError("no supported GemmConfig for this epilogue and call")
     return survivors
@@ -294,7 +327,6 @@ def _make_tuned_fn(mod, epi_names, transform_a=None, ta_names=()):
         bs_format_a=None,
         bs_format_b=None,
         concat_layout=None,
-        config_constraints=(),
         transform_digest=None,  # keyed; the mod itself is a closure capture
         transform_sf=None,
         config=None,
@@ -392,7 +424,6 @@ def _make_tuned_fn(mod, epi_names, transform_a=None, ta_names=()):
             "SFB",
             "bs_format_a",
             "bs_format_b",
-            "config_constraints",
             "config",
         )
     ]
@@ -410,10 +441,7 @@ def _make_tuned_fn(mod, epi_names, transform_a=None, ta_names=()):
 _MOD_TUNERS: dict = {}
 
 
-def _get_tuner(
-    mod, epi_names, has_c, device, transform_a=None, ta_names=(), config_constraints=None
-):
-    constraints = canonicalize_config_constraints(config_constraints)
+def _get_tuner(mod, epi_names, has_c, device, transform_a=None, ta_names=()):
     key = (
         mod.semantic_digest,
         epi_names,
@@ -421,7 +449,6 @@ def _get_tuner(
         get_device_capacity(device)[0],
         getattr(transform_a, "semantic_digest", None),
         ta_names,
-        constraints,
     )
     tuner = _MOD_TUNERS.get(key)
     if tuner is None:
@@ -429,7 +456,6 @@ def _get_tuner(
             _make_tuned_fn(mod, epi_names, transform_a, ta_names),
             key=[
                 "mod_digest",
-                "config_constraints",
                 "b_kn",
                 "dynamic_scheduler",
                 "concat_layout",
@@ -437,12 +463,8 @@ def _get_tuner(
                 "bs_format_b",
                 "transform_digest",
             ],
-            configs=[AutotuneConfig(config=c) for c in _config_space(mod, device, constraints)],
-            prune_configs_by={
-                "early_config_prune": partial(
-                    _prune_for_mod, mod, transform_a, config_constraints=constraints
-                )
-            },
+            configs=[AutotuneConfig(config=c) for c in _config_space(mod, device)],
+            prune_configs_by={"early_config_prune": partial(_prune_for_mod, mod, transform_a)},
             cache_results=True,
         )
         _MOD_TUNERS[key] = tuner
@@ -475,18 +497,22 @@ def mod_selection_args(
     }
 
 
-def _select_mod_config(
-    mod, device, config_constraints, named_args, *, preferred_config=None, transform_a=None
-):
-    """Return the preferred native config when legal, or the first supported one."""
-    constraints = canonicalize_config_constraints(config_constraints)
-    configs = _config_space(mod, device, constraints)
+def _legal_mod_configs(mod, device, named_args, *, preferred_config=None, transform_a=None):
+    """Return every supported native config, with the preferred one first when legal."""
+    problem = ModProblem.from_args(mod, transform_a, named_args)
+    return legal_mod_configs(
+        mod, device, problem, preferred_config=preferred_config, transform_a=transform_a
+    )
+
+
+def legal_mod_configs(mod, device, problem, *, preferred_config=None, transform_a=None):
+    """``_legal_mod_configs`` from a ``ModProblem`` instead of tensors."""
+    configs = _config_space(mod, device)
     if preferred_config in configs:
         configs = [preferred_config, *(config for config in configs if config != preferred_config)]
     candidates = [AutotuneConfig(config=config) for config in configs]
-    return _prune_for_mod(mod, transform_a, candidates, named_args, config_constraints=constraints)[
-        0
-    ].kwargs["config"]
+    survivors = prune_mod_configs(mod, transform_a, candidates, problem)
+    return [candidate.kwargs["config"] for candidate in survivors]
 
 
 def tuned_mod_gemm(
@@ -513,7 +539,6 @@ def tuned_mod_gemm(
     transform_a=None,
     transform_sf=None,
     transform_operands=None,
-    config_constraints=None,
 ):
     """Autotuned ``mod.gemm``: sweep the arch's config space on the first call
     per (mod, tensor metadata), then run the winner (warm calls replay through
@@ -524,38 +549,16 @@ def tuned_mod_gemm(
         from torch._vendor.quack.operand_transform.host import as_transform_mod
 
         transform_a = as_transform_mod(transform_a)
-    constraints = canonicalize_config_constraints(config_constraints)
     epi_names = tuple(sorted(epi_args))
     ta_names = tuple(sorted(transform_operands)) if transform_operands else ()
     assert not any(f"ta__{n}" in epi_args for n in ta_names)
-    tuner = _get_tuner(mod, epi_names, C is not None, A.device, transform_a, ta_names, constraints)
-    call_kwargs = dict(
-        b_kn=b_kn,
-        cu_seqlens_m=cu_seqlens_m,
-        A_idx=A_idx,
-        dynamic_scheduler=dynamic_scheduler,
-        SFA=SFA,
-        SFB=SFB,
-        bs_format_a=bs_format_a,
-        bs_format_b=bs_format_b,
-        concat_layout=concat_layout,
-    )
-    if len(tuner.configs) == 1:
-        _prune_for_mod(
-            mod,
-            transform_a,
-            tuner.configs,
-            {"A": A, "B": B, **epi_args},
-            config_constraints=constraints,
-            **call_kwargs,
-        )
+    tuner = _get_tuner(mod, epi_names, C is not None, A.device, transform_a, ta_names)
     plan = tuner(
         A=A,
         B=B,
         D=D,
         C=C,
         mod_digest=mod.semantic_digest,
-        config_constraints=constraints,
         b_kn=b_kn,
         cu_seqlens_m=cu_seqlens_m,
         A_idx=A_idx,

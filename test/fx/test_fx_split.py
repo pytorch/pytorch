@@ -2,12 +2,13 @@
 
 import dataclasses
 from collections import defaultdict
+from unittest import mock
 
 import torch
 import torch.fx.passes.operator_support as op_support
 import torch.fx.passes.splitter_base as splitter_base
 from torch.fx.passes.split_utils import split_by_tags
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import HardwareClassification, TestCase
 
 
 @torch.jit.script
@@ -24,6 +25,69 @@ def wrapped_add(_dataclass, y):
 
 
 class TestFXSplit(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_all_supported_nodes_skip_fusion_dependency_analysis(self) -> None:
+        class TestModule(torch.nn.Module):
+            def forward(self, x):
+                return torch.sin(x) + torch.cos(x)
+
+        class AllOperatorSupport(op_support.OperatorSupportBase):
+            def is_node_supported(self, submodules, node) -> bool:
+                return True
+
+        class SinOnlyOperatorSupport(op_support.OperatorSupportBase):
+            def is_node_supported(self, submodules, node) -> bool:
+                return node.target is torch.sin
+
+        class TestSplitter(splitter_base._SplitterBase):
+            def __init__(
+                self,
+                module,
+                sample_input,
+                operator_support,
+                *,
+                skip_fusion=False,
+            ):
+                super().__init__(
+                    module,
+                    sample_input,
+                    operator_support,
+                    splitter_base._SplitterSettingBase(skip_fusion=skip_fusion),
+                )
+
+        for operator_support, skip_fusion, expect_fusion_analysis in (
+            (AllOperatorSupport(), False, False),
+            (SinOnlyOperatorSupport(), False, True),
+            (SinOnlyOperatorSupport(), True, False),
+        ):
+            gm = torch.fx.symbolic_trace(TestModule())
+            with (
+                mock.patch.object(
+                    splitter_base,
+                    "FxNetAccFusionsFinder",
+                    wraps=splitter_base.FxNetAccFusionsFinder,
+                ) as fusion_finder,
+                mock.patch.object(
+                    splitter_base._SplitterBase,
+                    "update_deps_for_fusions",
+                    autospec=True,
+                ) as update_deps,
+            ):
+                splitter = TestSplitter(
+                    gm,
+                    (torch.randn(2, 3),),
+                    operator_support,
+                    skip_fusion=skip_fusion,
+                )
+
+            if expect_fusion_analysis:
+                fusion_finder.assert_called_once()
+            else:
+                fusion_finder.assert_not_called()
+            update_deps.assert_called_once_with(splitter)
+            self.assertEqual(splitter.fusions, {})
+
     def test_split_preserve_node_meta(self):
         class TestModule(torch.nn.Module):
             def forward(self, x, y):
@@ -115,6 +179,8 @@ class TestFXSplit(TestCase):
 
 
 class TestSplitByTags(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     class TestModule(torch.nn.Module):
         def __init__(self) -> None:
             super().__init__()
@@ -227,6 +293,8 @@ class TestSplitByTags(TestCase):
 
 
 class TestSplitOutputType(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     class TestModule(torch.nn.Module):
         def __init__(self) -> None:
             super().__init__()

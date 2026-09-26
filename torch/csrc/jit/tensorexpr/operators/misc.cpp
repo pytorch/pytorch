@@ -41,7 +41,7 @@ ExprHandle promoteToDtype(ExprHandle e, ScalarType dt) {
       e = cast<c10::qint8>(e);
       break;
     default:
-      throw unsupported_dtype();
+      TORCH_CHECK(false, "UNSUPPORTED DTYPE");
   }
   return e;
 }
@@ -104,9 +104,7 @@ void promoteInputs(std::vector<ExprHandle>& inputs, const int typeConstraints) {
     }
   }
 
-  if (!checkTypes(highType, typeConstraints)) {
-    throw unsupported_dtype();
-  }
+  TORCH_CHECK(checkTypes(highType, typeConstraints), "UNSUPPORTED DTYPE");
 
   for (ExprHandle& e : inputs) {
     e = promoteToDtype(e, highType);
@@ -150,7 +148,7 @@ ExprHandle demoteOutput(
     case ScalarType::Bool:
       return cast<bool>(e);
     default:
-      throw unsupported_dtype();
+      TORCH_CHECK(false, "UNSUPPORTED DTYPE");
   }
 }
 
@@ -286,16 +284,18 @@ ExprHandle constant(const ArgValue& v) {
     // the operator-specific lowering code.
     return IntImm::make(0);
   } else {
-    throw unsupported_dtype("Trying to convert unsupported dtype to constant");
+    TORCH_CHECK(
+        false,
+        "UNSUPPORTED DTYPE: Trying to convert unsupported dtype to constant");
   }
 }
 
 std::vector<ExprHandle> computeIndicesToBroadcast(
     const std::vector<ExprHandle>& outputAxes,
     const std::vector<ExprHandle>& inputSizes) {
-  if (outputAxes.size() < inputSizes.size()) {
-    throw malformed_input("Cannot broadcast to a lower rank tensor");
-  }
+  TORCH_CHECK(
+      outputAxes.size() >= inputSizes.size(),
+      "MALFORMED INPUT: Cannot broadcast to a lower rank tensor");
   std::vector<ExprHandle> bcast;
   auto axisIt = outputAxes.rbegin();
   auto sizeIt = inputSizes.rbegin();
@@ -462,22 +462,22 @@ Tensor computeFlatten(
     const std::optional<ScalarType>& outputType,
     at::Device device) {
   std::vector<int64_t> outputShapeVec;
-  for (const auto dim : c10::irange(outputShape.size())) {
-    outputShapeVec.push_back(outputShape[dim].AsNode<LongImm>()->value());
+  outputShapeVec.reserve(outputShape.size());
+  for (const auto& dim : outputShape) {
+    outputShapeVec.push_back(dim.AsNode<LongImm>()->value());
   }
   std::vector<ArgValue> reshapeInputs;
   reshapeInputs.push_back(inputs[0]);
-  reshapeInputs.emplace_back(outputShapeVec);
+  reshapeInputs.emplace_back(std::move(outputShapeVec));
   return computeReshape(
       reshapeInputs, outputShape, outputStrides, outputType, device);
 }
 
 static std::pair<ScalarType, std::vector<BufHandle>> processCatList(
     const std::vector<BufHandle>& bufList) {
-  if (bufList.empty()) {
-    throw std::runtime_error("Empty input list is passed to aten::cat");
-  }
+  TORCH_CHECK(!bufList.empty(), "Empty input list is passed to aten::cat");
   std::vector<BufHandle> bufInputs;
+  bufInputs.reserve(bufList.size());
   std::vector<BufHandle> nonEmptyInputs;
   for (auto buf : bufList) {
     bufInputs.push_back(buf);

@@ -47,6 +47,9 @@ class InductorWarningTests(TestCase):
                 },
             )
 
+        orig_matmul_precision = torch.get_float32_matmul_precision()
+        self.addCleanup(torch.set_float32_matmul_precision, orig_matmul_precision)
+        torch.set_float32_matmul_precision("high")
         torch.backends.cuda.matmul.fp32_precision = "bfx9"
         warning_once.cache_clear()
         self.addCleanup(warning_once.cache_clear)

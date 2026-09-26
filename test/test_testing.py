@@ -5,6 +5,7 @@ import dataclasses
 import doctest
 import functools
 import importlib
+import importlib.metadata
 import inspect
 import itertools
 import math
@@ -12,8 +13,11 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import textwrap
 import unittest.mock
+import xml.etree.ElementTree as ET
+from pathlib import Path
 from typing import Any
 from collections.abc import Callable
 from collections.abc import Iterator
@@ -22,10 +26,10 @@ import torch
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
-    IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
+    IS_CI, IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
     parametrize, reparametrize, subtest, instantiate_parametrized_tests, dtype_name,
-    TEST_WITH_PERIODIC, TEST_WITH_ROCM, decorateIf, periodic, skipIfTorchDynamo, skipIfXpu,
-    getRocmVersion, skipIfRocmVersionAtLeast, TemporaryFileName,
+    TEST_CUDA, TEST_WITH_CROSSREF, TEST_WITH_PERIODIC, TEST_WITH_ROCM, decorateIf, periodic, skipIfTorchDynamo, skipIfXpu,
+    getRocmVersion, TemporaryFileName, sanitize_pytest_xml,
 )
 from torch.testing._internal.common_cuda import _get_torch_rocm_version, has_device_side_assert
 from torch.testing._internal.common_device_type import \
@@ -629,13 +633,155 @@ if __name__ == '__main__':
         self.assertNotIn('OK', stderr.decode('ascii'))
 
 
+# Golden-file tests for the junit XML that CI uploads (tools/stats/upload_test_stats.py).
+# junit_xml_testdata/pytest_suite.py runs for real; its XML is normalized to drop
+# run-to-run noise and compared to expected/. After an intentional change:
+#     REGENERATE_JUNIT_GOLDENS=1 python test/test_testing.py -k TestJunitXml
+_JUNIT_TESTDATA = Path(__file__).resolve().parent / "junit_xml_testdata"
+_REGENERATE_JUNIT_GOLDENS = os.environ.get("REGENERATE_JUNIT_GOLDENS") == "1"
+# Run the fixture as the default config: drop the job's CI / PYTORCH_TEST_* /
+# PYTEST_ADDOPTS settings and a PYTHONPATH whose repo root would shadow the
+# installed torch, and don't write bytecode into test/.
+_JUNIT_CHILD_ENV = {
+    k: v
+    for k, v in os.environ.items()
+    if k not in ("PYTHONPATH", "CI", "PYTEST_ADDOPTS") and not k.startswith("PYTORCH_TEST_")
+} | {"PYTHONDONTWRITEBYTECODE": "1"}
+
+
+def _junit_provenance() -> str:
+    versions = []
+    for dist in ("pytest", "pytest-rerunfailures"):
+        try:
+            versions.append(f"{dist} {importlib.metadata.version(dist)}")
+        except importlib.metadata.PackageNotFoundError:
+            versions.append(f"{dist} missing")
+    return ", ".join(versions)
+
+
+def _redact_junit(text: str) -> str:
+    text = re.sub(r"(?:/[\w.+-]+)+/([\w.+-]+\.py)", r"PATH/\1", text)
+    return re.sub(r"(PATH/[\w.+-]+):\d+", r"\1:LINE", text)
+
+
+def _normalize_junit_xml(raw: str) -> str:
+    """Keep structure, attributes and the first line of text; drop run-specific noise."""
+    root = ET.fromstring(raw)
+    for el in root.iter():
+        if "time" in el.attrib:
+            el.set("time", "0.000")
+        for attr in ("timestamp", "hostname"):
+            el.attrib.pop(attr, None)
+        for attr in ("classname", "file", "name", "message", "value", "type"):
+            if attr in el.attrib:
+                el.set(attr, _redact_junit(el.attrib[attr]))
+        lines = [ln.strip() for ln in (el.text or "").splitlines() if ln.strip()]
+        if lines:
+            el.text = _redact_junit(lines[0])
+            if len(lines) > 1:
+                el.text += "\nELIDED"
+        el.tail = None
+    ET.indent(root, space="  ")
+    return ET.tostring(root, encoding="unicode").strip() + "\n"
+
+
+def _count_junit_tags(normalized: str) -> collections.Counter[str]:
+    return collections.Counter(el.tag for el in ET.fromstring(normalized).iter())
+
+
+# The fixture runs as the default config, so its XML doesn't depend on the test
+# config or device; skip the configs and GPU builds that would only repeat it.
+@unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
+@unittest.skipIf(IS_SANDCASTLE, "Skipping because doesn't work on sandcastle")
+@skipIfTorchDynamo("subprocess test does not need Dynamo coverage")
+@unittest.skipIf(TEST_WITH_CROSSREF, "subprocess test does not need crossref coverage")
+@unittest.skipIf(TEST_CUDA or TEST_WITH_ROCM, "junit XML shape doesn't depend on the device")
+class TestJunitXml(TestCase):
+    provenance: str
+    raw_xml: str
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        # The goldens depend on the pytest and pytest-rerunfailures versions they record.
+        cls.provenance = _junit_provenance()
+        header = f"<!-- provenance: {cls.provenance} -->"
+        golden = _JUNIT_TESTDATA / "expected" / "pytest.xml"
+        if not _REGENERATE_JUNIT_GOLDENS and golden.exists() and header not in golden.read_text().splitlines():
+            raise unittest.SkipTest(
+                f"goldens were generated with other versions than {cls.provenance}; "
+                "rerun with REGENERATE_JUNIT_GOLDENS=1"
+            )
+        with tempfile.TemporaryDirectory() as tmp:
+            xml_path = Path(tmp) / "report.xml"
+            # Run in place under test/ so test/conftest.py and pytest.ini apply, as in CI.
+            proc = subprocess.run(
+                [
+                    sys.executable, "-m", "pytest", "junit_xml_testdata/pytest_suite.py",
+                    f"--junit-xml-reruns={xml_path}", "-p", "no:cacheprovider", "-q",
+                ],
+                cwd=_JUNIT_TESTDATA.parent,
+                env=_JUNIT_CHILD_ENV,
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+            if not xml_path.exists():
+                raise RuntimeError(
+                    f"pytest produced no XML (exit {proc.returncode})\n"
+                    f"stdout:\n{proc.stdout[-3000:]}\nstderr:\n{proc.stderr[-3000:]}"
+                )
+            cls.raw_xml = xml_path.read_text()
+        super().setUpClass()
+
+    def _assert_matches_golden(self, name: str, doc: str) -> None:
+        golden = _JUNIT_TESTDATA / "expected" / f"{name}.xml"
+        if _REGENERATE_JUNIT_GOLDENS:
+            golden.write_text(
+                "<!-- generated by test/test_testing.py -->\n"
+                f"<!-- provenance: {self.provenance} -->\n{doc}"
+            )
+            return
+        self.assertTrue(golden.exists(), f"{golden} is missing; generate it with REGENERATE_JUNIT_GOLDENS=1")
+        expected = "".join(
+            ln for ln in golden.read_text().splitlines(keepends=True) if not ln.startswith("<!--")
+        )
+        self.assertMultiLineEqual(expected, doc, f"{golden} is stale; rerun with REGENERATE_JUNIT_GOLDENS=1")
+
+    def test_pytest_outcome_shapes(self) -> None:
+        normalized = _normalize_junit_xml(self.raw_xml)
+        self._assert_matches_golden("pytest", normalized)
+
+        counts = _count_junit_tags(normalized)
+        # <testsuite tests="14"> counts the teardown error separately, but it merges
+        # into its <testcase>
+        self.assertEqual(counts["testcase"], 13)
+        # assert_failure, raises_non_assertion, xpass_strict, rerun_then_fail
+        self.assertEqual(counts["failure"], 4)
+        # setup, teardown
+        self.assertEqual(counts["error"], 2)
+        # skip, skipif, xfail; non-strict xpass emits nothing
+        self.assertEqual(counts["skipped"], 3)
+        # 2 each for rerun_then_pass and rerun_then_fail
+        self.assertEqual(counts["rerun"], 4)
+
+    def test_sanitize_pytest_xml(self) -> None:
+        with TemporaryFileName() as path:
+            Path(path).write_text(self.raw_xml)
+            sanitize_pytest_xml(path)
+            normalized = _normalize_junit_xml(Path(path).read_text())
+        self._assert_matches_golden("pytest_sanitized", normalized)
+
+
 class TestPeriodicDecorator(TestCase):
+    @parametrize("in_ci", [False, True])
     @parametrize("periodic_enabled", [False, True])
-    def test_periodic_gates_on_periodic_mode(self, periodic_enabled):
+    def test_periodic_gates_on_periodic_mode(self, in_ci, periodic_enabled):
         calls = []
-        with unittest.mock.patch(
-            "torch.testing._internal.common_utils.TEST_WITH_PERIODIC",
-            periodic_enabled,
+        with unittest.mock.patch.multiple(
+            "torch.testing._internal.common_utils",
+            IS_CI=in_ci,
+            IS_SANDCASTLE=False,
+            TEST_WITH_PERIODIC=periodic_enabled,
         ):
             class TestP(unittest.TestCase):
                 def setUp(self):
@@ -648,19 +794,23 @@ class TestPeriodicDecorator(TestCase):
         result = unittest.TestResult()
         unittest.defaultTestLoader.loadTestsFromTestCase(TestP).run(result)
 
+        skipped = in_ci and not periodic_enabled
         marks = {mark.name for mark in getattr(TestP.test_p, "pytestmark", ())}
         self.assertIn("periodic", marks)
-        self.assertEqual(calls, ["setUp", "test"] if periodic_enabled else [])
-        self.assertEqual(len(result.skipped), 0 if periodic_enabled else 1)
+        self.assertEqual(calls, [] if skipped else ["setUp", "test"])
+        self.assertEqual(len(result.skipped), 1 if skipped else 0)
         self.assertEqual(result.failures, [])
         self.assertEqual(result.errors, [])
 
+    @parametrize("on_sandcastle", [False, True])
     @parametrize("periodic_enabled", [False, True])
-    def test_periodic_class_gates_setup(self, periodic_enabled):
+    def test_periodic_class_gates_setup(self, on_sandcastle, periodic_enabled):
         calls = []
-        with unittest.mock.patch(
-            "torch.testing._internal.common_utils.TEST_WITH_PERIODIC",
-            periodic_enabled,
+        with unittest.mock.patch.multiple(
+            "torch.testing._internal.common_utils",
+            IS_CI=False,
+            IS_SANDCASTLE=on_sandcastle,
+            TEST_WITH_PERIODIC=periodic_enabled,
         ):
             @periodic
             class TestP(unittest.TestCase):
@@ -678,11 +828,11 @@ class TestPeriodicDecorator(TestCase):
         result = unittest.TestResult()
         unittest.defaultTestLoader.loadTestsFromTestCase(TestP).run(result)
 
+        skipped = on_sandcastle and not periodic_enabled
         marks = {mark.name for mark in getattr(TestP, "pytestmark", ())}
         self.assertIn("periodic", marks)
-        expected_calls = ["setUpClass", "test", "tearDownClass"]
-        self.assertEqual(calls, expected_calls if periodic_enabled else [])
-        self.assertEqual(len(result.skipped), 0 if periodic_enabled else 1)
+        self.assertEqual(calls, [] if skipped else ["setUpClass", "test", "tearDownClass"])
+        self.assertEqual(len(result.skipped), 1 if skipped else 0)
         self.assertEqual(result.failures, [])
         self.assertEqual(result.errors, [])
 
@@ -692,26 +842,18 @@ class TestPeriodicDecorator(TestCase):
     @skipIfTorchDynamo("subprocess test does not need Dynamo coverage")
     def test_periodic_config_selects_only_periodic_tests(self):
         source = """\
-import os
-
 from torch.testing._internal.common_utils import periodic, run_tests, serialTest
 
 def test_plain_pytest():
-    if os.getenv("EXPECT_PERIODIC") == "1":
-        raise AssertionError("plain pytest test ran in periodic mode")
     print("PLAIN_PYTEST_RAN")
 
 @periodic
 def test_periodic_pytest():
-    if os.getenv("EXPECT_PERIODIC") != "1":
-        raise AssertionError("periodic pytest test ran outside periodic mode")
     print("PERIODIC_PYTEST_RAN")
 
 @serialTest()
 @periodic
 def test_periodic_serial_pytest():
-    if os.getenv("EXPECT_PERIODIC") != "1":
-        raise AssertionError("periodic serial test ran outside periodic mode")
     print("PERIODIC_SERIAL_PYTEST_RAN")
 
 if __name__ == "__main__":
@@ -742,7 +884,6 @@ if __name__ == "__main__":
 
             def run_test(periodic_mode):
                 test_env = env.copy()
-                test_env["EXPECT_PERIODIC"] = "1" if periodic_mode else "0"
                 if periodic_mode:
                     test_env["TEST_CONFIG"] = "periodic"
                     test_env["PYTORCH_TEST_WITH_SLOW"] = "1"
@@ -766,8 +907,8 @@ if __name__ == "__main__":
         self.assertIn("PERIODIC_SERIAL_PYTEST_RAN", periodic_output)
         self.assertNotIn("PLAIN_PYTEST_RAN", periodic_output)
         self.assertIn("PLAIN_PYTEST_RAN", default_output)
-        self.assertNotIn("PERIODIC_PYTEST_RAN", default_output)
-        self.assertNotIn("PERIODIC_SERIAL_PYTEST_RAN", default_output)
+        self.assertIn("PERIODIC_PYTEST_RAN", default_output)
+        self.assertIn("PERIODIC_SERIAL_PYTEST_RAN", default_output)
 
     def test_periodic_does_not_leak_across_parametrized_tests(self):
         with unittest.mock.patch(
@@ -789,7 +930,7 @@ if __name__ == "__main__":
 
     @periodic
     def test_periodic_smoke(self):
-        self.assertTrue(TEST_WITH_PERIODIC)
+        self.assertTrue(TEST_WITH_PERIODIC or not (IS_CI or IS_SANDCASTLE))
 
 
 instantiate_parametrized_tests(TestPeriodicDecorator)
@@ -2834,8 +2975,11 @@ class TestImports(TestCase):
                            "torch.onnx._internal",  # depends on onnx-script
                            "torch._inductor.runtime.triton_helpers",  # depends on triton
                            "torch._native.flydsl.intrinsics",  # depends on flydsl
+                           "torch._native.cutedsl",  # depends on cutlass
+                           "torch._native.ops.reductions.traits",  # depends on cutlass
                            "torch._native.ops.bmm_outer_product.triton_kernels",  # depends on triton
                            "torch._native.ops.foreach_mm",  # depends on nvmath-python, cuda-python
+                           "torch._native.ops.linear_cross_entropy.fused_grad_logits_kernel",  # depends on cutlass
                            "torch._native.ops.norm.flydsl_rmsnorm_fwd",  # depends on flydsl
                            "torch._native.ops.polar.nvmath_impl",  # depends on nvmath-python, cuda-python
                            "torch._native.ops.reductions.inner_tree_kernel",  # depends on cutlass
@@ -2843,6 +2987,7 @@ class TestImports(TestCase):
                            "torch._native.ops.topk",  # depends on cutlass
                            "torch._inductor.codegen.cuda",  # depends on cutlass
                            "torch._inductor.codegen.cutedsl",  # depends on cutlass
+                           "torch._inductor.kernel.flex_gemm.compile_pool",  # depends on cutlass
                            "torch._inductor.kernel.flex_gemm.output_layout_cutedsl",  # depends on cutlass
                            "torch.distributed.benchmarks",  # depends on RPC and DDP Optim
                            "torch.distributed.debug._frontend",  # depends on tabulate
@@ -2893,17 +3038,14 @@ class TestImports(TestCase):
                     raise RuntimeError(f"Failed to import {mod_name}: {e}") from e
                 self.assertTrue(inspect.ismodule(mod))
 
-    @skipIfRocmVersionAtLeast([10, 1])  # AIPROFSDK-1066
     def test_lazy_imports_are_lazy(self) -> None:
         out = self._check_python_output("import sys;import torch;print(all(x not in sys.modules for x in torch._lazy_modules))")
         self.assertEqual(out.strip(), "True")
 
-    @skipIfRocmVersionAtLeast([10, 1])  # AIPROFSDK-1066
     def test_no_warning_on_import(self) -> None:
         out = self._check_python_output("import torch")
         self.assertEqual(out, "")
 
-    @skipIfRocmVersionAtLeast([10, 1])  # AIPROFSDK-1066
     def test_not_import_sympy(self) -> None:
         out = self._check_python_output("import torch;import sys;print('sympy' not in sys.modules)")
         self.assertEqual(out.strip(), "True",
@@ -2915,12 +3057,10 @@ class TestImports(TestCase):
                          "  - Use TYPE_CHECKING if you are using sympy + strings if you are using sympy on type annotations\n"
                          "  - Import things that depend on SymPy locally")
 
-    @skipIfRocmVersionAtLeast([10, 1])  # AIPROFSDK-1066
     def test_not_import_triton(self) -> None:
         out = self._check_python_output("import torch;import sys;print('triton' not in sys.modules)")
         self.assertEqual(out.strip(), "True")
 
-    @skipIfRocmVersionAtLeast([10, 1])  # AIPROFSDK-1066
     @parametrize('path', ['torch', 'functorch'])
     def test_no_mutate_global_logging_on_import(self, path) -> None:
         # Calling logging.basicConfig, among other things, modifies the global

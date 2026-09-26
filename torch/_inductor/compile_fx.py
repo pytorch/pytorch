@@ -115,7 +115,12 @@ from ..fx._lazy_graph_module import _use_lazy_graph_module
 from ..fx.graph import _PyTreeCodeGen
 from ..utils._triton import has_triton
 from . import config, distributed_autotune, metrics
-from .codegen.common import get_wrapper_codegen_for_device, init_backend_registration
+from .codegen.common import (
+    get_compile_option_owner,
+    get_wrapper_codegen_for_device,
+    init_backend_registration,
+    patch_compile_options,
+)
 from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .exc import InductorError
@@ -972,10 +977,19 @@ def fake_tensor_prop(
 
 # pass config dict back to user
 def get_patched_config_dict(
-    config_patches: str | dict[str, Any] | None = None,
+    config_patches: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    with config.patch(config_patches):
-        return config.get_config_copy()
+    with patch_compile_options(config_patches):
+        config_copy = config.get_config_copy()
+        for name in config_patches or {}:
+            # core inductor keys take precedence over device namespaces
+            if name.replace("-", "_") in config._config:  # type: ignore[attr-defined]
+                continue
+            route = get_compile_option_owner(name)
+            if route is not None:
+                owner_config, key = route
+                config_copy[name] = getattr(owner_config, key)
+        return config_copy
 
 
 @contextlib.contextmanager
@@ -2180,7 +2194,12 @@ def get_input_idxs_to_check(
     This function runs at compile time, and generates a list of indices for which we
     might need to do a copy to preserve alignment requirements.
     """
-    ids_to_check = []
+    ids_to_check: list[int] = []
+
+    # Strict mode: the generated wrapper asserts that inputs assumed aligned
+    # actually are, instead of the runtime realigning them with a clone.
+    if config.alignment_asserts_inputs:
+        return ids_to_check
 
     for i, input in enumerate(inputs):
         if not isinstance(input, torch.Tensor):
@@ -2231,6 +2250,12 @@ def cudagraphify(
 
     cudagraphify_fn: Callable[..., Any]
     if config.triton.cudagraph_trees:
+        managed_input_rerecord_limit = (
+            config.triton.cudagraph_managed_input_rerecord_limit
+        )
+        managed_input_rerecord_action = (
+            config.triton.cudagraph_managed_input_rerecord_action
+        )
         cudagraphify_fn = functools.partial(
             new_cudagraphify_impl,
             device_index=device_index,
@@ -2242,6 +2267,11 @@ def cudagraphify(
             mutated_input_idxs=mutated_input_idxs,
             kernel_free_cudagraph=kernel_free_cudagraph,
             user_visible_output_idxs=user_visible_output_idxs,
+            cudagraph_managed_input_rerecord_limit=managed_input_rerecord_limit,
+            cudagraph_managed_input_rerecord_action=managed_input_rerecord_action,
+            cudagraph_initial_mempool_allocation_gb=(
+                config.triton.cudagraph_initial_mempool_allocation_gb
+            ),
             compile_id=torch._guards.CompileContext.current_compile_id(),
         )
     else:
@@ -2734,6 +2764,7 @@ class CompilerConfigExtra:
 def create_compiler_config_extra(
     gm: GraphModule | GmWrapper,
 ) -> CompilerConfigExtra:
+    """Compute state shared by the AOT forward and backward compilers."""
     dynamo_graph_metadata = gm.meta if isinstance(gm, GraphModule) else None
 
     # Although cudagraphs may have been enabled via config, various
@@ -2940,7 +2971,7 @@ def compile_fx_forward(
             not is_inference
             and isinstance(result, CompiledFxGraph)
             and result.partition_maps
-            and len(result.partition_maps) > 1
+            and result.has_uncaptured_partition
         ):
             compiler_config_extra.forward_is_cudagraph_partitioned.value = True
 
@@ -3105,6 +3136,10 @@ def compile_fx(
     function orchestrates end-to-end compilation for the inductor backend when
     you use :func:`torch.compile`.
 
+    Entries of ``config_patches`` of the form ``"<device>.<key>"`` are
+    patched onto that device's ``device_custom_config`` module instead of
+    ``torch._inductor.config``.
+
     NB: This function TAKES OWNERSHIP of the input ``model_`` and can potentially
     mutate it!  Make a copy if you need to preserve the original GraphModule.
     """
@@ -3125,12 +3160,12 @@ def compile_fx(
         return model_
 
     if config_patches:
-        with config.patch(config_patches):
+        with patch_compile_options(config_patches):
             return compile_fx(
                 model_,
                 example_inputs_,
                 # need extra layer of patching as backwards is compiled out of scope
-                inner_compile=config.patch(config_patches)(inner_compile),
+                inner_compile=patch_compile_options(config_patches)(inner_compile),
                 decompositions=decompositions,
                 ignore_shape_env=ignore_shape_env,
                 compile_region_name=compile_region_name,
