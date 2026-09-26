@@ -1598,7 +1598,7 @@ if(DEFINED USE_CUSTOM_DEBINFO)
 
   string(REGEX REPLACE " +" ";" SOURCE_FILES_LIST "${SOURCE_FILES}")
 
-  # Set the COMPILE_FLAGS property for each source file
+  # Add debug info for each source file
   foreach(SOURCE_FILE ${SOURCE_FILES_LIST})
     # We have to specify the scope here. We do this by specifying the targets we
     # care about and caffe2/ for all test targets defined there
@@ -1609,9 +1609,9 @@ if(DEFINED USE_CUSTOM_DEBINFO)
       # @todo test if we can remove this
       set(ALL_PT_TARGETS "torch_python;c10;torch_cpu;torch")
     endif()
-    set_source_files_properties(
-      ${SOURCE_FILE} DIRECTORY "caffe2/" TARGET_DIRECTORY ${ALL_PT_TARGETS}
-      PROPERTIES COMPILE_FLAGS "-g")
+    set_property(SOURCE ${SOURCE_FILE}
+      DIRECTORY "caffe2/" TARGET_DIRECTORY ${ALL_PT_TARGETS}
+      APPEND PROPERTY COMPILE_OPTIONS "-g")
   endforeach()
 
   # Link everything with debug info when any file is in debug mode
