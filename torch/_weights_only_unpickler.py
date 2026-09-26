@@ -3,6 +3,7 @@
 # Restrict constructing types to a list defined in _get_allowed_globals()
 # Restrict BUILD operation to `Tensor`, `Parameter` and `OrderedDict` types only
 # Restrict APPEND/APPENDS to `list` (and allowlisted list subclasses)
+# Restrict object state restored via `_set_obj_state` to non-dunder attribute names
 # In `GLOBALS` operation do not do class lookup by name, but rather rely on dictionary
 # defined by `_get_allowed_globals()` method, that contains:
 # - torch types (Storage, dtypes, Tensor, `torch.Size`),
@@ -173,6 +174,43 @@ def _tensor_rebuild_functions():
         torch._utils._rebuild_device_tensor_from_cpu_tensor,
     }
 
+def _check_no_dunder_attrs(state):
+    # ``torch._utils._set_obj_state`` restores attributes by calling ``setattr``
+    # with keys taken straight from the pickle stream. A normal ``torch.save`` never
+    # emits dunder-named keys, and allowing them lets a crafted state dict set e.g.
+    # ``__class__``, silently turning an ``nn.Parameter`` into a plain ``Tensor``.
+    parts = state if isinstance(state, tuple) and len(state) == 2 else (state,)
+    for part in parts:
+        if not isinstance(part, dict):
+            continue
+        for k in part:
+            if isinstance(k, str) and k.startswith("__") and k.endswith("__"):
+                raise UnpicklingError(
+                    f"Trying to set dunder attribute '{k}' on the object state of "
+                    f"a reconstructed tensor, which is not allowed when loading "
+                    f"with weights_only=True"
+                )
+
+
+def _rebuild_parameter_with_state_restricted(
+    data, requires_grad, backward_hooks, state
+):
+    _check_no_dunder_attrs(state)
+    return torch._utils._rebuild_parameter_with_state(
+        data, requires_grad, backward_hooks, state
+    )
+
+
+def _rebuild_from_type_v2_restricted(func, new_type, args, state):
+    # Only check when the state would reach ``_set_obj_state``, i.e. when the
+    # subclass does not define a ``__setstate__`` of its own.
+    if (
+        getattr(new_type, "__setstate__", torch.Tensor.__setstate__)
+        is torch.Tensor.__setstate__
+    ):
+        _check_no_dunder_attrs(state)
+    return torch._tensor._rebuild_from_type_v2(func, new_type, args, state)
+
 
 # Unpickling machinery
 @_functools.lru_cache(maxsize=1)
@@ -228,7 +266,15 @@ def _get_allowed_globals():
 
     # Handles Tensor Subclasses, Tensor's with attributes.
     # NOTE: It calls into above rebuild functions for regular Tensor types.
-    rc["torch._tensor._rebuild_from_type_v2"] = torch._tensor._rebuild_from_type_v2
+    rc["torch._tensor._rebuild_from_type_v2"] = _rebuild_from_type_v2_restricted
+
+    # These two are the only allowlisted rebuild functions that pass a
+    # stream-controlled state dict to ``_set_obj_state``, so both are routed through
+    # wrappers rejecting dunder-named keys. ``_set_obj_state`` is shared with
+    # unrestricted loading and is deliberately left untouched.
+    rc["torch._utils._rebuild_parameter_with_state"] = (
+        _rebuild_parameter_with_state_restricted
+    )
     return rc
 
 
