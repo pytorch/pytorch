@@ -40,6 +40,7 @@
 #include <ATen/ops/_scaled_dot_product_cudnn_attention.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention_for_cpu.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention_for_cpu_native.h>
+#include <ATen/ops/_scaled_dot_product_flash_attention_for_mps.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention_for_cpu_backward_native.h>
 #include <ATen/ops/_scaled_dot_product_fused_attention_overrideable.h>
 #include <ATen/ops/_scaled_dot_product_fused_attention_overrideable_native.h>
@@ -841,6 +842,12 @@ Tensor scaled_dot_product_attention(
         auto out_lse_softmax = at::_scaled_dot_product_flash_attention(
             query_padded, key_padded, value_padded, dropout_p, is_causal, false /*return_debug_mask*/, og_scale.guard_float("attention.cpp", 735));
         return post_process_flash_output(std::get<0>(out_lse_softmax), og_size);
+      }
+      // MPS: route through the prefill Metal kernel (existing fused attention
+      // path, now accessible as SDPBackend::flash_attention).
+      if (query_device_type == DeviceType::MPS) {
+        return std::get<0>(at::_scaled_dot_product_flash_attention_for_mps(
+            query_, key, value, dropout_p, is_causal, attn_mask, scale));
       }
       // For the CPU case we do not need to pad the last dim
       return std::get<0>(at::_scaled_dot_product_flash_attention_for_cpu(

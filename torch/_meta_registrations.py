@@ -6673,6 +6673,44 @@ def meta__scaled_dot_product_flash_backward(
 
 @register_meta(
     [
+        aten._scaled_dot_product_flash_attention_for_mps,
+    ]
+)
+def meta__scaled_dot_product_flash_attention_for_mps(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    dropout_p: float = 0.0,
+    is_causal: bool = False,
+    attn_mask: Tensor | None = None,
+    scale: float | None = None,
+):
+    num_heads = query.size(-3)
+    max_seqlen_q = query.size(-2)
+
+    attention = torch.empty_like(query)
+    # 4D batched [B, H, L, D] → logsumexp [B, H, L]
+    # 3D unbatched [H, L, D] → logsumexp [H, L]
+    if query.dim() == 4:
+        logsumexp = torch.empty(
+            (query.size(0), num_heads, max_seqlen_q),
+            dtype=torch.float32,
+            device=query.device,
+        )
+    else:
+        logsumexp = torch.empty(
+            (num_heads, max_seqlen_q),
+            dtype=torch.float32,
+            device=query.device,
+        )
+    return (
+        attention,
+        logsumexp,
+    )
+
+
+@register_meta(
+    [
         aten._scaled_dot_product_flash_attention_for_cpu,
     ]
 )
