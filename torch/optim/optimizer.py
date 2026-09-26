@@ -928,6 +928,9 @@ class Optimizer:
             If ``param_names`` exist in loaded state dict ``param_groups`` they will be saved and override
             the current names, if present, in the optimizer state. If they do not exist in loaded state dict,
             the optimizer ``param_names`` will remain unchanged.
+            If both the loaded and current state carry ``param_names`` for a group and they disagree at
+            some position, a ``UserWarning`` is raised, since state is still matched by position and may
+            be assigned to an unexpectedly different parameter.
 
         Example:
             >>> # xdoctest: +SKIP
@@ -980,6 +983,32 @@ class Optimizer:
                 "loaded state dict contains a parameter group "
                 "that doesn't match the size of optimizer's group"
             )
+
+        # State is matched to params by position, not by name (see the note above) -
+        # if both sides carry param_names but they disagree at some position, the
+        # optimizer state is about to be assigned to a differently-named (and possibly
+        # unrelated) parameter without any signal to the caller. Warn so this doesn't
+        # fail silently; the note above documents how to opt into name-based matching.
+        for i, (group, saved_group) in enumerate(zip(groups, saved_groups)):
+            saved_names = saved_group.get("param_names")
+            current_names = group.get("param_names")
+            if saved_names is not None and current_names is not None:
+                mismatched = [
+                    (saved_name, current_name)
+                    for saved_name, current_name in zip(saved_names, current_names)
+                    if saved_name != current_name
+                ]
+                if mismatched:
+                    warnings.warn(
+                        "loading a state_dict that contains param_names that do not "
+                        f"match the optimizer's current param_names in group {i}: "
+                        f"{mismatched}. State is matched to parameters by position, "
+                        "not by name, so this state may be assigned to the wrong "
+                        "parameter. If this is unexpected, see the param_names note "
+                        "in the load_state_dict docstring.",
+                        UserWarning,
+                        stacklevel=2,
+                    )
 
         # Update the state
         id_map = dict(
