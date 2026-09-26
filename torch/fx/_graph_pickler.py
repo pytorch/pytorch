@@ -3,11 +3,12 @@ import dataclasses
 import importlib
 import io
 import itertools
+import logging
 import pickle
 import weakref
 from abc import abstractmethod
 from collections.abc import Callable, Generator
-from typing import Any, NewType, TypeVar
+from typing import Any, NewType, TypeGuard, TypeVar
 from typing_extensions import override, Self
 
 from torch.utils._import_utils import import_dill
@@ -36,6 +37,9 @@ from torch._subclasses.meta_utils import (
 from torch.fx.experimental.sym_node import SymNode
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._mode_utils import no_dispatch
+
+
+log = logging.getLogger(__name__)
 
 
 _SymNodeT = TypeVar("_SymNodeT", torch.SymInt, torch.SymFloat)
@@ -157,6 +161,8 @@ class GraphPickler(pickle.Pickler):
 
         if is_fake_tensor(obj):
             return _TensorPickleData.reduce_helper(self, obj)
+        elif _is_pinned_cpu_tensor(obj):
+            return _PinnedTensorPickleData.reduce_helper(self, obj)
         elif isinstance(obj, torch.fx.GraphModule):
             return _GraphModulePickleData.reduce_helper(self, obj)
         elif isinstance(obj, (torch._ops.OperatorBase, torch._ops.OpOverloadPacket)):
@@ -591,6 +597,70 @@ class _TensorPickleData:
             None,
             None,
         )
+
+
+def _is_pinned_cpu_tensor(obj: object) -> TypeGuard[torch.Tensor]:
+    if not isinstance(obj, torch.Tensor) or is_fake_tensor(obj):
+        return False
+    if obj.device.type != "cpu" or not torch.cuda.is_available():
+        return False
+    try:
+        return obj.is_pinned()
+    except Exception:
+        return False
+
+
+class _PinnedTensorPickleData:
+    """
+    Round-trips a real pinned CPU tensor while preserving is_pinned().
+
+    Default tensor pickling rebuilds storage as pageable, which silently breaks
+    inductor's out-of-process FxCompile pin_memory codegen downstream. Only
+    pinned tensors take this path.
+    """
+
+    def __init__(
+        self, tensor_bytes: bytes, is_param: bool, requires_grad: bool
+    ) -> None:
+        self.tensor_bytes = tensor_bytes
+        self.is_param = is_param
+        self.requires_grad = requires_grad
+
+    @classmethod
+    def reduce_helper(
+        cls, pickler: GraphPickler, obj: torch.Tensor
+    ) -> tuple[
+        Callable[[Self, _UnpickleState], torch.Tensor], tuple[Self, _UnpickleStateToken]
+    ]:
+        # Serialize the data with a plain pickler: the tensor payload needs no
+        # graph context, and this avoids recursing into this override. The inner
+        # dumps bypasses the outer pickler's memo, so distinct-but-aliased
+        # tensors restore unshared (values and flags intact); inductor only reads
+        # constants, so that trade-off is acceptable here.
+        return cls.unpickle, (
+            cls(
+                pickle.dumps(obj),
+                isinstance(obj, torch.nn.Parameter),
+                obj.requires_grad,
+            ),
+            pickler._unpickle_state,
+        )
+
+    def unpickle(self, unpickle_state: _UnpickleState) -> torch.Tensor:
+        tensor = pickle.loads(self.tensor_bytes)
+        state = dict(tensor.__dict__)
+        try:
+            if not tensor.is_pinned() and torch.cuda.is_available():
+                with torch.no_grad():
+                    tensor = tensor.pin_memory()
+        except Exception:
+            log.debug("Failed to restore pinned memory, keeping pageable tensor")
+        if self.is_param:
+            tensor = torch.nn.Parameter(tensor, requires_grad=self.requires_grad)
+        else:
+            tensor.requires_grad_(self.requires_grad)
+        tensor.__dict__.update(state)
+        return tensor
 
 
 class _TorchNumpyPickleData:
