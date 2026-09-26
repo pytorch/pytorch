@@ -134,7 +134,6 @@ from torch.testing._internal.opinfo.definitions.linalg import (
     sample_inputs_linalg_qr_geqrf,
     sample_inputs_linalg_invertible,
     sample_inputs_lu_solve,
-    sample_inputs_legacy_solve,
     sample_inputs_svd,
     sample_inputs_linalg_det_logdet_slogdet,
     sample_inputs_linalg_lu,
@@ -6539,6 +6538,33 @@ def sample_inputs_cholesky_solve(op_info, device, dtype, requires_grad=False, **
         sample.input = make_tensor(psd_matrix.shape, dtype=dtype, device=device, requires_grad=requires_grad, low=None, high=None)
         sample.args = (psd_matrix.requires_grad_(requires_grad),)
         yield sample
+
+    # A right-hand side with the shape of L.shape[:-1] is a matrix broadcast over the batch. See #196694
+    A = make_fullrank_matrices_with_distinct_singular_values(S, S, S, dtype=dtype, device=device)
+    for upper in (False, True):
+        L = torch.linalg.cholesky(A @ A.mH, upper=upper)
+        yield SampleInput(make_tensor((S, S), dtype=dtype, device=device, requires_grad=requires_grad),
+                          args=(L.requires_grad_(requires_grad),), kwargs=dict(upper=upper))
+
+
+def sample_inputs_triangular_solve(op_info, device, dtype, requires_grad=False, **kwargs):
+    make_b = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    def make_a(*shape):
+        # The large diagonal keeps both triangles well conditioned
+        a = make_tensor(shape, dtype=dtype, device=device, low=-1, high=1)
+        a.diagonal(0, -2, -1).add_(shape[-1] + 1)
+        return a.requires_grad_(requires_grad)
+
+    for n, batch, k in product((5, 0), ((), (0,), (2,), (2, 2)), (1, 3)):
+        yield SampleInput(make_b(*batch, n, k), args=(make_a(*batch, n, n),))
+    for upper, transpose, unitriangular in product((True, False), repeat=3):
+        yield SampleInput(make_b(2, 3, 2), args=(make_a(2, 3, 3),),
+                          kwargs=dict(upper=upper, transpose=transpose, unitriangular=unitriangular))
+    # A right-hand side with the shape of A.shape[:-1] is a matrix broadcast over the batch. See #196694
+    yield SampleInput(make_b(3, 3), args=(make_a(3, 3, 3),))
+    # A broadcast against a batched right-hand side
+    yield SampleInput(make_b(2, 3, 2), args=(make_a(3, 3),))
 
 
 def sample_inputs_lu(op_info, device, dtype, requires_grad=False, **kwargs):
@@ -18954,11 +18980,10 @@ op_db: list[OpInfo] = [
     OpInfo('triangular_solve',
            op=torch.triangular_solve,
            dtypes=floating_and_complex_types(),
-           sample_inputs_func=sample_inputs_legacy_solve,
+           sample_inputs_func=sample_inputs_triangular_solve,
            check_batched_gradgrad=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           gradcheck_wrapper=lambda *args, **kwargs: gradcheck_wrapper_triangular_input(*args, idx=1, **kwargs),
            decorators=[
                skipCUDAIfNoMagmaAndNoLinalgsolver,
                skipCPUIfNoLapack,
@@ -18978,7 +19003,7 @@ op_db: list[OpInfo] = [
            skips=(
                # AssertionError: Scalars are not equal!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
-               # Gradcheck fails
+               # test_out passes on MPS, which the expectedFailure above would report as an unexpected success
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out',
                             device_type='mps', dtypes=[torch.float32]),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager',

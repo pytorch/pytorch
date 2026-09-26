@@ -968,9 +968,7 @@ def sample_inputs_linalg_pinv_hermitian(
         yield o
 
 
-def sample_inputs_linalg_solve(
-    op_info, device, dtype, requires_grad=False, vector_rhs_allowed=True, **kwargs
-):
+def sample_inputs_linalg_solve(op_info, device, dtype, requires_grad=False, **kwargs):
     """
     This function generates always solvable input for torch.linalg.solve
     We sample a fullrank square matrix (i.e. invertible) A
@@ -987,11 +985,6 @@ def sample_inputs_linalg_solve(
         (1,) - same as () but explicit
         (3,) - solve for 3 vectors.
     Zeros in dimensions are edge cases in the implementation and important to test for in order to avoid unexpected crashes.
-    'vector_rhs_allowed' controls whether to include nrhs = () to the list of SampleInputs.
-    torch.solve / triangular_solve / cholesky_solve (opposed to torch.linalg.solve) do not allow
-    1D tensors (vectors) as the right-hand-side.
-    Once torch.solve / triangular_solve / cholesky_solve and its testing are removed,
-    'vector_rhs_allowed' may be removed here as well.
     """
     make_fullrank = make_fullrank_matrices_with_distinct_singular_values
     make_a = partial(
@@ -1003,10 +996,7 @@ def sample_inputs_linalg_solve(
 
     batches = [(), (0,), (2,), (2, 2)]
     ns = [5, 0]
-    if vector_rhs_allowed:
-        nrhs = [(), (1,), (3,)]
-    else:
-        nrhs = [(1,), (3,)]
+    nrhs = [(), (1,), (3,)]
 
     for n, batch, rhs in product(ns, batches, nrhs):
         yield SampleInput(make_a(*batch, n, n), args=(make_b(batch + (n,) + rhs),))
@@ -1092,29 +1082,6 @@ def sample_inputs_linalg_solve_triangular(
             args=(B.requires_grad_(requires_grad),),
             kwargs={"upper": upper, "unitriangular": uni, "left": left},
         )
-
-
-def sample_inputs_legacy_solve(op_info, device, dtype, requires_grad=False, **kwargs):
-    """
-    This function generates always solvable input for legacy solve functions
-    (the ones that are not in torch.linalg module).
-    The difference from sample_inputs_linalg_solve is that here the right-hand-side of A x = b equation
-    should have b.ndim >= 2, vectors are not allowed.
-    Also the arguments order is swapped.
-    """
-    out = sample_inputs_linalg_solve(
-        op_info, device, dtype, requires_grad=requires_grad, vector_rhs_allowed=False
-    )
-
-    def out_fn(output):
-        return output[0]
-
-    # Reverses tensor order
-    for sample in out:
-        sample.input, sample.args = sample.args[0], (sample.input,)
-        if op_info.name == "solve":
-            sample.output_process_fn_grad = out_fn
-        yield sample
 
 
 def sample_inputs_linalg_lu(op_info, device, dtype, requires_grad=False, **kwargs):
