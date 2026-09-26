@@ -19,10 +19,18 @@ namespace at::mps {
 //  MPSStream
 //-----------------------------------------------------------------
 
+namespace {
+// Key for dispatch_queue_set_specific(): each stream's serial queue stores its MPSStream* under this address.
+// Per dispatch/queue.h keys are only compared as pointers and never dereferenced, and only NULL is reserved,
+// so the value of the variable does not matter.
+constexpr char kStreamQueueKey = 0;
+} // namespace
+
 MPSStream::MPSStream(Stream stream) : _stream(stream) {
   _commandQueue = [MPSDevice::getInstance()->device() newCommandQueue];
   TORCH_CHECK(_stream.device_type() == DeviceType::MPS);
   _serialQueue = dispatch_queue_create("metal gpu stream", nullptr);
+  dispatch_queue_set_specific(_serialQueue, &kStreamQueueKey, this, nullptr);
   _executionDescriptor = [MPSGraphExecutionDescriptor new];
   _compilationDescriptor = [MPSGraphCompilationDescriptor new];
 
@@ -66,7 +74,16 @@ id<MTLDevice> MPSStream::device() const {
   return [_commandQueue device];
 }
 
+bool MPSStream::isOnQueue() const {
+  return dispatch_get_specific(&kStreamQueueKey) == this;
+}
+
 id<MTLComputeCommandEncoder> MPSStream::commandEncoder() {
+  // endKernelCoalescing() ends and releases the encoder, and the serial queue is the only thing that orders it
+  // against a kernel that is still encoding, so an encoder fetched outside of the queue can be released mid-use
+  TORCH_INTERNAL_ASSERT(isOnQueue(),
+                        "MPSStream::commandEncoder() must be called from a block running on the stream's queue(), "
+                        "see https://github.com/pytorch/pytorch/issues/197805");
   if (!_commandEncoder) {
     _commandEncoder = [commandBuffer() computeCommandEncoder].retain;
   }
