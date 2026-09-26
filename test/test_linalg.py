@@ -11903,25 +11903,22 @@ class TestGroupedMM(TestCase):
     @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @serialTest()
     @largeTensorTest("6GB")
-    @largeMPSBufferTest((2**31 + 64) * torch.float16.itemsize)
-    @dtypes(torch.float16)
-    @parametrize("mode", ["k", "rows"])
-    def test_grouped_mm_u64_indexing(self, device, dtype, mode):
+    @largeMPSBufferTest((2**31 + 64) * torch.bfloat16.itemsize)
+    @dtypes(torch.bfloat16)
+    def test_grouped_mm_u64_indexing(self, device, dtype):
         # Exercises MPS's combined extent/stride guard and 64-bit indexing. Strides fit int32,
         # but accessed offsets exceed it; the size-one stride test never accesses distant storage.
         stride = 2**30
         storage = torch.empty(2 * stride + 64, device=device, dtype=dtype)
         for row in range(3):
             storage[row * stride:row * stride + 64].normal_()
-        if mode == "rows":
-            a = self._make_grouped_mm_matrix((2, 8), True, device, dtype)
-            b = storage.as_strided((2, 8, 8), (2 * stride, 8, 1))
-            offsets = [1, 2]
-        else:
-            a = self._make_grouped_mm_matrix((1, 3), False, device, dtype)
-            b = storage.as_strided((8, 3), (1, stride))
-            offsets = [1, 3]
-        offs = torch.tensor(offsets, device=device, dtype=torch.int32)
+        a = self._make_grouped_mm_matrix((1, 3), False, device, dtype)
+        b = storage.as_strided((8, 3), (1, stride))
+        offs = torch.tensor([1, 3], device=device, dtype=torch.int32)
+        self.grouped_mm_helper(a, b, offs, backward=False)
+        a = self._make_grouped_mm_matrix((2, 8), True, device, dtype)
+        b = storage.as_strided((2, 8, 8), (2 * stride, 8, 1))
+        offs = torch.tensor([1, 2], device=device, dtype=torch.int32)
         self.grouped_mm_helper(a, b, offs, backward=False)
 
 instantiate_device_type_tests(TestLinalg, globals())
