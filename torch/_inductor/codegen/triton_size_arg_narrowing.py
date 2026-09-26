@@ -30,14 +30,32 @@ from __future__ import annotations
 
 import ast
 import hashlib
-from typing import Any
+from typing import Any, cast
+
+from torch.utils._ordered_set import OrderedSet
 
 
 # SHA-256 of the canonical IR of the proved kernel (see _canonical).
 _PROVED_CAT6_SHA256 = "34f3438bd120082a5d7313f7c2a72784893577c12e792e2fa9fdf1c9ef99576c"
 _PROVED_ARGS = (
-    "in_ptr0", "in_ptr1", "in_ptr2", "in_ptr3", "in_ptr4", "in_ptr5", "in_ptr6", "in_ptr7", "out_ptr0",
-    "ks0", "ks1", "ks2", "ks3", "ks4", "ks5", "ks6", "xnumel", "XBLOCK",
+    "in_ptr0",
+    "in_ptr1",
+    "in_ptr2",
+    "in_ptr3",
+    "in_ptr4",
+    "in_ptr5",
+    "in_ptr6",
+    "in_ptr7",
+    "out_ptr0",
+    "ks0",
+    "ks1",
+    "ks2",
+    "ks3",
+    "ks4",
+    "ks5",
+    "ks6",
+    "xnumel",
+    "XBLOCK",
 )
 _KS = tuple(f"ks{i}" for i in range(7))
 _INT_MAX = 2**31 - 1
@@ -66,8 +84,11 @@ def _canonical(arg_names: list[str], body: str) -> tuple[Any, ...]:
         raise _Unsupported("prologue")
     ptrs = [a for a in arg_names if a.startswith(("in_ptr", "out_ptr"))]
     stmts = ast.parse("\n".join(ln.strip() for ln in lines[3:])).body
-    env: dict[str, tuple[str, Any]] = {"xindex": ("int", ("xindex",)), "xmask": ("bool", ("xmask",))}
-    used: set[str] = set()
+    env: dict[str, tuple[str, Any]] = {
+        "xindex": ("int", ("xindex",)),
+        "xmask": ("bool", ("xmask",)),
+    }
+    used: OrderedSet[str] = OrderedSet()
 
     def ref(name: str, kind: str) -> Any:
         if name in _KS:
@@ -85,10 +106,20 @@ def _canonical(arg_names: list[str], body: str) -> tuple[Any, ...]:
             return ref(n.id, "int")
         if isinstance(n, ast.Constant) and type(n.value) is int:
             return ("lit", n.value)
-        if isinstance(n, ast.UnaryOp) and isinstance(n.op, ast.USub) and isinstance(n.operand, ast.Constant):
-            return ("lit", -n.operand.value)
+        if (
+            isinstance(n, ast.UnaryOp)
+            and isinstance(n.op, ast.USub)
+            and isinstance(n.operand, ast.Constant)
+        ):
+            return ("lit", -cast(Any, n.operand.value))
         if isinstance(n, ast.BinOp):
-            op = {ast.Add: "add", ast.Mult: "mul", ast.Mod: "tmod", ast.FloorDiv: "tdiv"}.get(type(n.op))
+            ops: dict[type[ast.operator], str] = {
+                ast.Add: "add",
+                ast.Mult: "mul",
+                ast.Mod: "tmod",
+                ast.FloorDiv: "tdiv",
+            }
+            op = ops.get(type(n.op))
             if op:
                 return (op, ie(n.left), ie(n.right))
         if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute):
@@ -97,15 +128,27 @@ def _canonical(arg_names: list[str], body: str) -> tuple[Any, ...]:
                 return ("cast", ie(n.func.value), _dtype(n.args[0]))
             if f == "tl.broadcast_to" and ast.unparse(n.args[1]) == "[XBLOCK]":
                 return ie(n.args[0])
-            if f == "tl.full" and ast.unparse(n.args[0]) == "[1]" and type(getattr(n.args[1], "value", None)) is int:
-                return ("slit", n.args[1].value, _dtype(n.args[2]))
+            if (
+                f == "tl.full"
+                and ast.unparse(n.args[0]) == "[1]"
+                and type(getattr(n.args[1], "value", None)) is int
+            ):
+                return ("slit", cast(ast.Constant, n.args[1]).value, _dtype(n.args[2]))
         raise _Unsupported(ast.unparse(n)[:60])
 
     def be(n: ast.AST) -> Any:
         if isinstance(n, ast.Name):
             return ref(n.id, "bool")
-        if isinstance(n, ast.Compare) and len(n.ops) == 1 and type(n.ops[0]) in (ast.Lt, ast.GtE):
-            return ("lt" if isinstance(n.ops[0], ast.Lt) else "ge", ie(n.left), ie(n.comparators[0]))
+        if (
+            isinstance(n, ast.Compare)
+            and len(n.ops) == 1
+            and type(n.ops[0]) in (ast.Lt, ast.GtE)
+        ):
+            return (
+                "lt" if isinstance(n.ops[0], ast.Lt) else "ge",
+                ie(n.left),
+                ie(n.comparators[0]),
+            )
         if isinstance(n, ast.BinOp) and isinstance(n.op, ast.BitAnd):
             return ("and", be(n.left), be(n.right))
         raise _Unsupported(ast.unparse(n)[:60])
@@ -119,25 +162,47 @@ def _canonical(arg_names: list[str], body: str) -> tuple[Any, ...]:
             f = ast.unparse(n.func)
             if f == "tl.where":
                 return ("where", be(n.args[0]), fe(n.args[1]), fe(n.args[2]))
-            if (f == "tl.full" and type(getattr(n.args[1], "value", None)) is float and n.args[1].value == 0.0
-                    and ast.unparse(n.args[0]) != "[1]"):
+            if (
+                f == "tl.full"
+                and type(getattr(n.args[1], "value", None)) is float
+                and cast(ast.Constant, n.args[1]).value == 0.0
+                and ast.unparse(n.args[0]) != "[1]"
+            ):
                 return ("fzero",)
-            if isinstance(n.func, ast.Attribute) and n.func.attr == "to" and isinstance(n.func.value, ast.Call):
+            if (
+                isinstance(n.func, ast.Attribute)
+                and n.func.attr == "to"
+                and isinstance(n.func.value, ast.Call)
+            ):
                 ld = n.func.value
                 if ast.unparse(ld.func) == "tl.load":
                     kw = {k.arg: ast.unparse(k.value) for k in ld.keywords}
                     a0 = ld.args[0]
-                    if (kw.get("other") == "0.0" and set(kw) <= {"other", "eviction_policy"}
-                            and isinstance(a0, ast.BinOp) and isinstance(a0.op, ast.Add)
-                            and isinstance(a0.left, ast.Name) and a0.left.id in ptrs):
-                        return ("load", ptrs.index(a0.left.id), ie(a0.right), be(ld.args[1]))
+                    if (
+                        kw.get("other") == "0.0"
+                        and OrderedSet(kw) <= OrderedSet(["other", "eviction_policy"])
+                        and isinstance(a0, ast.BinOp)
+                        and isinstance(a0.op, ast.Add)
+                        and isinstance(a0.left, ast.Name)
+                        and a0.left.id in ptrs
+                    ):
+                        return (
+                            "load",
+                            ptrs.index(a0.left.id),
+                            ie(a0.right),
+                            be(ld.args[1]),
+                        )
         raise _Unsupported(ast.unparse(n)[:60])
 
     store = None
     for s in stmts:
-        if isinstance(s, ast.Assign) and len(s.targets) == 1 and isinstance(s.targets[0], ast.Name):
+        if (
+            isinstance(s, ast.Assign)
+            and len(s.targets) == 1
+            and isinstance(s.targets[0], ast.Name)
+        ):
             for kind, f in (("float", fe), ("bool", be), ("int", ie)):
-                snapshot = set(used)
+                snapshot = OrderedSet(used)
                 try:
                     env[s.targets[0].id] = (kind, f(s.value))
                     break
@@ -146,17 +211,36 @@ def _canonical(arg_names: list[str], body: str) -> tuple[Any, ...]:
                     used.update(snapshot)
             else:
                 raise _Unsupported(ast.unparse(s)[:60])
-        elif (isinstance(s, ast.Expr) and isinstance(s.value, ast.Call)
-              and ast.unparse(s.value.func) == "tl.store" and store is None):
+        elif (
+            isinstance(s, ast.Expr)
+            and isinstance(s.value, ast.Call)
+            and ast.unparse(s.value.func) == "tl.store"
+            and store is None
+        ):
             a0 = s.value.args[0]
-            if not (isinstance(a0, ast.BinOp) and isinstance(a0.left, ast.Name) and a0.left.id in ptrs):
+            if not (
+                isinstance(a0, ast.BinOp)
+                and isinstance(a0.left, ast.Name)
+                and a0.left.id in ptrs
+            ):
                 raise _Unsupported("store")
-            store = (ptrs.index(a0.left.id), ie(a0.right), fe(s.value.args[1]), be(s.value.args[2]))
+            store = (
+                ptrs.index(a0.left.id),
+                ie(a0.right),
+                fe(s.value.args[1]),
+                be(s.value.args[2]),
+            )
         else:
             raise _Unsupported(ast.unparse(s)[:60])
     if store is None:
         raise _Unsupported("no store")
-    dead = tuple(sorted((k, v[1]) for k, v in env.items() if k not in used and k not in ("xindex", "xmask")))
+    dead = tuple(
+        sorted(
+            (k, v[1])
+            for k, v in env.items()
+            if k not in used and k not in ("xindex", "xmask")
+        )
+    )
     return (tuple(arg_names), store, dead)
 
 
@@ -172,7 +256,9 @@ def _symbolic_facts(kernel: Any, numel: Any) -> dict[str, Any]:
     sv = V.graph.sizevars
     se = sv.shape_env
     name_of = {v: k for k, v in kernel.args.sizevars.items()}
-    full = {k: sv.inv_precomputed_replacements.get(name_of[k], name_of[k]) for k in _KS}
+    full: dict[str, Any] = {
+        k: sv.inv_precomputed_replacements.get(name_of[k], name_of[k]) for k in _KS
+    }
 
     def lower_ge1(e: Any) -> bool:
         rng = se.var_to_range.get(e) if isinstance(e, sympy.Symbol) else None
@@ -201,9 +287,17 @@ def proven_int32_size_args(
     body: str,
 ) -> list[str]:
     """Names of size arguments that may be declared i32 for this kernel; [] unless C1 and C2 hold."""
-    if heuristic != "pointwise" or grid_type != "Grid1D" or kernel.fixed_config is not None:
+    if (
+        heuristic != "pointwise"
+        or grid_type != "Grid1D"
+        or kernel.fixed_config is not None
+    ):
         return []
-    if kernel.inside_reduction or kernel.cooperative_reduction or tuple(arg_names) != _PROVED_ARGS:
+    if (
+        kernel.inside_reduction
+        or kernel.cooperative_reduction
+        or tuple(arg_names) != _PROVED_ARGS
+    ):
         return []
     if any(signature.get(k) != "i64" for k in _KS) or signature.get("xnumel") != "i32":
         return []

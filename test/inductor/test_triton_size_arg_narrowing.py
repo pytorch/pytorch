@@ -52,12 +52,16 @@ class TestSizeArgNarrowing(TestCase):
         self.assertEqual(out.view(torch.int16), nested_cat_add(*ins).view(torch.int16))
         # a second shape reuses the same kernel (no recompile) and stays exact
         ins2 = _inputs(n=3000, widths=(1000, 120, 136, 136, 1000, 120, 136, 136))
-        self.assertEqual(torch.compile(nested_cat_add, dynamic=True)(*ins2).view(torch.int16),
-                         nested_cat_add(*ins2).view(torch.int16))
+        self.assertEqual(
+            torch.compile(nested_cat_add, dynamic=True)(*ins2).view(torch.int16),
+            nested_cat_add(*ins2).view(torch.int16),
+        )
 
     @requires_gpu()
     def test_default_is_unchanged(self):
-        _, code = run_and_get_code(torch.compile(nested_cat_add, dynamic=True), *_inputs())
+        _, code = run_and_get_code(
+            torch.compile(nested_cat_add, dynamic=True), *_inputs()
+        )
         self.assertEqual(set(_ks_types("\n".join(code)).values()), {"i64"})
 
     @requires_gpu()
@@ -72,13 +76,26 @@ class TestSizeArgNarrowing(TestCase):
 
     @requires_gpu()
     def test_recognizer_rejects_mutations(self):
-        _, code = run_and_get_code(torch.compile(nested_cat_add, dynamic=True), *_inputs())
+        _, code = run_and_get_code(
+            torch.compile(nested_cat_add, dynamic=True), *_inputs()
+        )
         args, body = _kernel("\n".join(code))
-        self.assertEqual(narrowing.canonical_sha256(args, body), narrowing._PROVED_CAT6_SHA256)
+        self.assertEqual(
+            narrowing.canonical_sha256(args, body), narrowing._PROVED_CAT6_SHA256
+        )
         mutations = [
-            ("tmp32 = tmp30 + tmp31", "tmp32 = tmp30 + tmp31\ntmp99 = ks1 * ks2 < ks3"),  # extra size use
-            ("in_ptr0 + (ks1*x1 + (x0))", "in_ptr0 + (ks1*x1 + (x0) + ks2)"),  # different index
-            ("tmp41 = (ks0).to(tl.int32)", "tmp41 = (ks0).to(tl.int64)"),  # different cast
+            (
+                "tmp32 = tmp30 + tmp31",
+                "tmp32 = tmp30 + tmp31\ntmp99 = ks1 * ks2 < ks3",
+            ),  # extra size use
+            (
+                "in_ptr0 + (ks1*x1 + (x0))",
+                "in_ptr0 + (ks1*x1 + (x0) + ks2)",
+            ),  # different index
+            (
+                "tmp41 = (ks0).to(tl.int32)",
+                "tmp41 = (ks0).to(tl.int64)",
+            ),  # different cast
         ]
         for old, new in mutations:
             self.assertIn(old, body)
