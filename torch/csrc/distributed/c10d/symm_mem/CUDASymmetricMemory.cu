@@ -10,7 +10,6 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/PeerToPeerAccess.h>
 #include <c10/cuda/CUDACachingAllocator.h>
-#include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/env.h>
 #include <c10/util/error.h>
@@ -41,17 +40,20 @@ namespace {
 // stream (see the cudaStreamSynchronize calls below). That is not permitted
 // while the stream is capturing a CUDA graph; without this check the failure
 // surfaces as a bare cudaErrorStreamCaptureUnsupported from deep inside the
-// driver call, with nothing telling the caller what to change. Callers must
-// hold a CUDAGuard for the target device before calling this.
-void check_not_capturing(const std::string& op, const char* hint) {
-  const auto status = c10::cuda::currentStreamCaptureStatusMayInitCtx();
+// driver call, with nothing telling the caller what to change. The check
+// goes through the caching allocator's capture tracking, so an eager call
+// costs a counter read rather than a driver query.
+void check_not_capturing(
+    c10::DeviceIndex device,
+    const std::string& op,
+    const char* hint) {
+  if (C10_LIKELY(!c10::cuda::CUDACachingAllocator::isCaptureContext(device))) {
+    return;
+  }
   TORCH_CHECK(
-      status == c10::cuda::CaptureStatus::None,
+      false,
       op,
-      ": not supported while the current CUDA stream is capturing a graph "
-      "(capture status: ",
-      status,
-      "). ",
+      ": not supported while the current CUDA stream is capturing a graph. ",
       hint);
 }
 
@@ -366,6 +368,7 @@ void* CUDASymmetricMemoryAllocator::alloc(
   c10::cuda::CUDAGuard guard(device_idx);
   device_idx = static_cast<int>(guard.current_device().index());
   check_not_capturing(
+      static_cast<c10::DeviceIndex>(device_idx),
       "CUDASymmetricMemoryAllocator::alloc",
       "Allocation maps the block, zeroes the signal pad and synchronizes the "
       "stream. Allocate the buffer with "
@@ -1131,9 +1134,8 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
     // uploads the peer pointer tables and synchronizes the stream (see
     // CUDAPeerAllocInfo::CUDAPeerAllocInfo). None of that can be captured, so
     // refuse up front. Later calls hit the cache above and are capture-safe.
-    c10::cuda::CUDAGuard guard(
-        static_cast<c10::DeviceIndex>(block->device_idx));
     check_not_capturing(
+        static_cast<c10::DeviceIndex>(block->device_idx),
         c10::str(
             "CUDASymmetricMemory::rendezvous (group \"", group_name_, "\")"),
         "Call torch.distributed._symmetric_memory.rendezvous(tensor, group) "
