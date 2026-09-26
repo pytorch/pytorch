@@ -11558,7 +11558,7 @@ Reverse the order of an n-D tensor along given axis in dims.
 
 Args:
     {input}
-    dims (a list or tuple): axis to flip on
+    dims (a list or tuple of ints): axes to flip on
 
 Example::
 
@@ -11704,7 +11704,7 @@ Rotation direction is from the first towards the second axis if k > 0, and from 
 Args:
     {input}
     k (int): number of times to rotate. Default value is 1
-    dims (a list or tuple): axis to rotate. Default value is [0, 1]
+    dims (a list or tuple of ints): axes to rotate. Default value is [0, 1]
 
 Example::
 
