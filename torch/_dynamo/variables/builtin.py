@@ -190,7 +190,9 @@ IN_PLACE_DESUGARING_MAP = {
 _BUILTIN_CONSTANT_FOLDABLE_METHODS: dict[type, frozenset[str]] = {
     int: frozenset({"__new__", "from_bytes"}),
     bool: frozenset({"__new__", "from_bytes"}),
+    bytes: frozenset({"maketrans"}),
     float: frozenset({"fromhex", "hex"}),
+    str: frozenset({"maketrans"}),
 }
 if sys.version_info >= (3, 14):
     _BUILTIN_CONSTANT_FOLDABLE_METHODS[float] |= frozenset({"from_number"})
