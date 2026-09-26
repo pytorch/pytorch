@@ -360,10 +360,10 @@ Examples::
 
     >>> # Generates a symmetric Kaiser window with a shape parameter of 12.0.
     >>> torch.signal.windows.kaiser(5)
-    tensor([4.0065e-05, 2.1875e-03, 4.3937e-02, 3.2465e-01, 8.8250e-01, 8.8250e-01, 3.2465e-01, 4.3937e-02, 2.1875e-03, 4.0065e-05])
+    tensor([5.2773e-05, 2.1567e-01, 1.0000e+00, 2.1567e-01, 5.2773e-05])
     >>> # Generates a periodic Kaiser window and shape parameter equal to 0.9.
     >>> torch.signal.windows.kaiser(5, sym=False, beta=0.9)
-    tensor([1.9858e-07, 5.1365e-05, 3.8659e-03, 8.4658e-02, 5.3941e-01, 1.0000e+00, 5.3941e-01, 8.4658e-02, 3.8659e-03, 5.1365e-05])
+    tensor([0.8244, 0.9348, 0.9926, 0.9926, 0.9348])
 """.format(
         **window_common_args,
     ),
@@ -855,11 +855,11 @@ References::
 Examples::
 
     >>> # Generates a symmetric Nuttall window.
-    >>> torch.signal.windows.general_hamming(5, sym=True)
+    >>> torch.signal.windows.nuttall(5, sym=True)
     tensor([3.6280e-04, 2.2698e-01, 1.0000e+00, 2.2698e-01, 3.6280e-04])
 
     >>> # Generates a periodic Nuttall window.
-    >>> torch.signal.windows.general_hamming(5, sym=False)
+    >>> torch.signal.windows.nuttall(5, sym=False)
     tensor([3.6280e-04, 1.1052e-01, 7.9826e-01, 7.9826e-01, 1.1052e-01])
 """.format(**window_common_args),
 )
