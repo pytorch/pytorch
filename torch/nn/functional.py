@@ -3119,8 +3119,10 @@ def ctc_loss(
     Args:
         log_probs: :math:`(T, N, C)` or :math:`(T, C)` where `C = number of characters in alphabet including blank`,
             `T = input length`, and `N = batch size`.
-            The logarithmized probabilities of the outputs
-            (e.g. obtained with :func:`torch.nn.functional.log_softmax`).
+            The logarithmized probabilities of the outputs, which must be the
+            result of applying :func:`torch.nn.functional.log_softmax` to
+            unnormalized logits. See :class:`~torch.nn.CTCLoss` for details on
+            gradient correctness requirements.
         targets: :math:`(N, S)` or `(sum(target_lengths))`.
                 May be an empty tensor if all entries in `target_lengths` are zero.
                 In the second form, the targets are assumed to be concatenated.
