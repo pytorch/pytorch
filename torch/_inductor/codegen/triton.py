@@ -58,6 +58,7 @@ from ..runtime.hints import (
     native_matmul_persistent_rblock,
     ReductionHint,
     TRITON_MAX_BLOCK,
+    TRITON_MAX_MIX_ORDER_XBLOCK,
     TRITON_MAX_RSPLIT,
     TritonMeta,
 )
@@ -3300,6 +3301,25 @@ class TMACompatibilityChecker:
                     )
                 )
 
+                if (
+                    self.kernel.mix_order_reduction
+                    and innermost_block_symt == SymT.XBLOCK
+                    and (
+                        self.kernel.rsplit_size % min_block_size != 0
+                        or (
+                            not self.kernel.fixed_config
+                            and min_block_size > TRITON_MAX_MIX_ORDER_XBLOCK
+                        )
+                    )
+                ):
+                    log.debug(
+                        "%s mix-order RSPLIT_SIZE=%d has no supported XBLOCK satisfying the minimum block size %d",
+                        self.failed_debug_prefix,
+                        self.kernel.rsplit_size,
+                        min_block_size,
+                    )
+                    return False
+
                 # TODO: min block size may be too large / introduce redundancy
                 if min_block_size > self.kernel.max_block(
                     prefix_str[innermost_block_symt]
@@ -3943,6 +3963,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             and len(self.numels) == self.num_reduction_dims + 1
             and self.fixed_config
             and self.fixed_config["XBLOCK"] == 1
+            and not self.mix_order_reduction
         )
 
     @property
@@ -7103,7 +7124,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 raise AssertionError(
                     "Mix order reduction requires persistent reduction"
                 )
-            accumname2var = {}
+            accumulators = []
             for idx, partial_accum in enumerate(self.saved_partial_accumulate):
                 reduction_type = partial_accum.reduction_type
                 default = ir.Reduction.default_accumulator(reduction_type, torch.float)
@@ -7112,23 +7133,24 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 self.body.writeline(
                     f"{name} = tl.full([R0_BLOCK], {default}, tl.float32)[None, :]"
                 )
-                accumname2var[name] = self.cse.namedvar(
-                    name, dtype=torch.float, shape=("1", "R0_BLOCK")
+                accumulators.append(
+                    (
+                        self.cse.namedvar(
+                            name, dtype=torch.float, shape=("1", "R0_BLOCK")
+                        ),
+                        default,
+                    )
                 )
+            has_constant_xmask = self._has_constant_xmask()
             self.body.writeline("split_size = min(RSPLIT_SIZE, xnumel - xoffset)")
             self.body.writeline(
                 "for _ in tl.range(0, split_size, XBLOCK, num_stages=NUM_STAGES):"
             )
             with self.body.indent(offset=1):
                 # generate xmask if it's not constant
-                if not self._has_constant_xmask():
+                if not has_constant_xmask:
                     entry = self.range_trees[0]
-                    if entry.prefix != "x":
-                        raise AssertionError(
-                            f"expected entry prefix 'x', got {entry.prefix!r}"
-                        )
-                    x = entry.prefix
-                    self.body.writeline(f"{x}mask = {entry.name} < {x}numel")
+                    self.body.writeline(f"xmask = {entry.name} < xnumel")
                 self.body.splice(self.indexing_code)
                 self.body.writelines(
                     [
@@ -7147,6 +7169,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 for idx, partial_accum in enumerate(self.saved_partial_accumulate):
                     var = partial_accum.value
                     name = f"accum{idx}"
+                    accumulator, default = accumulators[idx]
+                    if not has_constant_xmask:
+                        # Pointwise compute can transform masked load values.
+                        var = self.cse.generate(
+                            self.body,
+                            TritonKernelOverrides.where("xmask", var, default),
+                            dtype=var.dtype,
+                            shape=var.shape,
+                        )
                     combine_fn = ir.get_reduction_combine_fn(
                         partial_accum.reduction_type, torch.float
                     )
@@ -7163,7 +7194,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
                     with unittest.mock.patch.object(self, "compute", self.body):
                         updated = combine_fn(
-                            accumname2var[name],
+                            accumulator,
                             newval,
                         )
                     self.body.writeline(f"{name} = {updated}")
@@ -8243,8 +8274,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         )
 
     def max_block(self, prefix: str) -> int:
-        if self.fixed_config:
-            return self.fixed_config[f"{prefix.upper()}BLOCK"]
+        block = f"{prefix.upper()}BLOCK"
+        if self.fixed_config and block in self.fixed_config:
+            return self.fixed_config[block]
         return TRITON_MAX_BLOCK[prefix.upper()]
 
     def _has_constant_mask(self, tree: IterationRangesRoot) -> bool:
@@ -8264,9 +8296,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             if self.fixed_config[f"{tree.prefix.upper()}BLOCK"] == 1:
                 return True
         elif not self.is_combo_kernel:
-            if V.graph.sizevars.statically_known_equals(tree.numel, 1):
-                if not (tree.is_reduction and self.persistent_reduction):
-                    return True
+            if (
+                V.graph.sizevars.statically_known_equals(tree.numel, 1)
+                and not (tree.is_reduction and self.persistent_reduction)
+                and not (self.mix_order_reduction and tree.prefix == "x")
+            ):
+                return True
 
         # Masks are superfluous if numel is a multiple of BLOCK
         # (We use the fact that BLOCK is required by triton to be a power of 2)

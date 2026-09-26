@@ -22,12 +22,15 @@ from torch._inductor.codegen.simd import IterationRangesRoot
 from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
 from torch._inductor.codegen.triton import (
     _materialize_trunc_to_float_expr,
+    BlockParameters,
     FixedTritonConfig,
     get_triton_reduction_function,
     IndexingOptions,
+    TMACompatibilityChecker,
     TritonCSEVariable,
     TritonKernel,
     TritonKernelOverrides,
+    TritonScheduling,
     TritonSymbols,
 )
 from torch._inductor.codegen.wrapper import _escape_triton_kernel_source_for_wrapper
@@ -41,7 +44,11 @@ from torch._inductor.utils import (
     run_and_get_code,
     run_and_get_kernels,
 )
-from torch._inductor.virtualized import V
+from torch._inductor.virtualized import ops, V
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
@@ -81,6 +88,7 @@ except ImportError:
     )
 
 
+@instantiate_parametrized_tests
 class TestCodegenTriton(InductorTestCase):
     def setUp(self):
         super().setUp()
@@ -344,6 +352,139 @@ def helper(x):
 
         self.assertFalse(kernel.persistent_reduction)
         self.assertEqual(seen_scores, [tiling_scores])
+
+    @parametrize(
+        "reduction_type,identity,reduction_fn",
+        (("sum", "0", "tl.sum"), ("prod", "1", "triton_helpers.prod")),
+    )
+    @parametrize(
+        "xnumel,optimize_mask",
+        ((sympy.Integer(40961), False), (sympy.Integer(1), True)),
+    )
+    def test_mix_order_partial_accumulate_masks_x(
+        self, reduction_type, identity, reduction_fn, xnumel, optimize_mask
+    ):
+        self._stack.enter_context(self._graph.set_current_device(torch.device("cpu")))
+        rnumel = sympy.Integer(129)
+        kernel = TritonKernel(
+            {"x": xnumel, "r0_": rnumel},
+            features=SIMDKernelFeatures([], xnumel, rnumel),
+            mix_order_reduction=True,
+            optimize_mask=optimize_mask,
+            override_persistent_reduction=True,
+            override_cooperative_reduction=False,
+        )
+
+        with kernel:
+            x_tree, r_tree = kernel.range_trees
+            xvalue = ops.index_expr(x_tree.full_range().symbol(), torch.float32)
+            rvalue = ops.index_expr(r_tree.full_range().symbol(), torch.float32)
+            value = ops.add(xvalue, rvalue)
+            value = ops.add(value, ops.constant(0.25, torch.float32))
+            ops.partial_accumulate("out", reduction_type, value, {})
+            kernel.codegen_body()
+
+        code = kernel.body.getvalue()
+        masked_reduction = re.compile(
+            rf"(?P<masked>tmp\d+) = tl\.where\(xmask, tmp\d+, {identity}\)\n"
+            rf"\s+tmp\d+ = {re.escape(reduction_fn)}\((?P=masked), 0\)"
+        )
+        self.assertRegex(code, masked_reduction)
+
+    def test_mix_order_rejects_tma_xblock_above_heuristic_limit(self):
+        xnumel = sympy.Integer(8192)
+        rnumel = sympy.Integer(8)
+        with self._graph.set_current_device(torch.device("cpu")):
+            kernel = TritonKernel(
+                {"x": xnumel, "r0_": rnumel},
+                features=SIMDKernelFeatures([], xnumel, rnumel),
+                mix_order_reduction=True,
+                override_persistent_reduction=True,
+                override_cooperative_reduction=False,
+            )
+        kernel.rsplit_size = 64
+        xblock = TritonSymbols.block_sizes[SymT.XBLOCK]
+        block_params = BlockParameters(
+            shape=[rnumel, xnumel],
+            block_shape=[rnumel, FloorDiv(xblock, rnumel)],
+            strides=[xnumel, sympy.Integer(1)],
+            offsets=[sympy.Integer(0), sympy.Integer(0)],
+        )
+
+        checker = TMACompatibilityChecker(
+            kernel, torch.float32, for_store=False, force=False
+        )
+        with self._graph.set_current_device(torch.device("cuda")):
+            compatible = checker.are_block_parameters_compatible(block_params)
+        self.assertFalse(compatible)
+        self.assertEqual(kernel.tma_min_block_sizes, {})
+
+    @parametrize(
+        "split_size,fixed_config,error",
+        (
+            (
+                48,
+                {"XBLOCK": 32},
+                "RSPLIT_SIZE=48 is incompatible with fixed XBLOCK=32",
+            ),
+            (
+                18,
+                {"XBLOCK": 2, "RSPLIT_SIZE": 32, "NUM_STAGES": 1},
+                "fixed RSPLIT_SIZE=32 does not match scheduled RSPLIT_SIZE=18",
+            ),
+        ),
+    )
+    def test_mix_order_rejects_incompatible_fixed_config(
+        self, split_size, fixed_config, error
+    ):
+        class CustomChoices(InductorChoices):
+            def triton_kernel_kwargs(self, kernel_cls, features, groups, kernel_kwargs):
+                return {
+                    **kernel_kwargs,
+                    "fixed_config": FixedTritonConfig(fixed_config),
+                }
+
+        xnumel = sympy.Integer(40961)
+        rnumel = sympy.Integer(129)
+        with (
+            self._graph.set_current_device(torch.device("cpu")),
+            V.set_choices_handler(CustomChoices()),
+            self.assertRaisesRegex(ValueError, error),
+        ):
+            TritonScheduling(None)._generate_kernel_code_for_mix_order_reduction(
+                SIMDKernelFeatures([], xnumel, rnumel),
+                split_size=split_size,
+                for_benchmark=False,
+            )
+
+    @parametrize(
+        "fixed_config",
+        (
+            {"XBLOCK": 1, "RSPLIT_SIZE": 18, "NUM_STAGES": 1},
+            {"XBLOCK": 2, "NUM_STAGES": 1},
+        ),
+    )
+    def test_mix_order_normalizes_fixed_config(self, fixed_config):
+        class CustomChoices(InductorChoices):
+            def triton_kernel_kwargs(self, kernel_cls, features, groups, kernel_kwargs):
+                return {
+                    **kernel_kwargs,
+                    "fixed_config": FixedTritonConfig(fixed_config),
+                }
+
+        xnumel = sympy.Integer(40961)
+        rnumel = sympy.Integer(129)
+        with (
+            self._graph.set_current_device(torch.device("cpu")),
+            V.set_choices_handler(CustomChoices()),
+        ):
+            kernel = TritonScheduling(None)._create_kernel_for_mix_order_reduction(
+                SIMDKernelFeatures([], xnumel, rnumel),
+                split_size=18,
+            )
+
+        self.assertFalse(kernel.no_x_dim)
+        self.assertEqual(kernel.fixed_config["RSPLIT_SIZE"], 18)
 
     def test_reduction_invariant_load_indexing(self):
         self._stack.enter_context(self._graph.set_current_device(torch.device("cuda")))

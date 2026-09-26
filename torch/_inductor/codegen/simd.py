@@ -3324,17 +3324,8 @@ class SIMDScheduling(BaseScheduling):
                 epilogues.append(node)
         return reductions, epilogues
 
-    def _generate_kernel_code_for_mix_order_reduction(
-        self, kernel_features, split_size, for_benchmark
-    ):
-        """
-        for_benchmark:
-            True if the generated code is for benchmarking. We need make
-            sure benchmark harness code is generated.
-        """
+    def _create_kernel_for_mix_order_reduction(self, kernel_features, split_size):
         numel, rnumel = kernel_features.numel, kernel_features.reduction_numel
-        node_schedule = kernel_features.node_schedule
-
         kernel = self.create_kernel_choices(
             kernel_features,
             [{"x": numel, "r0_": rnumel}],
@@ -3345,11 +3336,43 @@ class SIMDScheduling(BaseScheduling):
                 "override_persistent_reduction": True,
             },
         )[0]
+        kernel.rsplit_size = split_size
         if not kernel.persistent_reduction:
             raise AssertionError("expected kernel.persistent_reduction")
         if not kernel.mix_order_reduction:
             raise AssertionError("expected kernel.mix_order_reduction")
-        kernel.rsplit_size = split_size
+        if kernel.fixed_config:
+            if "RSPLIT_SIZE" not in kernel.fixed_config:
+                kernel.fixed_config = dataclasses.replace(
+                    kernel.fixed_config,
+                    config={**kernel.fixed_config.config, "RSPLIT_SIZE": split_size},
+                )
+            elif kernel.fixed_config["RSPLIT_SIZE"] != split_size:
+                raise ValueError(
+                    f"fixed RSPLIT_SIZE={kernel.fixed_config['RSPLIT_SIZE']} does not "
+                    f"match scheduled RSPLIT_SIZE={split_size}"
+                )
+            xblock = kernel.fixed_config["XBLOCK"]
+            if split_size % xblock != 0:
+                raise ValueError(
+                    f"RSPLIT_SIZE={split_size} is incompatible with fixed "
+                    f"XBLOCK={xblock}"
+                )
+        return kernel
+
+    def _generate_kernel_code_for_mix_order_reduction(
+        self, kernel_features, split_size, for_benchmark, kernel=None
+    ):
+        """
+        for_benchmark:
+            True if the generated code is for benchmarking. We need make
+            sure benchmark harness code is generated.
+        """
+        if kernel is None:
+            kernel = self._create_kernel_for_mix_order_reduction(
+                kernel_features, split_size
+            )
+        node_schedule = kernel_features.node_schedule
         self.codegen_node_schedule_with_kernel(node_schedule, kernel)
 
         # allocate workspace for this kernel
@@ -3430,11 +3453,15 @@ class SIMDScheduling(BaseScheduling):
             node1.get_nodes() + converted_nodes, numel, rnumel
         )
         kernel_features = SIMDKernelFeatures(node_schedule, numel, rnumel)
+        kernel = self._create_kernel_for_mix_order_reduction(
+            kernel_features, split_size
+        )
 
         # The autotuning is skipped in deterministic mode
         if (
             not torch._inductor.config.deterministic
             and config.triton.mix_order_reduction_split_size is None
+            and not kernel.fixed_config
             and (
                 config.triton.mix_order_reduction_autotune_split_size
                 or config.max_autotune
@@ -3457,11 +3484,15 @@ class SIMDScheduling(BaseScheduling):
                 split_size,
                 8,
             )
+            kernel = self._create_kernel_for_mix_order_reduction(
+                kernel_features, split_size
+            )
 
         kernel, ws_name, src_code = self._generate_kernel_code_for_mix_order_reduction(
             kernel_features,
             split_size=split_size,
             for_benchmark=False,
+            kernel=kernel,
         )
 
         # rename intermediate reduction output to final reduction

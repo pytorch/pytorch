@@ -14,8 +14,13 @@ from torch._inductor.heuristics.registry import (
     CodegenConfigHeuristics,
     register_codegen_heuristic,
 )
-from torch._inductor.runtime.hints import AutotuneHint, ReductionHint, TRITON_MAX_BLOCK
-from torch._inductor.runtime.runtime_utils import next_power_of_2
+from torch._inductor.runtime.hints import (
+    AutotuneHint,
+    ReductionHint,
+    TRITON_MAX_BLOCK,
+    TRITON_MAX_MIX_ORDER_XBLOCK,
+)
+from torch._inductor.runtime.runtime_utils import last_power_of_2, next_power_of_2
 from torch._inductor.utils import prefix_is_reduction
 from torch.utils._ordered_set import OrderedSet
 
@@ -596,7 +601,6 @@ class ReductionHeuristic(CodegenConfigHeuristics):
     ) -> list[Config]:
         """Generate configs for cooperative reduction (RSPLIT)."""
         from torch._inductor.runtime.hints import TRITON_MAX_RSPLIT
-        from torch._inductor.runtime.runtime_utils import last_power_of_2
 
         # Cooperative reductions currently only support a single reduction dimension.
         if len(size_hints) != 2:
@@ -655,7 +659,19 @@ class ReductionHeuristic(CodegenConfigHeuristics):
             required_x_block = max(
                 required_x_block, tma_min_block_sizes.get("XBLOCK", 1)
             )
-        x_block = min(max(rsplit_size // 32, min_x_block, required_x_block), 16)
+        x_block = last_power_of_2(
+            min(
+                max(rsplit_size // 32, min_x_block, required_x_block),
+                TRITON_MAX_MIX_ORDER_XBLOCK,
+            )
+        )
+        while rsplit_size % x_block != 0:
+            x_block //= 2
+        if x_block < required_x_block:
+            raise ValueError(
+                f"RSPLIT_SIZE={rsplit_size} is incompatible with the required "
+                f"XBLOCK={required_x_block}"
+            )
 
         new_configs: list[Config] = []
         for c in configs:

@@ -216,6 +216,20 @@ class TestCoordinateDescentTuner(TestCase):
         neighbours = tuner.get_neighbour_configs(baseline, "XBLOCK")
         self.assertNotIn(512, [cfg.kwargs["XBLOCK"] for cfg in neighbours])
 
+    def test_mix_order_reduction_rejects_incompatible_xblock(self):
+        tuner = CoordescTuner(
+            is_mix_order_reduction=True,
+            size_hints={"x": 40961, "r0_": 129},
+        )
+        config = triton.Config(
+            {"XBLOCK": 1, "RSPLIT_SIZE": 17, "NUM_STAGES": 1},
+            num_warps=1,
+            num_stages=1,
+        )
+
+        neighbours = tuner.get_neighbour_configs(config, "XBLOCK")
+        self.assertEqual(neighbours, [])
+
     def test_native_matmul_persistent_uses_meta_rblock_for_limit(self):
         size_hints = {"x": 4096, "y": 4096, "r0_": 64}
         effective_rblock = 1024
