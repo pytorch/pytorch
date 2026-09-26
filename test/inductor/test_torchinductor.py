@@ -110,6 +110,7 @@ from torch.testing._internal.common_quantization import (
 from torch.testing._internal.common_utils import (
     decorateIf,
     DeterministicGuard,
+    getRocmVersion,
     instantiate_parametrized_tests,
     IS_ARM64,
     IS_CPU_EXT_SVE_SUPPORTED,
@@ -118,6 +119,7 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_X86,
     isRocmArchAnyOf,
+    lazy_skip_if,
     MACOS_VERSION,
     MI200_ARCH,
     NAVI3_ARCH,
@@ -128,7 +130,6 @@ from torch.testing._internal.common_utils import (
     skipIfNoLapack,
     skipIfRocm,
     skipIfRocmArch,
-    skipIfRocmVersionAtLeast,
     skipIfTorchInductor,
     skipIfWindows,
     skipIfXpu,
@@ -6530,9 +6531,12 @@ for dtype in (torch.int32, torch.int64):
     @parametrize("nhwc_weight", (False, True))
     @parametrize("nhwc_input", (False, True))
     @with_tf32_off
-    @skipIfRocmVersionAtLeast(
-        [7, 14]
-    )  # ROCm 7.14+ Triton conv2d backward accuracy issue in this UT family
+    @lazy_skip_if(
+        lambda: TEST_WITH_ROCM
+        and not isRocmArchAnyOf(NAVI_ARCH)
+        and getRocmVersion() >= (7, 14),
+        "ROCm 7.14+ Triton conv2d backward accuracy issue on CDNA; passes on RDNA",
+    )
     def test_conv2d_backward_input_layout(self, nhwc_weight: bool, nhwc_input: bool):
         in_channels, out_channels, groups = 3, 4, 1
         stride, dilation, padding, kernel = 1, 1, 1, 3
