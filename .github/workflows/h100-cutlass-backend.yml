@@ -49,7 +49,7 @@ jobs:
       cuda-arch-list: '9.0'
       test-matrix: |
         { include: [
-          { config: "h100_cutlass_backend", shard: 1, num_shards: 1, runner: "linux.aws.h100", owners: ["oncall:pt2"] },
+          { config: "h100_cutlass_backend", shard: 1, num_shards: 1, runner: "mt-l-x86iamx-22-225-h100", owners: ["oncall:pt2"] },
         ]}
       python-version: "3.11"
       compiler: gcc11
@@ -83,7 +83,7 @@ jobs:
       cuda-arch-list: '9.0'
       test-matrix: |
         { include: [
-          { config: "h100_cutlass_backend", shard: 1, num_shards: 1, runner: "linux.aws.h100", owners: ["oncall:pt2"] },
+          { config: "h100_cutlass_backend", shard: 1, num_shards: 1, runner: "mt-l-x86iamx-22-225-h100", owners: ["oncall:pt2"] },
         ]}
       python-version: "3.11"
       compiler: gcc11
