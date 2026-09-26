@@ -1242,8 +1242,15 @@ def is_valid_splitwithsizes_cat(match):
     if len(split_nodes) != 1 or len(cat_nodes) != 1:
         return False
     split_node, cat_node = split_nodes[0], cat_nodes[0]
-    # The dim of split and cat should match for passthrough
-    if get_arg_value(split_node, 2, "dim") != get_arg_value(cat_node, 1, "dim"):
+    # The dim of split and cat should match for passthrough; a negative dim
+    # and its positive twin name the same axis
+    split_dim = get_arg_value(split_node, 2, "dim")
+    cat_dim = get_arg_value(cat_node, 1, "dim")
+    # rank comes from the split's input: the split node's own meta value is
+    # a list of per-part tensors, not a Tensor
+    if not _dim_matches(
+        split_dim, cat_dim, _meta_rank(get_arg_value(split_node, 0))
+    ):
         return False
     get_item_args = OrderedSet(
         get_arg_value(get_item_node, 1) for get_item_node in get_item_nodes
@@ -1264,6 +1271,26 @@ def is_valid_splitwithsizes_cat(match):
         return False
 
     return True
+
+
+def _meta_rank(node: torch.fx.Node):
+    """Rank of the node's fake-tensor meta value, when present."""
+    val = node.meta.get("val")
+    return val.ndim if isinstance(val, torch.Tensor) else None
+
+
+def _dim_matches(split_dim, cat_dim, rank):
+    """True when two dim arguments name the same axis, normalizing a negative
+    dim against the input rank (``-1`` and ``rank - 1`` are the same axis)."""
+    if split_dim == cat_dim:
+        return True
+    if not isinstance(split_dim, int) or not isinstance(cat_dim, int):
+        return False
+    if rank is None:
+        return False
+    norm_split = split_dim + rank if split_dim < 0 else split_dim
+    norm_cat = cat_dim + rank if cat_dim < 0 else cat_dim
+    return norm_split == norm_cat
 
 
 def same_meta(node1: torch.fx.Node, node2: torch.fx.Node):
@@ -1926,12 +1953,23 @@ def is_valid_cat_splitwithsizes(match):
     if len(cat_node.users) > 1:
         return False
 
-    # the dim of the cat and split should match
+    cat_inputs = list(get_arg_value(cat_node, 0))
+
+    # the dim of the cat and split should match; a negative dim and its
+    # positive twin name the same axis
     dim = get_arg_value(split_node, 2, "dim")
-    if dim != get_arg_value(cat_node, 1, "dim"):
+    cat_dim = get_arg_value(cat_node, 1, "dim")
+    rank = next(
+        (
+            c.meta["val"].ndim
+            for c in cat_inputs
+            if isinstance(c.meta.get("val"), torch.Tensor)
+        ),
+        None,
+    )
+    if not _dim_matches(dim, cat_dim, rank):
         return False
 
-    cat_inputs = list(get_arg_value(cat_node, 0))
     split_sizes = get_arg_value(split_node, 1, "split_sizes")
     # the number of input tensors in cat and the
     # length of the split sizes should match
