@@ -415,8 +415,12 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
         parser.error("warmup must be nonnegative and iterations must be positive")
     if not 0 <= parsed.minimum_line_rate <= 1:
         parser.error("minimum-line-rate must be between zero and one")
-    if parsed.one_way_connect and parsed.backend.lower() != "ucxx":
-        parser.error("one-way-connect is supported only by UCXX")
+    if parsed.one_way_connect and parsed.backend.lower() not in (
+        "mooncake",
+        "nixl",
+        "ucxx",
+    ):
+        parser.error("one-way-connect is supported only by Mooncake, NIXL, and UCXX")
     return parsed
 
 
