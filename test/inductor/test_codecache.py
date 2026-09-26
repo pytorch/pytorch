@@ -50,6 +50,7 @@ from torch._inductor.codecache import (
     FxGraphHashDetails,
     PyCodeCache,
     TensorMetadata,
+    TensorMetadataAndPinned,
     TensorMetadataAndValues,
 )
 from torch._inductor.codegen.cuda import compile_utils as cuda_compile_utils
@@ -2742,6 +2743,32 @@ class TestFxGraphCache(TestCase):
             counters["inductor"]["fxgraph_cache_hit"], 0 if inlinable else 1
         )
 
+    @requires_gpu()
+    @config.patch({"fx_graph_cache": True, "fx_graph_remote_cache": False})
+    def test_fx_graph_cache_key_distinguishes_pinned(self):
+        """
+        Same-values compiles differing only in pinned-ness must not share an
+        FX-graph cache entry: each compile misses, and each output keeps its
+        requested memory kind, whichever order it compiles in.
+        """
+
+        def make(pin):
+            def fn():
+                return torch.tensor([1, 2, 3], pin_memory=pin, device="cpu")
+
+            reset()
+            return torch.compile(fn, backend="inductor")()
+
+        for first_pin, second_pin in ((True, False), (False, True)):
+            with fresh_cache():
+                counters.clear()
+                o1 = make(first_pin)
+                o2 = make(second_pin)
+                self.assertEqual(o1.is_pinned(), first_pin)
+                self.assertEqual(o2.is_pinned(), second_pin)
+                self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
+                self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
 
 @instantiate_parametrized_tests
 class TestStandaloneCompile(TestCase):
@@ -4029,7 +4056,47 @@ class TestFxGraphCacheHashing(TestCase):
         data = pickler.dumps(small)
         self.assertIsInstance(pickle.loads(data), TensorMetadataAndValues)
         data = pickler.dumps(large)
-        self.assertIsInstance(pickle.loads(data), TensorMetadata)
+        self.assertIsInstance(pickle.loads(data), TensorMetadataAndPinned)
+
+    @requires_gpu()
+    def test_pinned_affects_cache_key(self):
+        """
+        Pinned and pageable constants with identical values must hash to
+        different FX-graph cache keys, on both the inlined-values path and
+        the frozen-param metadata-only path.
+        """
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        pickler = FxGraphCachePickler(gm)
+
+        # Inlined path: small 1-D constants.
+        pinned = torch.tensor([1, 2, 3], pin_memory=True)
+        pageable = torch.tensor([1, 2, 3])
+        self.assertTrue(pinned.is_pinned())
+        self.assertFalse(pageable.is_pinned())
+        self.assertIsInstance(
+            pickle.loads(pickler.dumps(pinned)), TensorMetadataAndValues
+        )
+        self.assertIsInstance(
+            pickle.loads(pickler.dumps(pageable)), TensorMetadataAndValues
+        )
+        self.assertNotEqual(pickler.dumps(pinned), pickler.dumps(pageable))
+
+        # Frozen-param metadata-only path: large constants marked frozen.
+        gm._has_frozen_params = True
+        big_pinned = torch.tensor(list(range(32)), pin_memory=True)
+        big_pageable = torch.tensor(list(range(32)))
+        gm._frozen_param0 = big_pinned
+        gm._frozen_param1 = big_pageable
+        big_pinned._is_frozen_param = True
+        big_pageable._is_frozen_param = True
+        self.assertFalse(GraphLowering.can_inline_constant(big_pinned))
+        self.assertIsInstance(
+            pickle.loads(pickler.dumps(big_pinned)), TensorMetadataAndPinned
+        )
+        self.assertIsInstance(
+            pickle.loads(pickler.dumps(big_pageable)), TensorMetadataAndPinned
+        )
+        self.assertNotEqual(pickler.dumps(big_pinned), pickler.dumps(big_pageable))
 
     def test_hash_fake_tensors(self):
         """
