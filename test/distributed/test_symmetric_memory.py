@@ -2606,6 +2606,7 @@ class SymmetricMemoryTestCudaGraph(MultiProcContinuousTest):
         # Every replay must leave the signal pad back at zero.
         self.assertTrue(symm_mem_hdl.get_signal_pad(self.rank).eq(0).all().item())
 
+
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
 class LoweringTest(MultiProcContinuousTest):
