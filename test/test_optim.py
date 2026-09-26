@@ -3,6 +3,7 @@ import functools
 import math
 import tempfile
 import unittest
+import warnings
 from copy import deepcopy
 from itertools import product
 from typing import Any
@@ -1830,6 +1831,43 @@ class TestOptimRenewed(TestCase):
                     optimizer2.state_dict()["param_groups"][0]["param_names"],
                     ref_names,
                 )
+
+    def test_load_state_dict_warns_on_param_names_mismatch(self):
+        # State is matched to parameters by position, not by name (see the
+        # param_names note in load_state_dict's docstring) - if the same-shape
+        # parameters of a model get reordered between save and load, the state
+        # silently lands on the wrong parameter. A UserWarning should surface
+        # this instead of failing silently. See https://github.com/pytorch/pytorch/issues/198694
+        class AB(torch.nn.Module):
+            def __init__(self, swap=False):
+                super().__init__()
+                if swap:
+                    self.b = torch.nn.Linear(4, 4)
+                    self.a = torch.nn.Linear(4, 4)
+                else:
+                    self.a = torch.nn.Linear(4, 4)
+                    self.b = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.b(self.a(x))
+
+        old = AB()
+        opt = torch.optim.Adam(old.named_parameters())
+        old(torch.randn(2, 4)).sum().backward()
+        opt.step()
+
+        new = AB(swap=True)
+        opt2 = torch.optim.Adam(new.named_parameters())
+        with self.assertWarnsRegex(
+            UserWarning, "param_names that do not match"
+        ):
+            opt2.load_state_dict(opt.state_dict())
+
+        # Loading matching names must not warn.
+        opt3 = torch.optim.Adam(old.named_parameters())
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", UserWarning)
+            opt3.load_state_dict(opt.state_dict())
 
     @parametrize("is_named_optim", [True, False])
     @optims(optim_db, dtypes=[torch.float32])
