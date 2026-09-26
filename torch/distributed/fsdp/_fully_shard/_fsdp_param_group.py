@@ -867,17 +867,14 @@ class FSDPParamGroup:
         if not hasattr(param, "_unsharded_param"):
             return None
         unsharded_param = param.unsharded_param
-        grad_pending_all_reduce = self._get_partial_reduce_grad(param)
         # A group unused in this microbatch may still own gradients from an
         # earlier backward without synchronization.
         if unsharded_param.grad is not None:
             return param.unsharded_grad_data
-        if grad_pending_all_reduce is not None:
-            return param.get_unsharded_zero_grad_data(grad_pending_all_reduce.dtype)
-        if self.reduce_scatter_unused_params and unsharded_param.requires_grad:
-            return param.get_unsharded_zero_grad_data(
-                param.unsharded_grad_dtype or unsharded_param.dtype
-            )
+        if self._get_partial_reduce_grad(param) is not None or (
+            self.reduce_scatter_unused_params and unsharded_param.requires_grad
+        ):
+            return param.unsharded_zero_grad_data
         return None
 
     def _prepare_partial_reduce_output(
