@@ -5325,14 +5325,21 @@ class PropertyVariable(VariableTracker):
             tx, f"'{self.python_type_name()}' object has no attribute '__name__'"
         )
 
+    def _isabstractmethod_getter(
+        self, tx: "InstructionTranslatorBase"
+    ) -> VariableTracker:
+        from ..polyfills import property_isabstractmethod
+
+        # Trace truth testing so user-defined __bool__ methods and their
+        # exceptions are handled within the traced program.
+        return UserFunctionVariable(property_isabstractmethod).call_function(
+            tx, [self], {}
+        )
+
     tp_getset = {
         "__name__": GetSet(_name_getter, getset_set("__name__")),
         "__isabstractmethod__": GetSet(
-            getset_load_or_build(
-                lambda s: s.descriptor.__isabstractmethod__,
-                "__isabstractmethod__",
-                lambda s: s.source and AttrSource(s.source, "__isabstractmethod__"),
-            ),
+            _isabstractmethod_getter,
             readonly_setter,
         ),
     }
