@@ -1063,6 +1063,19 @@ class TestInductorDynamic(DynamicShapesTestCase):
                 cfn = self.compile_fn(fn, fullgraph=True)
                 self.assertEqual(fn(x), cfn(x))
 
+    def test_tensorify_symbolic_python_scalar_mod_and_sym_ite(self, device):
+        def python_mod(x, k):
+            return x + float(k % 3)
+
+        def sym_ite(x, k):
+            return x + float(torch.sym_ite(k > 2, 1, 0))
+
+        x = torch.randn(4, 3, device=device)
+        for fn in (python_mod, sym_ite):
+            with self.subTest(fn=fn.__name__):
+                cfn = torch.compile(fn, dynamic=True, fullgraph=True)
+                self.assertEqual(fn(x, 5), cfn(x, 5))
+
     @onlyCPU
     def test_arithmetic_constant_folding(self, device):
         def test(fn):

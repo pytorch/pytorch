@@ -504,6 +504,10 @@ class TensorReferenceAnalysis:
         )
 
     @staticmethod
+    def python_mod(x, y):
+        return torch.ops.aten.remainder.Tensor(x, y)
+
+    @staticmethod
     def abs(x):
         return torch.ops.aten.abs.default(x)
 
@@ -631,3 +635,14 @@ class TensorReferenceAnalysis:
         )
 
         # return torch.ops.aten.round.decimals(a, b)
+
+    @staticmethod
+    def expr_cond_pair(expr, cond):
+        return (expr, cond)
+
+    @staticmethod
+    def piecewise(*pairs):
+        result = pairs[-1][0]
+        for expr, cond in reversed(pairs[:-1]):
+            result = torch.ops.aten.where.self(cond, expr, result)
+        return result
