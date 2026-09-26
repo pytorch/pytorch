@@ -2,8 +2,11 @@
 
 import copy
 import math
+import os
 from typing import Any
 
+import torch
+import torch.distributed as dist
 from torch.distributed.flight_recorder.components.builder import build_db
 from torch.distributed.flight_recorder.components.config_manager import JobConfig
 from torch.distributed.flight_recorder.components.types import (
@@ -13,7 +16,24 @@ from torch.distributed.flight_recorder.components.types import (
     Op,
 )
 from torch.distributed.flight_recorder.components.utils import match_one_event
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
+
+
+if (acc := torch.accelerator.current_accelerator(check_available=True)) is not None:
+    device_type = acc.type
+else:
+    device_type = "cpu"
+
+BACKEND = os.environ.get("BACKEND", None)
+if BACKEND is None:
+    try:
+        BACKEND = dist.get_default_backend_for_device(device_type)
+    except ValueError:
+        BACKEND = "gloo"
 
 
 def create_one_event(
@@ -26,7 +46,7 @@ def create_one_event(
     p2p_seq_id=0,
     output_dtypes="float32",
     input_dtypes="float32",
-    backend="nccl",
+    backend=BACKEND,
 ):
     return {
         "profiling_name": f"{backend}:{collective_name}",
@@ -44,6 +64,8 @@ def create_one_event(
 
 
 class FlightRecorderEventTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_match_one_event(self):
         e1 = create_one_event(
             "all_reduce", ("0", "default"), [[4, 4]], [[4, 4]], "scheduled", 1
@@ -272,6 +294,8 @@ class FlightRecorderEventTest(TestCase):
 class FlightRecorderOpBackendTest(TestCase):
     """Tests that the Op class accepts all supported backend prefixes."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def _make_event(self, backend: str, collective: str = "all_reduce"):
         return {
             "profiling_name": f"{backend}:{collective}",
@@ -343,6 +367,8 @@ class FlightRecorderOpBackendTest(TestCase):
 
 
 class FlightMatchInfoTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_match_info(self):
         m1 = MatchInfo(MatchState.FULLY_MATCHED, "rank 0")
         m2 = MatchInfo(MatchState.FULLY_MATCHED, "rank 1")
@@ -403,6 +429,8 @@ def create_one_entry(
 
 
 class FlightRecorderE2ETest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def testBuildDB(self):
         config = JobConfig()
         args = config.parse_args([])
@@ -430,10 +458,10 @@ class FlightRecorderE2ETest(TestCase):
         db = build_db(details1, args, version)
         self.assertEqual(len(db.collectives), 3)
         self.assertEqual(db.collectives[0].record_id, 0)
-        self.assertEqual(db.collectives[0].collective_name, "nccl:all_reduce")
+        self.assertEqual(db.collectives[0].collective_name, f"{BACKEND}:all_reduce")
         self.assertEqual(db.collectives[0].pass_check, True)
         self.assertEqual(db.collectives[1].record_id, 1)
-        self.assertEqual(db.collectives[1].collective_name, "nccl:all_reduce")
+        self.assertEqual(db.collectives[1].collective_name, f"{BACKEND}:all_reduce")
         self.assertEqual(db.collectives[1].pass_check, True)
         self.assertEqual(db.collectives[2].pass_check, True)
         # Test case 2: matched allreduce_coalesced case.
@@ -447,7 +475,9 @@ class FlightRecorderE2ETest(TestCase):
         db = build_db(details2, args, version)
         self.assertEqual(len(db.collectives), 1)
         self.assertEqual(db.collectives[0].record_id, 0)
-        self.assertEqual(db.collectives[0].collective_name, "nccl:allreduce_coalesced")
+        self.assertEqual(
+            db.collectives[0].collective_name, f"{BACKEND}:allreduce_coalesced"
+        )
         self.assertEqual(db.collectives[0].pass_check, True)
         # Test case 3: matched slow path, two broadcast coalesce case.
         details3 = copy.deepcopy(LOADED_FR_DETAIL_TEMPLATE)
@@ -473,7 +503,7 @@ class FlightRecorderE2ETest(TestCase):
         db = build_db(details3, args, version)
         self.assertEqual(len(db.collectives), 1)
         self.assertEqual(db.collectives[0].record_id, 2)
-        self.assertEqual(db.collectives[0].collective_name, "nccl:coalesced")
+        self.assertEqual(db.collectives[0].collective_name, f"{BACKEND}:coalesced")
         self.assertEqual(db.collectives[0].pass_check, True)
         # Test case 4: mis-matched uneven all-gather case.
         details4 = copy.deepcopy(LOADED_FR_DETAIL_TEMPLATE)
@@ -499,7 +529,7 @@ class FlightRecorderE2ETest(TestCase):
         db = build_db(details4, args, version)
         self.assertEqual(len(db.collectives), 1)
         self.assertEqual(db.collectives[0].record_id, 1)
-        self.assertEqual(db.collectives[0].collective_name, "nccl:_broadcast_oop")
+        self.assertEqual(db.collectives[0].collective_name, f"{BACKEND}:_broadcast_oop")
         self.assertEqual(db.collectives[0].pass_check, False)
         # Test case 5: matched uneven reduce scatter case.
         details5 = copy.deepcopy(LOADED_FR_DETAIL_TEMPLATE)
@@ -526,7 +556,7 @@ class FlightRecorderE2ETest(TestCase):
         self.assertEqual(len(db.collectives), 1)
         self.assertEqual(db.collectives[0].record_id, 2)
         self.assertEqual(
-            db.collectives[0].collective_name, "nccl:REDUCE_SCATTER_coalesced"
+            db.collectives[0].collective_name, f"{BACKEND}:REDUCE_SCATTER_coalesced"
         )
         self.assertEqual(db.collectives[0].pass_check, True)
         # Test case 6: empty coalesced call on rank 0 case.
@@ -549,7 +579,7 @@ class FlightRecorderE2ETest(TestCase):
         )
         db = build_db(details6, args, version)
         self.assertEqual(len(db.collectives), 2)
-        self.assertEqual(db.collectives[1].collective_name, "nccl:_reduce_oop")
+        self.assertEqual(db.collectives[1].collective_name, f"{BACKEND}:_reduce_oop")
         self.assertEqual(db.collectives[1].record_id, 1)
         self.assertEqual(db.collectives[1].pass_check, True)
 
