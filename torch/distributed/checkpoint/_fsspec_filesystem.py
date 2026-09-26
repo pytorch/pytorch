@@ -114,7 +114,7 @@ class FsspecWriter(FileSystemWriter):
         sync_files: bool = True,
         thread_count: int = 1,
         per_thread_copy_ahead: int = 10_000_000,
-        overwrite: bool = True,
+        overwrite: bool = False,
         _extensions: Sequence[StreamTransformExtension] | None = None,
         serialization_format: SerializationFormat = SerializationFormat.TORCH_SAVE,
         **kwargs,
@@ -128,7 +128,7 @@ class FsspecWriter(FileSystemWriter):
             sync_files : force files to be synced to permanent storage. Default to True.
             thread_count: Number of IO threads to use to write. Default to 1.
             per_thread_copy_ahead: How many bytes to copy from the GPU ahead of saving them. Default 10Mb.
-            overwrite: Whether to allow overwriting existing checkpoints. Defaults to True.
+            overwrite: Whether to allow overwriting existing checkpoints. Defaults to False.
             _extensions: Extensions to apply to output streams (EXPERIMENTAL)
 
         N. B. If sync_files is disabled, there's no guarantee that the checkpoint will be consistent in the case of a failure.

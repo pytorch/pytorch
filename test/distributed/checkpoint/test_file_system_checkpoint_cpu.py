@@ -377,7 +377,9 @@ class TestDistributedReshardOnLoad(MultiProcContinuousTest):
                 model_to_save._register_state_dict_hook(state_dict_hook)
                 state_dict_to_save = model_to_save.state_dict()
 
-                fs_writer = FileSystemWriter(path=path, thread_count=thread_count)
+                fs_writer = FileSystemWriter(
+                    path=path, thread_count=thread_count, overwrite=True
+                )
                 save_state_dict(state_dict=state_dict_to_save, storage_writer=fs_writer)
 
                 dist.barrier()
@@ -525,7 +527,9 @@ class TestDistributedReshardOnLoad(MultiProcContinuousTest):
                 }
                 dist.broadcast(save_dict["replicated"], src=0)
 
-                fs_writer = FileSystemWriter(path=path, thread_count=thread_count)
+                fs_writer = FileSystemWriter(
+                    path=path, thread_count=thread_count, overwrite=True
+                )
                 save_state_dict(state_dict=save_dict, storage_writer=fs_writer)
 
                 # Freaky Friday the tensors

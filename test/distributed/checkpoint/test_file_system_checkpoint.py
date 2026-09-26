@@ -493,7 +493,7 @@ class TestDistributedReshardOnLoad(_CheckpointContinuousTest):
                     "replicated": torch.rand(tensor_size, device=self.rank),
                 }
 
-                fs_writer = FileSystemWriter(path=path)
+                fs_writer = FileSystemWriter(path=path, overwrite=True)
                 save_state_dict(state_dict=save_dict, storage_writer=fs_writer)
 
                 # Freaky Friday the tensors
