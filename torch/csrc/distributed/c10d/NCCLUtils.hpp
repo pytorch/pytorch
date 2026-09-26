@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstdlib>
 
+#include <functional>
 #include <memory>
 #include <mutex>
 
@@ -360,6 +361,13 @@ class NCCLComm {
   // Unique hash for this communicator.
   std::string uniqueHash_;
   bool aborted_{false};
+  // On ROCm, run once at the start of the first abort() or destroy(), while
+  // the handle is still valid. Set by the owner under `mutex_`; must not throw
+  // or call back into the owner, whose locks abort() can run under. Declared on
+  // every platform so the class layout does not depend on USE_ROCM.
+  std::function<void()> preInvalidateHook_;
+  // Caller must hold `mutex_`.
+  void runPreInvalidateHook();
   uint64_t ncclCommSplitCounter_{0};
   ncclResult_t ncclAsyncErr_{ncclSuccess};
   mutable MutexType mutex_;

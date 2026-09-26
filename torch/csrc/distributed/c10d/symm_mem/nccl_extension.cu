@@ -372,6 +372,7 @@ void nccl_put_signal(at::Tensor& tensor, const c10::intrusive_ptr<SymmetricMemor
 
   // Get window etc
   auto nccl_hdl = dynamic_cast<NCCLSymmetricMemory*>(hdl.get());
+  TORCH_CHECK(nccl_hdl != nullptr, "nccl_put_signal requires an NCCL handle");
   auto window = nccl_hdl->get_window();
   TORCH_CHECK(window != nullptr, "window is nullptr");
   auto offset = nccl_hdl->get_window_offset();
@@ -406,6 +407,7 @@ void nccl_wait_signal(const c10::intrusive_ptr<SymmetricMemory>& hdl, int64_t pe
 
   // Get the NCCL handle
   auto nccl_hdl = dynamic_cast<NCCLSymmetricMemory*>(hdl.get());
+  TORCH_CHECK(nccl_hdl != nullptr, "nccl_wait_signal requires an NCCL handle");
   // Get the NCCL communicator
   auto& manager = NCCLDevCommManager::get(device);
   ncclComm_t comm = manager.get_comm(nccl_hdl->get_group_name());
