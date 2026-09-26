@@ -985,6 +985,10 @@ fallback_random = False
 # align random/dropout as eager mode(aten) behavior, maintaining fused possibility and faster gpu kernel
 align_random_eager = False
 
+# Use tl.rand4x/randn4x for 1D CUDA Triton random. Disabled pending
+# https://github.com/pytorch/pytorch/issues/198333
+use_rand4x = os.environ.get("TORCHINDUCTOR_USE_RAND4X") == "1"
+
 # fallback embedding_bag_byte_unpack to eager
 fallback_embedding_bag_byte_unpack = False
 
