@@ -339,6 +339,7 @@ jobs:
       runner_prefix: "mt-"
       build-environment: linux-noble-rocm-py3.11-mi350
       docker-image-name: ci-image:pytorch-linux-noble-rocm-n-py3.11
+      rocm-arch-list: gfx950
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       # TODO (huydhn): Add this back once other workflow migrates
       # sync-tag: rocm-build
