@@ -77,7 +77,6 @@ GITHUB_OUTPUT = os.getenv("GITHUB_OUTPUT", "")
 GH_OUTPUT_KEY_AMI = "runner-ami"
 GH_OUTPUT_KEY_LABEL_TYPE = "label-type"
 GH_OUTPUT_KEY_AMD_SANDBOX_LABEL_TYPE = "amd-sandbox-label-type"
-GH_OUTPUT_KEY_AMD_DPX_LABEL_TYPE = "amd-dpx-label-type"
 GH_OUTPUT_KEY_SCALE_CONFIG_LABEL_TYPE = "scale-config-label-type"
 OPT_OUT_LABEL = "no-runner-experiments"
 
@@ -101,8 +100,6 @@ SCALE_CONFIG_VARIANT_EXPERIMENTS = frozenset({"wincanary", "wincanarylf"})
 
 AMD_SANDBOX_EXPERIMENT = "amd-sandbox"
 AMD_SANDBOX_LABEL_PREFIX = "amd-sandbox-"
-AMD_DPX_EXPERIMENT = "amd-dpx"
-AMD_DPX_LABEL_PREFIX = "amd-dpx-"
 
 
 class Experiment(NamedTuple):
@@ -129,7 +126,6 @@ class Experiment(NamedTuple):
 class RunnerPrefixResult(NamedTuple):
     prefix: str
     amd_sandbox_prefix: str = ""
-    amd_dpx_prefix: str = ""
     scale_config_prefix: str = ""
 
 
@@ -539,7 +535,6 @@ def get_runner_prefix(
 
     lf_enabled = False
     amd_sandbox_prefix = ""
-    amd_dpx_prefix = ""
     scale_config_experiments: list[str] = []
     for experiment_name, experiment_settings in settings.experiments.items():
         if not experiment_settings.all_branches and is_exception_branch(branch):
@@ -656,11 +651,6 @@ def get_runner_prefix(
                 log.info(
                     "amd-sandbox experiment enabled. Exposing 'amd-sandbox-' prefix via the amd-sandbox-label-type output."
                 )
-            elif experiment_name == AMD_DPX_EXPERIMENT:
-                amd_dpx_prefix = AMD_DPX_LABEL_PREFIX
-                log.info(
-                    "amd-dpx experiment enabled. Exposing 'amd-dpx-' prefix via the amd-dpx-label-type output."
-                )
             elif experiment_name == LF_FLEET_EXPERIMENT:
                 lf_enabled = True
                 log.info("lf experiment enabled. Using the Linux Foundation fleet.")
@@ -694,7 +684,6 @@ def get_runner_prefix(
     return RunnerPrefixResult(
         prefix=prefix,
         amd_sandbox_prefix=amd_sandbox_prefix,
-        amd_dpx_prefix=amd_dpx_prefix,
         scale_config_prefix=scale_config_prefix,
     )
 
@@ -760,7 +749,6 @@ def main() -> None:
 
     runner_label_prefix = META_LABEL_PREFIX
     amd_sandbox_label_prefix = ""
-    amd_dpx_label_prefix = ""
     scale_config_label_prefix = ""
 
     # no-runner-experiments means "use Meta, not LF": opt out of the lf
@@ -801,7 +789,6 @@ def main() -> None:
         )
         runner_label_prefix = result.prefix
         amd_sandbox_label_prefix = result.amd_sandbox_prefix
-        amd_dpx_label_prefix = result.amd_dpx_prefix
         scale_config_label_prefix = result.scale_config_prefix
 
     except Exception as e:
@@ -811,7 +798,6 @@ def main() -> None:
 
     set_github_output(GH_OUTPUT_KEY_LABEL_TYPE, runner_label_prefix)
     set_github_output(GH_OUTPUT_KEY_AMD_SANDBOX_LABEL_TYPE, amd_sandbox_label_prefix)
-    set_github_output(GH_OUTPUT_KEY_AMD_DPX_LABEL_TYPE, amd_dpx_label_prefix)
     set_github_output(GH_OUTPUT_KEY_SCALE_CONFIG_LABEL_TYPE, scale_config_label_prefix)
 
 
