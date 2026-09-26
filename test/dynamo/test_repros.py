@@ -3669,6 +3669,31 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         y = torch.randn(10)
         self.assertTrue(same(f(y), ReLUSquaredActivation()(y + 0.2) + 1))
 
+    def test_inplace_view_on_noop_alias_of_input(self):
+        # x.contiguous() / x.to(x.dtype) return x itself when they are no-ops.
+        # An in-place rank-changing view op on that result must be handled like
+        # the direct x.unsqueeze_(...) case instead of crashing guard creation
+        # with "IndexError: list index out of range" in produce_guards.
+        def f_contiguous(x):
+            v = x.contiguous()
+            v.unsqueeze_(2)
+            return x
+
+        def f_to(x):
+            v = x.to(x.dtype)
+            v.unsqueeze_(0)
+            return x
+
+        for f in (f_contiguous, f_to):
+            x = torch.arange(24, dtype=torch.int64).reshape(4, 6)
+            ref_x = x.clone()
+            ref = f(ref_x)
+            torch._dynamo.reset()
+            opt_x = x.clone()
+            res = torch.compile(f, backend="eager")(opt_x)
+            self.assertEqual(ref, res)
+            self.assertEqual(ref_x.shape, opt_x.shape)
+
     def test_inplace_unsqueeze_input(self):
         def backend(gm, example_inputs):
             tensor_inputs = [x for x in example_inputs if isinstance(x, torch.Tensor)]

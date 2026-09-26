@@ -1242,6 +1242,24 @@ class TensorVariable(VariableTracker):
             result = wrap_fx_proxy(tx, proxy)
         self._sync_if_inplace_mutation(tx, version_before)
 
+        # Non-mutating methods that are no-ops in eager return `self` itself
+        # (x.contiguous() on a contiguous tensor, x.to(x.dtype), x.to(x.device),
+        # x.type(x.dtype), ...). Keep tracking such a result as the very same
+        # variable, so it is still recognised as the graph input downstream:
+        # otherwise an in-place view op on the result
+        # (v = x.contiguous(); v.unsqueeze_(0)) bypasses the "inplace view on a
+        # graph input" graph break above, mutates the input's fake tensor behind
+        # the recorded guards and guard creation fails with
+        # "IndexError: list index out of range" in produce_guards.
+        if (
+            not name.endswith("_")
+            and isinstance(result, TensorVariable)
+            and result.proxy.node.meta.get("example_value") is not None
+            and result.proxy.node.meta.get("example_value")
+            is self.proxy.node.meta.get("example_value")
+        ):
+            return self
+
         return result
 
     def method_size(
