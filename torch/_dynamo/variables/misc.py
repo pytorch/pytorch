@@ -1765,10 +1765,21 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
             self.saved_tensors.tensors.append(arg)
         return variables.ConstantVariable.create(None)
 
+    def _get_saved_tensors(
+        self, tx: "InstructionTranslatorBase"
+    ) -> VariableTracker | None:
+        if self.saved_tensors is None:
+            return None
+        return variables.TupleVariable(list(self.saved_tensors.tensors))
+
     tp_methods = {
         "mark_non_differentiable": Method(mark_non_differentiable),
         "mark_dirty": Method(mark_dirty),
         "save_for_backward": Method(save_for_backward),
+    }
+
+    tp_getset = {
+        "saved_tensors": GetSet(_get_saved_tensors, readonly_setter),
     }
 
     def tp_getattro_impl(
@@ -1782,8 +1793,6 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
             if self.dirty_tensors is None:
                 return variables.ConstantVariable.create(None)
             return variables.TupleVariable(list(self.dirty_tensors))
-        if name == "saved_tensors" and self.saved_tensors is not None:
-            return variables.TupleVariable(list(self.saved_tensors.tensors))
 
         return super().tp_getattro_impl(tx, name)
 
