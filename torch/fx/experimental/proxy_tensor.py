@@ -40,6 +40,7 @@ import torch.fx as fx
 import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch import SymBool, SymInt, Tensor
+from torch._C._symbolic import _NativeSymNode
 from torch._custom_class_base import CustomClassBase
 from torch._dispatch.python import enable_python_dispatcher
 from torch._library.fake_class_registry import FakeScriptObject
@@ -95,7 +96,7 @@ from torch.utils._thunk import Thunk
 from torch.utils.weak import _WeakHashRef, WeakIdKeyDictionary, WeakTensorKeyDictionary
 
 from ._backward_state import BackwardState
-from .sym_node import SymNode
+from .sym_node import SymNodeTypes
 
 
 if TYPE_CHECKING:
@@ -368,7 +369,7 @@ def set_proxy_slot(
 
 
 def has_proxy_slot(obj: Tensor, tracer: _ProxyTracer) -> bool:
-    if not isinstance(obj, (Tensor, SymNode)):
+    if not isinstance(obj, (Tensor, *SymNodeTypes)):
         raise AssertionError(f"Expected Tensor or SymNode, got {type(obj)}")
 
     return bool(get_proxy_slot(obj, tracer, False, lambda _: True))
@@ -1058,7 +1059,7 @@ def fetch_sym_proxy(
         n = e.node
         if n.constant is not None:
             return n.constant
-        if e.node.expr.is_number:
+        if n._expr_is_number if isinstance(n, _NativeSymNode) else n.expr.is_number:
             if isinstance(e, SymBool):
                 return bool(e.node.expr)
             elif isinstance(e, SymInt):

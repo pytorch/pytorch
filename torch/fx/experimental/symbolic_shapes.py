@@ -32,6 +32,7 @@ import re
 import sys
 import threading
 import traceback
+import weakref
 from collections import Counter, defaultdict
 from collections.abc import Callable, Generator, Iterator, Mapping, Sequence
 from contextlib import _GeneratorContextManager, contextmanager
@@ -43,6 +44,7 @@ from typing import (
     Generic,
     NamedTuple,
     NoReturn,
+    overload,
     TYPE_CHECKING,
     TypeAlias,
     TypeGuard,
@@ -58,6 +60,7 @@ import torch.utils._pytree as pytree
 # NB: The sym_* functions are used via getattr() and must be imported here.
 from torch import SymBool, SymFloat, SymInt
 from torch._C._functorch import get_unwrapped, is_batchedtensor, is_gradtrackingtensor
+from torch._C._symbolic import _native_config_is_default, _NativeSymNode
 from torch._custom_class_base import CustomClassBase
 from torch._guards import ShapeGuard, SLoc, Source, TracingContext
 from torch._library.fake_class_registry import FakeScriptObject
@@ -74,7 +77,14 @@ from torch.fx.experimental.recording import (
     shape_env_check_state_equal,
     ShapeEnvEvent,
 )
-from torch.fx.experimental.sym_node import _NO_HINT, SymNode, SymTypes
+from torch.fx.experimental.sym_node import (
+    _install_native_glue,
+    _native_glue_originals,
+    _NO_HINT,
+    SymNode,
+    SymNodeTypes,
+    SymTypes,
+)
 from torch.types import py_sym_types
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -110,6 +120,7 @@ if TYPE_CHECKING:
     import types
 
     from torch import Tensor
+    from torch._C._symbolic import NativeShapeEnv
     from torch._dynamo.source import TensorPropertySource
     from torch._subclasses.fake_tensor import FakeTensor
     from torch.fx.experimental.dynamic_spec import IntVar, ShapesSpec, TensorSpec
@@ -137,13 +148,15 @@ def guarding_hint_or_throw(
     Returns Python bool (True/False) for boolean inputs (SymBool, bool),
     and Python int for integer inputs (SymInt, int).
     """
-    if isinstance(a, SymNode):
+    if isinstance(a, SymNodeTypes):
         if a._hint is not None:
             return a._hint  # pyrefly: ignore[bad-return]
         if a.shape_env is None:
             raise AssertionError("shape_env is required for guarding_hint_or_throw")
         hint = a.shape_env.guarding_hint_or_throw(a.expr)
-        a._hint = hint
+        # Native nodes are immutable, so their hint is not cached.
+        if not isinstance(a, _NativeSymNode):
+            a._hint = hint
         return hint
     if isinstance(a, (torch.SymInt, torch.SymBool)):
         return guarding_hint_or_throw(a.node)
@@ -965,9 +978,22 @@ IterateExprsAtom: TypeAlias = (
 IterateExprs: TypeAlias = IterateExprsAtom | Sequence[IterateExprsAtom]
 
 
-def _iterate_exprs(val: IterateExprs) -> Iterator[sympy.Basic]:
+@overload
+def _iterate_exprs(val: IterateExprs) -> Iterator[sympy.Basic]: ...
+
+
+@overload
+def _iterate_exprs(
+    val: IterateExprs, native_nodes: bool
+) -> Iterator[sympy.Basic | _NativeSymNode]: ...
+
+
+def _iterate_exprs(
+    val: IterateExprs, native_nodes: bool = False
+) -> Iterator[sympy.Basic | _NativeSymNode]:
     """
     Recursively iterate through a value and yield all sympy expressions contained within it.
+    With native_nodes, a native SymNode is yielded itself instead of its expr.
 
     This function traverses various data structures (tensors, lists, tuples, etc.) and extracts
     any symbolic expressions they contain. It's used for operations like finding free symbols
@@ -991,25 +1017,28 @@ def _iterate_exprs(val: IterateExprs) -> Iterator[sympy.Basic]:
         # This allow applies to the jagged layout NestedTensor case as
         # nested ints are not symbolic
         if is_symbolic(val):
-            yield val.node.expr
-    elif isinstance(val, SymNode):
-        yield val.expr
+            node = val.node
+            yield (
+                node if native_nodes and isinstance(node, _NativeSymNode) else node.expr
+            )
+    elif isinstance(val, SymNodeTypes):
+        yield val if native_nodes and isinstance(val, _NativeSymNode) else val.expr
     elif isinstance(val, sympy.Basic):
         yield val
     elif isinstance(val, (int, float, bool, str)):
         pass
     elif isinstance(val, (tuple, list)):
         for s in val:
-            yield from _iterate_exprs(s)
+            yield from _iterate_exprs(s, native_nodes)
     elif isinstance(val, dict):
         for s in itertools.chain(val.keys(), val.values()):
-            yield from _iterate_exprs(s)
+            yield from _iterate_exprs(s, native_nodes)
     elif is_sparse_any(val):
-        yield from _iterate_exprs(val.size())
+        yield from _iterate_exprs(val.size(), native_nodes)
     elif isinstance(val, torch.Tensor):
-        yield from _iterate_exprs(val.size())
-        yield from _iterate_exprs(val.stride())
-        yield from _iterate_exprs(val.storage_offset())
+        yield from _iterate_exprs(val.size(), native_nodes)
+        yield from _iterate_exprs(val.stride(), native_nodes)
+        yield from _iterate_exprs(val.storage_offset(), native_nodes)
     elif val is None:
         pass
     # see Note: [Generator arguments in AOTDispatcher]
@@ -1021,12 +1050,12 @@ def _iterate_exprs(val: IterateExprs) -> Iterator[sympy.Basic]:
         raise AssertionError(f"cannot extract sympy expressions from {val} {type(val)}")
 
 
-def _iterate_nodes(val: Any) -> Iterator[SymNode]:
+def _iterate_nodes(val: Any) -> Iterator[SymNode | _NativeSymNode]:
     """
     Recursively iterate through a value and yield all SymNodes contained
     within it.
     """
-    if isinstance(val, SymNode):
+    if isinstance(val, SymNodeTypes):
         yield val
     elif isinstance(val, py_sym_types):
         # This allow applies to the jagged layout NestedTensor case as
@@ -1076,7 +1105,12 @@ def free_symbols(val: IterateExprs) -> OrderedSet[sympy.Symbol]:
 
 def has_free_symbols(val: IterateExprs) -> bool:
     """Faster version of bool(free_symbols(val))"""
-    return not all((e.is_number or e.is_Boolean) for e in _iterate_exprs(val))
+    return not all(
+        (e._expr_is_number or e._expr_is_Boolean)
+        if isinstance(e, _NativeSymNode)
+        else (e.is_number or e.is_Boolean)
+        for e in _iterate_exprs(val, native_nodes=True)
+    )
 
 
 def has_free_unbacked_symbols(x: IterateExprs) -> bool:
@@ -1562,6 +1596,17 @@ def _guard_or(a: BoolLikeType, default: bool) -> bool:
             raise AssertionError(f"Expected bool, got {type(a)}")
         return a
 
+    # Native nodes check the config in C++, cheaper than the lookups below.
+    sym_node = a.node
+    if (
+        isinstance(sym_node, _NativeSymNode)
+        and _native_config_is_default()
+        and sym_node.shape_env is not None
+    ):
+        if default:
+            return sym_node.guard_or_true("", 0)
+        return sym_node.guard_or_false("", 0)
+
     # if backed_size_oblivious is True we treat backed as unbacked here.
     if torch.fx.experimental._config.backed_size_oblivious:
         result = _static_eval_sym_bool(a)
@@ -1573,7 +1618,10 @@ def _guard_or(a: BoolLikeType, default: bool) -> bool:
     if shape_env is None:
         return guard_bool(a)
 
-    sym_node = a.node
+    if isinstance(sym_node, _NativeSymNode):
+        if default:
+            return sym_node.guard_or_true("", 0)
+        return sym_node.guard_or_false("", 0)
     if sym_node.shape_env is None:
         raise AssertionError("shape_env should not be None")
     r = sym_node.shape_env.evaluate_sym_node(
@@ -1672,6 +1720,8 @@ def statically_known_true(x: BoolLikeType) -> bool:
         if not isinstance(x, bool):
             raise AssertionError(f"Expected bool, got {type(x)}")
         return x
+    if isinstance(x.node, _NativeSymNode):
+        return x.node.statically_known_true("", 0)
     if _sym_node_hint_disproves(x.node, target=True):
         return False
     result = _static_eval_sym_bool(x)
@@ -2768,6 +2818,8 @@ def _lru_cache(
         @functools.wraps(fn)
         def wrapper(self: ShapeEnv, *args: Any, **kwargs: Any) -> _T:
             nonlocal prior_version, prior_key
+            if _native_envs_created:
+                _flush_native_queries()
             if prior_key is None:
                 prior_key = self._get_key()
 
@@ -2788,6 +2840,8 @@ def _lru_cache(
         @functools.wraps(fn)
         def wrapper(self: ShapeEnv, *args: Any, **kwargs: Any) -> _T:  # type: ignore[misc]
             nonlocal prior_version
+            if _native_envs_created:
+                _flush_native_queries()
             if prior_version != self._version_counter:
                 fn_cache.cache_clear()
                 prior_version = self._version_counter
@@ -3954,6 +4008,173 @@ class _FrameLocalResult:
     symbols: dict[str, str] = field(default_factory=dict)
 
 
+def _notifying(base: type[Any], mutators: tuple[str, ...]) -> type:
+    """
+    A subclass of base whose mutators call self._on_mutate() before mutating.
+    Used for the ShapeEnv state mirrored by a native env. Copies and pickles
+    produce a plain base.
+    """
+
+    def notify_before(name: str) -> Callable[..., Any]:
+        method = getattr(base, name)
+
+        def wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
+            self._on_mutate()
+            return method(self, *args, **kwargs)
+
+        return wrapper
+
+    def __init__(self: Any, data: Any, on_mutate: Callable[[], None]) -> None:
+        # pyrefly: ignore [no-matching-overload]
+        base.__init__(self, data)
+        self._on_mutate = on_mutate
+
+    def __reduce__(self: Any) -> tuple[type, tuple[Any]]:
+        return (base, (base(self),))
+
+    namespace: dict[str, Any] = {n: notify_before(n) for n in mutators}
+    namespace.update(
+        __slots__=("_on_mutate",), __init__=__init__, __reduce__=__reduce__
+    )
+    return type(f"_Notifying{base.__name__.title()}", (base,), namespace)
+
+
+_NotifyingList = _notifying(
+    list,
+    (
+        "__setitem__",
+        "__delitem__",
+        "__iadd__",
+        "__imul__",
+        "append",
+        "extend",
+        "insert",
+        "pop",
+        "remove",
+        "clear",
+        "sort",
+        "reverse",
+    ),
+)
+_NotifyingDict = _notifying(
+    dict,
+    (
+        "__setitem__",
+        "__delitem__",
+        "__ior__",
+        "update",
+        # Also when the key exists: callers mutate the returned value in place.
+        "setdefault",
+        "pop",
+        "popitem",
+        "clear",
+    ),
+)
+_NotifyingSet = _notifying(
+    set,
+    (
+        "__ior__",
+        "__iand__",
+        "__isub__",
+        "__ixor__",
+        "add",
+        "update",
+        "intersection_update",
+        "difference_update",
+        "symmetric_difference_update",
+        "discard",
+        "remove",
+        "pop",
+        "clear",
+    ),
+)
+
+
+class _NotifyingRangeDict(_NotifyingDict):  # type: ignore[valid-type, misc]
+    # Assigning a new key (symbol creation) is not a range update.
+    def __setitem__(self, key: sympy.Symbol, value: ValueRanges[sympy.Expr]) -> None:
+        if key in self:
+            self._on_mutate()
+        dict.__setitem__(self, key, value)
+
+
+class _NativeSymopCache(dict):  # type: ignore[type-arg]
+    """
+    ShapeEnv._symop_cache under a native env. The native env memoizes its mod
+    results and flushes them here before leaving pristine; copies and pickles
+    flush first too, and produce a plain dict.
+    """
+
+    __slots__ = ("_flush",)
+
+    def __init__(self, data: dict[Any, Any], flush: Callable[[], None]) -> None:
+        super().__init__(data)
+        self._flush = flush
+
+    def __reduce__(self) -> tuple[type, tuple[dict[Any, Any]]]:
+        self._flush()
+        return (dict, (dict(self),))
+
+
+# ShapeEnvs with a native env. _native_envs_created gates the flush points.
+_native_shape_envs: weakref.WeakSet[ShapeEnv] = weakref.WeakSet()
+_native_envs_created = False
+_NATIVE_SYMNODE_CHECK = os.environ.get("TORCH_NATIVE_SYMNODE_CHECK", "0") == "1"
+
+
+def _set_suppress_guards_tls(value: bool) -> None:
+    TLS.suppress_guards = value
+    torch._C._symbolic._set_suppress_guards(value)
+
+
+def _flush_native_queries() -> None:
+    """
+    Replays, oldest first, the queries that native envs answered since the
+    last flush. Python's evaluation caches do not key on guards, axioms or
+    ranges and are shared by all ShapeEnvs, so this runs before Python
+    evaluates or mutates any ShapeEnv. With TORCH_NATIVE_SYMNODE_CHECK=1 it
+    also checks the native mirrors and answers against Python.
+    """
+    if not torch._C._symbolic._native_queries_pending():
+        return
+    pending: list[tuple[int, ShapeEnv, tuple[Any, ...]]] = []
+    for env in list(_native_shape_envs):
+        native = env._native_env
+        if native is None:
+            continue
+        queries = native.take_queries()
+        if queries and _NATIVE_SYMNODE_CHECK:
+            env._check_native_mirror()
+        pending += [(q[0], env, q[1:]) for q in queries]
+    pending.sort(key=operator.itemgetter(0))
+    for _, env, query in pending:
+        expr, evaluate, hint, fallback_value, suppress_guards, native_result = query
+        if evaluate:
+            prior = ShapeEnv._suppress_guards_tls()
+            _set_suppress_guards_tls(suppress_guards)
+            try:
+                # fx_node=False: the key evaluate_sym_node passes without translation validation.
+                # pyrefly: ignore [bad-argument-type]
+                result = env.evaluate_expr(expr, hint, False, False, fallback_value)
+            finally:
+                _set_suppress_guards_tls(prior)
+        else:
+            # As _static_eval_sym_bool calls it.
+            try:
+                result = env._maybe_evaluate_static(expr)
+            except Exception:
+                result = None
+        if _NATIVE_SYMNODE_CHECK and result != native_result:
+            raise AssertionError(
+                f"native answered {native_result} for {query}, Python {result}"
+            )
+
+
+def _native_pre_mutation(mark: Callable[[], None]) -> None:
+    _flush_native_queries()
+    mark()
+
+
 class ShapeEnv:
     # This is a wrapper over the actual __init__ function.
     #
@@ -3970,6 +4191,9 @@ class ShapeEnv:
         *,
         should_record_events: bool | None = None,
         tracked_fakes: list[Any] | None = None,
+        # None: follow torch._dynamo.config.use_cpp_symnode. Config that the
+        # native env does not model disables it either way.
+        _allow_native: bool | None = None,
         **kwargs: Any,
     ) -> None:
         self._init(**kwargs)
@@ -4022,6 +4246,48 @@ class ShapeEnv:
             torch._subclasses.fake_tensor._DispatchCacheKey,
             torch._subclasses.fake_tensor._DispatchCacheEntry,
         ] = {}
+
+        # C++ mirror of the state that native SymNodes evaluate against. The
+        # mirrored containers notify it before every mutation.
+        self._native_env: NativeShapeEnv | None = None
+        if _allow_native is None:
+            _allow_native = torch._dynamo.config.use_cpp_symnode
+        if (
+            _allow_native
+            and not self.should_record_events
+            and not self._translation_validation_enabled
+            and not config.backed_size_oblivious
+            and config.aggressive_guard_free_semantics == 0
+            and config.symbol_guard_limit_before_specialize is None
+            and not self.settings.prefer_deferred_runtime_asserts_over_guards
+            and not self.settings.trace_asserts
+            and not torch._logging._internal.GET_DTRACE_STRUCTURED
+        ):
+            global _native_envs_created
+            _native_envs_created = True
+            _native_shape_envs.add(self)
+            symbolic = torch._C._symbolic
+            native = self._native_env = symbolic.NativeShapeEnv(symbolic._Arena(), self)
+            if not _native_glue_originals:
+                _install_native_glue()
+            not_pristine = functools.partial(
+                _native_pre_mutation, native.mark_not_pristine
+            )
+            self.guards = _NotifyingList(self.guards, not_pristine)
+            self.axioms = _NotifyingDict(self.axioms, not_pristine)
+            self.replacements = _NotifyingDict(
+                self.replacements,
+                functools.partial(_native_pre_mutation, native.mark_replacements),
+            )
+            self.var_to_range = _NotifyingRangeDict(self.var_to_range, not_pristine)
+            self.divisible = _NotifyingSet(self.divisible, not_pristine)
+            self.size_like = _NotifyingSet(self.size_like, not_pristine)
+            self.deferred_runtime_asserts = _NotifyingDict(
+                self.deferred_runtime_asserts, not_pristine
+            )
+            self._symop_cache = _NativeSymopCache(
+                self._symop_cache, native.flush_mod_memo
+            )
 
     # Pro-tip: if you add new field to ShapeEnv, this affects some accept
     # tests.  Accept their output with:
@@ -4415,6 +4681,26 @@ class ShapeEnv:
                 self.replacements.pop(k, None)
             self.frozen = False
 
+    def _check_native_mirror(self) -> None:
+        native = self._native_env
+        if native is None or not native.pristine:
+            return
+        state = (
+            self.guards,
+            self.axioms,
+            self.replacements,
+            self.divisible,
+            self.size_like,
+            self.deferred_runtime_asserts,
+        )
+        if any(state):
+            raise AssertionError(f"pristine native env, but Python has {state}")
+        for s, vr in self.var_to_range.items():
+            mirrored = native.mirrored(s)
+            want = (self.backed_var_to_val.get(s), vr.lower, vr.upper, False)
+            if mirrored is not None and mirrored != want:
+                raise AssertionError(f"native mirror of {s} is {mirrored}, not {want}")
+
     def check_equal(self, other: ShapeEnv) -> None:
         """Compare another ShapeEnv for equivalence"""
         # ShapeEnv fields that are not relevant for the outcome of
@@ -4454,6 +4740,7 @@ class ShapeEnv:
             # Foreign ShapeEnv transfer cache; replay reconstructs equivalent
             # transferred symbols through recorded registration events.
             "foreign_unbacked_symbol_cache",
+            "_native_env",
         )
 
         # Mapping of the value of each to-be-compared field into the values that
@@ -4837,7 +5124,7 @@ class ShapeEnv:
             TLS.suppress_guards_stack = []
         old = self._suppress_guards_tls()
         TLS.suppress_guards_stack.append(old)
-        TLS.suppress_guards = True
+        _set_suppress_guards_tls(True)
 
     @record_shapeenv_event()
     def _suppress_guards_exit(self) -> None:
@@ -4846,7 +5133,7 @@ class ShapeEnv:
             if len(TLS.suppress_guards_stack) > 0
             else False
         )
-        TLS.suppress_guards = old
+        _set_suppress_guards_tls(old)
 
     def suppress_guards(self) -> _GeneratorContextManager[None]:
         """Context manager to ignore all guards generated inside."""
@@ -5513,7 +5800,8 @@ class ShapeEnv:
             # inconsistent with size oblivious tests.
             if free_unbacked_symbols(sym):
                 hint = None
-            out = SymInt(SymNode(sym, self, int, hint, fx_node=fx_node))
+            node = SymNode(sym, self, int, hint, fx_node=fx_node)
+            out = SymInt(self._maybe_native(node))
         return out
 
     @record_shapeenv_event()
@@ -5588,7 +5876,25 @@ class ShapeEnv:
         """Create a SymBool object from a sympy boolean expression"""
         # This function is only being used in serialization, so we do not track it
         # for validation.
-        return SymBool(SymNode(sym, self, bool, None))
+        return SymBool(self._maybe_native(SymNode(sym, self, bool, None)))
+
+    def _maybe_native(self, node: SymNode) -> SymNode | _NativeSymNode:
+        """
+        The native node for a new int or bool node when this env is native
+        and the node has a hint and a native expression, else the node.
+        """
+        native = self._native_env
+        if (
+            native is None
+            or type(node._hint) is not node.pytype
+            or not isinstance(node._expr, sympy.Basic)
+        ):
+            return node
+        try:
+            r = native.make_node(node._expr, node.pytype, node._hint)
+        except torch._C._symbolic.NativeUnsupported:
+            return node
+        return r if r._expr == node._expr else node
 
     def _log_create_unbacked_symbol(
         self,
@@ -6031,6 +6337,8 @@ class ShapeEnv:
                     raise ConstraintViolationError(
                         f"{val} not in range [{vr.lower}, {vr.upper}]"
                     )
+                if self._native_env is not None:
+                    self._native_env.mirror_symbol(sympy_expr, val, vr.lower, vr.upper)
 
                 range_str = f"[{vr.lower}, {vr.upper}]"
             elif isinstance(val, float):
@@ -6119,6 +6427,8 @@ class ShapeEnv:
         log.debug("add_backed_var_to_val %s %s", expr, val, stack_info=True)
         if expr in self.backed_var_to_val:
             raise AssertionError(f"{expr} already exists")
+        if self._native_env is not None:
+            _native_pre_mutation(self._native_env.mark_not_pristine)
         self.backed_var_to_val[expr] = sympy.Integer(val)
         self.name_to_symbol[expr.name] = expr
 
@@ -7480,7 +7790,8 @@ class ShapeEnv:
                 # expressions only depend on the expression itself.
                 if k.has(FloorDiv):
                     new_items.update({self.simplify(k): v})
-            axioms.update(new_items)
+            if new_items:
+                axioms.update(new_items)
 
         # Pattern matching
         if axioms is None:
@@ -7558,6 +7869,13 @@ class ShapeEnv:
             if not res.is_number:
                 new_divisible.add(k)
 
+        if self._native_env is not None:
+            new_divisible = _NotifyingSet(
+                new_divisible,
+                functools.partial(
+                    _native_pre_mutation, self._native_env.mark_not_pristine
+                ),
+            )
         self.divisible = new_divisible
         self._update_version_counter()
 
@@ -8738,6 +9056,8 @@ class ShapeEnv:
         When fallback_value is not None the function return fallback_value instead of failing with data dependent error.
         """
 
+        if _native_envs_created:
+            _flush_native_queries()
         # Add extra state that evaluate_expr() depends on.
         suppress_guards_tls = ShapeEnv._suppress_guards_tls()
         return self._inner_evaluate_expr(
@@ -9139,6 +9459,8 @@ class ShapeEnv:
             fx_node (Optional, torch.fx.Node): node in ``self.graph`` corresponding
                 to the expression, if applicable
         """
+        if _native_envs_created:
+            _flush_native_queries()
         expr = orig_expr
 
         # TODO: split conjunctions and evaluate them separately
@@ -9506,7 +9828,7 @@ def _remove_effect_token_unbacked_bindings(
 # When accessing expressions representing input placeholders, we do not apply replacements
 # since those inputs should be seen by assertions that use them to be inserted. The only replacement
 # that we apply is unbacked renaming.
-def _get_placeholder_expr(sym_node: SymNode) -> sympy.Expr:
+def _get_placeholder_expr(sym_node: SymNode | _NativeSymNode) -> sympy.Expr:
     shape_env = sym_node.shape_env
     if shape_env is None:
         raise AssertionError("shape_env is required for _get_placeholder_expr")
