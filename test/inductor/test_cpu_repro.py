@@ -4749,6 +4749,20 @@ class CPUReproTests(TestCase):
             self.assertEqual(metrics.generated_kernel_count, 1)
             self.assertTrue(same(fn(a, b, c, idx), opt_fn(a, b, c, idx)))
 
+    def test_compatible_ranges_fusion_into_fused_node(self):
+        def fn(x):
+            v1 = F.layer_norm(x.float(), (x.shape[-1],))
+            v2 = F.max_pool2d(v1, kernel_size=1, stride=1, padding=0)
+            v3 = torch.transpose(v2, 2, 3)
+            return v2, torch.clamp(v3, min=-0.66, max=0.53)
+
+        metrics.reset()
+        torch._dynamo.reset()
+        x = torch.rand(3, 1, 2, 2)
+        opt_fn = torch.compile(fn, backend="inductor")
+        self.assertTrue(same(fn(x), opt_fn(x)))
+        self.assertEqual(metrics.generated_kernel_count, 2)
+
     def test_lowp_fp_neg_abs(self):
         def fn(x):
             return x.neg().abs()
