@@ -21,6 +21,17 @@ from .virtualized import V
 log = logging.getLogger(__name__)
 
 
+def _get_device_type_str() -> str:
+    """Return the current accelerator device type string (e.g. "cuda", "npu")."""
+    acc = torch.accelerator.current_accelerator(check_available=False)
+    return acc.type if acc is not None else "cuda"
+
+
+def _get_device_module() -> Any:
+    """Return the device module of the current accelerator (e.g. ``torch.cuda``)."""
+    return getattr(torch, _get_device_type_str(), torch.cuda)
+
+
 class NCCL_COLL(IntEnum):
     ALL_REDUCE = 0
     ALL_GATHER = 1
@@ -99,8 +110,15 @@ def _has_nvlink() -> bool:
     """Detect NVLink via nvidia-smi topology, falling back to peer access check."""
     import subprocess
 
-    if not torch.cuda.is_available() or torch.cuda.device_count() < 2:
-        return True  # Single GPU: interconnect irrelevant
+    device_module = _get_device_module()
+    if not device_module.is_available() or device_module.device_count() < 2:
+        return True  # Single device: interconnect irrelevant
+    if device_module is not torch.cuda:
+        # Third-party backend: peer access is the NVLink-equivalent probe
+        try:
+            return device_module.can_device_access_peer(0, 1)
+        except (AssertionError, RuntimeError):
+            return True
     try:
         result = subprocess.run(
             ["nvidia-smi", "topo", "-m"],
@@ -124,7 +142,7 @@ def _has_nvlink() -> bool:
 @functools.lru_cache
 def get_gpu_type() -> NVIDIA_GPU_TYPE:
     # Prefer compute capability (works for all NVIDIA GPUs, including H200, L40, etc.)
-    if torch.cuda.is_available() and torch.cuda.device_count() > 0:
+    if _get_device_type_str() == "cuda" and torch.cuda.is_available() and torch.cuda.device_count() > 0:
         major = torch.cuda.get_device_properties(0).major
         if major >= 10:
             return NVIDIA_GPU_TYPE.BLACKWELL
@@ -150,7 +168,8 @@ def get_gpu_type() -> NVIDIA_GPU_TYPE:
 
 def detect_interconnect(group_size: int) -> InterconnectType:
     """Auto-detect interconnect type from GPU generation and group topology."""
-    gpus_per_node = torch.cuda.device_count() if torch.cuda.is_available() else 8
+    device_module = _get_device_module()
+    gpus_per_node = device_module.device_count() if device_module.is_available() else 8
     gpu_gen = get_gpu_type()
     if math.ceil(group_size / gpus_per_node) == 1:
         if not _has_nvlink():
@@ -467,7 +486,10 @@ def estimate_nccl_collective_runtime_nccl_estimator(snode) -> float | None:  # t
     rank: int = torch.distributed.get_rank(pg)
     # TODO(ivankobzarev): Figure out how we can use time estimations,
     # without cuda allocations.
-    device = torch.device(f"cuda:{rank}")
+    device = torch.device(f"{_get_device_type_str()}:{rank}")
+    backend = pg._get_backend(device)
+    if not getattr(backend, "_supports_time_estimate", False):
+        return None
 
     fn = eval(py_kernel_name)
     args, kwargs = snode_args_kwargs(snode)
@@ -504,7 +526,8 @@ def _nccl_algo_time(
     ncclTopoGetAlgoTime from NCCL tuning.cc. Returns -1 if the
     (algo, proto) combination is disabled for this configuration.
     """
-    gpus_per_node = torch.cuda.device_count() if torch.cuda.is_available() else 8
+    device_module = _get_device_module()
+    gpus_per_node = device_module.device_count() if device_module.is_available() else 8
     nNodes = math.ceil(group_size / gpus_per_node)
     nRanks = group_size
     compCapIndex = get_gpu_type()
@@ -669,7 +692,10 @@ def _nccl_best_algo_time(
 
 
 def estimate_nccl_collective_runtime_impl(
-    tensor_storage_size_bytes: int, group_size: int, coll: NCCL_COLL
+    tensor_storage_size_bytes: int,
+    group_size: int,
+    coll: NCCL_COLL,
+    device_type: str | None = None,
 ) -> float:
     """Returns estimated NCCL collective runtime in milliseconds (ms).
 
@@ -678,6 +704,12 @@ def estimate_nccl_collective_runtime_impl(
     Ring and Tree algorithms across LL, LL128, and SIMPLE protocols,
     selecting the (algo, proto) pair that minimizes estimated time.
     """
+    if device_type is None:
+        device_type = _get_device_type_str()
+    estimator = _collective_cost_estimators.get(device_type)
+    if estimator is not None:
+        return estimator(tensor_storage_size_bytes, group_size, coll)
+
     if group_size <= 1:
         return 0
 
@@ -729,6 +761,25 @@ def compute_min_saturation_bytes(
 ################################################################################################################
 # The above code and constants are adapted from https://github.com/NVIDIA/nccl/blob/master/src/graph/tuning.cc #
 ################################################################################################################
+
+
+# Registry of third-party collective cost estimators, keyed by device type.
+# An estimator receives (tensor_storage_size_bytes, group_size, coll) and
+# returns the estimated runtime in milliseconds, replacing the built-in NCCL
+# analytical model for that device type.
+_collective_cost_estimators: dict[str, Any] = {}
+
+
+def register_collective_cost_estimator(device_type: str, estimator: Any) -> None:
+    """Register a collective runtime estimator for ``device_type``.
+
+    The estimator is called as ``estimator(tensor_storage_size_bytes,
+    group_size, coll)`` and must return the estimated runtime in
+    milliseconds. It replaces the built-in NCCL analytical model for the
+    given device type, which is useful for backends whose collective library
+    (e.g. HCCL) has tuning characteristics that differ from NCCL.
+    """
+    _collective_cost_estimators[device_type] = estimator
 
 
 def estimate_nccl_collective_runtime(node: ir.IRNode) -> float:
@@ -860,7 +911,7 @@ def estimate_nccl_collective_runtime_from_fx_node(
             # nccl estimator requires real process group
             return None
 
-        device = torch.device("cuda")
+        device = torch.device(_get_device_type_str())
         try:
             backend = pg._get_backend(device)
         except RuntimeError:
