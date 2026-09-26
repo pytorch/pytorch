@@ -610,6 +610,41 @@ namespace {
           AssertVectorized<vec>(NAME_INFO(isnan), expected, actual).check();
         }
     }
+#if !defined(CPU_CAPABILITY_SVE256) && !defined(CPU_CAPABILITY_SVE128) && \
+    !defined(CPU_CAPABILITY_VSX) && !defined(CPU_CAPABILITY_ZVECTOR)
+    TYPED_TEST(Nan, ReduceMax) {
+        using vec = TypeParam;
+        using VT = ValueType<TypeParam>;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+        CACHE_ALIGN VT test_vals[vec::size()];
+        // Every NaN placement, with the finite maximum rotated across lanes: an
+        // x86 max instruction returns its second operand for NaN, which can
+        // displace the true maximum rather than merely drop the NaN. All lanes
+        // are negative so that a zero-seeded reduction is caught too.
+        auto vals = 1 << (vec::size());
+        for (const auto val : c10::irange(vals)) {
+          VT expected = -std::numeric_limits<VT>::infinity();
+          bool has_nan = false;
+          for (int i = 0; i < vec::size(); ++i) {
+            if (val & (1 << i)) {
+              test_vals[i] = std::numeric_limits<VT>::quiet_NaN();
+              has_nan = true;
+            } else {
+              test_vals[i] = -(VT)((i + val) % vec::size() + 1);
+              expected = std::max(expected, test_vals[i]);
+            }
+          }
+          VT actual = vec::loadu(test_vals).reduce_max();
+          if (has_nan) {
+            ASSERT_TRUE(std::isnan(actual))
+                << "reduce_max dropped a NaN, NaN mask: " << val
+                << ", got: " << actual;
+          } else {
+            ASSERT_EQ(expected, actual) << "reduce_max, NaN mask: " << val;
+          }
+        }
+    }
+#endif
     TEST(NanFloat16, IsNan) {
       for (unsigned int ii = 0; ii < 0xFFFF; ++ii) {
         c10::Half val(ii, c10::Half::from_bits());
@@ -2281,6 +2316,44 @@ namespace {
       }
     }
 #endif
+    template <typename vec>
+    void test_convert_to_int_of_same_size(const std::vector<ValueType<vec>>& inputs) {
+      using VT = ValueType<vec>;
+      using IntVT = at::vec::int_same_size_t<VT>;
+      constexpr auto N = vec::size();
+      CACHE_ALIGN VT x[N];
+      CACHE_ALIGN IntVT y[N];
+      for (size_t base = 0; base < inputs.size(); base += N) {
+        for (const auto i : c10::irange(N)) {
+          x[i] = inputs[std::min(base + static_cast<size_t>(i), inputs.size() - 1)];
+        }
+        at::vec::convert_to_int_of_same_size(vec::loadu(x)).store(y);
+        for (const auto i : c10::irange(N)) {
+          ASSERT_EQ(y[i], static_cast<IntVT>(x[i]))
+            << "Failure Details:\nx[" << i << "]=" << x[i];
+        }
+      }
+    }
+    // Inputs stay inside the range where static_cast to the integer type is
+    // defined; conversion beyond it is UB and diverges between ISAs.
+    TEST(VecConvert, DoubleToInt64) {
+      test_convert_to_int_of_same_size<vdouble>({
+          0.0, -0.0, 0.5, -0.5, 1.5, -1.5, 2.5, -2.5, 3.5, -3.5,
+          0x1p51, -0x1p51, 0x1p51 + 1.0, 0x1p52, -0x1p52, 0x1p53,
+          0x1p62, -0x1p62, 0x1.fffffffffffffp62,
+          -0x1p63, // INT64_MIN
+          123456789.75, -123456789.75,
+      });
+    }
+    TEST(VecConvert, FloatToInt32) {
+      test_convert_to_int_of_same_size<vfloat>({
+          0.0f, -0.0f, 0.5f, -0.5f, 1.5f, -1.5f, 2.5f, -2.5f, 3.5f, -3.5f,
+          0x1p22f, -0x1p22f, 0x1p23f, 0x1p30f, -0x1p30f,
+          0x1.fffffep30f,
+          -0x1p31f, // INT32_MIN
+          123456.75f, -123456.75f,
+      });
+    }
     TYPED_TEST(VecMaskTests, MaskedLoad) {
       using vec = TypeParam;
       using src_t = ValueType<TypeParam>;
