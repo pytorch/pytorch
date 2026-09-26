@@ -145,12 +145,6 @@ def tearDownModule():
         _PRIOR_FP32_MATMUL_PRECISION = None
 
 
-# Conditional patch for decompose_k tests - override to 10 on ROCm, no-op elsewhere
-_DECOMPOSE_K_PATCH_ROCM = (
-    {"triton.num_decompose_k_splits": 10} if torch.version.hip else {}
-)
-
-
 def benchmark_choice(choice, args, out, expected_out, timings):
     result = choice.benchmark(*args, out=out)
     if expected_out is not None:
@@ -1826,111 +1820,108 @@ class TestMaxAutotune(TestCase):
         shape_padding=False,
     )
     def test_max_autotune_decompose_k(self, sizes, dtype, dynamic):
-        # UT specific change to force testing decompose K feature on ROCm until
-        # enabled by default, same strategy as #169948
-        with config.patch(_DECOMPOSE_K_PATCH_ROCM):
-            fp16_red_setting = (
-                torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
+        fp16_red_setting = (
+            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
+        )
+        bf16_red_setting = (
+            torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction
+        )
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
+
+        M, N, K = sizes
+
+        atol = 1e-4
+        rtol = 1e-4
+        # K can be huge huge, this is why the data distribution is set to iid N(0, K ** 0.5),
+        # which makes the result of reductions distributed as N(0, 1).
+        a, b = self._make_matrices(
+            M,
+            K,
+            N,
+            dtype=dtype,
+            device=GPU_TYPE,
+            requires_grad=True,
+        )
+
+        possible_splits = range(2, min(K // M, K // N) + 1)
+
+        divisors = {split for split in possible_splits if K % split == 0}
+
+        def check_divisors(code):
+            for kernel in code:
+                if "decompose_k" in kernel:
+                    divisor_found = False
+                    for divisor in divisors:
+                        if f"{divisor}_split" in kernel:
+                            divisor_found = True
+                            break
+
+                    self.assertTrue(
+                        divisor_found,
+                        lambda msg: f"{msg}\nCould not find a split in {divisors} in {kernel}",
+                    )
+
+        compiled_func = torch.compile(lambda a, b: a @ b, dynamic=dynamic)
+        # We assume with the large k dim relative to m, n, decompose_k will be most performant
+        out, code = run_and_get_code(compiled_func, a, b)
+
+        if dynamic:
+            FileCheck().check_not("extern_kernels.bmm_dtype").check_not(
+                "decompose_k"
+            ).run(code[0])
+        else:
+            FileCheck().check("extern_kernels.bmm_dtype").check_regex(
+                "triton_.*_fused_.*.run"
+            ).check("decompose_k").run(code[0])
+            check_divisors(code)
+            torch.testing.assert_close(out, a @ b, atol=atol, rtol=rtol)
+
+        # Test adding epilogue also equivalent to eager
+        compiled_func = torch.compile(lambda a, b: (a @ b).relu(), dynamic=dynamic)
+        out, code = run_and_get_code(compiled_func, a, b)
+        if dynamic:
+            FileCheck().check_not("extern_kernels.bmm_dtype").check_not(
+                "decompose_k"
+            ).run(code[0])
+        else:
+            FileCheck().check("extern_kernels.bmm_dtype").check_regex(
+                "triton_.*_fused_.*.run"
+            ).check("decompose_k").run(code[0])
+            check_divisors(code)
+            torch.testing.assert_close(
+                compiled_func(a, b), (a @ b).relu(), atol=atol, rtol=rtol
             )
-            bf16_red_setting = (
-                torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction
+
+        # Test adding reinterpret view before subgraph
+        a = a.transpose(0, 1)
+        compiled_func = torch.compile(
+            lambda a, b: (a.transpose(0, 1) @ b).relu(), dynamic=dynamic
+        )
+        out, code = run_and_get_code(compiled_func, a, b)
+
+        if dynamic:
+            FileCheck().check_not("extern_kernels.bmm_dtype").check_not(
+                "decompose_k"
+            ).run(code[0])
+        else:
+            FileCheck().check("extern_kernels.bmm_dtype").check_regex(
+                "triton_.*_fused_.*_0.run"
+            ).check("decompose_k").run(code[0])
+            check_divisors(code)
+            torch.testing.assert_close(
+                compiled_func(a, b),
+                (a.transpose(0, 1) @ b).relu(),
+                atol=atol,
+                rtol=rtol,
             )
-            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
-            torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
 
-            M, N, K = sizes
-
-            atol = 1e-4
-            rtol = 1e-4
-            # K can be huge huge, this is why the data distribution is set to iid N(0, K ** 0.5),
-            # which makes the result of reductions distributed as N(0, 1).
-            a, b = self._make_matrices(
-                M,
-                K,
-                N,
-                dtype=dtype,
-                device=GPU_TYPE,
-                requires_grad=True,
-            )
-
-            possible_splits = range(2, min(K // M, K // N) + 1)
-
-            divisors = {split for split in possible_splits if K % split == 0}
-
-            def check_divisors(code):
-                for kernel in code:
-                    if "decompose_k" in kernel:
-                        divisor_found = False
-                        for divisor in divisors:
-                            if f"{divisor}_split" in kernel:
-                                divisor_found = True
-                                break
-
-                        self.assertTrue(
-                            divisor_found,
-                            lambda msg: f"{msg}\nCould not find a split in {divisors} in {kernel}",
-                        )
-
-            compiled_func = torch.compile(lambda a, b: a @ b, dynamic=dynamic)
-            # We assume with the large k dim relative to m, n, decompose_k will be most performant
-            out, code = run_and_get_code(compiled_func, a, b)
-
-            if dynamic:
-                FileCheck().check_not("extern_kernels.bmm_dtype").check_not(
-                    "decompose_k"
-                ).run(code[0])
-            else:
-                FileCheck().check("extern_kernels.bmm_dtype").check_regex(
-                    "triton_.*_fused_.*.run"
-                ).check("decompose_k").run(code[0])
-                check_divisors(code)
-                torch.testing.assert_close(out, a @ b, atol=atol, rtol=rtol)
-
-            # Test adding epilogue also equivalent to eager
-            compiled_func = torch.compile(lambda a, b: (a @ b).relu(), dynamic=dynamic)
-            out, code = run_and_get_code(compiled_func, a, b)
-            if dynamic:
-                FileCheck().check_not("extern_kernels.bmm_dtype").check_not(
-                    "decompose_k"
-                ).run(code[0])
-            else:
-                FileCheck().check("extern_kernels.bmm_dtype").check_regex(
-                    "triton_.*_fused_.*.run"
-                ).check("decompose_k").run(code[0])
-                check_divisors(code)
-                torch.testing.assert_close(
-                    compiled_func(a, b), (a @ b).relu(), atol=atol, rtol=rtol
-                )
-
-            # Test adding reinterpret view before subgraph
-            a = a.transpose(0, 1)
-            compiled_func = torch.compile(
-                lambda a, b: (a.transpose(0, 1) @ b).relu(), dynamic=dynamic
-            )
-            out, code = run_and_get_code(compiled_func, a, b)
-
-            if dynamic:
-                FileCheck().check_not("extern_kernels.bmm_dtype").check_not(
-                    "decompose_k"
-                ).run(code[0])
-            else:
-                FileCheck().check("extern_kernels.bmm_dtype").check_regex(
-                    "triton_.*_fused_.*_0.run"
-                ).check("decompose_k").run(code[0])
-                check_divisors(code)
-                torch.testing.assert_close(
-                    compiled_func(a, b),
-                    (a.transpose(0, 1) @ b).relu(),
-                    atol=atol,
-                    rtol=rtol,
-                )
-
-            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (
-                fp16_red_setting
-            )
-            torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = (
-                bf16_red_setting
-            )
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (
+            fp16_red_setting
+        )
+        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = (
+            bf16_red_setting
+        )
 
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
@@ -1969,7 +1960,6 @@ class TestMaxAutotune(TestCase):
                     "max_autotune_gemm_search_space": search_space,
                     # keeps the exhaustive space from dominating test runtime
                     "test_configs.max_mm_configs": 1,
-                    **_DECOMPOSE_K_PATCH_ROCM,
                 }
             ):
                 torch.compile(lambda x, y: x @ y)(a, b)
@@ -1996,46 +1986,42 @@ class TestMaxAutotune(TestCase):
         max_autotune_gemm_backends="TRITON",
     )
     def test_max_autotune_decompose_k_dynamic_input(self):
-        # UT specific change to force testing decompose K feature on ROCm until
-        # enabled by default, same strategy as #169948
-        with config.patch(_DECOMPOSE_K_PATCH_ROCM):
+        def f(a, b):
+            a_in = torch.stack((a, a), dim=0)
+            return (a_in @ b).relu()
 
-            def f(a, b):
-                a_in = torch.stack((a, a), dim=0)
-                return (a_in @ b).relu()
+        a, b = self._make_matrices(
+            M=32,
+            K=32768,
+            N=64,
+            dtype=torch.bfloat16,
+            device=GPU_TYPE,
+            requires_grad=True,
+        )
 
-            a, b = self._make_matrices(
-                M=32,
-                K=32768,
-                N=64,
-                dtype=torch.bfloat16,
-                device=GPU_TYPE,
-                requires_grad=True,
+        torch._dynamo.reset()
+        torch._dynamo.maybe_mark_dynamic(a, 0)
+        compiled_func = torch.compile(f)
+
+        with mock.patch(
+            "torch._inductor.kernel.mm.use_decompose_k_choice"
+        ) as decomp_mock:
+            decomp_mock.side_effect = (
+                lambda *args, **kwargs: kwargs.get("threshold_multiple", 1) == 1
             )
 
-            torch._dynamo.reset()
-            torch._dynamo.maybe_mark_dynamic(a, 0)
-            compiled_func = torch.compile(f)
-
-            with mock.patch(
-                "torch._inductor.kernel.mm.use_decompose_k_choice"
-            ) as decomp_mock:
-                decomp_mock.side_effect = (
-                    lambda *args, **kwargs: kwargs.get("threshold_multiple", 1) == 1
-                )
-
-                out, code = run_and_get_code(compiled_func, a, b)
-                FileCheck().check("extern_kernels.bmm_dtype").check_regex(
-                    "triton_.*_fused_.*.run"
-                ).check("decompose_k").check_regex(r"s[0-9]+ = s[0-9]+").check_regex(
-                    r"2\*s[0-9]+"
-                ).check_regex("s[0-9]+ = 32").run(code[0])
-                torch.testing.assert_close(
-                    out,
-                    f(a, b),
-                    atol=1e-4,
-                    rtol=1e-4,
-                )
+            out, code = run_and_get_code(compiled_func, a, b)
+            FileCheck().check("extern_kernels.bmm_dtype").check_regex(
+                "triton_.*_fused_.*.run"
+            ).check("decompose_k").check_regex(r"s[0-9]+ = s[0-9]+").check_regex(
+                r"2\*s[0-9]+"
+            ).check_regex("s[0-9]+ = 32").run(code[0])
+            torch.testing.assert_close(
+                out,
+                f(a, b),
+                atol=1e-4,
+                rtol=1e-4,
+            )
 
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
@@ -2049,59 +2035,55 @@ class TestMaxAutotune(TestCase):
         max_autotune_gemm_backends="TRITON",
     )
     def test_max_autotune_decompose_k_dynamic_input_bwd(self):
-        # UT specific change to force testing decompose K feature on ROCm until
-        # enabled by default, same strategy as #169948
-        with config.patch(_DECOMPOSE_K_PATCH_ROCM):
+        def f(a, b):
+            # 256 * s0
+            a_in = torch.cat([a for _ in range(256)], dim=0)
+            return (a_in @ b).relu().sum()
 
-            def f(a, b):
-                # 256 * s0
-                a_in = torch.cat([a for _ in range(256)], dim=0)
-                return (a_in @ b).relu().sum()
+        a, b = self._make_matrices(
+            M=8,
+            K=64,
+            N=32768,
+            dtype=torch.bfloat16,
+            device=GPU_TYPE,
+            requires_grad=True,
+        )
 
-            a, b = self._make_matrices(
-                M=8,
-                K=64,
-                N=32768,
-                dtype=torch.bfloat16,
-                device=GPU_TYPE,
-                requires_grad=True,
+        torch._dynamo.reset()
+        torch._dynamo.maybe_mark_dynamic(a, 0)
+        compiled_func = torch.compile(f)
+        res = compiled_func(a, b)
+        res.backward()
+
+        with mock.patch(
+            "torch._inductor.kernel.mm.use_decompose_k_choice"
+        ) as decomp_mock:
+            decomp_mock.side_effect = (
+                lambda *args, **kwargs: kwargs.get("threshold_multiple", 1) == 1
             )
 
+            def fwd_bwd():
+                out = compiled_func(a, b)
+                out.backward()
+                return out
+
+            # The mock only affects autotuning choices, so the backward has
+            # to be compiled (not served from the AOTAutograd/FX caches)
+            # inside this block for the choice to show up in the code. Both
+            # passes are captured together because the backward is only
+            # compiled once .backward() runs.
             torch._dynamo.reset()
-            torch._dynamo.maybe_mark_dynamic(a, 0)
-            compiled_func = torch.compile(f)
-            res = compiled_func(a, b)
-            res.backward()
+            with fresh_cache():
+                out, code = run_and_get_code(fwd_bwd)
 
-            with mock.patch(
-                "torch._inductor.kernel.mm.use_decompose_k_choice"
-            ) as decomp_mock:
-                decomp_mock.side_effect = (
-                    lambda *args, **kwargs: kwargs.get("threshold_multiple", 1) == 1
-                )
-
-                def fwd_bwd():
-                    out = compiled_func(a, b)
-                    out.backward()
-                    return out
-
-                # The mock only affects autotuning choices, so the backward has
-                # to be compiled (not served from the AOTAutograd/FX caches)
-                # inside this block for the choice to show up in the code. Both
-                # passes are captured together because the backward is only
-                # compiled once .backward() runs.
-                torch._dynamo.reset()
-                with fresh_cache():
-                    out, code = run_and_get_code(fwd_bwd)
-
-                FileCheck().check("extern_kernels.bmm_dtype").check_regex(
-                    "triton_.*_fused_.*.run"
-                ).check("decompose_k").check_regex(r"s[0-9]+ = s[0-9]+").check_regex(
-                    r"256\*s[0-9]+"
-                ).check_regex("s[0-9]+ = 8").run(
-                    # code[1] in this case given backwards
-                    code[1]
-                )
+            FileCheck().check("extern_kernels.bmm_dtype").check_regex(
+                "triton_.*_fused_.*.run"
+            ).check("decompose_k").check_regex(r"s[0-9]+ = s[0-9]+").check_regex(
+                r"256\*s[0-9]+"
+            ).check_regex("s[0-9]+ = 8").run(
+                # code[1] in this case given backwards
+                code[1]
+            )
 
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
@@ -2115,44 +2097,38 @@ class TestMaxAutotune(TestCase):
         max_autotune_gemm_backends="TRITON",
     )
     def test_max_autotune_decompose_k_output_stride(self):
-        # UT specific change to force testing decompose K feature on ROCm until
-        # enabled by default, same strategy as #169948
-        with config.patch(_DECOMPOSE_K_PATCH_ROCM):
+        def f(a, b):
+            a = a.transpose(0, 1)
+            return a @ b
 
-            def f(a, b):
-                a = a.transpose(0, 1)
-                return a @ b
+        a = torch.randn((32768, 256), device=GPU_TYPE, dtype=torch.bfloat16)
+        b = torch.randn((32768, 1152), device=GPU_TYPE, dtype=torch.bfloat16)
 
-            a = torch.randn((32768, 256), device=GPU_TYPE, dtype=torch.bfloat16)
-            b = torch.randn((32768, 1152), device=GPU_TYPE, dtype=torch.bfloat16)
+        b = b[:, :1096]
 
-            b = b[:, :1096]
+        # Force only decomposeK choice
+        with (
+            override_template_heuristics(
+                device_type=GPU_TYPE,
+                template_op_pairs=[(torch._inductor.kernel.mm.mm_template.name, "mm")],
+            ),
+            mock.patch(
+                "torch._inductor.kernel.mm.use_decompose_k_choice"
+            ) as decompose_mock,
+        ):
+            decompose_mock.return_value = True
+            compiled_f = torch.compile(f)
+            out, code = run_and_get_code(compiled_f, a, b)
 
-            # Force only decomposeK choice
-            with (
-                override_template_heuristics(
-                    device_type=GPU_TYPE,
-                    template_op_pairs=[
-                        (torch._inductor.kernel.mm.mm_template.name, "mm")
-                    ],
-                ),
-                mock.patch(
-                    "torch._inductor.kernel.mm.use_decompose_k_choice"
-                ) as decompose_mock,
-            ):
-                decompose_mock.return_value = True
-                compiled_f = torch.compile(f)
-                out, code = run_and_get_code(compiled_f, a, b)
+            # Output stride equal to original gm output stride
+            # If output stride is not correctly checked, this will be (1152, 1) which can cause nans
+            self.assertEqual(out.stride(), (1096, 1))
 
-                # Output stride equal to original gm output stride
-                # If output stride is not correctly checked, this will be (1152, 1) which can cause nans
-                self.assertEqual(out.stride(), (1096, 1))
-
-                FileCheck().check_not("extern_kernels.bmm_dtype").check(
-                    "decompose_k"
-                ).check(
-                    f" empty_strided_{GPU_TYPE}((256, 1096), (1096, 1), torch.bfloat16)"
-                ).run(code[0])
+            FileCheck().check_not("extern_kernels.bmm_dtype").check(
+                "decompose_k"
+            ).check(
+                f" empty_strided_{GPU_TYPE}((256, 1096), (1096, 1), torch.bfloat16)"
+            ).run(code[0])
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @parametrize("dtype", (torch.float16, torch.bfloat16, torch.float32))
