@@ -9,7 +9,9 @@ from torch._inductor import config
 from torch._inductor.codegen import triton_size_arg_narrowing as narrowing
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
+from torch.testing._internal.common_utils import skipIfRocm
 from torch.testing._internal.inductor_utils import GPU_TYPE, requires_gpu
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
 def nested_cat_add(q1, k1, v1a, v1b, q2, k2, v2a, v2b):
@@ -37,12 +39,19 @@ def _kernel(code: str) -> tuple:
     return args, body
 
 
+# The proven class is pinned to the exact source Inductor emits for this program on NVIDIA
+# CUDA. Other backends may emit different code, in which case the rule does not fire (the
+# kernel keeps i64), so the tests that expect recognition run on CUDA only.
+_RECOGNITION_MSG = "the proven kernel class is pinned to CUDA codegen"
+
+
 class TestSizeArgNarrowing(TestCase):
     def setUp(self):
         super().setUp()
         torch._dynamo.reset()
 
-    @requires_gpu()
+    @requires_cuda_and_triton
+    @skipIfRocm(msg=_RECOGNITION_MSG)
     @config.patch({"triton.narrow_proven_size_args": True})
     def test_narrows_proven_cat_kernel(self):
         ins = _inputs()
@@ -74,7 +83,8 @@ class TestSizeArgNarrowing(TestCase):
         _, code = run_and_get_code(torch.compile(three, dynamic=True), *ins)
         self.assertNotIn("i32", set(_ks_types("\n".join(code)).values()))
 
-    @requires_gpu()
+    @requires_cuda_and_triton
+    @skipIfRocm(msg=_RECOGNITION_MSG)
     def test_recognizer_rejects_mutations(self):
         _, code = run_and_get_code(
             torch.compile(nested_cat_add, dynamic=True), *_inputs()
