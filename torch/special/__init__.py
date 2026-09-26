@@ -356,6 +356,9 @@ expit(input, *, out=None) -> Tensor
 
 Computes the expit (also known as the logistic sigmoid function) of the elements of :attr:`input`.
 
+Alias for :func:`torch.sigmoid`. See :class:`torch.nn.Sigmoid` for the
+module form and formula.
+
 .. math::
     \text{out}_{i} = \frac{1}{1 + e^{-\text{input}_{i}}}
 """
