@@ -151,8 +151,8 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
                  const_cast<void*>(requantize_multiplier_tensor.const_data_ptr()), quantized_output.mutable_data_ptr<int8_t>()};
     uids = {'x', 'w', 's', 'r'};
     if (bias_.has_value()) {
-      data_ptrs.insert(data_ptrs.end(), {const_cast<void*>(broadcasted_bias.value().const_data_ptr()), const_cast<void*>(bias_multiplier_tensor.value().const_data_ptr()),
-                                         const_cast<void*>(broadcasted_bias.value().const_data_ptr()), const_cast<void*>(broadcasted_bias.value().const_data_ptr())});
+      void* bias_ptr = broadcasted_bias.value().mutable_data_ptr();
+      data_ptrs.insert(data_ptrs.end(), {bias_ptr, const_cast<void*>(bias_multiplier_tensor.value().const_data_ptr()), bias_ptr, bias_ptr});
       uids.insert(uids.end(), {'b', 'c', 'd', 'n'});
     }
     auto variantPack = cudnn_frontend::VariantPackBuilder()
