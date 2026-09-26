@@ -220,6 +220,12 @@ class _TestSelectCat(torch.nn.Module):
         return cat, cat1, cat2, cat3
 
 
+class _TestSelectCatMixedInputs(torch.nn.Module):
+    def forward(self, x: torch.Tensor, y: torch.Tensor):
+        select = torch.ops.aten.select.int(x, 1, 0)
+        return torch.ops.aten.cat.default([select, torch.mul(y, 2.0), y], 1)
+
+
 class TestSplitCatAten(TestCase):
     def compare_dict_tensors(self, ref_dict, res_dict, rtol=1e-3, atol=1e-3):
         if len(set(ref_dict.keys())) != len(set(res_dict.keys())):
@@ -341,6 +347,27 @@ class TestSplitCatAten(TestCase):
         self.assertEqual(counters["inductor"]["select_cat_aten_pass"], 1)
         self.assertEqual(ref, res, rtol=1e-8, atol=1e-8)
         self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
+        counters.clear()
+
+    @torch._inductor.config.patch(
+        freezing=True,
+        pre_grad_fusion_options={},
+        post_grad_fusion_options={"select_cat_aten_pass": {}},
+    )
+    def test_select_cat_with_non_select_inputs(self):
+        counters.clear()
+        inputs = [
+            torch.randn(4, 4, 4, 4, dtype=torch.float64),
+            torch.randn(4, 4, 4, dtype=torch.float64),
+        ]
+        module = _TestSelectCatMixedInputs()
+        traced = torch.compile(module)
+        ref = module(*inputs)
+        with torch.no_grad():
+            res = traced(*inputs)
+        self.assertEqual(ref.shape, torch.Size([4, 12, 4]))
+        self.assertEqual(ref, res, rtol=1e-8, atol=1e-8)
+        self.assertEqual(counters["inductor"]["select_cat_aten_pass"], 0)
         counters.clear()
 
     @requires_gpu_and_triton

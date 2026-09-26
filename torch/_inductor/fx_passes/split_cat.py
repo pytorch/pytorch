@@ -1908,12 +1908,22 @@ def merge_select_cat_aten(match: Match, *args, **kwargs):
     graph = match.graph
     node = match.nodes[0]
     node_input = get_arg_value(node, 0, "tensors")
-    # get the select nodes from the node
-    select_nodes = list(node_input.users.keys())
+    input_users = list(node_input.users.keys())
     for cat_node in list(node.users.keys()):
         if cat_node.target is torch.ops.aten.cat.default:
             cat_dim = get_arg_value(cat_node, 1, "dim")
             cat_inputs = get_arg_value(cat_node, 0, "tensors")
+            if (
+                len(input_users) != len(cat_inputs)
+                or not all(
+                    isinstance(select_node, torch.fx.Node)
+                    and select_node.target is torch.ops.aten.select.int
+                    and select_node.args[0] is node_input
+                    for select_node in cat_inputs
+                )
+            ):
+                continue
+            select_nodes = list(cat_inputs)
             # check all select nodes has same slice dim
             if not all(
                 select_node.args[1] == select_nodes[0].args[1]
@@ -1927,10 +1937,7 @@ def merge_select_cat_aten(match: Match, *args, **kwargs):
                 continue
             # check the cat node has consecutive indices
             indices = [select.args[2] for select in cat_node.args[0]]  # type: ignore[union-attr]
-            if (
-                not is_sorted_and_consecutive(indices)  # type: ignore[arg-type]
-                or len(select_nodes) != len(cat_inputs)
-            ):
+            if not is_sorted_and_consecutive(indices):  # type: ignore[arg-type]
                 continue
             # check all the select nodes can be merged to the cat node input
             if len(indices) != select_nodes[0].args[0].meta["val"].shape[cat_dim]:  # type: ignore[union-attr]
