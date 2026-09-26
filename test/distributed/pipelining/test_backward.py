@@ -1,6 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 import copy
+from contextlib import nullcontext
 
 from model_registry import MLPModule, MultiInterMediateModel
 
@@ -10,11 +11,9 @@ from torch.distributed.pipelining._backward import (
     stage_backward_input,
     stage_backward_weight,
 )
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    skipXPUIf,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    DeterministicGuard,
     HardwareClassification,
     run_tests,
     TestCase,
@@ -28,45 +27,46 @@ batch_size = 256
 class StageBackwardTests(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1682")
     def test_stage_backward(self, device):
-        # MLP as a stage module
-        mod = MLPModule(d_hid).to(device)
-        x = torch.randn(batch_size, d_hid, device=device)
-        # As in a pipeline stage, the inputs to this stage requires gradients
-        x.requires_grad_(True)
-        target = torch.randn(batch_size, d_hid, device=device)
-        loss_fn = torch.nn.MSELoss(reduction="sum")
+        # oneDNN is nondeterministic on XPU: https://github.com/intel/torch-xpu-ops/issues/1682
+        with DeterministicGuard(True) if self.device_type == "xpu" else nullcontext():
+            # MLP as a stage module
+            mod = MLPModule(d_hid).to(device)
+            x = torch.randn(batch_size, d_hid, device=device)
+            # As in a pipeline stage, the inputs to this stage requires gradients
+            x.requires_grad_(True)
+            target = torch.randn(batch_size, d_hid, device=device)
+            loss_fn = torch.nn.MSELoss(reduction="sum")
 
-        # Make a copy
-        ref_mod = copy.deepcopy(mod).to(device)
-        ref_x = x.detach().requires_grad_(x.requires_grad).to(device)
-        ref_target = target.detach().to(device)
+            # Make a copy
+            ref_mod = copy.deepcopy(mod).to(device)
+            ref_x = x.detach().requires_grad_(x.requires_grad).to(device)
+            ref_target = target.detach().to(device)
 
-        # Forward and backward in stage manner
-        out = mod(x)
-        loss = loss_fn(out, target)
-        grad_inputs = stage_backward(
-            stage_output=loss,
-            output_grads=None,
-            input_values=(x,),
-        )
+            # Forward and backward in stage manner
+            out = mod(x)
+            loss = loss_fn(out, target)
+            grad_inputs = stage_backward(
+                stage_output=loss,
+                output_grads=None,
+                input_values=(x,),
+            )
 
-        # Run reference
-        ref_out = ref_mod(ref_x)
-        ref_loss = loss_fn(ref_out, ref_target)
-        ref_loss.backward()
+            # Run reference
+            ref_out = ref_mod(ref_x)
+            ref_loss = loss_fn(ref_out, ref_target)
+            ref_loss.backward()
 
-        torch.testing.assert_close(grad_inputs[0], ref_x.grad)
+            torch.testing.assert_close(grad_inputs[0], ref_x.grad)
 
-        # Every rank checks gradients
-        for name, p in mod.named_parameters():
-            ref_p = ref_mod.get_parameter(name)
-            try:
-                torch.testing.assert_close(p.grad, ref_p.grad)
-            except AssertionError:
-                print(f"Gradient test failed for {name}: {p.grad} vs {ref_p.grad}")
-                raise
+            # Every rank checks gradients
+            for name, p in mod.named_parameters():
+                ref_p = ref_mod.get_parameter(name)
+                try:
+                    torch.testing.assert_close(p.grad, ref_p.grad)
+                except AssertionError:
+                    print(f"Gradient test failed for {name}: {p.grad} vs {ref_p.grad}")
+                    raise
 
     def test_stage_backward_input(self, device):
         # MLP as a stage module
@@ -124,71 +124,22 @@ class StageBackwardTests(TestCase):
         torch.testing.assert_close(x.grad, ref_x.grad)
         torch.testing.assert_close(dinputs[1], ref_x.grad)
 
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1682")
     def test_stage_backward_weight(self, device):
-        # MLP as a stage module
-        mod = MLPModule(d_hid).to(device)
-        x = torch.randn(batch_size, d_hid, device=device)
-        # As in a pipeline stage, the inputs to this stage requires gradients
-        x.requires_grad_(True)
-        target = torch.randn(batch_size, d_hid, device=device)
-        loss_fn = torch.nn.MSELoss(reduction="sum")
-
-        # Make a copy
-        ref_mod = copy.deepcopy(mod).to(device)
-        ref_x = x.detach().requires_grad_(x.requires_grad).to(device)
-        ref_target = target.detach().to(device)
-        # Forward, then backward of loss with respect to inputs
-        out = mod(x)
-        loss = loss_fn(out, target)
-        _dinputs, param_groups = stage_backward_input(
-            stage_outputs_or_loss=(loss,),
-            output_grads=None,
-            input_values=[x],
-            weights=mod.parameters(),
-        )
-
-        # backward of loss with respect to weights
-        stage_backward_weight(mod.parameters(), param_groups, retain_graph=True)
-
-        # Run reference
-        ref_out = ref_mod(ref_x)
-        ref_loss = loss_fn(ref_out, ref_target)
-        ref_loss.backward()
-
-        # Every rank checks gradients
-        for name, p in mod.named_parameters():
-            ref_p = ref_mod.get_parameter(name)
-            try:
-                torch.testing.assert_close(p.grad, ref_p.grad)
-            except AssertionError:
-                print(f"Gradient test failed for {name}: {p.grad} vs {ref_p.grad}")
-                raise
-
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1682")
-    def test_stage_backward_weight_multiple_iters(self, device):
-        # MLP as a stage module
-        mod = MLPModule(d_hid).to(device)
-        inputs = []
-        for _ in range(10):
+        # oneDNN is nondeterministic on XPU: https://github.com/intel/torch-xpu-ops/issues/1682
+        with DeterministicGuard(True) if self.device_type == "xpu" else nullcontext():
+            # MLP as a stage module
+            mod = MLPModule(d_hid).to(device)
             x = torch.randn(batch_size, d_hid, device=device)
-            inputs.append(x)
             # As in a pipeline stage, the inputs to this stage requires gradients
             x.requires_grad_(True)
+            target = torch.randn(batch_size, d_hid, device=device)
+            loss_fn = torch.nn.MSELoss(reduction="sum")
 
-        target = torch.randn(batch_size, d_hid, device=device)
-        loss_fn = torch.nn.MSELoss(reduction="sum")
-
-        # Make a copy
-        ref_mod = copy.deepcopy(mod).to(device)
-        ref_inputs = []
-        for x in inputs:
+            # Make a copy
+            ref_mod = copy.deepcopy(mod).to(device)
             ref_x = x.detach().requires_grad_(x.requires_grad).to(device)
-            ref_inputs.append(ref_x)
-        ref_target = target.detach().to(device)
-
-        # Forward, then backward of loss with respect to inputs
-        for x in inputs:
+            ref_target = target.detach().to(device)
+            # Forward, then backward of loss with respect to inputs
             out = mod(x)
             loss = loss_fn(out, target)
             _dinputs, param_groups = stage_backward_input(
@@ -199,22 +150,73 @@ class StageBackwardTests(TestCase):
             )
 
             # backward of loss with respect to weights
-            stage_backward_weight(mod.parameters(), param_groups)
+            stage_backward_weight(mod.parameters(), param_groups, retain_graph=True)
 
-        # Run reference
-        for ref_x in ref_inputs:
+            # Run reference
             ref_out = ref_mod(ref_x)
             ref_loss = loss_fn(ref_out, ref_target)
             ref_loss.backward()
 
-        # Every rank checks gradients
-        for name, p in mod.named_parameters():
-            ref_p = ref_mod.get_parameter(name)
-            try:
-                torch.testing.assert_close(p.grad, ref_p.grad)
-            except AssertionError:
-                print(f"Gradient test failed for {name}: {p.grad} vs {ref_p.grad}")
-                raise
+            # Every rank checks gradients
+            for name, p in mod.named_parameters():
+                ref_p = ref_mod.get_parameter(name)
+                try:
+                    torch.testing.assert_close(p.grad, ref_p.grad)
+                except AssertionError:
+                    print(f"Gradient test failed for {name}: {p.grad} vs {ref_p.grad}")
+                    raise
+
+    def test_stage_backward_weight_multiple_iters(self, device):
+        # oneDNN is nondeterministic on XPU: https://github.com/intel/torch-xpu-ops/issues/1682
+        with DeterministicGuard(True) if self.device_type == "xpu" else nullcontext():
+            # MLP as a stage module
+            mod = MLPModule(d_hid).to(device)
+            inputs = []
+            for _ in range(10):
+                x = torch.randn(batch_size, d_hid, device=device)
+                inputs.append(x)
+                # As in a pipeline stage, the inputs to this stage requires gradients
+                x.requires_grad_(True)
+
+            target = torch.randn(batch_size, d_hid, device=device)
+            loss_fn = torch.nn.MSELoss(reduction="sum")
+
+            # Make a copy
+            ref_mod = copy.deepcopy(mod).to(device)
+            ref_inputs = []
+            for x in inputs:
+                ref_x = x.detach().requires_grad_(x.requires_grad).to(device)
+                ref_inputs.append(ref_x)
+            ref_target = target.detach().to(device)
+
+            # Forward, then backward of loss with respect to inputs
+            for x in inputs:
+                out = mod(x)
+                loss = loss_fn(out, target)
+                _dinputs, param_groups = stage_backward_input(
+                    stage_outputs_or_loss=(loss,),
+                    output_grads=None,
+                    input_values=[x],
+                    weights=mod.parameters(),
+                )
+
+                # backward of loss with respect to weights
+                stage_backward_weight(mod.parameters(), param_groups)
+
+            # Run reference
+            for ref_x in ref_inputs:
+                ref_out = ref_mod(ref_x)
+                ref_loss = loss_fn(ref_out, ref_target)
+                ref_loss.backward()
+
+            # Every rank checks gradients
+            for name, p in mod.named_parameters():
+                ref_p = ref_mod.get_parameter(name)
+                try:
+                    torch.testing.assert_close(p.grad, ref_p.grad)
+                except AssertionError:
+                    print(f"Gradient test failed for {name}: {p.grad} vs {ref_p.grad}")
+                    raise
 
     def test_stage_backward_weight_grad_validation(self, device):
         test_cases = [
@@ -293,41 +295,44 @@ class StageBackwardTests(TestCase):
             torch.testing.assert_close(p.grad, ref_p.grad)
 
     def test_stage_backward_weight_shared_weights(self, device):
-        class SharedWeightModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.w = torch.nn.Parameter(torch.randn(d_hid, d_hid))
+        # oneDNN is nondeterministic on XPU: https://github.com/intel/torch-xpu-ops/issues/1682
+        with DeterministicGuard(True) if self.device_type == "xpu" else nullcontext():
 
-            def forward(self, x):
-                x = torch.matmul(x, self.w)
-                x = torch.relu(x)
-                return torch.matmul(x, self.w)
+            class SharedWeightModule(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.w = torch.nn.Parameter(torch.randn(d_hid, d_hid))
 
-        mod = SharedWeightModule().to(device)
-        x = torch.randn(batch_size, d_hid, device=device, requires_grad=True)
+                def forward(self, x):
+                    x = torch.matmul(x, self.w)
+                    x = torch.relu(x)
+                    return torch.matmul(x, self.w)
 
-        ref_mod = copy.deepcopy(mod)
-        ref_x = x.detach().clone().requires_grad_(True)
+            mod = SharedWeightModule().to(device)
+            x = torch.randn(batch_size, d_hid, device=device, requires_grad=True)
 
-        out = mod(x)
-        loss = out.sum()
+            ref_mod = copy.deepcopy(mod)
+            ref_x = x.detach().clone().requires_grad_(True)
 
-        dinputs, param_groups = stage_backward_input(
-            stage_outputs_or_loss=[loss],
-            output_grads=None,
-            input_values=[x],
-            weights=mod.parameters(),
-        )
-        stage_backward_weight(mod.parameters(), param_groups)
+            out = mod(x)
+            loss = out.sum()
 
-        ref_out = ref_mod(ref_x)
-        ref_loss = ref_out.sum()
-        ref_loss.backward()
+            dinputs, param_groups = stage_backward_input(
+                stage_outputs_or_loss=[loss],
+                output_grads=None,
+                input_values=[x],
+                weights=mod.parameters(),
+            )
+            stage_backward_weight(mod.parameters(), param_groups)
 
-        torch.testing.assert_close(dinputs[0], ref_x.grad)
-        for name, p in mod.named_parameters():
-            ref_p = ref_mod.get_parameter(name)
-            torch.testing.assert_close(p.grad, ref_p.grad)
+            ref_out = ref_mod(ref_x)
+            ref_loss = ref_out.sum()
+            ref_loss.backward()
+
+            torch.testing.assert_close(dinputs[0], ref_x.grad)
+            for name, p in mod.named_parameters():
+                ref_p = ref_mod.get_parameter(name)
+                torch.testing.assert_close(p.grad, ref_p.grad)
 
 
 instantiate_device_type_tests(StageBackwardTests, globals(), allow_xpu=True)
