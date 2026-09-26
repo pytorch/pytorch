@@ -123,6 +123,10 @@ def is_available() -> bool:
     return True
 
 
+def _is_scaled_mm_supported(device: torch.types.Device = None) -> bool:
+    return True
+
+
 def synchronize(device: torch.types.Device = None) -> None:
     r"""Waits for all kernels in all streams on the CPU device to complete.
 

@@ -128,6 +128,7 @@ __all__ = [
     "inference_mode",
     "initial_seed",
     "is_deterministic_algorithms_warn_only_enabled",
+    "is_scaled_mm_supported",
     "is_storage",
     "is_tensor",
     "is_warn_always_enabled",
@@ -3486,6 +3487,48 @@ def get_device_module(device: "torch.device | str | None" = None) -> _ModuleType
             f"Device '{device_module_name}' does not have a corresponding module registered as 'torch.{device_module_name}'."
         )
     return device_module
+
+
+def is_scaled_mm_supported(device: "Device" = None) -> builtins.bool:
+    r"""Return device- and build-level support for :func:`torch.nn.functional.scaled_mm`.
+
+    Returns ``False`` if the backend is unavailable or does not support
+    scaled_mm. Backends that do not implement the support query, including
+    out-of-tree backends, report ``False``. A ``True`` result does not validate
+    a particular invocation: dtypes, scaling recipes, layouts, swizzles, and
+    output configurations have additional restrictions.
+
+    Args:
+        device (:class:`torch.device`, str, int, optional): Device for which to
+            query support. If unspecified, uses
+            :func:`torch.accelerator.current_accelerator`, or CPU when PyTorch
+            was built without an accelerator. An integer selects a device index
+            on that accelerator. Default: ``None``.
+
+    Examples::
+
+        >>> torch.is_scaled_mm_supported("cpu")
+        True
+    """
+    if isinstance(device, builtins.int):
+        accelerator = torch.accelerator.current_accelerator() or torch.device("cpu")
+        resolved_device = torch.device(accelerator.type, device)
+    elif device is None:
+        resolved_device = torch.accelerator.current_accelerator() or torch.device("cpu")
+    else:
+        resolved_device = torch.device(device)
+
+    try:
+        device_module = get_device_module(resolved_device)
+    except RuntimeError:
+        return False
+
+    # Optional backend hook: accepts a torch.device (index may be None), returns
+    # bool, and owns availability and index validation. Errors propagate.
+    backend_query = getattr(device_module, "_is_scaled_mm_supported", None)
+    if backend_query is None:
+        return False
+    return builtins.bool(backend_query(resolved_device))
 
 
 def _constrain_as_size(

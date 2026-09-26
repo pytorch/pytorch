@@ -4,6 +4,7 @@
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/RNN.h>
+#include <ATen/native/cuda/ScaledBlasDeviceUtils.h>
 #include <c10/core/Device.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/util/Exception.h>
@@ -2305,6 +2306,14 @@ PyObject* THCPModule_benchmarkLimitCuDNN(PyObject* _unused, PyObject* noargs) {
 
 static void initCudaMethodBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
+  m.def("_cuda_isScaledMMAllowed", [](c10::DeviceIndex device_index) {
+    TORCH_CHECK(
+        device_index >= 0 && device_index < c10::cuda::device_count(),
+        "Invalid device index ",
+        static_cast<int>(device_index));
+    return at::native::scaled::scaled_mm_arch_allowed(
+        /*sm90_only=*/false, /*sm100_only=*/false, device_index);
+  });
   m.def(
       "_cuda_getStreamFromExternal",
       [](uintptr_t data_ptr, c10::DeviceIndex device_index) {

@@ -635,7 +635,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
           Tensor& out) {
   // Check sizes
   bool allowed_device = scaled_mm_arch_allowed();
-  TORCH_CHECK(allowed_device, "torch._scaled_mm is only supported on CUDA devices with compute capability >= 9.0 or 8.9, or ROCm MI300+");
+  TORCH_CHECK(allowed_device, "torch._scaled_mm is only supported on CUDA devices with compute capability >= 9.0 or 8.9, or ROCm gfx942, gfx950/gfx1200/gfx1201 (ROCm 6.5+), or gfx1250 (ROCm 7.14+)");
   check_mm_shapes(mat1, mat2, "_scaled_mm");
 
   // Check what type of scaling we are doing based on inputs. This list is sorted
@@ -1510,7 +1510,7 @@ void scaled_mm_cuda_v2_impl(
   TORCH_CHECK_NOT_IMPLEMENTED(
       allowed_device,
       op_name,
-      " is only supported on CUDA devices with compute capability >= 9.0 or 8.9, or ROCm MI300+");
+      " is only supported on CUDA devices with compute capability >= 9.0 or 8.9, or ROCm gfx942, gfx950/gfx1200/gfx1201 (ROCm 6.5+), or gfx1250 (ROCm 7.14+)");
 #ifdef USE_ROCM
   TORCH_CHECK_NOT_IMPLEMENTED(
       !accumulator.has_value(), op_name, " is not implemented for ROCm");

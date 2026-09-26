@@ -37,6 +37,7 @@ from torch.testing._internal.common_cuda import (
     with_tf32_off,
 )
 from torch.testing._internal.common_device_type import (
+    dtypes,
     instantiate_device_type_tests,
     onlyAccelerator,
     onlyCUDA,
@@ -720,7 +721,42 @@ def _build_scaled_grouped_mm_kwargs(scale_a, scale_b, offs, format):
     kwargs['mxfp4'] = kwargs['mxfp8']
     return kwargs[format]
 
+
 class TestFP8Matmul(TestCase):
+    @dtypes(e4m3_type, e5m2_type)
+    def test_is_scaled_mm_supported(self, device, dtype) -> None:
+        if "mps" in device and dtype == e5m2_type:
+            raise unittest.SkipTest("MPS has no float8_e5m2")
+        supported = torch.is_scaled_mm_supported(device)
+        self.assertIsInstance(supported, bool)
+        for device_form in (device, torch.device(device)):
+            self.assertEqual(torch.is_scaled_mm_supported(device_form), supported)
+
+        size = 16
+        mat_a = torch.eye(size, device=device).to(dtype)
+        # CUDA rejects e5m2 x e5m2 and MPS has no e5m2, so mat_b stays e4m3.
+        mat_b = torch.eye(size, device=device).to(e4m3_type).t()
+        scale = torch.tensor(1.0, device=device)
+
+        def run_scaled_mm():
+            return scaled_mm(
+                mat_a,
+                mat_b,
+                scale,
+                ScalingType.TensorWise,
+                scale,
+                ScalingType.TensorWise,
+            )
+
+        if supported:
+            result = run_scaled_mm()
+            self.assertEqual(result, torch.eye(size, device=device, dtype=result.dtype))
+        else:
+            self.assertRaisesRegex(
+                RuntimeError,
+                "only supported",
+                run_scaled_mm,
+            )
 
     def _test_tautological_mm(self, device: str,
                               x_dtype: torch.dtype = e4m3_type,
@@ -1859,7 +1895,7 @@ class TestFP8Matmul(TestCase):
         scale_b = torch.tensor(1.0, device=device)
         self.assertRaisesRegex(
             RuntimeError,
-            r"torch\.\_scaled\_mm is only supported on CUDA devices with compute capability \>\= 9\.0 or 8\.9, or ROCm MI300\+",
+            r"torch\.\_scaled\_mm is only supported on CUDA devices with compute capability \>\= 9\.0 or 8\.9, or ROCm gfx942",
             lambda: scaled_mm_wrap(x, y, scale_a, scale_b, out_dtype=torch.float32),
         )
 

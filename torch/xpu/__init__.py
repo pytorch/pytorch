@@ -311,6 +311,13 @@ def is_tf32_supported() -> bool:
     return torch.xpu.get_device_properties().has_subgroup_matrix_multiply_accumulate
 
 
+def _is_scaled_mm_supported(device: Device = None) -> bool:
+    if not is_available():
+        return False
+    get_device_properties(device)
+    return True
+
+
 def is_initialized():
     r"""Return whether PyTorch's XPU state has been initialized."""
     return _initialized and not _is_in_bad_fork()

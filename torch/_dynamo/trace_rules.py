@@ -639,6 +639,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._cuda_isCurrentStreamCapturing",
         "torch._C._cuda_isHistoryEnabled",
         "torch._C._cuda_isInBadFork",
+        "torch._C._cuda_isScaledMMAllowed",
         "torch._C._cuda_jiterator_compile_and_launch_kernel",
         "torch._C._cuda_maybeExchangeDevice",
         "torch._C._cuda_memorySnapshot",
