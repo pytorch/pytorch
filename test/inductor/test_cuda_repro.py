@@ -312,13 +312,14 @@ class CudaReproTests(TestCase):
         # Only compiler-proven zero masks may be removed; a runtime mask must
         # remain an FX input because its contents can change between calls.
         def runtime_mask_fn(query, key, value, attention_mask):
-            return F.scaled_dot_product_attention(
-                query, key, value, attn_mask=attention_mask
-            )
+            output = aten._scaled_dot_product_efficient_attention.default(
+                query, key, value, attention_mask, False
+            )[0]
+            return output
 
         padding_mask = torch.zeros(
             batch_size,
-            1,
+            num_heads,
             seq_len,
             seq_len,
             device=device_type,
