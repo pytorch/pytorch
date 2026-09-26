@@ -3515,7 +3515,9 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
-        if user_cls not in {dict, OrderedDict, defaultdict}:
+        if user_cls not in {dict, defaultdict} and not issubclass(
+            user_cls, OrderedDict
+        ):
             unimplemented(
                 gb_type="Unsupported dict type for fromkeys()",
                 context=f"{user_cls.__name__}.fromkeys(): {args} {kwargs}",
@@ -3526,9 +3528,9 @@ class DictBuiltinVariable(BaseBuiltinVariable):
                 ],
             )
         if kwargs:
-            # Only `OrderedDict.fromkeys` accepts `value` passed by keyword
+            # OrderedDict.fromkeys also accepts `value` on inherited subclasses.
             if (
-                user_cls is not OrderedDict
+                not issubclass(user_cls, OrderedDict)
                 or len(args) != 1
                 or len(kwargs) != 1
                 or "value" not in kwargs
@@ -3564,6 +3566,24 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         ) -> VariableTracker:
             if user_cls is OrderedDict:
                 return OrderedDictVariable(items, mutation_type=ValueMutationNew())
+            elif issubclass(user_cls, OrderedDict):
+                from .builder import SourcelessBuilder
+                from .user_defined import UserDefinedDictVariable
+
+                result = tx.output.side_effects.track_new_user_defined_object(
+                    SourcelessBuilder.create(tx, dict),
+                    VariableTracker.build(tx, user_cls),
+                    [],
+                    tx=tx,
+                )
+                if not isinstance(result, UserDefinedDictVariable):
+                    raise AssertionError(
+                        f"Expected UserDefinedDictVariable, got {type(result)}"
+                    )
+                result._base_vt = OrderedDictVariable(
+                    items, mutation_type=ValueMutationNew()
+                )
+                return result
             elif user_cls is defaultdict:
                 from .builder import SourcelessBuilder
                 from .user_defined import DefaultDictVariable

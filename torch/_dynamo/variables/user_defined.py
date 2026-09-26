@@ -1147,10 +1147,27 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 source = AttrSource(self.source, "__subclasses__")
                 source = CallFunctionNoArgsSource(source)
             return VariableTracker.build(tx, self.value.__subclasses__(), source)
-        elif (
-            self.value in {collections.OrderedDict, collections.defaultdict}
-            and name == "fromkeys"
-        ):
+        elif name == "fromkeys" and self.value in {
+            collections.OrderedDict,
+            collections.defaultdict,
+        }:
+            return variables.DictBuiltinVariable.call_custom_dict_fromkeys(
+                tx, self.value, *args, **kwargs
+            )
+        elif name == "fromkeys" and issubclass(self.value, collections.OrderedDict):
+            if (
+                inspect.getattr_static(self.value, "fromkeys")
+                is not collections.OrderedDict.__dict__["fromkeys"]
+                or self.value.__new__ is not collections.OrderedDict.__new__
+                or self.value.__init__ is not collections.OrderedDict.__init__
+                or self.value.__setitem__ is not collections.OrderedDict.__setitem__
+            ):
+                unimplemented(
+                    gb_type="OrderedDict subclass fromkeys override",
+                    context=self.value.__name__,
+                    explanation="Cannot trace fromkeys with overridden construction or insertion",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
             return variables.DictBuiltinVariable.call_custom_dict_fromkeys(
                 tx, self.value, *args, **kwargs
             )

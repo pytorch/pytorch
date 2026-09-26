@@ -102,6 +102,37 @@ def _is_set_or_dictview(obj: VariableTracker) -> bool:
     return issubclass(t, (set, frozenset, dict_keys, dict_items))
 
 
+def _bind_ordered_dict_args(
+    vt: VariableTracker,
+    tx: "InstructionTranslatorBase",
+    name: str,
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> list[VariableTracker]:
+    if not isinstance(vt, OrderedDictVariable):
+        raise_type_error(
+            tx, f"{vt.python_type_name()}.{name}() takes no keyword arguments"
+        )
+    for key in kwargs:
+        if key not in ("key", "default"):
+            raise_type_error(tx, f"{name}() got an unexpected keyword argument '{key}'")
+    if len(args) + len(kwargs) > 2:
+        raise_type_error(
+            tx, f"{name}() takes at most 2 arguments ({len(args) + len(kwargs)} given)"
+        )
+    if "key" in kwargs:
+        if args:
+            raise_type_error(tx, f"{name}() got multiple values for argument 'key'")
+        args = [kwargs["key"]]
+    if not args:
+        check_positional(tx, name, 0, 1, 2)
+    if "default" in kwargs:
+        if len(args) == 2:
+            raise_type_error(tx, f"{name}() got multiple values for argument 'default'")
+        args = [*args, kwargs["default"]]
+    return args
+
+
 class ConstDictVariable(VariableTracker):
     # PyDict_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L4825
     _cpython_type = dict
@@ -583,6 +614,8 @@ class ConstDictVariable(VariableTracker):
     ) -> VariableTracker | None:
         if not self.is_mutable():
             return None
+        if kwargs:
+            args = _bind_ordered_dict_args(self, tx, "pop", args, kwargs)
         check_positional(tx, "pop", len(args), 1, 2)
         if args[0] not in self:
             # missing item, return the default value. Install no DICT_CONTAINS guard.
@@ -687,6 +720,8 @@ class ConstDictVariable(VariableTracker):
     ) -> VariableTracker | None:
         if not self.is_mutable():
             return None
+        if kwargs:
+            args = _bind_ordered_dict_args(self, tx, "setdefault", args, kwargs)
         check_positional(tx, "setdefault", len(args), 1, 2)
         self.install_dict_keys_match_guard()
         value = self.maybe_getitem_const(args[0])
