@@ -689,10 +689,16 @@ void ProcessGroupNCCL::revokeNcclComm() {
   detachMemoryHook();
   retireComm();
   if (nccl_comm_) {
-    // Best-effort: this may run on the timeout watchdog thread, so log instead
-    // of throwing on failure (the communicator is already being torn down).
-    NCCL_CHECK_IGNORE(
-        nccl_api_, nccl_api_->commRevoke(nccl_comm_), "NCCL Revoke failed");
+    try {
+      waitForNcclCompletion(
+          *nccl_api_,
+          nccl_comm_,
+          nccl_api_->commRevoke(nccl_comm_),
+          options_c10d_->timeout,
+          "NCCL Revoke failed");
+    } catch (const std::exception& e) {
+      LOG(ERROR) << e.what();
+    }
   }
 }
 
