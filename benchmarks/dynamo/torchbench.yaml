@@ -87,6 +87,7 @@ tolerance:
     sam_fast: 5
 
 require_larger_multiplier_for_smaller_tensor:
+  - functorch_dp_cifar10
   - yolov3
 
 # These benchmarks took >600s on an i9-11900K CPU

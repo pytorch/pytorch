@@ -71,7 +71,8 @@ class _PollingWork(Work):
                 raise TimeoutError(
                     "transport wait timed out; operation remains pending"
                 )
-            time.sleep(0)
+            # Yielding alone would immediately poll again and consume a CPU core.
+            time.sleep(0.001)
         if self._error is not None:
             raise self._error
         return True
@@ -84,7 +85,7 @@ class _PollingWork(Work):
 
     async def _drive_future(self) -> None:
         while not self.is_completed():
-            await asyncio.sleep(0)
+            await asyncio.sleep(0.001)
 
     def get_future(self) -> torch.futures.Future[list[torch.Tensor]]:
         if self.is_completed():
