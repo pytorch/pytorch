@@ -6008,6 +6008,41 @@ def _grid_sampler_2d_cpu_fallback_backward_meta(
     return (grad_input, grad_grid)
 
 
+def _rocm_grid_sampler_2d_backward_returns_channels_last(grad_output, input, grid):
+    """Mirror the ROCm eager path's choice of grad_input memory format.
+
+    Keep in sync with rocm_grid_sampler_2d_backward_use_channel_lane in
+    aten/src/ATen/native/cuda/GridSampler.h and the allocation in
+    aten/src/ATen/native/cuda/GridSampler.cpp -- including the launch-extent
+    test, which is part of eligibility and not merely a dispatch detail. On a
+    ROCm build, eager returns a channels-last grad_input for eligible
+    channels-last inputs, so a meta result that always claimed contiguous would
+    hand tracing and Inductor the wrong output strides.
+    """
+    # device_hint, not input.device: a meta kernel is handed meta tensors even
+    # under FakeTensorMode, so input.device.type is always "meta" here and a
+    # direct device check can never fire.
+    if torch.version.hip is None or device_hint(input) != "cuda":
+        return False
+    if input.dim() != 4 or grid.dim() != 4:
+        return False
+    num_channels = input.shape[1]
+    if num_channels < 4:
+        return False
+    if not (
+        input.is_contiguous(memory_format=torch.channels_last)
+        and grad_output.is_contiguous(memory_format=torch.channels_last)
+    ):
+        return False
+    nblocks_nhw = input.shape[0] * grid.shape[1] * grid.shape[2]
+    if nblocks_nhw <= 0 or nblocks_nhw > 2**31 - 1:
+        return False
+    lanes = 1
+    while lanes < num_channels and lanes < 256:
+        lanes <<= 1
+    return nblocks_nhw <= (2**32 - 1) // lanes
+
+
 @register_meta(aten.grid_sampler_2d_backward.default)
 def grid_sampler_2d_backward_meta(
     grad_output,
@@ -6020,7 +6055,12 @@ def grid_sampler_2d_backward_meta(
 ):
     input_requires_grad = output_mask[0]
     if input_requires_grad:
-        grad_input = torch.zeros_like(input, memory_format=torch.contiguous_format)
+        if _rocm_grid_sampler_2d_backward_returns_channels_last(
+            grad_output, input, grid
+        ):
+            grad_input = torch.zeros_like(input, memory_format=torch.preserve_format)
+        else:
+            grad_input = torch.zeros_like(input, memory_format=torch.contiguous_format)
     else:
         grad_input = None
     grad_grid = torch.empty_like(grid, memory_format=torch.contiguous_format)

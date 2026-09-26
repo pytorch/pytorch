@@ -12,6 +12,7 @@
 #include <ATen/Dispatch.h>
 #include <c10/macros/Macros.h>
 #include <cmath>
+#include <limits>
 
 namespace at::native {
 
@@ -383,6 +384,293 @@ namespace {
       }
     }
   }
+
+// ROCm-specific 2D backward kernel for grid_sample
+// - The generic kernel launches N*H*W threads, each looping over C and issuing
+//   four atomics per channel.
+// - Here one block handles one (n, h, w) and its lanes stride over the channel
+//   dimension, so the per-channel gathers and atomics are issued in parallel
+//   and, for channels-last tensors, coalesce across the wave.
+// - Each lane accumulates the grad_grid contribution of the channels it owns;
+//   the block reduces those once, after the channel loop, and lane 0 stores it.
+// - Eligibility -- channel count, layout and launch extent -- lives in the
+//   shared predicate; see Note [ROCm grid_sampler_2d backward channel-lane
+//   eligibility] in GridSampler.h.
+#ifdef USE_ROCM
+  // Note [ROCm grid_sampler_2d backward wide offset arithmetic]
+  // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  // The shared safe_add_2d / add_value_bounded / within_bounds_2d helpers take
+  // coordinates and spatial strides as `int`, so `h * sH + w * sW` is evaluated
+  // in 32 bits before being added to the 64-bit NC_offset -- even when the
+  // 64-bit-index kernel was selected. That is latent upstream, where a
+  // contiguous grad_input has sH == W; a channels-last grad_input has
+  // sH == W * C, so the product overflows C times sooner. For FP32 the generic
+  // fastAtomicAdd overload also ignores memory_span, so an overflowed offset is
+  // an unchecked out-of-bounds atomic.
+  //
+  // These ROCm-local copies keep every term in index_t. The shared helpers are
+  // deliberately left alone: they serve the CUDA path too, so widening them is a
+  // separate change with its own review surface.
+  template <typename index_t>
+  __forceinline__ __device__
+  bool rocm_within_bounds_2d(index_t h, index_t w, index_t H, index_t W) {
+    return h >= 0 && h < H && w >= 0 && w < W;
+  }
+
+  template <typename scalar_t, typename index_t>
+  __forceinline__ __device__
+  void rocm_safe_add_2d(scalar_t* data, index_t h, index_t w,
+                        index_t sH, index_t sW, index_t H, index_t W,
+                        scalar_t delta, index_t NC_offset, index_t memory_span) {
+    if (rocm_within_bounds_2d(h, w, H, W)) {
+      fastAtomicAdd(data, NC_offset + h * sH + w * sW, memory_span, delta, true);
+    }
+  }
+
+  template <typename scalar_t, typename index_t>
+  __forceinline__ __device__
+  void rocm_add_value_bounded(scalar_t* data, scalar_t x, scalar_t y,
+                              index_t W, index_t H, index_t sW, index_t sH,
+                              scalar_t delta, GridSamplerPadding padding_mode,
+                              bool align_corners, index_t NC_offset,
+                              index_t memory_span) {
+    x = compute_coordinates(x, static_cast<int>(W), padding_mode, align_corners);
+    y = compute_coordinates(y, static_cast<int>(H), padding_mode, align_corners);
+    rocm_safe_add_2d(data, static_cast<index_t>(y), static_cast<index_t>(x),
+                     sH, sW, H, W, delta, NC_offset, memory_span);
+  }
+
+  // ROCm channel-lane mapping, revision 2 (AIPYTORCH-1219).
+  //
+  // Same work decomposition as grid_sampler_2d_backward_kernel_rocm_channel_lane
+  // -- one block per (n, h, w), lanes striding over channels -- with the
+  // grad_grid reduction fixed. In that earlier revision lane 0 gathered four
+  // input neighbours for every channel serially while the other lanes idled,
+  // and repeated the whole gather once per channel-loop iteration when
+  // C > blockDim. On gfx1250 it measured slower than the generic kernel on the
+  // recorded workload; this revision measured faster than both.
+  //
+  // Here each lane accumulates the grad_grid contribution for the channels it
+  // already owns -- reusing the neighbour coordinates and weights it computed
+  // for the scatter -- and the block reduces once, after the loop. With
+  // channels-last input those per-lane gathers are coalesced across the wave.
+  //
+  // Requires blockDim.x to be a power of two (the launcher guarantees it) so the
+  // tree reduction below is exact.
+  template <typename scalar_t, typename index_t>
+  C10_LAUNCH_BOUNDS_1(256)
+  __global__ void grid_sampler_2d_backward_kernel_rocm_channel_lane_v2(
+      const index_t nblocks_nhw,  // N * out_H * out_W
+      TensorInfo<const scalar_t, index_t> grad_output,
+      TensorInfo<const scalar_t, index_t> input,
+      TensorInfo<const scalar_t, index_t> grid,
+      TensorInfo<scalar_t, index_t> grad_input,
+      TensorInfo<scalar_t, index_t> grad_grid,
+      const GridSamplerInterpolation interpolation_mode,
+      const GridSamplerPadding padding_mode,
+      bool align_corners,
+      const index_t grad_input_memory_span,
+      const bool input_requires_grad) {
+    using opmath_t = at::opmath_type<scalar_t>;
+    constexpr int kMaxLanes = 256;
+
+    const index_t C = input.sizes[1];
+    const index_t inp_H = input.sizes[2];
+    const index_t inp_W = input.sizes[3];
+    const index_t out_H = grid.sizes[1];
+    const index_t out_W = grid.sizes[2];
+
+    const index_t inp_sN = input.strides[0];
+    const index_t inp_sC = input.strides[1];
+    const index_t inp_sH = input.strides[2];
+    const index_t inp_sW = input.strides[3];
+
+    const index_t grid_sN = grid.strides[0];
+    const index_t grid_sH = grid.strides[1];
+    const index_t grid_sW = grid.strides[2];
+    const index_t grid_sCoor = grid.strides[3];
+
+    const index_t gOut_sN = grad_output.strides[0];
+    const index_t gOut_sC = grad_output.strides[1];
+    const index_t gOut_sH = grad_output.strides[2];
+    const index_t gOut_sW = grad_output.strides[3];
+
+    index_t gInp_sN = 0, gInp_sC = 0, gInp_sH = 0, gInp_sW = 0;
+    if (input_requires_grad) {
+      gInp_sN = grad_input.strides[0];
+      gInp_sC = grad_input.strides[1];
+      gInp_sH = grad_input.strides[2];
+      gInp_sW = grad_input.strides[3];
+    }
+
+    const index_t gGrid_sN = grad_grid.strides[0];
+    const index_t gGrid_sH = grad_grid.strides[1];
+    const index_t gGrid_sW = grad_grid.strides[2];
+
+    const index_t nhw = blockIdx.x;
+    if (nhw >= nblocks_nhw) return;
+    const index_t w =  nhw % out_W;
+    const index_t h = (nhw / out_W) % out_H;
+    const index_t n =  nhw / (out_W * out_H);
+
+    // Same address for every lane; a plain load broadcasts from cache.
+    const index_t grid_off = n * grid_sN + h * grid_sH + w * grid_sW;
+    const scalar_t x = grid.data[grid_off];
+    const scalar_t y = grid.data[grid_off + grid_sCoor];
+
+    // None of this depends on the channel, so hoist it out of the loop.
+    scalar_t gix_mult, giy_mult;
+    const scalar_t ix = grid_sampler_compute_source_index_set_grad(
+        x, inp_W, padding_mode, align_corners, &gix_mult);
+    const scalar_t iy = grid_sampler_compute_source_index_set_grad(
+        y, inp_H, padding_mode, align_corners, &giy_mult);
+
+    opmath_t gix_acc = static_cast<opmath_t>(0);
+    opmath_t giy_acc = static_cast<opmath_t>(0);
+
+    if (interpolation_mode == GridSamplerInterpolation::Bilinear) {
+      const index_t ix_nw = static_cast<index_t>(std::floor(ix));
+      const index_t iy_nw = static_cast<index_t>(std::floor(iy));
+      const index_t ix_ne = ix_nw + 1, iy_ne = iy_nw;
+      const index_t ix_sw = ix_nw,     iy_sw = iy_nw + 1;
+      const index_t ix_se = ix_nw + 1, iy_se = iy_nw + 1;
+
+      const scalar_t nw = (ix_se - ix) * (iy_se - iy);
+      const scalar_t ne = (ix - ix_sw) * (iy_sw - iy);
+      const scalar_t sw = (ix_ne - ix) * (iy - iy_ne);
+      const scalar_t se = (ix - ix_nw) * (iy - iy_nw);
+
+      for (index_t c = threadIdx.x; c < C; c += blockDim.x) {
+        const scalar_t gOut =
+            grad_output.data[n * gOut_sN + c * gOut_sC + h * gOut_sH + w * gOut_sW];
+
+        if (input_requires_grad) {
+          const index_t NC_offset = n * gInp_sN + c * gInp_sC;
+          rocm_safe_add_2d(grad_input.data, iy_nw, ix_nw, gInp_sH, gInp_sW, inp_H, inp_W, nw * gOut, NC_offset, grad_input_memory_span);
+          rocm_safe_add_2d(grad_input.data, iy_ne, ix_ne, gInp_sH, gInp_sW, inp_H, inp_W, ne * gOut, NC_offset, grad_input_memory_span);
+          rocm_safe_add_2d(grad_input.data, iy_sw, ix_sw, gInp_sH, gInp_sW, inp_H, inp_W, sw * gOut, NC_offset, grad_input_memory_span);
+          rocm_safe_add_2d(grad_input.data, iy_se, ix_se, gInp_sH, gInp_sW, inp_H, inp_W, se * gOut, NC_offset, grad_input_memory_span);
+        }
+
+        // This lane's grad_grid contribution for its own channel.
+        const scalar_t* inp_ptr_NC = input.data + n * inp_sN + c * inp_sC;
+        if (rocm_within_bounds_2d(iy_nw, ix_nw, inp_H, inp_W)) {
+          const scalar_t v = inp_ptr_NC[iy_nw * inp_sH + ix_nw * inp_sW];
+          gix_acc -= static_cast<opmath_t>(v * (iy_se - iy) * gOut);
+          giy_acc -= static_cast<opmath_t>(v * (ix_se - ix) * gOut);
+        }
+        if (rocm_within_bounds_2d(iy_ne, ix_ne, inp_H, inp_W)) {
+          const scalar_t v = inp_ptr_NC[iy_ne * inp_sH + ix_ne * inp_sW];
+          gix_acc += static_cast<opmath_t>(v * (iy_sw - iy) * gOut);
+          giy_acc -= static_cast<opmath_t>(v * (ix - ix_sw) * gOut);
+        }
+        if (rocm_within_bounds_2d(iy_sw, ix_sw, inp_H, inp_W)) {
+          const scalar_t v = inp_ptr_NC[iy_sw * inp_sH + ix_sw * inp_sW];
+          gix_acc -= static_cast<opmath_t>(v * (iy - iy_ne) * gOut);
+          giy_acc += static_cast<opmath_t>(v * (ix_ne - ix) * gOut);
+        }
+        if (rocm_within_bounds_2d(iy_se, ix_se, inp_H, inp_W)) {
+          const scalar_t v = inp_ptr_NC[iy_se * inp_sH + ix_se * inp_sW];
+          gix_acc += static_cast<opmath_t>(v * (iy - iy_nw) * gOut);
+          giy_acc += static_cast<opmath_t>(v * (ix - ix_nw) * gOut);
+        }
+      }
+    } else if (interpolation_mode == GridSamplerInterpolation::Nearest) {
+      if (input_requires_grad) {
+        const index_t ix_nearest = static_cast<index_t>(std::nearbyint(ix));
+        const index_t iy_nearest = static_cast<index_t>(std::nearbyint(iy));
+        for (index_t c = threadIdx.x; c < C; c += blockDim.x) {
+          const scalar_t gOut =
+              grad_output.data[n * gOut_sN + c * gOut_sC + h * gOut_sH + w * gOut_sW];
+          const index_t NC_offset = n * gInp_sN + c * gInp_sC;
+          rocm_safe_add_2d(grad_input.data, iy_nearest, ix_nearest, gInp_sH, gInp_sW,
+                      inp_H, inp_W, gOut, NC_offset, grad_input_memory_span);
+        }
+      }
+      // grad_grid is zero for nearest; accumulators stay at zero.
+    } else {  // Bicubic
+      scalar_t ix_mult, iy_mult;
+      const scalar_t ix_unscaled = grid_sampler_unnormalize_set_grad(x, inp_W, align_corners, &ix_mult);
+      const scalar_t iy_unscaled = grid_sampler_unnormalize_set_grad(y, inp_H, align_corners, &iy_mult);
+      gix_mult = ix_mult;
+      giy_mult = iy_mult;
+
+      const scalar_t ix_nw = std::floor(ix_unscaled);
+      const scalar_t iy_nw = std::floor(iy_unscaled);
+      const scalar_t tx = ix_unscaled - ix_nw;
+      const scalar_t ty = iy_unscaled - iy_nw;
+
+      scalar_t x_coeffs[4], y_coeffs[4], x_coeffs_grad[4], y_coeffs_grad[4];
+      get_cubic_upsampling_coefficients<scalar_t>(x_coeffs, tx);
+      get_cubic_upsampling_coefficients<scalar_t>(y_coeffs, ty);
+      get_cubic_coefficients_grad<scalar_t>(x_coeffs_grad, tx);
+      get_cubic_coefficients_grad<scalar_t>(y_coeffs_grad, ty);
+
+      for (index_t c = threadIdx.x; c < C; c += blockDim.x) {
+        const scalar_t gOut =
+            grad_output.data[n * gOut_sN + c * gOut_sC + h * gOut_sH + w * gOut_sW];
+        const scalar_t* inp_ptr_NC = input.data + n * inp_sN + c * inp_sC;
+
+        if (input_requires_grad) {
+          const index_t NC_offset = n * gInp_sN + c * gInp_sC;
+          #pragma unroll 4
+          for (index_t i = 0; i < 4; ++i) {
+            #pragma unroll 4
+            for (index_t j = 0; j < 4; ++j) {
+              rocm_add_value_bounded<scalar_t, index_t>(
+                  grad_input.data, ix_nw - 1 + i, iy_nw - 1 + j, inp_W, inp_H,
+                  gInp_sW, gInp_sH, gOut * x_coeffs[i] * y_coeffs[j],
+                  padding_mode, align_corners, NC_offset, grad_input_memory_span);
+            }
+          }
+        }
+
+        #pragma unroll 4
+        for (index_t i = 0; i < 4; ++i) {
+          #pragma unroll 4
+          for (index_t j = 0; j < 4; ++j) {
+            const scalar_t val = get_value_bounded<scalar_t>(
+                inp_ptr_NC, static_cast<scalar_t>(ix_nw - 1 + i),
+                static_cast<scalar_t>(iy_nw - 1 + j), inp_W, inp_H, inp_sW, inp_sH,
+                padding_mode, align_corners);
+            gix_acc -= static_cast<opmath_t>(val * x_coeffs_grad[i] * y_coeffs[j] * gOut);
+            giy_acc -= static_cast<opmath_t>(val * y_coeffs_grad[j] * x_coeffs[i] * gOut);
+          }
+        }
+      }
+    }
+
+    // Single block-wide reduction after the channel loop, so it runs once
+    // regardless of C and every lane contributes the channels it owns.
+    __shared__ opmath_t s_gix[kMaxLanes];
+    __shared__ opmath_t s_giy[kMaxLanes];
+    s_gix[threadIdx.x] = gix_acc;
+    s_giy[threadIdx.x] = giy_acc;
+    __syncthreads();
+    for (unsigned int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
+      if (threadIdx.x < stride) {
+        s_gix[threadIdx.x] += s_gix[threadIdx.x + stride];
+        s_giy[threadIdx.x] += s_giy[threadIdx.x + stride];
+      }
+      __syncthreads();
+    }
+
+    if (threadIdx.x == 0) {
+      scalar_t* gGrid_ptr = grad_grid.data + n * gGrid_sN + h * gGrid_sH + w * gGrid_sW;
+      if (interpolation_mode == GridSamplerInterpolation::Nearest) {
+        // Store an exact zero, as the generic kernel does. Going through the
+        // common `mult * accumulator` path would compute inf * 0 == NaN whenever
+        // the coordinate multiplier overflows the dtype -- e.g. Half with
+        // inp_W == 65536, where static_cast<Half>(65536) is already inf.
+        gGrid_ptr[0] = static_cast<scalar_t>(0);
+        gGrid_ptr[1] = static_cast<scalar_t>(0);
+      } else {
+        gGrid_ptr[0] = static_cast<scalar_t>(gix_mult * static_cast<scalar_t>(s_gix[0]));
+        gGrid_ptr[1] = static_cast<scalar_t>(giy_mult * static_cast<scalar_t>(s_giy[0]));
+      }
+    }
+  }
+#endif  // USE_ROCM
 
 // Note [Passing pointer and offset to fastAtomicAdd]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1065,6 +1353,62 @@ void launch_grid_sampler_3d_forward_kernel(
   }
 }
 
+// Portable launcher: one thread per (n, h, w), looping over channels. This is
+// the long-standing implementation, factored out of the launcher below so that
+// the ROCm channel-parallel mappings can delegate to it for shapes they do not
+// cover, and so a diagnosis build can select it explicitly. (AIPYTORCH-1219)
+static void launch_grid_sampler_2d_backward_generic(
+    const TensorBase &grad_input, const TensorBase &grad_grid,
+    const TensorBase &grad_output, const TensorBase &input,
+    const TensorBase &grid, int64_t interpolation_mode, int64_t padding_mode,
+    bool align_corners, bool input_requires_grad) {
+  const auto N = input.size(0);
+  const auto H = grid.size(1);
+  const auto W = grid.size(2);
+  const int64_t count = N * H * W;
+  if (count <= 0) {
+    return;
+  }
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+    ScalarType::Half, ScalarType::BFloat16,
+    input.scalar_type(), "grid_sampler_2d_backward_cuda", [&] {
+    if (canUse32BitIndexMath(input) && canUse32BitIndexMath(grid) &&
+        canUse32BitIndexMath(grad_output)) {
+      grid_sampler_2d_backward_kernel<scalar_t>
+        <<<GET_BLOCKS(count, 256), 256, 0, at::cuda::getCurrentCUDAStream()>>>(
+          static_cast<int>(count),
+          getTensorInfo<const scalar_t, int>(grad_output),
+          getTensorInfo<const scalar_t, int>(input),
+          getTensorInfo<const scalar_t, int>(grid),
+          input_requires_grad ? getTensorInfo<scalar_t, int>(grad_input) : TensorInfo<scalar_t, int>(),
+          getTensorInfo<scalar_t, int>(grad_grid),
+          static_cast<GridSamplerInterpolation>(interpolation_mode),
+          static_cast<GridSamplerPadding>(padding_mode),
+          align_corners,
+          /*grad_input_memory_span =*/input_requires_grad ? static_cast<int>(grad_input.numel()) : 0,
+          input_requires_grad);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+    } else {
+      grid_sampler_2d_backward_kernel<scalar_t>
+        <<<GET_BLOCKS(count, 256), 256, 0, at::cuda::getCurrentCUDAStream()>>>(
+          count,
+          getTensorInfo<const scalar_t, int64_t>(grad_output),
+          getTensorInfo<const scalar_t, int64_t>(input),
+          getTensorInfo<const scalar_t, int64_t>(grid),
+          input_requires_grad ? getTensorInfo<scalar_t, int64_t>(grad_input) : TensorInfo<scalar_t, int64_t>(),
+          getTensorInfo<scalar_t, int64_t>(grad_grid),
+          static_cast<GridSamplerInterpolation>(interpolation_mode),
+          static_cast<GridSamplerPadding>(padding_mode),
+          align_corners,
+          /*grad_input_memory_span =*/input_requires_grad ? grad_input.numel() : 0,
+          input_requires_grad);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+    }
+  });
+}
+
+
+
 void launch_grid_sampler_2d_backward_kernel(
     const TensorBase &grad_input, const TensorBase &grad_grid,
     const TensorBase &grad_output, const TensorBase &input,
@@ -1077,54 +1421,97 @@ void launch_grid_sampler_2d_backward_kernel(
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("grid_sampler_2d_backward_cuda");
-  auto N = input.size(0);
-  auto H = grid.size(1);
-  auto W = grid.size(2);
 
   // If `input` gradient is not required, we skip computing it -- not needing to create
   // the tensor to hold the gradient can markedly increase performance. (`grid` gradient
   // is always computed.)
-  auto input_requires_grad = output_mask[0];
+  const auto input_requires_grad = output_mask[0];
 
-  int64_t count = N * H * W;
-  if (count > 0) {
-    AT_DISPATCH_FLOATING_TYPES_AND2(
+#ifdef USE_ROCM
+  const auto N = input.size(0);
+  const auto C = input.size(1);
+  const auto H = grid.size(1);
+  const auto W = grid.size(2);
+  const int64_t nblocks_nhw = N * H * W;
+
+  // See Note [ROCm grid_sampler_2d backward channel-lane eligibility].
+  // grad_input's format was chosen by the same predicate in
+  // grid_sampler_2d_backward_cuda, so the two stay consistent.
+  //
+  // The integer tests come first on purpose. Inspecting three tensors' memory
+  // formats costs a few microseconds, which is invisible next to the workloads
+  // this kernel targets but measurable on the small shapes that will never be
+  // eligible anyway. C >= 4 is the loosest threshold the predicate can use, so
+  // anything below it skips the stride inspection entirely.
+  //
+  // Every eligibility condition lives in the shared predicate, including the
+  // launch-extent test -- see Note [ROCm grid_sampler_2d backward channel-lane
+  // eligibility]. The allocation in GridSampler.cpp already made the same call,
+  // so a fallback here can never be handed a channels-last grad_input.
+  bool eligible = C >= 4;
+  if (eligible) {
+    const bool channels_last =
+        input.is_contiguous(at::MemoryFormat::ChannelsLast) &&
+        grad_output.is_contiguous(at::MemoryFormat::ChannelsLast) &&
+        (!input_requires_grad ||
+         grad_input.is_contiguous(at::MemoryFormat::ChannelsLast));
+    eligible = rocm_grid_sampler_2d_backward_use_channel_lane(
+        C, channels_last, nblocks_nhw);
+  }
+  if (!eligible) {
+    launch_grid_sampler_2d_backward_generic(
+        grad_input, grad_grid, grad_output, input, grid, interpolation_mode,
+        padding_mode, align_corners, input_requires_grad);
+    return;
+  }
+
+  if (nblocks_nhw <= 0) {
+    return;
+  }
+
+  const int lanes =
+      static_cast<int>(rocm_grid_sampler_2d_backward_lanes(C));
+  const auto blocks = static_cast<unsigned int>(nblocks_nhw);
+  AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::Half, ScalarType::BFloat16,
       input.scalar_type(), "grid_sampler_2d_backward_cuda", [&] {
-      if (canUse32BitIndexMath(input) && canUse32BitIndexMath(grid) &&
-          canUse32BitIndexMath(grad_output)) {
-        grid_sampler_2d_backward_kernel<scalar_t>
-          <<<GET_BLOCKS(count, 256), 256, 0, at::cuda::getCurrentCUDAStream()>>>(
-            static_cast<int>(count),
-            getTensorInfo<const scalar_t, int>(grad_output),
-            getTensorInfo<const scalar_t, int>(input),
-            getTensorInfo<const scalar_t, int>(grid),
-            input_requires_grad ? getTensorInfo<scalar_t, int>(grad_input) : TensorInfo<scalar_t, int>(),
-            getTensorInfo<scalar_t, int>(grad_grid),
-            static_cast<GridSamplerInterpolation>(interpolation_mode),
-            static_cast<GridSamplerPadding>(padding_mode),
-            align_corners,
-            /*grad_input_memory_span =*/input_requires_grad ? static_cast<int>(grad_input.numel()) : 0,
-            input_requires_grad);
-        C10_CUDA_KERNEL_LAUNCH_CHECK();
-      } else {
-        grid_sampler_2d_backward_kernel<scalar_t>
-          <<<GET_BLOCKS(count, 256), 256, 0, at::cuda::getCurrentCUDAStream()>>>(
-            count,
-            getTensorInfo<const scalar_t, int64_t>(grad_output),
-            getTensorInfo<const scalar_t, int64_t>(input),
-            getTensorInfo<const scalar_t, int64_t>(grid),
-            input_requires_grad ? getTensorInfo<scalar_t, int64_t>(grad_input) : TensorInfo<scalar_t, int64_t>(),
-            getTensorInfo<scalar_t, int64_t>(grad_grid),
-            static_cast<GridSamplerInterpolation>(interpolation_mode),
-            static_cast<GridSamplerPadding>(padding_mode),
-            align_corners,
-            /*grad_input_memory_span =*/input_requires_grad ? grad_input.numel() : 0,
-            input_requires_grad);
-        C10_CUDA_KERNEL_LAUNCH_CHECK();
-      }
-    });
-  }
+    if (canUse32BitIndexMath(input) && canUse32BitIndexMath(grid) &&
+        canUse32BitIndexMath(grad_output)) {
+      grid_sampler_2d_backward_kernel_rocm_channel_lane_v2<scalar_t, int>
+          <<<blocks, lanes, 0, at::cuda::getCurrentCUDAStream()>>>(
+              static_cast<int>(nblocks_nhw),
+              getTensorInfo<const scalar_t, int>(grad_output),
+              getTensorInfo<const scalar_t, int>(input),
+              getTensorInfo<const scalar_t, int>(grid),
+              input_requires_grad ? getTensorInfo<scalar_t, int>(grad_input) : TensorInfo<scalar_t, int>(),
+              getTensorInfo<scalar_t, int>(grad_grid),
+              static_cast<GridSamplerInterpolation>(interpolation_mode),
+              static_cast<GridSamplerPadding>(padding_mode),
+              align_corners,
+              input_requires_grad ? static_cast<int>(grad_input.numel()) : 0,
+              input_requires_grad);
+    } else {
+      grid_sampler_2d_backward_kernel_rocm_channel_lane_v2<scalar_t, int64_t>
+          <<<blocks, lanes, 0, at::cuda::getCurrentCUDAStream()>>>(
+              nblocks_nhw,
+              getTensorInfo<const scalar_t, int64_t>(grad_output),
+              getTensorInfo<const scalar_t, int64_t>(input),
+              getTensorInfo<const scalar_t, int64_t>(grid),
+              input_requires_grad ? getTensorInfo<scalar_t, int64_t>(grad_input) : TensorInfo<scalar_t, int64_t>(),
+              getTensorInfo<scalar_t, int64_t>(grad_grid),
+              static_cast<GridSamplerInterpolation>(interpolation_mode),
+              static_cast<GridSamplerPadding>(padding_mode),
+              align_corners,
+              input_requires_grad ? grad_input.numel() : 0,
+              input_requires_grad);
+    }
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  });
+#else  // CUDA path
+  launch_grid_sampler_2d_backward_generic(
+      grad_input, grad_grid, grad_output, input, grid, interpolation_mode,
+      padding_mode, align_corners, input_requires_grad);
+#endif  // USE_ROCM
 }
 
 void launch_grid_sampler_3d_backward_kernel(
