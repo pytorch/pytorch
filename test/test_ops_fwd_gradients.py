@@ -143,7 +143,6 @@ class TestFwdGradients(TestGradients):
             skip("_batch_norm_with_update"),
             skip("nn.functional.scaled_dot_product_attention"),
             xfail("bernoulli"),
-            xfail("logcumsumexp", dtypes=(torch.complex128,)),
             xfail("nn.functional.feature_alpha_dropout", variant_name="with_train"),
             skip("nn.functional.multi_head_attention_forward"),
             xfail("scatter_reduce", variant_name="prod"),
@@ -177,6 +176,32 @@ class TestFwdGradients(TestGradients):
         self._forward_grad_helper(
             device, dtype, op, self._get_safe_inplace(op.get_inplace()), is_inplace=True
         )
+
+    def test_logcumsumexp_jvp_large_range(self, device):
+        # Regression for #196705: early-prefix JVP must not underflow to 0 when
+        # a later element along dim is much larger.
+        dtype = torch.float64
+
+        def f(t):
+            x = torch.stack((t, 1 - t, 2 * t + 3, -t, t + 2, 3 * t - 1)).reshape(2, 3)
+            w = torch.tensor([[1, 2, -1], [3, -2, 4]], dtype=t.dtype, device=t.device)
+            return (torch.logcumsumexp(x, dim=-1) * w).sum()
+
+        t = torch.tensor(-400.0, dtype=dtype, device=device)
+        _, actual = torch.func.jvp(f, (t,), (torch.ones_like(t),))
+        self.assertEqual(actual, torch.tensor(-5.0, dtype=dtype, device=device))
+
+    def test_logcumsumexp_jvp_nan_tangent(self, device):
+        # Pos/neg log-domain split must not drop NaN tangents (review on #196741).
+        dtype = torch.float64
+        x = torch.zeros(3, dtype=dtype, device=device)
+        t = torch.tensor(
+            [float("nan"), 1.0, 1.0], dtype=dtype, device=device
+        )
+        _, j = torch.func.jvp(
+            lambda y: y.logcumsumexp(0), (x,), (t,)
+        )
+        self.assertTrue(torch.isnan(j).all())
 
 
 instantiate_device_type_tests(TestFwdGradients, globals(), allow_xpu=True)
