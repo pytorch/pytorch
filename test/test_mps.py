@@ -5712,6 +5712,44 @@ class TestMPS(TestCaseMPS):
             self.assertEqual(res.dtype, ref.dtype)
             self.assertEqual(res, ref)
 
+    # batch_norm only accepts a mixed pair when the parameters are float32; other combinations are
+    # rejected by the reference with "expect parameter to have scalar type of Float".
+    @parametrize("in_dtype", [torch.float16, torch.bfloat16])
+    def test_batch_norm_mixed_dtype(self, in_dtype):
+        # Regression test for https://github.com/pytorch/pytorch/issues/154887
+        # float32 running stats against a half input: the inference path fed the stats into
+        # normalizationWithTensor uncast, and its backward subtracted them from the input, both of
+        # which abort inside MPSGraph's verifier rather than raising. Training mode is excluded
+        # on purpose: it was never broken, and it differs by a few ulps because MPS accumulates the
+        # batch stats at the input dtype where the reference uses float (see the "Accumulate type?"
+        # TODO in batch_norm_mps), which is a separate issue from the dtype reinterpretation here.
+        cpu_x = torch.rand((2, 3, 4), dtype=in_dtype)
+        cpu_p = [torch.rand((3,)) for _ in range(4)]
+        cpu_p[1] += 1  # running_var must be positive
+
+        def run(device):
+            x = cpu_x.to(device).clone().requires_grad_()
+            mean, var, weight, bias = (t.to(device).clone() for t in cpu_p)
+            weight.requires_grad_()
+            bias.requires_grad_()
+            out = F.batch_norm(x, mean, var, weight=weight, bias=bias)
+            out.sum().backward()
+            return out, x.grad, weight.grad, bias.grad
+
+        # The output, grad_input and grad_bias match the reference bit-exactly; grad_weight is a
+        # float32 reduction and lands within an ulp of it, so default tolerances apply there.
+        for res, ref in zip(run("mps"), run("cpu")):
+            self.assertEqual(res.dtype, ref.dtype)
+            self.assertEqual(res, ref)
+
+    def test_batch_norm_mixed_dtype_no_training_op(self):
+        # the _native_batch_norm_legit_no_training overload from the issue report
+        cpu_args = (torch.rand((2, 3, 4), dtype=torch.float16), None, None,
+                    torch.rand((3,), dtype=torch.float32), torch.rand((3,), dtype=torch.float32) + 1)
+        mps_args = tuple(a.to("mps") if a is not None else None for a in cpu_args)
+        op = torch.ops.aten._native_batch_norm_legit_no_training.default
+        self.assertEqual(op(*mps_args, 0.1, 1e-5)[0], op(*cpu_args, 0.1, 1e-5)[0])
+
     def test_addbmm_mixed_dtype_errors(self):
         # addbmm has no promotion on any backend, so it must raise rather than abort
         m = torch.ones(2, 2, device="mps")
