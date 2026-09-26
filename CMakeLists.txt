@@ -763,6 +763,18 @@ if(MSVC)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Zc:__cplusplus")
   set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler /Zc:__cplusplus -Xcompiler /Zc:preprocessor")
 
+  # Since VS 2022 17.10 (MSVC 14.40) std::mutex has a constexpr constructor
+  # that zero-initializes the mutex and relies on msvcp140.dll >= 14.40 to
+  # cope with that layout. If an older msvcp140.dll is already loaded in the
+  # process (stale VC redist, or a copy bundled by another package such as
+  # PyQt), the first lock during c10.dll static init faults inside DllMain and
+  # `import torch` fails with WinError 1114. Opt back into the classic
+  # constructor so the wheels work with any 14.x runtime.
+  # See https://github.com/pytorch/pytorch/issues/169429 and
+  # https://github.com/microsoft/STL/issues/4730
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /D_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR")
+  set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -D_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR")
+
   set(CMAKE_NINJA_CMCLDEPS_RC OFF)
   if(MSVC_Z7_OVERRIDE)
     # CMake set debug flags to use /Z7
