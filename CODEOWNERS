@@ -942,6 +942,7 @@
 # /codex_setup.sh
 # /defs.bzl
 # /docker.Makefile
+# /mkldnn.bzl
 # /pt_ops.bzl
 # /pt_template_srcs.bzl
 # /pyproject.toml
