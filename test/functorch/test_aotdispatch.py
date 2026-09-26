@@ -5352,6 +5352,19 @@ def forward(self, tangents_1):
 
         self._assert_no_extra_refs(refcount_box)
 
+    def test_input_mutation_with_returned_input(self):
+        def f(x, w):
+            w.mul_(2)
+            x.add_(1)
+            return x
+
+        x = torch.full((3,), 10.0)
+        w = torch.full((3,), 3.0, requires_grad=True) * 1.0
+        res = torch.compile(f, backend="aot_eager")(x, w)
+
+        self.assertEqual(w, torch.full((3,), 6.0))
+        self.assertEqual(res, torch.full((3,), 11.0))
+
 
 def extract_graph(fx_g, _, graph_cell):
     graph_cell[0] = fx_g
