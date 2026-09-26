@@ -95,11 +95,6 @@ def main() -> None:
         if "runner" not in entry:
             continue
         clean = strip_prefix(entry["runner"].strip(), args.prefix)
-        # Workflows are moving to naming the ARC runner directly, so a label
-        # that is already an ARC name needs no translation. Leave it exactly as
-        # the workflow wrote it, prefix included -- note this is the opposite of
-        # arc.yaml's identity entries below, which deliberately drop the prefix
-        # because the runners they cover (ROCm, XPU, B200) are never prefixed.
         if clean not in mapping:
             if clean.startswith("l-"):
                 continue
