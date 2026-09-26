@@ -376,7 +376,7 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                 exit_stack.close()
                 torch._C._set_grad_enabled(prior_grad_mode)
                 torch.autograd.grad_mode._enter_inference_mode(prior_inference_mode)
-                torch.use_deterministic_algorithms(
+                torch._C._set_deterministic_algorithms(
                     prior_deterministic, warn_only=prior_warn_only
                 )
                 torch.random.set_rng_state(torch_rng_state)
