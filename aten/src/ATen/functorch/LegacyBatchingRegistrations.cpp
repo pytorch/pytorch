@@ -588,6 +588,18 @@ Tensor block_diag_batching_rule(TensorList tensors) {
   // Implementing this as a dummy for loop for now, since I'm not sure how to do it any better.
   // I'm probably not accounting for potentially multiple batched dimensions?
   auto bdim = physical_tensors[0].size(0);
+  if (bdim == 0) {
+    // The loop below would give cat nothing. One block_diag call on
+    // per-sample-shaped zeros (sum keeps dtype) yields the right empty result.
+    std::vector<Tensor> inputs_for_batch;
+    inputs_for_batch.reserve(physical_tensors.size());
+    for (const auto& t : physical_tensors) {
+      inputs_for_batch.push_back(t.sum(0, /*keepdim=*/false, t.scalar_type()));
+    }
+    auto out = at::block_diag(inputs_for_batch);
+    auto result = out.unsqueeze(0).narrow(0, 0, 0);
+    return physical_views[0].getPhysicalToLogicalMap().apply(result);
+  }
   std::vector<Tensor> batched_outputs;
   batched_outputs.reserve(bdim);
   for (const auto& i : c10::irange(bdim)) {
