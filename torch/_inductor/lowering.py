@@ -90,6 +90,7 @@ from .utils import (
     ceildiv,
     convert_symint_to_expr,
     decode_device,
+    get_current_backend,
     is_dynamic,
     is_gpu,
     is_nvidia_sm100_or_later,
@@ -8811,9 +8812,7 @@ def nextafter(x, y):
     dtype = x.get_dtype()
     is_low_precision = dtype in (torch.float16, torch.bfloat16)
     device = x.get_device()
-    is_halide = (device.type == "cpu" and config.cpu_backend == "halide") or (
-        device.type == "cuda" and config.cuda_backend == "halide"
-    )
+    is_halide = get_current_backend(device.type) == "halide"
     if dtype not in (
         torch.float16,
         torch.bfloat16,
