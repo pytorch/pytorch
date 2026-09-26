@@ -1619,16 +1619,18 @@ void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter, const std
   convert_double_scalar(other2);
 
   MPSStream* mpsStream = getCurrentMPSStream();
-  // An out= dtype differing from the (matching) inputs also needs the cast
-  // kernel: non-cast names are only registered for matching in/out pairs, and
-  // the _cast_{out} instantiations read the runtime input types anyway.
-  const auto cast_needed = (input.scalar_type() != other1.scalar_type()) ||
-      (input.scalar_type() != other2.scalar_type()) || (input.scalar_type() != out.scalar_type());
   const auto suffix = iter.is_contiguous() ? "dense" : "strided";
   // TODO: Implicitly pass both input and output types to non-cast kernels
-  const auto kernel_name = cast_needed
-      ? fmt::format("{}_{}_cast_{}", name, suffix, scalarToMetalTypeString(out))
-      : fmt::format("{}_{}_{}_{}", name, suffix, scalarToMetalTypeString(out), scalarToMetalTypeString(input));
+  const auto direct_name =
+      fmt::format("{}_{}_{}_{}", name, suffix, scalarToMetalTypeString(out), scalarToMetalTypeString(input));
+  // An out= dtype differing from the (matching) inputs also needs the cast
+  // kernel: non-cast names are only registered for outputs matching other1/other2, and
+  // the _cast_{out} instantiations read the runtime input types anyway.
+  const auto cast_needed = (other1.scalar_type() != other2.scalar_type()) ||
+      (other1.scalar_type() != out.scalar_type()) ||
+      (input.scalar_type() != other1.scalar_type() && !hasFunction(direct_name));
+  const auto kernel_name =
+      cast_needed ? fmt::format("{}_{}_cast_{}", name, suffix, scalarToMetalTypeString(out)) : direct_name;
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       auto computeEncoder = mpsStream->commandEncoder();
