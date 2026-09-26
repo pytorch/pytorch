@@ -118,18 +118,51 @@ To debug memory errors, set
 hipBLAS workspaces
 ------------------
 
-Unlike CUDA, ROCm continues to cache workspaces by default.
+As on CUDA, ATen allocates a hipBLAS workspace for each operation from the HIP caching allocator and
+releases it when the operation returns. Set ``TORCH_CUBLAS_WORKSPACE_CACHE=1`` to instead retain one
+workspace for each hipBLAS handle and HIP stream, which was the default before PyTorch 2.15.
+Persistent workspaces must not be used when capturing multiple HIP graphs on the same stream.
 
-For each combination of hipBLAS handle and HIP stream, a hipBLAS workspace will be allocated if that
-handle and stream combination executes a hipBLAS kernel that requires a workspace.  In order to
+When ATen workspace caching is disabled, ATen operations bind their workspaces to handles that
+``torch.cuda.current_blas_handle()`` never returns. That function returns a separate handle for each
+thread and stream, because a rocBLAS handle's workspace must not be used by two streams at once. Each
+handle keeps the workspace rocBLAS allocates when it is created, outside the HIP caching allocator:
+128 MiB on MI355X, and the size depends on the GPU and the rocBLAS version. Handles are never
+destroyed. When a thread exits, its handles pass to other threads and streams, so that memory stays
+allocated for the life of the process. rocBLAS grows a handle's workspace when a call needs more than
+it holds, and frees it when a workspace is bound; neither is legal while a stream is capturing, so
+bind before capture begins. ``ROCBLAS_DEVICE_MEMORY_SIZE`` fixes the size and rocBLAS then never grows
+it: GEMMs that need more fall back to kernels that use less, and other calls that need more fail.
+
+A workspace bound with ``rocblas_set_workspace`` stays bound, even after the buffer is freed, and
+after the thread exits and the handle passes to another thread. Unbind it with
+``rocblas_set_workspace(handle, nullptr, 0)`` before freeing the buffer. The handle then has no
+workspace of its own, so GEMMs on it use kernels that need none and other calls make rocBLAS allocate
+one, which is not allowed during capture. A caller that needs its own workspace can create its own
+rocBLAS handle instead. Synchronize a handle's stream before its thread exits, and before moving the
+handle to another stream with ``rocblas_set_stream``, as rocBLAS requires.
+
+Call ``torch.cuda.current_blas_handle()`` on each thread before capture begins. It also creates ATen's
+handle for that thread; an ATen warmup operation alone does not create the handle the function
+returns. ``hipblasCreate`` initializes hipBLASLt, which allocates device memory that HIP rejects on a
+capturing stream. Once a device's handle has been requested, graph capture keeps one spare handle
+ready, so the first request on the capture stream inside the capture succeeds, but a second new
+stream in the same capture does not. This also applies to TunableOp, whose tuning benchmarks must run
+outside capture. See
+`ROCm/rocm-libraries#11838 <https://github.com/ROCm/rocm-libraries/issues/11838>`_.
+
+When caching is enabled, a hipBLAS workspace is allocated for each combination of hipBLAS handle and
+HIP stream that executes a hipBLAS kernel requiring a workspace.  In order to
 avoid repeatedly allocating workspaces, these workspaces are not deallocated unless
 ``torch._C._cuda_clearCublasWorkspaces()`` is called; note that it's the same function for CUDA or
 HIP. The workspace size per allocation can be specified via the environment variable
 ``HIPBLAS_WORKSPACE_CONFIG`` with the format ``:[SIZE]:[COUNT]``.  As an example, the environment
 variable ``HIPBLAS_WORKSPACE_CONFIG=:4096:2:16:8`` specifies a total size of ``2 * 4096 + 8 * 16
-KiB`` or 8 MIB. The default workspace size is 32 MiB; MI300 and newer defaults to 128 MiB. To force
-hipBLAS to avoid using workspaces, set ``HIPBLAS_WORKSPACE_CONFIG=:0:0``. For convenience,
-``CUBLAS_WORKSPACE_CONFIG`` is also accepted.
+KiB`` or 8 MIB. The default workspace size is 32 MiB; MI300 and newer defaults to 128 MiB.
+``HIPBLAS_WORKSPACE_CONFIG=:0:0`` makes rocBLAS GEMMs use kernels that need no workspace. Unlike on
+CUDA, other rocBLAS calls such as ``torch.dot`` then have rocBLAS allocate a workspace itself, outside
+the caching allocator, so they cannot be captured. For convenience, ``CUBLAS_WORKSPACE_CONFIG`` is also
+accepted.
 
 .. _hipfft-plan-cache:
 

@@ -83,8 +83,11 @@ TORCH_CUDA_CPP_API c10::Allocator* getCUDADeviceAllocator();
 
 /* Handles */
 TORCH_CUDA_CPP_API cusparseHandle_t getCurrentCUDASparseHandle();
-// On CUDA, the public handle uses cuBLAS's default workspace unless ATen
-// workspace caching is explicitly enabled. ROCm caches workspaces by default.
+// The public handle uses the BLAS library's default workspace unless ATen
+// workspace caching is explicitly enabled. On ROCm, ATen binds its
+// per-operation workspaces to separate handles, and each stream gets its own
+// public handle, which keeps the arena rocBLAS allocates at handle creation,
+// outside the caching allocator.
 TORCH_CUDA_CPP_API cublasHandle_t getCurrentCUDABlasHandle(bool setup = true);
 
 // Internal scoped handle for ATen operations. When caching is disabled, it owns
@@ -127,6 +130,19 @@ TORCH_CUDA_CPP_API cublasLtHandle_t getCurrentCUDABlasLtHandle();
 // while stream capture is active. Pre-stock the shared free list so other
 // threads (e.g. autograd workers) can reserve one mid-capture.
 TORCH_CUDA_CPP_API void ensureCublasLtHandlesAvailable(size_t n);
+// Under capture, getCurrentCUDABlasHandle() returns a capture handle: one per
+// (thread, device), with no rocBLAS arena, shared by every stream the thread
+// uses in the capture. Each request points it at the current stream and binds
+// that stream's workspace from the capture's memory pool. Once the public
+// handle has been requested on the current device, reserve this thread's
+// capture handle and pre-stock one spare for another thread, because creating
+// a handle is illegal under capture.
+TORCH_CUDA_CPP_API void prepareCaptureCublasHandles();
+// Unbinds the capture handles used by this capture and frees their workspaces,
+// and the hipBLASLt workspaces getCUDABlasLtWorkspace handed out during it,
+// back to the capture's memory pool.
+TORCH_CUDA_CPP_API void releaseCaptureCublasWorkspaces(
+    c10::CaptureId_t capture_id);
 #endif
 
 TORCH_CUDA_CPP_API void clearCublasWorkspaces();
@@ -143,6 +159,10 @@ TORCH_CUDA_CPP_API size_t getCUDABlasLtWorkspaceSize();
 TORCH_CUDA_CPP_API bool isCUDABlasWorkspaceCachingEnabled();
 // These return cache-owned allocations even when ATen workspace caching is
 // disabled. Use allocateCUDABlasWorkspace for operation-scoped storage.
+// On ROCm without workspace caching, under stream capture they return a buffer
+// from the capture's memory pool instead, one per (capture, stream), which the
+// graph owns once the capture ends. A pointer fetched before the capture must
+// not be used in it.
 TORCH_CUDA_CPP_API void* getCUDABlasLtWorkspace();
 TORCH_CUDA_CPP_API void* getCUDABlasLtWorkspace(size_t workspace_size);
 TORCH_CUDA_CPP_API at::DataPtr allocateCUDABlasWorkspace(size_t size);
