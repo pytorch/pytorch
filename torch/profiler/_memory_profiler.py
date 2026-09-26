@@ -126,6 +126,10 @@ class TensorKey(Key):
             and storage_ptr is not None
             and allocation_id is not None
         ):
+            # _ExtraFields_Allocation.ptr is a signed intptr_t, so high-bit
+            # addresses (e.g. XPU) arrive negative; the same pointer from
+            # _TensorMetadata is unsigned. Normalize so the two compare equal.
+            storage_ptr &= 0xFFFFFFFFFFFFFFFF
             return TensorKey(device, tensor_id, _Storage(storage_ptr, allocation_id))
         return None
 
