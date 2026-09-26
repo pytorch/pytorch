@@ -426,6 +426,7 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
     def load(self, name: str, index: sympy.Expr):
         """Handle loading from tensor or fixed input."""
         if name not in self.fixed_inputs:
+            self.kernel._record_negative_offset(index)
             index_str = self._process_indexing(index)
             var = self._add_kernel_input(name)
             buffer = V.graph.get_buffer(name)
@@ -1056,11 +1057,13 @@ class TritonTemplateKernel(TritonKernel):
                 continue
 
             arg_name = self.args.input_buffers[input_node.get_name()]
-            if input_node.get_layout().offset == 0:
+            offset = input_node.get_layout().offset
+            if offset == 0:
                 renames.writeline(f"{name} = {arg_name}")
             else:
-                offset = texpr(self.rename_indexing(input_node.get_layout().offset))
-                renames.writeline(f"{name} = {arg_name} + {offset}")
+                self._record_negative_offset(offset)
+                offset_expr = texpr(self.rename_indexing(offset))
+                renames.writeline(f"{name} = {arg_name} + {offset_expr}")
 
         for input_node in self.input_nodes[len(self.input_nodes) - self.suffix_args :]:
             # get args in correct order

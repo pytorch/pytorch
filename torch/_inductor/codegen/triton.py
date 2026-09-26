@@ -31,6 +31,7 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import (
     CeilDiv,
     FloorDiv,
+    Max,
     Min,
     ModularIndexing,
     TruncToFloat,
@@ -44,7 +45,7 @@ from torch.utils._triton import (
 )
 
 from ...utils._sympy.symbol import free_symbol_is_type, prefix_str, symbol_is_type, SymT
-from ...utils._sympy.value_ranges import ValueRanges
+from ...utils._sympy.value_ranges import bound_sympy, ValueRanges
 from .. import config, dependencies, ir, metrics, utils
 from ..async_compile import AsyncCompile
 from ..codecache import code_hash, get_path, PyCodeCache, write_atomic
@@ -3489,6 +3490,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.has_load_with_contiguous_rdim = False
         # We track the store name since a store can be canceled later
         self.stores_with_contiguous_rdim: list[str] = []
+        # AMD buffer ops reject negative offsets from the kernel pointer.
+        self.negative_offset_found = False
 
     @property
     def uses_tma(self) -> bool:
@@ -5035,6 +5038,36 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             PartialAccumulate(name, reduction_type, val)
         )
 
+    def _record_negative_offset(self, index: sympy.Expr) -> None:
+        if self.negative_offset_found:
+            return
+
+        index = sympy.expand(index)
+        if not index.free_symbols:
+            self.negative_offset_found = index < 0
+            return
+
+        index = sympy.expand(V.graph.sizevars.remove_precomputed_replacements(index))
+        if not index.free_symbols:
+            self.negative_offset_found = index < 0
+            return
+
+        if not any(
+            term.could_extract_minus_sign() for term in sympy.Add.make_args(index)
+        ):
+            return
+
+        shape_ranges = V.graph.sizevars.shape_env.var_to_range
+        var_ranges = dict(shape_ranges)
+        try:
+            for var, size in self.var_ranges().items():
+                size_upper = bound_sympy(Max(size - 1, 0), shape_ranges).upper
+                var_ranges[var] = ValueRanges(0, size_upper)
+            self.negative_offset_found = bound_sympy(index, var_ranges).lower < 0
+        except (KeyError, TypeError, ValueError, ZeroDivisionError):
+            # A negative term with unknown bounds cannot safely use unsigned offsets.
+            self.negative_offset_found = True
+
     def load(self, name: str, index: sympy.Expr):
         """
         Load from the memory location 'name', offset by some indexing expression 'index'.
@@ -5078,6 +5111,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         )
 
         if isinstance(indexing, IndexingOptions):
+            self._record_negative_offset(indexing.index)
             if self._has_stride1_on_rdim(indexing.index):
                 self.has_load_with_contiguous_rdim = True
 
@@ -5305,10 +5339,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             mask_constant_index=mode == "atomic_add",
         )
 
-        if isinstance(indexing, IndexingOptions) and self._has_stride1_on_rdim(
-            indexing.index
-        ):
-            self.stores_with_contiguous_rdim.append(name)
+        if isinstance(indexing, IndexingOptions):
+            self._record_negative_offset(indexing.index)
+            if self._has_stride1_on_rdim(indexing.index):
+                self.stores_with_contiguous_rdim.append(name)
 
         # Guard against write-after-read corruption in triton.
         # See # https://github.com/triton-lang/triton/issues/1615
@@ -7710,14 +7744,16 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return False
 
     def pointer_range_override(self) -> tuple[int, ...] | None:
-        """Suppress ``tt.pointer_range=32`` when this kernel uses atomics.
+        """Suppress ``tt.pointer_range=32`` for incompatible HIP indexing.
 
         On HIP the annotation lets the backend use buffer ops, and buffer atomics are
-        far slower than global ones under contention. ``()`` suppresses; ``None`` lets
-        ``config_of`` decide, which is also where the config flag is applied. Only
-        valid once the kernel body exists, since it reads ``atomic_add_found``.
+        far slower than global ones under contention while negative offsets are
+        unsupported. ``()`` suppresses; ``None`` lets ``config_of`` decide, which is
+        also where the config flag is applied. Only valid once the kernel body exists.
         """
-        if torch.version.hip is not None and self.atomic_add_found:
+        if torch.version.hip is not None and (
+            self.atomic_add_found or self.negative_offset_found
+        ):
             return ()
         return None
 

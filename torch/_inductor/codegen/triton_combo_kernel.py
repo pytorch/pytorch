@@ -936,11 +936,10 @@ class ComboKernel(Kernel):
             config_of(
                 signature,
                 # sub-kernel bodies are spliced into this kernel, so their
-                # atomics are this kernel's atomics
+                # pointer-range restrictions apply to the combined kernel
                 pointer_range_override=(
                     ()
-                    if torch.version.hip is not None
-                    and any(k.atomic_add_found for k in self.sub_kernels)
+                    if any(k.pointer_range_override() == () for k in self.sub_kernels)
                     else None
                 ),
                 skip_cpp_wrapper_input_tensor_alignment=True,
