@@ -4325,7 +4325,6 @@ class TestConvolutionNNCUDA(NNTestCase):
         F.conv2d(x, torch.randn(1, 16, 1, 1, device=device))
 
     @skipCUDAIfNoCudnn
-    @skipCUDAIfRocm
     @dtypes(torch.half)
     def test_Conv2d_depthwise_kernel_flag(self, device, dtype):
         channels = 32
@@ -4334,7 +4333,11 @@ class TestConvolutionNNCUDA(NNTestCase):
             channels, channels, kernel_size=3, padding=1, groups=channels
         ).to(device, dtype)
 
+        one, zero = (1, 1), (0, 0)
+        args = [x, conv.weight, conv.bias, one, one, one, False, zero, channels]
+
         results = {}
+        backends = {}
         for mode in ("auto", "cudnn", "native"):
             with torch.backends.cudnn.flags(
                 enabled=True,
@@ -4342,10 +4345,41 @@ class TestConvolutionNNCUDA(NNTestCase):
                 deterministic=True,
                 depthwise_kernel=mode,
             ):
+                backends[mode] = torch._C._select_conv_backend(*args)
                 results[mode] = conv(x).detach().clone()
 
-        self.assertEqual(results["cudnn"], results["native"], atol=1e-3, rtol=1e-3)
-        self.assertEqual(results["auto"], results["native"], atol=1e-3, rtol=1e-3)
+        # The comparisons below are vacuous unless the modes really do reach different
+        # kernels: when "native" is not honored every mode runs the same kernel and
+        # returns bitwise identical results, which passes at any tolerance.
+        self.assertEqual(backends["native"], torch._C._ConvBackend.CudaDepthwise2d)
+        if TEST_WITH_ROCM:
+            self.assertEqual(backends["cudnn"], torch._C._ConvBackend.MiopenDepthwise)
+
+        # On ROCm "cudnn" and "auto" select MIOpen, which runs fp16 depthwise 3x3 through a
+        # Winograd solver whose output is off by about two fp16 steps from the native kernel.
+        atol = 1e-2 if TEST_WITH_ROCM else 1e-3
+        self.assertEqual(results["cudnn"], results["native"], atol=atol, rtol=1e-3)
+        self.assertEqual(results["auto"], results["native"], atol=atol, rtol=1e-3)
+
+    @dtypes(torch.half)
+    def test_Conv3d_depthwise_kernel_flag_native_is_2d_only(self, device, dtype):
+        # The native depthwise kernel that depthwise_kernel="native" asks for is 2-D
+        # only, so a 5-D depthwise convolution keeps whatever backend it had.
+        channels = 32
+        x = torch.randn(2, channels, 4, 8, 8, device=device, dtype=dtype)
+        weight = torch.randn(channels, 1, 3, 3, 3, device=device, dtype=dtype)
+        expected = (
+            torch._C._ConvBackend.MiopenDepthwise
+            if TEST_WITH_ROCM
+            else torch._C._ConvBackend.CudaDepthwise3d
+        )
+        one, zero = (1, 1, 1), (0, 0, 0)
+        args = [x, weight, None, one, one, one, False, zero, channels]
+        with torch.backends.cudnn.flags(
+            enabled=True, benchmark=False, deterministic=True, depthwise_kernel="native"
+        ):
+            backend = torch._C._select_conv_backend(*args)
+        self.assertEqual(backend, expected)
 
     @dtypes(torch.half, torch.float, torch.cfloat)
     def test_conv_cudnn_nhwc(self, device, dtype):
