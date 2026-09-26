@@ -1,8 +1,12 @@
 # Owner(s): ["oncall: distributed"]
 
+import inspect
+import os
+import queue
 import sys
 import tempfile
 from typing import Any, IO
+from unittest import mock
 
 import torch
 import torch.distributed as dist
@@ -543,13 +547,151 @@ class TestDistributedReshardOnLoad(MultiProcContinuousTest):
                 if dist.get_rank() == 0:
                     self.assertTrue(
                         torch.allclose(save_dict_sharded, load_dict["sharded"]),
-                        lambda msg: f"{msg}\nsave-spec {save_spec} load-spec {load_spec}",
+                        lambda msg: (
+                            f"{msg}\nsave-spec {save_spec} load-spec {load_spec}"
+                        ),
                     )
 
                     self.assertTrue(
                         torch.allclose(save_dict["replicated"], load_dict_replicated),
-                        lambda msg: f"{msg}\nsave-spec {save_spec} load-spec {load_spec}",
+                        lambda msg: (
+                            f"{msg}\nsave-spec {save_spec} load-spec {load_spec}"
+                        ),
                     )
+
+
+class TestThreadCountAutoTuning(TestCase):
+    def _create_plan(self, state_dict):
+        planner = dist.checkpoint.DefaultSavePlanner()
+        planner.set_up_planner(state_dict, is_coordinator=True)
+        return planner.create_local_plan()
+
+    def test_calculate_optimal_thread_count(self) -> None:
+        # 4 tensors, 15360 bytes total.
+        plan = self._create_plan(
+            {
+                "t1": torch.ones(256, dtype=torch.float32),  # 1KB
+                "t2": torch.ones(512, dtype=torch.float32),  # 2KB
+                "t3": torch.ones(1024, dtype=torch.float32),  # 4KB
+                "t4": torch.ones(2048, dtype=torch.float32),  # 8KB
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as path:
+            # Size suggests 15360 // 1024 == 15 threads, but only 4 write items exist.
+            writer = FileSystemWriter(
+                path=path,
+                thread_count=None,
+                max_threads=8,
+                min_size_per_thread=1024,
+            )
+            self.assertIsNone(writer.thread_count)
+            with mock.patch(
+                "os.sched_getaffinity", return_value=set(range(8)), create=True
+            ):
+                self.assertEqual(writer._calculate_optimal_thread_count(plan), 4)
+
+                # max_threads is the binding limit.
+                writer.max_threads = 2
+                self.assertEqual(writer._calculate_optimal_thread_count(plan), 2)
+                writer.max_threads = 8
+
+                # Payload too small to justify a second thread.
+                writer.min_size_per_thread = 100 * 1024 * 1024
+                self.assertEqual(writer._calculate_optimal_thread_count(plan), 1)
+
+                # A non-positive min_size_per_thread disables the size limit.
+                writer.min_size_per_thread = 0
+                self.assertEqual(writer._calculate_optimal_thread_count(plan), 4)
+
+    def test_calculate_optimal_thread_count_respects_cpu_affinity(self) -> None:
+        plan = self._create_plan(
+            {f"t{i}": torch.ones(1024, dtype=torch.float32) for i in range(16)}
+        )
+
+        with tempfile.TemporaryDirectory() as path:
+            writer = FileSystemWriter(
+                path=path, thread_count=None, max_threads=16, min_size_per_thread=1
+            )
+            with mock.patch(
+                "os.sched_getaffinity", return_value=set(range(16)), create=True
+            ):
+                self.assertEqual(writer._calculate_optimal_thread_count(plan), 16)
+
+            # A narrowed affinity mask (srun --cpu-bind, numactl, k8s static CPU policy, ...) caps the count.
+            with mock.patch(
+                "os.sched_getaffinity", return_value=set(range(4)), create=True
+            ):
+                self.assertEqual(writer._calculate_optimal_thread_count(plan), 4)
+
+    def test_calculate_optimal_thread_count_ignores_byte_io_size(self) -> None:
+        # BYTE_IO items carry no size info in the plan, so they cannot raise the size limit.
+        plan = self._create_plan({"bytes": "a string that is not a tensor"})
+
+        with tempfile.TemporaryDirectory() as path:
+            writer = FileSystemWriter(
+                path=path, thread_count=None, max_threads=8, min_size_per_thread=1
+            )
+            self.assertEqual(writer._calculate_optimal_thread_count(plan), 1)
+
+    def test_write_data_thread_count_is_optional(self) -> None:
+        # Subclasses such as HuggingFaceStorageWriter call _write_data() with the pre-existing signature.
+        with tempfile.TemporaryDirectory() as path:
+            writer = FileSystemWriter(path=path)
+            self.assertEqual(len(inspect.signature(writer._write_data).parameters), 3)
+            self.assertIsNone(
+                inspect.signature(writer._write_data).parameters["thread_count"].default
+            )
+
+    def test_write_data_propagates_worker_thread_exception(self) -> None:
+        with tempfile.TemporaryDirectory() as path:
+            writer = FileSystemWriter(path=path, thread_count=2)
+            file_queue = queue.Queue()
+            for i in range(2):
+                file_queue.put((os.path.join(path, f"f{i}"), f"f{i}", []))
+
+            def boom(*args, **kwargs):
+                raise ValueError("write failed")
+
+            with mock.patch(
+                "torch.distributed.checkpoint.filesystem._write_files_from_queue",
+                side_effect=boom,
+            ):
+                with self.assertRaisesRegex(ValueError, "write failed"):
+                    writer._write_data(mock.MagicMock(), file_queue)
+
+    def test_filesystem_writer_save_and_load_auto_tuned(self) -> None:
+        with tempfile.TemporaryDirectory() as path:
+            state_dict_to_save = {f"tensor_{i}": torch.randn(10, 10) for i in range(8)}
+            # Save with auto-tuned thread_count (None)
+            fs_writer = FileSystemWriter(
+                path=path,
+                thread_count=None,
+                max_threads=4,
+                min_size_per_thread=1,
+            )
+            with (
+                mock.patch(
+                    "os.sched_getaffinity", return_value=set(range(4)), create=True
+                ),
+                mock.patch.object(
+                    fs_writer, "_write_data", wraps=fs_writer._write_data
+                ) as mock_write_data,
+            ):
+                save(
+                    state_dict=state_dict_to_save,
+                    storage_writer=fs_writer,
+                    no_dist=True,
+                )
+                mock_write_data.assert_called_once()
+                self.assertEqual(mock_write_data.call_args.args[2], 4)
+
+            state_dict_to_load = {f"tensor_{i}": torch.zeros(10, 10) for i in range(8)}
+            fs_reader = FileSystemReader(path=path)
+            load(state_dict=state_dict_to_load, storage_reader=fs_reader, no_dist=True)
+
+            for k in state_dict_to_save:
+                self.assertEqual(state_dict_to_save[k], state_dict_to_load[k])
 
 
 instantiate_parametrized_tests(TestDistributedStateDictSaveLoad)
