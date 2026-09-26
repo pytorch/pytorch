@@ -1624,11 +1624,9 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
                 )
             ),
             "sm12x": lambda h: (
-                FlexBwDConfig(32, 128, 128, 32, 3, 4)
-                if h < 64
-                else FlexBwDConfig(
-                    64, 64, 64, 64, 1 if h >= 128 else 2, 4
-                )
+                FlexBwDConfig(32, 128, 128, 32, 3, 4) if h < 64 else
+                FlexBwDConfig(32, 32, 32, 32, 2, 4) if h > 128 else
+                FlexBwDConfig(64, 64, 64, 64, 1 if h >= 128 else 2, 4)
             ),
         }
         # fmt: on
