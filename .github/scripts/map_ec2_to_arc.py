@@ -13,6 +13,7 @@ Usage:
 import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -33,6 +34,9 @@ def parse_args() -> argparse.Namespace:
         help="Runner prefix to strip from labels (e.g. 'mt-')",
     )
     return parser.parse_args()
+
+
+ARC_LABEL = re.compile(r"^(?:mt-|lf-)?(?:rel-)?l-")
 
 
 def strip_prefix(label: str, prefix: str) -> str:
@@ -96,7 +100,10 @@ def main() -> None:
             continue
         clean = strip_prefix(entry["runner"].strip(), args.prefix)
         if clean not in mapping:
-            if clean.startswith("l-"):
+            # A workflow that names its pod outright needs no translation. Match
+            # the fleet prefix loosely: a label pinned to one fleet still has to
+            # pass through a build running on the other.
+            if ARC_LABEL.match(clean):
                 continue
             print(f"error: no ARC runner found for '{clean}'", file=sys.stderr)
             sys.exit(1)
