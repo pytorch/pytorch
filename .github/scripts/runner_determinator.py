@@ -41,6 +41,7 @@ Example config:
         rollout_percent: 25
         all_branches: false
         default: true
+        restrict_runners: true # kill-switch: false disables LF allowlist, no PR
     ---
 
     # Opt-ins:
@@ -79,6 +80,7 @@ GH_OUTPUT_KEY_LABEL_TYPE = "label-type"
 GH_OUTPUT_KEY_AMD_SANDBOX_LABEL_TYPE = "amd-sandbox-label-type"
 GH_OUTPUT_KEY_AMD_DPX_LABEL_TYPE = "amd-dpx-label-type"
 GH_OUTPUT_KEY_SCALE_CONFIG_LABEL_TYPE = "scale-config-label-type"
+GH_OUTPUT_KEY_LF_RUNNERS = "lf-runners"
 OPT_OUT_LABEL = "no-runner-experiments"
 
 SETTING_EXPERIMENTS = "experiments"
@@ -87,6 +89,7 @@ SETTING_EXPERIMENTS = "experiments"
 WORKFLOW_ALLOWLIST_ALL = "ALL"
 
 LF_FLEET_EXPERIMENT = "lf"
+LF_ALLOWLIST_MODES = ("all", "restricted")
 
 # The Meta (OSDC) fleet is the default; the "lf" experiment switches to the
 # Linux Foundation fleet. META_LABEL_PREFIX is also the fallback on error.
@@ -123,6 +126,10 @@ class Experiment(NamedTuple):
     # exclusions take priority over inclusions. Applied after user opt-in/out.
     workflows: str = ""
 
+    # Kill-switch for the LF allowlist (ci-infra#1081): False here (in
+    # test-infra#5132) unrestricts it without a PR. Ignored by other experiments.
+    restrict_runners: bool = True
+
     # Add more fields as needed
 
 
@@ -131,6 +138,7 @@ class RunnerPrefixResult(NamedTuple):
     amd_sandbox_prefix: str = ""
     amd_dpx_prefix: str = ""
     scale_config_prefix: str = ""
+    lf_restrict_runners: bool = True
 
 
 class Settings(NamedTuple):
@@ -253,6 +261,13 @@ def parse_args() -> Any:
         required=False,
         default="",
         help="the name of the calling workflow (github.workflow)",
+    )
+    parser.add_argument(
+        "--arc-yaml-path",
+        type=str,
+        required=False,
+        default=".github/arc.yaml",
+        help="path to arc.yaml, used to read the LF fleet allowlist",
     )
 
     return parser.parse_args()
@@ -538,6 +553,7 @@ def get_runner_prefix(
     user_optins = parse_users(rollout_state)
 
     lf_enabled = False
+    lf_restrict_runners = True
     amd_sandbox_prefix = ""
     amd_dpx_prefix = ""
     scale_config_experiments: list[str] = []
@@ -663,6 +679,7 @@ def get_runner_prefix(
                 )
             elif experiment_name == LF_FLEET_EXPERIMENT:
                 lf_enabled = True
+                lf_restrict_runners = experiment_settings.restrict_runners
                 log.info("lf experiment enabled. Using the Linux Foundation fleet.")
             elif experiment_name in SCALE_CONFIG_VARIANT_EXPERIMENTS:
                 scale_config_experiments.append(experiment_name)
@@ -696,7 +713,56 @@ def get_runner_prefix(
         amd_sandbox_prefix=amd_sandbox_prefix,
         amd_dpx_prefix=amd_dpx_prefix,
         scale_config_prefix=scale_config_prefix,
+        lf_restrict_runners=lf_restrict_runners,
     )
+
+
+def get_lf_runners_output(
+    arc_yaml_path: str, lf_enabled: bool, restrict_runners: bool = True
+) -> str:
+    """Comma-separated allowlist for --lf-runners (ci-infra#1081).
+
+    Empty means unrestricted: lf disabled, mode "all", no lf_allowlist,
+    restrict_runners is False (the kill-switch, test-infra#5132), or
+    arc.yaml is missing/malformed (fail open but loud, see except below).
+    """
+    if not lf_enabled:
+        return ""
+    if not restrict_runners:
+        # Not a misconfiguration -- record why the mapper is seeing "" so an
+        # incident-time kill-switch flip isn't mistaken for "nothing to log".
+        log.info(
+            "lf_allowlist restrict_runners kill-switch is off (test-infra#5132); "
+            "treating lf_allowlist as unrestricted"
+        )
+        return ""
+    try:
+        with open(arc_yaml_path) as f:
+            data = yaml.safe_load(f)
+        allowlist = (data or {}).get("lf_allowlist") or {}
+        mode = allowlist.get("mode", "all")
+        if mode not in LF_ALLOWLIST_MODES:
+            # Fail open but loud: map_ec2_to_arc.py validates the same field
+            # and will hard-exit every build job on this typo. Logging here
+            # points at the root cause from the one place that only runs once.
+            log.error(
+                f"{arc_yaml_path}: lf_allowlist.mode must be one of "
+                f"{LF_ALLOWLIST_MODES}, got '{mode}'; treating as unrestricted"
+            )
+            return ""
+        if mode != "restricted":
+            log.info(f"{arc_yaml_path}: lf_allowlist.mode is '{mode}'; unrestricted")
+            return ""
+        return ",".join(sorted(allowlist.get("runners") or []))
+    except Exception as e:
+        # Broad by design: a syntax error, a non-mapping lf_allowlist, or an
+        # unsortable runners: list must not abort main() before it emits any
+        # of the other four outputs (ci-infra#1081).
+        log.warning(
+            f"Could not read lf_allowlist from {arc_yaml_path} ({e}); "
+            "treating as unrestricted"
+        )
+        return ""
 
 
 def get_rollout_state_from_issue(github_token: str, repo: str, issue_num: int) -> str:
@@ -762,6 +828,7 @@ def main() -> None:
     amd_sandbox_label_prefix = ""
     amd_dpx_label_prefix = ""
     scale_config_label_prefix = ""
+    lf_restrict_runners = True
 
     # no-runner-experiments means "use Meta, not LF": opt out of the lf
     # experiment, so the run stays on the default Meta fleet.
@@ -803,16 +870,22 @@ def main() -> None:
         amd_sandbox_label_prefix = result.amd_sandbox_prefix
         amd_dpx_label_prefix = result.amd_dpx_prefix
         scale_config_label_prefix = result.scale_config_prefix
+        lf_restrict_runners = result.lf_restrict_runners
 
     except Exception as e:
         log.error(
             f"Failed to get issue. Defaulting to Meta runners and no experiments. Exception: {e}"
         )
 
+    lf_runners = get_lf_runners_output(
+        args.arc_yaml_path, runner_label_prefix == LF_LABEL_PREFIX, lf_restrict_runners
+    )
+
     set_github_output(GH_OUTPUT_KEY_LABEL_TYPE, runner_label_prefix)
     set_github_output(GH_OUTPUT_KEY_AMD_SANDBOX_LABEL_TYPE, amd_sandbox_label_prefix)
     set_github_output(GH_OUTPUT_KEY_AMD_DPX_LABEL_TYPE, amd_dpx_label_prefix)
     set_github_output(GH_OUTPUT_KEY_SCALE_CONFIG_LABEL_TYPE, scale_config_label_prefix)
+    set_github_output(GH_OUTPUT_KEY_LF_RUNNERS, lf_runners)
 
 
 if __name__ == "__main__":

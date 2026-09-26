@@ -40,6 +40,16 @@ on:
         default: ""
         type: string
         description: Prefix for runner label
+      lf_runners:
+        required: false
+        default: ""
+        type: string
+        description: |
+          Comma-separated LF allowlist (ci-infra#1081). Empty means
+          unrestricted. Forwarded verbatim to map_ec2_to_arc.py's
+          --lf-runners for the test matrix, and also applied to this job's
+          own runs-on: below -- a build whose ARC target isn't listed is
+          forced onto 'mt-'.
       runner:
         required: false
         type: string
@@ -162,7 +172,19 @@ jobs:
       actions: read
     # Don't run on forked repos
     if: github.repository_owner == 'pytorch'
-    runs-on: ${{ inputs.runner_prefix }}${{ startsWith(inputs.runner, 'l-') && inputs.runner || contains(inputs.runner, 'arm64') && 'l-arm64g4-16-62' || 'l-x86iavx512-8-64' }}
+    # runs-on: resolves before any step runs, so it can't call
+    # map_ec2_to_arc.py; this mirrors its allowlist check inline against the
+    # determinator's lf_runners (ci-infra#1081). The ARC-target expression is
+    # duplicated on both sides since runs-on: has no env/step-output access.
+    runs-on: >-
+      ${{
+        (inputs.runner_prefix == 'lf-' && inputs.lf_runners != '' &&
+         !contains(
+           format(',{0},', inputs.lf_runners),
+           format(',{0},', startsWith(inputs.runner, 'l-') && inputs.runner || contains(inputs.runner, 'arm64') && 'l-arm64g4-16-62' || 'l-x86iavx512-8-64')
+         ))
+        && 'mt-' || inputs.runner_prefix
+      }}${{ startsWith(inputs.runner, 'l-') && inputs.runner || contains(inputs.runner, 'arm64') && 'l-arm64g4-16-62' || 'l-x86iavx512-8-64' }}
     container:
       image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${{ inputs.docker-image-name }}${{ inputs.ci-docker-hash && format('-{0}', inputs.ci-docker-hash) || '' }}
     timeout-minutes: 480
@@ -208,6 +230,7 @@ jobs:
         env:
           FILTERED_TEST_MATRIX: ${{ steps.filter.outputs.test-matrix }}
           RUNNER_PREFIX: ${{ inputs.runner_prefix }}
+          LF_RUNNERS: ${{ inputs.lf_runners }}
         shell: bash
         run: |
           # Run via uv so pyyaml is provisioned regardless of the build image's
@@ -215,8 +238,11 @@ jobs:
           # system apt python3, which doesn't include pyyaml. Matches the
           # pattern used by parse_ref.py / filter_test_configs.py in
           # .github/actions/filter-test-configs/action.yml.
+          # Always pass --lf-runners (even ""): omitting it would let the
+          # mapper fall back to arc.yaml directly, bypassing the
+          # restrict_runners kill-switch for this path (ci-infra#1081).
           uv run --no-project --with pyyaml==6.0.2 \
-            python .github/scripts/map_ec2_to_arc.py --prefix "${RUNNER_PREFIX}" "${FILTERED_TEST_MATRIX}"
+            python .github/scripts/map_ec2_to_arc.py --prefix "${RUNNER_PREFIX}" --lf-runners "${LF_RUNNERS}" "${FILTERED_TEST_MATRIX}"
 
       - name: Configure AWS credentials
         id: aws-creds

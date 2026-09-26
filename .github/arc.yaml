@@ -125,3 +125,19 @@ meta_only_runners:
   - linux.aws.h100
   - linux.aws.h100.4
   - linux.aws.h100.8
+
+# LF fleet allowlist (pytorch/ci-infra#1081). mode: all = any runner may use
+# LF (legacy); mode: restricted = only these ARC targets may keep 'lf-', else
+# forced to 'mt-'. Keyed by post-mapping ARC label, the shared Karpenter
+# resource that several EC2 types bin-pack onto.
+lf_allowlist:
+  mode: all
+  runners:
+    - l-x86iavx512-8-64        # c5.2xlarge, c7i.2xlarge, r7i.2xlarge
+    - l-x86iavx512-16-128      # c5.4xlarge, c7i.4xlarge, r7i.4xlarge, r5.4xlarge
+    - l-x86iavx512-32-256      # r5.8xlarge
+    - l-x86iavx512-48-384      # c5.12xlarge, c7i.12xlarge, r5.12xlarge
+    - l-x86iamx-8-64           # m7i-flex.2xlarge
+    - l-x86aavx2-11-41-l4      # g6.4xlarge
+    - l-x86aavx2-11-41-a10g    # g5.4xlarge
+    - l-x86aavx2-45-167-a10g-4 # g5.12xlarge
