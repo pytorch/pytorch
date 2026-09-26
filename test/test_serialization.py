@@ -1,6 +1,7 @@
 # Owner(s): ["module: serialization"]
 # ruff: noqa: F841
 
+import asyncio
 import contextlib
 import copy
 import functools
@@ -20,6 +21,7 @@ import unittest
 import warnings
 import zipfile
 from collections import namedtuple, OrderedDict
+from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
@@ -1250,6 +1252,125 @@ class TestSerialization(TestCase, SerializationMixin):
             with torch.serialization.safe_globals([print]):
                 f.seek(0)
                 torch.load(f, weights_only=True)
+
+    @parametrize("persistent", [False, True])
+    def test_safe_globals_thread_isolation(self, persistent):
+        previous = torch.serialization.get_safe_globals()
+        self.addCleanup(torch.serialization.add_safe_globals, previous)
+        self.addCleanup(torch.serialization.clear_safe_globals)
+        torch.serialization.clear_safe_globals()
+        buffer = io.BytesIO()
+        torch.save(Point(1, 2), buffer)
+        payload = buffer.getvalue()
+
+        def load_in_thread():
+            self.assertEqual(Point in torch.serialization.get_safe_globals(), persistent)
+            if persistent:
+                self.assertEqual(torch.load(io.BytesIO(payload), weights_only=True), Point(1, 2))
+            else:
+                with self.assertRaisesRegex(pickle.UnpicklingError, "Unsupported global"):
+                    torch.load(io.BytesIO(payload), weights_only=True)
+
+        if persistent:
+            torch.serialization.add_safe_globals([Point])
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            with safe_globals([Point]):
+                self.assertEqual(torch.load(io.BytesIO(payload), weights_only=True), Point(1, 2))
+                executor.submit(load_in_thread).result(timeout=10)
+        self.assertEqual(Point in torch.serialization.get_safe_globals(), persistent)
+
+    @parametrize("persistent", [False, True])
+    def test_safe_globals_nested_context(self, persistent):
+        previous = torch.serialization.get_safe_globals()
+        self.addCleanup(torch.serialization.add_safe_globals, previous)
+        self.addCleanup(torch.serialization.clear_safe_globals)
+        torch.serialization.clear_safe_globals()
+        if persistent:
+            torch.serialization.add_safe_globals([Point])
+        context = safe_globals([Point])
+        with context:
+            with self.assertRaisesRegex(RuntimeError, "test error"):
+                with context:
+                    raise RuntimeError("test error")
+            self.assertEqual(Point in torch.serialization.get_safe_globals(), persistent)
+        self.assertEqual(Point in torch.serialization.get_safe_globals(), persistent)
+
+    def test_safe_globals_clear_nested_context(self):
+        previous = torch.serialization.get_safe_globals()
+        self.addCleanup(torch.serialization.add_safe_globals, previous)
+        self.addCleanup(torch.serialization.clear_safe_globals)
+        torch.serialization.clear_safe_globals()
+        buffer = io.BytesIO()
+        torch.save(Point(1, 2), buffer)
+        payload = buffer.getvalue()
+        with safe_globals([Point]):
+            with safe_globals([Point]):
+                torch.serialization.clear_safe_globals()
+                self.assertEqual(torch.serialization.get_safe_globals(), [])
+                with self.assertRaisesRegex(pickle.UnpicklingError, "Unsupported global"):
+                    torch.load(io.BytesIO(payload), weights_only=True)
+            self.assertEqual(torch.serialization.get_safe_globals(), [])
+            with self.assertRaisesRegex(pickle.UnpicklingError, "Unsupported global"):
+                torch.load(io.BytesIO(payload), weights_only=True)
+        self.assertEqual(torch.serialization.get_safe_globals(), [])
+
+    def test_safe_globals_save_restore_does_not_promote_temporary_entries(self):
+        previous = torch.serialization.get_safe_globals()
+        self.addCleanup(torch.serialization.add_safe_globals, previous)
+        self.addCleanup(torch.serialization.clear_safe_globals)
+        torch.serialization.clear_safe_globals()
+        torch.serialization.add_safe_globals([print])
+        buffer = io.BytesIO()
+        torch.save(Point(1, 2), buffer)
+        payload = buffer.getvalue()
+        with safe_globals([Point]):
+            saved = torch.serialization.get_safe_globals()
+            self.assertIn(print, saved)
+            self.assertNotIn(Point, saved)
+            try:
+                torch.serialization.clear_safe_globals()
+            finally:
+                torch.serialization.add_safe_globals(saved)
+            with self.assertRaisesRegex(pickle.UnpicklingError, "Unsupported global"):
+                torch.load(io.BytesIO(payload), weights_only=True)
+            self.assertIn(print, torch.serialization.get_safe_globals())
+        self.assertNotIn(Point, torch.serialization.get_safe_globals())
+        self.assertIn(print, torch.serialization.get_safe_globals())
+        with self.assertRaisesRegex(pickle.UnpicklingError, "Unsupported global"):
+            torch.load(io.BytesIO(payload), weights_only=True)
+
+    def test_safe_globals_async_context_inheritance(self):
+        previous = torch.serialization.get_safe_globals()
+        self.addCleanup(torch.serialization.add_safe_globals, previous)
+        self.addCleanup(torch.serialization.clear_safe_globals)
+        torch.serialization.clear_safe_globals()
+        buffer = io.BytesIO()
+        torch.save(Point(1, 2), buffer)
+        payload = buffer.getvalue()
+
+        def load_point():
+            return torch.load(io.BytesIO(payload), weights_only=True)
+
+        async def check_inheritance():
+            release_child = asyncio.Event()
+
+            async def child():
+                await release_child.wait()
+                return load_point()
+
+            with safe_globals([Point]):
+                child_task = asyncio.create_task(child())
+                self.assertEqual(await asyncio.to_thread(load_point), Point(1, 2))
+                torch.serialization.clear_safe_globals()
+                with self.assertRaisesRegex(pickle.UnpicklingError, "Unsupported global"):
+                    load_point()
+            with self.assertRaisesRegex(pickle.UnpicklingError, "Unsupported global"):
+                load_point()
+            release_child.set()
+            self.assertEqual(await child_task, Point(1, 2))
+
+        asyncio.run(check_inheritance())
+        self.assertNotIn(Point, torch.serialization.get_safe_globals())
 
     def test_weights_only_safe_globals_newobj(self):
         # This will use NEWOBJ
