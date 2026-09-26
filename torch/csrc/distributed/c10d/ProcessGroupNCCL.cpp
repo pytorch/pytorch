@@ -5089,18 +5089,19 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
             at::Tensor& output,
             ncclComm_t comm,
             at::cuda::CUDAStream& stream) {
-          // TODO: remove once upstream NCCL is fixed
-          // https://github.com/pytorch/pytorch/issues/168092
+          auto ncclFunc = ncclReduceScatter;
+#if NCCL_VERSION_CODE < NCCL_VERSION(2, 29, 7)
+          // Work around single-rank reduce-scatter corruption (#168092).
+          // All-reduce is equivalent for one rank, including PreMulSum.
           if (this->getSize() == 1) {
-            at::cuda::CUDAStreamGuard guard(stream);
-            output.flatten().copy_(input.flatten(), true);
-            return ncclSuccess;
+            ncclFunc = ncclAllReduce;
           }
+#endif
 
           const auto ncclDataType = getNcclDataType(input.scalar_type());
           const auto ncclReduceOp =
               getNcclReduceOp(opts.reduceOp, input, ncclDataType, comm);
-          return ncclReduceScatter(
+          return ncclFunc(
               input.data_ptr(),
               output.data_ptr(),
               output.numel(),
@@ -5206,18 +5207,18 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter_single(
           at::Tensor& output,
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
-        // TODO: remove once upstream NCCL is fixed
-        // https://github.com/pytorch/pytorch/issues/168092
+        auto ncclFunc = ncclReduceScatter;
+#if NCCL_VERSION_CODE < NCCL_VERSION(2, 29, 7)
+        // All-reduce avoids #168092 while preserving PreMulSum for one rank.
         if (this->getSize() == 1) {
-          at::cuda::CUDAStreamGuard guard(stream);
-          output.flatten().copy_(input.flatten(), true);
-          return ncclSuccess;
+          ncclFunc = ncclAllReduce;
         }
+#endif
 
         auto ncclDataType = getNcclDataType(input.scalar_type());
         auto ncclReduceOp =
             getNcclReduceOp(opts.reduceOp, input, ncclDataType, comm);
-        return ncclReduceScatter(
+        return ncclFunc(
             input.data_ptr(),
             output.data_ptr(),
             output.numel(),
@@ -5266,18 +5267,18 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter_single_coalesced(
           at::Tensor& output,
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
-        // TODO: remove once upstream NCCL is fixed
-        // https://github.com/pytorch/pytorch/issues/168092
+        auto ncclFunc = ncclReduceScatter;
+#if NCCL_VERSION_CODE < NCCL_VERSION(2, 29, 7)
+        // All-reduce avoids #168092 while preserving PreMulSum for one rank.
         if (this->getSize() == 1) {
-          at::cuda::CUDAStreamGuard guard(stream);
-          output.flatten().copy_(input.flatten(), true);
-          return ncclSuccess;
+          ncclFunc = ncclAllReduce;
         }
+#endif
 
         auto ncclDataType = getNcclDataType(input.scalar_type());
         auto ncclReduceOp =
             getNcclReduceOp(opts.reduceOp, input, ncclDataType, comm);
-        return ncclReduceScatter(
+        return ncclFunc(
             input.data_ptr(),
             output.data_ptr(),
             output.numel(),

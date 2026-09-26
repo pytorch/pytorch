@@ -1050,6 +1050,21 @@ class TestProfiler(TestCase):
             with profile(activities=[ProfilerActivity.CPU], with_modules=True):
                 torch.ones(1)
 
+    @parametrize("api", ("load_nvprof", "parse_nvprof_trace"))
+    def test_nvprof_import_deprecated(self, api):
+        with patch("torch.autograd.profiler._parse_nvprof_trace", return_value=[]):
+            with self.assertWarnsRegex(
+                FutureWarning, rf"{api}.*deprecated.*PyTorch 2\.17"
+            ):
+                events = getattr(torch.autograd.profiler, api)("trace.prof")
+        self.assertEqual(events, [])
+
+    def test_enforce_unique_deprecated(self):
+        with self.assertWarnsRegex(
+            FutureWarning, r"EnforceUnique.*deprecated.*PyTorch 2\.17"
+        ):
+            torch.autograd.profiler.EnforceUnique()
+
     def test_profiler_metadata(self):
         t1, t2 = torch.ones(1), torch.ones(1)
         with profile() as prof:
@@ -3445,7 +3460,9 @@ class TestExperimentalUtils(TestCase):
         )
 
         self.assertEqual(event.metadata, typed_metadata)
-        self.assertEqual(event.event_metadata.grid, [1, 2, 3])
+        with self.assertWarnsRegex(FutureWarning, "event_metadata.*metadata"):
+            event_metadata = event.event_metadata
+        self.assertEqual(event_metadata.grid, [1, 2, 3])
 
 
 class TestExperimentalUtilsDevice(TestCase):
