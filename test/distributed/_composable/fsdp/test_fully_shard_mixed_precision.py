@@ -857,6 +857,53 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
             all_gather.assert_called_once()
 
     @skip_if_lt_x_gpu(2)
+    def test_grad_dtype_pending_all_reduce_not_narrowed(self):
+        mesh = init_device_mesh(
+            device_type.type,
+            (2, self.world_size // 2),
+            mesh_dim_names=("replicate", "shard"),
+        )
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.first = nn.Parameter(
+                    torch.zeros(8, device=device_type, dtype=torch.bfloat16)
+                )
+                self.second = nn.Parameter(torch.zeros_like(self.first))
+                self.second.grad_dtype = None
+
+            def forward(self, inp):
+                return (self.first * inp).sum() + (self.second * inp).sum()
+
+        model = Model()
+        fully_shard(model, mesh=mesh)
+        model.set_gradient_divide_factor(1.0)
+        copy_in_dtypes = []
+
+        def copy_in(grads, buffer, world_size):
+            copy_in_dtypes.append({grad.dtype for grad in grads})
+            foreach_reduce_scatter_copy_in(grads, buffer, world_size)
+
+        with patch(
+            "torch.distributed.fsdp._fully_shard._fsdp_collectives."
+            "foreach_reduce_scatter_copy_in",
+            copy_in,
+        ):
+            model.set_requires_all_reduce(False)
+            model(torch.full((8,), 256.0, device=device_type)).backward()
+            model.set_requires_all_reduce(True)
+            model(torch.ones(8, device=device_type, dtype=torch.bfloat16)).backward()
+        # The bf16 gradients reach the copy-in uncast, and the pending fp32
+        # reduction keeps the reduce dtype at fp32: 256 + 1 is 256 in bf16.
+        self.assertEqual(
+            copy_in_dtypes, [{torch.bfloat16, torch.float32}, {torch.bfloat16}]
+        )
+        grad = model.second.grad.to_local()
+        expected = torch.full_like(grad, 257 * self.world_size, dtype=torch.float32)
+        self.assertEqual(grad, expected)
+
+    @skip_if_lt_x_gpu(2)
     def test_grad_dtype_unused_last_microbatch(self):
         class Model(nn.Module):
             def __init__(self):

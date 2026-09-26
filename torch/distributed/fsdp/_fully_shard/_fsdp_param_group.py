@@ -706,9 +706,18 @@ class FSDPParamGroup:
                 else:
                     all_reduce_stream = self.comm_ctx.all_reduce_stream
 
-                reduce_dtype = self._reduce_dtype or functools.reduce(
-                    torch.promote_types, {grad.dtype for grad in unsharded_grads}
-                )
+                reduce_dtype = self._reduce_dtype
+                if reduce_dtype is None:
+                    dtypes = {grad.dtype for grad in unsharded_grads}
+                    if self._partial_reduce_output is not None:
+                        # The pending partial has an earlier backward's reduce dtype,
+                        # and _prepare_partial_reduce_output casts it to this one's.
+                        # Only grad_dtype=None params can make the grads narrower:
+                        # their dtype follows the computation, e.g. fp32 in one
+                        # microbatch and bf16 in the next. Promoting over the grads
+                        # alone would then cast the fp32 partial down to bf16.
+                        dtypes.add(self._partial_reduce_output.dtype)
+                    reduce_dtype = functools.reduce(torch.promote_types, dtypes)
                 partial_sizes = (
                     [p.padded_sharded_param_size.numel() for p in fsdp_params_with_grad]
                     if isinstance(self.mesh_info, DDPMeshInfo)
@@ -862,16 +871,7 @@ class FSDPParamGroup:
         # A group unused in this microbatch may still own gradients from an
         # earlier backward without synchronization.
         if unsharded_param.grad is not None:
-            grad = param.unsharded_grad_data
-            if grad_pending_all_reduce is not None:
-                # An unrestricted gradient policy may produce a new dtype;
-                # preserve higher-precision pending reductions. With restricted
-                # policies this only casts in mixed-dtype groups, replacing the
-                # cast foreach_reduce would otherwise do.
-                grad = grad.to(
-                    torch.promote_types(grad.dtype, grad_pending_all_reduce.dtype)
-                )
-            return grad
+            return param.unsharded_grad_data
         if grad_pending_all_reduce is not None:
             return param.get_unsharded_zero_grad_data(grad_pending_all_reduce.dtype)
         if self.reduce_scatter_unused_params and unsharded_param.requires_grad:
