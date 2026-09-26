@@ -8815,7 +8815,43 @@ register_pointwise_numeric(aten.erfinv)
 register_pointwise_numeric(aten.hypot)
 register_pointwise_numeric(aten.log10)
 register_pointwise_numeric(aten.log2)
-register_pointwise_numeric(aten.nextafter)
+
+register_op_dtype_propagation_rules(
+    "nextafter",
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
+    override_return_dtype=None,
+)
+register_pointwise_op("nextafter")
+
+
+def nextafter(x, y):
+    dtype = x.get_dtype()
+    is_low_precision = dtype in (torch.float16, torch.bfloat16)
+    if dtype not in (
+        torch.float16,
+        torch.bfloat16,
+        torch.float32,
+        torch.float64,
+    ) or (is_low_precision and not is_triton(x)):
+        return fallback_handler(aten.nextafter.default, add_to_fallback_set=False)(x, y)
+
+    def inner_fn(x, y):
+        if is_low_precision:
+            x = ops.to_dtype(x, dtype, use_compute_types=False)
+            y = ops.to_dtype(y, dtype, use_compute_types=False)
+            return ops.to_dtype(ops.nextafter(x, y), dtype)
+        return ops.nextafter(x, y)
+
+    return make_pointwise(inner_fn)(x, y)
+
+
+register_lowering(
+    aten.nextafter,
+    broadcast=True,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
+)(nextafter)
+register_lowering(prims.nextafter, broadcast=True, type_promotion_kind=None)(nextafter)
+
 
 from .codegen.common import BackendFeature, pointwise_overrides_data
 
