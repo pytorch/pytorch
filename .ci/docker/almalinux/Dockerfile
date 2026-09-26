@@ -53,10 +53,6 @@ ENV CUDA_VERSION=${CUDA_VERSION}
 # Make things in our path by default
 ENV PATH=/usr/local/cuda-${CUDA_VERSION}/bin:/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/bin:$PATH
 
-FROM cuda as cuda12.6
-RUN bash ./install_cuda.sh 12.6
-ENV DESIRED_CUDA=12.6
-
 FROM cuda as cuda12.8
 RUN bash ./install_cuda.sh 12.8
 ENV DESIRED_CUDA=12.8
@@ -102,7 +98,6 @@ ADD ./common/install_mnist.sh install_mnist.sh
 RUN bash ./install_mnist.sh
 
 FROM base as all_cuda
-COPY --from=cuda12.6  /usr/local/cuda-12.6 /usr/local/cuda-12.6
 COPY --from=cuda12.8  /usr/local/cuda-12.8 /usr/local/cuda-12.8
 COPY --from=cuda12.9  /usr/local/cuda-12.9 /usr/local/cuda-12.9
 COPY --from=cuda13.0  /usr/local/cuda-13.0 /usr/local/cuda-13.0
