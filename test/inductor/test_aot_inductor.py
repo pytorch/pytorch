@@ -1892,6 +1892,70 @@ class AOTInductorTestsTemplate:
         example_inputs = (x, y)
         self.check_model(Model(), example_inputs, dynamic_shapes=dynamic_shapes)
 
+    def test_dynamic_mutated_view_storage_offset(self):
+        # A custom op that mutates a view of a larger buffer has to see that
+        # view's storage offset. Under dynamic shapes the offset is symbolic,
+        # and dropping it makes every write land at the start of the buffer.
+        @torch.library.custom_op("aoti_test::write_into_view", mutates_args=("out",))
+        def write_into_view(out: torch.Tensor, x: torch.Tensor) -> None:
+            out.copy_(x)
+
+        @write_into_view.register_fake
+        def _(out: torch.Tensor, x: torch.Tensor) -> None:
+            return None
+
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                nx, ny = x.shape[0], y.shape[0]
+                buf = torch.zeros(nx * 8 + ny * 8, dtype=x.dtype, device=x.device)
+                # The second view's storage offset depends on a dynamic dim.
+                vx = buf[: nx * 8].view(nx, 8)
+                vy = buf[nx * 8 :].view(ny, 8)
+                torch.ops.aoti_test.write_into_view(vx, x)
+                torch.ops.aoti_test.write_into_view(vy, y)
+                return vx.clone(), vy.clone()
+
+        x = torch.ones(10, 8, device=self.device)
+        y = torch.full((5, 8), 2.0, device=self.device)
+        dim0_x = Dim("dim0_x", min=2, max=64)
+        dim0_y = Dim("dim0_y", min=2, max=64)
+        dynamic_shapes = {"x": {0: dim0_x}, "y": {0: dim0_y}}
+        example_inputs = (x, y)
+        self.check_model(Model(), example_inputs, dynamic_shapes=dynamic_shapes)
+
+    def test_dynamic_mutated_view_storage_offset_input_buffer(self):
+        # Same as above, but the shared buffer is a graph input that itself
+        # starts at a nonzero storage offset. Inductor keeps an input's layout
+        # offset relative to the input tensor, so the view's storage offset
+        # must add the input's own offset back.
+        @torch.library.custom_op(
+            "aoti_test::write_into_input_view", mutates_args=("out",)
+        )
+        def write_into_view(out: torch.Tensor, x: torch.Tensor) -> None:
+            out.copy_(x)
+
+        @write_into_view.register_fake
+        def _(out: torch.Tensor, x: torch.Tensor) -> None:
+            return None
+
+        class Model(torch.nn.Module):
+            def forward(self, x, y, buf):
+                nx, ny = x.shape[0], y.shape[0]
+                vx = buf[: nx * 8].view(nx, 8)
+                vy = buf[nx * 8 :].view(ny, 8)
+                torch.ops.aoti_test.write_into_input_view(vx, x)
+                torch.ops.aoti_test.write_into_input_view(vy, y)
+                return vx.clone(), vy.clone()
+
+        x = torch.ones(10, 8, device=self.device)
+        y = torch.full((5, 8), 2.0, device=self.device)
+        buf = torch.zeros(5 + 15 * 8, device=self.device)[5:]
+        dim0_x = Dim("dim0_x", min=2, max=64)
+        dim0_y = Dim("dim0_y", min=2, max=64)
+        dynamic_shapes = {"x": {0: dim0_x}, "y": {0: dim0_y}, "buf": {0: Dim.AUTO}}
+        example_inputs = (x, y, buf)
+        self.check_model(Model(), example_inputs, dynamic_shapes=dynamic_shapes)
+
     @skipIfWindows(msg="TODO: (xuhancn) confirm, Crash: access violation")
     def test_large_dynamic_dim(self):
         class Model(torch.nn.Module):

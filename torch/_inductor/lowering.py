@@ -9041,6 +9041,26 @@ def sym_numel(a):
     return a.get_numel()
 
 
+@register_lowering(aten.sym_storage_offset.default)
+def sym_storage_offset(a):
+    # Read the offset off the IR tensor. Without a lowering this op falls back to
+    # being re-executed on a tensor rebuilt by ir_node_to_tensor(), which
+    # allocates with torch.empty_strided() and therefore always reports 0.
+    a.realize()
+    x = a.data if isinstance(a, TensorBox) else a
+    if isinstance(x, ir.BaseView):
+        # A lazy view (e.g. a slice) keeps its start in its indexing, not in its
+        # base's layout; a ReinterpretView makes the offset explicit.
+        x = ir.ExternKernel.convert_to_reinterpret_view(x)
+    storage, layout = ir.as_storage_and_layout(x, freeze=False)
+    offset = layout.offset
+    if isinstance(storage.data, ir.InputBuffer):
+        # Graph-input layouts are relative to the input tensor; add the input's
+        # own storage offset so the result is storage-relative, like eager.
+        offset += V.graph.graph_input_storage_offsets.get(storage.data.get_name(), 0)
+    return offset
+
+
 def _unwrap_symbolic_magic_arg(x):
     if isinstance(x, SymTypes):
         return x.node.expr
