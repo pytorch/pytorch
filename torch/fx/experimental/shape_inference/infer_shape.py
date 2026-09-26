@@ -38,7 +38,7 @@ def infer_shape(
         for k, v in sample.items()
     ]
     symints: list[IntLikeType] = copy.deepcopy(init_symints)
-    symbol_to_idx_dict = {f"s{i}": i for i in range(dim_count)}
+    symbol_to_idx_dict = {str(sym): i for i, sym in enumerate(init_symints)}
     padding_constraints = defaultdict(list)  # type: ignore[var-annotated]
 
     complete_flag = False
