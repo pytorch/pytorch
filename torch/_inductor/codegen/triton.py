@@ -1413,6 +1413,15 @@ class TritonOverrides(OpOverrides):
         ):
             return f"{x}.to(tl.float32).to({out_dtype})"
 
+        # A cast whose source is already the target dtype is a no-op in Triton
+        # but still prints as one more instruction. This shows up as
+        # `tmp = tmp.to(tl.float32)` chains in emulate_precision_casts mode
+        # (#196958). When the input's tracked dtype already matches, and the
+        # emitted type is that same torch dtype (not a compute upcast), skip
+        # the cast entirely.
+        if getattr(x, "dtype", None) == dtype and out_dtype == triton_type(dtype):
+            return x
+
         return f"{x}.to({out_dtype})"
 
     @staticmethod

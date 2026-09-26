@@ -1124,6 +1124,29 @@ def helper(x):
         for kernel in atomic:
             self.assertNotIn("tt.pointer_range", kernel)
 
+    def test_to_dtype_skips_dead_same_dtype_cast(self):
+        """A cast whose input is already at the target dtype returns the input.
+
+        emulate_precision_casts mode otherwise prints chains like
+        `tmp22 = tmp21.to(tl.float32)` where tmp21 is already fp32 (#196958).
+        """
+        from torch._inductor.codegen.triton import TritonOverrides
+
+        value = TritonCSEVariable(
+            "tmp21", ValueRanges.unknown(), torch.float32, shape=("1",)
+        )
+        self.assertIs(TritonOverrides.to_dtype(value, torch.float32), value)
+
+        # real conversions are never skipped
+        self.assertEqual(
+            TritonOverrides.to_dtype(value, torch.int64), "tmp21.to(tl.int64)"
+        )
+
+        # untracked callers (plain strings) keep emitting the cast as before
+        self.assertEqual(
+            TritonOverrides.to_dtype("tmp21", torch.float32), "tmp21.to(tl.float32)"
+        )
+
     def test_is_multiple_of_rules(self):
         """Test structural divisibility rules in _is_multiple_of."""
         from torch.utils._sympy.functions import FloorDiv, Mod
