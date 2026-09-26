@@ -1856,12 +1856,23 @@ class VariableBuilder:
                     target_values=[getattr(value, field) for field in fields],
                     source=self.source,
                 )
-        elif TorchCtxManagerClassVariable.is_matching_cls(value):
+        elif (
+            ctx_manager_kind := TorchCtxManagerClassVariable.matching_cls_kind(value)
+        ) is not None:
             if inspect.isclass(value):
                 self.install_guards(GuardBuilder.CLASS_MATCH)
             elif inspect.isfunction(value):
                 self.install_guards(GuardBuilder.CLOSURE_MATCH)
-            return TorchCtxManagerClassVariable(value, source=self.source)
+            is_privateuse1_autocast = ctx_manager_kind == "privateuse1_autocast"
+            if is_privateuse1_autocast:
+                from .torch import _install_privateuse1_autocast_guards
+
+                _install_privateuse1_autocast_guards()
+            return TorchCtxManagerClassVariable(
+                value,
+                is_privateuse1_autocast=is_privateuse1_autocast,
+                source=self.source,
+            )
         elif inspect.getattr_static(value, "__script_if_tracing_wrapper", False):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return WrapperUserFunctionVariable(
@@ -5359,6 +5370,17 @@ class SourcelessBuilder:
         if isinstance(value, VariableTracker):
             # This is always valid to call, and useful for recursive calls.
             return value
+        elif (
+            TorchCtxManagerClassVariable.matching_cls_kind(value)
+            == "privateuse1_autocast"
+        ):
+            from .torch import _install_privateuse1_autocast_guards
+
+            _install_privateuse1_autocast_guards()
+            return TorchCtxManagerClassVariable(
+                value,
+                is_privateuse1_autocast=True,
+            )
         elif (
             is_opaque_constant_type(type(value))
             and not isinstance(value, enum.Enum)
