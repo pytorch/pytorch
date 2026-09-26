@@ -1,3 +1,9 @@
+from torch.utils.data._shared_container import (
+    SharedDict,
+    SharedList,
+    SharedTensor,
+    to_shared_dataset,
+)
 from torch.utils.data.dataloader import (
     _DatasetKind,
     DataLoader,
@@ -55,6 +61,9 @@ __all__ = [
     "RandomSampler",
     "Sampler",
     "SequentialSampler",
+    "SharedDict",
+    "SharedList",
+    "SharedTensor",
     "StackDataset",
     "Subset",
     "SubsetRandomSampler",
@@ -71,6 +80,7 @@ __all__ = [
     "random_split",
     "runtime_validation",
     "runtime_validation_disabled",
+    "to_shared_dataset",
 ]
 
 # Please keep this list sorted

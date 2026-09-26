@@ -272,8 +272,14 @@ class DataLoader(Generic[_T_co]):
         persistent_workers: bool = False,
         pin_memory_device: str = "",
         in_order: bool = True,
+        use_shared_memory: bool = False,
     ) -> None:
         torch._C._log_api_usage_once("python.data_loader")
+
+        if use_shared_memory:
+            from torch.utils.data._shared_container import to_shared_dataset
+
+            to_shared_dataset(dataset)
 
         if num_workers < 0:
             raise ValueError(
