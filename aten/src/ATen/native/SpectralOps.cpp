@@ -72,6 +72,8 @@ namespace {
 // * float16 on CUDA: passed through; cuFFT handles natively (SM53+, pow2)
 // * bfloat16 on CUDA: passed through; cuFFT handles natively (SM80+, pow2)
 //   or falls back to float32 promotion for older hardware
+// * float16 on MPS: passed through; MPSGraph FFT handles it natively
+// * bfloat16 on MPS: promoted to float32 (no native MPS bfloat16 FFT kernel)
 // * Raises an error for half-precision types on CPU
 ScalarType promote_type_fft(ScalarType type, bool require_complex, Device device) {
   if (at::isComplexType(type)) {
@@ -83,9 +85,9 @@ ScalarType promote_type_fft(ScalarType type, bool require_complex, Device device
   }
 
   const bool maybe_support_half = (
-    // CUDA and XPU support half precision, but since meta tensors don't have a
-    // device we err on the side of accepting it
-    device.is_cuda() || device.is_meta() || device.is_xpu()
+    // CUDA, XPU and MPS support half precision, but since meta tensors don't
+    // have a device we err on the side of accepting it
+    device.is_cuda() || device.is_meta() || device.is_xpu() || device.is_mps()
   );
   if (maybe_support_half) {
     // XPU has no native bfloat16 FFT kernel; promote to float32.
@@ -97,6 +99,10 @@ ScalarType promote_type_fft(ScalarType type, bool require_complex, Device device
     }
     // ROCm/hipFFT does not support bfloat16; promote to float32
     if (type == kBFloat16 && device.is_cuda() && at::globalContext().hasROCM()) {
+      type = kFloat;
+    }
+    // MPS has a native float16 FFT kernel but no bfloat16 one; promote to float32.
+    if (type == kBFloat16 && device.is_mps()) {
       type = kFloat;
     }
     TORCH_CHECK_NOT_IMPLEMENTED(type == kHalf || type == kBFloat16 || type == kFloat || type == kDouble,
