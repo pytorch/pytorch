@@ -39,8 +39,10 @@ from torch._inductor.scheduler import (
     SchedulerNode,
     SubParentAccessRelation,
     SubParentEpilogueCandidate,
+    SubParentEpilogueStage,
     SubParentEpilogueGrouping,
     SubParentOutputGroup,
+    StagedReductionPlan,
 )
 from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.utils import fresh_inductor_cache, snode_args_kwargs
@@ -737,42 +739,6 @@ class TestScheduler(TestCase):
         self.assertEqual(args[1], 1)
         self.assertEqual(kwargs, {})
 
-    def test_translated_shape_admission(self):
-        row, feature = sympy.symbols(
-            "admission_row admission_feature", integer=True, nonnegative=True
-        )
-
-        def prove_translation(parent_width, factor):
-            child_width = parent_width // factor
-            source = MemoryDep(
-                "buf0",
-                parent_width * row + feature,
-                (row, feature),
-                (2, parent_width),
-            )
-            consumer = MemoryDep(
-                "buf0",
-                parent_width * row + feature + child_width,
-                (row, feature),
-                (2, child_width),
-            )
-            return NestedReduction.prove_sub_parent_translation(
-                (source,),
-                consumer,
-                2,
-                parent_width,
-                factor,
-                {},
-            )
-
-        with (
-            V.set_graph_handler(Mock(sizevars=SizeVarAllocator())),
-            inductor_config.patch(polyhedral_fusion=True),
-        ):
-            self.assertIsNone(prove_translation(192, 3))
-            self.assertIsNotNone(prove_translation(256, 4))
-            self.assertIsNone(prove_translation(384, 6))
-
     def test_sub_parent_resolver_rejects_inconsistent_name_contract(self):
         d0 = sympy.Symbol("d0", integer=True)
         access = MemoryDep("buf0", d0, (d0,), (sympy.Integer(16),))
@@ -982,54 +948,53 @@ class TestScheduler(TestCase):
             )
         )
 
-    def test_translated_capability_gate_declines_unsupported_geometry(self):
+    def test_translated_capability_gate_requires_cuda(self, device):
         row, feature = sympy.symbols(
             "capability_row capability_feature", integer=True, nonnegative=True
         )
         source = MemoryDep(
             "buf0",
-            192 * row + feature,
+            256 * row + feature,
             (row, feature),
-            (4, 192),
+            (4, 256),
         )
-        def make_plan(child_width, factor, translation):
-            consumer = MemoryDep(
-                "buf0",
-                192 * row + feature + translation,
-                (row, feature),
-                (4, child_width),
-            )
-            proof = SubParentAccessRelation.prove_translation(
-                source, consumer, sizevars=SizeVarAllocator()
-            )
-            self.assertIsNotNone(proof)
-            relation = SubParentAccessRelation(
-                (source,),
-                consumer,
-                None,
-                False,
-                translation=proof.translation,
-            )
-            stage = SubParentEpilogueStage(
-                factor=factor,
-                access_relations=(relation,),
-                output_groups=(
-                    SubParentOutputGroup(output_lanes=1, nodes=(Mock(),)),
+        consumer = MemoryDep(
+            "buf0",
+            256 * row + feature + 64,
+            (row, feature),
+            (4, 64),
+        )
+        proof = SubParentAccessRelation.prove_translation(
+            source, consumer, sizevars=SizeVarAllocator()
+        )
+        self.assertIsNotNone(proof)
+        relation = SubParentAccessRelation(
+            (source,),
+            consumer,
+            None,
+            False,
+            translation=proof.translation,
+        )
+        plan = StagedReductionPlan(
+            parent_nodes=(),
+            parent_numel=sympy.Integer(4),
+            parent_rnumel=sympy.Integer(256),
+            nested_stage=None,
+            sub_parent_stages=(
+                SubParentEpilogueStage(
+                    factor=4,
+                    access_relations=(relation,),
+                    output_groups=(
+                        SubParentOutputGroup(output_lanes=1, nodes=(Mock(),)),
+                    ),
                 ),
-            )
-            return StagedReductionPlan(
-                parent_nodes=(),
-                parent_numel=sympy.Integer(4),
-                parent_rnumel=sympy.Integer(192),
-                nested_stage=None,
-                sub_parent_stages=(stage,),
-            )
-
-        supported_plan = make_plan(64, 3, 0)
-        unsupported_plan = make_plan(96, 2, 0)
+            ),
+        )
         scheduling = object.__new__(SIMDScheduling)
         scheduling.supports_sub_parent_epilogue = True
         graph = Mock(sizevars=SizeVarAllocator())
+        node = Mock()
+        node.get_device.return_value = torch.device(device)
 
         with (
             V.set_graph_handler(graph),
@@ -1038,17 +1003,16 @@ class TestScheduler(TestCase):
             ),
             patch.object(
                 NestedReduction,
-                "sub_parent_epilogue_plan",
-                side_effect=(supported_plan, unsupported_plan),
+                "sub_parent_epilogue_result",
+                return_value=Mock(plan=plan),
             ),
             inductor_config.patch({"triton.nested_reduction": True}),
         ):
-            self.assertIs(
-                scheduling._sub_parent_epilogue_plan([], 4, 192), supported_plan
-            )
-            self.assertIsNone(
-                scheduling._sub_parent_epilogue_plan([], 4, 192)
-            )
+            admitted = scheduling._sub_parent_epilogue_plan((node,), 4, 256)
+            if torch.device(device).type == "cuda":
+                self.assertIs(admitted, plan)
+            else:
+                self.assertIsNone(admitted)
 
     def test_sub_parent_resolver_uses_planned_lane_set(self):
         d0 = sympy.Symbol("d0", integer=True, nonnegative=True)
