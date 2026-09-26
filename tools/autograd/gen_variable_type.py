@@ -198,6 +198,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "flipud",
     "rot90",
     "nanmean",
+    "nan_to_num",
     "nansum",
     "transpose",
     "transpose_copy",
