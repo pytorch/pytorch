@@ -161,6 +161,11 @@ void OperatorEntry::deregisterSchema() {
   TORCH_INTERNAL_ASSERT(schema_.has_value());
   schema_ = std::nullopt;
   dispatchKeyExtractor_.deregisterSchema();
+  // This entry can outlive the deregistration and be reused by a later
+  // registration of the same name. py_cache_ holds a borrowed torch.ops
+  // overload built from the *old* schema, so it must not survive into the
+  // redefined operator.
+  py_cache_.reset();
 }
 
 OperatorEntry::AnnotatedKernelContainerIterator OperatorEntry::registerKernel(

@@ -847,6 +847,30 @@ class TestCustomOp(CustomOpTestCaseBase):
         self.assertEqual(len(xs), 1)
 
     @skipIfTorchDynamo("PyObject dispatch test is eager-only")
+    def test_pyobject_dispatch_stale_overload_after_redefinition(self):
+        @torch.library.custom_op(
+            f"{self.test_ns}::pyobject_dispatch_redefined", mutates_args=()
+        )
+        def f(x: Tensor) -> Tensor:
+            return x + 1
+
+        stale = self.ns().pyobject_dispatch_redefined.default
+        self.assertTrue(stale._is_pyobj_dispatcher_enabled())
+        x = torch.ones(2)
+        self.assertEqual(stale(x), torch.full((2,), 2.0))
+
+        # Redefining the qualname destroys the Library owning the operator.
+        # The OperatorHandle cached inside `stale` must keep the OperatorDef
+        # alive; otherwise calling it reads freed memory.
+        @torch.library.custom_op(
+            f"{self.test_ns}::pyobject_dispatch_redefined", mutates_args=()
+        )
+        def g(x: Tensor) -> Tensor:
+            return x + 2
+
+        self.assertEqual(stale(x), torch.full((2,), 3.0))
+
+    @skipIfTorchDynamo("PyObject dispatch test is eager-only")
     def test_pyobject_dispatch_passes_keyset_to_python_kernel(self):
         lib = self.lib()
         lib.define("pyobject_dispatch_with_keyset(Tensor x) -> Tensor")
