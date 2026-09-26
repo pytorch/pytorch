@@ -716,6 +716,23 @@ def meta_philox_randint_(self, key, low=None, high=None):
 def meta_fft_c2r(self: Tensor, dim: list[int], normalization: int, lastdim: int):
     # _fft_c2r_mkl
     torch._check(self.dtype.is_complex)
+    # Mirror check_fft_c2r_input (SpectralOpsUtils.h) so export/compile reject
+    # an inconsistent last_dim_size at trace time, matching eager.
+    from torch.fx.experimental.symbolic_shapes import sym_or
+
+    torch._check(len(dim) > 0, lambda: "_fft_c2r: dim must not be empty")
+    torch._check(
+        lastdim >= 1,
+        lambda: f"Invalid number of data points ({lastdim}) specified",
+    )
+    onesided = lastdim // 2 + 1
+    in_size = self.size(dim[-1])
+    torch._check(
+        sym_or(in_size == onesided, in_size == lastdim),
+        lambda: f"Expected size of last transformed dimension of input to be "
+        f"{onesided} (= last_dim_size / 2 + 1) or {lastdim} (= last_dim_size), "
+        f"but got {in_size}",
+    )
 
     if device_hint(self) == "cuda":
         out_sizes = list(self.size())

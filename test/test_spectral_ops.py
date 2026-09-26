@@ -253,6 +253,49 @@ class TestFFT(TestCase):
             with self.assertRaisesRegex(RuntimeError, match):
                 f(t)
 
+    # Regression test for https://github.com/pytorch/pytorch/issues/141448:
+    # _fft_c2r used to crash (heap-buffer overflow on pocketfft, an internal
+    # assert on MKL/cuFFT, or an uncatchable abort on MPS) when last_dim_size
+    # was inconsistent with the input's last transformed dimension.
+    @skipCPUIfNoFFT
+    @onlyNativeDeviceTypes
+    def test_fft_c2r_invalid_last_dim_size(self, device):
+        t = torch.full((3, 1, 3, 1), 0.372049, dtype=torch.cfloat, device=device)
+        with self.assertRaisesRegex(
+                RuntimeError,
+                r"Expected size of last transformed dimension of input to be"):
+            torch._fft_c2r(t, [2], 2, 536870912)
+
+        with self.assertRaisesRegex(
+                RuntimeError, r"Invalid number of data points"):
+            torch._fft_c2r(t, [2], 2, 0)
+
+        with self.assertRaisesRegex(RuntimeError, r"dim must not be empty"):
+            torch._fft_c2r(t, [], 2, 4)
+
+        # Intermediate band (last_dim_size/2+1 < in_size < last_dim_size) is
+        # rejected.
+        t2 = torch.zeros(5, 1, dtype=torch.cfloat, device=device)
+        with self.assertRaisesRegex(
+                RuntimeError,
+                r"Expected size of last transformed dimension of input to be"):
+            torch._fft_c2r(t2, [0], 0, 6)
+
+        # in_size > last_dim_size is rejected: pocketfft would read only the
+        # onesided prefix, but MKL/cuFFT assert and MPS aborts.
+        t3 = torch.zeros(6, 3, dtype=torch.cfloat, device=device)
+        with self.assertRaisesRegex(
+                RuntimeError,
+                r"Expected size of last transformed dimension of input to be"):
+            torch._fft_c2r(t3, [0], 0, 4)
+
+        # Onesided (in_size == last_dim_size/2+1) and full (in_size ==
+        # last_dim_size) inputs are both accepted.
+        t4 = torch.zeros(3, 3, dtype=torch.cfloat, device=device)
+        self.assertEqual(torch._fft_c2r(t4, [0], 0, 4).shape, torch.Size([4, 3]))
+        t5 = torch.zeros(4, 3, dtype=torch.cfloat, device=device)
+        self.assertEqual(torch._fft_c2r(t5, [0], 0, 4).shape, torch.Size([4, 3]))
+
     @onlyNativeDeviceTypes
     def test_fft_invalid_dtypes(self, device):
         t = torch.randn(64, device=device, dtype=torch.complex128)
