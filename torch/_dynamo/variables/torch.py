@@ -1010,6 +1010,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 return device.value
             return device.as_python_constant()
 
+        import warnings
+
         from torch.backends.cuda import SDPAParams
 
         from . import (
@@ -1022,6 +1024,23 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             UserDefinedObjectVariable,
         )
         from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
+
+        @register(warnings.filterwarnings, warnings.simplefilter)
+        def handle_warning_filters(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> ConstantVariable:
+            python_args = [arg.as_python_constant() for arg in args]
+            python_kwargs = {
+                name: value.as_python_constant() for name, value in kwargs.items()
+            }
+            try:
+                self.value(*python_args, **python_kwargs)
+            except Exception as exc:
+                raise_observed_exception(type(exc), tx, args=list(exc.args))
+            return ConstantVariable.create(None)
 
         @register(*tracing_state_functions())
         def handle_tracing_state_functions(
