@@ -638,3 +638,10 @@ def import_fresh_module(name: str, blocked: list[str]) -> ModuleType:
     finally:
         _save_and_remove_modules(names)
         py_sys.modules.update(orig_modules)
+
+
+def property_isabstractmethod(prop: property) -> bool:
+    for accessor in (prop.fget, prop.fset, prop.fdel):
+        if getattr(accessor, "__isabstractmethod__", False):
+            return True
+    return False

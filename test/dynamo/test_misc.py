@@ -17365,6 +17365,35 @@ fn
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_property_isabstractmethod_raises(self):
+        class NotBool:
+            def __bool__(self):
+                raise ValueError("truth-test failure")
+
+        def accessor(*args):
+            pass
+
+        accessor.__isabstractmethod__ = NotBool()
+
+        def fn(t, prop):
+            try:
+                prop.__isabstractmethod__
+            except ValueError:
+                return t + 1
+            return t - 1
+
+        for accessor_index in range(3):
+            with self.subTest(accessor_index=accessor_index):
+                accessors = [None, None, None]
+                accessors[accessor_index] = accessor
+                prop = property(*accessors)
+                compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+                for value in (0.0, 2.0):
+                    t = torch.tensor(value)
+                    self.assertEqual(fn(t, prop), t + 1)
+                    self.assertEqual(compiled_fn(t, prop), t + 1)
+
     def test_assert_size_stride(self):
         x = torch.randn(2, 3, 4)
         with self.assertRaisesRegex(
