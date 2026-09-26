@@ -362,17 +362,80 @@ jobs:
       python-version: "3.11"
     secrets: inherit
 
+  # Default ROCm shards can run on the kubernetes-novolume scale set when the CI
+  # image is on the public GHCR mirror (same tag docker-builds pushed to ECR).
+  # Otherwise they stay on DinD, which can log into ECR at job start. Non-default
+  # configs (inductor, distributed, …) always use DinD regardless.
+  linux-noble-rocm-py3_11-ghcr-probe:
+    if: github.repository_owner == 'pytorch'
+    name: linux-noble-rocm-py3.11-mi350-ghcr-probe
+    needs:
+      - linux-noble-rocm-py3_11-build
+      - job-filter
+    runs-on: ubuntu-24.04
+    outputs:
+      ghcr-available: ${{ steps.route.outputs.ghcr-available }}
+      dind-has-jobs: ${{ steps.route.outputs.dind-has-jobs }}
+      dind-test-matrix: ${{ steps.route.outputs.dind-test-matrix }}
+    steps:
+      - name: Probe GHCR mirror and select DinD matrix
+        id: route
+        shell: bash
+        env:
+          ECR_IMAGE: ${{ needs.linux-noble-rocm-py3_11-build.outputs.docker-image }}
+          BUILD_TEST_MATRIX: ${{ needs.linux-noble-rocm-py3_11-build.outputs.test-matrix }}
+        run: |
+          set -euo pipefail
+
+          repository="pytorch/ci-image"
+          tag="${ECR_IMAGE##*:}"
+          ghcr_available=false
+
+          for attempt in $(seq 1 5); do
+            token="$(curl -fsSL "https://ghcr.io/token?scope=repository:${repository}:pull" | jq -r .token)"
+            status="$(curl -sS -o /dev/null -w '%{http_code}' \
+              -H "Authorization: Bearer ${token}" \
+              -H 'Accept: application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.docker.distribution.manifest.v2+json' \
+              "https://ghcr.io/v2/${repository}/manifests/${tag}")"
+            if [[ "${status}" == "200" ]]; then
+              ghcr_available=true
+              echo "GHCR mirror present: ghcr.io/${repository}:${tag}"
+              break
+            fi
+            echo "attempt ${attempt}: HTTP ${status} for ghcr.io/${repository}:${tag}"
+            sleep 30
+          done
+
+          echo "ghcr-available=${ghcr_available}" >> "${GITHUB_OUTPUT}"
+
+          if [[ "${ghcr_available}" == true ]]; then
+            dind_matrix="$(echo "${BUILD_TEST_MATRIX}" | jq -c '.include |= map(select(.config != "default" or .num_shards != 8))')"
+          else
+            echo "GHCR mirror absent; default shards will run on DinD"
+            dind_matrix="${BUILD_TEST_MATRIX}"
+          fi
+
+          dind_count="$(echo "${dind_matrix}" | jq '.include | length')"
+          echo "dind-test-matrix=${dind_matrix}" >> "${GITHUB_OUTPUT}"
+          if [[ "${dind_count}" -gt 0 ]]; then
+            echo "dind-has-jobs=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "dind-has-jobs=false" >> "${GITHUB_OUTPUT}"
+          fi
+
   linux-noble-rocm-py3_11-test:
     name: linux-noble-rocm-py3.11-mi350
     uses: ./.github/workflows/_rocm-test.yml
     needs:
       - linux-noble-rocm-py3_11-build
+      - linux-noble-rocm-py3_11-ghcr-probe
       - target-determination
       - job-filter
+    if: github.repository_owner == 'pytorch' && needs.linux-noble-rocm-py3_11-ghcr-probe.outputs.dind-has-jobs == 'true'
     with:
       build-environment: ${{ needs.linux-noble-rocm-py3_11-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-noble-rocm-py3_11-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-noble-rocm-py3_11-build.outputs.test-matrix }}
+      test-matrix: ${{ needs.linux-noble-rocm-py3_11-ghcr-probe.outputs.dind-test-matrix }}
       # The default config picks these up by discovery; the inductor config in
       # this same job already runs them. Only affects default (see EXCLUDE_CLAUSE
       # in .ci/pytorch/test.sh).
@@ -381,6 +444,37 @@ jobs:
         inductor/test_torchinductor_opinfo
         inductor/test_aot_inductor
         inductor/test_cpu_select_algorithm
+      tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
+    secrets: inherit
+
+  # Default shards on the kubernetes-novolume scale set when the GHCR mirror exists.
+  # The matrix is spelled out here rather than reusing the build output because
+  # it needs the no-dind runner label, and it carries no experiment prefix: the
+  # ARC scale set registers the bare label, so a prefix would resolve to a
+  # runner group that does not exist and the jobs would queue forever.
+  linux-noble-rocm-py3_11-test-k8s:
+    name: linux-noble-rocm-py3.11-mi350-k8s
+    uses: ./.github/workflows/_rocm-test-kubernetes.yml
+    needs:
+      - linux-noble-rocm-py3_11-build
+      - linux-noble-rocm-py3_11-ghcr-probe
+      - target-determination
+      - job-filter
+    if: github.repository_owner == 'pytorch' && needs.linux-noble-rocm-py3_11-ghcr-probe.outputs.ghcr-available == 'true'
+    with:
+      build-environment: ${{ needs.linux-noble-rocm-py3_11-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-noble-rocm-py3_11-build.outputs.docker-image }}
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 8, runner: "linux.rocm.gpu.gfx950.1-no-dind" },
+          { config: "default", shard: 2, num_shards: 8, runner: "linux.rocm.gpu.gfx950.1-no-dind" },
+          { config: "default", shard: 3, num_shards: 8, runner: "linux.rocm.gpu.gfx950.1-no-dind" },
+          { config: "default", shard: 4, num_shards: 8, runner: "linux.rocm.gpu.gfx950.1-no-dind" },
+          { config: "default", shard: 5, num_shards: 8, runner: "linux.rocm.gpu.gfx950.1-no-dind" },
+          { config: "default", shard: 6, num_shards: 8, runner: "linux.rocm.gpu.gfx950.1-no-dind" },
+          { config: "default", shard: 7, num_shards: 8, runner: "linux.rocm.gpu.gfx950.1-no-dind" },
+          { config: "default", shard: 8, num_shards: 8, runner: "linux.rocm.gpu.gfx950.1-no-dind" },
+        ]}
       tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
     secrets: inherit
 
