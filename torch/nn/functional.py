@@ -7476,3 +7476,9 @@ def scaled_grouped_mm(
     )
 
     return out
+
+
+from torch.nn.attention.gated_delta import gated_delta_rule
+
+
+gated_delta_rule.__module__ = "torch.nn.functional"

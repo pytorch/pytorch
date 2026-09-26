@@ -75,6 +75,7 @@ from .dropout import (
 )
 from .flatten import Flatten, Unflatten
 from .fold import Fold, Unfold
+from .gated_delta import GatedDeltaNet
 from .instancenorm import (
     InstanceNorm1d,
     InstanceNorm2d,
@@ -222,6 +223,7 @@ __all__ = [
     "GLU",
     "GRU",
     "GRUCell",
+    "GatedDeltaNet",
     "GaussianNLLLoss",
     "GroupNorm",
     "Hardshrink",
