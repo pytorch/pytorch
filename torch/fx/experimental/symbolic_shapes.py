@@ -2864,10 +2864,12 @@ class _ShapeGuardPrinter(abc.ABC):
         symbol_to_source: Mapping[sympy.Symbol, list[Source]],
         source_ref: Callable[[Source], str],
         var_to_sources: Mapping[sympy.Symbol, list[Source]],
+        specialize_unbound: Mapping[sympy.Symbol, sympy.Integer] | None = None,
     ) -> None:
         self.symbol_to_source = symbol_to_source
         self.source_ref = source_ref
         self.var_to_sources = var_to_sources
+        self.specialize_unbound = specialize_unbound
         super().__init__()
 
     def _print_Float(self, expr: sympy.Float) -> str:
@@ -2898,6 +2900,15 @@ class _ShapeGuardPrinter(abc.ABC):
         # Try symbol_to_source first, fall back to var_to_sources if not found
         if source := self.symbol_to_source.get(expr):
             return self.print_source(source[0])
+        elif self.specialize_unbound is not None and (
+            (val := self.specialize_unbound.get(expr)) is not None
+        ):
+            # The var_to_sources fallback below emits the symbol's ORIGINAL Dynamo
+            # source, which only resolves against a frame's locals. Consumers whose
+            # namespace is positional -- produce_guards_expression, whose args are
+            # named t0..tN -- cannot resolve anything else, so for them a symbol with
+            # no placeholder is specialized to its value instead.
+            return str(int(val))
         elif source := self.var_to_sources.get(expr):
             return self.print_source(source[0])
         else:
@@ -6187,6 +6198,7 @@ class ShapeEnv:
         # Indicates if we should produce guards for known static values.
         ignore_static: bool = True,
         langs: tuple[str, ...] = ("python", "verbose_python"),
+        specialize_unbound_symbols: Mapping[sympy.Symbol, sympy.Integer] | None = None,
     ) -> list[_ShapeGuardsHelper]:
         """
         Generates a list of guards strings which, when evaluated in a context that
@@ -6338,7 +6350,10 @@ class ShapeEnv:
 
         printers: list[_ShapeGuardPrinter] = []
         py_printer = ShapeGuardPythonPrinter(
-            symbol_to_source, source_ref, self.var_to_sources
+            symbol_to_source,
+            source_ref,
+            self.var_to_sources,
+            specialize_unbound_symbols,
         )
         for lang in langs:
             if lang in ["python", "verbose_python"]:
@@ -6346,7 +6361,10 @@ class ShapeEnv:
             elif lang == "cpp":
                 printers.append(
                     _ShapeGuardCppPrinter(
-                        symbol_to_source, source_ref, self.var_to_sources
+                        symbol_to_source,
+                        source_ref,
+                        self.var_to_sources,
+                        specialize_unbound_symbols,
                     )
                 )
             else:
@@ -7144,6 +7162,12 @@ class ShapeEnv:
             [LocalSource(a) for a in arg_names],
             guards=guards,
             ignore_static=ignore_static,
+            # evaluate_guards_expression binds only t0..tN, so a symbol that has no
+            # placeholder here can never be looked up later. get_pruned_guards keeps a
+            # guard whose UNSIMPLIFIED symbols are all placeholders, while rendering
+            # applies replacements and can surface others; specializing those to their
+            # values keeps the expression evaluable instead of emitting a Dynamo source.
+            specialize_unbound_symbols=self.backed_var_to_val,
         )
         if produced_guards:
             return " and ".join(produced_guards)
