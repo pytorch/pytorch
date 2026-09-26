@@ -34,9 +34,11 @@ def get_pytorch_dir():
     # We only need to get the PyTorch installation directory, so whether the accelerator is loaded or not is irrelevant
     # If the accelerator has been previously built and not uninstalled, importing torch will cause a circular import error
     os.environ["TORCH_DEVICE_BACKEND_AUTOLOAD"] = "0"
-    import torch
+    from torch._utils_internal import get_file_path
 
-    return os.path.dirname(os.path.realpath(torch.__file__))
+    # Not derived from torch.__file__: editable installs redirect that to the
+    # source tree, which holds no lib/, include/ or share/cmake.
+    return get_file_path("torch")
 
 
 def build_deps():
