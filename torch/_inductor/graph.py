@@ -1800,12 +1800,46 @@ class GraphLowering(torch.fx.Interpreter):
                 except ValueError:
                     pass
 
+        if config.keep_output_aliasing:
+            self._preserve_user_visible_output_aliases()
         self.finalize()
         log.debug(
             "Force channels last inputs for %d conv for the current graph with id %d",
             self.num_channels_last_conv,
             self.graph_id if self.graph_id is not None else -1,
         )
+
+    def _preserve_user_visible_output_aliases(self) -> None:
+        """Remove input aliases newly introduced on user-visible outputs."""
+        module = cast(torch.fx.GraphModule, self.module)
+        output = module.graph.find_nodes(op="output")[0]
+        visible_outputs = tuple(output.meta.get("user_visible_output_idxs", ()))
+        original_aliasing_output_idxs = output.meta.get(
+            "original_input_aliasing_output_idxs"
+        )
+        if original_aliasing_output_idxs is None or not visible_outputs:
+            return
+        originally_aliasing_outputs = frozenset(original_aliasing_output_idxs)
+
+        input_names = OrderedSet(
+            (
+                self.graph_inputs_original[name].get_name()
+                if name in self.graph_inputs_original
+                else None
+            )
+            for name in self.graph_input_names
+        )
+
+        for output_idx in visible_outputs:
+            if output_idx in originally_aliasing_outputs:
+                continue
+            value = self.graph_outputs[output_idx]
+            if (
+                isinstance(value, ir.IRNode)
+                and value.has_tensor_output()
+                and value.maybe_get_name() in input_names
+            ):
+                self.graph_outputs[output_idx] = ir.ExternKernel.copy_input(value)
 
     def finalize(self) -> None:
         for buf in self.buffers:

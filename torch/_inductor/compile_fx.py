@@ -53,6 +53,7 @@ from torch._dynamo.utils import (
     set_feature_use,
 )
 from torch._functorch import aot_autograd, config as functorch_config
+from torch._functorch._aot_autograd.schemas import OutputType
 from torch._functorch._aot_autograd.subclass_parametrization import (
     unwrap_tensor_subclass_parameters,
 )
@@ -453,11 +454,12 @@ def _recursive_record_user_visible_output_idxs(gm: GraphModule) -> None:
         subgraph = getattr(gm, node.args[0].target)
 
         for node in subgraph.graph.find_nodes(op="output"):
-            node.meta["user_visible_output_idxs"] = [
+            user_visible_output_idxs = [
                 idx
                 for idx in range(len(node.args[0]))
                 if isinstance(node.args[0][idx], torch.fx.Node)
             ]
+            node.meta["user_visible_output_idxs"] = user_visible_output_idxs
         _recursive_record_user_visible_output_idxs(subgraph)
 
 
@@ -2546,9 +2548,10 @@ def fw_compiler_freezing(
     # for freezing, all graph outputs should be user visible
     *_, model_outputs_node = opt_model.graph.nodes
     model_outputs = model_outputs_node.args[0]
-    model_outputs_node.meta["user_visible_output_idxs"] = [
+    user_visible_output_idxs = [
         idx for idx, n in enumerate(model_outputs) if isinstance(n, torch.fx.Node)
     ]
+    model_outputs_node.meta["user_visible_output_idxs"] = user_visible_output_idxs
 
     static_input_idxs: list[Any] = []
     # constant params will be real tensors, not fake
@@ -2697,18 +2700,17 @@ def partition_fn(
     )
 
     if partitioner_fn_override is not None:
-        return partitioner_fn_override(
+        partition_result = partitioner_fn_override(
             gm,
             joint_inputs,
             static_lifetime_input_indices=static_lifetime_input_indices,
             **kwargs,
         )
-
-    if config.custom_partitioner_fn is None:
+    elif config.custom_partitioner_fn is None:
         with dynamo_utils.dynamo_timed(
             "min_cut_rematerialization_partition", log_pt2_compile_event=True
         ):
-            return min_cut_rematerialization_partition(
+            partition_result = min_cut_rematerialization_partition(
                 gm,
                 joint_inputs,
                 compiler="inductor",
@@ -2726,13 +2728,15 @@ def partition_fn(
             config.custom_partitioner_fn.__class__.__name__,
             log_pt2_compile_event=True,
         ):
-            return config.custom_partitioner_fn(
+            partition_result = config.custom_partitioner_fn(
                 gm,
                 joint_inputs,
                 compiler="inductor",
                 static_lifetime_input_indices=static_lifetime_input_indices,
                 **kwargs,
             )
+
+    return partition_result
 
 
 def get_num_model_outputs(model: GraphModule) -> int:
@@ -2899,7 +2903,11 @@ def compile_fx_forward(
     clone_live_user_outputs = _cudagraph_trees_clone_live_user_outputs()
     model_outputs = None
     user_visible_output_idxs: list[int] = []
-    if config.keep_output_stride or clone_live_user_outputs:
+    if (
+        config.keep_output_stride
+        or config.keep_output_aliasing
+        or clone_live_user_outputs
+    ):
         model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
         num_model_outputs = len(model_outputs)
 
@@ -2946,7 +2954,39 @@ def compile_fx_forward(
             if isinstance(model_outputs[idx], torch.fx.Node)
         ]
 
-    if config.keep_output_stride or clone_live_user_outputs:
+        if config.keep_output_aliasing and context is not None and context.fw_metadata:
+            output_info = context.fw_metadata.output_info
+            if len(output_info) != num_orig_model_outputs:
+                raise AssertionError(
+                    f"Expected {num_orig_model_outputs} output alias entries, "
+                    f"got {len(output_info)}"
+                )
+            input_alias_types = (
+                OutputType.alias_of_input,
+                OutputType.is_input,
+                OutputType.custom_function_view,
+            )
+            visible_set = frozenset(user_visible_output_idxs)
+            model_outputs_node.meta["original_input_aliasing_output_idxs"] = [
+                original_output_start_index + idx
+                for idx, info in enumerate(output_info)
+                if original_output_start_index + idx in visible_set
+                and (
+                    info.output_type in input_alias_types
+                    # AOTAutograd hides differentiable multi-output views from
+                    # autograd, but base_idx still identifies their input base.
+                    or (
+                        info.output_type is OutputType.non_alias
+                        and info.base_idx is not None
+                    )
+                )
+            ]
+
+    if (
+        config.keep_output_stride
+        or config.keep_output_aliasing
+        or clone_live_user_outputs
+    ):
         model_outputs_node.meta["user_visible_output_idxs"] = user_visible_output_idxs
     else:
         model_outputs_node.meta["user_visible_output_idxs"] = []

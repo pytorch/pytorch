@@ -20115,6 +20115,67 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(y, ey)
         self.assertEqual(base, ebase)
 
+    # https://github.com/pytorch/pytorch/issues/197893
+    @parametrize("requires_grad", (False, True))
+    def test_preserve_output_aliasing_noop_optimization(self, requires_grad):
+        def fn(x):
+            return x + 0, x * 1, torch.sin(x)
+
+        eager_input = torch.randn(8, device=self.device, requires_grad=requires_grad)
+        compiled_input = eager_input.detach().clone().requires_grad_(requires_grad)
+        eager_outputs = fn(eager_input)
+        compiled_outputs = torch.compile(fn, fullgraph=True)(compiled_input)
+
+        self.assertEqual(compiled_outputs, eager_outputs)
+        for inputs, outputs in (
+            ((eager_input,), eager_outputs),
+            ((compiled_input,), compiled_outputs),
+        ):
+            for input_tensor, output in itertools.product(inputs, outputs):
+                self.assertFalse(torch._C._is_alias_of(input_tensor, output))
+            for left, right in itertools.combinations(outputs, 2):
+                self.assertFalse(torch._C._is_alias_of(left, right))
+
+    # https://github.com/pytorch/pytorch/issues/195451
+    def test_preserve_output_aliasing_reinplace(self):
+        def fn(x, src):
+            updated = torch.slice_scatter(x, src, 0, 0, 1)
+            x.copy_(updated)
+            return updated
+
+        def run(target):
+            x = torch.tensor([1.0, 2.0], device=self.device)
+            output = target(x, torch.tensor([10.0], device=self.device))
+            self.assertEqual(x, torch.tensor([10.0, 2.0], device=self.device))
+            self.assertEqual(output, x)
+            return x, output
+
+        eager_input, eager_output = run(fn)
+        compiled_input, compiled_output = run(torch.compile(fn, fullgraph=True))
+        self.assertFalse(torch._C._is_alias_of(eager_input, eager_output))
+        self.assertFalse(torch._C._is_alias_of(compiled_input, compiled_output))
+
+    # https://github.com/pytorch/pytorch/issues/198094
+    def test_preserve_output_aliasing_before_unrelated_mutation(self):
+        def fn(x, src):
+            output = torch.slice_scatter(x, src[1:3], dim=0, start=1, end=3)
+            x.zero_()
+            return output
+
+        def run(target):
+            x = torch.arange(24, dtype=torch.int64, device=self.device).reshape(4, 6)
+            src = torch.arange(-12, 12, dtype=torch.int64, device=self.device).reshape(
+                4, 6
+            )
+            return x, target(x, src)
+
+        eager_input, eager_output = run(fn)
+        compiled_input, compiled_output = run(torch.compile(fn, fullgraph=True))
+        self.assertEqual(compiled_input, eager_input)
+        self.assertEqual(compiled_output, eager_output)
+        self.assertFalse(torch._C._is_alias_of(eager_input, eager_output))
+        self.assertFalse(torch._C._is_alias_of(compiled_input, compiled_output))
+
     # end of class CommonTemplate - add new tests here
 
 

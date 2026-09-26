@@ -939,6 +939,9 @@ cache_sdpa_constraint = (
 # Whether to keep the output strides the same as eager after layout optimization.
 keep_output_stride = os.environ.get("TORCHINDUCTOR_KEEP_OUTPUT_STRIDE", "1") == "1"
 
+# Whether to preserve input/output and output/output aliases for user-visible outputs.
+keep_output_aliasing = os.environ.get("TORCHINDUCTOR_KEEP_OUTPUT_ALIASING", "1") == "1"
+
 # Whether view outputs must match eager strides exactly instead of only matching
 # their stride order. Exact matching can introduce additional copy kernels.
 strict_output_strides = False
