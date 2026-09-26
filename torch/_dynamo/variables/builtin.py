@@ -2374,6 +2374,12 @@ class BuiltinVariable(BaseBuiltinVariable):
         if len(args) > 3:
             raise_type_error(tx, f"range expected at most 3 arguments, got {len(args)}")
         args = tuple(pynumber_index(tx, arg) for arg in args)
+        if (
+            len(args) == 3
+            and args[2].is_python_constant()
+            and args[2].as_python_constant() == 0
+        ):
+            raise_value_error(tx, "range() arg 3 must not be zero")
         return variables.RangeVariable(list(args))
 
     def _dynamic_args(self, *args: VariableTracker, **kwargs: VariableTracker) -> bool:

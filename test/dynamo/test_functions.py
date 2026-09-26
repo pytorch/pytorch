@@ -5088,6 +5088,18 @@ class GraphModule(torch.nn.Module):
             print("testing :", args)
             test(*args)
 
+    def test_range_zero_step(self):
+        def fn(step):
+            try:
+                range(1, 2, step)
+            except ValueError:
+                return "zero step"
+            return "valid step"
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        for step in (0, 2):
+            self.assertEqual(compiled(step), fn(step))
+
     def test_indexed_range(self):
         def test(range, index, expected=None):
             range_variable = RangeVariable(
