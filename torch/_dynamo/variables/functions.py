@@ -2361,7 +2361,23 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
                 try:
                     value = cell_contents.as_python_constant()
-                    cells.append(make_cell(value))
+                    cell = make_cell(value)
+                    if allow_sourced_cells:
+                        needs_tracking = False
+
+                        def check_mutation(var):
+                            nonlocal needs_tracking
+                            if var.mutation_type is not None:
+                                needs_tracking = True
+
+                        VariableTracker.visit(check_mutation, cell_contents)
+                        if needs_tracking:
+                            # Preserve tracked mutable contents, including
+                            # those nested inside immutable containers.
+                            tx.output.side_effects.track_cell_existing(
+                                None, cell, cell_contents
+                            )
+                    cells.append(cell)
                     continue
                 except (NotImplementedError, Unsupported):
                     if not allow_sourced_cells:

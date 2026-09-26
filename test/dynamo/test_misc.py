@@ -17962,6 +17962,95 @@ fn
         self.assertEqual(res, t.sin())
 
     @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_build_class_closure_shared_mutation(self):
+        def fn(t, wrap_in_tuple):
+            state = ([],) if wrap_in_tuple else []
+
+            class C:
+                def first(self):
+                    target = state[0] if wrap_in_tuple else state
+                    target.append(1)
+
+                def second(self):
+                    target = state[0] if wrap_in_tuple else state
+                    target.append(2)
+
+            obj = C()
+            obj.first()
+            obj.second()
+            target = state[0] if wrap_in_tuple else state
+            return t + len(target), tuple(target)
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        t = torch.tensor(0.0)
+
+        for wrap_in_tuple in (False, True):
+            with self.subTest(wrap_in_tuple=wrap_in_tuple):
+                expected = (t + 2, (1, 2))
+                self.assertEqual(fn(t, wrap_in_tuple), expected)
+                self.assertEqual(compiled_fn(t, wrap_in_tuple), expected)
+
+    def test_contextlib_closing(self):
+        import contextlib
+
+        class Closeable:
+            def __init__(self):
+                self.close_count = 0
+
+            def close(self):
+                self.close_count += 1
+
+        def fn(t, obj, raise_error):
+            caught = False
+            try:
+                with contextlib.closing(obj) as resource:
+                    same_object = resource is obj
+                    if raise_error:
+                        raise ValueError("test error")
+            except ValueError:
+                caught = True
+
+            return t + obj.close_count, same_object, caught
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        t = torch.tensor(0.0)
+
+        for raise_error in (False, True):
+            with self.subTest(raise_error=raise_error):
+                eager_obj = Closeable()
+                compiled_obj = Closeable()
+                expected = (t + 1, True, raise_error)
+
+                self.assertEqual(fn(t, eager_obj, raise_error), expected)
+                self.assertEqual(compiled_fn(t, compiled_obj, raise_error), expected)
+                self.assertEqual(eager_obj.close_count, 1)
+                self.assertEqual(compiled_obj.close_count, 1)
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_build_class_closure_rebinding(self):
+        def fn(t):
+            state = []
+
+            class C:
+                def replace(self):
+                    nonlocal state
+                    state = [1]
+
+            C().replace()
+            return t + len(state), tuple(state)
+
+        t = torch.tensor(0.0)
+        expected = (t + 1, (1,))
+        self.assertEqual(fn(t), expected)
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        # Rebinding the materialized sourceless cell remains unsupported.
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Write to immutable cell"
+        ):
+            compiled_fn(t)
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
     def test_return___build_class__(self):
         @torch.compile(fullgraph=True, backend="eager")
         def fn(t):
@@ -17978,6 +18067,35 @@ fn
         cls, res = fn(t)
         self.assertEqual(res, t.sin())
         self.assertEqual(cls.__name__, "NonTensor")
+
+    @unittest.expectedFailure
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_build_class_closure_body_rebinding(self):
+        def fn(t):
+            state = []
+
+            class C:
+                nonlocal state
+                state = [1]
+
+                def get(self):
+                    return tuple(state)
+
+            return t + 1, C().get(), tuple(state)
+
+        t = torch.tensor(0.0)
+        expected = (t + 1, (1,), (1,))
+        self.assertEqual(fn(t), expected)
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Invalid call to __build_class__"
+        ):
+            compiled_fn(t)
+
+        torch._dynamo.reset()
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=False)
+        self.assertEqual(compiled_fn(t), expected)
 
     @unittest.expectedFailure
     @torch._dynamo.config.patch(enable_trace_load_build_class=True)
