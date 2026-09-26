@@ -3126,6 +3126,13 @@ class _StaticCudaLauncher:
         device: _int,
     ) -> tuple[_int, _int, _int]: ...
     @staticmethod
+    def _load_kernel_from_binary(
+        binary: bytes,
+        func_name: str,
+        shared_mem_bytes: _int,
+        device: _int,
+    ) -> tuple[Any, ...]: ...
+    @staticmethod
     def _launch_kernel(
         func: _int,
         grid_x: _int,

@@ -8,6 +8,7 @@
 #include <torch/csrc/inductor/static_launcher/cuda.h>
 #include <cstdint>
 
+#include <c10/util/ScopeExit.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <cstring>
 #include <filesystem>
@@ -165,32 +166,28 @@ std::vector<char> readKernelImage(const std::string& filePath) {
 }
 #endif
 
-std::pair<CUmodule, CUfunction> loadKernel(
-    std::string filePath,
+std::pair<CUmodule, CUfunction> finishLoadingKernel(
+    CUmodule mod,
     const std::string& funcName,
     uint32_t sharedMemBytes,
-    CUdevice device,
-    const std::optional<std::string>& cubinDir = std::nullopt) {
-  if (cubinDir) {
-    std::filesystem::path p1{*cubinDir};
-    std::filesystem::path p2{filePath};
-    filePath = (p1 / p2.filename()).string();
-  }
-  CUmodule mod = nullptr;
+    CUdevice device) {
   CUfunction func = nullptr;
+  auto unload_module_on_error = c10::make_scope_exit([mod]() {
+  // Cleanup must not replace the original exception.
+#if defined(USE_ROCM)
+    hipModuleUnload(mod);
+#else
+    nvrtc().cuModuleUnload(mod);
+#endif
+  });
 
 #if defined(USE_ROCM)
-  // Unlike cuModuleLoad, hipModuleLoad keeps a file descriptor for the loaded
-  // HSACO. Load from memory to avoid retaining one FD per static launcher.
-  auto image = readKernelImage(filePath);
-  AT_CUDA_DRIVER_CHECK(hipModuleLoadData(&mod, image.data()));
   AT_CUDA_DRIVER_CHECK(hipModuleGetFunction(&func, mod, funcName.c_str()));
   int shared_optin = 0;
   AT_CUDA_DRIVER_CHECK(hipDeviceGetAttribute(
       &shared_optin, hipDeviceAttributeMaxSharedMemoryPerBlock, device));
 
 #else
-  AT_CUDA_DRIVER_CHECK(nvrtc().cuModuleLoad(&mod, filePath.c_str()));
   AT_CUDA_DRIVER_CHECK(
       nvrtc().cuModuleGetFunction(&func, mod, funcName.c_str()));
   int shared_optin = 0;
@@ -266,7 +263,47 @@ std::pair<CUmodule, CUfunction> loadKernel(
         shared_optin - shared_static));
 #endif
   }
+  unload_module_on_error.release();
   return {mod, func};
+}
+
+std::pair<CUmodule, CUfunction> loadKernel(
+    std::string filePath,
+    const std::string& funcName,
+    uint32_t sharedMemBytes,
+    CUdevice device,
+    const std::optional<std::string>& cubinDir = std::nullopt) {
+  if (cubinDir) {
+    std::filesystem::path p1{*cubinDir};
+    std::filesystem::path p2{filePath};
+    filePath = (p1 / p2.filename()).string();
+  }
+  CUmodule mod = nullptr;
+#if defined(USE_ROCM)
+  // Unlike cuModuleLoad, hipModuleLoad keeps a file descriptor for the loaded
+  // HSACO. Load from memory to avoid retaining one FD per static launcher.
+  auto image = readKernelImage(filePath);
+  AT_CUDA_DRIVER_CHECK(hipModuleLoadData(&mod, image.data()));
+#else
+  AT_CUDA_DRIVER_CHECK(nvrtc().cuModuleLoad(&mod, filePath.c_str()));
+#endif
+  return finishLoadingKernel(mod, funcName, sharedMemBytes, device);
+}
+
+std::pair<CUmodule, CUfunction> loadKernel(
+    const char* binary,
+    size_t binarySize,
+    const std::string& funcName,
+    uint32_t sharedMemBytes,
+    CUdevice device) {
+  TORCH_CHECK(binarySize > 0, "Kernel image is empty");
+  CUmodule mod = nullptr;
+#if defined(USE_ROCM)
+  AT_CUDA_DRIVER_CHECK(hipModuleLoadData(&mod, binary));
+#else
+  AT_CUDA_DRIVER_CHECK(nvrtc().cuModuleLoadData(&mod, binary));
+#endif
+  return finishLoadingKernel(mod, funcName, sharedMemBytes, device);
 }
 
 inline void launchKernel(
@@ -430,23 +467,9 @@ void parseKernelArgs(
   (module, function, n_regs, n_spills) = load_kernel(
       cubin_path, func_name, sharedMemBytes)
 */
-PyObject* load_kernel(PyObject* self, PyObject* args) {
-  HANDLE_TH_ERRORS
-  const char* filePath = nullptr;
-  const char* funcName = nullptr;
-  int sharedMemBytes = 0;
-  int n_regs = 0;
-  int n_spills = 0;
-  int device_ptr = 0;
-  if (!PyArg_ParseTuple(
-          args, "ssii", &filePath, &funcName, &sharedMemBytes, &device_ptr)) {
-    return nullptr;
-  }
-  CUdevice device = static_cast<CUdevice>(device_ptr); // NOLINT
-
+void ensureDeviceContext(CUdevice device) {
   // Ensure CUDA context is initialized before loading kernel
   CUcontext pctx = nullptr;
-
 #if defined(USE_ROCM)
   AT_CUDA_DRIVER_CHECK(hipCtxGetCurrent(&pctx));
   if (!pctx) {
@@ -460,8 +483,20 @@ PyObject* load_kernel(PyObject* self, PyObject* args) {
     AT_CUDA_DRIVER_CHECK(nvrtc().cuCtxSetCurrent(pctx));
   }
 #endif
+}
 
-  auto [mod, func] = loadKernel(filePath, funcName, sharedMemBytes, device);
+PyObject* buildKernelResult(std::pair<CUmodule, CUfunction> loaded) {
+  auto [mod, func] = loaded;
+  auto unload_module_on_error = c10::make_scope_exit([mod]() {
+  // Keep ownership native until the Python tuple safely owns the handle.
+#if defined(USE_ROCM)
+    hipModuleUnload(mod);
+#else
+    nvrtc().cuModuleUnload(mod);
+#endif
+  });
+  int n_regs = 0;
+  int n_spills = 0;
 
 #if defined(USE_ROCM)
   AT_CUDA_DRIVER_CHECK(
@@ -478,12 +513,64 @@ PyObject* load_kernel(PyObject* self, PyObject* args) {
 #endif
   n_spills /= 4;
   // Return a tuple of CUmodule, CUfunction, n_regs, n_spills.
-  return Py_BuildValue(
+  THPObjectPtr result{Py_BuildValue(
       "(KKii)",
       reinterpret_cast<uint64_t>(mod),
       reinterpret_cast<uint64_t>(func),
       n_regs,
-      n_spills);
+      n_spills)};
+  if (!result) {
+    return nullptr;
+  }
+  unload_module_on_error.release();
+  return result.release();
+}
+
+PyObject* load_kernel(PyObject* self, PyObject* args) {
+  HANDLE_TH_ERRORS
+  const char* filePath = nullptr;
+  const char* funcName = nullptr;
+  int sharedMemBytes = 0;
+  int device_ptr = 0;
+  if (!PyArg_ParseTuple(
+          args, "ssii", &filePath, &funcName, &sharedMemBytes, &device_ptr)) {
+    return nullptr;
+  }
+  CUdevice device = static_cast<CUdevice>(device_ptr); // NOLINT
+  ensureDeviceContext(device);
+  return buildKernelResult(
+      loadKernel(filePath, funcName, sharedMemBytes, device));
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* load_kernel_from_binary(PyObject* self, PyObject* args) {
+  HANDLE_TH_ERRORS
+  PyObject* binaryObject = nullptr;
+  const char* funcName = nullptr;
+  int sharedMemBytes = 0;
+  int device_ptr = 0;
+  if (!PyArg_ParseTuple(
+          args,
+          "Osii",
+          &binaryObject,
+          &funcName,
+          &sharedMemBytes,
+          &device_ptr)) {
+    return nullptr;
+  }
+  char* binary = nullptr;
+  Py_ssize_t binarySize = 0;
+  if (PyBytes_AsStringAndSize(binaryObject, &binary, &binarySize) < 0) {
+    return nullptr;
+  }
+  CUdevice device = static_cast<CUdevice>(device_ptr); // NOLINT
+  ensureDeviceContext(device);
+  return buildKernelResult(loadKernel(
+      binary,
+      static_cast<size_t>(binarySize),
+      funcName,
+      sharedMemBytes,
+      device));
   END_HANDLE_TH_ERRORS
 }
 
@@ -671,7 +758,7 @@ PyObject* unload_kernel(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-std::array<PyMethodDef, 3> StaticCudaLauncherMethods = {
+std::array<PyMethodDef, 4> StaticCudaLauncherMethods = {
     PyMethodDef{
         "_launch_kernel",
         launch_kernel,
@@ -682,6 +769,11 @@ std::array<PyMethodDef, 3> StaticCudaLauncherMethods = {
         load_kernel,
         METH_VARARGS,
         "Load CUDA kernel from cubin file"},
+    PyMethodDef{
+        "_load_kernel_from_binary",
+        load_kernel_from_binary,
+        METH_VARARGS,
+        "Load CUDA kernel from retained cubin bytes"},
     PyMethodDef{
         "_unload_kernel",
         unload_kernel,

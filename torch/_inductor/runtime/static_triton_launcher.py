@@ -1,13 +1,88 @@
 import functools
 import inspect
 import os
+import threading
 from functools import cached_property
-from typing import Any
+from typing import Any, NoReturn
 from typing_extensions import Unpack
 
 from ..utils import is_rocm
 from .triton_compat import ASTSource, CompiledKernel, knobs as triton_knobs
 from .triton_helpers import get_constexprs
+
+
+class MissingTritonKernelError(RuntimeError):
+    pass
+
+
+class InvalidTritonKernelArtifactError(MissingTritonKernelError):
+    pass
+
+
+def _cubin_stat_identity(cubin_path: str) -> tuple[int, int, int, int] | None:
+    try:
+        stat = os.stat(cubin_path)
+    except OSError:
+        return None
+    return stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns
+
+
+def _read_cubin_snapshot(cubin_path: str) -> bytes | None:
+    """Read bytes with enough file identity to detect an atomic replacement."""
+    before_identity = _cubin_stat_identity(cubin_path)
+    if before_identity is None:
+        return None
+    try:
+        with open(cubin_path, "rb") as file:
+            payload = file.read()
+    except OSError:
+        return None
+
+    after_identity = _cubin_stat_identity(cubin_path)
+    if before_identity != after_identity:
+        return None
+    return payload
+
+
+def _is_invalid_kernel_image_error(error: RuntimeError) -> bool:
+    message = str(error).lower()
+    return any(
+        marker in message
+        for marker in (
+            "invalid image",
+            "invalid kernel image",
+            "invalid device function",
+            "a ptx jit compilation failed",
+            "kernel image is invalid",
+            "kernel image is empty",
+            "no kernel image is available",
+            "named symbol not found",
+            "cuda driver error: 98",
+            "cuda driver error: 200",
+            "cuda driver error: 209",
+            "cuda driver error: 218",
+            "cuda driver error: 500",
+            "l0 runtime error: 70000004",
+            "l0 runtime error: 78000008",
+            "l0 runtime error: 7800000f",
+            "l0 runtime error: 78000011",
+        )
+    )
+
+
+def _is_missing_kernel_file_error(error: RuntimeError) -> bool:
+    message = str(error).lower()
+    return "file not found" in message or "failed to open kernel image" in message
+
+
+def _raise_kernel_load_error(
+    error: RuntimeError, source: str, missing: bool = False
+) -> NoReturn:
+    if _is_invalid_kernel_image_error(error):
+        raise InvalidTritonKernelArtifactError(f"{source} is unusable") from error
+    if missing or _is_missing_kernel_file_error(error):
+        raise MissingTritonKernelError(f"{source} is unavailable") from error
+    raise error
 
 
 @functools.lru_cache(None)
@@ -103,6 +178,8 @@ class StaticallyLaunchedTritonKernel:
     to how it handles constants in 3.3, so there's some special logic necessary to handle both versions.
     """
 
+    cubin_raw: bytes | None
+
     @cached_property
     def C_impl(self):
         raise NotImplementedError
@@ -188,13 +265,13 @@ class StaticallyLaunchedTritonKernel:
         # compile-on-one-rank: a device-agnostic kernel (no baked device index) can be
         # launched on more than one device within a single process. A loaded module/
         # function is bound to a single device, so when device_agnostic is set we keep
-        # them per device and resolve the current device at launch time. The cubin
-        # (device-agnostic) is retained so it can be loaded onto additional devices.
-        # CooR's intended model uses one current device per rank/process, which
-        # make_launcher loads eagerly. These dicts also support sequential reuse across
-        # devices, but lazy initialization for a previously unseen device is not
-        # thread-safe; callers must serialize its first use.
+        # them per device and resolve the current device at launch time. The
+        # device-agnostic binary is retained so it can be loaded onto additional
+        # devices. CooR's intended model uses one current device per rank/process,
+        # which make_launcher loads eagerly; the per-launcher lock also serializes
+        # each device's first load and handle publication.
         self.device_agnostic: bool = False
+        self._load_lock = threading.Lock()
         self.functions: dict[int, int] = {}
         self.modules: dict[int, int] = {}
         num_ctas = 1
@@ -208,73 +285,83 @@ class StaticallyLaunchedTritonKernel:
                 "Static cuda launcher only supports num_ctas == 1"
             )
 
-    def reload_cubin_from_raw(self, filepath: str) -> str:
-        """
-        If the cubin file triton generated gets deleted under us, we can
-        reload it from the raw cubin file.
-        """
+    def retain_cubin_from_path(self) -> None:
+        """Retain an existing cache artifact for later device loads."""
+        if self.cubin_raw is not None:
+            return
         if self.cubin_path is None:
-            if self.cubin_raw is None:
-                raise AssertionError("cubin_raw must be set when cubin_path is None")
-            os.makedirs(os.path.dirname(filepath), exist_ok=True)
-            with open(filepath, "wb") as f:
-                f.write(self.cubin_raw)
-                self.cubin_path = filepath  # pyre-ignore
-        return self.cubin_path
-
-    def _agnostic_cubin_path(self) -> str:
-        # The cubin bytes are device-agnostic, so the same file loads onto any device.
-        # Keep it available (the single-device path frees it after one load) and rewrite
-        # from the retained raw bytes if the file was removed under us.
-        if self.cubin_path is not None and os.path.exists(self.cubin_path):
-            return self.cubin_path
-        if self.cubin_raw is None or self.cubin_path is None:
-            raise AssertionError(
-                "device-agnostic kernel cannot reload its cubin for a new device"
+            raise MissingTritonKernelError("Triton kernel binary path is not set")
+        snapshot = _read_cubin_snapshot(self.cubin_path)
+        if snapshot is None:
+            raise MissingTritonKernelError(
+                f"Triton kernel binary not readable at {self.cubin_path}"
             )
-        os.makedirs(os.path.dirname(self.cubin_path), exist_ok=True)
-        with open(self.cubin_path, "wb") as f:
-            f.write(self.cubin_raw)
-        return self.cubin_path
+        self.cubin_raw = snapshot
 
-    def load_kernel(self, device: int) -> None:
-        if self.device_agnostic:
-            if device in self.functions:
-                return
-            (module, function, self.n_regs, self.n_spills) = self.C_impl._load_kernel(
-                self._agnostic_cubin_path(), self.name, self.shared, device
+    def _load_kernel_from_path(self, cubin_path: str, device: int):
+        try:
+            return self.C_impl._load_kernel(cubin_path, self.name, self.shared, device)
+        except RuntimeError as error:
+            _raise_kernel_load_error(
+                error,
+                f"Triton kernel binary at {cubin_path}",
+                not os.path.exists(cubin_path),
             )
-            self.modules[device] = module
-            self.functions[device] = function
-            return
 
-        if self.function is not None:
-            return
+    def _load_kernel_from_binary(self, device: int):
+        cubin_raw = self.cubin_raw
+        if cubin_raw is None:
+            raise AssertionError("retained Triton kernel binary is not set")
+        try:
+            return self.C_impl._load_kernel_from_binary(
+                cubin_raw, self.name, self.shared, device
+            )
+        except RuntimeError as error:
+            _raise_kernel_load_error(error, "Retained Triton kernel binary")
 
+    def _load_kernel_for_device(self, device: int):
+        if self.cubin_raw is not None:
+            return self._load_kernel_from_binary(device)
         if not hasattr(self, "cubin_path"):
             raise AssertionError("cubin_path attribute not set before load_kernel")
         if self.cubin_path is None:
             raise AssertionError("cubin_path must not be None before load_kernel")
-        (self.module, self.function, self.n_regs, self.n_spills) = (
-            self.C_impl._load_kernel(self.cubin_path, self.name, self.shared, device)
-        )
-        # Don't need the cubin path anymore now that we've loaded
-        self.cubin_path = None
-        self.cubin_raw = None
+        return self._load_kernel_from_path(self.cubin_path, device)
+
+    def load_kernel(self, device: int) -> None:
+        with self._load_lock:
+            if self.device_agnostic:
+                if device in self.functions:
+                    return
+                loaded_kernel = self._load_kernel_for_device(device)
+                (module, function, self.n_regs, self.n_spills) = loaded_kernel
+                self.modules[device] = module
+                self.functions[device] = function
+                return
+
+            if self.function is not None:
+                return
+
+            loaded_kernel = self._load_kernel_for_device(device)
+            (self.module, self.function, self.n_regs, self.n_spills) = loaded_kernel
+            # Don't need the cubin path anymore now that we've loaded
+            self.cubin_path = None
+            self.cubin_raw = None
 
     def _current_device(self) -> int:
         raise NotImplementedError
 
     def close(self) -> None:
-        # Clear Python-visible handles first so repeated cleanup is harmless even if
-        # the driver reports an error while unloading.
-        modules = list(self.modules.values())
-        if self.module is not None:
-            modules.append(self.module)
-        self.module = None
-        self.function = None
-        self.modules = {}
-        self.functions = {}
+        with self._load_lock:
+            # Clear Python-visible handles first so repeated cleanup is harmless even
+            # if the driver reports an error while unloading.
+            modules = list(self.modules.values())
+            if self.module is not None:
+                modules.append(self.module)
+            self.module = None
+            self.function = None
+            self.modules = {}
+            self.functions = {}
         for mod in modules:
             self.C_impl._unload_kernel(mod)
 
@@ -406,10 +493,15 @@ class StaticallyLaunchedTritonKernel:
         state["module"] = None
         state["functions"] = {}
         state["modules"] = {}
+        state.pop("_load_lock", None)
         # Cubin paths aren't consistent across processes, so we clear
         # and reload them.
         state["cubin_path"] = None
         return state
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        self.__dict__.update(state)
+        self._load_lock = threading.Lock()
 
     def _expand_tma_args(self, args: tuple[object, ...]) -> tuple[object, ...]:
         """Fallback expansion of host-side TMA TensorDescriptor args into the
@@ -556,29 +648,24 @@ class StaticallyLaunchedXpuKernel(StaticallyLaunchedTritonKernel):
     def load_kernel(self, device: int) -> None:
         # The XPU static launcher returns a PyCapsule for the loaded SYCL kernel,
         # not a separate module/function pair like the CUDA/HIP launcher.
-        if self.device_agnostic:
-            if device in self.functions:
+        with self._load_lock:
+            if self.device_agnostic:
+                if device in self.functions:
+                    return
+                loaded_kernel = self._load_kernel_for_device(device)
+                (function, self.n_regs, self.n_spills) = loaded_kernel
+                # XPU has no separate module handle (only the function capsule).
+                self.functions[device] = function
                 return
-            (function, self.n_regs, self.n_spills) = self.C_impl._load_kernel(
-                self._agnostic_cubin_path(), self.name, self.shared, device
-            )
-            # XPU has no separate module handle (only the function capsule).
-            self.functions[device] = function
-            return
 
-        if self.function is not None:
-            return
+            if self.function is not None:
+                return
 
-        if not hasattr(self, "cubin_path"):
-            raise AssertionError("expected cubin_path attribute to be set")
-        if self.cubin_path is None:
-            raise AssertionError("expected cubin_path to not be None")
-        (self.function, self.n_regs, self.n_spills) = self.C_impl._load_kernel(
-            self.cubin_path, self.name, self.shared, device
-        )
-        self.module = None
-        self.cubin_path = None
-        self.cubin_raw = None
+            loaded_kernel = self._load_kernel_for_device(device)
+            (self.function, self.n_regs, self.n_spills) = loaded_kernel
+            self.module = None
+            self.cubin_path = None
+            self.cubin_raw = None
 
     def _current_device(self) -> int:
         import torch
@@ -586,10 +673,12 @@ class StaticallyLaunchedXpuKernel(StaticallyLaunchedTritonKernel):
         return torch.xpu.current_device()
 
     def close(self) -> None:
-        self.module = None
-        # Drop the PyCapsule references so their destructors can release sycl::kernel.
-        self.function = None
-        self.functions = {}
+        with self._load_lock:
+            self.module = None
+            # Drop the PyCapsule references so their destructors can release
+            # sycl::kernel.
+            self.function = None
+            self.functions = {}
         self.modules = {}
 
 

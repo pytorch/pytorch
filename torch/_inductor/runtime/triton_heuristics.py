@@ -809,10 +809,10 @@ class CachingAutotuner(KernelInterface):
                 if plugin.pre_compile(self) is not DEFER:
                     return
             self._precompile_worker()
-            if static_triton_bundle_key is not None and self.is_statically_launchable():
-                TritonBundler.put_static_autotuner(static_triton_bundle_key, self)
             self._make_launchers()
             self._dynamic_scale_rblock()
+            if static_triton_bundle_key is not None and self.is_statically_launchable():
+                TritonBundler.put_static_autotuner(static_triton_bundle_key, self)
 
     def _precompile_worker(self):
         if self.compile_results:
@@ -1193,10 +1193,8 @@ class CachingAutotuner(KernelInterface):
         that we don't need to store in the cache(since TritonBundler handles the collection for us),
         this behavior is gated by keep_static_cubin_raw config.
         """
-        # Only cubin_raw must be retained: __getstate__ already nulls cubin_path
-        # on every serialize, so a cold-container load rehydrates the cubin from
-        # cubin_raw (reload_cubin_path calls reload_cubin_from_raw) instead of
-        # pointing at a missing file.
+        # Only cubin_raw must be retained: __getstate__ nulls cubin_path on every
+        # serialize, and cached launchers load retained bytes directly in memory.
         if torch._inductor.config.keep_static_cubin_raw:
             return
         for result in self.compile_results:
@@ -3026,6 +3024,35 @@ class StaticTritonCompileResult(CompileResult[_T]):
     which vastly simplifies the setup and metadata needed to be kept.
     """
 
+    def __init__(
+        self,
+        kernel: _T,
+        config: Config,
+        compile_meta: dict[str, Any],
+        inductor_meta: InductorMeta,
+    ) -> None:
+        super().__init__(kernel, config, compile_meta, inductor_meta)
+        cubin_raw = getattr(kernel, "cubin_raw", None)
+        self.expected_cubin_digest = (
+            hashlib.sha256(cubin_raw).digest() if cubin_raw is not None else None
+        )
+
+    def matches_expected_cubin(self, payload: bytes) -> bool:
+        expected_digest = getattr(self, "expected_cubin_digest", None)
+        return (
+            expected_digest is not None
+            and hashlib.sha256(payload).digest() == expected_digest
+        )
+
+    def bundled_artifact_identity(self) -> tuple[int | None, str, str]:
+        device_type = self.compile_meta.get("device_type", "cuda")
+        binary_ext = GPU_KERNEL_BIN_EXTS[device_type]
+        return (
+            self.compile_meta.get("device"),
+            triton_hash_to_path_key(self.kernel.hash),
+            f"{self.kernel.name}{binary_ext}",
+        )
+
     @staticmethod
     def can_statically_launch(
         kernel: CompiledKernel,
@@ -3114,39 +3141,34 @@ class StaticTritonCompileResult(CompileResult[_T]):
                 raise e
             return None
 
-    def reload_cubin_path(self):
-        """
-        When loading from cache on disk, we want to reload cubin
-        files from their appropriate location on disc.
-        """
+    def cubin_path(self) -> str:
+        """Return the canonical cache path for this result's GPU binary."""
         device_type = (
             "hip" if torch.version.hip else self.compile_meta.get("device_type", "cuda")
         )
-        binary_ext = GPU_KERNEL_BIN_EXTS.get(device_type, "cubin")
-        cubin_location = os.path.join(
-            triton_cache_dir(
-                _resolve_load_device(self.compile_meta.get("device"), device_type)
-            ),
-            triton_hash_to_path_key(self.kernel.hash),
-            f"{self.kernel.name}{binary_ext}",
+        device, kernel_hash, binary_filename = self.bundled_artifact_identity()
+        return os.path.join(
+            triton_cache_dir(_resolve_load_device(device, device_type)),
+            kernel_hash,
+            binary_filename,
         )
-        if not os.path.exists(cubin_location):
-            if self.kernel.cubin_raw is not None:
-                # We saved the raw cubin, so write it to he appropriate location
-                self.kernel.reload_cubin_from_raw(cubin_location)
-            else:
-                raise RuntimeError(
-                    "Cubin file saved by TritonBundler not found at %s", cubin_location
-                )
-        self.kernel.cubin_path = cubin_location
+
+    def set_cubin_path(self) -> None:
+        """Point the launcher at its canonical path without materializing it."""
+        self.kernel.cubin_path = self.cubin_path()
 
     def make_launcher(self) -> LauncherType:
         # If at least one static make_launcher call occurs,
         # we're sure static cuda launcher was used for this compile
         set_feature_use("static_triton_launcher", True)
         # Load the binary on the parent
-        if not self.kernel.cubin_path:
-            self.reload_cubin_path()
+        if self.kernel.cubin_raw is None:
+            if not self.kernel.cubin_path:
+                self.set_cubin_path()
+        retained_cubin = None
+        if torch._inductor.config.keep_static_cubin_raw:
+            self.kernel.retain_cubin_from_path()
+            retained_cubin = self.kernel.cubin_raw
         # compile-on-one-rank: a None device in compile_meta marks a rank/device-agnostic
         # kernel, so the launcher must keep its loaded handles per device.
         self.kernel.device_agnostic = self.compile_meta.get("device") is None
@@ -3154,7 +3176,11 @@ class StaticTritonCompileResult(CompileResult[_T]):
             self.compile_meta.get("device"),
             self.compile_meta.get("device_type", "cuda"),
         )
-        self.kernel.load_kernel(device)
+        try:
+            self.kernel.load_kernel(device)
+        finally:
+            if retained_cubin is not None:
+                self.kernel.cubin_raw = retained_cubin
         scope = {
             "runner": self.kernel.run,
         }
