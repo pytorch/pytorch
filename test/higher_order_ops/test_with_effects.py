@@ -251,6 +251,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         res = torch.compile(f, backend="aot_eager")(*inputs)
         self.assertTrue(torch.allclose(res, f(*inputs)))
 
+    @skipIfTorchDynamo("test inspects inner torch.compile/AOT backend graph")
     def test_pure_while_loop_empty_carry_with_unrelated_effect(self):
         class M(torch.nn.Module):
             def forward(self, matrix, post, count):
