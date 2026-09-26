@@ -2425,6 +2425,80 @@ test_operator_benchmark() {
   fi
 
   cd "${TEST_DIR}"/benchmarks/operator_benchmark
+
+  if [[ "$ARCH" == "aarch64" && "$1" == "cpu" ]]; then
+    diagnostic_one_cpu=$(
+      python -c 'import os; print(",".join(map(str, sorted(os.sched_getaffinity(0))[:1])))'
+    )
+    diagnostic_fourteen_cpus=$(
+      python -c 'import os; print(",".join(map(str, sorted(os.sched_getaffinity(0))[:14])))'
+    )
+    diagnostic_fifteen_cpus=$(
+      python -c 'import os; print(",".join(map(str, sorted(os.sched_getaffinity(0))[:15])))'
+    )
+    diagnostic_cpu_count=$(
+      python -c 'import os; print(len(os.sched_getaffinity(0)))'
+    )
+
+    echo "===== OpenBLAS matmul diagnostic ====="
+    echo "Original allowed CPU count: ${diagnostic_cpu_count}"
+    echo "One CPU: ${diagnostic_one_cpu}"
+    echo "Fourteen CPUs: ${diagnostic_fourteen_cpus}"
+    echo "Fifteen CPUs: ${diagnostic_fifteen_cpus}"
+    echo "Normal CI TASKSET: ${TASKSET}"
+    echo "Normal CI OMP_NUM_THREADS: ${OMP_NUM_THREADS}"
+
+    if [[ "$diagnostic_cpu_count" -lt 15 ]]; then
+      echo "Expected at least 15 CPUs for the AArch64 diagnostic"
+      return 1
+    fi
+
+    for diagnostic_repeat in $(seq 1 5); do
+      echo "===== Diagnostic repetition ${diagnostic_repeat} ====="
+
+      # Exact existing CI configuration. Do not unset or override anything.
+      # Based on current logs this is normally 15 OpenMP threads on 14 CPUs.
+      $TASKSET env \
+        OPENBLAS_VERBOSE=2 \
+        MATMUL_DIAGNOSTIC_CONFIG="ci-default-repeat-${diagnostic_repeat}" \
+        python openblas_matmul_diag.py
+
+      # Match the OpenMP team to the existing 14-CPU benchmark mask.
+      env \
+        -u OPENBLAS_NUM_THREADS \
+        -u GOTO_NUM_THREADS \
+        -u MKL_NUM_THREADS \
+        OMP_NUM_THREADS=14 \
+        OPENBLAS_VERBOSE=2 \
+        MATMUL_DIAGNOSTIC_CONFIG="matched-14-on-14-repeat-${diagnostic_repeat}" \
+        taskset -c "$diagnostic_fourteen_cpus" \
+        python openblas_matmul_diag.py
+
+      # Eliminate multithreading entirely.
+      env \
+        -u OPENBLAS_NUM_THREADS \
+        -u GOTO_NUM_THREADS \
+        -u MKL_NUM_THREADS \
+        OMP_NUM_THREADS=1 \
+        OPENBLAS_VERBOSE=2 \
+        MATMUL_DIAGNOSTIC_CONFIG="single-1-on-1-repeat-${diagnostic_repeat}" \
+        taskset -c "$diagnostic_one_cpu" \
+        python openblas_matmul_diag.py
+
+      # Strongly recommended fourth control. This separates the effect of
+      # requesting 15 threads from the effect of restricting them to 14 CPUs.
+      env \
+        -u OPENBLAS_NUM_THREADS \
+        -u GOTO_NUM_THREADS \
+        -u MKL_NUM_THREADS \
+        OMP_NUM_THREADS=15 \
+        OPENBLAS_VERBOSE=2 \
+        MATMUL_DIAGNOSTIC_CONFIG="matched-15-on-15-repeat-${diagnostic_repeat}" \
+        taskset -c "$diagnostic_fifteen_cpus" \
+        python openblas_matmul_diag.py
+    done
+  fi
+
   $TASKSET python -m benchmark_all_test --device "$1" --tag-filter "$2" \
       --output-csv "${TEST_REPORTS_DIR}/operator_benchmark_eager_float32_cpu.csv" \
       --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_benchmark_eager_float32_cpu.json" \
