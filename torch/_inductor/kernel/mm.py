@@ -959,8 +959,8 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     if use_aten_gemm_kernels():
         aten_templates: list[ExternKernelChoice | KernelTemplate] = [aten_addmm]
         if (
-            inp.get_stride()[0] == 0
-            and len(inp.get_size()) == 2
+            len(inp.get_size()) == 2
+            and inp.get_stride()[0] == 0
             and inductor_config.triton.autotune_cublasLt
             and not V.graph.cpp_wrapper  # bias_addmm only has a Python implementation
         ):
