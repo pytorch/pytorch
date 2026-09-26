@@ -4326,6 +4326,10 @@ def _weight_int4pack_mm_with_scales_and_zeros(x, w, q_group_size, qScale, qZeros
         w.dtype is torch.int32,
         lambda: f"expected w to be int32, got {w.dtype}",
     )
+    torch._check(
+        qScale.dtype == x.dtype or qScale.dtype == torch.float32,
+        lambda: f"expected qScale.dtype to match x.dtype ({x.dtype}) or be fp32, got {qScale.dtype}",
+    )
     return x.new_empty(x.size(0), w.size(0), dtype=x.dtype)
 
 
