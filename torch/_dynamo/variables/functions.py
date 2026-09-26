@@ -2107,6 +2107,84 @@ class UserMethodVariable(BaseUserFunctionVariable):
         }
 
 
+class BoundCallableMethodVariable(VariableTracker):
+    """A MethodType wrapping a builtin callable."""
+
+    tp_members = {
+        "__func__": Member(lambda s, _: s.func, readonly_setter),
+        "__self__": Member(lambda s, _: s.im_self, readonly_setter),
+    }
+
+    def __init__(
+        self, func: VariableTracker, im_self: VariableTracker, **kwargs: Any
+    ) -> None:
+        super().__init__(**kwargs)
+        self.func = func
+        self.im_self = im_self
+
+    def __repr__(self) -> str:
+        return f"BoundCallableMethodVariable({self.func}, {self.im_self})"
+
+    def python_type(self) -> type[types.MethodType]:
+        return types.MethodType
+
+    def call_function(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return self.func.call_function(tx, [self.im_self, *args], kwargs)
+
+    def tp_getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        if name in types.MethodType.__dict__ or name in object.__dict__:
+            return super().tp_getattro_impl(tx, name)
+
+        try:
+            getattr(self.func.as_python_constant(), name)
+        except AttributeError:
+            raise_observed_exception(AttributeError, tx)
+        return self.func.tp_getattro_impl(tx, name)
+
+    def call_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name in ("__setattr__", "__delattr__"):
+            if kwargs:
+                raise_type_error(tx, "this method takes no keyword arguments")
+            expected_args = 2 if name == "__setattr__" else 1
+            if len(args) != expected_args:
+                raise_type_error(
+                    tx, f"expected {expected_args} arguments, got {len(args)}"
+                )
+            attr_name = args[0]
+            if not issubclass(attr_name.python_type(), str):
+                raise_type_error(
+                    tx,
+                    f"attribute name must be string, not '{attr_name.python_type_name()}'",
+                )
+            attr_name_value = attr_name.as_python_constant()
+            if attr_name_value in ("__func__", "__self__"):
+                raise_attribute_error(tx, "readonly attribute")
+            raise_attribute_error(
+                tx,
+                f"'{self.python_type_name()}' object has no attribute '{attr_name_value}'",
+            )
+        return super().call_method(tx, name, args, kwargs)
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.add_push_null(lambda: codegen.load_import_from("types", "MethodType"))
+        codegen(self.func)
+        codegen(self.im_self)
+        codegen.extend_output(create_call_function(2, False))
+
+
 class WrappedUserMethodVariable(UserMethodVariable):
     def __init__(
         self,

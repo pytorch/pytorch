@@ -6008,6 +6008,26 @@ class GraphModule(torch.nn.Module):
         self.assertFalse(hasattr(method, "source_fn"))
         self.assertIs(method.get_source(), im_func.get_source())
 
+    def test_method_type_builtin_callable(self):
+        class C:
+            pass
+
+        obj = C()
+
+        def fn(obj):
+            obj.id = types.MethodType(id, obj)
+            method = obj.id
+            has_get = hasattr(method, "__get__")
+            return method(), method.__func__ is id, method.__self__ is obj, has_get
+
+        expected = fn(obj)
+        del obj.id
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(obj), expected)
+        self.assertEqual(obj.id(), id(obj))
+        self.assertIs(obj.id.__func__, id)
+        self.assertIs(obj.id.__self__, obj)
+
     # generate_pycode cannot reconstruct a TensorPropertySource, which is what
     # a symbolic size input is sourced by; the dynamic_shapes variant therefore
     # cannot run this, with or without a method involved.

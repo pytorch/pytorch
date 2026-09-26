@@ -1468,6 +1468,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 args[1],
                 source=self.source,
             )
+        elif self.value is types.MethodType and len(args) == 2 and not kwargs:
+            func = args[0].realize()
+            if isinstance(func, variables.BuiltinVariable):
+                return variables.BoundCallableMethodVariable(func, args[1].realize())
         elif self.value is weakref.ref:
             if len(args) > 1:
                 callback = args[1]
