@@ -44,7 +44,7 @@ jobs:
       cuda-arch-list: '8.0'
       test-matrix: |
         { include: [
-          { config: "inductor-micro-benchmark", shard: 1, num_shards: 1, runner: "linux.aws.a100", owners: ["oncall:pt2"] },
+          { config: "inductor-micro-benchmark", shard: 1, num_shards: 1, runner: "mt-l-x86iavx512-11-125-a100", owners: ["oncall:pt2"] },
         ]}
       python-version: "3.11"
       compiler: gcc11

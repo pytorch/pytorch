@@ -46,8 +46,8 @@ jobs:
       cuda-arch-list: '8.0 9.0'
       test-matrix: |
         { include: [
-          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.h100" },
-          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
+          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "mt-l-x86iamx-22-225-h100" },
+          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "mt-l-x86iavx512-11-125-a100" },
         ]}
       python-version: "3.11"
       compiler: gcc11

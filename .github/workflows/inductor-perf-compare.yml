@@ -42,10 +42,10 @@ jobs:
       cuda-arch-list: '8.0'
       test-matrix: |
         { include: [
-          { config: "inductor_huggingface_perf_compare", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
-          { config: "inductor_timm_perf_compare", shard: 1, num_shards: 2, runner: "linux.aws.a100" },
-          { config: "inductor_timm_perf_compare", shard: 2, num_shards: 2, runner: "linux.aws.a100" },
-          { config: "inductor_torchbench_perf_compare", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
+          { config: "inductor_huggingface_perf_compare", shard: 1, num_shards: 1, runner: "mt-l-x86iavx512-11-125-a100" },
+          { config: "inductor_timm_perf_compare", shard: 1, num_shards: 2, runner: "mt-l-x86iavx512-11-125-a100" },
+          { config: "inductor_timm_perf_compare", shard: 2, num_shards: 2, runner: "mt-l-x86iavx512-11-125-a100" },
+          { config: "inductor_torchbench_perf_compare", shard: 1, num_shards: 1, runner: "mt-l-x86iavx512-11-125-a100" },
         ]}
       build-additional-packages: "vision audio fbgemm torchao"
       python-version: "3.11"
