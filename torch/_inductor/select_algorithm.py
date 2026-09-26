@@ -4207,9 +4207,9 @@ class AlgorithmSelectorCache(PersistentCache):
 
         if return_multi_template and (config.max_autotune or config.max_autotune_gemm):
             if use_pipelined_autotuning():
-                if config.benchmark_epilogue_fusion:
+                if config.benchmark_template_fusion:
                     raise AssertionError(
-                        "Benchmarking epilogues will cause gpu contention with pipelined autotuning"
+                        "Benchmarking template fusion will cause gpu contention with pipelined autotuning"
                     )
                 extern_kernels = [
                     c for c in choices if AlgorithmSelectorCache._is_extern(c)
@@ -5447,7 +5447,7 @@ class AlgorithmSelectorCache(PersistentCache):
             except CUDACompileError:
                 if not isinstance(choice, CUTLASSTemplateCaller):
                     log.exception(
-                        "CUDA compilation error during autotuning: \n%s. \nIgnoring this choice."
+                        "CUDA compilation error during autotuning. Ignoring this choice."
                     )
                 timing = float("inf")
             except NotImplementedError:
@@ -6236,7 +6236,7 @@ def autotune_select_algorithm(*args, **kwargs):
 
     if "return_multi_template" not in kwargs:
         kwargs["return_multi_template"] = (
-            torch._inductor.config.benchmark_epilogue_fusion
+            torch._inductor.config.benchmark_template_fusion
             or torch._inductor.config.pipeline_max_autotune_gemm
         )
 
