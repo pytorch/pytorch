@@ -2106,6 +2106,29 @@ class BuiltinVariable(BaseBuiltinVariable):
         no_keywords(tx, "bytes", kwargs)
         return variables.ConstantVariable.create(b"")
 
+    def call_bytearray(
+        self,
+        tx: "InstructionTranslatorBase",
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
+    ) -> VariableTracker | None:
+        if kwargs or len(args) > 1:
+            return None
+        if not args:
+            value = bytearray()
+        elif args[0].is_python_constant():
+            try:
+                value = bytearray(args[0].as_python_constant())
+            except Exception as exc:
+                raise_observed_exception(type(exc), tx, args=list(exc.args))
+        else:
+            return None
+
+        return variables.ByteArrayVariable(
+            [ConstantVariable.create(item) for item in value],
+            mutation_type=ValueMutationNew(),
+        )
+
     def call___build_class__(self, tx, *args, **kwargs):
         def fail(args, kwargs) -> NoReturn:
             unimplemented(
