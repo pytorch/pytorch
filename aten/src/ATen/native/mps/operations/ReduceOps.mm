@@ -33,7 +33,6 @@
 #include <ATen/ops/mean_native.h>
 #include <ATen/ops/min_native.h>
 #include <ATen/ops/nansum_native.h>
-#include <ATen/ops/prod_native.h>
 #include <ATen/ops/real.h>
 #include <ATen/ops/std_mean_native.h>
 #include <ATen/ops/std_native.h>
@@ -56,7 +55,6 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 enum MPSReductionType {
   MAX,
   MIN,
-  PROD,
   MEAN,
 };
 
@@ -195,9 +193,6 @@ static void reduction_out_mps(const Tensor& input_t,
 
   if (output_t.numel() == 0 || input_t.numel() == 0) {
     switch (reduction_type) {
-      case MPSReductionType::PROD:
-        output_t.fill_(1);
-        break;
       case MPSReductionType::MEAN:
         output_t.fill_(std::numeric_limits<float>::quiet_NaN());
         break;
@@ -237,13 +232,7 @@ static void reduction_out_mps(const Tensor& input_t,
         castInputTensor = castMPSTensor(mpsGraph, inputTensor, inputCastType);
       }
 
-      MPSGraphTensor* castOutputTensor = nil;
-
-      if (reduction_type == MPSReductionType::PROD) {
-        castOutputTensor = [mpsGraph reductionProductWithTensor:castInputTensor axes:wrappedAxes name:nil];
-      } else if (reduction_type == MPSReductionType::MEAN) {
-        castOutputTensor = [mpsGraph meanOfTensor:castInputTensor axes:wrappedAxes name:nil];
-      }
+      MPSGraphTensor* castOutputTensor = [mpsGraph meanOfTensor:castInputTensor axes:wrappedAxes name:nil];
 
       MPSGraphTensor* outputTensor = castOutputTensor;
       if (getMPSDataType(output_t) != [castOutputTensor dataType]) {
@@ -915,6 +904,13 @@ static void count_nonzero_kernel_mps(TensorIterator& iter) {
   sum_nansum_kernel_mps(iter, "count_nonzero_");
 }
 
+static void prod_kernel_mps(TensorIterator& iter) {
+  const auto in_dtype = iter.input_dtype() == kBool ? kByte : iter.input_dtype();
+  const auto dtype = iter.dtype() == kBool ? kByte : iter.dtype();
+  const ReductionOp op{/*is_arg=*/false, "prod_", in_dtype, dtype};
+  reduction_dispatch_mps(iter.input(0), iter.output(0), op, at::toOpMathType(dtype), "prod_");
+}
+
 static void norm_kernel_mps(TensorIterator& iter, const Scalar& p_scalar) {
   const Tensor& output = iter.output(0);
   Tensor input = iter.input(0);
@@ -1006,12 +1002,6 @@ Tensor trace_mps(const Tensor& self) {
   return self.diagonal().sum();
 }
 
-TORCH_IMPL_FUNC(prod_out_mps)
-(const Tensor& input_t, int64_t dim, bool keepdim, std::optional<ScalarType> dtype, const Tensor& output_t) {
-  int64_t dims[1] = {dim};
-  reduction_out_mps(input_t, IntArrayRef(dims, 1), keepdim, dtype, output_t, MPSReductionType::PROD, "prod_out_mps");
-}
-
 static void aminmax_kernel_mps(const Tensor& self, int64_t dim, bool keepdim, Tensor& min, Tensor& max) {
   TORCH_CHECK(!c10::isComplexType(self.scalar_type()), "aminmax not implemented for ", self.scalar_type());
   at::amin_outf(self, IntArrayRef(&dim, 1), keepdim, min);
@@ -1022,19 +1012,6 @@ static void aminmax_allreduce_kernel_mps(const Tensor& self, Tensor& min, Tensor
   TORCH_CHECK(!c10::isComplexType(self.scalar_type()), "aminmax not implemented for ", self.scalar_type());
   at::amin_outf(self, IntArrayRef{}, /*keepdim=*/false, min);
   at::amax_outf(self, IntArrayRef{}, /*keepdim=*/false, max);
-}
-
-Tensor prod_mps(const Tensor& self, std::optional<ScalarType> opt_dtype) {
-  std::vector<int64_t> dims(self.dim());
-  std::iota(dims.begin(), dims.end(), 0);
-
-  Tensor output_t =
-      at::empty({}, get_dtype_from_self(self, opt_dtype, true), std::nullopt, kMPS, std::nullopt, std::nullopt);
-
-  reduction_out_mps(
-      self, IntArrayRef(dims), false, opt_dtype, const_cast<Tensor&>(output_t), MPSReductionType::PROD, "prod_mps");
-
-  return output_t;
 }
 
 Tensor count_nonzero_mps(const Tensor& self, IntArrayRef dims) {
@@ -1164,6 +1141,7 @@ std::tuple<Tensor, Tensor> var_mean_mps(const Tensor& self,
 REGISTER_DISPATCH(norm_stub, &norm_kernel_mps)
 REGISTER_DISPATCH(sum_stub, &sum_kernel_mps)
 REGISTER_DISPATCH(nansum_stub, &nansum_kernel_mps)
+REGISTER_DISPATCH(prod_stub, &prod_kernel_mps)
 REGISTER_DISPATCH(mean_stub, &mean_kernel_mps)
 REGISTER_DISPATCH(min_values_stub, &min_values_kernel_mps)
 REGISTER_DISPATCH(max_values_stub, &max_values_kernel_mps)
