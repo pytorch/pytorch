@@ -3,7 +3,7 @@ import itertools
 import logging
 import operator
 from collections import defaultdict
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any, cast
@@ -11,14 +11,17 @@ from typing import Any, cast
 import torch
 import torch.fx.node
 from torch._C._dynamo.guards import compute_overlapping_tensors
+from torch._C._functionalization import apply_view_meta_sequence
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import ReinplaceCounters, ReInplaceTrigger
 from torch._guards import detect_fake_mode
 from torch._higher_order_ops.triton_kernel_wrap import (
     kernel_side_table,
     triton_kernel_wrapper_functional,
+    TritonReinplacementInfo,
 )
 from torch._inductor import config, inductor_prims
+from torch._inductor.fx_passes.utils import BitsetAncestors
 from torch._inductor.fx_utils import get_node_storage, is_node_realized
 from torch._inductor.lowering import (
     inplaceable_foreach_ops as inplaceable_foreach_ops_lowerings,
@@ -89,9 +92,7 @@ class ViewOp:
     kwargs: dict[str, Any]
 
 
-def _inplace_generalized_scatter(
-    inp: torch.Tensor, src: torch.Tensor, view_ops: list[ViewOp]
-) -> torch.Tensor:
+def _apply_view_ops(inp: torch.Tensor, view_ops: Iterable[ViewOp]) -> torch.Tensor:
     tmp = inp
     for view in view_ops:
         fake_args, fake_kwargs = pytree.tree_map(
@@ -107,6 +108,13 @@ def _inplace_generalized_scatter(
             else nullcontext()
         ):
             tmp = view.target(tmp, *fake_args, **fake_kwargs)
+    return tmp
+
+
+def _inplace_generalized_scatter(
+    inp: torch.Tensor, src: torch.Tensor, view_ops: list[ViewOp]
+) -> torch.Tensor:
+    tmp = _apply_view_ops(inp, view_ops)
     try:
         tmp.copy_(src)
     except RuntimeError as e:
@@ -276,7 +284,9 @@ def decompose_generalized_scatter(graph: torch.fx.Graph) -> None:
         graph.erase_node(node)
 
 
-def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
+def canonicalize_view_scatter_ops(
+    graph: torch.fx.Graph,
+) -> dict[torch.fx.Node, torch.fx.Node]:
     """
     This canonicalizes view scatter ops into a generalized form, defined as:
       def scatter(inp, src, views):
@@ -298,6 +308,7 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
 
     node_to_view_base: dict[torch.fx.Node, torch.fx.Node] = {}
     node_to_view_op: dict[torch.fx.Node, list[ViewOp]] = defaultdict(list)
+    replacements: dict[torch.fx.Node, torch.fx.Node] = {}
 
     def handle_views(node: torch.fx.Node):
         inp = node.args[0]
@@ -347,6 +358,7 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
                     src,
                     [scatter_view_op],
                 )
+            replacements[node] = new_node
             node.replace_all_uses_with(new_node)
             graph.erase_node(node)
             return
@@ -382,6 +394,8 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
             handle_views(node)
         elif node.target in _SCATTER_OP_TO_VIEW:
             handle_view_scatter(node)
+
+    return replacements
 
 
 inplaceable_ops: dict[Callable[..., Any], InplaceableOp] = {
@@ -445,9 +459,7 @@ def _get_view_base(node: torch.fx.Node) -> torch.fx.Node:
     return node
 
 
-def _same_tensor_metadata(lhs: torch.fx.Node, rhs: torch.fx.Node) -> bool:
-    lhs_val = lhs.meta.get("val")
-    rhs_val = rhs.meta.get("val")
+def _same_tensor_metadata_values(lhs_val: Any, rhs_val: Any) -> bool:
     if not isinstance(lhs_val, torch.Tensor) or not isinstance(rhs_val, torch.Tensor):
         return False
 
@@ -465,6 +477,94 @@ def _same_tensor_metadata(lhs: torch.fx.Node, rhs: torch.fx.Node) -> bool:
         and same_sequence(lhs_val.stride(), rhs_val.stride())
         and same_value(lhs_val.storage_offset(), rhs_val.storage_offset())
     )
+
+
+def _same_tensor_metadata(lhs: torch.fx.Node, rhs: torch.fx.Node) -> bool:
+    return _same_tensor_metadata_values(lhs.meta.get("val"), rhs.meta.get("val"))
+
+
+@dataclass(frozen=True)
+class TritonKernelReinplacementPlan:
+    logical_input_base: torch.fx.Node
+    updated_base: torch.fx.Node
+    redundant_ops: list[torch.fx.Node]
+
+
+def canonicalized_root(
+    node: torch.fx.Node, canonicalized_replacements: dict[torch.fx.Node, torch.fx.Node]
+) -> torch.fx.Node:
+    """
+    Some view ops have replay nodes that get canonicalized, e.g.
+    slice_scatter -> _generalized_scatter, so using the replacements we
+    recorded, figure out the new node.
+    """
+    while node in canonicalized_replacements:
+        node = canonicalized_replacements[node]
+    return node
+
+
+def _match_functionalized_user_defined_triton_kernel(
+    triton_kernel: torch.fx.Node,
+    canonicalized_replacements: dict[torch.fx.Node, torch.fx.Node],
+) -> dict[tuple[torch.fx.Node, torch.fx.Node], TritonKernelReinplacementPlan] | None:
+    """
+    Attempts to in-place all triton_kernel_wrapper_functional ops that were
+    emitted during functionalization. Using the metadata we create around the
+    views that the kernel writes to and the ops that get created as a result of
+    the ``ctx.commit_update()``, we can also remove the view replay ops, even
+    if we can't associate them with an epilogue copy.
+    """
+    if triton_kernel.target not in inplaceable_triton_ops:
+        return None
+
+    kwargs = cast(Mapping[str, Any], triton_kernel.kwargs["kwargs"])
+    tensors_to_clone = cast(list[str], triton_kernel.kwargs["tensors_to_clone"])
+
+    plans = {}
+
+    for user in triton_kernel.users:
+        if user.target is not operator.getitem:
+            raise AssertionError(
+                f"found a user ({user}) of a Triton kernel ({triton_kernel}) that is not getitem"
+            )
+
+        key = cast(str, user.args[1])
+        if key not in tensors_to_clone:
+            continue
+
+        if triton_reinplace_info := cast(
+            TritonReinplacementInfo | None, user.meta.get("triton_reinplace_info")
+        ):
+            mutated_arg = kwargs[key]
+            logical_input_base = _get_view_base(mutated_arg)
+
+            redundant_ops = [user]
+
+            if (base_val := logical_input_base.meta.get("val")) is not None:
+                replayed_val = apply_view_meta_sequence(
+                    base_val, triton_reinplace_info.view_meta_sequence.sequence
+                )
+                if not _same_tensor_metadata_values(
+                    mutated_arg.meta.get("val"), replayed_val
+                ):
+                    continue
+
+            redundant_ops.extend(
+                canonicalized_root(node, canonicalized_replacements)
+                for node in triton_reinplace_info.view_replay_nodes
+            )
+
+            plans[(mutated_arg, triton_kernel)] = TritonKernelReinplacementPlan(
+                canonicalized_root(
+                    triton_reinplace_info.logical_input_base, canonicalized_replacements
+                ),
+                canonicalized_root(
+                    triton_reinplace_info.updated_base, canonicalized_replacements
+                ),
+                redundant_ops,
+            )
+
+    return plans
 
 
 def _is_layout_preserving_view_copy_back(
@@ -497,7 +597,10 @@ def _is_control_deps_ordering_only_use(
     return view in additional_deps and view not in pass_through
 
 
-def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
+def reinplace_inplaceable_ops_core(
+    graph: torch.fx.Graph,
+    canonicalized_replacements: dict[torch.fx.Node, torch.fx.Node],
+) -> None:
     """
     Reinplaces in-placeable operations.
     If there are no uses of a view of the mutated arg after the current node,
@@ -522,6 +625,11 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
     # maps (view_arg, inplaceable_op_node) to copy_ nodes that copy a view of
     # the op result back into the graph input that view_arg aliases.
     copy_args_to_copy_nodes_via_views = {}
+    # maps (view_arg, inplaceable_op_node) to a TritonKernelReinplacementPlan
+    copy_args_to_triton_kernel_reinplacement_plans: dict[
+        tuple[torch.fx.Node, torch.fx.Node], TritonKernelReinplacementPlan
+    ] = {}
+    logical_to_physical_input_bases: dict[torch.fx.Node, torch.fx.Node] = {}
     mutated_inputs = OrderedSet[Any]()
     storage_to_nodes = defaultdict(list)
     node_order: dict[Any, int] = {}
@@ -568,7 +676,37 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                                 (mutated_arg, src_base)
                             ] = node
 
-    def any_use_of_views_after_node(node, shared_view_nodes, *, copy_node, mutated_arg):
+        if plans := _match_functionalized_user_defined_triton_kernel(
+            node, canonicalized_replacements
+        ):
+            copy_args_to_triton_kernel_reinplacement_plans.update(plans)
+
+    if copy_args_to_triton_kernel_reinplacement_plans:
+        ancestors = BitsetAncestors(list(graph.nodes))
+
+        for key, plan in reversed(
+            copy_args_to_triton_kernel_reinplacement_plans.items()
+        ):
+            physical_input_base = logical_to_physical_input_bases.get(
+                plan.logical_input_base, plan.logical_input_base
+            )
+            logical_to_physical_input_bases[plan.updated_base] = physical_input_base
+            copy_node = copy_nodes.get(physical_input_base)
+            if copy_node is None:
+                # We do not have an epilogue copy that reflects the update back
+                # to the graph input.
+                continue
+
+            copy_src = copy_node.args[1]
+            if copy_src is plan.updated_base or (
+                isinstance(copy_src, torch.fx.Node)
+                and ancestors.is_ancestor(plan.updated_base, copy_src)
+            ):
+                copy_args_to_copy_nodes_via_views[key] = copy_node
+
+    def any_use_of_views_after_node(
+        node, shared_view_nodes, *, copy_node, mutated_arg, ignored_users=None
+    ):
         node_loc = node_order[node]
         copy_node_loc = node_order[copy_node] if copy_node is not None else None
 
@@ -586,6 +724,8 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 # Ignore uses after the copy_ epilogue node, where the input
                 # has already been mutated anyway
                 if copy_node_loc is not None and copy_node_loc <= user_loc:
+                    continue
+                if ignored_users and user in ignored_users:
                     continue
                 # Reinplacing does not change shape metadata
                 if is_meta_only_user(user):
@@ -641,6 +781,9 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             if _overlap([mutated_arg.meta["val"], v.meta["val"]])
         ]
 
+        copy_node: torch.fx.Node | None = None
+        ignored_users: OrderedSet[torch.fx.Node] | None = None
+
         if mutated_arg.op in ("placeholder", "get_attr"):
             # Get the first copy_ node that mutates the mutated_arg.
             copy_node = copy_nodes.get(mutated_arg)
@@ -655,7 +798,16 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 return False
 
             return True
-        elif any(view.op in ("placeholder", "get_attr") for view in shared_view_nodes):
+
+        if (
+            (
+                plan := copy_args_to_triton_kernel_reinplacement_plans.get(
+                    (mutated_arg, node)
+                )
+            )
+            and logical_to_physical_input_bases[plan.updated_base].op
+            in ("placeholder", "get_attr")
+        ) or any(view.op in ("placeholder", "get_attr") for view in shared_view_nodes):
             # If mutated_arg is a view of a graph input, we can only reinplace
             # when a later copy_ writes this op's result back to that input.
             copy_node = copy_args_to_copy_nodes_via_views.get((mutated_arg, node))
@@ -667,24 +819,28 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             if not (
                 isinstance(mutated_arg_base, torch.fx.Node)
                 and isinstance(copy_src, torch.fx.Node)
-                and _is_layout_preserving_view_copy_back(
-                    mutated_arg_base, copy_src, mutated_arg, node
-                )
             ):
                 return False
 
-            if any_use_of_views_after_node(
-                node,
-                shared_view_nodes,
-                copy_node=copy_node,
-                mutated_arg=mutated_arg_base,
+            if plan is not None:
+                # We need to ignore the replay ops as they might be considered
+                # users and the re-inplacement will be rejected, even though we
+                # are preparing to delete them anyway.
+                ignored_users = OrderedSet(plan.redundant_ops)
+            elif not _is_layout_preserving_view_copy_back(
+                mutated_arg_base, copy_src, mutated_arg, node
             ):
                 return False
-            return True
-        else:
-            return not any_use_of_views_after_node(
-                node, shared_view_nodes, copy_node=None, mutated_arg=mutated_arg
-            )
+
+            mutated_arg = mutated_arg_base
+
+        return not any_use_of_views_after_node(
+            node,
+            shared_view_nodes,
+            copy_node=copy_node,
+            mutated_arg=mutated_arg,
+            ignored_users=ignored_users,
+        )
 
     def copy_node_for_reinplaced_arg(node, mutated_arg):
         copy_node = copy_args_to_copy_nodes.get((mutated_arg, node))
@@ -699,6 +855,8 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                     and _is_layout_preserving_view_copy_back(
                         copy_dst, copy_src, mutated_arg, node
                     )
+                    or (mutated_arg, node)
+                    in copy_args_to_triton_kernel_reinplacement_plans
                 ):
                     return None
         return copy_node
@@ -751,9 +909,12 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
         ReinplaceCounters.add_missed_bytes(trigger, missed_bytes)
 
     replace_dict: dict[torch.fx.Node, torch.fx.Node] = {}
+    skip_nodes: OrderedSet[torch.fx.Node] = OrderedSet()
+    # copy nodes that should be considered separately for replacement
+    candidate_copy_nodes: OrderedSet[torch.fx.Node] = OrderedSet()
 
     def reinplace_and_refine_tensors_to_clone(
-        old_tensors_to_clone, kwargs, node_name, trigger
+        node, old_tensors_to_clone, kwargs, node_name, trigger
     ):
         tensors_to_clone: list[str] = []
         storage_of_reinplaced_args = OrderedSet[int | None]()
@@ -793,7 +954,15 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 # In general, we probably do not need those optimizations.
                 copy_node = copy_node_for_reinplaced_arg(node, mutated_arg)
                 if copy_node is not None:
-                    replace_dict[copy_node] = copy_node.args[0]
+                    plan = copy_args_to_triton_kernel_reinplacement_plans.get(
+                        (mutated_arg, node)
+                    )
+                    if plan is not None:
+                        replace_dict[plan.updated_base] = plan.logical_input_base
+                        skip_nodes.add(plan.updated_base)
+                        candidate_copy_nodes.add(copy_node)
+                    else:
+                        replace_dict[copy_node] = copy_node.args[0]
                 if trigger != ReInplaceTrigger.AUTO_FUNC_V2:
                     for user in node.users:
                         # For auto_functionalize_v2, arg is the index of the base, where base at index i corresponds to
@@ -826,6 +995,9 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
         return tensors_to_clone
 
     for node in graph.nodes:
+        if node in skip_nodes:
+            continue
+
         if (inplaceable_op := inplaceable_ops.get(node.target)) is not None:
             # Check if ALL mutated args can be inplaced
             # Only convert if we don't need to clone any tensor
@@ -844,6 +1016,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             bases_to_clone = range(len(all_bases))
             base_tensors_dct = dict(enumerate(all_bases))
             new_bases_to_clone: list[int] = reinplace_and_refine_tensors_to_clone(
+                node,
                 bases_to_clone,
                 base_tensors_dct,
                 _mutable_op._name,
@@ -863,6 +1036,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 t for t in tensors_to_clone if node.kwargs[t] is not None
             ]
             tensors_to_clone = reinplace_and_refine_tensors_to_clone(
+                node,
                 tensors_to_clone,
                 node.kwargs,
                 _mutable_op._name,
@@ -1032,6 +1206,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             # This pass iterates over them and sees which ones are safe
             # to eliminate (i.e. no longer need the clones)
             tensors_to_clone = reinplace_and_refine_tensors_to_clone(
+                node,
                 node.kwargs["tensors_to_clone"],
                 node.kwargs["kwargs"],
                 kernel_name,
@@ -1052,15 +1227,46 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
         elif (inplaceable_op := inplaceable_foreach_ops.get(node.target)) is not None:
             mutated_args = node.args[inplaceable_op.mutated_arg]
 
-            if not all((arg, node) in copy_args_to_copy_nodes for arg in mutated_args):
+            def has_matching_copy_back(mutated_arg: torch.fx.Node) -> bool:
+                key = (mutated_arg, node)
+                return key in copy_args_to_copy_nodes or (
+                    key in copy_args_to_triton_kernel_reinplacement_plans
+                    and key in copy_args_to_copy_nodes_via_views
+                )
+
+            if not all(has_matching_copy_back(arg) for arg in mutated_args):
                 continue
 
             if can_inplace(node, mutated_args):
                 for arg in mutated_args:
-                    copy_node = copy_args_to_copy_nodes[(arg, node)]
-                    replace_dict[copy_node] = copy_node.args[0]
+                    key = (arg, node)
+                    if plan := copy_args_to_triton_kernel_reinplacement_plans.get(key):
+                        replace_dict[plan.updated_base] = plan.logical_input_base
+                        skip_nodes.add(plan.updated_base)
+                        copy_node = copy_args_to_copy_nodes_via_views[key]
+                        candidate_copy_nodes.add(copy_node)
+                    else:
+                        copy_node = copy_args_to_copy_nodes[key]
+                        replace_dict[copy_node] = copy_node.args[0]
 
                 node.target = inplaceable_op.inplace_op
+
+    def replacement_root(node):
+        while node in replace_dict:
+            node = replace_dict[node]
+        return node
+
+    for copy_node in candidate_copy_nodes:
+        dst = copy_node.args[0]
+        src = copy_node.args[1]
+
+        if (
+            isinstance(dst, torch.fx.Node)
+            and isinstance(src, torch.fx.Node)
+            and replacement_root(src) is dst
+        ):
+            replace_dict[copy_node] = dst
+
     for node, replacement in replace_dict.items():
         while replacement in replace_dict:
             replacement = replace_dict[replacement]
@@ -1075,10 +1281,10 @@ def reinplace_inplaceable_ops(
     graph: torch.fx.Graph,
 ) -> None:
     with enable_python_dispatcher():
-        canonicalize_view_scatter_ops(graph)
+        canonicalized_replacements = canonicalize_view_scatter_ops(graph)
         # canonicalize_view_scatter_ops adds new operations to the graph.
         # We run fake_tensor_updater to update the alias information.
         # Correct alias information is required for `reinplace_inplaceable_ops_core`.
         fake_tensor_updater.incremental_update()
-        reinplace_inplaceable_ops_core(graph)
+        reinplace_inplaceable_ops_core(graph, canonicalized_replacements)
         decompose_generalized_scatter(graph)

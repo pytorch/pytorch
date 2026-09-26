@@ -11,7 +11,8 @@ import threading
 import typing
 from collections import defaultdict
 from collections.abc import Callable, Sequence
-from typing import Any, Optional, Protocol, TYPE_CHECKING, Union
+from dataclasses import dataclass
+from typing import Any, cast, Optional, Protocol, TYPE_CHECKING, Union
 from typing_extensions import Never
 
 import sympy
@@ -19,13 +20,20 @@ import sympy
 import torch.fx as fx
 import torch.utils._pytree as pytree
 from torch import SymBool, SymFloat, SymInt, Tensor
-from torch._C import _dispatch_keys, DispatchKey
+from torch._C import (
+    _dispatch_keys,
+    _get_dispatch_mode,
+    _TorchDispatchModeKey,
+    DispatchKey,
+)
+from torch._functorch._aot_autograd.functional_utils import ViewMetaSequence
 from torch._higher_order_ops.utils import redirect_to_mode, register_fake
 from torch._ops import HigherOrderOperator
 from torch._prims_common import (
     clone_preserve_strides,
     is_non_overlapping_and_dense_or_false,
 )
+from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
@@ -1743,6 +1751,14 @@ def get_mutated_tensors(
     ]
 
 
+@dataclass(frozen=True)
+class TritonReinplacementInfo:
+    logical_input_base: fx.Node
+    updated_base: fx.Node
+    view_meta_sequence: ViewMetaSequence
+    view_replay_nodes: list[fx.Node]
+
+
 @triton_kernel_wrapper_mutation.py_functionalize_impl
 def triton_kernel_wrapper_mutation_functionalize(
     ctx: "BaseFunctionalizeAPI",
@@ -1753,6 +1769,9 @@ def triton_kernel_wrapper_mutation_functionalize(
     kwargs: dict[str, Any],
     launch_kwargs: tuple[str, ...] | None = None,
 ) -> None:
+    proxy_mode = cast(
+        ProxyTorchDispatchMode | None, _get_dispatch_mode(_TorchDispatchModeKey.PROXY)
+    )
     unwrapped_kwargs = ctx.unwrap_tensors(kwargs)  # type: ignore[arg-type]
     # TODO(oulgen): Preexisting bug, if two kernel inputs are views of each
     # other, and one gets mutated in kernel, and later another gets mutated,
@@ -1766,11 +1785,18 @@ def triton_kernel_wrapper_mutation_functionalize(
     # an untracked tensor that the tracer would lift to a constant. See
     # clone_preserve_strides for why cloning the view itself is not graph-safe.
     tensor_bases = {}
+    # Keep around view metadata so that this can be used in the re-inplacement pass.
+    # We need to keep the unwrapped base so we can find the updated base after the
+    # functionalization sync.
+    view_bases = {}
+    view_metas = {}
     for key in tensors_to_clone:
         tensor = kwargs[key]
-        base = tensor._base if isinstance(tensor, Tensor) else None
+        base = tensor._base if isinstance(tensor, FunctionalTensor) else None
         if base is not None:
+            view_bases[key] = base
             tensor_bases[key] = ctx.unwrap_tensors(base)
+            view_metas[key] = ViewMetaSequence(tensor)
     with ctx.redispatch_to_next():
         functional_kwargs: dict[str, Any] = {
             "kernel_idx": kernel_idx,
@@ -1803,7 +1829,37 @@ def triton_kernel_wrapper_mutation_functionalize(
         # indicate that above replace is hidden from autograd
         ctx.mark_mutation_hidden_from_autograd(input_arg)
         ctx.commit_update(input_arg)
+
+        replay_start = OrderedSet()
+        if proxy_mode is not None:
+            replay_start.update(proxy_mode.tracer.graph.nodes)
+
         ctx.sync(input_arg)
+
+        if proxy_mode is not None:
+            node = proxy_mode.tracer.tensor_tracker[output_arg].proxy.node
+
+            logical_input_base_val = tensor_bases.get(key)
+            if logical_input_base_val is None:
+                continue
+            logical_input_base = proxy_mode.tracer.tensor_tracker[
+                logical_input_base_val
+            ].proxy.node
+            updated_base_val = ctx.unwrap_tensors(
+                view_bases[key]
+            )  # unwrap AFTER calling sync()
+            updated_base = proxy_mode.tracer.tensor_tracker[updated_base_val].proxy.node
+            view_meta_sequence = view_metas[key]
+            view_replay_nodes = [
+                node
+                for node in proxy_mode.tracer.graph.nodes
+                if node not in replay_start
+            ]
+
+            node.meta["triton_reinplace_info"] = TritonReinplacementInfo(
+                logical_input_base, updated_base, view_meta_sequence, view_replay_nodes
+            )
+
     return None
 
 
@@ -1844,10 +1900,10 @@ def triton_kernel_wrapper_functional_dense(
     launch_kwargs: tuple[str, ...] | None = None,
     tensor_bases: dict[str, Tensor] | None = None,
 ) -> dict[str, Any]:
-    # TODO(oulgen): For performance reasons, we want to ensure that these
-    # `clone_preserve_strides` calls are never executed at runtime
-    # (inductor should always optimize them away).
-    # Requires https://github.com/pytorch/pytorch/issues/109240
+    # For performance reasons, we want to ensure that these
+    # `clone_preserve_strides` calls are never executed at runtime,
+    # the op should be inplaced by Inductor's reinplace.py pass and thus
+    # never called.
     kwargs = {
         key: (
             _clone_mutated_arg(key, val, tensor_bases)
@@ -1881,10 +1937,10 @@ def triton_kernel_wrapper_functional_fake_tensor_mode(
     launch_kwargs: tuple[str, ...] | None = None,
     tensor_bases: dict[str, Tensor] | None = None,
 ) -> dict[str, Any]:
-    # TODO(oulgen): For performance reasons, we want to ensure that these
-    # `clone_preserve_strides` calls are never executed at runtime
-    # (inductor should always optimize them away).
-    # Requires https://github.com/pytorch/pytorch/issues/109240
+    # For performance reasons, we want to ensure that these
+    # `clone_preserve_strides` calls are never executed at runtime,
+    # the op should be inplaced by Inductor's reinplace.py pass and thus
+    # never called.
     return {
         key: _clone_mutated_arg(key, val, tensor_bases)
         for key, val in kwargs.items()

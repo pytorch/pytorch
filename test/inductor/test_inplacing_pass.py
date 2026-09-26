@@ -7,12 +7,18 @@ import torch._inductor.config as inductor_config
 from functorch import make_fx
 from torch import Tensor
 from torch._dynamo.utils import ReinplaceCounters
+from torch._guards import detect_fake_mode
 from torch._higher_order_ops.auto_functionalize import (
     auto_functionalized,
     auto_functionalized_v2,
 )
-from torch._inductor.fx_passes.reinplace import reinplace_inplaceable_ops_core
+from torch._inductor.fx_passes.reinplace import (
+    reinplace_inplaceable_ops,
+    reinplace_inplaceable_ops_core,
+)
+from torch._inductor.fx_utils import FakeTensorUpdater
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
+from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
@@ -97,6 +103,35 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         inp2 = (inp[0].clone(), inp[1].clone())
         self.assertEqual(f(*inp), nf(*inp2))
         self.assertEqual(inp, inp2)
+
+    def _reinplace_functional_graph(self, f, *args):
+        gm = make_fx(f, tracing_mode="fake")(*args)
+        fake_mode = detect_fake_mode(
+            tuple(node.meta.get("val") for node in gm.graph.nodes)
+        )
+        self.assertIsNotNone(fake_mode)
+        with V.set_fake_mode(fake_mode):
+            reinplace_inplaceable_ops(FakeTensorUpdater(gm), gm.graph)
+
+        gm.graph.lint()
+        gm.recompile()
+        return gm
+
+    def _assert_functional_graph_matches(self, f, gm, *args):
+        expected_args = tuple(arg.clone() for arg in args)
+        actual_args = tuple(arg.clone() for arg in args)
+        expected = f(*expected_args)
+
+        # The reinplacing pass leaves now-unused foreach result getitems for the
+        # normal post-grad DCE pass. Remove them before executing the FX graph,
+        # since in-place foreach ops do not return a result list in eager mode.
+        gm.graph.eliminate_dead_code()
+        gm.graph.lint()
+        gm.recompile()
+        actual = gm(*actual_args)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_args, expected_args)
 
     def test_dont_modify_live(self):
         def f(x, y):
@@ -232,6 +267,126 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         actual = gm(input_pos, val, actual_cache)
         self.assertEqual(actual, expected)
         self.assertEqual(actual_cache, expected_cache)
+
+    def test_foreach_views_reinplaced_when_all_safe(self):
+        def f(x, y):
+            x_view = aten.slice.Tensor(x, 0, 0, 2)
+            y_view = aten.slice.Tensor(y, 0, 0, 2)
+            result = aten._foreach_mul.Scalar([x_view, y_view], 2.0)
+            updated_x = aten.slice_scatter.default(x, result[0], 0, 0, 2)
+            updated_y = aten.slice_scatter.default(y, result[1], 0, 0, 2)
+            copied_x = aten.copy_.default(x, updated_x)
+            copied_y = aten.copy_.default(y, updated_y)
+            return copied_x, copied_y
+
+        test_device = GPU_TYPE if HAS_GPU else "cpu"
+        args = (
+            torch.randn(4, device=test_device),
+            torch.randn(4, device=test_device),
+        )
+        gm = self._reinplace_functional_graph(f, *args)
+
+        targets = [node.target for node in gm.graph.nodes]
+        self.assertIn(aten._foreach_mul_.Scalar, targets)
+        self.assertNotIn(aten._foreach_mul.Scalar, targets)
+        self.assertNotIn(aten.slice_scatter.default, targets)
+        self.assertNotIn(aten.copy_.default, targets)
+        self._assert_functional_graph_matches(f, gm, *args)
+
+    def test_foreach_views_not_reinplaced_when_one_is_unsafe(self):
+        def f(x, y):
+            old_x_view = aten.slice.Tensor(x, 0, 0, 1)
+            x_view = aten.slice.Tensor(x, 0, 0, 2)
+            y_view = aten.slice.Tensor(y, 0, 0, 2)
+            result = aten._foreach_mul.Scalar([x_view, y_view], 2.0)
+            updated_x = aten.slice_scatter.default(x, result[0], 0, 0, 2)
+            updated_y = aten.slice_scatter.default(y, result[1], 0, 0, 2)
+            old_x_value = aten.sin.default(old_x_view)
+            copied_x = aten.copy_.default(x, updated_x)
+            copied_y = aten.copy_.default(y, updated_y)
+            return old_x_value, copied_x, copied_y
+
+        test_device = GPU_TYPE if HAS_GPU else "cpu"
+        args = (
+            torch.randn(4, device=test_device),
+            torch.randn(4, device=test_device),
+        )
+        gm = self._reinplace_functional_graph(f, *args)
+
+        targets = [node.target for node in gm.graph.nodes]
+        self.assertIn(aten._foreach_mul.Scalar, targets)
+        self.assertNotIn(aten._foreach_mul_.Scalar, targets)
+        self._assert_functional_graph_matches(f, gm, *args)
+
+    def test_foreach_views_reinplaced_before_later_input_mutation(self):
+        def f(x, y):
+            x_view = aten.slice.Tensor(x, 0, 0, 2)
+            y_view = aten.slice.Tensor(y, 0, 0, 2)
+            result = aten._foreach_mul.Scalar([x_view, y_view], 2.0)
+            updated_x = aten.slice_scatter.default(x, result[0], 0, 0, 2)
+            updated_y = aten.slice_scatter.default(y, result[1], 0, 0, 2)
+            final_x = aten.mul.Tensor(updated_x, 3.0)
+            copied_x = aten.copy_.default(x, final_x)
+            copied_y = aten.copy_.default(y, updated_y)
+            return copied_x, copied_y
+
+        test_device = GPU_TYPE if HAS_GPU else "cpu"
+        args = (
+            torch.randn(4, device=test_device),
+            torch.randn(4, device=test_device),
+        )
+        gm = self._reinplace_functional_graph(f, *args)
+
+        targets = [node.target for node in gm.graph.nodes]
+        self.assertIn(aten._foreach_mul_.Scalar, targets)
+        self.assertNotIn(aten._foreach_mul.Scalar, targets)
+        self.assertIn(aten.mul.Tensor, targets)
+        epilogue_copies = [
+            node for node in gm.graph.nodes if node.target is aten.copy_.default
+        ]
+        self.assertEqual(len(epilogue_copies), 1)
+        self.assertIs(epilogue_copies[0].args[1].target, aten.mul.Tensor)
+        self._assert_functional_graph_matches(f, gm, *args)
+
+    def test_foreach_nonzero_offset_views_reinplaced(self):
+        def f(x, y):
+            x_view = aten.slice.Tensor(x, 0, 2, 4)
+            y_view = aten.slice.Tensor(y, 0, 2, 4)
+            result = aten._foreach_mul.Scalar([x_view, y_view], 2.0)
+            updated_x = aten.slice_scatter.default(x, result[0], 0, 2, 4)
+            updated_y = aten.slice_scatter.default(y, result[1], 0, 2, 4)
+            copied_x = aten.copy_.default(x, updated_x)
+            copied_y = aten.copy_.default(y, updated_y)
+            return copied_x, copied_y
+
+        test_device = GPU_TYPE if HAS_GPU else "cpu"
+        args = (
+            torch.randn(4, device=test_device),
+            torch.randn(4, device=test_device),
+        )
+        gm = self._reinplace_functional_graph(f, *args)
+
+        targets = [node.target for node in gm.graph.nodes]
+        self.assertIn(aten._foreach_mul_.Scalar, targets)
+        self.assertNotIn(aten._foreach_mul.Scalar, targets)
+        self.assertNotIn(aten.slice_scatter.default, targets)
+        self.assertNotIn(aten.copy_.default, targets)
+        self._assert_functional_graph_matches(f, gm, *args)
+
+    def test_foreach_aliased_list_entries_not_reinplaced(self):
+        def f(x):
+            result = aten._foreach_mul.Scalar([x, x], 2.0)
+            copied_first = aten.copy_.default(x, result[0])
+            return aten.copy_.default(copied_first, result[1])
+
+        test_device = GPU_TYPE if HAS_GPU else "cpu"
+        args = (torch.randn(4, device=test_device),)
+        gm = self._reinplace_functional_graph(f, *args)
+
+        targets = [node.target for node in gm.graph.nodes]
+        self.assertIn(aten._foreach_mul.Scalar, targets)
+        self.assertNotIn(aten._foreach_mul_.Scalar, targets)
+        self._assert_functional_graph_matches(f, gm, *args)
 
     def test_counters_functionalize_old(self):
         ReinplaceCounters.clear()
