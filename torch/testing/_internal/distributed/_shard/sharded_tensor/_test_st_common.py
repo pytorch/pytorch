@@ -8,28 +8,46 @@ from torch.distributed._shard import sharded_tensor
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
 
 
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+def _get_default_placements(device_type=None):
+    """Generate placements dynamically based on device type.
 
-
-def _placement(rank):
+    If device_type is None, uses the current accelerator type.
+    CPU does not support device indices, so placements omit the index.
+    """
+    if device_type is None:
+        import torch
+        acc = torch.accelerator.current_accelerator()
+        device_type = acc.type if acc is not None else "cpu"
     if device_type == "cpu":
-        return f"rank:{rank}/cpu"
-    return f"rank:{rank}/{device_type}:{rank}"
+        return [
+            "rank:0/cpu",
+            "rank:1/cpu",
+            "rank:2/cpu",
+            "rank:3/cpu",
+        ]
+    return [
+        f"rank:0/{device_type}:0",
+        f"rank:1/{device_type}:1",
+        f"rank:2/{device_type}:2",
+        f"rank:3/{device_type}:3",
+    ]
 
 
-PLACEMENTS = [_placement(i) for i in range(4)]
+# Default placements for backward compatibility
+PLACEMENTS = _get_default_placements()
 
 DEFAULT_GPU_NUM = 4
 
 
-def _chunk_sharding_specs_list_for_test(sharding_dims, seed=0):
+def _chunk_sharding_specs_list_for_test(sharding_dims, seed=0, device_type=None):
     spec_list = []
+    placements = _get_default_placements(device_type)
     for i in range(len(sharding_dims)):
-        random.Random(seed + i).shuffle(PLACEMENTS)
+        random.Random(seed + i).shuffle(placements)
         spec_list.append(
             ChunkShardingSpec(
                 dim=sharding_dims[i],
-                placements=copy.deepcopy(PLACEMENTS),
+                placements=copy.deepcopy(placements),
             )
         )
     return spec_list
