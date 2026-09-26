@@ -85,11 +85,12 @@ class WhileLoopOp(HigherOrderOperator):
 
         _validate_num_effect_tokens(num_effect_tokens, len(carried_inputs))
         if num_effect_tokens and carried_inputs[0] is None:
-            raise NotImplementedError(
-                "the leading effect-token carry of this while_loop is None, "
-                "which means the compiling backend keeps effect tokens lifted "
-                "(unlift_effect_tokens=False); effectful torch.while_loop "
-                "requires an effect-token-unlifting backend such as inductor"
+            # Backends that keep effect tokens lifted, such as aot_eager, pass
+            # None for them at runtime.
+            from torch._higher_order_ops.effects import new_token_tensor
+
+            carried_inputs = type(carried_inputs)(
+                (new_token_tensor(), *carried_inputs[1:])
             )
         validate_subgraph_args_types(carried_inputs)
         validate_subgraph_args_types(additional_inputs)
@@ -728,21 +729,9 @@ def while_loop_func(
             )
 
         body_has_effect = False
-        if not num_effect_tokens:
-
-            def _discover_effect_tokens(fn):
-                tokens_before = dict(mode._tokens) if mode is not None else {}
-                probed_tokens = {}
-                try:
-                    materialize_as_graph(fn, unwrapped_inputs)
-                    if mode is not None:
-                        probed_tokens = dict(mode._tokens)
-                finally:
-                    _restore_tokens(tokens_before)
-                if mode is not None and mode._allow_token_discovery:
-                    for key, token in probed_tokens.items():
-                        mode._tokens.setdefault(key, token)
-
+        # C++ and functorch functionalization run effectful ops as plain ops;
+        # only Python functionalization threads effect tokens.
+        if not num_effect_tokens and mode is not None:
             if _graph_has_effects(checked_graphs["cond_fn"]):
                 raise NotImplementedError(
                     "effects in while_loop cond_fn are unsupported"
@@ -752,10 +741,6 @@ def while_loop_func(
                 raise NotImplementedError(
                     "effects in while_loop_stack_output are unsupported"
                 )
-            if body_has_effect and mode is None:
-                raise NotImplementedError(
-                    "while_loop effects require Python functionalization"
-                )
             if body_has_effect and mutated_arg_indices:
                 raise NotImplementedError(
                     "while_loop effects with mutation are unsupported"
@@ -764,8 +749,17 @@ def while_loop_func(
                 raise NotImplementedError(
                     "effects in while_loop are unsupported during export"
                 )
-            if body_has_effect:
-                _discover_effect_tokens(functional_body_fn)
+            # If no earlier effect created the ORDERED token, create it the way
+            # handle_effects does.
+            if body_has_effect and EffectType.ORDERED not in mode._tokens:
+                if not mode._allow_token_discovery:
+                    raise NotImplementedError(
+                        "while_loop body has an effect but no ORDERED token "
+                        "was discovered for this trace"
+                    )
+                from torch._higher_order_ops.effects import new_token_tensor
+
+                mode._tokens[EffectType.ORDERED] = new_token_tensor()
 
         active_mode = mode if body_has_effect else None
         if active_mode is not None:
@@ -796,13 +790,7 @@ def while_loop_func(
 
         loop_carried_inputs = unwrapped_carried_inputs
         if active_mode is not None:
-            ordered_token = active_mode._tokens.get(EffectType.ORDERED)
-            if ordered_token is None:
-                raise NotImplementedError(
-                    "while_loop body effect detection and token discovery "
-                    "disagree: the materialized body graph contains an effect "
-                    "but no ORDERED token was discovered for this trace"
-                )
+            ordered_token = active_mode._tokens[EffectType.ORDERED]
             token = ctx.unwrap_tensors((ordered_token,))[0]
             loop_carried_inputs = (token, *loop_carried_inputs)
         ret = op(

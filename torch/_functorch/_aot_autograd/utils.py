@@ -550,11 +550,12 @@ def unlift_tokens(
                         )
                         for n in body_module.graph.nodes
                     ):
-                        raise AssertionError(
-                            f"while_loop body {body_node.target} is marked with "
-                            "num_effect_tokens=1 but contains no with_effects "
-                            "nodes and no tokenized inner while_loop; effect "
-                            "detection and emission disagree"
+                        # The effect sits inside a nested higher-order op
+                        # that does not thread effect tokens, such as torch.cond.
+                        raise NotImplementedError(
+                            "effects inside a nested higher-order op (such as "
+                            "torch.cond) in a torch.while_loop body are "
+                            "unsupported"
                         )
                     _unlift_tokens_from_module_helper(
                         body_module,
