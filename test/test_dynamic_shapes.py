@@ -709,6 +709,42 @@ class TestPySymInt(TestCase):
             """Eq(Piecewise((s97, Eq(s26, 5)), (s26, True)), 4)""",
         )
 
+    def test_sym_ite_mixed_python_literal(self):
+        # Regression for #197718: SymX vs matching Python literal must work.
+        shape_env = ShapeEnv()
+        n = create_symint(shape_env, 4)
+        r_then = torch.sym_ite(n > 2, n, 1)
+        self.assertEqual(r_then, 4)
+        self.assertIsInstance(r_then, torch.SymInt)
+        r_else = torch.sym_ite(n > 10, 1, n)
+        self.assertEqual(r_else, 4)
+        self.assertIsInstance(r_else, torch.SymInt)
+
+        x = create_symfloat(shape_env, 3.0)
+        rf = torch.sym_ite(x > 1.0, x, 0.5)
+        self.assertEqual(rf, 3.0)
+        self.assertIsInstance(rf, torch.SymFloat)
+
+        b = create_symbool(shape_env, True)
+        rb = torch.sym_ite(n > 0, b, False)
+        self.assertTrue(rb)
+        self.assertIsInstance(rb, torch.SymBool)
+
+        with self.assertRaisesRegex(TypeError, "matching types"):
+            torch.sym_ite(n > 2, n, 1.0)
+
+    def test_compile_sym_ite_mixed_literal(self):
+        def f(x):
+            n = x.shape[0]
+            size = torch.sym_ite(n > 2, n, 1)
+            return torch.ones(size, device=x.device)
+
+        x = torch.randn(4, 3)
+        self.assertEqual(f(x).shape, (4,))
+        compiled = torch.compile(f, dynamic=True, fullgraph=True)
+        self.assertEqual(compiled(x).shape, (4,))
+        self.assertEqual(compiled(torch.randn(1, 3)).shape, (1,))
+
     def test_tracing_sym_ite(self):
         def f(x):
             b = x.shape[0] == 5

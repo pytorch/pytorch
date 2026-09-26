@@ -1399,14 +1399,32 @@ sym_sqrt = globals()["_sym_sqrt"]
 __all__.append("sym_sqrt")
 
 
+def _sym_ite_types_compatible(t: object, f: object) -> builtins.bool:
+    # Same Python type, or SymX paired with the matching literal scalar.
+    # Use `type(...) is` for the literal side so bool is not treated as int.
+    if type(t) is type(f):
+        return True
+    return (
+        (isinstance(t, SymInt) and type(f) is builtins.int)
+        or (isinstance(f, SymInt) and type(t) is builtins.int)
+        or (isinstance(t, SymFloat) and type(f) is builtins.float)
+        or (isinstance(f, SymFloat) and type(t) is builtins.float)
+        or (isinstance(t, SymBool) and type(f) is builtins.bool)
+        or (isinstance(f, SymBool) and type(t) is builtins.bool)
+    )
+
+
 def sym_ite(b: "BoolLikeType", t: _SymIteT, f: _SymIteT) -> _SymIteT:
     """SymInt-aware utility for ternary operator (``t if b else f``.)"""
     if overrides.has_torch_function((b, t, f)):
         return overrides.handle_torch_function(sym_ite, (b, t, f), b, t, f)
     if not isinstance(b, (SymBool, builtins.bool)):
-        raise AssertionError(f"expected SymBool or bool, got {type(b)}")
-    if type(t) is not type(f):
-        raise AssertionError(f"type mismatch: {type(t)} vs {type(f)}")
+        raise TypeError(f"expected SymBool or bool, got {type(b)}")
+    if not _sym_ite_types_compatible(t, f):
+        raise TypeError(
+            "torch.sym_ite branches must have matching types "
+            f"(SymInt/int, SymFloat/float, or SymBool/bool); got {type(t)} and {type(f)}"
+        )
     if isinstance(b, SymBool):
         return b.__sym_ite__(t, f)
     return t if b else f
