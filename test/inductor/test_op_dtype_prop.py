@@ -300,6 +300,31 @@ class TestCase(InductorTestCase):
         # There should be no downcast, since the input is promoted to float32.
         self.assertNotIn(".to(tl.float16)", code)
 
+    def test_ldexp_dtype_promotion(self):
+        """
+        ldexp must promote both operands like eager (mul(x, pow(2, n)) does),
+        see https://github.com/pytorch/pytorch/issues/197091.
+        """
+        pairs = (
+            (torch.bool, torch.float16),
+            (torch.int64, torch.bfloat16),
+            (torch.float16, torch.float32),
+            (torch.float16, torch.bfloat16),
+            (torch.bfloat16, torch.float64),
+        )
+        compiled = torch.compile(backend="inductor")(torch.ldexp)
+        for x_dtype, n_dtype in pairs:
+            x = torch.ones(8, device=GPU_TYPE, dtype=x_dtype)
+            n = torch.randn(8, device=GPU_TYPE, dtype=n_dtype)
+            eager = torch.ldexp(x, n)
+            result = compiled(x, n)
+            self.assertEqual(
+                eager.dtype,
+                result.dtype,
+                msg=f"ldexp dtype mismatch for ({x_dtype}, {n_dtype})",
+            )
+            self.assertEqual(eager, result)
+
     @config.patch("test_configs.static_cpp_dtype_assert", True)
     @config.patch("test_configs.runtime_triton_dtype_assert", True)
     @config.patch("test_configs.runtime_triton_shape_assert", True)
