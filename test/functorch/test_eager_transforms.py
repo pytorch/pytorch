@@ -3112,6 +3112,34 @@ class TestJvp(TestCase):
         # Should not error
         vmap(vmap(push_jvp, (0, None)))(dummy, x)
 
+    # https://github.com/pytorch/pytorch/issues/123996
+    # The target carries no tangent, so its tangent is an efficient ZeroTensor
+    # inside the forward-AD formula of mse_loss_backward.
+    @parametrize("reduction", ["mean", "sum", "none"])
+    def test_jvp_of_grad_mse_loss(self, device, reduction):
+        w = torch.randn(4, 3, device=device, dtype=torch.double)
+        v = torch.randn_like(w)
+        X = torch.randn(5, 4, device=device, dtype=torch.double)
+        t = torch.randn(5, 3, device=device, dtype=torch.double)
+
+        def loss(p):
+            return F.mse_loss(X @ p, t, reduction=reduction).sum()
+
+        def reference(p):
+            out = (X @ p - t) ** 2
+            return out.mean() if reduction == "mean" else out.sum()
+
+        _, hvp = jvp(grad(loss), (w,), (v,))
+        _, expected = jvp(grad(reference), (w,), (v,))
+        self.assertEqual(hvp, expected)
+
+        # Same through plain forward AD, where the ZeroTensor is not wrapped
+        w.requires_grad_()
+        with fwAD.dual_level():
+            w_dual = fwAD.make_dual(w, v)
+            (g,) = torch.autograd.grad(loss(w_dual), w_dual, create_graph=True)
+            self.assertEqual(fwAD.unpack_dual(g).tangent, expected)
+
 
 @markDynamoStrictTest
 class TestLinearize(TestCase):
