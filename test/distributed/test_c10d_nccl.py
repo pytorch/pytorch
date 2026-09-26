@@ -6413,6 +6413,9 @@ class NCCLTraceTest(NCCLTraceTestBase):
     @skip_but_pass_in_sandcastle_if(
         not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
     )
+    @skipIfXpu(  # https://github.com/intel/torch-xpu-ops/issues/5385
+        msg="XCCL does not implement waitForPendingWorks"
+    )
     @parametrize("timing_enabled", [True, False])
     def test_fr_record_reset(self, timing_enabled):
         if self.rank == self.MAIN_PROCESS_RANK:
@@ -7338,6 +7341,9 @@ class NCCLTraceTest(NCCLTraceTestBase):
     @skip_if_lt_x_gpu(2)
     @parametrize("timing_enabled", [True, False])
     def test_allgather_uneven(self, timing_enabled):
+        if timing_enabled and device_type == "xpu":
+            # https://github.com/intel/torch-xpu-ops/issues/5385
+            self.skipTest("XCCL does not implement waitForPendingWorks")
         if self.rank == self.MAIN_PROCESS_RANK:
             return
         pg = self._create_process_group_nccl()
@@ -7392,6 +7398,9 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
         For now, flight recording of coalescing_manager collectives is less detailed than cpp coalesced collectives.
         """
+        if timing_enabled and device_type == "xpu":
+            # https://github.com/intel/torch-xpu-ops/issues/5385
+            self.skipTest("XCCL does not implement waitForPendingWorks")
         if self.rank == self.MAIN_PROCESS_RANK:
             return
         pg = self._create_process_group_nccl()
@@ -7448,6 +7457,9 @@ class NCCLTraceTest(NCCLTraceTestBase):
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
         not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
+    )
+    @skipIfXpu(  # https://github.com/intel/torch-xpu-ops/issues/5385
+        msg="XCCL does not implement waitForPendingWorks"
     )
     @parametrize("timing_enabled", [True, False])
     def test_fr_record_reset_circular_buffer_full(self, timing_enabled):
@@ -7509,6 +7521,9 @@ class NCCLTraceTest(NCCLTraceTestBase):
     @skip_but_pass_in_sandcastle_if(
         not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
     )
+    @skipIfXpu(  # https://github.com/intel/torch-xpu-ops/issues/5385
+        msg="XCCL does not implement waitForPendingWorks"
+    )
     @parametrize("timing_enabled", [True, False])
     def test_fr_record_reset_partial_overwrite(self, timing_enabled):
         """
@@ -7561,6 +7576,9 @@ class NCCLTraceTest(NCCLTraceTestBase):
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
         not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
+    )
+    @skipIfXpu(  # https://github.com/intel/torch-xpu-ops/issues/5385
+        msg="XCCL does not implement waitForPendingWorks"
     )
     @parametrize("timing_enabled", [True, False])
     def test_fr_record_reset_wraparound(self, timing_enabled):
@@ -7618,6 +7636,9 @@ class NCCLTraceTest(NCCLTraceTestBase):
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
         not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
+    )
+    @skipIfXpu(  # https://github.com/intel/torch-xpu-ops/issues/5385
+        msg="XCCL does not implement waitForPendingWorks"
     )
     @parametrize("timing_enabled", [True, False])
     def test_fr_record_multiple_resets(self, timing_enabled):
