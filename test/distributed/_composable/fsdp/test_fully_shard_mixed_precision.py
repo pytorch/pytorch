@@ -574,11 +574,11 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
                     self.assertIsNone(model.second.weight.grad)
                     grad_owner.reshard()
                     continue
-                # Fresh gradients stay bf16 until the copy-in, while an fp32
-                # accumulated gradient makes foreach_reduce upcast the group
+                # Fresh gradients stay bf16 until the copy-in, while the fp32
+                # gradient first accumulated in iteration 10 keeps its dtype
                 accumulated = iteration == 11 and not all_reduce_only
-                dtype = torch.float32 if accumulated else torch.bfloat16
-                self.assertEqual(copy_dtypes, [(dtype, dtype)])
+                first_dtype = torch.float32 if accumulated else torch.bfloat16
+                self.assertEqual(copy_dtypes, [(first_dtype, torch.bfloat16)])
                 for index, param in enumerate(model.parameters()):
                     factor = 2 if iteration == 11 and index == 0 else 1
                     self.assertEqual(param.grad.dtype, torch.float32)
@@ -776,6 +776,12 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
                 self.assertEqual(param.grad_dtype, reduce_dtype or grad_dtype)
 
         model.register_forward_pre_hook(check_unsharded_grad_dtype)
+        copy_in_dtypes = []
+
+        def copy_in(grads, buffer, world_size):
+            copy_in_dtypes.append(tuple(grad.dtype for grad in grads))
+            foreach_reduce_scatter_copy_in(grads, buffer, world_size)
+
         for microbatch_idx in range(3):
             sync = microbatch_idx == 2
             model.set_requires_gradient_sync(sync)
@@ -788,6 +794,11 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
                     dist, "reduce_scatter_single", wraps=dist.reduce_scatter_single
                 ) as reduce_scatter,
                 patch.object(dist, "all_reduce", wraps=dist.all_reduce) as all_reduce,
+                patch(
+                    "torch.distributed.fsdp._fully_shard._fsdp_collectives."
+                    "foreach_reduce_scatter_copy_in",
+                    copy_in,
+                ),
             ):
                 model(microbatch_inp).sum().backward()
                 all_gather.assert_called_once()
@@ -796,6 +807,11 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
                 if sync:
                     rs_input = reduce_scatter.call_args.kwargs["input"]
                     self.assertEqual(rs_input.dtype, torch.float32)
+                    # Gradients reach the copy-in in their own dtypes
+                    self.assertEqual(
+                        copy_in_dtypes,
+                        [tuple(reduce_dtype or dtype for dtype in grad_dtypes)],
+                    )
             ref_model(microbatch_inp).sum().backward()
             if not sync:
                 for param, grad_dtype in zip(model.parameters(), grad_dtypes):
@@ -896,6 +912,53 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
             for param in model.parameters():
                 self.assertEqual(param.grad.dtype, torch.float32)
             all_gather.assert_called_once()
+
+    @skip_if_lt_x_gpu(2)
+    def test_grad_dtype_pending_all_reduce_not_narrowed(self):
+        mesh = init_device_mesh(
+            device_type.type,
+            (2, self.world_size // 2),
+            mesh_dim_names=("replicate", "shard"),
+        )
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.first = nn.Parameter(
+                    torch.zeros(8, device=device_type, dtype=torch.bfloat16)
+                )
+                self.second = nn.Parameter(torch.zeros_like(self.first))
+                self.second.grad_dtype = None
+
+            def forward(self, inp):
+                return (self.first * inp).sum() + (self.second * inp).sum()
+
+        model = Model()
+        fully_shard(model, mesh=mesh)
+        model.set_gradient_divide_factor(1.0)
+        copy_in_dtypes = []
+
+        def copy_in(grads, buffer, world_size):
+            copy_in_dtypes.append({grad.dtype for grad in grads})
+            foreach_reduce_scatter_copy_in(grads, buffer, world_size)
+
+        with patch(
+            "torch.distributed.fsdp._fully_shard._fsdp_collectives."
+            "foreach_reduce_scatter_copy_in",
+            copy_in,
+        ):
+            model.set_requires_all_reduce(False)
+            model(torch.full((8,), 256.0, device=device_type)).backward()
+            model.set_requires_all_reduce(True)
+            model(torch.ones(8, device=device_type, dtype=torch.bfloat16)).backward()
+        # The bf16 gradients reach the copy-in uncast, and the pending fp32
+        # reduction keeps the reduce dtype at fp32: 256 + 1 is 256 in bf16.
+        self.assertEqual(
+            copy_in_dtypes, [{torch.bfloat16, torch.float32}, {torch.bfloat16}]
+        )
+        grad = model.second.grad.to_local()
+        expected = torch.full_like(grad, 257 * self.world_size, dtype=torch.float32)
+        self.assertEqual(grad, expected)
 
     @skip_if_lt_x_gpu(2)
     def test_grad_dtype_unused_last_microbatch(self):

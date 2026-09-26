@@ -889,9 +889,15 @@ class FSDPParamGroup:
         # unset) since they match across ranks. Gradient dtypes may not: a fresh
         # gradient may not be upcast to its accumulation dtype yet, while an
         # accumulated one is. grad_dtype=None has no accumulation dtype, so use
-        # its gradient's dtype. Keep the precision of pending HSDP reductions.
+        # its gradient's dtype.
         dtypes = {p.unsharded_grad_dtype or g.dtype for p, g in zip(fsdp_params, grads)}
         if self._partial_reduce_output is not None:
+            # The pending partial has an earlier backward's reduce dtype, and
+            # _prepare_partial_reduce_output casts it to this one's. Only
+            # grad_dtype=None params can make these dtypes narrower: their dtype
+            # follows the computation, e.g. fp32 in one microbatch and bf16 in
+            # the next. Promoting over these dtypes alone would then cast the
+            # fp32 partial down to bf16.
             dtypes.add(self._partial_reduce_output.dtype)
         return functools.reduce(torch.promote_types, dtypes)
 
