@@ -611,6 +611,52 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
         self.assertEqual(model.weight.grad.full_tensor(), model.scale)
 
     @skip_if_lt_x_gpu(2)
+    @parametrize("reduce_dtype", [None, torch.float32])
+    def test_grad_dtype_accumulation_skips_upcast(
+        self, reduce_dtype: torch.dtype | None
+    ):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = nn.Parameter(torch.ones(8, device=device_type))
+
+            def forward(self, inp):
+                return (self.weight * inp).sum()
+
+        model = Model()
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16, reduce_dtype=reduce_dtype
+        )
+        fully_shard(model, mp_policy=mp_policy)
+        model.unshard()
+        unsharded_weight = model.weight
+        model.reshard()
+        grad_dtypes = []
+        unsharded_weight.register_hook(lambda grad: grad_dtypes.append(grad.dtype))
+        # 256 + 1 is 256 in bf16
+        for value, sync in ((256.0, False), (1.0, False), (-256.0, True)):
+            model.set_requires_gradient_sync(sync)
+            inp = torch.full((8,), value, device=device_type)
+            model(inp).backward()
+            self.assertEqual(unsharded_weight.grad_dtype, torch.float32)
+        # Only the gradient that starts accumulation is cast; AccumulateGrad
+        # adds the later ones to it in place
+        self.assertEqual(grad_dtypes, [torch.float32, torch.bfloat16, torch.bfloat16])
+        self.assertEqual(model.weight.grad.full_tensor(), torch.ones_like(inp))
+
+    @skip_if_lt_x_gpu(2)
+    def test_grad_dtype_restored_when_sync_disabled_in_backward(self):
+        model = nn.Linear(8, 8, bias=False, device=device_type)
+        fully_shard(model, mp_policy=MixedPrecisionPolicy(param_dtype=torch.bfloat16))
+        out = model(torch.ones(2, 8, device=device_type))
+        # Runs after pre-backward defers the upcast for a reducing backward
+        out.register_hook(lambda grad: model.set_requires_gradient_sync(False))
+        out.sum().backward()
+        model.unshard()
+        self.assertEqual(model.weight.grad.dtype, torch.float32)
+        self.assertEqual(model.weight.grad_dtype, torch.float32)
+
+    @skip_if_lt_x_gpu(2)
     def test_grad_dtype_restored_by_reset_iter_state(self):
         model = nn.Linear(8, 8, bias=False, device=device_type)
         fully_shard(model, mp_policy=MixedPrecisionPolicy(param_dtype=torch.bfloat16))
@@ -625,10 +671,8 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
         with self.assertRaisesRegex(RuntimeError, "abort backward"):
             out.sum().backward()
         model.reset_iter_state()
-        model.set_requires_gradient_sync(False)
-        model(inp).sum().backward()
         model.unshard()
-        self.assertEqual(model.weight.grad.dtype, torch.float32)
+        self.assertEqual(model.weight.grad_dtype, torch.float32)
 
     @skip_if_lt_x_gpu(2)
     @parametrize("reshard_after_backward", [False, True])
