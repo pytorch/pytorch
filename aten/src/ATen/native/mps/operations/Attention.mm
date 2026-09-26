@@ -1004,9 +1004,11 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_flash_attention_mps(
   Tensor k_c = k_.stride(-1) == 1 ? k_ : k_.contiguous();
   Tensor v_c = v_.stride(-1) == 1 ? v_ : v_.contiguous();
 
+  const bool use_mpp =
+      can_use_mpp_prefill(query, attn_mask, query.size(-1), value.size(-1), qL, k_.size(2), false);
   Tensor out, _attn_w;
   std::tie(out, _attn_w) =
-      sdpa_prefill_mps(q_c, k_c, v_c, mask_, is_causal, scale, query, unsqueezed_q);
+      sdpa_prefill_mps(q_c, k_c, v_c, mask_, is_causal, scale, query, unsqueezed_q, use_mpp);
 
   // logsumexp placeholder — prefill kernel does not expose log-sum-exp.
   // Shape: [B, num_heads, max_seqlen_q] for 4D input, [num_heads, max_seqlen_q]
