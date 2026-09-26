@@ -3,6 +3,8 @@
 #include <c10/xpu/XPUException.h>
 #include <c10/xpu/XPUStream.h>
 
+#include <cstdlib>
+
 #include <atomic>
 #include <deque>
 #include <vector>
@@ -385,8 +387,13 @@ void syncStreamsOnDevice(DeviceIndex device) {
 // TODO: drop the legacy fallback below once a driver supporting
 // `ext_oneapi_device_wait` is widely deployed across all supported platforms.
 #if SYCL_COMPILER_VERSION >= 20260100
-  const bool use_device_wide_wait = c10::xpu::get_raw_device(device).has(
-      sycl::aspect::ext_oneapi_device_wait);
+  static const bool opt_in_device_wide = []() {
+    const char* e = std::getenv("TORCH_XPU_SYNC_STREAMS_DEVICE_WIDE");
+    return e != nullptr && e[0] == '1';
+  }();
+  const bool use_device_wide_wait = opt_in_device_wide &&
+      c10::xpu::get_raw_device(device).has(
+          sycl::aspect::ext_oneapi_device_wait);
 #else
   constexpr bool use_device_wide_wait = false;
 #endif
