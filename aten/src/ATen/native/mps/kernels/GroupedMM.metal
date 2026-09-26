@@ -23,6 +23,87 @@ inline uint32_t grouped_mm_offset(int32_t offset, uint32_t limit) {
   return min(static_cast<uint32_t>(offset), limit);
 }
 
+// One SIMD group computes one output element. Find the expert on-device so
+// sparse routing needs neither a CPU sync nor threadgroups for empty experts.
+template <typename T, typename idx_t>
+[[max_total_threads_per_threadgroup(
+    kGroupedMMFewRowsSimdgroups * simdgroup_size)]]
+kernel void grouped_mm_few_rows(
+    device const T* mat_a [[buffer(0)]],
+    device const T* mat_b [[buffer(1)]],
+    device const int32_t* offsets [[buffer(2)]],
+    device T* output [[buffer(3)]],
+    constant GroupedMMParams<idx_t>& params [[buffer(4)]],
+    uint3 tgid [[threadgroup_position_in_grid]],
+    uint simd_group [[simdgroup_index_in_threadgroup]],
+    uint simd_lane [[thread_index_in_simdgroup]]) {
+  const uint32_t row = tgid.y;
+  const uint32_t col = tgid.x * kGroupedMMFewRowsSimdgroups + simd_group;
+  if (col >= params.n) {
+    return;
+  }
+  uint32_t group = 0;
+  if (simd_lane == 0) {
+    uint32_t end = params.groups;
+    while (group < end) {
+      const uint32_t mid = group + (end - group) / 2;
+      if (offsets[mid] <= static_cast<int32_t>(row)) {
+        group = mid + 1;
+      } else {
+        end = mid;
+      }
+    }
+  }
+  group = simd_broadcast_first(group);
+  if (group == params.groups) {
+    return;
+  }
+  mat_a += row * params.a_stride_m;
+  mat_b += group * params.batch_stride + col * params.b_stride_n;
+  float4 accum = 0;
+  constexpr auto chunk = kGroupedMMFewRowsLaneChunk;
+  for (idx_t base = simd_lane * chunk; base < params.k;
+       base += simdgroup_size * chunk) {
+    const idx_t end = min(base + chunk, static_cast<idx_t>(params.k));
+    idx_t k = base;
+    for (; k + 4 <= end; k += 4) {
+      const float4 a =
+          float4(*reinterpret_cast<device const vec<T, 4>*>(mat_a + k));
+      const float4 b =
+          float4(*reinterpret_cast<device const vec<T, 4>*>(mat_b + k));
+      accum = fma(a, b, accum);
+    }
+    for (; k < end; ++k) {
+      accum.x = fma(float(mat_a[k]), float(mat_b[k]), accum.x);
+    }
+  }
+  const float value = simd_sum(dot(accum, float4(1)));
+  if (simd_lane == 0) {
+    output[row * params.out_stride_m + col * params.out_stride_n] = T(value);
+  }
+}
+
+#define INSTANTIATE_GROUPED_MM_FEW_ROWS(DTYPE, IDX_T, IDX_NAME)              \
+  template                                                                   \
+      [[host_name("grouped_mm_few_rows_" #DTYPE "_" #IDX_NAME)]] kernel void \
+      grouped_mm_few_rows<DTYPE, IDX_T>(                                     \
+          device const DTYPE*,                                               \
+          device const DTYPE*,                                               \
+          device const int32_t*,                                             \
+          device DTYPE*,                                                     \
+          constant GroupedMMParams<IDX_T>&,                                  \
+          uint3,                                                             \
+          uint,                                                              \
+          uint)
+
+#define INSTANTIATE_GROUPED_MM_FEW_ROWS_DTYPE(DTYPE)     \
+  INSTANTIATE_GROUPED_MM_FEW_ROWS(DTYPE, uint32_t, u32); \
+  INSTANTIATE_GROUPED_MM_FEW_ROWS(DTYPE, uint64_t, u64)
+
+INSTANTIATE_GROUPED_MM_FEW_ROWS_DTYPE(float);
+INSTANTIATE_GROUPED_MM_FEW_ROWS_DTYPE(half);
+INSTANTIATE_GROUPED_MM_FEW_ROWS_DTYPE(bfloat);
+
 // Maps a flat tile index along the jagged dimension (rows or columns, capped
 // at limit) to its (group, first index, valid count) triple by walking the
 // jagged group extents; padding tiles leave the zero-initialized outputs

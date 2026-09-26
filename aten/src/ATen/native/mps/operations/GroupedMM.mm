@@ -108,6 +108,8 @@ void grouped_mm_out_mps(const Tensor& mat_a, const Tensor& mat_b, const Tensor& 
   // mode k here is a 2D x 2D matmul but with offsets and that's why we can't use regular mm.
   const auto mode = jagged_rows ? "rows" : jagged_cols ? "cols" : "k";
   const auto params = grouped_mm_params<uint64_t>(mat_a, mat_b, out, groups);
+  const bool use_few_rows = jagged_rows && (params.m <= std::min(kGroupedMMFewRowsMax, groups)) &&
+      (params.a_stride_k == 1) && (params.b_stride_k == 1);
   const auto bm = grouped_mm_tile_rows(jagged_rows ? mat_a.size(0) / groups : mat_a.size(-2));
   const auto mpp_bn = grouped_mm_mpp_tile_cols(params.n, mat_b.nbytes(), bm);
   // Every operand is either row or col major, because mpp matmul2d wants
@@ -116,7 +118,8 @@ void grouped_mm_out_mps(const Tensor& mat_a, const Tensor& mat_b, const Tensor& 
   const char a_layout = params.a_stride_k == 1 ? 'n' : 't';
   const char b_layout = params.b_stride_k == 1 ? 't' : 'n';
   const auto dtype = scalarToMetalTypeString(out);
-  const bool use_mpp = has_mpp() && grouped_mm_mpp_indices_fit(params, bm, mpp_bn) && params.out_stride_n == 1;
+  const bool use_mpp =
+      !use_few_rows && has_mpp() && grouped_mm_mpp_indices_fit(params, bm, mpp_bn) && params.out_stride_n == 1;
   if (jagged_cols && !use_mpp) {
     // Without matmul2d the jagged columns are cheaper to reach through the
     // transpose identity, which the simdgroup rows kernels can store.
@@ -128,16 +131,21 @@ void grouped_mm_out_mps(const Tensor& mat_a, const Tensor& mat_b, const Tensor& 
   const auto mpp_kernel_name =
       fmt::format("grouped_mm_{}_mpp_{}{}_{}_bm{}_bn{}", mode, a_layout, b_layout, dtype, bm, mpp_bn);
   const auto simdgroup_kernel_name = fmt::format("grouped_mm_{}_{}_bm{}{}", mode, dtype, bm, mtlIdxSuffix(use_u32));
-  const auto kernel_name = use_mpp ? mpp_kernel_name : simdgroup_kernel_name;
+  const auto few_rows_kernel_name = fmt::format("grouped_mm_few_rows_{}{}", dtype, mtlIdxSuffix(use_u32));
+  const auto kernel_name = use_few_rows ? few_rows_kernel_name : use_mpp ? mpp_kernel_name : simdgroup_kernel_name;
   const auto pipeline = lib.getPipelineStateForFunc(kernel_name);
   const auto bn = use_mpp ? mpp_bn : kGroupedMMTileN;
   // The jagged grid axis covers the worst case of one extra partial tile per
   // group; the kernel discards the excess tiles.
-  const auto threadgroups = MTLSizeMake(at::ceil_div<NSUInteger>(params.n, bn) + (jagged_cols ? groups : 0),
-                                        at::ceil_div<NSUInteger>(params.m, bm) + (jagged_rows ? groups : 0),
-                                        jagged_rows || jagged_cols ? 1 : groups);
-  const auto threads = MTLSizeMake(grouped_mm_simdgroups(bm, bn) * c10::metal::simdgroup_size, 1, 1);
-  const auto profile_name = fmt::format("grouped_mm_{}{}", mode, use_mpp ? "_mpp" : "");
+  const auto threadgroups = use_few_rows
+      ? MTLSizeMake(at::ceil_div<NSUInteger>(params.n, kGroupedMMFewRowsSimdgroups), params.m, 1)
+      : MTLSizeMake(at::ceil_div<NSUInteger>(params.n, bn) + (jagged_cols ? groups : 0),
+                    at::ceil_div<NSUInteger>(params.m, bm) + (jagged_rows ? groups : 0),
+                    jagged_rows || jagged_cols ? 1 : groups);
+  const auto simdgroups = use_few_rows ? kGroupedMMFewRowsSimdgroups : grouped_mm_simdgroups(bm, bn);
+  const auto threads = MTLSizeMake(simdgroups * c10::metal::simdgroup_size, 1, 1);
+  const auto profile_name =
+      use_few_rows ? "grouped_mm_few_rows" : fmt::format("grouped_mm_{}{}", mode, use_mpp ? "_mpp" : "");
   auto stream = getCurrentMPSStream();
 
   dispatch_sync_with_rethrow(stream->queue(), ^() {
