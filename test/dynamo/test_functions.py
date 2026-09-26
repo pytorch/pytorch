@@ -5284,6 +5284,75 @@ class GraphModule(torch.nn.Module):
         g = torch.compile(fn, backend="eager", fullgraph=True)(t)
         self.assertEqual(e, g)
 
+    def test_round_uses_type_method(self):
+        class NoRound:
+            pass
+
+        class ClassRound:
+            def __round__(self):
+                return 31
+
+        def missing_method():
+            obj = NoRound()
+            obj.__round__ = lambda: 23
+            try:
+                return round(obj)
+            except TypeError:
+                return 7
+
+        def type_method():
+            obj = ClassRound()
+            obj.__round__ = lambda: 23
+            return round(obj)
+
+        self.assertEqual(missing_method(), 7)
+        self.assertEqual(
+            torch.compile(missing_method, backend="eager", fullgraph=True)(), 7
+        )
+        self.assertEqual(type_method(), 31)
+        self.assertEqual(
+            torch.compile(type_method, backend="eager", fullgraph=True)(), 31
+        )
+
+    def test_round_forwards_ndigits_like_cpython(self):
+        class NoArgRound:
+            def __round__(self):
+                return "no-arg"
+
+        class OtherName:
+            def __round__(self, n=None):
+                return ("n", n)
+
+        class Base:
+            def __round__(self, nd=None):
+                return ("base", nd)
+
+        class Child(Base):
+            pass
+
+        def type_error(f):
+            try:
+                f()
+            except TypeError:
+                return "TypeError"
+            return "no error"
+
+        cases = [
+            lambda: round(NoArgRound(), None),
+            lambda: round(NoArgRound(), ndigits=None),
+            lambda: round(OtherName(), ndigits=2),
+            lambda: round(OtherName(), 2),
+            lambda: round(Child(), 3),
+            lambda: type_error(lambda: round(OtherName(), 2, 3)),
+            lambda: type_error(lambda: round(OtherName(), 2, ndigits=3)),
+            lambda: type_error(lambda: round(OtherName(), digits=2)),
+        ]
+        for case in cases:
+            torch._dynamo.reset()
+            self.assertEqual(
+                torch.compile(case, backend="eager", fullgraph=True)(), case()
+            )
+
     @unittest.skipIf(sys.platform == "darwin", "No mkldnn on MacOS")
     def test_quantize_per_tensor(self):
         def fn(t, scale, zero_point):
