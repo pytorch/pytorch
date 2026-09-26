@@ -655,6 +655,20 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)()
         self.assertEqual(result, [1, 2, 3, 4])
 
+    def test_unbound_c_descriptor_richcompare(self):
+        def fn():
+            return (
+                list.__add__ == list.__add__,
+                list.__add__ != list.__add__,
+                list.__add__ == list.__mul__,
+                list.append == list.append,
+                list.append != list.append,
+                list.append == list.pop,
+            )
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, (True, False, False, True, False, False))
+
     def test_method_descriptor_binding(self):
         """dict.keys is a method_descriptor; {}.keys() binds and calls it."""
 

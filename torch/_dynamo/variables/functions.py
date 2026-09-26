@@ -4616,6 +4616,13 @@ class WrapperDescriptorVariable(DescriptorVariable):
             tx, self.descriptor.__name__, [obj, *rest], kwargs
         )
 
+    def tp_richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
+    ) -> "VariableTracker":
+        from .object_protocol import python_constant_richcompare_impl
+
+        return python_constant_richcompare_impl(self, tx, other, op)
+
     def tp_descr_get_impl(
         self,
         tx: "InstructionTranslatorBase",
@@ -4811,6 +4818,13 @@ class MethodDescriptorVariable(DescriptorVariable):
         # than obj.call_method, which would do MRO resolution from type(obj)
         # and find Python overrides on subclasses.
         return self.owner.call_method(tx, name, [obj, *rest], kwargs)
+
+    def tp_richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
+    ) -> "VariableTracker":
+        from .object_protocol import python_constant_richcompare_impl
+
+        return python_constant_richcompare_impl(self, tx, other, op)
 
     def tp_descr_get_impl(
         self,
