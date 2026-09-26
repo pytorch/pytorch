@@ -12,11 +12,15 @@
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/native/cuda/UpSample.cuh>
 #include <ATen/native/cuda/KernelUtils.cuh>
+#ifndef USE_ROCM
+#include <ATen/native/cuda/MemoryAccess.cuh>
+#endif
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/empty.h>
 #include <ATen/ops/upsample_trilinear3d_native.h>
 #include <ATen/ops/upsample_trilinear3d_backward_native.h>
 #endif
@@ -34,6 +38,316 @@ idx_3d(const size_t nc,
     const size_t x) {
   return ((nc * depth + z) * height + y) * width + x;
 }
+
+template <typename accscalar_t>
+__device__ __forceinline__ void compute_output_range(
+    const int input_pos,
+    const accscalar_t scale,
+    const int output_size,
+    const bool align_corners,
+    int& min_output,
+    int& max_output) {
+  if (scale == static_cast<accscalar_t>(0)) {
+    min_output = input_pos == 0 ? 0 : 1;
+    max_output = input_pos == 0 ? output_size - 1 : 0;
+    return;
+  }
+
+  accscalar_t lo;
+  accscalar_t hi;
+  if (align_corners) {
+    lo = static_cast<accscalar_t>(input_pos - 1) / scale;
+    hi = static_cast<accscalar_t>(input_pos + 1) / scale;
+  } else {
+    lo = (static_cast<accscalar_t>(input_pos) - static_cast<accscalar_t>(0.5)) /
+        scale - static_cast<accscalar_t>(0.5);
+    hi = (static_cast<accscalar_t>(input_pos) + static_cast<accscalar_t>(1.5)) /
+        scale - static_cast<accscalar_t>(0.5);
+  }
+
+  min_output = max(0, static_cast<int>(ceil(lo)));
+  max_output = min(output_size - 1, static_cast<int>(floor(hi)));
+}
+
+template <typename accscalar_t>
+__device__ __forceinline__ accscalar_t compute_linear_axis_weight(
+    const int input_pos,
+    const int input_base,
+    const int input_step,
+    const accscalar_t input_lambda) {
+  accscalar_t weight = 0;
+  if (input_pos == input_base) {
+    weight += static_cast<accscalar_t>(1) - input_lambda;
+  }
+  if (input_pos == input_base + input_step) {
+    weight += input_lambda;
+  }
+  return weight;
+}
+
+template <typename scalar_t, typename accscalar_t>
+__device__ __forceinline__ void upsample_trilinear3d_backward_gather(
+    const size_t index,
+    const int input_depth,
+    const int input_height,
+    const int input_width,
+    const int output_depth,
+    const int output_height,
+    const int output_width,
+    const accscalar_t rdepth,
+    const accscalar_t rheight,
+    const accscalar_t rwidth,
+    const bool align_corners,
+    scalar_t* __restrict__ idata,
+    const scalar_t* __restrict__ odata) {
+  size_t index_temp = index;
+  const int input_w = index_temp % input_width;
+  index_temp /= input_width;
+  const int input_h = index_temp % input_height;
+  index_temp /= input_height;
+  const int input_d = index_temp % input_depth;
+  const size_t nc_idx = index_temp / input_depth;
+
+  int output_d_min;
+  int output_d_max;
+  int output_h_min;
+  int output_h_max;
+  int output_w_min;
+  int output_w_max;
+  compute_output_range(
+      input_d, rdepth, output_depth, align_corners, output_d_min, output_d_max);
+  compute_output_range(
+      input_h, rheight, output_height, align_corners, output_h_min, output_h_max);
+  compute_output_range(
+      input_w, rwidth, output_width, align_corners, output_w_min, output_w_max);
+
+  accscalar_t grad_sum = 0;
+  const size_t output_plane = static_cast<size_t>(output_height) * output_width;
+
+  for (int output_d_idx = output_d_min; output_d_idx <= output_d_max; ++output_d_idx) {
+    const accscalar_t input_dr = area_pixel_compute_source_index<accscalar_t>(
+        rdepth, output_d_idx, align_corners, /*cubic=*/false);
+    const int input_d_base = static_cast<int>(input_dr);
+    const int input_dp = (input_d_base < input_depth - 1) ? 1 : 0;
+    const accscalar_t input_d_lambda = input_dr - input_d_base;
+    const accscalar_t input_d0_lambda = static_cast<accscalar_t>(1) - input_d_lambda;
+
+    for (int output_h_idx = output_h_min; output_h_idx <= output_h_max; ++output_h_idx) {
+      const accscalar_t input_hr = area_pixel_compute_source_index<accscalar_t>(
+          rheight, output_h_idx, align_corners, /*cubic=*/false);
+      const int input_h_base = static_cast<int>(input_hr);
+      const int input_hp = (input_h_base < input_height - 1) ? 1 : 0;
+      const accscalar_t input_h_lambda = input_hr - input_h_base;
+      const accscalar_t input_h0_lambda = static_cast<accscalar_t>(1) - input_h_lambda;
+
+      for (int output_w_idx = output_w_min; output_w_idx <= output_w_max; ++output_w_idx) {
+        const accscalar_t input_wr = area_pixel_compute_source_index<accscalar_t>(
+            rwidth, output_w_idx, align_corners, /*cubic=*/false);
+        const int input_w_base = static_cast<int>(input_wr);
+        const int input_wp = (input_w_base < input_width - 1) ? 1 : 0;
+        const accscalar_t input_w_lambda = input_wr - input_w_base;
+        const accscalar_t input_w0_lambda = static_cast<accscalar_t>(1) - input_w_lambda;
+
+        const accscalar_t d_weight = compute_linear_axis_weight(
+            input_d, input_d_base, input_dp, input_d_lambda);
+        const accscalar_t h_weight = compute_linear_axis_weight(
+            input_h, input_h_base, input_hp, input_h_lambda);
+        const accscalar_t w_weight = compute_linear_axis_weight(
+            input_w, input_w_base, input_wp, input_w_lambda);
+        const accscalar_t weight = d_weight * h_weight * w_weight;
+
+        if (weight > 0) {
+          const size_t output_index =
+              nc_idx * static_cast<size_t>(output_depth) * output_plane +
+              static_cast<size_t>(output_d_idx) * output_plane +
+              static_cast<size_t>(output_h_idx) * output_width + output_w_idx;
+          grad_sum += weight * static_cast<accscalar_t>(odata[output_index]);
+        }
+      }
+    }
+  }
+
+  idata[index] = static_cast<scalar_t>(grad_sum);
+}
+
+template <typename scalar_t, typename accscalar_t>
+C10_LAUNCH_BOUNDS_1(1024)
+__global__ void upsample_trilinear3d_backward_gather_out_frame(
+    const size_t numel,
+    const int input_depth,
+    const int input_height,
+    const int input_width,
+    const int output_depth,
+    const int output_height,
+    const int output_width,
+    const accscalar_t rdepth,
+    const accscalar_t rheight,
+    const accscalar_t rwidth,
+    const bool align_corners,
+    scalar_t* __restrict__ idata,
+    const scalar_t* __restrict__ odata) {
+  for (size_t index = blockDim.x * blockIdx.x + threadIdx.x; index < numel;
+       index += static_cast<size_t>(blockDim.x) * gridDim.x) {
+    upsample_trilinear3d_backward_gather<scalar_t, accscalar_t>(
+        index,
+        input_depth,
+        input_height,
+        input_width,
+        output_depth,
+        output_height,
+        output_width,
+        rdepth,
+        rheight,
+        rwidth,
+        align_corners,
+        idata,
+        odata);
+  }
+}
+
+#ifndef USE_ROCM
+template <typename scalar_t, typename accscalar_t, int vec_size>
+__device__ __forceinline__ void upsample_trilinear3d_backward_gather_ndhwc(
+    const size_t index,
+    const int channels,
+    const int input_depth,
+    const int input_height,
+    const int input_width,
+    const int output_depth,
+    const int output_height,
+    const int output_width,
+    const accscalar_t rdepth,
+    const accscalar_t rheight,
+    const accscalar_t rwidth,
+    const bool align_corners,
+    scalar_t* __restrict__ idata,
+    const scalar_t* __restrict__ odata) {
+  using vector_t = memory::aligned_vector<scalar_t, vec_size>;
+  const int channel_vectors = channels / vec_size;
+  size_t index_temp = index;
+  const int c = (index_temp % channel_vectors) * vec_size;
+  index_temp /= channel_vectors;
+  const int input_w = index_temp % input_width;
+  index_temp /= input_width;
+  const int input_h = index_temp % input_height;
+  index_temp /= input_height;
+  const int input_d = index_temp % input_depth;
+  const size_t n = index_temp / input_depth;
+
+  int output_d_min;
+  int output_d_max;
+  int output_h_min;
+  int output_h_max;
+  int output_w_min;
+  int output_w_max;
+  compute_output_range(
+      input_d, rdepth, output_depth, align_corners, output_d_min, output_d_max);
+  compute_output_range(
+      input_h, rheight, output_height, align_corners, output_h_min, output_h_max);
+  compute_output_range(
+      input_w, rwidth, output_width, align_corners, output_w_min, output_w_max);
+
+  accscalar_t grad_sum[vec_size] = {};
+
+  for (int output_d_idx = output_d_min; output_d_idx <= output_d_max; ++output_d_idx) {
+    const accscalar_t input_dr = area_pixel_compute_source_index<accscalar_t>(
+        rdepth, output_d_idx, align_corners, /*cubic=*/false);
+    const int input_d_base = static_cast<int>(input_dr);
+    const int input_dp = (input_d_base < input_depth - 1) ? 1 : 0;
+    const accscalar_t input_d_lambda = input_dr - input_d_base;
+    const accscalar_t input_d0_lambda = static_cast<accscalar_t>(1) - input_d_lambda;
+
+    for (int output_h_idx = output_h_min; output_h_idx <= output_h_max; ++output_h_idx) {
+      const accscalar_t input_hr = area_pixel_compute_source_index<accscalar_t>(
+          rheight, output_h_idx, align_corners, /*cubic=*/false);
+      const int input_h_base = static_cast<int>(input_hr);
+      const int input_hp = (input_h_base < input_height - 1) ? 1 : 0;
+      const accscalar_t input_h_lambda = input_hr - input_h_base;
+      const accscalar_t input_h0_lambda = static_cast<accscalar_t>(1) - input_h_lambda;
+
+      for (int output_w_idx = output_w_min; output_w_idx <= output_w_max; ++output_w_idx) {
+        const accscalar_t input_wr = area_pixel_compute_source_index<accscalar_t>(
+            rwidth, output_w_idx, align_corners, /*cubic=*/false);
+        const int input_w_base = static_cast<int>(input_wr);
+        const int input_wp = (input_w_base < input_width - 1) ? 1 : 0;
+        const accscalar_t input_w_lambda = input_wr - input_w_base;
+        const accscalar_t input_w0_lambda = static_cast<accscalar_t>(1) - input_w_lambda;
+
+        const accscalar_t d_weight = compute_linear_axis_weight(
+            input_d, input_d_base, input_dp, input_d_lambda);
+        const accscalar_t h_weight = compute_linear_axis_weight(
+            input_h, input_h_base, input_hp, input_h_lambda);
+        const accscalar_t w_weight = compute_linear_axis_weight(
+            input_w, input_w_base, input_wp, input_w_lambda);
+        const accscalar_t weight = d_weight * h_weight * w_weight;
+
+        if (weight > 0) {
+          const size_t output_index =
+              ((((n * output_depth + output_d_idx) * output_height + output_h_idx) *
+                output_width + output_w_idx) *
+               channels) +
+              c;
+          const vector_t output =
+              reinterpret_cast<const vector_t*>(odata)[output_index / vec_size];
+#pragma unroll
+          for (int lane = 0; lane < vec_size; ++lane) {
+            grad_sum[lane] += weight * static_cast<accscalar_t>(output.val[lane]);
+          }
+        }
+      }
+    }
+  }
+
+  const size_t input_index =
+      ((((n * input_depth + input_d) * input_height + input_h) * input_width +
+        input_w) *
+       channels) +
+      c;
+  vector_t input;
+#pragma unroll
+  for (int lane = 0; lane < vec_size; ++lane) {
+    input.val[lane] = static_cast<scalar_t>(grad_sum[lane]);
+  }
+  reinterpret_cast<vector_t*>(idata)[input_index / vec_size] = input;
+}
+
+template <typename scalar_t, typename accscalar_t, int vec_size>
+C10_LAUNCH_BOUNDS_1(1024)
+__global__ void upsample_trilinear3d_backward_gather_ndhwc_out_frame(
+    const size_t numel,
+    const int channels,
+    const int input_depth,
+    const int input_height,
+    const int input_width,
+    const int output_depth,
+    const int output_height,
+    const int output_width,
+    const accscalar_t rdepth,
+    const accscalar_t rheight,
+    const accscalar_t rwidth,
+    const bool align_corners,
+    scalar_t* __restrict__ idata,
+    const scalar_t* __restrict__ odata) {
+  for (size_t index = blockDim.x * blockIdx.x + threadIdx.x; index < numel;
+       index += static_cast<size_t>(blockDim.x) * gridDim.x) {
+    upsample_trilinear3d_backward_gather_ndhwc<scalar_t, accscalar_t, vec_size>(
+        index,
+        channels,
+        input_depth,
+        input_height,
+        input_width,
+        output_depth,
+        output_height,
+        output_width,
+        rdepth,
+        rheight,
+        rwidth,
+        align_corners,
+        idata,
+        odata);
+  }
+}
+#endif
 
 template <typename scalar_t, typename accscalar_t>
 C10_LAUNCH_BOUNDS_1(512)
@@ -368,6 +682,153 @@ static void upsample_trilinear3d_backward_out_cuda_template(
         if (!grad_input_.is_contiguous()) {
             grad_input_.copy_(grad_input);
         }
+  });
+}
+
+static void upsample_trilinear3d_backward_out_cuda_template_deterministic(
+    const Tensor& grad_input_,
+    const Tensor& grad_output_,
+    IntArrayRef output_size,
+    IntArrayRef input_size,
+    bool align_corners,
+    std::optional<double> scales_d,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w) {
+  TensorArg grad_input_arg{grad_input_, "grad_input_", 1},
+      grad_output_arg{grad_output_, "grad_output_", 2};
+  checkAllSameGPU(
+      "upsample_trilinear3d_backward_out_cuda",
+      {grad_output_arg, grad_input_arg});
+
+  const int output_depth = output_size[0];
+  const int output_height = output_size[1];
+  const int output_width = output_size[2];
+  const int nbatch = input_size[0];
+  const int channels = input_size[1];
+  const int input_depth = input_size[2];
+  const int input_height = input_size[3];
+  const int input_width = input_size[4];
+
+  if (grad_input_.numel() == 0) {
+    return;
+  }
+
+  if (input_depth == output_depth && input_height == output_height &&
+      input_width == output_width) {
+    grad_input_.copy_(grad_output_);
+    return;
+  }
+
+  const int num_threads = std::min(
+      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half,
+      at::ScalarType::BFloat16,
+      grad_output_.scalar_type(),
+      "upsample_trilinear3d_backward_gather",
+      [&] {
+        using accscalar_t = at::acc_type<scalar_t, true>;
+
+        const accscalar_t rdepth = area_pixel_compute_scale<accscalar_t>(
+            input_depth, output_depth, align_corners, scales_d);
+        const accscalar_t rheight = area_pixel_compute_scale<accscalar_t>(
+            input_height, output_height, align_corners, scales_h);
+        const accscalar_t rwidth = area_pixel_compute_scale<accscalar_t>(
+            input_width, output_width, align_corners, scales_w);
+
+#ifndef USE_ROCM
+        if (grad_input_.is_contiguous(at::MemoryFormat::ChannelsLast3d)) {
+          Tensor grad_output =
+              grad_output_.contiguous(at::MemoryFormat::ChannelsLast3d);
+          constexpr int vector_size = 16 / sizeof(scalar_t);
+          const bool vectorized =
+              vector_size > 1 && channels % vector_size == 0 &&
+              memory::can_vectorize_up_to<scalar_t>(reinterpret_cast<const char*>(
+                  grad_input_.const_data_ptr<scalar_t>())) >= vector_size &&
+              memory::can_vectorize_up_to<scalar_t>(reinterpret_cast<const char*>(
+                  grad_output.const_data_ptr<scalar_t>())) >= vector_size;
+          const size_t num_input_elements = static_cast<size_t>(nbatch) * channels *
+              input_depth * input_height * input_width;
+          const size_t work_items = vectorized
+              ? num_input_elements / vector_size
+              : num_input_elements;
+          const size_t num_blocks = std::min(
+              ceil_div(work_items, static_cast<size_t>(num_threads)),
+              static_cast<size_t>(
+                  at::cuda::getCurrentDeviceProperties()->maxGridSize[0]));
+          if (vectorized) {
+            upsample_trilinear3d_backward_gather_ndhwc_out_frame<
+                scalar_t, accscalar_t, vector_size><<<
+                num_blocks, num_threads, 0, stream>>>(
+                work_items,
+                channels,
+                input_depth,
+                input_height,
+                input_width,
+                output_depth,
+                output_height,
+                output_width,
+                rdepth,
+                rheight,
+                rwidth,
+                align_corners,
+                grad_input_.mutable_data_ptr<scalar_t>(),
+                grad_output.const_data_ptr<scalar_t>());
+          } else {
+            upsample_trilinear3d_backward_gather_ndhwc_out_frame<
+                scalar_t, accscalar_t, 1><<<num_blocks, num_threads, 0, stream>>>(
+                work_items,
+                channels,
+                input_depth,
+                input_height,
+                input_width,
+                output_depth,
+                output_height,
+                output_width,
+                rdepth,
+                rheight,
+                rwidth,
+                align_corners,
+                grad_input_.mutable_data_ptr<scalar_t>(),
+                grad_output.const_data_ptr<scalar_t>());
+          }
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
+          return;
+        }
+#endif
+
+        Tensor grad_output = grad_output_.contiguous();
+        Tensor grad_input = grad_input_.is_contiguous()
+            ? grad_input_
+            : at::empty(grad_input_.sizes(), grad_input_.options());
+        const size_t num_input_elements = static_cast<size_t>(nbatch) * channels *
+            input_depth * input_height * input_width;
+        const size_t num_blocks = std::min(
+            ceil_div(num_input_elements, static_cast<size_t>(num_threads)),
+            static_cast<size_t>(
+                at::cuda::getCurrentDeviceProperties()->maxGridSize[0]));
+        upsample_trilinear3d_backward_gather_out_frame<scalar_t, accscalar_t>
+            <<<num_blocks, num_threads, 0, stream>>>(
+                num_input_elements,
+                input_depth,
+                input_height,
+                input_width,
+                output_depth,
+                output_height,
+                output_width,
+                rdepth,
+                rheight,
+                rwidth,
+                align_corners,
+                grad_input.mutable_data_ptr<scalar_t>(),
+                grad_output.const_data_ptr<scalar_t>());
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+        if (!grad_input_.is_contiguous()) {
+          grad_input_.copy_(grad_input);
+        }
       });
 }
 
@@ -393,11 +854,31 @@ TORCH_IMPL_FUNC(upsample_trilinear3d_backward_out_cuda) (
     std::optional<double> scales_h,
     std::optional<double> scales_w,
     const Tensor& grad_input) {
+#ifdef USE_ROCM
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("upsample_trilinear3d_backward_out_cuda");
   upsample_trilinear3d_backward_out_cuda_template(
       grad_input, grad_output, output_size, input_size, align_corners, scales_d, scales_h, scales_w);
+#else
+  if (globalContext().deterministicAlgorithms()) {
+    upsample_trilinear3d_backward_out_cuda_template_deterministic(
+        grad_input,
+        grad_output,
+        output_size,
+        input_size,
+        align_corners,
+        scales_d,
+        scales_h,
+        scales_w);
+  } else {
+    // See Note [Writing Nondeterministic Operations]
+    // Nondeterministic because of atomicAdd usage
+    globalContext().alertNotDeterministic("upsample_trilinear3d_backward_out_cuda");
+    upsample_trilinear3d_backward_out_cuda_template(
+        grad_input, grad_output, output_size, input_size, align_corners, scales_d, scales_h, scales_w);
+  }
+#endif
 }
 
 } // namespace at::native
