@@ -1648,20 +1648,19 @@ class WhileLoopTests(TestCase):
         loop_op = torch.ops.higher_order.while_loop
         loop = next(node for node in with_effect_nodes if node.args[1] is loop_op)
         self.assertEqual(len(loop.args[4]), 2)
-        # The loop participates in the ordered chain: the effect that follows
-        # it consumes the loop's token output.
+        # The loop joins the ordered token chain in the order the two ops have
+        # in the graph Dynamo produced (Dynamo may emit the unused loop after
+        # inv(post)): the second one consumes the first one's token output.
         check_errors = torch.ops.aten._linalg_check_errors.default
         post_effect = next(n for n in with_effect_nodes if n.args[1] is check_errors)
-        # Both effects belong to one ordered chain: one consumes the getitem of
-        # the other. The direction depends on effect-discovery order.
-        post_token, loop_token = post_effect.args[0], loop.args[0]
-        chained = (
-            isinstance(post_token, torch.fx.Node) and post_token.args[:1] == (loop,)
-        ) or (
-            isinstance(loop_token, torch.fx.Node)
-            and loop_token.args[:1] == (post_effect,)
+        dynamo_targets = [n.target for n in backend.graphs[-1].graph.nodes]
+        loop_first = dynamo_targets.index(loop_op) < dynamo_targets.index(
+            torch._C._linalg.linalg_inv
         )
-        self.assertTrue(chained)
+        first, second = (loop, post_effect) if loop_first else (post_effect, loop)
+        token = second.args[0]
+        self.assertIsInstance(token, torch.fx.Node)
+        self.assertIs(token.args[0], first)
 
     @requires_gpu
     def test_while_loop_effect_provenance_gpu(self):

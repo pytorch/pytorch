@@ -283,6 +283,25 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         )[0]
         self.assertNotIn("num_effect_tokens", export_loop.kwargs)
 
+    def test_effectful_while_loop_aot_eager_and_functionalize(self):
+        # aot_eager keeps effect tokens lifted, and torch.func.functionalize
+        # runs effectful ops as plain ops; neither should need the token carry.
+        def f(matrix, count):
+            def cond(i, out):
+                return i < count
+
+            def body(i, out):
+                return i + 1, out + torch.linalg.inv(matrix)
+
+            carries = (torch.zeros_like(count), torch.zeros_like(matrix))
+            return torch.while_loop(cond, body, carries)[1]
+
+        inputs = (torch.tensor([[2.0, 1.0], [1.0, 3.0]]), torch.tensor(2))
+        expected = 2 * torch.linalg.inv(inputs[0])
+        compiled = torch.compile(f, backend="aot_eager", fullgraph=True)
+        self.assertEqual(compiled(*inputs), expected)
+        self.assertEqual(torch.func.functionalize(f)(*inputs), expected)
+
     @unittest.skipIf(IS_WINDOWS, "triton")
     def test_compile_inductor(self):
         def f(x):
