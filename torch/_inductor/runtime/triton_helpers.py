@@ -279,7 +279,13 @@ def fmaximum(a, b):
 @triton.jit
 def nextafter(x, y):
     bitwidth: tl.constexpr = x.dtype.primitive_bitwidth
-    if not is_floating(x) or (bitwidth != 16 and bitwidth != 32):
+    if not is_floating(x):
+        return libdevice.nextafter(x, y)
+    if bitwidth == 64:
+        result = libdevice.nextafter(x, y)
+        # ROCm's fp64 libdevice nextafter can preserve signaling NaNs.
+        return tl.where((x != x) | (y != y), x + y, result)
+    if bitwidth != 16 and bitwidth != 32:
         return libdevice.nextafter(x, y)
 
     # libdevice.nextafterf honors CUDA FTZ and skips fp32 subnormals. For

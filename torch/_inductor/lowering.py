@@ -8815,7 +8815,7 @@ def nextafter(x, y):
         torch.bfloat16,
         torch.float32,
         torch.float64,
-    ) or (is_low_precision and not is_triton(x)):
+    ) or (not is_triton(x) and (is_low_precision or ir.get_device_type(x) == "mps")):
         return fallback_handler(aten.nextafter.default, add_to_fallback_set=False)(x, y)
 
     def inner_fn(x, y):
