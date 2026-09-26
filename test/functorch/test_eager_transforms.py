@@ -5416,6 +5416,10 @@ def construct_sum_pyop():
     def mysum_autograd_cuda(x, dim):
         return torch.sum(x, dim)
 
+    @mysum.py_impl(torch._C.DispatchKey.AutogradXPU)
+    def mysum_autograd_xpu(x, dim):
+        return torch.sum(x, dim)
+
     return mysum
 
 
@@ -5772,76 +5776,90 @@ class TestGradTrackingTensorToList(TestCase):
         self.assertEqual(result, [2.0 + 4.0j, 6.0 + 8.0j])
 
 
-only_for = ("cpu", "cuda")
+only_for = ("cpu", "cuda", "xpu")
 instantiate_device_type_tests(
     TestGradTransform,
     globals(),
     only_for=only_for,
+    allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestVmapOfGrad,
     globals(),
     only_for=only_for,
+    allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestJac,
     globals(),
     only_for=only_for,
+    allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestJvp,
     globals(),
     only_for=only_for,
+    allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestLinearize,
     globals(),
     only_for=only_for,
+    allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestVmapJvpInplaceView,
     globals(),
     only_for=only_for,
+    allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestHessian,
     globals(),
     only_for=only_for,
+    allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestComposability,
     globals(),
     only_for=only_for,
+    allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestExamplesCorrectness,
     globals(),
     only_for=only_for,
+    allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestHigherOrderOperatorInteraction,
     globals(),
     only_for=only_for,
+    allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestFunctionalize,
     globals(),
     only_for=only_for,
+    allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestAutogradFunction,
     globals(),
     only_for=only_for,
+    allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestAutogradFunctionVmapAPI,
     globals(),
     only_for=only_for,
+    allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestHelpers,
     globals(),
     only_for=only_for,
+    allow_xpu=True,
 )
 instantiate_parametrized_tests(
     TestMakeFunctional,
@@ -5850,9 +5868,13 @@ instantiate_device_type_tests(
     TestCompileTransforms,
     globals(),
     only_for=only_for,
+    allow_xpu=True,
 )
 instantiate_device_type_tests(
-    TestGradTrackingTensorToList, globals(), only_for=only_for
+    TestGradTrackingTensorToList,
+    globals(),
+    only_for=only_for,
+    allow_xpu=True,
 )
 
 if __name__ == "__main__":
