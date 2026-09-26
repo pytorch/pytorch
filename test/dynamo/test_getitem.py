@@ -840,6 +840,65 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4)
         self.assertEqual(fn(x), self._compile(fn, x))
 
+    def test_str_bytes_subscript_index_object(self):
+        class Index:
+            def __init__(self, value):
+                self.value = value
+
+            def __index__(self):
+                return self.value
+
+        def fn():
+            return "abcd"[Index(1)], b"abcd"[Index(-1)]
+
+        self.assertEqual(fn(), self._compile(fn))
+
+    def test_str_bytes_subscript_index_object_errors(self):
+        class Index:
+            def __init__(self, value):
+                self.value = value
+
+            def __index__(self):
+                return self.value
+
+        def fn():
+            result = []
+            for value in ("bad", 100):
+                try:
+                    "abcd"[Index(value)]
+                except (TypeError, IndexError) as e:
+                    result.append(type(e).__name__)
+            return result
+
+        self.assertEqual(fn(), self._compile(fn))
+
+    def test_str_bytes_subscript_invalid_object(self):
+        def fn():
+            errors = []
+            for value in ("abc", b"abc"):
+                try:
+                    value[object()]
+                except TypeError as e:
+                    errors.append(str(e))
+            return errors
+
+        self.assertEqual(fn(), self._compile(fn))
+
+    def test_str_bytes_subscript_slice_index_object(self):
+        class Index:
+            def __init__(self, value):
+                self.value = value
+
+            def __index__(self):
+                return self.value
+
+        def fn():
+            return "abcde"[Index(1) : Index(5) : Index(2)], b"abcde"[
+                Index(-4) : Index(-1)
+            ]
+
+        self.assertEqual(fn(), self._compile(fn))
+
     def test_str_subscript_symbolic_index(self):
         # A non-constant key must fall through to the generic "unsupported
         # subscript" graph break, not leak AsPythonConstantNotImplementedError.

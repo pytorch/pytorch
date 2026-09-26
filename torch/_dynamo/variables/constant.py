@@ -268,7 +268,30 @@ class ConstantVariable(VariableTracker):
         tx: InstructionTranslatorBase,
         key: VariableTracker,
     ) -> VariableTracker:
-        from .object_protocol import type_implements_mp_subscript
+        from .lists import SliceVariable
+        from .object_protocol import (
+            maybe_get_python_type,
+            pyindex_check,
+            pynumber_index,
+            type_implements_mp_subscript,
+        )
+
+        if isinstance(self.value, (str, bytes)):
+            if isinstance(key, SliceVariable):
+                key = ConstantVariable.create(key.as_index_slice(tx))
+            elif not key.is_python_constant():
+                if pyindex_check(maybe_get_python_type(key)):
+                    key = pynumber_index(tx, key)
+                elif isinstance(self.value, str):
+                    raise_type_error(
+                        tx,
+                        f"string indices must be integers, not '{key.python_type_name()}'",
+                    )
+                else:
+                    raise_type_error(
+                        tx,
+                        f"byte indices must be integers or slices, not {key.python_type_name()}",
+                    )
 
         if type_implements_mp_subscript(type(self.value)) and key.is_python_constant():
             try:
