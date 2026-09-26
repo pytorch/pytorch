@@ -4098,6 +4098,34 @@ class TestTemplateConfigPruning(TestCase):
                     lambda msg: f"{msg}\nEstimated maximum smem should exceed actual smem used for config {c}",
                 )
 
+    def test_scaled_mm_block_k_pruning_is_limited_to_gfx950(self):
+        import torch._inductor.heuristics.template.triton as triton_heuristics
+        from torch._inductor.heuristics.template.triton import (
+            ROCmScaledMMTemplateConfigHeuristic,
+        )
+
+        expected = {
+            "gfx1100": [32, 64, 128],
+            "gfx1151": [32, 64, 128],
+            "gfx1200": [32, 64, 128],
+            "gfx950": [128],
+        }
+        heuristic = ROCmScaledMMTemplateConfigHeuristic()
+        for arch, expected_block_k in expected.items():
+            configs = [
+                GemmConfig(64, 64, 32, 1, 4),
+                GemmConfig(64, 64, 64, 1, 4),
+                GemmConfig(64, 64, 128, 1, 4),
+            ]
+            with (
+                self.subTest(arch=arch),
+                mock.patch.object(
+                    triton_heuristics, "rocm_gfx_arch", return_value=arch
+                ),
+            ):
+                kept = [config.block_k for config in heuristic._filter_configs(configs)]
+                self.assertEqual(kept, expected_block_k)
+
 
 class TestMaxAutotunePrecompile(TestCase):
     def test_precompilation_threads(self):

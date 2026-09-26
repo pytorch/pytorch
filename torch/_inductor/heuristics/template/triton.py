@@ -3303,29 +3303,6 @@ class ScaledMMConfigMixin(BaseScaledMMConfigMixin):
             return False
         return True
 
-    # pyrefly: ignore [bad-override]
-    def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
-        """
-        Filter out bad configs for specific hardware.
-        On AMD MI350X (GFX 9.5+), skip configs with BLOCK_K<=64 due to lack of corresponding MFMA instructions.
-        """
-
-        def should_skip_mi350x_config(config: BaseConfig) -> bool:
-            """Skip config if BLOCK_K<=64 on MI350X (GFX 9.5+)"""
-            try:
-                return (
-                    config.block_k <= 64
-                    and IS_ROCM
-                    and torch.cuda.get_device_capability() >= (9, 5)
-                )
-            except RuntimeError:
-                # If no HIP GPUs are available, we can't check device capability
-                # so we don't skip any configs
-                return False
-
-        filtered_configs = [c for c in configs if not should_skip_mi350x_config(c)]
-        return super()._filter_configs(filtered_configs)
-
 
 # Scaled TMA-specific mixin for scaled MM templates with TMA
 class ScaledTMAConfigMixin(TMAWorkspaceMixin, BaseScaledMMConfigMixin):
@@ -3838,6 +3815,9 @@ class ROCmScaledMMTemplateConfigHeuristic(ScaledMMConfigMixin, ROCmConfigHeurist
 
     def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
         configs = [c for c in configs if c.block_k >= 32]
+        # gfx950 lacks the MFMA instructions required by BLOCK_K <= 64.
+        if rocm_gfx_arch() == "gfx950":
+            configs = [c for c in configs if c.block_k > 64]
         return super()._filter_configs(configs)
 
 
