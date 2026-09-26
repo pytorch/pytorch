@@ -14,7 +14,13 @@ from torch._inductor.codecache import HalideCodeCache
 from torch._inductor.runtime.hints import HalideInputSpec, HalideMeta
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import parallel_num_threads, run_and_get_code
-from torch.testing._internal.common_utils import IS_CI, IS_MACOS, IS_WINDOWS
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    IS_CI,
+    IS_MACOS,
+    IS_WINDOWS,
+    parametrize,
+)
 from torch.testing._internal.inductor_utils import HAS_CPU
 from torch.utils._triton import has_triton
 
@@ -69,7 +75,20 @@ def make_halide(cls):
 
 
 @unittest.skipUnless(HAS_HALIDE, "requires halide")
+@instantiate_parametrized_tests
 class HalideTests(TestCase):
+    @parametrize("dtype", (torch.float32, torch.float64))
+    def test_prims_nextafter_fallback(self, dtype):
+        x = torch.tensor([0.0, 1.0], dtype=dtype)
+        y = torch.tensor([1.0, 2.0], dtype=dtype)
+        expected = torch.ops.prims.nextafter.default(x, y)
+        actual = torch.compile(
+            torch.ops.prims.nextafter.default,
+            fullgraph=True,
+            options={"cpu_backend": "halide"},
+        )(x, y)
+        self.assertEqual(actual, expected)
+
     def test_codecache(self):
         fn = HalideCodeCache.generate_halide(
             HalideMeta(

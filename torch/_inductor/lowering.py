@@ -8810,12 +8810,22 @@ register_pointwise_op("nextafter")
 def nextafter(x, y):
     dtype = x.get_dtype()
     is_low_precision = dtype in (torch.float16, torch.bfloat16)
+    device = x.get_device()
+    if is_gpu(ir.get_device_type(y)):
+        device = y.get_device()
+    is_halide = (device.type == "cpu" and config.cpu_backend == "halide") or (
+        device.type == "cuda" and config.cuda_backend == "halide"
+    )
     if dtype not in (
         torch.float16,
         torch.bfloat16,
         torch.float32,
         torch.float64,
-    ) or (not is_triton(x) and (is_low_precision or ir.get_device_type(x) == "mps")):
+    ) or (
+        device.type == "mps"
+        or is_halide
+        or (is_low_precision and not is_triton(device))
+    ):
         return fallback_handler(aten.nextafter.default, add_to_fallback_set=False)(x, y)
 
     def inner_fn(x, y):
