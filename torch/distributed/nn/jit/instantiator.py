@@ -123,11 +123,21 @@ def instantiate_scriptable_remote_module_template(
             "@torch.jit.interface"
         )
 
-    # Generate the template instance name.
+    # Generate the template instance name. The generated module's behavior
+    # depends on ``enable_moving_cpu_tensors_to_cuda``, so the flag must be part
+    # of the module name, which serves as the cache key in ``sys.modules``.
+    # Otherwise, instantiating the same interface class first for a cuda device
+    # and then for a cpu device would incorrectly reuse the cached cuda variant
+    # (and vice versa).
     module_interface_cls_name = torch._jit_internal._qualified_name(
         module_interface_cls
     ).replace(".", "_")
-    generated_module_name = f"{_FILE_PREFIX}{module_interface_cls_name}"
+    variant_suffix = (
+        "_enable_moving_cpu_tensors_to_cuda" if enable_moving_cpu_tensors_to_cuda else ""
+    )
+    generated_module_name = (
+        f"{_FILE_PREFIX}{module_interface_cls_name}{variant_suffix}"
+    )
 
     # Generate type annotation strs.
     assign_module_interface_cls_str = (
