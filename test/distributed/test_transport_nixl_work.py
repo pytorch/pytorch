@@ -2,6 +2,7 @@
 
 import asyncio
 from datetime import timedelta
+from unittest.mock import patch
 
 from torch.distributed._transport import wait_all
 from torch.distributed._transport.nixl._work import _PollingWork
@@ -21,6 +22,26 @@ class _ManualWork(_PollingWork):
 
 
 class TestNIXLPollingWork(TestCase):
+    def test_polling_backoff(self):
+        work = _ManualWork()
+        with patch(
+            "torch.distributed._transport.nixl._work.time.sleep",
+            side_effect=lambda _: setattr(work, "done", True),
+        ) as sleep:
+            work.wait()
+            sleep.assert_called_once_with(0.001)
+
+        async def run():
+            work = _ManualWork()
+            with patch(
+                "torch.distributed._transport.nixl._work.asyncio.sleep",
+                side_effect=lambda _: setattr(work, "done", True),
+            ) as sleep:
+                await work._drive_future()
+                sleep.assert_awaited_once_with(0.001)
+
+        asyncio.run(run())
+
     def test_wait_timeout_and_retry(self):
         work = _ManualWork()
         with self.assertRaises(TimeoutError):

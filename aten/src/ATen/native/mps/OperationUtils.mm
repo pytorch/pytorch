@@ -854,7 +854,7 @@ id<MTLLibrary> MetalShaderLibrary::compileLibrary(const std::string& src) {
   library = [device newLibraryWithSource:str options:options error:&error];
   if (library == nil) {
     if ([error domain] == MTLLibraryErrorDomain && [error code] == MTLLibraryErrorCompileFailure) {
-      throw c10::SyntaxError([[error localizedDescription] UTF8String]);
+      TORCH_CHECK_WITH(SyntaxError, false, [[error localizedDescription] UTF8String]);
     }
     TORCH_CHECK(false, "Failed to create metal library, error: ", [[error description] UTF8String]);
   }
@@ -903,9 +903,7 @@ bool MetalShaderLibrary::hasFunction(const std::string& fname) {
 std::vector<std::string> MetalShaderLibrary::getFunctionNames() {
   {
     std::lock_guard guard(cache_mutex);
-    if (C10_UNLIKELY(!library && nparams > 0)) {
-      throw std::runtime_error("Library must be initialized first");
-    }
+    TORCH_CHECK(library || nparams == 0, "Library must be initialized first");
   }
   std::vector<std::string> rc;
   @autoreleasepool {
@@ -965,7 +963,7 @@ class BundledShaderLibrary : public MetalShaderLibrary {
   }
 
   id<MTLLibrary> getLibrary(const std::initializer_list<std::string>& params) override {
-    throw std::runtime_error("Should never be called");
+    TORCH_CHECK(false, "Should never be called");
   }
 
  private:
@@ -980,9 +978,7 @@ class BundledShaderLibrary : public MetalShaderLibrary {
     const auto* mach_header = reinterpret_cast<const struct mach_header_64*>(_dyld_get_image_header(idx));
     unsigned long mtl_lib_size = 0;
     const auto* mtl_lib_data = getsectiondata(mach_header, "__TEXT", name.c_str(), &mtl_lib_size);
-    if (mtl_lib_data == nullptr) {
-      throw std::runtime_error("Can't find metal library section " + name);
-    }
+    TORCH_CHECK(mtl_lib_data != nullptr, "Can't find metal library section ", name);
     return dispatch_data_create(mtl_lib_data,
                                 mtl_lib_size,
                                 dispatch_get_main_queue(),

@@ -120,18 +120,18 @@ class TestUtils(TestCase):
 
     def test_larger_multiplier_for_smaller_tensor(self):
         """
-        Tensor numel between (10, 500]
+        Tensor numel between (10, 1000)
         """
-        N = 100
+        N = 512
         fp64_ref = torch.full([N], 0.0, dtype=torch.double)
         a = torch.full([N], 1.0)
-        tol = 4 * 1e-2
+        tol = 1e-3
         self.assertTrue(utils.same(a, a * 2, fp64_ref=fp64_ref, tol=tol))
-        self.assertFalse(utils.same(a, a * 4, fp64_ref=fp64_ref, tol=tol))
+        self.assertFalse(utils.same(a, a * 7.57, fp64_ref=fp64_ref, tol=tol))
         self.assertTrue(
             utils.same(
                 a,
-                a * 4,
+                a * 7.57,
                 fp64_ref=fp64_ref,
                 use_larger_multiplier_for_smaller_tensor=True,
                 tol=tol,
