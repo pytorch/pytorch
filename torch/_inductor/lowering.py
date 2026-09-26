@@ -8811,8 +8811,6 @@ def nextafter(x, y):
     dtype = x.get_dtype()
     is_low_precision = dtype in (torch.float16, torch.bfloat16)
     device = x.get_device()
-    if is_gpu(ir.get_device_type(y)):
-        device = y.get_device()
     is_halide = (device.type == "cpu" and config.cpu_backend == "halide") or (
         device.type == "cuda" and config.cuda_backend == "halide"
     )

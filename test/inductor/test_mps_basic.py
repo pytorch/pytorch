@@ -65,13 +65,6 @@ class MPSBasicTests(TestCase):
         actual = torch.compile(torch.ops.prims.nextafter.default, fullgraph=True)(x, y)
         self.assertEqual(actual, expected)
 
-    def test_nextafter_cpu_scalar_first(self):
-        x = torch.tensor(1.0)
-        y = torch.tensor([2.0], device=self.device)
-        expected = torch.nextafter(x, y)
-        actual = torch.compile(torch.nextafter, fullgraph=True)(x, y)
-        self.assertEqual(actual, expected)
-
     def test_acos(self):
         self.common(lambda x: x.acos(), (torch.rand(1024),))
 
