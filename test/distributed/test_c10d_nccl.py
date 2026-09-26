@@ -117,16 +117,19 @@ BACKEND = (
     if device_type == "cuda"
     else dist.get_default_backend_for_device(device_type)
 )
-# ENABLE_TIMING is backend-prefixed; the flight-recorder vars have neutral
-# TORCH_FR_* spellings that fall back to the TORCH_NCCL_* ones.
 BACKEND_ENV_PREFIX = ""
+# ProcessGroupNCCL reads DUMP_ON_TIMEOUT/DEBUG_INFO_PIPE_FILE only as TORCH_NCCL_*,
+# XCCL only as TORCH_FR_*.
+FR_ENV_PREFIX = ""
 # Not a plain prefix swap: NCCL spells this CUDA_EVENT_CACHE, XCCL XPU_EVENT_CACHE.
 EVENT_CACHE_ENV = ""
 if device_type == "cuda":
     BACKEND_ENV_PREFIX = "TORCH_NCCL"
+    FR_ENV_PREFIX = "TORCH_NCCL"
     EVENT_CACHE_ENV = "TORCH_NCCL_CUDA_EVENT_CACHE"
 elif device_type == "xpu":
     BACKEND_ENV_PREFIX = "TORCH_XCCL"
+    FR_ENV_PREFIX = "TORCH_FR"
     EVENT_CACHE_ENV = "TORCH_XCCL_XPU_EVENT_CACHE"
 
 
@@ -1090,7 +1093,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
         os.environ["TORCH_NCCL_ENABLE_MONITORING"] = "0"
         # FileStore check() would be executed
-        os.environ["TORCH_FR_DUMP_ON_TIMEOUT"] = "1"
+        os.environ[f"{FR_ENV_PREFIX}_DUMP_ON_TIMEOUT"] = "1"
         os.environ["TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"] = "0"
 
         # self.file_name is created using "delete=False"
@@ -2703,7 +2706,7 @@ class DistributedDataParallelTest(
         os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
         os.environ[f"{BACKEND_ENV_PREFIX}_BLOCKING_WAIT"] = "1"
         # Need to disable TORCH_NCCL_DUMP_ON_TIMEOUT otherwise this test times out
-        os.environ["TORCH_FR_DUMP_ON_TIMEOUT"] = "0"
+        os.environ[f"{FR_ENV_PREFIX}_DUMP_ON_TIMEOUT"] = "0"
         store = c10d.FileStore(self.file_name, self.world_size)
         # provide sufficient timeout to initialize NCCL comm.
         pg = c10d.ProcessGroupNCCL(
@@ -5498,20 +5501,23 @@ class SetDeviceMethod(Enum):
 class NcclProcessGroupWithDispatchedCollectivesTests(
     test_c10d_common.ProcessGroupWithDispatchedCollectivesTests
 ):
+    # The common helpers pick the tensor device from "nccl"/"xccl", not "nccl-legacy".
+    backend = dist.get_default_backend_for_device(device_type)
+
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_if_lt_x_gpu(1)
     def test_collectives(self):
-        self._test_collectives(backend=BACKEND)
+        self._test_collectives(backend=self.backend)
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_if_lt_x_gpu(1)
     def test_allreduce_coalesced(self):
-        self._test_allreduce_coalesced(backend=BACKEND)
+        self._test_allreduce_coalesced(backend=self.backend)
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_if_lt_x_gpu(1)
     def test_all_to_all_single(self):
-        self._test_all_to_all_single(backend=BACKEND)
+        self._test_all_to_all_single(backend=self.backend)
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_if_lt_x_gpu(1)
@@ -6166,10 +6172,10 @@ class NCCLTraceTestBase(MultiProcessTestCase):
             "0"  # see 'timing_enabled' parametrized tests
         )
         os.environ["TORCH_FR_BUFFER_SIZE"] = "1000"
-        os.environ["TORCH_FR_DUMP_ON_TIMEOUT"] = "1"
+        os.environ[f"{FR_ENV_PREFIX}_DUMP_ON_TIMEOUT"] = "1"
         self.tempdir = tempfile.TemporaryDirectory()
         os.environ["TORCH_FR_DUMP_TEMP_FILE"] = self._trace_basename()
-        os.environ["TORCH_FR_DEBUG_INFO_PIPE_FILE"] = self._trace_basename()
+        os.environ[f"{FR_ENV_PREFIX}_DEBUG_INFO_PIPE_FILE"] = self._trace_basename()
         self._spawn_processes()
 
     @classmethod
@@ -6222,7 +6228,7 @@ class NCCLTraceTestBase(MultiProcessTestCase):
 
     def tearDown(self):
         os.environ.pop("TORCH_FR_DUMP_TEMP_FILE", None)
-        os.environ.pop("TORCH_FR_DEBUG_INFO_PIPE_FILE", None)
+        os.environ.pop(f"{FR_ENV_PREFIX}_DEBUG_INFO_PIPE_FILE", None)
         super().tearDown()
         try:
             os.remove(self.file_name)
