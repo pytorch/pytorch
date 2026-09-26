@@ -351,6 +351,23 @@ def is_data_descriptor(obj: object) -> bool:
     )
 
 
+def build_existing_attr_value(
+    tx: "InstructionTranslatorBase", name: str, value: object, source: Source | None
+) -> VariableTracker:
+    # Without a source, SourcelessBuilder wraps a list/dict/set as a fresh
+    # ValueMutationNew copy, so a mutation through it never reaches the
+    # container that the real object already holds.
+    if source is None and isinstance(value, (list, dict, set)):
+        unimplemented(
+            gb_type="Sourceless read of a mutable container attribute",
+            context=f"attribute {name} of type {type(value).__name__}",
+            explanation="Dynamo has no source for the object holding this pre-existing container, "
+            "so it would trace a detached copy and silently drop mutations made through it.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+    return VariableTracker.build(tx, value, source)
+
+
 def is_hashable(obj: object) -> bool:
     try:
         hash(obj)
@@ -3299,7 +3316,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             _tuplegetter = getattr(collections, "_tuplegetter", None)
             if _tuplegetter is not None and type(descriptor) is _tuplegetter:
                 raise_readonly_attr()
-            desc_var = VariableTracker.build(tx, descriptor, desc_source)
+            if desc_source:
+                desc_var = VariableTracker.build(tx, descriptor, desc_source)
+            else:
+                desc_var = UserDefinedObjectVariable(descriptor)
             if isinstance(value, variables.DeletedVariable):
                 if isinstance(deleter, types.FunctionType):
                     del_source = (
@@ -3901,7 +3921,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             source = self.get_source_by_walking_mro(tx, name)
         elif not source and self.cls_source is not None:
             source = AttrSource(self.cls_source, name)
-        return VariableTracker.build(tx, type_attr, source)
+        return build_existing_attr_value(tx, name, type_attr, source)
 
     def invoke_descriptor_get(
         self,
@@ -3958,7 +3978,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if hasattr(self.value, "__dict__") and name in self.value.__dict__:
             subobj = self.value.__dict__[name]
             source = self.maybe_wrap_nn_module_source_for_instance(tx, name, source)
-            return VariableTracker.build(tx, subobj, source)
+            return build_existing_attr_value(tx, name, subobj, source)
 
         return None
 

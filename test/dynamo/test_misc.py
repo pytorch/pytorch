@@ -18018,6 +18018,97 @@ fn
             fn(t)
 
     @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test___build_class___descriptor_mutates_own_container(self):
+        class Descriptor:
+            def __init__(self):
+                self.log = []
+
+            def __get__(self, obj, owner):
+                self.log.append(obj)
+                return len(self.log)
+
+        def fn(t):
+            class Foo:
+                x = Descriptor()
+
+            obj = Foo()
+            a = obj.x
+            b = obj.x
+            return t + a, a, b
+
+        t = torch.randn(2)
+        self.assertEqual(torch.compile(fn, backend="eager")(t), fn(t))
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test___build_class___descriptor_set(self):
+        class Descriptor:
+            def __init__(self, fget, fset):
+                self.fget = fget
+                self.fset = fset
+
+            def __get__(self, obj, owner):
+                return self.fget(obj)
+
+            def __set__(self, obj, value):
+                self.fset(obj, value)
+
+        def fn(t):
+            class Foo:
+                def _get(self):
+                    return self._x * 2
+
+                def _set(self, value):
+                    self._x = value
+
+                x = Descriptor(_get, _set)
+
+            obj = Foo()
+            obj.x = 5
+            return t + obj.x, obj._x
+
+        t = torch.randn(2)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(t), fn(t))
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test___build_class___descriptor_set_mutates_own_container(self):
+        class Descriptor:
+            def __init__(self):
+                self.store = {}
+
+            def __get__(self, obj, owner):
+                return self.store.get(id(obj), -1)
+
+            def __set__(self, obj, value):
+                self.store[id(obj)] = value
+
+        def fn(t):
+            class Foo:
+                x = Descriptor()
+
+            obj = Foo()
+            obj.x = 5
+            return t + obj.x, obj.x
+
+        t = torch.randn(2)
+        self.assertEqual(torch.compile(fn, backend="eager")(t), fn(t))
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test___build_class___method_mutates_class_container(self):
+        def fn(t):
+            class Foo:
+                seen = {}
+
+                def add(self, k):
+                    self.seen[k] = k
+                    return len(self.seen)
+
+            obj = Foo()
+            return t + obj.add(1), obj.add(2)
+
+        t = torch.randn(2)
+        self.assertEqual(torch.compile(fn, backend="eager")(t), fn(t))
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
     def test_dynamically_created_class_object_escape_unimplemented(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
