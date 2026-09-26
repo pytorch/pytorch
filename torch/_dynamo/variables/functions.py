@@ -439,6 +439,12 @@ class BaseUserFunctionVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name == "__setattr__":
+            if self.python_type() is types.FunctionType and args[0].is_constant_match(
+                "__globals__"
+            ):
+                raise_observed_exception(
+                    AttributeError, tx, args=["readonly attribute"]
+                )
             if args[0].is_constant_match("__annotations__"):
                 self.annotations = args[1]
                 return ConstantVariable.create(None)
@@ -446,6 +452,12 @@ class BaseUserFunctionVariable(VariableTracker):
                 tx, "__setitem__", list(args), kwargs
             )
         elif name == "__delattr__":
+            if self.python_type() is types.FunctionType and args[0].is_constant_match(
+                "__globals__"
+            ):
+                raise_observed_exception(
+                    AttributeError, tx, args=["readonly attribute"]
+                )
             if args[0].is_constant_match("__annotations__"):
                 self.annotations = None
                 return ConstantVariable.create(None)
