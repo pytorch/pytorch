@@ -250,6 +250,7 @@ build/
 build_host_protoc
 build_android
 build_ios
+build_lint
 .build_debug/*
 .build_release/*
 .build_profile/*
