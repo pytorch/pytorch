@@ -322,7 +322,7 @@ def _check_rng_sync_internal(
         # as a (seed, offset) pair.
         return _check_philox_rng_sync(generator, group)
     else:
-        # Any other device (cpu, npu, ...) falls back to comparing the full
+        # Any other device (cpu, privateuse1, ...) falls back to comparing the full
         # generator state tensors, which works for generators whose
         # ``get_state()`` returns a tensor. This keeps the check usable by
         # third-party backends without raising NotImplementedError.
