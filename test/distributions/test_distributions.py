@@ -1354,7 +1354,17 @@ class TestDistributions(DistributionsTestCase):
         distribution = dist_ctor(*ctor_params)
         s = distribution.sample()
         if not distribution.support.is_discrete:
-            s = s.detach().requires_grad_()
+            s = s.detach()
+            # For simplex-constrained distributions (e.g. RelaxedOneHotCategorical),
+            # samples near the boundary cause numerical Jacobian to produce nan
+            # because log_prob inverts ExpTransform via log(), and finite
+            # differencing (eps=1e-6) near zero yields log(<=0) = -inf/nan.
+            # Clamp to the simplex interior (1e-4 gives ~100x margin above
+            # gradcheck eps) and renormalize.
+            if isinstance(distribution.support, constraints._Simplex):
+                s = s.clamp(min=1e-4)
+                s = s / s.sum(-1, keepdim=True)
+            s.requires_grad_()
 
         expected_shape = distribution.batch_shape + distribution.event_shape
         self.assertEqual(s.size(), expected_shape)
@@ -1524,6 +1534,12 @@ class TestDistributions(DistributionsTestCase):
                         self.assertEqual(
                             expanded.variance,
                             d.variance.expand(expanded_shape + d.event_shape),
+                        )
+                    except NotImplementedError:
+                        pass
+                    try:
+                        self.assertEqual(
+                            expanded.entropy(), d.entropy().expand(expanded_shape)
                         )
                     except NotImplementedError:
                         pass
@@ -1931,6 +1947,22 @@ class TestDistributions(DistributionsTestCase):
             dtype=torch.get_default_dtype(),
         )
         self.assertEqual(dist.entropy(), expected, atol=1e-3, rtol=0)
+
+    @expectedFailureMPS
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_multinomial_entropy_double(self):
+        # lgamma(total_count + 1) used to be evaluated in the default dtype, so a double
+        # distribution carried a float32 error that grows with total_count
+        total_count = 1000
+        p = torch.tensor([0.1, 0.2, 0.7], dtype=torch.double)
+        dist = Multinomial(total_count, probs=p)
+        entropy = dist.entropy()
+        self.assertEqual(entropy.dtype, torch.double)
+        expected = torch.tensor(
+            scipy.stats.multinomial.entropy(total_count, p.numpy()), dtype=torch.double
+        )
+        self.assertEqual(entropy, expected)
+        self.assertEqual(dist.expand((2,)).entropy(), expected.expand(2))
 
     @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
@@ -7032,6 +7064,28 @@ class TestFunctors(DistributionsTestCase):
 
 
 class TestValidation(DistributionsTestCase):
+    def test_valid_does_not_format_error(self):
+        class UnformattableConstraint(Constraint):
+            def check(self, value):
+                return torch.ones_like(value, dtype=torch.bool)
+
+            def __repr__(self):
+                raise AssertionError("valid constraints should not be formatted")
+
+        constraint = UnformattableConstraint()
+
+        class UnformattableDistribution(Distribution):
+            arg_constraints = {"value": constraint}
+            support = constraint
+
+            def __init__(self, value, validate_args):
+                self.value = value
+                super().__init__(validate_args=validate_args)
+
+        value = torch.tensor(0.0)
+        UnformattableDistribution(value, validate_args=False)._validate_sample(value)
+        UnformattableDistribution(value, validate_args=True)
+
     def test_valid(self):
         for Dist, params in _get_examples():
             for param in params:
