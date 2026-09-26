@@ -7483,7 +7483,7 @@ class Scheduler:
 
             from torch._inductor.codegen.nv_universal_gemm import NVUniversalGemmCaller
 
-            bench_epilogue = config.benchmark_epilogue_fusion
+            benchmark_template_fusion = config.benchmark_template_fusion
             num_fusible_callers = sum(
                 isinstance(c, (TritonTemplateCallerBase, NVUniversalGemmCaller))
                 for c in multi_node.choices
@@ -7491,8 +7491,9 @@ class Scheduler:
             # Track if the choice timings can be retrieved async after compilation
             get_choice_timings_async = (
                 use_pipelined_autotuning()
-                and not bench_epilogue
-                and num_fusible_callers <= config.max_epilogue_benchmarked_choices
+                and not benchmark_template_fusion
+                and num_fusible_callers
+                <= config.max_template_fusion_benchmarked_choices
             )
 
             ms1, ms2 = float("inf"), float("inf")
@@ -7505,7 +7506,7 @@ class Scheduler:
                     choice_timings.items(), key=operator.itemgetter(1)
                 )
             else:
-                # Use 0 for unfused time, won't be used as bench_epilogue
+                # Use 0 for unfused time, won't be used as benchmark_template_fusion
                 # is guaranteed to be False here
                 choice_timings_iter = [(c, 0) for c in multi_node.choices]
 
@@ -7584,7 +7585,7 @@ class Scheduler:
                     multi_node.finalize_as_triton_caller(best)
                 return FusionResult.fuse(True)
 
-            if bench_epilogue:
+            if benchmark_template_fusion:
                 ms2, path2 = (
                     self.benchmark_fused_nodes(node_list_2)
                     if epilogue_fusion
@@ -7632,11 +7633,11 @@ class Scheduler:
                 ):
                     continue
 
-                if bench_epilogue and unfused_time >= ms1 + ms2:
+                if benchmark_template_fusion and unfused_time >= ms1 + ms2:
                     break
 
                 template_choices += 1
-                if template_choices > config.max_epilogue_benchmarked_choices:
+                if template_choices > config.max_template_fusion_benchmarked_choices:
                     break
 
                 try:
@@ -7698,7 +7699,7 @@ class Scheduler:
                     try:
                         if future is not None:
                             res = future.result()
-                        elif not bench_epilogue:
+                        elif not benchmark_template_fusion:
                             if hasattr(mod_fused, "triton_"):
                                 res = mod_fused.triton_
                                 res.precompile()
@@ -7718,7 +7719,7 @@ class Scheduler:
                             )
                         continue
 
-                    if bench_epilogue:
+                    if benchmark_template_fusion:
                         is_nvgemm_choice = isinstance(choice, NVUniversalGemmCaller)
                         swap_ctx = (
                             # pyrefly: ignore [missing-attribute]
@@ -7775,11 +7776,11 @@ class Scheduler:
                                 ms_fused_choice = choice
                                 break
 
-                if bench_epilogue:
+                if benchmark_template_fusion:
                     log_fusion(min_ms_fused, ms1, ms2)
 
                 if (
-                    not bench_epilogue or min_ms_fused < (ms1 + ms2)
+                    not benchmark_template_fusion or min_ms_fused < (ms1 + ms2)
                 ) and ms_fused_choice is not None:
                     is_nvgemm = isinstance(ms_fused_choice, NVUniversalGemmCaller)
                     if is_nvgemm:
@@ -7795,7 +7796,7 @@ class Scheduler:
                         # pyrefly: ignore [missing-attribute]
                         multi_node.finalize_as_triton_caller(ms_fused_choice)
 
-                    if bench_epilogue:
+                    if benchmark_template_fusion:
                         # pyrefly: ignore [missing-attribute]
                         multi_node._choice_timings[None] = new_timings
                     return True
