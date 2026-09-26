@@ -200,7 +200,9 @@ class FSDPParam:
     _sharded_post_forward_param: nn.Parameter | None  # ND
     _unsharded_param: nn.Parameter  # ND
     _sharding_spec: DTensorSpec
-    # _sharding_spec per dtype, for sharded grads; reset when _sharding_spec changes
+    # Sharding specs for sharded grads, whose dtype can differ from the param's.
+    # Cached per dtype so each backward doesn't build a DTensorSpec per param,
+    # which costs CPU time with many params. Reset when _sharding_spec changes.
     _sharding_spec_by_dtype: dict[torch.dtype, DTensorSpec]
     _unsharded_dtensor_spec: (
         DTensorSpec | None
@@ -1176,7 +1178,8 @@ class FSDPParam:
         param = getattr(self, "_unsharded_param", None)
         return param.grad if param is not None else None
 
-    def get_unsharded_zero_grad_data(self) -> torch.Tensor:
+    @property
+    def unsharded_zero_grad_data(self) -> torch.Tensor:
         # Use the dtype autograd would produce so group gradients stay uniform
         param = self.unsharded_param
         return self._get_grad_inner_tensor(

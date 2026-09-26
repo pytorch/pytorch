@@ -920,7 +920,7 @@ class FSDPParamGroup:
         if self._get_partial_reduce_grad(param) is not None or (
             self.reduce_scatter_unused_params and unsharded_param.requires_grad
         ):
-            return param.get_unsharded_zero_grad_data()
+            return param.unsharded_zero_grad_data
         return None
 
     def _prepare_partial_reduce_output(
