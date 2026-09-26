@@ -16,13 +16,17 @@ from torch._dynamo.utils import detect_fake_mode, lazy_format_graph_code
 from torch._logging import getArtifactLogger, trace_structured
 from torch._subclasses.functional_tensor import FunctionalTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.multiprocessing.reductions import StorageWeakRef
 from torchgen.utils import dataclass_repr
 
 from .. import config
 from .descriptors import AOTInput, BackwardTokenAOTInput
 from .functional_utils import (
     assert_functional_graph,
+    clear_input_view_bits_for_spec,
     propagate_input_mutation_stacktraces,
+    resolve_input_view_bits,
+    restore_input_view_bits_for_spec,
 )
 from .graph_capture_wrappers import (
     aot_dispatch_subclass,
@@ -282,6 +286,97 @@ def _create_graph_and_save_traced_inputs(
     )
 
 
+def _clear_flat_args_and_restore_in_fn(
+    flat_fn: TraceFn,
+    flat_args: list[FxValue],
+    *,
+    is_export: bool,
+) -> tuple[TraceFn, list[FxValue]]:
+    if is_export:
+        return flat_fn, flat_args
+
+    view_bit_specs = [
+        (i, arg.is_conj(), arg.is_neg())
+        for i, arg in enumerate(flat_args)
+        if isinstance(arg, torch.Tensor) and (arg.is_conj() or arg.is_neg())
+    ]
+    if not view_bit_specs:
+        return flat_fn, flat_args
+
+    cleared_flat_args = list(flat_args)
+    for i, is_conj, is_neg in view_bit_specs:
+        arg = cleared_flat_args[i]
+        if not isinstance(arg, torch.Tensor):
+            raise AssertionError(f"expected Tensor, got {type(arg)}")
+        cleared_flat_args[i] = clear_input_view_bits_for_spec(
+            arg, is_conj=is_conj, is_neg=is_neg
+        )
+
+    @simple_wraps(flat_fn)
+    def fn_with_restored_view_bits(*args: FxValue) -> Any:
+        restored_args = list(args)
+        for i, is_conj, is_neg in view_bit_specs:
+            arg = restored_args[i]
+            if not isinstance(arg, torch.Tensor):
+                raise AssertionError(f"expected Tensor, got {type(arg)}")
+            restored_args[i] = restore_input_view_bits_for_spec(
+                arg, is_conj=is_conj, is_neg=is_neg
+            )
+        return flat_fn(*restored_args)
+
+    return fn_with_restored_view_bits, cleared_flat_args
+
+
+def _propagate_no_vc_check_through_view_bit_restores(
+    graph: torch.fx.Graph,
+) -> None:
+    def same_storage(a: torch.fx.Node, b: torch.fx.Node) -> bool:
+        a_val = a.meta.get("val")
+        b_val = b.meta.get("val")
+        return (
+            isinstance(a_val, torch.Tensor)
+            and isinstance(b_val, torch.Tensor)
+            and StorageWeakRef(a_val.untyped_storage())
+            == StorageWeakRef(b_val.untyped_storage())
+        )
+
+    def path_to_lazy_input(
+        node: torch.fx.Node, seen: set[torch.fx.Node]
+    ) -> list[torch.fx.Node] | None:
+        if node in seen:
+            return None
+        next_seen = seen | {node}
+        if node.op == "placeholder":
+            return [node] if node.meta.get("aot_input_view_bits") is not None else None
+        for arg in pytree.tree_leaves(node.args):
+            if isinstance(arg, torch.fx.Node) and same_storage(node, arg):
+                path = path_to_lazy_input(arg, next_seen)
+                if path is not None:
+                    return [node, *path]
+        return None
+
+    # If the same alias family is both stashed directly on ctx and passed to
+    # save_for_backward, eager performs a version check.  Propagate that fact
+    # first and let it take precedence over the no-check path.
+    for node in graph.nodes:
+        if not node.meta.get("saved_tensor_with_vc_check", False):
+            continue
+        path = path_to_lazy_input(node, set())
+        if path is not None:
+            for source in path:
+                source.meta["saved_tensor_with_vc_check"] = True
+                source.meta.pop("saved_tensor_with_no_vc_check", None)
+
+    for node in graph.nodes:
+        if not node.meta.get("saved_tensor_with_no_vc_check", False):
+            continue
+        path = path_to_lazy_input(node, set())
+        if path is not None:
+            for source in path:
+                if not source.meta.get("saved_tensor_with_vc_check", False):
+                    source.meta["saved_tensor_with_no_vc_check"] = True
+
+
 def aot_dispatch_base_graph(
     flat_fn: TraceFn,
     flat_args: list[FxValue],
@@ -297,6 +392,9 @@ def aot_dispatch_base_graph(
     # While cases that it does need to handle include:
     # - input mutations (including when inputs are aliases of each other)
     # - input metadata mutations
+    flat_fn, flat_args = _clear_flat_args_and_restore_in_fn(
+        flat_fn, flat_args, is_export=aot_config.is_export
+    )
     fn_to_trace = fn_input_mutations_to_outputs(
         flat_fn,
         flat_args_descs,
@@ -494,10 +592,22 @@ def aot_dispatch_autograd_graph(
     # NB: flat_fn here is the original user function (as far as
     # aot_module_simplified is concerned)
 
+    lazy_input_descs = [
+        (flat_args_descs[i], (arg.is_conj(), arg.is_neg()))
+        for i, arg in enumerate(flat_args)
+        if isinstance(arg, torch.Tensor) and (arg.is_conj() or arg.is_neg())
+    ]
+    flat_fn, graph_flat_args = _clear_flat_args_and_restore_in_fn(
+        flat_fn, flat_args, is_export=aot_config.is_export
+    )
+
     # traced_tangents corresponds to the set of outputs in the traced forward that should get grad_outputs in the traced backward.
     # It includes outputs of the original forward, *and* any updated inputs due to input mutations.
     # However, it does *not* include any outputs that are aliases of inputs or intermediates, or any metadata-only input mutations.
-    joint_inputs = (flat_args, fw_metadata.traced_tangents)
+    traced_tangents = pytree.tree_map_only(
+        torch.Tensor, resolve_input_view_bits, fw_metadata.traced_tangents
+    )
+    joint_inputs = (graph_flat_args, traced_tangents)
     joint_inputs_descs = (flat_args_descs, fw_metadata.traced_tangents_descs)
 
     fn_prepared_for_autograd = fn_prepped_for_autograd(
@@ -543,6 +653,13 @@ def aot_dispatch_autograd_graph(
         updated_joint_inputs_descs,
         aot_config=aot_config,
     )
+    for node in fx_g.graph.find_nodes(op="placeholder"):
+        desc = node.meta.get("desc")
+        for lazy_desc, view_bits in lazy_input_descs:
+            if desc == lazy_desc:
+                node.meta["aot_input_view_bits"] = view_bits
+                break
+    _propagate_no_vc_check_through_view_bit_restores(fx_g.graph)
 
     # Redundant with the check above, but worth having in case tracing introduced
     # a fake tensor. Unlikely.

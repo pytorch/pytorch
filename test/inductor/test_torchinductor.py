@@ -8446,6 +8446,130 @@ for dtype in (torch.int32, torch.int64):
 
         self.common(fn, (x,))
 
+    @parametrize("case", ["negative", "conjugate", "both", "conjugate_imag"])
+    def test_lazy_view_bits_on_graph_inputs(self, case):
+        # Regression test for https://github.com/pytorch/pytorch/issues/145093
+        def fn(x):
+            return x.clone()
+
+        compiled = torch.compile(fn, fullgraph=True)
+        base = torch.tensor([1 + 2j, 3 + 4j], dtype=torch.complex64, device=self.device)
+        if case == "negative":
+            x = base.real._neg_view()
+        elif case == "conjugate":
+            x = base.conj()
+        elif case == "both":
+            x = base.conj()._neg_view()
+        else:
+            x = base.conj().imag
+        self.assertEqual(compiled(x), fn(x))
+
+    def test_negative_view_graph_input_backward(self):
+        def fn(x):
+            return (x * x).sum()
+
+        expected_base = torch.tensor([1.0, 3.0], device=self.device, requires_grad=True)
+        expected = fn(expected_base._neg_view())
+        expected.backward()
+
+        actual_base = expected_base.detach().clone().requires_grad_()
+        compiled = torch.compile(fn, fullgraph=True)
+        actual = compiled(actual_base._neg_view())
+        actual.backward()
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_base.grad, expected_base.grad)
+
+    def test_negative_view_graph_input_saved_version_counter(self):
+        def fn(x):
+            return x * x
+
+        compiled = torch.compile(fn, fullgraph=True)
+        x = (
+            torch.tensor([1.0, 2.0, 3.0], device=self.device)
+            ._neg_view()
+            .detach()
+            .requires_grad_()
+        )
+        out = compiled(x)
+        with torch.no_grad():
+            x.add_(10)
+
+        with self.assertRaisesRegex(RuntimeError, "modified by an inplace"):
+            out.sum().backward()
+
+    @parametrize("saved_view", ["direct", "slice"])
+    @parametrize("dynamic", [False, True])
+    def test_negative_view_graph_input_no_vc_saved_tensor(self, saved_view, dynamic):
+        class NoVersionCheck(torch.autograd.Function):
+            @staticmethod
+            def forward(x):
+                return x.clone()
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                ctx.x = inputs[0] if saved_view == "direct" else inputs[0][1:]
+
+            @staticmethod
+            def backward(ctx, grad):
+                if saved_view == "direct":
+                    return grad * ctx.x
+                return torch.cat((grad[:1], grad[1:] * ctx.x))
+
+        def fn(x):
+            return NoVersionCheck.apply(x)
+
+        def run(f, n):
+            x = (
+                torch.arange(1.0, n + 1, device=self.device)
+                ._neg_view()
+                .detach()
+                .requires_grad_()
+            )
+            out = f(x)
+            with torch.no_grad():
+                x.add_(10)
+            out.sum().backward()
+            return x.grad
+
+        compiled = torch.compile(fn, fullgraph=True, dynamic=dynamic)
+        for n in (3, 5):
+            self.assertEqual(run(compiled, n), run(fn, n))
+
+    def test_negative_view_graph_input_mixed_vc_saved_tensor(self):
+        class MixedVersionCheck(torch.autograd.Function):
+            @staticmethod
+            def forward(x):
+                return x.clone()
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                ctx.save_for_backward(inputs[0])
+                ctx.x = inputs[0][1:]
+
+            @staticmethod
+            def backward(ctx, grad):
+                (saved,) = ctx.saved_tensors
+                derived = torch.cat((grad[:1], grad[1:] * ctx.x))
+                return grad * saved + derived
+
+        def fn(x):
+            return MixedVersionCheck.apply(x)
+
+        compiled = torch.compile(fn, fullgraph=True)
+        x = (
+            torch.tensor([1.0, 2.0, 3.0], device=self.device)
+            ._neg_view()
+            .detach()
+            .requires_grad_()
+        )
+        out = compiled(x)
+        with torch.no_grad():
+            x.add_(10)
+
+        with self.assertRaisesRegex(RuntimeError, "modified by an inplace"):
+            out.sum().backward()
+
     def test_complex_conv2d_conj(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/171665
         # Tests that complex convolution works on conjugated inputs when compiled.

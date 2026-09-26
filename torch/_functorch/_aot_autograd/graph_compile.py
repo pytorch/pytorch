@@ -20,7 +20,7 @@ import traceback
 from collections import defaultdict
 from collections.abc import Callable, Generator
 from contextlib import contextmanager, nullcontext
-from typing import Any
+from typing import Any, cast
 
 import torch
 import torch.utils._pytree as pytree
@@ -63,6 +63,10 @@ from .autograd_cache import (
 )
 from .codegen import aggregate_runtime_wrapper_sources
 from .descriptors import AOTOutput, PlainAOTOutput
+from .functional_utils import (
+    clear_input_view_bits_and_insert_restore,
+    resolve_input_view_bits,
+)
 from .graph_capture import aot_dispatch_autograd_graph, aot_dispatch_base_graph
 from .logging_utils import track_graph_compiling
 from .runtime_wrappers import (
@@ -90,6 +94,7 @@ from .schemas import (
     FlatFn,
     FxValue,
     MutationType,
+    SavedTensorInputAliasInfo,
     SubclassMeta,
     ViewAndMutationMeta,
 )
@@ -2056,6 +2061,71 @@ def _categorize_saved_tensors_for_backward(
     num_symints_saved_for_bw = 0
     num_opaque_objects_saved_for_bw = 0
     saved_tensor_is_graph_input: list[bool] = []
+    saved_tensor_view_bits: list[tuple[bool, bool]] = []
+    saved_tensor_input_aliases: list[SavedTensorInputAliasInfo | None] = []
+
+    lazy_input_storages: dict[StorageWeakRef, list[tuple[int, torch.Tensor]]] = (
+        defaultdict(list)
+    )
+    for input_index, input_node in enumerate(
+        fw_module.graph.find_nodes(op="placeholder")
+    ):
+        input_val = input_node.meta.get("val")
+        if input_node.meta.get("aot_input_view_bits") is not None and is_fake_tensor(
+            input_val
+        ):
+            lazy_input_storages[StorageWeakRef(input_val.untyped_storage())].append(
+                (input_index, input_val)
+            )
+
+    def metadata_matches(a: torch.Tensor, b: torch.Tensor) -> bool:
+        return (
+            len(a.shape) == len(b.shape)
+            and all(
+                statically_known_true(x == y) for x, y in strict_zip(a.shape, b.shape)
+            )
+            and all(
+                statically_known_true(x == y)
+                for x, y in strict_zip(a.stride(), b.stride())
+            )
+            and statically_known_true(a.storage_offset() == b.storage_offset())
+        )
+
+    def input_alias_info(val: torch.Tensor) -> SavedTensorInputAliasInfo | None:
+        candidates = lazy_input_storages.get(StorageWeakRef(val.untyped_storage()), [])
+        if not candidates:
+            return None
+
+        input_index, input_val = candidates[0]
+        matches = metadata_matches(val, input_val)
+        size: tuple[int, ...] | None = None
+        stride: tuple[int, ...] | None = None
+        storage_offset_delta = 0
+        if not matches:
+            input_offset = input_val.storage_offset()
+            offset_delta = val.storage_offset() - input_offset
+            if not isinstance(offset_delta, int):
+                raise RuntimeError(
+                    "torch.compile does not yet support a saved view with a "
+                    "symbolic storage offset that aliases an input with lazy "
+                    "conjugate or negative bits"
+                )
+            else:
+                storage_offset_delta = offset_delta
+            if all(isinstance(x, int) for x in (*val.shape, *val.stride())):
+                size = tuple(cast(int, x) for x in val.shape)
+                stride = tuple(cast(int, x) for x in val.stride())
+
+        return SavedTensorInputAliasInfo(
+            input_index=input_index,
+            is_conj=val.is_conj(),
+            is_neg=val.is_neg(),
+            input_metadata_matches=matches,
+            size=size,
+            stride=stride,
+            storage_offset_delta=storage_offset_delta,
+        )
+
     for idx, node in enumerate(fw_outs_saved_for_bw):
         if is_sym_node(node):
             num_symints_saved_for_bw += 1
@@ -2068,6 +2138,10 @@ def _categorize_saved_tensors_for_backward(
                 # detach() it to prevent a reference cycle. Record
                 # if the saved_tensor is a graph input here to help.
                 saved_tensor_is_graph_input.append(node.op == "placeholder")
+                saved_tensor_view_bits.append(
+                    (node.meta["val"].is_conj(), node.meta["val"].is_neg())
+                )
+                saved_tensor_input_aliases.append(input_alias_info(node.meta["val"]))
                 # record dynamic tensor activations
                 dynamic_dims: set[int] = {
                     dim
@@ -2080,6 +2154,8 @@ def _categorize_saved_tensors_for_backward(
                 num_opaque_objects_saved_for_bw += 1
         else:
             saved_tensor_is_graph_input.append(False)
+            saved_tensor_view_bits.append((False, False))
+            saved_tensor_input_aliases.append(None)
 
     fw_metadata.num_symints_saved_for_bw = num_symints_saved_for_bw
     fw_metadata.num_opaque_objects_saved_for_bw = num_opaque_objects_saved_for_bw
@@ -2093,10 +2169,24 @@ def _categorize_saved_tensors_for_backward(
             "expected one saved_tensor_is_graph_input entry per saved tensor, "
             f"got {len(saved_tensor_is_graph_input)} != {num_tensors_saved_for_bw}"
         )
+    if len(saved_tensor_view_bits) != num_tensors_saved_for_bw:
+        raise AssertionError(
+            "expected one saved_tensor_view_bits entry per saved tensor, "
+            f"got {len(saved_tensor_view_bits)} != {num_tensors_saved_for_bw}"
+        )
+    if len(saved_tensor_input_aliases) != num_tensors_saved_for_bw:
+        raise AssertionError(
+            "expected one saved_tensor_input_aliases entry per saved tensor, "
+            f"got {len(saved_tensor_input_aliases)} != {num_tensors_saved_for_bw}"
+        )
     fw_metadata.saved_tensor_is_graph_input = saved_tensor_is_graph_input
+    fw_metadata.saved_tensor_view_bits = saved_tensor_view_bits
+    fw_metadata.saved_tensor_input_aliases = saved_tensor_input_aliases
     inner_meta.num_symints_saved_for_bw = num_symints_saved_for_bw
     inner_meta.num_opaque_objects_saved_for_bw = num_opaque_objects_saved_for_bw
     inner_meta.saved_tensor_is_graph_input = saved_tensor_is_graph_input
+    inner_meta.saved_tensor_view_bits = saved_tensor_view_bits
+    inner_meta.saved_tensor_input_aliases = saved_tensor_input_aliases
 
     # See Note [Activations with no version counter checks in eager]
     # Count tensors saved with no version counter check.
@@ -2355,6 +2445,36 @@ def _aot_stage2b_bw_compile(
     - the compiled backward function
     """
     with torch.no_grad():
+        inner_meta = _get_inner_meta(maybe_subclass_meta, fw_metadata)
+        placeholders = list(bw_module.graph.find_nodes(op="placeholder"))
+        saved_start = num_symints_saved_for_bw
+        saved_view_bits = inner_meta.saved_tensor_view_bits
+        saved_end = saved_start + len(saved_view_bits)
+        if saved_end > len(placeholders):
+            raise AssertionError(
+                "backward graph has fewer placeholders than saved tensors: "
+                f"{len(placeholders)} < {saved_end}"
+            )
+
+        for i, node in enumerate(placeholders):
+            val = node.meta.get("val")
+            if not isinstance(val, torch.Tensor):
+                continue
+            if saved_start <= i < saved_end:
+                is_conj, is_neg = saved_view_bits[i - saved_start]
+                if is_conj or is_neg:
+                    clear_input_view_bits_and_insert_restore(
+                        bw_module.graph,
+                        node,
+                        val,
+                        is_conj=is_conj,
+                        is_neg=is_neg,
+                    )
+                    continue
+            node.meta["val"] = resolve_input_view_bits(val)
+
+        bw_module.graph.lint()
+        bw_module.recompile()
         # NB: It's important to compile backwards ahead of time, as this may
         # add extra guards which we need to apply to the Dynamo cache at
         # forwards
@@ -2363,7 +2483,6 @@ def _aot_stage2b_bw_compile(
 
             forward_saved_for_backwards_strides = None
             if fwd_output_strides is not None:
-                inner_meta = _get_inner_meta(maybe_subclass_meta, fw_metadata)
                 forward_saved_for_backwards_strides = fwd_output_strides[
                     inner_meta.tensors_saved_for_backwards_slice
                 ]

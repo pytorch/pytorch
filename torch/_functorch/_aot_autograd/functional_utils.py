@@ -8,6 +8,7 @@ This file contains utilities related to functionalization in AOTAutograd:
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 from typing import Any, TypeGuard
 
@@ -61,6 +62,116 @@ def sync_functional_tensor(t: torch.Tensor) -> None:
                     )
     else:
         torch._sync(t)
+
+
+def resolve_input_view_bits(t: torch.Tensor) -> torch.Tensor:
+    if t.is_conj():
+        t = t.resolve_conj()
+    if t.is_neg():
+        t = t.resolve_neg()
+    return t
+
+
+def clear_input_view_bits(t: torch.Tensor) -> torch.Tensor:
+    """Return a view of ``t`` with its lazy conjugate/negative bits cleared."""
+    if t.is_conj():
+        t = t.conj()
+    if t.is_neg():
+        t = t._neg_view()
+    return t
+
+
+def clear_input_view_bits_for_spec(
+    t: torch.Tensor, *, is_conj: bool, is_neg: bool
+) -> torch.Tensor:
+    """Make the bit-free physical input for a graph that restores ``is_*``.
+
+    The fast path only creates views.  The fallback handles callers/backends that
+    materialized a tensor whose compile-time example carried lazy view bits.
+    """
+    if t.is_conj() == is_conj and t.is_neg() == is_neg:
+        return clear_input_view_bits(t)
+
+    t = resolve_input_view_bits(t)
+    if is_conj:
+        t = torch.conj_physical(t)
+    if is_neg:
+        t = torch.neg(t)
+    return t
+
+
+def restore_input_view_bits_for_spec(
+    t: torch.Tensor, *, is_conj: bool, is_neg: bool
+) -> torch.Tensor:
+    if is_conj:
+        t = t.conj()
+    if is_neg:
+        t = t._neg_view()
+    return t
+
+
+def clear_input_view_bits_and_insert_restore(
+    graph: torch.fx.Graph,
+    placeholder: torch.fx.Node,
+    example: torch.Tensor,
+    *,
+    is_conj: bool,
+    is_neg: bool,
+) -> torch.Tensor:
+    """Clear an example input's bits and restore them explicitly in ``graph``."""
+    if not (is_conj or is_neg):
+        return example
+
+    original_users = tuple(placeholder.users)
+    original_meta = copy.copy(placeholder.meta)
+    cleared_example = clear_input_view_bits_for_spec(
+        example, is_conj=is_conj, is_neg=is_neg
+    )
+
+    meta_val = placeholder.meta.get("val")
+    if isinstance(meta_val, torch.Tensor):
+        meta_val = clear_input_view_bits_for_spec(
+            meta_val, is_conj=is_conj, is_neg=is_neg
+        )
+        placeholder.meta["val"] = meta_val
+
+    restored = placeholder
+    for target in (
+        *([torch.ops.aten._conj.default] if is_conj else []),
+        *([torch.ops.aten._neg_view.default] if is_neg else []),
+    ):
+        with graph.inserting_after(restored):
+            restored = graph.call_function(target, (restored,))
+        restored.meta = copy.copy(original_meta)
+        if isinstance(meta_val, torch.Tensor):
+            meta_val = target(meta_val)
+            restored.meta["val"] = meta_val
+
+    for user in original_users:
+        user.replace_input_with(placeholder, restored)
+    return cleared_example
+
+
+def normalize_backward_input_view_bits_in_place(
+    args: list[Any],
+    *,
+    num_symints_saved_for_bw: int,
+    saved_tensor_view_bits: list[tuple[bool, bool]],
+) -> list[Any]:
+    saved_start = num_symints_saved_for_bw
+    saved_end = saved_start + len(saved_tensor_view_bits)
+    for i, arg in enumerate(args):
+        if not isinstance(arg, torch.Tensor):
+            continue
+        if saved_start <= i < saved_end:
+            is_conj, is_neg = saved_tensor_view_bits[i - saved_start]
+            if is_conj or is_neg:
+                args[i] = clear_input_view_bits_for_spec(
+                    arg, is_conj=is_conj, is_neg=is_neg
+                )
+                continue
+        args[i] = resolve_input_view_bits(arg)
+    return args
 
 
 # When subclasses are involved, t here will usually look something like:
@@ -319,6 +430,8 @@ def gen_alias_from_base(
     target_view_meta_sequence: ViewMetaSequence | None = None,
     *,
     replay_views: bool,
+    target_is_conj: bool | None = None,
+    target_is_neg: bool | None = None,
 ) -> Tensor:
     # Patch the correct requires_grad field of the output tensor, depending on whether:
     # (i) the reconstructed output (out) was came from a tensor that requires grad or not;
@@ -328,6 +441,17 @@ def gen_alias_from_base(
             out = out.detach()
         elif not aliased_base_tensor.requires_grad and target_requires_grad:
             out.requires_grad_(True)
+        return out
+
+    def patch_view_bits(out: Tensor) -> Tensor:
+        is_conj = (
+            target_meta_tensor.is_conj() if target_is_conj is None else target_is_conj
+        )
+        is_neg = target_meta_tensor.is_neg() if target_is_neg is None else target_is_neg
+        if out.is_conj() != is_conj:
+            out = out.conj()
+        if out.is_neg() != is_neg:
+            out = out._neg_view()
         return out
 
     # If provided, use the target functional tensor for replaying the views.
@@ -351,7 +475,7 @@ def gen_alias_from_base(
                 "incorrect out shape after application of ViewMeta sequence: "
                 f"{tuple(out.shape)} (actual) vs {tuple(target_meta_tensor.shape)} (expected)"
             )
-        return patch_requires_grad(out)
+        return patch_view_bits(patch_requires_grad(out))
 
     # Try to do view-replay if possible.
     # fall back to .as_strided() if we can't.
@@ -379,7 +503,7 @@ def gen_alias_from_base(
         #
         # As a stopgap, we'll fall back to as_strided.
         if out is not None and out.shape == target_meta_tensor.shape:
-            return patch_requires_grad(out)
+            return patch_view_bits(patch_requires_grad(out))
 
     size = target_meta_tensor.size()
     stride = target_meta_tensor.stride()
@@ -416,7 +540,7 @@ def gen_alias_from_base(
     # as_strided() is the "most generic" view, but it does not cover cross-dtype views
     if aliased_out.dtype != target_meta_tensor.dtype:
         aliased_out = aliased_out.view(target_meta_tensor.dtype)
-    return aliased_out
+    return patch_view_bits(aliased_out)
 
 
 def has_same_metadata(t1: Tensor, t2: Tensor) -> bool:
@@ -519,6 +643,14 @@ class ViewMetaSequence:
         self.sequence = sequence
         self.metadata = metadata
         return self
+
+
+def replay_view_meta_sequence(
+    base: torch.Tensor, view_meta_sequence: ViewMetaSequence
+) -> torch.Tensor:
+    return _functionalization.apply_view_meta_sequence(
+        base, view_meta_sequence.sequence
+    )
 
 
 # new_arg and arg here are either:

@@ -1469,6 +1469,492 @@ def forward(self, arg0_1, arg1_1):
         self.verify_aot_autograd(f, create_inp(True), test_mutation=True)
         self.verify_aot_autograd(f, create_inp(False), test_mutation=True)
 
+    @parametrize(
+        "case",
+        [
+            "negative_clone",
+            "conjugate_clone",
+            "conjugate_negative_clone",
+            "conjugate_real",
+            "conjugate_imag",
+            "negative_unsafe_view",
+        ],
+    )
+    def test_lazy_view_bits_are_cleared_before_backend(self, case):
+        def checking_compiler(gm, example_inputs):
+            for arg in example_inputs:
+                if isinstance(arg, torch.Tensor):
+                    self.assertFalse(arg.is_conj())
+                    self.assertFalse(arg.is_neg())
+            for node in gm.graph.nodes:
+                val = node.meta.get("val")
+                if node.op == "placeholder" and isinstance(val, torch.Tensor):
+                    self.assertFalse(val.is_conj())
+                    self.assertFalse(val.is_neg())
+
+            def compiled(*args):
+                for arg in args:
+                    if isinstance(arg, torch.Tensor):
+                        self.assertFalse(arg.is_conj())
+                        self.assertFalse(arg.is_neg())
+                return gm(*args)
+
+            return make_boxed_func(compiled)
+
+        def clone(y):
+            return y.clone()
+
+        def real(y):
+            return y.real
+
+        def imag(y):
+            return y.imag
+
+        def unsafe_view(y):
+            return torch.ops.aten._unsafe_view.default(y, [2, 3])
+
+        if case == "negative_clone":
+            x = torch.arange(6.0)._neg_view()
+            fn = clone
+        elif case == "conjugate_clone":
+            x = torch.tensor([1 + 2j, 3 + 4j]).conj()
+            fn = clone
+        elif case == "conjugate_negative_clone":
+            x = torch.tensor([1 + 2j, 3 + 4j]).conj()._neg_view()
+            fn = clone
+        elif case == "conjugate_real":
+            x = torch.tensor([1 + 2j, 3 + 4j]).conj()
+            fn = real
+        elif case == "conjugate_imag":
+            x = torch.tensor([1 + 2j, 3 + 4j]).conj()
+            fn = imag
+        else:
+            x = torch.arange(8.0)[1:7]._neg_view()
+            fn = unsafe_view
+
+        compiled = aot_function(fn, fw_compiler=checking_compiler)
+        self.assertEqual(compiled(x), fn(x))
+
+    @parametrize("view_bits", ["negative", "conjugate", "both"])
+    def test_lazy_view_bits_are_visible_during_tracing_and_autograd(self, view_bits):
+        is_conj = view_bits in ("conjugate", "both")
+        is_neg = view_bits in ("negative", "both")
+
+        def make_input():
+            if is_conj:
+                base = torch.tensor([1 + 2j, 3 + 4j], requires_grad=True)
+            else:
+                base = torch.tensor([1.0, 3.0], requires_grad=True)
+            x = base.conj() if is_conj else base
+            x = x._neg_view() if is_neg else x
+            return base, x
+
+        def fn(x):
+            if x.is_conj() != is_conj or x.is_neg() != is_neg:
+                return x + 1000
+            return x * x
+
+        expected_base, expected_x = make_input()
+        expected = fn(expected_x)
+        (expected_grad,) = torch.autograd.grad(expected.real.sum(), expected_base)
+
+        def checking_compiler(gm, example_inputs):
+            self.assertTrue(
+                all(
+                    not arg.is_conj() and not arg.is_neg()
+                    for arg in example_inputs
+                    if isinstance(arg, torch.Tensor)
+                )
+            )
+            return make_boxed_func(gm.forward)
+
+        actual_base, actual_x = make_input()
+        compiled = aot_function(
+            fn,
+            fw_compiler=checking_compiler,
+            bw_compiler=checking_compiler,
+        )
+        actual = compiled(actual_x)
+        (actual_grad,) = torch.autograd.grad(actual.real.sum(), actual_base)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_grad, expected_grad)
+
+    @parametrize("view_bits", ["negative", "conjugate", "both"])
+    def test_clearing_lazy_view_bits_preserves_storage_metadata(self, view_bits):
+        from torch._functorch._aot_autograd.functional_utils import (
+            clear_input_view_bits_for_spec,
+        )
+
+        is_conj = view_bits in ("conjugate", "both")
+        is_neg = view_bits in ("negative", "both")
+        if is_conj:
+            base = torch.arange(20.0).to(torch.complex64).reshape(4, 5)
+        else:
+            base = torch.arange(20.0).reshape(4, 5)
+        x = base[1:3, 1:4]
+        x = x.conj() if is_conj else x
+        x = x._neg_view() if is_neg else x
+
+        cleared = clear_input_view_bits_for_spec(x, is_conj=is_conj, is_neg=is_neg)
+
+        self.assertFalse(cleared.is_conj())
+        self.assertFalse(cleared.is_neg())
+        self.assertEqual(
+            cleared.untyped_storage().data_ptr(), x.untyped_storage().data_ptr()
+        )
+        self.assertEqual(cleared.data_ptr(), x.data_ptr())
+        self.assertEqual(cleared.shape, x.shape)
+        self.assertEqual(cleared.stride(), x.stride())
+        self.assertEqual(cleared.storage_offset(), x.storage_offset())
+        self.assertEqual(cleared._version, x._version)
+
+        cleared.add_(1)
+        self.assertEqual(cleared._version, x._version)
+
+    @parametrize("mutation", ["data", "metadata", "data_and_metadata"])
+    @parametrize("view_replay", [False, True])
+    def test_lazy_view_bits_preserve_aliases_and_mutations(self, mutation, view_replay):
+        def checking_compiler(gm, example_inputs):
+            self.assertTrue(
+                all(
+                    not arg.is_conj() and not arg.is_neg()
+                    for arg in example_inputs
+                    if isinstance(arg, torch.Tensor)
+                )
+            )
+
+            def compiled(*args):
+                return gm(
+                    *(
+                        arg.clone() if isinstance(arg, torch.Tensor) else arg
+                        for arg in args
+                    )
+                )
+
+            return make_boxed_func(compiled)
+
+        def fn(x):
+            if mutation in ("metadata", "data_and_metadata"):
+                x.transpose_(0, 1)
+            if mutation in ("data", "data_and_metadata"):
+                x.add_(2)
+            return x[1:] if mutation == "data" else x[:, 1:]
+
+        base_eager = torch.arange(20.0).reshape(4, 5)
+        x_eager = base_eager[1:3, 1:4]._neg_view()
+        out_eager = fn(x_eager)
+
+        base_actual = torch.arange(20.0).reshape(4, 5)
+        x_actual = base_actual[1:3, 1:4]._neg_view()
+        with patch(
+            "torch._functorch.config.view_replay_for_aliased_outputs",
+            view_replay,
+        ):
+            compiled = aot_function(
+                fn,
+                fw_compiler=checking_compiler,
+                keep_inference_input_mutations=True,
+            )
+            out_actual = compiled(x_actual)
+
+        self.assertEqual(out_actual, out_eager, exact_stride=True)
+        self.assertEqual(x_actual, x_eager, exact_stride=True)
+        self.assertEqual(base_actual, base_eager)
+        self.assertEqual(out_actual.is_conj(), out_eager.is_conj())
+        self.assertEqual(out_actual.is_neg(), out_eager.is_neg())
+
+        out_actual.add_(10)
+        out_eager.add_(10)
+        self.assertEqual(base_actual, base_eager)
+
+    def test_lazy_view_bits_synthetic_base_mutation(self):
+        def checking_compiler(gm, example_inputs):
+            self.assertTrue(
+                all(
+                    not arg.is_conj() and not arg.is_neg()
+                    for arg in example_inputs
+                    if isinstance(arg, torch.Tensor)
+                )
+            )
+            return make_boxed_func(gm.forward)
+
+        def fn(x, y):
+            x.transpose_(0, 1)
+            x.add_(2)
+            return x[:, 1:], y.clone()
+
+        def make_inputs():
+            base = torch.arange(20.0).reshape(4, 5)
+            return base, base[1:3, 1:4]._neg_view(), base[1:3, 1:4]
+
+        expected_base, expected_x, expected_y = make_inputs()
+        expected = fn(expected_x, expected_y)
+
+        actual_base, actual_x, actual_y = make_inputs()
+        with patch("torch._functorch.config.debug_assert", True):
+            compiled = aot_function(
+                fn,
+                fw_compiler=checking_compiler,
+                keep_inference_input_mutations=True,
+            )
+            actual = compiled(actual_x, actual_y)
+
+        self.assertEqual(actual, expected, exact_stride=True)
+        self.assertEqual(actual_base, expected_base)
+        self.assertEqual(actual_x, expected_x, exact_stride=True)
+        self.assertEqual(actual_y, expected_y, exact_stride=True)
+        actual[0].add_(10)
+        expected[0].add_(10)
+        self.assertEqual(actual_base, expected_base)
+
+    @parametrize("view_replay", [False, True])
+    def test_lazy_view_bits_dynamic_alias_output(self, view_replay):
+        def fn(x):
+            return x.narrow(0, 1, x.shape[0] - 1)
+
+        base = torch.arange(12.0)
+        x = base[2:10]._neg_view()
+        with patch(
+            "torch._functorch.config.view_replay_for_aliased_outputs", view_replay
+        ):
+            compiled = aot_function(
+                fn,
+                fw_compiler=lambda gm, _: make_boxed_func(gm.forward),
+                dynamic=True,
+            )
+            actual = compiled(x)
+        self.assertEqual(actual, fn(x), exact_stride=True)
+        self.assertTrue(actual.is_neg())
+
+    @parametrize("case", ["lazy_grad_output", "saved_lazy_activation"])
+    def test_lazy_view_bits_are_normalized_before_backward_backend(self, case):
+        def checking_compiler(gm, example_inputs):
+            for arg in example_inputs:
+                if isinstance(arg, torch.Tensor):
+                    self.assertFalse(arg.is_conj())
+                    self.assertFalse(arg.is_neg())
+            for node in gm.graph.nodes:
+                val = node.meta.get("val")
+                if node.op == "placeholder" and isinstance(val, torch.Tensor):
+                    self.assertFalse(val.is_conj())
+                    self.assertFalse(val.is_neg())
+            return make_boxed_func(gm.forward)
+
+        if case == "lazy_grad_output":
+
+            def fn(x):
+                return x.sin()
+        else:
+
+            def fn(x):
+                y = x._neg_view()
+                return y * y
+
+        x_eager = torch.randn(4, requires_grad=True)
+        grad_out = torch.randn(4)._neg_view()
+        (expected,) = torch.autograd.grad(fn(x_eager), x_eager, grad_out)
+
+        x_actual = x_eager.detach().clone().requires_grad_()
+        compiled = aot_function(
+            fn,
+            fw_compiler=checking_compiler,
+            bw_compiler=checking_compiler,
+        )
+        (actual,) = torch.autograd.grad(compiled(x_actual), x_actual, grad_out)
+        self.assertEqual(actual, expected)
+
+    @parametrize("saves_input", [False, True])
+    @parametrize("materialize_outputs", [False, True])
+    def test_lazy_view_bits_preserve_saved_input_version_counter(
+        self, saves_input, materialize_outputs
+    ):
+        def fn(x):
+            return x * x if saves_input else x * 2
+
+        def compiler(gm, _):
+            if not materialize_outputs:
+                return make_boxed_func(gm.forward)
+
+            def compiled(args):
+                return [
+                    out.clone() if isinstance(out, torch.Tensor) else out
+                    for out in gm(*args)
+                ]
+
+            compiled._boxed_call = True
+            return compiled
+
+        compiled = aot_function(
+            fn,
+            fw_compiler=compiler,
+            bw_compiler=compiler,
+        )
+        x = torch.tensor([1.0, 2.0, 3.0])._neg_view().detach().requires_grad_()
+        out = compiled(x)
+        with torch.no_grad():
+            x.add_(10)
+
+        if saves_input:
+            with self.assertRaisesRegex(RuntimeError, "modified by an inplace"):
+                out.sum().backward()
+        else:
+            out.sum().backward()
+            self.assertEqual(x.grad, torch.full_like(x, 2))
+
+    @parametrize("derived_view", ["slice", "transpose"])
+    @parametrize("materialize_outputs", [False, True])
+    def test_lazy_view_bits_preserve_derived_saved_view_version_counter(
+        self, derived_view, materialize_outputs
+    ):
+        def fn(x):
+            y = x[1:] if derived_view == "slice" else x.transpose(0, 1)
+            return y * y
+
+        def compiler(gm, _):
+            if not materialize_outputs:
+                return make_boxed_func(gm.forward)
+
+            def compiled(args):
+                return [
+                    out.clone() if isinstance(out, torch.Tensor) else out
+                    for out in gm(*args)
+                ]
+
+            compiled._boxed_call = True
+            return compiled
+
+        compiled = aot_function(
+            fn,
+            fw_compiler=compiler,
+            bw_compiler=compiler,
+        )
+        x = torch.arange(6.0).reshape(2, 3)._neg_view().detach().requires_grad_()
+        out = compiled(x)
+        with torch.no_grad():
+            x.add_(10)
+
+        with self.assertRaisesRegex(RuntimeError, "modified by an inplace"):
+            out.sum().backward()
+
+    @parametrize("lazy", [False, True])
+    def test_lazy_view_bits_preserve_static_inputs(self, lazy):
+        from torch._functorch._aot_autograd.collect_metadata_analysis import (
+            run_functionalized_fw_and_collect_metadata,
+        )
+        from torch._functorch._aot_autograd.descriptors import PlainAOTInput
+
+        x = torch.arange(4.0)
+        if lazy:
+            x = x._neg_view()
+        x = FakeTensorMode().from_tensor(x)
+        metadata = run_functionalized_fw_and_collect_metadata(
+            lambda y: [y.clone()],
+            flat_args_descs=[PlainAOTInput(0)],
+            keep_input_mutations=False,
+            static_input_indices=[0],
+        )(x)
+        self.assertEqual(metadata.static_input_indices, [0])
+
+    def test_lazy_view_bits_unsupported_boundaries_fail_explicitly(self):
+        def symbolic_saved_view(x):
+            y = x[x.shape[0] // 2 :]
+            return (y * y).sum()
+
+        x = torch.arange(6.0)._neg_view().requires_grad_()
+        compiled = aot_function(
+            symbolic_saved_view,
+            fw_compiler=lambda gm, _: make_boxed_func(gm.forward),
+            dynamic=True,
+        )
+        with self.assertRaisesRegex(RuntimeError, "symbolic storage offset"):
+            compiled(x)
+
+        def metadata_mutation(x):
+            x.as_strided_(
+                (x.shape[1], x.shape[0]),
+                (1, x.shape[1]),
+                x.storage_offset(),
+            )
+            return x.clone()
+
+        base = torch.arange(20.0)
+        x = base[5:11].reshape(2, 3)._neg_view()
+        compiled = aot_function(
+            metadata_mutation,
+            fw_compiler=lambda gm, _: make_boxed_func(gm.forward),
+            keep_inference_input_mutations=True,
+            dynamic=True,
+        )
+        with self.assertRaisesRegex(RuntimeError, "symbolic metadata mutations"):
+            compiled(x)
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return (x.clone(),)
+
+        gm, _ = aot_export_module(M(), [x], trace_joint=False)
+        self.assertEqual(gm(x)[0], x.clone())
+
+    @parametrize("target", ["lazy", "independent", "shared_storage"])
+    def test_lazy_view_bits_custom_autograd_views(self, target):
+        class ViewFn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.view(x.shape)
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad
+
+        def compiler(gm, _):
+            return make_boxed_func(gm.forward)
+
+        if target == "lazy":
+            x = torch.arange(6.0)._neg_view().requires_grad_()
+            compiled = aot_function(lambda y: ViewFn.apply(y), fw_compiler=compiler)
+            with self.assertRaisesRegex(RuntimeError, "custom autograd views"):
+                compiled(x)
+            return
+
+        if target == "independent":
+            x = torch.arange(6.0)._neg_view()
+            other = torch.arange(6.0, requires_grad=True)
+        else:
+            other = torch.arange(6.0, requires_grad=True)
+            x = other._neg_view()
+
+        def fn(y, z):
+            return y.clone(), ViewFn.apply(z)
+
+        compiled = aot_function(fn, fw_compiler=compiler)
+        self.assertEqual(compiled(x, other), fn(x, other))
+
+    def test_lazy_view_bits_inside_tensor_subclass_fail_explicitly(self):
+        x = TwoTensor(
+            torch.tensor([1 + 2j]).conj(),
+            torch.tensor([3 + 4j]).conj(),
+        )
+        compiled = aot_function(
+            lambda y: y.clone(),
+            fw_compiler=lambda gm, _: make_boxed_func(gm.forward),
+        )
+        with self.assertRaisesRegex(RuntimeError, "inside tensor subclass inputs"):
+            compiled(x)
+
+    def test_lazy_view_bits_next_to_tensor_subclass(self):
+        x = torch.arange(4.0)._neg_view()
+        y = TwoTensor(torch.arange(4.0), torch.arange(4.0))
+
+        def fn(a, b):
+            return a.clone(), b.clone()
+
+        compiled = aot_function(
+            fn,
+            fw_compiler=lambda gm, _: make_boxed_func(gm.forward),
+        )
+        self.assertEqual(compiled(x, y), fn(x, y))
+
     @parametrize("backend", ["aot_eager", "inductor"])
     @parametrize("view_replay_for_aliased_outputs", [False, True])
     @parametrize("dynamic_shapes", [False, True])

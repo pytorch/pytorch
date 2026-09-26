@@ -833,14 +833,16 @@ class AutogradFunctionApply(HigherOrderOperator):
                 output, saved_values = torch.fx.Interpreter(fwd).run(*args)
 
                 # See Note [Activations with no version counter checks in eager]
-                # Mark tensors that came from ctx.save_for_backward with metadata.
-                # This allows AOT autograd to distinguish between tensors saved via
-                # save_for_backward vs those stashed directly on ctx (e.g., ctx.x = x).
+                # Mark how each tensor was retained by the custom Function. This
+                # allows AOTAutograd to distinguish save_for_backward from tensors
+                # stashed directly on ctx (e.g., ctx.x = x).
                 from torch.fx.experimental.proxy_tensor import _get_proxies
 
                 for idx, t in enumerate(saved_values):
-                    if idx not in saved_for_backward_idx:
-                        for proxy in _get_proxies(t):
+                    for proxy in _get_proxies(t):
+                        if idx in saved_for_backward_idx:
+                            proxy.node.meta["saved_tensor_with_vc_check"] = True
+                        else:
                             proxy.node.meta["saved_tensor_with_no_vc_check"] = True
 
                 return output

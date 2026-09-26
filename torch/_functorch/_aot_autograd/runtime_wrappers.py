@@ -69,7 +69,13 @@ from .descriptors import (
     SyntheticBaseAOTInput,
     ViewBaseAOTInput,
 )
-from .functional_utils import gen_alias_from_base
+from .functional_utils import (
+    clear_input_view_bits_for_spec,
+    gen_alias_from_base,
+    normalize_backward_input_view_bits_in_place,
+    replay_view_meta_sequence,
+    restore_input_view_bits_for_spec,
+)
 from .graph_capture_wrappers import aot_dispatch_subclass
 from .input_output_analysis import (
     compute_overlapping_inputs,
@@ -89,6 +95,7 @@ from .schemas import (
     OutputAliasInfo,
     OutputType,
     PlainTensorMeta,
+    SavedTensorInputAliasInfo,
     SubclassCreationMeta,
     SubclassMeta,
     TensorAlias,
@@ -225,7 +232,11 @@ class NoopAliasHandler:
         pass
 
     def __call__(
-        self, orig_inputs: dict[int, Tensor], fw_outs: list[Any], out: Any
+        self,
+        orig_inputs: dict[int, Tensor],
+        pre_mutation_bases: dict[int, Tensor],
+        fw_outs: list[Any],
+        out: Any,
     ) -> Any:
         return out
 
@@ -253,18 +264,37 @@ class AliasOfInputHandler:
         self.unwrap_out = _unwrap_tensoralias if trace_joint else _identity
         self.requires_grad = info.requires_grad
         self.view_meta_sequence = info.view_meta_sequence
-        self.replay_views = config.view_replay_for_aliased_outputs
+        self.is_conj = info.is_conj
+        self.is_neg = info.is_neg
+        self.base_input_has_view_bits = info.base_input_has_view_bits
+        self.use_pre_mutation_base = (
+            self.base_input_has_view_bits
+            and runtime_metadata.input_info[self.base_idx].mutates_metadata
+        )
+        self.replay_views = (
+            config.view_replay_for_aliased_outputs or self.base_input_has_view_bits
+        )
 
     def __call__(
-        self, orig_inputs: dict[int, Tensor], fw_outs: list[Any], out: Any
+        self,
+        orig_inputs: dict[int, Tensor],
+        pre_mutation_bases: dict[int, Tensor],
+        fw_outs: list[Any],
+        out: Any,
     ) -> torch.Tensor:
-        aliased_base_tensor = orig_inputs[self.base_idx]
+        aliased_base_tensor = (
+            pre_mutation_bases[self.base_idx]
+            if self.use_pre_mutation_base
+            else orig_inputs[self.base_idx]
+        )
         return gen_alias_from_base(
             aliased_base_tensor,
             self.unwrap_out(out),
             self.requires_grad,
             self.view_meta_sequence,
             replay_views=self.replay_views,
+            target_is_conj=self.is_conj,
+            target_is_neg=self.is_neg,
         )
 
 
@@ -280,7 +310,11 @@ class IsInputHandler:
         self.base_idx = info.base_idx
 
     def __call__(
-        self, orig_inputs: dict[int, Tensor], fw_outs: list[Any], out: Any
+        self,
+        orig_inputs: dict[int, Tensor],
+        pre_mutation_bases: dict[int, Tensor],
+        fw_outs: list[Any],
+        out: Any,
     ) -> torch.Tensor:
         aliased_base_tensor = orig_inputs[self.base_idx]
         return aliased_base_tensor
@@ -310,10 +344,16 @@ class AliasOfIntermediateHandler:
         self.unwrap_out = _unwrap_tensoralias if trace_joint else _identity
         self.requires_grad = info.requires_grad
         self.view_meta_sequence = info.view_meta_sequence
+        self.is_conj = info.is_conj
+        self.is_neg = info.is_neg
         self.replay_views = config.view_replay_for_aliased_outputs
 
     def __call__(
-        self, orig_inputs: dict[int, Tensor], fw_outs: list[Any], out: Any
+        self,
+        orig_inputs: dict[int, Tensor],
+        pre_mutation_bases: dict[int, Tensor],
+        fw_outs: list[Any],
+        out: Any,
     ) -> torch.Tensor:
         aliased_base_tensor = fw_outs[self.base_idx]
         return gen_alias_from_base(
@@ -322,6 +362,8 @@ class AliasOfIntermediateHandler:
             self.requires_grad,
             self.view_meta_sequence,
             replay_views=self.replay_views,
+            target_is_conj=self.is_conj,
+            target_is_neg=self.is_neg,
         )
 
 
@@ -556,6 +598,7 @@ class _FirstInvocationContext:
 class _RuntimeCompiledFnInvoker:
     compiled_fn: Callable[..., Any]
     indices_of_inps_to_detach: list[int]
+    view_bit_input_specs: tuple[tuple[int, bool, bool], ...]
     trace_joint: bool
     disable_amp: bool
     first_invocation_ctx: _FirstInvocationContext = field(
@@ -586,6 +629,10 @@ class _RuntimeCompiledFnInvoker:
                     if not prev_view_replay_enabled:
                         torch._C._set_view_replay_enabled(True)
                     with torch.enable_grad():
+                        for idx, is_conj, is_neg in self.view_bit_input_specs:
+                            args_[idx] = clear_input_view_bits_for_spec(
+                                args_[idx], is_conj=is_conj, is_neg=is_neg
+                            )
                         on_before_call()
                         return call_func_at_runtime_with_args(
                             self.compiled_fn,
@@ -606,6 +653,10 @@ class _RuntimeCompiledFnInvoker:
             try:
                 if grad_enabled:
                     torch._C._set_grad_enabled(False)
+                for idx, is_conj, is_neg in self.view_bit_input_specs:
+                    args[idx] = clear_input_view_bits_for_spec(
+                        args[idx], is_conj=is_conj, is_neg=is_neg
+                    )
                 on_before_call()
                 return call_func_at_runtime_with_args(
                     self.compiled_fn,
@@ -624,6 +675,7 @@ class _RuntimeForwardEpilogue:
     trace_joint: bool
     keep_input_mutations: bool
     epilogue_args_idx: tuple[int, ...] = field(init=False)
+    pre_mutation_base_indices: tuple[int, ...] = field(init=False)
     output_handlers: tuple[
         NoopAliasHandler
         | AliasOfInputHandler
@@ -645,6 +697,16 @@ class _RuntimeForwardEpilogue:
                     )
                 epilogue_args_idx.append(info.base_idx)
         self.epilogue_args_idx = tuple(epilogue_args_idx)
+        self.pre_mutation_base_indices = tuple(
+            dict.fromkeys(
+                info.base_idx
+                for info in self.runtime_metadata.output_info
+                if info.output_type == OutputType.alias_of_input
+                and info.base_input_has_view_bits
+                and info.base_idx is not None
+                and self.runtime_metadata.input_info[info.base_idx].mutates_metadata
+            )
+        )
 
         if config.unlift_effect_tokens:
             if len(self.runtime_metadata.tokens) != 0:
@@ -667,6 +729,12 @@ class _RuntimeForwardEpilogue:
     def capture_orig_inputs(self, args: list[Any]) -> dict[int, Tensor]:
         return {i: typing.cast(Tensor, args[i]) for i in self.epilogue_args_idx}
 
+    def capture_pre_mutation_bases(self, args: list[Any]) -> dict[int, Tensor]:
+        return {
+            i: torch.ops.aten.alias.default(typing.cast(Tensor, args[i]))
+            for i in self.pre_mutation_base_indices
+        }
+
     # WARNING: this is a reference implementation; the hot path uses codegen'd
     # code from _create_runtime_wrapper(). Keep both in sync.
     # See Note [RuntimeWrapper codegen specification methods]
@@ -681,13 +749,18 @@ class _RuntimeForwardEpilogue:
     # WARNING: this is a reference implementation; the hot path uses codegen'd
     # code from _create_runtime_wrapper(). Keep both in sync.
     # See Note [RuntimeWrapper codegen specification methods]
-    def finalize(self, orig_inputs: dict[int, Tensor], all_outs: list[Any]) -> Any:
+    def finalize(
+        self,
+        orig_inputs: dict[int, Tensor],
+        pre_mutation_bases: dict[int, Tensor],
+        all_outs: list[Any],
+    ) -> Any:
         self._validate_compiled_output_arity(all_outs)
         updated_inputs, fw_outs = self._split_mutated_inputs(all_outs)
         if updated_inputs is not None:
             self._apply_input_mutations(orig_inputs, updated_inputs)
 
-        ret_outs = self._replay_output_aliases(orig_inputs, fw_outs)
+        ret_outs = self._replay_output_aliases(orig_inputs, pre_mutation_bases, fw_outs)
         if self.runtime_metadata.dynamic_outputs:
             for t, o in zip(ret_outs, self.runtime_metadata.output_info):
                 if o.dynamic_dims is None:
@@ -759,23 +832,40 @@ class _RuntimeForwardEpilogue:
                             f"expected TensorAlias for updated_inpt, got {type(updated_inpt)}"
                         )
                     updated_inpt = updated_inpt.alias
-                # We need to grab the size/stride/storage_offset from the compiled forward,
-                # and use that to mutate the metadata of the input
+                if meta.mutation_view_meta_sequence is not None:
+                    updated_inpt = replay_view_meta_sequence(
+                        original_inpt, meta.mutation_view_meta_sequence
+                    )
                 original_inpt.as_strided_(
                     updated_inpt.size(),
                     updated_inpt.stride(),
                     updated_inpt.storage_offset(),
                 )
             else:
+                updated_meta = None
                 if meta.mutates_data and meta.mutates_metadata:
-                    original_inpt.as_strided_(
-                        updated_inpt.size(),
-                        updated_inpt.stride(),
-                        updated_inpt.storage_offset(),
+                    updated_meta = (
+                        replay_view_meta_sequence(
+                            original_inpt, meta.mutation_view_meta_sequence
+                        )
+                        if meta.mutation_view_meta_sequence is not None
+                        else updated_inpt
                     )
+                    if not meta.has_view_bits:
+                        original_inpt.as_strided_(
+                            updated_meta.size(),
+                            updated_meta.stride(),
+                            updated_meta.storage_offset(),
+                        )
                 else:
                     if not meta.mutates_data:
                         raise AssertionError("expected meta.mutates_data to be True")
+                if meta.has_view_bits:
+                    updated_inpt = clear_input_view_bits_for_spec(
+                        updated_inpt,
+                        is_conj=meta.is_conj,
+                        is_neg=meta.is_neg,
+                    )
                 if meta.is_leaf and original_inpt.requires_grad:
                     # We can hit this situation in this case:
                     #   def f(x):
@@ -803,9 +893,18 @@ class _RuntimeForwardEpilogue:
                             "See: https://github.com/pytorch/pytorch/issues/172522"
                         )
                     original_inpt.copy_(updated_inpt)
+                if updated_meta is not None and meta.has_view_bits:
+                    original_inpt.as_strided_(
+                        updated_meta.size(),
+                        updated_meta.stride(),
+                        updated_meta.storage_offset(),
+                    )
 
     def _replay_output_aliases(
-        self, orig_inputs: dict[int, Tensor], fw_outs: list[Any]
+        self,
+        orig_inputs: dict[int, Tensor],
+        pre_mutation_bases: dict[int, Tensor],
+        fw_outs: list[Any],
     ) -> Any:
         if self.runtime_metadata.num_outputs_aliased == 0:
             return fw_outs
@@ -819,7 +918,7 @@ class _RuntimeForwardEpilogue:
                 f"expected {expect_num_outputs} fw_outs, got {len(fw_outs)}"
             )
         return [
-            handler(orig_inputs, fw_outs, out)
+            handler(orig_inputs, pre_mutation_bases, fw_outs, out)
             for out, handler in zip(fw_outs, self.output_handlers)
         ]
 
@@ -827,12 +926,21 @@ class _RuntimeForwardEpilogue:
 def _codegen_capture_orig_inputs(
     buf: "PySourceBuilder",
     epilogue_args_idx: tuple[int, ...],
+    pre_mutation_base_indices: tuple[int, ...],
 ) -> None:
     if epilogue_args_idx:
         idx_str = ", ".join(f"{i}: args[{i}]" for i in epilogue_args_idx)
         buf.emit(f"orig_inputs = {{{idx_str}}}", indent=1)
     else:
         buf.emit("orig_inputs = {}", indent=1)
+    if pre_mutation_base_indices:
+        idx_str = ", ".join(
+            f"{i}: torch.ops.aten.alias.default(args[{i}])"
+            for i in pre_mutation_base_indices
+        )
+        buf.emit(f"pre_mutation_bases = {{{idx_str}}}", indent=1)
+    else:
+        buf.emit("pre_mutation_bases = {}", indent=1)
 
 
 def _codegen_increment_mutation_versions(
@@ -863,8 +971,11 @@ def _codegen_compiled_fn_invocation(
     buf: "PySourceBuilder",
     trace_joint: bool,
     indices_of_inps_to_detach: list[int],
+    view_bit_input_specs: tuple[tuple[int, bool, bool], ...],
     disable_amp: bool,
 ) -> None:
+    if view_bit_input_specs:
+        buf.bind(_clear_input_view_bits_=clear_input_view_bits_for_spec)
     buf.emit("with _first_ctx_():", indent=1)
     # trace_joint is known at codegen time. Only the joint/training path needs
     # forced view replay; inference wrappers should not touch this TLS state.
@@ -883,6 +994,12 @@ def _codegen_compiled_fn_invocation(
         buf.emit("if not prev_view_replay_enabled:", indent=3)
         buf.emit("torch._C._set_view_replay_enabled(True)", indent=4)
         buf.emit("with torch.enable_grad():", indent=3)
+        for idx, is_conj, is_neg in view_bit_input_specs:
+            buf.emit(
+                f"args_[{idx}] = _clear_input_view_bits_(args_[{idx}], "
+                f"is_conj={is_conj!r}, is_neg={is_neg!r})",
+                indent=4,
+            )
         buf.emit("_on_before_call_()", indent=4)
         if disable_amp:
             buf.add_global("_DisableAutocast_", torch._C._DisableAutocast)
@@ -904,6 +1021,12 @@ def _codegen_compiled_fn_invocation(
         buf.emit("grad_enabled = torch.is_grad_enabled()", indent=2)
         buf.emit("try:", indent=2)
         buf.emit("if grad_enabled: torch._C._set_grad_enabled(False)", indent=3)
+        for idx, is_conj, is_neg in view_bit_input_specs:
+            buf.emit(
+                f"args[{idx}] = _clear_input_view_bits_(args[{idx}], "
+                f"is_conj={is_conj!r}, is_neg={is_neg!r})",
+                indent=3,
+            )
         buf.emit("_on_before_call_()", indent=3)
         if disable_amp:
             buf.add_global("_DisableAutocast_", torch._C._DisableAutocast)
@@ -951,7 +1074,10 @@ def _codegen_epilogue(
 
     if runtime_metadata.num_outputs_aliased > 0:
         buf.add_global("_replay_aliases_", replay_aliases_fn)
-        buf.emit("ret_outs = _replay_aliases_(orig_inputs, fw_outs)", indent=1)
+        buf.emit(
+            "ret_outs = _replay_aliases_(orig_inputs, pre_mutation_bases, fw_outs)",
+            indent=1,
+        )
     else:
         buf.emit("ret_outs = fw_outs", indent=1)
 
@@ -981,9 +1107,15 @@ def _create_runtime_wrapper(
     keep_input_mutations: bool,
     disable_amp: bool,
 ) -> Callable[..., Any]:
+    view_bit_input_specs = tuple(
+        (i, info.is_conj, info.is_neg)
+        for i, info in enumerate(runtime_metadata.input_info)
+        if info.has_view_bits
+    )
     compiled_invoker = _RuntimeCompiledFnInvoker(
         compiled_fn=compiled_fn,
         indices_of_inps_to_detach=indices_of_inps_to_detach,
+        view_bit_input_specs=view_bit_input_specs,
         trace_joint=trace_joint,
         disable_amp=disable_amp,
     )
@@ -1007,7 +1139,7 @@ def _create_runtime_wrapper(
 
         buf = PySourceBuilder(
             "_alias_fn",
-            args="orig_inputs, fw_outs",
+            args="orig_inputs, pre_mutation_bases, fw_outs",
             artifact_name="output_alias_wrapper",
         )
         buf.bind(
@@ -1028,11 +1160,18 @@ def _create_runtime_wrapper(
                         if trace_joint
                         else f"fw_outs[{i}]"
                     )
+                    base_expr = (
+                        f"pre_mutation_bases[{handler.base_idx}]"
+                        if handler.use_pre_mutation_base
+                        else f"orig_inputs[{handler.base_idx}]"
+                    )
                     buf.writeline(
                         f"ret_outs.append(gen_alias_from_base("
-                        f"orig_inputs[{handler.base_idx}], {out_expr}, "
+                        f"{base_expr}, {out_expr}, "
                         f"{handler.requires_grad!r}, {vms_name}, "
-                        f"replay_views={handler.replay_views!r}))"
+                        f"replay_views={handler.replay_views!r}, "
+                        f"target_is_conj={handler.is_conj!r}, "
+                        f"target_is_neg={handler.is_neg!r}))"
                     )
                 elif isinstance(handler, AliasOfIntermediateHandler):
                     vms_name = buf.bind_value("_vms", handler.view_meta_sequence)
@@ -1053,7 +1192,9 @@ def _create_runtime_wrapper(
                         f"ret_outs.append(gen_alias_from_base("
                         f"{base_expr}, {out_expr}, "
                         f"{handler.requires_grad!r}, {vms_name}, "
-                        f"replay_views={handler.replay_views!r}))"
+                        f"replay_views={handler.replay_views!r}, "
+                        f"target_is_conj={handler.is_conj!r}, "
+                        f"target_is_neg={handler.is_neg!r}))"
                     )
                 else:
                     raise AssertionError(
@@ -1091,7 +1232,12 @@ def _create_runtime_wrapper(
             args="orig_inputs, updated_inputs",
             artifact_name="mutation_epilogue",
         )
-        buf.bind(torch=torch, _unwrap_tensoralias=_unwrap_tensoralias)
+        buf.bind(
+            _clear_input_view_bits=clear_input_view_bits_for_spec,
+            torch=torch,
+            _replay_view_meta_sequence=replay_view_meta_sequence,
+            _unwrap_tensoralias=_unwrap_tensoralias,
+        )
         wrote_body = False
         with buf.indent():
             for i, inpt_idx in enumerate(runtime_metadata.mutated_inp_runtime_indices):
@@ -1110,7 +1256,12 @@ def _create_runtime_wrapper(
                     buf.writeline(f"with torch.no_grad(): {oi}.set_({u})")
                 elif meta.mutates_metadata and not meta.mutates_data:
                     u = buf.fresh_name("_u")
-                    if trace_joint:
+                    if meta.mutation_view_meta_sequence is not None:
+                        seq = buf.bind_value(
+                            "_mutation_vms", meta.mutation_view_meta_sequence
+                        )
+                        buf.writeline(f"{u} = _replay_view_meta_sequence({oi}, {seq})")
+                    elif trace_joint:
                         buf.writeline(f"{u} = _unwrap_tensoralias({ui})")
                     else:
                         buf.writeline(f"{u} = {ui}")
@@ -1118,20 +1269,39 @@ def _create_runtime_wrapper(
                         f"{oi}.as_strided_({u}.size(), {u}.stride(), {u}.storage_offset())"
                     )
                 else:
+                    copy_src = ui
+                    metadata_src = None
                     if meta.mutates_data and meta.mutates_metadata:
-                        buf.writeline(
-                            f"{oi}.as_strided_({ui}.size(), {ui}.stride(), {ui}.storage_offset())"
-                        )
+                        u = ui
+                        if meta.mutation_view_meta_sequence is not None:
+                            u = buf.fresh_name("_u_meta")
+                            seq = buf.bind_value(
+                                "_mutation_vms", meta.mutation_view_meta_sequence
+                            )
+                            buf.writeline(
+                                f"{u} = _replay_view_meta_sequence({oi}, {seq})"
+                            )
+                        metadata_src = u
+                        if not meta.has_view_bits:
+                            buf.writeline(
+                                f"{oi}.as_strided_({u}.size(), {u}.stride(), {u}.storage_offset())"
+                            )
                     else:
                         if not meta.mutates_data:
                             raise AssertionError(
                                 f"expected mutates_data for input {inpt_idx}"
                             )
+                    if meta.has_view_bits:
+                        copy_src = buf.fresh_name("_u_data")
+                        buf.writeline(
+                            f"{copy_src} = _clear_input_view_bits({ui}, "
+                            f"is_conj={meta.is_conj!r}, is_neg={meta.is_neg!r})"
+                        )
                     if meta.is_leaf:
                         buf.writeline(
-                            f"if {oi}.requires_grad: {oi}.detach().copy_({ui})"
+                            f"if {oi}.requires_grad: {oi}.detach().copy_({copy_src})"
                         )
-                        buf.writeline(f"else: {oi}.copy_({ui})")
+                        buf.writeline(f"else: {oi}.copy_({copy_src})")
                     else:
                         has_stream = (
                             runtime_metadata.mutated_inp_stream_indices is not None
@@ -1147,7 +1317,12 @@ def _create_runtime_wrapper(
                             )
                             buf.writeline(f"raise RuntimeError({msg_name})")
                         else:
-                            buf.writeline(f"{oi}.copy_({ui})")
+                            buf.writeline(f"{oi}.copy_({copy_src})")
+                    if metadata_src is not None and meta.has_view_bits:
+                        buf.writeline(
+                            f"{oi}.as_strided_({metadata_src}.size(), "
+                            f"{metadata_src}.stride(), {metadata_src}.storage_offset())"
+                        )
             if not wrote_body:
                 buf.writeline("pass")
 
@@ -1170,10 +1345,16 @@ def _create_runtime_wrapper(
     )
     buf.bind(torch=torch)
 
-    _codegen_capture_orig_inputs(buf, epilogue_args_idx)
+    _codegen_capture_orig_inputs(
+        buf, epilogue_args_idx, runtime_epilogue.pre_mutation_base_indices
+    )
     _codegen_increment_mutation_versions(buf, keep_input_mutations, runtime_metadata)
     _codegen_compiled_fn_invocation(
-        buf, trace_joint, indices_of_inps_to_detach, disable_amp
+        buf,
+        trace_joint,
+        indices_of_inps_to_detach,
+        view_bit_input_specs,
+        disable_amp,
     )
     _codegen_epilogue(
         buf,
@@ -2632,13 +2813,47 @@ class AOTDispatchAutogradCompileSpec:
 class _AutogradSavedState:
     metadata: ViewAndMutationMeta
 
-    def save_from_forward(self, ctx: Any, fw_outs: Sequence[Any]) -> None:
-        tensors_saved_with_vc_check = fw_outs[
-            self.metadata.tensors_saved_for_backwards_with_vc_check_slice
-        ]
-        tensors_saved_no_vc_check = fw_outs[
-            self.metadata.tensors_saved_for_backwards_no_vc_check_slice
-        ]
+    @staticmethod
+    def _rebuild_input_alias(
+        graph_inputs: Sequence[Any],
+        info: SavedTensorInputAliasInfo,
+        runtime_saved_tensor: torch.Tensor,
+    ) -> torch.Tensor:
+        tensor = graph_inputs[info.input_index]
+        if not isinstance(tensor, torch.Tensor):
+            raise AssertionError(
+                f"expected graph input {info.input_index} to be a Tensor, "
+                f"got {type(tensor)}"
+            )
+        if not info.input_metadata_matches:
+            size = (
+                info.size
+                if info.size is not None
+                else tuple(runtime_saved_tensor.shape)
+            )
+            stride = (
+                info.stride
+                if info.stride is not None
+                else runtime_saved_tensor.stride()
+            )
+            tensor = tensor.as_strided(
+                size,
+                stride,
+                tensor.storage_offset() + info.storage_offset_delta,
+            )
+        return restore_input_view_bits_for_spec(
+            tensor, is_conj=info.is_conj, is_neg=info.is_neg
+        )
+
+    def save_from_forward(
+        self, ctx: Any, fw_outs: Sequence[Any], graph_inputs: Sequence[Any]
+    ) -> None:
+        tensors_saved_with_vc_check = list(
+            fw_outs[self.metadata.tensors_saved_for_backwards_with_vc_check_slice]
+        )
+        tensors_saved_no_vc_check = list(
+            fw_outs[self.metadata.tensors_saved_for_backwards_no_vc_check_slice]
+        )
         if not all(isinstance(x, torch.Tensor) for x in tensors_saved_with_vc_check):
             raise AssertionError(
                 "expected all tensors_saved_with_vc_check to be Tensors, "
@@ -2653,6 +2868,24 @@ class _AutogradSavedState:
         # See Note [Detaching saved tensors in AOTAutograd]
         num_vc_check = len(tensors_saved_with_vc_check)
         is_graph_input = self.metadata.saved_tensor_is_graph_input
+        saved_input_aliases = self.metadata.saved_tensor_input_aliases
+        if len(saved_input_aliases) != (num_vc_check + len(tensors_saved_no_vc_check)):
+            raise AssertionError(
+                "expected one input-alias entry per saved tensor, "
+                f"got {len(saved_input_aliases)} != "
+                f"{num_vc_check + len(tensors_saved_no_vc_check)}"
+            )
+        for i, info in enumerate(saved_input_aliases[:num_vc_check]):
+            if info is not None:
+                tensors_saved_with_vc_check[i] = self._rebuild_input_alias(
+                    graph_inputs, info, tensors_saved_with_vc_check[i]
+                )
+        for i, info in enumerate(saved_input_aliases[num_vc_check:]):
+            if info is not None:
+                tensors_saved_no_vc_check[i] = self._rebuild_input_alias(
+                    graph_inputs, info, tensors_saved_no_vc_check[i]
+                )
+
         tensors_to_save = [
             x if is_graph_input[i] or not x._is_view() else x.detach()
             for i, x in enumerate(tensors_saved_with_vc_check)
@@ -3273,7 +3506,7 @@ def _codegen_compiled_forward(
             buf.writeline("fw_outs = _compiled_fw_(list(args))")
             _codegen_normalize_as_list(buf, "fw_outs", indent_level=1)
 
-        buf.writeline("_save_(ctx, fw_outs)")
+        buf.writeline("_save_(ctx, fw_outs, args)")
         buf.writeline("return _finalize_(ctx, fw_outs)")
 
     return buf.build()
@@ -3632,7 +3865,11 @@ class _AOTDispatchAutogradFunctionFactory:
 
                 return call_func_at_runtime_with_args(
                     compiled_bw,
-                    all_args,
+                    normalize_backward_input_view_bits_in_place(
+                        all_args,
+                        num_symints_saved_for_bw=num_symints_saved_for_bw_,
+                        saved_tensor_view_bits=fw_metadata.saved_tensor_view_bits,
+                    ),
                     steal_args=True,
                     disable_amp=disable_amp,
                 )
