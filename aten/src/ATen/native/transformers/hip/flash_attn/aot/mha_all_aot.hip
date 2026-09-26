@@ -148,6 +148,20 @@ prepare_philox_arguments(float p_dropout, int64_t counter_offset) {
 #define CHECK_SHAPE(x, ...) TORCH_CHECK(x.sizes() == at::IntArrayRef({__VA_ARGS__}), #x " must have shape (" #__VA_ARGS__ ")")
 #define CHECK_CONTIGUOUS(x) TORCH_CHECK(x.is_contiguous(), #x " must be contiguous")
 
+// AOTriton streams K and V along the sequence dimension and relies on L2 to reuse
+// them across Q tiles. Strided K/V, from a fused QKV split or a (batch, seqlen,
+// heads, dim) layout, defeats that reuse. Packing costs a copy, so it only wins
+// once a head's K and V no longer fit in L2.
+static bool kv_packing_pays_off(const at::Tensor& k, const at::Tensor& v) {
+  // k, v: batch x num_heads x seqlen x head_dim
+  const auto head_dim = k.size(3);
+  if (k.stride(2) == head_dim && v.stride(2) == head_dim) {
+    return false;
+  }
+  const int64_t bytes_per_head = (k.size(2) + v.size(2)) * head_dim * k.element_size();
+  return bytes_per_head > at::cuda::getCurrentDeviceProperties()->l2CacheSize;
+}
+
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor>
 mha_fwd_aot(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head_size
             const at::Tensor &k,         // batch_size x seqlen_k x num_heads_k x head_size
@@ -223,6 +237,10 @@ mha_fwd_aot(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x 
   at::Tensor q_t = q_padded.permute({0,2,1,3});
   at::Tensor k_t = k_padded.permute({0,2,1,3});
   at::Tensor v_t = v_padded.permute({0,2,1,3});
+  if (kv_packing_pays_off(k_t, v_t)) {
+    k_t = k_t.contiguous();
+    v_t = v_t.contiguous();
+  }
   at::Tensor output_t = out.permute({0,2,1,3});
 
   auto opts = q.options();
