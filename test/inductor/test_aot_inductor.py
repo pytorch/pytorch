@@ -5978,7 +5978,9 @@ class AOTInductorTestsTemplate:
             with self.assertRaisesRegex(Exception, "Expected .* but received"):
                 optimized(torch.randn(100), torch.tensor(2))
 
+    # Exercise the generated shape guard; fallback raises ATen's reshape error.
     @patch.dict(os.environ, {"TORCHINDUCTOR_SCALAR_ASSERTS_FULL": "1"})
+    @unittest.skipIf(config.fallback_by_default, "requires generated shape guards")
     def test_aoti_runtime_asserts_backed_symint(self):
         if not full_aoti_runtime_assert():
             raise unittest.SkipTest("full runtime assert not turned on")
@@ -6589,8 +6591,8 @@ class AOTInductorTestsTemplate:
         self.check_model(model, example_inputs, dynamic_shapes=dynamic_shapes)
 
     @unittest.skipIf(config.triton.native_matmul, "matmul is generated")
+    @unittest.skipIf(config.fallback_by_default, "requires the addmm out shim")
     def test_aoti_debug_printer_codegen(self):
-        # basic addmm model to test codegen for aoti intermediate debug printer
         class Model(torch.nn.Module):
             def __init__(self, n, k, device):
                 super().__init__()
@@ -6677,6 +6679,7 @@ class AOTInductorTestsTemplate:
     )
     @common_utils.parametrize("enable_kernel_profile", (True, False))
     @common_utils.parametrize("enable_kernel_context_guard", (True, False))
+    @unittest.skipIf(config.fallback_by_default, "requires the addmm out shim")
     def test_aoti_profiler(self, enable_kernel_context_guard, enable_kernel_profile):
         # basic addmm model
         class Model(torch.nn.Module):
@@ -6735,6 +6738,7 @@ class AOTInductorTestsTemplate:
         sys.platform not in ["linux", "win32"],
         "enable_kernel_profile only supported on linux and win32",
     )
+    @unittest.skipIf(config.fallback_by_default, "requires out shims and view lowering")
     def test_aoti_profiler_input_shapes(self):
         # Verify that kernel profiling records tensor input shapes,
         # scalar args, output handles, and ReinterpretView logical shapes.
@@ -6813,6 +6817,7 @@ class AOTInductorTestsTemplate:
         sys.platform not in ["linux", "win32"],
         "enable_kernel_profile only supported on linux and win32",
     )
+    @unittest.skipIf(config.fallback_by_default, "requires view lowering")
     def test_aoti_profiler_multi_output_fallback_input_shapes(self):
         # A tuple-returning fallback (scaled_dot_product_attention) is the
         # representative kernel reaching generate_c_shim_fallback_kernel;
@@ -6862,6 +6867,7 @@ class AOTInductorTestsTemplate:
         sys.platform not in ["linux", "win32"],
         "enable_kernel_profile only supported on linux and win32",
     )
+    @unittest.skipIf(config.fallback_by_default, "requires view lowering")
     def test_aoti_profiler_tensor_list_input_shapes(self):
         # A tensor-list fallback collapses its whole list into a single codegen
         # arg, so the profiling handles for its ReinterpretView inputs have no
@@ -7608,12 +7614,11 @@ class AOTInductorTestsTemplate:
                     count,
                 ).run(code)
 
+    @unittest.skipIf(config.fallback_by_default, "requires a fused C++ kernel")
     def test_aoti_debug_printer_cpp_kernel(self):
         if self.device != "cpu":
             raise unittest.SkipTest("cpu test case only")
 
-        # a simple cpp kernel test case for testing the debug printer codegen
-        # on cpp kernel cpu device.
         class Model(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
