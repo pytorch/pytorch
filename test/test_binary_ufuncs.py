@@ -25,6 +25,7 @@ from torch.testing._internal.common_device_type import (
     dtypesIfXPU,
     expectedFailureMeta,
     instantiate_device_type_tests,
+    onlyCPU,
     onlyNativeDeviceTypes,
     onlyOn,
     OpDTypes,
@@ -2491,6 +2492,36 @@ class TestBinaryUfuncsDevice(TestCase):
             else:
                 self.assertEqual(tensor_result, numpy_result)
                 self.assertEqual(out, numpy_result)
+
+    @onlyCPU
+    @dtypes(*(floating_types_and(torch.half, torch.bfloat16)))
+    def test_maximum_minimum_signed_zero(self, device, dtype):
+        # The scalar kernel used std::min / std::max, which compare with < and
+        # so cannot tell +0.0 from -0.0. They returned whichever argument came
+        # first, so the result depended on whether an element landed on the
+        # scalar tail or in the vectorized body, and therefore on the length.
+        #
+        # The expected signs are IEEE 754's minimum / maximum: the result is
+        # -0.0 for min and +0.0 for max, in either argument order. That is also
+        # what at::vec::minimum on NEON, std::fmin / std::fmax, and numpy in
+        # float32 and float64 all give. It is written out rather than taken from
+        # numpy because numpy's own float16 loop returns the first argument.
+        #
+        # A one element tensor takes the scalar path on every ISA, so this
+        # exercises the kernel that was wrong without depending on the vector
+        # width.
+        for torch_op, want_negative_zero in (
+            (torch.maximum, False),
+            (torch.minimum, True),
+        ):
+            for a_val, b_val in ((0.0, -0.0), (-0.0, 0.0)):
+                a = torch.tensor([a_val], device=device, dtype=dtype)
+                b = torch.tensor([b_val], device=device, dtype=dtype)
+                self.assertEqual(
+                    torch_op(a, b).signbit().item(),
+                    want_negative_zero,
+                    msg=f"{torch_op.__name__}({a_val}, {b_val}) in {dtype}",
+                )
 
     @dtypes(
         *product(
