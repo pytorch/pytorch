@@ -183,6 +183,63 @@ class TestCodegenTriton(InductorTestCase):
             finally:
                 kernel.range_trees = saved_range_trees
 
+    def test_device_tma_metadata_ignores_removed_buffers(self):
+        kernel = TritonKernel(
+            {"x": sympy.Integer(4), "r0_": sympy.Integer(512)},
+            features=SIMDKernelFeatures([], sympy.Integer(4), sympy.Integer(512)),
+            override_persistent_reduction=False,
+            override_cooperative_reduction=False,
+        )
+        kernel._device_tma_buffers.update(("strict_output", "live_output"))
+        kernel._record_tma_min_block_size("strict_output", "XBLOCK", 8)
+        kernel._record_tma_min_block_size("live_output", "XBLOCK", 4)
+
+        with V.set_kernel_handler(kernel):
+            self.assertTrue(kernel.uses_device_tma)
+            self.assertEqual(
+                kernel.inductor_meta_per_kernel()["tma_min_block_sizes"],
+                {"XBLOCK": 8},
+            )
+            self.assertTrue(kernel.inductor_meta_per_kernel()["uses_device_tma"])
+
+            # Removing only the stricter descriptor must recompute the aggregate
+            # constraint from the surviving descriptor.
+            self._graph.removed_buffers.add("strict_output")
+            self.assertTrue(kernel.uses_device_tma)
+            self.assertEqual(
+                kernel.inductor_meta_per_kernel()["tma_min_block_sizes"],
+                {"XBLOCK": 4},
+            )
+
+            # Cover graph-level inplaced removal of the final live descriptor.
+            self._graph.inplaced_to_remove.add("live_output")
+            self.assertFalse(kernel.uses_tma)
+            self.assertNotIn("tma_min_block_sizes", kernel.inductor_meta_per_kernel())
+            self.assertNotIn("uses_device_tma", kernel.inductor_meta_per_kernel())
+
+            # Also cover kernel-local removed_buffers and inplaced_to_remove branches.
+            kernel._device_tma_buffers.add("kernel_local_removed")
+            kernel._record_tma_min_block_size("kernel_local_removed", "XBLOCK", 16)
+            self.assertTrue(kernel.uses_device_tma)
+            self.assertEqual(
+                kernel.inductor_meta_per_kernel()["tma_min_block_sizes"],
+                {"XBLOCK": 16},
+            )
+
+            kernel.removed_buffers.add("kernel_local_removed")
+            self.assertFalse(kernel.uses_device_tma)
+            self.assertNotIn("tma_min_block_sizes", kernel.inductor_meta_per_kernel())
+
+            kernel.removed_buffers.discard("kernel_local_removed")
+            self.assertTrue(kernel.uses_device_tma)
+            self.assertEqual(
+                kernel.inductor_meta_per_kernel()["tma_min_block_sizes"],
+                {"XBLOCK": 16},
+            )
+            kernel.inplaced_to_remove.add("kernel_local_removed")
+            self.assertFalse(kernel.uses_device_tma)
+            self.assertNotIn("tma_min_block_sizes", kernel.inductor_meta_per_kernel())
+
     def test_importable_constexpr_types_nested_values(self):
         type_specs = get_importable_constexpr_types(
             [
