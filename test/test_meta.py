@@ -2871,6 +2871,41 @@ class TestMetaKernelRegistrations(TestCase):
         self.assertEqual(diff_b1.shape, expected_bias_shape)
         self.assertEqual(diff_b2.shape, expected_bias_shape)
 
+    @parametrize("mode", ["bilinear", "bicubic", "lanczos"])
+    def test_upsample_bimode2d_aa_backward_meta_symbolic(self, mode):
+        # The AA upsample backward ops share one shape-only meta kernel, but
+        # _upsample_bicubic2d_aa_backward was missing from the registration, so
+        # tracing its backward with symbolic sizes (e.g.
+        # torch.compile(dynamic=True)) fell back to the composite kernel and
+        # crashed with "isIntList() INTERNAL ASSERT FAILED ... Expected
+        # IntList but got GenericList".
+        # https://github.com/pytorch/pytorch/issues/197622
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        input_size = [2, 3, 8, 8]
+        output_size = [16, 16]
+        fwd_op = getattr(torch.ops.aten, f"_upsample_{mode}2d_aa").default
+        bwd_op = getattr(torch.ops.aten, f"_upsample_{mode}2d_aa_backward").default
+        x = torch.randn(*input_size)
+        out = fwd_op(x, output_size, False)
+        grad_out = torch.randn_like(out)
+        expected = bwd_op(grad_out, output_size, input_size, False)
+
+        shape_env = ShapeEnv()
+        with FakeTensorMode(shape_env=shape_env) as fake_mode:
+            f_x = fake_mode.from_tensor(x)
+            f_grad_out = fake_mode.from_tensor(grad_out)
+            f_result = bwd_op(
+                f_grad_out,
+                [f_grad_out.shape[2], f_grad_out.shape[3]],
+                list(f_x.shape),
+                False,
+            )
+        self.assertEqual(f_result.shape, expected.shape)
+        self.assertEqual(f_result.stride(), expected.stride())
+        self.assertEqual(f_result.dtype, expected.dtype)
+
 
 instantiate_device_type_tests(TestMeta, globals())
 
