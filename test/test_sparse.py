@@ -4165,6 +4165,29 @@ class TestSparse(TestSparseBase):
 
     @coalescedonoff
     @expectedFailureMPS
+    @dtypes(torch.double, torch.cdouble)
+    @dtypesIfMPS(torch.float32, torch.complex64)
+    def test_sparse_dense_mul_broadcast_sparse_dim(self, device, dtype, coalesced):
+        # Regression test for https://github.com/pytorch/pytorch/issues/188900.
+        # Broadcasting a non-trailing size-1 sparse dim yields unsorted indices,
+        # so the result must not be flagged coalesced in that case.
+        for sparse_shape, dense_shape in (
+            ((2, 2, 1), (1, 1, 3)),      # trailing dim, s.dim() == d.dim()
+            ((1, 2, 2), (3, 1, 1)),      # leading dim, s.dim() == d.dim()
+            ((1, 2), (2, 3, 2)),         # leading dim, d.dim() > s.dim()
+            ((2, 1, 3), (4, 2, 5, 3)),   # middle dim, d.dim() > s.dim()
+        ):
+            s = make_tensor(sparse_shape, dtype=dtype, device=device, exclude_zero=True).to_sparse()
+            if not coalesced:
+                s = torch.sparse_coo_tensor(s._indices().repeat(1, 2), s._values().repeat(2), s.shape)
+            d = make_tensor(dense_shape, dtype=dtype, device=device)
+            for res in (s * d, d * s):
+                self.assertEqual(res.to_dense(), s.to_dense() * d)
+                if res.is_coalesced():
+                    self.assertTrue(is_coalesced_indices(res))
+
+    @coalescedonoff
+    @expectedFailureMPS
     @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16))
     @dtypesIfMPS(*all_mps_types())
     @precisionOverride({torch.bfloat16: 1e-2, torch.float16: 1e-2})

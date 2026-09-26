@@ -27,6 +27,7 @@
 #else
 #include <ATen/ops/_sparse_addmm.h>
 #include <ATen/ops/_sparse_addmm_native.h>
+#include <ATen/ops/_sparse_broadcast_to.h>
 #include <ATen/ops/_sparse_coo_tensor_with_dims_and_tensors.h>
 #include <ATen/ops/_sparse_mm_native.h>
 #include <ATen/ops/_sparse_sum.h>
@@ -861,7 +862,29 @@ static Tensor& intersection_binary_op_sparse_dense_out(
   // Always coalesce when sparse broadcasts over dense,
   // because new sparse dimensions are created and
   // repeated indices have to be eliminated because of that.
-  const auto s = (coalesce || d_dim > s_dim) ? s_.coalesce() : s_;
+  const auto s_coalesced = (coalesce || d_dim > s_dim) ? s_.coalesce() : s_;
+
+  // A size-1 sparse dimension of the sparse operand has to broadcast up to the
+  // result size. The intersection logic below reuses the sparse indices as-is
+  // and does not expand them, which would silently drop all but the index-0
+  // slice along such a dimension. Materialize the broadcast here so each
+  // specified element is replicated across the broadcasted sparse dimensions.
+  // See https://github.com/pytorch/pytorch/issues/188900.
+  const auto s = [&]() -> Tensor {
+    const auto n_sparse = s_coalesced.sparse_dim();
+    const auto s_ndim = s_coalesced.dim();
+    const auto res_ndim = static_cast<int64_t>(res_shape.size());
+    auto bcast_shape = s_coalesced.sizes().vec();
+    bool needs_bcast = false;
+    for (const auto j : c10::irange(n_sparse)) {
+      const auto res_size = res_shape[res_ndim - s_ndim + j];
+      if (bcast_shape[j] == 1 && res_size != 1) {
+        bcast_shape[j] = res_size;
+        needs_bcast = true;
+      }
+    }
+    return needs_bcast ? at::_sparse_broadcast_to(s_coalesced, bcast_shape) : s_coalesced;
+  }();
 
   const auto sparse_dim = s.sparse_dim();
   const auto dense_dim = s.dense_dim();
@@ -988,9 +1011,10 @@ static Tensor& intersection_binary_op_sparse_dense_out(
   res_impl->raw_resize_(res_sparse_dim, res_dense_dim, res_shape);
   res_impl->set_indices_and_values_unsafe(res_indices, res_values);
   res_impl->set_nnz_and_narrow(res_nnz);
-  // By design of index expansion and that s is coalesced,
-  // the result is also coalesced.
-  return res._coalesced_(true);
+  // Index expansion preserves the order of s_indices, so the result is
+  // coalesced iff s is. s is uncoalesced when _sparse_broadcast_to above
+  // expanded a non-trailing sparse dim.
+  return res._coalesced_(s.is_coalesced());
 }
 
 Tensor& _mul_dense_sparse_out(const Tensor& d, const Tensor& s, Tensor& res) {
