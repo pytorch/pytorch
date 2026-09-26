@@ -524,6 +524,7 @@ TORCH_PRECOMPUTE_META_FUNC2(index, Tensor)
       " (got ",
       materialized.size(),
       ")");
+  at::native::checkAtLeastOneIndexTensor(indices);
 
   // Only allow: `dev_tensor[{cpu,dev}_tensor]`.
   // See: https://github.com/pytorch/pytorch/pull/69607
@@ -971,6 +972,7 @@ Tensor& _index_put_impl_(
       " (got ",
       indices.size(),
       ")");
+  checkAtLeastOneIndexTensor(indices);
   if (at::has_internal_overlap(self) == MemOverlap::Yes) {
     TORCH_WARN(
         "Use of index_put_ on expanded tensors is deprecated. "
