@@ -318,7 +318,11 @@ class CacheArtifactManager:
     @staticmethod
     def populate_caches(artifacts: CacheArtifactsResult) -> CacheInfo:
         info = CacheInfo()
-        for artifact in chain(*artifacts.values()):
+        runtime = artifacts.get("triton_runtime", ())
+        remaining = (
+            entries for name, entries in artifacts.items() if name != "triton_runtime"
+        )
+        for artifact in chain(runtime, *remaining):
             log.debug("writing: %s", artifact)
             info.add(artifact)
             artifact.populate_cache()
@@ -339,4 +343,7 @@ class CacheArtifactManager:
         from torch._inductor.codecache import InductorCacheArtifact  # noqa: F401
         from torch._inductor.runtime.autotune_cache import (  # noqa: F401
             AutotuneCacheArtifact,
+        )
+        from torch.compiler._runtime_cache import (  # noqa: F401
+            TritonRuntimeCacheArtifact,
         )

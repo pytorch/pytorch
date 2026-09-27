@@ -269,7 +269,10 @@ class CompiledTritonKernels:
 
     @staticmethod
     def cache_clear():
+        from torch.compiler._runtime_cache import clear_triton_kernels
+
         CompiledTritonKernels._cache = {}
+        clear_triton_kernels()
 
     @staticmethod
     def remove_future(kernel_src: str) -> None:
@@ -299,6 +302,24 @@ class AsyncCompile:
                 f"expected get_compile_threads() > 1, got {get_compile_threads()}"
             )
         return ThreadPoolExecutor(get_compile_threads())
+
+    @classmethod
+    def drain_pending(cls) -> None:
+        """Finish compiler work and result callbacks after submissions have stopped."""
+        for future in list(CompiledTritonKernels._cache.values()):
+            if not isinstance(future, StaticAutotunerFuture):
+                future.result()
+        if cls.pool.cache_info().currsize:
+            cls.pool().shutdown(wait=True)
+            cls.pool.cache_clear()
+        if cls._ready_future is not None:
+            cls._ready_future.result()
+        for pool in _pool_set:
+            if isinstance(pool, SubprocPool):
+                pool.drain_pending()
+            else:
+                pool.shutdown(wait=True)
+        shutdown_compile_workers()
 
     @staticmethod
     def _get_ready():
@@ -539,12 +560,23 @@ class AsyncCompile:
             check_compilation_allowed,
             is_compilation_forbidden,
         )
+        from torch.compiler._runtime_cache import (
+            load_triton_kernel,
+            record_triton_kernel,
+        )
 
         is_parallel = not is_compilation_forbidden() and self.use_process_pool()
         set_feature_use("parallel_compile_post_warmup", is_parallel)
 
         compile_id = torch._guards.CompileContext.current_compile_id()
         is_backward = getattr(V.graph, "is_backward", False)
+
+        source_key = CompiledTritonKernels.key(source_code)
+        if (kernel := load_triton_kernel(source_key)) is not None:
+            counters["inductor"]["async_compile_cache_hit"] += 1
+            kernel._reload_kernel = reload_kernel_in_parent
+            record_triton_kernel(source_key, kernel)
+            return kernel
 
         if (future := CompiledTritonKernels.get(source_code)) is not None:
             counters["inductor"]["async_compile_cache_hit"] += 1
@@ -553,6 +585,7 @@ class AsyncCompile:
                 # Remove the future now that we've cache hit
                 CompiledTritonKernels.remove_future(source_code)
                 future.reload_kernel_from_src = reload_kernel_in_parent
+                record_triton_kernel(source_key, future.static_autotuner)
             if is_parallel:
                 return future
             else:
@@ -573,7 +606,10 @@ class AsyncCompile:
             ]
             extra_env = {v: os.environ.get(v) for v in env_vars}
             extra_config = {
-                "use_static_triton_launcher": torch._inductor.config.use_static_triton_launcher
+                "use_static_triton_launcher": torch._inductor.config.use_static_triton_launcher,
+                "static_launch_user_defined_triton_kernels": (
+                    torch._inductor.config.static_launch_user_defined_triton_kernels
+                ),
             }
 
             if len(torch._inductor.config.autotune_lookup_table) > 0:
@@ -633,6 +669,7 @@ class AsyncCompile:
                     reload_kernel=reload_kernel_in_parent,
                     static_triton_bundle_key=CompiledTritonKernels.key(source_code),
                 )
+                record_triton_kernel(source_key, kernel)
                 _emit_triton_kernel_compile_metric(kernel, kernel_name, elapsed_us)
                 return kernel
 
@@ -658,6 +695,7 @@ class AsyncCompile:
                         warm_cache_only=False,
                         static_triton_bundle_key=CompiledTritonKernels.key(source_code),
                     )
+                    record_triton_kernel(source_key, kernel)
                     elapsed_us = (time_ns() - start_ns) // 1000
                     _emit_triton_kernel_compile_metric(kernel, kernel_name, elapsed_us)
                     return kernel
