@@ -262,6 +262,7 @@ if HAS_GPU:
 
 
 class KernelTests(torch._inductor.test_case.TestCase):
+    @requires_gpu
     @_assert_no_mutation_fallback
     def test_triton_kernel_namedtuple_arg(self):
         # Cover both an externally supplied NamedTuple and one constructed while
@@ -298,7 +299,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
             )
             return external_out, constructed_out
 
-        x = torch.arange(32, dtype=torch.float32, device="cpu")
+        x = torch.arange(32, dtype=torch.float32, device=GPU_TYPE)
         external_config = Config(x, Metadata(3))
         constructed_source = x + 1
         actual = torch.compile(fn, backend="aot_eager", fullgraph=True)(
@@ -306,6 +307,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
         )
         self.assertEqual(actual, (x * 3, constructed_source * 4))
 
+    @requires_gpu
     @_assert_no_mutation_fallback
     def test_triton_kernel_tuple_arg(self):
         # An externally supplied tuple uses UserDefinedTupleVariable, while one
@@ -327,12 +329,10 @@ class KernelTests(torch._inductor.test_case.TestCase):
             external_out = torch.empty_like(config[0])
             tuple_kernel[(1,)](config, external_out, BLOCK_SIZE=16)
             constructed_out = torch.empty_like(source)
-            tuple_kernel[(1,)](
-                (source, (5,), ()), constructed_out, BLOCK_SIZE=16
-            )
+            tuple_kernel[(1,)]((source, (5,), ()), constructed_out, BLOCK_SIZE=16)
             return external_out, constructed_out
 
-        x = torch.arange(16, dtype=torch.float32, device="cpu")
+        x = torch.arange(16, dtype=torch.float32, device=GPU_TYPE)
         compiled = torch.compile(fn, backend="aot_eager", fullgraph=True)
         externally_supplied_configs = ((x, (3,), ()), (x + 1, (4,), ()))
         constructed_sources = (x + 2, x + 3)
@@ -344,7 +344,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
                 (config[0] * config[1][0], source * 5),
             )
 
-    @unittest.skipUnless(HAS_GPU, "requires gpu")
+    @requires_gpu
     @parametrize("version", ("V1_COMPILER", "V2_BACKENDS", "V3_BACKENDS_TUPLE"))
     @parametrize("aggregate", ("tuple", "namedtuple"))
     def test_triton_kernel_aggregate_rejected_before_v4(self, version, aggregate):
@@ -386,6 +386,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
         ):
             torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
 
+    @requires_gpu
     @_assert_no_mutation_fallback
     def test_triton_kernel_aggregate_with_tl_constexpr_leaves(self):
         # tl.constexpr type should be captured in dynamo and also preserved
@@ -421,7 +422,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
             )
             return out
 
-        x = torch.arange(16, dtype=torch.float32, device="cpu")
+        x = torch.arange(16, dtype=torch.float32, device=GPU_TYPE)
         mode = tl.constexpr("double")
 
         def fn_with_existing_constexpr(x):
@@ -519,6 +520,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
         self.assertEqual(read_only_result, read_only_before)
         self.assertEqual(read_only, read_only_before)
 
+    @requires_gpu
     @parametrize(
         "aggregate_form",
         ("signature_constexpr", "nested_constexpr", "nested_runtime"),
@@ -562,11 +564,11 @@ class KernelTests(torch._inductor.test_case.TestCase):
         counter = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
         compiled = torch.compile(fn, backend=counter, fullgraph=True, dynamic=True)
 
-        source = torch.arange(17, dtype=torch.float32, device="cpu")
+        source = torch.arange(17, dtype=torch.float32, device=GPU_TYPE)
         self.assertEqual(compiled(source), source + 17)
         first_frame_count = counter.frame_count
 
-        source = torch.arange(33, dtype=torch.float32, device="cpu")
+        source = torch.arange(33, dtype=torch.float32, device=GPU_TYPE)
         self.assertEqual(compiled(source), source + 33)
         # Runtime symbolic leaves remain graph inputs; constexpr leaves are guards.
         if aggregate_form.endswith("constexpr"):
@@ -605,6 +607,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
         ):
             torch.compile(fn, backend="eager", fullgraph=True)(source)
 
+    @requires_gpu
     @_assert_no_mutation_fallback
     def test_generate_ttir_namedtuple_nested_constexpr(self):
         # Constexpr values are removed from the native argument list for TTIR
@@ -617,9 +620,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
 
         @triton.jit
         def nested_constexpr_kernel(config, out, BLOCK_SIZE: tl.constexpr):
-            tl.static_assert(
-                isinstance(config.parameters[1].type, tl.constexpr_type)
-            )
+            tl.static_assert(isinstance(config.parameters[1].type, tl.constexpr_type))
             tl.static_assert(config.parameters[1] == "double")
             offsets = tl.arange(0, BLOCK_SIZE)
             values = tl.load(config.source + offsets)
@@ -631,9 +632,11 @@ class KernelTests(torch._inductor.test_case.TestCase):
 
         fake_mode = FakeTensorMode()
         source = fake_mode.from_tensor(
-            torch.empty(16, dtype=torch.float32, device="cpu")
+            torch.empty(16, dtype=torch.float32, device=GPU_TYPE)
         )
-        out = fake_mode.from_tensor(torch.empty(16, dtype=torch.float32, device="cpu"))
+        out = fake_mode.from_tensor(
+            torch.empty(16, dtype=torch.float32, device=GPU_TYPE)
+        )
         spec = triton_kernel_wrap.create_named_tuple_spec(
             "Config",
             ("source", "parameters"),
@@ -677,9 +680,10 @@ class KernelTests(torch._inductor.test_case.TestCase):
         self.assertIn("config.parameters.2", ttir_text)
 
     @requires_cuda_tma
+    @requires_gpu
     @unittest.skipUnless(
-        HAS_GPU and has_triton_tensor_descriptor_host_tma(),
-        "requires gpu and TensorDescriptor support",
+        has_triton_tensor_descriptor_host_tma(),
+        "requires TensorDescriptor support",
     )
     @_assert_no_mutation_fallback
     def test_generate_ttir_namedtuple_with_tma_fake_tensor_leaves(self):
