@@ -114,7 +114,11 @@ class TestNVGemmPickling(TestCase):
             ScaledOperandConstraints,
         )
 
-        import torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_utils  # noqa: F401
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_utils import (
+            register_scaled_operand_constraints_pickling,
+        )
+
+        register_scaled_operand_constraints_pickling()
 
         quantized = DenseTensorConstraints(cutlass.Float16, (1, 0), 16)
         scale = DenseTensorConstraints(cutlass.Float32, (1,), 4)

@@ -42,7 +42,6 @@ class CuteDSLTemplate(KernelTemplate):
         self.source = source
         self.subgraph_fn = subgraph_fn
         self.mask_fn = mask_fn
-        self.template = CuteDSLTemplate._template_from_string(source)
         # A module that registers templates can be initialized more than once in
         # a single process (e.g. a double-import path). Tolerate re-registration
         # under an existing name as long as the template source matches, but
@@ -57,6 +56,11 @@ class CuteDSLTemplate(KernelTemplate):
     # pyrefly: ignore [bad-override]
     def _template_from_string(source: str) -> Any:
         return KernelTemplate._template_from_string(source)
+
+    @functools.cached_property
+    def template(self) -> Any:
+        # Compiled on first use since templates are registered at import time.
+        return CuteDSLTemplate._template_from_string(self.source)
 
     def maybe_append_choice(
         self, choices: list[Any], **kwargs: Any
