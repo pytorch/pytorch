@@ -85,8 +85,6 @@ jobs:
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      # Every bit to make perf run faster helps
-      runner: linux.12xlarge.memory
       build-environment: linux-jammy-cuda13.0-py3.11-gcc11-sm80
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
