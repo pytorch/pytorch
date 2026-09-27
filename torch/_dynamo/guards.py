@@ -266,6 +266,11 @@ class FunctionCodeMetadata(NamedTuple):
     code: types.CodeType
     globals_module: str
 
+    def qualified_name(self) -> str:
+        # co_qualname is new in Python 3.11.
+        name = getattr(self.code, "co_qualname", self.code.co_name)
+        return f"{self.globals_module}.{name}"
+
 
 def _function_code_metadata(value: object) -> FunctionCodeMetadata | None:
     from .package import _globals_module_name
@@ -3296,7 +3301,7 @@ class GuardBuilder(GuardBuilderBase):
 
         code = (
             f"___check_function_code({self.arg_ref(guard)}, "
-            f"{expected.globals_module}.{expected.code.co_qualname})"
+            f"{expected.qualified_name()})"
         )
         self._set_guard_export_info(guard, [code])
         self.get_guard_manager(guard).add_lambda_guard(
@@ -3315,7 +3320,7 @@ class GuardBuilder(GuardBuilderBase):
 
         code = (
             f"___check_method_code({self.arg_ref(guard)}, "
-            f"{expected.func.globals_module}.{expected.func.code.co_qualname})"
+            f"{expected.func.qualified_name()})"
         )
         self._set_guard_export_info(guard, [code])
         self.get_guard_manager(guard).add_lambda_guard(
