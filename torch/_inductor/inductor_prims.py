@@ -4,6 +4,7 @@ from __future__ import annotations
 import functools
 import logging
 import operator
+import sys
 from typing import TYPE_CHECKING
 
 import torch
@@ -249,13 +250,13 @@ torch.library.register_autograd(
 )
 
 
-# Register DTensor sharding strategies for inductor prims ops.
-# This must happen here (not in _pointwise_ops.py) because the ops
-# don't exist until make_prim() is called above.
-if torch.distributed.is_available():
-    from torch.distributed.tensor._ops._pointwise_ops import register_inductor_prims
-
-    register_inductor_prims()
+# Register DTensor sharding strategies for inductor prims ops, which don't
+# exist until make_prim() is called above. If DTensor isn't imported yet (it is
+# expensive), _pointwise_ops registers them when it is.
+if (
+    pointwise_ops := sys.modules.get("torch.distributed.tensor._ops._pointwise_ops")
+) is not None:
+    pointwise_ops.register_inductor_prims()
 
 prepare_softmax_online = make_prim(
     "prepare_softmax_online(Tensor a, int dim) -> (Tensor, Tensor)",

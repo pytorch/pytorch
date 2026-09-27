@@ -1165,9 +1165,7 @@ def mark_unbacked(
         max (Optional[int], default=None): Maximum value constraint for this dimension.
             If provided, a runtime check will be added to ensure the dimension is <= max.
     """
-    if torch.distributed.is_available() and isinstance(
-        t, torch.distributed.tensor.DTensor
-    ):
+    if torch._utils._is_dtensor(t):
         # apply on inner tensor sizes/strides
         mark_unbacked(t._local_tensor, index, shape_id=shape_id)
     else:

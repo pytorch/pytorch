@@ -42,7 +42,6 @@ from unittest.mock import patch
 import sympy
 from sympy import Expr, Integer, Symbol
 
-import torch._export.serde.schema as export_schema
 import torch._library.custom_ops as custom_ops
 import torch._library.utils as library_utils
 import torch._logging
@@ -50,7 +49,6 @@ import torch.fx
 import torch.utils._pytree as pytree
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import identity
-from torch._export.serde.serialize import GraphModuleSerializer
 from torch._higher_order_ops.auto_functionalize import can_auto_functionalize
 from torch._inductor import metrics
 from torch._inductor.utils import get_free_symbols
@@ -141,6 +139,7 @@ from .virtualized import ops, OpsValue, V
 
 
 if TYPE_CHECKING:
+    import torch._export.serde.schema as export_schema
     from torch.fx.experimental.symbolic_shapes import SympyBoolean
     from torch.fx.node import Argument
     from torch.types import IntLikeType
@@ -9866,6 +9865,9 @@ class FallbackKernel(ExternKernelAlloc):
         if not V.graph.aot_mode:
             # No need to serialize in the cpp wrapper JIT mode
             return [*args, *ordered_kwargs]
+
+        import torch._export.serde.schema as export_schema
+        from torch._export.serde.serialize import GraphModuleSerializer
 
         serializer = GraphModuleSerializer(None, [])  # type: ignore[arg-type]
         named_arguments = serializer.serialize_inputs(target, args, kwargs)
