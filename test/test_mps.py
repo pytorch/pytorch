@@ -5693,12 +5693,6 @@ class TestMPS(TestCaseMPS):
                 return x.grad
             self.assertEqual(grad_of("mps"), grad_of("cpu"), f"{fn.__name__} grad")
 
-    def test_huber_loss_backward_mixed_dtype_errors(self):
-        x = torch.tensor([0.5, 2.0], device="mps")
-        t = torch.tensor([1.0, 1.0], dtype=torch.float16, device="mps")
-        with self.assertRaisesRegex(RuntimeError, "expected all tensors to have the same dtype"):
-            torch.ops.aten.huber_loss_backward(torch.ones_like(x), x, t, 1, 1.0)
-
     @parametrize("dtypes", MIXED_DTYPES)
     def test_addr_mixed_dtype(self, dtypes):
         # addr also took its result dtype from `self` instead of the promoted type
@@ -5711,6 +5705,12 @@ class TestMPS(TestCaseMPS):
             ref = torch.addr(cpu_self, cpu_v1, cpu_v2, beta=beta, alpha=alpha)
             self.assertEqual(res.dtype, ref.dtype)
             self.assertEqual(res, ref)
+
+    def test_huber_loss_backward_mixed_dtype_errors(self):
+        x = torch.tensor([0.5, 2.0], device="mps")
+        t = torch.tensor([1.0, 1.0], dtype=torch.float16, device="mps")
+        with self.assertRaisesRegex(RuntimeError, "expected all tensors to have the same dtype"):
+            torch.ops.aten.huber_loss_backward(torch.ones_like(x), x, t, 1, 1.0)
 
     # batch_norm only accepts a mixed pair when the parameters are float32; other combinations are
     # rejected by the reference with "expect parameter to have scalar type of Float".
