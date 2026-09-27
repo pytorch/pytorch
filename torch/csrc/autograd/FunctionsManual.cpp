@@ -1222,6 +1222,101 @@ Tensor associative_scan_backward(
       combine_mode);
 }
 
+namespace {
+
+// out[0] = fill, out[i] = t[i - 1]; a one-step shift towards higher indices.
+Tensor shift_right(const Tensor& t, int64_t dim, const Scalar& fill) {
+  const int64_t n = t.size(dim);
+  auto head = at::full(t.narrow(dim, 0, 1).sizes(), fill, t.options());
+  if (n <= 1) {
+    return head;
+  }
+  return at::cat({head, t.narrow(dim, 0, n - 1)}, dim);
+}
+
+// Reverse linear recurrence out[i] = coeff[i] * out[i + 1] + input[i], i.e. a
+// linear recurrence over the reversed dimension.
+Tensor reverse_linear_recurrence(
+    const Tensor& coeff,
+    const Tensor& input,
+    int64_t dim) {
+  std::vector<Tensor> xs{coeff, input};
+  return at::associative_scan(
+      xs, "linear_recurrence", dim, /*reverse=*/true)[1];
+}
+
+} // namespace
+
+std::vector<Tensor> associative_scan_tensor_list_backward(
+    const std::vector<Tensor>& grads,
+    const std::vector<Tensor>& xs,
+    int64_t dim,
+    bool reverse) {
+  TORCH_CHECK(
+      grads.size() == 2 && xs.size() == 2,
+      "associative_scan_tensor_list_backward expects 2 inputs and 2 output gradients");
+  Tensor grad_A = grads[0];
+  Tensor grad_H = grads[1];
+  Tensor a = xs[0];
+  Tensor b = xs[1];
+
+  dim = at::maybe_wrap_dim(dim, a.dim(), /*wrap_scalar=*/true);
+
+  // Forward is [flip -> scan -> flip] for reverse=True; work in the scan frame.
+  if (reverse) {
+    a = at::flip(a, {dim});
+    b = at::flip(b, {dim});
+    if (grad_A.defined()) {
+      grad_A = at::flip(grad_A, {dim});
+    }
+    if (grad_H.defined()) {
+      grad_H = at::flip(grad_H, {dim});
+    }
+  }
+  if (!grad_A.defined()) {
+    grad_A = at::zeros_like(a);
+  }
+  if (!grad_H.defined()) {
+    grad_H = at::zeros_like(b);
+  }
+
+  // A[0] = a[0], H[0] = b[0]: the scan is the identity for 0-d tensors and for
+  // a scan dimension of size <= 1 (the forward returns clones without
+  // flipping).
+  if (a.dim() == 0 || a.size(dim) <= 1) {
+    return {grad_A, grad_H};
+  }
+  const int64_t N = a.size(dim);
+
+  // A[i] = prod_{j <= i} a[j], H[i] = a[i] * H[i - 1] + b[i].
+  std::vector<Tensor> ab{a, b};
+  auto fwd =
+      at::associative_scan(ab, "linear_recurrence", dim, /*reverse=*/false);
+  const Tensor& A = fwd[0];
+  const Tensor& H = fwd[1];
+
+  // a_shift[i] = a[i + 1] (0 at the last index).
+  auto a_shift = at::cat(
+      {a.narrow(dim, 1, N - 1), at::zeros_like(a.narrow(dim, 0, 1))}, dim);
+
+  // G[i]  = grad_H[i] + a_shift[i] * G[i + 1]   (dL/db)
+  // GA[i] = grad_A[i] + a_shift[i] * GA[i + 1]
+  auto G = reverse_linear_recurrence(a_shift, grad_H, dim);
+  auto GA = reverse_linear_recurrence(a_shift, grad_A, dim);
+
+  // dL/da = GA * A[i - 1] + G * H[i - 1], with A[-1] = 1 and H[-1] = 0.
+  auto A_prev = shift_right(A, dim, /*fill=*/1);
+  auto H_prev = shift_right(H, dim, /*fill=*/0);
+  auto da = GA * A_prev + G * H_prev;
+  auto db = G;
+
+  if (reverse) {
+    da = at::flip(da, {dim});
+    db = at::flip(db, {dim});
+  }
+  return {da, db};
+}
+
 Tensor logsumexp_backward(
     Tensor grad,
     const Tensor& self,

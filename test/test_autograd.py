@@ -15621,6 +15621,29 @@ class TestAssociativeScanAutograd(TestCase):
             self.assertEqual(x.grad.shape, x.shape)
             x.grad = None
 
+    @parametrize("reverse", [False, True])
+    @dtypes(torch.float64)
+    def test_associative_scan_linear_recurrence_gradcheck(self, device, reverse, dtype):
+        def fn(a, b):
+            return torch.associative_scan(
+                [a, b], "linear_recurrence", 0, reverse=reverse
+            )
+
+        a = (torch.rand(6, 4, device=device, dtype=dtype) * 0.5 + 0.5).requires_grad_()
+        b = torch.randn(6, 4, device=device, dtype=dtype, requires_grad=True)
+        # The TensorList backward evaluates the native op, which has no vmap
+        # batching rule yet, so batched-gradient checking is disabled.
+        self.assertTrue(
+            gradcheck(
+                fn, (a, b), eps=1e-6, atol=1e-5, rtol=1e-3, check_batched_grad=False
+            )
+        )
+        self.assertTrue(
+            gradgradcheck(
+                fn, (a, b), eps=1e-6, atol=1e-5, rtol=1e-3, check_batched_grad=False
+            )
+        )
+
 
 class _TestAutogradStreamSynchronizationBase(TestCase):
     def get_default_streams(self, num_devices=1):

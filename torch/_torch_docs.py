@@ -3611,10 +3611,13 @@ The operation is selected by :attr:`combine_mode` and must be associative:
   ``torch.associative_scan([a, b], 'linear_recurrence', dim)``.
 
 This operator is the native counterpart of
-``torch.func.associative_scan`` for the common built-in combine
-functions, matching the semantics of ``jax.lax.associative_scan``. For an
-arbitrary user-supplied combine function, use
-``torch.func.associative_scan`` instead.
+the higher order operator ``torch._higher_order_ops.associative_scan.associative_scan``
+for the common built-in combine functions, matching the semantics of
+``jax.lax.associative_scan``. For an arbitrary user-supplied combine function,
+use ``from torch._higher_order_ops.associative_scan import associative_scan`` instead.
+
+Autograd is supported for every combine mode, including the tensor-list
+``'linear_recurrence'`` form.
 
 For floating point types, ``'max'`` and ``'min'`` propagate NaN like
 ``jax.lax.max`` / ``jax.lax.min``.
