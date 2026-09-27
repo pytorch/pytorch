@@ -1447,6 +1447,10 @@ def current_blas_handle():
     outside the caching allocator. A workspace bound with
     ``rocblas_set_workspace`` stays bound, even after the thread exits and the
     handle passes to another thread, so unbind it before freeing the buffer.
+    While the current stream is capturing, ROCm returns a capture handle
+    instead, bound to a workspace from the capture's memory pool: call this
+    function inside the capture rather than reusing a handle obtained before
+    it, and do not use the capture handle after the capture ends.
     """
     _lazy_init()
     return torch._C._cuda_getCurrentBlasHandle()

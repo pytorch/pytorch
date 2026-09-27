@@ -145,11 +145,31 @@ handle to another stream with ``rocblas_set_stream``, as rocBLAS requires.
 Call ``torch.cuda.current_blas_handle()`` on each thread before capture begins. It also creates ATen's
 handle for that thread; an ATen warmup operation alone does not create the handle the function
 returns. ``hipblasCreate`` initializes hipBLASLt, which allocates device memory that HIP rejects on a
-capturing stream. Once a device's handle has been requested, graph capture keeps one spare handle
-ready, so the first request on the capture stream inside the capture succeeds, but a second new
-stream in the same capture does not. This also applies to TunableOp, whose tuning benchmarks must run
-outside capture. See
+capturing stream.
+
+With caching disabled, while the current stream is capturing, ``torch.cuda.current_blas_handle()``
+returns a capture handle instead. There is one per thread, and it serves every stream in the capture:
+each request points it at the current stream and binds a workspace for that stream allocated from the
+capture's memory pool, so a graph shares its rocBLAS scratch memory neither with eager work nor with
+other graphs. It has no rocBLAS arena of its own. Request the handle inside the capture instead of
+using one obtained before it, whose arena eager work on that stream keeps using. When the capture
+ends, its workspaces return to the pool and the handle is unbound, so do not use it afterwards. Once a
+device's handle has been requested, graph capture creates the capturing thread's capture handle and
+one spare for another thread, such as an autograd worker, so side streams that first appear inside a
+capture can use the function too.
+
+hipBLASLt handles are created for each thread and stream on first use, and creating one on a
+capturing stream raises an error. Graph capture creates the capture stream's hipBLASLt handle and one
+spare whenever the device supports hipBLASLt, in both workspace modes, so in a capture that forks two
+new side streams running hipBLASLt operations such as ``torch._scaled_mm``, the second raises. Run a
+hipBLASLt operation on each such stream before capture begins. TunableOp's tuning benchmarks must also
+run outside capture. See
 `ROCm/rocm-libraries#11838 <https://github.com/ROCm/rocm-libraries/issues/11838>`_.
+
+Extensions that call hipBLASLt themselves can use the workspace ``at::cuda::getCUDABlasLtWorkspace()``
+returns: a buffer cached for each stream, or, with caching disabled while the stream is capturing, a
+buffer from the capture's memory pool, one per stream and capture, which returns to the pool when the
+capture ends. Fetch it inside the capture: a buffer fetched before the capture must not be used in it.
 
 When caching is enabled, a hipBLAS workspace is allocated for each combination of hipBLAS handle and
 HIP stream that executes a hipBLAS kernel requiring a workspace.  In order to

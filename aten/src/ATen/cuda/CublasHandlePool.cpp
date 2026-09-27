@@ -552,8 +552,9 @@ static void setupCUDABlasHandle(
       break;
     case WorkspaceMode::Default:
       // cuBLAS: cublasSetStream above resets the handle to its default
-      // workspace. rocBLAS: only public handles take this path, and they keep
-      // the arena rocBLAS allocated at creation because ATen never binds them.
+      // workspace. rocBLAS: public handles keep the arena rocBLAS allocated at
+      // creation because ATen never binds them, and capture handles keep the
+      // capture workspace getCaptureCublasHandle bound.
       break;
   }
 
