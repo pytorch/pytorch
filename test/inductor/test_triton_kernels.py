@@ -422,6 +422,52 @@ class KernelTests(torch._inductor.test_case.TestCase):
         self.assertIn(f"{bias_name} = collections.namedtuple", code)
         self.assertGreaterEqual(code.count(f"{scale_name}(source="), 2)
 
+    @requires_cuda_tma
+    @unittest.skipUnless(
+        HAS_GPU and has_triton_tensor_descriptor_host_tma(),
+        "requires gpu and TensorDescriptor support",
+    )
+    @requires_python_wrapper_for_aggregates
+    @_assert_no_mutation_fallback
+    def test_triton_kernel_aggregate_contains_tensor_descriptor(self):
+        # Exercise wrapper reconstruction when the descriptor is an aggregate
+        # leaf, rather than an ordinary top-level kernel argument.
+        import triton
+        import triton.language as tl
+        from triton.tools.tensor_descriptor import TensorDescriptor
+
+        from torch._higher_order_ops import triton_kernel_wrap
+
+        Config = collections.namedtuple("Config", ("source", "scale"))
+
+        @triton.jit
+        def kernel(config, out, BLOCK_SIZE: tl.constexpr):
+            block_start = tl.program_id(0) * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            source = tl.load_tensor_descriptor(config.source, [block_start])
+            tl.store(out + offsets, source * config.scale)
+
+        def fn(source):
+            out = torch.empty_like(source)
+            descriptor = TensorDescriptor.from_tensor(source, block_shape=[16])
+            kernel[(2,)](Config(descriptor, 3.0), out, BLOCK_SIZE=16)
+            return out
+
+        source = torch.arange(32, dtype=torch.float32, device=GPU_TYPE)
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, fullgraph=True), source
+        )
+
+        self.assertEqual(actual, source * 3.0)
+        config_name = triton_kernel_wrap.create_structural_named_tuple_name(
+            "Config", Config._fields
+        )
+        # Runtime success checks that the generated descriptor is placed in the
+        # reconstructed Config; these source checks cover both emitted pieces.
+        FileCheck().check("TensorDescriptor.from_tensor(").check(
+            f"{config_name}(source="
+        ).run(code)
+
     @requires_gpu
     @parametrize("version", ("V1_COMPILER", "V2_BACKENDS", "V3_BACKENDS_TUPLE"))
     @parametrize("aggregate", ("tuple", "namedtuple"))
@@ -7881,6 +7927,66 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
             FileCheck().check(get_func_call()).check_count(
                 "del", num_deallocs, exactly=True
             ).run(code_str)
+
+    @unittest.skipUnless(HAS_GPU, "requires gpu")
+    @parametrize("aggregate", ("tuple", "nested_namedtuple"))
+    @requires_python_wrapper_for_aggregates
+    @_assert_no_mutation_fallback
+    def test_fusion_relu_epilogue_aggregate(self, aggregate):
+        # A written leaf inside either aggregate remains visible to fusion.
+        from torch._higher_order_ops import triton_kernel_wrap
+
+        Nested = collections.namedtuple("Nested", ("destination",))
+        Output = collections.namedtuple("Output", ("nested", "scale"))
+
+        @triton.jit
+        def tuple_kernel(source, destination, n_elements, BLOCK_SIZE: tl.constexpr):
+            offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            values = tl.load(source + offsets, mask=mask)
+            tl.store(destination[0] + offsets, values * 2.0, mask=mask)
+
+        @triton.jit
+        def nested_kernel(source, output, n_elements, BLOCK_SIZE: tl.constexpr):
+            offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            values = tl.load(source + offsets, mask=mask)
+            tl.store(
+                output.nested.destination + offsets,
+                values * output.scale,
+                mask=mask,
+            )
+
+        def fn(source):
+            destination = torch.empty_like(source)
+            n_elements = source.numel()
+            if aggregate == "tuple":
+                tuple_kernel[(triton.cdiv(n_elements, 32),)](
+                    source, (destination,), n_elements, BLOCK_SIZE=32
+                )
+            else:
+                nested_kernel[(triton.cdiv(n_elements, 32),)](
+                    source, Output(Nested(destination), 2.0), n_elements, BLOCK_SIZE=32
+                )
+            return destination.relu()
+
+        source = torch.linspace(-2.0, 2.0, 1024, device=GPU_TYPE)
+        metrics.reset()
+        actual, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True), source)
+
+        self.assertEqual(actual, (source * 2.0).relu())
+        self.assertEqual(metrics.generated_kernel_count, 1)
+        self.check_code(code, num_kernels=1, num_allocs=1, num_deallocs=1)
+        if aggregate == "nested_namedtuple":
+            nested_name = triton_kernel_wrap.create_structural_named_tuple_name(
+                "Nested", Nested._fields
+            )
+            output_name = triton_kernel_wrap.create_structural_named_tuple_name(
+                "Output", Output._fields
+            )
+            FileCheck().check(
+                f"{output_name}(nested={nested_name}(destination=buf"
+            ).run(code)
 
     @requires_cuda_and_triton
     def test_fusion_relu_epilogue(self):
