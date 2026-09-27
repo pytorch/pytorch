@@ -819,7 +819,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> miopen_rnn_backward_input(
 
     auto x = input.contiguous();
     auto dy = grad_output.contiguous();
-    auto y = output;
+    auto y = output.contiguous();
     auto w = weight_buf;
     auto dx = at::empty(input.sizes(), input.options());
     auto dhy = grad_hy.contiguous().view(hidden_size);
@@ -948,7 +948,7 @@ std::vector<Tensor> miopen_rnn_backward_weight(
     TORCH_CHECK(!cx.defined() || cx.is_contiguous(), "rnn: cx is not contiguous");
 
     auto x = input.contiguous();
-    const auto& y = output;
+    auto y = output.contiguous();
     auto dw = at::zeros(weight_buf.sizes(), weight_buf.options());
 
     miopenRNNAlgo_t algo = miopenRNNdefault;

@@ -3194,6 +3194,29 @@ main()
                 b.sum().backward()
 
     @requires_cuda_and_triton
+    @unittest.skipIf(not torch.backends.cudnn.is_available(), "requires cudnn")
+    def test_chained_cudnn_lstm(self):
+        # https://github.com/pytorch/pytorch/issues/198652
+        # _cudnn_rnn_backward has no meta kernel, so the first node graph breaks. With
+        # static sizes the second node is lowered as an inductor fallback, which hands
+        # the kernel a contiguous copy of the transposed saved output.
+        def fn():
+            enc = nn.LSTM(8, 8, batch_first=True, device="cuda")
+            dec = nn.LSTM(8, 8, batch_first=True, device="cuda")
+            x = torch.randn(2, 4, 8, device="cuda")
+            target = torch.randn(2, 4, 8, device="cuda")
+            loss = nn.functional.mse_loss(dec(enc(x)[0])[0], target)
+            loss.backward()
+            yield from (p.grad for p in enc.parameters())
+            yield from (p.grad for p in dec.parameters())
+
+        self.check_output_and_recompiles(
+            fn,
+            count=[1, 2],
+            compiler_fn=make_compiler_fn(fullgraph=False, dynamic=False),
+        )
+
+    @requires_cuda_and_triton
     def test_cudagraphs_cpu_division(self):
         from torch._dynamo.testing import reduce_to_scalar_loss
 

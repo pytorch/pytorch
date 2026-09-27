@@ -1817,7 +1817,7 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
 
   auto x = input.contiguous();
   auto dy = grad_output.contiguous();
-  auto y = output;
+  auto y = output.contiguous();
   auto w = weight_buf;
   auto dx = at::empty(
       input.sizes(), input.options()); // TODO: more compact way of saying this
@@ -2060,7 +2060,7 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
   TORCH_CHECK(!cx.defined() || cx.is_contiguous(), "rnn: cx is not contiguous");
 
   auto x = input.contiguous();
-  const auto& y = output;
+  auto y = output.contiguous();
   auto dw = at::zeros(weight_buf.sizes(), weight_buf.options());
 
   cudnnRNNAlgo_t algo = get_algo(fn.rnn, fn.tensors, input, false);
