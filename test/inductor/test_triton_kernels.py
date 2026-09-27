@@ -683,6 +683,180 @@ class KernelTests(torch._inductor.test_case.TestCase):
         )
         self.assertIn("'constants': {(0, 1): 1, (0, 2): None", code)
 
+    @parametrize("autotune", (False, True))
+    @requires_python_wrapper_for_aggregates
+    @_assert_no_mutation_fallback
+    def test_triton_kernel_aggregate_constexpr_type(self, autotune):
+        # Exercise constexpr aggregate reconstruction and unspecialized scalar
+        # handling in both the runtime and compile-time autotune scopes.
+        import triton
+        import triton.language as tl
+
+        from torch._higher_order_ops import triton_kernel_wrap
+
+        Transform = collections.namedtuple("Transform", ("scale", "bias", "dtype"))
+        RuntimeConfig = collections.namedtuple(
+            "RuntimeConfig", ("source", "runtime", "leaf_dtype", "transform")
+        )
+        ConstexprConfig = collections.namedtuple(
+            "ConstexprConfig", ("transform", "dtype")
+        )
+
+        @triton.jit
+        def kernel(
+            config,
+            declared_config: tl.constexpr,
+            explicit_config,
+            unspec_scalar,
+            out,
+            n_elements,
+            BLOCK_SIZE: tl.constexpr,
+        ):
+            tl.static_assert(isinstance(config.leaf_dtype.type, tl.constexpr_type))
+            tl.static_assert(config.transform.scale == 3.0)
+            tl.static_assert(declared_config.transform.scale == 2.0)
+            tl.static_assert(explicit_config.transform.scale == 5.0)
+            offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            values = tl.load(config.source + offsets, mask=mask)
+            values = values.to(config.leaf_dtype).to(config.transform.dtype)
+            values = values * config.runtime[0] * config.transform.scale
+            values += config.transform.bias
+            values = values.to(declared_config.dtype)
+            values = values * declared_config.transform.scale
+            values += declared_config.transform.bias
+            values = values.to(explicit_config.dtype)
+            values = values * explicit_config.transform.scale
+            values += explicit_config.transform.bias
+            tl.store(out + offsets, values, mask=mask)
+
+        if autotune:
+            kernel = triton.autotune(
+                configs=[
+                    triton.Config({"BLOCK_SIZE": 16}),
+                    triton.Config({"BLOCK_SIZE": 32}),
+                ],
+                key=[],
+            )(kernel)
+
+        launch_kwargs = {} if autotune else {"BLOCK_SIZE": 16}
+
+        source = torch.arange(35, dtype=torch.float32, device="cpu")
+        # Combine a constexpr leaf and a nested constexpr aggregate with
+        # ordinary runtime leaves in the same argument.
+        runtime_config = RuntimeConfig(
+            source=source,
+            runtime=(2.0,),
+            leaf_dtype=tl.constexpr(tl.float32),
+            transform=tl.constexpr(Transform(3.0, 1.0, tl.float32)),
+        )
+        # This unused 0d input remains in the launch signature and exercises
+        # scalar unwrapping without being classified as a mutated CPU input.
+        unspec_scalar = torch.tensor(11.0)
+        # The annotation makes the complete aggregate constexpr.
+        declared_config = ConstexprConfig(
+            Transform(2.0, 4.0, tl.float32), tl.float32
+        )
+        # This complete aggregate is wrapped explicitly at the call site.
+        explicit_config = ConstexprConfig(
+            Transform(5.0, 7.0, tl.float32), tl.float32
+        )
+
+        def fn(runtime_config, unspec_scalar):
+            out = torch.empty_like(runtime_config.source)
+            n_elements = runtime_config.source.numel()
+            kernel[lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)](
+                runtime_config,
+                declared_config,
+                tl.constexpr(explicit_config),
+                unspec_scalar,
+                out,
+                n_elements,
+                **launch_kwargs,
+            )
+            return out
+
+        with inductor_config.patch("triton.autotune_at_compile_time", autotune):
+            actual, (code,) = run_and_get_code(
+                torch.compile(fn, fullgraph=True), runtime_config, unspec_scalar
+            )
+        self.assertEqual(actual, source * 60.0 + 37.0)
+        transform_name = triton_kernel_wrap.create_structural_named_tuple_name(
+            "Transform", Transform._fields
+        )
+        config_name = triton_kernel_wrap.create_structural_named_tuple_name(
+            "ConstexprConfig", ConstexprConfig._fields
+        )
+        # Compile-time autotuning emits a tuning call in addition to the
+        # ordinary runtime call.
+        expected_calls = 2 if autotune else 1
+        nested_constexpr = (
+            f"transform=tl.constexpr({transform_name}(scale=3.0, bias=1.0"
+        )
+        explicit_constexpr = (
+            f"tl.constexpr({config_name}(transform={transform_name}(scale=5.0, bias=7.0"
+        )
+        self.assertEqual(code.count(nested_constexpr), expected_calls)
+        self.assertEqual(code.count(explicit_constexpr), expected_calls)
+        # The top-level 0d CPU tensor is an unspecialized scalar and must be
+        # unwrapped in every emitted call scope.
+        self.assertEqual(code.count(".item()"), expected_calls)
+
+    @requires_python_wrapper_for_aggregates
+    @_assert_no_mutation_fallback
+    def test_triton_kernel_autotune_aggregate_codegen_cache_key(self):
+        # Autotuned kernel definitions are shared across tensor leaves, but
+        # static aggregate leaves must distinguish their codegen cache entries.
+        import triton
+        import triton.language as tl
+
+        Config = collections.namedtuple("Config", ("source", "scale"))
+
+        @triton.autotune(
+            configs=[
+                triton.Config({"BLOCK_SIZE": 16}),
+                triton.Config({"BLOCK_SIZE": 32}),
+            ],
+            key=[],
+        )
+        @triton.jit
+        def kernel(config, out, n_elements, BLOCK_SIZE: tl.constexpr):
+            offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            values = tl.load(config.source + offsets, mask=mask)
+            tl.store(out + offsets, values * config.scale, mask=mask)
+
+        def fn(source, replacement):
+            def launch(config):
+                out = torch.empty_like(config.source)
+                n_elements = config.source.numel()
+                kernel[lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)](
+                    config, out, n_elements
+                )
+                return out
+
+            return (
+                launch(Config(source, 2.0)),
+                launch(Config(replacement, 2.0)),
+                launch(Config(source, 3.0)),
+            )
+
+        source = torch.arange(35, dtype=torch.float32, device="cpu")
+        replacement = source + 1
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, fullgraph=True), source, replacement
+        )
+        self.assertEqual(
+            actual,
+            (source * 2.0, replacement * 2.0, source * 3.0),
+        )
+
+        # The two scale=2.0 launches share a definition despite using different
+        # tensor buffers; scale=3.0 requires a second cache entry.
+        FileCheck().check_count(
+            "@triton_heuristics.user_autotune(", 2, exactly=True
+        ).run(code)
+
     @requires_gpu
     @parametrize(
         "aggregate_form",

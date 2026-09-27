@@ -42,7 +42,7 @@ from torch._inductor.codegen.wrapper import _escape_triton_kernel_source_for_wra
 from torch._inductor.dtype_propagation import DtypePropagationOpsHandler, promote_types
 from torch._inductor.graph import GraphLowering
 from torch._inductor.runtime.hints import AutotuneHint, DeviceProperties
-from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+from torch._inductor.runtime.triton_heuristics import CachingAutotuner, CompileResult
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import (
     get_importable_constexpr_types,
@@ -917,6 +917,69 @@ def helper(x):
         )
         self.assertEqual(pickle.loads(pickle.dumps(value)), value)
         self.assertEqual(pickle.loads(pickle.dumps(restored)), value)
+
+    def test_udtk_constexpr_launcher_scope_binding(self):
+        # Bind aggregate constants in the launcher's globals so their dynamic
+        # structural classes never have to be reconstructed from repr strings.
+        inner_type = namedtuple("InnerType", ("scale",))
+        outer_type = namedtuple("OuterType", ("inner",))
+        aggregate = outer_type(inner_type(2))
+        compile_result = CompileResult(
+            kernel=None,
+            config=SimpleNamespace(kwargs={}, num_warps=4, num_stages=3),
+            compile_meta={
+                "signature": {
+                    "aggregate": "constexpr",
+                    "plain_tuple": "constexpr",
+                    "scalar": "constexpr",
+                    "text": "constexpr",
+                },
+                "constants": {
+                    "aggregate": aggregate,
+                    "plain_tuple": (3, 4),
+                    "scalar": 4,
+                    "text": "value",
+                },
+            },
+            inductor_meta={},
+        )
+
+        with patch(
+            "torch._inductor.runtime.triton_heuristics.triton_version_uses_attrs_dict",
+            return_value=True,
+        ):
+            (
+                call_args,
+                def_args,
+                none_args,
+                bound_udtk_constexprs,
+            ) = compile_result._get_arg_lists(
+                ["aggregate", "plain_tuple", "scalar", "text"],
+                [0, 1, 2, 3],
+            )
+
+        self.assertEqual(
+            call_args,
+            ["__udtk_constexpr_0", "__udtk_constexpr_1", "4", "r'value'"],
+        )
+        self.assertEqual(def_args, [])
+        self.assertEqual(none_args, set())
+        self.assertIs(bound_udtk_constexprs["__udtk_constexpr_0"], aggregate)
+        self.assertIs(
+            bound_udtk_constexprs["__udtk_constexpr_1"],
+            compile_result.compile_meta["constants"]["plain_tuple"],
+        )
+
+        # Earlier Triton signatures cannot represent aggregate arguments.
+        with patch(
+            "torch._inductor.runtime.triton_heuristics.triton_version_uses_attrs_dict",
+            return_value=False,
+        ):
+            _, _, _, legacy_bound_udtk_constexprs = compile_result._get_arg_lists(
+                ["aggregate", "plain_tuple", "scalar", "text"],
+                [0, 1, 2, 3],
+            )
+        self.assertEqual(legacy_bound_udtk_constexprs, {})
 
     def test_config_of_sizearg_with_check_constraint(self):
         from torch.utils._sympy.functions import Mod
