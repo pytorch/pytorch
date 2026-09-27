@@ -3099,27 +3099,50 @@ Generate the torch object - Dynamo tracing rule (the wrapping variable) map.
 """
 
 
+def _add_torch_obj_rule(
+    d: dict[Any, type["VariableTracker"]], obj: Any, v: type["VariableTracker"]
+) -> None:
+    if obj is None:
+        return
+    if is_lru_cache_wrapped_function(obj):
+        obj = obj.__wrapped__
+    if obj in d and d[obj] != v:
+        raise AssertionError(
+            f"Duplicate torch object {obj} with different rules: {v}, {d[obj]}"
+        )
+    d[obj] = v
+
+
 @functools.cache
-def get_torch_obj_rule_map() -> dict[Any, type["VariableTracker"]]:
+def _get_torch_obj_rule_map() -> tuple[
+    dict[Any, type["VariableTracker"]],
+    dict[str, list[tuple[str, type["VariableTracker"]]]],
+]:
     d: dict[Any, type[VariableTracker]] = {}
+    # Rules for objects whose module isn't imported yet, keyed by module name.
+    # Such objects can't reach Dynamo before their module is imported, so their
+    # rules are added then rather than importing e.g. DTensor and ONNX eagerly.
+    pending: dict[str, list[tuple[str, type[VariableTracker]]]] = {}
     for m in torch_name_rule_map:
         for k, v in m.items():  # type: ignore[attr-defined]
             if ".py#" not in k:
-                obj = load_object(k)
+                module = k.split("#")[0].rsplit(".", 1)[0]
+                if module in sys.modules:
+                    _add_torch_obj_rule(d, load_object(k), v)
+                else:
+                    pending.setdefault(module, []).append((k, v))
             else:
                 torch_dir = _module_dir(torch)
-                if torch_dir is None:
-                    continue
-                obj = torch_dir + k[len("torch/") :]
-            if obj is not None:
-                if is_lru_cache_wrapped_function(obj):
-                    obj = obj.__wrapped__
-                if obj in d and d[obj] != v:
-                    raise AssertionError(
-                        f"Duplicate torch object {obj} with different rules: {v}, {d[obj]}"
-                    )
-                else:
-                    d[obj] = v
+                if torch_dir is not None:
+                    _add_torch_obj_rule(d, torch_dir + k[len("torch/") :], v)
+    return d, pending
+
+
+def get_torch_obj_rule_map() -> dict[Any, type["VariableTracker"]]:
+    d, pending = _get_torch_obj_rule_map()
+    for module in [m for m in pending if m in sys.modules]:
+        for k, v in pending.pop(module):
+            _add_torch_obj_rule(d, load_object(k), v)
     return d
 
 
@@ -4305,7 +4328,7 @@ def _lookup_inner(
 
 
 def clear_lru_cache() -> None:
-    torch._dynamo.trace_rules.get_torch_obj_rule_map.cache_clear()
+    torch._dynamo.trace_rules._get_torch_obj_rule_map.cache_clear()
     torch._dynamo.trace_rules.get_tensor_method.cache_clear()
     torch._dynamo.trace_rules.get_legacy_mod_inlinelist.cache_clear()
     torch._dynamo.trace_rules.get_mod_inlinelist.cache_clear()

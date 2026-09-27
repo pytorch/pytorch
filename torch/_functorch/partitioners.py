@@ -65,15 +65,12 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils.checkpoint import CheckpointPolicy
 
 from . import config
-from ._activation_checkpointing.graph_info_provider import GraphInfoProvider
 from ._activation_checkpointing.knapsack import (
     dp_knapsack,
     dp_knapsack_sliding_hirschberg,
     greedy_knapsack,
     ilp_knapsack,
 )
-from ._activation_checkpointing.knapsack_evaluator import KnapsackEvaluator
-from ._activation_checkpointing.min_cut import minimum_cut
 from ._aot_autograd.descriptors import (
     AOTOutput,
     SavedForBackwardsAOTOutput,
@@ -2565,6 +2562,8 @@ def solve_min_cut(
 
     try:
         import networkx as nx
+
+        from ._activation_checkpointing.min_cut import minimum_cut
     except ImportError as e:
         raise RuntimeError(
             "Need networkx installed to perform smart recomputation heuristics"
@@ -3418,6 +3417,10 @@ def _optimize_runtime_with_given_memory(
             "It does not guarantee performance improvements. "
             "Additionally, it is not guaranteed to be stable."
         )
+        # Imported lazily since they import networkx.
+        from ._activation_checkpointing.graph_info_provider import GraphInfoProvider
+        from ._activation_checkpointing.knapsack_evaluator import KnapsackEvaluator
+
         graph_info_provider = GraphInfoProvider.inialize_from_graph(
             joint_graph=joint_graph,
             all_recomputable_banned_nodes=all_recomputable_banned_nodes,
