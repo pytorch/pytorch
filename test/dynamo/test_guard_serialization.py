@@ -1,12 +1,14 @@
 # Owner(s): ["module: dynamo"]
 
 import builtins
+import cmath
 import collections
 import dataclasses
 import enum
 import functools
 import io
 import itertools
+import math
 import pickle
 import sys
 import tempfile
@@ -29,10 +31,13 @@ from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
 from torch._dynamo.bytecode_transformation import transform_code_object
 from torch._dynamo.exc import PackageError
 from torch._dynamo.guards import (
+    _method_code_matches,
+    _method_code_metadata,
     _Missing,
     CheckFunctionManager,
     CompileId,
     GuardsStatePickler,
+    is_portable_function_guard,
     pickle_guards_state,
 )
 from torch._dynamo.package import (
@@ -741,6 +746,12 @@ class MyClassNotSerializable:
         return x + 1
 
 
+class LockHolder:
+    def __init__(self, scale):
+        self.scale = scale
+        self.lock = threading.Lock()
+
+
 class Inputs:
     def __init__(self, x, unused):
         self.x = x
@@ -819,6 +830,30 @@ class PlainMethods:
     @classmethod
     def make(cls):
         return cls()
+
+
+class _DoubleFn(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x):
+        return x * 2
+
+    @staticmethod
+    def backward(ctx, grad):
+        return grad * 2
+
+
+class _TripleFn(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x):
+        return x * 3
+
+    @staticmethod
+    def backward(ctx, grad):
+        return grad * 3
+
+
+# A builtin bound to a class: every read of _DoubleFn.apply makes a new object.
+double_apply = _DoubleFn.apply
 
 
 def _global_func_wrong_fqn(x):
@@ -1296,7 +1331,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             # The meta template is a plain tensor, not another fake carrying
             # the mode (without no_dispatch the dump still succeeds, with the
             # mode and its converters pickled along).
-            _, args = pickler.reducer_override(fake)
+            args = pickler.reducer_override(fake)[1]
             self.assertIs(type(args[0]), torch.Tensor)
             pickler.dump({"t": fake})
             self.assertNotIn(b"FakeTensorMode", buf.getvalue())
@@ -3285,12 +3320,46 @@ class TestGuardSerialization(TestGuardSerializationBase):
 
         x = torch.randn(3)
 
-        # we don't support FUNCTION_MATCH because it adds an ID_MATCH guard, and we don't
-        # support that in serialization
+        ref, loaded = self._test_serialization("CLASS_MATCH", fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        with mock.patch.object(torch, "no_grad", torch.enable_grad):
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+
+    def test_class_match_on_a_local_class(self):
+        class Local:
+            pass
+
+        def fn(x):
+            if isinstance(x, Local):
+                return x
+            return x + 1
+
+        # A <locals> class does not unpickle to the loading process's class.
         with self.assertRaisesRegex(
             PackageError, "CLASS_MATCH guard cannot be serialized."
         ):
-            self._test_serialization("CLASS_MATCH", fn, x)
+            self._test_serialization("CLASS_MATCH", fn, torch.randn(3))
+
+    def test_module_match(self):
+        def fn(x):
+            return x + math.sqrt(2)
+
+        x = torch.randn(3)
+
+        ref, loaded = self._test_serialization("MODULE_MATCH", fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        with mock.patch.dict(globals(), {"math": cmath}):
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+
+    def test_guarded_user_object_prunes_unguarded_attributes(self):
+        def fn(x, holder):
+            return x * holder.scale
+
+        x = torch.randn(3)
+
+        ref, loaded = self._test_serialization("CONSTANT_MATCH", fn, x, LockHolder(2))
+        self._test_check_fn(ref, loaded, {"x": x, "holder": LockHolder(2)}, True)
+        self._test_check_fn(ref, loaded, {"x": x, "holder": LockHolder(3)}, False)
 
     def test_closure_match(self):
         def fn(x):
@@ -3298,13 +3367,72 @@ class TestGuardSerialization(TestGuardSerializationBase):
             return global_func(x)
 
         x = torch.randn(3)
+        ref, loaded = self._test_serialization("CLOSURE_MATCH", fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        # The saved guard compares code by value rather than identity, so it
+        # matches the loading process's own copy of the function.
+        copy = types.FunctionType(global_func.__code__.replace(), globals())
+        self.assertIsNot(copy.__code__, global_func.__code__)
+        with mock.patch.dict(globals(), {"global_func": copy}):
+            self.assertFalse(ref.check({"x": x}))
+            self.assertTrue(loaded.check({"x": x}))
+        with mock.patch.dict(globals(), {"global_func": lambda x: x + 2}):
+            self._test_check_fn(ref, loaded, {"x": x}, False)
 
-        # we don't support CLOSURE_MATCH because it adds a FUNCTION_MATCH guard, and we don't
-        # support that in serialization
-        with self.assertRaisesRegex(
-            PackageError, "CLOSURE_MATCH guard cannot be serialized."
+    def test_closure_match_without_module_globals(self):
+        namespace = {}
+        exec("def global_func(x):\n    return x + 1\n", namespace)
+
+        def fn(x):
+            return global_func(x)
+
+        # No importable module owns these globals, so a loading process has no
+        # way to find the function's globals again.
+        with (
+            mock.patch.dict(globals(), {"global_func": namespace["global_func"]}),
+            self.assertRaisesRegex(
+                PackageError, "CLOSURE_MATCH guard cannot be serialized."
+            ),
         ):
-            self._test_serialization("CLOSURE_MATCH", fn, x)
+            self._test_serialization("CLOSURE_MATCH", fn, torch.randn(3))
+
+    def test_bound_method_closure_match(self):
+        def fn(x, m):
+            return m(x) + 1
+
+        x = torch.randn(3)
+        ref, loaded = self._test_serialization(
+            "CLOSURE_MATCH", fn, x, PlainMethods().add
+        )
+        self._test_check_fn(ref, loaded, {"x": x, "m": PlainMethods().add}, True)
+        other = types.MethodType(lambda self, x: x, PlainMethods())
+        self._test_check_fn(ref, loaded, {"x": x, "m": other}, False)
+
+    def test_method_code_match_round_trips(self):
+        # An identity guard on a bound method is saved as its function's code
+        # and globals module; the receiver keeps its own guards.
+        self.assertTrue(is_portable_function_guard("ID_MATCH", PlainMethods().add))
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {}, {}, buf).dump(
+            _method_code_metadata(PlainMethods().add)
+        )
+        expected = load_guards_state(buf.getvalue())
+        self.assertTrue(_method_code_matches(PlainMethods().add, expected))
+        self.assertFalse(_method_code_matches(PlainMethods.make, expected))
+        self.assertFalse(_method_code_matches(PlainMethods.add, expected))
+
+    def test_native_method_match(self):
+        def fn(x):
+            return double_apply(x)
+
+        x = torch.randn(3)
+        ref, loaded = self._test_serialization("ID_MATCH", fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        with mock.patch.dict(globals(), {"double_apply": _DoubleFn.apply}):
+            self.assertFalse(ref.check({"x": x}))
+            self.assertTrue(loaded.check({"x": x}))
+        with mock.patch.dict(globals(), {"double_apply": _TripleFn.apply}):
+            self._test_check_fn(ref, loaded, {"x": x}, False)
 
     def test_sequence_length(self):
         # tuple input installs a SEQUENCE_LENGTH guard
@@ -3978,6 +4106,19 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(ref, loaded, {"x": torch.randn(3, 10, 2)}, True)
         self._test_check_fn(ref, loaded, {"x": torch.randn(3, 11, 2)}, False)
         self._test_check_fn(ref, loaded, {"x": torch.randn(3, 2, 2)}, False)
+
+    def test_guarded_tensor_attribute_round_trips(self):
+        def fn(x):
+            return x * x.scale
+
+        x = torch.randn(3)
+        x.scale = 2
+        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, x)
+        same, other = torch.randn(3), torch.randn(3)
+        same.scale = 2
+        other.scale = 3
+        self._test_check_fn(ref, loaded, {"x": same}, True)
+        self._test_check_fn(ref, loaded, {"x": other}, False)
 
     def test_builtin_match(self):
         def fn(x):
