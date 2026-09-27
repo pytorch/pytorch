@@ -13042,6 +13042,35 @@ if __name__ == '__main__':
         self.assertEqual(a_bf16.grad, expected_bf16)
 
     @onlyCPU
+    def test_rrelu_with_noise_out_smaller_than_input(self, device):
+        # A short out used to be written past its end and corrupt the heap.
+        x = torch.randn(64, device=device)
+        noise = torch.empty_like(x)
+        out = torch.empty(2, device=device)
+        torch._C._nn.rrelu_with_noise(x, noise, 0.1, 0.3, True, None, out=out)
+        self.assertEqual(out.shape, x.shape)
+
+    @onlyCPU
+    def test_rrelu_with_noise_noncontiguous_noise(self, device):
+        # A strided noise materializes, the same way a strided out does.
+        x = torch.randn(4, 16, device=device)
+        noise = torch.randn(4, 32, device=device)[:, ::2]
+        out = torch._C._nn.rrelu_with_noise(x, noise, 0.1, 0.3, True)
+        self.assertEqual(out, x * noise)
+
+    @onlyCPU
+    def test_rrelu_with_noise_expanded_noise(self, device):
+        # An expanded noise's storage holds one element; writing through its
+        # data pointer used to go past the storage. Distinct per-element noise
+        # values cannot land there, so the copy back rejects it.
+        x = torch.randn(64, device=device)
+        expanded_noise = torch.zeros(1, device=device).expand(64)
+        with self.assertRaisesRegex(
+            RuntimeError, "refers to a single memory location"
+        ):
+            torch._C._nn.rrelu_with_noise(x, expanded_noise, 0.1, 0.3, True)
+
+    @onlyCPU
     def test_rrelu_bounds_validation(self, device):
         """Test RReLU bounds validation for finite and infinite values."""
         x = torch.randn(5, 5, device=device)
