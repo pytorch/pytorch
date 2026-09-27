@@ -45,11 +45,7 @@ from torch.utils._config_module import ConfigModule
 from .aot_compile import _BUILTINS_DICT_PREFIX, _IMPORT_ALIAS_PREFIX
 from .convert_frame import ConvertFrame
 from .exc import PackageError
-from .guards import (
-    CheckFunctionManager,
-    is_portable_identity_guard,
-    strip_local_scope,
-)
+from .guards import CheckFunctionManager, is_portable_identity_guard, strip_local_scope
 from .package import CompilePackage
 from .source import (
     AttrSource,

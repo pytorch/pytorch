@@ -412,9 +412,17 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         control_counts = collections.Counter(
             g.create_fn_name() for g in control_state.output_graph.guards
         )
+        # pytree's classes are TreeSpec and typing.Any, which is a class only
+        # from Python 3.11 on.
+        class_matches = 2 if isinstance(pytree.Any, type) else 1
         self.assertEqual(
             counts - control_counts,
-            {"DICT_KEYS_MATCH": 1, "MODULE_MATCH": 1, "CLASS_MATCH": 2, "ID_MATCH": 2},
+            {
+                "DICT_KEYS_MATCH": 1,
+                "MODULE_MATCH": 1,
+                "CLASS_MATCH": class_matches,
+                "ID_MATCH": 2,
+            },
         )
         self.assertEqual(control_counts - counts, {})
         control_data = AOTCompiledFunction.serialize(control).serialized_data
