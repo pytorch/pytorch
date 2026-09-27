@@ -885,7 +885,8 @@ def _is_dtensor(obj: object) -> TypeIs["DTensor"]:
     # Checked without importing DTensor, which is expensive: nothing can be a
     # DTensor before its module is imported.
     dtensor_api = sys.modules.get("torch.distributed.tensor._api")
-    return dtensor_api is not None and isinstance(obj, dtensor_api.DTensor)
+    dtensor_cls = getattr(dtensor_api, "DTensor", None)
+    return dtensor_cls is not None and isinstance(obj, dtensor_cls)
 
 
 def _get_device_index(
