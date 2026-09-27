@@ -348,6 +348,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
                 (config[0] * config[1][0], source * 5),
             )
 
+    @requires_gpu
     @requires_python_wrapper_for_aggregates
     @_assert_no_mutation_fallback
     def test_triton_kernel_same_named_structural_types_do_not_collide(self):
@@ -396,8 +397,8 @@ class KernelTests(torch._inductor.test_case.TestCase):
             )
             return out
 
-        left = torch.arange(32, dtype=torch.float32, device="cpu")
-        right = torch.arange(32, dtype=torch.float32, device="cpu") + 1
+        left = torch.arange(32, dtype=torch.float32, device=GPU_TYPE)
+        right = torch.arange(32, dtype=torch.float32, device=GPU_TYPE) + 1
         actual, (code,) = run_and_get_code(
             torch.compile(fn, fullgraph=True), left, right
         )
@@ -687,6 +688,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
         self.assertEqual(read_only_result, read_only_before)
         self.assertEqual(read_only, read_only_before)
 
+    @requires_gpu
     @requires_python_wrapper_for_aggregates
     @_assert_no_mutation_fallback
     def test_triton_kernel_namedtuple_nested_implicit_constants(self):
@@ -715,7 +717,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
             )
             return out
 
-        x = torch.arange(16, dtype=torch.float32, device="cpu")
+        x = torch.arange(16, dtype=torch.float32, device=GPU_TYPE)
         actual, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True), x)
         self.assertEqual(actual, x)
         config_name = triton_kernel_wrap.create_structural_named_tuple_name(
@@ -728,6 +730,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
         self.assertIn("'constants': {(0, 1): 1, (0, 2): None", code)
 
     @parametrize("autotune", (False, True))
+    @requires_gpu
     @requires_python_wrapper_for_aggregates
     @_assert_no_mutation_fallback
     def test_triton_kernel_aggregate_constexpr_type(self, autotune):
@@ -785,7 +788,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
 
         launch_kwargs = {} if autotune else {"BLOCK_SIZE": 16}
 
-        source = torch.arange(35, dtype=torch.float32, device="cpu")
+        source = torch.arange(35, dtype=torch.float32, device=GPU_TYPE)
         # Combine a constexpr leaf and a nested constexpr aggregate with
         # ordinary runtime leaves in the same argument.
         runtime_config = RuntimeConfig(
@@ -795,8 +798,8 @@ class KernelTests(torch._inductor.test_case.TestCase):
             transform=tl.constexpr(Transform(3.0, 1.0, tl.float32)),
         )
         # This unused 0d input remains in the launch signature and exercises
-        # scalar unwrapping without being classified as a mutated CPU input.
-        unspec_scalar = torch.tensor(11.0)
+        # scalar unwrapping in the generated call.
+        unspec_scalar = torch.tensor(11.0, device=GPU_TYPE)
         # The annotation makes the complete aggregate constexpr.
         declared_config = ConstexprConfig(Transform(2.0, 4.0, tl.float32), tl.float32)
         # This complete aggregate is wrapped explicitly at the call site.
@@ -838,10 +841,11 @@ class KernelTests(torch._inductor.test_case.TestCase):
         )
         self.assertEqual(code.count(nested_constexpr), expected_calls)
         self.assertEqual(code.count(explicit_constexpr), expected_calls)
-        # The top-level 0d CPU tensor is an unspecialized scalar and must be
+        # The top-level 0d tensor is an unspecialized scalar and must be
         # unwrapped in every emitted call scope.
         self.assertEqual(code.count(".item()"), expected_calls)
 
+    @requires_gpu
     @requires_python_wrapper_for_aggregates
     @_assert_no_mutation_fallback
     def test_triton_kernel_autotune_aggregate_codegen_cache_key(self):
@@ -881,7 +885,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
                 launch(Config(source, 3.0)),
             )
 
-        source = torch.arange(35, dtype=torch.float32, device="cpu")
+        source = torch.arange(35, dtype=torch.float32, device=GPU_TYPE)
         replacement = source + 1
         actual, (code,) = run_and_get_code(
             torch.compile(fn, fullgraph=True), source, replacement
