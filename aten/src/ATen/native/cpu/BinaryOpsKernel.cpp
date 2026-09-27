@@ -1,7 +1,9 @@
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/native/BinaryOps.h>
 
+#include <algorithm>
 #include <cmath>
+#include <limits>
 
 #include <ATen/Dispatch.h>
 #include <ATen/Dispatch_v2.h>
@@ -1433,12 +1435,20 @@ void shifted_chebyshev_polynomial_w_kernel(TensorIteratorBase& iterator) {
 void ldexp_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.input_dtype(0), "ldexp_cpu", [&] {
     using float_t = scalar_t;
-    AT_DISPATCH_INTEGRAL_TYPES(iter.input_dtype(1), "ldexp_cpu_exp", [&] {
+    AT_DISPATCH_V2(iter.input_dtype(1), "ldexp_cpu_exp", AT_WRAP([&] {
       using int_t = scalar_t;
       cpu_kernel(iter, [](float_t x, int_t exp) -> float_t {
-        return static_cast<float_t>(std::ldexp(static_cast<double>(x), exp));
+        // Saturate to int: any exponent beyond int range already over/underflows double.
+        constexpr int64_t int_max = std::numeric_limits<int>::max();
+        int e;
+        if constexpr (std::is_unsigned_v<int_t>) {
+          e = static_cast<int>(std::min<uint64_t>(exp, int_max));
+        } else {
+          e = static_cast<int>(std::clamp<int64_t>(exp, std::numeric_limits<int>::min(), int_max));
+        }
+        return static_cast<float_t>(std::ldexp(static_cast<double>(x), e));
       });
-    });
+    }), kBool, AT_EXPAND(AT_INTEGRAL_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
   });
 }
 
