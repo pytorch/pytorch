@@ -1302,9 +1302,6 @@ if NEXTAFTER_IN_RANGE:
 
     @wrapper_noop_set_seed_decorator
     class TestInductorNextafter(TestCase):
-        def tearDown(self):
-            torch._dynamo.reset()
-
         @device_dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
         @parametrize("noncontiguous", (False, True))
         @skipCPUIf(not HAS_CPU, "Skipped! Supported CPU compiler not found")
