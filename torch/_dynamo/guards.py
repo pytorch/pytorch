@@ -21,6 +21,7 @@ import ast
 import builtins
 import collections
 import contextlib
+import copyreg
 import dataclasses
 import enum
 import functools
@@ -3114,7 +3115,7 @@ class GuardBuilder(GuardBuilderBase):
     )
     def FUNCTION_MATCH(self, guard: Guard) -> None:
         """things like torch.add and user defined functions"""
-        # don't support this in serialization because it uses unsupported ID_MATCH
+        # Serialized only when is_portable_identity_guard accepts the function.
         return self.ID_MATCH(guard)
 
     @register_guard_check_spec(
@@ -4225,6 +4226,22 @@ def _get_unsupported_types() -> tuple[type, ...]:
     return ret
 
 
+def _pickles_from_dict(cls: type) -> bool:
+    """Whether pickle rebuilds an instance of cls by restoring its ``__dict__``,
+    with no hook that could read a pruned attribute (an Enum member's
+    ``__reduce_ex__`` passes ``_value_`` to the class, for one)."""
+    object_getstate = getattr(object, "__getstate__", None)
+    return (
+        cls not in copyreg.dispatch_table
+        and cls.__reduce_ex__ is object.__reduce_ex__
+        and cls.__reduce__ is object.__reduce__
+        and getattr(cls, "__getstate__", None) is object_getstate
+        and not hasattr(cls, "__setstate__")
+        and not hasattr(cls, "__getnewargs_ex__")
+        and not hasattr(cls, "__getnewargs__")
+    )
+
+
 def _is_shared_constant(value: Any) -> bool:
     """Whether pruning ``value`` by id would poison unrelated references to it.
 
@@ -4787,12 +4804,7 @@ class GuardsStatePickler(FunctionPicklerBase):
                 )
             return obj._torch_unpickler, (obj._torch_handler_name,)
 
-        elif (
-            inspect.isclass(obj)
-            and issubclass(obj, tuple)
-            and hasattr(obj, "_fields")
-            and obj.__qualname__ != obj.__name__
-        ):
+        elif _is_nested_named_tuple_type(obj):
             return type(self)._unpickle_named_tuple_type, (obj.__name__, obj._fields)
 
         elif isinstance(obj, (torch.SymInt, torch.SymFloat, torch.SymBool)):
@@ -4874,21 +4886,6 @@ class GuardsStatePickler(FunctionPicklerBase):
         elif isinstance(obj, types.CellType):
             return self._reduce_cell(obj)
 
-        if (
-            id(obj) in self.guard_tree_values
-            and hasattr(obj, "__dict__")
-            and not inspect.isclass(obj)
-            and not inspect.ismodule(obj)
-            and not isinstance(obj, (torch.nn.Module, torch.Tensor))
-            and not type(obj).__module__.startswith("torch.")
-        ):
-            # A guarded user object (a train pipeline, a wrapper holding a
-            # dataloader) would otherwise be pickled whole, so one unguarded
-            # unpicklable attribute takes the frame down. Last, so the specific
-            # reducers above get first refusal; user types only, since torch's
-            # structural types (DTensorSpec) need fields no guard names.
-            self._prune_unguarded_attributes(obj)
-
         if hasattr(torch.distributed, "distributed_c10d") and isinstance(
             obj, torch.distributed.distributed_c10d.Work
         ):
@@ -4921,18 +4918,37 @@ class GuardsStatePickler(FunctionPicklerBase):
                     )
                 return type(self)._unpickle_fsdp_module_type, (original_type,)
 
+        if (
+            id(obj) in self.guard_tree_values
+            and hasattr(obj, "__dict__")
+            and not inspect.isclass(obj)
+            and not inspect.ismodule(obj)
+            and not inspect.isroutine(obj)
+            and not isinstance(obj, (torch.nn.Module, torch.Tensor))
+            and not type(obj).__module__.startswith("torch.")
+            and _pickles_from_dict(type(obj))
+        ):
+            # A guarded user object (a train pipeline, a wrapper holding a
+            # dataloader) would otherwise be pickled whole, so one unguarded
+            # unpicklable attribute takes the frame down. Last, so the specific
+            # reducers above get first refusal; user types only, since torch's
+            # structural types (DTensorSpec) need fields no guard names.
+            self._prune_unguarded_attributes(obj)
+
         return NotImplemented
 
     def _prune_unguarded_attributes(self, obj: Any) -> None:
         """Mark every ``__dict__`` value nothing guards as prunable.
 
-        Reaching a module through the guard tree does not mean its whole state
+        Reaching an object through the guard tree does not mean its whole state
         is needed, only the attributes a guard actually reads. The rest becomes
         the _Missing sentinel, which is what keeps an unpicklable bystander (a
         generator, a live iterator, a C handle) from taking the frame down.
-        What the module itself reads back at load stays: the containers in
-        _NN_MODULE_STATE_ATTRS. Precondition: the caller has checked that the
-        module's __setstate__ is nn.Module's, since any other may read anything.
+        What an nn.Module itself reads back at load stays: the containers in
+        _NN_MODULE_STATE_ATTRS. Precondition: the caller has checked that
+        unpickling obj reads nothing but its ``__dict__`` back (nn.Module's
+        __setstate__, or ``_pickles_from_dict``), since any other hook may read
+        anything.
         """
         for name, attr in obj.__dict__.items():
             if isinstance(attr, (torch.Tensor, torch.nn.Module)):
@@ -4953,6 +4969,15 @@ _PORTABLE_IDENTITY_GUARD_TYPES = frozenset(
 )
 
 
+def _is_nested_named_tuple_type(obj: object) -> bool:
+    return (
+        inspect.isclass(obj)
+        and issubclass(obj, tuple)
+        and hasattr(obj, "_fields")
+        and obj.__qualname__ != obj.__name__
+    )
+
+
 def _resolves_by_reference(value: object) -> bool:
     """Whether unpickling ``value`` in another process yields that process's
     canonical object, so an identity guard rebuilt at load checks the right id.
@@ -4961,27 +4986,17 @@ def _resolves_by_reference(value: object) -> bool:
         return sys.modules.get(value.__name__) is value
     if isinstance(value, enum.Enum):
         owner = type(value)
+        # Not owner.__dict__: a member named like an Enum attribute (name,
+        # value) is stored behind a descriptor there.
         return (
-            _resolves_by_reference(owner)
-            and owner.__dict__.get(value.name, None) is value
+            _resolves_by_reference(owner) and getattr(owner, value.name, None) is value
         )
-    if not isinstance(value, (type, types.FunctionType, types.BuiltinFunctionType)):
+    if _is_nested_named_tuple_type(value):
+        # GuardsStatePickler.reducer_override rebuilds it as a fresh class.
         return False
-    module = getattr(value, "__module__", None)
-    qualname = getattr(value, "__qualname__", None)
-    if not isinstance(module, str) or not isinstance(qualname, str):
-        return False
-    if "<locals>" in qualname:
-        return False
-    obj: object = sys.modules.get(module)
-    for part in qualname.split("."):
-        obj = getattr(obj, part, _PORTABLE_IDENTITY_MISSING)
-        if obj is _PORTABLE_IDENTITY_MISSING:
-            return False
-    return obj is value
-
-
-_PORTABLE_IDENTITY_MISSING = object()
+    if isinstance(value, (type, types.FunctionType, types.BuiltinFunctionType)):
+        return FunctionPicklerBase._fqn_resolves(value)  # type: ignore[arg-type]
+    return False
 
 
 def is_portable_identity_guard(
@@ -4999,6 +5014,14 @@ def is_portable_identity_guard(
         )
         and _resolves_by_reference(value)
     )
+
+
+def _guard_value(builder: GuardBuilder, guard: Guard) -> object:
+    try:
+        return builder.get(guard)
+    except Exception:
+        # Not a module, enum member, class or function: never portable.
+        return None
 
 
 def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterEntry:
@@ -5329,6 +5352,8 @@ class CheckFunctionManager:
         self._weakrefs.clear()
         self.output_graph = None
 
+    # serialize_guards still accepts an ID_MATCH, FUNCTION_MATCH, CLASS_MATCH or
+    # MODULE_MATCH that is_portable_identity_guard accepts.
     UNSUPPORTED_SERIALIZATION_GUARD_TYPES: tuple[LiteralString, ...] = (
         "DICT_VERSION",
         "NN_MODULE",
@@ -5357,9 +5382,7 @@ class CheckFunctionManager:
                     raise_local_type_error(guard._unserializable)
             elif guard_type in _PORTABLE_IDENTITY_GUARD_TYPES and (
                 is_portable_identity_guard(
-                    guard_type,
-                    derived_guard_types,
-                    make_guard_filter_entry(guard, builder).value,
+                    guard_type, derived_guard_types, _guard_value(builder, guard)
                 )
             ):
                 continue
