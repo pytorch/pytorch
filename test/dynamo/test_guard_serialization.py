@@ -10,6 +10,7 @@ import io
 import itertools
 import math
 import pickle
+import random
 import sys
 import tempfile
 import threading
@@ -35,6 +36,7 @@ from torch._dynamo.guards import (
     CheckFunctionManager,
     CompileId,
     GuardsStatePickler,
+    is_portable_identity_guard,
     pickle_guards_state,
 )
 from torch._dynamo.package import (
@@ -232,6 +234,33 @@ def keep_annotations(func):
         return func(self, x)
 
     return wrapper
+
+
+class _Mode(enum.Enum):
+    FAST = 1
+    SLOW = 2
+
+
+class _NameClash(enum.Enum):
+    name = 1
+
+
+_MODE = _Mode.FAST
+_torch_add = torch.add
+
+
+class _TupleOwner:
+    class Point(NamedTuple):
+        x: int
+
+
+def _wrapped_target(x):
+    return x
+
+
+@functools.wraps(_wrapped_target)
+def _wraps_wrapper(x):
+    return _wrapped_target(x)
 
 
 class UnpicklableDefault:
@@ -3317,6 +3346,54 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(ref, loaded, {"x": x}, True)
         with mock.patch.dict(globals(), {"math": cmath}):
             self._test_check_fn(ref, loaded, {"x": x}, False)
+
+    def test_id_match_on_an_enum_member(self):
+        def fn(x):
+            if _MODE is _Mode.FAST:
+                return x + 1
+            return x - 1
+
+        x = torch.randn(3)
+
+        ref, loaded = self._test_serialization("ID_MATCH", fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        with mock.patch.dict(globals(), {"_MODE": _Mode.SLOW}):
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+
+    def test_id_match_on_a_builtin_function(self):
+        def fn(x):
+            return _torch_add(x, 1)
+
+        x = torch.randn(3)
+
+        ref, loaded = self._test_serialization("ID_MATCH", fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        with mock.patch.dict(globals(), {"_torch_add": torch.sub}):
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+
+    def test_portable_identity_guard_values(self):
+        class Local:
+            pass
+
+        cases = [
+            (math, True),
+            (math.sqrt, True),
+            (_wrapped_target, True),
+            (_Mode.SLOW, True),
+            (_NameClash["name"], True),
+            (types.ModuleType("_unregistered"), False),
+            (Local, False),
+            # Its __qualname__ leads to _wrapped_target instead.
+            (_wraps_wrapper, False),
+            (_TupleOwner.Point, False),
+            # Bound to the module's Random instance, with no __module__.
+            (random.random, False),
+        ]
+        for value, expected in cases:
+            with self.subTest(value=value):
+                self.assertEqual(
+                    is_portable_identity_guard("ID_MATCH", (), value), expected
+                )
 
     def test_closure_match(self):
         def fn(x):

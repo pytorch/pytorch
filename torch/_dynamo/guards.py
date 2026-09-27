@@ -3114,7 +3114,7 @@ class GuardBuilder(GuardBuilderBase):
     )
     def FUNCTION_MATCH(self, guard: Guard) -> None:
         """things like torch.add and user defined functions"""
-        # don't support this in serialization because it uses unsupported ID_MATCH
+        # Serialized only when is_portable_identity_guard accepts the function.
         return self.ID_MATCH(guard)
 
     @register_guard_check_spec(
@@ -4787,12 +4787,7 @@ class GuardsStatePickler(FunctionPicklerBase):
                 )
             return obj._torch_unpickler, (obj._torch_handler_name,)
 
-        elif (
-            inspect.isclass(obj)
-            and issubclass(obj, tuple)
-            and hasattr(obj, "_fields")
-            and obj.__qualname__ != obj.__name__
-        ):
+        elif _is_nested_named_tuple_type(obj):
             return type(self)._unpickle_named_tuple_type, (obj.__name__, obj._fields)
 
         elif isinstance(obj, (torch.SymInt, torch.SymFloat, torch.SymBool)):
@@ -4938,6 +4933,15 @@ _PORTABLE_IDENTITY_GUARD_TYPES = frozenset(
 )
 
 
+def _is_nested_named_tuple_type(obj: object) -> bool:
+    return (
+        inspect.isclass(obj)
+        and issubclass(obj, tuple)
+        and hasattr(obj, "_fields")
+        and obj.__qualname__ != obj.__name__
+    )
+
+
 def _resolves_by_reference(value: object) -> bool:
     """Whether unpickling ``value`` in another process yields that process's
     canonical object, so an identity guard rebuilt at load checks the right id.
@@ -4946,27 +4950,17 @@ def _resolves_by_reference(value: object) -> bool:
         return sys.modules.get(value.__name__) is value
     if isinstance(value, enum.Enum):
         owner = type(value)
+        # Not owner.__dict__: a member named like an Enum attribute (name,
+        # value) is stored behind a descriptor there.
         return (
-            _resolves_by_reference(owner)
-            and owner.__dict__.get(value.name, None) is value
+            _resolves_by_reference(owner) and getattr(owner, value.name, None) is value
         )
-    if not isinstance(value, (type, types.FunctionType, types.BuiltinFunctionType)):
+    if _is_nested_named_tuple_type(value):
+        # GuardsStatePickler.reducer_override rebuilds it as a fresh class.
         return False
-    module = getattr(value, "__module__", None)
-    qualname = getattr(value, "__qualname__", None)
-    if not isinstance(module, str) or not isinstance(qualname, str):
-        return False
-    if "<locals>" in qualname:
-        return False
-    obj: object = sys.modules.get(module)
-    for part in qualname.split("."):
-        obj = getattr(obj, part, _PORTABLE_IDENTITY_MISSING)
-        if obj is _PORTABLE_IDENTITY_MISSING:
-            return False
-    return obj is value
-
-
-_PORTABLE_IDENTITY_MISSING = object()
+    if isinstance(value, (type, types.FunctionType, types.BuiltinFunctionType)):
+        return FunctionPicklerBase._fqn_resolves(value)  # type: ignore[arg-type]
+    return False
 
 
 def is_portable_identity_guard(
@@ -4984,6 +4978,14 @@ def is_portable_identity_guard(
         )
         and _resolves_by_reference(value)
     )
+
+
+def _guard_value(builder: GuardBuilder, guard: Guard) -> object:
+    try:
+        return builder.get(guard)
+    except Exception:
+        # Not a module, enum member, class or function: never portable.
+        return None
 
 
 def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterEntry:
@@ -5314,6 +5316,8 @@ class CheckFunctionManager:
         self._weakrefs.clear()
         self.output_graph = None
 
+    # serialize_guards still accepts an ID_MATCH, FUNCTION_MATCH, CLASS_MATCH or
+    # MODULE_MATCH that is_portable_identity_guard accepts.
     UNSUPPORTED_SERIALIZATION_GUARD_TYPES: tuple[LiteralString, ...] = (
         "DICT_VERSION",
         "NN_MODULE",
@@ -5342,9 +5346,7 @@ class CheckFunctionManager:
                     raise_local_type_error(guard._unserializable)
             elif guard_type in _PORTABLE_IDENTITY_GUARD_TYPES and (
                 is_portable_identity_guard(
-                    guard_type,
-                    derived_guard_types,
-                    make_guard_filter_entry(guard, builder).value,
+                    guard_type, derived_guard_types, _guard_value(builder, guard)
                 )
             ):
                 continue
