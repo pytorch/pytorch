@@ -1433,6 +1433,14 @@ def sample_inputs_addcmul_addcdiv(op_info, device, dtype, requires_grad, **kwarg
             *args, value=3.14 if dtype.is_floating_point or dtype.is_complex else 3
         ).with_metadata(broadcasts_input=broadcasts_input)
 
+    # value=0 must still propagate the non-finite values tensor1 and tensor2 contribute, but skip autograd testing
+    if not requires_grad and (dtype.is_floating_point or dtype.is_complex):
+        make_t = partial(torch.tensor, device=device, dtype=dtype)
+        arg1 = make_t([1.0, 1.0, 1.0, 1.0])
+        arg2 = make_t([float("nan"), float("inf"), -float("inf"), 2.0])
+        arg3 = make_t([1.0, 1.0, 0.0, 2.0])
+        yield SampleInput(arg1, args=(arg2, arg3), kwargs=dict(value=0))
+
 def reference_inputs_addcmul_addcdiv(op_info, device, dtype, requires_grad, **kwargs):
     yield from sample_inputs_addcmul_addcdiv(
         op_info, device, dtype, requires_grad, **kwargs)
