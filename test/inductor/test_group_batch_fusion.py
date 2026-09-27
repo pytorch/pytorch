@@ -434,9 +434,22 @@ class TestGroupBatchFusion(TestCase):
     def compare_gradients(self, module, traced, rtol=1e-3, atol=1e-3):
         ref_grad = {key: param.grad for key, param in module.named_parameters()}
         res_grad = {key: param.grad for key, param in traced.named_parameters()}
-        self.assertTrue(
-            self.compare_dict_tensors(ref_grad, res_grad, rtol=rtol, atol=atol)
-        )
+        if not self.compare_dict_tensors(ref_grad, res_grad, rtol=rtol, atol=atol):
+            missing = [key for key in ref_grad if "_orig_mod." + key not in res_grad]
+            if missing:
+                self.fail(f"missing gradients in traced module: {missing}")
+            worst = max(
+                ref_grad,
+                key=lambda key: (res_grad["_orig_mod." + key] - ref_grad[key])
+                .abs()
+                .max()
+                .item(),
+            )
+            diff = (res_grad["_orig_mod." + worst] - ref_grad[worst]).abs().max().item()
+            self.fail(
+                f"gradient mismatch vs eager (rtol={rtol}, atol={atol}): "
+                f"max_abs_diff={diff:.3e} on {worst}"
+            )
 
     @requires_gpu()
     @unittest.skipIf(not has_fbgemm, "requires fbgemm")
@@ -1729,7 +1742,15 @@ class TestGroupBatchFusion(TestCase):
         ref.sum().backward()
         res.sum().backward()
         self.compare_parameters(ref_module, traced, rtol=1e-5, atol=1e-5)
-        self.compare_gradients(ref_module, traced, rtol=1e-5, atol=1e-5)
+        # The fused and eager fp32 gradients of this 20-linear chain are each
+        # within ~1e-5 of a float64 reference of the same weights, so their
+        # mutual difference is summation order over the backward reductions
+        # (up to 160 rows), not a functional difference. Locally the worst
+        # element already uses 0.5-0.9 of a (1e-5, 1e-5) budget, and CI's
+        # generated CPU kernels exceed it (the forward comparison still passes
+        # there). 1e-4 keeps ~10x headroom for backend variation and stays far
+        # below functional-error scale.
+        self.compare_gradients(ref_module, traced, rtol=1e-4, atol=1e-4)
         counters.clear()
 
     def test_batch_linear_lhs_skips_tensor_subclass_weights(self):
@@ -1779,20 +1800,34 @@ class TestGroupBatchFusion(TestCase):
         self.assertIsNotNone(fusion.match(linear_node))
 
 
-@torch._inductor.config.patch(
-    pre_grad_fusion_options={
-        "batch_linear_lhs": {
-            "devices": ("cpu", "cuda", "xpu"),
-            "min_fuse_set_size": 2,
-        },
-    },
-    post_grad_fusion_options={},
-)
 class _BatchLinearLHSGuardConfigBase(TestCase):
-    # The config patch lives on this base class: instantiate_device_type_tests
-    # reads test methods from the instantiated class's own __dict__, which a
-    # class-level config.patch would otherwise shadow with a bare subclass.
-    pass
+    # The guard options are applied per test rather than with a class-level
+    # config.patch for two reasons:
+    #   1. instantiate_device_type_tests invokes setUpClass while creating the
+    #      CUDA/XPU variants (get_primary_device() raises until setUpClass sets
+    #      primary_device), so a class-level patch would take effect at import
+    #      time on GPU runners. The later runtime setUpClass/tearDownClass pair
+    #      closes only its own enter, leaving the import-time patch active for
+    #      every other class in the file, including tests that assert the
+    #      default config (e.g.
+    #      test_batch_linear_lhs_skipped_under_default_config).
+    #   2. A class-level config.patch on the generic class itself would wrap
+    #      it in a bare subclass whose __dict__ hides the test methods from
+    #      instantiate_device_type_tests' member scan.
+
+    def setUp(self) -> None:
+        super().setUp()
+        patch = torch._inductor.config.patch(
+            pre_grad_fusion_options={
+                "batch_linear_lhs": {
+                    "devices": ("cpu", "cuda", "xpu"),
+                    "min_fuse_set_size": 2,
+                },
+            },
+            post_grad_fusion_options={},
+        )
+        patch.__enter__()
+        self.addCleanup(patch.__exit__, None, None, None)
 
 
 class TestBatchLinearLHSLayoutGuard(_BatchLinearLHSGuardConfigBase):
