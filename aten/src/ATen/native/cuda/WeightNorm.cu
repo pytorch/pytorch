@@ -335,10 +335,16 @@ __global__ void weight_norm_bwd_last_dim_kernel
 } // anonymous namespace
 
 std::tuple<Tensor,Tensor> weight_norm_cuda
-  (const Tensor & v,
-   const Tensor & g,
+  (const Tensor & v_in,
+   const Tensor & g_in,
    int64_t dim)
 {
+  // The fused kernels walk v and g as flat buffers, so a non-contiguous input
+  // would be read in storage order and silently give a wrong result. The
+  // backward already requires its saved tensors to be contiguous.
+  auto v = v_in.contiguous();
+  auto g = g_in.contiguous();
+
   auto w = at::empty_like(v, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
   // weight_norm_fused does have a derivative defined in derivatives.yaml, therefore, VariableType.cpp
