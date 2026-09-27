@@ -19,6 +19,7 @@ from torch._precompile import (
     DynamoTracer,
     load,
     MakeFxTracer,
+    no_compilation,
     PrecompiledRunnable,
     PrecompileError,  # noqa: F401
 )
@@ -37,6 +38,7 @@ __all__ = [
     "MakeFxTracer",
     "PrecompiledRunnable",
     "PrecompileSummary",
+    "no_compilation",
 ]
 
 # These objects are defined in torch._precompile / torch.compiler._precompile_types

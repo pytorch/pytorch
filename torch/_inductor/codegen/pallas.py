@@ -100,6 +100,9 @@ class PallasKernelWrapper:
         Returns:
             Result of the kernel execution
         """
+        from torch.compiler._no_compile import check_compilation_allowed
+
+        check_compilation_allowed("Pallas runtime JIT")
         return self.kernel_fn(*args, stream=stream, **kwargs)
 
 
