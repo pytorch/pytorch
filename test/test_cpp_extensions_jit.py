@@ -42,7 +42,9 @@ TEST_MPS = torch.backends.mps.is_available()
 IS_WINDOWS = sys.platform == "win32"
 IS_LINUX = sys.platform.startswith("linux")
 # setuptools always supplies these on the MSVC path; a bare `cl -c` is missing /EHsc.
-BASE_CFLAGS = COMMON_MSVC_FLAGS if IS_WINDOWS else []
+# /Brepro keeps MSVC from stamping the compile time into each .obj, so the tests
+# that compare a rebuilt object byte for byte do not depend on the clock.
+BASE_CFLAGS = COMMON_MSVC_FLAGS + ["/Brepro"] if IS_WINDOWS else []
 
 
 class TestCppExtensionImport(common.TestCase):
