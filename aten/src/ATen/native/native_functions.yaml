@@ -547,6 +547,7 @@
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta, SparseCsrXPU: add_sparse_csr
     MkldnnCPU: mkldnn_add
     ZeroTensor: add_zerotensor
+    Meta: add_Tensor_meta
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA, NestedTensorXPU: NestedTensor_add_Tensor
   tags: [core, pointwise]
 
@@ -2107,6 +2108,7 @@
   dispatch:
     SparseCPU, SparseCUDA, SparseMPS, SparseXPU: div_sparse
     ZeroTensor: div_zerotensor
+    Meta: div_Tensor_meta
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA, NestedTensorXPU: NestedTensor_div_Tensor
   tags: [core, pointwise]
 
@@ -4252,6 +4254,7 @@
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta, SparseCsrXPU: mul_sparse_csr
     MkldnnCPU: mkldnn_mul
     ZeroTensor: mul_zerotensor
+    Meta: mul_Tensor_meta
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA, NestedTensorXPU: NestedTensor_mul_Tensor
   tags: [core, pointwise]
 
@@ -6950,6 +6953,7 @@
   dispatch:
     SparseCPU, SparseCUDA, SparseMPS, SparseXPU: sub_sparse
     ZeroTensor: sub_zerotensor
+    Meta: sub_Tensor_meta
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA, NestedTensorXPU: NestedTensor_sub_Tensor
   tags: [core, pointwise]
 
