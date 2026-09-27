@@ -32,7 +32,6 @@ class FlyDSLTemplate(KernelTemplate):
     def __init__(self, name: str, source: str) -> None:
         super().__init__(name)
         self.source = source
-        self.template = FlyDSLTemplate._template_from_string(source)
         existing = self.all_templates.get(name)
         if existing is not None and existing.source != source:
             raise AssertionError(f"duplicate template name, {name}")
@@ -43,6 +42,11 @@ class FlyDSLTemplate(KernelTemplate):
     # pyrefly: ignore [bad-override]
     def _template_from_string(source: str) -> Any:
         return KernelTemplate._template_from_string(source)
+
+    @functools.cached_property
+    def template(self) -> Any:
+        # Compiled on first use since templates are registered at import time.
+        return FlyDSLTemplate._template_from_string(self.source)
 
     def maybe_append_choice(
         self, choices: list[Any], **kwargs: Any
