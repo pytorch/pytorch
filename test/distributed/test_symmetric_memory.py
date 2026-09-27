@@ -57,7 +57,10 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
+    getRocmVersion,
     instantiate_parametrized_tests,
+    isRocmArchAnyOf,
+    lazy_skip_if,
     MI350_ARCH,
     parametrize,
     requires_cuda,
@@ -1436,7 +1439,12 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
 # we should fix this too). We still want to get the test signals for the core
 # symmetric memory APIs when Async TP ops fail.
 @skipIf(not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch")
-@skip_if_rocm_ver_lessthan_multiprocess((10, 2))
+@lazy_skip_if(
+    lambda: TEST_WITH_ROCM
+    and isRocmArchAnyOf(MI350_ARCH)
+    and getRocmVersion() < (10, 1),
+    "symmetric memory hangs on MI350 CI runners before ROCm 10.1",
+)
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
 class AsyncTPTest(MultiProcContinuousTest):
@@ -1536,23 +1544,19 @@ class AsyncTPTest(MultiProcContinuousTest):
         ag_baseline, mm_baseline = _fused_all_gather_matmul_fallback(
             A_shard, [B], gather_dim=0, group_name=group_name
         )
-
-        # CPU activity is needed on ROCm: CK surfaces the scheduler path through
-        # RECORD_FUNCTION rather than the HIP kernel symbol. Enabled everywhere
-        # for uniformity; it is harmless on CUDA.
-        profiler_activities = [
-            torch.profiler.ProfilerActivity.CPU,
-            torch.profiler.ProfilerActivity.CUDA,
-        ]
-
-        with torch.profiler.profile(activities=profiler_activities) as prof:
+        with torch.profiler.profile(
+            activities=[
+                torch.profiler.ProfilerActivity.CUDA,
+            ],
+        ) as prof:
             ag_target, mm_target = torch.ops.symm_mem.fused_all_gather_matmul(
                 A_shard, [B], gather_dim=0, group_name=group_name
             )
 
-        self.assertTrue(
-            any("PersistentAsyncInputScheduler" in event.key for event in prof.events())
+        kernel_name = (
+            "AsyncInputMMKernel" if TEST_WITH_ROCM else "PersistentAsyncInputScheduler"
         )
+        self.assertTrue(any(kernel_name in event.key for event in prof.events()))
 
         torch.testing.assert_close(ag_target, ag_baseline)
         torch.testing.assert_close(mm_target[0], mm_baseline[0])

@@ -1,15 +1,17 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/hip/HIPContext.h>
-#include <ATen/record_function.h>
 #include <c10/hip/HIPGuard.h>
+#include <torch/csrc/distributed/c10d/cuda/AsyncMM.cuh>
 
-// ROCm-only native async-TP GEMM, gated so it can be turned off at build time.
-// The CUDA (CUTLASS) implementation lives in cuda/AsyncMM.cu; this file holds
-// the AMD Composable Kernel (CK) tile implementation and is compiled only on
-// ROCm builds. Keeping the two backends in separate files avoids interleaving
-// two entirely different kernel stacks behind preprocessor branches.
+// ROCm-only native async-TP GEMM. The CUDA (CUTLASS) implementation lives in
+// cuda/AsyncMM.cu; this file holds the AMD Composable Kernel (CK) tile
+// implementation and is compiled only on ROCm builds. Keeping the two backends
+// in separate files avoids interleaving two entirely different kernel stacks
+// behind preprocessor branches.
 #if defined(USE_ROCM_ASYNC_MM)
+
+#include <string_view>
 
 #include <ck_tile/core.hpp>
 #include <ck_tile/ops/gemm/kernel/gemm_kernel.hpp>
@@ -24,36 +26,7 @@
 
 namespace {
 
-// Pipeline type traits for mapping pipeline enum to pipeline implementation
-template <ck_tile::GemmPipeline PipelineId>
-struct PipelineTypeTraits;
-
-template <>
-struct PipelineTypeTraits<ck_tile::GemmPipeline::COMPUTE_V3>
-{
-    template <typename PipelineProblem>
-    using GemmPipeline = ck_tile::GemmPipelineAgBgCrCompV3<PipelineProblem>;
-};
-
-template <typename PrecType, ck_tile::index_t M_Warp_Tile>
-constexpr ck_tile::index_t get_k_warp_tile()
-{
-#if defined(CK_GFX950_SUPPORT)
-    constexpr bool is_8bit_float =
-        std::is_same_v<PrecType, ck_tile::fp8_t> || std::is_same_v<PrecType, ck_tile::bf8_t>;
-    if constexpr(M_Warp_Tile == 32)
-        return is_8bit_float ? 64 : 16;
-    else
-        return is_8bit_float ? 128 : 32;
-#else
-    if constexpr(M_Warp_Tile == 32)
-        return 16;
-    else
-        return 32;
-#endif
-}
-
-template <typename PrecType, typename LayoutB>
+template <typename LayoutB>
 struct AsyncGemmConfig
 {
     static constexpr ck_tile::index_t M_Tile = 256;
@@ -68,15 +41,13 @@ struct AsyncGemmConfig
 
     static constexpr ck_tile::index_t M_Warp_Tile = 32;
     static constexpr ck_tile::index_t N_Warp_Tile = 32;
-    static constexpr ck_tile::index_t K_Warp_Tile =
-        get_k_warp_tile<PrecType, M_Warp_Tile>();
+    static constexpr ck_tile::index_t K_Warp_Tile = 16;
 
     static constexpr bool kPadM = false;
     static constexpr bool kPadN = true;
     static constexpr bool kPadK = true;
 
     static constexpr bool DoubleSmemBuffer = true;
-    static constexpr ck_tile::GemmPipeline Pipeline = ck_tile::GemmPipeline::COMPUTE_V3;
     static constexpr auto Scheduler = ck_tile::GemmPipelineScheduler::Intrawave;
 
     static constexpr bool TransposeC = false;
@@ -88,71 +59,49 @@ struct AsyncGemmConfig
     static constexpr ck_tile::index_t TilePartitionerM01 = 4;
     static constexpr bool PermuteA = false;
     static constexpr bool PermuteB = false;
-
-    static constexpr int kBlockPerCu = 1;
 };
 
-template <typename PrecType, typename LayoutB>
-struct AsyncGemmLargeKConfig : AsyncGemmConfig<PrecType, LayoutB>
+// The kernel is only instantiated for gfx942/gfx950; other arches in
+// PYTORCH_ROCM_ARCH get an empty body instead of compiling the CK GEMM.
+template <typename Kernel>
+struct AsyncInputMMKernel
 {
-    static constexpr ck_tile::index_t M_Tile = 128;
-    static constexpr ck_tile::index_t N_Tile = 128;
-    static constexpr ck_tile::index_t K_Tile = 64;
+    static constexpr ck_tile::index_t kBlockSize = Kernel::kBlockSize;
+
+    template <typename KernelArgs>
+    CK_TILE_DEVICE void operator()(KernelArgs kargs) const
+    {
+#if defined(__gfx942__) || defined(__gfx950__)
+        Kernel{}(kargs);
+#endif
+    }
 };
 
-} // namespace
+// gfx942 and gfx950 have 4 shader engines per XCC.
+constexpr int kShaderEnginesPerXcc = 4;
 
-template <typename LayoutB, template <typename, typename> class Config>
-at::Tensor async_input_mm_impl_ck_tile_config(
-    at::Tensor a,
-    at::Tensor b,
-    at::Tensor a_chunk_signals,
+template <typename LayoutB>
+void async_input_mm_impl(
+    const at::Tensor& a,
+    const at::Tensor& b,
+    const at::Tensor& a_chunk_signals,
     int64_t a_chunk_pivot,
-    at::Tensor out) {
-
+    at::Tensor& out) {
   c10::cuda::CUDAGuard device_guard(a.device());
+
+  const std::string_view arch = at::cuda::getCurrentDeviceProperties()->gcnArchName;
+  TORCH_CHECK(
+      arch.starts_with("gfx942") || arch.starts_with("gfx950"),
+      "async_input_mm: only gfx942 and gfx950 are supported, got ", arch);
 
   using ElementA = ck_tile::bf16_t;
   using LayoutA = ck_tile::tensor_layout::gemm::RowMajor;
-
   using ElementB = ck_tile::bf16_t;
-
   using ElementC = ck_tile::bf16_t;
   using LayoutC = ck_tile::tensor_layout::gemm::RowMajor;
-
   using ElementAccumulator = float;
 
-  TORCH_CHECK(a.dim() == 2 && b.dim() == 2 && out.dim() == 2);
-  TORCH_CHECK(a.is_contiguous() && out.is_contiguous());
-
-  if constexpr (std::is_same_v<LayoutB, ck_tile::tensor_layout::gemm::RowMajor>) {
-    TORCH_CHECK(b.is_contiguous());
-  } else {
-    TORCH_CHECK(b.stride(1) == b.size(0));
-    TORCH_CHECK(b.stride(0) == 1);
-  }
-  TORCH_CHECK_EQ(a.scalar_type(), at::kBFloat16);
-  TORCH_CHECK_EQ(b.scalar_type(), at::kBFloat16);
-  TORCH_CHECK_EQ(out.scalar_type(), at::kBFloat16);
-
-  int M = static_cast<int>(a.sizes()[0]);
-  int N = static_cast<int>(b.sizes()[1]);
-  int K = static_cast<int>(a.sizes()[1]);
-  TORCH_CHECK_EQ(b.sizes()[0], K);
-  TORCH_CHECK_EQ(out.sizes()[0], M);
-  TORCH_CHECK_EQ(out.sizes()[1], N);
-
-  TORCH_CHECK(
-      a_chunk_signals.dim() == 1,
-      "async_input_mm: `a_chunk_signals` must be a 1D tensor.");
-  size_t num_chunks_M = a_chunk_signals.numel();
-
-  TORCH_CHECK(
-      M % num_chunks_M == 0,
-      "async_input_mm: `a.shape(0)` must be an integer multiple of `a_chunk_signals.numel()`");
-
-  // Set up GEMM configuration using CK tile
-  using GemmConfig = Config<ElementA, LayoutB>;
+  using GemmConfig = AsyncGemmConfig<LayoutB>;
 
   using GemmShape = ck_tile::TileGemmShape<
       ck_tile::sequence<GemmConfig::M_Tile, GemmConfig::N_Tile, GemmConfig::K_Tile>,
@@ -180,17 +129,14 @@ at::Tensor async_input_mm_impl_ck_tile_config(
                                        GemmConfig::NumWaveGroups,
                                        GemmConfig::Preshuffle>;
 
-  constexpr auto scheduler = GemmConfig::Scheduler;
-
   using UniversalGemmProblem = ck_tile::UniversalGemmPipelineProblem<ElementA,
                                                                      ElementB,
                                                                      ElementAccumulator,
                                                                      GemmShape,
                                                                      GemmUniversalTraits,
-                                                                     scheduler>;
+                                                                     GemmConfig::Scheduler>;
 
-  using GemmPipeline = typename PipelineTypeTraits<
-      GemmConfig::Pipeline>::template GemmPipeline<UniversalGemmProblem>;
+  using GemmPipeline = ck_tile::GemmPipelineAgBgCrCompV3<UniversalGemmProblem>;
 
   using GemmEpilogue = ck_tile::CShuffleEpilogue<
       ck_tile::CShuffleEpilogueProblem<ElementA,
@@ -220,107 +166,70 @@ at::Tensor async_input_mm_impl_ck_tile_config(
       Kernel::UniversalGemmKernel::PersistentKernel,
       "async_input_mm: CK kernel must be persistent");
 
-  // Calculate tile and chunk parameters
-  size_t chunk_size_M = M / num_chunks_M;
-  size_t tile_size_M = GemmConfig::M_Tile;
+  const ck_tile::index_t M = a.size(0);
+  const ck_tile::index_t N = b.size(1);
+  const ck_tile::index_t K = a.size(1);
+  const ck_tile::index_t num_chunks = a_chunk_signals.numel();
+  const ck_tile::index_t chunk_size_M = M / num_chunks;
+  TORCH_CHECK(
+      chunk_size_M % GemmConfig::M_Tile == 0,
+      "async_input_mm: `a.shape(0) / a_chunk_signals.numel()` must be a multiple of ",
+      GemmConfig::M_Tile);
+  const ck_tile::index_t tiles_per_chunk = chunk_size_M / GemmConfig::M_Tile;
 
-  TORCH_CHECK(chunk_size_M % tile_size_M == 0,
-              "async_input_mm: chunk_size_M must be divisible by tile_size_M");
-
-  const ck_tile::index_t tiles_per_chunk = chunk_size_M / tile_size_M;
-  const ck_tile::index_t tile_idx_pivot = a_chunk_pivot * tiles_per_chunk;
-
-  // Setup persistent async input scheduler
   ck_tile::PersistentAsyncInputScheduler async_scheduler;
   async_scheduler.tiles_per_chunk_m = tiles_per_chunk;
   async_scheduler.chunk_signals = a_chunk_signals.data_ptr<uint32_t>();
-  async_scheduler.tile_idx_pivot_m = tile_idx_pivot;
-  async_scheduler.num_chunks = num_chunks_M;
+  async_scheduler.tile_idx_pivot_m = a_chunk_pivot * tiles_per_chunk;
+  async_scheduler.num_chunks = num_chunks;
 
-  // Validate that the persistent async scheduler is properly configured.
-  // On CUDA, scheduler usage is verified via profiler symbol matching
-  // (PersistentAsyncInputScheduler appears in the Cutlass kernel's mangled
-  // name). On ROCm, the CK scheduler is a runtime struct - its name doesn't
-  // appear in HIP profiler traces. This check, combined with Persistent=true
-  // as a compile-time template parameter and functional assert_close in the
-  // test, provides equivalent verification.
-  TORCH_CHECK(
-      async_scheduler.chunk_signals != nullptr
-          && async_scheduler.tiles_per_chunk_m > 0
-          && async_scheduler.num_chunks > 0,
-      "async_input_mm: PersistentAsyncInputScheduler is not properly configured "
-      "(signals=", async_scheduler.chunk_signals,
-      ", tiles_per_chunk=", async_scheduler.tiles_per_chunk_m,
-      ", num_chunks=", async_scheduler.num_chunks, ")");
-
-  // Setup strides for row-major and column-major layouts
   constexpr bool is_b_row_major = std::is_same_v<LayoutB, ck_tile::tensor_layout::gemm::RowMajor>;
-  const ck_tile::index_t stride_A = K;
-  const ck_tile::index_t stride_B = is_b_row_major ? N : K;
-  const ck_tile::index_t stride_C = N;
-
-  // Create universal GEMM host arguments with async scheduler
   ck_tile::UniversalGemmHostArgs<1, 1, 0> host_args(
-      {reinterpret_cast<const void*>(a.data_ptr<at::BFloat16>())},
-      {reinterpret_cast<const void*>(b.data_ptr<at::BFloat16>())},
+      {a.const_data_ptr()},
+      {b.const_data_ptr()},
       {},
-      reinterpret_cast<void*>(out.data_ptr<at::BFloat16>()),
+      out.data_ptr(),
       1, // k_batch
       M,
       N,
       K,
-      {stride_A},
-      {stride_B},
+      {K},
+      {is_b_row_major ? N : K},
       {},
-      stride_C,
+      N,
       async_scheduler);
-
   auto kargs = Kernel::UniversalGemmKernel::MakeKernelArgs(host_args);
+  TORCH_CHECK(
+      Kernel::UniversalGemmKernel::IsSupportedArgument(kargs),
+      "async_input_mm: arguments not supported by the CK tile kernel");
 
-  ck_tile::stream_config stream_cfg{
-      at::cuda::getCurrentCUDAStream(),
-      false,
-      0
-  };
-
-  const dim3 grids = Kernel::MaxOccupancyGridSize(stream_cfg);
+  using LaunchedKernel = AsyncInputMMKernel<Kernel>;
   const dim3 blocks = Kernel::BlockSize();
+  const auto kernel_entry = ck_tile::kentry<1, LaunchedKernel, decltype(kargs)>;
+  int occupancy = 0;
+  C10_CUDA_CHECK(
+      hipOccupancyMaxActiveBlocksPerMultiprocessor(&occupancy, kernel_entry, blocks.x, 0));
+  int num_xcc = 8;
+#if ROCM_VERSION >= 70000
+  C10_CUDA_CHECK(hipDeviceGetAttribute(&num_xcc, hipDeviceAttributeNumberOfXccs, a.get_device()));
+#endif
+  // Chunk copies feeding this kernel run as shader kernels on ROCm, and their
+  // workgroups are spread over every shader engine. Keep one CU per shader
+  // engine out of the persistent grid, or blocks spinning on unsignaled chunks
+  // can starve the copies and deadlock.
+  const int max_grid = std::max(
+      at::cuda::getCurrentDeviceProperties()->multiProcessorCount * std::max(occupancy, 1) -
+          num_xcc * kShaderEnginesPerXcc,
+      1);
+  const dim3 grids(std::min<int>(TilePartitioner::GridSize(M, N), max_grid));
 
-  bool is_supported = Kernel::UniversalGemmKernel::IsSupportedArgument(kargs);
-
-  TORCH_CHECK(is_supported,
-              "async_input_mm: Arguments not supported by CK tile kernel");
-
-  // CK passes the async scheduler as runtime kernel state, so unlike the
-  // CUTLASS path it does not appear in the HIP kernel symbol. Surface the
-  // scheduler path through a profiler annotation instead.
-  RECORD_FUNCTION(
-      "PersistentAsyncInputScheduler",
-      c10::ArrayRef<const c10::IValue>{});
-
-  // Launch the kernel
+  ck_tile::stream_config stream_cfg{at::cuda::getCurrentCUDAStream(), false, 0};
   ck_tile::launch_kernel(
-      stream_cfg,
-      ck_tile::make_kernel<GemmConfig::kBlockPerCu>(Kernel{}, grids, blocks, 0, kargs));
-
+      stream_cfg, ck_tile::make_kernel<1>(LaunchedKernel{}, grids, blocks, 0, kargs));
   C10_CUDA_KERNEL_LAUNCH_CHECK();
-  return out;
 }
 
-template <typename LayoutB>
-at::Tensor async_input_mm_impl_ck_tile(
-    at::Tensor a,
-    at::Tensor b,
-    at::Tensor a_chunk_signals,
-    int64_t a_chunk_pivot,
-    at::Tensor out) {
-  if (a.dim() == 2 && a.sizes()[1] >= 2048) {
-    return async_input_mm_impl_ck_tile_config<LayoutB, AsyncGemmLargeKConfig>(
-        a, b, a_chunk_signals, a_chunk_pivot, out);
-  }
-  return async_input_mm_impl_ck_tile_config<LayoutB, AsyncGemmConfig>(
-      a, b, a_chunk_signals, a_chunk_pivot, out);
-}
+} // namespace
 
 #endif // defined(USE_ROCM_ASYNC_MM)
 
@@ -354,19 +263,32 @@ at::Tensor async_input_mm_out(
   TORCH_CHECK_EQ(out.sizes()[0], M);
   TORCH_CHECK_EQ(out.sizes()[1], N);
 
+  TORCH_CHECK(
+      a_chunk_signals.dim() == 1 && a_chunk_signals.numel() > 0 &&
+          a_chunk_signals.is_contiguous() &&
+          a_chunk_signals.scalar_type() == at::kUInt32 &&
+          a_chunk_signals.device() == a.device(),
+      "async_input_mm: `a_chunk_signals` must be a non-empty contiguous 1D uint32 tensor on the device of `a`");
+  const int64_t num_chunks = a_chunk_signals.numel();
+  TORCH_CHECK(
+      M % num_chunks == 0,
+      "async_input_mm: `a.shape(0)` must be an integer multiple of `a_chunk_signals.numel()`");
+  TORCH_CHECK(
+      a_chunk_pivot >= 0 && a_chunk_pivot < num_chunks,
+      "async_input_mm: `a_chunk_pivot` must be in [0, ", num_chunks, "), got ", a_chunk_pivot);
+
 #if defined(USE_ROCM_ASYNC_MM)
-  const bool is_b_row_major = b.is_contiguous();
-  if (is_b_row_major) {
-    using LayoutB = ck_tile::tensor_layout::gemm::RowMajor;
-    async_input_mm_impl_ck_tile<LayoutB>(
+  if (b.is_contiguous()) {
+    async_input_mm_impl<ck_tile::tensor_layout::gemm::RowMajor>(
         a, b, a_chunk_signals, a_chunk_pivot, out);
   } else {
-    using LayoutB = ck_tile::tensor_layout::gemm::ColumnMajor;
-    async_input_mm_impl_ck_tile<LayoutB>(
+    async_input_mm_impl<ck_tile::tensor_layout::gemm::ColumnMajor>(
         a, b, a_chunk_signals, a_chunk_pivot, out);
   }
 #else
-  TORCH_CHECK(false, "async_input_mm is not currently supported on your device");
+  TORCH_CHECK(
+      false,
+      "async_input_mm: PyTorch was built without ROCm gfx942/gfx950 support for this kernel");
 #endif
   return out;
 }
