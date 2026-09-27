@@ -23,6 +23,7 @@ import functools
 import inspect
 import itertools
 import logging
+import sys
 import traceback
 import types
 import warnings
@@ -6192,16 +6193,17 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
 
     @classmethod
     def should_wrap_in_hop(cls, value: Any) -> bool:
-        if not torch.distributed.is_available():
+        # Not imported eagerly since it pulls in DTensor; value can't be
+        # _local_map_wrapped unless the module was already imported.
+        func_map = sys.modules.get("torch.distributed.tensor.experimental._func_map")
+        if func_map is None:
             return False
-
-        from torch.distributed.tensor.experimental._func_map import _local_map_wrapped
 
         # check is important to avoid subclass dispatch
-        if type(value) is not type(_local_map_wrapped):
+        if type(value) is not type(func_map._local_map_wrapped):
             return False
 
-        return value is _local_map_wrapped and cls._enabled
+        return value is func_map._local_map_wrapped and cls._enabled
 
     @staticmethod
     # pyrefly: ignore[bad-override]

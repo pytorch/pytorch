@@ -31,6 +31,7 @@ import inspect
 import logging
 import math
 import re
+import sys
 from collections.abc import Callable, Iterable
 from contextlib import nullcontext
 from typing import Any, cast, NoReturn, TYPE_CHECKING, TypeVar, Union
@@ -127,11 +128,6 @@ try:
     import numpy as np
 except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
-
-try:
-    from torch.distributed.fsdp._fully_shard import _fsdp_param_group
-except ModuleNotFoundError:
-    _fsdp_param_group = None  # type: ignore[assignment]
 
 
 if TYPE_CHECKING:
@@ -919,8 +915,14 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                 tx, args[0].as_python_constant()
             )
         elif (
-            _fsdp_param_group is not None
-            and self.value is _fsdp_param_group.FSDPParamGroup.use_training_state
+            (
+                # Not imported eagerly since it pulls in all of FSDP and DTensor.
+                fsdp_param_group := sys.modules.get(
+                    "torch.distributed.fsdp._fully_shard._fsdp_param_group"
+                )
+            )
+            is not None
+            and self.value is fsdp_param_group.FSDPParamGroup.use_training_state
         ):
             if len(args) != 2:
                 raise AssertionError(

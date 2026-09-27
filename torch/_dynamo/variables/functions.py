@@ -117,12 +117,6 @@ from .user_defined import (
 )
 
 
-try:
-    from torch.distributed.fsdp._fully_shard import _fsdp_param_group
-except ModuleNotFoundError:
-    _fsdp_param_group = None  # type: ignore[assignment]
-
-
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import (
@@ -2027,9 +2021,11 @@ class UserMethodVariable(BaseUserFunctionVariable):
                     tx, func.__name__, list(args), kwargs, constant=self.is_constant
                 )
         elif (
-            _fsdp_param_group is not None
-            and func is _fsdp_param_group.FSDPParamGroup.use_training_state  # type: ignore[attr-defined]
-        ):
+            # Not imported eagerly since it pulls in all of FSDP and DTensor.
+            fsdp_param_group := sys.modules.get(
+                "torch.distributed.fsdp._fully_shard._fsdp_param_group"
+            )
+        ) is not None and func is fsdp_param_group.FSDPParamGroup.use_training_state:
             return variables.TorchCtxManagerClassVariable(func).call_function(
                 tx, [self.im_self, *args], kwargs
             )
