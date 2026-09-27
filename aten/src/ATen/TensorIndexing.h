@@ -239,10 +239,13 @@ inline Tensor applySelect(
     const std::optional<SymIntArrayRef>& self_sizes) {
   // See NOTE [nested tensor size for indexing]
   if (self_sizes.has_value()) {
-    TORCH_CHECK_INDEX(
-        !(dim == 0 && self_sizes->empty()),
-        "invalid index of a 0-dim tensor. ",
-        "Use `tensor.item()` in Python or `tensor.item<T>()` in C++ to convert a 0-dim tensor to a number");
+    auto maybe_index = index.maybe_as_int();
+    if (maybe_index.has_value()) {
+      TORCH_CHECK_INDEX(
+          !(maybe_index.value() == 0 && dim == 0 && self_sizes->empty()),
+          "invalid index of a 0-dim tensor. ",
+          "Use `tensor.item()` in Python or `tensor.item<T>()` in C++ to convert a 0-dim tensor to a number");
+    }
 
     auto size = (*self_sizes)[dim];
     // Note: `size >= -index` is not equivalent to `size > -1 - index` if index
