@@ -45,7 +45,11 @@ from torch.utils._config_module import ConfigModule
 from .aot_compile import _BUILTINS_DICT_PREFIX, _IMPORT_ALIAS_PREFIX
 from .convert_frame import ConvertFrame
 from .exc import PackageError
-from .guards import CheckFunctionManager, strip_local_scope
+from .guards import (
+    CheckFunctionManager,
+    is_portable_identity_guard,
+    strip_local_scope,
+)
 from .package import CompilePackage
 from .source import (
     AttrSource,
@@ -263,6 +267,10 @@ def default_guard_filter_fn(guard_entries: Sequence[GuardFilterEntry]) -> list[b
             # test_precompile_package.py's _pre_check_accepts too; a type added
             # to one is not seen by the others.
             g.guard_type in ("TYPE_MATCH", "BUILTIN_MATCH")
+            or (
+                g.has_value
+                and is_portable_identity_guard(g.guard_type, derived, g.value)
+            )
             or (
                 g.guard_type not in unsupported
                 and not any(d in unsupported for d in derived)
