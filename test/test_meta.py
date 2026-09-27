@@ -3444,6 +3444,63 @@ class TestMetaKernelRegistrations(TestCase):
             self.assertEqual(result.dtype, torch.float32)
             self.assertEqual(result.device, torch.device("meta"))
 
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @parametrize("shape_kind", ["static", "backed", "unbacked"])
+    def test_alias_fake_tensor(self, shape_kind):
+        # The CompositeExplicitAutograd alias kernel is symint-aware. Check that
+        # FakeTensorMode and the raw kernel both keep the input geometry, share
+        # its storage and record no guards.
+        from torch._dynamo.source import ConstantSource
+        from torch._subclasses.fake_tensor import (
+            FakeTensorMode,
+            in_kernel_invocation_manager,
+        )
+        from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
+
+        shape_env = ShapeEnv()
+
+        def make_size(name, hint):
+            if shape_kind == "static":
+                return hint
+            if shape_kind == "unbacked":
+                return shape_env.create_unbacked_symint()
+            source = ConstantSource(name)
+            symbol = shape_env.create_symbol(
+                hint, source=source, dynamic_dim=DimDynamic.DYNAMIC
+            )
+            return shape_env.create_symintnode(symbol, hint=hint, source=source)
+
+        mode = FakeTensorMode(shape_env=shape_env)
+        self.assertTrue(mode.cpp_meta_supports_symint(torch.ops.aten.alias.default))
+        s0, s1 = make_size("s0", 4), make_size("s1", 6)
+        with mode:
+            base = torch.empty(s0, s1, 3)
+            inputs = (
+                base,
+                base.permute(2, 0, 1),
+                base[:, 1:],
+                torch.empty(2, 3, s0, s1, memory_format=torch.channels_last),
+            )
+
+        num_guards = len(shape_env.guards)
+        results = []
+        for x in inputs:
+            with mode:
+                out = torch.ops.aten.alias.default(x)
+            with in_kernel_invocation_manager(mode):
+                kernel_out = torch.ops.aten.alias.default(x)
+            results.append((x, out, kernel_out))
+        self.assertEqual(len(shape_env.guards), num_guards)
+
+        for x, out, kernel_out in results:
+            self.assertEqual(out.device, x.device)
+            for r in (out, kernel_out):
+                self.assertEqual(r.shape, x.shape)
+                self.assertEqual(r.stride(), x.stride())
+                self.assertEqual(r.storage_offset(), x.storage_offset())
+                self.assertEqual(r.dtype, x.dtype)
+                self.assertTrue(torch._C._is_alias_of(r, x))
+
 
 instantiate_device_type_tests(TestMeta, globals())
 
