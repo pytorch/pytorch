@@ -827,6 +827,13 @@ def sample_inputs_ldexp(op_info, device, dtype, requires_grad, **kwargs):
             exponent = torch.tensor(values, device=device, dtype=exponent_dtype)
             yield SampleInput(x, args=(exponent,))
 
+    # Exponents outside int range saturate. CPU-only: the CUDA kernel still truncates them.
+    if dtype.is_floating_point and not requires_grad and torch.device(device).type == "cpu":
+        x = torch.tensor([1.0, -3.0], device=device, dtype=dtype)
+        yield SampleInput(x, args=(torch.tensor([2**32 + 1, -(2**32) - 1], device=device),))
+        exponent = torch.tensor([2**63 + 1, 2**32 + 1], device=device, dtype=torch.uint64)
+        yield SampleInput(x.clone(), args=(exponent,))
+
 
 def error_inputs_arange(op, device, **kwargs):
     yield ErrorInput(SampleInput(0, args=(3, 0)), error_type=RuntimeError, error_regex='step must be nonzero')

@@ -25,7 +25,6 @@ from torch.testing._internal.common_device_type import (
     dtypesIfXPU,
     expectedFailureMeta,
     instantiate_device_type_tests,
-    onlyCPU,
     onlyNativeDeviceTypes,
     onlyOn,
     OpDTypes,
@@ -3921,16 +3920,6 @@ class TestBinaryUfuncsDevice(TestCase):
             torch.full((1,), 2, device=device, dtype=torch.float64), 128
         )
         self.assertEqual(torch.ldexp(mantissas, exponents), expected)
-
-    @onlyCPU
-    def test_ldexp_exponent_out_of_int_range(self, device):
-        mantissas = torch.tensor([1.0, 1.0], dtype=torch.float64, device=device)
-        exponents = torch.tensor([2**32 + 1, -(2**32) - 1], device=device)
-        expected = torch.tensor([float("inf"), 0.0], dtype=torch.float64)
-        self.assertEqual(torch.ldexp(mantissas, exponents), expected)
-        exponents = torch.tensor([2**63 + 1, 2**32 + 1], dtype=torch.uint64)
-        expected = torch.tensor([float("inf"), float("inf")], dtype=torch.float64)
-        self.assertEqual(torch.ldexp(mantissas, exponents.to(device)), expected)
 
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_lerp(self, device, dtype):
