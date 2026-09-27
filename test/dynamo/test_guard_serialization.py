@@ -4164,6 +4164,20 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(ref, loaded, {"x": same}, True)
         self._test_check_fn(ref, loaded, {"x": other}, False)
 
+    def test_dim_markings_round_trip(self):
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(3, 2)
+        torch._dynamo.mark_dynamic(x, 0)
+        ref, loaded = self._test_serialization("TENSOR_MATCH", fn, x)
+        subset, superset = torch.randn(4, 2), torch.randn(4, 2)
+        torch._dynamo.mark_dynamic(subset, 0)
+        torch._dynamo.mark_dynamic(superset, [0, 1])
+        self._test_check_fn(ref, loaded, {"x": subset}, True)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(4, 2)}, True)
+        self._test_check_fn(ref, loaded, {"x": superset}, False)
+
     def test_builtin_match(self):
         def fn(x):
             # usage of getattr() here installs a BUILTIN_MATCH guard
