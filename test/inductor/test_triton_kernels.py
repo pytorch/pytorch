@@ -643,38 +643,45 @@ class KernelTests(torch._inductor.test_case.TestCase):
         self.assertEqual(read_only_result, read_only_before)
         self.assertEqual(read_only, read_only_before)
 
-    @requires_gpu
     @requires_python_wrapper_for_aggregates
     @_assert_no_mutation_fallback
-    def test_triton_kernel_namedtuple_nested_specialized_one(self):
-        # A nested integer one needs both a constexpr signature leaf and a
-        # path-keyed constant for the compiled Triton launcher.
+    def test_triton_kernel_namedtuple_nested_implicit_constants(self):
+        # Nested integer one and None leaves must be constexpr signature leaves
+        # with path-keyed constants for the compiled Triton launcher.
         import triton
         import triton.language as tl
 
         from torch._higher_order_ops import triton_kernel_wrap
 
-        Config = collections.namedtuple("Config", ("source", "scale"))
+        Config = collections.namedtuple("Config", ("source", "scale", "bias"))
 
         @triton.jit
-        def specialized_one_kernel(config, out, BLOCK_SIZE: tl.constexpr):
+        def implicit_constants_kernel(config, out, BLOCK_SIZE: tl.constexpr):
             offsets = tl.arange(0, BLOCK_SIZE)
             values = tl.load(config.source + offsets)
-            tl.store(out + offsets, values * config.scale)
+            values *= config.scale
+            if config.bias is not None:
+                values += config.bias
+            tl.store(out + offsets, values)
 
         def fn(x):
             out = torch.empty_like(x)
-            specialized_one_kernel[(1,)](Config(source=x, scale=1), out, BLOCK_SIZE=16)
+            implicit_constants_kernel[(1,)](
+                Config(source=x, scale=1, bias=None), out, BLOCK_SIZE=16
+            )
             return out
 
-        x = torch.arange(16, dtype=torch.float32, device=GPU_TYPE)
+        x = torch.arange(16, dtype=torch.float32, device="cpu")
         actual, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True), x)
         self.assertEqual(actual, x)
         config_name = triton_kernel_wrap.create_structural_named_tuple_name(
             "Config", Config._fields
         )
-        self.assertIn(f"{config_name}(source='*fp32', scale='constexpr')", code)
-        self.assertIn("'constants': {(0, 1): 1", code)
+        self.assertIn(
+            f"{config_name}(source='*fp32', scale='constexpr', bias='constexpr')",
+            code,
+        )
+        self.assertIn("'constants': {(0, 1): 1, (0, 2): None", code)
 
     @requires_gpu
     @parametrize(
