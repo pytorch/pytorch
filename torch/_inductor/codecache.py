@@ -126,8 +126,6 @@ from torch.compiler._cache import (
     CacheArtifactFactory,
     CacheArtifactRecorder,
 )
-from torch.export.pt2_archive._package_weights import TensorProperties, Weights
-from torch.export.pt2_archive.constants import CUSTOM_OBJ_FILENAME_PREFIX
 from torch.fx.experimental.symbolic_shapes import (
     guarding_hint_or_throw,
     has_guarding_hint,
@@ -194,6 +192,8 @@ class CacheInfo(TypedDict, total=False):
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator, KeysView, Sequence
     from concurrent.futures import Future
+
+    from torch.export.pt2_archive._package_weights import Weights
 
     from .compile_fx import _CompileFxKwargs
     from .cpp_builder import BuildOptionsBase
@@ -3188,6 +3188,11 @@ end
                 serialized_weights = b""
 
             if config.aot_inductor.package_constants_on_disk_format == "pickle_weights":
+                from torch.export.pt2_archive._package_weights import (
+                    TensorProperties,
+                    Weights,
+                )
+
                 # We need to return a storage key here because the original value tensor might be a clone
                 weights_dict = Weights(
                     {
@@ -3375,6 +3380,8 @@ end
             # in package_sigmoid(). The keys in custom_objs_config.json directly correspond to the arg name in extern
             # nodes json. The key in model_constants_config.json produced by package_sigmoid is the attribute name in the
             # user model code.
+
+            from torch.export.pt2_archive.constants import CUSTOM_OBJ_FILENAME_PREFIX
 
             qual_name_to_id = {}  # Map from constant name to its name in constants folder
             for custom_obj_idx, (name, constant) in enumerate(

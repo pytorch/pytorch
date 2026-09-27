@@ -32,6 +32,9 @@ from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
     _unwrap_efc_compiled_obj,
     CuTeDSLEpilogueArguments,
 )
+from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_utils import (
+    register_scaled_operand_constraints_pickling,
+)
 from torch._inductor.heuristics.template.nv_universal_gemm import get_nvgemm_heuristics
 from torch._inductor.ir import (
     Buffer,
@@ -104,6 +107,8 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
         has_bias_epilogue: bool = False,
     ) -> None:
         super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, ())
+        # This request is pickled to the autotune subprocess along with kernel.
+        register_scaled_operand_constraints_pickling()
         self.kernel = kernel
         self.accumulator_type = accumulator_type
         self.has_bias_epilogue = has_bias_epilogue
