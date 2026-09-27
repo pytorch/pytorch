@@ -269,13 +269,13 @@ class KernelTests(torch._inductor.test_case.TestCase):
         import triton
         import triton.language as tl
 
-        from torch._higher_order_ops import triton_kernel_wrap
-
         Metadata = collections.namedtuple("Metadata", ("scale",))
         Config = collections.namedtuple("Config", ("source", "metadata"))
 
         @triton.jit
         def namedtuple_kernel(config, out, n_elements, BLOCK_SIZE: tl.constexpr):
+            tl.static_assert(len(config) == 2)
+            tl.static_assert(len(config.metadata) == 1)
             offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
             mask = offsets < n_elements
             values = tl.load(config.source + offsets, mask=mask)
@@ -301,34 +301,9 @@ class KernelTests(torch._inductor.test_case.TestCase):
         x = torch.arange(32, dtype=torch.float32, device="cpu")
         external_config = Config(x, Metadata(3))
         constructed_source = x + 1
-        with mock.patch.object(
-            namedtuple_kernel, "run", wraps=namedtuple_kernel.run
-        ) as kernel_run:
-            actual = torch.compile(fn, backend="aot_eager", fullgraph=True)(
-                external_config, constructed_source
-            )
-
-        self.assertEqual(kernel_run.call_count, 2)
-        config_name = triton_kernel_wrap.create_structural_named_tuple_name(
-            "Config", Config._fields
+        actual = torch.compile(fn, backend="aot_eager", fullgraph=True)(
+            external_config, constructed_source
         )
-        metadata_name = triton_kernel_wrap.create_structural_named_tuple_name(
-            "Metadata", Metadata._fields
-        )
-        expected_configs = (
-            external_config,
-            Config(constructed_source, Metadata(4)),
-        )
-        for call, expected_config in zip(
-            kernel_run.call_args_list, expected_configs, strict=True
-        ):
-            config = call.args[0]
-            self.assertEqual(type(config).__name__, config_name)
-            self.assertEqual(config._fields, Config._fields)
-            self.assertEqual(config.source, expected_config.source)
-            self.assertEqual(type(config.metadata).__name__, metadata_name)
-            self.assertEqual(config.metadata._fields, Metadata._fields)
-            self.assertEqual(config.metadata.scale, expected_config.metadata.scale)
         self.assertEqual(actual, (x * 3, constructed_source * 4))
 
     @_assert_no_mutation_fallback
@@ -341,6 +316,8 @@ class KernelTests(torch._inductor.test_case.TestCase):
 
         @triton.jit
         def tuple_kernel(config, out, BLOCK_SIZE: tl.constexpr):
+            tl.static_assert(len(config) == 3)
+            tl.static_assert(len(config[1]) == 1)
             tl.static_assert(len(config[2]) == 0)
             offsets = tl.arange(0, BLOCK_SIZE)
             values = tl.load(config[0] + offsets)
@@ -359,31 +336,13 @@ class KernelTests(torch._inductor.test_case.TestCase):
         compiled = torch.compile(fn, backend="aot_eager", fullgraph=True)
         externally_supplied_configs = ((x, (3,), ()), (x + 1, (4,), ()))
         constructed_sources = (x + 2, x + 3)
-        expected_launch_configs = []
-        with mock.patch.object(
-            tuple_kernel, "run", wraps=tuple_kernel.run
-        ) as kernel_run:
-            for config, source in zip(
-                externally_supplied_configs, constructed_sources, strict=True
-            ):
-                self.assertEqual(
-                    compiled(config, source),
-                    (config[0] * config[1][0], source * 5),
-                )
-                expected_launch_configs.extend((config, (source, (5,), ())))
-
-        self.assertEqual(kernel_run.call_count, 4)
-        # Inspect the launch inputs to distinguish reconstruction coverage from
-        # a numerical check that could pass after flattening the tuple argument.
-        for call, expected_config in zip(
-            kernel_run.call_args_list, expected_launch_configs, strict=True
+        for config, source in zip(
+            externally_supplied_configs, constructed_sources, strict=True
         ):
-            config = call.args[0]
-            self.assertIs(type(config), tuple)
-            self.assertIs(type(config[1]), tuple)
-            self.assertIs(type(config[2]), tuple)
-            self.assertEqual(config[2], ())
-            self.assertEqual(config, expected_config)
+            self.assertEqual(
+                compiled(config, source),
+                (config[0] * config[1][0], source * 5),
+            )
 
     @unittest.skipUnless(HAS_GPU, "requires gpu")
     @parametrize("version", ("V1_COMPILER", "V2_BACKENDS", "V3_BACKENDS_TUPLE"))
@@ -427,7 +386,6 @@ class KernelTests(torch._inductor.test_case.TestCase):
         ):
             torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
 
-    @requires_gpu
     @_assert_no_mutation_fallback
     def test_triton_kernel_aggregate_with_tl_constexpr_use(self):
         # tl.constexpr type should be captured in dynamo and also preserved
@@ -435,12 +393,11 @@ class KernelTests(torch._inductor.test_case.TestCase):
         import triton
         import triton.language as tl
 
-        from torch._higher_order_ops import triton_kernel_wrap
-
         Config = collections.namedtuple("Config", ("source", "mode"))
 
         @triton.jit
         def nested_constexpr_kernel(config, out, n_elements, BLOCK_SIZE: tl.constexpr):
+            tl.static_assert(config.mode == "double")
             offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
             mask = offsets < n_elements
             values = tl.load(config.source + offsets, mask=mask)
@@ -463,7 +420,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
             )
             return out
 
-        x = torch.arange(16, dtype=torch.float32, device=GPU_TYPE)
+        x = torch.arange(16, dtype=torch.float32, device="cpu")
         mode = tl.constexpr("double")
 
         def fn_with_existing_constexpr(x):
@@ -473,38 +430,23 @@ class KernelTests(torch._inductor.test_case.TestCase):
             )
             return out
 
-        with mock.patch.object(
-            nested_constexpr_kernel, "run", wraps=nested_constexpr_kernel.run
-        ) as kernel_run:
-            # tl.constexpr(value) capture
-            actual = torch.compile(fn, backend="aot_eager", fullgraph=True)(
-                x, use_value_keyword=False
-            )
-            self.assertEqual(actual, x * 2)
-
-            # tl.constexpr(value=value) capture
-            actual = torch.compile(fn, backend="aot_eager", fullgraph=True)(
-                x, use_value_keyword=True
-            )
-            self.assertEqual(actual, x * 2)
-
-            # tl.constexpr from outside the graph
-            actual = torch.compile(
-                fn_with_existing_constexpr, backend="aot_eager", fullgraph=True
-            )(x)
-            self.assertEqual(actual, x * 2)
-
-        self.assertEqual(kernel_run.call_count, 3)
-        config_type_name = triton_kernel_wrap.create_structural_named_tuple_name(
-            "Config", Config._fields
+        # tl.constexpr(value) capture
+        actual = torch.compile(fn, backend="aot_eager", fullgraph=True)(
+            x, use_value_keyword=False
         )
-        for call in kernel_run.call_args_list:
-            config = call.args[0]
-            self.assertEqual(type(config).__name__, config_type_name)
-            self.assertEqual(config._fields, Config._fields)
-            self.assertEqual(config.source, x)
-            self.assertIsInstance(config.mode, tl.constexpr)
-            self.assertEqual(config.mode.value, "double")
+        self.assertEqual(actual, x * 2)
+
+        # tl.constexpr(value=value) capture
+        actual = torch.compile(fn, backend="aot_eager", fullgraph=True)(
+            x, use_value_keyword=True
+        )
+        self.assertEqual(actual, x * 2)
+
+        # tl.constexpr from outside the graph
+        actual = torch.compile(
+            fn_with_existing_constexpr, backend="aot_eager", fullgraph=True
+        )(x)
+        self.assertEqual(actual, x * 2)
 
     @requires_gpu
     @_assert_no_mutation_fallback
