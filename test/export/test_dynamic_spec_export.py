@@ -28,7 +28,11 @@ from torch.fx.experimental.dynamic_spec import (
     TensorSpec as T,
 )
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 def _reset_uid_counter():
@@ -104,6 +108,8 @@ class _ModBranch(torch.nn.Module):
 
 class _TestExportDynamicSpecBase(TestCase):
     """torch.export.export support for the new ShapesSpec/ParamsSpec API."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
@@ -986,10 +992,12 @@ class <lambda>(torch.nn.Module):
 
 
 class TestExportDynamicSpecStrict(_TestExportDynamicSpecBase):
+    hw_classification = HardwareClassification.GENERIC
     strict = True
 
 
 class TestExportDynamicSpecNonStrict(_TestExportDynamicSpecBase):
+    hw_classification = HardwareClassification.GENERIC
     strict = False
 
 
@@ -997,6 +1005,8 @@ del _TestExportDynamicSpecBase
 
 
 class _TestContainerSpecBase(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         _reset_uid_counter()
@@ -1505,7 +1515,9 @@ class _TestContainerSpecBase(TestCase):
             leaves = pytree.tree_leaves(arg_value)
             out = _walk_spec(spec, arg_value, where="<root>")
             self.assertEqual(
-                len(out), len(leaves), f"leaf-count drift for case {arg_value!r}"
+                len(out),
+                len(leaves),
+                lambda msg: f"{msg}\nleaf-count drift for case {arg_value!r}",
             )
             # Per-slot check: each slot's spec name must match the
             # tensor at that flat position from pytree.tree_flatten.
@@ -1513,7 +1525,7 @@ class _TestContainerSpecBase(TestCase):
                 self.assertIsInstance(
                     slot_spec,
                     T,
-                    msg=f"slot {i} is {slot_spec!r} (expected TensorSpec) "
+                    msg=lambda msg: f"{msg}\nslot {i} is {slot_spec!r} (expected TensorSpec) "
                     f"for case {arg_value!r}",
                 )
                 expected = f"t{id(leaf)}"
@@ -1522,7 +1534,7 @@ class _TestContainerSpecBase(TestCase):
                     actual,
                     expected,
                     msg=(
-                        f"alignment drift at slot {i}: spec name "
+                        lambda msg: f"{msg}\nalignment drift at slot {i}: spec name "
                         f"{actual!r} does not match pytree-flatten leaf "
                         f"name {expected!r} for case {arg_value!r}"
                     ),
@@ -1544,15 +1556,19 @@ class _TestContainerSpecBase(TestCase):
             expected = len(pytree.tree_leaves(arg_value))
             out = _walk_spec(None, arg_value, where="<root>")
             self.assertEqual(
-                len(out), expected, f"no-spec leaf-count drift for {arg_value!r}"
+                len(out),
+                expected,
+                lambda msg: f"{msg}\nno-spec leaf-count drift for {arg_value!r}",
             )
 
 
 class TestContainerSpecStrict(_TestContainerSpecBase):
+    hw_classification = HardwareClassification.GENERIC
     strict = True
 
 
 class TestContainerSpecNonStrict(_TestContainerSpecBase):
+    hw_classification = HardwareClassification.GENERIC
     strict = False
 
 

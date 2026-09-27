@@ -9,8 +9,8 @@ from torch._guards import detect_fake_mode
 from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
 from torch._library.opaque_object import (
     get_opaque_type_name,
-    is_opaque_reference_type,
-    is_opaque_type,
+    is_custom_class,
+    is_opaque_symbolic_type,
 )
 from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch.export.exported_program import (
@@ -52,7 +52,7 @@ class ConstantAttrMap(collections.abc.MutableMapping):
         real_key = hash(key) if isinstance(key, torch.ScriptObject) else key
         if not isinstance(
             real_key, (int, torch.Tensor, FakeScriptObject)
-        ) and not is_opaque_type(type(real_key)):
+        ) and not is_custom_class(type(real_key)):
             raise AssertionError(
                 f"expected int, Tensor, FakeScriptObject, or opaque type key, got {type(real_key)}"
             )
@@ -71,7 +71,7 @@ The same key can be mapped to multiple values, for handling constant aliasing.""
                 self._constant_attrs[hash(key)] = []
             self._constant_attrs[hash(key)].append(value)
             self._script_object_map[hash(key)] = key
-        elif isinstance(key, (torch.Tensor, FakeScriptObject)) or is_opaque_type(
+        elif isinstance(key, (torch.Tensor, FakeScriptObject)) or is_custom_class(
             type(key)
         ):
             if key not in self._constant_attrs:
@@ -271,7 +271,7 @@ def lift_constants_pass(
             # some name and attach it to the module in which it was used.
             if isinstance(
                 constant_val, (torch.ScriptObject, FakeScriptObject)
-            ) or is_opaque_reference_type(type(constant_val)):
+            ) or is_opaque_symbolic_type(type(constant_val)):
                 constant_kind = InputKind.CUSTOM_OBJ
                 constant_fqn = _get_first_fqn(constant_attrs, constant_val)
                 if constant_fqn is not None:
@@ -355,7 +355,7 @@ def lift_constants_pass(
                         class_fqn=class_fqn,
                         fake_val=constant_val,
                     )
-                elif is_opaque_type(type(constant_val)):
+                elif is_custom_class(type(constant_val)):
                     class_fqn = get_opaque_type_name(type(constant_val))
                     fake_val = (
                         maybe_to_fake_obj(fake_mode, constant_val)

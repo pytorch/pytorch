@@ -152,7 +152,7 @@ class CapabilityBasedPartitioner:
                         # If any of the nodes in the dfs path of this node are in the assignment
                         # map then we have to make sure that the partitions that these nodes belong
                         # to do not form a cycle with the current partitions being merged. This means
-                        # iterating through all the nodes in all the parititons that are traversed in
+                        # iterating through all the nodes in all the partitions that are traversed in
                         # the dfs path and checking if they are in the merged_nodes list.
                         if path_node in assignment:
                             partition_id = assignment[path_node]

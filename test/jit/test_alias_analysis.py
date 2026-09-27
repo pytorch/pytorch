@@ -39,7 +39,6 @@ class TestAliasAnalysis(JitTestCase):
             return [y]
 
         graph = foo.graph
-        graph.alias_db()
         alias_db = graph.alias_db()
         ten_construct = graph.findNode("aten::rand").output()
         output = next(graph.outputs())

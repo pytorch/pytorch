@@ -4,10 +4,9 @@ from typing import Any
 import torch
 from torch._inductor.kernel.mm_common import mm_args
 
-from . import config, lowering
+from . import config
 from .codegen.cpp_gemm_template import CppGemmTemplate, CppWoqInt4GemmTemplate
 from .codegen.cpp_utils import create_epilogue_with_attr
-from .lowering import expand, register_lowering
 from .mkldnn_ir import WeightInt4PackMatmul
 from .select_algorithm import (
     autotune_select_algorithm,
@@ -37,6 +36,8 @@ aten = torch.ops.aten
 
 
 def register_quantized_ops() -> None:
+    from . import lowering
+
     lowering.add_needs_realized_inputs(
         [
             quantized.max_pool2d,
@@ -50,6 +51,10 @@ def register_quantized_ops() -> None:
 
 
 def register_woq_mm_ops() -> None:
+    """Register weight-only quantized matmul lowerings."""
+    from . import lowering
+    from .lowering import expand, register_lowering
+
     @register_lowering(aten._weight_int8pack_mm, type_promotion_kind=None)  # type: ignore[misc]
     def int8pack_mm(
         input: torch.Tensor,

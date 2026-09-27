@@ -262,7 +262,7 @@ def _kl_continuous_bernoulli_continuous_bernoulli(p, q):
 
 @register_kl(Dirichlet, Dirichlet)
 def _kl_dirichlet_dirichlet(p, q):
-    # From http://bariskurt.com/kullback-leibler-divergence-between-two-dirichlet-and-beta-distributions/
+    # From https://statproofbook.github.io/P/dir-kl.html
     sum_p_concentration = p.concentration.sum(-1)
     sum_q_concentration = q.concentration.sum(-1)
     t1 = sum_p_concentration.lgamma() - sum_q_concentration.lgamma()

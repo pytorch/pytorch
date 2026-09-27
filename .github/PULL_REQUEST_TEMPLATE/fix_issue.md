@@ -2,7 +2,7 @@
 
 Before submitting, please review:
 - [The Ultimate Guide to PyTorch Contributions](https://github.com/pytorch/pytorch/wiki/The-Ultimate-Guide-to-PyTorch-Contributions#getting-started-with-pull-requests)
-- [AI-Assisted Development](https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md#ai-assisted-development) policy
+- [AI-Assisted Development](https://github.com/pytorch/pytorch/blob/main/AI_POLICY.md) policy
 
 ---
 

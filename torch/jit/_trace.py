@@ -661,7 +661,7 @@ def analyze_ts_result_with_export_result(export, trace):
         if type(orig) is not type(loaded):
             return False
 
-        if isinstance(orig, torch._subclasses.FakeTensor):
+        if torch._subclasses.fake_tensor.is_fake_tensor(orig):
             # Skip for FakeTensor.
             return True
         elif isinstance(orig, torch.Tensor):
@@ -1000,12 +1000,12 @@ def trace(
         warnings.warn(
             "`torch.jit.trace` is not supported in Python 3.14+ and may break. "
             "Please switch to `torch.compile` or `torch.export`.",
-            DeprecationWarning,
+            FutureWarning,
         )
     else:
         warnings.warn(
             "`torch.jit.trace` is deprecated. Please switch to `torch.compile` or `torch.export`.",
-            DeprecationWarning,
+            FutureWarning,
         )
     if not _enabled:
         return func
@@ -1139,12 +1139,12 @@ def trace_module(
         warnings.warn(
             "`torch.jit.trace_method` is not supported in Python 3.14+ and may break. "
             "Please switch to `torch.compile` or `torch.export`.",
-            DeprecationWarning,
+            FutureWarning,
         )
     else:
         warnings.warn(
             "`torch.jit.trace_method` is deprecated. Please switch to `torch.compile` or `torch.export`.",
-            DeprecationWarning,
+            FutureWarning,
         )
     if not _enabled:
         return mod

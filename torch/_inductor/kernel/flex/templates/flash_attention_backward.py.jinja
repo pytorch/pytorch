@@ -1,17 +1,17 @@
 {% if HAS_BLOCK_MASK and HAS_DQ_WRITE_ORDER and HAS_DQ_WRITE_ORDER_FULL and HAS_DQ_KV_ORDER %}
-{{def_kernel("Q", "K", "V", "OUT", "D_OUT", "LSE", "DK", "DV", "Q_NUM_BLKS", "Q_IDX", "FULL_Q_NUM_BLKS", "FULL_Q_IDX", "DQ_WRITE_ORDER", "DQ_WRITE_ORDER_FULL", "DQ_KV_ORDER")}}
+{{def_kernel("Q", "K", "V", "OUT", "D_OUT", "LSE", "DK", "DV", "Q_NUM_BLKS", "Q_IDX", "FULL_Q_NUM_BLKS", "FULL_Q_IDX", "DQ_WRITE_ORDER", "DQ_WRITE_ORDER_FULL", "DQ_KV_ORDER", "DLSE")}}
 {% elif HAS_BLOCK_MASK and HAS_DQ_WRITE_ORDER and HAS_DQ_WRITE_ORDER_FULL %}
-{{def_kernel("Q", "K", "V", "OUT", "D_OUT", "LSE", "DK", "DV", "Q_NUM_BLKS", "Q_IDX", "FULL_Q_NUM_BLKS", "FULL_Q_IDX", "DQ_WRITE_ORDER", "DQ_WRITE_ORDER_FULL")}}
+{{def_kernel("Q", "K", "V", "OUT", "D_OUT", "LSE", "DK", "DV", "Q_NUM_BLKS", "Q_IDX", "FULL_Q_NUM_BLKS", "FULL_Q_IDX", "DQ_WRITE_ORDER", "DQ_WRITE_ORDER_FULL", "DLSE")}}
 {% elif HAS_BLOCK_MASK and HAS_DQ_WRITE_ORDER and HAS_DQ_KV_ORDER %}
-{{def_kernel("Q", "K", "V", "OUT", "D_OUT", "LSE", "DK", "DV", "Q_NUM_BLKS", "Q_IDX", "FULL_Q_NUM_BLKS", "FULL_Q_IDX", "DQ_WRITE_ORDER", "DQ_KV_ORDER")}}
+{{def_kernel("Q", "K", "V", "OUT", "D_OUT", "LSE", "DK", "DV", "Q_NUM_BLKS", "Q_IDX", "FULL_Q_NUM_BLKS", "FULL_Q_IDX", "DQ_WRITE_ORDER", "DQ_KV_ORDER", "DLSE")}}
 {% elif HAS_BLOCK_MASK and HAS_DQ_WRITE_ORDER %}
-{{def_kernel("Q", "K", "V", "OUT", "D_OUT", "LSE", "DK", "DV", "Q_NUM_BLKS", "Q_IDX", "FULL_Q_NUM_BLKS", "FULL_Q_IDX", "DQ_WRITE_ORDER")}}
+{{def_kernel("Q", "K", "V", "OUT", "D_OUT", "LSE", "DK", "DV", "Q_NUM_BLKS", "Q_IDX", "FULL_Q_NUM_BLKS", "FULL_Q_IDX", "DQ_WRITE_ORDER", "DLSE")}}
 {% elif HAS_BLOCK_MASK and HAS_DQ_KV_ORDER %}
-{{def_kernel("Q", "K", "V", "OUT", "D_OUT", "LSE", "DK", "DV", "Q_NUM_BLKS", "Q_IDX", "FULL_Q_NUM_BLKS", "FULL_Q_IDX", "DQ_KV_ORDER")}}
+{{def_kernel("Q", "K", "V", "OUT", "D_OUT", "LSE", "DK", "DV", "Q_NUM_BLKS", "Q_IDX", "FULL_Q_NUM_BLKS", "FULL_Q_IDX", "DQ_KV_ORDER", "DLSE")}}
 {% elif HAS_BLOCK_MASK %}
-{{def_kernel("Q", "K", "V", "OUT", "D_OUT", "LSE", "DK", "DV", "Q_NUM_BLKS", "Q_IDX", "FULL_Q_NUM_BLKS", "FULL_Q_IDX")}}
+{{def_kernel("Q", "K", "V", "OUT", "D_OUT", "LSE", "DK", "DV", "Q_NUM_BLKS", "Q_IDX", "FULL_Q_NUM_BLKS", "FULL_Q_IDX", "DLSE")}}
 {% else %}
-{{def_kernel("Q", "K", "V", "OUT", "D_OUT", "LSE", "DK", "DV")}}
+{{def_kernel("Q", "K", "V", "OUT", "D_OUT", "LSE", "DK", "DV", "DLSE")}}
 {% endif %}
     from flash_attn.cute.interface import _flash_attn_bwd
 
@@ -157,5 +157,6 @@
         dk=dk_out_transposed,
         dv=dv_out_transposed,
         block_sparse_tensors=block_sparse_tensors,
-        deterministic={{DETERMINISTIC_BACKWARD_ENABLED}},
+        deterministic={{DETERMINISTIC_BACKWARD_ENABLED}},{% if HAS_DLSE %}
+        dlse=DLSE,{% endif %}
     )

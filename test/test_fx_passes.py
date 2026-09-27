@@ -14,7 +14,12 @@ from torch.fx.passes.operator_support import OperatorSupport
 from torch.fx.passes.utils.fuser_utils import fuse_by_partitions, topo_sort
 from torch.fx.passes.utils.matcher_utils import SubgraphMatcher
 
-from torch.testing._internal.common_utils import run_tests, parametrize, instantiate_parametrized_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+)
 from torch.testing._internal.jit_utils import JitTestCase
 
 logging.basicConfig(level=logging.WARNING)
@@ -297,6 +302,7 @@ class MockOperatorSupport(OperatorSupport):
 
 @instantiate_parametrized_tests
 class TestFXGraphPasses(JitTestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     @parametrize("fn, expected_partition, bookend_non_compute_pass", [
         (TestPartitionFunctions.forward1, [["add_7", "add_6"], ["add_5", "add_4", "add_3"], ["add_2", "add_1", "add"]], False),
@@ -719,7 +725,7 @@ class TestFXGraphPasses(JitTestCase):
                     self.assertEqual(
                         getitem_partition,
                         producer_partition,
-                        f"Getitem node '{getitem_node.name}' (nested in chain from producer) "
+                        lambda msg: f"{msg}\nGetitem node '{getitem_node.name}' (nested in chain from producer) "
                         f"should be in same partition as producer. "
                         f"Got partition {getitem_partition}, expected {producer_partition}"
                     )
@@ -1143,6 +1149,7 @@ class NoAnchorFound:
 
 @instantiate_parametrized_tests
 class TestFXMatcherUtils(JitTestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     @parametrize("test_model", [
         SingleNodePattern,

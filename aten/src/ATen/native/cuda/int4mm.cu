@@ -144,6 +144,10 @@ static bool isCDNA2orLater(int index) {
     return at::detail::getCUDAHooks().isGPUArch({"gfx90a", "gfx942", "gfx950"}, index);
 }
 
+static bool isCDNA5orLater(int index) {
+  return at::detail::getCUDAHooks().isGPUArch({"gfx1250"}, index);
+}
+
 #else
 constexpr int32_t kWarpSize = 32;
 #endif
@@ -1105,6 +1109,11 @@ at::Tensor _weight_int4pack_mm_cuda(
       A.device() == B.device() && A.device() == qScaleAndZeros.device());
 
 #if defined(USE_ROCM)
+  if (isCDNA5orLater(A.device().index())) {
+    TORCH_CHECK(false,
+                "_weight_int4pack_mm_cuda is not yet supported on gfx1250. "
+                "A WMMA-based implementation is required for gfx1250.");
+  }
   if (!isCDNA2orLater(A.device().index())) {
     TORCH_CHECK(false, "_weight_int4pack_mm_cuda is only supported on AMD gpu arch greater than or equal to CDNA2");
   }
@@ -1299,6 +1308,11 @@ at::Tensor _convert_weight_to_int4pack_cuda(
   TORCH_CHECK(innerKTiles == 2 || innerKTiles == 4 || innerKTiles == 8);
 
 #if defined(USE_ROCM)
+  if (isCDNA5orLater(in.device().index())) {
+    TORCH_CHECK(false,
+                "_convert_weight_to_int4pack_cuda is not yet supported on gfx1250. "
+                "A WMMA-based implementation is required for gfx1250.");
+  }
   if (!isCDNA2orLater(in.device().index())) {
     TORCH_CHECK(false, "_convert_weight_to_int4pack_cuda is only supported on AMD gpu arch greater than or equal to CDNA2");
   }
