@@ -4146,6 +4146,9 @@ class CppCodeCache:
             if submit_fn is not None:
                 with FileLock(lock_path, timeout=LOCK_TIMEOUT):
                     if not os.path.exists(binary_path):
+                        from torch.compiler._no_compile import check_compilation_allowed
+
+                        check_compilation_allowed("C++ kernel cache miss")
                         future = submit_fn(worker_fn)
 
             cls.cache[key] = load_fn
@@ -4164,8 +4167,13 @@ def _worker_compile_cpp(
     from torch.utils._filelock import FileLock
 
     with FileLock(lock_path, timeout=LOCK_TIMEOUT):
+        if os.path.exists(cpp_builders[-1].get_target_file_path()):
+            return
         for builder in cpp_builders:
             if not os.path.exists(builder.get_target_file_path()):
+                from torch.compiler._no_compile import check_compilation_allowed
+
+                check_compilation_allowed("C++ kernel compilation")
                 builder.build()
 
 
@@ -5304,6 +5312,9 @@ class CUTLASSCodeCache:
                     )
                     raise cls._COMPILE_ERROR(cmd_parts, error_output)
                 if not os.path.exists(output_path):
+                    from torch.compiler._no_compile import check_compilation_allowed
+
+                    check_compilation_allowed("GPU kernel compilation")
                     cmd = cls._compile_command(
                         src_files, output_path, dst_file_ext, extra_args
                     )
@@ -5584,6 +5595,9 @@ class ROCmCodeCache:
             with lock:
                 output_path = input_path[: -len(cls._SOURCE_CODE_SUFFIX)] + dst_file_ext
                 if not os.path.exists(output_path):
+                    from torch.compiler._no_compile import check_compilation_allowed
+
+                    check_compilation_allowed("GPU kernel compilation")
                     cmd = rocm_compile_command(
                         [input_path], output_path, dst_file_ext, extra_args
                     )

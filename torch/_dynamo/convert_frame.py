@@ -1714,6 +1714,9 @@ def _compile(
         BisectValidationException,
         ValidationException,
     )
+    from torch.compiler._no_compile import check_compilation_allowed
+
+    check_compilation_allowed("Dynamo graph compilation")
 
     # Only nonlocal defs here please!
     # Time spent compiling this frame before restarting or failing analysis
@@ -2000,7 +2003,9 @@ def _compile(
 
     metrics_context = get_metrics_context()
     package_code_context = (
-        package.code_context(code) if package is not None else contextlib.nullcontext()
+        package.code_context(code, globals)
+        if package is not None
+        else contextlib.nullcontext()
     )
     with (
         _use_lazy_graph_module(config.use_lazy_graph_module),
