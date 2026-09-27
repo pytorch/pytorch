@@ -261,6 +261,31 @@ def _try_is_cow_tensor(value: object) -> bool | object:
     return torch._C._is_cow_tensor(value)  # pyrefly: ignore[missing-attribute]
 
 
+class FunctionCodeMetadata(NamedTuple):
+    code: types.CodeType
+    globals_module: str
+
+    def qualified_name(self) -> str:
+        # co_qualname is new in Python 3.11.
+        name = getattr(self.code, "co_qualname", self.code.co_name)
+        return f"{self.globals_module}.{name}"
+
+
+def _function_code_metadata(value: object) -> FunctionCodeMetadata | None:
+    from .package import _globals_module_name
+
+    if type(value) is not types.FunctionType:
+        return None
+    module_name = _globals_module_name(value.__globals__)
+    if module_name is None or value.__builtins__ is not builtins.__dict__:
+        return None
+    return FunctionCodeMetadata(value.__code__, module_name)
+
+
+def _function_code_matches(value: object, expected: FunctionCodeMetadata) -> bool:
+    return _function_code_metadata(value) == expected
+
+
 def _cow_tensor_matches(value: object, expected: object) -> bool:
     if not isinstance(expected, bool):
         return False
@@ -3160,6 +3185,28 @@ class GuardBuilder(GuardBuilderBase):
             self.FUNCTION_MATCH(guard)
 
     @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: _guard_create_fn_keyword(
+            guard, "expected"
+        ),
+        eval_fn=_function_code_matches,
+    )
+    def FUNCTION_CODE_MATCH(self, guard: Guard, expected: FunctionCodeMetadata) -> None:
+        """A function by its code and globals module, compared by value so the
+        check survives serialization; defaults and cells keep their own guards."""
+
+        def guard_fn(value: object) -> bool:
+            return _function_code_matches(value, expected)
+
+        code = (
+            f"___check_function_code({self.arg_ref(guard)}, "
+            f"{expected.qualified_name()})"
+        )
+        self._set_guard_export_info(guard, [code])
+        self.get_guard_manager(guard).add_lambda_guard(
+            guard_fn, get_verbose_code_parts(code, guard), guard.user_stack
+        )
+
+    @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: value,
         eval_fn=lambda value, metadata: value is metadata,
     )
@@ -5001,6 +5048,40 @@ def is_portable_identity_guard(
     )
 
 
+def _portable_function_metadata(
+    guard_type: str, value: object
+) -> tuple[Callable[..., None], NamedTuple] | None:
+    if guard_type == "CLOSURE_MATCH":
+        if (code := _function_code_metadata(value)) is not None:
+            return GuardBuilder.FUNCTION_CODE_MATCH, code
+    return None
+
+
+def is_portable_function_guard(guard_type: str, value: object) -> bool:
+    """An identity guard on a function that ``to_portable_function_guard``
+    rewrites into a by-value check for serialization."""
+    return _portable_function_metadata(guard_type, value) is not None
+
+
+def to_portable_function_guard(guard: Guard, builder: GuardBuilder) -> Guard:
+    entry = make_guard_filter_entry(guard, builder)
+    if not entry.has_value:
+        return guard
+    portable = _portable_function_metadata(entry.guard_type, entry.value)
+    if portable is None:
+        return guard
+    create_fn, expected = portable
+    return dataclasses.replace(
+        guard,
+        create_fn=functools.partial(create_fn, expected=expected),
+        guard_types=None,
+        code_list=None,
+        obj_weakref=None,
+        guarded_class_weakref=None,
+        _hash=None,
+    )
+
+
 def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterEntry:
     MISSING = object()
     name = strip_local_scope(guard.name)
@@ -5214,6 +5295,11 @@ class CheckFunctionManager:
                 sorted_guards = [
                     guard for i, guard in enumerate(sorted_guards) if filter_results[i]
                 ]
+                if save_guards:
+                    sorted_guards = [
+                        to_portable_function_guard(guard, builder)
+                        for guard in sorted_guards
+                    ]
 
             # Redo the guards because filtering relies on the results from the last guard builder.
             builder, guard_manager = self.build_guards(

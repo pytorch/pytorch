@@ -80,6 +80,20 @@ _unregistered = types.ModuleType("_unregistered")
 _unregistered.SCALE = 1
 
 
+def _without_module_globals(fn):
+    """A copy of fn whose globals no importable module owns, so a guard on it
+    cannot be rebuilt by value in another process and the default filter drops
+    it."""
+    return types.FunctionType(fn.__code__, dict(fn.__globals__), fn.__name__)
+
+
+def _unportable_op(x):
+    return x + 1
+
+
+_unportable_op = _without_module_globals(_unportable_op)
+
+
 def _stack(*filenames):
     """A guard's user_stack, outermost frame first."""
     return traceback.StackSummary.from_list([(f, 1, "forward", "") for f in filenames])
@@ -302,7 +316,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
 
     def test_default_guard_filter_through_serialize_guards(self):
         def fn(x):
-            return _user_op(x) + len(x.shape)
+            return _unportable_op(x) + len(x.shape)
 
         seen = []
         x = torch.randn(3)
@@ -317,15 +331,17 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # pickles, so a kept CLOSURE_MATCH would have thrown above.
         len_slot = f"G['{builtins_key}']['len']"
         verdicts = {(e.guard_type, e.name): keep for e, keep in seen}
-        self.assertIs(verdicts.get(("CLOSURE_MATCH", "G['_user_op']")), False)
+        self.assertIs(verdicts.get(("CLOSURE_MATCH", "G['_unportable_op']")), False)
         self.assertIs(verdicts.get(("BUILTIN_MATCH", len_slot)), True)
         self.assertEqual(kept, {t for (t, _), keep in verdicts.items() if keep})
         data = AOTCompiledFunction.serialize(compiled).serialized_data
         loaded = AOTCompiledFunction.deserialize(data)
         self.assertEqual(loaded(x), fn(x))
-        # What the dropped guard would have noticed: with _user_op rebound the
-        # loaded artifact still passes its guards and serves the old graph.
-        with mock.patch.object(sys.modules[__name__], "_user_op", lambda x: x - 1):
+        # What the dropped guard would have noticed: with _unportable_op rebound
+        # the loaded artifact still passes its guards and serves the old graph.
+        with mock.patch.object(
+            sys.modules[__name__], "_unportable_op", lambda x: x - 1
+        ):
             self.assertEqual(fn(x), x)
             self.assertTrue(loaded.guard_check(x))
             self.assertEqual(loaded(x), x + 2)
@@ -337,6 +353,34 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             with self.assertRaisesRegex(RuntimeError, failed_on_len):
                 loaded(x)
         self.assertTrue(loaded.guard_check(x))
+
+    def test_default_guard_filter_keeps_a_module_function_by_code(self):
+        # A function in a module's globals keeps its CLOSURE_MATCH, which is
+        # serialized as a check of the function's code against the loading
+        # process's module, so the rebinding a dropped guard misses fails it.
+        def fn(x):
+            return _user_op(x) + len(x.shape)
+
+        seen = []
+        x = torch.randn(3)
+        compiled = _aot_compile(fn, x, seen=seen)
+        _, kept = _kept_types(compiled)
+        verdicts = {(e.guard_type, e.name): keep for e, keep in seen}
+        self.assertIs(verdicts.get(("CLOSURE_MATCH", "G['_user_op']")), True)
+        kept_by_filter = {t for (t, _), keep in verdicts.items() if keep}
+        self.assertEqual(
+            kept, kept_by_filter - {"CLOSURE_MATCH"} | {"FUNCTION_CODE_MATCH"}
+        )
+        data = AOTCompiledFunction.serialize(compiled).serialized_data
+        scope = dict(globals())
+        loaded = AOTCompiledFunction.deserialize(data, guard_globals=scope)
+        self.assertEqual(loaded(x), fn(x))
+        with mock.patch.dict(scope, {"_user_op": lambda x: x - 1}):
+            self.assertFalse(loaded.guard_check(x))
+        # An equal but distinct code object stands in for another process's.
+        copy = types.FunctionType(_user_op.__code__.replace(), globals())
+        with mock.patch.dict(scope, {"_user_op": copy}):
+            self.assertTrue(loaded.guard_check(x))
 
     def test_default_guard_filter_keeps_the_pytree_registry_keys_match(self):
         # The DICT_KEYS_MATCH on SUPPORTED_NODES reaches the filter as the
@@ -422,6 +466,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
                 "MODULE_MATCH": 1,
                 "CLASS_MATCH": class_matches,
                 "ID_MATCH": 2,
+                "FUNCTION_CODE_MATCH": 4,
             },
         )
         self.assertEqual(control_counts - counts, {})
@@ -2418,7 +2463,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertIn(("MODULE_MATCH", "G['_unregistered']"), summary.dropped_guards)
         self.assertIn(("MODULE_MATCH", "G['torch']"), summary.kept_guards)
         self.assertIn(
-            ("CLOSURE_MATCH", "G['torch']._dynamo.graph_break"), summary.dropped_guards
+            ("CLOSURE_MATCH", "G['torch']._dynamo.graph_break"), summary.kept_guards
         )
         self.assertTrue(summary.kept_guards)
         self.assertEqual(summary.risky_dropped_guards, ())
@@ -2458,10 +2503,10 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             precompile_package.precompile_capture(model.forward)
 
     def test_a_dropped_guard_that_tells_variants_apart_is_risky(self):
-        # The default filter drops the CLOSURE_MATCH on _act, a global bound to
-        # a def of that name in this file. The static shapes recompile either
-        # way; a dropped slot that held a different def in each variant cannot
-        # pick between them at serve time.
+        # The default filter drops the CLOSURE_MATCH on _act when the def bound
+        # there has no module globals. The static shapes recompile either way; a
+        # dropped slot that held a different def in each variant cannot pick
+        # between them at serve time.
         def capture(acts):
             session = precompile_package.precompile_capture(
                 _through_act, backend="eager", dynamic=False
@@ -2473,11 +2518,19 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             return session.summary()
 
         slot = ("CLOSURE_MATCH", "G['_act']")
-        same = capture([_relu, _relu])
+        relu, sigmoid = (
+            _without_module_globals(_relu),
+            _without_module_globals(_sigmoid),
+        )
+        same = capture([relu, relu])
         self.assertIn(slot, same.dropped_guards)
         self.assertGreaterEqual(same.guarded_codes, 2)
         self.assertNotIn(slot, same.risky_dropped_guards)
-        self.assertIn(slot, capture([_relu, _sigmoid]).risky_dropped_guards)
+        self.assertIn(slot, capture([relu, sigmoid]).risky_dropped_guards)
+        # Defs in a module's globals are told apart by code at serve time.
+        kept = capture([_relu, _sigmoid])
+        self.assertNotIn(slot, kept.dropped_guards)
+        self.assertIn(slot, kept.kept_guards)
 
     @parametrize("backend", ["eager", "inductor"])
     def test_precompile_session_renders_behind_the_gates(self, backend):
