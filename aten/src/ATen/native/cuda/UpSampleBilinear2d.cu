@@ -155,8 +155,28 @@ __device__ __forceinline__ void compute_output_range(
       lo = (input_pos - static_cast<accscalar_t>(0.5)) / scale - static_cast<accscalar_t>(0.5);
       hi = (input_pos + static_cast<accscalar_t>(1.5)) / scale - static_cast<accscalar_t>(0.5);
   }
-  min_output = max(0, static_cast<int>(std::ceil(lo)));
-  max_output = min(output_size - 1, static_cast<int>(std::floor(hi)));
+  const int min_output_bound = static_cast<int>(std::ceil(lo));
+  const int max_output_bound = static_cast<int>(std::floor(hi));
+  // The inverse bounds are rounded in accscalar_t. Include one extra output on
+  // each side and filter by exact interpolation participation below.
+  min_output = min_output_bound > 0 ? min_output_bound - 1 : 0;
+  max_output = max_output_bound < output_size - 1 ? max_output_bound + 1 : output_size - 1;
+}
+
+template <typename accscalar_t>
+__device__ __forceinline__ accscalar_t compute_linear_axis_weight(
+    const int input_pos,
+    const int input_base,
+    const int input_step,
+    const accscalar_t input_lambda) {
+  accscalar_t weight = 0;
+  if (input_pos == input_base) {
+    weight += static_cast<accscalar_t>(1) - input_lambda;
+  }
+  if (input_pos == input_base + input_step) {
+    weight += input_lambda;
+  }
+  return weight;
 }
 
 template <typename scalar_t, typename accscalar_t>
@@ -178,6 +198,7 @@ __device__ __forceinline__ void upsample_bilinear2d_backward_gather(
   const size_t nc_idx = index_temp / height1;
 
   accscalar_t grad_sum = 0;
+  const size_t output_plane = static_cast<size_t>(height2) * width2;
 
   int h2_min, h2_max, w2_min, w2_max;
   compute_output_range<accscalar_t>(h1, rheight, height2, align_corners, h2_min, h2_max);
@@ -187,35 +208,53 @@ __device__ __forceinline__ void upsample_bilinear2d_backward_gather(
     for (int w2 = w2_min; w2 <= w2_max; w2++) {
       const accscalar_t h1r = area_pixel_compute_source_index<accscalar_t>(
           rheight, h2, align_corners, /*cubic=*/false);
-      const int h1_base = (int)h1r;
+      const int h1_base = static_cast<int>(h1r);
       const int h1p = (h1_base < height1 - 1) ? 1 : 0;
       const accscalar_t h1lambda = h1r - h1_base;
-      const accscalar_t h0lambda = static_cast<accscalar_t>(1) - h1lambda;
+      const bool h1_participates =
+          h1 == h1_base || h1 == h1_base + h1p;
 
       const accscalar_t w1r = area_pixel_compute_source_index<accscalar_t>(
           rwidth, w2, align_corners, /*cubic=*/false);
-      const int w1_base = (int)w1r;
+      const int w1_base = static_cast<int>(w1r);
       const int w1p = (w1_base < width1 - 1) ? 1 : 0;
       const accscalar_t w1lambda = w1r - w1_base;
-      const accscalar_t w0lambda = static_cast<accscalar_t>(1) - w1lambda;
+      const bool w1_participates =
+          w1 == w1_base || w1 == w1_base + w1p;
 
-      accscalar_t weight = 0;
-      if (h1 == h1_base && w1 == w1_base) {
-        weight += h0lambda * w0lambda;
-      }
-      if (h1 == h1_base && w1 == w1_base + w1p) {
-        weight += h0lambda * w1lambda;
-      }
-      if (h1 == h1_base + h1p && w1 == w1_base) {
-        weight += h1lambda * w0lambda;
-      }
-      if (h1 == h1_base + h1p && w1 == w1_base + w1p) {
-        weight += h1lambda * w1lambda;
-      }
-
-      if (weight > 0) {
-        const size_t output_idx = nc_idx * height2 * width2 + h2 * width2 + w2;
-        grad_sum += weight * static_cast<accscalar_t>(odata[output_idx]);
+      if (h1p == 0 || w1p == 0) {
+        // Preserve each corner contribution at aliased boundaries; merging zero
+        // weights changes IEEE-754 results for non-finite inputs.
+        if (h1_participates && w1_participates) {
+          const size_t output_idx =
+              nc_idx * output_plane + static_cast<size_t>(h2) * width2 + w2;
+          const accscalar_t output = static_cast<accscalar_t>(odata[output_idx]);
+          const accscalar_t h0lambda = static_cast<accscalar_t>(1) - h1lambda;
+          const accscalar_t w0lambda = static_cast<accscalar_t>(1) - w1lambda;
+          if (h1 == h1_base && w1 == w1_base) {
+            grad_sum += h0lambda * w0lambda * output;
+          }
+          if (h1 == h1_base && w1 == w1_base + w1p) {
+            grad_sum += h0lambda * w1lambda * output;
+          }
+          if (h1 == h1_base + h1p && w1 == w1_base) {
+            grad_sum += h1lambda * w0lambda * output;
+          }
+          if (h1 == h1_base + h1p && w1 == w1_base + w1p) {
+            grad_sum += h1lambda * w1lambda * output;
+          }
+        }
+      } else {
+        const accscalar_t h1_weight = compute_linear_axis_weight(
+            h1, h1_base, h1p, h1lambda);
+        const accscalar_t w1_weight = compute_linear_axis_weight(
+            w1, w1_base, w1p, w1lambda);
+        const accscalar_t weight = h1_weight * w1_weight;
+        if (h1_participates && w1_participates) {
+          const size_t output_idx =
+              nc_idx * output_plane + static_cast<size_t>(h2) * width2 + w2;
+          grad_sum += weight * static_cast<accscalar_t>(odata[output_idx]);
+        }
       }
     }
   }
@@ -237,8 +276,9 @@ __global__ void upsample_bilinear2d_backward_gather_out_frame(
     scalar_t* __restrict__ idata,
     const scalar_t* __restrict__ odata) {
   const size_t i_numel = nc * width1 * height1;
-  for (size_t index = blockDim.x * blockIdx.x + threadIdx.x; index < i_numel;
-       index += blockDim.x * gridDim.x) {
+  for (size_t index = static_cast<size_t>(blockDim.x) * blockIdx.x + threadIdx.x;
+       index < i_numel;
+       index += static_cast<size_t>(blockDim.x) * gridDim.x) {
     upsample_bilinear2d_backward_gather<scalar_t, accscalar_t>(
         index,
         height1,
@@ -288,41 +328,64 @@ __device__ __forceinline__ void upsample_bilinear2d_backward_gather_nhwc(
     for (int w2 = w2_min; w2 <= w2_max; w2++) {
       const accscalar_t h1r = area_pixel_compute_source_index<accscalar_t>(
           rheight, h2, align_corners, /*cubic=*/false);
-      const int h1_base = (int)h1r;
+      const int h1_base = static_cast<int>(h1r);
       const int h1p = (h1_base < input_height - 1) ? 1 : 0;
       const accscalar_t h1lambda = h1r - h1_base;
-      const accscalar_t h0lambda = static_cast<accscalar_t>(1) - h1lambda;
+      const bool h1_participates =
+          ih == h1_base || ih == h1_base + h1p;
 
       const accscalar_t w1r = area_pixel_compute_source_index<accscalar_t>(
           rwidth, w2, align_corners, /*cubic=*/false);
-      const int w1_base = (int)w1r;
+      const int w1_base = static_cast<int>(w1r);
       const int w1p = (w1_base < input_width - 1) ? 1 : 0;
       const accscalar_t w1lambda = w1r - w1_base;
-      const accscalar_t w0lambda = static_cast<accscalar_t>(1) - w1lambda;
+      const bool w1_participates =
+          iw == w1_base || iw == w1_base + w1p;
 
-      accscalar_t weight = 0;
-      if (ih == h1_base && iw == w1_base) {
-        weight += h0lambda * w0lambda;
-      }
-      if (ih == h1_base && iw == w1_base + w1p) {
-        weight += h0lambda * w1lambda;
-      }
-      if (ih == h1_base + h1p && iw == w1_base) {
-        weight += h1lambda * w0lambda;
-      }
-      if (ih == h1_base + h1p && iw == w1_base + w1p) {
-        weight += h1lambda * w1lambda;
-      }
-
-      if (weight > 0) {
-        const size_t output_index =
-            (((n * output_height + h2) * output_width + w2) * channels + c);
-        const vector_t output =
-            reinterpret_cast<const vector_t*>(odata)[output_index / vec_size];
+      if (h1p == 0 || w1p == 0) {
+        // Preserve each corner contribution at aliased boundaries; merging zero
+        // weights changes IEEE-754 results for non-finite inputs.
+        if (h1_participates && w1_participates) {
+          const size_t output_index =
+              (((n * output_height + h2) * output_width + w2) * channels + c);
+          const vector_t output =
+              reinterpret_cast<const vector_t*>(odata)[output_index / vec_size];
+          const accscalar_t h0lambda = static_cast<accscalar_t>(1) - h1lambda;
+          const accscalar_t w0lambda = static_cast<accscalar_t>(1) - w1lambda;
 #pragma unroll
-        for (int lane = 0; lane < vec_size; ++lane) {
-          grad_sum[lane] +=
-              weight * static_cast<accscalar_t>(output.val[lane]);
+          for (int lane = 0; lane < vec_size; ++lane) {
+            const accscalar_t output_lane =
+                static_cast<accscalar_t>(output.val[lane]);
+            if (ih == h1_base && iw == w1_base) {
+              grad_sum[lane] += h0lambda * w0lambda * output_lane;
+            }
+            if (ih == h1_base && iw == w1_base + w1p) {
+              grad_sum[lane] += h0lambda * w1lambda * output_lane;
+            }
+            if (ih == h1_base + h1p && iw == w1_base) {
+              grad_sum[lane] += h1lambda * w0lambda * output_lane;
+            }
+            if (ih == h1_base + h1p && iw == w1_base + w1p) {
+              grad_sum[lane] += h1lambda * w1lambda * output_lane;
+            }
+          }
+        }
+      } else {
+        const accscalar_t h1_weight = compute_linear_axis_weight(
+            ih, h1_base, h1p, h1lambda);
+        const accscalar_t w1_weight = compute_linear_axis_weight(
+            iw, w1_base, w1p, w1lambda);
+        const accscalar_t weight = h1_weight * w1_weight;
+        if (h1_participates && w1_participates) {
+          const size_t output_index =
+              (((n * output_height + h2) * output_width + w2) * channels + c);
+          const vector_t output =
+              reinterpret_cast<const vector_t*>(odata)[output_index / vec_size];
+#pragma unroll
+          for (int lane = 0; lane < vec_size; ++lane) {
+            grad_sum[lane] +=
+                weight * static_cast<accscalar_t>(output.val[lane]);
+          }
         }
       }
     }
@@ -352,8 +415,9 @@ __global__ void upsample_bilinear2d_backward_gather_nhwc_out_frame(
     const bool align_corners,
     scalar_t* __restrict__ idata,
     const scalar_t* __restrict__ odata) {
-  for (size_t index = blockDim.x * blockIdx.x + threadIdx.x; index < numel;
-       index += blockDim.x * gridDim.x) {
+  for (size_t index = static_cast<size_t>(blockDim.x) * blockIdx.x + threadIdx.x;
+       index < numel;
+       index += static_cast<size_t>(blockDim.x) * gridDim.x) {
     upsample_bilinear2d_backward_gather_nhwc<scalar_t, accscalar_t, vec_size>(
         index,
         channels,
@@ -868,7 +932,7 @@ static void upsample_bilinear2d_backward_out_cuda_template_deterministic(
 
     upsample_bilinear2d_backward_gather_out_frame<scalar_t, accscalar_t>
         <<<num_blocks, num_threads, 0, stream>>>(
-            nbatch * channels,
+            static_cast<size_t>(nbatch) * channels,
             input_height,
             input_width,
             output_height,
