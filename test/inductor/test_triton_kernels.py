@@ -387,7 +387,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
             torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
 
     @_assert_no_mutation_fallback
-    def test_triton_kernel_aggregate_with_tl_constexpr_use(self):
+    def test_triton_kernel_aggregate_with_tl_constexpr_leaves(self):
         # tl.constexpr type should be captured in dynamo and also preserved
         # with nested types
         import triton
