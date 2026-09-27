@@ -2505,4 +2505,17 @@ Tensor sub_Tensor_meta(const Tensor& self, const Tensor& other, const Scalar& al
   return binary_ref_meta(self, other, TypePromotionKind::DEFAULT, symbolic, alpha, /*is_sub=*/true);
 }
 
+// Mirrors what Python fake tensor runs for mul.Tensor: the fast path for
+// symbolic inputs, then refs.mul.
+Tensor mul_Tensor_meta(const Tensor& self, const Tensor& other) {
+  const bool symbolic = self.unsafeGetTensorImpl()->has_symbolic_sizes_strides() ||
+      other.unsafeGetTensorImpl()->has_symbolic_sizes_strides();
+  if (symbolic) {
+    if (auto out = fast_binary_meta(self, other, TypePromotionKind::DEFAULT); out.defined()) {
+      return out;
+    }
+  }
+  return binary_ref_meta(self, other, TypePromotionKind::DEFAULT, symbolic);
+}
+
 } // namespace at::native

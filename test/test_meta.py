@@ -3264,6 +3264,60 @@ class TestMetaKernelRegistrations(TestCase):
                 with self.assertRaises(GuardOnDataDependentSymNode):
                     run(impl)
 
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @parametrize("shape_kind", ["static", "backed", "unbacked"])
+    @parametrize("layout", ["contiguous", "channels_last", "permuted", "non_contiguous", "expanded"])
+    @parametrize(
+        "other",
+        [torch.float32, torch.float64, torch.int64, "broadcast_3d", "zero_dim_float64", "zero_dim_int64", 2, 2.5, True],
+    )
+    def test_mul_meta_matches_python(self, shape_kind, layout, other):
+        def make_args(s):
+            a = self._add_meta_input(s, layout)
+            if isinstance(other, torch.dtype):
+                return a, self._add_meta_input(s, layout, other)
+            if other == "broadcast_3d":
+                return a, torch.empty(s, 1, 5)
+            if isinstance(other, str):
+                return a, torch.empty((), dtype=getattr(torch, other.removeprefix("zero_dim_")))
+            return a, other
+
+        cpp, python = self._add_meta_results(shape_kind, make_args, op="mul")
+        self.assertEqual(cpp, python)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @parametrize("shape_kind", ["static", "backed", "unbacked"])
+    def test_mul_meta_broadcast_both(self, shape_kind):
+        # Both operands broadcast, so the symbolic fast path bails to the ref.
+        cpp, python = self._add_meta_results(shape_kind, lambda s: (torch.empty(s, 1), torch.empty(1, s)), op="mul")
+        self.assertEqual(cpp, python)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @parametrize("shape_kind", ["static", "backed", "unbacked"])
+    @parametrize(
+        "dtype,other",
+        [
+            (torch.float16, torch.bfloat16),
+            (torch.bfloat16, 2.5),
+            (torch.int32, torch.int64),
+            (torch.int32, 2.5),
+            (torch.bool, torch.bool),
+            (torch.bool, True),
+            (torch.bool, 2),
+            (torch.uint8, 300),
+            (torch.float32, 1j),
+        ],
+    )
+    def test_mul_meta_dtype_promotion(self, shape_kind, dtype, other):
+        def make_args(s):
+            a = self._add_meta_input(s, "permuted", dtype)
+            if isinstance(other, torch.dtype):
+                return a, torch.empty(s, 1, 5, dtype=other)
+            return a, other
+
+        cpp, python = self._add_meta_results(shape_kind, make_args, op="mul")
+        self.assertEqual(cpp, python)
+
 
 instantiate_device_type_tests(TestMeta, globals())
 
