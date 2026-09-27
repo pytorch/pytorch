@@ -244,6 +244,10 @@ class TritonBundler:
                     for compile_result in result.kernel.compile_results:
                         compile_result.reload_cubin_path()
                 except RuntimeError:
+                    from torch.compiler._no_compile import is_compilation_forbidden
+
+                    if is_compilation_forbidden():
+                        raise
                     log.warning(
                         "Failed to reload cubin file statically launchable autotuner %s",
                         result.kernel_name,
@@ -382,6 +386,21 @@ class TritonBundler:
                 directory = os.path.join(basedir, artifacts.kernel_hash)
 
                 if os.path.exists(directory) and len(os.listdir(directory)) != 0:
+                    from torch.compiler._no_compile import is_compilation_forbidden
+
+                    if is_compilation_forbidden():
+                        for artifact in artifacts.artifacts:
+                            payload = artifact.payload
+                            if artifact.filename.endswith(".json"):
+                                payload = payload.replace(
+                                    TritonBundler._REPLACE_BYTES, str.encode(directory)
+                                )
+                            path = Path(directory) / artifact.filename
+                            if not path.is_file() or path.read_bytes() != payload:
+                                raise RuntimeError(
+                                    "strict precompile cache hydration found an "
+                                    f"incomplete or incompatible kernel file: {path}"
+                                )
                     # If directory already exists, we bail out and leave
                     # local disk to take care of caching
                     log.debug(

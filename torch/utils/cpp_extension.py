@@ -844,6 +844,9 @@ class BuildExtension(_LazyBuildExt):
             self.force = True
 
     def build_extensions(self) -> None:
+        from torch.compiler._no_compile import check_compilation_allowed
+
+        check_compilation_allowed("C++ extension compilation")
         compiler_name, compiler_version = self._check_abi()
 
         cuda_ext = False
@@ -1986,6 +1989,9 @@ def load(name,
         ...     extra_cflags=['-O2'],
         ...     verbose=True)
     """
+    from torch.compiler._no_compile import check_compilation_allowed
+
+    check_compilation_allowed("C++ extension runtime JIT")
     return _jit_compile(
         name,
         [sources] if isinstance(sources, str) else sources,
@@ -2108,6 +2114,9 @@ def _check_and_build_extension_h_precompiler_headers(
             f.close()
 
     def build_precompile_header(pch_cmd) -> None:
+        from torch.compiler._no_compile import check_compilation_allowed
+
+        check_compilation_allowed("C++ extension precompiled header compilation")
         try:
             subprocess.check_output(shlex.split(pch_cmd), stderr=subprocess.STDOUT)
         except subprocess.CalledProcessError as e:
@@ -2281,6 +2290,9 @@ def load_inline(name,
         can control the number of workers by setting the `MAX_JOBS` environment
         variable to a non-negative number.
     '''
+    from torch.compiler._no_compile import check_compilation_allowed
+
+    check_compilation_allowed("C++ extension runtime JIT")
     build_directory = build_directory or _get_build_directory(name, verbose)
 
     if isinstance(cpp_sources, str):
@@ -2944,6 +2956,9 @@ def _get_vc_env(vc_arch: str) -> dict[str, str]:
             return msvc._get_vc_env(vc_arch)  # type: ignore[attr-defined]
 
 def _run_ninja_build(build_directory: str, verbose: bool, error_prefix: str) -> None:
+    from torch.compiler._no_compile import check_compilation_allowed
+
+    check_compilation_allowed("C++ extension compilation")
     command = ['ninja', '-v']
     num_workers = _get_num_workers(verbose)
     if num_workers is not None:
