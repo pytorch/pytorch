@@ -4127,6 +4127,39 @@ class TestGuardSerialization(TestGuardSerializationBase):
         finally:
             torch.set_default_device(device)
 
+    def test_autograd_saved_tensors_hooks_compare_by_content(self):
+        def pack(x):
+            return x * 2
+
+        def unpack(x):
+            return x / 2
+
+        def other_unpack(x):
+            return x / 3
+
+        def fn(x):
+            return x + 1
+
+        def trace(*fns):
+            return tuple(torch.fx.symbolic_trace(f) for f in fns)
+
+        x = torch.randn(3, 2)
+        captured = trace(pack, unpack)
+        with torch.autograd.graph.saved_tensors_hooks(*captured):
+            ref, loaded = self._test_serialization(
+                "AUTOGRAD_SAVED_TENSORS_HOOKS", fn, x
+            )
+        # A serving process installs its own copies of the hooks, so the ids
+        # the capturing process saw never recur.
+        with torch.autograd.graph.saved_tensors_hooks(*trace(pack, unpack)):
+            self._test_check_fn(ref, ref, {"x": x}, False)
+            self._test_check_fn(loaded, loaded, {"x": x}, True)
+        with torch.autograd.graph.saved_tensors_hooks(*trace(pack, other_unpack)):
+            self._test_check_fn(loaded, loaded, {"x": x}, False)
+        self._test_check_fn(loaded, loaded, {"x": x}, False)
+        with torch.autograd.graph.saved_tensors_hooks(*captured):
+            self._test_check_fn(ref, loaded, {"x": x}, True)
+
     def test_shape_env(self):
         def fn(x):
             return x + 1
