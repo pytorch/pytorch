@@ -106,7 +106,7 @@ class TestShapeInference(TestCase):
         m = TestModule()
         gm = generate_graph_module(m)
         input_tensors = [torch.randn(1, 1)]
-        infer_shape(gm, input_tensors)
+        self.assertIsNotNone(infer_shape(gm, input_tensors))
 
 
 if __name__ == "__main__":
