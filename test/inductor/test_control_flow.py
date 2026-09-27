@@ -1760,8 +1760,107 @@ class WhileLoopTests(TestCase):
             return torch.while_loop(cond, body, (i0, matrix))[1]
 
         compiled = torch.compile(fn, fullgraph=True)
-        with self.assertRaisesRegex(Exception, "alias"):
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError, "aliasing"
+        ):
             compiled(torch.ones(2, 2), torch.tensor(1))
+
+        # Dynamo rejects the alias itself, so call the op directly to reach the
+        # functionalization check.
+        def direct(matrix, count):
+            def cond(i, out, c):
+                return i < c
+
+            def body(i, out, c):
+                return i + 1, out
+
+            carries = (torch.zeros_like(count), matrix)
+            return torch.ops.higher_order.while_loop(cond, body, carries, (count,))
+
+        with self.assertRaisesRegex(RuntimeError, "body_fn might be aliasing"):
+            torch.func.functionalize(direct)(torch.ones(2, 2), torch.tensor(1))
+
+    @torch.no_grad()
+    def test_while_loop_effect_with_mutation_error(self):
+        # Dynamo allows input mutation in the loop under no_grad.
+        def fn(matrix, count, buf):
+            def cond(i, out):
+                return i < count
+
+            def body(i, out):
+                buf.add_(1)
+                return i + 1, out + torch.linalg.inv(matrix)
+
+            carries = (torch.zeros_like(count), torch.zeros_like(matrix))
+            return torch.while_loop(cond, body, carries)[1]
+
+        compiled = torch.compile(fn, fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.BackendCompilerFailed,
+            "while_loop effects with mutation are unsupported",
+        ):
+            compiled(torch.eye(2) * 2, torch.tensor(2), torch.zeros(1))
+
+    def test_while_loop_effect_in_cond_fn_error(self):
+        def fn(matrix, count):
+            def cond(i, out):
+                return (i < count) & (torch.linalg.inv(matrix).sum() > 0)
+
+            def body(i, out):
+                return i + 1, out + 1
+
+            carries = (torch.zeros_like(count), torch.zeros_like(matrix))
+            return torch.while_loop(cond, body, carries)[1]
+
+        compiled = torch.compile(fn, fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.BackendCompilerFailed,
+            "effects in while_loop cond_fn are unsupported",
+        ):
+            compiled(torch.eye(2) * 2, torch.tensor(2))
+
+    def test_while_loop_effect_in_nested_cond_error(self):
+        def true_fn(m):
+            return torch.linalg.inv(m).contiguous()
+
+        def false_fn(m):
+            return m.clone()
+
+        def fn(matrix, count):
+            def cond(i, out):
+                return i < count
+
+            def body(i, out):
+                return i + 1, out + torch.cond(i >= 0, true_fn, false_fn, (matrix,))
+
+            carries = (torch.zeros_like(count), torch.zeros_like(matrix))
+            return torch.while_loop(cond, body, carries)[1]
+
+        compiled = torch.compile(fn, fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.BackendCompilerFailed,
+            "effects inside a nested higher-order op",
+        ):
+            compiled(torch.eye(2) * 2, torch.tensor(2))
+
+    def test_while_loop_effect_autograd_error(self):
+        def fn(matrix, count):
+            def cond(i, out):
+                return i < count
+
+            def body(i, out):
+                return i + 1, out + torch.linalg.inv(matrix)
+
+            carries = (torch.zeros_like(count), torch.zeros_like(matrix))
+            return torch.while_loop(cond, body, carries)[1]
+
+        compiled = torch.compile(fn, fullgraph=True)
+        matrix = (torch.eye(2) * 2).requires_grad_()
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.BackendCompilerFailed,
+            "effects in while_loop_stack_output are unsupported",
+        ):
+            compiled(matrix, torch.tensor(2))
 
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])

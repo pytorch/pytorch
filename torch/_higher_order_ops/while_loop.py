@@ -13,6 +13,7 @@ from torch._higher_order_ops.auto_functionalize import (
 )
 from torch._higher_order_ops.utils import (
     _check_alias_and_mutation,
+    _maybe_fake_tracing,
     _maybe_run_with_interpreter,
     autograd_not_implemented,
     check_meta_consistency,
@@ -689,6 +690,11 @@ def while_loop_func(
     if num_effect_tokens and mutated_arg_indices:
         raise NotImplementedError("while_loop effects with mutation are unsupported")
 
+    unwrapped_carried_inputs = ctx.unwrap_tensors(carried_inputs)
+    unwrapped_additional_inputs = ctx.unwrap_tensors(additional_inputs)
+    unwrapped_inputs = unwrapped_carried_inputs + unwrapped_additional_inputs
+    pre_dispatch = mode is not None and mode.pre_dispatch
+
     # For now, we only support auto-functionalization for while_loop when using python
     # functionalization mode
     if not stack_output and mode is not None:
@@ -701,6 +707,15 @@ def while_loop_func(
             mutated_arg_indices=mutated_arg_indices,
         )
         if can_auto_functionalize(hop_instance):
+            # Auto-functionalization does not thread effect tokens, and Dynamo
+            # allows input mutation in the loop under no_grad.
+            with ctx.redispatch_to_next():
+                cond_gm = _maybe_fake_tracing(cond_fn, unwrapped_inputs, pre_dispatch)
+                body_gm = _maybe_fake_tracing(body_fn, unwrapped_inputs, pre_dispatch)
+            if _graph_has_effects(cond_gm) or _graph_has_effects(body_gm):
+                raise NotImplementedError(
+                    "while_loop effects with mutation are unsupported"
+                )
             return do_auto_functionalize_v2(
                 mode,
                 hop_instance,
@@ -712,13 +727,9 @@ def while_loop_func(
                 {},
             )
 
-    unwrapped_carried_inputs = ctx.unwrap_tensors(carried_inputs)
-    unwrapped_additional_inputs = ctx.unwrap_tensors(additional_inputs)
-    unwrapped_inputs = unwrapped_carried_inputs + unwrapped_additional_inputs
     with ctx.redispatch_to_next():
         functional_cond_fn = ctx.functionalize(_maybe_run_with_interpreter(cond_fn))
         functional_body_fn = ctx.functionalize(_maybe_run_with_interpreter(body_fn))
-        pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
         checked_graphs = {}
         for fn, fn_name in [
             (cond_fn, "cond_fn"),
