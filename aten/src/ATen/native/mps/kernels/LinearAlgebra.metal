@@ -548,6 +548,452 @@ INSTANTIATE_APPLY_TRSM(L, false, float)
 INSTANTIATE_APPLY_TRSM(U, true, float2)
 INSTANTIATE_APPLY_TRSM(L, false, float2)
 
+// op(A)(i, j): row-major (n x n) A, optionally transposed and/or conjugated.
+template <typename T>
+inline T tri_opA(
+    device const T* Ab,
+    uint i,
+    uint j,
+    uint n,
+    bool transpose,
+    bool conj) {
+  T v = transpose ? Ab[j * n + i] : Ab[i * n + j];
+  return conj ? c10::metal::conj(v) : v;
+}
+
+// Batched triangular solve by forward/back substitution. One threadgroup owns
+// one right-hand side and walks the n substitution steps serially; the dot
+// product against the already-solved prefix is split across the group and
+// reduced. The caller folds the side into the transpose so only op(A) X = B is
+// handled here, and keeps n small enough that the prefix always fits in
+// threadgroup memory; op itself stays in the kernel so that a transposed or
+// conjugated solve does not have to materialize an n x n copy.
+// Complex support comes from the c10::metal mul/div helpers, no-ops for real T.
+template <typename T>
+kernel void triangular_solve(
+    device const T* A [[buffer(0)]],
+    device const T* B [[buffer(1)]],
+    device T* X [[buffer(2)]],
+    constant TriangularSolveParams& p [[buffer(3)]],
+    threadgroup T* xs [[threadgroup(0)]],
+    threadgroup T* red [[threadgroup(1)]],
+    uint tgid [[threadgroup_position_in_grid]],
+    uint lid [[thread_position_in_threadgroup]],
+    uint tg_size [[threads_per_threadgroup]],
+    uint sg_lane [[thread_index_in_simdgroup]],
+    uint sg_id [[simdgroup_index_in_threadgroup]],
+    uint nsimd [[simdgroups_per_threadgroup]]) {
+  const uint n = p.n;
+  const uint k = p.k;
+  if (tgid >= p.nbatch * k) {
+    return;
+  }
+  const uint batch = tgid / k;
+  const uint vec = tgid % k;
+  device const T* Ab = A + batch * n * n;
+  const bool tr = p.transpose;
+  const bool cj = p.conj;
+  // A is upper before op; a transpose flips the effective triangle, and a lower
+  // one substitutes forward.
+  const bool forward = p.upper == p.transpose;
+  device const T* b = B + batch * n * k + vec;
+  device T* x = X + batch * n * k + vec;
+
+  for (uint step = 0; step < n; ++step) {
+    const uint t = forward ? step : n - 1 - step;
+    const uint s_begin = forward ? 0 : t + 1;
+    const uint s_end = forward ? t : n;
+
+    T part = T(0);
+    for (uint s = s_begin + lid; s < s_end; s += tg_size) {
+      part = part + c10::metal::mul(tri_opA(Ab, t, s, n, tr, cj), xs[s]);
+    }
+    part = c10::metal::simd_sum(part);
+    if (sg_lane == 0) {
+      red[sg_id] = part;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    if (lid == 0) {
+      T sum = b[t * k];
+      for (uint s = 0; s < nsimd; ++s) {
+        sum = sum - red[s];
+      }
+      const T xt =
+          p.unit ? sum : c10::metal::div(sum, tri_opA(Ab, t, t, n, tr, cj));
+      xs[t] = xt;
+      x[t * k] = xt;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
+}
+
+#define INSTANTIATE_TRIANGULAR_SOLVE(DTYPE)                      \
+  template [[host_name("triangular_solve_" #DTYPE)]] kernel void \
+  triangular_solve<DTYPE>(                                       \
+      device const DTYPE* A [[buffer(0)]],                       \
+      device const DTYPE* B [[buffer(1)]],                       \
+      device DTYPE* X [[buffer(2)]],                             \
+      constant TriangularSolveParams& p [[buffer(3)]],           \
+      threadgroup DTYPE* xs [[threadgroup(0)]],                  \
+      threadgroup DTYPE* red [[threadgroup(1)]],                 \
+      uint tgid [[threadgroup_position_in_grid]],                \
+      uint lid [[thread_position_in_threadgroup]],               \
+      uint tg_size [[threads_per_threadgroup]],                  \
+      uint sg_lane [[thread_index_in_simdgroup]],                \
+      uint sg_id [[simdgroup_index_in_threadgroup]],             \
+      uint nsimd [[simdgroups_per_threadgroup]]);
+
+INSTANTIATE_TRIANGULAR_SOLVE(float);
+INSTANTIATE_TRIANGULAR_SOLVE(float2);
+
+inline uint triangular_tile_offset(uint row, uint col) {
+  return (row * (row + 1) / 2 + col) * kTriangularSolveTileSize *
+      kTriangularSolveTileSize;
+}
+
+inline uint triangular_elem_offset(uint row, uint col) {
+  constexpr uint t = kTriangularSolveTileSize;
+  return triangular_tile_offset(row / t, col / t) + row % t * t + col % t;
+}
+
+// x = inv(L) b for every RHS tile; returns whether this thread saw a
+// nonfinite output. The MPP overload is selected for the mpp_ kernel names.
+template <uint n, bool general>
+METAL_FUNC bool apply_triangular_inverse(
+    bool_constant<false>,
+    threadgroup const float* inverse,
+    device const float* b,
+    device float* x,
+    constant TriangularSolveParams& p,
+    uint lane,
+    uint sg) {
+  constexpr uint tile_size = kTriangularSolveTileSize;
+  constexpr uint groups = n / tile_size;
+  const bool reverse = general && (p.upper != p.transpose);
+  using tile_index_t = conditional_t<general, ulong, uint>;
+  const auto col_tiles =
+      c10::metal::ceil_div(tile_index_t(p.k), tile_index_t(tile_size));
+  // Same 8x8 fragment lane mapping as GroupedMM.metal.
+  const uint quad = lane / 4;
+  const uint frag_row = (quad & 4) + ((lane / 2) % 4);
+  const uint frag_col = (quad & 2) * 2 + (lane % 2) * 2;
+  bool nonfinite = false;
+  for (tile_index_t tile = sg; tile < groups * col_tiles; tile += groups) {
+    const uint row = tile / col_tiles;
+    const uint col = tile % col_tiles * tile_size;
+    const bool scalar_io = general && (reverse || p.k - col < tile_size);
+    simdgroup_float8x8 lhs_tile, rhs_tile, result_tile(0);
+    for (uint j = 0; j <= row; ++j) {
+      simdgroup_load(
+          lhs_tile, inverse + triangular_tile_offset(row, j), tile_size);
+      if (scalar_io) {
+        const uint r = j * tile_size + frag_row;
+#pragma unroll
+        for (uint i = 0; i < 2; ++i) {
+          const uint c = col + frag_col + i;
+          rhs_tile.thread_elements()[i] =
+              c < p.k ? b[ulong(reverse ? n - 1 - r : r) * p.k + c] : 0;
+        }
+      } else {
+        simdgroup_load(rhs_tile, b + ulong(j * tile_size) * p.k + col, p.k);
+      }
+      simdgroup_multiply_accumulate(
+          result_tile, lhs_tile, rhs_tile, result_tile);
+    }
+#pragma unroll
+    for (uint i = 0; i < tile_size * tile_size / c10::metal::simdgroup_size;
+         ++i) {
+      nonfinite |= !isfinite(result_tile.thread_elements()[i]);
+    }
+    if (scalar_io) {
+      const uint r = row * tile_size + frag_row;
+#pragma unroll
+      for (uint i = 0; i < 2; ++i) {
+        const uint c = col + frag_col + i;
+        if (c < p.k) {
+          x[ulong(reverse ? n - 1 - r : r) * p.k + c] =
+              result_tile.thread_elements()[i];
+        }
+      }
+    } else {
+      simdgroup_store(result_tile, x + ulong(row * tile_size) * p.k + col, p.k);
+    }
+  }
+  return nonfinite;
+}
+
+#if C10_METAL_HAS_MPP
+template <uint n, bool general>
+METAL_FUNC bool apply_triangular_inverse(
+    bool_constant<true>,
+    threadgroup const float* inverse,
+    device const float* b,
+    device float* x,
+    constant TriangularSolveParams& p,
+    uint,
+    uint sg) {
+  constexpr uint tile_size = kTriangularSolveTileSize;
+  constexpr uint groups = n / tile_size;
+  const bool reverse = general && (p.upper != p.transpose);
+  bool nonfinite = false;
+  constexpr uint mpp_rows = kTriangularSolveMppRows;
+  constexpr uint mpp_cols = kTriangularSolveMppCols;
+  constexpr auto desc = mpp::tensor_ops::matmul2d_descriptor(
+      mpp_rows,
+      mpp_cols,
+      mpp_rows,
+      false,
+      false,
+      false,
+      mpp::tensor_ops::matmul2d_descriptor::mode::multiply_accumulate);
+  mpp::tensor_ops::matmul2d<desc, execution_simdgroup> op;
+  const uint col_tiles = c10::metal::ceil_div(p.k, mpp_cols);
+  for (uint tile = sg; tile < (n / mpp_rows) * col_tiles; tile += groups) {
+    const uint row = tile / col_tiles * mpp_rows;
+    const uint col = tile % col_tiles * mpp_cols;
+    const int cols = min(mpp_cols, p.k - col);
+    tensor<device float, dextents<int32_t, 2>, tensor_inline> out(
+        x + ulong(row) * p.k + col,
+        dextents<int32_t, 2>(cols, mpp_rows),
+        array<int32_t, 2>{1, int(p.k)});
+    auto lhs =
+        op.template get_left_input_cooperative_tensor<float, float, float>();
+    auto rhs =
+        op.template get_right_input_cooperative_tensor<float, float, float>();
+    auto result = op.template get_destination_cooperative_tensor<
+        decltype(lhs),
+        decltype(rhs),
+        float>();
+#pragma unroll
+    for (uint16_t i = 0; i < result.get_capacity(); ++i) {
+      result[i] = 0;
+    }
+    for (uint j = 0; j <= row; j += mpp_rows) {
+#pragma unroll
+      for (uint16_t i = 0; i < lhs.get_capacity(); ++i) {
+        auto idx = lhs.get_multidimensional_index(i);
+        const uint r = row + idx[1];
+        const uint c = j + idx[0];
+        lhs[i] = r >= c ? inverse[triangular_elem_offset(r, c)] : 0;
+      }
+      if (reverse) {
+#pragma unroll
+        for (uint16_t i = 0; i < rhs.get_capacity(); ++i) {
+          auto idx = rhs.get_multidimensional_index(i);
+          rhs[i] = idx[0] < cols
+              ? b[ulong(n - 1 - j - idx[1]) * p.k + col + idx[0]]
+              : 0;
+        }
+      } else {
+        tensor<device float, dextents<int32_t, 2>, tensor_inline> in(
+            const_cast<device float*>(b + ulong(j) * p.k + col),
+            dextents<int32_t, 2>(cols, mpp_rows),
+            array<int32_t, 2>{1, int(p.k)});
+        rhs.load(in);
+      }
+      op.run(lhs, rhs, result);
+    }
+#pragma unroll
+    for (uint16_t i = 0; i < result.get_capacity(); ++i) {
+      nonfinite |= !isfinite(result[i]);
+    }
+    if (reverse) {
+#pragma unroll
+      for (uint16_t i = 0; i < result.get_capacity(); ++i) {
+        auto idx = result.get_multidimensional_index(i);
+        if (idx[0] < cols) {
+          x[ulong(n - 1 - row - idx[1]) * p.k + col + idx[0]] = result[i];
+        }
+      }
+    } else {
+      result.store(out);
+    }
+  }
+  return nonfinite;
+}
+#endif
+
+// Invert small triangular matrices in shared memory, then reuse the inverse
+// across all RHS columns. Each diagonal 8x8 block is inverted independently;
+// larger blocks use inv(L) = [[inv(A), 0], [-inv(D) C inv(A), inv(D)]].
+// general=false specializes unit lower matrices and aligned RHS columns.
+template <uint n, bool use_mpp, bool general>
+[[max_total_threads_per_threadgroup(
+    n / kTriangularSolveTileSize * c10::metal::simdgroup_size)]]
+kernel void triangular_solve_small(
+    device const float* a [[buffer(0)]],
+    device const float* b [[buffer(1)]],
+    device float* x [[buffer(2)]],
+    constant TriangularSolveParams& p [[buffer(3)]],
+    uint batch [[threadgroup_position_in_grid]],
+    uint tid [[thread_index_in_threadgroup]],
+    uint lane [[thread_index_in_simdgroup]],
+    uint sg [[simdgroup_index_in_threadgroup]]) {
+  constexpr uint tile_size = kTriangularSolveTileSize;
+  static_assert(tile_size == 8, "simdgroup_float8x8 tiles");
+  constexpr uint groups = n / tile_size;
+  constexpr uint threads = groups * c10::metal::simdgroup_size;
+  threadgroup float inverse[groups * (groups + 1) / 2 * tile_size * tile_size];
+  threadgroup float tmp[n * n / 4];
+  threadgroup uint nonfinite_groups[groups];
+  a += ulong(batch) * n * n;
+  b += ulong(batch) * n * p.k;
+  x += ulong(batch) * n * p.k;
+  // Reversing rows and columns turns an effective upper triangle into lower.
+  const bool transpose = general && p.transpose;
+  const bool unit = !general || p.unit;
+  const bool reverse = general && (p.upper != p.transpose);
+  // Keep off-diagonal blocks negated until they are replaced by their inverse.
+  // The unused triangle and implicit unit diagonal must not be read.
+  for (uint i = tid; i < n * n; i += threads) {
+    const uint row = i / n;
+    const uint col = i % n;
+    if (row / tile_size >= col / tile_size) {
+      const uint r = reverse ? n - 1 - row : row;
+      const uint c = reverse ? n - 1 - col : col;
+      float value = 0;
+      if (row > col) {
+        value = -tri_opA(a, r, c, n, transpose, p.conj);
+      } else if (row == col) {
+        value = unit ? 1 : tri_opA(a, r, c, n, transpose, p.conj);
+      }
+      inverse[triangular_elem_offset(row, col)] = value;
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  float v[tile_size];
+  const uint base = triangular_tile_offset(sg, sg);
+#pragma unroll
+  for (uint i = 0; i < tile_size; ++i) {
+    v[i] = i == lane ? 1 : 0;
+#pragma unroll
+    for (uint j = 0; j < i; ++j) {
+      v[i] = fma(inverse[base + i * tile_size + j], v[j], v[i]);
+    }
+    if (!unit) {
+      v[i] /= inverse[base + i * tile_size + i];
+    }
+  }
+  simdgroup_barrier(mem_flags::mem_threadgroup);
+  if (lane < tile_size) {
+#pragma unroll
+    for (uint i = 0; i < tile_size; ++i) {
+      inverse[base + i * tile_size + lane] = v[i];
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  for (uint s = tile_size; s <= n / 2; s *= 2) {
+    const uint tiles_per_side = s / tile_size;
+    const uint tiles_per_block = tiles_per_side * tiles_per_side;
+    const uint tiles = (n / (2 * s)) * tiles_per_block;
+    for (uint tile = sg; tile < tiles; tile += groups) {
+      const uint block = tile / tiles_per_block;
+      const uint row = tile % tiles_per_block / tiles_per_side;
+      const uint col = tile % tiles_per_side;
+      const uint lo = block * 2 * tiles_per_side;
+      const uint hi = lo + tiles_per_side;
+      threadgroup float* tmp_row = tmp + (block * s + row * tile_size) * s;
+      simdgroup_float8x8 lhs_tile, rhs_tile, result_tile(0);
+      for (uint j = 0; j <= row; ++j) {
+        simdgroup_load(
+            lhs_tile,
+            inverse + triangular_tile_offset(hi + row, hi + j),
+            tile_size);
+        simdgroup_load(
+            rhs_tile,
+            inverse + triangular_tile_offset(hi + j, lo + col),
+            tile_size);
+        simdgroup_multiply_accumulate(
+            result_tile, lhs_tile, rhs_tile, result_tile);
+      }
+      simdgroup_store(result_tile, tmp_row + col * tile_size, s);
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    for (uint tile = sg; tile < tiles; tile += groups) {
+      const uint block = tile / tiles_per_block;
+      const uint row = tile % tiles_per_block / tiles_per_side;
+      const uint col = tile % tiles_per_side;
+      const uint lo = block * 2 * tiles_per_side;
+      const uint hi = lo + tiles_per_side;
+      threadgroup const float* tmp_row =
+          tmp + (block * s + row * tile_size) * s;
+      simdgroup_float8x8 lhs_tile, rhs_tile, result_tile(0);
+      for (uint j = col; j < tiles_per_side; ++j) {
+        simdgroup_load(lhs_tile, tmp_row + j * tile_size, s);
+        simdgroup_load(
+            rhs_tile,
+            inverse + triangular_tile_offset(lo + j, lo + col),
+            tile_size);
+        simdgroup_multiply_accumulate(
+            result_tile, lhs_tile, rhs_tile, result_tile);
+      }
+      simdgroup_store(
+          result_tile,
+          inverse + triangular_tile_offset(hi + row, lo + col),
+          tile_size);
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
+  const bool nonfinite = apply_triangular_inverse<n, general>(
+      bool_constant<use_mpp>{}, inverse, b, x, p, lane, sg);
+  const bool needs_substitution =
+      c10::metal::threadgroup_max(
+          nonfinite_groups, uint(nonfinite), tid, threads) != 0;
+  // An inverse can overflow even when the solution is finite. Substitution
+  // also preserves the dependency order for non-finite matrix or RHS entries.
+  if (needs_substitution) {
+    threadgroup_barrier(mem_flags::mem_device);
+    for (ulong col = tid; col < p.k; col += threads) {
+      for (uint step = 0; step < n; ++step) {
+        const uint row = reverse ? n - 1 - step : step;
+        float value = b[ulong(row) * p.k + col];
+        for (uint j = 0; j < step; ++j) {
+          const uint prior = reverse ? n - 1 - j : j;
+          value =
+              fma(-tri_opA(a, row, prior, n, transpose, p.conj),
+                  x[ulong(prior) * p.k + col],
+                  value);
+        }
+        if (!unit) {
+          value /= tri_opA(a, row, row, n, transpose, p.conj);
+        }
+        x[ulong(row) * p.k + col] = value;
+      }
+    }
+  }
+}
+
+#define INSTANTIATE_TRIANGULAR_SOLVE_SMALL(N, SUFFIX, MPP, GENERAL)       \
+  template [[host_name("triangular_solve_small_" SUFFIX #N)]] kernel void \
+  triangular_solve_small<N, MPP, GENERAL>(                                \
+      device const float*,                                                \
+      device const float*,                                                \
+      device float*,                                                      \
+      constant TriangularSolveParams&,                                    \
+      uint,                                                               \
+      uint,                                                               \
+      uint,                                                               \
+      uint);
+
+INSTANTIATE_TRIANGULAR_SOLVE_SMALL(16, "", false, false);
+INSTANTIATE_TRIANGULAR_SOLVE_SMALL(32, "", false, false);
+INSTANTIATE_TRIANGULAR_SOLVE_SMALL(64, "", false, false);
+INSTANTIATE_TRIANGULAR_SOLVE_SMALL(16, "general_", false, true);
+INSTANTIATE_TRIANGULAR_SOLVE_SMALL(32, "general_", false, true);
+INSTANTIATE_TRIANGULAR_SOLVE_SMALL(64, "general_", false, true);
+
+#if C10_METAL_HAS_MPP
+INSTANTIATE_TRIANGULAR_SOLVE_SMALL(16, "mpp_", true, false);
+INSTANTIATE_TRIANGULAR_SOLVE_SMALL(32, "mpp_", true, false);
+INSTANTIATE_TRIANGULAR_SOLVE_SMALL(64, "mpp_", true, false);
+INSTANTIATE_TRIANGULAR_SOLVE_SMALL(16, "mpp_general_", true, true);
+INSTANTIATE_TRIANGULAR_SOLVE_SMALL(32, "mpp_general_", true, true);
+INSTANTIATE_TRIANGULAR_SOLVE_SMALL(64, "mpp_general_", true, true);
+#endif
+
 template <bool upper>
 inline void syrk_simdgroup_tile(
     device float* A,
@@ -1165,9 +1611,7 @@ kernel void applyPanelTRSM(
 INSTANTIATE_APPLY_PANEL_TRSM(U, true)
 INSTANTIATE_APPLY_PANEL_TRSM(L, false)
 
-#if __METAL_VERSION__ >= 400 && \
-    __has_include(<MetalPerformancePrimitives/MetalPerformancePrimitives.h>)
-#include <MetalPerformancePrimitives/MetalPerformancePrimitives.h>
+#if C10_METAL_HAS_MPP
 
 template <bool upper, int BM, int BN, int NSG>
 kernel void applySYRKTrailing(
@@ -1318,7 +1762,7 @@ INSTANTIATE_SYRK_TRAILING(L, false, 32, 64, 2)
 INSTANTIATE_SYRK_TRAILING(U, true, 32, 128, 4)
 INSTANTIATE_SYRK_TRAILING(L, false, 32, 128, 4)
 
-#endif // __METAL_VERSION__ >= 400 && MetalPerformancePrimitives
+#endif // C10_METAL_HAS_MPP
 
 // LU factorization with partial pivoting (mirrors LAPACK sgetrf), in place on a
 // row-major fp32 (B, M, N) buffer. The host (lu_factor_panel_encode in
@@ -2258,9 +2702,7 @@ kernel void gemmSimdLU(
   }
 }
 
-#if __METAL_VERSION__ >= 400 && \
-    __has_include(<MetalPerformancePrimitives/MetalPerformancePrimitives.h>)
-#include <MetalPerformancePrimitives/MetalPerformancePrimitives.h>
+#if C10_METAL_HAS_MPP
 
 template <int BM, int BN, int NSG>
 kernel void int_mm_mpp(
@@ -2415,7 +2857,7 @@ kernel void gemmLU(
 INSTANTIATE_GEMM_LU(64, 64, 4)
 INSTANTIATE_GEMM_LU(32, 64, 2)
 
-#endif // __METAL_VERSION__ >= 400 && MetalPerformancePrimitives
+#endif // C10_METAL_HAS_MPP
 
 template <typename T, bool upper, bool unit, short TS>
 kernel void trsmDiagSolveLU(
@@ -3324,10 +3766,13 @@ kernel void svd_jacobi(
           }
         }
       }
-      threadgroup_barrier(
-          params.stage_v
-              ? mem_flags::mem_threadgroup
-              : (mem_flags::mem_threadgroup | mem_flags::mem_device));
+      // Barrier scope must be a compile-time constant (runtime mem_flags
+      // crashes the AGX compiler)
+      if (params.stage_v) {
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+      } else {
+        threadgroup_barrier(mem_flags::mem_threadgroup | mem_flags::mem_device);
+      }
     }
 
     threadgroup_barrier(mem_flags::mem_device | mem_flags::mem_threadgroup);
@@ -3384,7 +3829,7 @@ kernel void svd_jacobi(
     }
     float inv = sigma > eps ? (1 / sigma) : 0.0f;
     threadgroup T* colsrc = Atg + src * m;
-    if (params.transposed == 0u) {
+    if (!params.transposed) {
       for (uint32_t i = simd_lane; i < m; i += kSimd) {
         U_b[j * params.u_ld + i] = inv * colsrc[i];
       }
@@ -3409,6 +3854,73 @@ kernel void svd_jacobi(
     }
   }
   threadgroup_barrier(mem_flags::mem_device);
+
+  // The Jacobi update forms the range factor's columns as (A V)_j / sigma_j,
+  // which collapses to 0 when sigma_j <= eps, leaving U (or V, when transposed)
+  // non-orthonormal for rank-deficient inputs. Replace those null columns with
+  // an orthonormal basis of the complement of the emitted columns (two-pass
+  // Gram-Schmidt of canonical vectors), matching LAPACK gesdd. Columns are
+  // sorted by descending sigma, so the null ones are a contiguous tail. One
+  // simd-group runs it (each lane owns a strided slice of the working column,
+  // so the projections are simd_sum reductions needing no barriers); the rare
+  // degenerate path. Reuses Atg as scratch.
+  if (params.compute_uv && simd_group == 0) {
+    device T* out = params.transposed ? V_b : U_b;
+    const uint32_t ld = params.transposed ? params.v_ld : params.u_ld;
+    // U_b is column-major (elem i of col c at out[c*ld + i]); the transposed
+    // run emits V_b row-major (out[i*ld + c]), so index columns accordingly.
+    const uint32_t col_off = params.transposed ? 1u : ld;
+    const uint32_t elem_step = params.transposed ? ld : 1u;
+    // Relative rank cutoff: sigma_j at or below the Jacobi noise floor
+    // (~m*eps*sigma_max) is numerically zero, so its column is arbitrary and
+    // gets completed. An absolute eps would keep noise-amplified columns.
+    const float thresh = eps * sig[ord[0]] * static_cast<float>(m);
+    uint32_t rank = 0;
+    while (rank < n && sig[ord[rank]] > thresh) {
+      ++rank;
+    }
+    // Accept a candidate as a null-space column when its squared residual after
+    // orthogonalization clears this: loose (well above the fp32 roundoff
+    // floor), but enough that the canonicals span the complement. Cf.
+    // Rutishauser/DGKS Gram-Schmidt reorthogonalization.
+    constexpr float kIndepThreshSq = 1e-2f;
+    threadgroup T* col = Atg;
+    uint32_t cand = 0;
+    for (uint32_t j = rank; j < n; ++j) {
+      while (cand < m) {
+        for (uint32_t i = simd_lane; i < m; i += kSimd) {
+          col[i] = (i == cand) ? svd_one(T(0)) : T(0);
+        }
+        ++cand;
+        for (uint32_t pass = 0; pass < 2; ++pass) {
+          for (uint32_t l = 0; l < j; ++l) {
+            device T* cl = out + l * col_off;
+            T partial = T(0);
+            for (uint32_t i = simd_lane; i < m; i += kSimd) {
+              partial += svd_conjmul(cl[i * elem_step], col[i]);
+            }
+            T dot = svd_simd_sum(partial);
+            for (uint32_t i = simd_lane; i < m; i += kSimd) {
+              col[i] -= svd_mul(dot, cl[i * elem_step]);
+            }
+          }
+        }
+        float partial_n = 0;
+        for (uint32_t i = simd_lane; i < m; i += kSimd) {
+          partial_n += svd_abs2(col[i]);
+        }
+        const float nrm_sq = c10::metal::simd_sum(partial_n);
+        if (nrm_sq > kIndepThreshSq) {
+          const float inv = 1.0f / precise::sqrt(nrm_sq);
+          device T* cj = out + j * col_off;
+          for (uint32_t i = simd_lane; i < m; i += kSimd) {
+            cj[i * elem_step] = col[i] * inv;
+          }
+          break;
+        }
+      }
+    }
+  }
 
   if (tid == 0) {
     // NaN/Inf never triggers a rotation, so flag info to raise like the CPU
@@ -3467,7 +3979,7 @@ kernel void eigh_jacobi(
   const uint32_t batch_idx = tg_pos.x;
   const uint32_t kSimd = c10::metal::simdgroup_size;
   const uint32_t num_sg = group_size / kSimd;
-  const bool compute_v = params.compute_v != 0u;
+  const bool compute_v = params.compute_v;
 
   device T* A_b = A + batch_idx * n * n;
   device T* Q_b = Q + batch_idx * n * n;
@@ -3475,7 +3987,7 @@ kernel void eigh_jacobi(
   // Stage A into Atg, symmetrizing from the selected UPLO triangle (input may
   // be non-Hermitian otherwise); two-sided Jacobi needs an exactly Hermitian
   // matrix.
-  const bool upper = params.upper != 0u;
+  const bool upper = params.upper;
   for (uint32_t i = tid; i < n * n; i += group_size) {
     uint32_t row = i % n, col = i / n;
     if (row == col) {

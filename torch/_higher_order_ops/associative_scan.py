@@ -8,9 +8,13 @@ import torch
 import torch._prims_common as utils
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
+from torch._functorch.vmap import unwrap_batched, wrap_batched
 from torch._higher_order_ops.utils import (
+    _batch_dims_as_last_for_scan,
     _maybe_compile_and_run_fn,
     _maybe_run_with_interpreter,
+    _move_batch_dims_to_last_for_scan,
+    _VmapCombineFnWrapper,
     check_input_alias_and_mutation_return_outputs,
     check_meta_consistency,
     create_bw_fn,
@@ -879,6 +883,60 @@ def associative_scan_functionalize(ctx, combine_fn, xs, additional_inputs):
             unwrapped_additional_inputs,
         )
     return ctx.wrap_tensors(ret)
+
+
+# Note [associative_scan vmap coverage]
+# This batch rule is dispatched only when the associative_scan_op HOP is present
+# under a vmap layer. The frontend builds that HOP for combine_mode="pointwise";
+# combine_mode="generic" is a pure-Python decomposition (generic_associative_scan)
+# that never constructs the HOP, so vmap over a generic scan is handled entirely
+# by the batching rules of the individual aten ops and never reaches this rule.
+# Consequently only the pointwise cases in the vmap tests exercise the code below;
+# the generic cases guard the frontend decomposition instead. This rule is itself
+# device-agnostic, since in eager the HOP dense-decomposes on any device; the
+# CUDA-only parametrization of those tests and the compile-time lowering failure
+# are properties of the lowered pointwise scan, not of this rule.
+@associative_scan_op.py_impl(torch._C._functorch.TransformType.Vmap)
+def associative_scan_batch_rule(interpreter, combine_fn, xs, additional_inputs):
+    unbatched_args, in_dims = unwrap_batched(
+        (xs, additional_inputs), interpreter.level()
+    )
+    # move to last dim to not interfere with scan's batching
+    unbatched_xs, unbatched_additional_inputs = _move_batch_dims_to_last_for_scan(
+        unbatched_args, in_dims
+    )
+    xs_in_dims, additional_in_dims = in_dims
+    xs_move_dims = _batch_dims_as_last_for_scan(xs_in_dims)
+    additional_move_dims = _batch_dims_as_last_for_scan(additional_in_dims)
+    # combine_fn is called with (lhs xs leaves, rhs xs leaves, additional_inputs),
+    # so the xs batch-dim markers must be duplicated. See generic_associative_scan.
+    after_move_dims = (*xs_move_dims, *xs_move_dims, *additional_move_dims)
+
+    with interpreter.lower():
+        # generic_associative_scan feeds combine_fn outputs back as the left-hand
+        # args on later levels, reusing after_move_dims; that is only valid if the
+        # outputs keep the same batch dims as xs. expected_out_dims makes the wrapper
+        # raise a clear error otherwise instead of silently mismatching downstream.
+        wrapper = _VmapCombineFnWrapper(
+            combine_fn,
+            after_move_dims,
+            interpreter.batch_size(),
+            interpreter.randomness(),
+            expected_out_dims=xs_move_dims,
+            op_name="associative_scan",
+        )
+        unwrapped_out = associative_scan_op(
+            wrapper, unbatched_xs, unbatched_additional_inputs
+        )
+
+    out_dims = wrapper.out_dims
+    if out_dims is None:
+        # Scan was a no-op (scan length < 2): the combine_fn is never called, so
+        # outputs alias xs one-to-one and their batch dims equal the xs batch dims.
+        out_dims = xs_move_dims
+    # wrap_batched matches bdims against the output container; associative_scan_op
+    # returns a list, so pass a tuple to align with the tuple out_dims.
+    return wrap_batched(tuple(unwrapped_out), out_dims, interpreter.level())
 
 
 def _fake_associative_scan(combine_fn, xs, dim, reverse=False):
