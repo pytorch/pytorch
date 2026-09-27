@@ -262,85 +262,127 @@ if HAS_GPU:
 
 
 class KernelTests(torch._inductor.test_case.TestCase):
-    @requires_gpu
     @_assert_no_mutation_fallback
     def test_triton_kernel_namedtuple_arg(self):
-        # The eager HOP must rebuild the NamedTuple before Triton launches it.
+        # Cover both an externally supplied NamedTuple and one constructed while
+        # tracing. The eager HOP must recursively rebuild both before launch.
         import triton
         import triton.language as tl
 
         from torch._higher_order_ops import triton_kernel_wrap
 
-        Config = collections.namedtuple("Config", ("source", "scale"))
+        Metadata = collections.namedtuple("Metadata", ("scale",))
+        Config = collections.namedtuple("Config", ("source", "metadata"))
 
         @triton.jit
         def namedtuple_kernel(config, out, n_elements, BLOCK_SIZE: tl.constexpr):
             offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
             mask = offsets < n_elements
             values = tl.load(config.source + offsets, mask=mask)
-            tl.store(out + offsets, values * config.scale, mask=mask)
+            tl.store(out + offsets, values * config.metadata.scale, mask=mask)
 
-        def fn(x):
-            out = torch.empty_like(x)
-            namedtuple_kernel[(triton.cdiv(x.numel(), 16),)](
-                Config(x, 3), out, x.numel(), BLOCK_SIZE=16
+        def fn(config, source):
+            external_out = torch.empty_like(config.source)
+            namedtuple_kernel[(triton.cdiv(config.source.numel(), 16),)](
+                config,
+                external_out,
+                config.source.numel(),
+                BLOCK_SIZE=16,
             )
-            return out
+            constructed_out = torch.empty_like(source)
+            namedtuple_kernel[(triton.cdiv(source.numel(), 16),)](
+                Config(source, Metadata(4)),
+                constructed_out,
+                source.numel(),
+                BLOCK_SIZE=16,
+            )
+            return external_out, constructed_out
 
-        x = torch.arange(32, dtype=torch.float32, device=GPU_TYPE)
+        x = torch.arange(32, dtype=torch.float32, device="cpu")
+        external_config = Config(x, Metadata(3))
+        constructed_source = x + 1
         with mock.patch.object(
             namedtuple_kernel, "run", wraps=namedtuple_kernel.run
         ) as kernel_run:
-            actual = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+            actual = torch.compile(fn, backend="aot_eager", fullgraph=True)(
+                external_config, constructed_source
+            )
 
-        self.assertEqual(kernel_run.call_count, 1)
-        config = kernel_run.call_args.args[0]
-        self.assertEqual(
-            type(config).__name__,
-            triton_kernel_wrap.create_structural_named_tuple_name(
-                "Config", Config._fields
-            ),
+        self.assertEqual(kernel_run.call_count, 2)
+        config_name = triton_kernel_wrap.create_structural_named_tuple_name(
+            "Config", Config._fields
         )
-        self.assertEqual(config._fields, Config._fields)
-        self.assertEqual(config.source, x)
-        self.assertEqual(config.scale, 3)
-        self.assertEqual(actual, x * 3)
+        metadata_name = triton_kernel_wrap.create_structural_named_tuple_name(
+            "Metadata", Metadata._fields
+        )
+        expected_configs = (
+            external_config,
+            Config(constructed_source, Metadata(4)),
+        )
+        for call, expected_config in zip(
+            kernel_run.call_args_list, expected_configs, strict=True
+        ):
+            config = call.args[0]
+            self.assertEqual(type(config).__name__, config_name)
+            self.assertEqual(config._fields, Config._fields)
+            self.assertEqual(config.source, expected_config.source)
+            self.assertEqual(type(config.metadata).__name__, metadata_name)
+            self.assertEqual(config.metadata._fields, Metadata._fields)
+            self.assertEqual(config.metadata.scale, expected_config.metadata.scale)
+        self.assertEqual(actual, (x * 3, constructed_source * 4))
 
-    @requires_gpu
     @_assert_no_mutation_fallback
-    def test_triton_kernel_externally_supplied_plain_tuple(self):
-        # An input tuple uses UserDefinedTupleVariable, unlike one constructed
-        # during tracing, which uses TupleVariable.
+    def test_triton_kernel_tuple_arg(self):
+        # An externally supplied tuple uses UserDefinedTupleVariable, while one
+        # constructed during tracing uses TupleVariable. Empty children in both
+        # paths must remain exact built-in tuples through reconstruction.
         import triton
         import triton.language as tl
 
         @triton.jit
         def tuple_kernel(config, out, BLOCK_SIZE: tl.constexpr):
+            tl.static_assert(len(config[2]) == 0)
             offsets = tl.arange(0, BLOCK_SIZE)
             values = tl.load(config[0] + offsets)
             tl.store(out + offsets, values * config[1][0])
 
-        def fn(config):
-            out = torch.empty_like(config[0])
-            tuple_kernel[(1,)](config, out, BLOCK_SIZE=16)
-            return out
+        def fn(config, source):
+            external_out = torch.empty_like(config[0])
+            tuple_kernel[(1,)](config, external_out, BLOCK_SIZE=16)
+            constructed_out = torch.empty_like(source)
+            tuple_kernel[(1,)](
+                (source, (5,), ()), constructed_out, BLOCK_SIZE=16
+            )
+            return external_out, constructed_out
 
-        x = torch.arange(16, dtype=torch.float32, device=GPU_TYPE)
+        x = torch.arange(16, dtype=torch.float32, device="cpu")
         compiled = torch.compile(fn, backend="aot_eager", fullgraph=True)
-        expected_configs = ((x, (3,)), (x + 1, (4,)))
+        externally_supplied_configs = ((x, (3,), ()), (x + 1, (4,), ()))
+        constructed_sources = (x + 2, x + 3)
+        expected_launch_configs = []
         with mock.patch.object(
             tuple_kernel, "run", wraps=tuple_kernel.run
         ) as kernel_run:
-            for config in expected_configs:
-                self.assertEqual(compiled(config), config[0] * config[1][0])
+            for config, source in zip(
+                externally_supplied_configs, constructed_sources, strict=True
+            ):
+                self.assertEqual(
+                    compiled(config, source),
+                    (config[0] * config[1][0], source * 5),
+                )
+                expected_launch_configs.extend((config, (source, (5,), ())))
 
-        self.assertEqual(kernel_run.call_count, 2)
+        self.assertEqual(kernel_run.call_count, 4)
+        # Inspect the launch inputs to distinguish reconstruction coverage from
+        # a numerical check that could pass after flattening the tuple argument.
         for call, expected_config in zip(
-            kernel_run.call_args_list, expected_configs, strict=True
+            kernel_run.call_args_list, expected_launch_configs, strict=True
         ):
             config = call.args[0]
             self.assertIs(type(config), tuple)
             self.assertIs(type(config[1]), tuple)
+            self.assertIs(type(config[2]), tuple)
+            self.assertEqual(config[2], ())
             self.assertEqual(config, expected_config)
 
     @unittest.skipUnless(HAS_GPU, "requires gpu")
@@ -534,11 +576,13 @@ class KernelTests(torch._inductor.test_case.TestCase):
         self.assertEqual(read_only_result, read_only_before)
         self.assertEqual(read_only, read_only_before)
 
-    @requires_gpu
-    @parametrize("constexpr_form", ("signature", "nested"))
+    @parametrize(
+        "aggregate_form",
+        ("signature_constexpr", "nested_constexpr", "nested_runtime"),
+    )
     @_assert_no_mutation_fallback
-    def test_triton_kernel_constexpr_aggregate_symbolic_guard(self, constexpr_form):
-        # Shape values in either constexpr form require a new specialization.
+    def test_triton_kernel_aggregate_symbolic_guard(self, aggregate_form):
+        # Only constexpr aggregate shape values require a new specialization.
         import triton
         import triton.language as tl
 
@@ -562,26 +606,33 @@ class KernelTests(torch._inductor.test_case.TestCase):
 
         def fn(source):
             out = torch.empty_like(source)
-            if constexpr_form == "signature":
+            if aggregate_form == "signature_constexpr":
                 sig_kernel[(1,)](Config(source.shape[0]), source, out, BLOCK_SIZE=64)
             else:
-                config = NestedConfig(source, tl.constexpr(Metadata(source.shape[0])))
+                metadata = Metadata(source.shape[0])
+                if aggregate_form == "nested_constexpr":
+                    metadata = tl.constexpr(metadata)
+                config = NestedConfig(source, metadata)
                 nested_kernel[(1,)](config, out, BLOCK_SIZE=64)
             return out
 
         counter = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
         compiled = torch.compile(fn, backend=counter, fullgraph=True, dynamic=True)
 
-        source = torch.arange(17, dtype=torch.float32, device=GPU_TYPE)
+        source = torch.arange(17, dtype=torch.float32, device="cpu")
         self.assertEqual(compiled(source), source + 17)
         first_frame_count = counter.frame_count
 
-        source = torch.arange(33, dtype=torch.float32, device=GPU_TYPE)
+        source = torch.arange(33, dtype=torch.float32, device="cpu")
         self.assertEqual(compiled(source), source + 33)
-        self.assertGreater(counter.frame_count, first_frame_count)
+        # Runtime symbolic leaves remain graph inputs; constexpr leaves are guards.
+        if aggregate_form.endswith("constexpr"):
+            self.assertGreater(counter.frame_count, first_frame_count)
+        else:
+            self.assertEqual(counter.frame_count, first_frame_count)
         second_frame_count = counter.frame_count
 
-        # Tensor values change, but the constexpr shape stays 33.
+        # Tensor values change, but the shape stays 33.
         source = source + 1
         self.assertEqual(compiled(source), source + 33)
         self.assertEqual(counter.frame_count, second_frame_count)
