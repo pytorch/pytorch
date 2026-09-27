@@ -2134,10 +2134,10 @@ class PythonWrapperCodegen(CodeGen):
                 from cmath import nanj
                 from torch._inductor.hooks import run_intermediate_hooks
                 from torch._inductor.utils import maybe_profile
-                from torch._inductor.codegen.memory_planning import _align as align
+                from torch._inductor.utils import _align as align
                 from torch import device, empty_strided
                 from {async_compile.__name__} import AsyncCompile
-                from torch._inductor.select_algorithm import extern_kernels
+                from torch._inductor.extern_kernels import extern_kernels
                 {inductor_debug_utils}
             """,
             strip=True,
