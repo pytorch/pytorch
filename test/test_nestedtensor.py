@@ -39,6 +39,7 @@ from torch.testing._internal.common_device_type import (
     dtypesIfCUDA,
     dtypesIfXPU,
     instantiate_device_type_tests,
+    onlyAccelerator,
     onlyCPU,
     onlyCUDA,
     ops,
@@ -325,8 +326,6 @@ def convert_nt_to_jagged(nt):
 @markDynamoStrictTest
 @skipIfCppFakeTensor("no nested tensor support")
 class TestNestedTensor(NestedTensorTestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     @parametrize("batch_size", [2, 4])
     @parametrize("max_seq_len", [3, 5])
     @parametrize("vocab_size", [10, 20])
@@ -1032,6 +1031,7 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
 
     @dtypes(torch.float)
     @dtypesIfCUDA(torch.float, torch.half)
+    @dtypesIfXPU(torch.float, torch.half)
     @skipMeta
     @torch.inference_mode()
     def test_layer_norm(self, device, dtype):
@@ -1093,6 +1093,7 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
 
     @dtypes(torch.float)
     @dtypesIfCUDA(torch.float, torch.half)
+    @dtypesIfXPU(torch.float, torch.half)
     @skipMeta
     @torch.inference_mode()
     def test_layer_norm_breaking(self, device, dtype):
@@ -6907,6 +6908,7 @@ torch.cuda.synchronize()
 
     # Note: Math fallback doesn't work with bfloat16 on CUDA
     @tf32_on_and_off(0.005)
+    @dtypesIfXPU(torch.float16, torch.bfloat16, torch.float32)
     @dtypes(
         *(
             [torch.float16, torch.bfloat16, torch.float32]
@@ -6914,8 +6916,6 @@ torch.cuda.synchronize()
             else [torch.float16, torch.float32]
         )
     )
-    # XPU float16/bfloat16 SDPA failure: https://github.com/intel/torch-xpu-ops/issues/5346
-    @dtypesIfXPU(torch.float32)
     def test_sdpa(self, device, dtype):
         batch_size = 1
         emb_dims = 128
@@ -7179,7 +7179,8 @@ torch.cuda.synchronize()
     @skipIfTorchDynamo("SDPA test compiles internally")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @xfailIfWindows
-    @onlyCUDA
+    @onlyAccelerator
+    @dtypesIfXPU(torch.float16, torch.bfloat16, torch.float32)
     @dtypes(
         *(
             [torch.float16, torch.bfloat16, torch.float32]
@@ -7277,8 +7278,6 @@ torch.cuda.synchronize()
         )
 
     @dtypes(torch.float32, torch.double, torch.half)
-    # XPU float16 SDPA failure: https://github.com/intel/torch-xpu-ops/issues/5346
-    @dtypesIfXPU(torch.float32, torch.double)
     def test_sdpa_with_constant_sequence_length(self, device, dtype):
         # shape (B, P*, S, D)
         # B: batch size
@@ -7367,7 +7366,8 @@ torch.cuda.synchronize()
     @decorateIf(xfailIfWindows, lambda params: params["dtype"] == torch.float32)
     @skipIfTorchDynamo("SDPA test compiles internally")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
-    @onlyCUDA
+    @onlyAccelerator
+    @dtypesIfXPU(torch.float16, torch.bfloat16, torch.float32)
     @dtypes(
         *(
             [torch.float16, torch.bfloat16, torch.float32]
