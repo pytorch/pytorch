@@ -183,10 +183,10 @@ log = logging.getLogger(__name__)
 _pool_set = OrderedSet[AnyPool]()
 
 
-def shutdown_compile_workers() -> None:
+def shutdown_compile_workers(wait: bool = True) -> None:
     """Shut down all outstanding compile-worker pools."""
     for pool in _pool_set:
-        pool.shutdown()
+        pool.shutdown(wait=wait)
     AsyncCompile._ready_future = None
     after_fork()
 
@@ -350,7 +350,9 @@ class AsyncCompile:
         # atexit handler may not run, and we need to register our own handler.
         # exitpriority has to be high, because another one of the finalizers will
         # kill the worker thread that sends the shutdown message to the workers.
-        multiprocessing.util.Finalize(None, pool.shutdown, exitpriority=sys.maxsize)
+        multiprocessing.util.Finalize(
+            None, pool.shutdown, kwargs={"wait": False}, exitpriority=sys.maxsize
+        )
 
         _pool_set.add(pool)
         return pool
@@ -1116,4 +1118,6 @@ def maybe_warm_pool() -> None:
 # ProcessPoolExecutor:
 #   UserWarning: resource_tracker: There appear to be 5 leaked semaphore objects
 #   to clean up at shutdown
-atexit.register(shutdown_compile_workers)
+# Don't wait for the sidecar, though: it may still be importing torch and would
+# delay interpreter exit by seconds.
+atexit.register(shutdown_compile_workers, wait=False)

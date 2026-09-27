@@ -402,7 +402,7 @@ def test_flydsl_loader_main(value, stream):
             def __init__(self, *args, **kwargs):
                 pass
 
-            def shutdown(self):
+            def shutdown(self, wait=True):
                 pass
 
         shutdown_compile_workers()
@@ -421,7 +421,9 @@ def test_flydsl_loader_main(value, stream):
                 self.assertIsNone(args[0])
                 self.assertIs(args[1].__self__, pool)
                 self.assertIs(args[1].__func__, FakeSubprocPool.shutdown)
-                self.assertEqual(kwargs, {"exitpriority": sys.maxsize})
+                self.assertEqual(
+                    kwargs, {"kwargs": {"wait": False}, "exitpriority": sys.maxsize}
+                )
         finally:
             shutdown_compile_workers()
 
