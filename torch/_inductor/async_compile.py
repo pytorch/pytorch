@@ -110,6 +110,23 @@ def pre_fork_setup():
 
     if HAS_TRITON:
         triton_key()
+        # Every compile worker imports these for its first kernel; importing
+        # them before forking lets the workers inherit them instead.
+        import triton.compiler.code_generator  # noqa: F401
+
+        import torch._inductor.runtime.triton_heuristics
+
+        if torch.cuda.is_available():
+            from triton.backends.compiler import GPUTarget
+            from triton.compiler.compiler import make_backend
+
+            from torch._inductor.runtime.hints import DeviceProperties
+
+            # The backend hash runs `ptxas --version` (twice on CUDA), cached
+            # per process.
+            props = DeviceProperties.create(torch.device("cuda"))
+            target = GPUTarget(props.type, props.cc, props.warp_size_or_default)
+            make_backend(target).hash()
 
 
 def caching_device_properties():
