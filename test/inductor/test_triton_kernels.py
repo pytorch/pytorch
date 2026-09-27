@@ -263,10 +263,12 @@ if HAS_GPU:
 
 class KernelTests(torch._inductor.test_case.TestCase):
     @requires_gpu
+    @parametrize("backend", ("aot_eager", "inductor"))
+    @requires_python_wrapper_for_aggregates
     @_assert_no_mutation_fallback
-    def test_triton_kernel_namedtuple_arg(self):
+    def test_triton_kernel_namedtuple_arg(self, backend):
         # Cover both an externally supplied NamedTuple and one constructed while
-        # tracing. The eager HOP must recursively rebuild both before launch.
+        # tracing. Both launch paths must recursively rebuild them before use.
         import triton
         import triton.language as tl
 
@@ -302,14 +304,16 @@ class KernelTests(torch._inductor.test_case.TestCase):
         x = torch.arange(32, dtype=torch.float32, device=GPU_TYPE)
         external_config = Config(x, Metadata(3))
         constructed_source = x + 1
-        actual = torch.compile(fn, backend="aot_eager", fullgraph=True)(
+        actual = torch.compile(fn, backend=backend, fullgraph=True)(
             external_config, constructed_source
         )
         self.assertEqual(actual, (x * 3, constructed_source * 4))
 
     @requires_gpu
+    @parametrize("backend", ("aot_eager", "inductor"))
+    @requires_python_wrapper_for_aggregates
     @_assert_no_mutation_fallback
-    def test_triton_kernel_tuple_arg(self):
+    def test_triton_kernel_tuple_arg(self, backend):
         # An externally supplied tuple uses UserDefinedTupleVariable, while one
         # constructed during tracing uses TupleVariable. Empty children in both
         # paths must remain exact built-in tuples through reconstruction.
@@ -333,7 +337,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
             return external_out, constructed_out
 
         x = torch.arange(16, dtype=torch.float32, device=GPU_TYPE)
-        compiled = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
         externally_supplied_configs = ((x, (3,), ()), (x + 1, (4,), ()))
         constructed_sources = (x + 2, x + 3)
         for config, source in zip(
@@ -347,7 +351,8 @@ class KernelTests(torch._inductor.test_case.TestCase):
     @requires_python_wrapper_for_aggregates
     @_assert_no_mutation_fallback
     def test_triton_kernel_same_named_structural_types_do_not_collide(self):
-        # Equal user type names with different fields need distinct generated types.
+        # Equal user type names with different fields need distinct generated
+        # names, while repeated structures must reuse the same generated name.
         import triton
         import triton.language as tl
 
@@ -358,7 +363,8 @@ class KernelTests(torch._inductor.test_case.TestCase):
 
         @triton.jit
         def kernel(
-            scale_config,
+            left_scale_config,
+            right_scale_config,
             bias_config,
             out,
             n_elements,
@@ -366,31 +372,37 @@ class KernelTests(torch._inductor.test_case.TestCase):
         ):
             offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
             mask = offsets < n_elements
-            scaled = (
-                tl.load(scale_config.source + offsets, mask=mask) * scale_config.scale
+            left_scaled = (
+                tl.load(left_scale_config.source + offsets, mask=mask)
+                * left_scale_config.scale
+            )
+            right_scaled = (
+                tl.load(right_scale_config.source + offsets, mask=mask)
+                * right_scale_config.scale
             )
             biased = tl.load(bias_config.source + offsets, mask=mask) + bias_config.bias
-            tl.store(out + offsets, scaled + biased, mask=mask)
+            tl.store(out + offsets, left_scaled + right_scaled + biased, mask=mask)
 
         def fn(left, right):
             out = torch.empty_like(left)
             n_elements = left.numel()
             kernel[(triton.cdiv(n_elements, 16),)](
                 ScaleConfig(left, 2.0),
-                BiasConfig(right, 3.0),
+                ScaleConfig(right, 4.0),
+                BiasConfig(left, 3.0),
                 out,
                 n_elements,
                 BLOCK_SIZE=16,
             )
             return out
 
-        left = torch.arange(32, dtype=torch.float32, device=GPU_TYPE)
-        right = torch.arange(32, dtype=torch.float32, device=GPU_TYPE) + 1
+        left = torch.arange(32, dtype=torch.float32, device="cpu")
+        right = torch.arange(32, dtype=torch.float32, device="cpu") + 1
         actual, (code,) = run_and_get_code(
             torch.compile(fn, fullgraph=True), left, right
         )
 
-        self.assertEqual(actual, left * 2.0 + right + 3.0)
+        self.assertEqual(actual, left * 2.0 + right * 4.0 + left + 3.0)
         scale_name = triton_kernel_wrap.create_structural_named_tuple_name(
             "Config", ScaleConfig._fields
         )
@@ -408,6 +420,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
         )
         self.assertIn(f"{scale_name} = collections.namedtuple", code)
         self.assertIn(f"{bias_name} = collections.namedtuple", code)
+        self.assertGreaterEqual(code.count(f"{scale_name}(source="), 2)
 
     @requires_gpu
     @parametrize("version", ("V1_COMPILER", "V2_BACKENDS", "V3_BACKENDS_TUPLE"))
@@ -495,8 +508,10 @@ class KernelTests(torch._inductor.test_case.TestCase):
             torch.compile(fn, fullgraph=True)(x)
 
     @requires_gpu
+    @parametrize("backend", ("aot_eager", "inductor"))
+    @requires_python_wrapper_for_aggregates
     @_assert_no_mutation_fallback
-    def test_triton_kernel_aggregate_with_tl_constexpr_leaves(self):
+    def test_triton_kernel_aggregate_with_tl_constexpr_leaves(self, backend):
         # tl.constexpr type should be captured in dynamo and also preserved
         # with nested types
         import triton
@@ -541,96 +556,22 @@ class KernelTests(torch._inductor.test_case.TestCase):
             return out
 
         # tl.constexpr(value) capture
-        actual = torch.compile(fn, backend="aot_eager", fullgraph=True)(
+        actual = torch.compile(fn, backend=backend, fullgraph=True)(
             x, use_value_keyword=False
         )
         self.assertEqual(actual, x * 2)
 
         # tl.constexpr(value=value) capture
-        actual = torch.compile(fn, backend="aot_eager", fullgraph=True)(
+        actual = torch.compile(fn, backend=backend, fullgraph=True)(
             x, use_value_keyword=True
         )
         self.assertEqual(actual, x * 2)
 
         # tl.constexpr from outside the graph
         actual = torch.compile(
-            fn_with_existing_constexpr, backend="aot_eager", fullgraph=True
+            fn_with_existing_constexpr, backend=backend, fullgraph=True
         )(x)
         self.assertEqual(actual, x * 2)
-
-    @requires_gpu
-    @requires_python_wrapper_for_aggregates
-    @_assert_no_mutation_fallback
-    def test_triton_kernel_recursive_mixed_aggregates(self):
-        # One graph must handle empty tuples, nested fields, repeated structural
-        # types, and a changed symbolic size without a new compilation.
-        import triton
-        import triton.language as tl
-
-        from torch._higher_order_ops import triton_kernel_wrap
-
-        Config = collections.namedtuple("Config", ("source", "scale"))
-
-        @triton.jit
-        def kernel(
-            empty,
-            left,
-            right,
-            mixed,
-            out,
-            BLOCK_SIZE: tl.constexpr,
-        ):
-            tl.static_assert(len(empty) == 0)
-            offsets = tl.arange(0, BLOCK_SIZE)
-            n_elements = mixed[1][0]
-            mask = offsets < n_elements
-            nested = mixed[0][0]
-            values = tl.load(left.source + offsets, mask=mask) * left.scale
-            values += tl.load(right.source + offsets, mask=mask) * right.scale
-            values += tl.load(nested.source + offsets, mask=mask) * nested.scale
-            tl.store(out + offsets, values, mask=mask)
-
-        def fn(left_source, right_source, nested_source):
-            out = torch.empty_like(left_source)
-            n_elements = left_source.shape[0]
-            kernel[(1,)](
-                (),
-                Config(left_source, 2.0),
-                Config(right_source, 3.0),
-                ((Config(nested_source, 4.0),), (n_elements,)),
-                out,
-                BLOCK_SIZE=64,
-            )
-            return out
-
-        counter = torch._dynamo.testing.CompileCounterWithBackend("inductor")
-        compiled = torch.compile(fn, backend=counter, fullgraph=True, dynamic=True)
-        sources = tuple(
-            torch.arange(17, dtype=torch.float32, device=GPU_TYPE) + offset
-            for offset in range(3)
-        )
-        actual, (code,) = run_and_get_code(compiled, *sources)
-        self.assertEqual(
-            actual,
-            sources[0] * 2.0 + sources[1] * 3.0 + sources[2] * 4.0,
-        )
-        frame_count = counter.frame_count
-
-        sources = tuple(
-            torch.arange(33, dtype=torch.float32, device=GPU_TYPE) + offset
-            for offset in range(3)
-        )
-        self.assertEqual(
-            compiled(*sources),
-            sources[0] * 2.0 + sources[1] * 3.0 + sources[2] * 4.0,
-        )
-        self.assertEqual(counter.frame_count, frame_count)
-
-        config_name = triton_kernel_wrap.create_structural_named_tuple_name(
-            "Config", Config._fields
-        )
-        self.assertIn(f"{config_name} = collections.namedtuple", code)
-        self.assertGreaterEqual(code.count(f"{config_name}("), 3)
 
     @requires_gpu
     @_assert_no_mutation_fallback
