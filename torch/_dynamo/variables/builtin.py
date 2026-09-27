@@ -37,6 +37,7 @@ from collections.abc import Callable, Iterable, Sequence
 from typing import Any, NoReturn, TYPE_CHECKING
 
 import torch
+from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 from torch.overrides import BaseTorchFunctionMode
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
@@ -67,6 +68,7 @@ from ..source import (
 from ..utils import (
     check_constant_args,
     check_numpy_ndarray_args,
+    check_positional,
     check_unspec_or_constant_args,
     check_unspec_python_args,
     dict_methods,
@@ -79,6 +81,7 @@ from ..utils import (
     numpy_operator_wrapper,
     proxy_args_kwargs,
     raise_args_mismatch,
+    specialize_symnode,
     str_methods,
     tensortype_to_dtype,
     unpack_iterable,
@@ -88,6 +91,7 @@ from .base import (
     GetSet,
     Member,
     Method,
+    NO_SUCH_SUBOBJ,
     readonly_setter,
     unmodeled_setter,
     ValueMutationNew,
@@ -123,6 +127,7 @@ from .object_protocol import (
     maybe_get_python_type,
     pycallable_check,
     pyiter_check,
+    pylong_as_ssize_t,
     pylong_from_base,
     pynumber_absolute,
     pynumber_add,
@@ -147,7 +152,7 @@ from .object_protocol import (
     type_implements_sq_length,
     vt_identity_compare,
 )
-from .sets import FrozensetVariable, SetVariable
+from .sets import FrozensetVariable, OrderedSetVariable, SetVariable
 from .tensor import (
     FakeItemVariable,
     supported_comparison_ops,
@@ -279,13 +284,29 @@ BUILTIN_TO_TENSOR_RFN_MAP: dict[Callable[..., Any], Callable[..., Any]] = {}
 # opt-out).
 _MISSING_SENTINEL = object()
 
-_COMPUTED_LAZY_CONSTANT_OPS: frozenset[Callable[..., Any]] = frozenset(
-    [
-        operator.add,
-        operator.sub,
-        operator.mul,
-    ]
-)
+# Runtime-raising ops (e.g. truediv) excluded: recompute escapes traced handlers
+_COMPUTED_LAZY_CONSTANT_OPS_BY_ARITY: dict[int, frozenset[Callable[..., Any]]] = {
+    # invert is excluded: SymNodeVariable has no nb_invert_impl for symbolic realization
+    1: frozenset([operator.neg, operator.pos, operator.abs, operator.not_]),
+    2: frozenset(
+        [
+            operator.add,
+            operator.sub,
+            operator.mul,
+            operator.and_,
+            operator.or_,
+            operator.xor,
+            operator.eq,
+            operator.ne,
+            operator.lt,
+            operator.le,
+            operator.gt,
+            operator.ge,
+        ]
+    ),
+}
+
+_BUILTIN_TO_OPERATOR: dict[Callable[..., Any], Callable[..., Any]] = {abs: operator.abs}
 
 
 def _try_computed_lazy_constant(
@@ -295,7 +316,8 @@ def _try_computed_lazy_constant(
     from .lazy import ComputedLazyConstantVariable, LazyConstantVariable
 
     fn = IN_PLACE_DESUGARING_MAP.get(fn, fn)
-    if fn not in _COMPUTED_LAZY_CONSTANT_OPS or len(args) != 2:
+    fn = _BUILTIN_TO_OPERATOR.get(fn, fn)
+    if fn not in _COMPUTED_LAZY_CONSTANT_OPS_BY_ARITY.get(len(args), frozenset()):
         return None
     any_unrealized = False
     for arg in args:
@@ -524,6 +546,47 @@ class BaseBuiltinVariable(VariableTracker):
                     )
             return generic_repr(tx, arg)
         return super().call_method(tx, name, args, kwargs)
+
+
+# Instances of these types cannot carry per-instance attributes, so whether an
+# attribute based __instancecheck__ (a runtime_checkable Protocol with data
+# members) matches is fixed by the type alone. Dynamo often has no wrapped object
+# for them -- a symbolic scalar, a container built while tracing -- and can then
+# answer with a representative value, but only for the hooks below, which do not
+# read the value. Exact types only: a subclass may add a __dict__ or a
+# __getattr__, and classes themselves always have one.
+_VALUE_INDEPENDENT_TYPES = frozenset(
+    {
+        int,
+        float,
+        bool,
+        complex,
+        str,
+        bytes,
+        bytearray,
+        list,
+        tuple,
+        dict,
+        set,
+        frozenset,
+        type(None),
+    }
+)
+
+# __instancecheck__ hooks that provably do not read the instance value: the
+# Protocol hook looks only at attribute presence, and the typing alias hook
+# forwards to __subclasscheck__(type(obj)). Only these may be answered from the
+# type alone; an arbitrary hook may read the value itself. Looked up defensively
+# because they are private: a future typing change must not turn importing
+# dynamo into an AttributeError.
+_VALUE_INDEPENDENT_INSTANCECHECKS = frozenset(
+    hook
+    for hook in (
+        getattr(getattr(typing, name, None), "__instancecheck__", None)
+        for name in ("_ProtocolMeta", "_BaseGenericAlias")
+    )
+    if hook is not None
+)
 
 
 def _uses_custom_classinfo_check(
@@ -1256,17 +1319,6 @@ class BuiltinVariable(BaseBuiltinVariable):
                 args: list[VariableTracker],
                 kwargs: dict[str, VariableTracker],
             ) -> VariableTracker:
-                if fn is AssertionError and not all(
-                    x.is_python_constant() and isinstance(x.as_python_constant(), str)
-                    for x in args
-                ):
-                    unimplemented(
-                        gb_type="assert with non-string message",
-                        context=str(args),
-                        explanation="Dynamo only supports asserts with string messages",
-                        hints=[*graph_break_hints.SUPPORTABLE],
-                    )
-
                 if fn is StopIteration:
                     return variables.StopIterationVariable(fn, args, kwargs)
                 elif fn is AttributeError:
@@ -1928,12 +1980,23 @@ class BuiltinVariable(BaseBuiltinVariable):
                 if isinstance(args[0], ConstantVariable):
                     return args[0].call_method(tx, name, args[1:], kwargs)
 
-        if self.fn is float and len(args) >= 1:
-            # Only delegate to ConstantVariable, not other types that happen to be constants
-            if isinstance(args[0], ConstantVariable):
-                return VariableTracker.build(
-                    tx, getattr(float, name)(args[0].as_python_constant())
+        if (
+            self.fn in (int, float, complex)
+            and args
+            and all(isinstance(a, ConstantVariable) for a in args)
+            and all(isinstance(v, ConstantVariable) for v in kwargs.values())
+        ):
+            # Unbound method on constants, e.g. float.__rsub__(3.0, 1). Only
+            # delegate for ConstantVariable, not other types that happen to be
+            # constants.
+            try:
+                res = getattr(self.fn, name)(
+                    *(a.as_python_constant() for a in args),
+                    **{k: v.as_python_constant() for k, v in kwargs.items()},
                 )
+            except Exception as e:
+                raise_observed_exception(type(e), tx, args=list(e.args))
+            return VariableTracker.build(tx, res)
 
         if name == "__len__" and len(args) == 1 and not kwargs:
             # type.__len__(instance) → len(instance)
@@ -2459,6 +2522,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                 variables.SetVariable,
                 variables.FrozensetVariable,
                 variables.DictKeySetVariable,
+                variables.OrderedSetVariable,
                 variables.ConstDictVariable,
             ),
         ):
@@ -2515,27 +2579,92 @@ class BuiltinVariable(BaseBuiltinVariable):
         **kwargs: VariableTracker,
     ) -> VariableTracker:
         # ref: PyObject_LengthHint (Objects/abstract.c): try __len__, then
-        # __length_hint__, falling back to the supplied default for either a
-        # missing slot or a TypeError raised by the slot.
-        if kwargs or not (1 <= len(args) <= 2):
-            raise_type_error(
-                tx, f"length_hint expected 1 or 2 arguments, got {len(args)}"
-            )
+        # __length_hint__, falling back to the supplied default for a missing
+        # slot, a TypeError raised by the slot, or a NotImplemented result.
+        if kwargs:
+            # `default` is positional-only, so a keyword call is rejected before
+            # any argument count is looked at.  The name matches CPython's.
+            raise_type_error(tx, "_operator.length_hint() takes no keyword arguments")
+        check_positional(tx, "length_hint", len(args), 1, 2)
         obj = args[0]
-        default = args[1] if len(args) == 2 else ConstantVariable.create(0)
+        if len(args) == 2:
+            # The C entry point takes the default as Py_ssize_t: __index__ is
+            # applied and the result must fit an ssize_t before the body runs,
+            # even when the default is never used.
+            default = specialize_symnode(pynumber_index(tx, args[1]))
+            if not default.is_python_constant():
+                unimplemented(
+                    gb_type="length_hint with a non-constant default",
+                    context=f"length_hint default {args[1]}",
+                    explanation="Dynamo cannot convert a non-constant default "
+                    "to an integer index.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            default = ConstantVariable.create(pylong_as_ssize_t(tx, default))
+        else:
+            default = ConstantVariable.create(0)
 
         obj_type = maybe_get_python_type(obj)
 
         if type_implements_sq_length(obj_type) or type_implements_mp_length(obj_type):
-            return generic_size(tx, obj)
+            try:
+                return generic_size(tx, obj)
+            except ObservedTypeError:
+                # CPython clears the TypeError and falls back to __length_hint__.
+                # ObservedTypeError is only produced for TypeError itself, not for
+                # subclasses; those are rare enough to revisit if they show up.
+                handle_observed_exception(tx)
 
         if getattr(obj_type, "__length_hint__", None) is None:
             return default
         try:
-            return obj.call_method(tx, "__length_hint__", [], {})
+            hint = obj.call_method(tx, "__length_hint__", [], {})
         except ObservedTypeError:
+            # Ditto: a TypeError from __length_hint__ selects the default.
             handle_observed_exception(tx)
             return default
+
+        # Like the default, a symbolic hint is specialized so that its type and
+        # range can be checked here instead of at runtime.
+        hint = specialize_symnode(hint)
+        if hint.is_python_constant():
+            val = hint.as_python_constant()
+            if val is NotImplemented:
+                return default
+            if not isinstance(val, int):
+                if sys.version_info >= (3, 15):
+                    err_msg = f"{obj.python_qualified_name()}.__length_hint__() must return an int, not {type(val).__name__}"
+                else:
+                    err_msg = (
+                        f"__length_hint__ must be an integer, not {type(val).__name__}"
+                    )
+                raise_type_error(tx, err_msg)
+            val = pylong_as_ssize_t(tx, hint)
+            if val < 0:
+                if sys.version_info >= (3, 15):
+                    err_msg = f"{obj.python_qualified_name()}.__length_hint__() must return a non-negative int"
+                else:
+                    err_msg = "__length_hint__() should return >= 0"
+                raise_value_error(tx, err_msg)
+            # The C entry point ends in PyLong_FromSsize_t, so an int subclass
+            # such as bool is normalized to int before the caller sees it.
+            return ConstantVariable.create(int(val))
+
+        # Any other non-constant hint (e.g. a compile-time-only id()) cannot be
+        # type- or range-checked at trace time; refuse it rather than return a
+        # value CPython might reject for being negative or out of ssize_t range.
+        hint_type = maybe_get_python_type(hint)
+        if not issubclass(hint_type, int):
+            raise_type_error(
+                tx, f"__length_hint__ must be an integer, not {hint_type.__name__}"
+            )
+        unimplemented(
+            gb_type="length_hint with a non-constant result",
+            context=f"length_hint {obj} returned {hint}",
+            explanation="Dynamo cannot verify the type and range of a "
+            "non-constant __length_hint__ result.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
 
     def call_getitem(
         self,
@@ -2665,54 +2794,101 @@ class BuiltinVariable(BaseBuiltinVariable):
                 "attributes; intentionally graph breaking.",
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
-        # handle __instancecheck__ defined in user class
-        if (
-            isinstance(arg, variables.UserDefinedObjectVariable)
-            and "__instancecheck__" in isinstance_type.__class__.__dict__
-        ):
-            return VariableTracker.build(
-                tx,
-                isinstance_type.__class__.__instancecheck__(isinstance_type, arg.value),
-            )
-
         if isinstance(arg, variables.UserDefinedExceptionClassVariable):
             # pyrefly: ignore [unbound-name]
             return VariableTracker.build(tx, isinstance(arg_type, isinstance_type))
 
-        isinstance_type_tuple: tuple[type, ...]
-        if isinstance(isinstance_type, type) or callable(
-            # E.g. isinstance(obj, typing.Sequence)
-            getattr(isinstance_type, "__instancecheck__", None)
-        ):
-            isinstance_type_tuple = (isinstance_type,)
-        elif isinstance(isinstance_type, types.UnionType):
-            isinstance_type_tuple = typing.get_args(isinstance_type)
-        elif isinstance(isinstance_type, tuple) and all(
-            isinstance(tp, type) or callable(getattr(tp, "__instancecheck__", None))
-            for tp in isinstance_type
-        ):
-            isinstance_type_tuple = isinstance_type
-        else:
-            raise_observed_exception(
-                TypeError,
-                tx,
-                args=[
-                    "isinstance() arg 2 must be a type, a tuple of types, or a union"
-                ],
+        # Mirror CPython's object_recursive_isinstance: nested tuples and
+        # unions are flattened, and members are validated and checked left to
+        # right, stopping at the first match. A member whose metaclass supplies
+        # __instancecheck__ (Protocols, ABCs, typing aliases, ...) is evaluated
+        # with the real isinstance() whenever Dynamo has the object. Only that
+        # branch reads the object, so a lazy constant stays unrealized -- and
+        # keeps its weaker type-only guard -- until such a member is reached.
+        pending: list[Any] = [isinstance_type]
+        while pending:
+            member = pending.pop()
+            if isinstance(member, tuple):
+                pending.extend(reversed(member))
+                continue
+            if isinstance(member, types.UnionType):
+                pending.extend(reversed(typing.get_args(member)))
+                continue
+            if not (
+                isinstance(member, type)
+                # E.g. isinstance(obj, typing.Sequence)
+                or callable(getattr(member, "__instancecheck__", None))
+            ):
+                raise_observed_exception(
+                    TypeError,
+                    tx,
+                    args=[
+                        "isinstance() arg 2 must be a type, a tuple of types, or a union"
+                    ],
+                )
+            # Like CPython's _PyObject_LookupSpecial, resolve the hook through
+            # the metaclass MRO: an inherited __instancecheck__ (a typing alias,
+            # a metaclass deriving from ABCMeta) hooks the check just as much as
+            # one defined directly. For a plain class this yields
+            # type.__instancecheck__, whose answer is issubclass() below.
+            instancecheck = getattr(type(member), "__instancecheck__", None)
+            # A class based hook reads only type(obj), so issubclass() is exact
+            # and a lazy constant keeps its weaker TYPE_MATCH guard. For the
+            # exact builtins in _VALUE_INDEPENDENT_TYPES an attribute based hook
+            # cannot see per-instance state either, and they cannot spoof
+            # __class__ -- the one thing ABCMeta's hook sees that issubclass()
+            # does not. Everything else needs the object itself.
+            answered_by_type = instancecheck is type.__instancecheck__ or (
+                arg_type in _VALUE_INDEPENDENT_TYPES
+                and (
+                    instancecheck is abc.ABCMeta.__instancecheck__
+                    or instancecheck in _VALUE_INDEPENDENT_INSTANCECHECKS
+                )
             )
-
-        try:
-            # NB: `isinstance()` does not call `__subclasscheck__` but use `__instancecheck__`.
-            # But usually `isinstance(obj, type_info)` and `issubclass(type(obj), type_info)` gives
-            # the same result.
-            # WARNING: This might run arbitrary user code `__subclasscheck__` and we did not trace
-            # through it. This is a limitation of the current implementation.
-            # Usually `__subclasscheck__` and `__instancecheck__` can be constant fold through, it
-            # might not be a big issue and we trade off it for performance.
-            val = issubclass(arg_type, isinstance_type_tuple)
-        except TypeError:
-            val = arg_type in isinstance_type_tuple
-        return VariableTracker.build(tx, val)
+            value = (
+                NO_SUCH_SUBOBJ
+                if answered_by_type
+                else arg.get_real_python_backed_value()
+            )
+            if value is not NO_SUCH_SUBOBJ:
+                try:
+                    val = isinstance(value, member)
+                except TypeError as e:
+                    raise_observed_exception(TypeError, tx, args=list(e.args))
+            else:
+                try:
+                    # NB: `isinstance()` does not call `__subclasscheck__` but use `__instancecheck__`.
+                    # But usually `isinstance(obj, type_info)` and `issubclass(type(obj), type_info)` gives
+                    # the same result.
+                    # WARNING: This might run arbitrary user code `__subclasscheck__` and we did not trace
+                    # through it. This is a limitation of the current implementation.
+                    # Usually `__subclasscheck__` and `__instancecheck__` can be constant fold through, it
+                    # might not be a big issue and we trade off it for performance.
+                    val = issubclass(arg_type, member)
+                except TypeError as e:
+                    # issubclass() rejecting the classinfo (e.g. a runtime_checkable
+                    # Protocol with data members) says nothing about isinstance().
+                    if not (
+                        arg_type in _VALUE_INDEPENDENT_TYPES
+                        and instancecheck in _VALUE_INDEPENDENT_INSTANCECHECKS
+                    ):
+                        unimplemented(
+                            gb_type="builtin isinstance() with classinfo that does not support issubclass()",
+                            context=f"isinstance({arg}, {isinstance_type})",
+                            explanation=f"issubclass({arg_type}, {member}) raised "
+                            f"TypeError: {e}. Dynamo emulates isinstance() with "
+                            "issubclass() for this argument and cannot determine the result.",
+                            hints=[*graph_break_hints.SUPPORTABLE],
+                        )
+                    try:
+                        val = isinstance(arg_type(), member)
+                    except TypeError as probe_error:
+                        raise_observed_exception(
+                            TypeError, tx, args=list(probe_error.args)
+                        )
+            if val:
+                return VariableTracker.build(tx, True)
+        return VariableTracker.build(tx, False)
 
     def call_issubclass(
         self,
@@ -3231,6 +3407,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                 SetVariable,
                 FrozensetVariable,
                 variables.DictKeySetVariable,
+                OrderedSetVariable,
             ),
         ):
             return VariableTracker.build(tx, len(a.items) == 0)
@@ -3418,6 +3595,7 @@ class DictBuiltinVariable(BaseBuiltinVariable):
                 variables.SetVariable,
                 variables.FrozensetVariable,
                 variables.DictKeySetVariable,
+                variables.OrderedSetVariable,
                 ConstDictVariable,
             ),
         ):
@@ -3507,6 +3685,8 @@ class GetAttrBuiltinVariable(BaseBuiltinVariable):
             args = [
                 a.realize() if isinstance(a, LazyVariableTracker) else a for a in args
             ]
+        no_keywords(tx, "getattr", kwargs)
+        check_positional(tx, "getattr", len(args), 2, 3)
         try:
             return self._call_getattr(tx, args, kwargs)
         except Unsupported:
@@ -3546,6 +3726,9 @@ class GetAttrBuiltinVariable(BaseBuiltinVariable):
             )
 
         name = name_var.as_python_constant()
+        if not isinstance(name, str):
+            type_name = name_var.python_type_name()
+            raise_type_error(tx, f"attribute name must be string, not '{type_name}'")
         return generic_getattr(tx, obj, name, default)
 
 
@@ -3702,6 +3885,24 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
                     )
                 elif name == "data":
                     # [Note: set_data_on_scoped_tensor]
+                    tensor_obj = typing.cast(TensorVariable, obj)
+                    if isinstance(val, TensorVariable) and tensor_obj.requires_grad:
+                        obj_fake = get_fake_value(tensor_obj.as_proxy().node, tx)
+                        val_fake = get_fake_value(val.as_proxy().node, tx)
+                        # Do not guard on symbolic equality: an unproven match
+                        # could become a shape change when the graph is reused.
+                        if not statically_known_true(
+                            sym_eq(obj_fake.shape, val_fake.shape)
+                        ):
+                            unimplemented(
+                                gb_type="setattr() on Tensor.data with different shape",
+                                context=f"setattr({obj}, {name}, {val})",
+                                explanation="Dynamo does not trace shape-changing "
+                                "`.data` mutations on differentiable tensors. "
+                                "AOTAutograd assumes graph input metadata is stable "
+                                "while building the backward graph.",
+                                hints=[*graph_break_hints.SUPPORTABLE],
+                            )
                     if obj.source is None:
                         unimplemented(
                             gb_type="Failed to mutate tensor data attribute",
@@ -3884,14 +4085,10 @@ class ListBuiltinVariable(BaseBuiltinVariable):
                 obj,
                 (variables.IteratorVariable, variables.LocalGeneratorObjectVariable),
             ):
-                if isinstance(
-                    obj,
-                    (
-                        ConstDictVariable,
-                        variables.OrderedSetVariable,
-                        variables.DictKeySetVariable,
-                    ),
-                ):
+                # An OrderedSet's key order is already guarded through the
+                # ``_dict`` source VariableBuilder registers; the object itself
+                # is not a dict and the guard manager would reject it.
+                if isinstance(obj, (ConstDictVariable, variables.DictKeySetVariable)):
                     tx.output.guard_on_key_order.add(obj.source)
                 if isinstance(obj, variables.MappingProxyVariable):
                     install_guard(

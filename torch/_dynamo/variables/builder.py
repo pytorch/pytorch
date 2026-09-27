@@ -114,6 +114,7 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     is_traceable_wrapper_subclass_type,
+    TraceableWrapperSubclass,
 )
 from torch.utils.weak import TensorWeakRef
 
@@ -1341,7 +1342,11 @@ class VariableBuilder:
                 for i, v in enumerate(L)
             ]
             result = set_var_cls(items, source=self.source)
-            return self.tx.output.side_effects.track_object_existing(value, result)
+            # Value mutation, like the literal-set path through wrap_literal:
+            # track_object_existing would give AttributeMutationExisting, which
+            # SideEffects.mutation never flags, so add/discard/|= on a
+            # passed-in set or OrderedSet would silently not reach the caller.
+            return self.tx.output.side_effects.track_mutable(value, result)
         elif istype(value, frozenset) and all(
             (
                 # For DBR quantization, we could get a frozenset of torch funcs.
@@ -1367,6 +1372,8 @@ class VariableBuilder:
             (enum.Enum, torch.DispatchKey, torch._C._functorch.TransformType),
         ) or is_pybind11_enum_member(value):
             self.install_guards(GuardBuilder.ID_MATCH)
+            # _call_impl registers this object with SideEffects after _wrap returns,
+            # so sourced enum members support attribute mutation.
             return UserDefinedObjectVariable(value, source=self.source)
         elif DebuggingVariable.is_reorderable_logging_function(value):
             # Put this above builtin_callable so that print() can be handled
@@ -5130,6 +5137,39 @@ def wrap_to_fake_tensor_and_record(
         )
 
 
+def _coor_check_tensor_device(
+    e: torch.Tensor | TraceableWrapperSubclass, source: Source
+) -> None:
+    """Refuse a tensor on a non-current accelerator under compile-on-one-rank.
+
+    Its index is the tracing rank's, so no guard on it can be rank-portable and the
+    artifact could not be shared. The make_fx backends already refuse such a graph
+    (_coor_check_current_accelerator), but Dynamo builds the tensor guards before any
+    backend runs, so a backend that never traces -- "eager" -- would otherwise reach
+    the guard with a device only the tracing rank has. Refusing here is what lets
+    TENSOR_MATCH decide relative-vs-exact from the device type alone, identically on
+    every rank, instead of recording the decision and replaying it.
+    """
+    from torch.fx.experimental.proxy_tensor import _coor_enabled
+
+    if not _coor_enabled():
+        return
+    device = e.device
+    if device.type in ("cpu", "meta"):
+        return
+    acc = torch.accelerator.current_accelerator()
+    cur = None
+    if acc is not None and device.type == acc.type:
+        cur = torch.device(acc.type, torch.accelerator.current_device_index())
+        if device.index is None or device.index == cur.index:
+            return
+    raise RuntimeError(
+        f"device_as_parameter: {source.name} is on {device}, which is not the "
+        f"current accelerator ({cur or acc}); the traced graph cannot be made "
+        f"device-agnostic for compile-on-one-rank."
+    )
+
+
 def _wrap_to_fake_tensor_and_record_impl(
     e: Any,
     tx: "InstructionTranslatorBase",
@@ -5146,6 +5186,7 @@ def _wrap_to_fake_tensor_and_record_impl(
     ):
         if source is None:
             raise AssertionError("source must not be None for tensor wrapping")
+        _coor_check_tensor_device(e, source)
         static_shapes, _reason = tensor_always_has_static_shape(
             e,
             is_tensor,
@@ -5429,7 +5470,10 @@ class SourcelessBuilder:
                         )
                 if obj_vt is not None:
                     return torch._dynamo.variables.UserMethodVariable(
-                        value.__func__, obj_vt
+                        torch._dynamo.variables.UserFunctionVariable(
+                            value.__func__, source=None
+                        ),
+                        obj_vt,
                     )
         elif isinstance(value, torch.fx.graph_module.GraphModule):
             return SourcelessGraphModuleVariable(value)

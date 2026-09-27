@@ -765,10 +765,12 @@
 - func: arange(Scalar end, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
     CompositeExplicitAutograd: arange
+    Meta: arange_meta
 
 - func: arange.start(Scalar start, Scalar end, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
     CompositeExplicitAutograd: arange
+    Meta: arange_meta
 
 # This operator should be named `arange.start_out` if following the naming convention. However that
 # name is already taken. Disabled because of CI job failures.
@@ -780,6 +782,7 @@
 - func: arange.start_step(Scalar start, Scalar end, Scalar step=1, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
     CompositeExplicitAutograd: arange
+    Meta: arange_meta
   cpp_no_default_args: ['step']
   tags: core
 
@@ -5084,8 +5087,7 @@
   device_check: NoCheck   # TensorIterator
   variants: function, method
   dispatch:
-    CPU, CUDA, XPU: relu
-    MPS: relu_mps
+    CPU, CUDA, MPS, XPU: relu
     MTIA: relu_mtia
     MkldnnCPU: mkldnn_relu
     QuantizedCPU: relu_quantized_cpu
@@ -5099,8 +5101,7 @@
   device_check: NoCheck   # TensorIterator
   variants: function, method
   dispatch:
-    CPU, CUDA, XPU: relu_
-    MPS: relu_mps_
+    CPU, CUDA, MPS, XPU: relu_
     MTIA: relu_mtia_
     MkldnnCPU: mkldnn_relu_
     QuantizedCPU: relu_quantized_cpu_
@@ -7004,7 +7005,7 @@
   structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA, XPU: heaviside_out
+    CPU, CUDA, MPS, XPU: heaviside_out
   tags: pointwise
 
 - func: heaviside(Tensor self, Tensor values) -> Tensor
@@ -7136,7 +7137,6 @@
 - func: _scaled_mm_v2(Tensor self, Tensor mat2, Tensor[] scale_a, int[] recipe_a, int[] swizzle_a, Tensor[] scale_b, int[] recipe_b, int[] swizzle_b, Tensor? bias, ScalarType? out_dtype, int[] contraction_dim=[], bool use_fast_accum=False) -> Tensor
   structured_delegate: _scaled_mm_v2.out
   variants: function
-  tags: needs_exact_strides
 
 - func: _scaled_mm_v2.out(Tensor self, Tensor mat2, Tensor[] scale_a, int[] recipe_a, int[] swizzle_a, Tensor[] scale_b, int[] recipe_b, int[] swizzle_b, Tensor? bias, ScalarType? out_dtype, int[] contraction_dim=[], bool use_fast_accum=False, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -7144,8 +7144,8 @@
   dispatch:
     CPU: _scaled_mm_cpu_v2_out
     CUDA: _scaled_mm_cuda_v2_out
+    MPS: _scaled_mm_mps_v2_out
     XPU: _scaled_mm_xpu_v2_out
-  tags: needs_exact_strides
 
 - func: _scaled_addmm(Tensor self, Tensor mat1, Tensor mat2, Tensor[] scale_a, int[] recipe_a, int[] swizzle_a, Tensor[] scale_b, int[] recipe_b, int[] swizzle_b, int[] contraction_dim=[], *, Scalar beta=1, Scalar alpha=1, bool use_fast_accum=False) -> Tensor
   structured_delegate: _scaled_addmm.out
@@ -11439,6 +11439,7 @@
   dispatch:
     CompositeExplicitAutograd: foreach_tensor_powsum_slow
     CUDA: foreach_tensor_powsum_cuda
+    XPU: foreach_tensor_powsum_xpu
   autogen: _foreach_powsum.Scalar_out
 
 - func: _foreach_pow.List(Tensor[] self, Tensor[] exponent) -> Tensor[]
@@ -12319,8 +12320,7 @@
   device_check: NoCheck   # TensorIterator
   python_module: nn
   dispatch:
-    CPU, CUDA, XPU: softplus_out
-    MPS: softplus_out_mps
+    CPU, CUDA, MPS, XPU: softplus_out
 
 - func: softplus(Tensor self, Scalar beta=1, Scalar threshold=20) -> Tensor
   structured_delegate: softplus.out
@@ -12333,8 +12333,7 @@
   structured_inherits: TensorIteratorBase
   python_module: nn
   dispatch:
-    CPU, CUDA, XPU: softplus_backward_out
-    MPS: softplus_backward_out_mps
+    CPU, CUDA, MPS, XPU: softplus_backward_out
 
 - func: softplus_backward(Tensor grad_output, Tensor self, Scalar beta, Scalar threshold) -> Tensor
   structured_delegate: softplus_backward.grad_input
@@ -14587,7 +14586,7 @@
   variants: function
   dispatch:
     CompositeExplicitAutograd: linalg__powsum_slow
-    CPU, CUDA: linalg__powsum
+    CPU, CUDA, XPU: linalg__powsum
   tags: reduction
 
 - func: linalg_matrix_norm(Tensor self, Scalar ord, int[] dim=[-2,-1], bool keepdim=False, *, ScalarType? dtype=None) -> Tensor

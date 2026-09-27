@@ -1515,7 +1515,7 @@ inline long4 ternary_offsets(
 // expressed with `om_t` optional argument (which stands for opmath_type) which
 // is identical to output type but could be something else
 
-template <typename T, typename F, typename om_t = T>
+template <typename T, typename F, typename om_t = T, typename T0 = T>
 kernel void ternary_strided(
     device void* output [[buffer(0)]],
     constant void* input [[buffer(1)]],
@@ -1538,7 +1538,7 @@ kernel void ternary_strided(
       input_strides,
       other1_strides,
       other2_strides);
-  const auto a = val_at_offs<T>(input, offs.y);
+  const auto a = val_at_offs<T0>(input, offs.y);
   const auto b = val_at_offs<T>(other1, offs.z);
   const auto c = val_at_offs<T>(other2, offs.w);
   ref_at_offs<res_t>(output, offs.x) =
@@ -1578,10 +1578,10 @@ kernel void ternary_strided_cast(
   ref_at_offs<res_t>(output, offs.x) = static_cast<res_t>(f(a, b, c));
 }
 
-template <typename T, typename F, typename om_t = opmath_t<T>>
+template <typename T, typename F, typename om_t = opmath_t<T>, typename T0 = T>
 kernel void ternary_dense(
     device result_of<F, T, T, T>* out [[buffer(0)]],
-    constant T* input [[buffer(1)]],
+    constant T0* input [[buffer(1)]],
     constant T* other1 [[buffer(2)]],
     constant T* other2 [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {

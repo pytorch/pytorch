@@ -29,12 +29,8 @@ from torch.export.pt2_archive._package import (
     load_pt2,
     load_weights_to_pt2_contents,
 )
-from torch.testing._internal.common_cuda import (
-    _get_torch_cuda_version,
-    requires_triton_ptxas_compat,
-    TRITON_PTXAS_VERSION,
-)
-from torch.testing._internal.common_utils import IS_FBCODE, TEST_CUDA
+from torch.testing._internal.common_cuda import requires_triton_ptxas_compat
+from torch.testing._internal.common_utils import HardwareClassification, IS_FBCODE
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.utils import _pytree as pytree
 
@@ -78,20 +74,36 @@ def compile(
 @unittest.skipIf(sys.platform == "darwin", "No CUDA on MacOS")
 @parameterized_class(
     [
-        {"device": "cpu", "package_cpp_only": False},
+        {
+            "device": "cpu",
+            "package_cpp_only": False,
+            "hw_classification": HardwareClassification.GENERIC,
+        },
     ]
     + (
         [
             # FIXME: AssertionError: AOTInductor compiled library does not exist at
-            {"device": "cpu", "package_cpp_only": True}
+            {
+                "device": "cpu",
+                "package_cpp_only": True,
+                "hw_classification": HardwareClassification.GENERIC,
+            }
         ]
         if not IS_FBCODE
         else []
     )
     + (
         [
-            {"device": GPU_TYPE, "package_cpp_only": False},
-            {"device": GPU_TYPE, "package_cpp_only": True},
+            {
+                "device": GPU_TYPE,
+                "package_cpp_only": False,
+                "hw_classification": HardwareClassification.ACCELERATOR,
+            },
+            {
+                "device": GPU_TYPE,
+                "package_cpp_only": True,
+                "hw_classification": HardwareClassification.ACCELERATOR,
+            },
         ]
         if sys.platform != "darwin"
         else []
@@ -224,8 +236,8 @@ class TestAOTInductorPackage(TestCase):
         self.check_model(Model(), example_inputs)
 
     def test_int64_floor_divide_tensor_constant_divisor(self):
-        if self.device != "cuda":
-            raise unittest.SkipTest("requires CUDA")
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest(f"requires {GPU_TYPE}")
 
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -475,10 +487,7 @@ model(torch.ones(2))
         self.check_model(Model(), example_inputs)
 
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
-    @unittest.skipIf(
-        TEST_CUDA and _get_torch_cuda_version() < TRITON_PTXAS_VERSION,
-        "Test is only supported on CUDA {}.{}+".format(*TRITON_PTXAS_VERSION),
-    )
+    @requires_triton_ptxas_compat
     def test_compile_after_package(self):
         self.check_package_cpp_only()
 
