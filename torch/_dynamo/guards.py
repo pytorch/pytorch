@@ -5637,6 +5637,13 @@ class CheckFunctionManager:
                 # builtin dict in the common case.
                 if name != builtins_dict_name:
                     used_global_vars.add(name)
+                else:
+                    while isinstance(source, ChainedSource):
+                        if isinstance(source, DictGetItemSource) and isinstance(
+                            source.base, GlobalSource
+                        ):
+                            self.used_builtin_vars.add(source.index)
+                        source = source.base
             elif name := get_local_source_name(source):
                 if not isinstance(name, str):
                     raise AssertionError(f"Expected str, got {type(name)}")
