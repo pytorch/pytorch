@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import functools
 from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any, cast, Literal, NoReturn, overload, TYPE_CHECKING
 from typing_extensions import deprecated
 
@@ -302,17 +303,18 @@ def _unimplemented_deepcopy(*args: Any, **kwargs: Any) -> NoReturn:
     )
 
 
-_enable_fsdp_module_new_init: bool = True
+_disable_fsdp_module_new_init: ContextVar[bool] = ContextVar(
+    "_disable_fsdp_module_new_init", default=False
+)
 
 
 @contextmanager
 def disable_fsdp_module_new_init() -> Iterator[None]:
-    global _enable_fsdp_module_new_init
-    prev, _enable_fsdp_module_new_init = _enable_fsdp_module_new_init, False
+    token = _disable_fsdp_module_new_init.set(True)
     try:
         yield
     finally:
-        _enable_fsdp_module_new_init = prev
+        _disable_fsdp_module_new_init.reset(token)
 
 
 class FSDPModule:
@@ -325,12 +327,23 @@ class FSDPModule:
         """
         Override ``__new__`` to remove the FSDP class and directly construct
         the original class for cases like indexing into a container module.
+        Guard-state deserialization disables initialization and preserves the
+        wrapper class so its type guards match the live FSDP module.
         """
+        if _disable_fsdp_module_new_init.get():
+            return object.__new__(cls)
         orig_cls = cls.__mro__[cls._orig_cls_mro_index]
         self = orig_cls.__new__(orig_cls, *args, **kwargs)
-        if _enable_fsdp_module_new_init:
-            self.__init__(*args, **kwargs)
+        self.__init__(*args, **kwargs)
         return self
+
+    def __init__(self, *args, **kwargs):
+        # When __new__ preserves the dynamic wrapper type, type.__call__ follows
+        # it with __init__. Guard-state loading restores state separately.
+        if _disable_fsdp_module_new_init.get():
+            return
+        orig_cls = type(self).__mro__[self._orig_cls_mro_index]
+        orig_cls.__init__(self, *args, **kwargs)
 
     def reshard(self) -> None:
         """

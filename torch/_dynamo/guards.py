@@ -261,6 +261,65 @@ def _try_is_cow_tensor(value: object) -> bool | object:
     return torch._C._is_cow_tensor(value)  # pyrefly: ignore[missing-attribute]
 
 
+class FunctionCodeMetadata(NamedTuple):
+    code: types.CodeType
+    globals_module: str
+
+
+def _function_code_metadata(value: object) -> FunctionCodeMetadata | None:
+    from .package import _globals_module_name
+
+    if type(value) is not types.FunctionType:
+        return None
+    module_name = _globals_module_name(value.__globals__)
+    if module_name is None or value.__builtins__ is not builtins.__dict__:
+        return None
+    return FunctionCodeMetadata(value.__code__, module_name)
+
+
+def _function_code_matches(value: object, expected: FunctionCodeMetadata) -> bool:
+    return _function_code_metadata(value) == expected
+
+
+class MethodCodeMetadata(NamedTuple):
+    func: FunctionCodeMetadata
+
+
+def _method_code_metadata(value: object) -> MethodCodeMetadata | None:
+    # The receiver is not pinned: its own guards, if any, check it.
+    if type(value) is not types.MethodType:
+        return None
+    func = _function_code_metadata(value.__func__)
+    return None if func is None else MethodCodeMetadata(func)
+
+
+def _method_code_matches(value: object, expected: MethodCodeMetadata) -> bool:
+    return _method_code_metadata(value) == expected
+
+
+class NativeMethodMetadata(NamedTuple):
+    # Pickled by reference, so it is the loading process's class.
+    receiver: type
+    name: str
+
+
+def _native_method_metadata(value: object) -> NativeMethodMetadata | None:
+    # A builtin bound to a class, like an autograd Function's ``apply``: every
+    # attribute read makes a new bound object, so only equality is portable.
+    if type(value) is not types.BuiltinMethodType:
+        return None
+    receiver = value.__self__
+    if not isinstance(receiver, type) or not _resolves_by_reference(receiver):
+        return None
+    if getattr(receiver, value.__name__, None) != value:
+        return None
+    return NativeMethodMetadata(receiver, value.__name__)
+
+
+def _native_method_matches(value: object, expected: NativeMethodMetadata) -> bool:
+    return value == getattr(expected.receiver, expected.name)
+
+
 def _cow_tensor_matches(value: object, expected: object) -> bool:
     if not isinstance(expected, bool):
         return False
@@ -3160,6 +3219,66 @@ class GuardBuilder(GuardBuilderBase):
             self.FUNCTION_MATCH(guard)
 
     @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: _guard_create_fn_keyword(
+            guard, "expected"
+        ),
+        eval_fn=_function_code_matches,
+    )
+    def FUNCTION_CODE_MATCH(self, guard: Guard, expected: FunctionCodeMetadata) -> None:
+        """A function by its code and globals module, compared by value so the
+        check survives serialization; defaults and cells keep their own guards."""
+
+        def guard_fn(value: object) -> bool:
+            return _function_code_matches(value, expected)
+
+        code = (
+            f"___check_function_code({self.arg_ref(guard)}, "
+            f"{expected.globals_module}.{expected.code.co_qualname})"
+        )
+        self._set_guard_export_info(guard, [code])
+        self.get_guard_manager(guard).add_lambda_guard(
+            guard_fn, get_verbose_code_parts(code, guard), guard.user_stack
+        )
+
+    @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: _guard_create_fn_keyword(
+            guard, "expected"
+        ),
+        eval_fn=_method_code_matches,
+    )
+    def METHOD_CODE_MATCH(self, guard: Guard, expected: MethodCodeMetadata) -> None:
+        def guard_fn(value: object) -> bool:
+            return _method_code_matches(value, expected)
+
+        code = (
+            f"___check_method_code({self.arg_ref(guard)}, "
+            f"{expected.func.globals_module}.{expected.func.code.co_qualname})"
+        )
+        self._set_guard_export_info(guard, [code])
+        self.get_guard_manager(guard).add_lambda_guard(
+            guard_fn, get_verbose_code_parts(code, guard), guard.user_stack
+        )
+
+    @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: _guard_create_fn_keyword(
+            guard, "expected"
+        ),
+        eval_fn=_native_method_matches,
+    )
+    def NATIVE_METHOD_MATCH(self, guard: Guard, expected: NativeMethodMetadata) -> None:
+        def guard_fn(value: object) -> bool:
+            return _native_method_matches(value, expected)
+
+        code = (
+            f"___check_native_method({self.arg_ref(guard)}, "
+            f"{expected.receiver.__module__}.{expected.receiver.__qualname__}.{expected.name})"
+        )
+        self._set_guard_export_info(guard, [code])
+        self.get_guard_manager(guard).add_lambda_guard(
+            guard_fn, get_verbose_code_parts(code, guard), guard.user_stack
+        )
+
+    @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: value,
         eval_fn=lambda value, metadata: value is metadata,
     )
@@ -3947,11 +4066,17 @@ class GuardBuilder(GuardBuilderBase):
                 "_dynamo_static_indices",
             )
 
+            def read_marking(attr_name: str) -> Any:
+                marking = getattr(value, attr_name, None)
+                if marking is not None:
+                    self.guard_tree_values[id(marking)] = marking
+                return marking
+
             expected_attrs: dict[str, set[int]] = {}
             absent_attrs: list[str] = []
             for attr_name in dim_marking_attrs:
                 if hasattr(value, attr_name):
-                    expected_attrs[attr_name] = getattr(value, attr_name)
+                    expected_attrs[attr_name] = read_marking(attr_name)
                     code_part = f"((getattr({tensor_name}, '{attr_name}', set()).issubset({getattr(value, attr_name)!r})) if hasattr({tensor_name}, '{attr_name}') else True)"
                     code.append(code_part)
                 else:
@@ -3973,7 +4098,7 @@ class GuardBuilder(GuardBuilderBase):
                 if not hasattr(value, gate_attr):
                     continue
                 for attr_name in dep_attr_names:
-                    attr_value = getattr(value, attr_name, None)
+                    attr_value = read_marking(attr_name)
                     dependent_attrs[attr_name] = (attr_value, gate_attr)
                     code_part = f"((getattr({tensor_name}, '{attr_name}', None) == {attr_value!r}) if hasattr({tensor_name}, '{gate_attr}') else True)"
                     code.append(code_part)
@@ -4199,6 +4324,40 @@ class _LiveBuiltins:
 # One instance, so a scope binding the dict twice (__builtins__ and Dynamo's
 # __builtins_dict___N alias) carries the reduce once and a memo get for the rest.
 _live_builtins = _LiveBuiltins()
+
+
+# FakeTensor state held in __dict__, never carried off a fake.
+_FAKE_TENSOR_OWNED_ATTRIBUTES = frozenset(
+    {
+        "_fake_device",
+        "fake_mode",
+        "constant",
+        "pytype",
+        "dispatch_keys",
+        "real_tensor",
+        "_nonzero_memo",
+        "_nonzero_memo_vc",
+        "_nonzero_memo_epoch",
+        "_item_memo",
+        "_item_memo_vc",
+        "_item_memo_epoch",
+        "_unique_memo",
+        "_unique_memo_vc",
+        "_unique_memo_epoch",
+        "_unique_consecutive_memo",
+        "_unique_consecutive_memo_vc",
+        "_unique_consecutive_memo_epoch",
+        "_nested_int_memo",
+        "_nested_int_memo_vc",
+        "_nested_int_memo_epoch",
+    }
+)
+
+# The subset a rebuilt FakeTensor needs to be one; a user attribute of the same
+# name would overwrite it.
+_FAKE_TENSOR_RESERVED_ATTRIBUTES = frozenset(
+    {"_fake_device", "fake_mode", "pytype", "dispatch_keys"}
+)
 
 
 @functools.cache
@@ -4731,15 +4890,26 @@ class GuardsStatePickler(FunctionPicklerBase):
                     obj, device="meta", requires_grad=obj.requires_grad
                 )
 
-            return type(self)._unpickle_tensor, (
-                meta,
-                obj.device,
-                pytype,
-                dispatch_keys.raw_repr(),
-                # Whatever .grad holds, without the non-leaf warning: a plain
-                # non-leaf has None, a retained-grad non-leaf (torch.optim permits
-                # one as a param) or a fake mirroring one has a real tensor.
-                safe_grad(obj),
+            return (
+                type(self)._unpickle_tensor,
+                (
+                    meta,
+                    obj.device,
+                    pytype,
+                    dispatch_keys.raw_repr(),
+                    # Whatever .grad holds, without the non-leaf warning: a plain
+                    # non-leaf has None, a retained-grad non-leaf (torch.optim
+                    # permits one as a param) or a fake mirroring one has a real
+                    # tensor.
+                    safe_grad(obj),
+                ),
+                # The state slot, not a constructor argument: pickle memoizes the
+                # tensor before saving state, so an attribute referring back to
+                # the tensor round-trips instead of recursing.
+                self._carried_tensor_attributes(obj),
+                None,
+                None,
+                type(self)._restore_tensor_attributes,
             )
 
         elif isinstance(obj, torch.nn.Module):
@@ -4874,6 +5044,21 @@ class GuardsStatePickler(FunctionPicklerBase):
         elif isinstance(obj, types.CellType):
             return self._reduce_cell(obj)
 
+        if (
+            id(obj) in self.guard_tree_values
+            and hasattr(obj, "__dict__")
+            and not inspect.isclass(obj)
+            and not inspect.ismodule(obj)
+            and not isinstance(obj, (torch.nn.Module, torch.Tensor))
+            and not type(obj).__module__.startswith("torch.")
+        ):
+            # A guarded user object (a train pipeline, a wrapper holding a
+            # dataloader) would otherwise be pickled whole, so one unguarded
+            # unpicklable attribute takes the frame down. Last, so the specific
+            # reducers above get first refusal; user types only, since torch's
+            # structural types (DTensorSpec) need fields no guard names.
+            self._prune_unguarded_attributes(obj)
+
         if hasattr(torch.distributed, "distributed_c10d") and isinstance(
             obj, torch.distributed.distributed_c10d.Work
         ):
@@ -4908,7 +5093,41 @@ class GuardsStatePickler(FunctionPicklerBase):
 
         return NotImplemented
 
-    def _prune_unguarded_attributes(self, obj: torch.nn.Module) -> None:
+    @classmethod
+    def _restore_tensor_attributes(
+        cls, tensor: torch.Tensor, state: dict[str, Any]
+    ) -> None:
+        for name, value in state.items():
+            object.__setattr__(tensor, name, value)
+
+    def _carried_tensor_attributes(self, obj: torch.Tensor) -> dict[str, Any] | None:
+        """The Python attributes of ``obj`` a guard reaches.
+
+        A tensor is rebuilt from metadata, so a guard whose source traverses an
+        attribute assigned onto it cannot be rebuilt unless the attribute is
+        carried. Unguarded ones are left behind: they may not pickle.
+        """
+        state = getattr(obj, "__dict__", None)
+        if not state:
+            return None
+        is_fake = isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
+            obj, torch._subclasses.FakeTensor
+        )
+        carried: dict[str, Any] = {}
+        for name, value in state.items():
+            if is_fake and name in _FAKE_TENSOR_OWNED_ATTRIBUTES:
+                continue
+            if id(value) not in self.guard_tree_values:
+                continue
+            if name in _FAKE_TENSOR_RESERVED_ATTRIBUTES:
+                raise torch._dynamo.exc.PackageError(
+                    f"a guard reads {name!r} off a tensor, but a rebuilt tensor "
+                    f"is a FakeTensor, which stores its own state there"
+                )
+            carried[name] = value
+        return carried or None
+
+    def _prune_unguarded_attributes(self, obj: Any) -> None:
         """Mark every ``__dict__`` value nothing guards as prunable.
 
         Reaching a module through the guard tree does not mean its whole state
@@ -4931,6 +5150,98 @@ class GuardsStatePickler(FunctionPicklerBase):
             if _is_shared_constant(attr):
                 continue
             self.missing_values[id(attr)] = attr
+
+
+_PORTABLE_IDENTITY_GUARD_TYPES = frozenset(
+    ("ID_MATCH", "CLASS_MATCH", "FUNCTION_MATCH", "MODULE_MATCH")
+)
+
+
+def _resolves_by_reference(value: object) -> bool:
+    """Whether unpickling ``value`` in another process yields that process's
+    canonical object, so an identity guard rebuilt at load checks the right id.
+    """
+    if isinstance(value, types.ModuleType):
+        return sys.modules.get(value.__name__) is value
+    if isinstance(value, enum.Enum):
+        owner = type(value)
+        return (
+            _resolves_by_reference(owner)
+            and owner.__dict__.get(value.name, None) is value
+        )
+    if not isinstance(value, (type, types.FunctionType, types.BuiltinFunctionType)):
+        return False
+    module = getattr(value, "__module__", None)
+    qualname = getattr(value, "__qualname__", None)
+    if not isinstance(module, str) or not isinstance(qualname, str):
+        return False
+    if "<locals>" in qualname:
+        return False
+    obj: object = sys.modules.get(module)
+    for part in qualname.split("."):
+        obj = getattr(obj, part, _PORTABLE_IDENTITY_MISSING)
+        if obj is _PORTABLE_IDENTITY_MISSING:
+            return False
+    return obj is value
+
+
+_PORTABLE_IDENTITY_MISSING = object()
+
+
+def is_portable_identity_guard(
+    guard_type: str, derived_guard_types: Sequence[str], value: object
+) -> bool:
+    """An identity guard on an object pickled by reference survives
+    serialization: the load rebuilds it against the loading process's object.
+    """
+    return (
+        guard_type in _PORTABLE_IDENTITY_GUARD_TYPES
+        and all(
+            d in _PORTABLE_IDENTITY_GUARD_TYPES
+            or d not in CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
+            for d in derived_guard_types
+        )
+        and _resolves_by_reference(value)
+    )
+
+
+def _portable_function_metadata(
+    guard_type: str, value: object
+) -> tuple[Callable[..., None], NamedTuple] | None:
+    if guard_type == "CLOSURE_MATCH":
+        if (code := _function_code_metadata(value)) is not None:
+            return GuardBuilder.FUNCTION_CODE_MATCH, code
+    if guard_type in ("CLOSURE_MATCH", "ID_MATCH", "FUNCTION_MATCH"):
+        if (method := _native_method_metadata(value)) is not None:
+            return GuardBuilder.NATIVE_METHOD_MATCH, method
+        if (bound := _method_code_metadata(value)) is not None:
+            return GuardBuilder.METHOD_CODE_MATCH, bound
+    return None
+
+
+def is_portable_function_guard(guard_type: str, value: object) -> bool:
+    """An identity guard on a function that ``to_portable_function_guard``
+    rewrites into a by-value check for serialization."""
+    return _portable_function_metadata(guard_type, value) is not None
+
+
+def to_portable_function_guard(guard: Guard, builder: GuardBuilder) -> Guard:
+    entry = make_guard_filter_entry(guard, builder)
+    if not entry.has_value:
+        return guard
+    portable = _portable_function_metadata(entry.guard_type, entry.value)
+    if portable is None:
+        return guard
+    create_fn, expected = portable
+    return dataclasses.replace(
+        guard,
+        create_fn=functools.partial(create_fn, expected=expected),
+        guard_types=None,
+        code_list=None,
+        obj_weakref=None,
+        guarded_class_weakref=None,
+        _hash=None,
+    )
 
 
 def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterEntry:
@@ -5146,6 +5457,11 @@ class CheckFunctionManager:
                 sorted_guards = [
                     guard for i, guard in enumerate(sorted_guards) if filter_results[i]
                 ]
+                if save_guards:
+                    sorted_guards = [
+                        to_portable_function_guard(guard, builder)
+                        for guard in sorted_guards
+                    ]
 
             # Redo the guards because filtering relies on the results from the last guard builder.
             builder, guard_manager = self.build_guards(
@@ -5287,6 +5603,14 @@ class CheckFunctionManager:
             if guard_type in ("TYPE_MATCH", "BUILTIN_MATCH"):
                 if guard._unserializable is not None:
                     raise_local_type_error(guard._unserializable)
+            elif guard_type in _PORTABLE_IDENTITY_GUARD_TYPES and (
+                is_portable_identity_guard(
+                    guard_type,
+                    derived_guard_types,
+                    make_guard_filter_entry(guard, builder).value,
+                )
+            ):
+                continue
             elif (
                 guard_type in CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
             ):
@@ -5319,6 +5643,13 @@ class CheckFunctionManager:
                 # builtin dict in the common case.
                 if name != builtins_dict_name:
                     used_global_vars.add(name)
+                else:
+                    while isinstance(source, ChainedSource):
+                        if isinstance(source, DictGetItemSource) and isinstance(
+                            source.base, GlobalSource
+                        ):
+                            self.used_builtin_vars.add(source.index)
+                        source = source.base
             elif name := get_local_source_name(source):
                 if not isinstance(name, str):
                     raise AssertionError(f"Expected str, got {type(name)}")
