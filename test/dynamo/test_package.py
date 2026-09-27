@@ -3,8 +3,10 @@
 import functools
 import gc
 import importlib
+import inspect
 import os
 import pickle
+import subprocess
 import sys
 import tempfile
 import types
@@ -22,6 +24,7 @@ from torch._dynamo.exc import Unsupported
 from torch._dynamo.guards import CheckFunctionManager
 from torch._dynamo.package import (
     _collapse_device_types,
+    _lookup_code,
     CompilePackage,
     DiskDynamoStore,
     DynamoCache,
@@ -123,6 +126,19 @@ class StaticParamModule(torch.nn.Module):
         return x.sin()
 
 
+class _DescriptorCodeOwner:
+    @property
+    def prop(self):
+        def inner():
+            return 1
+
+        return inner
+
+    @functools.cached_property
+    def cached(self):
+        return 2
+
+
 # A dynamic dim on a module-level tensor is what makes a SHAPE_ENV guard read a
 # global -- as a literal G['PKG_DYN_ROWS'] inside a Python lambda by default.
 PKG_DYN_ROWS = torch.randn(4, 3)
@@ -171,6 +187,57 @@ class TestPackage(torch._inductor.test_case.TestCase):
         self.assertEqual(_collapse_device_types(frozenset(("cuda", "xpu"))), "cuda")
         self.assertEqual(_collapse_device_types(frozenset(("mps", "xpu"))), "xpu")
         self.assertEqual(_collapse_device_types(frozenset(("hpu", "mps"))), "hpu")
+
+    def test_code_source_walk_skips_non_code_constants(self):
+        # Python 3.10 has no co_qualname, so the walk visits every constant of the
+        # module's functions. b"" and 2**61 - 1 both hash to 0, and putting both in
+        # one set compares them: a BytesWarning, which CI's python -bb raises. (0
+        # would too, but newer Pythons keep small ints out of co_consts.)
+        source = """
+def f():
+    a = b""
+    b = 2305843009213693951
+
+    class C:
+        def g(self):
+            return a, b
+
+    return C
+"""
+        script = """
+import sys
+from unittest import mock
+
+import torch._dynamo.package as package
+import bbmod
+
+code = bbmod.f().g.__code__
+with mock.patch.object(package.sys, "version_info", (3, 10, 0)):
+    name, path = package._get_code_source(code)
+print(eval(f"bbmod.{name}.{path}") is code)
+"""
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "bbmod.py"), "w") as f:
+                f.write(source)
+            out = subprocess.run(
+                [sys.executable, "-bb", "-c", script],
+                cwd=d,
+                capture_output=True,
+                text=True,
+            )
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertEqual(out.stdout.strip(), "True")
+
+    def test_code_source_resolves_through_descriptors(self):
+        # getattr on the class returns the descriptor, not the function it wraps.
+        owner = vars(_DescriptorCodeOwner)
+        getter = owner["prop"].fget.__code__
+        inner = next(c for c in getter.co_consts if inspect.iscode(c))
+        for code in (getter, inner, owner["cached"].func.__code__):
+            package = CompilePackage(None)
+            with package.code_context(code):
+                pass
+            self.assertIs(_lookup_code(package._codes[code]), code)
 
     def test_package_records_the_devices_a_graph_names(self):
         # The recording side of the scan, which is what the artifact carries. A

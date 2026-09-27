@@ -680,6 +680,30 @@ def _lookup_code(entry: _DynamoCodeCacheEntry) -> types.CodeType:
     return fn
 
 
+def _descriptor_functions(obj: Any) -> list[tuple[str, Any]]:
+    """The functions a descriptor wraps, as (attribute name, function) pairs.
+
+    ``getattr`` on the CLASS returns the descriptor itself, not the function
+    inside it, so a code object defined under ``@property`` resolves to a
+    ``property`` object that nothing downstream can descend into. The attribute
+    name is what makes the path round-trip: the loader replays it with plain
+    ``getattr``, and ``property.fget`` is an ordinary attribute.
+    """
+    if isinstance(obj, property):
+        return [
+            (name, fn)
+            for name, fn in (
+                ("fget", obj.fget),
+                ("fset", obj.fset),
+                ("fdel", obj.fdel),
+            )
+            if fn is not None
+        ]
+    if isinstance(obj, functools.cached_property):
+        return [("func", obj.func)] if obj.func is not None else []
+    return []
+
+
 def _raise_resolution_error(code: types.CodeType, scope: Any) -> Never:
     raise PackageError(
         f"Cannot resolve a fully qualified name for {code}. Lookup scope: {scope}"
@@ -710,7 +734,14 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
             if not hasattr(toplevel, part):
                 _raise_resolution_error(code, toplevel)
             toplevel = getattr(toplevel, part)
-            if inspect.isfunction(toplevel) or inspect.ismethod(toplevel):
+            if (
+                inspect.isfunction(toplevel)
+                or inspect.ismethod(toplevel)
+                or _descriptor_functions(toplevel)
+            ):
+                # Stop at a descriptor too, and let _find_code_source unwrap it.
+                # The remaining parts of a qualname like "C.prop.<locals>.inner"
+                # are not attributes of the property object.
                 break
     seen = set()
 
@@ -726,9 +757,20 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
             if obj is code:
                 return ""
 
+            # Only a code constant can hold `code`. Adding the others to `seen`
+            # compares b"" with 0 (equal hashes), an error under python -bb.
             for i, const in enumerate(obj.co_consts):
+                if not inspect.iscode(const):
+                    continue
                 if (res := _find_code_source(const)) is not None:
                     return f".co_consts[{i}]{res}"
+
+        for attr, wrapped in _descriptor_functions(obj):
+            if (res := _find_code_source(wrapped)) is not None:
+                # No `toplevel = obj` here: the recursive call sets it to the
+                # wrapped function, whose __qualname__ is the descriptor's own
+                # dotted name, which is what the loader walks to.
+                return f".{attr}{res}"
 
         if inspect.ismethod(obj):
             if (res := _find_code_source(obj.__func__)) is not None:
@@ -1196,6 +1238,11 @@ class CompilePackage:
             function_name=_FunctionId(function_name),
             code_source=code_source,
         )
+
+    @property
+    def current_entry(self) -> _DynamoCodeCacheEntry | None:
+        """The entry of the code object being compiled inside ``code_context``."""
+        return self._current_entry
 
     @contextlib.contextmanager
     def code_context(self, code: types.CodeType) -> Generator[None, None, None]:
