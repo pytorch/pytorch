@@ -19,6 +19,22 @@ struct NLLLossBackwardParams {
   bool has_weight;
 };
 
+template <typename index_t = int64_t>
+struct NLLLossForwardParams {
+  index_t n_classes;
+  index_t map_size;
+  index_t batch_stride;
+  index_t class_stride;
+  index_t input_offset;
+  index_t output_offset;
+  index_t target_offset;
+  index_t weight_offset;
+  index_t ignore_index;
+  index_t tid_offset;
+  index_t num_outputs;
+  bool has_weight;
+};
+
 template <typename index_t>
 struct CTCLossParams {
   index_t BLANK;
