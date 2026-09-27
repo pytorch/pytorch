@@ -1159,6 +1159,22 @@ command = [
 ]
 
 [[linter]]
+code = 'PUBLIC_API_CHECKS'
+include_patterns = [
+    'torch/**/*.py',
+]
+exclude_patterns = [
+    '**/fb/**',
+    'torch/csrc/**',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/public_api_linter.py',
+    '--',
+    '@{{PATHSFILE}}',
+]
+
+[[linter]]
 code = 'CALL_ONCE'
 include_patterns = [
     'c10/**',
