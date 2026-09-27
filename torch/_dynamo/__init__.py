@@ -8,86 +8,76 @@ compiled backends to get the best of both worlds: usability and performance. Thi
 seamlessly optimize PyTorch programs, including those using modern Python features.
 """
 
-import gc
-
 import torch
 
+from . import (
+    aot_compile,
+    bytecode_debugger,
+    config,
+    convert_frame,
+    eval_frame,
+    functional_export,
+    resume_execution,
+)
+from .backends.registry import list_backends, lookup_backend, register_backend
+from .callback import callback_handler, on_compile_end, on_compile_start
+from .code_context import code_context
+from .convert_frame import replay
+from .decorators import (
+    allow_c_slot,
+    allow_in_graph,
+    assume_constant_result,
+    disable,
+    disable_nested_graph_breaks,
+    disallow_in_graph,
+    dont_skip_tracing,
+    error_on_graph_break,
+    forbid_in_graph,
+    graph_break,
+    is_dynamo_disable_recursive,
+    mark_dynamic,
+    mark_static,
+    mark_static_address,
+    maybe_mark_dynamic,
+    nonstrict_trace,
+    override_cudagraphs,
+    override_optimization_hint,
+    patch_dynamo_config,
+    run,
+    set_stance,
+    skip_frame,
+    step_unsupported,
+    substitute_in_graph,
+)
+from .eval_frame import (
+    _reset_guarded_backend_cache,
+    explain,
+    export,
+    is_dynamo_supported,
+    is_inductor_supported,
+    optimize,
+    optimize_assert,
+    OptimizedModule,
+    reset_code,
+)
 
-# Importing Dynamo allocates enough long-lived objects to trigger several full
-# collections of an ever-growing heap; defer them as compiles do (see
-# config.gc_gen2_threshold_during_compile).
-_gc_thresholds = gc.get_threshold()
-gc.set_threshold(*_gc_thresholds[:2], max(_gc_thresholds[2], 1000))
-try:
-    from . import (
-        aot_compile,
-        bytecode_debugger,
-        config,
-        convert_frame,
-        eval_frame,
-        functional_export,
-        resume_execution,
-    )
-    from .backends.registry import list_backends, lookup_backend, register_backend
-    from .callback import callback_handler, on_compile_end, on_compile_start
-    from .code_context import code_context
-    from .convert_frame import replay
-    from .decorators import (
-        allow_c_slot,
-        allow_in_graph,
-        assume_constant_result,
-        disable,
-        disable_nested_graph_breaks,
-        disallow_in_graph,
-        dont_skip_tracing,
-        error_on_graph_break,
-        forbid_in_graph,
-        graph_break,
-        is_dynamo_disable_recursive,
-        mark_dynamic,
-        mark_static,
-        mark_static_address,
-        maybe_mark_dynamic,
-        nonstrict_trace,
-        override_cudagraphs,
-        override_optimization_hint,
-        patch_dynamo_config,
-        run,
-        set_stance,
-        skip_frame,
-        step_unsupported,
-        substitute_in_graph,
-    )
-    from .eval_frame import (
-        _reset_guarded_backend_cache,
-        explain,
-        export,
-        is_dynamo_supported,
-        is_inductor_supported,
-        optimize,
-        optimize_assert,
-        OptimizedModule,
-        reset_code,
-    )
+# pyrefly: ignore [deprecated]
+from .external_utils import is_compiling
+from .mutation_guard import GenerationTracker
+from .pgo import reset_code_state
+from .symbolic_convert import TensorifyState
+from .utils import (
+    graph_break_reasons,
+    guard_failures,
+    orig_code_map,
+    register_hook_for_recompile_user_context,
+    reset_frame_count,
+    reset_recompile_user_contexts,
+)
 
-    # pyrefly: ignore [deprecated]
-    from .external_utils import is_compiling
-    from .mutation_guard import GenerationTracker
-    from .pgo import reset_code_state
-    from .symbolic_convert import TensorifyState
-    from .utils import (
-        graph_break_reasons,
-        guard_failures,
-        orig_code_map,
-        register_hook_for_recompile_user_context,
-        reset_frame_count,
-        reset_recompile_user_contexts,
-    )
 
-    # Register polyfill functions
-    from .polyfills import loader as _  # usort: skip
-finally:
-    gc.set_threshold(*_gc_thresholds)
+# Register polyfill functions
+from .polyfills import loader as _  # usort: skip
 
 
 __all__ = [
