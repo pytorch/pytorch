@@ -156,8 +156,8 @@ associative_scan_op = AssociativeScanOp()
 _NATIVE_COMBINE_MODES = {
     "aten.add.Tensor": "add",
     "aten.mul.Tensor": "mul",
-    "aten.maximum": "max",
-    "aten.minimum": "min",
+    "aten.maximum.default": "max",
+    "aten.minimum.default": "min",
 }
 
 
@@ -173,6 +173,13 @@ def _classify_native_combine(combine_fn, leaves_xs):
     ):
         return None
     if len(leaves_xs) != 1:
+        return None
+    # Device gating: native aten::associative_scan kernels only exist for CPU and CUDA.
+    # Other devices (e.g. MPS, XPU) must fall back to the generic HOP.
+    if not all(
+        isinstance(x, torch.Tensor) and x.device.type in ("cpu", "cuda")
+        for x in leaves_xs
+    ):
         return None
     sample = (
         first_slice_copy(leaves_xs[0]),
@@ -190,6 +197,14 @@ def _classify_native_combine(combine_fn, leaves_xs):
         return None
     tensor_args = [a for a in node.args if isinstance(a, torch.fx.Node)]
     if len(tensor_args) != 2:
+        return None
+    # alpha != 1 is not associative and ignored by the native kernel.
+    # Guard against alpha != 1 in kwargs or positional args.
+    if node.kwargs.get("alpha", 1) != 1:
+        return None
+    if any(k != "alpha" for k in node.kwargs):
+        return None
+    if len(node.args) > 2 and (len(node.args) != 3 or node.args[2] != 1):
         return None
     return _NATIVE_COMBINE_MODES.get(str(node.target))
 

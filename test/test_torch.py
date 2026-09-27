@@ -11610,6 +11610,7 @@ class TestAssociativeScan(TestCase):
 
     @dtypes(torch.float32, torch.float16, torch.bfloat16)
     def test_associative_scan_functional_dispatch(self, device, dtype):
+        import unittest.mock
         from torch._higher_order_ops.associative_scan import associative_scan
 
         atol, rtol = self._scan_tol(dtype)
@@ -11622,8 +11623,46 @@ class TestAssociativeScan(TestCase):
         ]
         for combine, mode in combines:
             expected = self._scan_ref(x, mode, 0)
-            actual = associative_scan(combine, x, dim=0)
+            with unittest.mock.patch(
+                "torch.ops.aten.associative_scan", wraps=torch.ops.aten.associative_scan
+            ) as mock_scan:
+                actual = associative_scan(combine, x, dim=0)
+                mock_scan.assert_called()
             self.assertEqual(actual, expected, atol=atol, rtol=rtol)
+
+        # Non-associative combine or unhandled kwargs should NOT route to native op
+        with unittest.mock.patch(
+            "torch.ops.aten.associative_scan", wraps=torch.ops.aten.associative_scan
+        ) as mock_scan:
+            actual = associative_scan(lambda u, v: torch.add(u, v, alpha=2), x, dim=0)
+            mock_scan.assert_not_called()
+
+    def test_classify_native_combine(self, device):
+        from torch._higher_order_ops.associative_scan import _classify_native_combine
+
+        x = torch.randn(4, 4, device=device)
+        self.assertEqual(_classify_native_combine(lambda u, v: u + v, [x]), "add")
+        self.assertEqual(
+            _classify_native_combine(lambda u, v: torch.add(u, v, alpha=1), [x]), "add"
+        )
+        self.assertEqual(_classify_native_combine(lambda u, v: u * v, [x]), "mul")
+        self.assertEqual(_classify_native_combine(torch.maximum, [x]), "max")
+        self.assertEqual(
+            _classify_native_combine(lambda u, v: torch.maximum(u, v), [x]), "max"
+        )
+        self.assertEqual(_classify_native_combine(torch.minimum, [x]), "min")
+        self.assertEqual(
+            _classify_native_combine(lambda u, v: torch.minimum(u, v), [x]), "min"
+        )
+
+        # alpha != 1 is not associative and should not match native add
+        self.assertIsNone(
+            _classify_native_combine(lambda u, v: torch.add(u, v, alpha=2), [x])
+        )
+
+        # Non-CPU/CUDA device (e.g. meta) should not route to native
+        meta_x = torch.randn(4, 4, device="meta")
+        self.assertIsNone(_classify_native_combine(lambda u, v: u + v, [meta_x]))
 
     def test_associative_scan_errors(self, device):
         x = torch.randn(4, 4, device=device)
