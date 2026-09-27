@@ -2289,13 +2289,22 @@ class TestForeachGroupsUnit(InductorTestCase):
         self.assertIn(-1, groups)
 
         # With and without groups should produce identical results
+        group_size, rank = 2, 0
         result_with = _pre_bucket_all_gather(
-            ag_ins, 2, torch.float32, out_dtype_ints, 0, groups
+            ag_ins, group_size, torch.float32, out_dtype_ints, rank, groups
         )
         result_without = _pre_bucket_all_gather(
-            ag_ins, 2, torch.float32, out_dtype_ints, 0, None
+            ag_ins, group_size, torch.float32, out_dtype_ints, rank, None
         )
-        self.assertTrue(torch.allclose(result_with, result_without))
+        # _pre_bucket_all_gather writes only this rank's slot. The other slots
+        # are left for the all_gather collective, which this test does not run,
+        # so they hold uninitialized memory and must not be compared.
+        n = result_with.numel() // group_size
+        written = slice(rank * n, (rank + 1) * n)
+        # Byte-level reference: t2 is fp16 packed into the fp32 bucket.
+        expected = torch.cat([t.reshape(-1).view(torch.uint8) for t in ag_ins])
+        self.assertEqual(result_with[written].view(torch.uint8), expected)
+        self.assertEqual(result_without[written].view(torch.uint8), expected)
 
 
 instantiate_device_type_tests(
