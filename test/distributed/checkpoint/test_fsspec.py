@@ -431,7 +431,7 @@ class TestFileSystem(TestCase):
         with (
             patch.object(reader.fs.fs, "cat_ranges", wraps=reader.fs.fs.cat_ranges),
             patch(
-                "torch.distributed.checkpoint.filesystem.narrow_tensor_by_index",
+                "torch.distributed.checkpoint._fsspec_filesystem.narrow_tensor_by_index",
                 side_effect=RuntimeError("simulated cpu crash"),
             ),
         ):
@@ -460,7 +460,7 @@ class TestFileSystem(TestCase):
         with (
             patch.object(reader.fs.fs, "cat_ranges", wraps=reader.fs.fs.cat_ranges),
             patch(
-                "torch.distributed.checkpoint.filesystem.narrow_tensor_by_index",
+                "torch.distributed.checkpoint._fsspec_filesystem.narrow_tensor_by_index",
                 side_effect=RuntimeError("shutdown test"),
             ),
         ):
