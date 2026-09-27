@@ -42,9 +42,9 @@ def get_source(stacklevel: int) -> str:
     Use stacklevel=2 to get the caller's caller's source
     etc.
     """
-    frame = inspect.getframeinfo(sys._getframe(stacklevel))
-    source = f"{frame.filename}:{frame.lineno}"
-    return source
+    # Not inspect.getframeinfo: it reads the source file and scans sys.modules.
+    frame = sys._getframe(stacklevel)
+    return f"{frame.f_code.co_filename}:{frame.f_lineno}"
 
 
 def parse_namespace(qualname: str) -> tuple[str, str]:
