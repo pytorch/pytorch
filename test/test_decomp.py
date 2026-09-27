@@ -1319,6 +1319,16 @@ class DecompOneOffTests(TestCase):
             torch._decomp.decompositions._weight_norm_interface(inp, inp2),
         )
 
+        # 1-D v: norm is the per-element abs, kept in float for reduced dtypes.
+        # |v| is bounded away from zero so g / norm cannot overflow in half.
+        for dtype in (torch.float, torch.half, torch.bfloat16):
+            v1d = torch.linspace(-3, 3, 30, device=device, dtype=dtype)
+            g1d = torch.randn(30, device=device, dtype=dtype)
+            self.assertEqual(
+                torch.ops.aten._weight_norm_interface(v1d, g1d),
+                torch._decomp.decompositions._weight_norm_interface(v1d, g1d),
+            )
+
     @onlyCUDA
     @skipIfCrossRef
     def test_fused_dropout_decomposition_extreme_p(self, device):

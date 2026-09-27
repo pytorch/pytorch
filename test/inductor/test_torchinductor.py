@@ -17779,6 +17779,22 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             lambda msg: f"{msg}\nRef:\n{ref_grad_list}\nAct:\n{act_grad_list}",
         )
 
+    def test_weight_norm_1d(self):
+        # https://github.com/pytorch/pytorch/issues/198676
+        def fn(v, g):
+            return torch._weight_norm(v, g, 0)
+
+        opt_fn = torch.compile(fn)
+        for dtype in (torch.float32, torch.float16, torch.bfloat16):
+            v = torch.randn(8, device=self.device, dtype=dtype, requires_grad=True)
+            g = torch.randn(8, device=self.device, dtype=dtype, requires_grad=True)
+            grad_out = torch.randn(8, device=self.device, dtype=dtype)
+            ref = fn(v, g)
+            ref_grad = torch.autograd.grad(ref, (v, g), grad_out)
+            act = opt_fn(v, g)
+            act_grad = torch.autograd.grad(act, (v, g), grad_out)
+            self.assertEqual((ref, ref_grad), (act, act_grad))
+
     def test_chunk_recompiles(self):
         def f(x):
             return x.chunk(4)
