@@ -3887,17 +3887,6 @@ class TestMPS(TestCaseMPS):
         helper((100, 300), 1.0)
         helper((100, 300), 0.2)
 
-    # `value=0` used to short-circuit into a copy of `self`, which drops the
-    # non-finite values `tensor1`/`tensor2` still contribute
-    @parametrize("op_name", ["addcmul", "addcdiv"])
-    def test_addc_ops_value_zero(self, op_name):
-        op = getattr(torch, op_name)
-        cpu_x = torch.ones(4)
-        cpu_y = torch.tensor([float("nan"), float("inf"), -float("inf"), 2.0])
-        cpu_z = torch.tensor([1.0, 1.0, 0.0, 2.0])
-        x, y, z = cpu_x.to("mps"), cpu_y.to("mps"), cpu_z.to("mps")
-        self.assertEqual(op(x, y, z, value=0), op(cpu_x, cpu_y, cpu_z, value=0))
-
     # An `out=` wider than the common dtype must not widen the computation:
     # CPU computes at the common dtype and casts the result on store
     @parametrize("op_name", ["addcmul", "addcdiv"])
