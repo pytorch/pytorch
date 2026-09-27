@@ -1331,7 +1331,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             # The meta template is a plain tensor, not another fake carrying
             # the mode (without no_dispatch the dump still succeeds, with the
             # mode and its converters pickled along).
-            _, args = pickler.reducer_override(fake)
+            args = pickler.reducer_override(fake)[1]
             self.assertIs(type(args[0]), torch.Tensor)
             pickler.dump({"t": fake})
             self.assertNotIn(b"FakeTensorMode", buf.getvalue())
@@ -4106,6 +4106,19 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(ref, loaded, {"x": torch.randn(3, 10, 2)}, True)
         self._test_check_fn(ref, loaded, {"x": torch.randn(3, 11, 2)}, False)
         self._test_check_fn(ref, loaded, {"x": torch.randn(3, 2, 2)}, False)
+
+    def test_guarded_tensor_attribute_round_trips(self):
+        def fn(x):
+            return x * x.scale
+
+        x = torch.randn(3)
+        x.scale = 2
+        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, x)
+        same, other = torch.randn(3), torch.randn(3)
+        same.scale = 2
+        other.scale = 3
+        self._test_check_fn(ref, loaded, {"x": same}, True)
+        self._test_check_fn(ref, loaded, {"x": other}, False)
 
     def test_builtin_match(self):
         def fn(x):
