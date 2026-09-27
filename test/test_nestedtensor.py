@@ -36,7 +36,6 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
-    dtypesIfXPU,
     instantiate_device_type_tests,
     onlyCPU,
     onlyCUDA,
@@ -6907,9 +6906,16 @@ torch.cuda.synchronize()
             else [torch.float16, torch.float32]
         )
     )
-    # XPU float16/bfloat16 SDPA failure: https://github.com/intel/torch-xpu-ops/issues/5346
-    @dtypesIfXPU(torch.float32)
     def test_sdpa(self, device, dtype):
+        if torch.device(device).type == "xpu" and dtype in (
+            torch.float16,
+            torch.bfloat16,
+        ):
+            self.skipTest(
+                "XPU float16/bfloat16 SDPA failure: "
+                "https://github.com/intel/torch-xpu-ops/issues/5346"
+            )
+
         batch_size = 1
         emb_dims = 128
         n_heads = 8
@@ -7270,9 +7276,13 @@ torch.cuda.synchronize()
         )
 
     @dtypes(torch.float32, torch.double, torch.half)
-    # XPU float16 SDPA failure: https://github.com/intel/torch-xpu-ops/issues/5346
-    @dtypesIfXPU(torch.float32, torch.double)
     def test_sdpa_with_constant_sequence_length(self, device, dtype):
+        if torch.device(device).type == "xpu" and dtype == torch.half:
+            self.skipTest(
+                "XPU float16 SDPA failure: "
+                "https://github.com/intel/torch-xpu-ops/issues/5346"
+            )
+
         # shape (B, P*, S, D)
         # B: batch size
         # P*: ragged number of prompts
