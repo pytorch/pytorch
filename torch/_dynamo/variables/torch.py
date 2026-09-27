@@ -83,6 +83,7 @@ from ..source import (
 )
 from ..utils import (
     _is_tensorify_enabled,
+    check_positional,
     check_unspec_or_constant_args,
     fqn,
     guard_if_dyn,
@@ -1234,6 +1235,30 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
             return result
 
+        @register(math.atan2, math.copysign, math.remainder)
+        def handle_math_2(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker | None:
+            # Mirrors CPython's shared math_2 argument conversion.
+            # https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Modules/mathmodule.c#L1035-L1068
+            from .object_protocol import pyfloat_as_double
+
+            # CPython uses the qualified name when rejecting keyword arguments,
+            # while FUNC2 passes the bare name to _PyArg_CheckPositional.
+            name = self.value.__name__
+            no_keywords(tx, f"math.{name}", kwargs)
+            check_positional(tx, name, len(args), 2, 2)
+            if not any(
+                isinstance(arg, variables.UserDefinedObjectVariable) for arg in args
+            ):
+                return None
+
+            converted = [pyfloat_as_double(tx, arg) for arg in args]
+            return self.call_function(tx, converted, {})
+
         @register(math.radians)
         def handle_radians(
             self,
@@ -2250,6 +2275,13 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 isinstance(condition, variables.SymNodeVariable)
                 and condition.evaluate_expr()
             ):
+                return ConstantVariable.create(None)
+            if condition.is_tensor():
+                tx.output.create_proxy(
+                    "call_function",
+                    torch._assert_async,
+                    *proxy_args_kwargs((condition, message), {}),
+                )
                 return ConstantVariable.create(None)
             return None
 
@@ -3331,9 +3363,17 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             from .constant import ConstantVariable
             from .dicts import ConstDictVariable
             from .lists import BaseListVariable
-            from .tensor import TensorVariable
+            from .tensor import _contains_graph_intermediate, TensorVariable
 
             if not config.trace_autograd_ops:
+                inputs = args[1] if len(args) >= 2 else kwargs.get("inputs")
+                skip_frame = (
+                    _contains_graph_intermediate(inputs)
+                    or tx.has_live_graph_intermediate()
+                )
+                # AOTAutograd does not preserve relationships between outputs of
+                # a compiled prefix. Skip this invocation if eager grad targets an
+                # intermediate or another differentiable intermediate stays live.
                 unimplemented(
                     gb_type="using `torch.autograd.grad` with `torch._dynamo.config.trace_autograd_ops=False`",
                     context=f"trace_autograd_ops={config.trace_autograd_ops}",
@@ -3344,6 +3384,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     hints=[
                         "Change `torch._dynamo.config.trace_autograd_ops` to `True`.",
                     ],
+                    skip_frame=skip_frame,
+                    preserve_skip_frame_after_inline=skip_frame,
+                    apply_to_code=not skip_frame,
                 )
 
             # Graph break if we detected on a previous attempt that autograd.grad

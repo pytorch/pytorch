@@ -40,7 +40,6 @@ L1:
   - riseproject-dev/pytorch-ci
   - NVIDIA-dev/pytorch-oot-internal
   - google-pytorch/torch_tpu
-  - Isalia20/pytorch-mps-ci
 
 L2:
   - NVIDIA/pytorch-windows-ci:
@@ -54,6 +53,7 @@ L2:
   - vllm-project/vllm:
       events:
         - nightly
+  - Isalia20/pytorch-mps-ci
 
 L3:
   # Canonical test repos for CRCR.
