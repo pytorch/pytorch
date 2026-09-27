@@ -1965,7 +1965,6 @@ class GraphLowering(torch.fx.Interpreter):
             (
                 self.graph_inputs_original[name].get_name()
                 if name in self.graph_inputs_original
-                and name not in self.mutated_buffers
                 else None
             )
             for name in self.graph_input_names
@@ -1984,7 +1983,9 @@ class GraphLowering(torch.fx.Interpreter):
             )
 
         output_names = [
-            output.maybe_get_name() if isinstance(output, ir.IRNode) else None
+            output.maybe_get_name()
+            if isinstance(output, ir.IRNode) and output.has_tensor_output()
+            else None
             for output in self.graph_outputs
         ]
         current_input_output = matching_pairs(
