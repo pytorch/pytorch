@@ -40,9 +40,8 @@ from torch.profiler import kineto_available
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     IS_LINUX,
-    MI200_ARCH,
+    MI300_ARCH,
     skipIfRocmArch,
-    TEST_WITH_ROCM,
     TEST_XPU,
 )
 from torch.testing._internal.inductor_utils import (
@@ -860,7 +859,6 @@ class TestExternKernelCaller(TestCase):
         expected = torch.mm(a, b)
         torch.testing.assert_close(result, expected, atol=1e-4, rtol=1e-4)
 
-    @skipIfRocmArch(MI200_ARCH)
     @patches
     def test_extern_kernel_caller_hash_key_deduplication(self):
         def fn(a, b, c, d):
@@ -887,7 +885,12 @@ class TestExternKernelCaller(TestCase):
         if not torch.version.hip:  # autotuning is not guaranteed to run on ROCm
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
-    @skipIfRocmArch(MI200_ARCH)
+    # gfx942: the 128x128x64 / 8-warp Triton candidate is miscompiled by the AMD
+    # block-pingpong schedule (LDS race, stale-by-one-BLOCK_K A operands), so the
+    # autotune correctness check fails intermittently; the compile-worker pool
+    # does not forward TRITON_HIP_USE_BLOCK_PINGPONG, so it cannot be disabled
+    # per test. https://github.com/triton-lang/triton/issues/11696
+    @skipIfRocmArch(MI300_ARCH)
     @patches
     def test_extern_kernel_benchmark_valid_timing(self):
         def fn(a, b):
@@ -1284,6 +1287,44 @@ class TestTemplateRender(TestCase):
             for kernel in template_kernels
         )
 
+    @requires_triton()
+    def test_jit_lines_preserves_hip_options(self):
+        kernel = unittest.mock.MagicMock()
+        kernel.use_jit = False
+        kernel.args.python_argdefs.return_value = ([], [], [], [])
+        kernel.index_dtype = "tl.int32"
+        kernel.output_node.get_device.return_value = torch.device("cuda")
+        kernel.meta = {
+            "matrix_instr_nonkdim": 16,
+            "waves_per_eu": 0,
+            "kpack": 1,
+        }
+        kernel.triton_meta = None
+        kernel.inductor_meta_common.return_value = {}
+        kernel.num_stages = 1
+        kernel.num_warps = 4
+        kernel.num_consumer_groups = 0
+        kernel.num_buffers_warp_spec = 0
+
+        with patch.object(
+            select_algorithm,
+            "triton_meta_device_props",
+            return_value=unittest.mock.MagicMock(),
+        ):
+            TritonTemplateKernel.jit_lines(kernel)
+
+        self.assertEqual(
+            {
+                key: kernel.triton_meta[key]
+                for key in ("matrix_instr_nonkdim", "waves_per_eu", "kpack")
+            },
+            {
+                "matrix_instr_nonkdim": 16,
+                "waves_per_eu": 0,
+                "kpack": 1,
+            },
+        )
+
     @requires_gpu()
     @requires_triton()
     @config.patch(cuda_backend="triton")
@@ -1416,12 +1457,10 @@ class TestTemplateRender(TestCase):
                 (large_capture,),
             )
 
-    @unittest.skipIf(
-        TEST_WITH_ROCM or TEST_XPU, "https://github.com/pytorch/pytorch/issues/179959"
-    )
     @requires_gpu()
     @requires_triton()
     @config.patch(cuda_backend="triton")
+    @unittest.skipIf(TEST_XPU, "https://github.com/pytorch/pytorch/issues/179959")
     def test_external_template_prologue_epilogue_fusion(self):
         """
         Tests prologue fusion, epilogue fusion, and extra inputs through the

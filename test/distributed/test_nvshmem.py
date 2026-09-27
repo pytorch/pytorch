@@ -405,6 +405,54 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
 
         dist.barrier()
 
+    @skip_but_pass_in_sandcastle_if(
+        TEST_WITH_ROCM, "graph capture over rocshmem not supported yet"
+    )
+    def test_cuda_graph_collective(self) -> None:
+        self._init_device()
+        group_name = dist.group.WORLD.group_name
+
+        dtype = torch.float
+        numel = 1024
+
+        # nvshmem_malloc barriers, so allocation cannot happen under capture; a
+        # first rendezvous cannot either, since its team split barriers too.
+        inp = symm_mem.empty(numel, dtype=dtype, device=self.device)
+        out = torch.empty(numel, dtype=dtype, device=self.device)
+        symm_mem.rendezvous(inp, group=group_name)
+
+        # Replays re-run the captured kernels against whatever is in memory, so
+        # the input is driven by a device-side value updated between replays.
+        rank_val = torch.empty((), dtype=dtype, device=self.device)
+
+        def expected(offset: int) -> float:
+            return float(
+                self.world_size * offset + self.world_size * (self.world_size - 1) / 2
+            )
+
+        stream = device_module.Stream(device=self.device)
+        # Warm up on the stream that will be captured.
+        with device_module.stream(stream):
+            rank_val.fill_(self.rank)
+            inp.fill_(rank_val)
+            torch.ops.symm_mem.one_shot_all_reduce_out(inp, "sum", group_name, out)
+            self.assertEqual(out, torch.full_like(out, expected(0)))
+        stream.synchronize()
+        dist.barrier()
+
+        graph = device_module.CUDAGraph()
+        with device_module.graph(graph, stream=stream):
+            inp.fill_(rank_val)
+            torch.ops.symm_mem.one_shot_all_reduce_out(inp, "sum", group_name, out)
+
+        for offset in range(1, 4):
+            rank_val.fill_(self.rank + offset)
+            out.fill_(-1)
+            graph.replay()
+            self.assertEqual(out, torch.full_like(out, expected(offset)))
+
+        dist.barrier()
+
 
 # Negative tests for barrier/put_signal/wait_signal. They use
 # MultiProcessTestCase rather than MultiProcContinuousTest: a device-side
