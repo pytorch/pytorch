@@ -173,10 +173,6 @@ struct ConcretePyInterpreterVTable final
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack,
       c10::Device common_device) const override;
-  bool fake_try_fast_op_impls(
-      const c10::OperatorHandle& op,
-      torch::jit::Stack* stack,
-      c10::Device common_device) const override;
   bool fake_try_prim_meta(
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack) const override;
@@ -1032,10 +1028,6 @@ DEFINE_CACHED_PYTHON_IMPORT(
     py::module::import("torch._subclasses.fake_tensor")
         .attr("torch_decomp_decompositions"))
 DEFINE_CACHED_PYTHON_IMPORT(
-    get_cached_fast_op_impls,
-    py::module::import("torch._subclasses.fake_impls")
-        .attr("get_fast_op_impls")())
-DEFINE_CACHED_PYTHON_IMPORT(
     get_run_fake_impl,
     py::module::import("torch._library.fake_impl").attr("run_fake_impl"))
 DEFINE_CACHED_PYTHON_IMPORT(
@@ -1050,20 +1042,17 @@ DEFINE_CACHED_PYTHON_IMPORT(
 #undef DEFINE_CACHED_PYTHON_IMPORT
 
 // Returns a per-output converter that stamps a callback's result tensors as
-// C++ fakes on the op's common device.
-// skip_fake: op_impl already converts its outputs to fakes through
-// fake_mode.from_real_tensor, so do not re-fakeify an already-fake output here.
+// C++ fakes on the op's common device. Already-fake outputs are skipped:
+// op_impl converts its outputs to fakes through fake_mode.from_real_tensor.
 std::function<py::object(py::object)> make_fake_device_stamp(
     c10::Device common_device,
-    std::shared_ptr<c10::FakeTensorMode> mode,
-    bool skip_fake) {
-  return [common_device, mode = std::move(mode), skip_fake](
-             py::object obj) -> py::object {
+    std::shared_ptr<c10::FakeTensorMode> mode) {
+  return [common_device, mode = std::move(mode)](py::object obj) -> py::object {
     if (!THPVariable_Check(obj.ptr())) {
       return obj;
     }
     at::Tensor t = THPVariable_Unpack(obj.ptr());
-    if (!t.defined() || (skip_fake && t.is_fake())) {
+    if (!t.defined() || t.is_fake()) {
       return obj;
     }
     at::set_and_normalize_fake_device(t.unsafeGetTensorImpl(), common_device);
@@ -1293,8 +1282,7 @@ bool ConcretePyInterpreterVTable::fake_try_op_impl(
   py::handle op_impl_checks = get_op_implementations_checks();
 
   auto active = get_active_fake_mode();
-  auto stamp =
-      make_fake_device_stamp(common_device, active.mode, /*skip_fake=*/true);
+  auto stamp = make_fake_device_stamp(common_device, active.mode);
 
   // Check op_impl_checks for op: if an impl applies, run it; otherwise keep
   // going (it returns NotImplemented). Args are popped and parsed once because
@@ -1335,33 +1323,6 @@ bool ConcretePyInterpreterVTable::fake_try_op_impl(
     return true;
   }
   return false;
-}
-
-// Try the Python fast op-impl (pointwise fast path) for op; its raw meta
-// outputs are stamped onto common_device.
-bool ConcretePyInterpreterVTable::fake_try_fast_op_impls(
-    const c10::OperatorHandle& op,
-    torch::jit::Stack* stack,
-    c10::Device common_device) const {
-  py::gil_scoped_acquire gil;
-  py::handle py_op = getTorchApiFunction(op);
-
-  py::handle fast_op_impls = get_cached_fast_op_impls();
-  if (!fast_op_impls.contains(py_op)) {
-    return false;
-  }
-  py::object fast_impl = fast_op_impls[py_op];
-
-  auto active = get_active_fake_mode();
-
-  return run_fake_python_callback(
-      op,
-      stack,
-      [&](const py::object& args, const py::dict& kwargs) {
-        return fast_impl(active.py_fake_mode, *args, **kwargs);
-      },
-      make_fake_device_stamp(common_device, active.mode, /*skip_fake=*/false),
-      "fast_op_impl");
 }
 
 // Try op's prim_meta_impl (prims meta rule) if it defines one.
