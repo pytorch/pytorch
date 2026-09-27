@@ -1645,7 +1645,8 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
   uint64_t resultSize = batch1.size(0) * batch1.size(1) * batch2.size(2);
   uint64_t aSize = batch1.numel();
   uint64_t bSize = batch2.numel();
-  if (resultSize > pow(2, 32) || aSize > pow(2, 32) || bSize > pow(2, 32)) {
+  uint64_t bMatrixSize = batch2.size(-2) * batch2.size(-1);
+  if (resultSize > pow(2, 32) || aSize > pow(2, 32) || (bSize > pow(2, 32) && bMatrixSize <= pow(2, 32))) {
     // Tiled path uses raw MPSNDArray directly from buffers, so we must resolve conjugate views
     // and explicitly enforce contiguous memory layouts to prevent silent math corruption
     // on transposed or sliced views (which also breaks the backward pass).
