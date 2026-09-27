@@ -14,3 +14,5 @@ torch.special.airy_ai(input=t)  # E: Unexpected keyword argument
 torch.linalg.vector_norm(t, dim=[0.5])  # E: incompatible type
 torch.linalg.vector_norm(t, ord=None)  # E: incompatible type
 torch.masked.norm(t, ord=None)  # E: incompatible type
+torch.special.xlog1py(input=1.0, other=t)  # E: No overload variant
+torch.xlogy(input=1.0, other=t)  # E: No overload variant

@@ -89,6 +89,11 @@ TYPE_STUBS = [
             "tools/pyi/gen_pyi.py",
             "torchgen/api/python.py",
             "torch/_C/_native_functions.pyi.in",
+            "torch/_C/__init__.pyi.in",
+            "torch/_C/_VariableFunctions.pyi.in",
+            "torch/_C/_nn.pyi.in",
+            "torch/_C/return_types.pyi.in",
+            "torch/nn/functional.pyi.in",
         ],
         [
             sys.executable,

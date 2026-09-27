@@ -14,7 +14,12 @@ from tools.autograd import gen_autograd_functions, load_derivatives
 from tools.pyi.gen_pyi import gen_pyi, generate_type_hints
 
 from torchgen import dest
-from torchgen.api.python import argument_type_str_pyi, PythonSignatureGroup, signature
+from torchgen.api.python import (
+    argument_type_str_pyi,
+    PythonArgument,
+    PythonSignatureGroup,
+    signature,
+)
 from torchgen.api.types import CppSignatureGroup, DispatcherSignature
 from torchgen.context import native_function_manager
 from torchgen.dest import native_functions as native_functions_dest
@@ -82,11 +87,24 @@ class TestGenPyi(unittest.TestCase):
                 "dim: _int | SymInt | Sequence[_int | SymInt] | None", stubs["fft"]
             )
             self.assertIn("def linalg_det(A: Tensor", stubs["linalg"])
-            self.assertIn("input: Number | _complex | PySymType", stubs["special"])
             self.assertIn("-> torch.return_types.linalg_qr", stubs["linalg"])
             returns = (Path(output) / "torch/return_types.pyi").read_text()
             self.assertIn("class linalg_qr(", returns)
             self.assertNotIn("QRResult", returns)
+
+    def test_self_keyword_matches_parser(self) -> None:
+        for schema in ("Tensor", "Scalar"):
+            for method in (False, True):
+                for use_sequence in (False, True):
+                    with self.subTest(
+                        schema=schema, method=method, use_sequence=use_sequence
+                    ):
+                        arg = PythonArgument("self", Type.parse(schema), None, None)
+                        parser_name = arg.argument_str(method=method).rsplit(" ", 1)[1]
+                        stub_name = arg.argument_str_pyi(
+                            method=method, use_sequence=use_sequence
+                        ).split(":", 1)[0]
+                        self.assertEqual(stub_name, parser_name)
 
     def test_native_module_symbolic_dimensions(self) -> None:
         for schema, expected, legacy in (

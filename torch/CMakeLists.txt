@@ -244,6 +244,8 @@ add_custom_command(
       "${TORCH_SRC_DIR}/_C/__init__.pyi.in"
       "${TORCH_SRC_DIR}/_C/_native_functions.pyi.in"
       "${TORCH_SRC_DIR}/_C/_VariableFunctions.pyi.in"
+      "${TORCH_SRC_DIR}/_C/_nn.pyi.in"
+      "${TORCH_SRC_DIR}/_C/return_types.pyi.in"
       "${TORCH_SRC_DIR}/nn/functional.pyi.in"
       "${TORCH_ROOT}/aten/src/ATen/native/native_functions.yaml"
       "${TORCH_ROOT}/aten/src/ATen/native/tags.yaml"

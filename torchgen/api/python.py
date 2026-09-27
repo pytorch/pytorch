@@ -272,7 +272,7 @@ class PythonArgument:
         # for the parse string
         if (
             name == "self"
-            and str(self.type) in ("Tensor", "Scalar")
+            and str(self.type) == "Tensor"
             and not method
             and not deprecated
         ):
@@ -972,6 +972,9 @@ def argument_type_str_pyi(t: Type, *, use_sequence: bool = False) -> str:
             ret = t.name.name
 
     elif isinstance(t, ListType):
+        # Sequence intentionally accepts annotations used by callers such as
+        # torch._numpy, although the runtime parser only accepts lists/tuples
+        # for integer and tensor lists (not arbitrary Sequence implementations).
         if str(t.elem) == "int":
             # PythonArgs::intlistWithDefault accepts SymInt elements (and a
             # single SymInt for fixed-size lists), guarding them to integers.
