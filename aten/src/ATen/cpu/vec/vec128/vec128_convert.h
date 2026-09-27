@@ -23,8 +23,7 @@ inline void convert(
   for (uint64_t i = 0; i < len; i++) {
     // float has 24 significant bits, so |x| >= 2^31 is a multiple of 256
     const float x = src[i];
-    const int32_t v =
-        std::fabs(x) < 2147483648.0f ? static_cast<int32_t>(x) : 0;
+    const int32_t v = std::fabs(x) < 0x1p31f ? static_cast<int32_t>(x) : 0;
     dst[i] = static_cast<uint8_t>(v);
   }
 }
