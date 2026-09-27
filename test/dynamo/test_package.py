@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import dataclasses
 import functools
 import gc
 import importlib
@@ -139,6 +140,11 @@ class _DescriptorCodeOwner:
         return 2
 
 
+@dataclasses.dataclass
+class _ExecGeneratedCodeOwner:
+    x: int = 0
+
+
 # A dynamic dim on a module-level tensor is what makes a SHAPE_ENV guard read a
 # global -- as a literal G['PKG_DYN_ROWS'] inside a Python lambda by default.
 PKG_DYN_ROWS = torch.randn(4, 3)
@@ -238,6 +244,19 @@ print(eval(f"bbmod.{name}.{path}") is code)
             with package.code_context(code):
                 pass
             self.assertIs(_lookup_code(package._codes[code]), code)
+
+    def test_code_source_resolves_exec_generated_code_from_globals(self):
+        # dataclasses exec() __init__, so its code names no source file and its
+        # co_qualname is synthetic; only the frame's globals name its module.
+        init = _ExecGeneratedCodeOwner.__init__
+        code = init.__code__
+        self.assertIsNone(inspect.getmodule(code))
+        package = CompilePackage(None)
+        with package.code_context(code, init.__globals__):
+            pass
+        entry = package._codes[code]
+        self.assertIs(sys.modules[entry.python_module], inspect.getmodule(init))
+        self.assertIs(_lookup_code(entry), code)
 
     def test_package_records_the_devices_a_graph_names(self):
         # The recording side of the scan, which is what the artifact carries. A
