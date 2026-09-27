@@ -3,6 +3,7 @@
 import functools
 import gc
 import importlib
+import inspect
 import os
 import pickle
 import subprocess
@@ -23,6 +24,7 @@ from torch._dynamo.exc import Unsupported
 from torch._dynamo.guards import CheckFunctionManager
 from torch._dynamo.package import (
     _collapse_device_types,
+    _lookup_code,
     CompilePackage,
     DiskDynamoStore,
     DynamoCache,
@@ -124,6 +126,27 @@ class StaticParamModule(torch.nn.Module):
         return x.sin()
 
 
+class _DescriptorCodeOwner:
+    @property
+    def prop(self):
+        def inner():
+            return 1
+
+        return inner
+
+    @prop.setter
+    def prop(self, value):
+        pass
+
+    @prop.deleter
+    def prop(self):
+        pass
+
+    @functools.cached_property
+    def cached(self):
+        return 2
+
+
 # A dynamic dim on a module-level tensor is what makes a SHAPE_ENV guard read a
 # global -- as a literal G['PKG_DYN_ROWS'] inside a Python lambda by default.
 PKG_DYN_ROWS = torch.randn(4, 3)
@@ -212,6 +235,21 @@ print(eval(f"bbmod.{name}.{path}") is code)
             )
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertEqual(out.stdout.strip(), "True")
+
+    def test_code_source_resolves_through_descriptors(self):
+        # getattr on the class returns the descriptor, not the function it wraps.
+        owner = vars(_DescriptorCodeOwner)
+        prop = owner["prop"]
+        getter = prop.fget.__code__
+        inner = next(c for c in getter.co_consts if inspect.iscode(c))
+        # The setter and deleter share the getter's qualname, so they are only
+        # found after the search through fget comes back empty.
+        codes = (getter, inner, prop.fset.__code__, prop.fdel.__code__)
+        for code in (*codes, owner["cached"].func.__code__):
+            package = CompilePackage(None)
+            with package.code_context(code):
+                pass
+            self.assertIs(_lookup_code(package._codes[code]), code)
 
     def test_package_records_the_devices_a_graph_names(self):
         # The recording side of the scan, which is what the artifact carries. A
