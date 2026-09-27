@@ -103,8 +103,9 @@ class Normal(ExponentialFamily):
     def cdf(self, value):
         if self._validate_args:
             self._validate_sample(value)
-        return 0.5 * (
-            1 + torch.erf((value - self.loc) * self.scale.reciprocal() / math.sqrt(2))
+        # 1 + erf(x) = erfc(-x)
+        return 0.5 * torch.erfc(
+            (self.loc - value) * self.scale.reciprocal() / math.sqrt(2)
         )
 
     def icdf(self, value):
