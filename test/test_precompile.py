@@ -4597,9 +4597,14 @@ class TestPrecompileCapture(TestCase):
 
 
 _GOLDEN_MODULE = """
+import types
+
 import torch
 
 SCALE = 2
+# Never registered in sys.modules, so no process can unpickle it by reference.
+unregistered = types.ModuleType("unregistered")
+unregistered.SCALE = 3
 
 
 class Model(torch.nn.Module):
@@ -4621,6 +4626,10 @@ def step(model, x, *, scale=1.0):
 
 def single(model, x):
     return model(x).sum(dim=0)
+
+
+def reads_unregistered(model, x):
+    return model(x).sum(dim=0) * unregistered.SCALE
 
 
 def train_step(model, x):
@@ -5223,14 +5232,17 @@ class TestPrecompileDynamoCapture(TestCase):
 
     def test_dropped_guards_are_reported_in_the_summary_and_the_artifact(self):
         # The default filter drops the identity guards that cannot be
-        # serialized (the MODULE_MATCH on the model here); the summary reports
-        # them and the artifact lists the same slots.
-        with self._capture(self.mod.single, backend="eager") as cap:
+        # serialized (the MODULE_MATCH on the unregistered module) and keeps the
+        # ones a load rebuilds by reference (the MODULE_MATCH on torch); the
+        # summary reports the drops and the artifact lists the same slots.
+        with self._capture(self.mod.reads_unregistered, backend="eager") as cap:
             cap(self.model, self.x2)
             summary = cap.summary()
         self.assertTrue(summary.complete)
-        self.assertIn("MODULE_MATCH", summary.dropped_guard_types)
-        self.assertTrue(summary.kept_guards)
+        self.assertEqual(
+            summary.dropped_guards, (("MODULE_MATCH", "G['unregistered']"),)
+        )
+        self.assertIn(("MODULE_MATCH", "G['torch']"), summary.kept_guards)
         self.assertEqual(summary.risky_dropped_guards, ())
         with open(self.artifact) as f:
             python_code = f.read()
