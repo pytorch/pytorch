@@ -473,7 +473,7 @@ skip_tensor_guards_with_matching_dict_tags = True
 # Capture an experimental, explicitly opted-in backend descriptor when compiling
 # a new cache entry. Existing entries are unaffected when this setting changes.
 # The backend owns launch-safety checks and commit/abort semantics.
-speculative_guard_eval = False
+speculative_guard_eval = True
 
 # Skips guards on func.__defaults__ if the element to be guarded is a constant
 skip_guards_on_constant_func_defaults = False
