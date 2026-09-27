@@ -116,6 +116,11 @@ class OutputAliasInfo:
     # under no_grad() that inherit requires_grad from their base without having a
     # grad_fn. Use when constructing tangent lists for torch.autograd.grad().
     requires_grad_for_backward: bool
+    # An input alias can have a grad_fn without a differentiable view base, e.g.
+    # a detached input updated in-place from a value that requires gradients.
+    # View replay cannot reconstruct this history, so the alias output itself
+    # must participate in backward and its history must be restored at runtime.
+    needs_alias_grad: bool = False
     # Sequence of ViewMeta objects.
     #
     # Provides us the means to re-run view functions on other tensors.

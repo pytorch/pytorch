@@ -729,6 +729,12 @@ from a multi-output view call"
                 # differentiation.
                 requires_grad_for_backward=requires_grad
                 and (o._base is None or grad_fn is not None),
+                needs_alias_grad=(
+                    output_type == OutputType.alias_of_input
+                    and requires_grad
+                    and o._base is None
+                    and grad_fn is not None
+                ),
                 view_meta_sequence=view_meta_sequence,
             )
             output_info.append(out_info)
@@ -810,12 +816,15 @@ from a multi-output view call"
         f_output_tangents_pairs = [
             (o, TangentAOTInput(desc))
             for o, info, desc in zip(flat_f_outs, output_info, flat_f_outs_descs)
-            if info.output_type
-            in [
-                OutputType.non_alias,
-                OutputType.unsafe_view_alias,
-                OutputType.custom_function_view,
-            ]
+            if (
+                info.output_type
+                in [
+                    OutputType.non_alias,
+                    OutputType.unsafe_view_alias,
+                    OutputType.custom_function_view,
+                ]
+                or info.needs_alias_grad
+            )
             and issubclass(info.raw_type, torch.Tensor)
             and info.requires_grad_for_backward
         ]

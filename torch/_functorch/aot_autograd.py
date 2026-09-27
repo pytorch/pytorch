@@ -616,9 +616,10 @@ def create_aot_state(
                 # setting their grad_fn properly.
                 and not (
                     x.output_type in (OutputType.alias_of_input, OutputType.is_input)
-                    and x.base_idx is not None
-                    and fw_metadata.input_info[x.base_idx].requires_grad
-                )
+                and x.base_idx is not None
+                and fw_metadata.input_info[x.base_idx].requires_grad
+                and not x.needs_alias_grad
+            )
                 for x in fw_metadata.output_info
             ) and not any(
                 x.requires_grad

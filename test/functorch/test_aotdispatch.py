@@ -1064,6 +1064,30 @@ def forward(self, primals_1):
         self.assertEqual(x_ref.grad, x_test.grad)
         self.assertEqual(x_ref_view.grad, x_test_view.grad)
 
+    def test_detached_input_alias_mutation_preserves_grad_history(self):
+        def f(a):
+            out = a.detach()
+            out.add_(a * 2)
+            return out
+
+        for backend in ("aot_eager", "inductor"):
+            torchdynamo.reset()
+            compiled_f = torch.compile(f, backend=backend)
+            x = torch.ones(3, requires_grad=True)
+            out = compiled_f(x)
+            self.assertTrue(out.requires_grad)
+            self.assertIsNotNone(out.grad_fn)
+            self.assertEqual(out.data_ptr(), x.data_ptr())
+            self.assertEqual(out, torch.full_like(x, 3))
+            out.sum().backward()
+            self.assertEqual(x.grad, torch.full_like(x, 2))
+
+            x = torch.ones(3, requires_grad=True)
+            out = compiled_f(x)
+            out.add_(1)
+            self.assertEqual(out.data_ptr(), x.data_ptr())
+            self.assertEqual(out, torch.full_like(x, 4))
+
     def test_nested_subclasses(self):
         @torch.compile(backend="aot_eager")
         def f(x):
