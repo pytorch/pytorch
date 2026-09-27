@@ -1421,15 +1421,18 @@ class TestTorchDeviceType(TestCase):
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_no_nondeterministic_alert_interpolate_bilinear(self, device):
         input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
-        res = torch.nn.functional.interpolate(
-            input,
-            size=12,
-            mode='bilinear',
-            align_corners=False)
-        grad = torch.ones_like(res)
+
+        def fn():
+            res = torch.nn.functional.interpolate(
+                input,
+                size=12,
+                mode='bilinear',
+                align_corners=False)
+            grad = torch.ones_like(res)
+            return res.backward(grad)
 
         self.check_nondeterministic_alert(
-            lambda: res.backward(grad),
+            fn,
             'upsample_bilinear2d_backward_out_cuda',
             False)
 
@@ -1612,6 +1615,136 @@ class TestTorchDeviceType(TestCase):
         )
         reference_output.backward(output_grad.cpu())
         self.assertEqual(input.grad.cpu(), reference_input.grad, atol=1e-5, rtol=1e-5)
+
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    @skipIfRocm
+    @onlyCUDA
+    @dtypes(torch.float32)
+    def test_deterministic_interpolate_bilinear_scale_factor_rounding(
+        self, device, dtype
+    ):
+        import torch.nn.functional as F
+
+        input_width = 382103
+        output_width = 8853214
+        scale_factor = 23.169707243602712
+        output_index = 8388627
+        affected_input_index = 362052
+
+        input_cuda = torch.ones(
+            1, 1, 1, input_width, dtype=dtype, device=device, requires_grad=True
+        )
+        output_grad = torch.zeros(
+            1, 1, 1, output_width, dtype=dtype, device=device
+        )
+        output_grad[..., output_index] = 1
+
+        with DeterministicGuard(True):
+            output = F.interpolate(
+                input_cuda,
+                scale_factor=(1.0, scale_factor),
+                mode="bilinear",
+                align_corners=False,
+            )
+            self.assertEqual(output.shape, (1, 1, 1, output_width))
+            output.backward(output_grad)
+            deterministic_grad = input_cuda.grad.detach().clone()
+
+        atomic_input = input_cuda.detach().clone().requires_grad_()
+        with DeterministicGuard(False):
+            output = F.interpolate(
+                atomic_input,
+                scale_factor=(1.0, scale_factor),
+                mode="bilinear",
+                align_corners=False,
+            )
+            output.backward(output_grad)
+            atomic_grad = atomic_input.grad.detach().clone()
+
+        self.assertEqual(deterministic_grad, atomic_grad)
+        affected_grad = deterministic_grad[..., affected_input_index]
+        self.assertEqual(
+            torch.isfinite(affected_grad),
+            torch.ones_like(affected_grad, dtype=torch.bool),
+        )
+        self.assertEqual(
+            affected_grad != 0,
+            torch.ones_like(affected_grad, dtype=torch.bool),
+        )
+
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    @skipIfRocm
+    @onlyCUDA
+    @dtypes(torch.float32)
+    @parametrize(
+        "nonfinite_value",
+        (torch.nan, torch.inf, -torch.inf),
+        name_fn=lambda value: str(value).replace("-", "negative_"),
+    )
+    @parametrize(
+        "output_grad_position",
+        ((0, 0), (2, 2)),
+        name_fn=lambda position: f"at_{position[0]}_{position[1]}",
+    )
+    @parametrize(
+        "memory_format",
+        (torch.contiguous_format, torch.channels_last),
+        name_fn=lambda fmt: (
+            "channels_last" if fmt == torch.channels_last else "contiguous"
+        ),
+    )
+    @parametrize("channels", (1, 4), name_fn=lambda value: f"channels_{value}")
+    def test_deterministic_interpolate_bilinear_nonfinite_zero_weight(
+        self,
+        device,
+        dtype,
+        nonfinite_value,
+        output_grad_position,
+        memory_format,
+        channels,
+    ):
+        import torch.nn.functional as F
+
+        input_cpu = torch.zeros(1, channels, 2, 2, dtype=dtype).contiguous(
+            memory_format=memory_format
+        ).requires_grad_()
+        output_grad_cpu = torch.zeros(1, channels, 3, 3, dtype=dtype).contiguous(
+            memory_format=memory_format
+        )
+        output_grad_cpu[
+            :, :, output_grad_position[0], output_grad_position[1]
+        ] = nonfinite_value
+        output_cpu = F.interpolate(
+            input_cpu, size=(3, 3), mode="bilinear", align_corners=True
+        )
+        output_cpu.backward(output_grad_cpu)
+
+        input_cuda = input_cpu.detach().to(device).requires_grad_()
+        output_grad_cuda = output_grad_cpu.to(device)
+        with DeterministicGuard(True):
+            output_cuda = F.interpolate(
+                input_cuda, size=(3, 3), mode="bilinear", align_corners=True
+            )
+            output_cuda.backward(output_grad_cuda)
+            deterministic_grad = input_cuda.grad.detach().clone()
+
+        atomic_input = input_cpu.detach().to(device).requires_grad_()
+        with DeterministicGuard(False):
+            output_cuda = F.interpolate(
+                atomic_input, size=(3, 3), mode="bilinear", align_corners=True
+            )
+            output_cuda.backward(output_grad_cuda)
+            atomic_grad = atomic_input.grad.detach().clone()
+
+        if output_grad_position == (0, 0):
+            expected_grad = torch.full_like(input_cpu.grad, torch.nan)
+            expected_grad[0, :, 0, 0] = nonfinite_value
+        else:
+            expected_grad = torch.zeros_like(input_cpu.grad)
+            expected_grad[0, :, 1, 1] = torch.nan
+        self.assertEqual(input_cpu.grad, expected_grad, equal_nan=True)
+        self.assertEqual(atomic_grad.cpu(), input_cpu.grad, equal_nan=True)
+        self.assertEqual(deterministic_grad.cpu(), input_cpu.grad, equal_nan=True)
 
     @onlyCUDA
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
