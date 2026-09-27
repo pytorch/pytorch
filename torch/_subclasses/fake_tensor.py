@@ -3562,6 +3562,7 @@ class FakeTensorMode(TorchDispatchMode):
         aten.arange.start,
         aten.arange.start_step,
         aten.add.Tensor,
+        aten.sub.Tensor,
     )
 
     _unbacked_special_fake_handling_ops = ordered_set(

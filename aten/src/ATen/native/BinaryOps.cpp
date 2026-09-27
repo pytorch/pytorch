@@ -2305,20 +2305,44 @@ MetaDesc prim_elementwise_desc(ArrayRef<MetaDesc> args, ScalarType dtype) {
   return out;
 }
 
-// _make_elementwise_binary_reference / refs.add (alpha is None when unset):
-// elementwise_type_promotion_wrapper -> _maybe_broadcast -> [prims.mul(b,
-// alpha)] -> prim -> conversion to the result dtype.
+// alpha != 1 in Python
+bool python_ne_one(const Scalar& s) {
+  if (s.isSymInt()) {
+    return s.toSymInt().sym_ne(1).guard_bool(__FILE__, __LINE__);
+  }
+  if (s.isSymFloat()) {
+    return s.toSymFloat().sym_ne(1.0).guard_bool(__FILE__, __LINE__);
+  }
+  if (s.isSymBool()) {
+    // Python evaluates SymBool != 1 to True without guarding.
+    return true;
+  }
+  return s.isComplex() ? s.toComplexDouble() != c10::complex<double>(1, 0) : s.toDouble() != 1;
+}
+
+// _make_elementwise_binary_reference / refs.add (alpha is None when unset) /
+// refs.sub: elementwise_type_promotion_wrapper -> _maybe_broadcast ->
+// [prims.mul(b, alpha)] -> prim -> conversion to the result dtype.
 Tensor binary_ref_meta(
     const Tensor& self,
     const Tensor& other,
     TypePromotionKind kind,
     bool fake_devices,
-    const std::optional<Scalar>& alpha = std::nullopt) {
+    const std::optional<Scalar>& alpha = std::nullopt,
+    bool is_sub = false) {
   const auto [compute_dtype, result_dtype] = elementwise_dtypes(self, other, kind);
   auto args = maybe_broadcast(
       {maybe_convert_desc(meta_desc(self, fake_devices), compute_dtype),
        maybe_convert_desc(meta_desc(other, fake_devices), compute_dtype)});
-  if (alpha.has_value()) {
+  if (is_sub) {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        args[0].is_number || args[1].is_number || (args[0].dtype != kBool && args[1].dtype != kBool),
+        "Subtraction, the `-` operator, with two bool tensors is not supported. "
+        "Use the `^` or `logical_xor()` operator instead.");
+  }
+  // refs.sub applies alpha when alpha != 1, after broadcasting (the check may
+  // guard), and has no bool exemption in the type check below.
+  if (alpha.has_value() && (!is_sub || python_ne_one(*alpha))) {
     // utils.is_weakly_lesser_type over bool < int < float < complex
     auto python_type_rank = [](ScalarType t) {
       return t == kBool ? 0 : isIntegralType(t, /*includeBool=*/false) ? 1 : isFloatingType(t) ? 2 : 3;
@@ -2328,7 +2352,7 @@ Tensor binary_ref_meta(
     const auto rank = python_type_rank(compute_dtype);
     const auto alpha_rank = python_type_rank(alpha->type());
     TORCH_CHECK_VALUE(
-        rank == 0 || alpha_rank <= rank,
+        (rank == 0 && !is_sub) || alpha_rank <= rank,
         "alpha argument of type ", python_type_names[alpha_rank], " cannot be safely cast to type ",
         python_type_names[rank], "!");
     auto& b = args[1];
@@ -2465,6 +2489,20 @@ Tensor add_Tensor_meta(const Tensor& self, const Tensor& other, const Scalar& al
   const bool default_alpha = !alpha.isSymbolic() && alpha.type() == kLong && alpha.toLong() == 1;
   return binary_ref_meta(
       self, other, TypePromotionKind::DEFAULT, symbolic, default_alpha ? std::nullopt : std::optional<Scalar>(alpha));
+}
+
+// Mirrors what Python fake tensor runs for sub.Tensor: the fast path for
+// symbolic inputs, then refs.sub.
+Tensor sub_Tensor_meta(const Tensor& self, const Tensor& other, const Scalar& alpha) {
+  // FakeTensorMode's has_symbolic_sizes counts SymInt arguments only.
+  const bool symbolic = self.unsafeGetTensorImpl()->has_symbolic_sizes_strides() ||
+      other.unsafeGetTensorImpl()->has_symbolic_sizes_strides() || alpha.isSymInt();
+  if (symbolic) {
+    if (auto out = fast_binary_meta(self, other, TypePromotionKind::DEFAULT); out.defined()) {
+      return out;
+    }
+  }
+  return binary_ref_meta(self, other, TypePromotionKind::DEFAULT, symbolic, alpha, /*is_sub=*/true);
 }
 
 } // namespace at::native
