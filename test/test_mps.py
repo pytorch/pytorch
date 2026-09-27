@@ -5715,7 +5715,7 @@ class TestMPS(TestCaseMPS):
     # batch_norm only accepts a mixed pair when the parameters are float32; other combinations are
     # rejected by the reference with "expect parameter to have scalar type of Float".
     @parametrize("in_dtype", [torch.float16, torch.bfloat16])
-    def test_batch_norm_mixed_dtype(self, in_dtype):
+    def test_batch_norm_mixed_dtype_eval(self, in_dtype):
         # Regression test for https://github.com/pytorch/pytorch/issues/154887
         # float32 running stats against a half input: the inference path fed the stats into
         # normalizationWithTensor uncast, and its backward subtracted them from the input, both of
