@@ -1170,6 +1170,19 @@ class SequentialLR(LRScheduler):
 
         self._last_lr = schedulers[idx].get_last_lr()
 
+    def _initial_step(self) -> None:
+        """Re-apply the active scheduler without consuming an epoch.
+
+        ``LRScheduler._initial_step`` calls ``step``. For this class that
+        advances ``last_epoch`` and the wrapped scheduler, so a parent
+        ``SequentialLR`` would reach a milestone one step early.
+        """
+        self._step_count = 0
+        idx = bisect_right(self._milestones, self.last_epoch)
+        scheduler = self._schedulers[idx]
+        scheduler._initial_step()
+        self._last_lr = scheduler.get_last_lr()
+
     def recursive_undo(self, sched=None) -> None:
         """
         Recursively undo any step performed by the initialization of
@@ -1535,6 +1548,17 @@ class ChainedScheduler(LRScheduler):
         self._schedulers = schedulers
         self.optimizer = optimizer
         self._last_lr = _param_groups_val_list(self._schedulers[-1].optimizer, "lr")
+
+    def _initial_step(self) -> None:
+        """Re-initialize each chained scheduler without an extra chained step.
+
+        ``LRScheduler._initial_step`` calls ``step``, which would decay every
+        scheduler once while a parent ``SequentialLR`` is still being built.
+        """
+        self._step_count = 0
+        for scheduler in self._schedulers:
+            scheduler._initial_step()
+        self._last_lr = _param_groups_val_list(self.optimizer, "lr")
 
     def step(self) -> None:  # type: ignore[override]
         """Perform a step."""

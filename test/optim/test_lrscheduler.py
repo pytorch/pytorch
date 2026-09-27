@@ -821,6 +821,47 @@ class TestLRScheduler(TestCase):
                 scheduler.step()
                 self.assertTrue(len(ws) == 0, "No warning should be raised")
 
+    def test_nested_sequential_and_chained_match_one_level(self):
+        def lrs_of(scheduler):
+            values = []
+            for _ in range(5):
+                values.append(scheduler.get_last_lr()[0])
+                scheduler.optimizer.step()
+                scheduler.step()
+            return values
+
+        def sequential(optimizer):
+            return SequentialLR(
+                optimizer,
+                [
+                    ConstantLR(optimizer, factor=0.5, total_iters=2),
+                    ConstantLR(optimizer, factor=0.2, total_iters=10),
+                ],
+                milestones=[2],
+            )
+
+        def chained(optimizer):
+            return ChainedScheduler(
+                [
+                    ConstantLR(optimizer, factor=0.5, total_iters=2),
+                    ExponentialLR(optimizer, gamma=0.9),
+                ],
+                optimizer=optimizer,
+            )
+
+        for factory in (sequential, chained):
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                outer_opt = SGD([torch.nn.Parameter(torch.zeros(1))], lr=0.1)
+                inner = factory(outer_opt)
+                outer = SequentialLR(outer_opt, [inner], milestones=[])
+                plain_opt = SGD([torch.nn.Parameter(torch.zeros(1))], lr=0.1)
+                plain = factory(plain_opt)
+            self.assertEqual(
+                [w for w in caught if issubclass(w.category, UserWarning)], []
+            )
+            self.assertEqual(lrs_of(outer), lrs_of(plain))
+
     def test_get_last_lr_sequentiallr(self):
         epochs = 12
         milestones = [3, 6]
