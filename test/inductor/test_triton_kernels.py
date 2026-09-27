@@ -397,6 +397,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
 
         @triton.jit
         def nested_constexpr_kernel(config, out, n_elements, BLOCK_SIZE: tl.constexpr):
+            tl.static_assert(isinstance(config.mode.type, tl.constexpr_type))
             tl.static_assert(config.mode == "double")
             offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
             mask = offsets < n_elements
@@ -604,7 +605,6 @@ class KernelTests(torch._inductor.test_case.TestCase):
         ):
             torch.compile(fn, backend="eager", fullgraph=True)(source)
 
-    @requires_gpu
     @_assert_no_mutation_fallback
     def test_generate_ttir_namedtuple_nested_constexpr(self):
         # Constexpr values are removed from the native argument list for TTIR
@@ -617,6 +617,10 @@ class KernelTests(torch._inductor.test_case.TestCase):
 
         @triton.jit
         def nested_constexpr_kernel(config, out, BLOCK_SIZE: tl.constexpr):
+            tl.static_assert(
+                isinstance(config.parameters[1].type, tl.constexpr_type)
+            )
+            tl.static_assert(config.parameters[1] == "double")
             offsets = tl.arange(0, BLOCK_SIZE)
             values = tl.load(config.source + offsets)
             values *= config.parameters[0]
@@ -627,11 +631,9 @@ class KernelTests(torch._inductor.test_case.TestCase):
 
         fake_mode = FakeTensorMode()
         source = fake_mode.from_tensor(
-            torch.empty(16, dtype=torch.float32, device=GPU_TYPE)
+            torch.empty(16, dtype=torch.float32, device="cpu")
         )
-        out = fake_mode.from_tensor(
-            torch.empty(16, dtype=torch.float32, device=GPU_TYPE)
-        )
+        out = fake_mode.from_tensor(torch.empty(16, dtype=torch.float32, device="cpu"))
         spec = triton_kernel_wrap.create_named_tuple_spec(
             "Config",
             ("source", "parameters"),
