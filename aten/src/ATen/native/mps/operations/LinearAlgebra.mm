@@ -2545,6 +2545,15 @@ Tensor& addr_out_mps(const Tensor& self,
   TensorArg args[]{{result, "out", 0}, {self, "self", 1}, {vec1, "vec1", 2}, {vec2, "vec2", 3}};
   checkAllSameGPU(__func__, args);
 
+  // The reference computes at the promoted input dtype and only then casts into `result`.
+  const auto opmathType =
+      c10::promoteTypes(c10::promoteTypes(self.scalar_type(), vec1.scalar_type()), vec2.scalar_type());
+  TORCH_CHECK(c10::canCast(opmathType, result.scalar_type()),
+              "result type ",
+              opmathType,
+              " can't be cast to the desired output type ",
+              result.scalar_type());
+
   IntArrayRef vec1_sizes = vec1.sizes();
   IntArrayRef vec2_sizes = vec2.sizes();
   IntArrayRef self_sizes;
@@ -2589,8 +2598,7 @@ Tensor& addr_out_mps(const Tensor& self,
   @autoreleasepool {
     std::string key = "addr_out_mps_impl" + getTensorsStringKey({vec1, vec2, *self_, result}) + ":" +
         std::to_string(beta.toDouble()) + ":" + std::to_string(alpha.toDouble());
-    // The reference promotes and computes at `result`'s (already promoted) dtype.
-    const auto computeType = getMPSDataType(result.scalar_type());
+    const auto computeType = getMPSDataType(opmathType);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       auto vec1Placeholder = mps::mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(vec1), inputShape);
       auto vec2Placeholder = mps::mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(vec2), otherShape);
@@ -2629,7 +2637,7 @@ Tensor& addr_out_mps(const Tensor& self,
       newCachedGraph->vec1Tensor_ = vec1Placeholder;
       newCachedGraph->vec2Tensor_ = vec2Placeholder;
       newCachedGraph->selfTensor_ = selfPlaceholder;
-      newCachedGraph->resultTensor_ = resultTensor;
+      newCachedGraph->resultTensor_ = castMPSTensor(mpsGraph, resultTensor, getMPSDataType(result));
     });
 
     Placeholder vec1Placeholder = Placeholder(cachedGraph->vec1Tensor_, vec1, inputShape);
