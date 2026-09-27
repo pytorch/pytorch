@@ -398,6 +398,237 @@ class KernelTests(torch._inductor.test_case.TestCase):
         self.assertEqual(actual, x * 2)
 
     @requires_gpu
+    @_assert_no_mutation_fallback
+    def test_triton_kernel_aggregate_constexpr_leaf_types(self):
+        # Exercise the scalar and dtype constexpr whitelist inside a nested tuple.
+        import triton
+        import triton.language as tl
+
+        Config = collections.namedtuple("Config", ("source", "metadata"))
+
+        @triton.jit
+        def constexpr_leaf_kernel(config, out, BLOCK_SIZE: tl.constexpr):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            values = tl.load(config.source + offsets)
+            if config.metadata[0] is None:
+                values += 1
+            if config.metadata[1] == "double":
+                values *= 2
+            values = values.to(config.metadata[2])
+            values += config.metadata[3]
+            values *= config.metadata[4]
+            if config.metadata[5]:
+                values += 1
+            tl.store(out + offsets, values)
+
+        def fn(x):
+            out = torch.empty_like(x)
+            metadata = (
+                tl.constexpr(None),
+                tl.constexpr("double"),
+                tl.constexpr(tl.float32),
+                tl.constexpr(3),
+                tl.constexpr(0.5),
+                tl.constexpr(True),
+            )
+            constexpr_leaf_kernel[(1,)](Config(x, metadata), out, BLOCK_SIZE=16)
+            return out
+
+        x = torch.arange(16, dtype=torch.float32, device=GPU_TYPE)
+        actual = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+        self.assertEqual(actual, ((x + 1) * 2 + 3) * 0.5 + 1)
+
+    @requires_gpu
+    @_assert_no_mutation_fallback
+    def test_triton_kernel_externally_supplied_plain_tuple(self):
+        # An input tuple uses UserDefinedTupleVariable, unlike one constructed
+        # during tracing, which uses TupleVariable.
+        import triton
+        import triton.language as tl
+
+        @triton.jit
+        def tuple_kernel(config, out, BLOCK_SIZE: tl.constexpr):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            values = tl.load(config[0] + offsets)
+            tl.store(out + offsets, values * config[1][0])
+
+        def fn(config):
+            out = torch.empty_like(config[0])
+            tuple_kernel[(1,)](config, out, BLOCK_SIZE=16)
+            return out
+
+        x = torch.arange(16, dtype=torch.float32, device=GPU_TYPE)
+        compiled = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        self.assertEqual(compiled((x, (3,))), x * 3)
+        self.assertEqual(compiled((x + 1, (4,))), (x + 1) * 4)
+
+    @requires_gpu
+    @_assert_no_mutation_fallback
+    def test_triton_kernel_aggregate_view_mutation(self):
+        import triton
+        import triton.language as tl
+
+        ReadOnly = collections.namedtuple("ReadOnly", ("source", "scale"))
+        Args = collections.namedtuple("Args", ("mutated", "nested"))
+
+        @triton.jit
+        def kernel(args, n_elements, BLOCK_SIZE: tl.constexpr):
+            offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            values = tl.load(args.nested.source + offsets, mask=mask)
+            tl.store(
+                args.mutated + offsets,
+                values * args.nested.scale,
+                mask=mask,
+            )
+
+        def fn(base, read_only):
+            mutated_view = base[2:-3]
+            args = Args(mutated_view, ReadOnly(read_only, -1.5))
+            n_elements = mutated_view.numel()
+            kernel[(triton.cdiv(n_elements, 16),)](args, n_elements, BLOCK_SIZE=16)
+            return base, mutated_view
+
+        read_only = torch.arange(35, dtype=torch.float32, device=GPU_TYPE)
+        read_only_before = read_only.clone()
+        base = torch.full((40,), 11.0, device=GPU_TYPE)
+        expected_base = base.clone()
+        expected_base[2:-3] = read_only_before * -1.5
+
+        base_result, view_result = torch.compile(
+            fn, backend="aot_eager", fullgraph=True
+        )(base, read_only)
+
+        self.assertEqual(base_result, expected_base)
+        self.assertEqual(view_result, read_only_before * -1.5)
+        self.assertEqual(base, expected_base)
+        self.assertEqual(read_only, read_only_before)
+
+    @requires_gpu
+    @_assert_no_mutation_fallback
+    def test_triton_kernel_aggregate_multiple_mutations(self):
+        import triton
+        import triton.language as tl
+
+        Nested = collections.namedtuple("Nested", ("second", "read_only"))
+        Args = collections.namedtuple("Args", ("first", "nested"))
+
+        @triton.jit
+        def kernel(args, n_elements, BLOCK_SIZE: tl.constexpr):
+            offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            values = tl.load(args.nested.read_only + offsets, mask=mask)
+            tl.store(args.first + offsets, values + 4.0, mask=mask)
+            tl.store(args.nested.second + offsets, values - 7.0, mask=mask)
+
+        def fn(args):
+            n_elements = args.first.numel()
+            kernel[(triton.cdiv(n_elements, 16),)](args, n_elements, BLOCK_SIZE=16)
+            return args.first, args.nested.second, args.nested.read_only
+
+        read_only = torch.arange(35, dtype=torch.float32, device=GPU_TYPE)
+        read_only_before = read_only.clone()
+        first = torch.zeros_like(read_only)
+        second = torch.zeros_like(read_only)
+        args = Args(first, Nested(second, read_only))
+
+        first_result, second_result, read_only_result = torch.compile(
+            fn, backend="aot_eager", fullgraph=True
+        )(args)
+
+        self.assertEqual(first_result, read_only_before + 4.0)
+        self.assertEqual(second_result, read_only_before - 7.0)
+        self.assertEqual(read_only_result, read_only_before)
+        self.assertEqual(first, read_only_before + 4.0)
+        self.assertEqual(second, read_only_before - 7.0)
+        self.assertEqual(read_only, read_only_before)
+
+    @requires_gpu
+    @_assert_no_mutation_fallback
+    def test_triton_kernel_aggregate_aliased_leaves(self):
+        # Two aggregate leaves may reference the same caller-owned tensor.
+        import triton
+        import triton.language as tl
+
+        Args = collections.namedtuple("Args", ("mutated", "alias"))
+
+        @triton.jit
+        def kernel(args, n_elements, BLOCK_SIZE: tl.constexpr):
+            offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            values = tl.load(args.alias + offsets, mask=mask)
+            tl.store(args.mutated + offsets, values + 5.0, mask=mask)
+
+        def fn(args):
+            n_elements = args.mutated.numel()
+            kernel[(triton.cdiv(n_elements, 16),)](args, n_elements, BLOCK_SIZE=16)
+            return args.mutated, args.alias
+
+        aliased = torch.arange(35, dtype=torch.float32, device=GPU_TYPE)
+        aliased_before = aliased.clone()
+        args = Args(aliased, aliased)
+
+        mutated_result, alias_result = torch.compile(
+            fn, backend="aot_eager", fullgraph=True
+        )(args)
+
+        self.assertEqual(mutated_result, aliased_before + 5.0)
+        self.assertEqual(alias_result, aliased_before + 5.0)
+        self.assertEqual(aliased, aliased_before + 5.0)
+
+    @requires_gpu
+    @parametrize("constexpr_form", ("signature", "nested"))
+    @_assert_no_mutation_fallback
+    def test_triton_kernel_constexpr_aggregate_symbolic_guard(self, constexpr_form):
+        # Shape values in either constexpr form require a new specialization.
+        import triton
+        import triton.language as tl
+
+        Metadata = collections.namedtuple("Metadata", ("n_elements",))
+        Config = collections.namedtuple("Config", ("n_elements",))
+        NestedConfig = collections.namedtuple("NestedConfig", ("source", "metadata"))
+
+        @triton.jit
+        def sig_kernel(config: tl.constexpr, source, out, BLOCK_SIZE: tl.constexpr):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            mask = offsets < config.n_elements
+            values = tl.load(source + offsets, mask=mask)
+            tl.store(out + offsets, values + config.n_elements, mask=mask)
+
+        @triton.jit
+        def nested_kernel(config, out, BLOCK_SIZE: tl.constexpr):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            mask = offsets < config.metadata.n_elements
+            values = tl.load(config.source + offsets, mask=mask)
+            tl.store(out + offsets, values + config.metadata.n_elements, mask=mask)
+
+        def fn(source):
+            out = torch.empty_like(source)
+            if constexpr_form == "signature":
+                sig_kernel[(1,)](Config(source.shape[0]), source, out, BLOCK_SIZE=64)
+            else:
+                config = NestedConfig(source, tl.constexpr(Metadata(source.shape[0])))
+                nested_kernel[(1,)](config, out, BLOCK_SIZE=64)
+            return out
+
+        counter = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        compiled = torch.compile(fn, backend=counter, fullgraph=True, dynamic=True)
+
+        source = torch.arange(17, dtype=torch.float32, device=GPU_TYPE)
+        self.assertEqual(compiled(source), source + 17)
+        first_frame_count = counter.frame_count
+
+        source = torch.arange(33, dtype=torch.float32, device=GPU_TYPE)
+        self.assertEqual(compiled(source), source + 33)
+        self.assertGreater(counter.frame_count, first_frame_count)
+        second_frame_count = counter.frame_count
+
+        # Tensor values change, but the constexpr shape stays 33.
+        source = source + 1
+        self.assertEqual(compiled(source), source + 33)
+        self.assertEqual(counter.frame_count, second_frame_count)
+
+    @requires_gpu
     def test_triton_kernel_constexpr_aggregate_rejects_tensor_leaf(self):
         # Whole constexpr subtrees cannot include graph-owned tensor leaves.
         import triton
