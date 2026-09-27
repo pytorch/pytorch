@@ -1715,14 +1715,35 @@ static void triangular_solve_metal(const Tensor& A_,
   params.conj = conjugate;
   params.unit = unitriangular;
 
+  const bool use_small_kernel =
+      A_.scalar_type() == kFloat && (n == 16 || n == 32 || n == 64) && k >= kTriangularSolveTileSize;
+  const bool general = !unitriangular || upper || transpose || k % kTriangularSolveTileSize != 0;
+  // MPP computes offsets within each 16x32 tile in int32.
+  constexpr uint64_t kMaxMppStride =
+      (std::numeric_limits<int32_t>::max() - (kTriangularSolveMppCols - 1)) / (kTriangularSolveMppRows - 1);
+  const bool use_mpp = use_small_kernel && has_mpp() && k <= kMaxMppStride;
+  // Inverse application and its substitution fallback may reread both inputs.
+  const auto a = use_small_kernel && A_.is_alias_of(out) ? A_.clone() : A_;
+  const auto b = use_small_kernel && B_.is_alias_of(out) ? B_.clone() : B_;
+
   const uint64_t elem_size = A_.element_size();
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       auto encoder = stream->commandEncoder();
-      auto pso = lib.getPipelineStateForFunc(fmt::format("triangular_solve_{}", scalarToMetalTypeString(A_)));
-      getMPSProfiler().beginProfileKernel(pso, "triangular_solve", {A_, B_}, stream);
+      auto pso = lib.getPipelineStateForFunc(
+          use_small_kernel
+              ? fmt::format("triangular_solve_small_{}{}{}", use_mpp ? "mpp_" : "", general ? "general_" : "", n)
+              : fmt::format("triangular_solve_{}", scalarToMetalTypeString(A_)));
+      getMPSProfiler().beginProfileKernel(pso, "triangular_solve", {a, b}, stream);
       [encoder setComputePipelineState:pso];
+      mtl_setArgs(encoder, a, b, out, params);
+      if (use_small_kernel) {
+        [encoder dispatchThreadgroups:MTLSizeMake(batchSize, 1, 1)
+                threadsPerThreadgroup:MTLSizeMake(n / kTriangularSolveTileSize * c10::metal::simdgroup_size, 1, 1)];
+        getMPSProfiler().endProfileKernel(pso, stream);
+        return;
+      }
       // Every substitution step reduces across the whole threadgroup, so don't
       // spread a short row over more threads than it has work for, and keep the
       // group a whole number of simdgroups so the reduction stays exact.
@@ -1739,7 +1760,6 @@ static void triangular_solve_metal(const Tensor& A_,
       const uint64_t maxTGMem = [MPSDevice::getInstance()->device() maxThreadgroupMemoryLength];
       TORCH_INTERNAL_ASSERT(
           prefixBytes + redBytes <= maxTGMem, "triangular_solve: n=", n, " does not fit in threadgroup memory");
-      mtl_setArgs(encoder, A_, B_, out, params);
       [encoder setThreadgroupMemoryLength:prefixBytes atIndex:0];
       [encoder setThreadgroupMemoryLength:redBytes atIndex:1];
       [encoder dispatchThreads:MTLSizeMake(tgSize * batchSize * k, 1, 1)
@@ -2210,14 +2230,14 @@ static void svd_kernel_mps(const Tensor& A,
   SvdParams params{static_cast<uint32_t>(wm),
                    static_cast<uint32_t>(k),
                    /*max_sweeps=*/30u,
-                   static_cast<uint32_t>(compute_uv ? 1 : 0),
                    /*tol=*/1e-6f,
                    static_cast<uint32_t>(u_ld),
                    static_cast<uint32_t>(u_bs),
                    static_cast<uint32_t>(v_ld),
                    static_cast<uint32_t>(v_bs),
-                   static_cast<uint32_t>(transposed ? 1 : 0),
-                   static_cast<uint32_t>(stage_v ? 1 : 0)};
+                   compute_uv,
+                   transposed,
+                   stage_v};
 
   MPSStream* stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
@@ -2325,9 +2345,9 @@ static void eigh_kernel_mps(const Tensor& eigenvalues,
 
   EighParams params{static_cast<uint32_t>(n),
                     /*max_sweeps=*/80u,
-                    static_cast<uint32_t>(compute_eigenvectors ? 1 : 0),
-                    static_cast<uint32_t>(upper ? 1 : 0),
-                    /*tol=*/1e-6f};
+                    /*tol=*/1e-6f,
+                    compute_eigenvectors,
+                    upper};
 
   MPSStream* stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
