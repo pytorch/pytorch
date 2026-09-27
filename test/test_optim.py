@@ -2136,6 +2136,37 @@ class TestOptimRenewed(TestCase):
             self.assertTrue(optim.state["ran_load_state_dict_pre_hook2"])
             self.assertTrue(optim.state["ran_load_state_dict_post_hook"])
 
+    def test_load_state_dict_does_not_alias_live_state(self):
+        # In-process transfer, no torch.save/load. Stepping the destination
+        # must not rewrite the source momentum.
+        model_a = torch.nn.Linear(4, 4)
+        model_b = torch.nn.Linear(4, 4)
+        opt_a = torch.optim.SGD(model_a.parameters(), lr=0.1, momentum=0.9)
+        opt_b = torch.optim.SGD(model_b.parameters(), lr=0.1, momentum=0.9)
+        model_a(torch.randn(2, 4)).sum().backward()
+        opt_a.step()
+        opt_b.load_state_dict(opt_a.state_dict())
+        buf_a = opt_a.state[model_a.weight]["momentum_buffer"]
+        buf_b = opt_b.state[model_b.weight]["momentum_buffer"]
+        self.assertEqual(buf_a, buf_b)
+        self.assertNotEqual(buf_a.data_ptr(), buf_b.data_ptr())
+        saved = buf_a.detach().clone()
+        model_b(torch.randn(2, 4)).sum().backward()
+        opt_b.step()
+        self.assertEqual(buf_a, saved)
+
+        opt_a = torch.optim.Adam(model_a.parameters(), lr=1e-3)
+        opt_b = torch.optim.Adam(model_b.parameters(), lr=1e-3)
+        model_a.zero_grad(set_to_none=True)
+        model_a(torch.randn(2, 4)).sum().backward()
+        opt_a.step()
+        opt_b.load_state_dict(opt_a.state_dict())
+        for key in ("exp_avg", "exp_avg_sq", "step"):
+            src = opt_a.state[model_a.weight][key]
+            dst = opt_b.state[model_b.weight][key]
+            self.assertEqual(src, dst)
+            self.assertNotEqual(src.data_ptr(), dst.data_ptr())
+
     @optims(optim_db, dtypes=[torch.float32])
     @parametrize("hook_type", ["pre", "post"])
     def test_step_local_hook(self, device, dtype, optim_info, hook_type):

@@ -820,16 +820,25 @@ class Optimizer:
                 fused = pg.get("fused", False)
                 capturable = pg.get("capturable", False)
                 break
+        # Tensor.to returns the same object when dtype and device already match.
+        # _cast documents a deep copy: two live optimizers must not share storage.
+        # Issue 74424 still applies to step: do not cast its dtype unless fused
+        # or capturable. Cloning does not change that dtype.
+        def _owned(cast: torch.Tensor) -> torch.Tensor:
+            if cast is value:
+                return value.clone()
+            return cast
+
         if key == "step":
             if capturable or fused:
-                return value.to(dtype=torch.float32, device=param.device)
+                return _owned(value.to(dtype=torch.float32, device=param.device))
             else:
-                return value
+                return value.clone()
         else:
             if param.is_floating_point():
-                return value.to(dtype=param.dtype, device=param.device)
+                return _owned(value.to(dtype=param.dtype, device=param.device))
             else:
-                return value.to(device=param.device)
+                return _owned(value.to(device=param.device))
 
     def register_load_state_dict_pre_hook(
         self,
