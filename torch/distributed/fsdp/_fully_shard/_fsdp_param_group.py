@@ -178,11 +178,12 @@ class ReduceScatterState(NamedTuple):
 
 
 class AllReduceState(NamedTuple):
-    # Holding all_reduce_input (the reduce-dtype AR buffer) keeps the
-    # caching allocator from reusing the block across layers. This is a
-    # structural invariant, not bookkeeping: without it, the next layer's
-    # RS can reuse the same physical block before this layer's AR finishes
-    # under slow AR, causing gradient aliasing. See PR #140044, PR #180900.
+    # Holding all_reduce_input (the reduce-dtype AR buffer, or the RS output
+    # passed to the all-reduce hook) keeps the caching allocator from reusing
+    # the block across layers. This is a structural invariant, not
+    # bookkeeping: without it, the next layer's RS can reuse the same
+    # physical block before this layer's AR or hook finishes under slow AR,
+    # causing gradient aliasing. See PR #140044, PR #180900.
     all_reduce_input: torch.Tensor
     event: torch.Event | None  # all-reduce event
 
@@ -303,11 +304,11 @@ class FSDPParamGroup:
         # partial reduce output (only reduce-scattered but not all-reduced)
         self._partial_reduce_output: torch.Tensor | None = None
         # Holds the reduce-dtype AR buffer + completion event across
-        # layers in HSDP+AR with reduce_dtype != orig_dtype (e.g., bf16
-        # reduce + fp32 params). Structural invariant: the live Python
-        # ref keeps the buffer off the caching allocator's free list,
-        # preventing the next layer's RS from reusing the same physical
-        # block while this layer's AR is still in flight. See
+        # layers in HSDP+AR or with an all-reduce hook, with reduce_dtype !=
+        # orig_dtype (e.g., bf16 reduce + fp32 params). Structural invariant:
+        # the live Python ref keeps the buffer off the caching allocator's
+        # free list, preventing the next layer's RS from reusing the same
+        # physical block while this layer's AR or hook is still in flight. See
         # AllReduceState docstring and regression test PR #180900.
         self._all_reduce_state: AllReduceState | None = None
 

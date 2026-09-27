@@ -753,6 +753,11 @@ def foreach_reduce(
         all_reduce_stream.wait_stream(reduce_scatter_stream)
         with device_handle.stream(all_reduce_stream):
             all_reduce_hook(reduce_output)
+            # The hook and the post-reduce ops below read the RS output off
+            # the RS stream. Without native HSDP nothing else holds it, so
+            # hold it the same way as the HSDP AR buffer (see AllReduceState).
+            all_reduce_input = reduce_output
+            all_reduce_event = all_reduce_stream.record_event()
     # -- END: ops post reduce_scatter
 
     with device_handle.stream(post_reduce_stream):
