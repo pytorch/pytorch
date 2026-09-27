@@ -2755,6 +2755,34 @@ class TestFloorDiv(TestCase):
                 self.assertTrue(op.is_real)
 
 
+class TestSympyMod(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_sympy_mod_plain_int_operands(self):
+        # Regression test: when neither operand is symbolic, callers such as
+        # the inductor lowering for operator.mod pass plain Python ints
+        # instead of sympy objects. This used to crash with
+        # AttributeError: 'int' object has no attribute 'is_nonnegative'.
+        self.assertEqual(sym_node._sympy_mod(20, 8), 4)
+
+    def test_sympy_mod_plain_int_operands_negative(self):
+        # Mixed-sign operands must match Python's modulo semantics (result
+        # takes the sign of the divisor), which routes through PythonMod
+        # rather than sympy's Mod.
+        self.assertEqual(sym_node._sympy_mod(-7, 3), -7 % 3)
+        self.assertEqual(sym_node._sympy_mod(7, -3), 7 % -3)
+
+    def test_sympy_mod_mixed_operands(self):
+        # Only one operand being a plain int must still be normalized.
+        self.assertEqual(sym_node._sympy_mod(20, sympy.Integer(8)), 4)
+        self.assertEqual(sym_node._sympy_mod(sympy.Integer(20), 8), 4)
+
+    def test_sympy_mod_sympy_operands(self):
+        # Pre-existing behavior for actual sympy.Basic operands must be
+        # unaffected by the plain-scalar normalization above.
+        self.assertEqual(sym_node._sympy_mod(sympy.Integer(20), sympy.Integer(8)), 4)
+
+
 class TestDimConstraints(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
