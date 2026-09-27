@@ -743,6 +743,12 @@ class MyClassNotSerializable:
         return x + 1
 
 
+class LockHolder:
+    def __init__(self, scale):
+        self.scale = scale
+        self.lock = threading.Lock()
+
+
 class Inputs:
     def __init__(self, x, unused):
         self.x = x
@@ -3317,6 +3323,16 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(ref, loaded, {"x": x}, True)
         with mock.patch.dict(globals(), {"math": cmath}):
             self._test_check_fn(ref, loaded, {"x": x}, False)
+
+    def test_guarded_user_object_prunes_unguarded_attributes(self):
+        def fn(x, holder):
+            return x * holder.scale
+
+        x = torch.randn(3)
+
+        ref, loaded = self._test_serialization("CONSTANT_MATCH", fn, x, LockHolder(2))
+        self._test_check_fn(ref, loaded, {"x": x, "holder": LockHolder(2)}, True)
+        self._test_check_fn(ref, loaded, {"x": x, "holder": LockHolder(3)}, False)
 
     def test_closure_match(self):
         def fn(x):
