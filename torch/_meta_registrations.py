@@ -9410,6 +9410,7 @@ def activate_meta():
                 "aten::arange",  # use the symint-aware C++ meta kernel (arange_meta)
                 "aten::arange.start",
                 "aten::arange.start_step",
+                "aten::add.Tensor",  # use the symint-aware C++ meta kernel (add_Tensor_meta)
             }
         ):
             pass
