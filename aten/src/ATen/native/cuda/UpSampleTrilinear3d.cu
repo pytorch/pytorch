@@ -65,8 +65,12 @@ __device__ __forceinline__ void compute_output_range(
         scale - static_cast<accscalar_t>(0.5);
   }
 
-  min_output = max(0, static_cast<int>(ceil(lo)));
-  max_output = min(output_size - 1, static_cast<int>(floor(hi)));
+  const int min_output_bound = static_cast<int>(ceil(lo));
+  const int max_output_bound = static_cast<int>(floor(hi));
+  // The inverse bounds are rounded in accscalar_t. Include one extra output on
+  // each side and filter by exact interpolation participation below.
+  min_output = min_output_bound > 0 ? min_output_bound - 1 : 0;
+  max_output = max_output_bound < output_size - 1 ? max_output_bound + 1 : output_size - 1;
 }
 
 template <typename accscalar_t>
@@ -130,7 +134,12 @@ __device__ __forceinline__ void upsample_trilinear3d_backward_gather(
     const int input_d_base = static_cast<int>(input_dr);
     const int input_dp = (input_d_base < input_depth - 1) ? 1 : 0;
     const accscalar_t input_d_lambda = input_dr - input_d_base;
-    const accscalar_t input_d0_lambda = static_cast<accscalar_t>(1) - input_d_lambda;
+    // Keep participation separate from the numeric weight so zero-weight
+    // branches still preserve 0 * NaN/Inf propagation.
+    const bool d_participates =
+        input_d == input_d_base || input_d == input_d_base + input_dp;
+    const accscalar_t d_weight = compute_linear_axis_weight(
+        input_d, input_d_base, input_dp, input_d_lambda);
 
     for (int output_h_idx = output_h_min; output_h_idx <= output_h_max; ++output_h_idx) {
       const accscalar_t input_hr = area_pixel_compute_source_index<accscalar_t>(
@@ -138,7 +147,10 @@ __device__ __forceinline__ void upsample_trilinear3d_backward_gather(
       const int input_h_base = static_cast<int>(input_hr);
       const int input_hp = (input_h_base < input_height - 1) ? 1 : 0;
       const accscalar_t input_h_lambda = input_hr - input_h_base;
-      const accscalar_t input_h0_lambda = static_cast<accscalar_t>(1) - input_h_lambda;
+      const bool h_participates =
+          input_h == input_h_base || input_h == input_h_base + input_hp;
+      const accscalar_t h_weight = compute_linear_axis_weight(
+          input_h, input_h_base, input_hp, input_h_lambda);
 
       for (int output_w_idx = output_w_min; output_w_idx <= output_w_max; ++output_w_idx) {
         const accscalar_t input_wr = area_pixel_compute_source_index<accscalar_t>(
@@ -146,17 +158,13 @@ __device__ __forceinline__ void upsample_trilinear3d_backward_gather(
         const int input_w_base = static_cast<int>(input_wr);
         const int input_wp = (input_w_base < input_width - 1) ? 1 : 0;
         const accscalar_t input_w_lambda = input_wr - input_w_base;
-        const accscalar_t input_w0_lambda = static_cast<accscalar_t>(1) - input_w_lambda;
-
-        const accscalar_t d_weight = compute_linear_axis_weight(
-            input_d, input_d_base, input_dp, input_d_lambda);
-        const accscalar_t h_weight = compute_linear_axis_weight(
-            input_h, input_h_base, input_hp, input_h_lambda);
+        const bool w_participates =
+            input_w == input_w_base || input_w == input_w_base + input_wp;
         const accscalar_t w_weight = compute_linear_axis_weight(
             input_w, input_w_base, input_wp, input_w_lambda);
         const accscalar_t weight = d_weight * h_weight * w_weight;
 
-        if (weight > 0) {
+        if (d_participates && h_participates && w_participates) {
           const size_t output_index =
               nc_idx * static_cast<size_t>(output_depth) * output_plane +
               static_cast<size_t>(output_d_idx) * output_plane +
@@ -186,7 +194,7 @@ __global__ void upsample_trilinear3d_backward_gather_out_frame(
     const bool align_corners,
     scalar_t* __restrict__ idata,
     const scalar_t* __restrict__ odata) {
-  for (size_t index = blockDim.x * blockIdx.x + threadIdx.x; index < numel;
+  for (size_t index = static_cast<size_t>(blockDim.x) * blockIdx.x + threadIdx.x; index < numel;
        index += static_cast<size_t>(blockDim.x) * gridDim.x) {
     upsample_trilinear3d_backward_gather<scalar_t, accscalar_t>(
         index,
@@ -255,7 +263,12 @@ __device__ __forceinline__ void upsample_trilinear3d_backward_gather_ndhwc(
     const int input_d_base = static_cast<int>(input_dr);
     const int input_dp = (input_d_base < input_depth - 1) ? 1 : 0;
     const accscalar_t input_d_lambda = input_dr - input_d_base;
-    const accscalar_t input_d0_lambda = static_cast<accscalar_t>(1) - input_d_lambda;
+    // Keep participation separate from the numeric weight so zero-weight
+    // branches still preserve 0 * NaN/Inf propagation.
+    const bool d_participates =
+        input_d == input_d_base || input_d == input_d_base + input_dp;
+    const accscalar_t d_weight = compute_linear_axis_weight(
+        input_d, input_d_base, input_dp, input_d_lambda);
 
     for (int output_h_idx = output_h_min; output_h_idx <= output_h_max; ++output_h_idx) {
       const accscalar_t input_hr = area_pixel_compute_source_index<accscalar_t>(
@@ -263,7 +276,10 @@ __device__ __forceinline__ void upsample_trilinear3d_backward_gather_ndhwc(
       const int input_h_base = static_cast<int>(input_hr);
       const int input_hp = (input_h_base < input_height - 1) ? 1 : 0;
       const accscalar_t input_h_lambda = input_hr - input_h_base;
-      const accscalar_t input_h0_lambda = static_cast<accscalar_t>(1) - input_h_lambda;
+      const bool h_participates =
+          input_h == input_h_base || input_h == input_h_base + input_hp;
+      const accscalar_t h_weight = compute_linear_axis_weight(
+          input_h, input_h_base, input_hp, input_h_lambda);
 
       for (int output_w_idx = output_w_min; output_w_idx <= output_w_max; ++output_w_idx) {
         const accscalar_t input_wr = area_pixel_compute_source_index<accscalar_t>(
@@ -271,17 +287,13 @@ __device__ __forceinline__ void upsample_trilinear3d_backward_gather_ndhwc(
         const int input_w_base = static_cast<int>(input_wr);
         const int input_wp = (input_w_base < input_width - 1) ? 1 : 0;
         const accscalar_t input_w_lambda = input_wr - input_w_base;
-        const accscalar_t input_w0_lambda = static_cast<accscalar_t>(1) - input_w_lambda;
-
-        const accscalar_t d_weight = compute_linear_axis_weight(
-            input_d, input_d_base, input_dp, input_d_lambda);
-        const accscalar_t h_weight = compute_linear_axis_weight(
-            input_h, input_h_base, input_hp, input_h_lambda);
+        const bool w_participates =
+            input_w == input_w_base || input_w == input_w_base + input_wp;
         const accscalar_t w_weight = compute_linear_axis_weight(
             input_w, input_w_base, input_wp, input_w_lambda);
         const accscalar_t weight = d_weight * h_weight * w_weight;
 
-        if (weight > 0) {
+        if (d_participates && h_participates && w_participates) {
           const size_t output_index =
               ((((n * output_depth + output_d_idx) * output_height + output_h_idx) *
                 output_width + output_w_idx) *
@@ -328,7 +340,7 @@ __global__ void upsample_trilinear3d_backward_gather_ndhwc_out_frame(
     const bool align_corners,
     scalar_t* __restrict__ idata,
     const scalar_t* __restrict__ odata) {
-  for (size_t index = blockDim.x * blockIdx.x + threadIdx.x; index < numel;
+  for (size_t index = static_cast<size_t>(blockDim.x) * blockIdx.x + threadIdx.x; index < numel;
        index += static_cast<size_t>(blockDim.x) * gridDim.x) {
     upsample_trilinear3d_backward_gather_ndhwc<scalar_t, accscalar_t, vec_size>(
         index,

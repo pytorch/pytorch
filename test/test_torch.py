@@ -1564,107 +1564,286 @@ class TestTorchDeviceType(TestCase):
     @skipIfRocm
     @onlyCUDA
     @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
-    def test_deterministic_interpolate_trilinear_values(self, device, dtype):
-        import torch.nn.functional as F
-        import torch._decomp.decompositions as decompositions
-
-        cases = [
+    @parametrize(
+        "channels,memory_format_name",
+        [
+            (3, "contiguous_format"),
+            (8, "contiguous_format"),
+            (3, "channels_last_3d"),
+            (8, "channels_last_3d"),
+        ],
+    )
+    @parametrize(
+        "spatial,output_size,scale_factor,align_corners,recompute_scale_factor",
+        [
             ((3, 4, 5), (6, 7, 8), None, False, None),
             ((5, 4, 3), (3, 2, 2), None, True, None),
             ((1, 3, 4), (2, 5, 6), None, False, None),
             ((4, 4, 4), (4, 4, 4), (1.1, 1.1, 1.1), False, False),
             ((4, 4, 4), (4, 4, 4), (1.1, 1.1, 1.1), False, True),
-        ]
-        for channels, memory_format in (
-            (3, torch.contiguous_format),
-            (8, torch.contiguous_format),
-            (3, torch.channels_last_3d),
-            (8, torch.channels_last_3d),
-        ):
-            for spatial, output_size, scale_factor, align_corners, recompute_scale_factor in cases:
-                input_cpu = torch.randn(1, channels, *spatial, dtype=dtype, requires_grad=True)
-                output_shape = tuple(
-                    int(size * scale) for size, scale in zip(spatial, scale_factor)
-                ) if scale_factor is not None else output_size
-                output_grad_cpu = torch.randn(1, channels, *output_shape, dtype=dtype)
+        ],
+    )
+    def test_deterministic_interpolate_trilinear_values(
+        self,
+        device,
+        dtype,
+        channels,
+        memory_format_name,
+        spatial,
+        output_size,
+        scale_factor,
+        align_corners,
+        recompute_scale_factor,
+    ):
+        import torch.nn.functional as F
+        import torch._decomp.decompositions as decompositions
 
-                with DeterministicGuard(True):
-                    output_cpu = F.interpolate(
-                        input_cpu,
+        memory_format = getattr(torch, memory_format_name)
+        # Atomic accumulation rounds each corner update in the output dtype.
+        atomic_atol, atomic_rtol = {
+            torch.float16: (1e-2, 1e-2),
+            torch.bfloat16: (5e-2, 5e-2),
+            torch.float32: (1e-5, 1e-5),
+            torch.float64: (1e-10, 1e-10),
+        }[dtype]
+        input_cpu = torch.randn(1, channels, *spatial, dtype=dtype, requires_grad=True)
+        output_shape = tuple(
+            int(size * scale) for size, scale in zip(spatial, scale_factor)
+        ) if scale_factor is not None else output_size
+        output_grad_cpu = torch.randn(1, channels, *output_shape, dtype=dtype)
+
+        with DeterministicGuard(True):
+            output_cpu = F.interpolate(
+                input_cpu,
+                size=output_size if scale_factor is None else None,
+                scale_factor=scale_factor,
+                mode='trilinear',
+                align_corners=align_corners,
+                recompute_scale_factor=recompute_scale_factor,
+            )
+            output_cpu.backward(output_grad_cpu)
+
+            input_cuda = input_cpu.detach().to(device).contiguous(
+                memory_format=memory_format
+            ).requires_grad_()
+            output_grad_cuda = output_grad_cpu.to(device).contiguous(
+                memory_format=memory_format
+            )
+            atomic_input = input_cuda.detach().clone().requires_grad_()
+            with DeterministicGuard(False):
+                atomic_output = F.interpolate(
+                    atomic_input,
+                    size=output_size if scale_factor is None else None,
+                    scale_factor=scale_factor,
+                    mode='trilinear',
+                    align_corners=align_corners,
+                    recompute_scale_factor=recompute_scale_factor,
+                )
+                atomic_output.backward(output_grad_cuda)
+            atomic_grad = atomic_input.grad.detach().clone()
+            with unittest.mock.patch.object(
+                decompositions,
+                "_upsample_linear_vec",
+                side_effect=RuntimeError("unexpected trilinear decomposition"),
+            ):
+                for iteration in range(2):
+                    output_cuda = F.interpolate(
+                        input_cuda,
                         size=output_size if scale_factor is None else None,
                         scale_factor=scale_factor,
                         mode='trilinear',
                         align_corners=align_corners,
                         recompute_scale_factor=recompute_scale_factor,
                     )
-                    output_cpu.backward(output_grad_cpu)
+                    output_cuda.backward(output_grad_cuda)
+                    if iteration == 0:
+                        first_grad = input_cuda.grad.detach().clone()
+                    else:
+                        self.assertEqual(first_grad, input_cuda.grad, atol=0, rtol=0)
+                    input_cuda.grad = None
 
-                    input_cuda = input_cpu.detach().to(device).contiguous(
-                        memory_format=memory_format
-                    ).requires_grad_()
-                    output_grad_cuda = output_grad_cpu.to(device)
-                    atomic_input = input_cuda.detach().clone().requires_grad_()
-                    with DeterministicGuard(False):
-                        atomic_output = F.interpolate(
-                            atomic_input,
-                            size=output_size if scale_factor is None else None,
-                            scale_factor=scale_factor,
-                            mode='trilinear',
-                            align_corners=align_corners,
-                            recompute_scale_factor=recompute_scale_factor,
-                        )
-                        atomic_output.backward(output_grad_cuda)
-                    atomic_grad = atomic_input.grad.detach().clone()
-                    with unittest.mock.patch.object(
-                        decompositions,
-                        "_upsample_linear_vec",
-                        side_effect=RuntimeError("unexpected trilinear decomposition"),
-                    ):
-                        for iteration in range(2):
-                            output_cuda = F.interpolate(
-                                input_cuda,
-                                size=output_size if scale_factor is None else None,
-                                scale_factor=scale_factor,
-                                mode='trilinear',
-                                align_corners=align_corners,
-                                recompute_scale_factor=recompute_scale_factor,
-                            )
-                            output_cuda.backward(output_grad_cuda)
-                            if iteration == 0:
-                                first_grad = input_cuda.grad.detach().clone()
-                            else:
-                                self.assertEqual(first_grad, input_cuda.grad, atol=0, rtol=0)
-                            input_cuda.grad = None
-
-                self.assertEqual(first_grad.cpu(), input_cpu.grad)
-                self.assertEqual(
-                    first_grad,
-                    atomic_grad,
-                    atol=16 * torch.finfo(dtype).eps,
-                    rtol=0,
-                )
+        self.assertEqual(first_grad.cpu(), input_cpu.grad)
+        self.assertEqual(first_grad, atomic_grad, atol=atomic_atol, rtol=atomic_rtol)
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     @onlyCUDA
-    def test_deterministic_interpolate_trilinear_channels_last_3d(self, device):
-        for channels in (8, 3):
-            input = torch.randn(1, channels, 4, 4, 4, device=device).contiguous(
-                memory_format=torch.channels_last_3d).requires_grad_()
-            output_grad = torch.randn(1, channels, 12, 12, 12, device=device)
-            grad = None
+    @parametrize("channels", (8, 3))
+    def test_deterministic_interpolate_trilinear_channels_last_3d(self, device, channels):
+        input = torch.randn(1, channels, 4, 4, 4, device=device).contiguous(
+            memory_format=torch.channels_last_3d).requires_grad_()
+        output_grad = torch.randn(1, channels, 12, 12, 12, device=device).contiguous(
+            memory_format=torch.channels_last_3d
+        )
+        grad = None
+        with DeterministicGuard(True):
+            for _ in range(5):
+                res = torch.nn.functional.interpolate(
+                    input,
+                    size=12,
+                    mode='trilinear',
+                    align_corners=False)
+                res.backward(output_grad)
+                if grad is None:
+                    grad = input.grad
+                    self.assertTrue(grad.is_contiguous(memory_format=torch.channels_last_3d))
+                else:
+                    self.assertEqual(grad, input.grad, atol=0, rtol=0)
+                input.grad = None
+
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    @skipIfRocm
+    @onlyCUDA
+    @dtypes(torch.float32)
+    def test_deterministic_interpolate_trilinear_noncontiguous(self, device, dtype):
+        import torch.nn.functional as F
+        import torch._decomp.decompositions as decompositions
+
+        input_cuda = torch.randn(
+            1, 4, 3, 4, 5, dtype=dtype, device=device
+        ).transpose(1, 2).requires_grad_()
+        output_grad = torch.randn(1, 3, 6, 8, 10, dtype=dtype, device=device)
+        self.assertFalse(input_cuda.is_contiguous())
+
+        with unittest.mock.patch.object(
+            decompositions,
+            "_upsample_linear_vec",
+            side_effect=RuntimeError("unexpected trilinear decomposition"),
+        ):
             with DeterministicGuard(True):
-                for _ in range(5):
-                    res = torch.nn.functional.interpolate(
-                        input,
-                        size=12,
-                        mode='trilinear',
-                        align_corners=False)
-                    res.backward(output_grad)
-                    if grad is None:
-                        grad = input.grad
-                    else:
-                        self.assertEqual(grad, input.grad, atol=0, rtol=0)
-                    input.grad = None
+                output = F.interpolate(
+                    input_cuda,
+                    size=(6, 8, 10),
+                    mode="trilinear",
+                    align_corners=False,
+                )
+                output.backward(output_grad)
+        self.assertFalse(input_cuda.grad.is_contiguous())
+        deterministic_grad = input_cuda.grad.detach().clone()
+
+        atomic_input = input_cuda.detach().clone().requires_grad_()
+        with DeterministicGuard(False):
+            output = F.interpolate(
+                atomic_input,
+                size=(6, 8, 10),
+                mode="trilinear",
+                align_corners=False,
+            )
+            output.backward(output_grad)
+        atomic_grad = atomic_input.grad.detach().clone()
+
+        self.assertEqual(deterministic_grad, atomic_grad, atol=1e-5, rtol=1e-5)
+
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    def test_deterministic_interpolate_trilinear_rocm_fallback(self, device):
+        import torch.nn.functional as F
+        import torch._decomp.decompositions as decompositions
+
+        input = torch.randn(1, 2, 4, 4, 4, device=device, requires_grad=True)
+        output_grad = torch.randn(1, 2, 8, 8, 8, device=device)
+        with unittest.mock.patch.object(
+            decompositions,
+            "_upsample_linear_vec",
+            wraps=decompositions._upsample_linear_vec,
+        ) as fallback:
+            with DeterministicGuard(True):
+                output = F.interpolate(
+                    input,
+                    size=(8, 8, 8),
+                    mode="trilinear",
+                    align_corners=False,
+                )
+                output.backward(output_grad)
+
+        self.assertTrue(fallback.called)
+
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    @skipIfRocm
+    @onlyCUDA
+    @dtypes(torch.float32)
+    def test_deterministic_interpolate_trilinear_scale_factor_rounding(self, device, dtype):
+        import torch.nn.functional as F
+
+        input_width = 382103
+        output_width = 8853214
+        scale_factor = 23.169707243602712
+        output_index = 8388627
+        affected_input_index = 362052
+
+        input_cuda = torch.ones(
+            1, 1, 1, 1, input_width, dtype=dtype, device=device, requires_grad=True
+        )
+        output_grad = torch.zeros(1, 1, 1, 1, output_width, dtype=dtype, device=device)
+        output_grad[..., output_index] = 1
+
+        with DeterministicGuard(True):
+            output = F.interpolate(
+                input_cuda,
+                scale_factor=(1.0, 1.0, scale_factor),
+                mode="trilinear",
+                align_corners=False,
+            )
+            self.assertEqual(output.shape, (1, 1, 1, 1, output_width))
+            output.backward(output_grad)
+            deterministic_grad = input_cuda.grad.detach().clone()
+
+        atomic_input = input_cuda.detach().clone().requires_grad_()
+        with DeterministicGuard(False):
+            output = F.interpolate(
+                atomic_input,
+                scale_factor=(1.0, 1.0, scale_factor),
+                mode="trilinear",
+                align_corners=False,
+            )
+            output.backward(output_grad)
+            atomic_grad = atomic_input.grad.detach().clone()
+
+        self.assertEqual(deterministic_grad, atomic_grad)
+        affected_grad = deterministic_grad[..., affected_input_index]
+        self.assertEqual(
+            torch.isfinite(affected_grad),
+            torch.ones_like(affected_grad, dtype=torch.bool),
+        )
+        self.assertEqual(
+            affected_grad != 0,
+            torch.ones_like(affected_grad, dtype=torch.bool),
+        )
+
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    @skipIfRocm
+    @onlyCUDA
+    @dtypes(torch.float32)
+    @parametrize(
+        "nonfinite_value",
+        (torch.nan, torch.inf, -torch.inf),
+        name_fn=lambda value: str(value).replace("-", "negative_"),
+    )
+    def test_deterministic_interpolate_trilinear_nonfinite_zero_weight(
+        self, device, dtype, nonfinite_value
+    ):
+        import torch.nn.functional as F
+
+        input_cpu = torch.zeros(1, 1, 2, 2, 2, dtype=dtype, requires_grad=True)
+        output_grad_cpu = torch.zeros(1, 1, 3, 3, 3, dtype=dtype)
+        output_grad_cpu[0, 0, 0, 0, 0] = nonfinite_value
+        output_cpu = F.interpolate(
+            input_cpu, size=(3, 3, 3), mode="trilinear", align_corners=True
+        )
+        output_cpu.backward(output_grad_cpu)
+
+        input_cuda = input_cpu.detach().to(device).requires_grad_()
+        output_grad_cuda = output_grad_cpu.to(device)
+        with DeterministicGuard(True):
+            output_cuda = F.interpolate(
+                input_cuda, size=(3, 3, 3), mode="trilinear", align_corners=True
+            )
+            output_cuda.backward(output_grad_cuda)
+
+        expected_grad = torch.full_like(input_cpu.grad, torch.nan)
+        expected_grad[0, 0, 0, 0, 0] = nonfinite_value
+        self.assertEqual(input_cpu.grad, expected_grad, equal_nan=True)
+        self.assertEqual(input_cuda.grad.cpu(), expected_grad, equal_nan=True)
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_interpolate_bicubic(self, device):
