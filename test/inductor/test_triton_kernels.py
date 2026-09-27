@@ -754,13 +754,9 @@ class KernelTests(torch._inductor.test_case.TestCase):
         # scalar unwrapping without being classified as a mutated CPU input.
         unspec_scalar = torch.tensor(11.0)
         # The annotation makes the complete aggregate constexpr.
-        declared_config = ConstexprConfig(
-            Transform(2.0, 4.0, tl.float32), tl.float32
-        )
+        declared_config = ConstexprConfig(Transform(2.0, 4.0, tl.float32), tl.float32)
         # This complete aggregate is wrapped explicitly at the call site.
-        explicit_config = ConstexprConfig(
-            Transform(5.0, 7.0, tl.float32), tl.float32
-        )
+        explicit_config = ConstexprConfig(Transform(5.0, 7.0, tl.float32), tl.float32)
 
         def fn(runtime_config, unspec_scalar):
             out = torch.empty_like(runtime_config.source)

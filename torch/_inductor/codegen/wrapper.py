@@ -4489,9 +4489,7 @@ class PythonWrapperCodegen(CodeGen):
 
                     def add_leaf_to_cache_key(leaf_spec, values, path):
                         flat_arg = values[0]
-                        if not isinstance(
-                            flat_arg, (ir.Buffer, ir.ReinterpretView)
-                        ):
+                        if not isinstance(flat_arg, (ir.Buffer, ir.ReinterpretView)):
                             cache_key_values.append(flat_arg)
 
                     triton_kernel_wrap.fold_aggregate(
