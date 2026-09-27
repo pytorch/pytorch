@@ -2,12 +2,18 @@
 #include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/vec_convert.h>
 #include <c10/util/bit_cast.h>
+#include <cmath>
 
 namespace at::vec {
 inline namespace CPU_CAPABILITY {
 #if defined(__aarch64__)
 
-// Define this specialization to match c10::convert, as defined in TypeCast.h
+// Define these specializations to match c10::convert, as defined in TypeCast.h,
+// which narrows float -> uint8_t via int64_t for CPU/CUDA consistency (see
+// https://github.com/pytorch/pytorch/issues/36807). Note that torch.Tensor.to
+// documents the result for values that do not fit into uint8_t as undefined.
+// Each loop below uses the narrowest integer that keeps the low byte exact for
+// every input that c10::convert defines, as wider lanes are much slower.
 template <>
 inline void convert(
     const float* __restrict src,
@@ -15,7 +21,44 @@ inline void convert(
     int64_t n) {
   uint64_t len = static_cast<uint64_t>(n);
   for (uint64_t i = 0; i < len; i++) {
-    dst[i] = static_cast<uint8_t>(static_cast<int64_t>(src[i]));
+    // float has 24 significant bits, so |x| >= 2^31 is a multiple of 256
+    const float x = src[i];
+    const int32_t v =
+        std::fabs(x) < 2147483648.0f ? static_cast<int32_t>(x) : 0;
+    dst[i] = static_cast<uint8_t>(v);
+  }
+}
+
+template <>
+inline void convert(
+    const at::Half* __restrict src,
+    uint8_t* __restrict dst,
+    int64_t n) {
+#ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
+  const float16_t* srcPtr = reinterpret_cast<const float16_t*>(src);
+#else
+  const at::Half* srcPtr = src;
+#endif
+  // Every finite fp16 fits in int32_t, so narrowing via it matches int64_t
+  uint64_t len = static_cast<uint64_t>(n);
+  for (uint64_t i = 0; i < len; i++) {
+    dst[i] = static_cast<uint8_t>(static_cast<int32_t>(srcPtr[i]));
+  }
+}
+
+template <>
+inline void convert(
+    const c10::BFloat16* __restrict src,
+    uint8_t* __restrict dst,
+    int64_t n) {
+  const uint16_t* srcPtr = reinterpret_cast<const uint16_t*>(src);
+  uint64_t len = static_cast<uint64_t>(n);
+  for (uint64_t i = 0; i < len; i++) {
+    float f = c10::bit_cast<float>(static_cast<uint32_t>(srcPtr[i]) << 16);
+    // bf16 has 8 significant bits, so |x| >= 2^16 is a multiple of 256 and
+    // clamping there keeps the low byte while making the int32_t cast exact
+    f = std::fmin(std::fmax(f, -65536.0f), 65536.0f);
+    dst[i] = static_cast<uint8_t>(static_cast<int32_t>(f));
   }
 }
 
@@ -154,7 +197,6 @@ CONVERT_FROM_BOOL_TEMPLATE(double)
     return convertImpl<from_type, float16_t>(src, dstPtr, n);           \
   }
 
-CONVERT_FROM_FP16_TEMPLATE(uint8_t)
 CONVERT_FROM_FP16_TEMPLATE(int8_t)
 CONVERT_FROM_FP16_TEMPLATE(int16_t)
 CONVERT_FROM_FP16_TEMPLATE(int32_t)
@@ -224,7 +266,6 @@ inline void convertFromBf16Impl(
     return convertFromBf16Impl<to_type>(src, dst, n);                      \
   }
 
-CONVERT_FROM_BF16_TEMPLATE(uint8_t)
 CONVERT_FROM_BF16_TEMPLATE(int8_t)
 CONVERT_FROM_BF16_TEMPLATE(int16_t)
 CONVERT_FROM_BF16_TEMPLATE(int32_t)
