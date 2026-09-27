@@ -1714,6 +1714,9 @@ def _compile(
         BisectValidationException,
         ValidationException,
     )
+    from torch.compiler._no_compile import check_compilation_allowed
+
+    check_compilation_allowed("Dynamo graph compilation")
 
     # Only nonlocal defs here please!
     # Time spent compiling this frame before restarting or failing analysis
