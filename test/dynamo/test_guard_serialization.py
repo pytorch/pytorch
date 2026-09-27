@@ -1,12 +1,14 @@
 # Owner(s): ["module: dynamo"]
 
 import builtins
+import cmath
 import collections
 import dataclasses
 import enum
 import functools
 import io
 import itertools
+import math
 import pickle
 import sys
 import tempfile
@@ -3285,12 +3287,36 @@ class TestGuardSerialization(TestGuardSerializationBase):
 
         x = torch.randn(3)
 
-        # we don't support FUNCTION_MATCH because it adds an ID_MATCH guard, and we don't
-        # support that in serialization
+        ref, loaded = self._test_serialization("CLASS_MATCH", fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        with mock.patch.object(torch, "no_grad", torch.enable_grad):
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+
+    def test_class_match_on_a_local_class(self):
+        class Local:
+            pass
+
+        def fn(x):
+            if isinstance(x, Local):
+                return x
+            return x + 1
+
+        # A <locals> class does not unpickle to the loading process's class.
         with self.assertRaisesRegex(
             PackageError, "CLASS_MATCH guard cannot be serialized."
         ):
-            self._test_serialization("CLASS_MATCH", fn, x)
+            self._test_serialization("CLASS_MATCH", fn, torch.randn(3))
+
+    def test_module_match(self):
+        def fn(x):
+            return x + math.sqrt(2)
+
+        x = torch.randn(3)
+
+        ref, loaded = self._test_serialization("MODULE_MATCH", fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        with mock.patch.dict(globals(), {"math": cmath}):
+            self._test_check_fn(ref, loaded, {"x": x}, False)
 
     def test_closure_match(self):
         def fn(x):
