@@ -651,7 +651,7 @@ def _globals_module_name(namespace: dict[str, object]) -> str | None:
         if not isinstance(name, str):
             continue
         module = sys.modules.get(name)
-        if type(module) is types.ModuleType and vars(module) is namespace:
+        if isinstance(module, types.ModuleType) and vars(module) is namespace:
             return name
     return None
 
@@ -713,7 +713,7 @@ def _descriptor_functions(obj: Any) -> list[tuple[str, Any]]:
             if fn is not None
         ]
     if isinstance(obj, functools.cached_property):
-        return [("func", obj.func)] if obj.func is not None else []
+        return [("func", obj.func)]
     return []
 
 
@@ -749,11 +749,7 @@ def _get_code_source(
 
         for part in parts:
             if not hasattr(toplevel, part):
-                # dataclasses and similar helpers generate a function with
-                # exec(), then attach it to a module-owned class. Its code's
-                # synthetic qualname is not traversable, so search that module.
-                toplevel = module
-                break
+                _raise_resolution_error(code, toplevel)
             toplevel = getattr(toplevel, part)
             if (
                 inspect.isfunction(toplevel)
@@ -761,9 +757,8 @@ def _get_code_source(
                 or _descriptor_functions(toplevel)
             ):
                 # Stop at a descriptor too, and let _find_code_source unwrap it.
-                # Walking past one cannot work: the remaining parts of a
-                # qualname like "C.prop.<locals>.inner" are not attributes of
-                # the property object.
+                # The remaining parts of a qualname like "C.prop.<locals>.inner"
+                # are not attributes of the property object.
                 break
     seen = set()
 
@@ -1275,6 +1270,18 @@ class CompilePackage:
             function_name=_FunctionId(function_name),
             code_source=code_source,
         )
+        if inspect.getmodule(code) is None:
+            # The module search records the found function's __qualname__,
+            # which the loader replays with plain getattr. dataclasses rename
+            # what they exec() to its attribute path; a helper that does not
+            # would otherwise only fail at load.
+            try:
+                resolves = _lookup_code(self._codes[code]) is code
+            except AttributeError:
+                resolves = False
+            if not resolves:
+                del self._codes[code]
+                _raise_resolution_error(code, module)
 
     @property
     def current_entry(self) -> _DynamoCodeCacheEntry | None:
