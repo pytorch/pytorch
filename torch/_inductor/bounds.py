@@ -9,6 +9,7 @@ from sympy import Expr
 
 import torch
 from torch.utils._sympy.value_ranges import (
+    AllIn,
     bound_sympy,
     SymPyValueRangeAnalysis,
     ValueRanges,
@@ -168,11 +169,13 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis, DefaultHandler):
             setattr(self, op, self.bool_handler)
 
     @staticmethod
-    def bool_handler(*args: Any, **kwargs: Any) -> ValueRanges[Any]:
+    def bool_handler(*args: object, **kwargs: object) -> ValueRanges[Any]:
         # just assuming bools can have both values
         return ValueRanges(sympy.false, sympy.true)  # type: ignore[arg-type]
 
-    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+    def _default(
+        self, name: str, args: tuple[object, ...], kwargs: dict[str, object]
+    ) -> Any:
         # many ops are unlikely to show up in optimizable indexing compute,
         # so we don't have full coverage
         return ValueRanges.unknown()
@@ -181,7 +184,7 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis, DefaultHandler):
         return ValueRanges.unknown()
 
     def store(
-        self, name: str, index: sympy.Expr, value: Any, mode: StoreMode = None
+        self, name: str, index: sympy.Expr, value: object, mode: StoreMode = None
     ) -> None:
         return
 
@@ -190,24 +193,24 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis, DefaultHandler):
         dtype: torch.dtype,
         src_dtype: torch.dtype,
         reduction_type: ReductionType,
-        value: Any,
+        value: object,
     ) -> ValueRanges[Any]:
         return ValueRanges.unknown()
 
     @classmethod
-    def index_expr(cls, index: Any, dtype: torch.dtype) -> ValueRanges[Any]:
+    def index_expr(cls, index: object, dtype: torch.dtype) -> ValueRanges[Any]:
         if not isinstance(index, ValueRanges):
             raise AssertionError(f"expected ValueRanges, got {type(index)}")
         return cls.to_dtype(index, dtype)
 
     @classmethod
-    def value_expr(cls, index: Any, dtype: torch.dtype) -> ValueRanges[Any]:
+    def value_expr(cls, index: object, dtype: torch.dtype) -> ValueRanges[Any]:
         return cls.index_expr(index, dtype)
 
     @staticmethod
     # pyrefly: ignore [bad-override]
     def to_dtype(
-        x: Any,
+        x: AllIn | ValueRanges[Any],
         dtype: torch.dtype,
         src_dtype: torch.dtype | None = None,
         use_compute_types: bool = True,

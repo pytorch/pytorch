@@ -22,6 +22,7 @@ from torch._inductor.codegen.triton_combo_kernel import (
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import clear_caches, fresh_cache, run_and_get_code
 from torch._inductor.virtualized import V
+from torch.profiler import kineto_available
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_utils import (
@@ -507,9 +508,14 @@ class ComboKernelTests(TestCase):
         # meta keys (XBLOCK, YBLOCK) but SequentialFlattenComboKernelGrid looks
         # up XBLOCK_0, XBLOCK_1 etc. — dict.get returns None, and ceildiv treats
         # None as block=1, hardcoding the grid to xnumel*ynumel per subkernel.
+        # kineto_available: CI runs this file with TORCHINDUCTOR_CPP_WRAPPER=1, so on a
+        # USE_KINETO=0 build both halves above are true and the GPU-only profile below
+        # raises. Extending the condition rather than gating the whole method keeps the
+        # eager-path coverage above.
         if (
             torch._inductor.config.cpp_wrapper
             and self.combo_kernel_per_subkernel_blocks
+            and kineto_available()
         ):
             from torch.profiler import ProfilerActivity
 
@@ -855,6 +861,7 @@ class ComboKernelTests(TestCase):
         # 3D poi (x, y, z) are separated from combo kernels
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
     @skipIfXpu(msg="Profiler JSON traceEvents is not supported on XPU")
     @requires_gpu_and_triton
     def test_combo_kernel_per_config_subkernel_block_size(self):
@@ -934,6 +941,7 @@ class ComboKernelTests(TestCase):
         else:
             FileCheck().check("pid_offset = pid").run(code[0])
 
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
     @skipIfXpu(msg="Profiler JSON traceEvents is not supported on XPU")
     @requires_gpu_and_triton
     @torch._dynamo.config.patch("assume_static_by_default", False)
@@ -1076,6 +1084,7 @@ class ComboKernelTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
     @skipIfXpu(msg="Profiler JSON traceEvents is not supported on XPU")
     @requires_gpu_and_triton
     @unittest.skipIf(not SM90OrLater, "Avoid oom on CI")
@@ -2189,6 +2198,118 @@ class ComboKernelCompileTimeAutotuneTests(TestCase):
         self.assertEqual(counters["inductor"]["combo_subkernel_autotune_fallback"], 0)
         if mode == "cdt":
             self.assertGreater(counters["inductor"]["coordesc_tuning_bench"], 0)
+
+    @requires_gpu_and_triton
+    @parametrize("per_kernel_alloc", [False, True])
+    def test_concat_autotune_preserves_output_aliasing(self, per_kernel_alloc):
+        from torch._inductor.codegen.wrapper import PythonWrapperCodegen
+
+        autotune_calls = []
+        original_generate_and_run = PythonWrapperCodegen.generate_and_run_autotune_block
+
+        def capture_autotune_calls(wrapper):
+            autotune_calls.append(wrapper.kernel_autotune_calls.getvalue())
+            return original_generate_and_run(wrapper)
+
+        def fn(*args):
+            return torch.cat(args, dim=1)
+
+        inputs = tuple(torch.randn(8, 4, device=GPU_TYPE) for _ in range(12))
+        with (
+            fresh_cache(),
+            torch._inductor.config.patch(
+                {
+                    "aot_inductor.autotune_per_kernel_alloc": per_kernel_alloc,
+                    "force_disable_caches": True,
+                    "triton.autotune_at_compile_time": True,
+                }
+            ),
+            patch.object(
+                PythonWrapperCodegen,
+                "generate_and_run_autotune_block",
+                capture_autotune_calls,
+            ),
+        ):
+            actual = torch.compile(fn, fullgraph=True)(*inputs)
+
+        self.assertEqual(actual, fn(*inputs))
+        self.assertEqual(len(autotune_calls), 1)
+        call_code = autotune_calls[0]
+        concat_storages = re.findall(
+            r"(_autotune_storage_\d+) = "
+            r"generate_example_value\(\(384,\), \(1,\)",
+            call_code,
+        )
+        self.assertEqual(len(concat_storages), 1)
+        concat_storage = concat_storages[0]
+        self.assertEqual(call_code.count(f"torch.as_strided({concat_storage}"), 12)
+        FileCheck().check(
+            f"torch.as_strided({concat_storage}, (8, 4), (48, 1), 0)"
+        ).check(f"torch.as_strided({concat_storage}, (8, 4), (48, 1), 44)").check_regex(
+            rf"del .*{concat_storage}"
+        ).run(call_code)
+
+    @requires_gpu_and_triton
+    def test_concat_autotune_bounds_backing_memory(self):
+        from torch._inductor.codegen.wrapper import PythonWrapperCodegen
+
+        device_module = getattr(torch, torch.device(GPU_TYPE).type)
+        original_generate_and_run = PythonWrapperCodegen.generate_and_run_autotune_block
+        peak_autotune_bytes = []
+
+        def measure_autotune_block(wrapper):
+            device_module.synchronize()
+            device_module.reset_peak_memory_stats()
+            baseline = device_module.memory_allocated()
+            try:
+                return original_generate_and_run(wrapper)
+            finally:
+                device_module.synchronize()
+                peak_autotune_bytes.append(
+                    device_module.max_memory_allocated() - baseline
+                )
+
+        num_inputs = 64
+        rows, cols = 512, 64
+
+        def fn(*args):
+            return torch.cat(args, dim=1)
+
+        inputs = tuple(
+            torch.randn(rows, cols, device=GPU_TYPE) for _ in range(num_inputs)
+        )
+        with (
+            fresh_cache(),
+            torch._inductor.config.patch(
+                {
+                    "force_disable_caches": True,
+                    "triton.autotune_at_compile_time": True,
+                }
+            ),
+            patch.object(
+                PythonWrapperCodegen,
+                "generate_and_run_autotune_block",
+                measure_autotune_block,
+            ),
+        ):
+            actual = torch.compile(fn, fullgraph=True)(*inputs)
+
+        self.assertEqual(actual, fn(*inputs))
+        self.assertTrue(peak_autotune_bytes)
+        element_size = torch.empty((), dtype=torch.float32).element_size()
+        concat_storage_bytes = rows * cols * num_inputs * element_size
+        # The concat output slices share a single backing allocation. Without
+        # sharing, each of the num_inputs slice views allocates storage spanning
+        # the whole concat output, so peak usage would grow ~num_inputs x. Allow
+        # up to 5x one backing buffer for the source example inputs and scratch,
+        # which stays far below the num_inputs x regression.
+        self.assertLess(
+            max(peak_autotune_bytes),
+            5 * concat_storage_bytes,
+            f"autotune block peaked at {max(peak_autotune_bytes)} bytes; expected "
+            f"the concat output slices to share one ~{concat_storage_bytes}-byte "
+            "buffer",
+        )
 
     @requires_gpu_and_triton
     def test_compile_time_autotune_caching(self):

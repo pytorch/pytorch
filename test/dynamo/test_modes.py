@@ -1913,8 +1913,8 @@ class outer_fn(torch.nn.Module):
             out.sum().backward()
 
     @unittest.skipUnless(
-        IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED and not torch.version.hip,
-        "Requires CUDA with SM >= 8.0, Triton, and not ROCm",
+        IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED,
+        "Requires CUDA with SM >= 8.0, and Triton",
     )
     def test_nested_compile_transformer_with_flex_attention_compiled_layers(
         self,
@@ -2167,9 +2167,9 @@ class outer_fn(torch.nn.Module):
         dist.destroy_process_group()
 
     @unittest.skipUnless(
-        (IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED and not torch.version.hip)
+        IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED
         or IS_FLEX_ATTENTION_XPU_PLATFORM_SUPPORTED,
-        "Requires CUDA with SM >= 8.0, Triton, and not ROCm",
+        "Requires CUDA with SM >= 8.0, and Triton",
     )
     def test_2tier_blockmask_tensor_closure_nested_compile_aot_export(self):
         """2-tier AOT export with BlockMask whose mask_mod captures tensors.

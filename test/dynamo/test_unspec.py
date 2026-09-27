@@ -2,7 +2,12 @@
 import contextlib
 import math
 import random
+import subprocess
+import sys
+import time
 import unittest
+import warnings
+from unittest import mock
 
 import numpy as np
 
@@ -14,10 +19,16 @@ import torch._inductor.config as inductor_config
 import torch.nn.functional as F
 from torch._dynamo.comptime import comptime
 from torch._dynamo.testing import CompileCounter, CompileCounterWithBackend, same
+from torch._dynamo.variables.functions import _TIME_FUNCTION_NAMES
 from torch._inductor.utils import fresh_cache
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_MEM_EFF_ATTENTION
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import skipIfWindows
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    IS_FBCODE,
+    parametrize,
+    skipIfWindows,
+)
 from torch.testing._internal.logging_utils import logs_to_string
 
 
@@ -27,9 +38,37 @@ from torch.testing._internal.logging_utils import logs_to_string
 # you assume static by default, put it in a regular test file and
 # test_dynamic_shapes will cover both the YOLO and non-YOLO cases.
 
+_EXPECTED_TIME_FUNCTION_NAMES = (
+    "clock_gettime",
+    "clock_gettime_ns",
+    "monotonic",
+    "monotonic_ns",
+    "perf_counter",
+    "perf_counter_ns",
+    "process_time",
+    "process_time_ns",
+    "thread_time",
+    "thread_time_ns",
+    "time",
+    "time_ns",
+)
+
+_TIME_FUNCTION_TEST_CASES = tuple(
+    (
+        name,
+        (time.CLOCK_MONOTONIC,) if name.startswith("clock_gettime") else (),
+    )
+    for name in _EXPECTED_TIME_FUNCTION_NAMES
+    if hasattr(time, name)
+)
+
 
 @torch._dynamo.config.patch(assume_static_by_default=False)
+@instantiate_parametrized_tests
 class UnspecTests(torch._dynamo.test_case.TestCase):
+    def test_time_function_names(self):
+        self.assertEqual(_TIME_FUNCTION_NAMES, _EXPECTED_TIME_FUNCTION_NAMES)
+
     def test_numpy_correctness(self):
         def fn(x, y, z):
             xy = [x + y, y, False]
@@ -122,6 +161,29 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         res2 = opt_fn(x)
         self.assertTrue(same(res1, res2))
 
+    def test_random_seed_takes_effect_on_first_call(self):
+        # An in-function random.seed() must be visible to a scalar draw
+        # traced right after it, including on the very first (compiling)
+        # call - unlike test_feed_random_values_into_graph_only and
+        # test_random_values_with_graph_break above, this deliberately does
+        # NOT "shake out" the compile before comparing, since that's exactly
+        # the call this is testing.
+        def fn(x):
+            random.seed(0)
+            return x + random.random(), random.random(), random.randint(0, 100)
+
+        x = torch.zeros(1)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        for _ in range(3):
+            res1 = fn(x)
+            eager_state = random.getstate()
+            res2 = opt_fn(x)
+            compiled_state = random.getstate()
+            self.assertEqual(res1, res2)
+            self.assertEqual(eager_state, compiled_state)
+        self.assertEqual(cnts.frame_count, 1)
+
     # Really annoying intersection of specialization and RandomValueSource
     # If we get a RandomValueSource with a single element tensor, we should return a ConstantVariable like other
     # unspects... but if we do, we break the bytecode assumptions and guards will not work as we will be referring
@@ -178,6 +240,127 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             res.append(fn(torch.ones(2)))
         for i in range(1, 5):
             self.assertFalse(same(res[i - 1], res[i]))
+
+    @parametrize("clock_name,clock_args", _TIME_FUNCTION_TEST_CASES)
+    def test_time_function_unused_no_warning(self, clock_name, clock_args):
+        torch._dynamo.reset()
+        clock_fn = getattr(time, clock_name)
+
+        def fn():
+            clock_fn(*clock_args)
+
+        opt_fn = torch.compile(fn, backend="eager")
+        with warnings.catch_warnings(record=True) as caught_warnings:
+            warnings.simplefilter("always")
+            self.assertIsNone(opt_fn())
+
+        self.assertFalse(
+            any(
+                f"time.{clock_name}" in str(warning.message)
+                for warning in caught_warnings
+            )
+        )
+
+    def test_time_functions_preserve_call_order(self):
+        # Guard against hoisting clock reads into pregraph runtime inputs.
+        graph_times = []
+
+        def backend(gm, _):
+            def run(*args):
+                graph_times.append(time.perf_counter())
+                return gm(*args)
+
+            return run
+
+        def fn(x):
+            before = time.perf_counter()
+            y = x + 1
+            after = time.perf_counter()
+            return y, before, after
+
+        opt_fn = torch.compile(fn, backend=backend)
+        x = torch.zeros(())
+
+        opt_fn(x)
+        graph_times.clear()
+        result, before, after = opt_fn(x)
+
+        self.assertEqual(result, x + 1)
+        self.assertEqual(len(graph_times), 1)
+        self.assertLessEqual(before, graph_times[0])
+        self.assertLessEqual(graph_times[0], after)
+
+    def test_time_time_does_not_bypass_disable(self):
+        # A disabled monkey patch should retain the usual disable graph break.
+        @torch.compiler.disable
+        def disabled_time():
+            return 0.0
+
+        with mock.patch.object(time, "time", disabled_time):
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "Skip calling `torch.compiler.disable\\(\\)`d function",
+            ):
+                torch.compile(lambda: time.time(), backend="eager", fullgraph=True)()
+
+    @unittest.skipIf(IS_FBCODE, "Subprocess spawning doesn't work in fbcode")
+    def test_time_function_patch_before_dynamo_import(self):
+        script = r"""
+import importlib
+import os
+import sys
+import time
+
+import numpy
+import torch
+
+if "torch._dynamo.variables.functions" in sys.modules:
+    raise AssertionError("Dynamo functions imported before the time patch")
+
+original_process_time = time.process_time
+original_perf_counter = time.perf_counter
+
+
+class UnhashableClock:
+    __hash__ = None
+
+    def __call__(self):
+        return original_perf_counter()
+
+
+time.process_time = os.getpid
+time.perf_counter = UnhashableClock()
+try:
+    importlib.import_module("torch._dynamo.variables.functions")
+finally:
+    time.perf_counter = original_perf_counter
+
+try:
+    torch.compile(lambda: time.process_time(), backend="eager", fullgraph=True)()
+except torch._dynamo.exc.Unsupported as exc:
+    if "Attempted to call function marked as skipped" not in str(exc):
+        raise
+else:
+    raise AssertionError("The monkey-patched time.process_time was treated as a clock")
+
+time.process_time = original_process_time
+torch._dynamo.reset()
+try:
+    torch.compile(lambda: time.process_time(), backend="eager", fullgraph=True)()
+except torch._dynamo.exc.Unsupported as exc:
+    if "Call to a time function" not in str(exc):
+        raise
+else:
+    raise AssertionError("The restored time.process_time was not treated as a clock")
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            msg=lambda msg: f"{msg}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+        )
 
     def test_random_call_with_while_loop(self):
         def fn(x):
@@ -814,6 +997,39 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         t = torch.tensor([1])
         compl_fn = torch.compile(fn, dynamic=True, backend="eager")
         self.assertEqual(fn(t, 1.0), compl_fn(t, 1.0))
+
+    def test_symint_number_methods(self):
+        def fn(x):
+            n = x.size(0)
+            bit_length = n.bit_length()
+            conjugate = n.conjugate()
+            ratio = n.as_integer_ratio()[0]
+            return bit_length + conjugate + ratio + n.__int__()
+
+        x = torch.randn(8, 3)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x), fn(x))
+
+    def test_symint_bit_length_wrong_arity(self):
+        def fn(x):
+            return x.size(0).bit_length(1)
+
+        x = torch.randn(8, 3)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "takes no arguments"
+        ):
+            compiled(x)
+
+    @torch._dynamo.config.patch(specialize_float=False)
+    def test_symfloat_number_methods(self):
+        def fn(t, m):
+            return (2 * t if m.is_integer() else t) + m.conjugate()
+
+        t = torch.tensor([1.0])
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(t, 1.0), fn(t, 1.0))
+        self.assertEqual(compiled(t, 1.5), fn(t, 1.5))
 
     @torch._dynamo.config.patch(specialize_float=False)
     def test_unspec_roundtrip_float_input(self):
