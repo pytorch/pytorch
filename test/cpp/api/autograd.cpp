@@ -522,6 +522,30 @@ TEST(CustomAutogradTest, FunctionReturnsInput) {
   ASSERT_VARIABLE_EQ(x.grad(), torch::full(1, 2.));
 }
 
+TEST(CustomAutogradTest, FunctionReturnsInputPreservesStrides) {
+  struct MyFunction : public Function<MyFunction> {
+    static Variable forward(AutogradContext*, Variable input) {
+      return input;
+    }
+
+    static variable_list backward(
+        AutogradContext*,
+        variable_list grad_outputs) {
+      return {grad_outputs[0] * 2};
+    }
+  };
+
+  auto input = torch::empty_strided({1, 3}, {1, 1}).zero_();
+  auto output = MyFunction::apply(input);
+  EXPECT_EQ(output.strides(), input.strides());
+
+  input.requires_grad_();
+  output = MyFunction::apply(input);
+  EXPECT_EQ(output.strides(), input.strides());
+  output.sum().backward();
+  ASSERT_VARIABLE_EQ(input.grad(), torch::full_like(input, 2.));
+}
+
 TEST(CustomAutogradTest, FunctionReturnsUndefined) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(AutogradContext* ctx, Variable var) {
