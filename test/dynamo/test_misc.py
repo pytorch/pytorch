@@ -225,6 +225,29 @@ class UserDefineSetAttr:
 
 
 class MiscTests(torch._inductor.test_case.TestCase):
+    def test_storage_offset_scalar_output(self):
+        def fn(x):
+            return x.storage_offset()
+
+        base = torch.arange(30)
+        inputs = (
+            base[:10],
+            base[5:15],
+            base[7:17],
+            base[:10],
+        )
+
+        compiled_fn = torch.compile(
+            fn,
+            backend="eager",
+            fullgraph=True,
+        )
+
+        for x in inputs:
+            result = compiled_fn(x)
+            self.assertIsInstance(result, int)
+            self.assertEqual(result, fn(x))
+
     def test_get_cache_entry(self):
         def f(x):
             return x + 1
@@ -5662,6 +5685,32 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         with self.assertRaises(TypeError):
             fn(torch.randn(4))
 
+    @parametrize(
+        "case",
+        [
+            subtest("no_args", name="no_args"),
+            subtest("one_arg", name="one_arg"),
+            subtest("too_many_args", name="too_many_args"),
+            subtest("keyword_arg", name="keyword_arg"),
+        ],
+    )
+    def test_getattr_wrong_args_raises(self, case):
+        def fn(x):
+            try:
+                if case == "no_args":
+                    return getattr()
+                if case == "one_arg":
+                    return getattr(x)
+                if case == "too_many_args":
+                    return getattr(x, "shape", None, None)
+                return getattr(x, name="shape")
+            except TypeError as exc:
+                return x.sin(), str(exc)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
     def test_user_defined_class_name(self):
         class MyClassFoo:
             pass
@@ -8773,6 +8822,33 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         self.assertTrue(torch.allclose(f(), torch.tensor([2.0])))
 
+    def test_opaque_value_instance_staticmethod(self):
+        from torch._library.opaque_object import register_opaque_type
+
+        class Quantizer:
+            def __eq__(self, other):
+                return type(self) is type(other)
+
+            def __hash__(self):
+                return hash(type(self))
+
+            def __fx_repr__(self):
+                name = type(self).__name__
+                return f"{name}()", {name: type(self)}
+
+            @staticmethod
+            def get_shape(shape):
+                return shape
+
+        register_opaque_type(Quantizer, typ="value")
+        q = Quantizer()
+
+        def fn(x):
+            return x + q.get_shape((3,))[0]
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(torch.zeros(3)), torch.full((3,), 3.0))
+
     def test_user_function_variable_supports_type_abcmeta_argument(self):
         class Foo(metaclass=abc.ABCMeta):
             @abc.abstractclassmethod
@@ -9306,22 +9382,22 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         )
         self.assertEqual(opt_fn(x), plain_member_matches_first(x))
 
-        # Reaching a member with an __instancecheck__ hook realizes a lazy
-        # constant and guards its value, so it recompiles once per value. A
-        # plain member matching first keeps the weaker type-only guard.
+        # A str cannot carry the attribute the Protocol reads, so the answer
+        # comes from the type in either member order and the lazy constant keeps
+        # its type-only guard. Neither spelling may specialize on the value.
         def plain_first(x, v):
             return x + 1 if isinstance(v, (str, HasReal)) else x - 1
 
         def hooked_first(x, v):
             return x + 1 if isinstance(v, (HasReal, str)) else x - 1
 
-        for fn, expected_frames in ((plain_first, 1), (hooked_first, 2)):
+        for fn in (plain_first, hooked_first):
             torch._dynamo.reset()
             cnt = CompileCounter()
             opt_fn = torch.compile(fn, backend=cnt)
             for value in ("hello", "world"):
                 self.assertEqual(opt_fn(x, value), fn(x, value))
-            self.assertEqual(cnt.frame_count, expected_frames)
+            self.assertEqual(cnt.frame_count, 1, msg=fn.__name__)
 
     def test_isinstance_protocol_without_issubclass_graph_breaks(self):
         @typing.runtime_checkable
@@ -9335,6 +9411,9 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             # A function is built during tracing, so Dynamo has no Python object
             # to run the Protocol's __instancecheck__ on, and unlike a list a
             # function carries a __dict__, so its type does not answer either.
+            # main answered False here by comparing class identity, which
+            # happens to match eager for this case and contradicts it whenever
+            # the attribute is present. Breaking is the honest answer.
             return x + 1 if isinstance(inner, HasPorts) else x - 1
 
         x = torch.ones(3)
@@ -9342,6 +9421,126 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             torch.compile(fn, backend="eager", fullgraph=True)(x)
         torch._dynamo.reset()
         self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+
+    def test_isinstance_value_reading_instancecheck_on_traced_list(self):
+        # This hook reads the instance, not its attributes, so answering it from
+        # a representative empty list would be wrong (here it raises IndexError).
+        # The traced list is reconstructible, so the real object answers.
+        class IndexMeta(type):
+            def __subclasscheck__(cls, subclass):
+                raise TypeError("nope")
+
+            def __instancecheck__(cls, instance):
+                return instance[0] == 1
+
+        class First1(metaclass=IndexMeta):
+            pass
+
+        def fn(x):
+            lst = [1, 2, 3]
+            return x + 1 if isinstance(lst, First1) else x - 1
+
+        x = torch.ones(3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_isinstance_inherited_instancecheck_metaclass(self):
+        # __instancecheck__ resolves through the metaclass MRO, so a hook that is
+        # inherited rather than defined directly still takes the object path.
+        class Meta(abc.ABCMeta):
+            pass
+
+        class Base(metaclass=Meta):
+            pass
+
+        class Obj(Base):
+            pass
+
+        def subscripted_generic(x, o):
+            # typing._GenericAlias inherits __instancecheck__ from
+            # _BaseGenericAlias and rejects subscripted generics
+            try:
+                isinstance(o, typing.List[int])
+            except TypeError:
+                return x + 1
+            return x - 1
+
+        def inherited_abcmeta(x, o):
+            return x + 1 if isinstance(o, Base) else x - 1
+
+        x = torch.ones(3)
+        o = Obj()
+        for fn in (subscripted_generic, inherited_abcmeta):
+            torch._dynamo.reset()
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(opt_fn(x, o), fn(x, o), msg=fn.__name__)
+
+    def test_isinstance_protocol_on_nn_module(self):
+        @typing.runtime_checkable
+        class HasWeight(typing.Protocol):
+            weight: torch.Tensor
+
+        @typing.runtime_checkable
+        class HasPorts(typing.Protocol):
+            ports: tuple[int, ...]
+
+        def fn(x, mod):
+            return x + 1 if isinstance(mod, HasPorts | HasWeight) else x - 1
+
+        x = torch.ones(3)
+        mod = torch.nn.Linear(3, 3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x, mod), fn(x, mod))
+
+    def test_isinstance_does_not_specialize_value_independent_constant(self):
+        # Neither hook can see anything about a str that its type does not
+        # already fix, so the answer must not realize the constant and guard
+        # its value. Both spellings used to recompile once per value.
+        @typing.runtime_checkable
+        class HasReal(typing.Protocol):
+            real: int
+
+        def protocol_member(t, v):
+            return t + 1 if isinstance(v, HasReal) else t - 1
+
+        def abc_member(t, v):
+            return t + 1 if isinstance(v, collections.abc.Sequence) else t - 1
+
+        t = torch.randn(3)
+        for fn in (protocol_member, abc_member):
+            torch._dynamo.reset()
+            cnt = CompileCounter()
+            opt_fn = torch.compile(fn, backend=cnt)
+            for v in ("a", "b", "c", "d"):
+                self.assertEqual(opt_fn(t, v), fn(t, v), msg=v)
+            self.assertEqual(cnt.frame_count, 1, msg=fn.__name__)
+
+    def test_isinstance_instancecheck_raises_non_str_args(self):
+        # Exception args are not all strings; a raw int used to reach the
+        # variable-tracker machinery and fail with an internal AttributeError.
+        class NonStrMeta(type):
+            def __subclasscheck__(cls, subclass):
+                raise TypeError("msg", 42)
+
+            def __instancecheck__(cls, instance):
+                raise TypeError("msg", 42)
+
+        class C(metaclass=NonStrMeta):
+            pass
+
+        class Obj:
+            pass
+
+        def fn(x, o):
+            try:
+                isinstance(o, C)
+            except TypeError:
+                return x + 1
+            return x - 1
+
+        x, o = torch.ones(3), Obj()
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x, o), fn(x, o))
 
     def test_isinstance_non_runtime_checkable_protocol_raises(self):
         class NotRuntime(typing.Protocol):
@@ -14328,8 +14527,13 @@ def ___make_guard_fn():
 
         x = torch.randn([0, 1, 2, 3, 4, 5])
         compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, "infinite generator"
+        # symbolic_convert imports the limit by value, so patch it there. A small
+        # limit exercises the same bail-out without tracing 100k YIELD_VALUEs.
+        with (
+            unittest.mock.patch.object(
+                torch._dynamo.symbolic_convert, "MAX_ITERATOR_LIMIT", 100
+            ),
+            self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "infinite generator"),
         ):
             compiled_fn(x)
 
@@ -18246,6 +18450,33 @@ fn
         self.assertEqual(res[8], -1)
         self.assertEqual(res[9], float.fromhex("0x1.ffffp10"))
         self.assertEqual(res[10], "0x1.8000000000000p+0")
+
+    def test_builtin_numeric_unbound_method_constant_fold(self):
+        def fn():
+            out = [
+                complex.__radd__(3j, 4.0),
+                float.__rsub__(3.0, 1),
+                float.__sub__(3.0, 1),
+                float.__rpow__(2.0, 3),
+                float.__radd__(3.0, "x"),
+                int.__radd__(3, 4),
+                int.__rsub__(3, 10),
+                int.__radd__(3, 4.5),
+                int.__pow__(3, 4, 5),
+                int.__repr__(True),
+                float.__round__(2.567, 1),
+            ]
+            try:
+                float.__rtruediv__(0.0, 1)
+            except ZeroDivisionError as e:
+                out.append(str(e))
+            try:
+                int.__add__("a", 1)
+            except TypeError as e:
+                out.append(str(e))
+            return out
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
 
     def test_builtin_constant_fold_str_conversions(self):
         @torch.compile(backend="eager", fullgraph=True)
