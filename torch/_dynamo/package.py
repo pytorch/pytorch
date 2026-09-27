@@ -815,14 +815,22 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
                         value = getattr(obj, name)
                     except AttributeError:
                         continue
+                    # A descriptor is what getattr on the CLASS returns for
+                    # anything defined under @property or @cached_property, so
+                    # excluding it here hides every code object inside one.
+                    wrapped = _descriptor_functions(value)
                     if not (
                         inspect.isfunction(value)
                         or inspect.isclass(value)
                         or inspect.ismethod(value)
+                        or wrapped
                     ):
                         continue
                     if (res := _find_code_source(value)) is not None:
-                        if value.__name__ != name:
+                        # A descriptor has no __name__; the functions it wraps
+                        # carry the attribute's name instead.
+                        actual = wrapped[0][1].__name__ if wrapped else value.__name__
+                        if actual != name:
                             _raise_resolution_error(code, toplevel)
                         return res
         return None
