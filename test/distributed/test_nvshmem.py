@@ -4,6 +4,7 @@
 # python test/distributed/test_nvshmem.py
 
 
+import faulthandler
 import os
 
 import torch
@@ -1069,31 +1070,37 @@ class NVSHMEMTileCommTest(MultiProcContinuousTest):
 
     @requires_nvls()
     def test_team_pool_released_on_process_group_destroy(self) -> None:
-        self._init_device()
-        ranks = list(range(self.world_size))
+        # Dump each worker's blocking Python frame before the outer CI timeout.
+        # Keep the timer local to this test: these workers run other tests too.
+        faulthandler.dump_traceback_later(120)
+        try:
+            self._init_device()
+            ranks = list(range(self.world_size))
 
-        # tile_reduce creates 24 duplicate teams for this tensor size. Repeat
-        # with fresh process groups to exceed NVSHMEM's default team limit if
-        # destroy_process_group() does not release each group's team pool.
-        for _ in range(16):
-            group = dist.new_group(ranks)
-            group_name = group.group_name
-            full_inp = symm_mem.empty(
-                1024, 1024, dtype=torch.float, device=self.device
-            ).fill_(self.rank)
-            full_out = symm_mem.empty(
-                1024, 1024, dtype=torch.float, device=self.device
-            ).zero_()
+            # tile_reduce creates 24 duplicate teams for this tensor size. Repeat
+            # with fresh process groups to exceed NVSHMEM's default team limit if
+            # destroy_process_group() does not release each group's team pool.
+            for _ in range(16):
+                group = dist.new_group(ranks)
+                group_name = group.group_name
+                full_inp = symm_mem.empty(
+                    1024, 1024, dtype=torch.float, device=self.device
+                ).fill_(self.rank)
+                full_out = symm_mem.empty(
+                    1024, 1024, dtype=torch.float, device=self.device
+                ).zero_()
 
-            torch.ops.symm_mem.tile_reduce(
-                full_inp[:512, :512],
-                full_out[:512, :512],
-                0,
-                group_name,
-            )
-            torch.cuda.synchronize()
-            del full_inp, full_out
-            dist.destroy_process_group(group)
+                torch.ops.symm_mem.tile_reduce(
+                    full_inp[:512, :512],
+                    full_out[:512, :512],
+                    0,
+                    group_name,
+                )
+                torch.cuda.synchronize()
+                del full_inp, full_out
+                dist.destroy_process_group(group)
+        finally:
+            faulthandler.cancel_dump_traceback_later()
 
     @requires_nvls()
     @parametrize("tile_size", [32, 128, 512])
