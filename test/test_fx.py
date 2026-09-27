@@ -61,6 +61,7 @@ from fx.test_gradual_type import (  # noqa: F401  # noqa: F401
 from fx.test_matcher_utils import TestMatcher  # noqa: F401
 from fx.test_opaque_infrastructure import TestOpaqueInfrastructure  # noqa: F401
 from fx.test_pass_infra import TestPassManager  # noqa: F401
+from fx.test_shape_inference import TestShapeInference  # noqa: F401
 from fx.test_source_matcher_utils import TestSourceMatcher  # noqa: F401
 from fx.test_subgraph_rewriter import TestSubgraphRewriter  # noqa: F401
 from torch.fx._compatibility import _BACK_COMPAT_OBJECTS, _MARKED_WITH_COMPATIBILITY

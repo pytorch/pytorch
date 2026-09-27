@@ -11,8 +11,11 @@ from torch.fx.experimental.shape_inference.infer_symbol_values import (
     infer_symbol_values,
 )
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
-from torch.testing._internal.common_utils import HardwareClassification, TestCase
-
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    raise_on_run_directly,
+    TestCase,
+)
 
 class TestShapeInference(TestCase):
     hw_classification = HardwareClassification.GENERIC
@@ -27,7 +30,7 @@ class TestShapeInference(TestCase):
         ]
         symints = copy.deepcopy(init_symints)
         name = [str(s) for s in init_symints]  # non-sequential names like s48, s49, ...
-        symbol_to_idx_dict = {str(init_symints[i]): i for i in range(N)}
+        symbol_to_idx_dict = {n: i for i, n in enumerate(name)}
         padding_constraints = defaultdict(list)
 
         # prepare constraints strings
@@ -107,7 +110,4 @@ class TestShapeInference(TestCase):
 
 
 if __name__ == "__main__":
-    raise RuntimeError(
-        "This test is not currently used and should be "
-        "enabled in discover_tests.py if required."
-    )
+    raise_on_run_directly("test/test_fx.py")
