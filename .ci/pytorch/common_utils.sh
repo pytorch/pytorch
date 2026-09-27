@@ -343,10 +343,6 @@ function install_torchcomms() {
   pip_build_and_install "git+https://github.com/meta-pytorch/torchcomms.git@${commit}" dist/torchcomms
 }
 
-function install_nccl4py() {
-  pip_install nccl4py==0.5.0
-}
-
 function install_spmd_types() {
   local commit
   commit=$(get_pinned_commit spmd_types)

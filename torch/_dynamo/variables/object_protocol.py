@@ -2246,11 +2246,12 @@ def mro_attr_source(
                 ).make_guard(partial(GuardBuilder.DICT_NOT_CONTAINS, key=name))
             )
 
-        # Reuse the source when the same descriptor is reached again under the
-        # same name, so it does not collect duplicate guards. klass_source is
-        # part of the key because one descriptor is reachable from objects with
-        # different sources, which need different sources for it.
-        cache_key = (id(base.__dict__[name]), name, klass_source)
+        # Reuse the source when the same owner is reached again for the same
+        # name, even from a differently-sourced object, so it does not collect
+        # duplicate guards or an OBJECT_ALIASING guard. Keyed on the owner, not
+        # the descriptor: a descriptor shared by unrelated classes needs a
+        # source through each one.
+        cache_key = (id(base), name)
         cached = tx.output.mro_source_cache.get(cache_key)
         if cached is not None:
             return cached
