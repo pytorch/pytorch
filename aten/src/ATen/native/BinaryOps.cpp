@@ -2518,4 +2518,17 @@ Tensor mul_Tensor_meta(const Tensor& self, const Tensor& other) {
   return binary_ref_meta(self, other, TypePromotionKind::DEFAULT, symbolic);
 }
 
+// Mirrors what Python fake tensor runs for div.Tensor: the INT_TO_FLOAT fast
+// path for symbolic inputs, then refs.div (true_divide).
+Tensor div_Tensor_meta(const Tensor& self, const Tensor& other) {
+  const bool symbolic = self.unsafeGetTensorImpl()->has_symbolic_sizes_strides() ||
+      other.unsafeGetTensorImpl()->has_symbolic_sizes_strides();
+  if (symbolic) {
+    if (auto out = fast_binary_meta(self, other, TypePromotionKind::INT_TO_FLOAT); out.defined()) {
+      return out;
+    }
+  }
+  return binary_ref_meta(self, other, TypePromotionKind::INT_TO_FLOAT, symbolic);
+}
+
 } // namespace at::native
