@@ -395,6 +395,11 @@ batch_fusion = True
 # mutate_cat_pass
 # split_cat_pass
 # The "devices" key limits a fusion to matching input device types.
+# batch_linear_lhs is on by default only for XPU. Assigning to
+# pre_grad_fusion_options (or config.patch-ing it) replaces the whole dict and
+# drops that default; to keep it while adding options:
+#   config.patch(pre_grad_fusion_options={
+#       **config.pre_grad_fusion_options, "my_fusion": {...}})
 pre_grad_fusion_options: dict[str, dict[str, Any]] = {
     "batch_linear_lhs": {
         "devices": ("xpu",),

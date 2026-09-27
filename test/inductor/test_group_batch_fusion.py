@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 import collections
+import contextlib
 import copy
 import operator
 import unittest
@@ -50,11 +51,11 @@ def _(x: torch.Tensor) -> torch.Tensor:
 
 
 @torch.library.custom_op("_batch_linear_lhs_test::compare_alias", mutates_args=())
-def _is_set_to(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+def _compare_alias(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     return a.new_tensor(int(a.is_set_to(b)), dtype=torch.int64)
 
 
-@_is_set_to.register_fake
+@_compare_alias.register_fake
 def _(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     return a.new_empty((), dtype=torch.int64)
 
@@ -67,6 +68,22 @@ def _stride_zero(x: torch.Tensor) -> torch.Tensor:
 @_stride_zero.register_fake
 def _(x: torch.Tensor) -> torch.Tensor:
     return x.new_empty((), dtype=torch.int64)
+
+
+@contextlib.contextmanager
+def _record_fusion_subsets():
+    from unittest import mock
+
+    rule_cls = torch._inductor.fx_passes.group_batch_fusion.BatchLinearLHSFusion
+    recorded: list[int] = []
+    original_fuse = rule_cls.fuse
+
+    def spy(self, graph, subset):
+        recorded.append(len(subset))
+        original_fuse(self, graph, subset)
+
+    with mock.patch.object(rule_cls, "fuse", new=spy):
+        yield recorded
 
 
 class _TestHighwaySelfGating(torch.nn.Module):
@@ -212,24 +229,32 @@ class MyModule4(torch.nn.Module):
         self.device = device
         self.has_bias = has_bias
         self.seq_len = 10
-        self.weights1 = [
-            torch.nn.Parameter(torch.randn(z - i % 5, z)).to(self.device)
-            for i in range(self.seq_len)
-        ]
-        self.weights2 = [
-            torch.nn.Parameter(torch.randn(z - i % 5, z)).to(self.device)
-            for i in range(self.seq_len)
-        ]
+        self.weights1 = torch.nn.ParameterList(
+            [
+                torch.nn.Parameter(torch.randn(z - i % 5, z, device=device))
+                for i in range(self.seq_len)
+            ]
+        )
+        self.weights2 = torch.nn.ParameterList(
+            [
+                torch.nn.Parameter(torch.randn(z - i % 5, z, device=device))
+                for i in range(self.seq_len)
+            ]
+        )
 
         if has_bias:
-            self.biases1 = [
-                torch.nn.Parameter(torch.randn(z - i % 5)).to(self.device)
-                for i in range(self.seq_len)
-            ]
-            self.biases2 = [
-                torch.nn.Parameter(torch.randn(z - i % 5)).to(self.device)
-                for i in range(self.seq_len)
-            ]
+            self.biases1 = torch.nn.ParameterList(
+                [
+                    torch.nn.Parameter(torch.randn(z - i % 5, device=device))
+                    for i in range(self.seq_len)
+                ]
+            )
+            self.biases2 = torch.nn.ParameterList(
+                [
+                    torch.nn.Parameter(torch.randn(z - i % 5, device=device))
+                    for i in range(self.seq_len)
+                ]
+            )
 
     def forward(self, x):
         x = x + 1.2
@@ -533,16 +558,17 @@ class TestGroupBatchFusion(TestCase):
         for has_bias in [True, False]:
             counters.clear()
             module = MyModule4(z, GPU_TYPE, has_bias)
+            ref_module = copy.deepcopy(module)
             input = [torch.randn(20, z, device=GPU_TYPE)]
             traced = torch.compile(module)
-            ref = module(*input)
+            ref = ref_module(*input)
             res = traced(*input)
-            self.compare_pred(module, traced, input)
+            self.compare_pred(ref_module, traced, input)
             self.assertEqual(counters["inductor"]["batch_linear_lhs"], 2)
             ref.sum().backward()
             res.sum().backward()
-            self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
-            self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
+            self.compare_parameters(ref_module, traced, rtol=1e-5, atol=1e-5)
+            self.compare_gradients(ref_module, traced, rtol=1e-5, atol=1e-5)
             counters.clear()
 
     def test_batch_linear_lhs_treats_higher_order_ops_as_layout_sensitive(self):
@@ -560,6 +586,119 @@ class TestGroupBatchFusion(TestCase):
             kwargs={"kwargs": {"input": linear}},
         )
 
+        self.assertTrue(_has_layout_sensitive_user(linear))
+
+    @parametrize("form", ["torch_transpose", "method_transpose", "torch_split"])
+    def test_batch_linear_lhs_dynamo_forms_are_sensitive(self, form):
+        # The aliasing forms dynamo emits (free-function transpose, method
+        # transpose, free-function split) reject when applied directly to the
+        # unmaterialized projection.
+        from torch._inductor.fx_passes.group_batch_fusion import (
+            _has_layout_sensitive_user,
+        )
+
+        graph = torch.fx.Graph()
+        linear = graph.placeholder("linear")
+        if form == "torch_transpose":
+            user = graph.call_function(torch.transpose, args=(linear, 0, 1))
+        elif form == "method_transpose":
+            user = graph.call_method("transpose", args=(linear, 0, 1))
+        else:
+            user = graph.call_function(torch.split, args=(linear, 2, 0))
+        graph.output(user)
+        self.assertTrue(_has_layout_sensitive_user(linear))
+
+    def test_batch_linear_lhs_gdn_direct_view_pattern_is_sensitive(self):
+        # HF gated-DiN models view the fused projection output directly for
+        # separate QKV and gates/acts branches, so both view users reject.
+        from torch._inductor.fx_passes.group_batch_fusion import (
+            _has_layout_sensitive_user,
+        )
+
+        graph = torch.fx.Graph()
+        linear = graph.placeholder("linear")
+        linear.meta["example_value"] = torch.randn(4, 64)
+        qkv = graph.call_method("view", args=(linear, 4, 16))
+        gates_acts = graph.call_method("view", args=(linear, 4, 4))
+        graph.output((qkv, gates_acts))
+        self.assertTrue(_has_layout_sensitive_user(linear))
+
+    @parametrize(
+        "op",
+        ["stack", "bmm", "sum", "mean", "rms_norm", "native_layer_norm", "_softmax"],
+    )
+    def test_batch_linear_lhs_layout_independent_consumers_are_terminal(self, op):
+        from torch._inductor.fx_passes.group_batch_fusion import (
+            _has_layout_sensitive_user,
+        )
+
+        graph = torch.fx.Graph()
+        linear = graph.placeholder("linear")
+        linear.meta["example_value"] = torch.randn(4, 6)
+        if op == "stack":
+            graph.call_function(torch.stack, args=((linear, linear), 0))
+        elif op == "bmm":
+            graph.call_function(torch.bmm, args=(linear, linear))
+        elif op == "sum":
+            graph.call_function(torch.sum, args=(linear,))
+        elif op == "mean":
+            graph.call_function(torch.mean, args=(linear,))
+        elif op == "rms_norm":
+            graph.call_function(torch.ops.aten.rms_norm, args=(linear, (6,)))
+        elif op == "native_layer_norm":
+            graph.call_function(
+                torch.ops.aten.native_layer_norm,
+                args=(linear, (6,), None, None, 1e-5),
+            )
+        else:
+            graph.call_function(torch.ops.aten._softmax, args=(linear, -1, False))
+        graph.output(())
+        self.assertFalse(_has_layout_sensitive_user(linear))
+
+    def test_batch_linear_lhs_conversion_after_contiguous_is_sensitive(self):
+        # contiguous() materializes the projection, but a conversion of that
+        # copy reaching graph output can still observe it, so the walk
+        # continues through the conversion and rejects at the output.
+        from torch._inductor.fx_passes.group_batch_fusion import (
+            _has_layout_sensitive_user,
+        )
+
+        graph = torch.fx.Graph()
+        linear = graph.placeholder("linear")
+        linear.meta["example_value"] = torch.randn(4, 6)
+        contiguous = graph.call_method("contiguous", args=(linear,))
+        converted = graph.call_method("float", args=(contiguous,))
+        graph.output(converted)
+        self.assertTrue(_has_layout_sensitive_user(linear))
+
+    @parametrize("call", ["kwarg", "positional"])
+    def test_batch_linear_lhs_bad_memory_format_contiguous_is_sensitive(self, call):
+        from torch._inductor.fx_passes.group_batch_fusion import (
+            _has_layout_sensitive_user,
+        )
+
+        graph = torch.fx.Graph()
+        linear = graph.placeholder("linear")
+        if call == "kwarg":
+            graph.call_method(
+                "contiguous",
+                args=(linear,),
+                kwargs={"memory_format": torch.preserve_format},
+            )
+        else:
+            graph.call_method("contiguous", args=(linear, torch.channels_last))
+        self.assertTrue(_has_layout_sensitive_user(linear))
+
+    def test_batch_linear_lhs_module_user_is_sensitive(self):
+        # A call_module user is opaque to the guard, so it rejects.
+        from torch._inductor.fx_passes.group_batch_fusion import (
+            _has_layout_sensitive_user,
+        )
+
+        graph = torch.fx.Graph()
+        linear = graph.placeholder("linear")
+        graph.call_module("submodule", args=(linear,))
+        graph.output(())
         self.assertTrue(_has_layout_sensitive_user(linear))
 
     def test_batch_linear_lhs_split_getitem_walked(self):
@@ -624,29 +763,16 @@ class TestGroupBatchFusion(TestCase):
                 graph.call_function(target, args=(linear, *extra_args))
                 self.assertTrue(_has_layout_sensitive_user(linear))
 
-    def test_batch_linear_lhs_preserve_format_contiguous_is_sensitive(self):
+    def test_batch_linear_lhs_clone_custom_op_is_sensitive(self):
+        # clone copies the projection while keeping its strides, so the
+        # clone still exposes the fused layout through an observable user.
         from torch._inductor.fx_passes.group_batch_fusion import (
             _has_layout_sensitive_user,
         )
 
         graph = torch.fx.Graph()
         linear = graph.placeholder("linear")
-        graph.call_method(
-            "contiguous",
-            args=(linear,),
-            kwargs={"memory_format": torch.preserve_format},
-        )
-        self.assertTrue(_has_layout_sensitive_user(linear))
-
-    @parametrize("rows", [0, 1, 2])
-    def test_batch_linear_lhs_clone_custom_op_is_sensitive(self, rows):
-        from torch._inductor.fx_passes.group_batch_fusion import (
-            _has_layout_sensitive_user,
-        )
-
-        graph = torch.fx.Graph()
-        linear = graph.placeholder("linear")
-        linear.meta["example_value"] = torch.randn(rows, 6)
+        linear.meta["example_value"] = torch.randn(4, 6)
         clone = graph.call_method("clone", args=(linear,))
         result = graph.call_function(
             torch.ops._batch_linear_lhs_test.stride_zero.default, args=(clone,)
@@ -655,20 +781,42 @@ class TestGroupBatchFusion(TestCase):
         graph.lint()
         self.assertTrue(_has_layout_sensitive_user(linear))
 
-    @parametrize("observer", ["stride", "storage_offset"])
-    def test_batch_linear_lhs_singleton_contiguous_observer_is_sensitive(
-        self, observer
-    ):
+    @parametrize("rows", [1, 2])
+    def test_batch_linear_lhs_singleton_contiguous_is_sensitive(self, rows):
+        # A single row may already look contiguous while keeping the wide
+        # stride, so contiguous() on it rejects outright; a multirow
+        # projection materializes and the walk continues into its users.
         from torch._inductor.fx_passes.group_batch_fusion import (
             _has_layout_sensitive_user,
         )
 
         graph = torch.fx.Graph()
         linear = graph.placeholder("linear")
-        linear.meta["example_value"] = torch.randn(1, 6)
+        linear.meta["example_value"] = torch.randn(rows, 6)
         contiguous = graph.call_method("contiguous", args=(linear,))
-        graph.call_method(observer, args=(contiguous,))
-        # No observed value is returned: rejection must come from the observer.
+        graph.call_function(torch.ops.aten.sin.default, args=(contiguous,))
+        graph.output(())
+        graph.lint()
+        self.assertEqual(_has_layout_sensitive_user(linear), rows == 1)
+
+    def test_batch_linear_lhs_unbacked_row_count_rejects_direct_contiguous(self):
+        # An unbacked row count cannot prove shape[0] > 1, so a direct
+        # contiguous() on the projection rejects conservatively even though
+        # no user observes the materialized result.
+        from torch._inductor.fx_passes.group_batch_fusion import (
+            _has_layout_sensitive_user,
+        )
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        with FakeTensorMode(shape_env=shape_env):
+            example_value = torch.empty(shape_env.create_unbacked_symint(None), 6)
+
+        graph = torch.fx.Graph()
+        linear = graph.placeholder("linear")
+        linear.meta["example_value"] = example_value
+        contiguous = graph.call_method("contiguous", args=(linear,))
+        graph.call_function(torch.ops.aten.sin.default, args=(contiguous,))
         graph.output(())
         graph.lint()
         self.assertTrue(_has_layout_sensitive_user(linear))
@@ -725,35 +873,6 @@ class TestGroupBatchFusion(TestCase):
             call in ("packet_out", "out", "mutating_packet"),
         )
 
-    def test_batch_linear_lhs_layout_constraint_tag_is_sensitive(self):
-        from unittest import mock
-
-        from torch._inductor.fx_passes import group_batch_fusion as gbf
-
-        graph = torch.fx.Graph()
-        linear = graph.placeholder("linear")
-        mat2 = graph.placeholder("mat2")
-        scale_a = graph.placeholder("scale_a")
-        scale_b = graph.placeholder("scale_b")
-        target = torch.ops.aten._scaled_mm.default
-        result = graph.call_function(target, args=(linear, mat2, scale_a, scale_b))
-        graph.output(graph.call_function(torch.sin, args=(result,)))
-        graph.lint()
-        self.assertEqual(
-            gbf.get_layout_constraint_tag(target, with_default=False),
-            torch.Tag.needs_exact_strides,
-        )
-
-        # Isolate the tag check from the fallback rejection of unknown ATen ops.
-        with mock.patch.object(
-            gbf,
-            "_LAYOUT_INDEPENDENT_OPS",
-            gbf._LAYOUT_INDEPENDENT_OPS | {"_scaled_mm"},
-        ):
-            self.assertTrue(gbf._has_layout_sensitive_user(linear))
-            with mock.patch.object(gbf, "get_layout_constraint_tag", return_value=None):
-                self.assertFalse(gbf._has_layout_sensitive_user(linear))
-
     @parametrize("name", ["sin", "clone", "contiguous"])
     def test_batch_linear_lhs_unknown_callable_name_collision(self, name):
         from torch._inductor.fx_passes.group_batch_fusion import (
@@ -794,10 +913,12 @@ class TestGroupBatchFusion(TestCase):
             (torch.nn.functional.softmax, (-1, 3, None), {}, False),
             (torch.nn.functional.softmax, (), {}, True),
             (torch.nn.functional.layer_norm, ((6,),), {}, False),
-            # aten.dropout may alias its input, so it rejects as an aliasing
-            # user of the unmaterialized output.
+            # F.dropout does not resolve to an ATen overload in the guard, so
+            # it rejects outright whether or not inplace is requested.
             (torch.nn.functional.dropout, (), {}, True),
             (torch.nn.functional.dropout, (), {"inplace": True}, True),
+            (torch.nn.functional.dropout, (0.5, True), {}, True),
+            (torch.nn.functional.dropout, (0.5, True, True), {}, True),
         ],
     )
     def test_batch_linear_lhs_functional_consumer(
@@ -836,13 +957,14 @@ class TestGroupBatchFusion(TestCase):
         graph.call_method(method, args=(linear, *args))
         self.assertFalse(_has_layout_sensitive_user(linear))
 
+    @parametrize("dynamic", [False, True])
     @torch._inductor.config.patch(
         pre_grad_fusion_options={
             "batch_linear_lhs": {"devices": ("cpu",), "min_fuse_set_size": 2},
         },
         post_grad_fusion_options={},
     )
-    def test_batch_linear_lhs_cpu_silu_modules_fuse(self):
+    def test_batch_linear_lhs_cpu_silu_modules_fuse(self, dynamic):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -851,10 +973,22 @@ class TestGroupBatchFusion(TestCase):
                 self.act = torch.nn.SiLU()
 
             def forward(self, x):
-                return self.act(self.gate(x)) * self.up(x)
+                gate = self.gate(x)
+                up = self.up(x)
+                out = self.act(gate) * up
+                # With a symbolic batch, gate.shape[0] resolves to the input's
+                # size symbol: dynamo unifies and prunes the intermediate size
+                # node before pre-grad, so no size user reaches the guard here
+                # (guard-level coverage:
+                # test_batch_linear_lhs_size_queries_are_terminal). Returning
+                # the shape exercises the dynamic use; the SwiGLU pair must
+                # still fuse.
+                return (out, gate.shape[0]) if dynamic else out
 
         module = M().eval()
         x = torch.randn(32, 64)
+        if dynamic:
+            torch._dynamo.mark_dynamic(x, 0)
         counters.clear()
         with torch.no_grad():
             expected = module(x)
@@ -941,7 +1075,7 @@ class TestGroupBatchFusion(TestCase):
                 large = self.large(x)
                 other = large if same_linear else self.a(x)
                 return (
-                    _is_set_to(large.contiguous(), other.contiguous()),
+                    _compare_alias(large.contiguous(), other.contiguous()),
                     torch.sin(self.a(x)),
                 )
 
@@ -955,41 +1089,6 @@ class TestGroupBatchFusion(TestCase):
         self.assertEqual(
             counters["inductor"]["batch_linear_lhs"], 0 if same_linear else 1
         )
-
-    @torch._inductor.config.patch(
-        pre_grad_fusion_options={
-            "batch_linear_lhs": {"devices": ("cpu",), "min_fuse_set_size": 2},
-        },
-        post_grad_fusion_options={},
-    )
-    def test_batch_linear_lhs_cpu_silu_modules_fuse_dynamic(self):
-        # With a symbolic batch, gate.shape[0] resolves to the input's size
-        # symbol: dynamo unifies and prunes the intermediate size node before
-        # pre-grad, so no size user reaches the guard here (guard-level
-        # coverage: test_batch_linear_lhs_size_queries_are_terminal). The
-        # shape is returned to exercise the dynamic use; the SwiGLU pair
-        # must still fuse.
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.gate = torch.nn.Linear(64, 16, bias=False)
-                self.up = torch.nn.Linear(64, 16, bias=False)
-                self.act = torch.nn.SiLU()
-
-            def forward(self, x):
-                gate = self.gate(x)
-                up = self.up(x)
-                return self.act(gate) * up, gate.shape[0]
-
-        module = M().eval()
-        x = torch.randn(32, 64)
-        torch._dynamo.mark_dynamic(x, 0)
-        counters.clear()
-        with torch.no_grad():
-            expected = module(x)
-            actual = torch.compile(module, fullgraph=True)(x)
-        self.assertEqual(actual, expected)
-        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
 
     @parametrize("same_linear", [False, True])
     @torch._inductor.config.patch(
@@ -1012,7 +1111,7 @@ class TestGroupBatchFusion(TestCase):
                 large = self.large(x)
                 other = large if same_linear else self.a(x)
                 return (
-                    _is_set_to(large.contiguous(), other.contiguous()),
+                    _compare_alias(large.contiguous(), other.contiguous()),
                     torch.sin(self.a(x)),
                     large.shape[0],
                 )
@@ -1069,10 +1168,8 @@ class TestGroupBatchFusion(TestCase):
         else:
             self.assertIsNotNone(rule.match(linear))
 
-    def test_batch_linear_accepts_safe_sin_packet(self):
-        from torch._inductor.fx_passes.group_batch_fusion import (
-            PreGradBatchLinearFusion,
-        )
+    def test_batch_linear_lhs_accepts_safe_sin_packet(self):
+        from torch._inductor.fx_passes.group_batch_fusion import BatchLinearLHSFusion
 
         graph = torch.fx.Graph()
         input = graph.placeholder("input")
@@ -1082,7 +1179,7 @@ class TestGroupBatchFusion(TestCase):
         linear = graph.call_function(torch.nn.functional.linear, args=(input, weight))
         linear.meta["example_value"] = torch.randn(4, 6)
         graph.output(graph.call_function(torch.ops.aten.sin, args=(linear,)))
-        self.assertIsNotNone(PreGradBatchLinearFusion().match(linear))
+        self.assertIsNotNone(BatchLinearLHSFusion().match(linear))
 
     @requires_gpu()
     def test_as_strided_storage_offset_after_mm_fusion(self):
@@ -1093,8 +1190,6 @@ class TestGroupBatchFusion(TestCase):
         Downstream as_strided must inherit that offset instead of resetting to
         the base storage offset.
         """
-        import copy
-
         from torch._dynamo.backends.common import aot_autograd
         from torch._inductor.compile_fx import compile_fx_inner
         from torch._inductor.decomposition import select_decomp_table
@@ -1519,28 +1614,55 @@ class TestGroupBatchFusion(TestCase):
         default_options = config.pre_grad_fusion_options
         self.assertIn("batch_linear_lhs", default_options)
         self.assertEqual(default_options["batch_linear_lhs"]["devices"], ("xpu",))
-        orig_fusion_options = dict(default_options)
+        orig_fusion_options = copy.deepcopy(default_options)
         z = 10
         for has_bias in [True, False]:
             counters.clear()
             module = MyModule4(z, "xpu", has_bias)
+            ref_module = copy.deepcopy(module)
             input = [torch.randn(20, z, device="xpu")]
             traced = torch.compile(module)
-            ref = module(*input)
+            ref = ref_module(*input)
             res = traced(*input)
-            self.compare_pred(module, traced, input)
+            self.compare_pred(ref_module, traced, input)
             self.assertEqual(counters["inductor"]["batch_linear_lhs"], 2)
             self.assertEqual(ref, res)
             ref.sum().backward()
             res.sum().backward()
-            self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
-            self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
+            self.compare_parameters(ref_module, traced, rtol=1e-5, atol=1e-5)
+            self.compare_gradients(ref_module, traced, rtol=1e-5, atol=1e-5)
             self.assertEqual(
                 orig_fusion_options,
                 dict(config.pre_grad_fusion_options),
                 "config.pre_grad_fusion_options should not be mutated",
             )
             counters.clear()
+
+    def test_batch_linear_lhs_skipped_under_default_config(self):
+        # The default pre_grad_fusion_options enable batch_linear_lhs only
+        # for XPU, so the same CPU graph must not fuse without an explicit
+        # config.patch.
+        self.assertEqual(
+            config.pre_grad_fusion_options["batch_linear_lhs"]["devices"], ("xpu",)
+        )
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.proj_a = torch.nn.Linear(64, 16, bias=False)
+                self.proj_b = torch.nn.Linear(64, 16, bias=False)
+
+            def forward(self, x):
+                return torch.sin(self.proj_a(x)), torch.cos(self.proj_b(x))
+
+        counters.clear()
+        module = M().eval()
+        x = torch.randn(32, 64)
+        with torch.no_grad():
+            expected = module(x)
+            actual = torch.compile(module, fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 0)
 
     @requires_gpu()
     @torch._inductor.config.patch(
@@ -1558,13 +1680,14 @@ class TestGroupBatchFusion(TestCase):
         # correctly resolves and filters fusion options.
         z = 10
         module = MyModule4(z, GPU_TYPE, has_bias=True)
+        ref_module = copy.deepcopy(module)
         input = [torch.randn(20, z, device=GPU_TYPE)]
 
         counters.clear()
         traced = torch.compile(module, fullgraph=True)
-        ref = module(*input)
+        ref = ref_module(*input)
         res = traced(*input)
-        self.compare_pred(module, traced, input)
+        self.compare_pred(ref_module, traced, input)
         self.assertGreater(
             counters["inductor"]["batch_linear_lhs"],
             0,
@@ -1573,8 +1696,8 @@ class TestGroupBatchFusion(TestCase):
         self.assertEqual(ref, res)
         ref.sum().backward()
         res.sum().backward()
-        self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
-        self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
+        self.compare_parameters(ref_module, traced, rtol=1e-5, atol=1e-5)
+        self.compare_gradients(ref_module, traced, rtol=1e-5, atol=1e-5)
         counters.clear()
 
     @torch._inductor.config.patch(
@@ -1589,13 +1712,14 @@ class TestGroupBatchFusion(TestCase):
         # This test runs on CPU so it can be verified in local dev without GPU.
         z = 10
         module = MyModule4(z, "cpu", has_bias=True)
+        ref_module = copy.deepcopy(module)
         input = [torch.randn(20, z, device="cpu")]
 
         counters.clear()
         traced = torch.compile(module, fullgraph=True)
-        ref = module(*input)
+        ref = ref_module(*input)
         res = traced(*input)
-        self.compare_pred(module, traced, input)
+        self.compare_pred(ref_module, traced, input)
         self.assertGreater(
             counters["inductor"]["batch_linear_lhs"],
             0,
@@ -1604,8 +1728,8 @@ class TestGroupBatchFusion(TestCase):
         self.assertEqual(ref, res)
         ref.sum().backward()
         res.sum().backward()
-        self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
-        self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
+        self.compare_parameters(ref_module, traced, rtol=1e-5, atol=1e-5)
+        self.compare_gradients(ref_module, traced, rtol=1e-5, atol=1e-5)
         counters.clear()
 
     def test_batch_linear_lhs_skips_tensor_subclass_weights(self):
@@ -1655,18 +1779,25 @@ class TestGroupBatchFusion(TestCase):
         self.assertIsNotNone(fusion.match(linear_node))
 
 
-class TestBatchLinearLHSLayoutGuard(TestCase):
+@torch._inductor.config.patch(
+    pre_grad_fusion_options={
+        "batch_linear_lhs": {
+            "devices": ("cpu", "cuda", "xpu"),
+            "min_fuse_set_size": 2,
+        },
+    },
+    post_grad_fusion_options={},
+)
+class _BatchLinearLHSGuardConfigBase(TestCase):
+    # The config patch lives on this base class: instantiate_device_type_tests
+    # reads test methods from the instantiated class's own __dict__, which a
+    # class-level config.patch would otherwise shadow with a bare subclass.
+    pass
+
+
+class TestBatchLinearLHSLayoutGuard(_BatchLinearLHSGuardConfigBase):
     """Device-generic batch_linear_lhs layout-guard regressions."""
 
-    @torch._inductor.config.patch(
-        pre_grad_fusion_options={
-            "batch_linear_lhs": {
-                "devices": ("cpu", "cuda", "xpu"),
-                "min_fuse_set_size": 2,
-            },
-        },
-        post_grad_fusion_options={},
-    )
     def test_batch_linear_lhs_skips_layout_sensitive_users(self, device):
         # Model the Qwen/vLLM projection-to-contiguous-custom-kernel boundary.
         # Only one of three linears feeds the layout-sensitive custom op; the
@@ -1691,20 +1822,13 @@ class TestBatchLinearLHSLayoutGuard(TestCase):
         x = torch.randn(32, 64, device=device)
         with torch.no_grad():
             expected = module(x)
-            actual = torch.compile(module, fullgraph=True)(x)
+            with _record_fusion_subsets() as subsets:
+                actual = torch.compile(module, fullgraph=True)(x)
 
         self.assertEqual(actual, expected)
         self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
+        self.assertEqual(subsets, [2])
 
-    @torch._inductor.config.patch(
-        pre_grad_fusion_options={
-            "batch_linear_lhs": {
-                "devices": ("cpu", "cuda", "xpu"),
-                "min_fuse_set_size": 2,
-            },
-        },
-        post_grad_fusion_options={},
-    )
     def test_batch_linear_lhs_keeps_pointwise_fusion(self, device):
         class M(torch.nn.Module):
             def __init__(self):
@@ -1727,15 +1851,6 @@ class TestBatchLinearLHSLayoutGuard(TestCase):
         self.assertEqual(actual, expected)
         self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
 
-    @torch._inductor.config.patch(
-        pre_grad_fusion_options={
-            "batch_linear_lhs": {
-                "devices": ("cpu", "cuda", "xpu"),
-                "min_fuse_set_size": 2,
-            },
-        },
-        post_grad_fusion_options={},
-    )
     @parametrize("alias", ["unsqueeze", "float", "type_as", "dropout"])
     def test_batch_linear_lhs_skips_view_through_alias(self, alias, device):
         class M(torch.nn.Module):
@@ -1771,15 +1886,6 @@ class TestBatchLinearLHSLayoutGuard(TestCase):
         self.assertEqual(actual, expected)
         self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
 
-    @torch._inductor.config.patch(
-        pre_grad_fusion_options={
-            "batch_linear_lhs": {
-                "devices": ("cpu", "cuda", "xpu"),
-                "min_fuse_set_size": 2,
-            },
-        },
-        post_grad_fusion_options={},
-    )
     def test_batch_linear_lhs_contiguous_alias_mutation(self, device):
         class M(torch.nn.Module):
             def __init__(self):
@@ -1809,15 +1915,6 @@ class TestBatchLinearLHSLayoutGuard(TestCase):
         self.assertEqual(actual, expected)
         self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
 
-    @torch._inductor.config.patch(
-        pre_grad_fusion_options={
-            "batch_linear_lhs": {
-                "devices": ("cpu", "cuda", "xpu"),
-                "min_fuse_set_size": 2,
-            },
-        },
-        post_grad_fusion_options={},
-    )
     @parametrize("consumer", ["clone", "sin"])
     def test_batch_linear_lhs_skips_reshape_copy_stride_order(self, consumer, device):
         class M(torch.nn.Module):
@@ -1846,15 +1943,6 @@ class TestBatchLinearLHSLayoutGuard(TestCase):
         self.assertEqual(actual, expected)
         self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
 
-    @torch._inductor.config.patch(
-        pre_grad_fusion_options={
-            "batch_linear_lhs": {
-                "devices": ("cpu", "cuda", "xpu"),
-                "min_fuse_set_size": 2,
-            },
-        },
-        post_grad_fusion_options={},
-    )
     def test_batch_linear_lhs_skips_contiguous_alias_comparison(self, device):
         class M(torch.nn.Module):
             def __init__(self):
@@ -1868,7 +1956,7 @@ class TestBatchLinearLHSLayoutGuard(TestCase):
                 a = large.contiguous()
                 b = large.contiguous(memory_format=torch.contiguous_format)
                 return (
-                    _is_set_to(a, b),
+                    _compare_alias(a, b),
                     torch.sin(self.proj_a(x)),
                     torch.cos(self.proj_b(x)),
                 )
@@ -1878,21 +1966,14 @@ class TestBatchLinearLHSLayoutGuard(TestCase):
         x = torch.randn(32, 64, device=device)
         with torch.no_grad():
             expected = module(x)
-            actual = torch.compile(module, fullgraph=True)(x)
+            with _record_fusion_subsets() as subsets:
+                actual = torch.compile(module, fullgraph=True)(x)
 
         self.assertEqual(expected[0], torch.ones((), device=device, dtype=torch.int64))
         self.assertEqual(actual, expected)
         self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
+        self.assertEqual(subsets, [2])
 
-    @torch._inductor.config.patch(
-        pre_grad_fusion_options={
-            "batch_linear_lhs": {
-                "devices": ("cpu", "cuda", "xpu"),
-                "min_fuse_set_size": 2,
-            },
-        },
-        post_grad_fusion_options={},
-    )
     def test_batch_linear_lhs_skips_as_strided_copy(self, device):
         class M(torch.nn.Module):
             def __init__(self):
@@ -1921,15 +2002,6 @@ class TestBatchLinearLHSLayoutGuard(TestCase):
         self.assertEqual(actual, expected)
         self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
 
-    @torch._inductor.config.patch(
-        pre_grad_fusion_options={
-            "batch_linear_lhs": {
-                "devices": ("cpu", "cuda", "xpu"),
-                "min_fuse_set_size": 2,
-            },
-        },
-        post_grad_fusion_options={},
-    )
     def test_batch_linear_lhs_skips_length_one_bias(self, device):
         class M(torch.nn.Module):
             def __init__(self):
@@ -1957,16 +2029,11 @@ class TestBatchLinearLHSLayoutGuard(TestCase):
         self.assertEqual(actual, expected)
         self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
 
-    @torch._inductor.config.patch(
-        pre_grad_fusion_options={
-            "batch_linear_lhs": {
-                "devices": ("cpu", "cuda", "xpu"),
-                "min_fuse_set_size": 2,
-            },
-        },
-        post_grad_fusion_options={},
-    )
     def test_batch_linear_lhs_skips_inplace_relu_backward(self, device):
+        # Each projection is routed through contiguous() so the layout guard,
+        # not the pre-existing mutable-user fusion check, rejects the group:
+        # after materialization the walk must not feed the fused slice into an
+        # inplace op.
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -1975,8 +2042,12 @@ class TestBatchLinearLHSLayoutGuard(TestCase):
 
             def forward(self, x):
                 return (
-                    torch.nn.functional.relu(self.proj_large(x), inplace=True),
-                    torch.nn.functional.relu(self.proj_small(x), inplace=True),
+                    torch.nn.functional.relu(
+                        self.proj_large(x).contiguous(), inplace=True
+                    ),
+                    torch.nn.functional.relu(
+                        self.proj_small(x).contiguous(), inplace=True
+                    ),
                 )
 
         counters.clear()
@@ -1997,15 +2068,6 @@ class TestBatchLinearLHSLayoutGuard(TestCase):
             self.assertEqual(res.grad, ref.grad)
         self.assertEqual(counters["inductor"]["batch_linear_lhs"], 0)
 
-    @torch._inductor.config.patch(
-        pre_grad_fusion_options={
-            "batch_linear_lhs": {
-                "devices": ("cpu", "cuda", "xpu"),
-                "min_fuse_set_size": 2,
-            },
-        },
-        post_grad_fusion_options={},
-    )
     def test_batch_linear_lhs_keeps_aten_sin_packet_fusion(self, device):
         class M(torch.nn.Module):
             def __init__(self):
@@ -2029,15 +2091,6 @@ class TestBatchLinearLHSLayoutGuard(TestCase):
         self.assertEqual(actual, expected)
         self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
 
-    @torch._inductor.config.patch(
-        pre_grad_fusion_options={
-            "batch_linear_lhs": {
-                "devices": ("cpu", "cuda", "xpu"),
-                "min_fuse_set_size": 2,
-            },
-        },
-        post_grad_fusion_options={},
-    )
     def test_batch_linear_lhs_skips_output_users(self, device):
         # The graph output can observe the fused stride directly, so linears
         # returned straight from forward must not be fused.
@@ -2060,15 +2113,6 @@ class TestBatchLinearLHSLayoutGuard(TestCase):
         self.assertEqual(actual, expected)
         self.assertEqual(counters["inductor"]["batch_linear_lhs"], 0)
 
-    @torch._inductor.config.patch(
-        pre_grad_fusion_options={
-            "batch_linear_lhs": {
-                "devices": ("cpu", "cuda", "xpu"),
-                "min_fuse_set_size": 2,
-            },
-        },
-        post_grad_fusion_options={},
-    )
     def test_batch_linear_lhs_skips_packet_form_custom_op(self, device):
         # Custom ops reached through the OpOverloadPacket call form
         # (torch.ops.ns.op(x), no .default) must be treated as layout-sensitive
@@ -2098,23 +2142,12 @@ class TestBatchLinearLHSLayoutGuard(TestCase):
         self.assertEqual(actual, expected)
         self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
 
-    @torch._inductor.config.patch(
-        pre_grad_fusion_options={
-            "batch_linear_lhs": {
-                "devices": ("cpu", "cuda", "xpu"),
-                "min_fuse_set_size": 2,
-            },
-        },
-        post_grad_fusion_options={},
-    )
     def test_batch_linear_lhs_skips_view_users(self, device):
         # A linear whose output feeds a view that needs the whole row contiguous
-        # (e.g. flattening across rows) crashes on the fused non-contiguous
-        # slice, so it must not be fused while the other pointwise-consumed
-        # linears still are. The view is routed through torch.sin so the guard
-        # reaches it via the "crash" branch rather than the graph-output branch;
-        # without the crash handling the fused slice would make view(-1) raise
-        # ("Cannot view ... strides").
+        # (e.g. flattening across rows) cannot be fused: the fused non-contiguous
+        # slice would make view(-1) raise ("Cannot view ... strides"). The view
+        # is routed through torch.sin so the assertion covers the aliasing-user
+        # rejection rather than the graph-output rejection.
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -2138,20 +2171,11 @@ class TestBatchLinearLHSLayoutGuard(TestCase):
         self.assertEqual(actual, expected)
         self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
 
-    @torch._inductor.config.patch(
-        pre_grad_fusion_options={
-            "batch_linear_lhs": {
-                "devices": ("cpu", "cuda", "xpu"),
-                "min_fuse_set_size": 2,
-            },
-        },
-        post_grad_fusion_options={},
-    )
     def test_batch_linear_lhs_skips_view_as_users(self, device):
         # view_as is view in disguise (self.view_symint(other.sym_sizes())), so
-        # it crashes on the fused non-contiguous slice exactly like .view(-1).
-        # Routed through torch.sin for the same crash-branch discriminator as
-        # the .view test above.
+        # the fused non-contiguous slice would break it exactly like .view(-1).
+        # Routed through torch.sin like the .view test above so the rejection
+        # is attributed to the aliasing user, not to graph output.
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -2175,21 +2199,12 @@ class TestBatchLinearLHSLayoutGuard(TestCase):
         self.assertEqual(actual, expected)
         self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
 
-    @torch._inductor.config.patch(
-        pre_grad_fusion_options={
-            "batch_linear_lhs": {
-                "devices": ("cpu", "cuda", "xpu"),
-                "min_fuse_set_size": 2,
-            },
-        },
-        post_grad_fusion_options={},
-    )
     def test_batch_linear_lhs_skips_as_strided_users(self, device):
-        # as_strided observes the storage layout directly, so it is treated as
-        # a crash view and keeps its linear unfused while the other
-        # pointwise-consumed linears still fuse. Routed through torch.sin so the
-        # guard reaches it via the crash branch; without that, the fused
-        # non-contiguous slice would make as_strided read the wrong elements.
+        # as_strided observes the storage layout directly, so the projection
+        # keeps its linear unfused while the other pointwise-consumed linears
+        # still fuse. Routed through torch.sin like the .view test above; a
+        # fused non-contiguous slice would make as_strided read the wrong
+        # elements.
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -2213,15 +2228,6 @@ class TestBatchLinearLHSLayoutGuard(TestCase):
         self.assertEqual(actual, expected)
         self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
 
-    @torch._inductor.config.patch(
-        pre_grad_fusion_options={
-            "batch_linear_lhs": {
-                "devices": ("cpu", "cuda", "xpu"),
-                "min_fuse_set_size": 2,
-            },
-        },
-        post_grad_fusion_options={},
-    )
     def test_batch_linear_lhs_keeps_contiguous_fusion(self, device):
         # These direct multirow projections must materialize after fusion.
         # Their contiguous outputs feed pure single-input custom ops, so the
@@ -2244,20 +2250,13 @@ class TestBatchLinearLHSLayoutGuard(TestCase):
         x = torch.randn(32, 64, device=device)
         with torch.no_grad():
             expected = module(x)
-            actual = torch.compile(module, fullgraph=True)(x)
+            with _record_fusion_subsets() as subsets:
+                actual = torch.compile(module, fullgraph=True)(x)
 
         self.assertEqual(actual, expected)
         self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
+        self.assertEqual(subsets, [3])
 
-    @torch._inductor.config.patch(
-        pre_grad_fusion_options={
-            "batch_linear_lhs": {
-                "devices": ("cpu", "cuda", "xpu"),
-                "min_fuse_set_size": 2,
-            },
-        },
-        post_grad_fusion_options={},
-    )
     @parametrize("rows", [0, 1, 2])
     def test_batch_linear_lhs_clone_preserves_observable_stride(self, rows, device):
         class M(torch.nn.Module):
@@ -2279,11 +2278,45 @@ class TestBatchLinearLHSLayoutGuard(TestCase):
         x = torch.randn(rows, 8, device=device)
         with torch.no_grad():
             expected = module(x)
-            actual = torch.compile(module, fullgraph=True)(x)
+            with _record_fusion_subsets() as subsets:
+                actual = torch.compile(module, fullgraph=True)(x)
 
         self.assertEqual(expected[0], torch.tensor(6, device=device))
         self.assertEqual(actual, expected)
         self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
+        self.assertEqual(subsets, [2])
+
+    def test_batch_linear_lhs_gdn_projection_view_pattern_skips(self, device):
+        # E2E mirror of the HF gated-DiN projection: the wide projection's
+        # output is viewed directly for the QKV and gates/acts branches, so
+        # it must not fuse while the two pointwise-consumed linears still do.
+        # The subset spy pins the fused group to those two linears.
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.proj_large = torch.nn.Linear(64, 192, bias=False)
+                self.proj_a = torch.nn.Linear(64, 16, bias=False)
+                self.proj_b = torch.nn.Linear(64, 16, bias=False)
+
+            def forward(self, x):
+                large = self.proj_large(x)
+                qkv = large.view(32, 3, 64)
+                gates_acts = large.view(32, 4, 48)
+                a = torch.sin(self.proj_a(x))
+                b = torch.cos(self.proj_b(x))
+                return qkv, gates_acts, a, b
+
+        counters.clear()
+        module = M().eval().to(device)
+        x = torch.randn(32, 64, device=device)
+        with torch.no_grad():
+            expected = module(x)
+            with _record_fusion_subsets() as subsets:
+                actual = torch.compile(module, fullgraph=True)(x)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
+        self.assertEqual(subsets, [2])
 
 
 instantiate_device_type_tests(TestBatchLinearLHSLayoutGuard, globals(), allow_xpu=True)
