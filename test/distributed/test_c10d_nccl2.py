@@ -735,6 +735,7 @@ class ProcessGroupNCCL2AbortTest(_ProcessGroupNCCL2SubgroupTest):
 class ProcessGroupNCCL2WatchdogNoTearDownTest(_ProcessGroupNCCL2SubgroupTest):
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_atleast_multiprocess((10, 2))  # ROCM-31513
     def test_timeout_without_process_abort(self) -> None:
         # NoHandling is how a stock NCCL user opts out of the process being
         # taken down by the watchdog; nccl2 reads the same variable, when the
@@ -820,6 +821,7 @@ class ProcessGroupNCCL2BlockingWaitTest(_ProcessGroupNCCL2SubgroupTest):
 class ProcessGroupNCCL2DumpOnTimeoutTest(_ProcessGroupNCCL2SubgroupTest):
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_atleast_multiprocess((10, 2))  # ROCM-31513
     def test_flight_recorder_dumped_on_timeout(self) -> None:
         # The dump is written by the abort hook c10d::FlightRecorderHook
         # registers, which nccl2 runs when it detects the timeout. NoHandling
@@ -917,6 +919,7 @@ class ProcessGroupNCCL2DumpOnTimeoutTest(_ProcessGroupNCCL2SubgroupTest):
 class ProcessGroupNCCL2DumpTimeoutBoundTest(_ProcessGroupNCCL2SubgroupTest):
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_atleast_multiprocess((10, 2))  # ROCM-31513
     def test_flight_recorder_dump_is_bounded(self) -> None:
         # Symbolizing a traceback may need the GIL, so the attempt that
         # includes stack traces is made under a bounded wait and abandoned for
