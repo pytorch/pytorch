@@ -1346,6 +1346,37 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             load_guards_state(buf.getvalue())["t"].dispatch_keys.raw_repr(), real_keys
         )
 
+    @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
+    def test_loaded_fsdp_module_keeps_its_wrapper_type(self):
+        from torch.distributed.fsdp import FSDPModule
+        from torch.distributed.fsdp._fully_shard._fsdp_init import _apply_to_module
+        from torch.distributed.fsdp._fully_shard._fully_shard import (
+            _unimplemented_deepcopy,
+            disable_fsdp_module_new_init,
+            get_cls_to_fsdp_cls,
+        )
+
+        m = torch.nn.Linear(2, 2)
+        _apply_to_module(
+            (m,), get_cls_to_fsdp_cls(), FSDPModule, "FSDP", _unimplemented_deepcopy
+        )
+        fsdp_cls = type(m)
+        buf = io.BytesIO()
+        GuardsStatePickler({id(m): m}, {}, {}, {}, buf).dump({"m": m})
+        loaded = load_guards_state(buf.getvalue())["m"]
+        # A TYPE_MATCH on the live module compares against the wrapper class.
+        self.assertIs(type(loaded), fsdp_cls)
+        # Outside a load, calling the wrapper class builds the original module,
+        # including in a thread running while another thread loads.
+        self.assertIs(type(fsdp_cls(2, 2)), torch.nn.Linear)
+        built = []
+        with disable_fsdp_module_new_init():
+            worker = threading.Thread(target=lambda: built.append(fsdp_cls(2, 2)))
+            worker.start()
+            worker.join()
+        self.assertIs(type(built[0]), torch.nn.Linear)
+        self.assertEqual(built[0].weight.shape, (2, 2))
+
     def test_retained_grad_non_leaf_survives_pickle(self):
         # A plain non-leaf's .grad is None (and reading it warns), but a
         # RETAINED-grad non-leaf -- which torch.optim explicitly permits as a
