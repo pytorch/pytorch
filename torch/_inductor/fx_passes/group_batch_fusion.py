@@ -658,7 +658,8 @@ def _layout_target_overloads(target):
     if isinstance(target, torch._ops.OpOverloadPacket):
         return tuple(target.op_overloads())
     if isinstance(target, str):
-        if not hasattr(torch.Tensor, target):
+        # sym_size exists only as an ATen op, not as a Tensor method.
+        if not hasattr(torch.Tensor, target) and target not in ("sym_size",):
             return ()
         return _aten_op_overloads(target)
     # Resolve genuine torch builtins by identity, not a callable's name.
@@ -703,12 +704,29 @@ def _layout_user_overloads(user):
         if len(args) < 3:
             kwargs.setdefault("train", True)
         target = torch.ops.aten.dropout
-    elif target in (operator.add, operator.sub, operator.mul, operator.truediv):
+    elif target in (torch.nn.functional.sigmoid, torch.nn.functional.tanh):
+        target = (
+            torch.ops.aten.sigmoid
+            if target is torch.nn.functional.sigmoid
+            else torch.ops.aten.tanh
+        )
+    elif target in (
+        operator.add,
+        operator.sub,
+        operator.mul,
+        operator.truediv,
+        operator.neg,
+        operator.pow,
+        operator.matmul,
+    ):
         target = {
             operator.add: torch.ops.aten.add,
             operator.sub: torch.ops.aten.sub,
             operator.mul: torch.ops.aten.mul,
             operator.truediv: torch.ops.aten.div,
+            operator.neg: torch.ops.aten.neg,
+            operator.pow: torch.ops.aten.pow,
+            operator.matmul: torch.ops.aten.matmul,
         }[target]
     candidates = []
     for op in _layout_target_overloads(target):
@@ -737,11 +755,14 @@ def _layout_user_overloads(user):
     return candidates
 
 
-# These ops require a compatible input layout or can reinterpret the fused
-# storage differently. This is op semantics, not alias info, so it cannot be
-# derived only from OpOverload.is_view.
-_CRASH_VIEW_OPS = OrderedSet(
+# Consumers that require a compatible input layout, reinterpret the fused
+# storage, read the layout, or propagate aliases. The unmaterialized walk
+# rejects them and the materialized walk follows them. This is op semantics,
+# not alias info, so it cannot be derived only from OpOverload.is_view.
+_LAYOUT_ALIAS_OPS = OrderedSet(
     [
+        # Require a compatible input layout or can reinterpret the fused
+        # storage differently.
         "view",
         "_unsafe_view",
         "view_as",
@@ -749,16 +770,11 @@ _CRASH_VIEW_OPS = OrderedSet(
         "as_strided",
         "as_strided_copy",
         "_reshape_alias",
-    ]
-)
-
-# The unsafe split variants return aliases despite omitting alias annotations.
-_PROPAGATE_VIEW_OPS = OrderedSet(
-    ["unsafe_chunk", "unsafe_split", "unsafe_split_with_sizes"]
-)
-
-_LAYOUT_OBSERVING_OPS = OrderedSet(
-    [
+        # Return aliases despite omitting alias annotations.
+        "unsafe_chunk",
+        "unsafe_split",
+        "unsafe_split_with_sizes",
+        # Observe the layout directly.
         "stride",
         "sym_stride",
         "storage_offset",
@@ -767,6 +783,10 @@ _LAYOUT_OBSERVING_OPS = OrderedSet(
         "sym_is_contiguous",
         "_has_same_storage_numel",
         "is_set_to",
+        # Can return self despite not having a matching view schema.
+        "type_as",
+        "to",
+        "clone",
     ]
 )
 
@@ -793,7 +813,8 @@ _CONVERSION_METHODS = OrderedSet(
 )
 
 # Non-aliasing schema alone does not establish layout independence (e.g.
-# as_strided_copy). Only known layout-independent consumers terminate the walk.
+# as_strided_copy). Only known layout-independent consumers terminate the
+# walk. The size queries only read shapes, which fusion does not change.
 _LAYOUT_INDEPENDENT_OPS = OrderedSet(
     [
         "cat",
@@ -808,8 +829,94 @@ _LAYOUT_INDEPENDENT_OPS = OrderedSet(
         "_softmax",
         "layer_norm",
         "native_layer_norm",
+        "rms_norm",
+        "size",
+        "sym_size",
+        "dim",
+        "numel",
     ]
 )
+
+
+def _classify_layout_user(
+    user: torch.fx.Node, current: torch.fx.Node, node: torch.fx.Node, exposed: bool
+) -> tuple[str, bool]:
+    # Classify one user of the walk. Returns (action, next_exposed), where
+    # action is "reject" (the guard rejects node), "terminal" (the walk ends
+    # here), or "walk" (enqueue (user, next_exposed) and keep walking).
+    if user.target is operator.getitem or (
+        user.op == "call_method" and user.target in _CONVERSION_METHODS
+    ):
+        if exposed:
+            return "reject", exposed
+        # getitem and conversions only forward values; they cannot expose
+        # the normalized layout.
+        return "walk", False
+    ops = _layout_user_overloads(user)
+    if not ops or any(op._schema.is_mutable for op in ops):
+        return "reject", exposed
+    non_aten = any(op.namespace != "aten" for op in ops)
+    if exposed:
+        if non_aten or any(
+            get_layout_constraint_tag(op, with_default=False)
+            in (
+                torch.Tag.needs_exact_strides,
+                torch.Tag.needs_contiguous_strides,
+                torch.Tag.needs_fixed_stride_order,
+            )
+            for op in ops
+        ):
+            # Opaque and layout-constrained users may observe the raw strides.
+            return "reject", exposed
+    elif non_aten:
+        # Another input of an opaque op may be an alias of this projection;
+        # eager aliasing across paths materialized by contiguous() would
+        # break after fusion. Exclude current (reaching it would trivially
+        # find node), and stop at nodes created before node: FX graphs are
+        # topologically ordered, so they cannot be node or its descendants.
+        pending = [n for n in user.all_input_nodes if n is not current]
+        visited = OrderedSet()
+        while pending:
+            candidate = pending.pop()
+            if candidate is node:
+                return "reject", exposed
+            if candidate < node:
+                continue
+            if candidate not in visited:
+                visited.add(candidate)
+                pending.extend(candidate.all_input_nodes)
+    names = OrderedSet(op.overloadpacket.__name__ for op in ops)
+    if names == OrderedSet(["contiguous"]):
+        if get_arg_value(user, 1, "memory_format") not in (
+            None,
+            torch.contiguous_format,
+        ):
+            return "reject", exposed
+        if not exposed:
+            return "walk", False
+        value = node.meta.get("example_value", node.meta.get("val"))
+        # All matched projections have positive width. With more than one
+        # row a direct fused slice must materialize here; a single row may
+        # already look contiguous while keeping the wide stride, so the
+        # walk stays strict.
+        if value is not None and statically_known_true(value.shape[0] > 1):
+            return "walk", False
+        return "walk", True
+    if names.intersection(_LAYOUT_ALIAS_OPS) or any(
+        op.is_view or torch.Tag.maybe_aliasing_or_mutating in op.tags for op in ops
+    ):
+        if exposed:
+            return "reject", exposed
+        return "walk", False
+    if any(torch.Tag.pointwise in op.tags for op in ops) or all(
+        (op.namespace != "aten")
+        or op.overloadpacket.__name__ in _LAYOUT_INDEPENDENT_OPS
+        for op in ops
+    ):
+        # Applied directly to the output, these cannot expose the fused
+        # strides: the walk ends here.
+        return "terminal", exposed
+    return "reject", exposed
 
 
 def _has_layout_sensitive_user(node: torch.fx.Node) -> bool:
@@ -822,116 +929,21 @@ def _has_layout_sensitive_user(node: torch.fx.Node) -> bool:
     queue = [(node, True)]
     seen = OrderedSet(queue)
     while queue:
-        current, layout_exposed = queue.pop()
+        current, exposed = queue.pop()
         for user in current.users:
             if user.op == "output":
                 return True
             if user.op not in ("call_method", "call_function"):
                 return True
-            exposed = layout_exposed
-            if layout_exposed:
-                if current is not node:
-                    # Reached through an alias of the unmaterialized output.
-                    return True
-                if user.target is operator.getitem or (
-                    user.op == "call_method" and user.target in _CONVERSION_METHODS
-                ):
-                    return True
-                ops = _layout_user_overloads(user)
-                if not ops or any(op._schema.is_mutable for op in ops):
-                    return True
-                names = OrderedSet(op.overloadpacket.__name__ for op in ops)
-                if any(
-                    op.namespace != "aten"
-                    or get_layout_constraint_tag(op, with_default=False)
-                    in (
-                        torch.Tag.needs_exact_strides,
-                        torch.Tag.needs_contiguous_strides,
-                        torch.Tag.needs_fixed_stride_order,
-                    )
-                    for op in ops
-                ):
-                    return True
-                if names == OrderedSet(["contiguous"]):
-                    if get_arg_value(user, 1, "memory_format") not in (
-                        None,
-                        torch.contiguous_format,
-                    ):
-                        return True
-                    value = node.meta.get("example_value", node.meta.get("val"))
-                    # All matched projections have positive width. With more
-                    # than one row a direct fused slice must materialize here.
-                    if value is not None and statically_known_true(value.shape[0] > 1):
-                        exposed = False
-                elif (
-                    names.intersection(_CRASH_VIEW_OPS | _LAYOUT_OBSERVING_OPS)
-                    or any(
-                        op.is_view or torch.Tag.maybe_aliasing_or_mutating in op.tags
-                        for op in ops
-                    )
-                    or names.intersection(
-                        _PROPAGATE_VIEW_OPS | OrderedSet(["type_as", "to", "clone"])
-                    )
-                ):
-                    return True
-                elif any(torch.Tag.pointwise in op.tags for op in ops) or all(
-                    op.overloadpacket.__name__ in _LAYOUT_INDEPENDENT_OPS for op in ops
-                ):
-                    # Applied directly to the output, these cannot expose
-                    # the fused strides: the walk ends here.
-                    continue
-                else:
-                    return True
-            else:
-                if user.target is operator.getitem or (
-                    user.op == "call_method" and user.target in _CONVERSION_METHODS
-                ):
-                    pass
-                else:
-                    ops = _layout_user_overloads(user)
-                    if not ops or any(op._schema.is_mutable for op in ops):
-                        return True
-                    names = OrderedSet(op.overloadpacket.__name__ for op in ops)
-                    if any(op.namespace != "aten" for op in ops):
-                        # Another input derived from this projection may compare
-                        # aliases across paths materialized by contiguous().
-                        for other in user.all_input_nodes:
-                            if other is current:
-                                continue
-                            pending = [other]
-                            visited = OrderedSet()
-                            while pending:
-                                candidate = pending.pop()
-                                if candidate is node:
-                                    return True
-                                if candidate not in visited:
-                                    visited.add(candidate)
-                                    pending.extend(candidate.all_input_nodes)
-                    if names == OrderedSet(["contiguous"]):
-                        if get_arg_value(user, 1, "memory_format") not in (
-                            None,
-                            torch.contiguous_format,
-                        ):
-                            return True
-                    elif names.intersection(
-                        _CRASH_VIEW_OPS
-                        | _LAYOUT_OBSERVING_OPS
-                        | _PROPAGATE_VIEW_OPS
-                        | OrderedSet(["type_as", "to", "clone"])
-                    ) or any(
-                        op.is_view or torch.Tag.maybe_aliasing_or_mutating in op.tags
-                        for op in ops
-                    ):
-                        pass
-                    elif any(torch.Tag.pointwise in op.tags for op in ops) or all(
-                        (op.namespace != "aten")
-                        or op.overloadpacket.__name__ in _LAYOUT_INDEPENDENT_OPS
-                        for op in ops
-                    ):
-                        continue
-                    else:
-                        return True
-            state = (user, exposed)
+            if exposed and current is not node:
+                # Reached through an alias of the unmaterialized output.
+                return True
+            action, next_exposed = _classify_layout_user(user, current, node, exposed)
+            if action == "reject":
+                return True
+            if action == "terminal":
+                continue
+            state = (user, next_exposed)
             if state not in seen:
                 seen.add(state)
                 queue.append(state)
