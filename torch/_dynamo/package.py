@@ -700,7 +700,7 @@ def _descriptor_functions(obj: Any) -> list[tuple[str, Any]]:
             if fn is not None
         ]
     if isinstance(obj, functools.cached_property):
-        return [("func", obj.func)] if obj.func is not None else []
+        return [("func", obj.func)]
     return []
 
 

@@ -134,6 +134,14 @@ class _DescriptorCodeOwner:
 
         return inner
 
+    @prop.setter
+    def prop(self, value):
+        pass
+
+    @prop.deleter
+    def prop(self):
+        pass
+
     @functools.cached_property
     def cached(self):
         return 2
@@ -231,9 +239,13 @@ print(eval(f"bbmod.{name}.{path}") is code)
     def test_code_source_resolves_through_descriptors(self):
         # getattr on the class returns the descriptor, not the function it wraps.
         owner = vars(_DescriptorCodeOwner)
-        getter = owner["prop"].fget.__code__
+        prop = owner["prop"]
+        getter = prop.fget.__code__
         inner = next(c for c in getter.co_consts if inspect.iscode(c))
-        for code in (getter, inner, owner["cached"].func.__code__):
+        # The setter and deleter share the getter's qualname, so they are only
+        # found after the search through fget comes back empty.
+        codes = (getter, inner, prop.fset.__code__, prop.fdel.__code__)
+        for code in (*codes, owner["cached"].func.__code__):
             package = CompilePackage(None)
             with package.code_context(code):
                 pass
