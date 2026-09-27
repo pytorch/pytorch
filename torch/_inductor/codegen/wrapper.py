@@ -2340,13 +2340,14 @@ class PythonWrapperCodegen(CodeGen):
         if compile_wrapper is not None:
             if not compile_wrapper.contains("import collections"):
                 compile_wrapper.writeline("import collections")
-            compile_wrapper.writelines(definition_lines)
-            # Allow aggregate constants captured by the autotuner to be pickled
-            # without importing this dynamically generated class.
-            compile_wrapper.writeline(
-                f"{type_name}.__reduce__ = "
-                "triton_heuristics.CachingAutotuner.reduce_udtk_aggregate"
-            )
+            if not compile_wrapper.contains(type_name):
+                compile_wrapper.writelines(definition_lines)
+                # Allow aggregate constants captured by the autotuner to be pickled
+                # without importing this dynamically generated class.
+                compile_wrapper.writeline(
+                    f"{type_name}.__reduce__ = "
+                    "triton_heuristics.CachingAutotuner.reduce_udtk_aggregate"
+                )
 
         if key in self.udtk_aggregate_var_names:
             return type_name
@@ -4290,10 +4291,11 @@ class PythonWrapperCodegen(CodeGen):
                         )
                     )
                     constant_paths.add(path)
+                # None is a scalar, so traversal is done. For container types
+                # keep traversing to preserve the full aggregate arg. Note that
+                # leafs contained within the container won't be added to
+                # constant_paths since the root has already been added
                 if value is None:
-                    # signature_of uses spec[-1] for ordinary constexpr nodes,
-                    # so keep traversing those to preserve the normalized tree.
-                    # None replaces a subtree and therefore cannot be traversed.
                     return True, ConstexprArg(name=key)
                 return False, None
 
@@ -4488,7 +4490,7 @@ class PythonWrapperCodegen(CodeGen):
                     def add_leaf_to_cache_key(leaf_spec, values, path):
                         flat_arg = values[0]
                         if not isinstance(
-                            flat_arg, (ir.Buffer, ir.ReinterpretView, ir.TMADescriptor)
+                            flat_arg, (ir.Buffer, ir.ReinterpretView)
                         ):
                             cache_key_values.append(flat_arg)
 
@@ -4816,9 +4818,6 @@ class PythonWrapperCodegen(CodeGen):
                     arg.spec, arg.value, leaf_fn=wrap_arg
                 )
             elif has_triton_package() and isinstance(arg, triton.language.dtype):
-                return repr(arg)
-            elif arg is None:
-                # None is reachable if within an aggregate type like a tuple / namedtuple
                 return repr(arg)
             elif isinstance(arg, StrCallArg):
                 return repr(arg.value)

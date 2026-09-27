@@ -8788,6 +8788,8 @@ class UserDefinedTritonKernel(ExternKernel):
                 )
             mutable_arg_name = next(iter(self.arg_accesses.read_writes.writes)).name
             epilogue_computed_buffer, _ = epilogue_fusion
+            # Check if the mutated tensor is part of a aggregate type, and if so
+            # transform the aggregate to reference this tensor instead
             for aggregate_name, aggregate_spec in self.aggregate_type_metadata.items():
                 if mutable_arg_name in triton_kernel_wrap.get_aggregate_leaf_keys(
                     aggregate_spec
@@ -8860,12 +8862,12 @@ class UserDefinedTritonKernel(ExternKernel):
                 return arg, type(arg)
             elif isinstance(arg, str):
                 return StrCallArg(arg), str
-            elif name in constexpr_names:
+            elif name in constexpr_names or arg is None:
                 # insert a dummy value for constexpr args of unsupported type
-                # constexprs will end up getting baked into the kernel at compile time
+                # constexprs will end up getting baked into the kernel at compile time.
+                # Note that a None value is reachable here if it is contained within
+                # a container type.
                 return -1, int
-            elif arg is None:
-                return None, None
             else:
                 raise NotImplementedError(f"Unsupported arg type: {type(arg)}: {arg}")
 
@@ -8901,7 +8903,7 @@ class UserDefinedTritonKernel(ExternKernel):
                 continue
             raw_keys_filtered.append(name)
             raw_args_filtered.append(arg)
-            if arg is None or (isinstance(arg, AggregateArg) and arg.value is None):
+            if arg is None:
                 """
                 Filter out None args.
 
