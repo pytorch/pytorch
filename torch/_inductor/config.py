@@ -3295,12 +3295,21 @@ _cache_config_ignore_prefix: list[str] = [
 
 
 def _serialize_inductor_choices(config: dict[str, Any]) -> None:
+    if "inductor_choices_class" not in config:
+        return
+    # Registering choices requires importing torch._inductor.choices (which pulls in
+    # lowering); on an FX graph cache hit nothing has imported it yet.
+    if (
+        config["inductor_choices_class"] is None
+        and "torch._inductor.choices" not in sys.modules
+    ):
+        return
+
     from .choices import inductor_choices_cache_key
 
-    if "inductor_choices_class" in config:
-        config["inductor_choices_class"] = inductor_choices_cache_key(
-            config["inductor_choices_class"]
-        )
+    config["inductor_choices_class"] = inductor_choices_cache_key(
+        config["inductor_choices_class"]
+    )
 
 
 _cache_config_serializer = _serialize_inductor_choices
