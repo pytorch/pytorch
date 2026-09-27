@@ -1,0 +1,115 @@
+# Owner(s): ["module: ci"]
+# TEMPORARY experimental workflow for BPF-traced target determination (phase 1).
+# Runs one Linux CPU config with all tests (NO_TD=1) under bpftrace syscall
+# tracing, uploads a test-file -> touched-files mapping plus the build graph.
+# Triggers only on its own PR (paths filter) and manual dispatch.
+name: bpf-td-trace
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/bpf-td-trace.yml
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+permissions:
+  id-token: write
+  contents: read
+  actions: read
+
+jobs:
+  get-label-type:
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    if: github.repository_owner == 'pytorch'
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      check_experiments: lf
+
+  # Prior EC2 run got further: the privileged container self-mounted tracefs
+  # fine (tracepoint present), then failed because Ubuntu 22.04's bpftrace 0.14
+  # does BCC-style header compilation and needs linux/types.h (absent). Fix:
+  # use the upstream static bpftrace binary (BTF/CO-RE, no kernel headers) --
+  # the same mechanism the jammy test container will use via run_traced.sh.
+  canary:
+    name: canary
+    runs-on: linux.4xlarge
+    timeout-minutes: 20
+    steps:
+      - name: docker run --privileged, self-mount tracefs, static bpftrace attach
+        run: |
+          set -eux
+          docker run --rm --privileged --security-opt seccomp=unconfined ubuntu:22.04 \
+            bash -c '
+              set -eux
+              mount -t debugfs debugfs /sys/kernel/debug 2>/dev/null || true
+              mount -t tracefs tracefs /sys/kernel/tracing 2>/dev/null || true
+              apt-get update -qq && apt-get install -qq -y curl ca-certificates
+              curl -fsSL -o /usr/local/bin/bpftrace \
+                https://github.com/bpftrace/bpftrace/releases/download/v0.26.1/bpftrace
+              chmod +x /usr/local/bin/bpftrace
+              bpftrace --version
+              ls /sys/kernel/btf/vmlinux
+              timeout 30 bpftrace -e \
+                "tracepoint:syscalls:sys_enter_openat { @n = count(); exit(); }"
+            '
+
+  build:
+    name: linux-jammy-py3.10-gcc11
+    needs:
+      - get-label-type
+      - canary
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      # skip-arc-mapping keeps the test matrix's raw EC2 labels (linux.4xlarge)
+      # so shards land on the classic docker-on-VM pool where a privileged
+      # container can mount tracefs (ARC strips those caps). runner_prefix still
+      # applies to the BUILD's own runner (label-type is mt-); zeroing it points
+      # the build at a dead bare label, so keep it.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      skip-arc-mapping: "true"
+      build-environment: linux-jammy-py3.10-gcc11
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang18
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+      bpf-td-extract-build-graph: "1"
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 10, runner: "linux.4xlarge" },
+          { config: "default", shard: 2, num_shards: 10, runner: "linux.4xlarge" },
+          { config: "default", shard: 3, num_shards: 10, runner: "linux.4xlarge" },
+          { config: "default", shard: 4, num_shards: 10, runner: "linux.4xlarge" },
+          { config: "default", shard: 5, num_shards: 10, runner: "linux.4xlarge" },
+          { config: "default", shard: 6, num_shards: 10, runner: "linux.4xlarge" },
+          { config: "default", shard: 7, num_shards: 10, runner: "linux.4xlarge" },
+          { config: "default", shard: 8, num_shards: 10, runner: "linux.4xlarge" },
+          { config: "default", shard: 9, num_shards: 10, runner: "linux.4xlarge" },
+          { config: "default", shard: 10, num_shards: 10, runner: "linux.4xlarge" },
+        ]}
+      python-version: "3.10"
+      compiler: gcc11
+    secrets: inherit
+
+  test:
+    name: linux-jammy-py3.10-gcc11
+    needs:
+      - build
+      - get-label-type
+    uses: ./.github/workflows/_linux-test.yml
+    with:
+      build-environment: ${{ needs.build.outputs.build-environment }}
+      docker-image: ${{ needs.build.outputs.docker-image }}
+      test-matrix: ${{ needs.build.outputs.test-matrix }}
+      # EC2 docker-on-VM honors these; privileged lets run_traced.sh mount
+      # tracefs. --pid=host makes container pids equal the host pids that
+      # system-wide bpftrace reports, so the pid-tree join in build_mapping.py
+      # matches (without it every test maps to 0 files). No --gpus all: CPU pool.
+      docker-container-options: "--privileged --pid=host --security-opt seccomp=unconfined"
+      bpf-td: "1"
+      python-version: "3.10"
+      compiler: gcc11
+    secrets: inherit
