@@ -454,9 +454,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
             return out
 
         source = torch.arange(32, dtype=torch.float32, device=GPU_TYPE)
-        actual, (code,) = run_and_get_code(
-            torch.compile(fn, fullgraph=True), source
-        )
+        actual, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True), source)
 
         self.assertEqual(actual, source * 3.0)
         config_name = triton_kernel_wrap.create_structural_named_tuple_name(
