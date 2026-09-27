@@ -591,7 +591,7 @@ class SubprocPool:
     def wakeup(self) -> None:
         self._send(MsgHeader.WAKEUP)
 
-    def shutdown(self) -> None:
+    def shutdown(self, wait: bool = True) -> None:
         try:
             with self.write_lock:
                 if not self.running:
@@ -602,6 +602,9 @@ class SubprocPool:
                 self.running_waitcounter.__exit__()
                 _send_msg(self.write_pipe, MsgHeader.SHUTDOWN)
                 self.write_pipe.close()
+            if not wait:
+                # The sidecar exits on its own once it reads SHUTDOWN (or EOF).
+                return
             try:
                 self.process.wait(300)
             except subprocess.TimeoutExpired:

@@ -3202,9 +3202,7 @@ class VariableBuilder:
         if isinstance(source, GradSource) and is_from_optimizer_source(source):
             guard_type = GuardBuilder.NOT_NONE_MATCH
 
-        is_dtensor = torch.distributed.is_available() and isinstance(
-            value, torch.distributed.tensor.DTensor
-        )
+        is_dtensor = torch._utils._is_dtensor(value)
 
         # An AsyncCollectiveTensor (ACT) flattens to a single inner tensor whose
         # metadata mirrors the wrapper, and the AOTAutograd runtime wrapper

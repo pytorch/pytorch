@@ -3004,20 +3004,20 @@ class GuardBuilder(GuardBuilderBase):
 
         if torch.distributed.is_available():
             from torch.distributed.device_mesh import _MeshLayout, DeviceMesh
-            from torch.distributed.tensor.placement_types import (
-                _StridedShard,
-                Partial,
-                Replicate,
-                Shard,
-            )
 
+            ok_types = ok_types + (DeviceMesh, _MeshLayout)
+        # Not imported eagerly since it pulls in DTensor; val can't be a
+        # placement unless it was already imported.
+        if (
+            placement_types := sys.modules.get(
+                "torch.distributed.tensor.placement_types"
+            )
+        ) is not None:
             ok_types = ok_types + (
-                Shard,
-                Replicate,
-                Partial,
-                DeviceMesh,
-                _StridedShard,
-                _MeshLayout,
+                placement_types.Shard,
+                placement_types.Replicate,
+                placement_types.Partial,
+                placement_types._StridedShard,
             )
 
         from torch.export.dynamic_shapes import _IntWrapper
@@ -4443,9 +4443,10 @@ class GuardsStatePickler(FunctionPicklerBase):
     def _unpickle_fsdp_module_type(
         cls, original_type: type[torch.nn.Module]
     ) -> type[torch.nn.Module]:
-        return torch.distributed.fsdp._fully_shard._fully_shard.get_cls_to_fsdp_cls()[
-            original_type
-        ]
+        # Unpickling may run in a fresh process that never imported FSDP.
+        from torch.distributed.fsdp._fully_shard._fully_shard import get_cls_to_fsdp_cls
+
+        return get_cls_to_fsdp_cls()[original_type]
 
     @classmethod
     def _unpickle_ddp_module(
