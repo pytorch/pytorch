@@ -393,6 +393,41 @@ class SubgraphInfo:
         }
 
 
+class _StoreOutputCapture(V.WrapperHandler):  # type: ignore[name-defined]
+    """Capture selected stores as kernel-local values during fused codegen."""
+
+    def __init__(
+        self,
+        inner,
+        *,
+        captured_values: dict[str, CSEVariable] | None = None,
+        capture_names: OrderedSet[str] | None = None,
+        on_store: Callable[[str, CSEVariable], None] | None = None,
+    ) -> None:
+        super().__init__(inner)
+        self.captured_values = captured_values
+        self.capture_names = capture_names
+        self.on_store = on_store
+
+    def store(
+        self,
+        name: str,
+        index: sympy.Expr,
+        value: CSEVariable,
+        mode: StoreMode = None,
+    ):
+        if self.capture_names is not None and name not in self.capture_names:
+            return self._inner.store(name, index, value, mode)
+
+        V.kernel.store_buffer_names.add(name)
+        V.kernel.cse.store_cache[name] = value
+        if self.captured_values is not None:
+            self.captured_values[name] = value
+        if self.on_store is not None:
+            self.on_store(name, value)
+        return None
+
+
 class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
     """Handles placeholder substitutions during subgraph processing."""
 
@@ -665,6 +700,8 @@ class TritonTemplateKernel(TritonKernel):
 
         # input buffers which we are fusing into
         self.prologue_fused_inputs: OrderedSet[str] = OrderedSet()
+        # Producer groups for prefix arguments consumed by store_output().
+        self.store_output_prologue_groups: dict[str, list[Any]] = {}
         # input buffers which we are fusing into, which preserve a zero mask
         self.prologue_fused_inputs_preserve_zero: OrderedSet[str] = OrderedSet()
 
@@ -1031,9 +1068,18 @@ class TritonTemplateKernel(TritonKernel):
                 )
             )
 
+        # Prefix inputs occupy the leading positions in input_nodes and are
+        # consumed by store_output(). For example, addmm uses [bias, A, B]
+        # with prefix_args=1, so this slice contains bias.
         for input_node in self.input_nodes[: self.prefix_args]:
+            input_name = input_node.get_name()
+            self.prologue_supported_inputs.add(input_name)
+            if input_name in V.graph.removed_buffers:
+                continue
+            if input_name in self.prologue_fused_inputs:
+                continue
             # get args in correct order
-            self.args.input(input_node.get_name())
+            self.args.input(input_name)
 
         for name, input_node in zip(argnames, named_args):
             arg_name = f"arg_{name}"
@@ -1376,42 +1422,34 @@ class TritonTemplateKernel(TritonKernel):
 
             template_mask = self.template_mask
 
-            class StoreOutputSubstitution(V.WrapperHandler):  # type: ignore[name-defined]
-                name = "StoreOutputSubstitution"
+            def capture_prologue_output(name: str, value: CSEVariable) -> None:
+                if name not in V.kernel.prologue_fused_inputs:
+                    return
 
-                def store(
-                    self,
-                    name: str,
-                    index: sympy.Expr,
-                    value: "CSEVariable",
-                    mode: "StoreMode" = None,
+                # We load masked out values with 0, then apply a prologue. The
+                # transformed values may no longer be 0, so reapply the mask.
+                value_dtype = value.dtype
+                value_str = str(value)
+                if template_mask != "None" and (
+                    name not in V.kernel.prologue_fused_inputs_preserve_zero
+                    or other != 0
                 ):
-                    V.kernel.store_buffer_names.add(name)
-                    V.kernel.cse.store_cache[name] = value
-                    if name in V.kernel.prologue_fused_inputs:
-                        # We load masked out values with 0, then apply a prologue.
-                        # The masked out values may not necessarily be 0 any more
-                        # so we need to reapply the mask.
-                        value_dtype = value.dtype
-                        value_str = str(value)
-                        if template_mask != "None" and (
-                            name not in V.kernel.prologue_fused_inputs_preserve_zero
-                            or other != 0
-                        ):
-                            value_str = (
-                                f"tl.where({template_mask}, {value_str}, {other})"
-                            )
+                    value_str = f"tl.where({template_mask}, {value_str}, {other})"
 
-                        if value_dtype != V.graph.get_buffer(name).dtype:
-                            value_str = f"{value_str}.to({triton_type(V.graph.get_buffer(name).dtype)})"
+                if value_dtype != V.graph.get_buffer(name).dtype:
+                    value_str = (
+                        f"{value_str}.to({triton_type(V.graph.get_buffer(name).dtype)})"
+                    )
 
-                        # TODO: we should have intermediary var shapes
-                        V.kernel.compute.writeline(
-                            f"{output_name} = {value_str}.broadcast_to(xindex.shape)"
-                        )
+                # TODO: we should have intermediary var shapes
+                V.kernel.compute.writeline(
+                    f"{output_name} = {value_str}.broadcast_to(xindex.shape)"
+                )
 
             # pyrefly: ignore [bad-assignment]
-            self.ops_handler = StoreOutputSubstitution
+            self.ops_handler = functools.partial(
+                _StoreOutputCapture, on_store=capture_prologue_output
+            )
 
             input_node = self.named_input_nodes[input_name]
             if isinstance(input_node.layout, ir.FlexibleLayout):
@@ -1734,6 +1772,41 @@ class TritonTemplateKernel(TritonKernel):
             )
             output_dtype = self.output_node.get_dtype()
 
+            captured_prefix_values: dict[str, CSEVariable] = {}
+            for input_node in self.input_nodes[: self.prefix_args]:
+                input_name = input_node.get_name()
+                prologue_group = self.store_output_prologue_groups.get(input_name)
+                if not prologue_group:
+                    continue
+
+                capture_names: OrderedSet[str] = OrderedSet()
+                for prologue_node in prologue_group:
+                    capture_names |= prologue_node.get_buffer_names()
+                can_codegen_without_upcast = all(
+                    node.can_codegen_without_upcasts() for node in prologue_group
+                )
+                capture_handler = _StoreOutputCapture(
+                    V.get_ops_handler(),
+                    captured_values=captured_prefix_values,
+                    capture_names=capture_names,
+                )
+                with (
+                    config.patch(
+                        "triton.codegen_upcast_to_fp32",
+                        not can_codegen_without_upcast,
+                    ),
+                    V.set_ops_handler(capture_handler),
+                ):
+                    for prologue_node in prologue_group:
+                        prologue_node.codegen(
+                            self.split_and_set_ranges(prologue_node.get_ranges())
+                        )
+
+                if input_name not in captured_prefix_values:
+                    raise AssertionError(
+                        f"failed to capture store-output prologue for {input_name}"
+                    )
+
             epilogue_args = [
                 V.kernel.cse.namedvar(val, dtype=acc_dtype, shape=val_shape)
             ]
@@ -1750,12 +1823,16 @@ class TritonTemplateKernel(TritonKernel):
                 self.input_nodes[len(self.input_nodes) - self.suffix_args :],
             ):
                 input_node.freeze_layout()
-                epilogue_arg = V.kernel.cse.generate(
-                    self.compute,
-                    input_node.make_loader()(index_symbols),
-                    dtype=acc_dtype,
-                    shape=input_node.get_size(),
-                )
+                input_name = input_node.get_name()
+                if input_name in captured_prefix_values:
+                    epilogue_arg = captured_prefix_values[input_name]
+                else:
+                    epilogue_arg = V.kernel.cse.generate(
+                        self.compute,
+                        input_node.make_loader()(index_symbols),
+                        dtype=acc_dtype,
+                        shape=input_node.get_size(),
+                    )
                 epilogue_args.append(epilogue_arg)
                 # We update frozen_layouts_cnt in order to replay this function on a cache hit.
                 self.frozen_layouts_cnt += 1
@@ -3110,13 +3187,20 @@ class TritonTemplate(KernelTemplate):
         """This function generates a TritonTemplateCaller
 
         Args:
-            input_nodes: List of input nodes
+            input_nodes: Template inputs ordered as [prefix inputs, named inputs,
+                suffix inputs]. Named inputs correspond to the arguments passed to
+                def_kernel().
             layout: Output layout
             num_stages: Number of stages for triton launch
             num_warps: Number of warps for triton launch
-            prefix_args: Number of input nodes to be passed as arguments
-            suffix_args: Number of input nodes to be passed as arguments
-            epilogue_fn: Optional epilogue function to be called on the output
+            prefix_args: Number of leading input nodes consumed exclusively by
+                store_output(). They are loaded over the output iteration domain and
+                passed to epilogue_fn immediately after the accumulator.
+            suffix_args: Number of trailing input nodes consumed exclusively by
+                store_output(). They are loaded over the output iteration domain and
+                passed to epilogue_fn after the prefix inputs.
+            epilogue_fn: Optional function called as
+                epilogue_fn(accumulator, *prefix_inputs, *suffix_inputs).
             subgraphs: Optional subgraphs to be passed as arguments, these will be inlined
                 into the triton template string
             mutated_inputs: Optional list of input nodes that are mutated by the kernel, this is helpful

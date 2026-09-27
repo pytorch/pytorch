@@ -4474,6 +4474,16 @@ class SIMDScheduling(BaseScheduling):
         """
         buf_name_to_prologue_group = {}
         template_reads = template_node.used_buffer_names()
+        prefix_input_names = OrderedSet(
+            input_node.get_name()
+            for input_node in kernel.input_nodes[: kernel.prefix_args]
+        )
+        named_input_names = OrderedSet(
+            input_node.get_name()
+            for input_node in kernel.input_nodes[
+                kernel.prefix_args : len(kernel.input_nodes) - kernel.suffix_args
+            ]
+        )
         prologue_group = []
         for prologue in prologue_nodes:
             names = prologue.get_buffer_names()
@@ -4482,8 +4492,12 @@ class SIMDScheduling(BaseScheduling):
             if names & template_reads:
                 if len(names) != 1:
                     raise AssertionError(f"expected len(names) == 1, got {len(names)}")
-                buf_name_to_prologue_group[next(iter(names))] = prologue_group
-                kernel.prologue_fused_inputs.add(next(iter(names)))
+                input_name = next(iter(names))
+                if input_name in prefix_input_names:
+                    kernel.store_output_prologue_groups[input_name] = prologue_group
+                if input_name in named_input_names:
+                    buf_name_to_prologue_group[input_name] = prologue_group
+                kernel.prologue_fused_inputs.add(input_name)
                 prologue_group = []
 
         # all prologue groups should have finalized with use in template
