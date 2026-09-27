@@ -4874,6 +4874,21 @@ class GuardsStatePickler(FunctionPicklerBase):
         elif isinstance(obj, types.CellType):
             return self._reduce_cell(obj)
 
+        if (
+            id(obj) in self.guard_tree_values
+            and hasattr(obj, "__dict__")
+            and not inspect.isclass(obj)
+            and not inspect.ismodule(obj)
+            and not isinstance(obj, (torch.nn.Module, torch.Tensor))
+            and not type(obj).__module__.startswith("torch.")
+        ):
+            # A guarded user object (a train pipeline, a wrapper holding a
+            # dataloader) would otherwise be pickled whole, so one unguarded
+            # unpicklable attribute takes the frame down. Last, so the specific
+            # reducers above get first refusal; user types only, since torch's
+            # structural types (DTensorSpec) need fields no guard names.
+            self._prune_unguarded_attributes(obj)
+
         if hasattr(torch.distributed, "distributed_c10d") and isinstance(
             obj, torch.distributed.distributed_c10d.Work
         ):
@@ -4908,7 +4923,7 @@ class GuardsStatePickler(FunctionPicklerBase):
 
         return NotImplemented
 
-    def _prune_unguarded_attributes(self, obj: torch.nn.Module) -> None:
+    def _prune_unguarded_attributes(self, obj: Any) -> None:
         """Mark every ``__dict__`` value nothing guards as prunable.
 
         Reaching a module through the guard tree does not mean its whole state
@@ -4931,6 +4946,59 @@ class GuardsStatePickler(FunctionPicklerBase):
             if _is_shared_constant(attr):
                 continue
             self.missing_values[id(attr)] = attr
+
+
+_PORTABLE_IDENTITY_GUARD_TYPES = frozenset(
+    ("ID_MATCH", "CLASS_MATCH", "FUNCTION_MATCH", "MODULE_MATCH")
+)
+
+
+def _resolves_by_reference(value: object) -> bool:
+    """Whether unpickling ``value`` in another process yields that process's
+    canonical object, so an identity guard rebuilt at load checks the right id.
+    """
+    if isinstance(value, types.ModuleType):
+        return sys.modules.get(value.__name__) is value
+    if isinstance(value, enum.Enum):
+        owner = type(value)
+        return (
+            _resolves_by_reference(owner)
+            and owner.__dict__.get(value.name, None) is value
+        )
+    if not isinstance(value, (type, types.FunctionType, types.BuiltinFunctionType)):
+        return False
+    module = getattr(value, "__module__", None)
+    qualname = getattr(value, "__qualname__", None)
+    if not isinstance(module, str) or not isinstance(qualname, str):
+        return False
+    if "<locals>" in qualname:
+        return False
+    obj: object = sys.modules.get(module)
+    for part in qualname.split("."):
+        obj = getattr(obj, part, _PORTABLE_IDENTITY_MISSING)
+        if obj is _PORTABLE_IDENTITY_MISSING:
+            return False
+    return obj is value
+
+
+_PORTABLE_IDENTITY_MISSING = object()
+
+
+def is_portable_identity_guard(
+    guard_type: str, derived_guard_types: Sequence[str], value: object
+) -> bool:
+    """An identity guard on an object pickled by reference survives
+    serialization: the load rebuilds it against the loading process's object.
+    """
+    return (
+        guard_type in _PORTABLE_IDENTITY_GUARD_TYPES
+        and all(
+            d in _PORTABLE_IDENTITY_GUARD_TYPES
+            or d not in CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
+            for d in derived_guard_types
+        )
+        and _resolves_by_reference(value)
+    )
 
 
 def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterEntry:
@@ -5287,6 +5355,14 @@ class CheckFunctionManager:
             if guard_type in ("TYPE_MATCH", "BUILTIN_MATCH"):
                 if guard._unserializable is not None:
                     raise_local_type_error(guard._unserializable)
+            elif guard_type in _PORTABLE_IDENTITY_GUARD_TYPES and (
+                is_portable_identity_guard(
+                    guard_type,
+                    derived_guard_types,
+                    make_guard_filter_entry(guard, builder).value,
+                )
+            ):
+                continue
             elif (
                 guard_type in CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
             ):
