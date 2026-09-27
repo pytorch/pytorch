@@ -47,7 +47,7 @@ from torch.testing._internal.common_dist_composable import (
     UnitModule,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.common_utils import run_tests, TestCase, TEST_WITH_DEV_DBG_ASAN
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     MultiProcessTestCase,
@@ -1108,6 +1108,41 @@ class TestNoComm(MultiProcessTestCase):
         )
         set_optimizer_state_dict(model, optim, osd)
         set_optimizer_state_dict(model, optim, optim.state_dict())
+
+
+class TestOptimStateInit(TestCase):
+    def test_init_does_not_change_the_first_step(self) -> None:
+        cases = [
+            (torch.optim.AdamW, {"lr": 0.1, "weight_decay": 0.01}),
+            (torch.optim.Adam, {"lr": 0.1}),
+            (torch.optim.NAdam, {"lr": 0.1}),
+            (torch.optim.ASGD, {"lr": 0.1}),
+            (torch.optim.SGD, {"lr": 0.1, "momentum": 0.9}),
+        ]
+        for opt_cls, kwargs in cases:
+            torch.manual_seed(0)
+            weight = torch.randn(4, 4)
+            grad = torch.randn(4, 4)
+            touched = nn.Linear(4, 4, bias=False)
+            fresh = nn.Linear(4, 4, bias=False)
+            touched.weight.data.copy_(weight)
+            fresh.weight.data.copy_(weight)
+            opt_touched = opt_cls(touched.parameters(), **kwargs)
+            opt_fresh = opt_cls(fresh.parameters(), **kwargs)
+            get_optimizer_state_dict(
+                touched,
+                opt_touched,
+                options=StateDictOptions(full_state_dict=True),
+            )
+            self.assertEqual(touched.weight, weight)
+            touched.weight.grad = grad.clone()
+            fresh.weight.grad = grad.clone()
+            opt_touched.step()
+            opt_fresh.step()
+            self.assertEqual(touched.weight, fresh.weight)
+            for key, value in opt_touched.state[touched.weight].items():
+                other = opt_fresh.state[fresh.weight][key]
+                self.assertEqual(value, other)
 
 
 if __name__ == "__main__":

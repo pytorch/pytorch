@@ -649,7 +649,14 @@ def _init_optim_state(optim: torch.optim.Optimizer) -> None:
                 param.grad = torch.zeros_like(param)
 
     # Some optimizers will update parameters regardless of grads due to lr, so
-    # make lr to zero when calling `step()`.
+    # make lr to zero when calling `step()`. Keep the parameter values anyway:
+    # the step exists to allocate state, not to train.
+    saved = [
+        param.detach().clone()
+        for param_group in optim.param_groups
+        for param in param_group[_PARAMS]
+        if param.requires_grad
+    ]
     lrs = []
     for param_group in optim.param_groups:
         if "lr" in param_group:
@@ -660,11 +667,42 @@ def _init_optim_state(optim: torch.optim.Optimizer) -> None:
                 else 0.0
             )
     optim.step(closure=None)
-    # Whether to recover the "lr" should not matter too much as we will
-    # restore checkpointing later.
     for param_group in optim.param_groups:
         if "lr" in param_group:
             param_group["lr"] = lrs.pop(0)
+    saved_i = 0
+    for param_group in optim.param_groups:
+        for param in param_group[_PARAMS]:
+            if param.requires_grad:
+                param.data.copy_(saved[saved_i])
+                saved_i += 1
+    # The dummy step also applies one update. Adam's step counter becomes 1,
+    # NAdam's mu_product moves off 1, and ASGD copies the temporary lr into eta
+    # and writes ax. Put each tensor back to the value assigned when the state
+    # was allocated, before that update. Other state tensors are allocated as zeros.
+    for param_group in optim.param_groups:
+        lr = param_group.get("lr", None)
+        for param in param_group[_PARAMS]:
+            state = optim.state.get(param, None)
+            if not state:
+                continue
+            for key, value in state.items():
+                if key == "step" and isinstance(value, (int, float)):
+                    state[key] = type(value)(0)
+                    continue
+                if not torch.is_tensor(value):
+                    continue
+                if key == "step":
+                    value.zero_()
+                elif key in ("mu", "mu_product"):
+                    value.fill_(1)
+                elif key == "eta":
+                    if torch.is_tensor(lr):
+                        value.fill_(lr.detach().item())
+                    else:
+                        value.fill_(0 if lr is None else lr)
+                else:
+                    value.zero_()
     optim.zero_grad(set_to_none=True)
 
 
