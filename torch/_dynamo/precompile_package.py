@@ -47,6 +47,7 @@ from .convert_frame import ConvertFrame
 from .exc import PackageError
 from .guards import (
     CheckFunctionManager,
+    is_portable_function_guard,
     is_portable_identity_guard,
     strip_local_scope,
 )
@@ -271,6 +272,7 @@ def default_guard_filter_fn(guard_entries: Sequence[GuardFilterEntry]) -> list[b
                 g.has_value
                 and is_portable_identity_guard(g.guard_type, derived, g.value)
             )
+            or (g.has_value and is_portable_function_guard(g.guard_type, g.value))
             or (
                 g.guard_type not in unsupported
                 and not any(d in unsupported for d in derived)
@@ -1259,8 +1261,11 @@ _SHAPE_BEARING_GUARD_TYPES = frozenset(
         "EMPTY_NN_MODULE_HOOKS_DICT",
         "EQUALS_MATCH",
         "FAKE_SCRIPT_TYPE_MATCH",
+        "FUNCTION_CODE_MATCH",
         "HASATTR",
         "MAPPING_KEYS_CHECK",
+        "METHOD_CODE_MATCH",
+        "NATIVE_METHOD_MATCH",
         "NONE_MATCH",
         "NOT_NONE_MATCH",
         "NOT_PRESENT_IN_GENERIC_DICT",
