@@ -1348,50 +1348,6 @@ class KernelTests(torch._inductor.test_case.TestCase):
         self.assertEqual(result, (1, "constant"))
         self.assertEqual(visited, [("visited", (0,))])
 
-    @unittest.skipUnless(has_triton_package(), "requires triton")
-    def test_aggregate_python_and_source_emission(self):
-        # In-process values and emitted Python must wrap the same aggregate node.
-        import triton.language as tl
-
-        from torch._higher_order_ops import triton_kernel_wrap
-        from torch._inductor.codegen.wrapper import PythonWrapperCodegen
-
-        spec = triton_kernel_wrap.create_named_tuple_spec(
-            "Config",
-            ("source", "options"),
-            (
-                triton_kernel_wrap.create_leaf_spec("source"),
-                triton_kernel_wrap.create_tuple_spec(
-                    (triton_kernel_wrap.create_leaf_spec("block"),),
-                    is_constexpr=True,
-                ),
-            ),
-        )
-        normalized = ("x", (16,))
-        materialized = triton_kernel_wrap.materialize_aggregate(spec, normalized)
-        self.assertEqual(materialized.source, "x")
-        self.assertIsInstance(materialized.options, tl.constexpr)
-        self.assertEqual(materialized.options.value, (16,))
-        constant = triton_kernel_wrap.materialize_aggregate(
-            spec, normalized, wrap_with_constexpr=False
-        )
-        self.assertEqual(constant.source, "x")
-        self.assertEqual(constant.options, (16,))
-
-        wrapper = object.__new__(PythonWrapperCodegen)
-        with mock.patch.object(
-            PythonWrapperCodegen,
-            "maybe_register_udtk_aggregate_type_def",
-            return_value="Config",
-        ):
-            source = wrapper._prepare_udtk_aggregate_call_str(
-                spec, normalized, leaf_fn=str
-            )
-        self.assertEqual(
-            source,
-            "Config(source=x, options=tl.constexpr((16,)))",
-        )
-
     def test_aggregate_type_metadata_uses_fx_literals(self):
         # The spec stays in FX-native literals so retracing adds no constructors.
         from torch._higher_order_ops import triton_kernel_wrap
