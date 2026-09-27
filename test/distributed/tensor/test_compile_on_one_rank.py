@@ -1523,6 +1523,30 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
     @requires_multigpu
     @compiler_config.patch(compile_on_one_rank=True)
     @parametrize("stream_kind", ("generic", "cuda"))
+    def test_other_device_current_stream_under_coor(self, stream_kind):
+        from torch._dynamo.testing import CompileCounter
+
+        mod = torch.accelerator if stream_kind == "generic" else torch.cuda
+
+        def f(x, stream):
+            return x + (1 if stream == mod.current_stream() else 2)
+
+        cnt = CompileCounter()
+        torch._dynamo.reset()
+        compiled = torch.compile(f, backend=cnt, fullgraph=True)
+        with torch.cuda.device(0):
+            x = torch.zeros(1, device="cuda:0")
+            # Current on cuda:1 but not on the current device, so not "current".
+            other = mod.current_stream(1)
+            self.assertEqual(compiled(x, other), f(x, other))
+            own = mod.current_stream(0)
+            self.assertEqual(compiled(x, own), f(x, own))
+
+        self.assertEqual(cnt.frame_count, 2)
+
+    @requires_multigpu
+    @compiler_config.patch(compile_on_one_rank=True)
+    @parametrize("stream_kind", ("generic", "cuda"))
     def test_nested_current_device_stream_observation_under_coor(self, stream_kind):
         from torch._dynamo.testing import CompileCounter
 

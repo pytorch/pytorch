@@ -6,7 +6,9 @@
 #include <ATen/native/DispatchStub.h>
 
 #include <ATen/AccumulateType.h>
+#include <ATen/OpMathType.h>
 #include <ATen/cpu/vec/vec.h>
+#include <ATen/cpu/vec/functional.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/cpu/Loops.h>
@@ -17,6 +19,24 @@ namespace at::native {
 namespace {
 
 using namespace vec;
+
+// Lanes of `start + step * (idx + lane)`. A reduced-precision scalar_t steps in
+// float and narrows once, matching the scalar lambda below; stepping in
+// scalar_t itself accumulates error across the lanes. Must stay a template so
+// the inapplicable `if constexpr` branch is discarded -- AT_DISPATCH bodies are
+// not templates, so inlining this would make both branches have to compile for
+// every dtype.
+template <typename scalar_t, typename accscalar_t>
+Vectorized<scalar_t> arange_vector(accscalar_t start, accscalar_t step, int64_t idx) {
+  if constexpr (is_reduced_floating_point_v<scalar_t>) {
+    using Vacc = Vectorized<float>;
+    return convert_from_float<scalar_t>(
+        Vacc::arange(start + step * idx, step),
+        Vacc::arange(start + step * (idx + Vacc::size()), step));
+  } else {
+    return Vectorized<scalar_t>::arange(start + step * idx, step);
+  }
+}
 
 void arange_kernel(TensorIterator& iter, const Scalar& scalar_start, const Scalar& scalar_steps, const Scalar& scalar_step) {
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "arange_cpu", [&]() {
@@ -33,8 +53,7 @@ void arange_kernel(TensorIterator& iter, const Scalar& scalar_start, const Scala
             return start + step * (idx++);
           },
           [start, step, &idx]() -> Vectorized<scalar_t> {
-            Vectorized<scalar_t> res;
-            res = Vectorized<scalar_t>::arange(start + step * idx, step);
+            Vectorized<scalar_t> res = arange_vector<scalar_t>(start, step, idx);
             idx += Vectorized<scalar_t>::size();
             return res;
           }, {p_begin, p_end});
@@ -44,8 +63,12 @@ void arange_kernel(TensorIterator& iter, const Scalar& scalar_start, const Scala
 
 void linspace_kernel(TensorIterator& iter, const Scalar& scalar_start, const Scalar& scalar_end, int64_t steps) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, iter.dtype(), "linspace_cpu", [&]() {
-    // step should be of double type for all integral types
-    using step_t = std::conditional_t<std::is_integral_v<scalar_t>, double, scalar_t>;
+    // step should be of double type for all integral types, and of the opmath
+    // type for reduced-precision floats: rounding step to half or bfloat16 and
+    // then multiplying by the index compounds that rounding across the range.
+    // arange_kernel above widens for the same reason.
+    using step_t = std::
+        conditional_t<std::is_integral_v<scalar_t>, double, at::opmath_type<scalar_t>>;
     const scalar_t start = scalar_start.to<scalar_t>();
     const scalar_t end = scalar_end.to<scalar_t>();
     // Cast `end` and `start` to `step_t`, since range can be larger than scalar_t for integral types

@@ -729,6 +729,32 @@ class DefaultsSource(ChainedSource):
         codegen.append_output(codegen.create_load_const(self.idx_key))
         codegen.append_output(create_binary_subscr())
 
+    def get_value(
+        self,
+        globals: dict[str, Any],
+        locals: dict[str, Any],
+        cache: dict[Source, Any],
+        *,
+        on_error: Callable[[Source, Any, Exception], None] | None = None,
+    ) -> Any:
+        if self in cache:
+            return cache[self]
+        base_value = self.base.get_value(globals, locals, cache, on_error=on_error)
+        try:
+            defaults = getattr(base_value, self.field)
+        except AttributeError as error:
+            if on_error is not None:
+                on_error(self, base_value, error)
+            raise
+        try:
+            value = defaults[self.idx_key]
+        except Exception as error:
+            if on_error is not None:
+                on_error(self, defaults, error)
+            raise
+        cache[self] = value
+        return value
+
     @functools.cached_property
     def _name_template(self) -> str:
         return self._name
@@ -829,12 +855,18 @@ class NonSerializableSetGetItemSource(ChainedSource):
         globals: dict[str, Any],
         locals: dict[str, Any],
         cache: dict[Source, Any],
+        *,
+        on_error: Callable[[Source, Any, Exception], None] | None = None,
     ) -> Any:
         if self in cache:
             return cache[self]
-        value = utils.set_getitem(
-            self.base.get_value(globals, locals, cache), self.index
-        )
+        base_value = self.base.get_value(globals, locals, cache, on_error=on_error)
+        try:
+            value = utils.set_getitem(base_value, self.index)
+        except Exception as error:
+            if on_error is not None:
+                on_error(self, base_value, error)
+            raise
         cache[self] = value
         return value
 
@@ -889,12 +921,23 @@ class DictGetItemSource(ChainedSource):
         globals: dict[str, Any],
         locals: dict[str, Any],
         cache: dict[Source, Any],
+        *,
+        on_error: Callable[[Source, Any, Exception], None] | None = None,
     ) -> Any:
-        if isinstance(self.index, Source):
-            return super().get_value(globals, locals, cache)
         if self in cache:
             return cache[self]
-        value = self.base.get_value(globals, locals, cache)[self.index]
+        base_value = self.base.get_value(globals, locals, cache, on_error=on_error)
+        index = (
+            self.index.get_value(globals, locals, cache, on_error=on_error)
+            if isinstance(self.index, Source)
+            else self.index
+        )
+        try:
+            value = base_value[index]
+        except Exception as error:
+            if on_error is not None:
+                on_error(self, base_value, error)
+            raise
         cache[self] = value
         return value
 
@@ -943,6 +986,34 @@ class DictSubclassGetItemSource(ChainedSource):
             codegen.append_output(codegen.create_load_const(self.index))
 
         codegen.extend_output(create_call_function(2, False))
+
+    def get_value(
+        self,
+        globals: dict[str, Any],
+        locals: dict[str, Any],
+        cache: dict[Source, Any],
+        *,
+        on_error: Callable[[Source, Any, Exception], None] | None = None,
+    ) -> Any:
+        if self in cache:
+            return cache[self]
+        base_value = self.base.get_value(globals, locals, cache, on_error=on_error)
+        index = (
+            self.index.get_value(globals, locals, cache, on_error=on_error)
+            if isinstance(self.index, Source)
+            else self.index
+        )
+        try:
+            if isinstance(self.index, ConstDictKeySource):
+                value = dict.__getitem__(base_value, index)
+            else:
+                value = base_value[index]
+        except Exception as error:
+            if on_error is not None:
+                on_error(self, base_value, error)
+            raise
+        cache[self] = value
+        return value
 
     @functools.cached_property
     def _name_template(self) -> str:

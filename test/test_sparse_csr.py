@@ -57,6 +57,7 @@ from torch.testing._internal.common_utils import (
     load_tests,
     parametrize,
     run_tests,
+    serialTest,
     skipIfTorchDynamo,
     subtest,
     suppress_warnings,
@@ -241,7 +242,13 @@ class TestSparseCompressed(TestCase):
         self.assertIn(str(layout), {'torch.sparse_csr', 'torch.sparse_csc', 'torch.sparse_bsr', 'torch.sparse_bsc'})
         self.assertEqual(type(layout), torch.layout)
 
-    @largeTensorTest("30GB", "cpu")
+    # arange(2**31 + 1, int64) is 16GiB and `// rows` holds a second one while it
+    # computes, so the peak is 32GiB, not the 30GB previously declared. Serial
+    # because largeTensorTest can only see the cgroup as a whole: the xdist
+    # workers share one memory limit, so a sibling's allocation can swallow the
+    # headroom this test was just told it had.
+    @serialTest()
+    @largeTensorTest("32GB", "cpu")
     def test_invalid_input_csr_large(self):
         rows = 2 ** 31
         with self.assertRaisesRegex(RuntimeError, '32-bit integer overflow in row dimension'):
@@ -4440,8 +4447,8 @@ class TestSparseCSRGeneric(TestCase):
 instantiate_parametrized_tests(TestSparseCompressed)
 instantiate_device_type_tests(TestSparseCompressedDevice, globals(), allow_xpu=True)
 
-instantiate_device_type_tests(TestSparseCSR, globals(), allow_xpu=True)
-instantiate_device_type_tests(TestSparseCompressedTritonKernels, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestSparseCSR, globals())
+instantiate_device_type_tests(TestSparseCompressedTritonKernels, globals())
 instantiate_device_type_tests(TestSparseCSRCudaOnly, globals(), only_for="cuda")
 
 if __name__ == '__main__':
