@@ -3340,6 +3340,19 @@ class TestGuardSerialization(TestGuardSerializationBase):
         ):
             self._test_serialization("CLASS_MATCH", fn, torch.randn(3))
 
+    def test_class_match_on_a_builtin_class(self):
+        def fn(x):
+            for i, y in enumerate([x, x]):
+                x = x + y * i
+            return x
+
+        x = torch.randn(3)
+
+        ref, loaded = self._test_serialization("CLASS_MATCH", fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        with mock.patch.object(builtins, "enumerate", list):
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+
     def test_module_match(self):
         def fn(x):
             return x + math.sqrt(2)
