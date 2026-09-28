@@ -918,7 +918,6 @@ include_patterns = [
 # therefore are permitted to use logging
 exclude_patterns = [
     'tools/**',
-    'third_party/kineto/tools/**',  # copies of tools/linter, excluded above
     'third_party/kineto/libkineto/third_party/**',  # Kineto's own third_party
     'test/**',
     'benchmarks/**',
