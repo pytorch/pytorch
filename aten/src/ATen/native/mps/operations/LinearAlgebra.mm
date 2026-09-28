@@ -2051,8 +2051,10 @@ static void cholesky_stub_impl(const Tensor& out, const Tensor& info, bool upper
   }
 }
 
+constexpr int64_t simd_size = c10::metal::simdgroup_size;
+
 static GeqrfParams<> get_geqrf_params(const Tensor& A, const Tensor& tau) {
-  TORCH_CHECK_NOT_IMPLEMENTED(A.dim() <= c10::metal::max_ndim, "MPS QR supports at most 16 dimensions");
+  TORCH_CHECK_NOT_IMPLEMENTED(A.dim() <= c10::metal::max_ndim, "MPS QR: at most ", c10::metal::max_ndim, " dims");
   TORCH_CHECK_NOT_IMPLEMENTED(canUse32BitIndexMath(A) && canUse32BitIndexMath(tau),
                               "MPS QR requires tensors addressable with 32-bit indices");
   GeqrfParams params{.num_batch_dims = c10::checked_convert<int32_t>(A.dim() - 2, "int32_t")};
@@ -2067,9 +2069,7 @@ static GeqrfParams<> get_geqrf_params(const Tensor& A, const Tensor& tau) {
 }
 
 static std::pair<Tensor, Tensor> householder_block(const Tensor& A, const Tensor& tau) {
-  auto sizes = A.sizes().vec();
-  std::swap(sizes[sizes.size() - 2], sizes.back());
-  auto V = at::empty(sizes, A.options()).transpose(-2, -1);
+  auto V = at::empty(A.mT().sizes(), A.options()).mT();
   auto W = at::empty_like(V);
   auto params = get_geqrf_params(A, tau);
   auto batches = batchCount(A);
@@ -2082,16 +2082,15 @@ static std::pair<Tensor, Tensor> householder_block(const Tensor& A, const Tensor
       [encoder setComputePipelineState:pso];
       mtl_setArgs(encoder, A, tau, V, W, params);
       auto threads = A.size(-2) > 8192 ? 1024 : A.size(-2) > 1024 ? 512 : 128;
-      threads = std::min<NSUInteger>(threads, pso.maxTotalThreadsPerThreadgroup);
       [encoder dispatchThreadgroups:MTLSizeMake(A.size(-1) * batches, 1, 1)
               threadsPerThreadgroup:MTLSizeMake(threads, 1, 1)];
       getMPSProfiler().endProfileKernel(pso, stream);
     }
   });
-  return {V, W};
+  return {std::move(V), std::move(W)};
 }
 
-static void apply_householder_block(const Tensor& V, const Tensor& W, Tensor target) {
+static void apply_householder_block(const Tensor& V, const Tensor& W, const Tensor& target) {
   // Apply I - V W^H; swap the factors when constructing Q.
   auto projection = at::matmul(W.mH(), target);
   if (target.dim() == 2) {
@@ -2107,6 +2106,7 @@ static Tensor& orgqr_stub_impl(Tensor& self, const Tensor& tau) {
   }
 
   auto m = self.size(-2);
+  auto m2 = m * m;
   auto n = self.size(-1);
   auto k = tau.size(-1);
 
@@ -2114,7 +2114,7 @@ static Tensor& orgqr_stub_impl(Tensor& self, const Tensor& tau) {
     return self.copy_(at::eye(m, n, self.options()));
   }
 
-  if (m > 32) {
+  if (m > simd_size) {
     auto opmath_dtype = at::toOpMathType(self.scalar_type());
     if (self.scalar_type() != opmath_dtype) {
       auto result = self.to(opmath_dtype);
@@ -2134,7 +2134,6 @@ static Tensor& orgqr_stub_impl(Tensor& self, const Tensor& tau) {
     return self;
   }
 
-  auto m2 = m * m;
   auto num_batch_dims = self.dim() - 2;
   auto batch_sizes = self.sizes().slice(0, num_batch_dims);
   int64_t num_batches = c10::multiply_integers(batch_sizes);
@@ -2492,8 +2491,8 @@ static void geqrf_kernel_mps(const Tensor& A, const Tensor& tau) {
 
   auto m = A.size(-2);
   auto n = A.size(-1);
-  if (m > 32 && n > 32) {
-    auto block_size = m > 4096 && m > 4 * n ? 8 : 32;
+  if (m > simd_size && n > simd_size) {
+    auto block_size = m > 4096 && m > 4 * n ? 8 : simd_size;
     auto k = std::min(m, n);
     for (int64_t i = 0; i < k; i += block_size) {
       auto width = std::min<int64_t>(block_size, k - i);
@@ -2509,16 +2508,11 @@ static void geqrf_kernel_mps(const Tensor& A, const Tensor& tau) {
   }
 
   auto batch_size = batchCount(A);
-  auto use_panel = m > 32 && m <= 2048 && n <= 32;
-  auto rows_per_thread = m <= 256 ? 8 : m <= 512 ? 16 : m <= 1024 ? 32 : 64;
-  constexpr auto simd_size = c10::metal::simdgroup_size;
+  auto use_panel = m > simd_size && m <= 32 * simd_size;
+  auto rows_per_thread = m <= 8 * simd_size ? 8 : m <= 16 * simd_size ? 16 : 32;
   auto pso = lib.getPipelineStateForFunc(use_panel ? fmt::format("geqrf_panel_{}", rows_per_thread)
                                                    : fmt::format("geqrf_{}", scalarToMetalTypeString(A)));
-  if (use_panel && n * simd_size > pso.maxTotalThreadsPerThreadgroup) {
-    use_panel = false;
-    pso = lib.getPipelineStateForFunc(fmt::format("geqrf_{}", scalarToMetalTypeString(A)));
-  }
-  auto v_work = use_panel ? Tensor() : at::empty({batch_size, m}, A.options());
+  auto v_work = use_panel ? std::nullopt : std::make_optional(at::empty({batch_size, m}, A.options()));
   auto params = get_geqrf_params(A, tau);
 
   MPSStream* stream = getCurrentMPSStream();
@@ -2526,7 +2520,7 @@ static void geqrf_kernel_mps(const Tensor& A, const Tensor& tau) {
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       auto compute_encoder = stream->commandEncoder();
-      getMPSProfiler().beginProfileKernel(pso, "geqrf", {A}, stream);
+      getMPSProfiler().beginProfileKernel(pso, use_panel ? "geqrf_panel" : "geqrf", {A}, stream);
       [compute_encoder setComputePipelineState:pso];
 
       auto threads = use_panel               ? n * simd_size
@@ -2535,10 +2529,7 @@ static void geqrf_kernel_mps(const Tensor& A, const Tensor& tau) {
       MTLSize threadGroupSize = MTLSizeMake(threads, 1, 1);
       MTLSize gridSize = MTLSizeMake(batch_size, 1, 1);
 
-      mtl_setArgs(compute_encoder, A, tau, params);
-      if (!use_panel) {
-        mtl_setBuffer(compute_encoder, v_work, 3);
-      }
+      mtl_setArgs(compute_encoder, A, tau, params, v_work);
       [compute_encoder dispatchThreadgroups:gridSize threadsPerThreadgroup:threadGroupSize];
 
       getMPSProfiler().endProfileKernel(pso, stream);

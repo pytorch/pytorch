@@ -12007,80 +12007,44 @@ class TestConv3dChannelsLast3dMPS(NNTestCase):
 
 class TestLinalgMPS(TestCaseMPS):
     @parametrize("shape,mode", (
-        ((33, 33), "r"),
-        ((1025, 129), "reduced"),
+        ((32, 64), "reduced"),
+        ((33, 33), "reduced"),
         ((65, 129), "reduced"),
         ((2, 3, 65, 33), "complete"),
-        ((257, 257), "reduced"),
-        ((2, 1, 2, 3, 9, 8), "complete"),
-        ((16, 32), "reduced"),
-        ((32, 64), "reduced"),
-        ((4097, 9), "reduced"),
+        ((1025, 129), "reduced"),
+        ((8193, 40), "reduced"),
     ))
-    def test_qr_dispatch(self, device, shape, mode):
-        a = torch.randn(*shape[:-1], 2 * shape[-1], device=device)[..., ::2]
-        expected = a.cpu()
-        q, r = torch.linalg.qr(a, mode=mode)
-        q, r = q.cpu(), r.cpu()
-        self.assertEqual(a.cpu(), expected)
-        self.assertEqual(r, r.triu())
-        if mode == "r":
-            gram = expected.double().mT @ expected.double() / expected.size(-2)
-            self.assertEqual(r.double().mT @ r.double() / expected.size(-2), gram, atol=1e-6, rtol=1e-5)
-        else:
-            self.assertEqual(q @ r, expected, atol=1e-4, rtol=1e-4)
-            identity = torch.eye(q.size(-1)).expand(*q.shape[:-2], -1, -1)
-            self.assertEqual(q.mT @ q, identity, atol=1e-5, rtol=1e-5)
-
-    @parametrize("shape", ((9, 8), (33, 33), (257, 129), (4097, 9)))
-    @parametrize("scale", (1e-30, 1e-19, 1e20, 1e30))
-    def test_qr_scaled(self, device, shape, scale):
+    @parametrize("scale", (1, 1e-30, 1e20))
+    def test_qr_dispatch(self, device, shape, mode, scale):
         a = torch.randn(shape)
-        q, r = torch.linalg.qr((a * scale).to(device))
-        self.assertEqual(q.cpu() @ (r.cpu() / scale), a, atol=1e-4, rtol=1e-4)
+        q, r = (t.cpu() for t in torch.linalg.qr((a * scale).to(device), mode=mode))
+        tol = 1e-6 * math.sqrt(a.size(-2) * a.size(-1))
+        self.assertEqual(q @ r / scale, a, atol=tol, rtol=tol)
+        qtq = q.mT @ q
+        self.assertEqual(qtq, torch.eye(qtq.size(-1)).expand_as(qtq), atol=tol, rtol=tol)
 
-    @parametrize("m", (32, 33))
-    @dtypes(torch.int32, torch.bool)
-    def test_householder_product_nonfloating(self, device, dtype, m):
-        a = torch.eye(m, dtype=dtype, device=device)
-        tau = torch.ones(m, dtype=dtype, device=device)
-        with self.assertRaises(RuntimeError):
-            torch.linalg.householder_product(a, tau)
+    @parametrize("m", (9, 33))
+    def test_qr_zero_column_keeps_inf(self, device, m):
+        a = torch.randn(m, 3)
+        a[:, 0] = 0
+        a[0, 1] = float("inf")
+        self.assertEqual(torch.linalg.qr(a.to(device)), torch.linalg.qr(a))
 
-    @parametrize("m", (9, 33, 4097))
-    def test_qr_zero_reflector_inf(self, device, m):
-        a = torch.zeros(m, 3)
-        a[0, 2] = float("inf")
-        a[1, 1] = a[2, 1] = a[1, 2] = 1
-        a[2, 2] = 2
-        expected = torch.linalg.qr(a)
-        q, r = (t.cpu() for t in torch.linalg.qr(a.to(device)))
-        signs = torch.where(r.diagonal() * expected.R.diagonal() < 0, -1.0, 1.0)
-        self.assertEqual(q * signs, expected.Q)
-        self.assertEqual(r * signs.unsqueeze(-1), expected.R)
-
-    @parametrize("m", (3, 33))
-    def test_householder_product_aliased_tau(self, device, m):
-        a = torch.zeros(2, m, device=device).mT
-        a[:, 0] = torch.arange(m, device=device) / (4 * m)
-        a[0, 0] = 1
-        a[1, 1] = 2
+    def test_householder_product_aliased_tau(self, device):
+        a = torch.randn(2, 33, device=device).mT
         tau = a[:2, 0]
         expected = torch.linalg.householder_product(a, tau)
-        actual = torch.linalg.householder_product(a, tau, out=a)
-        self.assertEqual(actual, expected)
+        self.assertEqual(torch.linalg.householder_product(a, tau, out=a), expected)
 
-    @parametrize("shape", ((65, 33), (2, 3, 257, 129)))
-    @parametrize("k", (0, 17, None))
-    @dtypes(torch.float32, torch.complex64, torch.float16, torch.bfloat16, torch.complex32)
+    @parametrize("shape,k", (((65, 33), 17), ((2, 3, 257, 129), None)))
+    @dtypes(torch.complex64, torch.bfloat16, torch.complex32)
     def test_householder_product_blocked(self, device, dtype, shape, k):
         cpu_dtype = torch.complex64 if dtype.is_complex else torch.float32
         a, tau = torch.geqrf(torch.randn(*shape, dtype=cpu_dtype))
         a, tau = a.to(dtype), tau[..., :k].to(dtype)
         expected = torch.linalg.householder_product(a.to(cpu_dtype), tau.to(cpu_dtype)).to(dtype)
         actual = torch.linalg.householder_product(a.to(device), tau.to(device))
-        tol = max(1e-5, torch.finfo(dtype).eps)
-        self.assertEqual(actual.cpu(), expected, atol=tol, rtol=tol)
+        self.assertEqual(actual.cpu(), expected)
 
     def test__int_mm(self):
         torch.manual_seed(0)

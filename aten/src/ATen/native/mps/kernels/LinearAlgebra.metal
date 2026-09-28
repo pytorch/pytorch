@@ -3109,6 +3109,10 @@ float2 bool_to_float(bool b) {
   return float2(b ? 1 : 0, 0);
 }
 
+constant constexpr auto kMaxThreadsPerThreadgroup = 1024;
+constant constexpr auto kMaxSIMDGroups =
+    kMaxThreadsPerThreadgroup / c10::metal::simdgroup_size;
+
 template <typename T>
 kernel void householder_block(
     device const T* A,
@@ -3135,7 +3139,7 @@ kernel void householder_block(
   auto col = tgid % n;
   V += uint64_t(tgid) * m;
   W += uint64_t(tgid) * m;
-  threadgroup T scratch[1024 / c10::metal::simdgroup_size];
+  threadgroup T scratch[kMaxSIMDGroups];
   for (auto row = tid; row < m; row += tptg) {
     auto value = row > col ? A[row * row_stride + col * col_stride]
                            : bool_to_float<T>(row == col);
@@ -3159,7 +3163,7 @@ kernel void householder_block(
                                   : A[row * row_stride + i * col_stride];
       W[row] -= c10::metal::mul(value, factor);
     }
-    threadgroup_barrier(mem_flags::mem_device);
+    threadgroup_barrier(mem_flags::mem_device | mem_flags::mem_threadgroup);
   }
 }
 
@@ -3376,18 +3380,19 @@ kernel void geqrf_panel(
   for (uint k = 0; k < n; ++k) {
     if (col == k) {
       float norm_sq = 0;
-      float scale = 0;
+      float max_abs = 0;
       for (uint j = 0; j < RowsPerThread; ++j) {
         if (lane + c10::metal::simdgroup_size * j >= k) {
           norm_sq = fma(r[j], r[j], norm_sq);
-          scale = c10::metal::max(scale, fabs(r[j]));
+          max_abs = c10::metal::max(max_abs, fabs(r[j]));
         }
       }
       norm_sq = simd_sum(norm_sq);
       constexpr auto safe_min =
           numeric_limits<float>::min() / numeric_limits<float>::epsilon();
+      float scale = 1;
       if (norm_sq < m * safe_min || !isfinite(norm_sq)) {
-        scale = c10::metal::simd_max(scale);
+        scale = c10::metal::simd_max(max_abs);
         scale = scale == 0 ? 1 : scale;
         norm_sq = 0;
         for (uint j = 0; j < RowsPerThread; ++j) {
@@ -3397,8 +3402,6 @@ kernel void geqrf_panel(
           }
         }
         norm_sq = simd_sum(norm_sq);
-      } else {
-        scale = 1;
       }
       auto norm = precise::sqrt(norm_sq);
       auto alpha = simd_broadcast(r[0], k);
@@ -3450,7 +3453,6 @@ kernel void geqrf_panel(
 REGISTER_GEQRF_PANEL(8);
 REGISTER_GEQRF_PANEL(16);
 REGISTER_GEQRF_PANEL(32);
-REGISTER_GEQRF_PANEL(64);
 
 template <typename T>
 kernel void geqrf(
@@ -3495,10 +3497,6 @@ kernel void geqrf(
   const uint32_t R_stride_r = params.A_strides[params.num_batch_dims];
   const uint32_t R_stride_c = params.A_strides[params.num_batch_dims + 1];
 
-  constexpr auto kMaxThreadsPerThreadgroup = 1024;
-  constexpr auto kMaxSIMDGroups =
-      kMaxThreadsPerThreadgroup / c10::metal::simdgroup_size;
-
   threadgroup opmath_t scratch[kMaxSIMDGroups];
   threadgroup opmath_t tau_shared;
   threadgroup opmath_t inv_u1;
@@ -3507,20 +3505,21 @@ kernel void geqrf(
     uint32_t R_k_offset = k * R_stride_c;
     uint32_t tau_k_offset = k * tau_stride;
     opmath_t norm_sq = 0;
-    opmath_t scale = 0;
+    opmath_t max_abs = 0;
     for (uint32_t i = k + tid; i < m; i += group_size) {
       auto value = static_cast<opmath_t>(R_batch[i * R_stride_r + R_k_offset]);
       v_batch[i] = static_cast<T>(value);
       norm_sq = fma(value, value, norm_sq);
-      scale = c10::metal::max(scale, fabs(value));
+      max_abs = c10::metal::max(max_abs, fabs(value));
     }
     norm_sq = c10::metal::threadgroup_sum(scratch, norm_sq, tid, group_size);
     // Recompute with scaling only when squaring overflowed or underflowed.
     constexpr auto safe_min =
         numeric_limits<opmath_t>::min() / numeric_limits<opmath_t>::epsilon();
+    opmath_t scale = 1;
     if (norm_sq < m * safe_min || !isfinite(norm_sq)) {
       threadgroup_barrier(mem_flags::mem_threadgroup);
-      scale = c10::metal::threadgroup_max(scratch, scale, tid, group_size);
+      scale = c10::metal::threadgroup_max(scratch, max_abs, tid, group_size);
       scale = scale == 0 ? 1 : scale;
       threadgroup_barrier(mem_flags::mem_threadgroup);
       norm_sq = 0;
@@ -3530,8 +3529,6 @@ kernel void geqrf(
         norm_sq = fma(value, value, norm_sq);
       }
       norm_sq = c10::metal::threadgroup_sum(scratch, norm_sq, tid, group_size);
-    } else {
-      scale = 1;
     }
     const auto norm = precise::sqrt(norm_sq);
 
@@ -3566,7 +3563,7 @@ kernel void geqrf(
 
     // Step 3: apply reflection to trailing columns of R
     uint32_t threads_per_col = c10::metal::simdgroup_size;
-    while (m > 1024 && threads_per_col * 2 * max(n - k - 1, 1u) <= group_size) {
+    while (threads_per_col * 2 * max(n - k - 1, 1u) <= group_size) {
       threads_per_col *= 2;
     }
     uint32_t col_lane = tid % threads_per_col;
