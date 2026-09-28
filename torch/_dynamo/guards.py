@@ -110,6 +110,10 @@ from torch._guards import (
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import get_opaque_obj_info, is_opaque_constant_type
 from torch._logging import structured
+from torch._subclasses.fake_tensor import (
+    _FAKE_TENSOR_CONSTRUCTOR_IGNORED_STATE_ATTRS,
+    FakeTensor,
+)
 from torch._subclasses.meta_utils import safe_grad
 from torch._utils_internal import justknobs_check
 from torch.fx.experimental.symbolic_shapes import (
@@ -4327,6 +4331,27 @@ class _LiveBuiltins:
 _live_builtins = _LiveBuiltins()
 
 
+# FakeTensor state held in __dict__, and the setters on FakeTensor that write
+# it (fake_device, the memo descriptors); never carried off a fake. _is_param
+# is not here: FakeTensor sets it only when asked, so restoring it is correct.
+_FAKE_TENSOR_OWNED_ATTRIBUTES = (
+    _FAKE_TENSOR_CONSTRUCTOR_IGNORED_STATE_ATTRS
+    | {
+        "_fake_device",
+        "fake_mode",
+        "constant",
+        "pytype",
+        "dispatch_keys",
+        "real_tensor",
+    }
+    | {
+        name
+        for name, attr in vars(FakeTensor).items()
+        if hasattr(attr, "__set__") and not hasattr(torch.Tensor, name)
+    }
+)
+
+
 @functools.cache
 def _get_unsupported_types() -> tuple[type, ...]:
     # We only do ID_MATCH on C objects which is already banned from guards serialization.
@@ -4920,15 +4945,26 @@ class GuardsStatePickler(FunctionPicklerBase):
                     obj, device="meta", requires_grad=obj.requires_grad
                 )
 
-            return type(self)._unpickle_tensor, (
-                meta,
-                obj.device,
-                pytype,
-                dispatch_keys.raw_repr(),
-                # Whatever .grad holds, without the non-leaf warning: a plain
-                # non-leaf has None, a retained-grad non-leaf (torch.optim permits
-                # one as a param) or a fake mirroring one has a real tensor.
-                safe_grad(obj),
+            return (
+                type(self)._unpickle_tensor,
+                (
+                    meta,
+                    obj.device,
+                    pytype,
+                    dispatch_keys.raw_repr(),
+                    # Whatever .grad holds, without the non-leaf warning: a plain
+                    # non-leaf has None, a retained-grad non-leaf (torch.optim
+                    # permits one as a param) or a fake mirroring one has a real
+                    # tensor.
+                    safe_grad(obj),
+                ),
+                # The state slot, not a constructor argument: pickle memoizes the
+                # tensor before saving state, so an attribute referring back to
+                # the tensor round-trips instead of recursing.
+                self._carried_tensor_attributes(obj, is_fake),
+                None,
+                None,
+                type(self)._restore_tensor_attributes,
             )
 
         elif isinstance(obj, torch.nn.Module):
@@ -5115,6 +5151,64 @@ class GuardsStatePickler(FunctionPicklerBase):
             self._prune_unguarded_attributes(obj)
 
         return NotImplemented
+
+    @classmethod
+    def _restore_tensor_attributes(
+        cls, tensor: torch.Tensor, state: dict[str, Any]
+    ) -> None:
+        for name, value in state.items():
+            object.__setattr__(tensor, name, value)
+
+    @staticmethod
+    def _warn_dropped_tensor_attribute(name: str, value: object) -> None:
+        message = (
+            f"a tensor's {name!r} attribute holds {value!r}, which a guard may "
+            f"read; the rebuilt FakeTensor keeps its own {name!r}, so such a "
+            f"guard fails after load"
+        )
+        log.warning(message)
+        torch._logging.trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "guard_state_dropped_tensor_attribute",
+                "encoding": "string",
+            },
+            payload_fn=lambda: message,
+        )
+
+    def _carried_tensor_attributes(
+        self, obj: torch.Tensor, is_fake: bool
+    ) -> dict[str, Any] | None:
+        """The Python attributes of ``obj``, pruned to what a guard reaches.
+
+        A tensor is rebuilt from metadata, so a guard whose source traverses an
+        attribute assigned onto it cannot be rebuilt unless the attribute is
+        carried. An unguarded value becomes the _Missing sentinel, since it may
+        not pickle; its name stays, as a HASATTR guard reads only presence.
+        """
+        state = getattr(obj, "__dict__", None)
+        if not state:
+            return None
+        carried: dict[str, Any] = {}
+        for name, value in state.items():
+            if name in _FAKE_TENSOR_OWNED_ATTRIBUTES:
+                if not is_fake and self._keep(value):
+                    if not self._is_literal(value):
+                        raise torch._dynamo.exc.PackageError(
+                            f"a guard reads {name!r} off a tensor, but a rebuilt "
+                            f"tensor is a FakeTensor, which stores its own state there"
+                        )
+                    # A literal can match an unrelated guard's interned value by
+                    # id, so this may not be a guard read. If it is, the loaded
+                    # guard sees the FakeTensor's own value and never passes.
+                    self._warn_dropped_tensor_attribute(name, value)
+                continue
+            if name.startswith("_dynamo_") and not self._keep(value):
+                # Rebuilding TENSOR_MATCH reads Dynamo's markings off the loaded
+                # tensor, and its check cannot take a _Missing in place of one.
+                continue
+            carried[name] = self._prune(value, "unguarded tensor attribute")
+        return carried or None
 
     def _prune_unguarded_attributes(self, obj: Any) -> None:
         """Mark every ``__dict__`` value nothing guards as prunable.
