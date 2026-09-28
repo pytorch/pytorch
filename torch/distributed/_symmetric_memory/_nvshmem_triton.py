@@ -453,6 +453,7 @@ if has_triton():
             ```
             # Transfer data and set completion flag to 1
             from torch._C._distributed_c10d import _ShmemSignalOp
+
             NVSHMEM_SIGNAL_SET = int(_ShmemSignalOp.SET)
             nvshmem.putmem_signal_block(
                 dst_ptr, src_ptr, 1024, sig_ptr, 1, NVSHMEM_SIGNAL_SET, target_pe
@@ -532,6 +533,7 @@ if has_triton():
             ```
             # Wait until flag tensor becomes 1 (set by another PE)
             from torch._C._distributed_c10d import _ShmemCompareOp
+
             NVSHMEM_CMP_EQ = int(_ShmemCompareOp.EQ)
             nvshmem.wait_until_tensor(flag_tensor, NVSHMEM_CMP_EQ, 1)
             ```
@@ -595,6 +597,7 @@ if has_triton():
             ```
             # Wait for signal to be set to completion value
             from torch._C._distributed_c10d import _ShmemCompareOp
+
             NVSHMEM_CMP_EQ = int(_ShmemCompareOp.EQ)
             nvshmem.signal_wait_until(signal_ptr, NVSHMEM_CMP_EQ, 42)
             ```
@@ -654,6 +657,7 @@ if has_triton():
             ```python
             # Atomically set remote signal to 1 to notify completion
             from torch._C._distributed_c10d import _ShmemSignalOp
+
             NVSHMEM_SIGNAL_SET = int(_ShmemSignalOp.SET)
             nvshmem.signal_op(remote_signal_ptr, 1, NVSHMEM_SIGNAL_SET, target_pe)
             ```
