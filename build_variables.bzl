@@ -1465,6 +1465,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/Distance.cpp",
     "aten/src/ATen/native/Distributions.cpp",
     "aten/src/ATen/native/Dropout.cpp",
+    "aten/src/ATen/native/ElementwiseRefMeta.cpp",
     "aten/src/ATen/native/Embedding.cpp",
     "aten/src/ATen/native/EmbeddingBag.cpp",
     "aten/src/ATen/native/Fill.cpp",
