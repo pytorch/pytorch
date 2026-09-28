@@ -4752,8 +4752,8 @@ at::Tensor as_strided_scatter_symint(
   auto output = clone_preserve_strides(self);
   auto slice =
       output.as_strided_symint(size, stride, std::move(storage_offset));
-  TORCH_CHECK(
-      slice.sym_sizes() == src.sym_sizes(),
+  TORCH_SYM_CHECK(
+      sym_equals(slice.sym_sizes(), src.sym_sizes()),
       "expected src to have a size equal to the slice of self. src size = ",
       src.sym_sizes(),
       ", slice size = ",
