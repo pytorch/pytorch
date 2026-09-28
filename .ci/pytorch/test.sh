@@ -1319,6 +1319,7 @@ PY
   python test/run_test.py \
     --include inductor/test_flydsl_template.py \
               inductor/flydsl_aot/test_flydsl_aot_compiler.py \
+              inductor/flydsl_aot/test_flydsl_capture.py \
     --verbose
   assert_git_not_dirty
 }
