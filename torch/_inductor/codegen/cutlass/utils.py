@@ -188,7 +188,12 @@ def try_import_cutlass() -> bool:
     return False
 
 
-def _normalize_xpu_arch(arch: str) -> str:
+def _normalize_xpu_arch(arch: str | None) -> str:
+    if arch is None:
+        raise NotImplementedError(
+            "Unable to determine the XPU architecture to generate CUTLASS kernels "
+            "for: the device codename is not recognized."
+        )
     if arch.startswith("Xe"):
         return arch[2:]
     if 12 <= int(arch) and int(arch) <= 50:
@@ -197,7 +202,12 @@ def _normalize_xpu_arch(arch: str) -> str:
         raise NotImplementedError(f"Unsupported xpu arch: {arch}")
 
 
-def _normalize_cuda_arch(arch: str) -> str:
+def _normalize_cuda_arch(arch: str | None) -> str:
+    if arch is None:
+        raise NotImplementedError(
+            "Unable to determine the CUDA architecture to generate CUTLASS kernels "
+            "for. Set torch._inductor.config.cuda.arch or run on a CUDA device."
+        )
     arch_num = arch
     if isinstance(arch, str):
         digits = "".join(ch for ch in arch if ch.isdigit())
@@ -233,23 +243,39 @@ def _normalize_cuda_arch(arch: str) -> str:
 @functools.lru_cache(8)
 def cutlass_arch(device_type: str) -> str:
     if device_type == "xpu":
-        arch = get_xpu_arch()
-        return _normalize_xpu_arch(arch)
-    else:
-        arch = get_cuda_arch()
-        return _normalize_cuda_arch(arch)
+        return _normalize_xpu_arch(get_xpu_arch())
+    if device_type == "cuda":
+        return _normalize_cuda_arch(get_cuda_arch())
+    raise NotImplementedError(
+        f"CUTLASS codegen is not implemented for device type {device_type!r}"
+    )
 
 
 @functools.lru_cache(1)
 def toolkit_version(device_type: str) -> str:
     if device_type == "xpu":
-        return get_xpu_version()
+        version = get_xpu_version()
+    elif device_type == "cuda":
+        version = get_cuda_version()
     else:
-        return get_cuda_version()
+        raise NotImplementedError(
+            f"CUTLASS codegen is not implemented for device type {device_type!r}"
+        )
+    if not version:
+        raise NotImplementedError(
+            f"Unable to determine the {device_type} toolkit version to generate "
+            "CUTLASS kernels for."
+        )
+    return version
 
 
 def get_device_cutlass_config(device_type: str):
-    """Get device-specific CUTLASS config (xpu/cuda overrides general cutlass config)."""
+    """
+    Get device-specific CUTLASS config (xpu/cuda overrides general cutlass config).
+
+    Devices that do not have a dedicated namespace fall back to the general
+    ``config.cutlass``; ``xpu`` is currently the only device with an override.
+    """
     if device_type == "xpu":
         return config.xpu
     from ...config import cutlass as inductor_cutlass_config
