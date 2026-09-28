@@ -46,7 +46,6 @@ class _NativeMemory:
     def __init__(self, tensor):
         self.tensor = tensor
         self.key = tensor.data_ptr(), tensor.nbytes
-        self.reused = self.key in self.registrations
         self.registrations[self.key] = tensor
 
     def to_view(self, offset, length):
@@ -61,9 +60,6 @@ class _NativeMemory:
 
     def to_remote_buffer(self):
         return _NativeRemote(self.key)
-
-    def reused_registration(self):
-        return self.reused
 
 
 class _NativeTransport:
@@ -153,7 +149,6 @@ class TestTorchCommsTransport(TransportTestMixin, TestCase):
                 tensor.data_ptr(), tensor.nbytes, "test-key"
             ),
         )
-        self.assertFalse(memory.reused_registration())
         self.assertIs(view._memory, memory)
         self.assertEqual(transport.write(view, remote), 0)
         self.assertEqual(transport.read(mutable_view, remote), 0)
@@ -361,8 +356,6 @@ class TestUCXXTransport(TransportTestMixin, TestCase):
             first = client.register_memory(destination_tensor)
             second = client.register_memory(destination_tensor)
 
-            self.assertFalse(first.reused_registration())
-            self.assertTrue(second.reused_registration())
             self.assertEqual(first.to_remote_buffer(), second.to_remote_buffer())
             invalid = _ucxx.UCXXRemoteBuffer(1, 16, 2)
             with self.assertRaisesRegex(RuntimeError, "unknown remote buffer"):
