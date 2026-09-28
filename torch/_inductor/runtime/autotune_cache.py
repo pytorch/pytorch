@@ -282,7 +282,7 @@ class AutotuneCache:
     # This is because AutotuneCache instances are created on the worker
     # process, but we need to run AutotuneCache.save on the parent process
     # when actually doing autotuning.
-    def __getstate__(self) -> dict[str, Any]:
+    def __getstate__(self) -> dict[str, object]:
         # The remote cache handles themselves may not be serializable
         # So clear it and reconstruct it on setstate
         remote_cache = getattr(self, "remote_cache", None)
@@ -292,7 +292,7 @@ class AutotuneCache:
             "remote_cache": remote_cache and remote_cache[1],
         }
 
-    def __setstate__(self, state: dict[str, Any]) -> None:
+    def __setstate__(self, state: dict[str, object]) -> None:
         # Reconstruct the remote cache on the parent class
         self.__dict__.update(state)
         if self.remote_cache is not None:

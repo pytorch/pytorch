@@ -80,7 +80,7 @@ kernel_code_log = torch._logging.getArtifactLogger(__name__, "kernel_code")
 
 log = logging.getLogger(__name__)
 
-_triton_kernel_metrics: dict[str, dict[str, Any]] | None = None
+_triton_kernel_metrics: dict[str, dict[str, object]] | None = None
 
 size_hints_regex = re.compile(
     r"size_hints=(\{.*?\})",
@@ -147,7 +147,7 @@ def _compile_end() -> None:
         _triton_kernel_metrics = None
 
 
-def _add_triton_kernel_info(kernel_name: str, info: dict[str, Any]):
+def _add_triton_kernel_info(kernel_name: str, info: dict[str, object]):
     global _triton_kernel_metrics
     # Must be called between _compile_start and _compile_end
     if _triton_kernel_metrics is not None:

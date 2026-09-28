@@ -399,7 +399,7 @@ class StaticallyLaunchedTritonKernel:
                 params.append(self.extract_type(ty))
         return "".join(params)
 
-    def __getstate__(self) -> dict[str, Any]:
+    def __getstate__(self) -> dict[str, object]:
         # Remove objects that are no longer valid for pickling
         state = self.__dict__.copy()
         state["function"] = None

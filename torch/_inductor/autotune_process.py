@@ -20,7 +20,7 @@ import warnings
 from collections.abc import Callable, Iterable, Sequence
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from ctypes import byref, c_size_t, c_void_p, CDLL
-from typing import Any, IO, TYPE_CHECKING
+from typing import Any, cast, IO, TYPE_CHECKING
 from typing_extensions import override
 
 import torch
@@ -156,6 +156,8 @@ class TuningProcess:
                     break
                 try:
                     _apply_subprocess_env_and_clear_caches(extra_env)
+                    if not callable(job):
+                        raise TypeError(f"Expected a callable job, got {type(job)}")
                     result = job()
                 except Exception as e:
                     result = e
@@ -177,7 +179,7 @@ class TuningProcess:
         write_pipe.flush()
 
     @staticmethod
-    def recv(read_pipe: IO[bytes]) -> Any:
+    def recv(read_pipe: IO[bytes]) -> tuple[object, dict[str, str | None] | None]:
         return pickle.load(read_pipe)
 
     def __init__(self, device: int | None):
@@ -243,7 +245,7 @@ class TuningProcess:
             self.start()
         TuningProcess.send(req, self.write_pipe, extra_env=extra_env)
 
-    def get(self, timeout: float = 120.0) -> Any:
+    def get(self, timeout: float = 120.0) -> object:
         """
         Get a response from the child process. Raises TimeoutError on timeout;
         raises EOFError if the subprocess crashes.
@@ -432,9 +434,8 @@ class TuningProcessPool(TuningPoolBase):
         process = self.process_queue.get()
         process.put(choice.bmreq.benchmark, extra_env=extra_env)
         try:
-            return process.get(
-                config.max_autotune_subproc_result_timeout_seconds,
-            )
+            timeout = config.max_autotune_subproc_result_timeout_seconds
+            return cast(float, process.get(timeout))
         except TimeoutError:
             warnings.warn(
                 f"Timed out benchmarking choice '{choice}'. It will be ignored. "
@@ -1320,14 +1321,14 @@ class CUTLASSBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
     def __str__(self) -> str:
         return f"{self.kernel_name=}, {self.source_file=}, {self.hash_key=}"
 
-    def __getstate__(self) -> dict[str, Any]:
+    def __getstate__(self) -> dict[str, object]:
         state = self.__dict__.copy()
         state["DLL"] = None
         state["workspace"] = None
         state["_workspace_size_updated"] = False
         return state
 
-    def __setstate__(self, state: dict[str, Any]) -> None:
+    def __setstate__(self, state: dict[str, object]) -> None:
         self.__dict__.update(state)
 
 
