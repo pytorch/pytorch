@@ -4,6 +4,7 @@ import pytorch_test_common
 from pytorch_test_common import skipIfNoCuda
 
 import torch
+from torch.onnx._internal import _ort_threads
 from torch.onnx._internal.torchscript_exporter import verification
 from torch.onnx._internal.torchscript_exporter._globals import GLOBALS
 from torch.onnx._internal.torchscript_exporter.utils import (
@@ -64,8 +65,10 @@ class _TestJITIRToONNX:
         onnx_proto = _jit_graph_to_onnx_model(
             graph, torch.onnx.OperatorExportTypes.ONNX, self.opset_version
         )
+        session_options = onnxruntime.SessionOptions()
+        session_options.intra_op_num_threads = _ort_threads.intra_op_num_threads()
         ort_sess = onnxruntime.InferenceSession(
-            onnx_proto, providers=self.ort_providers
+            onnx_proto, providers=self.ort_providers, sess_options=session_options
         )
         ort_outs = verification._run_onnx(ort_sess, example_inputs)
 
