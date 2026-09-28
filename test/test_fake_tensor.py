@@ -14,7 +14,7 @@ import subprocess
 import sys
 import unittest
 import weakref
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 
@@ -34,6 +34,7 @@ from torch._higher_order_ops.scan import scan
 from torch._subclasses.fake_tensor import (
     _CacheKeyState,
     _check_for_subclass_arg,
+    _pin_device_index,
     DynamicOutputShapeException,
     extract_tensor_metadata,
     FakeTensor,
@@ -3785,6 +3786,35 @@ class FakeTensorDispatchCache(TestCase):
 
         self.assertNotEqual(key_dev0, key_dev1)
         self.assertEqual(key_dev0, key_explicit)
+
+    def test_pin_device_index(self):
+        # Explicit index or non-indexed device is untouched
+        self.assertEqual(_pin_device_index(torch.device("cpu")), torch.device("cpu"))
+        cuda1 = torch.device("cuda", 1)
+        self.assertEqual(_pin_device_index(cuda1), cuda1)
+
+        # Unimported/missing backend safely defaults to 0
+        hpu0 = torch.device("hpu", 0)
+        self.assertEqual(_pin_device_index(torch.device("hpu")), hpu0)
+
+        # Initialized backend lacking current_device falls back to torch.accelerator
+        mock_mod = MagicMock(spec=["is_initialized"])
+        mock_mod.is_initialized.return_value = True
+        mock_acc = MagicMock(type="cuda")
+        acc_patch = patch.object(
+            torch.accelerator, "current_accelerator", return_value=mock_acc
+        )
+        idx_patch = patch.object(
+            torch.accelerator, "current_device_index", return_value=2
+        )
+        with (
+            patch.object(torch, "cuda", mock_mod),
+            patch.object(torch.accelerator, "is_available", return_value=True),
+            acc_patch,
+            idx_patch,
+        ):
+            dev = _pin_device_index(torch.device("cuda"))
+            self.assertEqual(dev, torch.device("cuda", 2))
 
     def test_cache_key_memory_format(self):
         with FakeTensorMode() as fm:
