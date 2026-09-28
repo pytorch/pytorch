@@ -4510,6 +4510,36 @@ assert x.item() == 2
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
 
+    @unittest.skipIf(not TEST_WITH_ROCM, "Only ROCm binds public handles to a buffer")
+    def test_blas_handle_workspace_outside_private_pools(self):
+        # A new stream's public handle is created, and its permanent buffer
+        # allocated, by its first request. A fresh process, because handles
+        # released by exited threads would otherwise satisfy the request.
+        script = """
+import torch
+from torch._inductor.cudagraph_trees import _use_cuda_memory_pool_manager
+
+pool = torch.cuda.MemPool()
+with torch.cuda.stream(torch.cuda.Stream()), torch.cuda.use_mem_pool(pool):
+    torch.cuda.current_blas_handle()
+assert pool.snapshot() == [], pool.snapshot()
+
+device = torch.cuda.current_device()
+graph_pool = torch.cuda.graph_pool_handle()
+x = torch.ones(4, device="cuda")
+graph = torch.cuda.CUDAGraph()
+with torch.cuda.graph(graph, pool=graph_pool):
+    y = x * 2
+state = torch._C._cuda_getCheckpointState(device, graph_pool)
+with _use_cuda_memory_pool_manager(device, graph_pool, torch.cuda.Stream()):
+    torch.cuda.current_blas_handle()
+torch._C._cuda_setCheckpointPoolState(device, state, [], [])
+"""
+        proc = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )

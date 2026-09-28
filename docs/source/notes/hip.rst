@@ -127,9 +127,12 @@ When ATen workspace caching is disabled, ATen operations bind their workspaces t
 ``torch.cuda.current_blas_handle()`` never returns. That function returns a separate handle for each
 thread and stream, because a rocBLAS handle's workspace must not be used by two streams at once. When
 the handle is created, ATen replaces the workspace rocBLAS allocated for it with a buffer from the HIP
-caching allocator on that stream, so ``torch.cuda.memory_allocated()`` counts it. The buffer is as
+caching allocator, so ``torch.cuda.memory_allocated()`` counts it. The buffer comes from a memory pool
+reserved for these buffers, never from a pool selected with ``torch.cuda.use_mem_pool`` or by
+CUDA graphs, and so never shares a segment with other allocations. The buffer is as
 large as the workspace rocBLAS allocated (128 MiB on MI355X; the size depends on the GPU, the rocBLAS
-version and ``ROCBLAS_DEVICE_MEMORY_SIZE``), and at least the hipBLAS workspace size described below.
+version and ``ROCBLAS_DEVICE_MEMORY_SIZE``), and at least the hipBLAS workspace size described below,
+so a ``ROCBLAS_DEVICE_MEMORY_SIZE`` below that size has no effect.
 rocBLAS never grows a bound workspace: GEMMs that need more fall back to kernels that use less, and
 other calls that need more fail with ``rocblas_status_memory_error``. Handles are never destroyed.
 When a thread exits, its handles pass to other threads and streams, so the buffer stays allocated for

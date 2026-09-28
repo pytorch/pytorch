@@ -1437,14 +1437,14 @@ def get_stream_from_external(data_ptr: int, device: Device = None) -> Stream:
 def current_blas_handle():
     r"""Return the ``cublasHandle_t`` pointer for the current device and stream.
 
-    The handle uses the BLAS library's default workspace unless ATen workspace
-    caching is explicitly enabled. When caching is disabled, internal ATen
-    operations on CUDA may temporarily bind their own workspace to this handle,
-    but restore the default workspace before releasing it. On ROCm they use
+    On CUDA, the handle uses the BLAS library's default workspace unless ATen
+    workspace caching is explicitly enabled. When caching is disabled, internal
+    ATen operations may temporarily bind their own workspace to this handle, but
+    restore the default workspace before releasing it. On ROCm they use
     separate handles, and this function returns a different handle for each
     stream, because a rocBLAS workspace must not be shared by two streams at
-    once. Each is bound when it is created to a buffer from the caching
-    allocator, at least as large as the workspace rocBLAS would allocate, which
+    once. Each is bound when it is created to a buffer from a caching-allocator
+    pool reserved for these buffers, at least as large as the workspace rocBLAS would allocate, which
     rocBLAS never grows. A workspace bound with
     ``rocblas_set_workspace`` stays bound, even after the thread exits and the
     handle passes to another thread, so unbind it before freeing the buffer.

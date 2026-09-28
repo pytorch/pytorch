@@ -12,13 +12,16 @@
 #include <regex>
 #include <shared_mutex>
 #include <string>
+#include <thread>
 #include <tuple>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
 #if defined(USE_ROCM)
+#include <ATen/cuda/MemPool.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
+#include <c10/util/ScopeExit.h>
 #include <rocblas/rocblas.h>
 #endif
 
@@ -143,10 +146,12 @@ void destroyCublasHandle(cublasHandle_t handle) {
 }
 
 #ifdef USE_ROCM
-// Buffers bound to public handles, keyed by handle.
+// Buffers bound to public handles, keyed by handle, and the per-device pools
+// they come from.
 struct PublicWorkspaces {
   std::mutex mutex;
   std::unordered_map<cublasHandle_t, at::DataPtr> map;
+  std::unordered_map<c10::DeviceIndex, std::unique_ptr<at::cuda::MemPool>> pools;
 };
 
 PublicWorkspaces& publicWorkspaces() {
@@ -154,10 +159,35 @@ PublicWorkspaces& publicWorkspaces() {
   return instance;
 }
 
+// A public handle outlives any private pool the calling thread may be routed
+// to (torch.cuda.use_mem_pool, cudagraph-tree warmup), whose blocks can be
+// freed or reused behind the handle, so its buffer comes from a dedicated pool.
+// That also keeps these permanent blocks out of the default pool's segments,
+// which empty_cache could otherwise never release.
+at::DataPtr allocatePublicWorkspace(size_t size) {
+  auto& workspaces = publicWorkspaces();
+  std::lock_guard<std::mutex> lock(workspaces.mutex);
+  const auto device = c10::cuda::current_device();
+  auto& pool = workspaces.pools[device];
+  if (!pool) {
+    pool = std::make_unique<at::cuda::MemPool>(
+        nullptr, /*is_user_created=*/false);
+  }
+  const auto tid = std::this_thread::get_id();
+  c10::cuda::CUDACachingAllocator::beginAllocateToPool(
+      device, pool->id(), [tid](cudaStream_t) {
+        return std::this_thread::get_id() == tid;
+      });
+  auto end_allocate = c10::make_scope_exit([&] {
+    c10::cuda::CUDACachingAllocator::endAllocateToPool(device, pool->id());
+  });
+  return allocateCUDABlasWorkspace(size);
+}
+
 // Replaces the arena rocBLAS allocates at creation with a caching-allocator
-// buffer on the current stream, so the handle's workspace is counted by the
-// allocator. rocBLAS never grows a bound workspace, so it is at least as large
-// as the arena, which honors ROCBLAS_DEVICE_MEMORY_SIZE.
+// buffer, so the handle's workspace is counted by the allocator. rocBLAS never
+// grows a bound workspace, so it is at least as large as the arena; a
+// ROCBLAS_DEVICE_MEMORY_SIZE below getChosenWorkspaceSize() has no effect.
 void createPublicCublasHandle(cublasHandle_t *handle) {
   createCublasHandle(handle);
   try {
@@ -165,7 +195,7 @@ void createPublicCublasHandle(cublasHandle_t *handle) {
     TORCH_CUDABLAS_CHECK(rocBLASStatusToHIPStatus(rocblas_get_device_memory_size(
         (rocblas_handle)*handle, &arena_size)));
     const size_t workspace_size = std::max(arena_size, getChosenWorkspaceSize());
-    auto workspace = allocateCUDABlasWorkspace(workspace_size);
+    auto workspace = allocatePublicWorkspace(workspace_size);
     TORCH_CUDABLAS_CHECK(
         cublasSetWorkspace(*handle, workspace.get(), workspace_size));
     auto& workspaces = publicWorkspaces();

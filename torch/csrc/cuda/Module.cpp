@@ -1674,8 +1674,13 @@ PyObject* THCPModule_getCurrentBlasHandle_wrap(
   HANDLE_TH_ERRORS
   // On CUDA, internal ATen operations restore this public handle to cuBLAS's
   // default workspace before releasing their eager workspace allocations. On
-  // ROCm they use separate handles.
-  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  // ROCm they use separate handles. Creating a ROCm public handle allocates
+  // from the caching allocator, whose OOM observers may need the GIL.
+  cublasHandle_t handle = nullptr;
+  {
+    pybind11::gil_scoped_release no_gil;
+    handle = at::cuda::getCurrentCUDABlasHandle();
+  }
   return PyLong_FromVoidPtr(handle);
   END_HANDLE_TH_ERRORS
 }
