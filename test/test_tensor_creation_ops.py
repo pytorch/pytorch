@@ -1109,8 +1109,8 @@ class TestTensorCreation(TestCase):
     # nondeterministically fails, warning "invalid value encountered in cast"
     @skipCUDAIf(True, "CUDA diverges on most dtypes, often dramatically.")
     @unittest.skipIf(IS_S390X, "Test fails for int16 on s390x. Needs investigation.")
-    @parametrize("dtype", [torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64])
-    def test_float_to_int_conversion_nonfinite(self, dtype):
+    @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
+    def test_float_to_int_conversion_nonfinite(self, device, dtype):
         vals = (float('-inf'), float('inf'), float('nan'))
 
         if dtype == torch.bool:
@@ -1123,7 +1123,7 @@ class TestTensorCreation(TestCase):
             refs = (0, 0, 0)
             if dtype in (torch.int32, torch.int64):
                 refs = (torch.iinfo(dtype).min, ) * 3
-        _float_to_int_conversion_helper(self, vals, "cpu", dtype, refs)
+        _float_to_int_conversion_helper(self, vals, device, dtype, refs)
 
     def test_complex_type_conversions(self, device):
         dtypes = [torch.float, torch.complex64, torch.complex128]
