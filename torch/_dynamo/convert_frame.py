@@ -2432,8 +2432,11 @@ class ConvertFrame:
 
             from torch._precompile import PrecompileError
 
-            # no_compilation() violations must surface even under suppress_errors.
-            if isinstance(e, PrecompileError):
+            # no_compilation() violations must surface even under
+            # suppress_errors, including one Inductor raised inside a backend.
+            if isinstance(e, PrecompileError) or isinstance(
+                getattr(e, "inner_exception", None), PrecompileError
+            ):
                 raise
 
             # These two exception types are "soft" failure, in the sense that
@@ -2487,7 +2490,9 @@ class ConvertFrame:
                                 "name": "dynamo_graph_break_reason",
                                 "encoding": "string",
                             },
-                            payload_fn=lambda: f"{user_stack_trace}\n{traceback.format_exc()}",
+                            payload_fn=lambda: (
+                                f"{user_stack_trace}\n{traceback.format_exc()}"
+                            ),
                         )
                         graph_break_log.debug(
                             user_stack_trace,
