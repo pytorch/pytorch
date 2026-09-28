@@ -62,3 +62,7 @@ reveal_type(torch.linalg.inv_ex(t))  # E: torch.return_types.linalg_inv_ex
 reveal_type(torch.linalg.ldl_factor(t))  # E: torch.return_types.linalg_ldl_factor
 reveal_type(torch.special.psi(v))  # E: torch._tensor.Tensor
 reveal_type(torch.special.xlog1py(1.0, v))  # E: torch._tensor.Tensor
+
+reveal_type(torch.linalg.qr(t, out=None))  # E: torch.return_types.linalg_qr
+reveal_type(torch.linalg.qr(t, out=(t, t)))  # E: torch.return_types.linalg_qr_out
+reveal_type(torch.linalg.svd(t, out=(t, v, t)))  # E: torch.return_types.linalg_svd_out

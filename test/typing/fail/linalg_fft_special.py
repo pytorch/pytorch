@@ -8,7 +8,7 @@ torch.linalg.logdet(t)  # E: Module has no attribute
 torch.linalg.trace(t)  # E: Module has no attribute
 torch.linalg.det(input=t)  # E: Unexpected keyword argument
 torch.linalg.vander(t, increasing=True)  # E: Unexpected keyword argument
-torch.linalg.svd(t, out=t)  # E: incompatible type
+torch.linalg.svd(t, out=t)  # E: No overload variant
 torch.fft.fft("invalid")  # E: incompatible type
 torch.special.airy_ai(input=t)  # E: Unexpected keyword argument
 torch.linalg.vector_norm(t, dim=[0.5])  # E: incompatible type
@@ -16,3 +16,7 @@ torch.linalg.vector_norm(t, ord=None)  # E: incompatible type
 torch.masked.norm(t, ord=None)  # E: incompatible type
 torch.special.xlog1py(input=1.0, other=t)  # E: No overload variant
 torch.xlogy(input=1.0, other=t)  # E: No overload variant
+qr: torch.return_types.linalg_qr
+qr = torch.linalg.qr(t, out=(t, t))  # E: Incompatible types in assignment
+qr_out: torch.return_types.linalg_qr_out
+qr_out = torch.linalg.qr(t)  # E: Incompatible types in assignment

@@ -66,6 +66,26 @@ def test_linalg(axes: Sequence[int], tensors: Sequence[torch.Tensor]) -> None:
     cross_result = torch.linalg.cross(v, v)
 
 
+def test_linalg_out_return_types(outputs: Sequence[torch.Tensor] | None) -> None:
+    t = torch.eye(3)
+    v = torch.empty(3)
+    assert_type(torch.linalg.qr(t), torch.return_types.linalg_qr)
+    assert_type(torch.linalg.qr(t, out=None), torch.return_types.linalg_qr)
+    assert_type(torch.linalg.qr(t, out=(t, t)), torch.return_types.linalg_qr_out)
+    assert_type(
+        torch.linalg.qr(t, out=outputs),
+        torch.return_types.linalg_qr | torch.return_types.linalg_qr_out,
+    )
+    assert_type(torch.linalg.svd(t, out=(t, v, t)), torch.return_types.linalg_svd_out)
+    assert_type(
+        torch.linalg.lstsq(t, v, out=(v, v, torch.empty((), dtype=torch.int64), v)),
+        torch.return_types.linalg_lstsq_out,
+    )
+    assert_type(
+        torch.linalg.slogdet(t, out=(v, v)), torch.return_types.linalg_slogdet_out
+    )
+
+
 def test_symbolic_dimensions(
     axes: Sequence[int | torch.SymInt], axis: torch.SymInt
 ) -> None:

@@ -91,6 +91,56 @@ class TestGenPyi(unittest.TestCase):
             returns = (Path(output) / "torch/return_types.pyi").read_text()
             self.assertIn("class linalg_qr(", returns)
             self.assertNotIn("QRResult", returns)
+            for name in (
+                "linalg_cholesky_ex",
+                "linalg_eig",
+                "linalg_eigh",
+                "linalg_inv_ex",
+                "linalg_ldl_factor",
+                "linalg_ldl_factor_ex",
+                "linalg_lstsq",
+                "linalg_lu",
+                "linalg_lu_factor",
+                "linalg_lu_factor_ex",
+                "linalg_polar",
+                "linalg_qr",
+                "linalg_slogdet",
+                "linalg_solve_ex",
+                "linalg_svd",
+            ):
+                with self.subTest(name=name):
+                    self.assertIn(f"class {name}_out(", returns)
+                    overloads = [
+                        node
+                        for node in ast.parse(stubs["linalg"]).body
+                        if isinstance(node, ast.FunctionDef) and node.name == name
+                    ]
+                    contracts = set()
+                    for overload in overloads:
+                        out_index = next(
+                            i
+                            for i, arg in enumerate(overload.args.kwonlyargs)
+                            if arg.arg == "out"
+                        )
+                        out_arg = overload.args.kwonlyargs[out_index]
+                        contracts.add(
+                            (
+                                ast.unparse(out_arg.annotation),
+                                overload.args.kw_defaults[out_index] is None,
+                                ast.unparse(overload.returns),
+                            )
+                        )
+                    self.assertEqual(
+                        contracts,
+                        {
+                            ("None", False, f"torch.return_types.{name}"),
+                            (
+                                "Sequence[Tensor]",
+                                True,
+                                f"torch.return_types.{name}_out",
+                            ),
+                        },
+                    )
 
     def test_self_keyword_matches_parser(self) -> None:
         for schema in ("Tensor", "Scalar"):

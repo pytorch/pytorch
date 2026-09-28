@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import collections
+import dataclasses
 import importlib
 import inspect
 import sys
@@ -39,7 +40,9 @@ from tools.autograd.gen_python_functions import (
     should_generate_py_binding,
 )
 
+from torchgen.api import cpp
 from torchgen.api.python import (
+    argument_type_str_pyi,
     format_function_signature as defs,
     PythonSignatureGroup,
     PythonSignatureNativeFunctionPair,
@@ -294,6 +297,36 @@ def sig_for_ops(opname: str) -> list[str]:
             tname = "_" + tname
         return [f"def {opname}(self) -> {tname}: ..."]
     raise ValueError(f"unknown op {opname!r}")
+
+
+def generate_structseq_type_hints(group: PythonSignatureGroup) -> list[str]:
+    """Keep functional and out= result classes distinct for native modules."""
+    sig = group.signature
+    if group.outplace is None or sig.output_args is None:
+        raise AssertionError("Expected a native signature with out arguments")
+    if sig.method or sig.deprecated:
+        raise AssertionError("Expected a non-deprecated native function")
+    formals = [
+        arg.argument_str_pyi(use_sequence=True)
+        for arg in sig.arguments(skip_outputs=True)
+    ]
+    # Both overloads have a keyword-only out parameter, including when the
+    # operation has no other keyword-only arguments.
+    formals.insert(len(sig.input_args), "*")
+    out_name = sig.output_args.name
+    out_type = argument_type_str_pyi(sig.output_args.type, use_sequence=True)
+    return [
+        defs(
+            sig.name,
+            [*formals, f"{out_name}: None = None"],
+            f"torch.return_types.{cpp.name(group.base.func)}",
+        ),
+        defs(
+            sig.name,
+            [*formals, f"{out_name}: {out_type}"],
+            f"torch.return_types.{cpp.name(group.outplace.func)}",
+        ),
+    ]
 
 
 def generate_type_hints(
@@ -1965,12 +1998,31 @@ def gen_pyi(
     for module in ("fft", "linalg", "special"):
         module_hints: dict[str, list[str]] = collections.defaultdict(list)
         for group in get_py_torch_functions(function_signatures, python_module=module):
-            module_hints[group.signature.name] += generate_type_hints(
-                group, use_sequence=True
-            )
             structseq = returns_structseq_pyi(group.signature)
+            module_structseqs = []
             if structseq is not None and not group.signature.deprecated:
-                tuple_name, tuple_def = structseq
+                module_structseqs.append(structseq)
+                if group.outplace is not None:
+                    out_structseq = returns_structseq_pyi(
+                        dataclasses.replace(
+                            group.signature, name=cpp.name(group.outplace.func)
+                        )
+                    )
+                    if out_structseq is None:
+                        raise AssertionError("Expected a named out result")
+                    module_structseqs.append(out_structseq)
+                    module_hints[group.signature.name] += generate_structseq_type_hints(
+                        group
+                    )
+                else:
+                    module_hints[group.signature.name] += generate_type_hints(
+                        group, use_sequence=True
+                    )
+            else:
+                module_hints[group.signature.name] += generate_type_hints(
+                    group, use_sequence=True
+                )
+            for tuple_name, tuple_def in module_structseqs:
                 if tuple_name in structseqs and structseqs[tuple_name] != tuple_def:
                     raise AssertionError(
                         f"Duplicate structseq {tuple_name} with different definition"
