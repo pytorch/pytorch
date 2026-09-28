@@ -126,7 +126,11 @@ class FSDPCommContext:
         ):
             # Use separate streams for implicit prefetching
             return self.all_gather_copy_in_stream, self.all_gather_stream
-        current_stream = self.device_handle.current_stream()
+        current_stream = (
+            torch.accelerator.current_stream()
+            if torch.accelerator.is_available()
+            else self.device_handle.current_stream()
+        )
         return current_stream, current_stream
 
     def wait_all_gather_streams_on_event(self, event: torch.Event | None) -> None:
@@ -162,7 +166,10 @@ class FSDPCommContext:
         if (all_gather_state := self.all_gather_state) is None:
             return
         if all_gather_state.event is not None and hasattr(self, "device_handle"):
-            self.device_handle.current_stream().wait_event(all_gather_state.event)
+            if hasattr(self.device_handle, "current_stream"):
+                self.device_handle.current_stream().wait_event(all_gather_state.event)
+            elif torch.accelerator.is_available():
+                torch.accelerator.current_stream().wait_event(all_gather_state.event)
         self.all_gather_state = None
 
 
@@ -310,6 +317,12 @@ class FSDPParamGroup:
         # block while this layer's AR is still in flight. See
         # AllReduceState docstring and regression test PR #180900.
         self._all_reduce_state: AllReduceState | None = None
+
+    @property
+    def _current_stream(self) -> torch.Stream:
+        if torch.accelerator.is_available():
+            return torch.accelerator.current_stream()
+        return self.device_handle.current_stream()
 
     # Initialization #
     def _init_mp_dtypes(self) -> None:
@@ -560,7 +573,7 @@ class FSDPParamGroup:
         # See FSDPState._reset_iter_state for semantics. Waits on any
         # in-flight collective events owned by this group, discards
         # accumulated grad-reduction state, and restores sharded params.
-        current_stream = self.device_handle.current_stream()
+        current_stream = self._current_stream
         if self._all_gather_result is not None:
             if (event := self._all_gather_result.all_gather_event) is not None:
                 current_stream.wait_event(event)
@@ -718,7 +731,7 @@ class FSDPParamGroup:
                     while len(states) >= max_input_buffers:
                         oldest = states.pop(0)
                         if oldest.event is not None:
-                            self.device_handle.current_stream().wait_event(oldest.event)
+                            self._current_stream.wait_event(oldest.event)
                         del oldest
             if len(fsdp_params_with_grad) == 0:
                 return
@@ -814,7 +827,7 @@ class FSDPParamGroup:
                     #      Whether vector 2 exists on CUDA FSDP but is timing-
                     #      masked is unresolved. See
                     #      ``fsdp2_chunked_loss_rocm_race.md``.
-                    self.device_handle.current_stream().wait_event(
+                    self._current_stream.wait_event(
                         self._post_reduce_event
                     )
                 if all_reduce_input is not None:
@@ -829,7 +842,7 @@ class FSDPParamGroup:
 
     def finalize_backward(self):
         for event in self.comm_ctx._last_post_reduce_events.values():
-            self.device_handle.current_stream().wait_event(event)
+            self._current_stream.wait_event(event)
         self.comm_ctx._last_post_reduce_events = dict()
         self._post_reduce_event = None
         self._all_reduce_state = None
@@ -850,13 +863,13 @@ class FSDPParamGroup:
 
     def _wait_for_post_backward(self):
         if self._post_reduce_event is not None:
-            self.device_handle.current_stream().wait_event(self._post_reduce_event)
+            self._current_stream.wait_event(self._post_reduce_event)
             self._post_reduce_event = None
         if (
             self._all_reduce_state is not None
             and self._all_reduce_state.event is not None
         ):
-            self.device_handle.current_stream().wait_event(self._all_reduce_state.event)
+            self._current_stream.wait_event(self._all_reduce_state.event)
         self._all_reduce_state = None
 
     def _backward_prefetch(self) -> None:

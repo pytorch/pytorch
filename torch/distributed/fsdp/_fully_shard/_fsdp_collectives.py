@@ -486,7 +486,10 @@ def foreach_all_gather_copy_out(
     device = all_gather_result.all_gather_output.device
     device_handle = _get_device_handle(device.type)
     if all_gather_event is not None:  # sync op
-        device_handle.current_stream().wait_event(all_gather_event)
+        if torch.accelerator.is_available():
+            torch.accelerator.current_stream().wait_event(all_gather_event)
+        elif hasattr(device_handle, "current_stream"):
+            device_handle.current_stream().wait_event(all_gather_event)
     if isinstance(all_gather_work, dist.distributed_c10d.Work):  # async op
         all_gather_work.wait()
     all_gather_output_fn(fsdp_params, all_gather_result, group.size())
@@ -632,7 +635,11 @@ def foreach_reduce(
     else:
         world_size = reduce_scatter_group.size()
     device_handle = _get_device_handle(device.type)
-    current_stream = device_handle.current_stream()
+    current_stream = (
+        torch.accelerator.current_stream()
+        if torch.accelerator.is_available()
+        else device_handle.current_stream()
+    )
 
     padded_unsharded_sizes = prepare_reduce_scatter_inputs(
         fsdp_params, unsharded_grads, world_size
