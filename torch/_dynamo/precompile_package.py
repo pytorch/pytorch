@@ -230,16 +230,15 @@ def default_guard_filter_fn(guard_entries: Sequence[GuardFilterEntry]) -> list[b
     function's globals: the save rewrites it into a FUNCTION_CODE_MATCH, which
     the loaded artifact checks against the function's code and that module by
     value. An ID_MATCH or CLOSURE_MATCH on a builtin bound to a class that
-    unpickles by reference, like an autograd Function's ``apply``, is kept
-    too: the save rewrites it into a NATIVE_METHOD_MATCH, which compares the
-    value with that class's attribute by equality. Dropping a guard gives up
-    on noticing that the guarded object was
-    rebound, mutated or collected: rebind a global function whose globals no
-    importable module owns between capture and load, and the artifact serves
-    the graph traced against the old one, with no error
-    (``test_default_guard_filter_through_serialize_guards``). Every dropped
-    slot is reported in ``PrecompileSummary.dropped_guards``, once however many
-    variants dropped it.
+    unpickles by reference, like an autograd Function's ``apply``, is kept too:
+    the save rewrites it into a NATIVE_METHOD_MATCH, which compares the value
+    with that class's attribute by equality. Dropping a guard gives up on
+    noticing that the guarded object was rebound, mutated or collected: rebind
+    a global function whose globals no importable module owns between capture
+    and load, and the artifact serves the graph traced against the old one,
+    with no error (``test_default_guard_filter_through_serialize_guards``).
+    Every dropped slot is reported in ``PrecompileSummary.dropped_guards``,
+    once however many variants dropped it.
 
     The criterion is the pre-check's own: apart from those portable identity
     and function guards, a guard is dropped if its type is refused or a
