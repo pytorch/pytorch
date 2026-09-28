@@ -88,6 +88,7 @@ device_type = (
     else "cpu"
 )
 
+
 def requires_compile(fun):
     fun = unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")(fun)
     return fun
@@ -2750,6 +2751,7 @@ Dynamic shape operator
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     @unittest.skipIf(not TEST_ACCELERATOR, "requires accelerator")
+    @skipIfMPS
     def test_impl_device_accelerator(self):
         self._test_impl_device("foo4", "default", device_type)
         self._test_impl_device("foo5", [device_type], device_type)
@@ -6621,6 +6623,7 @@ opcheck(op, args, kwargs, test_utils="test_schema")
     @unittest.skipIf(
         PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property"
     )
+    @skipIfMPS
     def test_opcheck_preserves_pinned_memory_for_schema_check(self):
         lib = self.lib()
         lib.define("requires_pinned(Tensor x) -> Tensor")
@@ -6640,6 +6643,7 @@ opcheck(op, args, kwargs, test_utils="test_schema")
     @unittest.skipIf(
         PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property"
     )
+    @skipIfMPS
     def test_opcheck_preserves_pinned_memory_by_default(self):
         @torch.library.custom_op(
             f"{self.test_ns}::requires_pinned_default", mutates_args=()
@@ -6705,6 +6709,7 @@ opcheck(op, args, kwargs, test_utils="test_schema")
     @unittest.skipIf(
         PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property"
     )
+    @skipIfMPS
     def test_safe_schema_check_copy_inputs_preserves_pinned_memory_and_copies(self):
         lib = self.lib()
         lib.define("check_and_mutate(Tensor(a!) x) -> ()")
@@ -6732,6 +6737,7 @@ opcheck(op, args, kwargs, test_utils="test_schema")
         self.assertEqual(len(seen_inputs), 2)
         self.assertEqual(seen_inputs[-1][1], x.data_ptr())
 
+    @skipIfMPS
     def test_opcheck_customopdef(self):
         sample_inputs = [
             (torch.randn(3),),
