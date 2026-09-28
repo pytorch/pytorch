@@ -251,9 +251,13 @@ def assert_mxfp8_semantics(
     actual_data = actual_data.view(torch.uint8).cpu()
     actual_scales = actual_scales.view(torch.uint8).cpu()
     if actual_data.shape != cases.expected_data.shape:
-        raise AssertionError(f"data shape {actual_data.shape} != {cases.expected_data.shape}")
+        raise AssertionError(
+            f"data shape {actual_data.shape} != {cases.expected_data.shape}"
+        )
     if actual_scales.shape != cases.expected_scales.shape:
-        raise AssertionError(f"scale shape {actual_scales.shape} != {cases.expected_scales.shape}")
+        raise AssertionError(
+            f"scale shape {actual_scales.shape} != {cases.expected_scales.shape}"
+        )
 
     errors = []
     for case_idx, case_name in enumerate(cases.names):

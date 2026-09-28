@@ -18,7 +18,7 @@ from torch.testing._internal.mxfp8_test_utils import (
 
 class TestMXFP8ReferenceNumerics(TestCase):
     def test_f32_to_e8m0_rceil(self, device):
-        # copied from 
+        # copied from
         # https://github.com/pytorch/ao/blob/3972ed015091f659418dedf12edb980a8ca56b53/test/prototype/mx_formats/test_mx_tensor.py#L113
         values, expected = make_f32_to_e8m0_rceil_cases(device=device)
         self.assertEqual(_f32_to_e8m0_rceil(values), expected.to(device))
@@ -43,7 +43,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
     def test_to_mx_rceil(self, device):
         # copied from
         # https://github.com/pytorch/ao/blob/3972ed015091f659418dedf12edb980a8ca56b53/test/prototype/mx_formats/test_mx_tensor.py#L276
-        # TODO(future PR): refactor below to make it look more like 
+        # TODO(future PR): refactor below to make it look more like
         # `test_mxfp8_corner_case_bytes`
 
         # nan
@@ -75,7 +75,9 @@ class TestMXFP8ReferenceNumerics(TestCase):
             dtype=torch.uint32,
         ).view(torch.float32)
         # fmt: on
-        ground_truth_scale = torch.tensor([0], dtype=torch.uint8).view(torch.float8_e8m0fnu)
+        ground_truth_scale = torch.tensor([0], dtype=torch.uint8).view(
+            torch.float8_e8m0fnu
+        )
         # E8M0 byte 0 is 2^-127, so these FP32 subnormals remain representable
         # after scaling instead of being flushed to zero.
         # fmt: off
@@ -104,7 +106,9 @@ class TestMXFP8ReferenceNumerics(TestCase):
             dtype=torch.uint16,
         ).view(torch.bfloat16)
         # fmt: on
-        ground_truth_scale = torch.tensor([0], dtype=torch.uint8).view(torch.float8_e8m0fnu)
+        ground_truth_scale = torch.tensor([0], dtype=torch.uint8).view(
+            torch.float8_e8m0fnu
+        )
         # fmt: off
         ground_truth_fp8 = torch.tensor(
             [
@@ -179,7 +183,9 @@ class TestMXFP8ReferenceNumerics(TestCase):
         self.assertEqual(qdata, ground_truth_fp8.to(device))
         # zero
         data_hp = torch.tensor([0] * 32, dtype=torch.uint32).view(torch.float32)
-        ground_truth_scale = torch.tensor([0], dtype=torch.uint8).view(torch.float8_e8m0fnu)
+        ground_truth_scale = torch.tensor([0], dtype=torch.uint8).view(
+            torch.float8_e8m0fnu
+        )
         ground_truth_fp8 = torch.tensor([0] * 32, dtype=torch.uint8).view(
             torch.float8_e4m3fn
         )
@@ -244,7 +250,6 @@ class TestMXFP8ReferenceNumerics(TestCase):
         scales, qdata = to_mxfp(data_hp.to(device), format="mxfp8")
         self.assertEqual(scales, ground_truth_scale.to(device))
         self.assertEqual(qdata, ground_truth_fp8.to(device))
-
 
 
 instantiate_device_type_tests(TestMXFP8ReferenceNumerics, globals(), only_for="cuda")

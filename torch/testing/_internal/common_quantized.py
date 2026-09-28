@@ -646,7 +646,7 @@ def _f32_to_e8m0_rceil(value: torch.Tensor) -> torch.Tensor:
 def _e8m0_scale_to_reciprocal_fp32(
     scale_e8m0_biased: torch.Tensor,
 ) -> torch.Tensor:
-    # copied from 
+    # copied from
     # https://github.com/pytorch/ao/blob/3972ed015091f659418dedf12edb980a8ca56b53/torchao/prototype/mx_formats/mx_tensor.py#L131
     reciprocal_e8m0_biased = (
         2 * E8M0_EXPONENT_BIAS - scale_e8m0_biased.to(torch.int32)
@@ -691,7 +691,7 @@ def to_mxfp(
         max_abs: torch.Tensor,
         max_pos: float,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        # copied from 
+        # copied from
         # https://github.com/pytorch/ao/blob/3972ed015091f659418dedf12edb980a8ca56b53/torchao/prototype/mx_formats/mx_tensor.py#L160
 
         descale = max_abs * (1.0 / max_pos)
