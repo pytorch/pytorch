@@ -201,7 +201,10 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
     def enter(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         source = None if self.source is None else AttrSource(self.source, "__enter__")
         return variables.UserMethodVariable(
-            self.cm_obj.__enter__.__func__,  # type: ignore[attr-defined]
+            variables.UserFunctionVariable(  # type: ignore[attr-defined]
+                self.cm_obj.__enter__.__func__,
+                source=source and AttrSource(source, "__func__"),
+            ),
             self,
             source=source,
         ).call_function(tx, [], {})
@@ -211,7 +214,10 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
     ) -> VariableTracker:
         source = None if self.source is None else AttrSource(self.source, "__exit__")
         x = variables.UserMethodVariable(
-            self.cm_obj.__exit__.__func__,  # type: ignore[attr-defined]
+            variables.UserFunctionVariable(  # type: ignore[attr-defined]
+                self.cm_obj.__exit__.__func__,
+                source=source and AttrSource(source, "__func__"),
+            ),
             self,
             source=source,
         ).call_function(tx, list(args), {})
@@ -805,6 +811,9 @@ class GenericDeviceVariable(ContextWrappingVariable):
     _exchange_fn: Any
     _maybe_exchange_fn: Any
     _get_device_index_fn: Any
+    # False for managers whose constructor takes an integer index rather than a
+    # torch.device, which cannot accept a rank-relative device.
+    _accepts_device_object = True
 
     @classmethod
     def create(
@@ -849,6 +858,53 @@ class GenericDeviceVariable(ContextWrappingVariable):
         raise NotImplementedError
 
 
+class CurrentDeviceContextVariable(ContextWrappingVariable):
+    """A device context whose target is the CooR runtime current device.
+
+    CooR assumes one accelerator per rank, so entering this context is a no-op.
+    That holds only while nothing moves the current device mid-frame, which is why
+    entering a device with an explicit index is refused under CooR (see
+    ``UserDefinedClassVariable.call_function``), as is calling a device setter such
+    as ``torch.cuda.set_device`` (see ``SkipFunctionVariable.call_function``).
+
+    ``target_values`` is deliberately index-less: at a graph break the inherited
+    ``reconstruct`` calls e.g. ``torch.cuda.device(torch.device("cuda"))``, which
+    resolves to whatever device is current in the resuming process. Freezing the
+    compiling rank's index here is exactly the bug this class exists to avoid.
+    """
+
+    _nonvar_fields = {
+        *ContextWrappingVariable._nonvar_fields,
+        "device_context",
+    }
+
+    def __init__(
+        self,
+        device_type: str,
+        device_context: type,
+        **kwargs: Any,
+    ) -> None:
+        self.device_context = device_context
+        super().__init__(target_values=[torch.device(device_type)], **kwargs)
+
+    def enter(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return variables.ConstantVariable.create(None)
+
+    def exit(
+        self, tx: "InstructionTranslatorBase", *args: VariableTracker
+    ) -> VariableTracker:
+        return variables.ConstantVariable.create(False)
+
+    def module_name(self) -> str:
+        return self.device_context.__module__
+
+    def fn_name(self) -> str:
+        return self.device_context.__name__
+
+    def python_type(self) -> type:
+        return self.device_context
+
+
 class CUDADeviceVariable(GenericDeviceVariable):
     """represents torch.cuda.device"""
 
@@ -883,6 +939,7 @@ class AcceleratorDeviceIndexVariable(GenericDeviceVariable):
     _exchange_fn = staticmethod(torch._C._accelerator_exchangeDevice)
     _maybe_exchange_fn = staticmethod(torch._C._accelerator_maybeExchangeDevice)
     _get_device_index_fn = staticmethod(lambda device, **kwargs: device)
+    _accepts_device_object = False
 
     def module_name(self) -> str:
         return "torch.accelerator"
@@ -1608,7 +1665,15 @@ class FxTracebackAnnotateVariable(ContextWrappingVariable):
         self, annotation: dict[str, Any], initial_values: Any = None, **kwargs: Any
     ) -> None:
         self.annotation = annotation
-        super().__init__(target_values=(), initial_values=initial_values, **kwargs)
+        budget = annotation.get(torch.fx.traceback.MEMORY_BUDGET_ANNOTATION_KEY)
+        target_values = (
+            (budget,) if len(annotation) == 1 and type(budget) is float else ()
+        )
+        super().__init__(
+            target_values=target_values,
+            initial_values=initial_values,
+            **kwargs,
+        )
 
     def enter(
         self, tx: "InstructionTranslatorBase", *args: VariableTracker
@@ -1626,12 +1691,16 @@ class FxTracebackAnnotateVariable(ContextWrappingVariable):
         return "torch.fx.traceback"
 
     def fn_name(self) -> str:
+        if self.target_values:
+            return "_dynamo_region_activation_memory_budget"
         return "annotate"
 
     def python_type(self) -> type:
         return contextlib._GeneratorContextManager
 
     def reconstruct_type(self, codegen: "PyCodegen") -> None:
+        if self.target_values:
+            return super().reconstruct_type(codegen)
         unimplemented(
             gb_type="torch.fx.traceback.annotate escaped from compiled region",
             context=str(self),
