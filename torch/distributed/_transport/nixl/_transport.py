@@ -185,7 +185,7 @@ class NIXLTransport(Transport):
         length = tensor.numel() * tensor.element_size()
         key = tensor.data_ptr(), length, str(tensor.device)
         if registration := self._registrations.get(key):
-            return NIXLMemory(self, registration, reused=True)
+            return NIXLMemory(self, registration)
         descs = agent.register_memory(tensor, backends=[self._plugin])
         registration = _Registration(
             tensor,
@@ -198,7 +198,7 @@ class NIXLTransport(Transport):
         )
         self._registrations[key] = registration
         _live_transports.add(self)
-        return NIXLMemory(self, registration, reused=False)
+        return NIXLMemory(self, registration)
 
     def unregister_memory(
         self, memory: Memory, *, timeout: float | None = None

@@ -72,15 +72,9 @@ class NIXLMutableMemoryView(NIXLMemoryView):
 class NIXLMemory:
     """A tensor registered with a NIXL transport."""
 
-    def __init__(
-        self, transport: NIXLTransport, registration: _Registration, reused: bool
-    ) -> None:
+    def __init__(self, transport: NIXLTransport, registration: _Registration) -> None:
         self._transport = transport
         self._registration = registration
-        # The Python handle is new; reused records whether its native
-        # registration already existed when register_memory() was called.
-        # It cannot be inferred from the shared registration after construction.
-        self._reused = reused
 
     def _range(self, offset: int | None, length: int | None) -> tuple[int, int]:
         self._registration.ensure_active()
@@ -110,6 +104,3 @@ class NIXLMemory:
         return self._transport._call(
             lambda: self._transport._remote_buffer(self._registration), timeout
         )
-
-    def reused_registration(self) -> bool:
-        return self._reused
