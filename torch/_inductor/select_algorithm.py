@@ -603,7 +603,7 @@ class TritonTemplateKernel(TritonKernel):
         epilogue_fn=identity,
         subgraphs: list[ir.ComputedBuffer] | None = None,
         workspace_arg: WorkspaceArg | None = None,
-        prologue_loads_all_named_inputs=False,
+        uses_load_input_for_all_named_inputs=False,
         hint_override: int | None = None,
         triton_meta: TritonMeta | None = None,
         always_freeze_layout: bool = False,
@@ -743,9 +743,7 @@ class TritonTemplateKernel(TritonKernel):
         # Update each time an input is marked frozen, used to replay the freezing of inputs on a cache hit.
         self.frozen_layouts_cnt = 0
 
-        # The template prologue loads all named inputs, so def_kernel can mark
-        # them all as eligible for load-input fusion.
-        self.prologue_loads_all_named_inputs = prologue_loads_all_named_inputs
+        self.uses_load_input_for_all_named_inputs = uses_load_input_for_all_named_inputs
 
         # When always_freeze_layout is True, get_stride_and_maybe_freeze_layout will
         # always freeze the layout immediately, bypassing layout constraints.
@@ -1092,13 +1090,10 @@ class TritonTemplateKernel(TritonKernel):
             self.store_output_fusion_allowed_inputs.add(input_name)
 
         for input_node in self.input_nodes[: self.prefix_args]:
-            input_name = input_node.get_name()
-            if input_name in V.graph.removed_buffers:
-                continue
-            if self._is_input_fused(input_name):
+            if self._is_input_fused(input_node.get_name()):
                 continue
             # get args in correct order
-            self.args.input(input_name)
+            self.args.input(input_node.get_name())
 
         for name, input_node in zip(argnames, named_args):
             arg_name = f"arg_{name}"
@@ -1113,7 +1108,7 @@ class TritonTemplateKernel(TritonKernel):
         # The args may be duplicated, so renaming must be after args are de-duplicated.
         for name in argnames:
             input_node = self.named_input_nodes[name]
-            if self.prologue_loads_all_named_inputs:
+            if self.uses_load_input_for_all_named_inputs:
                 self.load_input_fusion_allowed_inputs.add(input_node.get_name())
             if input_node.get_name() in V.graph.removed_buffers:
                 continue
@@ -1385,7 +1380,9 @@ class TritonTemplateKernel(TritonKernel):
         """
 
         input_node = self.named_input_nodes[input_name]
-        if not self.prologue_loads_all_named_inputs:
+        # when uses_load_input_for_all_named_inputs is True load_input_fusion_allowed_inputs
+        # is populate in def kernel
+        if not self.uses_load_input_for_all_named_inputs:
             self.load_input_fusion_allowed_inputs.add(input_node.get_name())
 
         tilings = (sympy_product(input_node.get_size()), sympy.Integer(1))
@@ -2899,7 +2896,7 @@ class TritonTemplate(KernelTemplate):
         source: str,
         debug=False,
         cache_codegen_enabled_for_template=False,
-        prologue_loads_all_named_inputs=False,
+        uses_load_input_for_all_named_inputs=False,
         always_freeze_layout: bool = False,
     ) -> None:
         super().__init__(name, hash=hashlib.sha256(source.encode("utf-8")).hexdigest())
@@ -2917,9 +2914,7 @@ class TritonTemplate(KernelTemplate):
         self._cache_codegen_enabled_for_template = cache_codegen_enabled_for_template
         self._generated_code_cache: GeneratedCodeCache = GeneratedCodeCache()
         clear_on_fresh_cache(self._generated_code_cache)
-        # The template prologue loads all named inputs, so def_kernel can mark
-        # them all as eligible for load-input fusion.
-        self.prologue_loads_all_named_inputs = prologue_loads_all_named_inputs
+        self.uses_load_input_for_all_named_inputs = uses_load_input_for_all_named_inputs
         # When always_freeze_layout is True, the kernel will always freeze layouts
         # immediately instead of using layout constraints. This is used by
         # FlexAttention templates which require frozen layouts.
@@ -3053,7 +3048,7 @@ class TritonTemplate(KernelTemplate):
             "prefix_inputs_fusion_indices": prefix_inputs_fusion_indices,
             "epilogue_fn": epilogue_fn,
             "subgraphs": subgraphs,
-            "prologue_loads_all_named_inputs": self.prologue_loads_all_named_inputs,
+            "uses_load_input_for_all_named_inputs": self.uses_load_input_for_all_named_inputs,
             "always_freeze_layout": self.always_freeze_layout,
             "index_dtype_override": index_dtype,
         }
