@@ -32,9 +32,9 @@ from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
 from torch._dynamo.bytecode_transformation import transform_code_object
 from torch._dynamo.exc import PackageError
 from torch._dynamo.guards import (
-    _method_code_matches,
-    _method_code_metadata,
     _Missing,
+    _native_method_matches,
+    _native_method_metadata,
     CheckFunctionManager,
     CompileId,
     GuardsStatePickler,
@@ -3790,35 +3790,11 @@ class TestGuardSerialization(TestGuardSerializationBase):
         ):
             self._test_serialization("CLOSURE_MATCH", fn, torch.randn(3))
 
-    def test_bound_method_closure_match(self):
-        def fn(x, m):
-            return m(x) + 1
-
-        x = torch.randn(3)
-        ref, loaded = self._test_serialization(
-            "CLOSURE_MATCH", fn, x, PlainMethods().add
-        )
-        self._test_check_fn(ref, loaded, {"x": x, "m": PlainMethods().add}, True)
-        other = types.MethodType(lambda self, x: x, PlainMethods())
-        self._test_check_fn(ref, loaded, {"x": x, "m": other}, False)
-
-    def test_method_code_match_round_trips(self):
-        # An identity guard on a bound method is saved as its function's code
-        # and globals module; the receiver keeps its own guards.
-        self.assertTrue(is_portable_function_guard("ID_MATCH", PlainMethods().add))
-        buf = io.BytesIO()
-        GuardsStatePickler({}, {}, {}, {}, buf).dump(
-            _method_code_metadata(PlainMethods().add)
-        )
-        expected = load_guards_state(buf.getvalue())
-        self.assertTrue(_method_code_matches(PlainMethods().add, expected))
-        self.assertFalse(_method_code_matches(PlainMethods.make, expected))
-        self.assertFalse(_method_code_matches(PlainMethods.add, expected))
-
     def test_native_method_match(self):
         def fn(x):
             return double_apply(x)
 
+        self.assertTrue(is_portable_function_guard("ID_MATCH", double_apply))
         x = torch.randn(3)
         ref, loaded = self._test_serialization("ID_MATCH", fn, x)
         self._test_check_fn(ref, loaded, {"x": x}, True)
@@ -3827,6 +3803,10 @@ class TestGuardSerialization(TestGuardSerializationBase):
             self.assertTrue(loaded.check({"x": x}))
         with mock.patch.dict(globals(), {"double_apply": _TripleFn.apply}):
             self._test_check_fn(ref, loaded, {"x": x}, False)
+        # An object whose __eq__ always answers True is still rejected.
+        expected = _native_method_metadata(double_apply)
+        self.assertTrue(_native_method_matches(_DoubleFn.apply, expected))
+        self.assertFalse(_native_method_matches(mock.ANY, expected))
 
     def test_sequence_length(self):
         # tuple input installs a SEQUENCE_LENGTH guard
