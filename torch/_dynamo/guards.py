@@ -294,24 +294,6 @@ def _function_code_matches(value: object, expected: FunctionCodeMetadata) -> boo
     )
 
 
-class MethodCodeMetadata(NamedTuple):
-    func: FunctionCodeMetadata
-
-
-def _method_code_metadata(value: object) -> MethodCodeMetadata | None:
-    # The receiver is not pinned: its own guards, if any, check it.
-    if type(value) is not types.MethodType:
-        return None
-    func = _function_code_metadata(value.__func__)
-    return None if func is None else MethodCodeMetadata(func)
-
-
-def _method_code_matches(value: object, expected: MethodCodeMetadata) -> bool:
-    return type(value) is types.MethodType and _function_code_matches(
-        value.__func__, expected.func
-    )
-
-
 class NativeMethodMetadata(NamedTuple):
     # Pickled by reference, so it is the loading process's class.
     receiver: type
@@ -332,7 +314,12 @@ def _native_method_metadata(value: object) -> NativeMethodMetadata | None:
 
 
 def _native_method_matches(value: object, expected: NativeMethodMetadata) -> bool:
-    return value == getattr(expected.receiver, expected.name)
+    # The type check first: == would otherwise run the new value's __eq__.
+    return (
+        type(value) is types.BuiltinMethodType
+        and value.__self__ is expected.receiver
+        and value == getattr(expected.receiver, expected.name)
+    )
 
 
 def _cow_tensor_matches(value: object, expected: object) -> bool:
@@ -3274,25 +3261,6 @@ class GuardBuilder(GuardBuilderBase):
         get_metadata_fn=lambda guard, value: _guard_create_fn_keyword(
             guard, "expected"
         ),
-        eval_fn=_method_code_matches,
-    )
-    def METHOD_CODE_MATCH(self, guard: Guard, expected: MethodCodeMetadata) -> None:
-        def guard_fn(value: object) -> bool:
-            return _method_code_matches(value, expected)
-
-        code = (
-            f"___check_method_code({self.arg_ref(guard)}, "
-            f"{expected.func.qualified_name()})"
-        )
-        self._set_guard_export_info(guard, [code])
-        self.get_guard_manager(guard).add_lambda_guard(
-            guard_fn, get_verbose_code_parts(code, guard), guard.user_stack
-        )
-
-    @register_guard_check_spec(
-        get_metadata_fn=lambda guard, value: _guard_create_fn_keyword(
-            guard, "expected"
-        ),
         eval_fn=_native_method_matches,
     )
     def NATIVE_METHOD_MATCH(self, guard: Guard, expected: NativeMethodMetadata) -> None:
@@ -5233,7 +5201,7 @@ def _guard_value(builder: GuardBuilder, guard: Guard) -> object:
         return None
 
 
-_PORTABLE_FUNCTION_GUARD_TYPES = ("CLOSURE_MATCH", "ID_MATCH", "FUNCTION_MATCH")
+_PORTABLE_FUNCTION_GUARD_TYPES = ("CLOSURE_MATCH", "ID_MATCH")
 
 
 def _portable_function_metadata(
@@ -5245,14 +5213,13 @@ def _portable_function_metadata(
     if guard_type in _PORTABLE_FUNCTION_GUARD_TYPES:
         if (method := _native_method_metadata(value)) is not None:
             return GuardBuilder.NATIVE_METHOD_MATCH, method
-        if (bound := _method_code_metadata(value)) is not None:
-            return GuardBuilder.METHOD_CODE_MATCH, bound
     return None
 
 
 def is_portable_function_guard(guard_type: str, value: object) -> bool:
-    """An identity guard on a function that ``to_portable_function_guard``
-    rewrites into a by-value check for serialization."""
+    """An identity guard on a function, or on a builtin bound to a class, that
+    ``to_portable_function_guard`` rewrites into a by-value check for
+    serialization."""
     return _portable_function_metadata(guard_type, value) is not None
 
 
