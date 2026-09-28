@@ -5087,7 +5087,11 @@ class FlexibleLayout(Layout):
 
 
 class NonOwningLayout(Layout):
-    """Is a view into the storage of another tensor"""
+    """Layout for a named buffer that aliases another tensor or view.
+
+    This layout does not add a view transformation. ``view`` is the logical
+    tensor being aliased and carries any view-specific layout metadata.
+    """
 
     def __init__(self, view: BaseView | TensorBox) -> None:
         layout = view.get_layout()
@@ -5188,6 +5192,14 @@ class NoneLayout(OutputSpec):
 
 
 class MutationLayoutSHOULDREMOVE(Layout):
+    """Layout for an operation that writes into an existing tensor or view.
+
+    A buffer with this layout does not own a new allocation or add a view
+    transformation. ``target`` is the logical mutation destination and carries
+    any view-specific layout metadata. ``get_buffer()`` unwraps it to the buffer
+    whose storage is mutated.
+    """
+
     def __init__(self, target: IRNode) -> None:
         super().__init__(
             target.get_device_or_error(),
@@ -7015,13 +7027,18 @@ class ConcatKernel(NopKernel):
                 input_unwrapped = inp.data.unwrap_view()
             else:
                 input_unwrapped = inp.data
-
             if (
                 isinstance(input_unwrapped, StorageBox)
                 and input_unwrapped.is_input_buffer()
                 and (dev := inp.get_device()) is not None
                 and is_gpu(dev.type)
-                and not is_dynamic(input_buffer)
+                and (
+                    not is_dynamic(input_buffer)
+                    or (
+                        dev.type != "mtia"
+                        and config.combo_kernel_foreach_dynamic_shapes
+                    )
+                )
             ):
                 op_names.append(input_buffer.get_operation_name())
 
@@ -9005,7 +9022,8 @@ class InplaceCopyFallback(ExternKernel):
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         (dst, src, non_blocking) = self.codegen_args()
-        wrapper.codegen_device_copy(src, dst, non_blocking)
+        with wrapper.profiled_kernel_scope("aoti_torch_copy_", self):
+            wrapper.codegen_device_copy(src, dst, non_blocking)
 
     def should_allocate(self) -> bool:
         return False
@@ -9303,12 +9321,21 @@ class DeviceCopy(ExternKernelOut):
         args = self.codegen_args()
         if len(args) != 2:
             raise AssertionError("Expected len(args) == 2")
-        if self.output_view:
-            wrapper.codegen_device_copy(
-                args[0], self.output_view.codegen_reference(), args[1]
-            )
-        else:
-            wrapper.codegen_device_copy(args[0], self.codegen_reference(), args[1])
+        # copy_(Tensor(a!) self, Tensor src, bool non_blocking): the
+        # destination is this node's own output, not one of its inputs, so
+        # deriving the metadata from inputs would record src in self's place
+        # and drop the destination entirely.
+        destination = self.output_view or self
+        profiling_args = wrapper.make_profiling_args(
+            [destination, self.inputs[0], None]
+        )
+        with wrapper.profiled_kernel_scope("aoti_torch_copy_", self, profiling_args):
+            if self.output_view:
+                wrapper.codegen_device_copy(
+                    args[0], self.output_view.codegen_reference(), args[1]
+                )
+            else:
+                wrapper.codegen_device_copy(args[0], self.codegen_reference(), args[1])
         if isinstance(self.layout, Layout) and self.layout.is_pinned:
             wrapper.sync_d2h_copy(self.get_name())
 
@@ -9753,6 +9780,10 @@ class FallbackKernel(ExternKernelAlloc):
             example_output, (torch._C.ScriptObject, FakeScriptObject)
         ) or is_custom_class_obj(example_output):
             return torch.device("cpu")
+        if isinstance(example_output, dict):
+            # generate_output builds a MultiOutput per value, so the values carry
+            # the devices; the keys never do.
+            example_output = list(example_output.values())
         if isinstance(example_output, (list, tuple)):
             device_set = OrderedSet(
                 # pyrefly: ignore [bad-argument-type]
@@ -10356,8 +10387,6 @@ class FallbackKernel(ExternKernelAlloc):
             device = torch.device("cpu")
 
         def create_direct_output(output: torch.Tensor) -> FallbackKernel:
-            if not device:
-                raise AssertionError("Not sure where to find device info")
             packed = cls(
                 cls.tensor_to_layout(output),
                 kernel,
@@ -10411,8 +10440,12 @@ class FallbackKernel(ExternKernelAlloc):
             return create_direct_output(example_output)
 
         else:
+            # No tensor in or out, so there is no device to inherit and nothing to
+            # run on but the host. An op that produces no output keeps None above --
+            # its placement is decided by the scheduler, and forcing a device there
+            # moves stream and event HOPs out of the stream block they belong to.
             if not device:
-                raise AssertionError("Not sure where to find device info")
+                device = torch.device("cpu")
             packed = cls(
                 MultiOutputLayout(device=device),
                 kernel,
@@ -10471,7 +10504,7 @@ class FallbackKernel(ExternKernelAlloc):
         if isinstance(outputs, (list, tuple)):
             packed.outputs = outputs
         elif isinstance(outputs, dict):
-            packed.outputs = tuple(outputs)
+            packed.outputs = tuple(outputs.values())
         else:
             packed.outputs = [outputs]
 
