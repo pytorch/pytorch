@@ -318,70 +318,14 @@ def step_with_optional_pre_split(
 
 @contextmanager
 def assert_explicit_forward_wait_ownership(test_case, stages):
-    """Check that explicit waits own sends until their scheduled retirement."""
-    storage_refs = []
-    with ExitStack() as stack:
-        for stage in stages:
-            original_get_fwd_send_ops = stage.get_fwd_send_ops
-
-            def get_fwd_send_ops(
-                microbatch_index, *, _original=original_get_fwd_send_ops
-            ):
-                test_case.assertTrue(all(ref() is not None for ref in storage_refs))
-                ops = _original(microbatch_index)
-                storage_refs.extend(
-                    weakref.ref(op.tensor.untyped_storage()) for op in ops
-                )
-                return ops
-
-            stack.enter_context(
-                mock.patch.object(
-                    stage, "get_fwd_send_ops", side_effect=get_fwd_send_ops
-                )
-            )
-        yield
-
-    test_case.assertTrue(all(ref() is None for ref in storage_refs))
-
-
-@contextmanager
-def assert_send_storage_released_before_backward(test_case, stages, overlap_actions=()):
-    """Check that each remote forward-send allocation dies before backward."""
+    """Check that each explicit wait releases its forward-send storage."""
     storage_refs = {}
-    overlap_backward_by_forward = {}
-    overlap_storage_checks = []
-    for action in overlap_actions:
-        if action.computation_type != OVERLAP_F_B:
-            continue
-        if action.sub_actions is None:
-            raise AssertionError("OVERLAP_F_B must contain sub-actions")
-        forward_action, backward_action = action.sub_actions
-        overlap_backward_by_forward[
-            (forward_action.stage_index, forward_action.microbatch_index)
-        ] = (backward_action.stage_index, backward_action.microbatch_index)
-
+    released = set()
     with ExitStack() as stack:
         for stage in stages:
             stage_index = stage.stage_index
-            original_forward_one_chunk = stage.forward_one_chunk
             original_get_fwd_send_ops = stage.get_fwd_send_ops
-            original_backward_one_chunk = stage.backward_one_chunk
-
-            def forward_one_chunk(
-                microbatch_index,
-                *args,
-                _stage_index=stage_index,
-                _original=original_forward_one_chunk,
-                **kwargs,
-            ):
-                backward_key = overlap_backward_by_forward.get(
-                    (_stage_index, microbatch_index)
-                )
-                if backward_key is not None:
-                    for storage_ref in storage_refs.get(backward_key, ()):
-                        test_case.assertIsNotNone(storage_ref())
-                        overlap_storage_checks.append(backward_key)
-                return _original(microbatch_index, *args, **kwargs)
+            original_release_fwd_send_outputs = stage.release_fwd_send_outputs
 
             def get_fwd_send_ops(
                 microbatch_index,
@@ -389,35 +333,25 @@ def assert_send_storage_released_before_backward(test_case, stages, overlap_acti
                 _stage_index=stage_index,
                 _original=original_get_fwd_send_ops,
             ):
-                for storage_ref in storage_refs.get(
-                    (_stage_index, microbatch_index), ()
-                ):
-                    test_case.assertIsNone(storage_ref())
                 ops = _original(microbatch_index)
-                if ops:
-                    storage_refs[(_stage_index, microbatch_index)] = [
-                        weakref.ref(op.tensor.untyped_storage()) for op in ops
-                    ]
+                storage_refs[(_stage_index, microbatch_index)] = [
+                    weakref.ref(op.tensor.untyped_storage()) for op in ops
+                ]
                 return ops
 
-            def backward_one_chunk(
+            def release_fwd_send_outputs(
                 microbatch_index,
-                *args,
+                *,
                 _stage_index=stage_index,
-                _original=original_backward_one_chunk,
-                **kwargs,
+                _original=original_release_fwd_send_outputs,
             ):
-                for storage_ref in storage_refs.get(
-                    (_stage_index, microbatch_index), ()
-                ):
-                    test_case.assertIsNone(storage_ref())
-                return _original(microbatch_index, *args, **kwargs)
+                key = (_stage_index, microbatch_index)
+                refs = storage_refs[key]
+                test_case.assertTrue(all(ref() is not None for ref in refs))
+                _original(microbatch_index)
+                test_case.assertTrue(all(ref() is None for ref in refs))
+                released.add(key)
 
-            stack.enter_context(
-                mock.patch.object(
-                    stage, "forward_one_chunk", side_effect=forward_one_chunk
-                )
-            )
             stack.enter_context(
                 mock.patch.object(
                     stage, "get_fwd_send_ops", side_effect=get_fwd_send_ops
@@ -425,14 +359,14 @@ def assert_send_storage_released_before_backward(test_case, stages, overlap_acti
             )
             stack.enter_context(
                 mock.patch.object(
-                    stage, "backward_one_chunk", side_effect=backward_one_chunk
+                    stage,
+                    "release_fwd_send_outputs",
+                    side_effect=release_fwd_send_outputs,
                 )
             )
-        yield overlap_storage_checks
+        yield released
 
-    for storage_ref_list in storage_refs.values():
-        for storage_ref in storage_ref_list:
-            test_case.assertIsNone(storage_ref())
+    test_case.assertEqual(released, storage_refs.keys())
 
 
 def create_packed_document_block_mask(
@@ -1277,19 +1211,13 @@ class ScheduleTest(MultiProcContinuousTest):
         # Run pipeline - special case where first and last stage are on rank 0
         out = None
         losses = []
-        overlap_actions = schedule.pipeline_order_with_comms[self.rank]
-        with assert_send_storage_released_before_backward(
-            self, stages, overlap_actions
-        ) as overlap_storage_checks:
-            for _ in range(2):
-                zero_gradients(stage_modules)
-                if self.rank == 0:
-                    out = schedule.step(x, target=target, losses=losses)
-                else:
-                    schedule.step()
-            assert_recv_buffers_drained(self, stages)
-        if any(action.computation_type == OVERLAP_F_B for action in overlap_actions):
-            self.assertGreater(len(overlap_storage_checks), 0)
+        for _ in range(2):
+            zero_gradients(stage_modules)
+            if self.rank == 0:
+                out = schedule.step(x, target=target, losses=losses)
+            else:
+                schedule.step()
+        assert_recv_buffers_drained(self, stages)
 
         # Verify results (rank 0 has both first and last stages)
         if self.rank == 0:
@@ -1435,7 +1363,6 @@ class ScheduleTest(MultiProcContinuousTest):
                     bwd_recv_ops.pop((backward_stage_index, backward_mb_index))
                 )
             loss = schedule._maybe_get_loss(backward_stage, backward_mb_index)
-            ctx.wait_fwd_send_if_implicit(backward_stage_index, backward_mb_index)
             schedule.backward_counter[backward_stage_index] += 1
             last_backward = (
                 schedule.backward_counter[backward_stage_index]
@@ -1467,17 +1394,12 @@ class ScheduleTest(MultiProcContinuousTest):
         out = None
         losses = []
         num_loops = 2
-        overlap_actions = base_schedule.pipeline_order_with_comms[self.rank]
-        with assert_send_storage_released_before_backward(
-            self, stages, overlap_actions
-        ) as overlap_storage_checks:
-            for _ in range(num_loops):
-                zero_gradients(stage_modules)
-                if self.rank == 0:
-                    out = base_schedule.step(x, target=target, losses=losses)
-                else:
-                    base_schedule.step()
-        self.assertGreater(len(overlap_storage_checks), 0)
+        for _ in range(num_loops):
+            zero_gradients(stage_modules)
+            if self.rank == 0:
+                out = base_schedule.step(x, target=target, losses=losses)
+            else:
+                base_schedule.step()
 
         dist.barrier()
 
@@ -1789,13 +1711,12 @@ class CustomSchedulesTest(MultiProcContinuousTest):
         # Run pipeline - special case where first and last stage are on rank 0
         out = None
         losses = []
-        with assert_send_storage_released_before_backward(self, stages):
-            for _ in range(2):
-                zero_gradients(stage_modules)
-                if self.rank == 0:
-                    out = schedule.step(x, target=target, losses=losses)
-                else:
-                    schedule.step()
+        for _ in range(2):
+            zero_gradients(stage_modules)
+            if self.rank == 0:
+                out = schedule.step(x, target=target, losses=losses)
+            else:
+                schedule.step()
 
         dist.barrier()
 

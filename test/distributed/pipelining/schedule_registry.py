@@ -208,7 +208,7 @@ class ScheduleWithReorderedB(_PipelineScheduleRuntime):
             scale_grads=scale_grads,
         )
         # Go through two microbatches
-        self.pipeline_order_with_comms = {
+        actions = {
             0: [
                 _Action(0, F, 0),
                 _Action(0, F, 1),
@@ -234,3 +234,4 @@ class ScheduleWithReorderedB(_PipelineScheduleRuntime):
                 _Action(1, WAIT_SEND_B, 1),
             ],
         }
+        self._prepare_schedule_with_comms(actions, format="compute_comms")

@@ -445,27 +445,27 @@ class OutputSlotReleaseTest(TestCase):
         entry = stage._forward_chunk_states[0]
 
         self.assertEqual(len(ops), 1)
-        self.assertEqual(entry.pending_consumers, [1])
+        self.assertEqual(entry.send_pending, [True])
         self.assertIsNotNone(entry.live_outputs[0])
         self.assertIsInstance(entry.output_grad_edges[0], GradientEdge)
 
-        stage.release_fwd_output_leases(0)
+        stage.release_fwd_send_outputs(0)
 
-        self.assertEqual(entry.pending_consumers, [0])
+        self.assertEqual(entry.send_pending, [False])
         self.assertIsNone(entry.live_outputs[0])
         self.assertIs(entry.stage_output_for_backward()[0], entry.output_grad_edges[0])
 
-    def test_output_kept_until_every_destination_retires(self):
+    def test_output_released_after_batched_destination_sends(self):
         stage = self._make_stage(num_stages=3, dst_stages=[1, 2])
         ops = self._forward_and_send(stage)
         entry = stage._forward_chunk_states[0]
 
-        # Destinations share one batched buffer lease.
+        # One pending send covers all destinations in the batch.
         self.assertEqual(len(ops), 2)
         self.assertIs(ops[0].tensor, ops[1].tensor)
-        self.assertEqual(entry.pending_consumers, [1])
+        self.assertEqual(entry.send_pending, [True])
 
-        stage.release_fwd_output_leases(0)
+        stage.release_fwd_send_outputs(0)
         self.assertIsNone(entry.live_outputs[0])
 
     def test_last_stage_output_never_released(self):
@@ -478,7 +478,7 @@ class OutputSlotReleaseTest(TestCase):
         self.assertIsNone(entry.output_grad_edges[0])
         self.assertEqual(stage._retained_output_reason, "last-stage output")
 
-        stage.release_fwd_output_leases(0)
+        stage.release_fwd_send_outputs(0)
         self.assertIsNotNone(entry.live_outputs[0])
 
     def test_forward_only_keeps_no_backward_root(self):
@@ -489,7 +489,7 @@ class OutputSlotReleaseTest(TestCase):
         entry = stage._forward_chunk_states[0]
 
         self.assertEqual(entry.output_grad_edges, (None,))
-        stage.release_fwd_output_leases(0)
+        stage.release_fwd_send_outputs(0)
         self.assertIsNone(entry.live_outputs[0])
 
     def test_dw_builder_keeps_output(self):
@@ -498,7 +498,7 @@ class OutputSlotReleaseTest(TestCase):
         entry = stage._forward_chunk_states[0]
 
         self.assertEqual(entry.releasable, (False,))
-        stage.release_fwd_output_leases(0)
+        stage.release_fwd_send_outputs(0)
         self.assertIsNotNone(entry.live_outputs[0])
 
     def test_tensor_subclass_output_kept(self):
@@ -527,7 +527,7 @@ class OutputSlotReleaseTest(TestCase):
         stage = self._make_stage()
         self._forward_and_send(stage)
         stage._forward_chunk_states.pop(0)
-        stage.release_fwd_output_leases(0)
+        stage.release_fwd_send_outputs(0)
 
     def test_split_backward_drops_edge_roots(self):
         """Drop edge roots before split weight backward."""
@@ -542,7 +542,7 @@ class OutputSlotReleaseTest(TestCase):
         stage.args_recv_info = {0: (act_recv_info,)}
         stage.forward_one_chunk(0, ())
         stage.get_fwd_send_ops(0)
-        stage.release_fwd_output_leases(0)
+        stage.release_fwd_send_outputs(0)
         self.assertIsNone(stage._forward_chunk_states[0].live_outputs[0])
 
         grad_buffer = torch.randn(batch_size, d_hid)
@@ -557,9 +557,16 @@ class OutputSlotReleaseTest(TestCase):
     def test_send_after_release_is_rejected(self):
         stage = self._make_stage()
         self._forward_and_send(stage)
-        stage.release_fwd_output_leases(0)
+        stage.release_fwd_send_outputs(0)
 
         with self.assertRaisesRegex(AssertionError, "released before its send"):
+            stage.get_fwd_send_ops(0)
+
+    def test_duplicate_pending_send_is_rejected(self):
+        stage = self._make_stage()
+        self._forward_and_send(stage)
+
+        with self.assertRaisesRegex(AssertionError, "already has a pending send"):
             stage.get_fwd_send_ops(0)
 
 
