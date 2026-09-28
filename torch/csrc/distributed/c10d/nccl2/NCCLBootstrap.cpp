@@ -2,7 +2,6 @@
 
 #ifdef USE_C10D_NCCL
 
-#include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <fmt/core.h>
 #include <nccl.h>
@@ -11,7 +10,6 @@
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/NCCLBootstrap.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
-#include <torch/csrc/distributed/c10d/nccl2/Utils.hpp>
 #include <cstring>
 #include <exception>
 #include <set>
@@ -67,11 +65,10 @@ std::vector<ncclUniqueId> NCCLBootstrap::exchangeUniqueIds(
   if (rootIndex >= 0) {
     ncclUniqueId uniqueId;
     const ncclResult_t ncclErr = nccl_api_->getUniqueId(&uniqueId);
-    if (ncclErr != ncclSuccess) {
-      throw std::runtime_error(
-          "Failed to get NCCL unique ID: " +
-          std::string(nccl_api_->getErrorString(ncclErr)));
-    }
+    TORCH_CHECK(
+        ncclErr == ncclSuccess,
+        "Failed to get NCCL unique ID: ",
+        nccl_api_->getErrorString(ncclErr));
 
     std::vector<uint8_t> vec(
         reinterpret_cast<uint8_t*>(&uniqueId),
@@ -83,9 +80,9 @@ std::vector<ncclUniqueId> NCCLBootstrap::exchangeUniqueIds(
   auto values = store->multiGet(keys);
   std::vector<ncclUniqueId> uniqueIds(numIds);
   for (int index = 0; index < numIds; ++index) {
-    if (values[index].size() != sizeof(ncclUniqueId)) {
-      throw std::runtime_error("Invalid NCCL unique ID size");
-    }
+    TORCH_CHECK(
+        values[index].size() == sizeof(ncclUniqueId),
+        "Invalid NCCL unique ID size");
     std::memcpy(&uniqueIds[index], values[index].data(), sizeof(ncclUniqueId));
   }
   return uniqueIds;
@@ -161,7 +158,8 @@ void populateNcclConfigFromHints(
       TC_LOG(INFO) << "[comm=" << name
                    << "] Setting config.nvlsCTAs=" << config.nvlsCTAs;
     }
-#elif NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0)
+#endif
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0)
     else if (key == "nChannelsPerNetPeer" || key == "n_channels_per_net_peer") {
       config.nChannelsPerNetPeer = std::stoi(val);
       TC_LOG(INFO) << "[comm=" << name
@@ -171,6 +169,13 @@ void populateNcclConfigFromHints(
       config.nvlinkCentricSched = std::stoi(val);
       TC_LOG(INFO) << "[comm=" << name << "] Setting config.nvlinkCentricSched="
                    << config.nvlinkCentricSched;
+    }
+#endif
+#ifdef NCCL_HAS_HOST_CFT_MODE
+    else if (key == "hostCftMode" || key == "host_cft_mode") {
+      config.hostCftMode = std::stoi(val);
+      TC_LOG(INFO) << "[comm=" << name
+                   << "] Setting config.hostCftMode=" << config.hostCftMode;
     }
 #endif
     else {
@@ -219,11 +224,10 @@ ncclComm_t NCCLBootstrap::createNcclComm(
     ncclErr = nccl_api_->commInitRankConfig(
         &nccl_comm, comm_size_, uniqueId, rank_, &config);
   }
-  if (nccl_comm == nullptr) {
-    throw std::runtime_error(
-        "Failed to initialize NCCL communicator: " +
-        std::string(nccl_api_->getErrorString(ncclErr)));
-  }
+  TORCH_CHECK(
+      nccl_comm != nullptr,
+      "Failed to initialize NCCL communicator: ",
+      nccl_api_->getErrorString(ncclErr));
   try {
     waitForNcclCompletion(
         *nccl_api_,

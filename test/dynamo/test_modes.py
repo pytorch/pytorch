@@ -21,8 +21,9 @@ from torch.overrides import (
 )
 from torch.testing._internal.common_device_type import (
     IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED,
+    IS_FLEX_ATTENTION_XPU_PLATFORM_SUPPORTED,
 )
-from torch.testing._internal.common_utils import skipIfXpu, TEST_ACCELERATOR
+from torch.testing._internal.common_utils import TEST_ACCELERATOR
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils._device import DeviceContext
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -841,7 +842,6 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             )
 
     @unittest.skipIf(not HAS_GPU, "requires GPU and Triton")
-    @skipIfXpu(msg="XPU does not support flex attention")
     def test_hop(self):
         import torch
         import torch._higher_order_ops
@@ -865,7 +865,6 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
                     )
 
     @unittest.skipIf(not HAS_GPU, "requires GPU and Triton")
-    @skipIfXpu(msg="XPU does not support flex attention")
     def test_hop_eager(self):
         import torch
         import torch._higher_order_ops
@@ -1914,8 +1913,8 @@ class outer_fn(torch.nn.Module):
             out.sum().backward()
 
     @unittest.skipUnless(
-        IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED and not torch.version.hip,
-        "Requires CUDA with SM >= 8.0, Triton, and not ROCm",
+        IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED,
+        "Requires CUDA with SM >= 8.0, and Triton",
     )
     def test_nested_compile_transformer_with_flex_attention_compiled_layers(
         self,
@@ -2168,8 +2167,9 @@ class outer_fn(torch.nn.Module):
         dist.destroy_process_group()
 
     @unittest.skipUnless(
-        IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED and not torch.version.hip,
-        "Requires CUDA with SM >= 8.0, Triton, and not ROCm",
+        IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED
+        or IS_FLEX_ATTENTION_XPU_PLATFORM_SUPPORTED,
+        "Requires CUDA with SM >= 8.0, and Triton",
     )
     def test_2tier_blockmask_tensor_closure_nested_compile_aot_export(self):
         """2-tier AOT export with BlockMask whose mask_mod captures tensors.
