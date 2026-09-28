@@ -418,6 +418,32 @@ def _multi_tensor_sgd(
             grad.is_sparse for grad in device_grads
         )
 
+        # foreach on a complex tensor lowers through getitem, which Inductor
+        # cannot compile. Eager foreach stays on the complex tensors and matches
+        # the single-tensor update. While compiling, the real view is the same
+        # componentwise update and shares storage with the complex tensors.
+        viewed_complex = False
+        if (
+            not device_has_sparse_grad
+            and torch.compiler.is_compiling()
+            and any(torch.is_complex(p) for p in device_params)
+        ):
+            # Copy the lists. The caller's param list is also the key used to
+            # write momentum back into optimizer state.
+            device_params = [
+                torch.view_as_real(p) if torch.is_complex(p) else p
+                for p in device_params
+            ]
+            device_grads = [
+                torch.view_as_real(g) if torch.is_complex(g) else g
+                for g in device_grads
+            ]
+            device_momentum_buffer_list = [
+                torch.view_as_real(b) if b is not None and torch.is_complex(b) else b
+                for b in device_momentum_buffer_list
+            ]
+            viewed_complex = True
+
         if maximize:
             device_grads = torch._foreach_neg(device_grads)  # type: ignore[assignment]
 
@@ -449,9 +475,15 @@ def _multi_tensor_sgd(
 
                 for i in range(len(device_momentum_buffer_list)):
                     if device_momentum_buffer_list[i] is None:
-                        buf = device_momentum_buffer_list[i] = momentum_buffer_list[
-                            indices[i]
-                        ] = device_grads[i].detach().clone()
+                        cloned = device_grads[i].detach().clone()
+                        # A new buffer has to stay complex in the state. The
+                        # foreach list keeps the real view of that storage.
+                        stored = (
+                            torch.view_as_complex(cloned) if viewed_complex else cloned
+                        )
+                        momentum_buffer_list[indices[i]] = stored
+                        device_momentum_buffer_list[i] = cloned
+                        buf = cloned
                     else:
                         buf = cast(Tensor, device_momentum_buffer_list[i])
                         buf.mul_(momentum).add_(device_grads[i], alpha=1 - dampening)

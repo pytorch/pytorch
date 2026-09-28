@@ -760,5 +760,67 @@ class TestDifferentiableOptimizer(TestCase):
         )
 
 
+class TestSGDComplexForeach(TestCase):
+    def test_complex_foreach_matches_single_and_compiles(self):
+        def run(foreach, momentum=0.0, weight_decay=0.0, maximize=False, nesterov=False):
+            torch.manual_seed(0)
+            param = nn.Parameter(
+                torch.complex(torch.randn(3, 2), torch.randn(3, 2))
+            )
+            opt = SGD(
+                [param],
+                lr=0.1,
+                foreach=foreach,
+                momentum=momentum,
+                weight_decay=weight_decay,
+                maximize=maximize,
+                nesterov=nesterov,
+                dampening=0.0,
+            )
+            generator = torch.Generator().manual_seed(1)
+            for _ in range(4):
+                param.grad = torch.complex(
+                    torch.randn(3, 2, generator=generator),
+                    torch.randn(3, 2, generator=generator),
+                )
+                opt.step()
+            return param.detach().clone()
+
+        for kwargs in (
+            {},
+            {"momentum": 0.9},
+            {"momentum": 0.9, "nesterov": True},
+            {"weight_decay": 0.1},
+            {"maximize": True},
+        ):
+            single = run(False, **kwargs)
+            multi = run(True, **kwargs)
+            self.assertEqual(multi, single)
+
+        torch.manual_seed(0)
+        eager_param = nn.Parameter(
+            torch.complex(torch.randn(3, 2), torch.randn(3, 2))
+        )
+        compiled_param = nn.Parameter(eager_param.detach().clone())
+        eager_opt = SGD([eager_param], lr=0.1, foreach=True, momentum=0.9)
+        compiled_opt = SGD([compiled_param], lr=0.1, foreach=True, momentum=0.9)
+        compiled_step = torch.compile(compiled_opt.step)
+        generator = torch.Generator().manual_seed(1)
+        for _ in range(3):
+            grad = torch.complex(
+                torch.randn(3, 2, generator=generator),
+                torch.randn(3, 2, generator=generator),
+            )
+            eager_param.grad = grad.clone()
+            compiled_param.grad = grad.clone()
+            eager_opt.step()
+            compiled_step()
+        self.assertEqual(compiled_param, eager_param)
+        self.assertEqual(
+            compiled_opt.state[compiled_param]["momentum_buffer"],
+            eager_opt.state[eager_param]["momentum_buffer"],
+        )
+
+
 if __name__ == "__main__":
     print("These tests should be run through test/test_optim.py instead")
