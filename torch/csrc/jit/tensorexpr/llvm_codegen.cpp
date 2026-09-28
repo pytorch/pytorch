@@ -149,7 +149,7 @@ llvm::CmpInst::Predicate llvm_comparison_predicate(
                                      : llvm::ICmpInst::ICMP_ULE;
     default:
       // TODO: change to a proper error report
-      throw std::runtime_error("invalid operator type");
+      TORCH_CHECK(false, "invalid operator type");
   }
 }
 
@@ -170,7 +170,7 @@ llvm::CmpInst::Predicate llvm_fp_comparison_predicate(
       return llvm::FCmpInst::FCMP_OLE;
     default:
       // TODO: change to a proper error report
-      throw std::runtime_error("invalid operator type");
+      TORCH_CHECK(false, "invalid operator type");
   }
 }
 
@@ -451,9 +451,9 @@ void LLVMCodeGen::call_with_numel(void** args, int64_t /* numel */) {
 
 void LLVMCodeGen::call(const std::vector<CallArg>& args) {
   auto& buf_args = buffer_args();
-  if (args.size() != buf_args.size()) {
-    throw malformed_input("wrong number of args in call");
-  }
+  TORCH_CHECK(
+      args.size() == buf_args.size(),
+      "MALFORMED INPUT: wrong number of args in call");
 
   constexpr unsigned nargs = 8;
   c10::SmallVector<void*, nargs> argv;
@@ -629,7 +629,7 @@ llvm::Type* LLVMCodeGenImpl::dtypeToLLVM(Dtype dtype) {
       break;
 
     default:
-      throw unsupported_dtype();
+      TORCH_CHECK(false, "UNSUPPORTED DTYPE");
   }
   return nullptr;
 }
@@ -768,9 +768,9 @@ void LLVMCodeGenImpl::emitKernel(
   GRAPH_DEBUG(
       "\nLLVM module before optimizations\n\n", asmStream.str().str(), "\n");
 
-  if (llvm::verifyFunction(*fn_, &llvm::outs())) {
-    throw std::runtime_error("Function verification failed");
-  }
+  TORCH_CHECK(
+      !llvm::verifyFunction(*fn_, &llvm::outs()),
+      "Function verification failed");
 
   optimize(*module_);
 
@@ -816,7 +816,10 @@ void LLVMCodeGenImpl::visit(const AddPtr& v) {
   } else if (!lfp && !rfp) {
     value_ = irb_.CreateAdd(lhs, rhs);
   } else {
-    throw malformed_input("llvm_codegen: bad type in Add", v);
+    TORCH_CHECK(
+        false,
+        "MALFORMED INPUT: llvm_codegen: bad type in Add - ",
+        std::to_string(v));
   }
 }
 
@@ -834,7 +837,10 @@ void LLVMCodeGenImpl::visit(const SubPtr& v) {
   } else if (!lfp && !rfp) {
     value_ = irb_.CreateSub(lhs, rhs);
   } else {
-    throw malformed_input("llvm_codegen: bad type in Sub", v);
+    TORCH_CHECK(
+        false,
+        "MALFORMED INPUT: llvm_codegen: bad type in Sub - ",
+        std::to_string(v));
   }
 }
 
@@ -852,7 +858,10 @@ void LLVMCodeGenImpl::visit(const MulPtr& v) {
   } else if (!lfp && !rfp) {
     value_ = irb_.CreateMul(lhs, rhs);
   } else {
-    throw malformed_input("llvm_codegen: bad type in Mul", v);
+    TORCH_CHECK(
+        false,
+        "MALFORMED INPUT: llvm_codegen: bad type in Mul - ",
+        std::to_string(v));
   }
 }
 
@@ -870,7 +879,10 @@ void LLVMCodeGenImpl::visit(const DivPtr& v) {
   } else if (!lfp && !rfp) {
     value_ = irb_.CreateSDiv(lhs, rhs);
   } else {
-    throw malformed_input("llvm_codegen: bad type in Div", v);
+    TORCH_CHECK(
+        false,
+        "MALFORMED INPUT: llvm_codegen: bad type in Div - ",
+        std::to_string(v));
   }
 }
 
@@ -885,7 +897,10 @@ void LLVMCodeGenImpl::visit(const AndPtr& v) {
   if (!lfp && !rfp) {
     value_ = irb_.CreateAnd(lhs, rhs);
   } else {
-    throw malformed_input("llvm_codegen: bad type in And", v);
+    TORCH_CHECK(
+        false,
+        "MALFORMED INPUT: llvm_codegen: bad type in And - ",
+        std::to_string(v));
   }
 }
 
@@ -900,7 +915,10 @@ void LLVMCodeGenImpl::visit(const OrPtr& v) {
   if (!lfp && !rfp) {
     value_ = irb_.CreateOr(lhs, rhs); // codespell:ignore
   } else {
-    throw malformed_input("llvm_codegen: bad type in Or", v);
+    TORCH_CHECK(
+        false,
+        "MALFORMED INPUT: llvm_codegen: bad type in Or - ",
+        std::to_string(v));
   }
 }
 
@@ -915,7 +933,10 @@ void LLVMCodeGenImpl::visit(const XorPtr& v) {
   if (!lfp && !rfp) {
     value_ = irb_.CreateXor(lhs, rhs);
   } else {
-    throw malformed_input("llvm_codegen: bad type in Xor", v);
+    TORCH_CHECK(
+        false,
+        "MALFORMED INPUT: llvm_codegen: bad type in Xor - ",
+        std::to_string(v));
   }
 }
 
@@ -930,7 +951,10 @@ void LLVMCodeGenImpl::visit(const LshiftPtr& v) {
   if (!lfp && !rfp) {
     value_ = irb_.CreateShl(lhs, rhs);
   } else {
-    throw malformed_input("llvm_codegen: bad type in Lshift", v);
+    TORCH_CHECK(
+        false,
+        "MALFORMED INPUT: llvm_codegen: bad type in Lshift - ",
+        std::to_string(v));
   }
 }
 
@@ -949,7 +973,10 @@ void LLVMCodeGenImpl::visit(const RshiftPtr& v) {
       value_ = irb_.CreateLShr(lhs, rhs);
     }
   } else {
-    throw malformed_input("llvm_codegen: bad type in Rshift", v);
+    TORCH_CHECK(
+        false,
+        "MALFORMED INPUT: llvm_codegen: bad type in Rshift - ",
+        std::to_string(v));
   }
 }
 
@@ -964,7 +991,10 @@ void LLVMCodeGenImpl::visit(const ModPtr& v) {
   if (!lfp && !rfp) {
     value_ = irb_.CreateSRem(lhs, rhs);
   } else {
-    throw malformed_input("llvm_codegen: bad type in Mod", v);
+    TORCH_CHECK(
+        false,
+        "MALFORMED INPUT: llvm_codegen: bad type in Mod - ",
+        std::to_string(v));
   }
 }
 
@@ -1035,7 +1065,7 @@ void LLVMCodeGenImpl::visit(const CompareSelectPtr& v) {
     } else if (c10::isFloatingType(type_used)) {
       cmp_ = irb_.CreateFCmp(llvm_fp_comparison_predicate(cmp_op_), lhs, rhs);
     } else {
-      throw std::runtime_error("invalid type for CompareSelect");
+      TORCH_CHECK(false, "invalid type for CompareSelect");
     }
 
     return irb_.CreateSelect(cmp_, retval1, retval2);
@@ -1057,7 +1087,7 @@ void LLVMCodeGenImpl::visit(const CompareSelectPtr& v) {
     } else if (c10::isFloatingType(cmp_type)) {
       cmp = irb_.CreateFCmp(llvm_fp_comparison_predicate(cmp_op), lhs, rhs);
     } else {
-      throw std::runtime_error("invalid type for CompareSelect");
+      TORCH_CHECK(false, "invalid type for CompareSelect");
     }
 
     auto lanes = v->lhs()->dtype().lanes();
@@ -1263,14 +1293,15 @@ void LLVMCodeGenImpl::visit(const CastPtr& v) {
         value_ = irb_.CreateFPToSI(value_, dstType);
       }
     } else {
-      throw unimplemented_lowering(v);
+      TORCH_CHECK(false, "UNIMPLEMENTED LOWERING: ", std::to_string(v));
     }
     return;
   }
 
-  if (!srcType->isIntOrIntVectorTy()) {
-    throw unimplemented_lowering(v);
-  }
+  TORCH_CHECK(
+      srcType->isIntOrIntVectorTy(),
+      "UNIMPLEMENTED LOWERING: ",
+      std::to_string(v));
   if (dstType->isFPOrFPVectorTy()) {
     if (srcUnsigned) {
       value_ = irb_.CreateUIToFP(value_, dstType);
@@ -1287,7 +1318,7 @@ void LLVMCodeGenImpl::visit(const CastPtr& v) {
     }
     value_ = irb_.CreateIntCast(value_, dstType, !destUnsigned);
   } else {
-    throw unimplemented_lowering(v);
+    TORCH_CHECK(false, "UNIMPLEMENTED LOWERING: ", std::to_string(v));
   }
 }
 
@@ -1382,7 +1413,7 @@ void LLVMCodeGenImpl::visit(const RampPtr& v) {
       vecType = llvm::VectorType::get(ShortTy_, element_count);
       break;
     default:
-      throw std::runtime_error("invalid dtype in Ramp");
+      TORCH_CHECK(false, "invalid dtype in Ramp");
   }
 
   value_ = llvm::UndefValue::get(vecType);
@@ -1472,7 +1503,7 @@ void LLVMCodeGenImpl::visit(const LoadPtr& v) {
       loadType = llvm::VectorType::get(ShortTy_, element_count);
       break;
     default:
-      throw std::runtime_error("invalid dtype in Load");
+      TORCH_CHECK(false, "invalid dtype in Load");
   }
 
   // Handle the case where the load is contiguous and unmasked efficiently
@@ -1741,7 +1772,7 @@ void LLVMCodeGenImpl::visit(const ForPtr& v) {
   if (!varToVal_.count(v->var())) {
     varToVal_.emplace(v->var(), idx);
   } else {
-    throw std::runtime_error("var should not exist before");
+    TORCH_CHECK(false, "var should not exist before");
   }
 
   // Create the body and exit blocks.
@@ -1786,9 +1817,7 @@ void LLVMCodeGenImpl::visit(const BlockPtr& v) {
   auto it = scopeToVar_.find(v);
   if (it != scopeToVar_.end()) {
     for (VarPtr e : it->second) {
-      if (varToVal_.erase(e) != 1) {
-        throw std::runtime_error("erasing var that doesn't exist");
-      }
+      TORCH_CHECK(varToVal_.erase(e) == 1, "erasing var that doesn't exist");
     }
   }
 }
@@ -2173,7 +2202,7 @@ void LLVMCodeGenImpl::visit(const IntrinsicsPtr& v) {
       } break;
 
       default: {
-        throw unimplemented_lowering(v);
+        TORCH_CHECK(false, "UNIMPLEMENTED LOWERING: ", std::to_string(v));
       } break;
     }
 
@@ -2242,7 +2271,7 @@ void LLVMCodeGenImpl::visit(const IntrinsicsPtr& v) {
       } break;
 
       default: {
-        throw unimplemented_lowering(v);
+        TORCH_CHECK(false, "UNIMPLEMENTED LOWERING: ", std::to_string(v));
       } break;
     }
   } else if (v->dtype().is_integral() && v->op_type() == kAbs) {
@@ -2303,9 +2332,10 @@ void LLVMCodeGenImpl::handleBufReuse(BufPtr buf, BufPtr buf_to_reuse) {
 
 void LLVMCodeGenImpl::visit(const ExternalCallPtr& v) {
   auto& func_registry = getNNCFunctionRegistry();
-  if (!func_registry.count(v->func_name())) {
-    throw unimplemented_lowering(v);
-  }
+  TORCH_CHECK(
+      func_registry.count(v->func_name()),
+      "UNIMPLEMENTED LOWERING: ",
+      std::to_string(v));
 
   // Prepare a vector of bufs that we need to pass to the external function.
   // This vector is the output buf followed by the buf_args.
@@ -2457,9 +2487,10 @@ void LLVMCodeGenImpl::visit(const ExternalCallPtr& v) {
 
 void LLVMCodeGenImpl::visit(const ExternalCallWithAllocPtr& v) {
   auto& func_registry = getNNCFunctionRegistry();
-  if (!func_registry.count(v->func_name())) {
-    throw unimplemented_lowering(v);
-  }
+  TORCH_CHECK(
+      func_registry.count(v->func_name()),
+      "UNIMPLEMENTED LOWERING: ",
+      std::to_string(v));
 
   const auto& bufs_out = v->buf_out_args();
   const auto& bufs_in = v->buf_args();
@@ -2805,7 +2836,7 @@ void LLVMCodeGenImpl::visit(const LetPtr& v) {
     varToVal_.emplace(v->var(), value_);
     scopeToVar_[scope_].push_back(v->var());
   } else {
-    throw std::runtime_error("var should not exist before");
+    TORCH_CHECK(false, "var should not exist before");
   }
 }
 

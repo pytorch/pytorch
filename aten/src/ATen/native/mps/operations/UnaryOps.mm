@@ -170,9 +170,6 @@ TORCH_IMPL_FUNC(sign_out_mps)(const Tensor& self, const Tensor& output) {
 REGISTER_MPS_UNARY_STUB(acosh, acosh);
 REGISTER_MPS_UNARY_STUB(asinh, asinh);
 REGISTER_MPS_UNARY_STUB(atanh, atanh);
-REGISTER_MPS_UNARY_STUB(ceil, ceil);
-REGISTER_MPS_UNARY_STUB(floor, floor);
-REGISTER_MPS_UNARY_STUB(trunc, truncate);
 
 TORCH_IMPL_FUNC(frac_out_mps)(const Tensor& self, const Tensor& output) {
   TORCH_CHECK(isFloatingType(self.scalar_type()), "frac_out_mps is only implemented for floating types");
