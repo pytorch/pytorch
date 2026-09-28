@@ -5673,6 +5673,53 @@ class TestMPS(TestCaseMPS):
             self.assertRaises(error_type, lambda: loss(a_mps, a_mps))
             self.assertRaises(RuntimeError, lambda: loss(a_cpu, a_cpu))
 
+    # MPSGraph refuses to mix element types across an operand pair and aborts the process rather
+    # than raising, so a mixed-dtype input/target used to crash. OpInfo cannot reach this: every
+    # sample_inputs_loss operand is built from a single dtype.
+    MIXED_DTYPES = [(torch.float32, torch.float16), (torch.float16, torch.float32),
+                    (torch.float32, torch.bfloat16), (torch.bfloat16, torch.float32),
+                    (torch.float16, torch.bfloat16), (torch.bfloat16, torch.float16)]
+
+    @parametrize("dtypes", MIXED_DTYPES)
+    @parametrize("reduction", ["mean", "sum", "none"])
+    def test_loss_mixed_dtype(self, dtypes, reduction):
+        in_dtype, target_dtype = dtypes
+        for fn in (F.mse_loss, F.smooth_l1_loss, F.huber_loss, F.l1_loss):
+            cpu_x = torch.tensor([0.5, 2.0, -3.0, 1.25], dtype=in_dtype)
+            cpu_t = torch.tensor([1.0, 1.0, 1.0, 1.0], dtype=target_dtype)
+            res = fn(cpu_x.to("mps"), cpu_t.to("mps"), reduction=reduction)
+            ref = fn(cpu_x, cpu_t, reduction=reduction)
+            self.assertEqual(res.dtype, ref.dtype, f"{fn.__name__} result dtype")
+            self.assertEqual(res, ref, f"{fn.__name__} with {in_dtype}/{target_dtype}")
+
+    @parametrize("dtypes", MIXED_DTYPES)
+    @parametrize("reduction", ["mean", "sum", "none"])
+    def test_loss_mixed_dtype_backward(self, dtypes, reduction):
+        # huber is excluded: its backward builds a plain TensorIterator, so mismatched operands
+        # are rejected rather than promoted (see test_huber_loss_backward_mixed_dtype_errors).
+        in_dtype, target_dtype = dtypes
+        for fn in (F.mse_loss, F.smooth_l1_loss, F.l1_loss):
+            def grad_of(device):
+                x = torch.tensor([0.5, 2.0, -3.0, 1.25], dtype=in_dtype, device=device, requires_grad=True)
+                t = torch.tensor([1.0, 1.0, 1.0, 1.0], dtype=target_dtype, device=device)
+                out = fn(x, t, reduction=reduction)
+                out.backward(torch.ones_like(out))
+                return x.grad
+            self.assertEqual(grad_of("mps"), grad_of("cpu"), f"{fn.__name__} grad")
+
+    @parametrize("dtypes", MIXED_DTYPES)
+    def test_addr_mixed_dtype(self, dtypes):
+        # addr also took its result dtype from `self` instead of the promoted type
+        self_dtype, vec_dtype = dtypes
+        cpu_self = torch.tensor([[1.0, 1.0], [1.0, 1.0]], dtype=self_dtype)
+        cpu_v1 = torch.tensor([1.0, 2.0], dtype=vec_dtype)
+        cpu_v2 = torch.tensor([3.0, 4.0], dtype=vec_dtype)
+        for beta, alpha in ((1, 1), (0.6, 0.2), (0, 1)):
+            res = torch.addr(cpu_self.to("mps"), cpu_v1.to("mps"), cpu_v2.to("mps"), beta=beta, alpha=alpha)
+            ref = torch.addr(cpu_self, cpu_v1, cpu_v2, beta=beta, alpha=alpha)
+            self.assertEqual(res.dtype, ref.dtype)
+            self.assertEqual(res, ref)
+
     # Binary Cross Enropy
     def test_bce_loss_simple(self):
         def helper(shape, reduction):
