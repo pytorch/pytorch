@@ -17,12 +17,13 @@ jobs:
       id-token: write
     secrets: inherit
     with:
-      # Large reviews were hitting the reusable workflow's 60-minute default.
-      timeout_minutes: 120
+      # The AWS session and Claude's GitHub App token (it posts the review) expire
+      # 1h after job start and are never refreshed; stay a few minutes under 60.
+      timeout_minutes: 55
       # Commenters opt into Fable by including "fable" in the comment (e.g.
       # "@claude fable review"); default stays Opus. Branch on event_name so an
       # issue/PR body mentioning "fable" doesn't affect an unrelated @claude comment.
-      model: ${{ ((github.event_name == 'issue_comment' && contains(github.event.comment.body, 'fable')) || (github.event_name == 'issues' && contains(github.event.issue.body, 'fable'))) && 'global.anthropic.claude-fable-5' || 'global.anthropic.claude-opus-5' }}
+      model: ${{ ((github.event_name == 'issue_comment' && contains(github.event.comment.body, 'fable')) || (github.event_name == 'issues' && contains(github.event.issue.body, 'fable'))) && 'global.anthropic.claude-fable-5' || 'global.anthropic.claude-opus-5-5' }}
       # Keep the comment text out of claude_args: only these hardcoded effort
       # values can reach the CLI. "effort=max" wins if multiple values appear.
       additional_claude_args: >-

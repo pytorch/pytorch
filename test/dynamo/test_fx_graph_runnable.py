@@ -14,7 +14,12 @@ from torch._inductor.codecache import WritableTempFile
 from torch._inductor.compile_fx import compile_fx_inner
 from torch._inductor.test_case import TestCase
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_utils import IS_FBCODE, IS_SANDCASTLE
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    IS_FBCODE,
+    IS_SANDCASTLE,
+    parametrize,
+)
 from torch.utils._triton import has_triton
 
 
@@ -154,6 +159,7 @@ class ToyModel(torch.nn.Module):
         return x
 
 
+@instantiate_parametrized_tests
 @mock.patch.dict(os.environ, {"TRITON_ALLOW_NON_CONSTEXPR_GLOBALS": "1"})
 class FxGraphRunnableTest(TestCase):
     def setUp(self):
@@ -570,14 +576,15 @@ class FxGraphRunnableTest(TestCase):
         self._exec_and_verify_payload()
 
     @torch._dynamo.config.patch(assume_static_by_default=False)
-    def test_repeat_interleave_with_output_size(self):
+    @parametrize("dtype", (torch.int32, torch.int64))
+    def test_repeat_interleave_with_output_size(self, dtype):
         def f(data, repeats, output_size):
             indices = torch.repeat_interleave(repeats, output_size=output_size.item())
             return data[indices]
 
         num_segments = 128
         data = torch.randn(1000, 16)
-        repeats = torch.randint(5, 15, (num_segments,), dtype=torch.int64)
+        repeats = torch.randint(5, 15, (num_segments,), dtype=dtype)
         output_size = repeats.sum()
 
         torch.compile(f, dynamic=True)(data, repeats, output_size)  # noqa: UNSPECIFIED_BACKEND
@@ -591,6 +598,19 @@ class FxGraphRunnableTest(TestCase):
         # Verify the fixup code is present
         self.assertIn("# Fixup: ensure sum(repeats) == output_size", payload)
         self.assertIn("_repeats.fill_", payload)
+
+    @torch._dynamo.config.patch(assume_static_by_default=False)
+    def test_repeat_interleave_with_empty_repeats(self):
+        def f(data, repeats, output_size):
+            indices = torch.repeat_interleave(repeats, output_size=output_size.item())
+            return data[indices]
+
+        data = torch.randn(1, 16)
+        repeats = torch.empty(0, dtype=torch.int32)
+        output_size = repeats.sum()
+
+        torch.compile(f, dynamic=True)(data, repeats, output_size)  # noqa: UNSPECIFIED_BACKEND
+        self._exec_and_verify_payload()
 
     def test_repeat_interleave_with_constant_output_size(self):
         def f(data, repeats):

@@ -393,6 +393,14 @@ class FlexGemmCuteDSLOpOverrides(GemmEpilogueCuteDSLOpOverrides):
     """Add PyTorch NaN propagation to the shared TensorSSA operation lowering."""
 
     @staticmethod
+    def erf(x: Any) -> Any:
+        return CuteDSLOpOverrides.erf(x)
+
+    @staticmethod
+    def sigmoid(x: Any) -> Any:
+        return CuteDSLOpOverrides.sigmoid(x)
+
+    @staticmethod
     def nan_propagating_minmax(a: Any, b: Any, op: str) -> Any:
         """Add FlexGEMM-specific NaN-propagating clamp semantics."""
         match op:
@@ -666,6 +674,7 @@ class FlexGemmEpilogueEmitter:
         epilogue_arg_kinds: tuple[str, ...],
         *,
         fast_math: bool,
+        mainloop_scale_count: int,
     ) -> None:
         self.graph_module = graph_module
         self.gemm = analysis.gemm
@@ -749,6 +758,7 @@ class FlexGemmEpilogueEmitter:
         self.alpha = alpha
         self.beta = beta
         self.fast_math = fast_math
+        self.mainloop_scale_count = mainloop_scale_count
         self.kernel = GemmEpilogueCuteDSLKernel()
         self.params = ["acc"]
         self.base_env = self.initial_env_for_params(self.params)
@@ -786,6 +796,10 @@ class FlexGemmEpilogueEmitter:
         if self.alpha != 1:
             params.append("alpha")
             gemm_value = "(acc * alpha)"
+        scales = self.operand_names[: self.mainloop_scale_count]
+        if scales:
+            # Match native: combine global scales before scaling the accumulator.
+            gemm_value = f"({gemm_value} * ({' * '.join(scales)}))"
         if (
             self.gemm.target
             in (
@@ -1228,6 +1242,7 @@ def materialize_flex_gemm_epilogue(
     epilogue_arg_kinds: tuple[str, ...],
     *,
     fast_math: bool = False,
+    mainloop_scale_count: int = 0,
 ) -> FlexGemmEpiModSource:
     """Materialize an analyzed FlexGEMM body as generated CuTeDSL source.
 
@@ -1256,4 +1271,5 @@ def materialize_flex_gemm_epilogue(
         beta,
         epilogue_arg_kinds,
         fast_math=fast_math,
+        mainloop_scale_count=mainloop_scale_count,
     ).materialize()
