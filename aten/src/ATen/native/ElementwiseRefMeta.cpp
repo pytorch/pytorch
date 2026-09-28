@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <functional>
 #include <numeric>
 #include <utility>
 #include <vector>
@@ -55,11 +56,7 @@ bool desc_is_symbolic(const MetaDesc& d) {
 }
 
 c10::SymInt sym_numel(c10::SymIntArrayRef sizes) {
-  c10::SymInt n = 1;
-  for (const auto& s : sizes) {
-    n = n * s;
-  }
-  return n;
+  return std::accumulate(sizes.begin(), sizes.end(), c10::SymInt(1), std::multiplies<>());
 }
 
 // Python fake runs the ref under FakeTensorMode when the inputs are symbolic
@@ -129,6 +126,7 @@ void check_same_shape(ArrayRef<MetaDesc> args) {
 
 std::vector<const MetaDesc*> filter_tensors(ArrayRef<MetaDesc> args) {
   std::vector<const MetaDesc*> tensors;
+  tensors.reserve(args.size());
   for (const auto& arg : args) {
     if (!arg.is_number && !arg.is_cpu_scalar_tensor) {
       tensors.push_back(&arg);
@@ -215,7 +213,7 @@ void python_sort(std::vector<int64_t>& a, Lt lt) {
     size_t l = 0;
     size_t r = start;
     while (l < r) {
-      const size_t p = l + ((r - l) >> 1);
+      const size_t p = std::midpoint(l, r);
       if (lt(pivot, a[p])) {
         r = p;
       } else {
@@ -238,7 +236,9 @@ bool is_non_overlapping_and_dense_or_false(const MetaDesc& a) {
   std::iota(order.begin(), order.end(), 0);
   python_sort(order, [&](int64_t i, int64_t j) { return stride_lt(a.strides[i], a.strides[j]); });
   c10::SymDimVector sorted_sizes;
+  sorted_sizes.reserve(a.dim());
   c10::SymDimVector sorted_strides;
+  sorted_strides.reserve(a.dim());
   for (auto it = order.rbegin(); it != order.rend(); ++it) {
     sorted_sizes.push_back(a.sizes[*it]);
     sorted_strides.push_back(a.strides[*it]);
@@ -503,6 +503,7 @@ MetaDesc aten_expand_desc(const MetaDesc& a, c10::SymIntArrayRef size) {
 std::vector<MetaDesc> _maybe_broadcast(ArrayRef<MetaDesc> args) {
   std::vector<MetaDesc> out(args.begin(), args.end());
   std::vector<c10::SymIntArrayRef> shapes;
+  shapes.reserve(args.size());
   for (const auto& arg : args) {
     if (!arg.is_number) {
       shapes.emplace_back(arg.sizes);
