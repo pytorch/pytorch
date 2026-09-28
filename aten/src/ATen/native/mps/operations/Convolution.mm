@@ -500,10 +500,23 @@ static void conv1d_metal_forward(const Tensor& input_t,
                                  const Tensor& output_t) {
   using namespace mps;
   constexpr int64_t kInt32Max = std::numeric_limits<int32_t>::max();
+  // matmul2d on M1/M2 misreads operands whose row stride exceeds this many elements.
+  constexpr int64_t kPreApple9MppMaxStride = std::numeric_limits<uint16_t>::max();
   const int64_t length = input_t.size(3);
   const int64_t kernel_size = weight_t.size(3);
   const bool depthwise = weight_t.size(1) == 1 && (groups > 1 || std::min(output_t.size(1), output_t.size(3)) < 64);
-  const bool use_mpp = !depthwise && weight_t.size(1) > 0 && has_mpp();
+  // Read an NLC copy of the input: required for stride > 1, free if channels-last, faster for wide outputs.
+  const bool nlc = !depthwise &&
+      (stride > 1 || input_t.is_contiguous(MemoryFormat::ChannelsLast) ||
+       (dilation == 1 && groups == 1 && output_t.size(1) >= 8 * input_t.size(1)));
+  // NLC windows are contiguous when dilation and groups are 1, so all taps run as one matmul.
+  const bool merged = nlc && dilation == 1 && groups == 1;
+  // Largest operand row stride: input (NCL row or NLC position step) versus weight row.
+  // M1/M2 can only use the MPP kernel when this fits within kPreApple9MppMaxStride.
+  const int64_t operand_stride =
+      std::max(nlc ? stride * input_t.size(1) : length + padding, (merged ? kernel_size : 1) * weight_t.size(1));
+  const bool use_mpp = !depthwise && weight_t.size(1) > 0 && has_mpp() &&
+      (is_apple_family_or_newer(AppleGPUFamily::APPLE_9_PLUS) || operand_stride <= kPreApple9MppMaxStride);
   if ((!depthwise && !use_mpp) || (length + 2 * padding) * input_t.size(1) > kInt32Max ||
       output_t.size(1) * output_t.size(3) > kInt32Max) {
     conv3d_metal_forward(input_t.unsqueeze(2),
@@ -516,9 +529,6 @@ static void conv1d_metal_forward(const Tensor& input_t,
                          output_t.unsqueeze(2));
     return;
   }
-  const bool nlc = !depthwise &&
-      (stride > 1 || input_t.is_contiguous(MemoryFormat::ChannelsLast) ||
-       (dilation == 1 && groups == 1 && output_t.size(1) >= 8 * input_t.size(1)));
   const auto input = !nlc ? input_t.contiguous()
       : padding > 0       ? at::constant_pad_nd(input_t.squeeze(2).transpose(1, 2), {0, 0, padding, padding})
                           : conv3d_to_ndhwc(input_t.unsqueeze(2));
@@ -527,7 +537,6 @@ static void conv1d_metal_forward(const Tensor& input_t,
   const auto head = !depthwise && !nlc && padding > 0
       ? at::constant_pad_nd(input.narrow(3, 0, head_length - padding), {padding, 0})
       : input;
-  const bool merged = nlc && dilation == 1 && groups == 1;
   const auto tap_major = weight_t.permute({3, 0, 1, 2});
   const auto weight = depthwise   ? weight_t.contiguous()
       : merged                    ? weight_t.squeeze(2).transpose(1, 2).contiguous()
@@ -749,7 +758,7 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
     output_c = at::empty_like(output_t, output_t.options().memory_format(kContiguous));
   }
 
-  if (!is_macos_at_least(MacOSVersion::MACOS_15_1) && !is3DConv) {
+  if (!is_macos_at_least(MacOSVersion::MACOS_15_1) && !is3DConv && !is1DConv) {
     // On macOS < 15.1, MPS convolution kernel does not support output channels > 2^16
     for (auto elem : output_t.sizes()) {
       TORCH_CHECK_NOT_IMPLEMENTED(elem <= (1 << 16), "Output channels > 65536 not supported at the MPS device. ");
