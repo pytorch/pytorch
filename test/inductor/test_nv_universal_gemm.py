@@ -823,9 +823,7 @@ class TestNVUniversalGemm(TestCase):
             graph.replay()
             torch.cuda.synchronize()
 
-        self.assertEqual(
-            graph_result, replay_expected, equal_nan=True, atol=0, rtol=0
-        )
+        self.assertEqual(graph_result, replay_expected, equal_nan=True, atol=0, rtol=0)
         self.assertIn("swap_ab=True", code)
         self.assertIn("output_scale=", code)
 
@@ -1106,10 +1104,7 @@ class TestNVUniversalGemm(TestCase):
             compiled = torch.compile(scaled_mm_qkv)
             result, (code,) = run_and_get_code(compiled, a, b, scale_a, scale_b, alpha)
 
-        for actual, reference in zip(result, expected):
-            torch.testing.assert_close(
-                actual, reference, equal_nan=True, atol=0, rtol=0
-            )
+        torch.testing.assert_close(result, expected, equal_nan=True, atol=0, rtol=0)
         self.assertEqual(counters["inductor"]["scaled_mm_output_scale_fused"], 1)
         self.assertIn("output_scale=", code)
         self.assertNotIn("triton_poi_fused_mul", code)
@@ -1208,9 +1203,7 @@ class TestNVUniversalGemm(TestCase):
         a, b, scale_a, scale_b = _make_nvfp4_scaled_mm_inputs(m, n, k)
         alpha = torch.rand((), device="cuda")
 
-        expected = _nvfp4_scaled_mm_with_output_scale(
-            a, b, scale_a, scale_b, alpha
-        )
+        expected = _nvfp4_scaled_mm_with_output_scale(a, b, scale_a, scale_b, alpha)
         torch._dynamo.reset()
         counters["inductor"]["scaled_mm_output_scale_fused"] = 0
         with (
@@ -1256,9 +1249,7 @@ class TestNVUniversalGemm(TestCase):
         a, b, scale_a, scale_b = _make_nvfp4_scaled_mm_inputs(m, n, k)
         alpha = torch.rand((), device="cuda")
 
-        expected = _nvfp4_scaled_mm_with_output_scale(
-            a, b, scale_a, scale_b, alpha
-        )
+        expected = _nvfp4_scaled_mm_with_output_scale(a, b, scale_a, scale_b, alpha)
         original_select = mm.autotune_select_algorithm
         select_calls = 0
 
@@ -1356,9 +1347,7 @@ class TestNVUniversalGemm(TestCase):
         if scale_kind == "vector":
             self.assertEqual(actual.dtype, torch.float32)
             self.assertEqual(actual.shape, expected.shape)
-        torch.testing.assert_close(
-            actual, expected, equal_nan=True, atol=0, rtol=0
-        )
+        torch.testing.assert_close(actual, expected, equal_nan=True, atol=0, rtol=0)
         self.assertEqual(counters["inductor"]["scaled_mm_output_scale_fused"], 0)
 
     def test_blockscaled_operator_cache_tracks_generation_policy(self):
