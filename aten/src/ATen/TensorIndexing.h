@@ -386,7 +386,8 @@ inline bool allowsScalarIndexOnDevice(const Scalar& value, const Tensor& self) {
 
 inline bool allowsScalarIndexOnDevice(const Tensor& value, const Tensor& self) {
   return value.dim() == 0 && value.device() == self.device() &&
-      value.scalar_type() == self.scalar_type() && !value.is_alias_of(self);
+      value.scalar_type() == self.scalar_type() && self.has_storage() &&
+      value.has_storage() && !value.is_alias_of(self);
 }
 
 // Setitem can leave an eligible scalar index on CUDA instead of calling item().
@@ -397,7 +398,7 @@ inline bool canKeepScalarIndexOnDevice(
   return index.dim() == 0 && self.is_cuda() &&
       index.device() == self.device() &&
       (index_dtype == kLong || index_dtype == kInt) && !self.is_quantized() &&
-      !index.is_alias_of(self) &&
+      self.has_storage() && index.has_storage() && !index.is_alias_of(self) &&
       // CUDA index_fill_ and index_put_ do not support unsigned dtypes.
       !c10::isBarebonesUnsignedType(self.scalar_type());
 }
