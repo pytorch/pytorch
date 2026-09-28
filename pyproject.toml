@@ -460,6 +460,7 @@ xccl = "torch.distributed.distributed_c10d:_register_builtin_xccl_backend"
 nccl4py = "torch.distributed.nccl4py_backend:_register_nccl4py_backend"
 
 [project.entry-points."torch.distributed.transports"]
+mooncake = "torch.distributed._transport._mooncake:MooncakeTransport"
 nixl = "torch.distributed._transport.nixl:NIXLTransport"
 ibverbs = "torch.distributed._transport._rdma4py:IBVerbsTransport"
 tcp = "torch.distributed._transport._tcp:TCPTransport"
