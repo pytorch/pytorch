@@ -1018,19 +1018,36 @@ def get_verbose_code_part(code_part: str, guard: Guard | None) -> str:
 _LIVE_SAVED_TENSORS_HOOKS = object()
 
 
-def _saved_tensors_hooks_fingerprint(hooks: Any) -> tuple[str, ...] | None:
-    """What AUTOGRAD_SAVED_TENSORS_HOOKS compares, named by content rather than id."""
+def _saved_tensors_hooks_fingerprint(hooks: Any) -> tuple[str | None, ...] | None:
+    """
+    What AUTOGRAD_SAVED_TENSORS_HOOKS compares, named by content rather than id.
+
+    A hook graph whose code does not pin down what it computes gets a None part,
+    which a serialized guard never accepts.
+    """
+    from torch._functorch._aot_autograd.autograd_cache import (
+        BypassAOTAutogradCache,
+        check_node_safe,
+    )
+
     if not torch._functorch._aot_autograd.utils.saved_tensors_hooks_are_inlineable(
         hooks
     ):
         return None
-    parts = []
+    parts: list[str | None] = []
     for gm in hooks:
         h = hashlib.sha256(gm.code.encode())
-        # An fx.wrap call renders only its name; the user's hash names its body.
-        for node in gm.graph.nodes:
-            if (user_hash := node.meta.get("user_cache_hash")) is not None:
-                h.update(str(user_hash).encode())
+        try:
+            for node in gm.graph.nodes:
+                # gm.code names a call_function target only by name; the
+                # AOTAutograd cache's safety rule says which names that is
+                # enough for, and an fx.wrap user_cache_hash names the body.
+                check_node_safe(node)
+                if (user_hash := node.meta.get("user_cache_hash")) is not None:
+                    h.update(str(user_hash).encode())
+        except BypassAOTAutogradCache:
+            parts.append(None)
+            continue
         parts.append(h.hexdigest())
     return tuple(parts)
 
@@ -2556,10 +2573,10 @@ class GuardBuilder(GuardBuilderBase):
         get_metadata_fn=lambda guard, value: type(
             value.real_obj if isinstance(value, FakeScriptObject) else value
         ),
-        eval_fn=lambda value, metadata: type(
-            value.real_obj if isinstance(value, FakeScriptObject) else value
-        )
-        is metadata,
+        eval_fn=lambda value, metadata: (
+            type(value.real_obj if isinstance(value, FakeScriptObject) else value)
+            is metadata
+        ),
     )
     def FAKE_SCRIPT_TYPE_MATCH(self, guard: Guard) -> None:
         # Like TYPE_MATCH, but for sources that may resolve to either a
@@ -2931,7 +2948,12 @@ class GuardBuilder(GuardBuilderBase):
                 return hooks_fingerprint is None
             if last and all(r() is h for r, h in zip(last[0][0], hooks)):
                 return last[0][1]
-            result = _saved_tensors_hooks_fingerprint(hooks) == hooks_fingerprint
+            fingerprint = _saved_tensors_hooks_fingerprint(hooks)
+            result = (
+                fingerprint is not None
+                and None not in fingerprint
+                and fingerprint == hooks_fingerprint
+            )
             last[:] = [(tuple(weakref.ref(h) for h in hooks), result)]
             return result
 
@@ -5749,7 +5771,9 @@ class CheckFunctionManager:
         # TODO: don't do the string rep, do something more structured here
         torch._logging.trace_structured(
             "dynamo_cpp_guards_str",
-            payload_fn=lambda: f"{self.guard_manager}\nGuard latency = {latency:.2f} us",
+            payload_fn=lambda: (
+                f"{self.guard_manager}\nGuard latency = {latency:.2f} us"
+            ),
         )
         # NB - We have to very careful of cleaning up here. Because of the
         # invalidate function, we can create a weakref finalizer that keeps
