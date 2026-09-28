@@ -3388,12 +3388,29 @@ class TestGuardSerialization(TestGuardSerializationBase):
             (_TupleOwner.Point, False),
             # Bound to the module's Random instance, with no __module__.
             (random.random, False),
+            # pybind11: bound to an instance, so its __qualname__ names the
+            # instance's type and leads to a different object.
+            (torch._C._get_tracing_state, False),
         ]
         for value, expected in cases:
             with self.subTest(value=value):
                 self.assertEqual(
                     is_portable_identity_guard("ID_MATCH", (), value), expected
                 )
+                if expected and not isinstance(value, types.ModuleType):
+                    self.assertIs(pickle.loads(pickle.dumps(value)), value)
+
+    def test_class_match_on_a_named_tuple_nested_in_a_class(self):
+        def fn(x):
+            if isinstance(x, _TupleOwner.Point):
+                return x
+            return x + 1
+
+        # The guard-state pickler rebuilds a nested NamedTuple as a fresh class.
+        with self.assertRaisesRegex(
+            PackageError, "CLASS_MATCH guard cannot be serialized."
+        ):
+            self._test_serialization("CLASS_MATCH", fn, torch.randn(3))
 
     def test_closure_match(self):
         def fn(x):
