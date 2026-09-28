@@ -390,7 +390,7 @@ class SuperVariable(VariableTracker):
                 tx, self.objvar, *args
             )
             if result is not None:
-                return result
+                return variables.ConstantVariable.create(None)
         elif inner_fn is object.__delattr__:
             attr = args[0]
             try:

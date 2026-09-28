@@ -785,6 +785,30 @@ class EnumTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(res_cls.a, ref_cls.a)
         self.assertFalse(hasattr(res_cls, "frozen"))
 
+    def test_metaclass_setattr_return_value(self):
+        class Meta(type):
+            def __setattr__(cls, name, value):
+                inner = super().__setattr__(name, value)
+                return ("hook", inner)
+
+        def make_cls():
+            class Foo(metaclass=Meta):
+                pass
+
+            return Foo
+
+        def fn(cls, x):
+            # setattr() discards the hook's return value; super().__setattr__
+            # (type.__setattr__) itself returns None.
+            return x + 1, setattr(cls, "a", 2), type(cls).__setattr__(cls, "b", 3)
+
+        x = torch.ones(2)
+        ref_cls, res_cls = make_cls(), make_cls()
+        ref = fn(ref_cls, x)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(res_cls, x)
+        self.assertEqual(res, ref)
+        self.assertEqual((res_cls.a, res_cls.b), (ref_cls.a, ref_cls.b))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

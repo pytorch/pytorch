@@ -3828,7 +3828,9 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
             and inspect.getattr_static(type(obj.value), "__setattr__")
             is not type.__setattr__
         ):
-            return obj.call_method(tx, "__setattr__", [name_var, val], {})
+            # setattr() discards the hook's return value and returns None.
+            obj.call_method(tx, "__setattr__", [name_var, val], {})
+            return variables.ConstantVariable.create(None)
         result = self._call_setattr(tx, obj, name_var, val)
         if result is not None:
             return result
