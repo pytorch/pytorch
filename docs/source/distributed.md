@@ -2278,6 +2278,7 @@ metadata is base64-encoded. Unknown fields, versions, backends, and invalid fiel
 types are rejected. Tensor contents and native handles are never serialized.
 
 .. autofunction:: torch.distributed._transport.new_transport
+.. autofunction:: torch.distributed._transport.new_transport_rank
 .. autoclass:: torch.distributed._transport.Transport
    :members:
 .. autoclass:: torch.distributed._transport.Memory
@@ -2317,6 +2318,12 @@ Timeout and asyncio cancellation stop waiting, not DMA. The transport retains
 pending requests and buffers, even if the caller drops its Work. Wait again or
 successfully close before reusing buffers. Coordinate with peers before closing
 exposed memory; close only drains locally submitted operations.
+
+The transport lifecycle is ``open -> closing -> closed``. Binding and connecting
+keep it open. Closing is terminal: it rejects new operations, and retrying close
+only finishes cleanup; it never reopens the endpoint. Construct a new transport
+for a new connection after close. Each Work represents one submission and cannot
+be reset or reused for another transfer.
 
 ``NIXLTransport.close_async`` awaits pending transfers before native cleanup.
 A timed-out or cancelled close rejects new work and retains resources; retry
