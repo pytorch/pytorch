@@ -272,9 +272,9 @@ def get_error_inputs_for_all_optims(device, dtype):
                 OptimizerInput(
                     params={sample_param, sample_param2},
                     kwargs={},
-                    desc="reject a bare unordered set of params",
+                    desc="warn on a bare unordered set of params",
                 ),
-                error_type=TypeError,
+                error_type=FutureWarning,
                 error_regex="optimizer parameters need to be organized in ordered collections",
             ),
             ErrorOptimizerInput(
