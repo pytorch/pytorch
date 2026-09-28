@@ -7743,9 +7743,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
     def resolved_host_tma_descriptor_args(
         self,
-        descriptor_args: dict[
-            str, TensorDescriptorOptions | dict[str, Any]
-        ] | None = None,
+        descriptor_args: dict[str, TensorDescriptorOptions | dict[str, Any]]
+        | None = None,
     ) -> dict[str, Any]:
         """Resolve host_tma_descriptor_args into the launcher's dim format.
 
