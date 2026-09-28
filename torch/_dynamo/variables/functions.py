@@ -52,6 +52,7 @@ from torch.utils._pytree import is_namedtuple_class
 from .. import config, graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_rot_n, is_generator
 from ..exc import (
+    CompileOnOneRankUnsupported,
     format_frame_info,
     get_dynamo_observed_exception,
     InfiniteGeneratorError,
@@ -2603,6 +2604,18 @@ RE_CONSTANT_FOLD_FNS = {
 }
 
 
+@functools.cache
+def _device_setters() -> dict[Any, str]:
+    """Functions that move the rank off whatever device it is currently on."""
+    return {
+        torch.cuda.set_device: "torch.cuda.set_device",
+        torch.xpu.set_device: "torch.xpu.set_device",
+        torch.accelerator.set_device_index: "torch.accelerator.set_device_index",
+        torch.accelerator.set_device_idx: "torch.accelerator.set_device_idx",
+        torch.mtia.set_device: "torch.mtia.set_device",
+    }
+
+
 class SkipFunctionVariable(VariableTracker):
     _nonvar_fields = {
         "value",
@@ -2674,6 +2687,28 @@ class SkipFunctionVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if self.value in _device_setters():
+            from torch.fx.experimental.proxy_tensor import (
+                _coor_current_accelerator,
+                _coor_enabled,
+            )
+
+            # Under CooR a rank owns exactly one accelerator, and device contexts are
+            # traced as no-ops on that basis. Moving off it would leave the rest of
+            # the frame's rank-relative devices pointing at the wrong GPU, and no
+            # graph break undoes it, so refuse rather than diverge from eager.
+            cur = _coor_current_accelerator() if _coor_enabled() else None
+            if cur is not None:
+                name = _device_setters()[self.value]
+                raise CompileOnOneRankUnsupported(
+                    f"Cannot call {name} under compile_on_one_rank: this rank is on "
+                    f"{cur} and CooR gives it a single accelerator, so changing the "
+                    "current device invalidates every rank-relative device in the "
+                    "frame.\n"
+                    "Next steps: drop the call, or turn off compile_on_one_rank "
+                    "for this region."
+                )
+
         # importlib functions are frozen builtins that Dynamo cannot trace
         # into.  They are deterministic for a given package name, so
         # constant-fold them when all args are constants.
