@@ -111,6 +111,7 @@ from torch._guards import (
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import get_opaque_obj_info, is_opaque_constant_type
 from torch._logging import structured
+from torch._subclasses.fake_tensor import _FAKE_TENSOR_CONSTRUCTOR_IGNORED_STATE_ATTRS
 from torch._subclasses.meta_utils import safe_grad
 from torch._utils_internal import justknobs_check
 from torch.fx.experimental.symbolic_shapes import (
@@ -4158,7 +4159,6 @@ class GuardBuilder(GuardBuilderBase):
             for gate_attr, dep_attr_names in gated_attrs:
                 if not hasattr(value, gate_attr):
                     continue
-                read_marking(gate_attr)
                 for attr_name in dep_attr_names:
                     attr_value = read_marking(attr_name)
                     dependent_attrs[attr_name] = (attr_value, gate_attr)
@@ -4388,34 +4388,16 @@ class _LiveBuiltins:
 _live_builtins = _LiveBuiltins()
 
 
-# FakeTensor state held in __dict__, never carried off a fake.
-_FAKE_TENSOR_OWNED_ATTRIBUTES = frozenset(
-    {
-        "_fake_device",
-        "fake_mode",
-        "constant",
-        "pytype",
-        "dispatch_keys",
-        "real_tensor",
-        "_nonzero_memo",
-        "_nonzero_memo_vc",
-        "_nonzero_memo_epoch",
-        "_item_memo",
-        "_item_memo_vc",
-        "_item_memo_epoch",
-        "_unique_memo",
-        "_unique_memo_vc",
-        "_unique_memo_epoch",
-        "_unique_consecutive_memo",
-        "_unique_consecutive_memo_vc",
-        "_unique_consecutive_memo_epoch",
-        "_nested_int_memo",
-        "_nested_int_memo_vc",
-        "_nested_int_memo_epoch",
-        "_is_param",
-        "_debug_trace",
-    }
-)
+# FakeTensor state held in __dict__, never carried off a fake. _is_param is
+# not here: FakeTensor sets it only when asked, so restoring it is correct.
+_FAKE_TENSOR_OWNED_ATTRIBUTES = _FAKE_TENSOR_CONSTRUCTOR_IGNORED_STATE_ATTRS | {
+    "_fake_device",
+    "fake_mode",
+    "constant",
+    "pytype",
+    "dispatch_keys",
+    "real_tensor",
+}
 
 
 @functools.cache
@@ -5242,7 +5224,9 @@ class GuardsStatePickler(FunctionPicklerBase):
         carried: dict[str, Any] = {}
         for name, value in state.items():
             if name in _FAKE_TENSOR_OWNED_ATTRIBUTES:
-                if not is_fake and self._keep(value):
+                # A literal can match an unrelated guard's interned value by id,
+                # so only a non-literal proves a guard reads this name.
+                if not is_fake and not self._is_literal(value) and self._keep(value):
                     raise torch._dynamo.exc.PackageError(
                         f"a guard reads {name!r} off a tensor, but a rebuilt "
                         f"tensor is a FakeTensor, which stores its own state there"
