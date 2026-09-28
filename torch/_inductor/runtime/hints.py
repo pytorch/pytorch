@@ -34,7 +34,7 @@ TRITON_DEFAULT_RSPLIT_SIZE = 1
 
 
 def mix_order_reduction_max_num_stages(
-    rnumel_hint: int | None, inductor_meta: InductorMeta
+    rnumel_hint: int | None, inductor_meta: typing.Mapping[str, typing.Any]
 ) -> int:
     if not inductor_meta.get("mix_order_reduction_allow_multi_stages", True):
         return 1
@@ -60,18 +60,21 @@ def is_valid_mix_order_reduction_config(
     config: typing.Mapping[str, typing.Any],
     rsplit_size: int,
     rnumel_hint: int | None,
-    inductor_meta: InductorMeta,
+    inductor_meta: typing.Mapping[str, typing.Any],
 ) -> bool:
     xblock = config.get("XBLOCK")
     min_xblock = inductor_meta.get("tma_min_block_sizes", {}).get("XBLOCK", 1)
     num_stages = config.get("NUM_STAGES")
+    if type(xblock) is not int or type(num_stages) is not int:
+        return False
+    xblock = typing.cast(int, xblock)
+    num_stages = typing.cast(int, num_stages)
     max_num_stages = mix_order_reduction_max_num_stages(rnumel_hint, inductor_meta)
     return (
         is_valid_mix_order_reduction_xblock(
             xblock, rsplit_size, TRITON_MAX_MIX_ORDER_XBLOCK
         )
         and xblock >= min_xblock
-        and type(num_stages) is int
         and 1 <= num_stages <= max_num_stages
     )
 
