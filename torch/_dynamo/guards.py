@@ -4987,6 +4987,8 @@ class GuardsStatePickler(FunctionPicklerBase):
             and not inspect.isroutine(obj)
             and not isinstance(obj, (torch.nn.Module, torch.Tensor))
             and not type(obj).__module__.startswith("torch.")
+            and not pytree.is_constant_class(type(obj))
+            and not is_opaque_constant_type(type(obj))
             and _pickles_from_dict(type(obj))
         ):
             # A guarded user object (a train pipeline, a wrapper holding a
@@ -4994,6 +4996,8 @@ class GuardsStatePickler(FunctionPicklerBase):
             # unpicklable attribute takes the frame down. Last, so the specific
             # reducers above get first refusal; user types only, since torch's
             # structural types (DTensorSpec) need fields no guard names.
+            # Constant and opaque value types are compared whole by
+            # EQUALS_MATCH, so they are never pruned.
             self._prune_unguarded_attributes(obj)
 
         return NotImplemented
@@ -5085,6 +5089,9 @@ def _guard_value(builder: GuardBuilder, guard: Guard) -> object:
         return None
 
 
+_PORTABLE_FUNCTION_GUARD_TYPES = ("CLOSURE_MATCH",)
+
+
 def _portable_function_metadata(
     guard_type: str, value: object
 ) -> tuple[Callable[..., None], NamedTuple] | None:
@@ -5101,10 +5108,10 @@ def is_portable_function_guard(guard_type: str, value: object) -> bool:
 
 
 def to_portable_function_guard(guard: Guard, builder: GuardBuilder) -> Guard:
-    entry = make_guard_filter_entry(guard, builder)
-    if not entry.has_value:
+    guard_type = guard.create_fn_name()
+    if guard_type not in _PORTABLE_FUNCTION_GUARD_TYPES:
         return guard
-    portable = _portable_function_metadata(entry.guard_type, entry.value)
+    portable = _portable_function_metadata(guard_type, _guard_value(builder, guard))
     if portable is None:
         return guard
     create_fn, expected = portable
@@ -5308,9 +5315,9 @@ class CheckFunctionManager:
         # before the guard sanity check so GlobalStateGuard.check() sees
         # the true runtime state.
         with torch._C.DisableTorchFunction():
-            if guard_filter_fn or save_guards:
-                # Filtering and the portable rewrite both read guarded values,
-                # so build an extra time first for the builder's results.
+            if guard_filter_fn:
+                # If we're filtering guards, we need to build it an extra time first
+                # because filtering depends on the builder/guard_manager results
                 builder, guard_manager = self.build_guards(
                     sorted_guards,
                     existing_diff_guard_sources,
@@ -5319,7 +5326,6 @@ class CheckFunctionManager:
                     False,
                 )
 
-            if guard_filter_fn:
                 filter_results = guard_filter_fn(
                     [make_guard_filter_entry(guard, builder) for guard in sorted_guards]
                 )
@@ -5333,7 +5339,20 @@ class CheckFunctionManager:
                 sorted_guards = [
                     guard for i, guard in enumerate(sorted_guards) if filter_results[i]
                 ]
-            if save_guards:
+            if save_guards and any(
+                guard.create_fn_name() in _PORTABLE_FUNCTION_GUARD_TYPES
+                for guard in sorted_guards
+            ):
+                if not guard_filter_fn:
+                    # The rewrite only reads guarded values from the scope,
+                    # so a builder with no guards built is enough.
+                    builder, _ = self.build_guards(
+                        [],
+                        existing_diff_guard_sources,
+                        f_code,
+                        output_graph,
+                        False,
+                    )
                 sorted_guards = [
                     to_portable_function_guard(guard, builder)
                     for guard in sorted_guards
