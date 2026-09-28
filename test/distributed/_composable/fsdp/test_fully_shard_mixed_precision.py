@@ -18,7 +18,6 @@ from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     foreach_reduce_scatter_copy_in,
 )
 from torch.distributed.tensor import DTensor, Shard
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     requires_nccl_version,
     SaveForwardInputsModel,
@@ -47,6 +46,18 @@ from torch.utils.checkpoint import checkpoint
 
 
 device_type = torch.device(get_devtype())
+
+
+def record_copy_in_dtypes(grad_dtypes: list[tuple[torch.dtype, ...]]):
+    def copy_in(grads, buffer, world_size):
+        grad_dtypes.append(tuple(grad.dtype for grad in grads))
+        foreach_reduce_scatter_copy_in(grads, buffer, world_size)
+
+    return patch(
+        "torch.distributed.fsdp._fully_shard._fsdp_collectives."
+        "foreach_reduce_scatter_copy_in",
+        copy_in,
+    )
 
 
 class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
@@ -468,122 +479,109 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
                 param.grad.div_(group.size())
 
     @skip_if_lt_x_gpu(2)
-    def test_grad_dtype_per_parameter(self):
-        torch.manual_seed(42)
-        model = nn.Linear(8, 8, device=device_type)
-        ref_model = copy.deepcopy(model).to(torch.bfloat16)
-        grad_dtypes = (torch.bfloat16, torch.float32)
-        for module in (model, ref_model):
-            for param, grad_dtype in zip(module.parameters(), grad_dtypes):
-                param.grad_dtype = grad_dtype
-        fully_shard(
-            model,
-            reshard_after_forward=False,
-            mp_policy=MixedPrecisionPolicy(param_dtype=torch.bfloat16),
-        )
-
-        inp = torch.arange(16, device=device_type, dtype=torch.bfloat16).reshape(2, 8)
-        inp = inp / 16 + self.rank / 8
-
-        def check_unsharded_grad_dtype(module: nn.Module, _inputs):
-            for param, grad_dtype in zip(module.parameters(), grad_dtypes):
-                self.assertEqual(param.grad_dtype, grad_dtype)
-
-        model.register_forward_pre_hook(check_unsharded_grad_dtype)
-        copy_in_dtypes = []
-
-        def copy_in(grads, buffer, world_size):
-            copy_in_dtypes.append(tuple(grad.dtype for grad in grads))
-            foreach_reduce_scatter_copy_in(grads, buffer, world_size)
-
-        for microbatch_idx in range(3):
-            sync = microbatch_idx == 2
-            model.set_requires_gradient_sync(sync)
-            microbatch_inp = inp + microbatch_idx / 16
-            with (
-                patch.object(
-                    dist, "reduce_scatter_single", wraps=dist.reduce_scatter_single
-                ) as reduce_scatter,
-                patch(
-                    "torch.distributed.fsdp._fully_shard._fsdp_collectives."
-                    "foreach_reduce_scatter_copy_in",
-                    copy_in,
-                ),
-            ):
-                model(microbatch_inp).sum().backward()
-            ref_model(microbatch_inp).sum().backward()
-            if not sync:
-                for param, grad_dtype in zip(model.parameters(), grad_dtypes):
-                    self.assertEqual(param.grad_dtype, grad_dtype)
-                    self.assertIsNone(param.grad)
-                model.unshard()
-            for param, ref_param, grad_dtype in zip(
-                model.parameters(), ref_model.parameters(), grad_dtypes
-            ):
-                self.assertEqual(param.grad_dtype, grad_dtype)
-                self.assertEqual(param.grad.dtype, grad_dtype)
-                if not sync:
-                    self.assertEqual(param.grad, ref_param.grad)
-                    continue
-                self.assertIsInstance(param.grad, DTensor)
-                self.assertEqual(param.grad.placements, param.placements)
-                expected_grad = ref_param.grad.to(torch.float32, copy=True)
-                dist.all_reduce(expected_grad, op=dist.ReduceOp.AVG)
-                expected_grad = expected_grad.chunk(self.world_size)[self.rank]
-                self.assertEqual(param.grad.to_local(), expected_grad.to(grad_dtype))
-            if not sync:
-                model.reshard()
-        rs_input = reduce_scatter.call_args.kwargs["input"]
-        self.assertEqual(rs_input.dtype, torch.float32)
-        # Gradients reach the copy-in in their own dtypes
-        self.assertEqual(copy_in_dtypes, [grad_dtypes])
-
-    @skip_if_lt_x_gpu(2)
-    def test_grad_dtype_pending_all_reduce_not_narrowed(self):
-        mesh = init_device_mesh(
-            device_type.type,
-            (2, self.world_size // 2),
-            mesh_dim_names=("replicate", "shard"),
-        )
+    def test_grad_pending_all_reduce_buffer(self):
+        device = device_type.type
 
         class Model(nn.Module):
             def __init__(self):
                 super().__init__()
-                self.first = nn.Parameter(
-                    torch.zeros(8, device=device_type, dtype=torch.bfloat16)
+                self.params = nn.ParameterList(
+                    [
+                        nn.Parameter(
+                            torch.ones(
+                                2 * i + 3, 8, device=device, dtype=torch.bfloat16
+                            )
+                        )
+                        for i in range(4)
+                    ]
                 )
-                self.second = nn.Parameter(torch.zeros_like(self.first))
-                self.second.grad_dtype = None
 
-            def forward(self, inp):
-                return (self.first * inp).sum() + (self.second * inp).sum()
+            def forward(self, inp, active):
+                return sum((self.params[i] * inp).sum() * (i + 1) for i in active)
 
         model = Model()
-        fully_shard(model, mesh=mesh)
-        model.set_gradient_divide_factor(1.0)
-        copy_in_dtypes = []
-
-        def copy_in(grads, buffer, world_size):
-            copy_in_dtypes.append({grad.dtype for grad in grads})
-            foreach_reduce_scatter_copy_in(grads, buffer, world_size)
-
-        with patch(
-            "torch.distributed.fsdp._fully_shard._fsdp_collectives."
-            "foreach_reduce_scatter_copy_in",
-            copy_in,
-        ):
-            model.set_requires_all_reduce(False)
-            model(torch.full((8,), 256.0, device=device_type)).backward()
-            model.set_requires_all_reduce(True)
-            model(torch.ones(8, device=device_type, dtype=torch.bfloat16)).backward()
-        # The bf16 gradients reach the copy-in uncast, and the pending fp32
-        # reduction keeps the reduce dtype at fp32: 256 + 1 is 256 in bf16.
-        self.assertEqual(
-            copy_in_dtypes, [{torch.bfloat16, torch.float32}, {torch.bfloat16}]
+        ref_model = copy.deepcopy(model)
+        for param in (*model.params, *ref_model.params):
+            param.grad_dtype = None
+        mesh = init_device_mesh(
+            device, (2, self.world_size // 2), mesh_dim_names=("replicate", "shard")
         )
-        grad = model.second.grad.to_local()
-        expected = torch.full_like(grad, 257 * self.world_size, dtype=torch.float32)
-        self.assertEqual(grad, expected)
+        fully_shard(model, mesh=mesh, reshard_after_forward=False)
+        group = model._get_fsdp_state()._fsdp_param_groups[0]
+        # Reuse a layout, insert a parameter before the pending entries, omit
+        # fresh gradients for a pending parameter, then change dtype and layout.
+        # The last step has only bf16 gradients, so the pending fp32 reduction
+        # must keep the reduce dtype at fp32 to preserve the 2**-10 offsets.
+        active_sets = ((1,), (1,), (0, 1), (1,), (0, 1), (2,), (3,))
+        expected_grads = {}
+        for step, active in enumerate(active_sets):
+            fp32_step = step in (4, 5)
+            inp_dtype = torch.float32 if fp32_step else torch.bfloat16
+            inp = torch.arange(8, device=device, dtype=inp_dtype) / 32
+            inp += self.rank / 32 + step / 16 + fp32_step * 2**-10
+            ref_model.zero_grad(set_to_none=True)
+            ref_model(inp, active).backward()
+            for i in active:
+                grad = ref_model.params[i].grad.float()
+                expected_grads[i] = (
+                    expected_grads[i] + grad if i in expected_grads else grad
+                )
+
+            sync = step == len(active_sets) - 1
+            model.set_requires_all_reduce(sync)
+            previous_output = group._partial_reduce_output
+            model(inp, active).backward()
+            output = group._partial_reduce_output
+            if sync:
+                self.assertIsNone(output)
+                self.assertEqual(
+                    len(group._partial_reduce_output_layout), len(model.params)
+                )
+                continue
+            self.assertIsNotNone(output)
+            self.assertEqual(output.dtype, inp_dtype)
+            if step in (1, 3):
+                self.assertIs(output, previous_output)
+            else:
+                self.assertIsNot(output, previous_output)
+            for param in model.params:
+                self.assertIsNone(param.grad)
+            if step == len(active_sets) - 2:
+                # zero_grad clears the unsharded gradients but not the partial
+                model.set_requires_gradient_sync(False)
+                model(inp, active).backward()
+                model.unshard()
+                model.zero_grad()
+                model.reshard()
+                model.set_requires_gradient_sync(True)
+                self.assertIs(group._partial_reduce_output, output)
+
+        for i, param in enumerate(model.params):
+            expected = expected_grads[i]
+            dist.all_reduce(expected)
+            expected /= self.world_size
+            self.assertEqual(param.grad.dtype, torch.float32)
+            self.assertEqual(param.grad.full_tensor(), expected)
+
+        # Reset discards the sharded and unsharded gradients, and the group's
+        # pending buffer and cached layout
+        model.set_requires_all_reduce(False)
+        inp = torch.ones(8, device=device, dtype=torch.bfloat16)
+        model(inp, (2,)).backward()
+        self.assertIsNotNone(group._partial_reduce_output)
+        model.set_requires_gradient_sync(False)
+        model(inp, (3,)).backward()
+        model.reset_iter_state()
+        self.assertIsNone(group._partial_reduce_output)
+        self.assertEqual(group._partial_reduce_output_layout, {})
+        model.set_requires_gradient_sync(True)
+        model(inp, (3,)).backward()
+        for param in model.params[:3]:
+            self.assertIsNone(param.grad)
+        self.assertEqual(
+            model.params[3].grad.full_tensor(),
+            torch.full_like(ref_model.params[3], 4, dtype=model.params[3].grad.dtype),
+        )
 
     @skip_if_lt_x_gpu(2)
     def test_grad_dtype_unused_last_microbatch(self):
@@ -669,32 +667,49 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
         class Model(nn.Module):
             def __init__(self):
                 super().__init__()
-                self.first = nn.Linear(1, 3, bias=False)
-                self.second = nn.Linear(1, 3, bias=False)
+                self.first = nn.Linear(1, 3)
+                self.second = nn.Linear(1, 3)
 
             def forward(self, inp, use_first):
                 return self.first(inp) if use_first else self.second(inp)
 
         model = Model().to(device_type, torch.bfloat16)
-        model.first.weight.grad_dtype = torch.float32
-        model.second.weight.grad_dtype = torch.bfloat16
+        for linear in (model.first, model.second):
+            linear.weight.grad_dtype = torch.float32
         fully_shard(model)
         model.set_reduce_scatter_unused_params(True)
-        # Only rank 0 uses the first parameter, so every rank reduces one
-        # computed and one zero gradient, which must share the reduce dtype
+        # Only rank 0 uses the first module, so every rank reduces both
+        # computed and zero gradients
         inp = torch.full(
             (1, 1), self.rank + 1, device=device_type, dtype=torch.bfloat16
         )
-        model(inp, use_first=self.rank == 0).sum().backward()
+        copy_in_dtypes = []
+        with (
+            patch.object(
+                dist, "reduce_scatter_single", wraps=dist.reduce_scatter_single
+            ) as reduce_scatter,
+            record_copy_in_dtypes(copy_in_dtypes),
+        ):
+            model(inp, use_first=self.rank == 0).sum().backward()
+        # The gradients reach the fp32 reduce-scatter uncast, grouped by dtype
+        rs_input = reduce_scatter.call_args.kwargs["input"]
+        self.assertEqual(rs_input.dtype, torch.float32)
+        self.assertEqual(copy_in_dtypes, [(torch.float32,) * 2 + (torch.bfloat16,) * 2])
         second_sum = self.world_size * (self.world_size + 1) // 2 - 1
-        for param, dtype, expected in zip(
+        for param, dtype, total in zip(
             model.parameters(),
-            (torch.float32, torch.bfloat16),
-            (1 / self.world_size, second_sum / self.world_size),
+            (torch.float32, torch.bfloat16) * 2,
+            (1, 1, second_sum, self.world_size - 1),
         ):
             self.assertEqual(param.grad.dtype, dtype)
             actual = param.grad.full_tensor()
-            self.assertEqual(actual, torch.full_like(actual, expected))
+            self.assertEqual(actual, torch.full_like(actual, total / self.world_size))
+        # Each gradient dtype is one allocation
+        grad_storages = {
+            param.grad.to_local().untyped_storage().data_ptr()
+            for param in model.parameters()
+        }
+        self.assertEqual(len(grad_storages), 2)
 
     @skip_if_lt_x_gpu(2)
     def test_structured_input_output(self):
@@ -867,197 +882,6 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
             # fp32 tolerances, so only check full param/grad parity for fp32.
             if param_dtype is None:
                 check_sharded_parity(self, ref_model, model)
-
-
-class TestFullyShardGradDtypePacking(FSDPTest):
-    @property
-    def world_size(self):
-        return 4
-
-    @skip_if_lt_x_gpu(4)
-    def test_grad_pending_all_reduce_buffer(self, device):
-        device = torch.device(device).type
-
-        class Model(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.params = nn.ParameterList(
-                    [
-                        nn.Parameter(
-                            torch.ones(
-                                2 * i + 3, 8, device=device, dtype=torch.bfloat16
-                            )
-                        )
-                        for i in range(4)
-                    ]
-                )
-
-            def forward(self, inp, active):
-                return sum((self.params[i] * inp).sum() * (i + 1) for i in active)
-
-        model = Model()
-        ref_model = copy.deepcopy(model)
-        for param in (*model.params, *ref_model.params):
-            param.grad_dtype = None
-        mesh = init_device_mesh(device, (2, 2), mesh_dim_names=("replicate", "shard"))
-        fully_shard(model, mesh=mesh, reshard_after_forward=False)
-        group = model._get_fsdp_state()._fsdp_param_groups[0]
-        # Reuse a layout, insert a parameter before the pending entries, omit
-        # fresh gradients for a pending parameter, then change dtype and layout.
-        active_sets = ((1,), (1,), (0, 1), (1,), (0, 1), (2,), (3,))
-        expected_grads = {}
-        for step, active in enumerate(active_sets):
-            inp_dtype = torch.bfloat16 if step < 4 else torch.float32
-            inp = torch.arange(8, device=device, dtype=inp_dtype) / 32
-            inp += self.rank / 32 + step / 16
-            ref_model.zero_grad(set_to_none=True)
-            ref_model(inp, active).backward()
-            for i in active:
-                grad = ref_model.params[i].grad.float()
-                expected_grads[i] = (
-                    expected_grads[i] + grad if i in expected_grads else grad
-                )
-
-            sync = step == len(active_sets) - 1
-            model.set_requires_all_reduce(sync)
-            previous_output = group._partial_reduce_output
-            model(inp, active).backward()
-            output = group._partial_reduce_output
-            if sync:
-                self.assertIsNone(output)
-                self.assertEqual(
-                    len(group._partial_reduce_output_layout), len(model.params)
-                )
-                continue
-            self.assertIsNotNone(output)
-            self.assertEqual(output.dtype, inp_dtype)
-            if step in (1, 3):
-                self.assertIs(output, previous_output)
-            else:
-                self.assertIsNot(output, previous_output)
-            for param in model.params:
-                self.assertIsNone(param.grad)
-            if step == len(active_sets) - 2:
-                # zero_grad clears the unsharded gradients but not the partial
-                model.set_requires_gradient_sync(False)
-                model(inp, active).backward()
-                model.unshard()
-                model.zero_grad()
-                model.reshard()
-                model.set_requires_gradient_sync(True)
-                self.assertIs(group._partial_reduce_output, output)
-
-        for i, param in enumerate(model.params):
-            expected = expected_grads[i]
-            dist.all_reduce(expected)
-            expected /= self.world_size
-            self.assertEqual(param.grad.dtype, torch.float32)
-            self.assertEqual(param.grad.full_tensor(), expected)
-
-        # Reset discards the sharded and unsharded gradients, and the group's
-        # pending buffer and cached layout
-        model.set_requires_all_reduce(False)
-        inp = torch.ones(8, device=device, dtype=torch.bfloat16)
-        model(inp, (2,)).backward()
-        self.assertIsNotNone(group._partial_reduce_output)
-        model.set_requires_gradient_sync(False)
-        model(inp, (3,)).backward()
-        model.reset_iter_state()
-        self.assertIsNone(group._partial_reduce_output)
-        self.assertEqual(group._partial_reduce_output_layout, {})
-        model.set_requires_gradient_sync(True)
-        model(inp, (3,)).backward()
-        for param in model.params[:3]:
-            self.assertIsNone(param.grad)
-        self.assertEqual(
-            model.params[3].grad.full_tensor(),
-            torch.full_like(ref_model.params[3], 4, dtype=model.params[3].grad.dtype),
-        )
-
-    @skip_if_lt_x_gpu(4)
-    def test_packed_grad_dtypes(self, device):
-        device = torch.device(device).type
-        grad_dtypes = (
-            torch.float16,
-            None,
-            "default",
-            torch.float32,
-            torch.float16,
-            "default",
-            None,
-            torch.float32,
-            "default",
-        )
-
-        class Model(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.params = nn.ParameterList(
-                    [
-                        nn.Parameter(torch.ones(2 * i + 1, 8, device=device))
-                        for i in range(len(grad_dtypes))
-                    ]
-                )
-
-            def forward(self, inp, active):
-                return sum((self.params[i] * inp).sum() * (i + 1) for i in active)
-
-        model = Model()
-        for param, grad_dtype in zip(model.parameters(), grad_dtypes):
-            if grad_dtype != "default":
-                param.grad_dtype = grad_dtype
-        ref_model = copy.deepcopy(model).bfloat16()
-        for param in ref_model.parameters():
-            param.grad_dtype = torch.float32
-        fully_shard(
-            model,
-            reshard_after_forward=False,
-            mp_policy=MixedPrecisionPolicy(reduce_dtype=torch.float32),
-        )
-        # The default sharded dtype changes before lazy init builds the order.
-        model.bfloat16()
-        expected_dtypes = [
-            torch.bfloat16 if dtype == "default" else dtype or torch.float32
-            for dtype in grad_dtypes
-        ]
-        active_sets = (
-            tuple(range(len(grad_dtypes))),
-            (2, 3, 5, 7, 8),
-            (1, 2, 4, 5, 6, 7),
-        )
-        for active in active_sets:
-            model.zero_grad(set_to_none=True)
-            expected_grads = {}
-            # Accumulate a second backward using a different parameter subset.
-            for step, selected in enumerate((active, active[::2])):
-                inp = torch.arange(8, device=device, dtype=torch.bfloat16) / 8
-                inp += self.rank / 4 + step / 8
-                model(inp, selected).backward()
-                ref_model.zero_grad(set_to_none=True)
-                ref_model(inp, selected).backward()
-                for i in selected:
-                    grad = ref_model.params[i].grad
-                    dist.all_reduce(grad)
-                    grad = (grad / self.world_size).to(expected_dtypes[i])
-                    if i in expected_grads:
-                        expected_grads[i] += grad
-                    else:
-                        expected_grads[i] = grad
-                storage_by_dtype = {}
-                for i, param in enumerate(model.params):
-                    if i not in expected_grads:
-                        self.assertIsNone(param.grad)
-                        continue
-                    self.assertEqual(param.grad.dtype, expected_dtypes[i])
-                    self.assertEqual(param.grad.full_tensor(), expected_grads[i])
-                    if step == 0:
-                        # Each dtype shares one flat allocation even when its
-                        # parameters were interleaved or skipped in this backward.
-                        storage = param.grad.to_local().untyped_storage().data_ptr()
-                        previous = storage_by_dtype.setdefault(
-                            param.grad.dtype, storage
-                        )
-                        self.assertEqual(storage, previous)
 
 
 class TestFullyShardMixedPrecisionJVP(FSDPTest):
@@ -1440,11 +1264,6 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
         model.weight.requires_grad_(True)
         with self.assertRaisesRegex(ValueError, "grad_dtype=None requires"):
             model(inp).sum().backward()
-
-
-instantiate_device_type_tests(
-    TestFullyShardGradDtypePacking, globals(), only_for=(get_devtype().type,)
-)
 
 
 if __name__ == "__main__":

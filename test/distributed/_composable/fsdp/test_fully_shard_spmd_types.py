@@ -585,41 +585,6 @@ class TestFullyShardSpmdTypes(TestCase):
         )
 
 
-class SpmdPendingGradModel(nn.Module):
-    def __init__(self, reference, mesh):
-        super().__init__()
-        self.tp_pg = mesh.get_group("tp")
-        self.replicated_weight = nn.Parameter(reference[0].weight.detach().clone())
-        self.sharded_weight = nn.Parameter(
-            reference[1].weight.detach().chunk(2)[mesh["tp"].get_local_rank()].clone()
-        )
-        dp_axis = spmd.MeshAxis.of(mesh.get_group("dp"))
-        tp_axis = spmd.MeshAxis.of(self.tp_pg)
-        spmd.assert_type(self.replicated_weight, {dp_axis: spmd.R, tp_axis: spmd.R})
-        spmd.assert_type(self.sharded_weight, {dp_axis: spmd.R, tp_axis: spmd.S(0)})
-        for param in self.parameters():
-            param.grad_dtype = torch.float32
-
-    def forward(self, inp):
-        output = inp @ self.replicated_weight.t()
-        output = spmd.redistribute(
-            output,
-            self.tp_pg,
-            src=spmd.S(0),
-            dst=spmd.R,
-            backward_options={"op_dtype": torch.float32},
-        )
-        output = output @ self.sharded_weight.t()
-        output = spmd.redistribute(
-            output,
-            self.tp_pg,
-            src=spmd.S(1),
-            dst=spmd.I,
-            backward_options={"op_dtype": torch.float32},
-        )
-        return output.sum()
-
-
 @unittest.skipUnless(dist._is_spmd_types_available(), "requires spmd_types")
 class TestFullyShardSpmdGradDtype(FSDPTest):
     @property
@@ -630,15 +595,19 @@ class TestFullyShardSpmdGradDtype(FSDPTest):
     def test_native_spmd_accumulation(self):
         device = get_devtype().type
         mesh = init_device_mesh(device, (2, 2), mesh_dim_names=("dp", "tp"))
-        reference = nn.Sequential(
-            nn.Linear(4, 4, bias=False, device=device, dtype=torch.bfloat16),
-            nn.Linear(4, 8, bias=False, device=device, dtype=torch.bfloat16),
-        )
-        for param in reference.parameters():
-            with torch.no_grad():
-                param.fill_(0.25)
+        dp_axis = spmd.MeshAxis.of(mesh.get_group("dp"))
+        tp_axis = spmd.MeshAxis.of(mesh.get_group("tp"))
+        model = SpmdLinear(mesh, seq_parallel=True).to(device, torch.bfloat16)
+        # The global computation is inp @ ref_weights[0] @ ref_weights[1].t()
+        ref_weights = [
+            torch.empty(n, 16, device=device, dtype=torch.bfloat16, requires_grad=True)
+            for n in (16, 32)
+        ]
+        for param in (*model.parameters(), *ref_weights):
+            nn.init.constant_(param, 0.25)
             param.grad_dtype = torch.float32
-        model = SpmdPendingGradModel(reference, mesh)
+        spmd.assert_type(model.unsharded_weight, {dp_axis: spmd.R, tp_axis: spmd.R})
+        spmd.assert_type(model.sharded_weight, {dp_axis: spmd.R, tp_axis: spmd.S(0)})
         fully_shard(
             model,
             mesh=mesh,
@@ -647,19 +616,20 @@ class TestFullyShardSpmdGradDtype(FSDPTest):
             reshard_after_forward=False,
         )
         model.set_reshard_after_backward(False)
-        dp_axis = spmd.MeshAxis.of(mesh.get_group("dp"))
-        tp_axis = spmd.MeshAxis.of(mesh.get_group("tp"))
         saved = []
+        arange = torch.arange(32, device=device, dtype=torch.bfloat16).view(1, 2, 16)
         for step in range(3):
             model.set_requires_gradient_sync(step == 2)
             inputs = [
-                torch.arange(8, device=device, dtype=torch.bfloat16).view(2, 4) / 8
-                + (rank + step + 1) / 2
-                for rank in range(self.world_size)
+                arange / 32 + (rank + step + 1) / 2 for rank in range(self.world_size)
             ]
             loss = (
                 sum(
-                    reference(torch.cat([inputs[rank] for rank in ranks])).sum()
+                    (
+                        torch.cat([inputs[rank] for rank in ranks], dim=1)
+                        @ ref_weights[0]
+                        @ ref_weights[1].t()
+                    ).sum()
                     for ranks in mesh.mesh.tolist()
                 )
                 / mesh["dp"].size()
@@ -673,7 +643,7 @@ class TestFullyShardSpmdGradDtype(FSDPTest):
                 spmd.assert_type(
                     inp,
                     {dp_axis: spmd.V, tp_axis: spmd.V},
-                    partition_spec=spmd.PartitionSpec((dp_axis, tp_axis), None),
+                    partition_spec=spmd.PartitionSpec(dp_axis, tp_axis, None),
                 )
                 model(inp).backward()
             if step == 2:
@@ -690,8 +660,8 @@ class TestFullyShardSpmdGradDtype(FSDPTest):
                 else:
                     saved.append(unreduced)
         model.reshard()
-        for param, ref_param in zip(model.parameters(), reference.parameters()):
-            self.assertEqual(param.grad.full_tensor(), ref_param.grad)
+        for param, ref_weight in zip(model.parameters(), ref_weights):
+            self.assertEqual(param.grad.full_tensor(), ref_weight.grad)
 
 
 if __name__ == "__main__":
