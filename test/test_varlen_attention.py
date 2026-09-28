@@ -937,24 +937,6 @@ class TestVarlenAttention(_VarlenVsSdpaMixin, NNTestCase):
         )
 
     @skipIfRocm
-    @setSdpaBackendsToDefaultFinally
-    @parametrize("dtype", [torch.bfloat16, torch.float16])
-    @parametrize("window_size", [(-1, -1), (-1, 0), [-1, 0]])
-    @parametrize("_should_use_cudnn", [True])
-    def test_cudnn_attention_varlen(
-        self, device, dtype, window_size, _should_use_cudnn
-    ):
-        self._test_varlen_vs_sdpa(
-            device,
-            dtype,
-            scale=None,
-            window_size=window_size,
-            backend="cudnn",
-            enable_gqa=False,
-            _should_use_cudnn=_should_use_cudnn,
-        )
-
-    @skipIfRocm
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
@@ -981,6 +963,549 @@ class TestVarlenAttention(_VarlenVsSdpaMixin, NNTestCase):
         self.assertTrue(out.requires_grad)
         self.assertFalse(lse.requires_grad)
         torch.autograd.grad(out.sum(), (q, k, v))
+
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179968")
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
+    )
+    @parametrize("dtype", [torch.bfloat16, torch.float16])
+    @parametrize("num_splits", [1, None])
+    @parametrize(
+        "window_size",
+        [
+            (-1, -1),
+            (-1, 0),
+            (1025, 1025),
+            (384, 0),  # edge case
+        ],
+    )
+    @parametrize(
+        "backend",
+        ["fa2"]
+        + (["fa3"] if IS_SM90 else [])
+        + (["fa4"] if SM100OrLater and not SM120OrLater else [])
+        + ["cudnn"],
+    )
+    def test_batch_invariance(
+        self, device, dtype, num_splits, window_size, backend, sdpa_backend=None
+    ):
+        use_cudnn = backend == "cudnn"
+        if use_cudnn and (
+            window_size not in ((-1, -1), (-1, 0)) or num_splits is not None
+        ):
+            self.skipTest("cuDNN does not support this window_size or num_splits")
+        if TEST_WITH_ROCM:
+            if num_splits is not None:
+                self.skipTest("num_splits is not supported on ROCm")
+            torch.backends.cuda.preferred_rocm_fa_library(sdpa_backend)
+        torch.manual_seed(42)
+
+        num_heads, head_dim = 2, 128
+        target_seq_len = 512
+        extra_seq_len = 1024
+
+        target_q = torch.randn(
+            target_seq_len, num_heads, head_dim, device=device, dtype=dtype
+        )
+        target_k = torch.randn(
+            target_seq_len, num_heads, head_dim, device=device, dtype=dtype
+        )
+        target_v = torch.randn(
+            target_seq_len, num_heads, head_dim, device=device, dtype=dtype
+        )
+
+        extra_q = torch.randn(
+            extra_seq_len, num_heads, head_dim, device=device, dtype=dtype
+        )
+        extra_k = torch.randn(
+            extra_seq_len, num_heads, head_dim, device=device, dtype=dtype
+        )
+        extra_v = torch.randn(
+            extra_seq_len, num_heads, head_dim, device=device, dtype=dtype
+        )
+
+        cu_seq_solo = torch.tensor(
+            [0, target_seq_len], device=device, dtype=torch.int32
+        )
+        cu_seq_batch = torch.tensor(
+            [0, target_seq_len, target_seq_len + extra_seq_len],
+            device=device,
+            dtype=torch.int32,
+        )
+
+        all_q = torch.cat([target_q, extra_q], dim=0)
+        all_k = torch.cat([target_k, extra_k], dim=0)
+        all_v = torch.cat([target_v, extra_v], dim=0)
+
+        forward_context = (
+            patch.object(
+                torch.ops.aten,
+                "_cudnn_attention_forward",
+                wraps=torch.ops.aten._cudnn_attention_forward,
+            )
+            if use_cudnn
+            else nullcontext()
+        )
+        # fa4 and cuDNN are batch invariant by default
+        with (
+            _use_backend(backend),
+            _use_cudnn_varlen(use_cudnn, device),
+            forward_context as cudnn_forward,
+            torch.no_grad(),
+        ):
+            solo_output = varlen_attn(
+                target_q,
+                target_k,
+                target_v,
+                cu_seq_solo,
+                cu_seq_solo,
+                target_seq_len,
+                target_seq_len,
+                window_size=window_size,
+                num_splits=num_splits,
+            )
+
+            batched_output = varlen_attn(
+                all_q,
+                all_k,
+                all_v,
+                cu_seq_batch,
+                cu_seq_batch,
+                extra_seq_len,
+                extra_seq_len,
+                window_size=window_size,
+                num_splits=num_splits,
+            )
+
+            solo_out_buf = torch.empty_like(target_q)
+            varlen_attn_out(
+                solo_out_buf,
+                target_q,
+                target_k,
+                target_v,
+                cu_seq_solo,
+                cu_seq_solo,
+                target_seq_len,
+                target_seq_len,
+                window_size=window_size,
+                num_splits=num_splits,
+            )
+
+            batched_out_buf = torch.empty_like(all_q)
+            varlen_attn_out(
+                batched_out_buf,
+                all_q,
+                all_k,
+                all_v,
+                cu_seq_batch,
+                cu_seq_batch,
+                extra_seq_len,
+                extra_seq_len,
+                window_size=window_size,
+                num_splits=num_splits,
+            )
+            if num_splits == 1:
+                self.assertEqual(solo_output, batched_output[:target_seq_len])
+                self.assertEqual(solo_out_buf, batched_out_buf[:target_seq_len])
+                self.assertEqual(solo_output, solo_out_buf)
+            elif use_cudnn:
+                self.assertEqual(solo_output, batched_output[:target_seq_len])
+                self.assertEqual(solo_out_buf, batched_out_buf[:target_seq_len])
+            else:
+                if backend == "fa3":
+                    self.assertNotEqual(solo_output, batched_output[:target_seq_len])
+                    self.assertNotEqual(solo_out_buf, batched_out_buf[:target_seq_len])
+
+        if use_cudnn and cudnn_forward.call_count == 0:
+            raise AssertionError(
+                "cuDNN varlen attention forward should have been called"
+            )
+
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
+    )
+    @decorateIf(
+        unittest.expectedFailure,
+        lambda params: params["backend"] != "fa2"
+        and any(kv_len < 128 for kv_len in params["actual_kv_lens"]),
+    )
+    @setSdpaBackendsToDefaultFinally
+    @parametrize(
+        "sdpa_backend",
+        ["aotriton", "ck"] if PLATFORM_SUPPORTS_CK_SDPA else ["aotriton"],
+    )
+    @parametrize("dtype", [torch.bfloat16, torch.float16])
+    @parametrize(
+        "actual_kv_lens",
+        [
+            [32, 64, 96, 48],
+            [1, 1, 1, 1],
+            [128, 128, 128, 128],
+            [1, 128, 1, 128],
+            [127, 63, 33, 17],
+        ],
+    )
+    @parametrize("backend", _varlen_backends(include_fa4_paged_kv=False))
+    def test_seqused_k_kv_cache(
+        self, device, dtype, actual_kv_lens, backend, sdpa_backend=None
+    ):
+        if TEST_WITH_ROCM:
+            if sdpa_backend == "ck":
+                self.skipTest("CK backend does not support seqused_k")
+            torch.backends.cuda.preferred_rocm_fa_library(sdpa_backend)
+
+        torch.manual_seed(42)
+
+        batch_size = 4
+        num_heads = 8
+        head_dim = 64
+        cache_size = 128
+
+        q_seqs = [
+            torch.randn(1, num_heads, head_dim, device=device, dtype=dtype)
+            for _ in range(batch_size)
+        ]
+        q_packed, cu_seq_q, max_q = pack_sequences(q_seqs, device)
+
+        k_seqs = [
+            torch.randn(kv_len, num_heads, head_dim, device=device, dtype=dtype)
+            for kv_len in actual_kv_lens
+        ]
+        v_seqs = [
+            torch.randn(kv_len, num_heads, head_dim, device=device, dtype=dtype)
+            for kv_len in actual_kv_lens
+        ]
+
+        k_cache_slots = []
+        v_cache_slots = []
+        for i in range(batch_size):
+            k_slot = torch.full(
+                (cache_size, num_heads, head_dim),
+                float("nan"),
+                device=device,
+                dtype=dtype,
+            )
+            v_slot = torch.full(
+                (cache_size, num_heads, head_dim),
+                float("nan"),
+                device=device,
+                dtype=dtype,
+            )
+            k_slot[: actual_kv_lens[i]] = k_seqs[i]
+            v_slot[: actual_kv_lens[i]] = v_seqs[i]
+            k_cache_slots.append(k_slot)
+            v_cache_slots.append(v_slot)
+
+        k_cache_packed = torch.cat(k_cache_slots, dim=0)
+        v_cache_packed = torch.cat(v_cache_slots, dim=0)
+        cu_seq_k_cache = torch.arange(
+            0,
+            (batch_size + 1) * cache_size,
+            cache_size,
+            device=device,
+            dtype=torch.int32,
+        )
+        seqused_k = torch.tensor(actual_kv_lens, device=device, dtype=torch.int32)
+
+        with _use_backend(backend), torch.no_grad():
+            output_cached = varlen_attn(
+                q_packed,
+                k_cache_packed,
+                v_cache_packed,
+                cu_seq_q,
+                cu_seq_k_cache,
+                max_q,
+                cache_size,
+                seqused_k=seqused_k,
+            )
+
+        k_real_packed, cu_seq_k_real, max_k_real = pack_sequences(k_seqs, device)
+        v_real_packed = torch.cat(v_seqs, dim=0)
+
+        with _use_backend(backend), torch.no_grad():
+            output_reference = varlen_attn(
+                q_packed,
+                k_real_packed,
+                v_real_packed,
+                cu_seq_q,
+                cu_seq_k_real,
+                max_q,
+                max_k_real,
+            )
+
+        self.assertFalse(output_cached.isnan().any())
+        self.assertEqual(output_cached, output_reference)
+
+        # varlen_attn_out with seqused_k should match
+        with _use_backend(backend), torch.no_grad():
+            out_buf = torch.empty_like(q_packed)
+            output_out = varlen_attn_out(
+                out_buf,
+                q_packed,
+                k_cache_packed,
+                v_cache_packed,
+                cu_seq_q,
+                cu_seq_k_cache,
+                max_q,
+                cache_size,
+                seqused_k=seqused_k,
+            )
+            self.assertEqual(output_out.data_ptr(), out_buf.data_ptr())
+            self.assertEqual(out_buf, output_cached)
+
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
+    )
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm does not support block_table")
+    @parametrize("dtype", [torch.bfloat16, torch.float16])
+    @parametrize("page_size", [32, 64, 128, 256])
+    @parametrize("compile", [False, True])
+    @parametrize(
+        "actual_kv_lens",
+        [
+            [32, 64, 96, 48],
+            [1, 1, 1, 1],
+            [128, 128, 128, 128],
+            [1, 128, 1, 128],
+            [127, 63, 33, 17],
+        ],
+    )
+    @parametrize(
+        "backend",
+        _varlen_backends(include_fa4_paged_kv=True),
+    )
+    def test_block_table_kv_cache(
+        self, device, dtype, page_size, compile, actual_kv_lens, backend
+    ):
+        if backend == "fa2" and page_size % 256 != 0:
+            self.skipTest("FA2 paged KV requires page_size divisible by 256")
+
+        # varlen_attn lives in a Dynamo skipfile, so torch.compile wraps it onto
+        # the process-global wrap_inline "inner" frame - the same code object the
+        # fa3/fa4 aten-op compile below uses. Compiling this whole matrix in one
+        # process accumulates recompiles on that shared cache until it hits
+        # recompile_limit; the non-fullgraph aten-op compile then pins "inner" to
+        # RUN_ONLY, and a later fullgraph compile silently finds no compiled
+        # frames. Reset per parametrization so each stays independent.
+        torch._dynamo.reset()
+
+        torch.manual_seed(42)
+
+        batch_size = 4
+        num_heads = 8
+        head_dim = 64
+        max_kv = max(actual_kv_lens)
+        max_pages_per_seq = (max_kv + page_size - 1) // page_size
+        cache_size = max_pages_per_seq * page_size
+        total_pages = batch_size * max_pages_per_seq
+
+        q_seqs = [
+            torch.randn(1, num_heads, head_dim, device=device, dtype=dtype)
+            for _ in range(batch_size)
+        ]
+        q_packed, cu_seq_q, max_q = pack_sequences(q_seqs, device)
+
+        k_pages = torch.randn(
+            total_pages, page_size, num_heads, head_dim, device=device, dtype=dtype
+        )
+        v_pages = torch.randn(
+            total_pages, page_size, num_heads, head_dim, device=device, dtype=dtype
+        )
+        block_table = torch.randperm(
+            total_pages, device=device, dtype=torch.int32
+        ).view(batch_size, max_pages_per_seq)
+        seqused_k = torch.tensor(actual_kv_lens, device=device, dtype=torch.int32)
+
+        k_gathered = gather_paged_cache(k_pages, block_table)
+        v_gathered = gather_paged_cache(v_pages, block_table)
+        k_seqs = [k_gathered[i, : actual_kv_lens[i]] for i in range(batch_size)]
+        v_seqs = [v_gathered[i, : actual_kv_lens[i]] for i in range(batch_size)]
+
+        k_real_packed, cu_seq_k_real, max_k_real = pack_sequences(k_seqs, device)
+        v_real_packed = torch.cat(v_seqs, dim=0)
+
+        attn_fn = torch.compile(varlen_attn, fullgraph=True) if compile else varlen_attn
+
+        # Reference: no block_table
+        with _use_backend(backend), torch.no_grad():
+            output_reference = varlen_attn(
+                q_packed,
+                k_real_packed,
+                v_real_packed,
+                cu_seq_q,
+                cu_seq_k_real,
+                max_q,
+                max_k_real,
+            )
+
+        cu_seq_k = torch.arange(
+            0,
+            (batch_size + 1) * cache_size,
+            cache_size,
+            device=device,
+            dtype=torch.int32,
+        )
+
+        # FA2 requires cu_seq_k for paged KV; FA3/FA4 pass None
+        cu_seq_k_paged = cu_seq_k if backend == "fa2" else None
+
+        with _use_backend(backend), torch.no_grad():
+            output_paged = attn_fn(
+                q_packed,
+                k_pages,
+                v_pages,
+                cu_seq_q,
+                cu_seq_k_paged,
+                max_q,
+                cache_size,
+                seqused_k=seqused_k,
+                block_table=block_table,
+            )
+
+        self.assertEqual(output_paged, output_reference)
+
+        # varlen_attn_out with paged KV cache should match
+        with _use_backend(backend), torch.no_grad():
+            out_buf = torch.empty_like(q_packed)
+            output_out = varlen_attn_out(
+                out_buf,
+                q_packed,
+                k_pages,
+                v_pages,
+                cu_seq_q,
+                cu_seq_k_paged,
+                max_q,
+                cache_size,
+                seqused_k=seqused_k,
+                block_table=block_table,
+            )
+            self.assertEqual(output_out.data_ptr(), out_buf.data_ptr())
+            self.assertEqual(out_buf, output_paged)
+
+        # compile the lower level aten op (FA3 only, will cause graph break)
+        if compile and backend != "fa2":
+            compiled_aten_op = torch.compile(
+                torch.ops.aten._flash_attention_forward_no_dropout_inplace
+            )
+            with _use_backend(backend), torch.no_grad():
+                out_buf = torch.empty_like(q_packed)
+                compiled_aten_op(
+                    out_buf,
+                    q_packed,
+                    k_pages,
+                    v_pages,
+                    cu_seq_q,
+                    None,
+                    max_q,
+                    cache_size,
+                    0.0,
+                    False,
+                    False,
+                    seqused_k=seqused_k,
+                    block_table=block_table,
+                )
+            self.assertEqual(out_buf, output_reference)
+
+        # With num_splits=1, paged and contiguous must be bit-identical
+        if backend == "fa2":
+            with _use_backend(backend), torch.no_grad():
+                ref_num_splits = varlen_attn(
+                    q_packed,
+                    k_real_packed,
+                    v_real_packed,
+                    cu_seq_q,
+                    cu_seq_k_real,
+                    max_q,
+                    max_k_real,
+                    num_splits=1,
+                )
+                paged_num_splits = varlen_attn(
+                    q_packed,
+                    k_pages,
+                    v_pages,
+                    cu_seq_q,
+                    cu_seq_k_paged,
+                    max_q,
+                    cache_size,
+                    seqused_k=seqused_k,
+                    block_table=block_table,
+                    num_splits=1,
+                )
+            self.assertTrue(torch.equal(paged_num_splits, ref_num_splits))
+
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
+    )
+    @parametrize("dtype", [torch.bfloat16, torch.float16])
+    @parametrize(
+        "backend",
+        ["fa2"]
+        + (["fa3"] if IS_SM90 else [])
+        + (["fa4"] if SM100OrLater and not SM120OrLater else []),
+    )
+    def test_enable_gqa(self, device, dtype, backend):
+        torch.manual_seed(42)
+
+        head_dim = 64
+        seq_len = 512
+        num_heads_q, num_heads_k = 16, 4
+        total_tokens = 2 * seq_len
+
+        q = torch.randn(total_tokens, num_heads_q, head_dim, device=device, dtype=dtype)
+        k = torch.randn(total_tokens, num_heads_k, head_dim, device=device, dtype=dtype)
+        v = torch.randn(total_tokens, num_heads_k, head_dim, device=device, dtype=dtype)
+        cu_seq = torch.tensor(
+            [0, seq_len, total_tokens], device=device, dtype=torch.int32
+        )
+
+        with self.assertRaisesRegex(ValueError, "enable_gqa=True"):
+            varlen_attn(q, k, v, cu_seq, cu_seq, seq_len, seq_len)
+
+        with self.assertRaisesRegex(ValueError, "enable_gqa=True"):
+            varlen_attn_out(
+                torch.empty_like(q), q, k, v, cu_seq, cu_seq, seq_len, seq_len
+            )
+
+        k_bad = torch.randn(total_tokens, 3, head_dim, device=device, dtype=dtype)
+        v_bad = torch.randn(total_tokens, 3, head_dim, device=device, dtype=dtype)
+        with self.assertRaisesRegex(ValueError, "multiple of kv heads"):
+            varlen_attn(
+                q, k_bad, v_bad, cu_seq, cu_seq, seq_len, seq_len, enable_gqa=True
+            )
+
+        with _use_backend(backend), torch.no_grad():
+            out = varlen_attn(
+                q, k, v, cu_seq, cu_seq, seq_len, seq_len, enable_gqa=True
+            )
+            out_buf = torch.empty_like(q)
+            varlen_attn_out(
+                out_buf, q, k, v, cu_seq, cu_seq, seq_len, seq_len, enable_gqa=True
+            )
+            self.assertEqual(out_buf, out)
+
+
+class TestVarlenAttentionCuDNN(_VarlenVsSdpaMixin, NNTestCase):
+    # cuDNN is the only varlen backend with dedicated aten ops
+    # (_cudnn_attention_forward/_backward) and it is only ever selected for a
+    # CUDA query, so these tests cannot be shared with other backends.
+
+    @skipIfRocm
+    @setSdpaBackendsToDefaultFinally
+    @parametrize("dtype", [torch.bfloat16, torch.float16])
+    @parametrize("window_size", [(-1, -1), (-1, 0), [-1, 0]])
+    @parametrize("_should_use_cudnn", [True])
+    def test_cudnn_attention_varlen(
+        self, device, dtype, window_size, _should_use_cudnn
+    ):
+        self._test_varlen_vs_sdpa(
+            device,
+            dtype,
+            scale=None,
+            window_size=window_size,
+            backend="fa2",
+            enable_gqa=False,
+            _should_use_cudnn=_should_use_cudnn,
+        )
 
     @skipIfRocm
     @unittest.skipIf(
@@ -1501,474 +2026,6 @@ class TestVarlenAttention(_VarlenVsSdpaMixin, NNTestCase):
         ):
             varlen_attn(q, k, v, cu_seq_q, cu_seq_k, 1, 64)
         self.assertEqual(cudnn_forward.call_count, 0)
-
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
-    )
-    @parametrize("dtype", [torch.bfloat16, torch.float16])
-    @parametrize("num_splits", [1, None])
-    @parametrize(
-        "window_size",
-        [
-            (-1, -1),
-            (-1, 0),
-            (1025, 1025),
-            (384, 0),  # edge case
-        ],
-    )
-    @parametrize(
-        "backend",
-        ["fa2"]
-        + (["fa3"] if IS_SM90 else [])
-        + (["fa4"] if SM100OrLater and not SM120OrLater else [])
-        + ["cudnn"],
-    )
-    def test_batch_invariance(
-        self, device, dtype, num_splits, window_size, backend, sdpa_backend=None
-    ):
-        use_cudnn = backend == "cudnn"
-        if use_cudnn and (
-            window_size not in ((-1, -1), (-1, 0)) or num_splits is not None
-        ):
-            self.skipTest("cuDNN does not support this window_size or num_splits")
-        if TEST_WITH_ROCM:
-            if num_splits is not None:
-                self.skipTest("num_splits is not supported on ROCm")
-            torch.backends.cuda.preferred_rocm_fa_library(sdpa_backend)
-        torch.manual_seed(42)
-
-        num_heads, head_dim = 2, 128
-        target_seq_len = 512
-        extra_seq_len = 1024
-
-        target_q = torch.randn(
-            target_seq_len, num_heads, head_dim, device=device, dtype=dtype
-        )
-        target_k = torch.randn(
-            target_seq_len, num_heads, head_dim, device=device, dtype=dtype
-        )
-        target_v = torch.randn(
-            target_seq_len, num_heads, head_dim, device=device, dtype=dtype
-        )
-
-        extra_q = torch.randn(
-            extra_seq_len, num_heads, head_dim, device=device, dtype=dtype
-        )
-        extra_k = torch.randn(
-            extra_seq_len, num_heads, head_dim, device=device, dtype=dtype
-        )
-        extra_v = torch.randn(
-            extra_seq_len, num_heads, head_dim, device=device, dtype=dtype
-        )
-
-        cu_seq_solo = torch.tensor(
-            [0, target_seq_len], device=device, dtype=torch.int32
-        )
-        cu_seq_batch = torch.tensor(
-            [0, target_seq_len, target_seq_len + extra_seq_len],
-            device=device,
-            dtype=torch.int32,
-        )
-
-        all_q = torch.cat([target_q, extra_q], dim=0)
-        all_k = torch.cat([target_k, extra_k], dim=0)
-        all_v = torch.cat([target_v, extra_v], dim=0)
-
-        forward_context = (
-            patch.object(
-                torch.ops.aten,
-                "_cudnn_attention_forward",
-                wraps=torch.ops.aten._cudnn_attention_forward,
-            )
-            if use_cudnn
-            else nullcontext()
-        )
-        # fa4 and cuDNN are batch invariant by default
-        with (
-            _use_backend(backend),
-            _use_cudnn_varlen(use_cudnn, device),
-            forward_context as cudnn_forward,
-            torch.no_grad(),
-        ):
-            solo_output = varlen_attn(
-                target_q,
-                target_k,
-                target_v,
-                cu_seq_solo,
-                cu_seq_solo,
-                target_seq_len,
-                target_seq_len,
-                window_size=window_size,
-                num_splits=num_splits,
-            )
-
-            batched_output = varlen_attn(
-                all_q,
-                all_k,
-                all_v,
-                cu_seq_batch,
-                cu_seq_batch,
-                extra_seq_len,
-                extra_seq_len,
-                window_size=window_size,
-                num_splits=num_splits,
-            )
-
-            solo_out_buf = torch.empty_like(target_q)
-            varlen_attn_out(
-                solo_out_buf,
-                target_q,
-                target_k,
-                target_v,
-                cu_seq_solo,
-                cu_seq_solo,
-                target_seq_len,
-                target_seq_len,
-                window_size=window_size,
-                num_splits=num_splits,
-            )
-
-            batched_out_buf = torch.empty_like(all_q)
-            varlen_attn_out(
-                batched_out_buf,
-                all_q,
-                all_k,
-                all_v,
-                cu_seq_batch,
-                cu_seq_batch,
-                extra_seq_len,
-                extra_seq_len,
-                window_size=window_size,
-                num_splits=num_splits,
-            )
-            if num_splits == 1:
-                self.assertEqual(solo_output, batched_output[:target_seq_len])
-                self.assertEqual(solo_out_buf, batched_out_buf[:target_seq_len])
-                self.assertEqual(solo_output, solo_out_buf)
-            elif use_cudnn:
-                self.assertEqual(solo_output, batched_output[:target_seq_len])
-                self.assertEqual(solo_out_buf, batched_out_buf[:target_seq_len])
-            else:
-                if backend == "fa3":
-                    self.assertNotEqual(solo_output, batched_output[:target_seq_len])
-                    self.assertNotEqual(solo_out_buf, batched_out_buf[:target_seq_len])
-
-        if use_cudnn and cudnn_forward.call_count == 0:
-            raise AssertionError(
-                "cuDNN varlen attention forward should have been called"
-            )
-
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
-    )
-    @decorateIf(
-        unittest.expectedFailure,
-        lambda params: params["backend"] != "fa2"
-        and any(kv_len < 128 for kv_len in params["actual_kv_lens"]),
-    )
-    @setSdpaBackendsToDefaultFinally
-    @parametrize(
-        "sdpa_backend",
-        ["aotriton", "ck"] if PLATFORM_SUPPORTS_CK_SDPA else ["aotriton"],
-    )
-    @parametrize("dtype", [torch.bfloat16, torch.float16])
-    @parametrize(
-        "actual_kv_lens",
-        [
-            [32, 64, 96, 48],
-            [1, 1, 1, 1],
-            [128, 128, 128, 128],
-            [1, 128, 1, 128],
-            [127, 63, 33, 17],
-        ],
-    )
-    @parametrize("backend", _varlen_backends(include_fa4_paged_kv=False))
-    def test_seqused_k_kv_cache(
-        self, device, dtype, actual_kv_lens, backend, sdpa_backend=None
-    ):
-        if TEST_WITH_ROCM:
-            if sdpa_backend == "ck":
-                self.skipTest("CK backend does not support seqused_k")
-            torch.backends.cuda.preferred_rocm_fa_library(sdpa_backend)
-
-        torch.manual_seed(42)
-
-        batch_size = 4
-        num_heads = 8
-        head_dim = 64
-        cache_size = 128
-
-        q_seqs = [
-            torch.randn(1, num_heads, head_dim, device=device, dtype=dtype)
-            for _ in range(batch_size)
-        ]
-        q_packed, cu_seq_q, max_q = pack_sequences(q_seqs, device)
-
-        k_seqs = [
-            torch.randn(kv_len, num_heads, head_dim, device=device, dtype=dtype)
-            for kv_len in actual_kv_lens
-        ]
-        v_seqs = [
-            torch.randn(kv_len, num_heads, head_dim, device=device, dtype=dtype)
-            for kv_len in actual_kv_lens
-        ]
-
-        k_cache_slots = []
-        v_cache_slots = []
-        for i in range(batch_size):
-            k_slot = torch.full(
-                (cache_size, num_heads, head_dim),
-                float("nan"),
-                device=device,
-                dtype=dtype,
-            )
-            v_slot = torch.full(
-                (cache_size, num_heads, head_dim),
-                float("nan"),
-                device=device,
-                dtype=dtype,
-            )
-            k_slot[: actual_kv_lens[i]] = k_seqs[i]
-            v_slot[: actual_kv_lens[i]] = v_seqs[i]
-            k_cache_slots.append(k_slot)
-            v_cache_slots.append(v_slot)
-
-        k_cache_packed = torch.cat(k_cache_slots, dim=0)
-        v_cache_packed = torch.cat(v_cache_slots, dim=0)
-        cu_seq_k_cache = torch.arange(
-            0,
-            (batch_size + 1) * cache_size,
-            cache_size,
-            device=device,
-            dtype=torch.int32,
-        )
-        seqused_k = torch.tensor(actual_kv_lens, device=device, dtype=torch.int32)
-
-        with _use_backend(backend), torch.no_grad():
-            output_cached = varlen_attn(
-                q_packed,
-                k_cache_packed,
-                v_cache_packed,
-                cu_seq_q,
-                cu_seq_k_cache,
-                max_q,
-                cache_size,
-                seqused_k=seqused_k,
-            )
-
-        k_real_packed, cu_seq_k_real, max_k_real = pack_sequences(k_seqs, device)
-        v_real_packed = torch.cat(v_seqs, dim=0)
-
-        with _use_backend(backend), torch.no_grad():
-            output_reference = varlen_attn(
-                q_packed,
-                k_real_packed,
-                v_real_packed,
-                cu_seq_q,
-                cu_seq_k_real,
-                max_q,
-                max_k_real,
-            )
-
-        self.assertFalse(output_cached.isnan().any())
-        self.assertEqual(output_cached, output_reference)
-
-        # varlen_attn_out with seqused_k should match
-        with _use_backend(backend), torch.no_grad():
-            out_buf = torch.empty_like(q_packed)
-            output_out = varlen_attn_out(
-                out_buf,
-                q_packed,
-                k_cache_packed,
-                v_cache_packed,
-                cu_seq_q,
-                cu_seq_k_cache,
-                max_q,
-                cache_size,
-                seqused_k=seqused_k,
-            )
-            self.assertEqual(output_out.data_ptr(), out_buf.data_ptr())
-            self.assertEqual(out_buf, output_cached)
-
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
-    )
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm does not support block_table")
-    @parametrize("dtype", [torch.bfloat16, torch.float16])
-    @parametrize("page_size", [32, 64, 128, 256])
-    @parametrize("compile", [False, True])
-    @parametrize(
-        "actual_kv_lens",
-        [
-            [32, 64, 96, 48],
-            [1, 1, 1, 1],
-            [128, 128, 128, 128],
-            [1, 128, 1, 128],
-            [127, 63, 33, 17],
-        ],
-    )
-    @parametrize(
-        "backend",
-        _varlen_backends(include_fa4_paged_kv=True),
-    )
-    def test_block_table_kv_cache(
-        self, device, dtype, page_size, compile, actual_kv_lens, backend
-    ):
-        if backend == "fa2" and page_size % 256 != 0:
-            self.skipTest("FA2 paged KV requires page_size divisible by 256")
-
-        # varlen_attn lives in a Dynamo skipfile, so torch.compile wraps it onto
-        # the process-global wrap_inline "inner" frame - the same code object the
-        # fa3/fa4 aten-op compile below uses. Compiling this whole matrix in one
-        # process accumulates recompiles on that shared cache until it hits
-        # recompile_limit; the non-fullgraph aten-op compile then pins "inner" to
-        # RUN_ONLY, and a later fullgraph compile silently finds no compiled
-        # frames. Reset per parametrization so each stays independent.
-        torch._dynamo.reset()
-
-        torch.manual_seed(42)
-
-        batch_size = 4
-        num_heads = 8
-        head_dim = 64
-        max_kv = max(actual_kv_lens)
-        max_pages_per_seq = (max_kv + page_size - 1) // page_size
-        cache_size = max_pages_per_seq * page_size
-        total_pages = batch_size * max_pages_per_seq
-
-        q_seqs = [
-            torch.randn(1, num_heads, head_dim, device=device, dtype=dtype)
-            for _ in range(batch_size)
-        ]
-        q_packed, cu_seq_q, max_q = pack_sequences(q_seqs, device)
-
-        k_pages = torch.randn(
-            total_pages, page_size, num_heads, head_dim, device=device, dtype=dtype
-        )
-        v_pages = torch.randn(
-            total_pages, page_size, num_heads, head_dim, device=device, dtype=dtype
-        )
-        block_table = torch.randperm(
-            total_pages, device=device, dtype=torch.int32
-        ).view(batch_size, max_pages_per_seq)
-        seqused_k = torch.tensor(actual_kv_lens, device=device, dtype=torch.int32)
-
-        k_gathered = gather_paged_cache(k_pages, block_table)
-        v_gathered = gather_paged_cache(v_pages, block_table)
-        k_seqs = [k_gathered[i, : actual_kv_lens[i]] for i in range(batch_size)]
-        v_seqs = [v_gathered[i, : actual_kv_lens[i]] for i in range(batch_size)]
-
-        k_real_packed, cu_seq_k_real, max_k_real = pack_sequences(k_seqs, device)
-        v_real_packed = torch.cat(v_seqs, dim=0)
-
-        attn_fn = torch.compile(varlen_attn, fullgraph=True) if compile else varlen_attn
-
-        # Reference: no block_table
-        with _use_backend(backend), torch.no_grad():
-            output_reference = varlen_attn(
-                q_packed,
-                k_real_packed,
-                v_real_packed,
-                cu_seq_q,
-                cu_seq_k_real,
-                max_q,
-                max_k_real,
-            )
-
-        cu_seq_k = torch.arange(
-            0,
-            (batch_size + 1) * cache_size,
-            cache_size,
-            device=device,
-            dtype=torch.int32,
-        )
-
-        # FA2 requires cu_seq_k for paged KV; FA3/FA4 pass None
-        cu_seq_k_paged = cu_seq_k if backend == "fa2" else None
-
-        with _use_backend(backend), torch.no_grad():
-            output_paged = attn_fn(
-                q_packed,
-                k_pages,
-                v_pages,
-                cu_seq_q,
-                cu_seq_k_paged,
-                max_q,
-                cache_size,
-                seqused_k=seqused_k,
-                block_table=block_table,
-            )
-
-        self.assertEqual(output_paged, output_reference)
-
-        # varlen_attn_out with paged KV cache should match
-        with _use_backend(backend), torch.no_grad():
-            out_buf = torch.empty_like(q_packed)
-            output_out = varlen_attn_out(
-                out_buf,
-                q_packed,
-                k_pages,
-                v_pages,
-                cu_seq_q,
-                cu_seq_k_paged,
-                max_q,
-                cache_size,
-                seqused_k=seqused_k,
-                block_table=block_table,
-            )
-            self.assertEqual(output_out.data_ptr(), out_buf.data_ptr())
-            self.assertEqual(out_buf, output_paged)
-
-        # compile the lower level aten op (FA3 only, will cause graph break)
-        if compile and backend != "fa2":
-            compiled_aten_op = torch.compile(
-                torch.ops.aten._flash_attention_forward_no_dropout_inplace
-            )
-            with _use_backend(backend), torch.no_grad():
-                out_buf = torch.empty_like(q_packed)
-                compiled_aten_op(
-                    out_buf,
-                    q_packed,
-                    k_pages,
-                    v_pages,
-                    cu_seq_q,
-                    None,
-                    max_q,
-                    cache_size,
-                    0.0,
-                    False,
-                    False,
-                    seqused_k=seqused_k,
-                    block_table=block_table,
-                )
-            self.assertEqual(out_buf, output_reference)
-
-        # With num_splits=1, paged and contiguous must be bit-identical
-        if backend == "fa2":
-            with _use_backend(backend), torch.no_grad():
-                ref_num_splits = varlen_attn(
-                    q_packed,
-                    k_real_packed,
-                    v_real_packed,
-                    cu_seq_q,
-                    cu_seq_k_real,
-                    max_q,
-                    max_k_real,
-                    num_splits=1,
-                )
-                paged_num_splits = varlen_attn(
-                    q_packed,
-                    k_pages,
-                    v_pages,
-                    cu_seq_q,
-                    cu_seq_k_paged,
-                    max_q,
-                    cache_size,
-                    seqused_k=seqused_k,
-                    block_table=block_table,
-                    num_splits=1,
-                )
-            self.assertTrue(torch.equal(paged_num_splits, ref_num_splits))
 
     @skipIfRocm
     @parametrize("dtype", [torch.bfloat16, torch.float16])
@@ -2609,59 +2666,10 @@ class TestVarlenAttention(_VarlenVsSdpaMixin, NNTestCase):
         ):
             torch.ops.aten._cudnn_attention_forward(**(aten_kwargs | {"query": q_grad}))
 
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
-    )
-    @parametrize("dtype", [torch.bfloat16, torch.float16])
-    @parametrize(
-        "backend",
-        ["fa2"]
-        + (["fa3"] if IS_SM90 else [])
-        + (["fa4"] if SM100OrLater and not SM120OrLater else []),
-    )
-    def test_enable_gqa(self, device, dtype, backend):
-        torch.manual_seed(42)
-
-        head_dim = 64
-        seq_len = 512
-        num_heads_q, num_heads_k = 16, 4
-        total_tokens = 2 * seq_len
-
-        q = torch.randn(total_tokens, num_heads_q, head_dim, device=device, dtype=dtype)
-        k = torch.randn(total_tokens, num_heads_k, head_dim, device=device, dtype=dtype)
-        v = torch.randn(total_tokens, num_heads_k, head_dim, device=device, dtype=dtype)
-        cu_seq = torch.tensor(
-            [0, seq_len, total_tokens], device=device, dtype=torch.int32
-        )
-
-        with self.assertRaisesRegex(ValueError, "enable_gqa=True"):
-            varlen_attn(q, k, v, cu_seq, cu_seq, seq_len, seq_len)
-
-        with self.assertRaisesRegex(ValueError, "enable_gqa=True"):
-            varlen_attn_out(
-                torch.empty_like(q), q, k, v, cu_seq, cu_seq, seq_len, seq_len
-            )
-
-        k_bad = torch.randn(total_tokens, 3, head_dim, device=device, dtype=dtype)
-        v_bad = torch.randn(total_tokens, 3, head_dim, device=device, dtype=dtype)
-        with self.assertRaisesRegex(ValueError, "multiple of kv heads"):
-            varlen_attn(
-                q, k_bad, v_bad, cu_seq, cu_seq, seq_len, seq_len, enable_gqa=True
-            )
-
-        with _use_backend(backend), torch.no_grad():
-            out = varlen_attn(
-                q, k, v, cu_seq, cu_seq, seq_len, seq_len, enable_gqa=True
-            )
-            out_buf = torch.empty_like(q)
-            varlen_attn_out(
-                out_buf, q, k, v, cu_seq, cu_seq, seq_len, seq_len, enable_gqa=True
-            )
-            self.assertEqual(out_buf, out)
-
 
 instantiate_device_type_tests(TestVarlenAttentionDevice, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestVarlenAttention, globals(), only_for=("cuda",))
+instantiate_device_type_tests(TestVarlenAttentionCuDNN, globals(), only_for=("cuda",))
 
 if __name__ == "__main__":
     run_tests()
