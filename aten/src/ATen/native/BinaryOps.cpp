@@ -1659,8 +1659,7 @@ Tensor special_xlogy(const Tensor& x, const Scalar& y) {
 
 // add.Tensor meta kernel
 Tensor add_Tensor_meta(const Tensor& self, const Tensor& other, const Scalar& alpha) {
-  const bool symbolic = self.unsafeGetTensorImpl()->has_symbolic_sizes_strides() ||
-      other.unsafeGetTensorImpl()->has_symbolic_sizes_strides() || alpha.isSymInt();
+  const bool symbolic = is_symbolic_operand(self) || is_symbolic_operand(other) || alpha.isSymInt();
   if (symbolic) {
     if (auto out = fast_binary_impl(self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::DEFAULT); out.defined()) {
       return out;
@@ -1678,8 +1677,7 @@ Tensor add_Tensor_meta(const Tensor& self, const Tensor& other, const Scalar& al
 
 // sub.Tensor meta kernel
 Tensor sub_Tensor_meta(const Tensor& self, const Tensor& other, const Scalar& alpha) {
-  const bool symbolic = self.unsafeGetTensorImpl()->has_symbolic_sizes_strides() ||
-      other.unsafeGetTensorImpl()->has_symbolic_sizes_strides() || alpha.isSymInt();
+  const bool symbolic = is_symbolic_operand(self) || is_symbolic_operand(other) || alpha.isSymInt();
   if (symbolic) {
     if (auto out = fast_binary_impl(self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::DEFAULT); out.defined()) {
       return out;
@@ -1708,8 +1706,7 @@ Tensor sub_Tensor_meta(const Tensor& self, const Tensor& other, const Scalar& al
 
 // mul.Tensor meta kernel
 Tensor mul_Tensor_meta(const Tensor& self, const Tensor& other) {
-  const bool symbolic = self.unsafeGetTensorImpl()->has_symbolic_sizes_strides() ||
-      other.unsafeGetTensorImpl()->has_symbolic_sizes_strides();
+  const bool symbolic = is_symbolic_operand(self) || is_symbolic_operand(other);
   if (symbolic) {
     if (auto out = fast_binary_impl(self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::DEFAULT); out.defined()) {
       return out;
@@ -1720,8 +1717,7 @@ Tensor mul_Tensor_meta(const Tensor& self, const Tensor& other) {
 
 // div.Tensor meta kernel
 Tensor div_Tensor_meta(const Tensor& self, const Tensor& other) {
-  const bool symbolic = self.unsafeGetTensorImpl()->has_symbolic_sizes_strides() ||
-      other.unsafeGetTensorImpl()->has_symbolic_sizes_strides();
+  const bool symbolic = is_symbolic_operand(self) || is_symbolic_operand(other);
   if (symbolic) {
     if (auto out = fast_binary_impl(self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::INT_TO_FLOAT); out.defined()) {
       return out;
@@ -1750,32 +1746,24 @@ Tensor& add__Tensor_meta(Tensor& self, const Tensor& other, const Scalar& /*alph
 // Python fake runs the refs for the ops below, under FakeTensorMode for
 // symbolic inputs and as the Meta kernel otherwise.
 Tensor bitwise_and_Tensor_meta(const Tensor& self, const Tensor& other) {
-  const bool symbolic = self.unsafeGetTensorImpl()->has_symbolic_sizes_strides() ||
-      other.unsafeGetTensorImpl()->has_symbolic_sizes_strides();
+  const bool symbolic = is_symbolic_operand(self) || is_symbolic_operand(other);
   return elementwise_binary_ref_meta("bitwise_and", self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::DEFAULT, symbolic);
 }
 
 Tensor le_Tensor_meta(const Tensor& self, const Tensor& other) {
-  const bool symbolic = self.unsafeGetTensorImpl()->has_symbolic_sizes_strides() ||
-      other.unsafeGetTensorImpl()->has_symbolic_sizes_strides();
+  const bool symbolic = is_symbolic_operand(self) || is_symbolic_operand(other);
   return elementwise_binary_ref_meta(
       "le", self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::ALWAYS_BOOL, symbolic, /*supports_lhs_python_scalar=*/false);
 }
 
 Tensor le_Scalar_meta(const Tensor& self, const Scalar& other) {
-  const bool symbolic = self.unsafeGetTensorImpl()->has_symbolic_sizes_strides() || other.isSymInt();
+  const bool symbolic = is_symbolic_operand(self) || other.isSymInt();
   return elementwise_binary_ref_meta(
-      "le",
-      self,
-      python_number(other),
-      ELEMENTWISE_TYPE_PROMOTION_KIND::ALWAYS_BOOL,
-      symbolic,
-      /*supports_lhs_python_scalar=*/false);
+      "le", self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::ALWAYS_BOOL, symbolic, /*supports_lhs_python_scalar=*/false);
 }
 
 Tensor eq_Tensor_meta(const Tensor& self, const Tensor& other) {
-  const bool symbolic = self.unsafeGetTensorImpl()->has_symbolic_sizes_strides() ||
-      other.unsafeGetTensorImpl()->has_symbolic_sizes_strides();
+  const bool symbolic = is_symbolic_operand(self) || is_symbolic_operand(other);
   return elementwise_binary_ref_meta(
       "eq", self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::ALWAYS_BOOL, symbolic, /*supports_lhs_python_scalar=*/false);
 }
