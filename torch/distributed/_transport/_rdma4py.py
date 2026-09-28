@@ -119,9 +119,8 @@ class IBVerbsMutableMemoryView(IBVerbsMemoryView):
 
 
 class IBVerbsMemory:
-    def __init__(self, registration: _Registration, reused: bool = False) -> None:
+    def __init__(self, registration: _Registration) -> None:
         self._registration = registration
-        self._reused = reused
 
     def _range(self, offset: int | None, length: int | None) -> tuple[int, int]:
         offset = 0 if offset is None else int(offset)
@@ -154,9 +153,6 @@ class IBVerbsMemory:
             self._registration.length,
             int(self._registration.mr.rkey),
         )
-
-    def reused_registration(self) -> bool:
-        return self._reused
 
 
 class _GPUNetIOProvider(Protocol):
@@ -764,7 +760,7 @@ class IBVerbsTransport(_BlockingTransport):
         length = tensor.numel() * tensor.element_size()
         key = (tensor.data_ptr(), length)
         if registration := self._registrations.get(key):
-            return IBVerbsMemory(registration, reused=True)
+            return IBVerbsMemory(registration)
         access = (
             self._ib.AccessFlags.LOCAL_WRITE
             | self._ib.AccessFlags.REMOTE_WRITE

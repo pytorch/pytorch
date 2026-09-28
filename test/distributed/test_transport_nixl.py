@@ -190,7 +190,9 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
     def test_unregister_invalidates_aliases_and_views(self):
         tensor = torch.ones(8)
         first, second, memory, remote = self.registered_pair(tensor)
-        alias = first.register_memory(tensor)
+        with patch.object(first._agent, "register_memory") as register:
+            alias = first.register_memory(tensor)
+            register.assert_not_called()
         view = alias.to_view()
         agent = first._agent
         with patch.object(
@@ -211,7 +213,8 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
         with self.assertRaisesRegex(RuntimeError, "unregistered"):
             first.write(view, remote)
         fresh = first.register_memory(tensor)
-        self.assertFalse(fresh.reused_registration())
+        self.assertIsNot(fresh._registration, memory._registration)
+        self.assertEqual(len(agent.registrations), 1)
         first.unregister_memory(memory)
         self.assertEqual(first.write(fresh.to_view(), remote), 0)
         first.unregister_memory(fresh)
