@@ -4469,14 +4469,24 @@ class SIMDScheduling(BaseScheduling):
         *,
         only_gen_src_code=False,
     ):
-        """
-        Helper method to codegen a single template kernel variant
+        """Codegen a single template kernel variant.
+
+        Template fusion has three codegen placements:
+
+        1. Load-input prologue fusion: producers of named template inputs such as
+           A/B are generated in LOAD_INPUT_A / LOAD_INPUT_B. Their values
+           participate in the main accumulator loop.
+        2. Store-output input-producer fusion: producers of inputs consumed by
+           STORE_OUTPUT are generated before the manual epilogue. Currently, only
+           prefix inputs are supported.
+        3. Output epilogue fusion: consumers of the template result, such as relu
+           or multiply, are generated after epilogue_fn and before the final store.
         """
         buf_name_to_prologue_group = {}
         template_reads = template_node.used_buffer_names()
-        prefix_input_names = OrderedSet(
-            input_node.get_name()
-            for input_node in kernel.input_nodes[: kernel.prefix_args]
+        prefix_inputs_fusion_names = OrderedSet(
+            kernel.input_nodes[index].get_name()
+            for index in kernel.prefix_inputs_fusion_indices
         )
         named_input_names = OrderedSet(
             input_node.get_name()
@@ -4493,8 +4503,10 @@ class SIMDScheduling(BaseScheduling):
                 if len(names) != 1:
                     raise AssertionError(f"expected len(names) == 1, got {len(names)}")
                 input_name = next(iter(names))
-                if input_name in prefix_input_names:
-                    kernel.store_output_prologue_groups[input_name] = prologue_group
+                if input_name in prefix_inputs_fusion_names:
+                    kernel.store_output_input_producer_groups[input_name] = (
+                        prologue_group
+                    )
                 if input_name in named_input_names:
                     buf_name_to_prologue_group[input_name] = prologue_group
                 kernel.prologue_fused_inputs.add(input_name)

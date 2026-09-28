@@ -32,4 +32,6 @@ class AddMMConfigMixin(TemplateConfigHeuristics):
                 ["addmm_epilogue", kernel_inputs.out_dtype(), alpha, beta]
             ),
             "prefix_args": 1,
+            # Index 0 is the prefix bias consumed by the addmm epilogue.
+            "prefix_inputs_fusion_indices": (0,),
         }

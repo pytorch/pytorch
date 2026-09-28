@@ -599,6 +599,7 @@ class TritonTemplateKernel(TritonKernel):
         transpose_discontiguous_tensor_descriptors_override=None,
         prefix_args=0,
         suffix_args=0,
+        prefix_inputs_fusion_indices: tuple[int, ...] = (),
         epilogue_fn=identity,
         subgraphs: list[ir.ComputedBuffer] | None = None,
         workspace_arg: WorkspaceArg | None = None,
@@ -676,6 +677,14 @@ class TritonTemplateKernel(TritonKernel):
         # for templates with fixed epilogues
         self.prefix_args = prefix_args
         self.suffix_args = suffix_args
+        # Indices are absolute in input_nodes and must identify prefix inputs.
+        self.prefix_inputs_fusion_indices = prefix_inputs_fusion_indices
+        if any(
+            index < 0 or index >= prefix_args for index in prefix_inputs_fusion_indices
+        ):
+            raise AssertionError(
+                "prefix_inputs_fusion_indices must reference prefix inputs"
+            )
         # pyrefly: ignore [invalid-type-var]
         self.epilogue_fn = epilogue_fn
         self.render_hooks = {}  # type: ignore[var-annotated]
@@ -695,13 +704,14 @@ class TritonTemplateKernel(TritonKernel):
         # `set_subgraph_body`
         self.subgraph_bodies: dict[str, SubgraphInfo] = {}
 
-        # input buffers which we are allowed to prologue fuse into
-        self.prologue_supported_inputs: OrderedSet[str] = OrderedSet()
+        # Inputs eligible for producer fusion, separated by codegen destination.
+        self.load_input_supported_inputs: OrderedSet[str] = OrderedSet()
+        self.store_output_supported_inputs: OrderedSet[str] = OrderedSet()
 
         # input buffers which we are fusing into
         self.prologue_fused_inputs: OrderedSet[str] = OrderedSet()
-        # Producer groups for prefix arguments consumed by store_output().
-        self.store_output_prologue_groups: dict[str, list[Any]] = {}
+        # Producer groups for inputs consumed by store_output().
+        self.store_output_input_producer_groups: dict[str, list[Any]] = {}
         # input buffers which we are fusing into, which preserve a zero mask
         self.prologue_fused_inputs_preserve_zero: OrderedSet[str] = OrderedSet()
 
@@ -732,8 +742,9 @@ class TritonTemplateKernel(TritonKernel):
         # Update each time an input is marked frozen, used to replay the freezing of inputs on a cache hit.
         self.frozen_layouts_cnt = 0
 
-        # When prologue_loads_all_inputs is true, prologue_supported_inputs is populated during def_kernel
-        # by adding all inputs.
+        # def_kernel adds prefix inputs selected by prefix_inputs_fusion_indices to
+        # store_output_supported_inputs. When this flag is true, it also adds every
+        # named template input to load_input_supported_inputs.
         self.prologue_loads_all_inputs = prologue_loads_all_inputs
 
         # When always_freeze_layout is True, get_stride_and_maybe_freeze_layout will
@@ -764,7 +775,8 @@ class TritonTemplateKernel(TritonKernel):
                 self.args.input_buffers,
                 self.args.sizevars,
                 self.args.workspace_args,
-                self.prologue_supported_inputs,
+                self.load_input_supported_inputs,
+                self.store_output_supported_inputs,
                 self.frozen_layouts_cnt,
             ]
         )
@@ -1071,9 +1083,10 @@ class TritonTemplateKernel(TritonKernel):
         # Prefix inputs occupy the leading positions in input_nodes and are
         # consumed by store_output(). For example, addmm uses [bias, A, B]
         # with prefix_args=1, so this slice contains bias.
-        for input_node in self.input_nodes[: self.prefix_args]:
+        for input_index, input_node in enumerate(self.input_nodes[: self.prefix_args]):
             input_name = input_node.get_name()
-            self.prologue_supported_inputs.add(input_name)
+            if input_index in self.prefix_inputs_fusion_indices:
+                self.store_output_supported_inputs.add(input_name)
             if input_name in V.graph.removed_buffers:
                 continue
             if input_name in self.prologue_fused_inputs:
@@ -1095,7 +1108,7 @@ class TritonTemplateKernel(TritonKernel):
         for name in argnames:
             input_node = self.named_input_nodes[name]
             if self.prologue_loads_all_inputs:
-                self.prologue_supported_inputs.add(input_node.get_name())
+                self.load_input_supported_inputs.add(input_node.get_name())
             if input_node.get_name() in V.graph.removed_buffers:
                 continue
             if input_node.get_name() in self.prologue_fused_inputs:
@@ -1367,7 +1380,7 @@ class TritonTemplateKernel(TritonKernel):
 
         input_node = self.named_input_nodes[input_name]
         if not self.prologue_loads_all_inputs:
-            self.prologue_supported_inputs.add(input_node.get_name())
+            self.load_input_supported_inputs.add(input_node.get_name())
 
         tilings = (sympy_product(input_node.get_size()), sympy.Integer(1))
         groups = {
@@ -1772,10 +1785,11 @@ class TritonTemplateKernel(TritonKernel):
             )
             output_dtype = self.output_node.get_dtype()
 
-            captured_prefix_values: dict[str, CSEVariable] = {}
-            for input_node in self.input_nodes[: self.prefix_args]:
+            captured_store_output_input_values: dict[str, CSEVariable] = {}
+            for input_index in self.prefix_inputs_fusion_indices:
+                input_node = self.input_nodes[input_index]
                 input_name = input_node.get_name()
-                prologue_group = self.store_output_prologue_groups.get(input_name)
+                prologue_group = self.store_output_input_producer_groups.get(input_name)
                 if not prologue_group:
                     continue
 
@@ -1787,7 +1801,7 @@ class TritonTemplateKernel(TritonKernel):
                 )
                 capture_handler = _StoreOutputCapture(
                     V.get_ops_handler(),
-                    captured_values=captured_prefix_values,
+                    captured_values=captured_store_output_input_values,
                     capture_names=capture_names,
                 )
                 with (
@@ -1802,7 +1816,7 @@ class TritonTemplateKernel(TritonKernel):
                             self.split_and_set_ranges(prologue_node.get_ranges())
                         )
 
-                if input_name not in captured_prefix_values:
+                if input_name not in captured_store_output_input_values:
                     raise AssertionError(
                         f"failed to capture store-output prologue for {input_name}"
                     )
@@ -1824,8 +1838,8 @@ class TritonTemplateKernel(TritonKernel):
             ):
                 input_node.freeze_layout()
                 input_name = input_node.get_name()
-                if input_name in captured_prefix_values:
-                    epilogue_arg = captured_prefix_values[input_name]
+                if input_name in captured_store_output_input_values:
+                    epilogue_arg = captured_store_output_input_values[input_name]
                 else:
                     epilogue_arg = V.kernel.cse.generate(
                         self.compute,
@@ -2684,7 +2698,7 @@ class GenerateAndLoadResult(NamedTuple):
     mod: ModuleType
     extra: str
     input_call_args: tuple[str, ...]
-    prologue_supported_inputs: OrderedSet[str]
+    allowed_prologue_inputs: OrderedSet[str]
     kernel_args_sizevars_keys: tuple[sympy.Expr, ...]
     kernel_options: dict[str, Any]
 
@@ -2896,8 +2910,9 @@ class TritonTemplate(KernelTemplate):
         self._cache_codegen_enabled_for_template = cache_codegen_enabled_for_template
         self._generated_code_cache: GeneratedCodeCache = GeneratedCodeCache()
         clear_on_fresh_cache(self._generated_code_cache)
-        # When prologue_loads_all_inputs is true, prologue_supported_inputs is populated during def_kernel
-        # by adding all inputs.
+        # When true, def_kernel adds every named template input to
+        # load_input_supported_inputs. Prefix inputs are controlled independently
+        # by prefix_inputs_fusion_indices passed to generate().
         self.prologue_loads_all_inputs = prologue_loads_all_inputs
         # When always_freeze_layout is True, the kernel will always freeze layouts
         # immediately instead of using layout constraints. This is used by
@@ -2947,6 +2962,7 @@ class TritonTemplate(KernelTemplate):
         call_sizes: Sequence[sympy.core.symbol.Symbol],
         prefix_args: int,
         suffix_args: int,
+        prefix_inputs_fusion_indices: tuple[int, ...],
         epilogue_fn: Callable[..., Any] | None,
         epilogue_fn_hash: str | None,
         subgraphs: list[ir.Buffer] | None,
@@ -3028,6 +3044,7 @@ class TritonTemplate(KernelTemplate):
             "call_sizes": call_sizes,
             "prefix_args": prefix_args,
             "suffix_args": suffix_args,
+            "prefix_inputs_fusion_indices": prefix_inputs_fusion_indices,
             "epilogue_fn": epilogue_fn,
             "subgraphs": subgraphs,
             "prologue_loads_all_inputs": self.prologue_loads_all_inputs,
@@ -3106,8 +3123,10 @@ class TritonTemplate(KernelTemplate):
                         code == code_test
                         and extra == extra_test
                         and kernel.args.input_buffers == kernel_test.args.input_buffers
-                        and kernel.prologue_supported_inputs
-                        == kernel_test.prologue_supported_inputs
+                        and kernel.load_input_supported_inputs
+                        == kernel_test.load_input_supported_inputs
+                        and kernel.store_output_supported_inputs
+                        == kernel_test.store_output_supported_inputs
                         and kernel.args.sizevars == kernel_test.args.sizevars
                     ):
                         raise AssertionError(
@@ -3145,7 +3164,9 @@ class TritonTemplate(KernelTemplate):
         mod = PyCodeCache.load(code, extra, set_sys_modules=False)
 
         input_call_args = tuple(kernel.args.input_buffers.keys())
-        prologue_supported_inputs = kernel.prologue_supported_inputs.copy()
+        allowed_prologue_inputs = (
+            kernel.load_input_supported_inputs | kernel.store_output_supported_inputs
+        )
         kernel_args_sizevars_keys = tuple(kernel.args.sizevars.keys())
 
         if cache_hit:
@@ -3155,7 +3176,7 @@ class TritonTemplate(KernelTemplate):
             mod,
             extra,
             input_call_args,
-            prologue_supported_inputs,
+            allowed_prologue_inputs,
             kernel_args_sizevars_keys,
             kernel_options,
         )
@@ -3170,6 +3191,7 @@ class TritonTemplate(KernelTemplate):
         num_buffers_warp_spec: int = 0,
         prefix_args: int = 0,
         suffix_args: int = 0,
+        prefix_inputs_fusion_indices: tuple[int, ...] = (),
         epilogue_fn: Callable[..., Any] | None = identity,
         epilogue_fn_hash: str | None = None,
         subgraphs: list[ir.Buffer] | None = None,
@@ -3199,6 +3221,9 @@ class TritonTemplate(KernelTemplate):
             suffix_args: Number of trailing input nodes consumed exclusively by
                 store_output(). They are loaded over the output iteration domain and
                 passed to epilogue_fn after the prefix inputs.
+            prefix_inputs_fusion_indices: Absolute input_nodes indices allowed to
+                use store-output input-producer fusion. Every index must identify a
+                prefix input.
             epilogue_fn: Optional function called as
                 epilogue_fn(accumulator, *prefix_inputs, *suffix_inputs).
             subgraphs: Optional subgraphs to be passed as arguments, these will be inlined
@@ -3224,6 +3249,7 @@ class TritonTemplate(KernelTemplate):
             call_sizes,
             prefix_args,
             suffix_args,
+            prefix_inputs_fusion_indices,
             epilogue_fn,
             epilogue_fn_hash,
             subgraphs,
@@ -3409,7 +3435,7 @@ class TritonTemplate(KernelTemplate):
             },
             mutated_inputs=mutated_inputs,
             workspace_arg=workspace_arg,
-            allowed_prologue_inps=result.prologue_supported_inputs,
+            allowed_prologue_inps=result.allowed_prologue_inputs,
             hint_override=hint_override,
         )
 
