@@ -1357,9 +1357,10 @@ def _saved_hooks_fingerprint() -> str:
     A serialized AUTOGRAD_SAVED_TENSORS_HOOKS guard compares
     ``guards._saved_tensors_hooks_fingerprint``: None for hooks it cannot inline,
     so plain-Python hooks and no hooks at all are one value, and otherwise a
-    content hash of each hook's graph and fx.wrap ``user_cache_hash``es. Reusing
-    it keeps two hook sets one line here exactly when the loaded guard accepts
-    either; an id could not go in a committed, diffable file anyway.
+    content hash of each hook's graph and fx.wrap ``user_cache_hash``es, with
+    None for a graph the guard never accepts. Reusing it keeps two hook sets one
+    line here exactly when the loaded guard treats them alike; an id could not
+    go in a committed, diffable file anyway.
     """
     try:
         from torch._dynamo.guards import _saved_tensors_hooks_fingerprint
@@ -1368,7 +1369,11 @@ def _saved_hooks_fingerprint() -> str:
         fingerprint = _saved_tensors_hooks_fingerprint(top_saved_tensors_hooks())
         if fingerprint is None:
             return "hooks=None"
-        return "hooks=(" + ", ".join(part[:12] for part in fingerprint) + ")"
+        return (
+            "hooks=("
+            + ", ".join("unverifiable" if p is None else p[:12] for p in fingerprint)
+            + ")"
+        )
     except Exception:
         # Distinct from the "" that means "the rendered code already names the
         # check": a failed read must not merge two variants.

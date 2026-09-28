@@ -44,6 +44,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TestCase,
 )
+from torch.testing._internal.inductor_utils import HAS_TRITON
 
 
 # A module-level (global) model + a function referencing it, to exercise the
@@ -5491,6 +5492,24 @@ class TestPrecompileNoCompilation(TestCase):
         ):
             compiled(torch.ones(4))
 
+    def test_backend_no_compilation_error_is_not_suppressed(self):
+        # Another thread can enter no_compilation() after this frame passed
+        # Dynamo's check, so Inductor raises from inside the backend.
+        def backend(gm, example_inputs):
+            raise PrecompileError(
+                "precompile.no_compilation() forbids Inductor graph compilation"
+            )
+
+        compiled = torch.compile(lambda x: x.cos(), backend=backend)
+        with (
+            torch._dynamo.config.patch(suppress_errors=True),
+            self.assertRaisesRegex(
+                torch._dynamo.exc.BackendCompilerFailed,
+                "forbids Inductor graph compilation",
+            ),
+        ):
+            compiled(torch.ones(4))
+
     def test_no_compilation_rejects_inductor_graph_compilation(self):
         from torch._inductor.compile_fx import compile_fx
 
@@ -5507,7 +5526,7 @@ class TestPrecompileNoCompilation(TestCase):
             with torch.compiler.precompile.no_compilation():
                 self.assertNotIn("TRITON_DISABLE_COMPILATION", os.environ)
 
-    @unittest.skipUnless(TEST_CUDA, "requires Triton")
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_no_compilation_rejects_late_triton_cache_miss_before_dispatch(self):
         from torch._inductor.async_compile import AsyncCompile, CompiledTritonKernels
 
@@ -5522,7 +5541,7 @@ class TestPrecompileNoCompilation(TestCase):
         readiness.assert_not_called()
         pool.assert_not_called()
 
-    @unittest.skipUnless(TEST_CUDA, "requires Triton")
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_no_compilation_loads_cached_kernel_without_compile_pool(self):
         from torch._inductor.async_compile import AsyncCompile, CompiledTritonKernels
         from torch._inductor.codecache import CodeCacheFuture
@@ -5542,7 +5561,7 @@ class TestPrecompileNoCompilation(TestCase):
         readiness.assert_not_called()
         pool.assert_not_called()
 
-    @unittest.skipUnless(TEST_CUDA, "requires Triton")
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_no_compilation_rejects_kernel_compile_and_autotune(self):
         from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 
@@ -5737,6 +5756,128 @@ class TestPrecompileNoCompilation(TestCase):
         ):
             cpp_extension._run_ninja_build("missing", False, "extension")
         build.assert_not_called()
+
+    def test_no_compilation_rejects_only_a_cpp_kernel_cache_miss(self):
+        from torch._inductor import codecache
+
+        cache = codecache.CppCodeCache
+        with (
+            tempfile.TemporaryDirectory() as d,
+            mock.patch.object(
+                codecache, "write", return_value=("key", os.path.join(d, "k.cpp"))
+            ),
+            mock.patch.object(codecache, "get_lock_dir", return_value=d),
+            mock.patch.object(cache, "cache", {}),
+        ):
+
+            def load(submit):
+                cache.cache.clear()
+                cache.load_async("int f();", submit_fn=submit, needs_vec_isa=False)
+
+            submit = mock.Mock()
+            load(submit)
+            ((worker_fn,), _) = submit.call_args
+            target = worker_fn.args[1][-1].get_target_file_path()
+            submit.reset_mock()
+            with torch.compiler.precompile.no_compilation():
+                with self.assertRaisesRegex(
+                    PrecompileError, r"C\+\+ kernel cache miss"
+                ):
+                    load(submit)
+                with open(target, "w"):
+                    pass
+                load(submit)
+        submit.assert_not_called()
+
+    @parametrize("linked", (False, True))
+    def test_no_compilation_cpp_worker_compiles_only_an_unlinked_kernel(self, linked):
+        from torch._inductor.codecache import _worker_compile_cpp
+
+        with tempfile.TemporaryDirectory() as d:
+            # A compile-only builder whose object file is gone, then the linker.
+            builders = [mock.Mock(), mock.Mock()]
+            for i, builder in enumerate(builders):
+                builder.get_target_file_path.return_value = os.path.join(d, str(i))
+            if linked:
+                with open(builders[-1].get_target_file_path(), "w"):
+                    pass
+            with torch.compiler.precompile.no_compilation():
+                if linked:
+                    _worker_compile_cpp(os.path.join(d, "lock"), builders)
+                else:
+                    with self.assertRaisesRegex(
+                        PrecompileError, r"C\+\+ kernel compilation"
+                    ):
+                        _worker_compile_cpp(os.path.join(d, "lock"), builders)
+        for builder in builders:
+            builder.build.assert_not_called()
+
+    @parametrize("cache_name", ("CUDACodeCache", "ROCmCodeCache"))
+    @parametrize("built", (False, True))
+    def test_no_compilation_rejects_only_a_gpu_kernel_cache_miss(
+        self, cache_name, built
+    ):
+        from torch._inductor import codecache
+
+        cache = getattr(codecache, cache_name)
+        with tempfile.TemporaryDirectory() as d:
+            source = os.path.join(d, f"k.{cache._SOURCE_CODE_SUFFIX}")
+            output = os.path.join(d, "k.o")
+            if built:
+                with open(output, "w"):
+                    pass
+            with (
+                mock.patch.object(cache, "cache", {}),
+                mock.patch.object(cache, "write", return_value=("key", source)),
+                mock.patch.object(codecache, "get_lock_dir", return_value=d),
+                mock.patch.object(codecache, "rocm_compile_command"),
+                mock.patch.object(cache, "_logged_compiler_version", True, create=True),
+                mock.patch.object(
+                    cache,
+                    "get_kernel_binary_remote_cache",
+                    return_value=None,
+                    create=True,
+                ),
+                mock.patch.object(cache, "_compile_command", create=True),
+                mock.patch.object(codecache.subprocess, "check_output") as run,
+                torch.compiler.precompile.no_compilation(),
+            ):
+                if built:
+                    self.assertEqual(cache.compile("", "o")[0], output)
+                else:
+                    with self.assertRaisesRegex(
+                        PrecompileError, "GPU kernel compilation"
+                    ):
+                        cache.compile("", "o")
+        run.assert_not_called()
+
+    def test_no_compilation_rejects_extension_precompiled_header_build(self):
+        from torch.utils import cpp_extension
+
+        with (
+            mock.patch.object(cpp_extension, "IS_LINUX", True),
+            mock.patch.object(cpp_extension, "get_cxx_compiler", return_value="g++"),
+            mock.patch.object(
+                cpp_extension, "check_compiler_is_gcc", return_value=True
+            ),
+            mock.patch.object(cpp_extension.os.path, "isfile", return_value=False),
+            mock.patch.object(cpp_extension.subprocess, "check_output") as build,
+            torch.compiler.precompile.no_compilation(),
+            self.assertRaisesRegex(PrecompileError, "precompiled header compilation"),
+        ):
+            cpp_extension._check_and_build_extension_h_precompiler_headers([], [])
+        build.assert_not_called()
+
+    def test_no_compilation_rejects_setuptools_extension_build(self):
+        from torch.utils.cpp_extension import BuildExtension
+
+        command = mock.Mock(spec=BuildExtension)
+        with (
+            torch.compiler.precompile.no_compilation(),
+            self.assertRaisesRegex(PrecompileError, r"C\+\+ extension compilation"),
+        ):
+            BuildExtension.build_extensions(command)
+        self.assertEqual(command.mock_calls, [])
 
 
 @contextlib.contextmanager
