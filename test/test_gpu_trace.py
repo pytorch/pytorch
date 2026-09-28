@@ -1,4 +1,4 @@
-# Owner(s): ["module: tests"]
+# Owner(s): ["module: cuda"]
 
 import importlib
 import unittest
@@ -7,13 +7,12 @@ import unittest.mock
 import torch
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    onlyCUDA,
     skipXPUIf,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
-    skipCUDANonDefaultStreamIf,
+    TEST_CUDA,
     TestCase,
 )
 
@@ -81,21 +80,6 @@ class TestGpuTraceDevice(TestCase):
         del tensor
         self.mock.assert_called_once_with(data_ptr)
 
-    @onlyCUDA
-    @skipCUDANonDefaultStreamIf(True)
-    def test_stream_creation_callback(self, device):
-        self.gpu_trace.register_callback_for_stream_creation(self.mock)
-
-        # see Note [HIP Lazy Streams]
-        if torch.version.hip:
-            user_stream = torch.cuda.Stream()
-            with torch.cuda.stream(user_stream):
-                torch.ones(5, device="cuda")
-        else:
-            torch.get_device_module(device).Stream()
-
-        self.mock.assert_called()
-
     def test_stream_pool_round_robin(self, device):
         # Under an active trace, lazy init used to reset the round-robin
         # counter on each stream's first touch, see Note [HIP Lazy Streams].
@@ -143,6 +127,32 @@ class TestGpuTraceDevice(TestCase):
         tensor = torch.empty(10, 4, device=device)
         self.mock.assert_called_once_with(tensor.data_ptr())
         other.assert_called_once_with(tensor.data_ptr())
+
+
+@unittest.skipUnless(TEST_CUDA, "CUDA required")
+@torch.testing._internal.common_utils.markDynamoStrictTest
+class TestGpuTraceCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def setUp(self):
+        super().setUp()
+        torch._C._activate_gpu_trace()
+        self.mock = unittest.mock.MagicMock()
+
+    def test_stream_creation_callback(self):
+        import torch.cuda._gpu_trace as gpu_trace
+
+        gpu_trace.register_callback_for_stream_creation(self.mock)
+
+        # see Note [HIP Lazy Streams]
+        if torch.version.hip:
+            user_stream = torch.cuda.Stream()
+            with torch.cuda.stream(user_stream):
+                torch.ones(5, device="cuda")
+        else:
+            torch.cuda.Stream()
+
+        self.mock.assert_called()
 
 
 instantiate_device_type_tests(
