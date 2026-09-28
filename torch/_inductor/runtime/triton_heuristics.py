@@ -1482,7 +1482,7 @@ class CachingAutotuner(KernelInterface):
         """Measure the performance of a given launcher."""
         from torch.compiler._no_compile import check_compilation_allowed
 
-        check_compilation_allowed("Triton kernel autotuning")
+        check_compilation_allowed("Triton kernel benchmarking")
         # we don't skip configs with spilled registers when auto-tuning custom
         # (user-written) Triton kernels, as (i) we don't have any knowledge or
         # control over the kernel code; (ii) there is empirical evidence that

@@ -9,8 +9,6 @@ import json
 import os
 import pickle
 import threading
-from collections.abc import Iterator
-from types import ModuleType
 from typing import cast, TYPE_CHECKING
 
 from torch.compiler._cache import (
@@ -24,6 +22,9 @@ from torch.utils._appending_byte_serializer import AppendingByteSerializer
 
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from types import ModuleType
+
     from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 
 
