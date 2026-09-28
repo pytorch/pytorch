@@ -3734,13 +3734,34 @@ class TestGuardSerialization(TestGuardSerializationBase):
             return global_func(x)
 
         x = torch.randn(3)
+        ref, loaded = self._test_serialization("CLOSURE_MATCH", fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        # The saved guard compares code by value rather than identity, so it
+        # matches the loading process's own copy of the function.
+        copy = types.FunctionType(global_func.__code__.replace(), globals())
+        self.assertIsNot(copy.__code__, global_func.__code__)
+        with mock.patch.dict(globals(), {"global_func": copy}):
+            self.assertFalse(ref.check({"x": x}))
+            self.assertTrue(loaded.check({"x": x}))
+        with mock.patch.dict(globals(), {"global_func": lambda x: x + 2}):
+            self._test_check_fn(ref, loaded, {"x": x}, False)
 
-        # we don't support CLOSURE_MATCH because it adds a FUNCTION_MATCH guard, and we don't
-        # support that in serialization
-        with self.assertRaisesRegex(
-            PackageError, "CLOSURE_MATCH guard cannot be serialized."
+    def test_closure_match_without_module_globals(self):
+        namespace = {}
+        exec("def global_func(x):\n    return x + 1\n", namespace)
+
+        def fn(x):
+            return global_func(x)
+
+        # No importable module owns these globals, so a loading process has no
+        # way to find the function's globals again.
+        with (
+            mock.patch.dict(globals(), {"global_func": namespace["global_func"]}),
+            self.assertRaisesRegex(
+                PackageError, "CLOSURE_MATCH guard cannot be serialized."
+            ),
         ):
-            self._test_serialization("CLOSURE_MATCH", fn, x)
+            self._test_serialization("CLOSURE_MATCH", fn, torch.randn(3))
 
     def test_sequence_length(self):
         # tuple input installs a SEQUENCE_LENGTH guard
