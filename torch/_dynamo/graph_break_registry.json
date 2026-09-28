@@ -158,6 +158,16 @@
       ]
     }
   ],
+  "GB3780": [
+    {
+      "Gb_type": "non-literal key in object __dict__",
+      "Context": "key={key}, type={type(key)}",
+      "Explanation": "Dynamo models object __dict__ keys as literal constants.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0010": [
     {
       "Gb_type": "Attempted to read a deleted variable",
@@ -2808,6 +2818,16 @@
       "Explanation": "Dynamo doesn't support writing to immutable/sourceless cell variables.",
       "Hints": [
         "This graph break may be difficult to debug. Please report an issue to PyTorch for assistance."
+      ]
+    }
+  ],
+  "GB1583": [
+    {
+      "Gb_type": "builtin isinstance() with classinfo that does not support issubclass()",
+      "Context": "isinstance({arg}, {isinstance_type})",
+      "Explanation": "issubclass({arg_type}, {member}) raised TypeError: {e}. Dynamo emulates isinstance() with issubclass() for this argument and cannot determine the result.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],

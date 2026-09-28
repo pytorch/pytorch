@@ -2777,8 +2777,20 @@ class _ModuleStackTracer(PythonKeyTracer):
         global _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT
         _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT.clear()
 
-        for key, val in self.tensor_tracker.items():
-            _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT[id(key)] = val.proxy.node
+        # Only step (2) of the strategy above, and only the consumers gated on
+        # detect_non_strict_fake_tensor_leaks ever read this. Populating it
+        # regardless kept a node per traced tensor in a module-level dict, and
+        # through them the graph, its owning module, and every parameter -- for
+        # the life of the process, long after the trace returned.
+        # Imported here rather than at module level on purpose: importing
+        # torch._export.config runs torch/_export/__init__.py, which does
+        # `from torch.fx.experimental.proxy_tensor import make_fx` -- a cycle
+        # back into this module while it is still initialising.
+        import torch._export.config as _export_config
+
+        if _export_config.detect_non_strict_fake_tensor_leaks:
+            for key, val in self.tensor_tracker.items():
+                _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT[id(key)] = val.proxy.node
 
         # Since we are making _AttrProxy mimic the original
         # submodule, when someone registers a module directly
