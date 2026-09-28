@@ -55,6 +55,12 @@
 // disk when the backend detects a timeout or an error, and is the single
 // trigger for a dump-on-failure: backends do not dump themselves, they only run
 // their abort hooks.
+//
+// A failure is seen only by the ranks with work in the failed collective, while
+// the rank that never issued it -- the usual culprit of a hang -- sees nothing.
+// So, like stock ProcessGroupNCCL, the first abort hook to fire in a process
+// also broadcasts a dump signal through the group's global store, and one
+// thread per process polls that store and dumps when any rank signaled.
 
 #pragma once
 
@@ -99,6 +105,12 @@ class TORCH_API FlightRecorderHook
 
   // Detach from the process group. Idempotent.
   void remove();
+
+  // Holds back a backend about to terminate the process after a failure until
+  // its peers had time to act on the dump signal this process broadcast. No-op
+  // if it broadcast none. Stock ProcessGroupNCCL waits the same way before
+  // tearing down.
+  static void waitForPeerDumps();
 
  private:
   // The backend serving one device type of the group. A group can mix
@@ -167,6 +179,9 @@ class TORCH_API FlightRecorderHook
   // Cap on inflight_, see onPre.
   size_t max_inflight_{0};
   std::shared_ptr<ProcessGroupStatus> pg_status_;
+  // The store every rank of the job shares, i.e. the group's store without
+  // its prefix; null if the group has none. Carries the dump signal.
+  c10::intrusive_ptr<Store> global_store_;
 
   // Sequencing and the op_id -> in-flight-op map. The mutex guards against
   // concurrent collectives from multiple threads (the hooks fire on the issuing
