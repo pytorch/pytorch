@@ -27,6 +27,8 @@ struct Conv2dLocalParams {
   int64_t pad_width;
   int64_t dilation_height;
   int64_t dilation_width;
+  int64_t kernel_numel; // in_channels * kernel_height * kernel_width
+  int64_t out_numel_per_channel; // out_height * out_width
 };
 
 // bias and grad_output may be undefined.
@@ -71,6 +73,8 @@ inline Conv2dLocalParams conv2d_local_shape_check(
   TORCH_CHECK(span_h >= 0 && span_w >= 0, "conv2d_local: kernel size (", p.kernel_height, ", ", p.kernel_width, ") with dilation ", dilation, " is larger than the padded input ", input.sizes(), " with padding ", padding);
   p.out_height = span_h / p.stride_height + 1;
   p.out_width = span_w / p.stride_width + 1;
+  p.kernel_numel = p.in_channels * p.kernel_height * p.kernel_width;
+  p.out_numel_per_channel = p.out_height * p.out_width;
   TORCH_CHECK(weight.size(0) == p.out_height && weight.size(1) == p.out_width, "conv2d_local: weight is sized for output (", weight.size(0), ", ", weight.size(1), ") but input ", input.sizes(), " with stride ", stride, ", padding ", padding, ", dilation ", dilation, " produces output (", p.out_height, ", ", p.out_width, ")");
 
   if (bias.defined()) {

@@ -28,10 +28,9 @@ void conv2d_local_forward_cpu_kernel(
     scalar_t* output,
     const Conv2dLocalParams& p) {
   using opmath_t = at::opmath_type<scalar_t>;
-  const int64_t kernel_numel = p.in_channels * p.kernel_height * p.kernel_width;
-  const int64_t numel = p.batch * p.out_channels * p.out_height * p.out_width;
-  const int64_t grain = std::max<int64_t>(1, at::internal::GRAIN_SIZE / std::max<int64_t>(1, kernel_numel));
-  at::parallel_for(0, numel, grain, [&](int64_t begin, int64_t end) {
+  const int64_t kernel_numel = p.kernel_numel;
+  const int64_t numel = p.batch * p.out_channels * p.out_numel_per_channel;
+  at::parallel_for(0, numel, at::internal::GRAIN_SIZE, [&](int64_t begin, int64_t end) {
     for (const auto i : c10::irange(begin, end)) {
       const int64_t ow = i % p.out_width;
       const int64_t oh = (i / p.out_width) % p.out_height;
@@ -68,11 +67,9 @@ void conv2d_local_grad_input_cpu_kernel(
     scalar_t* grad_input,
     const Conv2dLocalParams& p) {
   using opmath_t = at::opmath_type<scalar_t>;
-  const int64_t kernel_numel = p.in_channels * p.kernel_height * p.kernel_width;
+  const int64_t kernel_numel = p.kernel_numel;
   const int64_t numel = p.batch * p.in_channels * p.in_height * p.in_width;
-  const int64_t work = p.out_channels * p.kernel_height * p.kernel_width;
-  const int64_t grain = std::max<int64_t>(1, at::internal::GRAIN_SIZE / std::max<int64_t>(1, work));
-  at::parallel_for(0, numel, grain, [&](int64_t begin, int64_t end) {
+  at::parallel_for(0, numel, at::internal::GRAIN_SIZE, [&](int64_t begin, int64_t end) {
     for (const auto i : c10::irange(begin, end)) {
       const int64_t iw = i % p.in_width;
       const int64_t ih = (i / p.in_width) % p.in_height;
@@ -118,11 +115,10 @@ void conv2d_local_grad_weight_cpu_kernel(
     scalar_t* grad_weight,
     const Conv2dLocalParams& p) {
   using opmath_t = at::opmath_type<scalar_t>;
-  const int64_t numel = p.out_height * p.out_width * p.out_channels * p.in_channels * p.kernel_height * p.kernel_width;
-  const int64_t grain = std::max<int64_t>(1, at::internal::GRAIN_SIZE / std::max<int64_t>(1, p.batch));
+  const int64_t numel = p.out_numel_per_channel * p.out_channels * p.kernel_numel;
   const int64_t input_batch_stride = p.in_channels * p.in_height * p.in_width;
   const int64_t output_batch_stride = p.out_channels * p.out_height * p.out_width;
-  at::parallel_for(0, numel, grain, [&](int64_t begin, int64_t end) {
+  at::parallel_for(0, numel, at::internal::GRAIN_SIZE, [&](int64_t begin, int64_t end) {
     for (const auto i : c10::irange(begin, end)) {
       int64_t rest = i;
       const int64_t kw = rest % p.kernel_width;

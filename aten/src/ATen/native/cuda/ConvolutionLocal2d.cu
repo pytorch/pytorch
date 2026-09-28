@@ -66,7 +66,7 @@ Conv2dLocalDims to_dims(const Conv2dLocalParams& p) {
     TORCH_CHECK(v <= std::numeric_limits<int>::max(), "conv2d_local: dimension ", v, " is too large for the CUDA kernel");
     return static_cast<int>(v);
   };
-  Conv2dLocalDims d{
+  return Conv2dLocalDims{
       narrow(p.batch),
       narrow(p.in_channels),
       narrow(p.in_height),
@@ -82,11 +82,8 @@ Conv2dLocalDims to_dims(const Conv2dLocalParams& p) {
       narrow(p.pad_width),
       narrow(p.dilation_height),
       narrow(p.dilation_width),
-      0,
-      0};
-  d.kernel_numel = narrow(p.in_channels * p.kernel_height * p.kernel_width);
-  d.out_numel_per_channel = narrow(p.out_height * p.out_width);
-  return d;
+      narrow(p.kernel_numel),
+      narrow(p.out_numel_per_channel)};
 }
 
 // Smallest power of two >= n, clamped to [lo, hi]; the tile width along a dim.
@@ -111,9 +108,9 @@ int pick_rows(int extent, int rows, SmemBytes smem_bytes) {
   return r;
 }
 
-// Offset of input element (n, k) of the patch at output position (oh, ow), or
-// -1 when it falls in the zero padding.
-__device__ __forceinline__ int64_t patch_offset(const Conv2dLocalDims& d, int n, int k, int oh, int ow) {
+// Offset of input element k of the patch at output position (oh, ow) for batch
+// row 0, or -1 when it falls in the zero padding. Callers add n * batch_stride.
+__device__ __forceinline__ int64_t patch_offset(const Conv2dLocalDims& d, int k, int oh, int ow) {
   const int kw = k % d.kernel_width;
   const int rest = k / d.kernel_width;
   const int kh = rest % d.kernel_height;
@@ -123,7 +120,7 @@ __device__ __forceinline__ int64_t patch_offset(const Conv2dLocalDims& d, int n,
   if (ih < 0 || ih >= d.in_height || iw < 0 || iw >= d.in_width) {
     return -1;
   }
-  return ((static_cast<int64_t>(n) * d.in_channels + ic) * d.in_height + ih) * d.in_width + iw;
+  return (static_cast<int64_t>(ic) * d.in_height + ih) * d.in_width + iw;
 }
 
 // out[n, co, l] = bias[co, l] + sum_k patch[n, k] * w[l, co, k]
@@ -131,7 +128,7 @@ __device__ __forceinline__ int64_t patch_offset(const Conv2dLocalDims& d, int n,
 // (tn = rows*R wide, rows = thread rows per position), co-tile blockIdx.z (tc
 // wide). Thread (p, tr, tci) owns n = n0 + tr + r*rows at position l = l0 + p.
 // P > 1 only when the batch is too small to fill a block with one position.
-template <typename scalar_t, int R, bool Packed>
+template <typename scalar_t, int R>
 __global__ void __launch_bounds__(kThreads) conv2d_local_forward_kernel(
     const scalar_t* __restrict__ input,
     const scalar_t* __restrict__ weight,
@@ -139,10 +136,9 @@ __global__ void __launch_bounds__(kThreads) conv2d_local_forward_kernel(
     scalar_t* __restrict__ output,
     Conv2dLocalDims d,
     int tc,
-    int positions) {
+    int P) {
   using acc_t = at::acc_type<scalar_t, true>;
   extern __shared__ char smem_raw[];
-  const int P = Packed ? positions : 1;
   const int rows = kThreads / (tc * P);
   const int tn = rows * R;
   const int a_slot = kChunk * (tn + 1);
@@ -175,7 +171,7 @@ __global__ void __launch_bounds__(kThreads) conv2d_local_forward_kernel(
       const int kk = i % kChunk;
       const int li = l0 + i / kChunk;
       const int k = k0 + kk;
-      offs[i] = (k < K && li < L) ? patch_offset(d, 0, k, li / d.out_width, li % d.out_width) : int64_t(-1);
+      offs[i] = (k < K && li < L) ? patch_offset(d, k, li / d.out_width, li % d.out_width) : int64_t(-1);
     }
     for (int i = t; i < P * tc * kChunk; i += kThreads) {
       const int kk = i % kChunk;
@@ -268,7 +264,7 @@ __global__ void __launch_bounds__(kThreads) conv2d_local_forward_small_batch_ker
   }
   for (int k = lane; k < K; k += C10_WARP_SIZE) {
     const acc_t w = static_cast<acc_t>(wl[k]);
-    const int64_t off = patch_offset(d, 0, k, oh, ow);
+    const int64_t off = patch_offset(d, k, oh, ow);
     if (off >= 0) {
 #pragma unroll
       for (int n = 0; n < kSmallBatch; ++n) {
@@ -315,7 +311,7 @@ __global__ void __launch_bounds__(kThreads) conv2d_local_grad_weight_small_batch
   scalar_t* gw = grad_weight + (static_cast<int64_t>(l) * d.out_channels + co) * K;
   for (int k = lane; k < K; k += C10_WARP_SIZE) {
     acc_t acc(0);
-    const int64_t off = patch_offset(d, 0, k, oh, ow);
+    const int64_t off = patch_offset(d, k, oh, ow);
     if (off >= 0) {
 #pragma unroll
       for (int n = 0; n < kSmallBatch; ++n) {
@@ -348,7 +344,7 @@ __global__ void __launch_bounds__(kThreads) conv2d_local_grad_input_small_batch_
   const scalar_t* wl = weight + static_cast<int64_t>(l) * d.out_channels * K;
   const scalar_t* gol = grad_output + l;
   for (int k = lane; k < K; k += C10_WARP_SIZE) {
-    const int64_t off = patch_offset(d, 0, k, oh, ow);
+    const int64_t off = patch_offset(d, k, oh, ow);
     if (off < 0) {
       continue;
     }
@@ -412,7 +408,7 @@ __global__ void __launch_bounds__(kThreads) conv2d_local_grad_weight_kernel(
 
   for (int i = t; i < tk; i += kThreads) {
     const int k = k0 + i;
-    offs[i] = k < K ? patch_offset(d, 0, k, oh, ow) : int64_t(-1);
+    offs[i] = k < K ? patch_offset(d, k, oh, ow) : int64_t(-1);
   }
   __syncthreads();
   for (int nb = 0; nb < d.batch; nb += kChunk) {
@@ -531,7 +527,7 @@ __global__ void __launch_bounds__(kThreads) conv2d_local_grad_input_scatter_kern
   if (k >= K) {
     return;
   }
-  const int64_t off = patch_offset(d, 0, k, oh, ow);
+  const int64_t off = patch_offset(d, k, oh, ow);
   if (off < 0) {
     return;
   }
@@ -661,20 +657,12 @@ Tensor conv2d_local_cuda(
           P);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     };
-    if (P > 1) {
-      if (r == 4) {
-        launch(conv2d_local_forward_kernel<scalar_t, 4, true>);
-      } else if (r == 2) {
-        launch(conv2d_local_forward_kernel<scalar_t, 2, true>);
-      } else {
-        launch(conv2d_local_forward_kernel<scalar_t, 1, true>);
-      }
-    } else if (r == 4) {
-      launch(conv2d_local_forward_kernel<scalar_t, 4, false>);
+    if (r == 4) {
+      launch(conv2d_local_forward_kernel<scalar_t, 4>);
     } else if (r == 2) {
-      launch(conv2d_local_forward_kernel<scalar_t, 2, false>);
+      launch(conv2d_local_forward_kernel<scalar_t, 2>);
     } else {
-      launch(conv2d_local_forward_kernel<scalar_t, 1, false>);
+      launch(conv2d_local_forward_kernel<scalar_t, 1>);
     }
   });
   return output;
