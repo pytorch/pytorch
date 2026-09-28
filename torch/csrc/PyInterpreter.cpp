@@ -176,7 +176,6 @@ struct ConcretePyInterpreterVTable final
   bool fake_try_prim_meta(
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack) const override;
-  bool is_symbolic_wrapped_number(const c10::TensorImpl* self) const override;
   bool fake_infer_from_real_out(
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack,
@@ -1344,17 +1343,6 @@ bool ConcretePyInterpreterVTable::fake_try_prim_meta(
       },
       /*convert=*/{},
       "prim_meta_impl");
-}
-
-bool ConcretePyInterpreterVTable::is_symbolic_wrapped_number(
-    const c10::TensorImpl* self) const {
-  py::gil_scoped_acquire gil;
-  at::Tensor tensor(
-      c10::intrusive_ptr<c10::TensorImpl, c10::UndefinedTensorImpl>::
-          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-      unsafe_reclaim_from_nonowning(const_cast<c10::TensorImpl*>(self)));
-  auto tensor_obj = py::reinterpret_steal<py::object>(THPVariable_Wrap(tensor));
-  return py::hasattr(tensor_obj, "_wrapped_number");
 }
 
 bool ConcretePyInterpreterVTable::fake_infer_from_real_out(
