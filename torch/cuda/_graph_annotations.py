@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import gzip
 import importlib.metadata
+import json
 import pickle
 import threading
 import warnings
@@ -1107,7 +1108,7 @@ def remap_to_exec_graph(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
     matches the live exec id (e.g. replay after instantiate) this is a no-op.
     """
     capture_graph_id = torch_cuda_graph._capture_graph_id
-    if not _kernel_annotations or capture_graph_id is None:
+    if capture_graph_id is None:
         return
 
     exec_graph_id = _check_cuda_bindings(
