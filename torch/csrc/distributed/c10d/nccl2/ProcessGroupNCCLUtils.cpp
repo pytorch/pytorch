@@ -5,6 +5,7 @@
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
 
 #include <c10/cuda/CUDAGraphsC10Utils.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <nccl.h>
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/NCCLCachingAllocatorHook.hpp>
@@ -272,6 +273,9 @@ void ProcessGroupNCCL::timeoutWatchdog() noexcept {
   // Honor the noexcept contract: the loop issues NCCL probes (NCCL_CHECK) and
   // abort paths that can throw; swallow here so nothing escapes this thread.
   try {
+    // A new thread defaults to device 0; even setting capture mode can create
+    // a CUDA context, so bind the communicator device first.
+    c10::cuda::CUDAGuard device_guard(device_);
     c10::cuda::CUDAStreamCaptureModeGuard capture_mode_guard(
         cudaStreamCaptureModeThreadLocal);
     while (!shutdown_) {
