@@ -4744,6 +4744,24 @@ class TestGuardSerialization(TestGuardSerializationBase):
         with torch.autograd.graph.saved_tensors_hooks(*hooks(triple(), "v2")):
             self._test_check_fn(loaded, loaded, {"x": x}, False)
 
+    def test_autograd_saved_tensors_hooks_matches_traced_tensor_methods(self):
+        def fn(x):
+            return x + 1
+
+        def hooks(dtype):
+            return (
+                torch.fx.symbolic_trace(lambda x: x.to(dtype)),
+                torch.fx.symbolic_trace(lambda x: x.to(torch.float32)),
+            )
+
+        x = torch.randn(3, 2)
+        with torch.autograd.graph.saved_tensors_hooks(*hooks(torch.bfloat16)):
+            _, loaded = self._test_serialization("AUTOGRAD_SAVED_TENSORS_HOOKS", fn, x)
+        with torch.autograd.graph.saved_tensors_hooks(*hooks(torch.bfloat16)):
+            self._test_check_fn(loaded, loaded, {"x": x}, True)
+        with torch.autograd.graph.saved_tensors_hooks(*hooks(torch.float16)):
+            self._test_check_fn(loaded, loaded, {"x": x}, False)
+
     def test_autograd_saved_tensors_hooks_not_inlineable_at_capture(self):
         def fn(x):
             return x + 1
