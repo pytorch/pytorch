@@ -587,6 +587,13 @@ class ViewAndMutationMeta:
     # help users identify where to add .detach() in their code
     tangent_source_stack_traces: list[str | None] | None = None
 
+    # Storage aliasing of user inputs/outputs as seen in eager. Unlike output_info,
+    # these don't depend on requires_grad or on how AOTAutograd regenerates aliases.
+    # (input_idx, output_idx) pairs of inputs and outputs that share a storage.
+    aliased_input_output_pairs: list[tuple[int, int]] = field(default_factory=list)
+    # (i, j) pairs, i < j, of outputs that share a storage.
+    aliased_output_pairs: list[tuple[int, int]] = field(default_factory=list)
+
     def __post_init__(self) -> None:
         # pre-compute the indices of the inputs that are mutated.
         # When keep_input_mutations is set, we don't need to worry about our epilogue

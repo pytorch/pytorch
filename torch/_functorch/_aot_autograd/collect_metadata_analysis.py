@@ -893,6 +893,29 @@ from a multi-output view call"
             traced_tangents, count_symints=False, with_memory_format=True
         )
 
+        inp_storages = {
+            i: StorageWeakRef(a.untyped_storage())
+            for i, a in enumerate(flat_f_args)
+            if isinstance(a, Tensor)
+        }
+        out_storages = {
+            i: StorageWeakRef(o.untyped_storage())
+            for i, o in enumerate(flat_f_outs)
+            if isinstance(o, Tensor)
+        }
+        aliased_input_output_pairs = [
+            (i, j)
+            for j, out_storage in out_storages.items()
+            for i, inp_storage in inp_storages.items()
+            if inp_storage == out_storage
+        ]
+        aliased_output_pairs = [
+            (i, j)
+            for j, out_storage in out_storages.items()
+            for i, other_storage in out_storages.items()
+            if i < j and other_storage == out_storage
+        ]
+
         metadata = ViewAndMutationMeta(
             input_info=input_info,
             output_info=output_info,
@@ -906,6 +929,8 @@ from a multi-output view call"
             grad_enabled_mutation=grad_enabled_mutation,
             static_input_indices=static_input_indices,
             tokens=mode._tokens,
+            aliased_input_output_pairs=aliased_input_output_pairs,
+            aliased_output_pairs=aliased_output_pairs,
         )
         return metadata
 

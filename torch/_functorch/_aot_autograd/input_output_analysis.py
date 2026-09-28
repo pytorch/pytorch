@@ -120,6 +120,10 @@ def remove_dupe_metadata(
         subclass_inp_meta=[],
         subclass_fw_graph_out_meta=[],
         subclass_tangent_meta=subclass_tangent_meta,
+        aliased_input_output_pairs=list(
+            dict.fromkeys((add_dupe_map[i], j) for i, j in m.aliased_input_output_pairs)
+        ),
+        aliased_output_pairs=m.aliased_output_pairs,
     )
 
 
@@ -300,6 +304,13 @@ def create_synthetic_base_metadata(
     ]
 
     output_info = existing_output_infos + input_metadata_output_info
+    # Aliased inputs merge into their synthetic base.
+    aliased_input_output_pairs: list[tuple[int, int]] = []
+    for i, j in m.aliased_input_output_pairs:
+        base_info = synthetic_base_info[i]
+        pair = (base_info if isinstance(base_info, int) else base_info[0], j)
+        if pair not in aliased_input_output_pairs:
+            aliased_input_output_pairs.append(pair)
     # Regenerate traced tangents to include mutated inputs including synthetic bases
     traced_tangents = (
         inner_mutated_tangents + m.traced_tangents[len(inner_mutated_tangents) :]
@@ -328,6 +339,8 @@ def create_synthetic_base_metadata(
             subclass_inp_meta=[],
             subclass_fw_graph_out_meta=[],
             subclass_tangent_meta=subclass_tangent_meta,
+            aliased_input_output_pairs=aliased_input_output_pairs,
+            aliased_output_pairs=m.aliased_output_pairs,
         ),
         outer_aliased_arg_idx_with_metadata_mutations,
     )
