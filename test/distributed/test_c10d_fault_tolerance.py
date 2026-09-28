@@ -186,7 +186,17 @@ class AbstractFaultToleranceTest:
             with self.assertRaisesRegex(dist.DistBackendError, "NCCL operation failed"):
                 work.wait()
         else:
+            # Revoke/abort is a local operation: NCCL does not notify peer
+            # ranks when rank 0 aborts its side of the communicator. If ranks
+            # 1 and 2 don't also abort and instead fall through to
+            # tearDown()'s ordinary destroy_process_group(), the communicator
+            # ends up in an inconsistent state across ranks -- NCCL's
+            # ncclCommDestroy() barrier waits for every rank to enter
+            # destroy, but rank 0 already exited via abort and never will, so
+            # ranks 1 and 2 hang until the test harness's timeout. All ranks
+            # must take the same (abort) path.
             time.sleep(1)
+            self.backend.abort()
 
     def test_shrink_exclude_last_rank(self):
         handles = self._create_reconfigured_pg("ft_shrink_last", 400)

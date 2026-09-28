@@ -321,6 +321,34 @@ def chunk_cat(
     torch._chunk_cat(tensors, dim, num_chunks, out=out)
 
 
+lib.define(
+    "record_grad_output_stream(Tensor buffer, int stream_id, int device_index, int device_type) -> ()"
+)
+
+
+@torch.library.impl(lib, "record_grad_output_stream", "CompositeExplicitAutograd")
+def _record_grad_output_stream_default(
+    buffer: torch.Tensor,
+    stream_id: int,
+    device_index: int,
+    device_type: int,
+) -> None:
+    # No-op default. Where free is host-side bookkeeping (e.g. CUDA) the block
+    # stays mapped, so no read-before-free edge is needed. A backend whose free
+    # releases device memory registers its own impl. See foreach_reduce.
+    return
+
+
+def record_grad_output_stream(buffer: torch.Tensor, stream: torch.Stream) -> None:
+    # A CPU buffer has no device free to order against and no stream to record,
+    # so skip the op to avoid crashing on a CPU stream.
+    if buffer.device.type == "cpu":
+        return
+    torch.ops.fsdp.record_grad_output_stream(
+        buffer, stream.stream_id, stream.device_index, stream.device_type
+    )
+
+
 @torch.no_grad()
 def foreach_all_gather(
     fsdp_params: list[FSDPParam],
@@ -739,6 +767,15 @@ def foreach_reduce(
         # FSDPParamGroup._all_reduce_state (captured above) to prevent
         # this. See PR #140044, regression test PR #180900.
         reduce_output = _to_dtype_if_needed(reduce_output, orig_dtype)
+        # reduce_output now backs the sharded gradient (via the as_strided below):
+        # produced on the reduce-scatter / all-reduce stream but consumed on the
+        # caller's stream. When reduce_dtype != orig_dtype the cast above rebinds
+        # reduce_output to a *new* orig_dtype tensor, so this must run post-cast to
+        # record the buffer the gradient actually aliases. The op is a no-op by
+        # default; a backend whose free is a device op that releases the memory
+        # registers an impl that records the consumer stream, so the free is
+        # ordered behind that read.
+        record_grad_output_stream(reduce_output, current_stream)
         # View out and accumulate sharded gradients
         flat_grad_offset = 0  # [0, reduce_scatter_output_numel - 1]
         for padded_unsharded_size, fsdp_param in zip(

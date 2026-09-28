@@ -96,9 +96,7 @@ SimplifierHashType Term::hashVars() const {
 
 void Term::sort() {
   // order of ops important for float
-  if (dtype().is_floating_point()) {
-    throw std::logic_error("reordering FP ops");
-  }
+  TORCH_CHECK(!dtype().is_floating_point(), "reordering FP ops");
   std::unordered_map<ExprPtr, std::string> str_repr_cache;
   std::sort(
       variables_.begin(),
@@ -123,9 +121,7 @@ SimplifierHashType Polynomial::hashVars() const {
 }
 
 void Polynomial::sort() {
-  if (dtype().is_floating_point()) {
-    throw std::logic_error("reordering FP ops");
-  }
+  TORCH_CHECK(!dtype().is_floating_point(), "reordering FP ops");
   std::unordered_map<ExprPtr, std::string> str_repr_cache;
   std::sort(
       variables_.begin(),
@@ -208,9 +204,9 @@ template <class Op>
 static ExprPtr combineMultilane(const ExprPtr& lhs, const ExprPtr& rhs) {
   if (BroadcastPtr bc = to<Broadcast>(lhs)) {
     if (BroadcastPtr bcother = to<Broadcast>(rhs)) {
-      if (bc->lanes() != bcother->lanes()) {
-        throw malformed_input("multilane lane mismatch");
-      }
+      TORCH_CHECK(
+          bc->lanes() == bcother->lanes(),
+          "MALFORMED INPUT: multilane lane mismatch");
 
       ExprPtr ret = alloc<Broadcast>(
           alloc<Op>(bc->value(), bcother->value()), bc->lanes());
@@ -218,9 +214,9 @@ static ExprPtr combineMultilane(const ExprPtr& lhs, const ExprPtr& rhs) {
     }
 
     if (RampPtr r = to<Ramp>(rhs)) {
-      if (bc->lanes() != r->lanes()) {
-        throw malformed_input("multilane lane mismatch");
-      }
+      TORCH_CHECK(
+          bc->lanes() == r->lanes(),
+          "MALFORMED INPUT: multilane lane mismatch");
 
       ExprPtr ret = alloc<Ramp>(
           alloc<Op>(bc->value(), r->base()), r->stride(), r->lanes());
@@ -228,9 +224,9 @@ static ExprPtr combineMultilane(const ExprPtr& lhs, const ExprPtr& rhs) {
     }
   } else if (RampPtr ramp = to<Ramp>(lhs)) {
     if (RampPtr rother = to<Ramp>(rhs)) {
-      if (ramp->lanes() != rother->lanes()) {
-        throw malformed_input("multilane lane mismatch");
-      }
+      TORCH_CHECK(
+          ramp->lanes() == rother->lanes(),
+          "MALFORMED INPUT: multilane lane mismatch");
 
       ExprPtr ret = alloc<Ramp>(
           alloc<Op>(ramp->base(), rother->base()),
@@ -240,9 +236,9 @@ static ExprPtr combineMultilane(const ExprPtr& lhs, const ExprPtr& rhs) {
     }
 
     if (BroadcastPtr bc = to<Broadcast>(rhs)) {
-      if (ramp->lanes() != bc->lanes()) {
-        throw malformed_input("multilane lane mismatch");
-      }
+      TORCH_CHECK(
+          ramp->lanes() == bc->lanes(),
+          "MALFORMED INPUT: multilane lane mismatch");
       ExprPtr ret = alloc<Ramp>(
           alloc<Op>(ramp->base(), bc->value()), ramp->stride(), ramp->lanes());
       return ret;
@@ -256,9 +252,9 @@ static ExprPtr combineMultilane(const ExprPtr& lhs, const ExprPtr& rhs) {
 static ExprPtr mulMultilane(const ExprPtr& lhs, const ExprPtr& rhs) {
   if (BroadcastPtr bc = to<Broadcast>(lhs)) {
     if (BroadcastPtr bcother = to<Broadcast>(rhs)) {
-      if (bc->lanes() != bcother->lanes()) {
-        throw malformed_input("multilane lane mismatch");
-      }
+      TORCH_CHECK(
+          bc->lanes() == bcother->lanes(),
+          "MALFORMED INPUT: multilane lane mismatch");
 
       ExprPtr ret = alloc<Broadcast>(
           alloc<Mul>(bc->value(), bcother->value()), bc->lanes());
@@ -266,9 +262,9 @@ static ExprPtr mulMultilane(const ExprPtr& lhs, const ExprPtr& rhs) {
     }
 
     if (RampPtr r = to<Ramp>(rhs)) {
-      if (bc->lanes() != r->lanes()) {
-        throw malformed_input("multilane lane mismatch");
-      }
+      TORCH_CHECK(
+          bc->lanes() == r->lanes(),
+          "MALFORMED INPUT: multilane lane mismatch");
 
       ExprPtr ret = alloc<Ramp>(
           alloc<Mul>(bc->value(), r->base()),
@@ -278,9 +274,9 @@ static ExprPtr mulMultilane(const ExprPtr& lhs, const ExprPtr& rhs) {
     }
   } else if (RampPtr ramp = to<Ramp>(lhs)) {
     if (RampPtr r = to<Ramp>(rhs)) {
-      if (ramp->lanes() != r->lanes()) {
-        throw malformed_input("multilane lane mismatch");
-      }
+      TORCH_CHECK(
+          ramp->lanes() == r->lanes(),
+          "MALFORMED INPUT: multilane lane mismatch");
 
       ExprPtr ret = alloc<Ramp>(
           alloc<Mul>(ramp->base(), r->base()),
@@ -290,9 +286,9 @@ static ExprPtr mulMultilane(const ExprPtr& lhs, const ExprPtr& rhs) {
     }
 
     if (BroadcastPtr bc = to<Broadcast>(rhs)) {
-      if (ramp->lanes() != bc->lanes()) {
-        throw malformed_input("multilane lane mismatch");
-      }
+      TORCH_CHECK(
+          ramp->lanes() == bc->lanes(),
+          "MALFORMED INPUT: multilane lane mismatch");
 
       ExprPtr ret = alloc<Ramp>(
           alloc<Mul>(bc->value(), ramp->base()),
@@ -2290,11 +2286,9 @@ ExprPtr TermExpander::mutate(const PolynomialPtr& v) {
 ExprPtr TermExpander::mutate(const MaxTermPtr& v) {
   auto& variables = v->variables();
   if (variables.empty()) {
-    if (!v->scalar()) {
-      // This case should never happen because MaxTerm will be created only
-      // on valid Max expressions.
-      throw std::logic_error("empty maxterm op");
-    }
+    // This case should never happen because MaxTerm will be created only
+    // on valid Max expressions.
+    TORCH_CHECK(v->scalar(), "empty maxterm op");
     return v->scalar();
   }
   ExprPtr max;
@@ -2312,11 +2306,9 @@ ExprPtr TermExpander::mutate(const MaxTermPtr& v) {
 ExprPtr TermExpander::mutate(const MinTermPtr& v) {
   auto& variables = v->variables();
   if (variables.empty()) {
-    if (!v->scalar()) {
-      // This case should never happen because MinTerm will be created only
-      // on valid Min expressions.
-      throw std::logic_error("empty minterm op");
-    }
+    // This case should never happen because MinTerm will be created only
+    // on valid Min expressions.
+    TORCH_CHECK(v->scalar(), "empty minterm op");
     return v->scalar();
   }
   ExprPtr min;
@@ -3095,9 +3087,9 @@ ExprPtr IRSimplifier::simplify(ExprPtr e) {
   // There may be terms left in the IR, expand them.
   TermExpander expander(&simplifier);
   e = e->accept_mutator(&expander);
-  if (!expander.check_safe()) {
-    throw malformed_input("eliminated null Allocation without free");
-  }
+  TORCH_CHECK(
+      expander.check_safe(),
+      "MALFORMED INPUT: eliminated null Allocation without free");
 
   GRAPH_DEBUG("(Simplifier) Simplified: ", std::to_string(e));
   return e;
@@ -3118,9 +3110,9 @@ StmtPtr IRSimplifier::simplify(StmtPtr s) {
   // There may be terms left in the IR, expand them.
   TermExpander expander(&simplifier);
   s = s->accept_mutator(&expander);
-  if (!expander.check_safe()) {
-    throw malformed_input("eliminated null Allocation without free");
-  }
+  TORCH_CHECK(
+      expander.check_safe(),
+      "MALFORMED INPUT: eliminated null Allocation without free");
 
   GRAPH_DEBUG("(Simplifier) Simplified: ", std::to_string(s));
   return s;
