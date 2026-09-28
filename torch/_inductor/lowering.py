@@ -3901,6 +3901,7 @@ make_fallback(aten.unique_dim_consecutive.default, warn=False)
 
 # Misc
 make_fallback(aten.gcd.default, warn=False)
+make_fallback(aten.split_with_sizes_copy.out, override_decomp=True)
 make_fallback(aten._thnn_fused_lstm_cell, require_dense)
 make_fallback(torch._prims.rng_prims.run_and_save_rng_state)
 make_fallback(torch._prims.rng_prims.run_with_rng_state)
@@ -4456,9 +4457,33 @@ def _full(fill_value, device, dtype, size):
             return ops.constant(value, dtype)
 
     elif isinstance(value, sympy.Basic):
+        if is_integer_dtype(dtype):
+            dtype_info = torch.iinfo(dtype)
+            is_boolean_value = value.kind is sympy.core.kind.BooleanKind
+            if is_boolean_value:
+                lower_bound = sympy.true
+                upper_bound = sympy.true
+            elif value.is_integer is True:
+                if dtype == torch.uint64:
+                    lower_bound = upper_bound = sympy.true
+                else:
+                    lower = -dtype_info.max if not dtype.is_signed else dtype_info.min
+                    lower_bound = lower <= value
+                    upper_bound = value <= dtype_info.max
+            else:
+                lower_bound = dtype_info.min <= value
+                upper_bound = value < sympy.Float(float(dtype_info.max + 1))
+            in_range = sympy.And(lower_bound, upper_bound)
+            error_msg = f"value cannot be converted to type {dtype} without overflow"
+            if in_range == sympy.false:
+                raise RuntimeError(error_msg)
+            if not V.graph.sizevars.statically_known_true(in_range):
+                assert_op = ir.AssertScalar(in_range, error_msg)
+                assert_op.name = V.graph.register_buffer(assert_op)
+                V.graph.register_operation(assert_op)
 
         def inner_fn(index):
-            return ops.index_expr(value, dtype)
+            return ops.value_expr(value, dtype)
 
     else:
         if len(value.get_size()) != 0:
@@ -5837,6 +5862,22 @@ def max_pool_checks(
     return kernel_size, stride, padding, dilation, use_fallback
 
 
+def _pool_argmax_inner_fn(x, kernel_size, inner_fn):
+    # Loop reordering runs after lowering and may permute the reduction ranges, so
+    # the offset is returned as an explicit row-major index into the window.
+    supports_logical_index_argreduce = is_triton(x) or (
+        ir.get_device_type(x) == "cpu" and config.cpu_backend == "cpp"
+    )
+    if len(kernel_size) == 1 or not supports_logical_index_argreduce:
+        return inner_fn
+
+    def inner_fn_with_index(idx, reduction_idx):
+        logical_index = inductor_prims._flatten_index(reduction_idx, kernel_size)
+        return inner_fn(idx, reduction_idx), ops.index_expr(logical_index, torch.int64)
+
+    return inner_fn_with_index
+
+
 def _max_pool_with_offsets(
     x,
     kernel_size,
@@ -5898,7 +5939,7 @@ def _max_pool_with_offsets(
         device=x.get_device(),
         dst_dtype=torch.int64,
         src_dtype=dtype,
-        inner_fn=fn_inner,
+        inner_fn=_pool_argmax_inner_fn(x, kernel_size, fn_inner),
         ranges=new_size,
         reduction_ranges=kernel_size,
     )
@@ -6629,7 +6670,7 @@ def _fractional_max_pool(x, kernel_size, output_size, random_samples, n_dim):
             device=x.get_device(),
             dst_dtype=torch.int64,
             src_dtype=dtype,
-            inner_fn=fn_inner,
+            inner_fn=_pool_argmax_inner_fn(x, kernel_size, fn_inner),
             ranges=new_size,
             reduction_ranges=kernel_size,
         )

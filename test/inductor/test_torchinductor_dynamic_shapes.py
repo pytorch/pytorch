@@ -32,6 +32,7 @@ from torch.testing._internal.common_utils import (
     MI350_ARCH,
     parametrize,
     serialTest,
+    skipIfRocm,
     skipIfRocmArch,
     TEST_CUDA_MEM_LEAK_CHECK,
     TEST_WITH_ASAN,
@@ -504,6 +505,48 @@ class TestInductorDynamic(DynamicShapesTestCase):
 
         x = torch.tensor(fill_value, device=device)
         self.assertEqual(torch.compile(f, fullgraph=True)(x), f(x))
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @parametrize(
+        "dtype,fill_value",
+        (
+            (torch.int8, 3),
+            (torch.int8, 127.5),
+            (torch.int8, True),
+            (torch.uint8, -1),
+            (torch.uint64, -1),
+        ),
+    )
+    def test_full_symbolic_fill_accepts_integer_range(self, device, dtype, fill_value):
+        def f(x):
+            return torch.full((2,), x.item(), dtype=dtype, device=device).sum()
+
+        x = torch.tensor(fill_value, device=device)
+        self.assertEqual(torch.compile(f, fullgraph=True)(x), f(x))
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @parametrize(
+        "dtype,fill_value",
+        ((torch.int8, 300), (torch.int8, -128.5), (torch.uint8, -256)),
+    )
+    def test_full_symbolic_fill_checks_integer_range(self, device, dtype, fill_value):
+        def f(x):
+            return torch.full((2,), x.item(), dtype=dtype, device=device).sum()
+
+        x = torch.tensor(fill_value, device=device)
+        with self.assertRaisesRegex(RuntimeError, "without overflow"):
+            f(x)
+        with self.assertRaisesRegex(RuntimeError, "without overflow"):
+            torch.compile(f, fullgraph=True)(x)
+
+    def test_symbolic_float_cast_rounding(self, device):
+        def f(x):
+            return (
+                torch.arange(x.numel(), device=device) * 0 + 16777217
+            ).float() - 16777216.0
+
+        x = torch.ones(4, device=device, dtype=torch.float32)
+        self.assertEqual(torch.compile(f, fullgraph=True, dynamic=True)(x), f(x))
 
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     def test_nonzero_size_factory_nobreak(self, device):
@@ -1457,6 +1500,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
         # N + 1 for automatic dynamic float arguments
         self.assertEqual(cnt.frame_count, 4)
 
+    @skipIfRocm(msg="sort kernel exceeds the inductor compile-worker timeout")
     def test_sort_dynamic_shape_with_check(self, device):
         if torch.device(device).type != GPU_TYPE:
 
