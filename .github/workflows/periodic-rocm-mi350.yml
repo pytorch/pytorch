@@ -58,7 +58,8 @@ jobs:
       # run on the gfx950.4 (4-GPU) runner labels.
       test-matrix: |
         { include: [
-          { config: "distributed_4gpu", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.amd-dpx-label-type }}linux.rocm.gpu.gfx950.4", owners: ["module:rocm", "oncall:distributed"] },
+          { config: "distributed_4gpu", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.amd-dpx-label-type }}linux.rocm.gpu.gfx950.4", owners: ["module:rocm", "oncall:distributed"] },
+          { config: "distributed_4gpu", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.amd-dpx-label-type }}linux.rocm.gpu.gfx950.4", owners: ["module:rocm", "oncall:distributed"] },
         ]}
     secrets: inherit
 
