@@ -4347,8 +4347,8 @@ Returns:
           .def(
               "perform_nocolor_split",
               &::c10d::nccl2::ProcessGroupNCCL::performNocolorSplit)
-          .def_property_readonly(
-              "comm_ptr",
+          .def(
+              "_comm_ptr",
               &::c10d::nccl2::ProcessGroupNCCL::getCommPtr,
               R"(
             This process group's ``ncclComm_t``, as an opaque handle.
@@ -4420,6 +4420,12 @@ Returns:
           [](::c10d::nccl2::ProcessGroupNCCLLazy& self, at::Device device) {
             self.getPrimary()->performNocolorSplit(device);
           })
+      .def(
+          "_comm_ptr",
+          [](::c10d::nccl2::ProcessGroupNCCLLazy& self) {
+            return self.getPrimary()->getCommPtr();
+          },
+          R"(Return the primary communicator's ``ncclComm_t`` as an opaque handle.)")
       .def_property_readonly(
           "options",
           [](::c10d::nccl2::ProcessGroupNCCLLazy& self) {

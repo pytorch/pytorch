@@ -136,6 +136,13 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    def test_comm_ptr(self) -> None:
+        # Matches the legacy ProcessGroupNCCL binding used by external libs.
+        backend = dist.get_backend_impl(device=self.device)
+        self.assertNotEqual(backend._comm_ptr(), 0)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
     def test_reduction_semantics(self) -> None:
         tensor = torch.ones(4, dtype=torch.bool, device=self.device)
         dist.all_reduce(tensor, op=dist.ReduceOp.SUM)
