@@ -29,7 +29,6 @@
 #include <ATen/cpu/vec/vec256/vsx/vec256_common_vsx.h>
 #else
 // clang-format off
-#include <ATen/cpu/vec/vec256/zarch/vec256_zarch.h>
 #include <ATen/cpu/vec/vec256/vec256_bfloat16.h>
 #include <ATen/cpu/vec/vec256/vec256_half.h>
 // clang-format on
@@ -124,15 +123,24 @@ std::
 #endif
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CONVERT ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-// Only works for inputs in the range: [-2^51, 2^51]
-// From: https://stackoverflow.com/a/41148578
 template <>
 Vectorized<int64_t> inline convert_to_int_of_same_size<double>(
     const Vectorized<double>& src) {
-  auto x = _mm256_add_pd(src, _mm256_set1_pd(0x0018000000000000));
-  return _mm256_sub_epi64(
-      _mm256_castpd_si256(x),
-      _mm256_castpd_si256(_mm256_set1_pd(0x0018000000000000)));
+  // Split the truncated value into 32-bit halves so each half lands inside the
+  // magic-number trick's exact range. Every step below is exact: scaling by a
+  // power of two only adjusts the exponent, and |t - hi * 2^32| < 2^32.
+  const auto trunc = _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC;
+  auto magic = _mm256_set1_pd(0x0018000000000000);
+  auto t = _mm256_round_pd(src, trunc);
+  auto hi = _mm256_round_pd(_mm256_mul_pd(t, _mm256_set1_pd(0x1p-32)), trunc);
+  auto lo = _mm256_fnmadd_pd(hi, _mm256_set1_pd(0x1p32), t);
+
+  auto to_i64 = [magic](__m256d v) {
+    return _mm256_sub_epi64(
+        _mm256_castpd_si256(_mm256_add_pd(v, magic)),
+        _mm256_castpd_si256(magic));
+  };
+  return _mm256_add_epi64(_mm256_slli_epi64(to_i64(hi), 32), to_i64(lo));
 }
 
 template <>
@@ -141,7 +149,6 @@ Vectorized<int32_t> inline convert_to_int_of_same_size<float>(
   return _mm256_cvttps_epi32(src);
 }
 
-// From: https://stackoverflow.com/a/41148578
 template <>
 Vectorized<double> inline convert_to_fp_of_same_size<double>(
     const Vectorized<int64_t>& src) {
@@ -160,7 +167,12 @@ Vectorized<double> inline convert_to_fp_of_same_size<double>(
   /* int64 = low32 + high32*2^32 = v_hi + v_lo - 2^52 - 2^63 - 2^84 */
   __m256d v_hi_dbl = _mm256_sub_pd(_mm256_castsi256_pd(v_hi), magic_d_all);
   __m256d result = _mm256_add_pd(v_hi_dbl, _mm256_castsi256_pd(v_lo));
-  return result;
+
+  /* The final add cancels 2^52 against -2^52 when src is 0; IEEE gives that
+      exact-zero sum a negative sign under roundTowardNegative, where SCVTF
+      would give +0.0.  Force the all-zero encoding back. */
+  __m256i is_zero = _mm256_cmpeq_epi64(src, _mm256_setzero_si256());
+  return _mm256_andnot_pd(_mm256_castsi256_pd(is_zero), result);
 }
 
 template <>
