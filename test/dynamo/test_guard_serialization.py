@@ -800,6 +800,14 @@ class _Schedule(enum.Enum):
     STEADY = _Phase(1.0)
 
 
+@dataclasses.dataclass(frozen=True)
+class _Plan:
+    phase: _Phase
+
+
+pytree.register_constant(_Plan)
+
+
 class Inputs:
     def __init__(self, x, unused):
         self.x = x
@@ -3440,12 +3448,29 @@ class TestGuardSerialization(TestGuardSerializationBase):
             (_TupleOwner.Point, False),
             # Bound to the module's Random instance, with no __module__.
             (random.random, False),
+            # pybind11: bound to an instance, so its __qualname__ names the
+            # instance's type and leads to a different object.
+            (torch._C._get_tracing_state, False),
         ]
         for value, expected in cases:
             with self.subTest(value=value):
                 self.assertEqual(
                     is_portable_identity_guard("ID_MATCH", (), value), expected
                 )
+                if expected and not isinstance(value, types.ModuleType):
+                    self.assertIs(pickle.loads(pickle.dumps(value)), value)
+
+    def test_class_match_on_a_named_tuple_nested_in_a_class(self):
+        def fn(x):
+            if isinstance(x, _TupleOwner.Point):
+                return x
+            return x + 1
+
+        # The guard-state pickler rebuilds a nested NamedTuple as a fresh class.
+        with self.assertRaisesRegex(
+            PackageError, "CLASS_MATCH guard cannot be serialized."
+        ):
+            self._test_serialization("CLASS_MATCH", fn, torch.randn(3))
 
     def test_guarded_user_object_prunes_unguarded_attributes(self):
         def fn(x, holder):
@@ -3483,6 +3508,20 @@ class TestGuardSerialization(TestGuardSerializationBase):
         ref, loaded = self._test_serialization("ID_MATCH", fn, x, _Schedule.WARMUP)
         self._test_check_fn(ref, loaded, {"x": x, "mode": _Schedule.WARMUP}, True)
         self._test_check_fn(ref, loaded, {"x": x, "mode": _Schedule.STEADY}, False)
+
+    def test_constant_class_is_kept_whole_for_its_equals_match(self):
+        def fn(x, plan):
+            if isinstance(plan, _Plan):
+                return x * 2
+            return x
+
+        x = torch.randn(3)
+
+        ref, loaded = self._test_serialization(
+            "EQUALS_MATCH", fn, x, _Plan(_Phase(0.1))
+        )
+        self._test_check_fn(ref, loaded, {"x": x, "plan": _Plan(_Phase(0.1))}, True)
+        self._test_check_fn(ref, loaded, {"x": x, "plan": _Plan(_Phase(1.0))}, False)
 
     def test_nested_guarded_user_objects_are_pruned_in_turn(self):
         def fn(x, holder):
