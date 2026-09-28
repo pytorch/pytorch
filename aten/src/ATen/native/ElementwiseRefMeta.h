@@ -10,13 +10,12 @@
 // SymInt-aware Meta kernels that match Python fake tensor exactly.
 namespace at::native {
 
-// ELEMENTWISE_TYPE_PROMOTION_KIND
-enum class TypePromotionKind { DEFAULT, INT_TO_FLOAT, ALWAYS_BOOL };
+enum class ELEMENTWISE_TYPE_PROMOTION_KIND { DEFAULT, INT_TO_FLOAT, ALWAYS_BOOL };
 
 Tensor binary_ref_meta(
     const Tensor& self,
     const Tensor& other,
-    TypePromotionKind kind,
+    ELEMENTWISE_TYPE_PROMOTION_KIND kind,
     bool fake_devices,
     const std::optional<Scalar>& alpha = std::nullopt);
 
@@ -26,7 +25,7 @@ Tensor elementwise_binary_ref_meta(
     const char* name,
     const Tensor& self,
     const Tensor& other,
-    TypePromotionKind kind,
+    ELEMENTWISE_TYPE_PROMOTION_KIND kind,
     bool fake_devices,
     bool supports_lhs_python_scalar = true);
 
@@ -34,9 +33,8 @@ Tensor elementwise_binary_ref_meta(
 // kept; the refs only look at the Python type.
 Tensor python_number(const Scalar& s);
 
-// check_inplace_broadcast in _meta_registrations
 void check_inplace_broadcast(c10::SymIntArrayRef self_shape, c10::SymIntArrayRef other_shape);
 
-Tensor fast_binary_meta(const Tensor& self, const Tensor& other, TypePromotionKind kind);
+Tensor fast_binary_impl(const Tensor& self, const Tensor& other, ELEMENTWISE_TYPE_PROMOTION_KIND kind);
 
 } // namespace at::native
