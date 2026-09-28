@@ -24,6 +24,7 @@
 #include <ATen/ops/nll_loss_forward_native.h>
 #include <ATen/ops/smooth_l1_loss_backward_native.h>
 #include <ATen/ops/smooth_l1_loss_native.h>
+#include <ATen/ops/sum.h>
 #include <ATen/ops/tensor.h>
 #endif
 
@@ -350,20 +351,22 @@ static void nllnd_loss_backward_impl(Tensor& grad_input_arg,
   const auto class_dim = input_arg.dim() == 1 ? 0 : 1;
   const auto map_size = is2D ? input_arg.size(2) * input_arg.size(3) : 1;
   const NLLLossBackwardParams<> params{
-      .n_classes = input_arg.size(class_dim),
-      .map_size = map_size,
-      .batch_stride = input_arg.dim() == 1 ? 0 : grad_input_arg.stride(0),
-      .class_stride = grad_input_arg.stride(class_dim),
-      .grad_input_offset = grad_input_arg.storage_offset(),
-      .grad_output_offset = grad_output.storage_offset(),
-      .target_offset = target.storage_offset(),
-      .weight_offset = has_weight ? weight.storage_offset() : 0,
+      .forward = {
+          .n_classes = input_arg.size(class_dim),
+          .map_size = map_size,
+          .batch_stride = input_arg.dim() == 1 ? 0 : grad_input_arg.stride(0),
+          .class_stride = grad_input_arg.stride(class_dim),
+          .input_offset = grad_output.storage_offset(),
+          .output_offset = grad_input_arg.storage_offset(),
+          .target_offset = target.storage_offset(),
+          .weight_offset = has_weight ? weight.storage_offset() : 0,
+          .ignore_index = ignore_index,
+          .tid_offset = 0,
+          .has_weight = has_weight,
+      },
       .total_weight_offset = total_weight_cast.storage_offset(),
-      .ignore_index = ignore_index,
-      .tid_offset = 0,
       .is_reduction = reduction != Reduction::None,
       .is_mean = reduction == Reduction::Mean,
-      .has_weight = has_weight,
   };
 
   MPSStream* stream = getCurrentMPSStream();
@@ -468,7 +471,6 @@ static void nllnd_loss_forward_impl(Tensor& output,
       .weight_offset = has_weight ? weight.storage_offset() : 0,
       .ignore_index = ignore_index,
       .tid_offset = 0,
-      .num_outputs = num_outputs,
       .has_weight = has_weight,
   };
 
@@ -479,11 +481,11 @@ static void nllnd_loss_forward_impl(Tensor& output,
       auto encoder = stream->commandEncoder();
       [encoder setComputePipelineState:pso];
       mtl_setArgs(encoder,
-                  getMTLBufferStorage(input),
-                  getMTLBufferStorage(target),
-                  getMTLBufferStorage(weight),
-                  getMTLBufferStorage(unreduced_loss),
-                  getMTLBufferStorage(sample_weights));
+                  input,
+                  target,
+                  weight,
+                  unreduced_loss,
+                  sample_weights);
 
       constexpr auto max_threads = int64_t{std::numeric_limits<uint32_t>::max()};
       auto dispatch_params = params;
@@ -505,7 +507,6 @@ static void nllnd_loss_forward_impl(Tensor& output,
     output.copy_(at::sum(unreduced_loss).div(total_weight));
   }
 }
-
 
 static void smooth_l1_loss_impl(const Tensor& input,
                                 const Tensor& target,

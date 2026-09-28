@@ -11763,6 +11763,52 @@ class TestNLLLoss(TestCaseMPS):
             total_weight = torch.tensor(1.0, device=inp.device)
             torch.ops.aten.nll_loss_backward(grad_out, inp, label, None, 1, -100, total_weight)
 
+    def test_nll_loss_forward_correctness(self):
+        for dtype in (torch.float32, torch.half, torch.bfloat16):
+            for reduction in ("none", "mean", "sum"):
+                for has_weight in (False, True):
+                    B, C = 32, 10
+                    x = torch.randn(B, C, dtype=dtype)
+                    target = torch.randint(0, C, (B,))
+                    target[3] = -100
+                    weight = torch.rand(C, dtype=dtype) if has_weight else None
+
+                    x_mps = x.clone().to("mps")
+                    target_mps = target.clone().to("mps")
+                    weight_mps = weight.clone().to("mps") if has_weight else None
+
+                    out_cpu = torch.nn.functional.nll_loss(
+                        x.float(), target, weight=weight.float() if has_weight else None,
+                        reduction=reduction, ignore_index=-100
+                    )
+                    out_mps = torch.nn.functional.nll_loss(
+                        x_mps, target_mps, weight=weight_mps,
+                        reduction=reduction, ignore_index=-100
+                    )
+                    self.assertEqual(out_mps.cpu().float(), out_cpu, atol=1e-3, rtol=1e-3)
+
+    @largeTensorTest("8GB", device="mps")
+    @largeMPSBufferTest(int(4.5 * 1024**3), device="mps")
+    def test_nll_loss_large_tensor_indexing(self):
+        # On MPS, F.nll_loss with flat index >= 2**31 used to silently return 0
+        # due to 32-bit indexing in MPSGraph gatherWithUpdatesTensor:
+        # https://github.com/pytorch/pytorch/issues/198471
+        if torch.mps.recommended_max_memory() < 8_000_000_000:
+            raise unittest.SkipTest("Needs at least 8GB of RAM")
+        rows, cols = (1 << 23) + (1 << 16), 256
+        x = torch.zeros((rows, cols), dtype=torch.float16, device="mps")
+        target = torch.full((rows,), 42, dtype=torch.long, device="mps")
+        boundary_row = (1 << 31) // cols
+        x[boundary_row, 42] = -2.5
+        x[-1, 42] = -3.5
+
+        loss = torch.nn.functional.nll_loss(x, target, reduction="none")
+        self.assertEqual(loss[boundary_row].item(), 2.5)
+        self.assertEqual(loss[-1].item(), 3.5)
+        del x, target, loss
+        gc.collect()
+        torch.mps.empty_cache()
+
 
 class TestTopK(TestCase):
     def _test_topk(self, shape, largest):

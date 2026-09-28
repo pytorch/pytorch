@@ -2,24 +2,6 @@
 #include <c10/metal/common.h>
 
 template <typename index_t = int64_t>
-struct NLLLossBackwardParams {
-  index_t n_classes;
-  index_t map_size;
-  index_t batch_stride;
-  index_t class_stride;
-  index_t grad_input_offset;
-  index_t grad_output_offset;
-  index_t target_offset;
-  index_t weight_offset;
-  index_t total_weight_offset;
-  index_t ignore_index;
-  index_t tid_offset;
-  bool is_reduction;
-  bool is_mean;
-  bool has_weight;
-};
-
-template <typename index_t = int64_t>
 struct NLLLossForwardParams {
   index_t n_classes;
   index_t map_size;
@@ -31,8 +13,15 @@ struct NLLLossForwardParams {
   index_t weight_offset;
   index_t ignore_index;
   index_t tid_offset;
-  index_t num_outputs;
   bool has_weight;
+};
+
+template <typename index_t = int64_t>
+struct NLLLossBackwardParams {
+  NLLLossForwardParams<index_t> forward;
+  index_t total_weight_offset;
+  bool is_reduction;
+  bool is_mean;
 };
 
 template <typename index_t>

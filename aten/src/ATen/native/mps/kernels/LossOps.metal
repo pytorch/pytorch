@@ -17,19 +17,20 @@ kernel void nllnd_loss_backward(
     constant NLLLossBackwardParams<>& params [[buffer(5)]],
     device ErrorMessages* error_buf [[buffer(6)]],
     uint thread_index [[thread_position_in_grid]]) {
-  const long index = static_cast<long>(thread_index) + params.tid_offset;
-  const long target_index = target[params.target_offset + index];
-  if (target_index == params.ignore_index) {
+  const long index =
+      static_cast<long>(thread_index) + params.forward.tid_offset;
+  const long target_index = target[params.forward.target_offset + index];
+  if (target_index == params.forward.ignore_index) {
     return;
   }
-  if (target_index < 0 || target_index >= params.n_classes) {
+  if (target_index < 0 || target_index >= params.forward.n_classes) {
     TORCH_REPORT_ERROR(
         error_buf, "Target ", target_index, " is out of bounds.");
     return;
   }
 
   const long grad_output_index =
-      params.grad_output_offset + (params.is_reduction ? 0 : index);
+      params.forward.input_offset + (params.is_reduction ? 0 : index);
   T grad = -grad_output[grad_output_index];
   if (params.is_mean) {
     const T total = total_weight[params.total_weight_offset];
@@ -38,15 +39,16 @@ kernel void nllnd_loss_backward(
     }
     grad = static_cast<T>(grad / total);
   }
-  if (params.has_weight) {
-    grad = static_cast<T>(grad * weight[params.weight_offset + target_index]);
+  if (params.forward.has_weight) {
+    grad = static_cast<T>(
+        grad * weight[params.forward.weight_offset + target_index]);
   }
 
-  const long batch = index / params.map_size;
-  const long spatial = index % params.map_size;
-  const long output_index = batch * params.batch_stride +
-      target_index * params.class_stride + spatial;
-  grad_input[params.grad_input_offset + output_index] = grad;
+  const long batch = index / params.forward.map_size;
+  const long spatial = index % params.forward.map_size;
+  const long output_index = batch * params.forward.batch_stride +
+      target_index * params.forward.class_stride + spatial;
+  grad_input[params.forward.output_offset + output_index] = grad;
 }
 
 template <typename T>
@@ -60,9 +62,6 @@ kernel void nllnd_loss_forward(
     device ErrorMessages* error_buf [[buffer(6)]],
     uint thread_index [[thread_position_in_grid]]) {
   const long index = static_cast<long>(thread_index) + params.tid_offset;
-  if (index >= params.num_outputs) {
-    return;
-  }
   const long target_index = target[params.target_offset + index];
   if (target_index == params.ignore_index) {
     output[params.output_offset + index] = T(0);
@@ -79,8 +78,10 @@ kernel void nllnd_loss_forward(
   const long spatial = index % params.map_size;
   const long input_index = batch * params.batch_stride +
       target_index * params.class_stride + spatial;
-  const T w = params.has_weight ? weight[params.weight_offset + target_index] : T(1);
-  output[params.output_offset + index] = -input[params.input_offset + input_index] * w;
+  const T w = params.has_weight ?
+      weight[params.weight_offset + target_index] : T(1);
+  output[params.output_offset + index] =
+      -input[params.input_offset + input_index] * w;
   sample_weights[index] = w;
 }
 
