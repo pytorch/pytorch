@@ -341,3 +341,5 @@ When using `<cuda/ptx>` typed wrappers for PTX instructions:
   `ptx::n32_t<N>{}`, not a runtime integer.
 - **Mbarrier smem**: Mbarrier memory must never alias with data targeted by TMA
   operations. Place mbarriers in a separate smem region from data buffers.
+
+testing push
