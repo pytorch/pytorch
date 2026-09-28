@@ -158,6 +158,16 @@
       ]
     }
   ],
+  "GB3780": [
+    {
+      "Gb_type": "non-literal key in object __dict__",
+      "Context": "key={key}, type={type(key)}",
+      "Explanation": "Dynamo models object __dict__ keys as literal constants.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0010": [
     {
       "Gb_type": "Attempted to read a deleted variable",
