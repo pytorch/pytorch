@@ -149,7 +149,7 @@ class FSDPState(_State):
                 self._comm_ctx.all_gather_stream.wait_event(event)
                 self._state_ctx.post_optim_event = None
             else:
-                current_stream = self._device_handle.current_stream()
+                current_stream = torch.accelerator.current_stream()
                 self._comm_ctx.all_gather_copy_in_stream.wait_stream(current_stream)
                 self._comm_ctx.all_gather_stream.wait_stream(current_stream)
             if self._device.type in [
@@ -434,7 +434,7 @@ class FSDPState(_State):
                 # memory) is ordered past each reduce-scatter first.
                 for rs_state in self._comm_ctx.reduce_scatter_states:
                     if rs_state.event is not None:
-                        self._device_handle.current_stream().wait_event(rs_state.event)
+                        torch.accelerator.current_stream().wait_event(rs_state.event)
                 self._comm_ctx.reduce_scatter_states.clear()
             self._state_ctx.post_backward_final_callback_queued = False
 
@@ -489,7 +489,7 @@ class FSDPState(_State):
             raise RuntimeError(
                 "reset_iter_state must be called on the root FSDP module"
             )
-        current_stream = self._device_handle.current_stream()
+        current_stream = torch.accelerator.current_stream()
         self._comm_ctx.release_all_gather_state_on_current_stream()
         for rs_state in self._comm_ctx.reduce_scatter_states:
             if rs_state.event is not None:

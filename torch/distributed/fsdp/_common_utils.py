@@ -247,6 +247,15 @@ class _FSDPDeviceHandle:
             return cast(_FSDPDeviceHandle, torch.mtia)
         return cls(device)
 
+    def current_stream(self) -> torch.Stream:
+        if torch.accelerator.is_available():
+            return torch.accelerator.current_stream()
+        if hasattr(self.__backend, "current_stream"):
+            return self.__backend.current_stream()
+        raise RuntimeError(
+            f"Device '{self.__device}' has no 'current_stream' implementation."
+        )
+
     def __getattr__(self, name: str, /) -> Any:
         try:
             return getattr(self.__backend, name)

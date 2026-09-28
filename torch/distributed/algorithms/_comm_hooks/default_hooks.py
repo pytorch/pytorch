@@ -88,7 +88,12 @@ def _decompress(state: LowPrecisionState, grad: torch.Tensor):
         ) from e
 
     # Don't let this memory get reused until after the transfer.
-    orig_grad_data.record_stream(backend.current_stream())  # type: ignore[arg-type]
+    current_stream = (
+        torch.accelerator.current_stream()
+        if torch.accelerator.is_available()
+        else backend.current_stream()
+    )
+    orig_grad_data.record_stream(current_stream)  # type: ignore[arg-type]
 
 
 def allreduce_hook(state: DefaultState, grad: torch.Tensor):
