@@ -251,6 +251,7 @@ it.
 from __future__ import annotations
 
 import base64
+import contextlib  # noqa: TC003
 import dataclasses
 import errno
 import functools
@@ -3021,6 +3022,13 @@ def _read_artifact(
             f"{artifact_path!r}, cache_path={cache_path!r}): {e}"
         ) from e
     return python_code, cache
+
+
+def no_compilation() -> contextlib.AbstractContextManager[None]:
+    """Forbid graph/kernel compilation and autotuning across the process."""
+    from torch.compiler._no_compile import no_compilation as _no_compilation
+
+    return _no_compilation()
 
 
 def _runnable_from_pair(
