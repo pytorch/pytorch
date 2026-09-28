@@ -4275,7 +4275,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             ):
                 return variables.ConstantVariable.create(True)
 
-
         try:
             getset = self.lookup_tp_getset_member(name)
 
