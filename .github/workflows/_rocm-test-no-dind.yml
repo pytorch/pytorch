@@ -308,6 +308,9 @@ jobs:
           if [[ "${TEST_CONFIG}" == *distributed* ]]; then
             timeout 180 python .ci/pytorch/rocm_preflight.py
           fi
+          # Match the old Docker test environment.
+          ulimit -S -c 0
+          ulimit -H -c 0
           "${TEST_COMMAND}"
 
       - name: Print remaining test logs
