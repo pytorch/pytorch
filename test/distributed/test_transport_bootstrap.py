@@ -7,19 +7,25 @@ from unittest.mock import Mock, patch
 
 import torch.distributed as dist
 import torch.multiprocessing as mp
-from torch.distributed._transport import new_transport, register_transport, Transport
+from torch.distributed._transport import (
+    new_transport_rank,
+    register_transport,
+    Transport,
+)
 from torch.distributed._transport._bootstrap import _RankBootstrap
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
-def _bootstrap_worker(rank, path):
-    dist.init_process_group(
-        "gloo",
-        init_method=f"file://{path}",
-        rank=rank,
-        world_size=3,
-        timeout=timedelta(seconds=30),
-    )
+def _bootstrap_worker(rank, port, path, implicit):
+    store = dist.TCPStore("127.0.0.1", port, is_master=False)
+    if implicit:
+        dist.init_process_group(
+            "gloo",
+            init_method=f"file://{path}",
+            rank=rank,
+            world_size=3,
+            timeout=timedelta(seconds=30),
+        )
     try:
 
         def factory():
@@ -30,32 +36,38 @@ def _bootstrap_worker(rank, path):
 
         register_transport("bootstrap-test", factory)
         if rank < 2:
-            transport = new_transport(
-                "bootstrap-test", peer_rank=1 - rank, bootstrap_tag="default-pair"
+            transport = new_transport_rank(
+                "bootstrap-test",
+                store=store,
+                peer_rank=1 - rank if implicit else 11 - rank,
+                rank=None if implicit else 10 + rank,
+                bootstrap_tag="pair",
             )
             if transport.connect.call_args.args != (bytes([1 - rank, 0, 255]),):
-                raise AssertionError("incorrect default-group endpoint")
-        # Rank 2 deliberately does not bootstrap; no whole-group collective.
-        dist.barrier()
-        subgroup = dist.new_group([1, 2], backend="gloo")
-        if rank > 0:
-            transport = new_transport(
-                "bootstrap-test",
-                peer_rank=2 - rank,
-                group=subgroup,
-                bootstrap_tag="subgroup-pair",
-            )
-            if transport.connect.call_args.args != (bytes([3 - rank, 0, 255]),):
-                raise AssertionError("incorrect subgroup endpoint")
-        dist.barrier()
+                raise AssertionError("incorrect peer endpoint")
+        if implicit:
+            # Rank 2 does not bootstrap, proving there is no collective in it.
+            dist.barrier()
     finally:
-        dist.destroy_process_group()
+        if implicit:
+            dist.destroy_process_group()
 
 
 class TestRankBootstrap(TestCase):
-    def test_process_group_bootstrap(self):
+    def test_tcpstore_explicit_rank_without_process_group(self):
+        self._run_tcpstore(implicit=False)
+
+    def test_tcpstore_implicit_rank(self):
+        self._run_tcpstore(implicit=True)
+
+    def _run_tcpstore(self, implicit):
+        store = dist.TCPStore("127.0.0.1", 0, is_master=True, wait_for_workers=False)
         with tempfile.TemporaryDirectory() as directory:
-            mp.spawn(_bootstrap_worker, args=(f"{directory}/store",), nprocs=3)
+            mp.spawn(
+                _bootstrap_worker,
+                args=(store.port, f"{directory}/store", implicit),
+                nprocs=3 if implicit else 2,
+            )
 
     def test_pair(self):
         store = dist.HashStore()
@@ -96,25 +108,26 @@ class TestRankBootstrap(TestCase):
             _RankBootstrap(dist.HashStore(), 0, 1, 1).connect(transport)
         self.assertIn("close failed", error.exception.__notes__[0])
 
-    def test_group_relative_ranks_and_duplicate_tag(self):
+    def test_rank_override_and_duplicate_tag(self):
         store = dist.HashStore()
-        group = Mock(spec=dist.ProcessGroup)
-        with (
-            patch("torch.distributed.is_initialized", return_value=True),
-            patch("torch.distributed.get_rank", return_value=1),
-            patch("torch.distributed.get_world_size", return_value=2),
-            patch(
-                "torch.distributed._transport._bootstrap._get_process_group_store",
-                return_value=store,
-            ),
+        with patch(
+            "torch.distributed.get_rank", side_effect=AssertionError("unexpected")
         ):
-            bootstrap = _RankBootstrap.create("test", 0, group, "pair", 1)
-            self.assertEqual((bootstrap.rank, bootstrap.peer_rank), (1, 0))
+            bootstrap = _RankBootstrap.create("test", 5, store, 10, "pair", 1)
+            self.assertEqual((bootstrap.rank, bootstrap.peer_rank), (10, 5))
             with self.assertRaisesRegex(ValueError, "already used"):
-                _RankBootstrap.create("test", 0, group, "pair", 1)
-            for peer in (-1, 1, 2, True):
+                _RankBootstrap.create("test", 5, store, 10, "pair", 1)
+            for rank, peer in ((-1, 0), (True, 0), (0, -1), (0, True), (0, 0)):
                 with self.assertRaises(ValueError):
-                    _RankBootstrap.create("test", peer, group, "other", 1)
+                    _RankBootstrap.create("test", peer, store, rank, "other", 1)
+
+    def test_implicit_rank_lookup(self):
+        with patch("torch.distributed.get_rank", return_value=4) as get_rank:
+            bootstrap = _RankBootstrap.create(
+                "test", 8, dist.HashStore(), None, "pair", 1
+            )
+            self.assertEqual(bootstrap.rank, 4)
+            get_rank.assert_called_once_with()
 
 
 if __name__ == "__main__":
