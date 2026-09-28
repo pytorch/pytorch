@@ -16,9 +16,6 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 )
 
 
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
-
-
 class TestShardUtilsDistributed(FSDPTest):
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -29,7 +26,7 @@ class TestShardUtilsDistributed(FSDPTest):
     def _create_tensor(self, *size):
         # Keep everything deterministic.
         torch.manual_seed(0)
-        return torch.rand(*size).to(device=device_type)
+        return torch.rand(*size).to(device=self.device_type)
 
     @skip_if_lt_x_gpu(2)
     def test_create_chunk_sharded_tensor(self, device):
@@ -44,7 +41,9 @@ class TestShardUtilsDistributed(FSDPTest):
                 _get_default_group(),
             )
             output = (
-                torch.empty(*size).to(device=device_type) if self.rank == 0 else None
+                torch.empty(*size).to(device=self.device_type)
+                if self.rank == 0
+                else None
             )
             sharded_tensor.gather(0, output)
             if self.rank == 0:
@@ -61,7 +60,7 @@ class TestShardUtilsDistributedDTensor(DTensorTestBase):
     def _create_tensor(self, *size):
         # Keep everything deterministic.
         torch.manual_seed(0)
-        return torch.rand(*size).to(device=device_type)
+        return torch.rand(*size).to(device=self.device_type)
 
     @with_comms
     @skip_if_lt_x_gpu(2)
