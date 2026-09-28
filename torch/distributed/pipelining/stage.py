@@ -133,9 +133,9 @@ class _ForwardChunkState:
 
     output_grad_edges: tuple[GradientEdge | None, ...]
     input_values: list[torch.Tensor]
-    live_outputs: list[torch.Tensor | None]
+    live_outputs: list[Any]
     releasable: tuple[bool, ...]
-    pending_consumers: list[int]
+    send_pending: list[bool]
 
     def stage_output_for_backward(self) -> tuple[Any, ...]:
         """Return each live tensor or its saved gradient edge."""
@@ -746,7 +746,7 @@ class _PipelineStageBase(ABC):
             input_values=input_values,
             live_outputs=list(output_tuple),
             releasable=tuple(releasable),
-            pending_consumers=[0] * len(output_tuple),
+            send_pending=[False] * len(output_tuple),
         )
 
     def get_fwd_send_ops(self, fwd_chunk_id: int) -> list[dist.P2POp]:
@@ -754,7 +754,7 @@ class _PipelineStageBase(ABC):
         Get the activation send ops for current stage's forward.
         Handles DTensor outputs by extracting local tensors.
 
-        Sent slots hold a lease until :meth:`release_fwd_output_leases`.
+        Sent slots stay live until :meth:`release_fwd_send_outputs`.
         """
         state = self._forward_chunk_states[fwd_chunk_id]
 
@@ -769,8 +769,12 @@ class _PipelineStageBase(ABC):
                     f"{self.log_prefix} output {idx} of chunk {fwd_chunk_id} was "
                     "released before its send was issued"
                 )
-            # One lease covers the slot's batched sends.
-            state.pending_consumers[idx] += 1
+            if state.send_pending[idx]:
+                raise AssertionError(
+                    f"{self.log_prefix} output {idx} of chunk {fwd_chunk_id} "
+                    "already has a pending send"
+                )
+            state.send_pending[idx] = True
             # Extract local tensor if DTensor
             send_tensor = to_local_if_dtensor(out, detach=True)
             for dst in dst_stages:
@@ -792,21 +796,22 @@ class _PipelineStageBase(ABC):
 
         return ops
 
-    def release_fwd_output_leases(self, fwd_chunk_id: int) -> None:
-        """Release stage-owned output references after their sends complete.
+    def release_fwd_send_outputs(self, fwd_chunk_id: int) -> None:
+        """Drop stage references to outputs whose sends completed.
 
-        Autograd may retain tensor storage needed by backward. Missing state
-        means backward already consumed it.
+        This does not guarantee that tensor storage is freed. Autograd, aliases,
+        user code, or communication objects may still own it. Missing state
+        means backward already consumed the outputs.
         """
         state = self._forward_chunk_states.get(fwd_chunk_id)
         if state is None:
             return
 
-        for idx, pending in enumerate(state.pending_consumers):
-            if pending == 0:
+        for idx, pending in enumerate(state.send_pending):
+            if not pending:
                 continue
-            state.pending_consumers[idx] = pending - 1
-            if state.pending_consumers[idx] == 0 and state.releasable[idx]:
+            state.send_pending[idx] = False
+            if state.releasable[idx]:
                 state.live_outputs[idx] = None
 
     def _get_grad_send_meta(self, input_idx: int) -> TensorMeta | None:
@@ -1322,8 +1327,8 @@ class _PipelineStageBase(ABC):
                         "input", bwd_kwargs, last_backward=last_backward
                     )
 
-                    # Edges cannot be detached, so drop them before weight backward.
-                    # The first stage skips this path; tensor roots remain for DDP.
+                    # Weight backward resumes from param_groups and does not need
+                    # non-first-stage output edges after input backward.
                     bwd_kwargs["stage_output"] = tuple(
                         None if isinstance(root, GradientEdge) else root
                         for root in cast(tuple[Any, ...], bwd_kwargs["stage_output"])
