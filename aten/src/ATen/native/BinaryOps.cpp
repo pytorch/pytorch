@@ -1659,8 +1659,7 @@ Tensor special_xlogy(const Tensor& x, const Scalar& y) {
 
 // add.Tensor meta kernel
 Tensor add_Tensor_meta(const Tensor& self, const Tensor& other, const Scalar& alpha) {
-  const bool symbolic = self.unsafeGetTensorImpl()->has_symbolic_sizes_strides() ||
-      other.unsafeGetTensorImpl()->has_symbolic_sizes_strides() || alpha.isSymInt();
+  const bool symbolic = is_symbolic_operand(self) || is_symbolic_operand(other) || alpha.isSymInt();
   if (symbolic) {
     if (auto out = fast_binary_impl(self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::DEFAULT); out.defined()) {
       return out;
