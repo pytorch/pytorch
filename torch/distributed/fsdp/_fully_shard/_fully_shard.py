@@ -359,6 +359,12 @@ class FSDPModule:
             unshard in the module's pre-forward for the user. The user only
             needs to call :meth:`wait` explicitly if the wait should happen
             before pre-forward.
+
+        .. note:: If ``async_op=True``, then this method, :meth:`wait` (or
+            the module's pre-forward), and the use of the unsharded parameters
+            must all run on the same stream. The all-gather buffers are
+            allocated on this method's current stream and freed after the wait
+            without ordering that stream after other streams.
         """
         state = self._get_fsdp_state()
         for fsdp_param_group in state._fsdp_param_groups:
