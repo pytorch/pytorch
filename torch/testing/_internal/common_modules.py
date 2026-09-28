@@ -1030,6 +1030,23 @@ def module_inputs_torch_nn_ConvNd(module_info, device, dtype, requires_grad, tra
     ]
 
 
+def module_inputs_torch_nn_Conv2dLocal(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    C_in, C_out, input_size = 4, 5, (5, 6)
+    cases = [
+        ('', {'kernel_size': 3}),
+        ('stride_padding', {'kernel_size': (2, 3), 'stride': (2, 1), 'padding': 1}),
+        ('dilation_no_bias', {'kernel_size': 2, 'dilation': (2, 1), 'bias': False}),
+    ]
+    return [
+        ModuleInput(constructor_input=FunctionInput(C_in, C_out, input_size=input_size, **constructor_kwargs),
+                    forward_input=FunctionInput(make_input((2, C_in) + input_size if with_batch else (C_in,) + input_size)),
+                    desc=desc if with_batch else desc + '_no_batch_dim',
+                    reference_fn=(None if with_batch else no_batch_dim_reference_fn))
+        for with_batch, (desc, constructor_kwargs) in itertools.product([True, False], cases)
+    ]
+
+
 def module_inputs_torch_nn_CosineEmbeddingLoss(module_info, device, dtype, requires_grad, training, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     make_target = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
@@ -4297,6 +4314,13 @@ module_db: list[ModuleInfo] = [
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
+               )),
+    ModuleInfo(torch.nn.Conv2dLocal,
+               module_inputs_func=module_inputs_torch_nn_Conv2dLocal,
+               gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+               skips=(
+                   # The 6D weight has no channels_last layout to test.
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
                )),
     ModuleInfo(torch.nn.Conv3d,
                module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=3, lazy=False),

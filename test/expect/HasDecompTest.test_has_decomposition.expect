@@ -51,6 +51,10 @@ aten::_conj_copy
 aten::_conj_copy.out
 aten::_conj_physical
 aten::_conj_physical.out
+aten::_conv2d_local
+aten::_conv2d_local.out
+aten::_conv2d_local_backward
+aten::_conv2d_local_backward.out
 aten::_conv_depthwise2d
 aten::_conv_depthwise2d.out
 aten::_convert_indices_from_coo_to_csr

@@ -18,6 +18,7 @@
 
     conv1d
     conv2d
+    conv2d_local
     conv3d
     conv_transpose1d
     conv_transpose2d

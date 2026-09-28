@@ -18,6 +18,7 @@ from .utils import _pair, _reverse_repeat_tuple, _single, _triple
 __all__ = [
     "Conv1d",
     "Conv2d",
+    "Conv2dLocal",
     "Conv3d",
     "ConvTranspose1d",
     "ConvTranspose2d",
@@ -1919,3 +1920,159 @@ class LazyConvTranspose3d(_LazyConvXdMixin, ConvTranspose3d):  # type: ignore[mi
 
     def _get_num_spatial_dims(self) -> int:
         return 3
+
+
+class Conv2dLocal(Module):
+    r"""Applies a 2D locally connected operation over an input signal composed of
+    several input planes.
+
+    This is a :class:`~torch.nn.Conv2d` whose kernel weights are not shared
+    across output positions: every output location has its own
+    :math:`(C_{out}, C_{in}, kH, kW)` filter bank. Because the weight shape
+    depends on the output size, the spatial input size must be given up front.
+
+    In the simplest case, the output value of the layer with input size
+    :math:`(N, C_{\text{in}}, H_{\text{in}}, W_{\text{in}})` and output
+    :math:`(N, C_{\text{out}}, H_{\text{out}}, W_{\text{out}})` can be precisely
+    described as:
+
+    .. math::
+        \text{out}(N_i, C_{\text{out}_j}, h, w) = \text{bias}(C_{\text{out}_j}, h, w) +
+        \sum_{k = 0}^{C_{\text{in}} - 1} \sum_{i = 0}^{kH - 1} \sum_{j = 0}^{kW - 1}
+        \text{weight}(h, w, C_{\text{out}_j}, k, i, j) \,
+        \text{input}(N_i, k, h \cdot sH - padH + i \cdot dH, w \cdot sW - padW + j \cdot dW)
+
+    Args:
+        in_channels (int): Number of channels in the input image
+        out_channels (int): Number of channels produced by the layer
+        kernel_size (int or tuple): Size of the kernel
+        input_size (int or tuple): Spatial size :math:`(H_{in}, W_{in})` of the input
+        stride (int or tuple, optional): Stride of the kernel. Default: 1
+        padding (int or tuple, optional): Zero padding added to both sides of
+            the input. Default: 0
+        dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
+        bias (bool, optional): If ``True``, adds a learnable bias to the output. Default: ``True``
+
+    Shape:
+        - Input: :math:`(N, C_{in}, H_{in}, W_{in})` or :math:`(C_{in}, H_{in}, W_{in})`
+        - Output: :math:`(N, C_{out}, H_{out}, W_{out})` or :math:`(C_{out}, H_{out}, W_{out})`, where
+
+          .. math::
+              H_{out} = \left\lfloor\frac{H_{in}  + 2 \times \text{padding}[0] - \text{dilation}[0]
+                        \times (\text{kernel\_size}[0] - 1) - 1}{\text{stride}[0]} + 1\right\rfloor
+
+          .. math::
+              W_{out} = \left\lfloor\frac{W_{in}  + 2 \times \text{padding}[1] - \text{dilation}[1]
+                        \times (\text{kernel\_size}[1] - 1) - 1}{\text{stride}[1]} + 1\right\rfloor
+
+    Attributes:
+        weight (Tensor): the learnable weights of the module of shape
+            :math:`(H_{out}, W_{out}, C_{out}, C_{in}, kH, kW)`.
+            The values are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`, where
+            :math:`k = \frac{1}{C_\text{in} \cdot kH \cdot kW}`
+        bias (Tensor): the learnable bias of the module of shape
+            :math:`(C_{out}, H_{out}, W_{out})`. If :attr:`bias` is ``True``, the values
+            are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
+            :math:`k = \frac{1}{C_\text{in} \cdot kH \cdot kW}`
+
+    Examples:
+
+        >>> m = nn.Conv2dLocal(16, 33, 3, input_size=(50, 100), stride=2)
+        >>> input = torch.randn(20, 16, 50, 100)
+        >>> output = m(input)
+        >>> output.shape
+        torch.Size([20, 33, 24, 49])
+    """
+
+    __constants__ = [
+        "stride",
+        "padding",
+        "dilation",
+        "in_channels",
+        "out_channels",
+        "kernel_size",
+        "input_size",
+        "output_size",
+    ]
+
+    in_channels: int
+    out_channels: int
+    kernel_size: tuple[int, int]
+    input_size: tuple[int, int]
+    output_size: tuple[int, int]
+    stride: tuple[int, int]
+    padding: tuple[int, int]
+    dilation: tuple[int, int]
+    weight: Tensor
+    bias: Tensor | None
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: _size_2_t,
+        input_size: _size_2_t,
+        stride: _size_2_t = 1,
+        padding: _size_2_t = 0,
+        dilation: _size_2_t = 1,
+        bias: bool = True,
+        device=None,
+        dtype=None,
+    ) -> None:
+        factory_kwargs = {"device": device, "dtype": dtype}
+        super().__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.kernel_size = _pair(kernel_size)
+        self.input_size = _pair(input_size)
+        self.stride = _pair(stride)
+        self.padding = _pair(padding)
+        self.dilation = _pair(dilation)
+        output_size = []
+        for i in range(2):
+            extent = self.dilation[i] * (self.kernel_size[i] - 1) + 1
+            span = self.input_size[i] + 2 * self.padding[i] - extent
+            if span < 0:
+                raise ValueError(
+                    f"kernel_size {self.kernel_size} with dilation {self.dilation} is larger than "
+                    f"input_size {self.input_size} with padding {self.padding}"
+                )
+            output_size.append(span // self.stride[i] + 1)
+        self.output_size = (output_size[0], output_size[1])
+        self.weight = Parameter(
+            torch.empty(
+                (*self.output_size, out_channels, in_channels, *self.kernel_size),
+                **factory_kwargs,
+            )
+        )
+        if bias:
+            self.bias = Parameter(
+                torch.empty((out_channels, *self.output_size), **factory_kwargs)
+            )
+        else:
+            self.register_parameter("bias", None)
+        self.reset_parameters()
+
+    def reset_parameters(self) -> None:
+        # Same distribution as Conv2d's kaiming_uniform_(a=sqrt(5)); the fan-in
+        # helpers cannot be used because they misread the 6D weight layout.
+        fan_in = self.in_channels * self.kernel_size[0] * self.kernel_size[1]
+        bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
+        init.uniform_(self.weight, -bound, bound)
+        if self.bias is not None:
+            init.uniform_(self.bias, -bound, bound)
+
+    def forward(self, input: Tensor) -> Tensor:
+        return F.conv2d_local(
+            input, self.weight, self.bias, self.stride, self.padding, self.dilation
+        )
+
+    def extra_repr(self) -> str:
+        s = "{in_channels}, {out_channels}, kernel_size={kernel_size}, input_size={input_size}, stride={stride}"
+        if self.padding != (0, 0):
+            s += ", padding={padding}"
+        if self.dilation != (1, 1):
+            s += ", dilation={dilation}"
+        if self.bias is None:
+            s += ", bias=False"
+        return s.format(**self.__dict__)

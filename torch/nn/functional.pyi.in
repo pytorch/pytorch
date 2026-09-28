@@ -917,6 +917,17 @@ def triplet_margin_with_distance_loss(
 
 __all__ += ["triplet_margin_with_distance_loss"]
 
+def conv2d_local(
+    input: Tensor,
+    weight: Tensor,
+    bias: Tensor | None = ...,
+    stride: _size_2_t = ...,
+    padding: _size_2_t = ...,
+    dilation: _size_2_t = ...,
+) -> Tensor: ...
+
+__all__ += ["conv2d_local"]
+
 def unfold(
     input: Tensor,
     kernel_size: _size_any_t,

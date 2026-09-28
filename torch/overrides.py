@@ -1013,6 +1013,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.nn.functional.triplet_margin_with_distance_loss: (
             lambda anchor, positive, negative, *, distance_function=None, margin=1.0, swap=False, reduction="mean": -1
         ),
+        torch.nn.functional.conv2d_local: lambda input, weight, bias=None, stride=1, padding=0, dilation=1: -1,
         torch.nn.functional.unfold: lambda input, kernel_size, dilation=1, padding=0, stride=1: -1,
         torch.nn.init.uniform_: lambda tensor, a=0.0, b=1.0, generator=None: -1,
         torch.nn.init.normal_: lambda tensor, mean=0.0, std=1.0, generator=None: -1,

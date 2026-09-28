@@ -341,6 +341,61 @@ Args:
 )
 
 
+def conv2d_local(
+    input: Tensor,
+    weight: Tensor,
+    bias: Tensor | None = None,
+    stride: BroadcastingList2[int] = 1,
+    padding: BroadcastingList2[int] = 0,
+    dilation: BroadcastingList2[int] = 1,
+) -> Tensor:
+    r"""Applies a 2D locally connected operation (a convolution whose weights are
+    not shared across output positions) over an input image composed of several
+    input planes.
+
+    See :class:`~torch.nn.Conv2dLocal` for details and output shape.
+
+    Args:
+        input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iH , iW)`
+          or :math:`(\text{in\_channels} , iH , iW)`
+        weight: filters of shape :math:`(oH , oW , \text{out\_channels} , \text{in\_channels} , kH , kW)`,
+          one :math:`(\text{out\_channels} , \text{in\_channels} , kH , kW)` filter bank per output position
+        bias: optional bias tensor of shape :math:`(\text{out\_channels} , oH , oW)`. Default: ``None``
+        stride: the stride of the kernel. Can be a single number or a
+          tuple `(sH, sW)`. Default: 1
+        padding: implicit zero paddings on both sides of the input. Can be a
+          single number or a tuple `(padH, padW)`. Default: 0
+        dilation: the spacing between kernel elements. Can be a single number or
+          a tuple `(dH, dW)`. Default: 1
+
+    Examples::
+
+        >>> # 3 input channels, 8 output channels, 3x3 kernels on a 10x10 input -> 8x8 output
+        >>> inputs = torch.randn(4, 3, 10, 10)
+        >>> filters = torch.randn(8, 8, 8, 3, 3, 3)
+        >>> F.conv2d_local(inputs, filters).shape
+        torch.Size([4, 8, 8, 8])
+    """
+    if has_torch_function_variadic(input, weight, bias):
+        return handle_torch_function(
+            conv2d_local,
+            (input, weight, bias),
+            input,
+            weight,
+            bias,
+            stride=stride,
+            padding=padding,
+            dilation=dilation,
+        )
+    unbatched = input.dim() == 3
+    if unbatched:
+        input = input.unsqueeze(0)
+    output = torch._C._nn._conv2d_local(
+        input, weight, bias, _pair(stride), _pair(padding), _pair(dilation)
+    )
+    return output.squeeze(0) if unbatched else output
+
+
 # Pooling
 avg_pool1d = _add_docstr(
     torch.avg_pool1d,

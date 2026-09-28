@@ -46,6 +46,7 @@ from torch.testing._internal.common_dtype import (
 )
 from torch.testing._internal.common_nn import _test_module_empty_input, NNTestCase
 from torch.testing._internal.common_utils import (
+    DeterministicGuard,
     download_file,
     dtype2prec_DONTUSE,
     gradcheck,
@@ -1172,6 +1173,49 @@ class TestConvolutionNN(NNTestCase):
         input = input.transpose(1, 2)
         # This should not fail
         F.conv1d(input, weight, bias, stride, padding, dilation, groups)
+
+    def test_conv2d_local_module(self):
+        mod = nn.Conv2dLocal(
+            3,
+            4,
+            kernel_size=(3, 2),
+            input_size=(7, 8),
+            stride=(2, 1),
+            padding=1,
+            dilation=(1, 2),
+        )
+        self.assertEqual(mod.output_size, (4, 8))
+        self.assertEqual(mod.weight.shape, (4, 8, 4, 3, 3, 2))
+        self.assertEqual(mod.bias.shape, (4, 4, 8))
+        self.assertEqual(
+            repr(mod),
+            "Conv2dLocal(3, 4, kernel_size=(3, 2), input_size=(7, 8), stride=(2, 1), padding=(1, 1), dilation=(1, 2))",
+        )
+        self.assertEqual(mod(torch.randn(2, 3, 7, 8)).shape, (2, 4, 4, 8))
+        self.assertEqual(mod(torch.randn(3, 7, 8)).shape, (4, 4, 8))
+
+        mod = nn.Conv2dLocal(3, 4, 3, input_size=5, bias=False)
+        self.assertIsNone(mod.bias)
+        self.assertEqual(
+            repr(mod),
+            "Conv2dLocal(3, 4, kernel_size=(3, 3), input_size=(5, 5), stride=(1, 1), bias=False)",
+        )
+        bound = 1 / math.sqrt(3 * 3 * 3)
+        self.assertTrue(mod.weight.abs().max() <= bound)
+
+        with self.assertRaisesRegex(ValueError, "larger than input_size"):
+            nn.Conv2dLocal(3, 4, 5, input_size=4)
+        with self.assertRaisesRegex(RuntimeError, "weight is sized for output"):
+            mod(torch.randn(1, 3, 6, 6))
+
+
+def _conv2d_local_reference(input, weight, bias, stride, padding, dilation):
+    out_h, out_w, c_out, c_in, kh, kw = weight.shape
+    cols = F.unfold(input, (kh, kw), dilation=dilation, padding=padding, stride=stride)
+    cols = cols.view(input.shape[0], c_in * kh * kw, out_h, out_w)
+    w = weight.reshape(out_h, out_w, c_out, c_in * kh * kw)
+    out = torch.einsum("nkhw,hwok->nohw", cols, w)
+    return out if bias is None else out + bias
 
 
 class TestConvolutionNNDevice(NNTestCase):
@@ -3160,6 +3204,141 @@ class TestConvolutionNNDevice(NNTestCase):
         self.assertTrue(
             gradgradcheck(convolution, inputs, nondet_tol=gradcheck_nondet_tol)
         )
+
+    @dtypes(torch.float, torch.double, torch.half, torch.bfloat16)
+    def test_conv2d_local(self, device, dtype):
+        cases = [
+            # input shape, (C_out, kH, kW), kwargs
+            ((2, 3, 6, 5), (4, 3, 2), {}),
+            ((3, 2, 7, 9), (2, 3, 3), {"stride": (2, 3), "padding": (1, 2)}),
+            ((1, 4, 8, 8), (3, 2, 2), {"stride": 1, "padding": 2, "dilation": (2, 3)}),
+            ((2, 1, 5, 5), (1, 5, 5), {}),
+        ]
+        for input_shape, (c_out, kh, kw), kwargs in cases:
+            for has_bias in (True, False):
+                mod = nn.Conv2dLocal(
+                    input_shape[1],
+                    c_out,
+                    (kh, kw),
+                    input_shape[2:],
+                    bias=has_bias,
+                    **kwargs,
+                )
+                mod = mod.to(device=device, dtype=dtype)
+                x = torch.randn(input_shape, device=device, dtype=dtype)
+                out = mod(x)
+                ref = _conv2d_local_reference(
+                    x.double(),
+                    mod.weight.double(),
+                    None if mod.bias is None else mod.bias.double(),
+                    mod.stride,
+                    mod.padding,
+                    mod.dilation,
+                )
+                self.assertEqual(out.shape, ref.shape)
+                self.assertEqual(
+                    out, ref.to(dtype), atol=dtype2prec_DONTUSE[dtype], rtol=0
+                )
+                self.assertEqual(
+                    mod(x[0]), out[0], atol=dtype2prec_DONTUSE[dtype], rtol=0
+                )
+
+    @dtypes(torch.double)
+    def test_conv2d_local_grad(self, device, dtype):
+        for kwargs in ({}, {"stride": (2, 1), "padding": (1, 0), "dilation": (1, 2)}):
+            mod = nn.Conv2dLocal(2, 3, (3, 2), (5, 6), **kwargs).to(
+                device=device, dtype=dtype
+            )
+            x = torch.randn(2, 2, 5, 6, device=device, dtype=dtype, requires_grad=True)
+            inputs = (x, mod.weight, mod.bias)
+
+            def fn(x, w, b):
+                return F.conv2d_local(x, w, b, mod.stride, mod.padding, mod.dilation)
+
+            self.assertTrue(gradcheck(fn, inputs, nondet_tol=GRADCHECK_NONDET_TOL))
+            self.assertTrue(gradgradcheck(fn, inputs, nondet_tol=GRADCHECK_NONDET_TOL))
+
+            # Compare each gradient against the unfold-based reference.
+            go = torch.randn(mod(x).shape, device=device, dtype=dtype)
+            grads = torch.autograd.grad(fn(*inputs), inputs, go)
+            ref_grads = torch.autograd.grad(
+                _conv2d_local_reference(
+                    x, mod.weight, mod.bias, mod.stride, mod.padding, mod.dilation
+                ),
+                inputs,
+                go,
+            )
+            self.assertEqual(grads, ref_grads)
+
+    @dtypes(torch.float)
+    def test_conv2d_local_empty(self, device, dtype):
+        mod = nn.Conv2dLocal(3, 4, 3, (6, 6)).to(device=device, dtype=dtype)
+        _test_module_empty_input(
+            self,
+            mod,
+            torch.randn(0, 3, 6, 6, device=device, dtype=dtype),
+            check_size=False,
+        )
+        mod = nn.Conv2dLocal(0, 4, 3, (6, 6)).to(device=device, dtype=dtype)
+        x = torch.randn(2, 0, 6, 6, device=device, dtype=dtype)
+        self.assertEqual(mod(x), mod.bias.expand(2, -1, -1, -1))
+
+    @onlyCUDA
+    @dtypes(torch.float, torch.double, torch.half)
+    def test_conv2d_local_deterministic(self, device, dtype):
+        # The default grad_input kernel scatters with atomics; deterministic
+        # mode switches to a gather kernel that must agree with it.
+        mod = nn.Conv2dLocal(3, 5, (3, 2), (9, 8), stride=(2, 1), padding=1).to(
+            device=device, dtype=dtype
+        )
+        x = torch.randn(4, 3, 9, 8, device=device, dtype=dtype, requires_grad=True)
+        go = torch.randn(4, 5, 5, 9, device=device, dtype=dtype)
+        (grad_atomic,) = torch.autograd.grad(mod(x), x, go)
+        with DeterministicGuard(True):
+            (grad_gather,) = torch.autograd.grad(mod(x), x, go)
+        self.assertEqual(
+            grad_atomic, grad_gather, atol=dtype2prec_DONTUSE[dtype], rtol=0
+        )
+
+    @onlyCUDA
+    @dtypes(torch.float, torch.half)
+    def test_conv2d_local_cuda_vs_cpu(self, device, dtype):
+        mod = nn.Conv2dLocal(
+            3,
+            5,
+            (3, 2),
+            (11, 9),
+            stride=(2, 1),
+            padding=(1, 1),
+            dilation=(1, 2),
+            dtype=dtype,
+        )
+        x = torch.randn(4, 3, 11, 9, dtype=dtype, requires_grad=True)
+        out_cpu = mod(x)
+        go = torch.randn_like(out_cpu)
+        grads_cpu = torch.autograd.grad(out_cpu, (x, mod.weight, mod.bias), go)
+
+        mod_cuda = nn.Conv2dLocal(
+            3,
+            5,
+            (3, 2),
+            (11, 9),
+            stride=(2, 1),
+            padding=(1, 1),
+            dilation=(1, 2),
+            dtype=dtype,
+        )
+        mod_cuda.load_state_dict(mod.state_dict())
+        mod_cuda.to(device)
+        x_cuda = x.detach().to(device).requires_grad_()
+        out_cuda = mod_cuda(x_cuda)
+        grads_cuda = torch.autograd.grad(
+            out_cuda, (x_cuda, mod_cuda.weight, mod_cuda.bias), go.to(device)
+        )
+
+        tol = dtype2prec_DONTUSE[dtype]
+        self.assertEqual(out_cuda, out_cpu, atol=tol, rtol=0, exact_device=False)
+        self.assertEqual(grads_cuda, grads_cpu, atol=tol, rtol=0, exact_device=False)
 
     @dtypes(torch.float, torch.cfloat)
     def test_conv_empty_channel(self, device, dtype):

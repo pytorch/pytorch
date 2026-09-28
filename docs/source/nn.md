@@ -92,6 +92,7 @@ Global Hooks For Module
 
     nn.Conv1d
     nn.Conv2d
+    nn.Conv2dLocal
     nn.Conv3d
     nn.ConvTranspose1d
     nn.ConvTranspose2d

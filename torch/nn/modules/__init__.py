@@ -53,6 +53,7 @@ from .container import (
 from .conv import (
     Conv1d,
     Conv2d,
+    Conv2dLocal,
     Conv3d,
     ConvTranspose1d,
     ConvTranspose2d,
@@ -198,6 +199,7 @@ __all__ = [
     "Container",
     "Conv1d",
     "Conv2d",
+    "Conv2dLocal",
     "Conv3d",
     "ConvTranspose1d",
     "ConvTranspose2d",

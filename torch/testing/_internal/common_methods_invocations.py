@@ -20,6 +20,7 @@ from torch import inf, nan
 from typing import Any
 from collections.abc import Sequence
 from torch.testing import make_tensor
+from torch.nn.modules.utils import _pair
 from torch.testing._internal.common_dtype import (
     _dispatch_dtypes, floating_types, floating_types_and, complex_types, floating_and_complex_types,
     floating_and_complex_types_and, all_types_and_complex_and, all_types_and, integral_types_and,
@@ -4378,6 +4379,55 @@ def sample_inputs_conv2d(op_info, device, dtype, requires_grad, jit_fail_sample=
             make_arg(weight),
             make_arg(bias) if bias is not None else bias
         ), kwargs=kwargs)
+
+
+def sample_inputs_conv2d_local(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # (input shape, (C_out, kH, kW), has bias, kwargs); the weight shape follows from these
+    cases: tuple = (
+        ((1, 3, 5, 5), (2, 3, 3), True, {}),
+        ((2, 2, 6, 5), (3, 3, 2), True, {'stride': (2, 1), 'padding': (1, 0)}),
+        ((2, 2, 7, 7), (1, 2, 3), False, {'stride': 2, 'padding': 1, 'dilation': (2, 1)}),
+        ((1, 1, 4, 4), (2, 1, 1), True, {'stride': 1, 'padding': 0}),
+        ((0, 2, 4, 4), (2, 2, 2), True, {}),
+    )
+
+    for input_shape, (c_out, kh, kw), has_bias, fn_kwargs in cases:
+        stride = _pair(fn_kwargs.get('stride', 1))
+        padding = _pair(fn_kwargs.get('padding', 0))
+        dilation = _pair(fn_kwargs.get('dilation', 1))
+        out_h = (input_shape[2] + 2 * padding[0] - dilation[0] * (kh - 1) - 1) // stride[0] + 1
+        out_w = (input_shape[3] + 2 * padding[1] - dilation[1] * (kw - 1) - 1) // stride[1] + 1
+        weight_shape = (out_h, out_w, c_out, input_shape[1], kh, kw)
+        bias_shape = (c_out, out_h, out_w)
+        for batched in (True, False):
+            if not batched and input_shape[0] == 0:
+                continue
+            yield SampleInput(
+                make_arg(input_shape if batched else input_shape[1:]),
+                args=(make_arg(weight_shape), make_arg(bias_shape) if has_bias else None),
+                kwargs=fn_kwargs)
+
+
+def error_inputs_conv2d_local(opinfo, device, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=torch.float32)
+    # weight sized for the wrong output
+    yield ErrorInput(
+        SampleInput(make_arg((1, 2, 5, 5)), args=(make_arg((2, 2, 3, 2, 3, 3)),)),
+        error_regex="weight is sized for output \\(2, 2\\)")
+    # channel mismatch
+    yield ErrorInput(
+        SampleInput(make_arg((1, 2, 5, 5)), args=(make_arg((3, 3, 3, 4, 3, 3)),)),
+        error_regex="weight expects 4 input channels but input has 2")
+    # bad bias shape
+    yield ErrorInput(
+        SampleInput(make_arg((1, 2, 5, 5)), args=(make_arg((3, 3, 3, 2, 3, 3)), make_arg((3,)))),
+        error_regex="expected bias of shape \\(3, 3, 3\\)")
+    # wrong weight rank
+    yield ErrorInput(
+        SampleInput(make_arg((1, 2, 5, 5)), args=(make_arg((3, 2, 3, 3)),)),
+        error_regex="expected 6D weight")
 
 
 def sample_inputs_conv3d(opinfo, device, dtype, requires_grad, **kwargs):
@@ -16190,6 +16240,16 @@ op_db: list[OpInfo] = [
                ),
            ),
            supports_expanded_weight=True,
+           supports_out=False,),
+    OpInfo('nn.functional.conv2d_local',
+           aten_name='_conv2d_local',
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
+           sample_inputs_func=sample_inputs_conv2d_local,
+           error_inputs_func=error_inputs_conv2d_local,
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           gradcheck_fast_mode=True,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            supports_out=False,),
     OpInfo('nn.functional.conv3d',
            aliases=('conv3d',),
