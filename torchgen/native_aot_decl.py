@@ -30,7 +30,7 @@ class AotDeclaration(Protocol):
     DISPATCH_KEY: str
     KERNEL_MODULE: str
     # Architectures this op's kernels are valid on (sm strings, e.g.
-    # ("sm_90a", "sm_100a")). OPTIONAL in source declarations, so read it
+    # ("sm_90", "sm_100f")). OPTIONAL in source declarations, so read it
     # through archs_of(d), never d.ARCHS. Export skips (declaration x
     # arch) pairs outside it; gen_aot_lib emits a runtime gate from the
     # intersection with the arches actually shipped.
@@ -80,17 +80,22 @@ _OPTIONAL_FNS = {
 # instead of matching no declaration and exporting nothing at exit 0. Deliberately
 # WIDER than EXPORTABLE_ARCHES below: an explicit --arch is how a hand run targets
 # something the release wheels do not.
-KNOWN_ARCHES = ("sm_90", "sm_90a", "sm_100", "sm_100a", "sm_103", "sm_103a")
+KNOWN_ARCHES = (
+    "sm_90",
+    "sm_90a",
+    "sm_100",
+    "sm_100f",
+    "sm_100a",
+    "sm_103",
+    "sm_103f",
+    "sm_103a",
+)
 
-# Which of them the STANDARD build ships: the TORCH_CUDA_ARCH_LIST entries eligible
-# on the automatic export path, which an explicit --arch bypasses. Both spellings of
-# a capability are listed because they are distinct nvcc targets for the same
-# hardware -- "10.0a" (needed by tcgen05/wgmma) in native-aot.yml, plain "10.0"
-# in the manywheel lists -- and omitting either silently exports nothing there. Each
-# entry also costs another full set of compiled kernels in every wheel naming it, and
-# makes the DSL runtimes mandatory on a builder with that GPU. sm_103 stays out: no
-# arch list we see names 10.3.
-EXPORTABLE_ARCHES = ("sm_90", "sm_90a", "sm_100", "sm_100a")
+# Which targets the STANDARD build ships. archs_from_cuda_arch_list() maps the main
+# build's exact target onto one of these portable native-AOT targets. One sm_100f
+# artifact serves SM100, SM103 and later members of the same major family, avoiding
+# one full copy of every kernel per device capability.
+EXPORTABLE_ARCHES = ("sm_90", "sm_100f")
 if not set(EXPORTABLE_ARCHES) <= set(KNOWN_ARCHES):
     raise AssertionError(
         f"EXPORTABLE_ARCHES names arches this tooling cannot target: "
@@ -104,7 +109,7 @@ if not set(EXPORTABLE_ARCHES) <= set(KNOWN_ARCHES):
 # target this arch" is not "every declaration's kernels work on it".
 _DEFAULT_ARCHS = KNOWN_ARCHES
 
-_SM_RE = r"sm_\d+a?"
+_SM_RE = r"sm_\d+[af]?"
 
 
 def load_by_path(name: str, path: str):
@@ -142,11 +147,11 @@ _KNOWN_MAJORS = range(3, 13)
 # prefix and suffix and re-testing the middle. ASCII classes, not \d or
 # str.isdigit(): both are Unicode-aware, and full-width or Arabic-Indic digits
 # then read as an ordinary capability.
-_SM_SPELLING = re.compile(r"sm_([1-9][0-9]{1,2})a?")
+_SM_SPELLING = re.compile(r"sm_([1-9][0-9]{1,2})([af]?)")
 
 
 def cc_of(arch: str) -> tuple[int, int]:
-    """sm string -> compute capability. "sm_90" -> (9, 0), "sm_103a" -> (10, 3).
+    """sm string -> compute capability. "sm_90" -> (9, 0), "sm_103f" -> (10, 3).
 
     Shared, because the exporter (matching a detected arch against ARCHS) and the
     generator (grouping sidecars by capability) must agree what an sm string
@@ -156,9 +161,8 @@ def cc_of(arch: str) -> tuple[int, int]:
 
     Refuses what it cannot parse rather than computing a capability: "sm_9" gives
     (0, 9) and "sm_1000" (100, 0), each a gate no device satisfies, so the op
-    ships, links and declines every call unreported. Suffixes other than the
-    arch-conditional "a" (CUDA 12.9+'s family-conditional "f") are refused too --
-    they mean something the generator has not been taught.
+    ships, links and declines every call unreported. Only CUDA's arch-conditional
+    "a" and family-conditional "f" suffixes are accepted.
 
     _KNOWN_MAJORS would reject "sm_9" and "sm_1000" anyway (as capability 0.9 and
     100.0), so the digit count in _SM_SPELLING is there for the DIAGNOSTIC: a
@@ -168,7 +172,7 @@ def cc_of(arch: str) -> tuple[int, int]:
     if m is None:
         raise RuntimeError(
             f"cannot read a compute capability from arch {arch!r}: expected "
-            f"sm_<major><minor>[a], e.g. sm_90a or sm_100"
+            f"sm_<major><minor>[a|f], e.g. sm_90a, sm_100f or sm_100"
         )
     major, minor = divmod(int(m.group(1)), 10)
     if major not in _KNOWN_MAJORS:
@@ -178,6 +182,29 @@ def cc_of(arch: str) -> tuple[int, int]:
             f"{_KNOWN_MAJORS.stop - 1}; a gate for it would match no device"
         )
     return major, minor
+
+
+def suffix_of(arch: str) -> str:
+    """The CUDA feature-set suffix ("a", "f", or "") of a validated target."""
+    # cc_of owns the diagnostic for malformed strings and the known-major check.
+    cc_of(arch)
+    match = _SM_SPELLING.fullmatch(arch)
+    if match is None:
+        raise AssertionError(f"cc_of accepted an unparsable arch {arch!r}")
+    return match.group(2)
+
+
+def target_can_run_on(target: str, device_cc: tuple[int, int]) -> bool:
+    """Whether ``target``'s cubin can run on a device compute capability.
+
+    Native-AOT keeps baseline and architecture-specific ``a`` targets exact. A
+    family-specific ``f`` cubin is minor-version forward-compatible within the same
+    major family; for example, an sm_100f cubin runs on SM100 and SM103.
+    """
+    target_cc = cc_of(target)
+    if suffix_of(target) == "f":
+        return device_cc[0] == target_cc[0] and device_cc[1] >= target_cc[1]
+    return device_cc == target_cc
 
 
 def _check_arity(mod, name: str, want: int, path: str) -> None:
@@ -219,7 +246,7 @@ def _validate(d, path: str, label: str) -> None:
     ):
         raise RuntimeError(
             f"{path}: {label} ARCHS must be a non-empty sequence of sm "
-            f"strings (e.g. ('sm_90a', 'sm_100a')), got {archs!r}"
+            f"strings (e.g. ('sm_90', 'sm_100f')), got {archs!r}"
         )
     # ...and each one must name a capability, not merely look like an sm string.
     # _SM_RE accepts "sm_9" and "sm_1000", which cc_of refuses -- and export
