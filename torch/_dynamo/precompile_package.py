@@ -238,10 +238,10 @@ def default_guard_filter_fn(guard_entries: Sequence[GuardFilterEntry]) -> list[b
     variants dropped it.
 
     The criterion is the pre-check's own: apart from those portable identity
-    and function guards, a guard is dropped if its type is refused or a derived type is (a
-    CONSTANT_MATCH on a code object runs through ID_MATCH), and TYPE_MATCH and
-    BUILTIN_MATCH are kept whatever they derive, as the pre-check accepts them
-    before it looks at derived types.
+    and function guards, a guard is dropped if its type is refused or a
+    derived type is (a CONSTANT_MATCH on a code object runs through ID_MATCH),
+    and TYPE_MATCH and BUILTIN_MATCH are kept whatever they derive, as the
+    pre-check accepts them before it looks at derived types.
     That keeps BUILTIN_MATCH, an ``id_match_unchecked`` deriving ID_MATCH that
     the loaded artifact still checks against the loading process's builtins.
 
