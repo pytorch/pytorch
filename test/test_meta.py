@@ -3605,6 +3605,72 @@ class TestMetaKernelRegistrations(TestCase):
         cpp, python = self._add_meta_results(shape_kind, make_args, op="bitwise_and")
         self.assertEqual(cpp, python)
 
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @parametrize("shape_kind", ["static", "backed", "unbacked"])
+    @parametrize("layout", ["contiguous", "channels_last", "permuted", "non_contiguous", "expanded"])
+    @parametrize("op", ["le"])
+    @parametrize("other", [torch.float32, torch.float64, torch.int64, "broadcast_3d", "zero_dim_float64", "zero_dim_int64"])
+    def test_compare_tensor_meta_matches_python(self, shape_kind, layout, op, other):
+        def make_args(s):
+            a = self._add_meta_input(s, layout)
+            if isinstance(other, torch.dtype):
+                return a, self._add_meta_input(s, layout, other)
+            if other == "broadcast_3d":
+                return a, torch.empty(s, 1, 5)
+            return a, torch.empty((), dtype=getattr(torch, other.removeprefix("zero_dim_")))
+
+        cpp, python = self._add_meta_results(shape_kind, make_args, op=op)
+        self.assertEqual(cpp, python)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @parametrize("shape_kind", ["static", "backed", "unbacked"])
+    @parametrize(
+        "dtype,other",
+        [
+            (torch.float16, torch.bfloat16),
+            (torch.bfloat16, torch.float32),
+            (torch.int32, torch.int64),
+            (torch.bool, torch.uint8),
+            (torch.uint8, torch.int8),
+            (torch.int32, torch.complex64),
+        ],
+    )
+    def test_le_meta_dtype_promotion(self, shape_kind, dtype, other):
+        def make_args(s):
+            return self._add_meta_input(s, "permuted", dtype), torch.empty(s, 1, 5, dtype=other)
+
+        cpp, python = self._add_meta_results(shape_kind, make_args, op="le")
+        self.assertEqual(cpp, python)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @parametrize("backed", [False, True])
+    def test_le_symbolic_fake_tensor(self, backed):
+        # End to end through Python fake, which runs the C++ kernel for
+        # symbolic inputs too: a CPU scalar tensor mixes with meta device
+        # tensors, a CPU tensor does not.
+        from torch._dynamo.source import ConstantSource
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
+
+        shape_env = ShapeEnv()
+        if backed:
+            source = ConstantSource("size")
+            symbol = shape_env.create_symbol(8, source=source, dynamic_dim=DimDynamic.DYNAMIC)
+            size = shape_env.create_symintnode(symbol, hint=8, source=source)
+        else:
+            size = shape_env.create_unbacked_symint()
+        with FakeTensorMode(shape_env=shape_env):
+            a = torch.empty(2, size, 3, 5, device="meta", memory_format=torch.channels_last)
+            out = torch.le(a, torch.tensor(2.0, dtype=torch.float64))
+            with self.assertRaises(RuntimeError):
+                torch.le(a, torch.empty(2, size, 3, 5))
+
+        self.assertEqual(out.shape, a.shape)
+        # The ref gives unbacked channels_last results Max(1, u0) strides.
+        if backed:
+            self.assertEqual(out.stride(), a.stride())
+        self.assertEqual((out.dtype, out.device), (torch.bool, torch.device("meta")))
+
 
 instantiate_device_type_tests(TestMeta, globals())
 
