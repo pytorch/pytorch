@@ -9,6 +9,7 @@ from ._api import Transport
 
 if TYPE_CHECKING:
     import torch
+    import torch.distributed as dist
 
 
 _ENTRY_POINT_GROUP = "torch.distributed.transports"
@@ -72,6 +73,11 @@ def available_transports() -> tuple[str, ...]:
 def new_transport(
     backend: str,
     device: torch.device | str | None = None,
+    *,
+    peer_rank: int | None = None,
+    group: dist.ProcessGroup | None = None,
+    bootstrap_tag: str | None = None,
+    bootstrap_timeout: float = 30.0,
     **kwargs: Any,
 ) -> Transport:
     """Construct a one-sided transport, optionally restricting tensor devices.
@@ -81,10 +87,37 @@ def new_transport(
             ``torch.distributed.transports`` entry point.
         device: Optional CPU/CUDA device restriction; otherwise infer each tensor's
             device at registration.
+        peer_rank: Optional peer rank relative to ``group``. Both peers must call
+            concurrently with reciprocal ranks and the same ``bootstrap_tag``.
+            Uses the process group's Store, not a collective; other ranks need
+            not participate. Requires an initialized process group.
+        group: Bootstrap process group; defaults to the default group.
+        bootstrap_tag: Required with ``peer_rank``. Unique per rank pair for the
+            lifetime of the group Store, including failed attempts. Reusing a tag
+            raises instead of connecting to stale endpoints.
+        bootstrap_timeout: Bind, endpoint exchange, and connect wait budget in
+            seconds. Native backend calls and Store network operations may exceed
+            this budget. Does not change the group's Store timeout.
         **kwargs: Options forwarded to the selected backend's constructor.
             Backend modules are imported only when selected.
 
-    Example::
+    Rank bootstrap (run concurrently on ranks 0 and 1)::
+
+        import torch.distributed as dist
+        from torch.distributed._transport import new_transport
+
+        # An initialized process group supplies only the control-plane Store.
+        transport = new_transport(
+            "nixl",
+            "cpu",
+            peer_rank=1 - dist.get_rank(),
+            bootstrap_tag="checkpoint-channel-0",
+            bootstrap_timeout=30.0,
+        )
+        # Already bound and connected. Exchange registered-memory descriptors
+        # separately, and coordinate with the peer before unregistering/closing.
+
+    Manual bootstrap::
 
         import torch
         from torch.distributed._transport import new_transport
@@ -120,6 +153,15 @@ def new_transport(
             await trainer.close_async(timeout=30.0)
     """
     name = backend.lower()
+    bootstrap = None
+    if peer_rank is not None:
+        from ._bootstrap import _RankBootstrap
+
+        bootstrap = _RankBootstrap.create(
+            name, peer_rank, group, bootstrap_tag, bootstrap_timeout
+        )
+    elif group is not None or bootstrap_tag is not None:
+        raise ValueError("group and bootstrap_tag require peer_rank")
     factory = _find_factory(name)
     if (
         isinstance(factory, type)
@@ -141,4 +183,6 @@ def new_transport(
     if not transport.supported():
         transport.close()
         raise RuntimeError(f"transport {name!r} is not supported")
+    if bootstrap is not None:
+        bootstrap.connect(transport)
     return transport
