@@ -3873,7 +3873,10 @@ class TritonConstexprVariable(VariableTracker):
             context="call to a user-defined type wrapped in tl.constexpr",
             explanation="Dynamo does not yet support preserving the tl.constexpr "
             "wrapper when constructing an instance of a wrapped user-defined type.",
-            hints=[],
+            hints=[
+                "Annotate the Triton kernel parameter with tl.constexpr rather "
+                "than annotating the user-defined class."
+            ],
         )
 
     def python_type(self) -> type:
