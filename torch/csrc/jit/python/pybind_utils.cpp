@@ -115,6 +115,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
         tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
 
         if (save_symint) {
+          tensor.unsafeGetTensorImpl()->set_symbolic_wrapped_number(true);
           auto py_tensor = py::cast(tensor);
           TORCH_CHECK_PYTHON(
               PyObject_SetAttrString(
