@@ -64,11 +64,15 @@ def _native_worker(rank, connection, progress_thread):
             raise AssertionError("unexpected control-plane message")
         for memory in (source_memory, target_memory, other_memory):
             transport.unregister_memory(memory)
+        old_registrations = (source_memory._registration, target_memory._registration)
         source.add_(10)
         target.zero_()
         source_memory = transport.register_memory(source)
         target_memory = transport.register_memory(target)
-        if source_memory.reused_registration() or target_memory.reused_registration():
+        if any(
+            memory._registration is old
+            for memory, old in zip((source_memory, target_memory), old_registrations)
+        ):
             raise AssertionError("unregistered allocation was reused")
         connection.send_bytes(target_memory.to_remote_buffer().serialize())
         remote_target = NIXLRemoteBuffer.deserialize(_receive(connection))

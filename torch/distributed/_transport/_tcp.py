@@ -111,12 +111,10 @@ class TCPMemory:
         transport: TCPTransport,
         tensor: torch.Tensor,
         remote: TCPRemoteBuffer,
-        reused: bool,
     ) -> None:
         self._transport = transport
         self._tensor = tensor
         self._remote = remote
-        self._reused = reused
 
     def _range(self, offset: int | None, length: int | None) -> tuple[int, int]:
         offset = 0 if offset is None else offset
@@ -143,9 +141,6 @@ class TCPMemory:
                 "per-call timeout is not supported by this prototype"
             )
         return self._remote
-
-    def reused_registration(self) -> bool:
-        return self._reused
 
 
 @dataclass
@@ -312,7 +307,6 @@ class TCPTransport(_BlockingTransport):
             if self._closed.is_set():
                 raise RuntimeError("transport is closed")
             remote = self._registrations.get(registration_key)
-            reused = remote is not None
             if remote is None:
                 while True:
                     remote = TCPRemoteBuffer(
@@ -323,7 +317,7 @@ class TCPTransport(_BlockingTransport):
                         break
                 self._registrations[registration_key] = remote
                 self._registered[key] = _RegisteredMemory(tensor)
-        return TCPMemory(self, tensor, remote, reused)
+        return TCPMemory(self, tensor, remote)
 
     def write(
         self,
