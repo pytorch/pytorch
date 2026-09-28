@@ -678,24 +678,28 @@ class ProcessGroupNCCL2DumpOnTimeoutTest(_ProcessGroupNCCL2SubgroupTest):
             dist.all_reduce(torch.ones(7), group=gloo_pg)
 
             path = env["TORCH_FR_DUMP_TEMP_FILE"] + str(self.rank)
+            # Healthy collectives must not have dumped anything, or the
+            # artifacts below would not be evidence of the timeout.
+            self.assertFalse(os.path.exists(path))
+
+            def load_dump():
+                # The watchdog and the dump signal poller wake once a second;
+                # poll until the file is there and complete -- it reads back
+                # empty mid-write.
+                deadline = time.time() + 60
+                while time.time() < deadline:
+                    try:
+                        with open(path, "rb") as f:
+                            return pickle.load(f)
+                    except (OSError, EOFError, pickle.UnpicklingError):
+                        time.sleep(0.5)
+                self.fail(f"no trace written to {path}")
+
             if self.rank == 0:
                 # Nobody else joins, so this can never complete and the
                 # watchdog trips on it.
                 dist.all_reduce(torch.ones(1024, device=self.device), group=pg)
-                # Healthy collectives must not have dumped anything, or the
-                # artifact below would not be evidence of the timeout.
-                self.assertFalse(os.path.exists(path))
-                # The watchdog wakes once a second; poll until the file is
-                # there and complete -- it reads back empty mid-write.
-                dump = None
-                deadline = time.time() + 60
-                while dump is None and time.time() < deadline:
-                    try:
-                        with open(path, "rb") as f:
-                            dump = pickle.load(f)
-                    except (OSError, EOFError, pickle.UnpicklingError):
-                        time.sleep(0.5)
-                self.assertIsNotNone(dump, msg=f"no trace written to {path}")
+                dump = load_dump()
                 self.assertIn("version", dump)
                 self.assertIn("pg_config", dump)
                 self.assertIn("pg_status", dump)
@@ -738,10 +742,13 @@ class ProcessGroupNCCL2DumpOnTimeoutTest(_ProcessGroupNCCL2SubgroupTest):
                     {e["profiling_name"].split(":")[0] for e in dump["entries"]},
                     {"nccl2"},
                 )
+            else:
+                # Rank 1 saw no failure -- it never issued the collective, the
+                # usual culprit of a real hang -- and dumps on rank 0's signal.
+                sizes = [e["input_sizes"] for e in load_dump()["entries"]]
+                self.assertIn([[4]], sizes)
+                self.assertNotIn([[1024]], sizes)
             self._wait_for_rank_zero(pg)
-            if self.rank != 0:
-                # A rank that saw no failure must not have written a trace.
-                self.assertFalse(os.path.exists(path))
 
         dist.destroy_process_group(gloo_pg)
         dist.destroy_process_group(pg)

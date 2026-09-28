@@ -4,12 +4,17 @@
 
 #include <c10/core/Stream.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <c10/util/thread_name.h>
+#include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
+#include <cstring>
 #include <future>
 #include <set>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -195,6 +200,192 @@ bool streamIsCapturing(c10::Device device) {
   }
 }
 
+// Same key as stock ProcessGroupNCCL, so a failure seen by either wakes both.
+// The value is the signaling rank, as a native int.
+constexpr const char* kStoreDumpKey = "exception_dump";
+
+void dumpTraceOnce(const std::string& backend, const std::string& reason) {
+  // At most one dump per process. A failure is observed by every process group
+  // sharing the fabric, by the backend's watchdog and by the next synchronous
+  // collective, and every dump targets the same file, so the later ones would
+  // only overwrite the snapshot closest to the failure.
+  //
+  // The loser of the race waits on the mutex instead of returning right away:
+  // the thread that detects the failure is usually a watchdog, while the thread
+  // that runs ::abort() is the next synchronous collective on the main thread.
+  // Letting that one run ahead would terminate the process with the trace half
+  // written, which is exactly the post-mortem this exists to produce. The wait
+  // is bounded -- the dump only queries events, it never synchronizes on the
+  // device. Both statics live in libtorch_cpu, the single library that holds
+  // the recorder, so there is one instance of them per process.
+  static std::mutex dump_mutex;
+  static bool dumped = false;
+  std::lock_guard<std::mutex> lock(dump_mutex);
+  if (dumped) {
+    return;
+  }
+  // One shot whatever the outcome: retrying a dump that already failed once
+  // would just repeat itself on every watchdog tick.
+  dumped = true;
+  LOG(ERROR) << "FlightRecorderHook: dumping trace on " << reason;
+
+  // Stack traces are most of a post-mortem's value -- without them every
+  // culprit torchfrtrace reports has no code location -- but symbolizing one
+  // may need the GIL, and this runs on a watchdog thread or on a rank about to
+  // ::abort(), where blocking on the GIL would lose the very dump we are here
+  // to write. So attempt it with traces under a bounded wait and retry without
+  // them if that does not land in time. Stock ProcessGroupNCCL's heartbeat
+  // monitor does exactly this, and reads the same two env vars.
+  bool include_stack_traces = getCvarBool(TORCH_INCLUDE_STACK_TRACE, true);
+  const auto only_active = getCvarBool(TORCH_INCLUDE_ONLY_ACTIVE, false);
+  const std::chrono::milliseconds wait{
+      getCvarInt(TORCH_FR_WAIT_TIMEOUT_DUMP_MILSEC, 15 * 1000)};
+  // ~future joins, so an attempt that ran out of time may not be destroyed
+  // here: that would restore the unbounded wait this exists to avoid. Park it
+  // in a leaked list instead. At most two per process, since this is one-shot.
+  static auto* abandoned = new std::vector<std::future<void>>();
+  while (true) {
+    std::future<void> dump;
+    try {
+      dump = std::async(
+          std::launch::async, [include_stack_traces, only_active, backend]() {
+            try {
+              if (!try_dump_fr_trace_file(
+                      /*includeCollectives=*/true,
+                      include_stack_traces,
+                      only_active,
+                      backend)) {
+                // Recorder off, or no rank was ever set, which means nothing
+                // was recorded either.
+                LOG(ERROR) << "FlightRecorderHook: no trace to dump.";
+              }
+            } catch (const std::exception& e) {
+              LOG(ERROR) << "FlightRecorderHook: trace dump failed: "
+                         << e.what();
+            } catch (...) {
+              LOG(ERROR) << "FlightRecorderHook: trace dump failed.";
+            }
+          });
+    } catch (const std::exception& e) {
+      LOG(ERROR) << "FlightRecorderHook: cannot start trace dump: " << e.what();
+      return;
+    }
+    if (dump.wait_for(wait) == std::future_status::ready) {
+      return;
+    }
+    abandoned->push_back(std::move(dump));
+    if (!include_stack_traces) {
+      LOG(ERROR) << "FlightRecorderHook: trace dump did not finish within "
+                 << wait.count() << " ms, giving up.";
+      return;
+    }
+    LOG(ERROR) << "FlightRecorderHook: trace dump did not finish within "
+               << wait.count()
+               << " ms, retrying without stack traces. Set "
+                  "TORCH_INCLUDE_STACK_TRACE=0 to skip the first attempt.";
+    include_stack_traces = false;
+  }
+}
+
+std::atomic<bool> dump_signal_sent{false};
+// steady_clock ticks; zero until this process broadcast.
+std::atomic<std::chrono::steady_clock::rep> dump_signal_time{0};
+
+void broadcastDumpSignal(const c10::intrusive_ptr<Store>& store, int rank) {
+  if (!store || dump_signal_sent.exchange(true)) {
+    return;
+  }
+  dump_signal_time =
+      std::chrono::steady_clock::now().time_since_epoch().count();
+  try {
+    std::vector<uint8_t> value(sizeof(rank));
+    std::memcpy(value.data(), &rank, sizeof(rank));
+    store->set(kStoreDumpKey, value);
+  } catch (const std::exception& e) {
+    LOG(ERROR) << "FlightRecorderHook: cannot broadcast dump signal: "
+               << e.what();
+  }
+}
+
+// One poller per process, owned by the hook that started it. Stock polls from
+// the heartbeat monitor of the group with uid 0; there is no such thread here.
+// A stopped poller is detached rather than joined: remove() runs with the GIL
+// held, and a poller mid-dump may be waiting on it for a stack trace.
+struct DumpSignalPoller {
+  std::mutex mutex;
+  std::condition_variable cv;
+  bool stop = false;
+};
+
+std::mutex poller_mutex;
+int64_t poller_owner = -1;
+std::shared_ptr<DumpSignalPoller> poller;
+
+void pollDumpSignal(
+    std::shared_ptr<DumpSignalPoller> state,
+    c10::intrusive_ptr<Store> store,
+    std::string backend) {
+  c10::setThreadName("pt_fr_dump_sig");
+  const std::chrono::milliseconds interval{
+      getCvarInt(TORCH_FR_COORD_CHECK_MILSEC, 1000)};
+  while (true) {
+    {
+      std::unique_lock<std::mutex> lock(state->mutex);
+      if (state->cv.wait_for(lock, interval, [&] { return state->stop; })) {
+        return;
+      }
+    }
+    int rank = -1;
+    try {
+      if (!store->check({kStoreDumpKey})) {
+        continue;
+      }
+      auto value = store->get(kStoreDumpKey);
+      if (value.size() == sizeof(rank)) {
+        std::memcpy(&rank, value.data(), sizeof(rank));
+      }
+    } catch (const std::exception& e) {
+      // Usually the store's server exiting at shutdown.
+      LOG(WARNING) << "FlightRecorderHook: stopped polling for dump signals: "
+                   << e.what();
+      return;
+    }
+    dumpTraceOnce(backend, c10::str("dump signal from rank ", rank));
+    return;
+  }
+}
+
+void startDumpSignalPoller(
+    int64_t owner,
+    c10::intrusive_ptr<Store> store,
+    std::string backend) {
+  std::lock_guard<std::mutex> lock(poller_mutex);
+  if (poller) {
+    return;
+  }
+  poller = std::make_shared<DumpSignalPoller>();
+  poller_owner = owner;
+  std::thread(pollDumpSignal, poller, std::move(store), std::move(backend))
+      .detach();
+}
+
+void stopDumpSignalPoller(int64_t owner) {
+  std::shared_ptr<DumpSignalPoller> state;
+  {
+    std::lock_guard<std::mutex> lock(poller_mutex);
+    if (poller_owner != owner) {
+      return;
+    }
+    state = std::exchange(poller, nullptr);
+    poller_owner = -1;
+  }
+  {
+    std::lock_guard<std::mutex> lock(state->mutex);
+    state->stop = true;
+  }
+  state->cv.notify_all();
+}
+
 } // namespace
 
 std::shared_ptr<FlightRecorderHook> FlightRecorderHook::attach(
@@ -240,6 +431,13 @@ std::shared_ptr<FlightRecorderHook> FlightRecorderHook::attach(
     });
     hook->abort_hook_registered_ = true;
   }
+  static const bool dump_on_timeout =
+      getCvarBool(TORCH_FR_DUMP_ON_TIMEOUT, true);
+  if (dump_on_timeout && hook->global_store_ &&
+      hook->default_target_.recorder != nullptr) {
+    startDumpSignalPoller(
+        hook->hook_id_, hook->global_store_, hook->default_target_.name);
+  }
   return hook;
 }
 
@@ -251,6 +449,10 @@ FlightRecorderHook::FlightRecorderHook(
       pg_id_(next_pg_id++),
       pg_status_(std::make_shared<ProcessGroupStatus>()) {
   TORCH_CHECK(pg_, "FlightRecorderHook: null process group");
+  global_store_ = pg_->getStore();
+  if (auto* prefix = dynamic_cast<PrefixStore*>(global_store_.get())) {
+    global_store_ = prefix->getUnderlyingNonPrefixStore();
+  }
 
   auto makeTarget = [](const c10::intrusive_ptr<Backend>& backend) {
     BackendTarget target;
@@ -400,6 +602,7 @@ void FlightRecorderHook::remove() {
     had_completion_hook = std::exchange(push_completion_, false);
     had_abort_hook = std::exchange(abort_hook_registered_, false);
   }
+  stopDumpSignalPoller(hook_id_);
   pg->unregisterPreHook(hook_id_);
   pg->unregisterPostHook(hook_id_);
   if (had_completion_hook) {
@@ -572,93 +775,26 @@ void FlightRecorderHook::onAbort() {
   if (default_target_.recorder == nullptr) {
     return;
   }
-  // At most one dump per process. A failure is observed by every process group
-  // sharing the fabric, by the backend's watchdog and by the next synchronous
-  // collective, and every dump targets the same file, so the later ones would
-  // only overwrite the snapshot closest to the failure.
-  //
-  // The loser of the race waits on the mutex instead of returning right away:
-  // the thread that detects the failure is usually a watchdog, while the thread
-  // that runs ::abort() is the next synchronous collective on the main thread.
-  // Letting that one run ahead would terminate the process with the trace half
-  // written, which is exactly the post-mortem this exists to produce. The wait
-  // is bounded -- the dump only queries events, it never synchronizes on the
-  // device. Both statics live in libtorch_cpu, the single library that holds
-  // the recorder, so there is one instance of them per process.
-  static std::mutex dump_mutex;
-  static bool dumped = false;
-  std::lock_guard<std::mutex> lock(dump_mutex);
-  if (dumped) {
-    return;
-  }
-  // One shot whatever the outcome: retrying a dump that already failed once
-  // would just repeat itself on every watchdog tick.
-  dumped = true;
   // No mutex_ here. The abort hook fires from inside the backend, on a thread
   // that may hold backend locks, whereas onPre/onPost take mutex_ and then the
   // recorder's; keeping this path off mutex_ leaves that order intact.
-  LOG(ERROR) << "FlightRecorderHook: dumping trace on collective failure";
+  broadcastDumpSignal(global_store_, default_target_.recorder->getRank());
+  dumpTraceOnce(default_target_.name, "collective failure");
+}
 
-  // Stack traces are most of a post-mortem's value -- without them every
-  // culprit torchfrtrace reports has no code location -- but symbolizing one
-  // may need the GIL, and this runs on a watchdog thread or on a rank about to
-  // ::abort(), where blocking on the GIL would lose the very dump we are here
-  // to write. So attempt it with traces under a bounded wait and retry without
-  // them if that does not land in time. Stock ProcessGroupNCCL's heartbeat
-  // monitor does exactly this, and reads the same two env vars.
-  bool include_stack_traces = getCvarBool(TORCH_INCLUDE_STACK_TRACE, true);
-  const auto only_active = getCvarBool(TORCH_INCLUDE_ONLY_ACTIVE, false);
-  const std::chrono::milliseconds wait{
-      getCvarInt(TORCH_FR_WAIT_TIMEOUT_DUMP_MILSEC, 15 * 1000)};
-  // ~future joins, so an attempt that ran out of time may not be destroyed
-  // here: that would restore the unbounded wait this exists to avoid. Park it
-  // in a leaked list instead. At most two per process, since onAbort is
-  // one-shot.
-  static auto* abandoned = new std::vector<std::future<void>>();
-  while (true) {
-    std::future<void> dump;
-    try {
-      dump = std::async(
-          std::launch::async,
-          [include_stack_traces,
-           only_active,
-           backend = default_target_.name]() {
-            try {
-              if (!try_dump_fr_trace_file(
-                      /*includeCollectives=*/true,
-                      include_stack_traces,
-                      only_active,
-                      backend)) {
-                // Recorder off, or no rank was ever set, which means nothing
-                // was recorded either.
-                LOG(ERROR) << "FlightRecorderHook: no trace to dump.";
-              }
-            } catch (const std::exception& e) {
-              LOG(ERROR) << "FlightRecorderHook: trace dump failed: "
-                         << e.what();
-            } catch (...) {
-              LOG(ERROR) << "FlightRecorderHook: trace dump failed.";
-            }
-          });
-    } catch (const std::exception& e) {
-      LOG(ERROR) << "FlightRecorderHook: cannot start trace dump: " << e.what();
-      return;
-    }
-    if (dump.wait_for(wait) == std::future_status::ready) {
-      return;
-    }
-    abandoned->push_back(std::move(dump));
-    if (!include_stack_traces) {
-      LOG(ERROR) << "FlightRecorderHook: trace dump did not finish within "
-                 << wait.count() << " ms, giving up.";
-      return;
-    }
-    LOG(ERROR) << "FlightRecorderHook: trace dump did not finish within "
-               << wait.count()
-               << " ms, retrying without stack traces. Set "
-                  "TORCH_INCLUDE_STACK_TRACE=0 to skip the first attempt.";
-    include_stack_traces = false;
+void FlightRecorderHook::waitForPeerDumps() {
+  const auto sent = dump_signal_time.load();
+  if (sent == 0) {
+    return;
   }
+  // Stock waits the same 4x the dump timeout: a peer polls once per
+  // TORCH_FR_COORD_CHECK_MILSEC, then may spend up to two dump attempts.
+  const std::chrono::milliseconds wait{
+      4 * getCvarInt(TORCH_FR_WAIT_TIMEOUT_DUMP_MILSEC, 15 * 1000)};
+  std::this_thread::sleep_until(
+      std::chrono::steady_clock::time_point(
+          std::chrono::steady_clock::duration(sent)) +
+      wait);
 }
 
 void FlightRecorderHook::onPost(const PostHookArgs& args) {

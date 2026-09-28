@@ -358,6 +358,12 @@ static std::vector<std::string> TORCH_FR_WAIT_TIMEOUT_DUMP_MILSEC = {
     "TORCH_FR_WAIT_TIMEOUT_DUMP_MILSEC",
     "TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC"};
 
+// How often to poll the store for another rank's dump signal (default 1s),
+// same knob and default as stock ProcessGroupNCCL's heartbeat monitor.
+static std::vector<std::string> TORCH_FR_COORD_CHECK_MILSEC = {
+    "TORCH_FR_COORD_CHECK_MILSEC",
+    "TORCH_NCCL_COORD_CHECK_MILSEC"};
+
 // Backend name of the default FlightRecorder<c10::Event> instance, i.e. the
 // process-wide singleton FlightRecorder<c10::Event>::get() returns. That is
 // the instance ProcessGroupGloo records into natively, so leaving the backend
