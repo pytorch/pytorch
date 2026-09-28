@@ -582,10 +582,8 @@ class CUTLASSCompileSourceCapturingContext:
 
         import torch._inductor.codecache
 
-        codecache_cls = (
-            torch._inductor.codecache.XPUCodeCache
-            if self.device_type == "xpu"
-            else torch._inductor.codecache.CUDACodeCache
+        codecache_cls = torch._inductor.codecache.get_device_codecache(
+            self.device_type
         )
         _compile_method_orig = codecache_cls.compile
 

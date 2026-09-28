@@ -3417,11 +3417,9 @@ end
                     f.write(json.dumps(qual_name_to_id))
                 generated_files.append(constants_config_json)
 
-            cache_cls = {
-                "rocm": ROCmCodeCache,
-                "cuda": CUDACodeCache,
-                "xpu": XPUCodeCache,
-            }.get("rocm" if torch.version.hip else device_type, CUDACodeCache)
+            cache_cls = get_device_codecache(
+                "rocm" if torch.version.hip else device_type
+            )
 
             gpu_codecache = cache_cls()
             gpu_kernels_o = gpu_codecache.aot_kernels_o.copy()
@@ -5644,6 +5642,42 @@ class ROCmCodeCache:
             source_code, dst_file_ext
         )
         return (DLLWrapper(dst_file_path), hash_key, source_code_path)
+
+
+# Registry of the CodeCache class used to compile kernels for a given device type.
+# Out-of-tree backends should call register_device_codecache() from their backend
+# registration hook (see codegen.common.register_backend_for_device).
+_DEVICE_CODECACHE_REGISTRY: dict[str, type] = {}
+
+
+def register_device_codecache(device_type: str, codecache_cls: type) -> None:
+    """Register the CodeCache class used to compile kernels for ``device_type``."""
+    _DEVICE_CODECACHE_REGISTRY[device_type] = codecache_cls
+
+
+def get_device_codecache(device_type: str) -> type:
+    """
+    Return the CodeCache class registered for ``device_type``.
+
+    This deliberately fails loudly for unregistered devices instead of falling back
+    to CUDACodeCache: silently handing back a CUDA code cache makes the kernel get
+    compiled for the wrong device, which surfaces as a confusing error from the
+    generated C++ rather than as a device dispatch problem.
+    """
+    try:
+        return _DEVICE_CODECACHE_REGISTRY[device_type]
+    except KeyError:
+        raise NotImplementedError(
+            f"No CodeCache registered for device type {device_type!r}. "
+            f"Registered device types: {sorted(_DEVICE_CODECACHE_REGISTRY)}. "
+            "Out-of-tree backends must call register_device_codecache() from their "
+            "backend registration hook."
+        ) from None
+
+
+register_device_codecache("cuda", CUDACodeCache)
+register_device_codecache("xpu", XPUCodeCache)
+register_device_codecache("rocm", ROCmCodeCache)
 
 
 class CodeCacheFuture:
