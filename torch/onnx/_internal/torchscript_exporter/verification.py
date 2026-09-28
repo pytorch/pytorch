@@ -26,6 +26,7 @@ import numpy.typing as npt
 
 import torch
 import torch._C._onnx as _C_onnx
+from torch.onnx._internal import _ort_threads
 from torch.onnx._internal.torchscript_exporter import utils
 from torch.types import Number
 
@@ -187,6 +188,7 @@ def _ort_session(
     # suppress ort warnings.
     # 0:Verbose, 1:Info, 2:Warning. 3:Error, 4:Fatal. Default is 2.
     session_options.log_severity_level = 3
+    session_options.intra_op_num_threads = _ort_threads.intra_op_num_threads()
     ort_session = onnxruntime.InferenceSession(
         model if isinstance(model, str) else model.getvalue(),
         session_options,

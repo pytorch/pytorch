@@ -27,6 +27,7 @@ import onnxscript.evaluator
 import pytest
 
 import torch
+from torch.onnx._internal import _ort_threads
 from torch.onnx._internal.exporter import _building, _ir_passes, _tensors
 from torch.testing._internal.opinfo import core as opinfo_core
 
@@ -304,6 +305,7 @@ def _ort_session_run(serialized_model: bytes, ort_inputs: Mapping[str, Any]):
     session_options.graph_optimization_level = (
         onnxruntime.GraphOptimizationLevel.ORT_DISABLE_ALL
     )
+    session_options.intra_op_num_threads = _ort_threads.intra_op_num_threads()
     session = ort.InferenceSession(
         serialized_model, session_options, providers=("CPUExecutionProvider",)
     )
