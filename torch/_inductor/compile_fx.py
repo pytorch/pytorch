@@ -467,12 +467,6 @@ def get_output_aliases(gm: GraphModule) -> dict[str, tuple[tuple[int, int], ...]
     }
 
 
-def record_original_output_aliases(gm: GraphModule) -> None:
-    output = output_node(gm)
-    if "original_output_aliases" not in output.meta:
-        output.meta["original_output_aliases"] = get_output_aliases(gm)
-
-
 def has_new_user_visible_output_aliases(gm: GraphModule) -> bool:
     output = output_node(gm)
     original_aliases = output.meta.get("original_output_aliases")
@@ -497,16 +491,6 @@ def has_new_user_visible_output_aliases(gm: GraphModule) -> bool:
         if current - original:
             return True
     return False
-
-
-def _recursive_record_original_output_aliases(gm: GraphModule) -> None:
-    for node in gm.graph.find_nodes(
-        op="call_function", target=torch.ops.higher_order.invoke_subgraph
-    ):
-        subgraph = getattr(gm, node.args[0].target)
-        _recursive_record_original_output_aliases(subgraph)
-
-    record_original_output_aliases(gm)
 
 
 def _recursive_record_original_output_strides(gm: GraphModule) -> None:
@@ -2756,10 +2740,6 @@ def partition_fn(
     partitioner_fn_override: Callable[..., Any] | None = None,
     **kwargs: object,
 ) -> tuple[GraphModule, GraphModule]:
-    # In training, record aliases before joint graph passes can change them.
-    _recursive_record_original_output_aliases(gm)
-    original_output_aliases = output_node(gm).meta["original_output_aliases"]
-
     cuda_context = get_cuda_device_context(gm)
     with cuda_context:
         # We can skip the invoke_subgraph because the
@@ -2814,8 +2794,6 @@ def partition_fn(
             )
 
     fw_module, bw_module = partition_result
-    # Partitioning creates a new output node, so restore the recorded metadata.
-    output_node(fw_module).meta["original_output_aliases"] = original_output_aliases
     return fw_module, bw_module
 
 
@@ -2960,8 +2938,6 @@ def compile_fx_forward(
         # pad_mm (run as part of joint_graph_passes) can introduce views with
         # padded strides that would be incorrectly captured as "original".
         _recursive_record_original_output_strides(gm)
-        # In inference, record aliases before joint graph passes can change them.
-        _recursive_record_original_output_aliases(gm)
 
         inputs_devices = get_inputs_devices(example_inputs, gm)
         gm = _recursive_joint_graph_passes(gm, input_device=next(iter(inputs_devices)))
@@ -2983,14 +2959,15 @@ def compile_fx_forward(
 
     model_outputs_node = output_node(gm)
     clone_live_user_outputs = _cudagraph_trees_clone_live_user_outputs()
-    keep_output_aliases = "original_output_aliases" in model_outputs_node.meta
+    context = torch._guards.TracingContext.try_get()
+    fw_metadata = context.fw_metadata if context is not None else None
+    keep_output_aliases = fw_metadata is not None
     model_outputs = None
     user_visible_output_idxs: list[int] = []
     if config.keep_output_stride or clone_live_user_outputs or keep_output_aliases:
         model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
         num_model_outputs = len(model_outputs)
 
-        context = torch._guards.TracingContext.try_get()
         # See Note [User Outputs in the inductor graph]
         if context is not None and context.fw_metadata and not is_inference:
             original_output_start_index = (
@@ -3032,6 +3009,32 @@ def compile_fx_forward(
             for idx in range(original_output_start_index, orig_output_end_idx)
             if isinstance(model_outputs[idx], torch.fx.Node)
         ]
+
+        if fw_metadata is not None:
+            # Record the user-visible (eager) aliasing, since this graph's FakeTensor
+            # storages don't reflect it: functionalization drops aliases of mutated
+            # inputs, and joint graph passes can add new ones. For example,
+            #
+            #   def f(x, idx):
+            #       x.index_put_((idx,), src)
+            #       return x.expand(2, x.shape[0])
+            #
+            # functionalizes to
+            #
+            #   index_put = aten.index_put(x, [idx], src)
+            #   copy_ = aten.copy_(x, index_put)
+            #   return (aten.expand(index_put, [2, 1024]),)
+            #
+            # AOTAutograd records this aliasing while tracing the Dynamo-captured
+            # graph, where FunctionalTensors alias exactly as in eager. Its output
+            # indices exclude mutated inputs.
+            start = original_output_start_index
+            io_pairs = fw_metadata.aliased_input_output_pairs
+            oo_pairs = fw_metadata.aliased_output_pairs
+            model_outputs_node.meta["original_output_aliases"] = {
+                "input_output": tuple((i, start + j) for i, j in io_pairs),
+                "output_output": tuple((start + i, start + j) for i, j in oo_pairs),
+            }
 
     if config.keep_output_stride or clone_live_user_outputs or keep_output_aliases:
         model_outputs_node.meta["user_visible_output_idxs"] = user_visible_output_idxs
