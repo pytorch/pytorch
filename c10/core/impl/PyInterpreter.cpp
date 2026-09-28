@@ -172,9 +172,6 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
       torch::jit::Stack* /*stack*/) const override {
     PANIC(fake_try_prim_meta);
   }
-  bool is_symbolic_wrapped_number(const TensorImpl* /*self*/) const override {
-    PANIC(is_symbolic_wrapped_number);
-  }
   bool fake_infer_from_real_out(
       const c10::OperatorHandle& /*op*/,
       torch::jit::Stack* /*stack*/,

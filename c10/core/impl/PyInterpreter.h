@@ -256,7 +256,6 @@ struct C10_API PyInterpreterVTable {
   virtual bool fake_try_prim_meta(
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack) const = 0;
-  virtual bool is_symbolic_wrapped_number(const TensorImpl* self) const = 0;
   // Infer the outputs of a custom op with no fake kernel from real (borrowed).
   virtual bool fake_infer_from_real_out(
       const c10::OperatorHandle& op,
