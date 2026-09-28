@@ -1331,6 +1331,7 @@ class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
                 guards_state = check_fn_manager.guards_state
                 self._cached_guards_state = guards_state
                 self._cached_f_code = self._frame_state.f_code
+                self._cached_saved_gm = check_fn_manager.guard_manager
                 self.assertIsNotNone(guards_state)
                 guards_state = torch._dynamo.package.load_guards_state(guards_state)
 
@@ -3878,21 +3879,27 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self.assertTrue(is_portable_function_guard("ID_MATCH", double_apply))
         x = torch.randn(3)
         ref, loaded = self._test_serialization("ID_MATCH", fn, x)
+        # The capture process installs the same rewritten guard.
+        saved = self._cached_saved_gm
         self._test_check_fn(ref, loaded, {"x": x}, True)
         with mock.patch.dict(globals(), {"double_apply": _DoubleFn.apply}):
             self.assertFalse(ref.check({"x": x}))
             self.assertTrue(loaded.check({"x": x}))
+            self.assertTrue(saved.check({"x": x}))
         with mock.patch.dict(globals(), {"double_apply": _TripleFn.apply}):
             self._test_check_fn(ref, loaded, {"x": x}, False)
-        # An object whose __eq__ always answers True is still rejected.
-        with mock.patch.dict(globals(), {"double_apply": mock.ANY}):
-            self.assertFalse(loaded.check({"x": x}))
-        # A repeat of the last matched object is accepted without comparing.
-        self.assertTrue(loaded.check({"x": x}))
-        with mock.patch(
-            "torch._dynamo.guards._native_method_matches", side_effect=AssertionError
-        ):
-            self.assertTrue(loaded.check({"x": x}))
+            self.assertFalse(saved.check({"x": x}))
+        for gm in (loaded, saved):
+            # An object whose __eq__ always answers True is still rejected.
+            with mock.patch.dict(globals(), {"double_apply": mock.ANY}):
+                self.assertFalse(gm.check({"x": x}))
+            # A repeat of the last matched object is accepted without comparing.
+            self.assertTrue(gm.check({"x": x}))
+            with mock.patch(
+                "torch._dynamo.guards._native_method_matches",
+                side_effect=AssertionError,
+            ):
+                self.assertTrue(gm.check({"x": x}))
 
     def test_native_method_match_needs_a_receiver_by_reference(self):
         class LocalFn(torch.autograd.Function):
@@ -4651,6 +4658,19 @@ class TestGuardSerialization(TestGuardSerializationBase):
         with self.assertRaisesRegex(PackageError, "reads 'constant' off a tensor"):
             self._test_serialization("EQUALS_MATCH", fn, x)
 
+    def test_guard_reading_a_literal_fake_tensor_owned_name_warns(self):
+        def fn(x):
+            return x * x.constant
+
+        x = torch.randn(3)
+        x.constant = 2
+        with self.assertLogs("torch._dynamo.guards", "WARNING") as logs:
+            ref, loaded = self._test_serialization("EQUALS_MATCH", fn, x)
+        self.assertIn("'constant' attribute holds 2", "\n".join(logs.output))
+        # The loaded guard compares against the FakeTensor's own constant.
+        self.assertTrue(ref.check({"x": x}))
+        self.assertFalse(loaded.check({"x": x}))
+
     def test_literal_on_a_fake_tensor_owned_name_is_not_a_guard_read(self):
         x = torch.randn(3)
         x._is_param = True
@@ -4688,8 +4708,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
         fake = FakeTensorMode().from_tensor(torch.randn(3))
         fake.scale = 2
         tree = {
-            id(v): v
-            for v in (x, x._cpu_copy, x._dynamo_weak_dynamic_indices, fake)
+            id(v): v for v in (x, x._cpu_copy, x._dynamo_weak_dynamic_indices, fake)
         }
         buf = io.BytesIO()
         GuardsStatePickler(tree, {}, {}, {}, buf).dump({"x": x, "fake": fake})
