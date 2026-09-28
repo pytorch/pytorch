@@ -421,9 +421,6 @@ class Optimizer:
                 "an iterable of Tensors or dicts, but got " + torch.typename(params)
             )
         elif isinstance(params, set):
-            # A bare set is just as unordered as a set inside a param group (which
-            # add_param_group already rejects below) - reject it here too, before it's
-            # silently converted to a list and the "it was a set" information is lost.
             raise TypeError(
                 "optimizer parameters need to be organized in ordered collections, but "
                 "the ordering of tensors in sets will change between runs. Please use a list instead."

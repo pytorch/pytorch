@@ -272,8 +272,7 @@ def get_error_inputs_for_all_optims(device, dtype):
                 OptimizerInput(
                     params={sample_param, sample_param2},
                     kwargs={},
-                    desc="a bare set of params is just as unordered as a set inside a "
-                    "param group, which is already rejected - see #198693",
+                    desc="reject a bare unordered set of params",
                 ),
                 error_type=TypeError,
                 error_regex="optimizer parameters need to be organized in ordered collections",
