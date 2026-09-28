@@ -3675,7 +3675,7 @@ class TestMetaKernelRegistrations(TestCase):
     @parametrize("shape_kind", ["static", "backed", "unbacked"])
     @parametrize("layout", ["contiguous", "permuted", "non_contiguous"])
     @parametrize("dtype", [torch.float32, torch.bfloat16, torch.int32, torch.uint8, torch.bool])
-    @parametrize("op", ["le"])
+    @parametrize("op", ["le", "ne"])
     @parametrize("other", [2, 2.5, True, 300, 1j, "size"])
     def test_compare_scalar_meta_matches_python(self, shape_kind, layout, dtype, op, other):
         def make_args(s):
