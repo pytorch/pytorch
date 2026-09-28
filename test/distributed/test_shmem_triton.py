@@ -28,6 +28,7 @@ import triton.language as tl
 
 import torch.distributed as dist
 import torch.distributed._symmetric_memory._shmem_triton as shmem_triton
+from torch._C._distributed_c10d import _ShmemCompareOp, _ShmemSignalOp
 from torch._inductor.runtime.triton_compat import triton
 from torch.distributed._symmetric_memory._shmem_triton import requires_shmem
 from torch.testing._internal.common_utils import (
@@ -447,8 +448,6 @@ class SHMEMTritonTest(MultiProcContinuousTest):
         flag = out_hdl.get_signal_pad(rank, (1,), dtype=torch.int64).fill_(0)
 
         peer = 1 - rank
-        from torch._C._distributed_c10d import _ShmemCompareOp, _ShmemSignalOp
-
         NVSHMEM_SIGNAL_SET = int(_ShmemSignalOp.SET)
         SIGNAL_VAL = 1  # Signal completion value
         NVSHMEM_CMP_EQ = int(_ShmemCompareOp.EQ)
@@ -508,8 +507,6 @@ class SHMEMTritonTest(MultiProcContinuousTest):
         flag = out_hdl.get_signal_pad(rank, (1,), dtype=torch.int64).fill_(0)
 
         peer = 1 - rank
-        from torch._C._distributed_c10d import _ShmemCompareOp, _ShmemSignalOp
-
         NVSHMEM_SIGNAL_ADD = int(_ShmemSignalOp.ADD)
         SIGNAL_VAL = 16  # val + NVSHMEM_SIGNAL_ADD
         NVSHMEM_CMP_EQ = int(_ShmemCompareOp.EQ)
@@ -552,7 +549,7 @@ class SHMEMTritonTest(MultiProcContinuousTest):
 
         rank = self.rank
         peer = 1 - rank
-        NVSHMEM_CMP_EQ = 0  # equal comparison
+        NVSHMEM_CMP_EQ = int(_ShmemCompareOp.EQ)
         FLAG_INITIAL_VALUE = 0
         FLAG_FINAL_VALUE = 42
 
@@ -601,8 +598,8 @@ class SHMEMTritonTest(MultiProcContinuousTest):
         peer = 1 - rank
 
         # NVSHMEM constants from documentation
-        NVSHMEM_CMP_EQ = 0  # equal comparison
-        NVSHMEM_SIGNAL_SET = 0  # atomic set operation
+        NVSHMEM_CMP_EQ = int(_ShmemCompareOp.EQ)
+        NVSHMEM_SIGNAL_SET = int(_ShmemSignalOp.SET)
 
         # Message configuration
         msg_size_bytes = 8
@@ -693,7 +690,7 @@ class SHMEMTritonTest(MultiProcContinuousTest):
         flag_update_val = torch.tensor(
             [flag_val], dtype=torch.int32, device=self.device
         )
-        NVSHMEM_CMP_EQ = 0  # compare equal
+        NVSHMEM_CMP_EQ = int(_ShmemCompareOp.EQ)
 
         # Barrier so the local flag init cannot erase the peer's incoming write.
         dist.barrier()
@@ -753,7 +750,7 @@ class SHMEMTritonTest(MultiProcContinuousTest):
         symm_mem.rendezvous(out, group=group_name)
         symm_mem.rendezvous(flag, group=group_name)
 
-        NVSHMEM_CMP_EQ = 0
+        NVSHMEM_CMP_EQ = int(_ShmemCompareOp.EQ)
 
         dist.barrier()
         if rank == 1:
