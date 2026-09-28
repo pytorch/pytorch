@@ -56,6 +56,7 @@ class Config:
     kwargs: dict[str, int]
     num_stages: int
     num_warps: int
+    num_ctas: int = 1
 
 
 _NV_CONFIGS = [
@@ -121,7 +122,7 @@ def early_config_prune(g, m, dtsize, configs, named_args):
 
 
 def gluon_grouped_mm_configs(dtype_AB, k_is_varying):
-    from torch._inductor.template_heuristics.gluon import get_grouped_mm_configs
+    from torch._inductor.heuristics.template.gluon import get_grouped_mm_configs
 
     gluon_configs = get_grouped_mm_configs(
         dtype_AB=dtype_AB,
@@ -143,7 +144,7 @@ def gluon_grouped_mm_configs(dtype_AB, k_is_varying):
                     "USE_TMA_STORE": gluon_config.USE_TMA_STORE,
                     "NUM_SMS": get_num_sms(),
                 },
-                num_stages=1,  # Dummy value, the kernel uses NUM_LOAD_BUFFERS/NUM_ACC_BUFFERS for this purpose.
+                num_stages=1,  # Dummy value; NUM_LOAD_BUFFERS/NUM_ACC_BUFFERS drive pipelining instead.
                 num_warps=gluon_config.NUM_STORE_WARPS,
             ),
         )
@@ -764,6 +765,7 @@ def _tuned_grouped_mm_common(
                 layout=layout,
                 num_stages=config.num_stages,
                 num_warps=config.num_warps,
+                num_ctas=config.num_ctas,
                 **(kwargs | config.kwargs),
             )
 

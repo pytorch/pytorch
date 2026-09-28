@@ -264,7 +264,7 @@ def _autotune_winning_config(A, B, offs):
     Timed without instrumentation, so the winner is the one that is
     actually fastest.
     """
-    from torch._inductor.template_heuristics import gluon as gluon_heuristics
+    from torch._inductor.heuristics.template import gluon as gluon_heuristics
 
     seen = []
     orig_get_configs = gluon_heuristics.get_grouped_mm_configs
@@ -370,7 +370,7 @@ def _proton_profile_gluon(
         mode_kwargs["sampling_strategy"] = "selective"
         mode_kwargs["sampling_options"] = sample_warps
 
-    from torch._inductor.template_heuristics import gluon as gluon_heuristics
+    from torch._inductor.heuristics.template import gluon as gluon_heuristics
 
     orig_get_configs = gluon_heuristics.get_grouped_mm_configs
     gluon_heuristics.get_grouped_mm_configs = lambda **kwargs: [pinned]

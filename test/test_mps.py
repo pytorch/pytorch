@@ -3887,6 +3887,20 @@ class TestMPS(TestCaseMPS):
         helper((100, 300), 1.0)
         helper((100, 300), 0.2)
 
+    # An `out=` wider than the common dtype must not widen the computation:
+    # CPU computes at the common dtype and casts the result on store
+    @parametrize("op_name", ["addcmul", "addcdiv"])
+    @parametrize("out_dtype", [torch.float16, torch.float32])
+    def test_addc_ops_out_dtype(self, op_name, out_dtype):
+        op = getattr(torch, op_name)
+        cpu_args = [torch.randn(4, 5, dtype=torch.float16).clamp_min(0.5) for _ in range(3)]
+        mps_args = [t.to("mps") for t in cpu_args]
+        cpu_out = torch.empty(4, 5, dtype=out_dtype)
+        out = torch.empty(4, 5, dtype=out_dtype, device="mps")
+        op(*cpu_args, value=2.5, out=cpu_out)
+        op(*mps_args, value=2.5, out=out)
+        self.assertEqual(out, cpu_out)
+
     @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
     def test_lerp_scalar_weight_dtype(self, dtype):
         # Regression test for https://github.com/pytorch/pytorch/issues/196067
@@ -10959,6 +10973,24 @@ class TestLargeTensors(TestCaseMPS):
         self.assertGreater(tail.unique().numel(), 50)
         del x
 
+    def test_64bit_range_factories(self):
+        # https://github.com/pytorch/pytorch/issues/198473: elements past 2^32 were left unwritten
+        if torch.mps.recommended_max_memory() < 8_000_000_000:
+            raise unittest.SkipTest("Needs at least 8Gb of RAM")
+        n = (1 << 32) + (1 << 20)
+        idx = torch.tensor([0, 1 << 20, 1 << 31, (1 << 32) - 1, 1 << 32, n - 1], device='mps')
+        x = torch.arange(n, dtype=torch.uint8, device='mps')
+        self.assertEqual(x[idx], idx.to(torch.uint8))
+        del x
+        m = n // 4
+        out = torch.empty(m, 4, dtype=torch.uint8, device='mps').t()
+        torch.arange(n, out=out)
+        self.assertEqual(out[idx // m, idx % m], idx.to(torch.uint8))
+        del out
+        x = torch.linspace(0, 255, n, dtype=torch.uint8, device='mps')
+        self.assertEqual(x[idx], (idx * 255 // (n - 1)).to(torch.uint8), atol=1, rtol=0)
+        del x
+
     def test_64bit_strided_unary(self):
         # https://github.com/pytorch/pytorch/issues/183419: slice's byte-stride
         # extent > INT32_MAX forces TensorIterator to split the iter
@@ -16545,7 +16577,6 @@ class TestConsistency(TestCaseMPS):
         for mps_sample in op.sample_inputs(
                 device,
                 dtype,
-                requires_grad=(op.supports_autograd and (dtype.is_floating_point or dtype.is_complex)),
                 include_conjugated_inputs=include_conjugated_inputs,
                 set_seed=True):
 

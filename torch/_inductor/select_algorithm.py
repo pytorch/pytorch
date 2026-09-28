@@ -558,6 +558,7 @@ class TritonTemplateKernel(TritonKernel):
         call_sizes,
         num_consumer_groups=0,
         num_buffers_warp_spec=0,
+        num_ctas=1,
         use_jit=False,
         tma_store=False,
         tma_load_for_template_epilogue=False,
@@ -633,6 +634,7 @@ class TritonTemplateKernel(TritonKernel):
         )
         self.num_stages = num_stages
         self.num_warps = num_warps
+        self.num_ctas = num_ctas
         self.num_consumer_groups = num_consumer_groups
         self.num_buffers_warp_spec = num_buffers_warp_spec
         self.grid_fn = grid_fn
@@ -980,6 +982,7 @@ class TritonTemplateKernel(TritonKernel):
         template_args = f"""
             num_stages={self.num_stages},
             num_warps={self.num_warps},
+            num_ctas={self.num_ctas},
             triton_meta={self.triton_meta!r},
             inductor_meta={inductor_meta!r},
         """
@@ -2725,6 +2728,7 @@ class GeneratedCodeCache:
         kwargs: dict[str, Any],
         hint_override: int | None = None,
         triton_meta: TritonMeta | None = None,
+        num_ctas: int = 1,
     ) -> str | None:
         def layout_key(layout: ir.Layout) -> str:
             if isinstance(layout, ir.FlexibleLayout):
@@ -2793,6 +2797,7 @@ class GeneratedCodeCache:
                 "layout": layout_key(layout),
                 "num_consumer_groups": num_consumer_groups,
                 "num_buffers_warp_spec": num_buffers_warp_spec,
+                "num_ctas": num_ctas,
                 "epilogue_fn_hash": epilogue_fn_hash,
                 "tma_store": tma_store,
                 "tma_load_for_template_epilogue": tma_load_for_template_epilogue,
@@ -2935,6 +2940,7 @@ class TritonTemplate(KernelTemplate):
         tma_load_for_template_epilogue: bool = False,
         transpose_discontiguous_tensor_descriptors_override: bool | None = None,
         triton_meta: TritonMeta | None = None,
+        num_ctas: int = 1,
     ) -> GenerateAndLoadResult | None:
         """Generate the python code and load it into the current process"""
         caching_enabled = (
@@ -2964,6 +2970,7 @@ class TritonTemplate(KernelTemplate):
                 kwargs,
                 hint_override,
                 triton_meta,
+                num_ctas,
             )
 
         if not self.template:
@@ -2999,6 +3006,7 @@ class TritonTemplate(KernelTemplate):
             "defines": defines,
             "num_stages": num_stages,
             "num_warps": num_warps,
+            "num_ctas": num_ctas,
             "grid_fn": self.grid,
             "meta": kwargs,
             "call_sizes": call_sizes,
@@ -3144,6 +3152,7 @@ class TritonTemplate(KernelTemplate):
         num_warps: int,
         num_consumer_groups: int = 0,
         num_buffers_warp_spec: int = 0,
+        num_ctas: int = 1,
         prefix_args: int = 0,
         suffix_args: int = 0,
         epilogue_fn: Callable[..., Any] | None = identity,
@@ -3203,6 +3212,7 @@ class TritonTemplate(KernelTemplate):
             kwargs,
             generate_with_caching and self._cache_codegen_enabled_for_template,
             hint_override=hint_override,
+            num_ctas=num_ctas,
             tma_store=tma_store,
             tma_load_for_template_epilogue=tma_load_for_template_epilogue,
             transpose_discontiguous_tensor_descriptors_override=transpose_discontiguous_tensor_descriptors_override,

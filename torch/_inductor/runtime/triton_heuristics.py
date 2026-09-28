@@ -1252,6 +1252,7 @@ class CachingAutotuner(KernelInterface):
         )
         compile_meta["num_warps"] = cfg.num_warps
         compile_meta["num_stages"] = cfg.num_stages
+        compile_meta["num_ctas"] = getattr(cfg, "num_ctas", 1)
 
         cfg_kwargs = {**cfg.kwargs}
         if self.device_props.type == "hip":
@@ -1350,6 +1351,7 @@ class CachingAutotuner(KernelInterface):
         options = {
             "num_warps": compile_meta["num_warps"],
             "num_stages": compile_meta["num_stages"],
+            "num_ctas": compile_meta["num_ctas"],
             "debug": compile_meta["debug"],
             "sanitize_overflow": False,  # turn off additional asserts added for overflow checks
         }
@@ -2187,8 +2189,8 @@ class CachingAutotuner(KernelInterface):
         # over hasattr probing of CompiledKernel internals.
         # TODO: When the AOTI C++ launch path gains cuLaunchKernelEx support for
         # CTA clusters, add num_ctas/cluster_dims here from the schema.
-        # Currently num_ctas is already captured via config_to_dict(launcher.config)
-        # for scratch space scaling, but is not used in the actual kernel launch.
+        # config_to_dict(launcher.config) does not currently include num_ctas,
+        # so this path has no cluster information at all yet.
         binary_metadata = binary.metadata
         legacy_tensordesc_meta = (
             binary_metadata.get("tensordesc_meta")
@@ -5128,6 +5130,7 @@ def template(
     triton_meta: TritonMeta,
     num_consumer_groups=0,
     num_buffers_warp_spec=0,
+    num_ctas=1,
     filename=None,
     inductor_meta: InductorMeta | None = None,
     **kwargs,
@@ -5139,6 +5142,7 @@ def template(
     config_args = {
         "num_stages": num_stages,
         "num_warps": num_warps,
+        "num_ctas": num_ctas,
     }
     config_kwargs = {}
 
