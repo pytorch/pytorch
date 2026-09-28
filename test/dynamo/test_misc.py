@@ -5881,6 +5881,23 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         res = opt_fn(x, obj)
         self.assertTrue(same(ref, res))
 
+    def test_super_init_reinitializes(self):
+        class Base:
+            def value(self, x):
+                return x + 1
+
+        class Derived(Base):
+            pass
+
+        def fn(x):
+            obj = Derived()
+            super_obj = super(Base, obj)
+            super.__init__(super_obj, Derived, obj)
+            return super_obj.value(x)
+
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
     def test_usr_cls_staticmethod(self):
         class Foo:
             @staticmethod

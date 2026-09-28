@@ -134,6 +134,18 @@ class SuperVariable(VariableTracker):
     def python_type(self) -> type:
         return builtins.super
 
+    def tp_init_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        no_keywords(tx, "super", kwargs)
+        check_positional(tx, "super", len(args), 1, 2)
+        self.typevar = args[0]
+        self.objvar = args[1] if len(args) == 2 else None
+        return ConstantVariable.create(None)
+
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(lambda: codegen(variables.BuiltinVariable(super)))
         codegen(self.typevar)
