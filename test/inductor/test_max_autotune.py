@@ -59,7 +59,7 @@ from torch._inductor.heuristics.template.triton import (
 )
 from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout, FlexibleLayout
 from torch._inductor.kernel.mm import (
-    blackwell_ws_persistent_device_tma_mm_template,
+    blackwell_ws_persistent_tma_mm_template,
     mm_template,
     persistent_mm_template,
     persistent_tma_mm_template,
@@ -3849,9 +3849,7 @@ class TestTemplateConfigPruning(TestCase):
 
         # Mirrors the persistent-template selection in tuned_mm/tuned_addmm.
         if has_datacenter_blackwell_tma_device():
-            cls.persistent_template_uid = (
-                blackwell_ws_persistent_device_tma_mm_template.uid
-            )
+            cls.persistent_template_uid = blackwell_ws_persistent_tma_mm_template.uid
         elif torch.version.hip is not None:
             cls.persistent_template_uid = persistent_mm_template.uid
         else:
@@ -3895,9 +3893,9 @@ class TestTemplateConfigPruning(TestCase):
         """Whether the compiler will select a persistent GEMM template here.
 
         HIP has no device-side TMA but still runs a non-TMA persistent kernel,
-        so the persistent path is live there despite has_triton_tma_device().
+        so the persistent path is live there despite has_triton_cuda_tma_device().
         """
-        return torch.version.hip is not None or has_triton_tma_device()
+        return torch.version.hip is not None or has_triton_cuda_tma_device()
 
     def pinned_heuristic_class(self, heuristic):
         """Return the pinned subclass of ``heuristic``'s class, built once.
