@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <functional>
+#include <limits>
 #include <numeric>
 #include <utility>
 #include <vector>
@@ -16,6 +17,7 @@
 #include <c10/core/SymNodeImpl.h>
 #include <c10/util/StringUtil.h>
 #include <c10/util/irange.h>
+#include <c10/util/safe_numerics.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
@@ -331,20 +333,16 @@ DimVector compute_elementwise_output_logical_to_physical_perm(const std::vector<
   return perm;
 }
 
+// torch.empty_permuted: a contiguous allocation of the physical sizes, which
+// runs the size checks, restrided to the logical order.
 MetaDesc empty_permuted(c10::SymIntArrayRef shape, IntArrayRef l2p_perm, ScalarType dtype) {
   const int64_t dim = static_cast<int64_t>(shape.size());
   c10::SymDimVector phys_size(dim);
   for (const auto i : c10::irange(dim)) {
     phys_size[i] = shape[l2p_perm[i]];
   }
-  // Contiguous strides as computed by empty_tensor_restride_symint.
-  c10::SymDimVector phys_strides(dim);
-  if (dim > 0) {
-    phys_strides[dim - 1] = c10::SymInt(1);
-    for (int64_t i = dim - 2; i >= 0; --i) {
-      phys_strides[i] = phys_strides[i + 1] * phys_size[i + 1].max(1);
-    }
-  }
+  const auto phys = at::native::empty_meta_symint(phys_size, dtype, std::nullopt, kMeta, std::nullopt, std::nullopt);
+  const auto phys_strides = phys.sym_strides();
   MetaDesc out;
   out.sizes = c10::SymDimVector(shape.begin(), shape.end());
   out.strides = c10::SymDimVector(dim);
@@ -355,6 +353,35 @@ MetaDesc empty_permuted(c10::SymIntArrayRef shape, IntArrayRef l2p_perm, ScalarT
   out.has_symbolic_sizes_strides = desc_is_symbolic(out);
   return out;
 }
+
+// The hints of a and b when backed_size_oblivious is set and both have one.
+// Plain ints are their own hint; nested ints have none.
+std::optional<std::pair<int64_t, int64_t>> backed_size_oblivious_hints(const c10::SymInt& a, const c10::SymInt& b) {
+  if (!a.is_heap_allocated() && !b.is_heap_allocated()) {
+    return std::nullopt;
+  }
+  const auto hint = [](const c10::SymInt& s) -> std::optional<int64_t> {
+    if (!s.is_heap_allocated()) {
+      return s.as_int_unchecked();
+    }
+    auto* node = s.toSymNodeImplUnowned();
+    return node->is_nested_int() ? std::nullopt : node->backed_size_oblivious_hint();
+  };
+  const auto a_hint = hint(a);
+  if (!a_hint.has_value()) {
+    return std::nullopt;
+  }
+  const auto b_hint = hint(b);
+  if (!b_hint.has_value()) {
+    return std::nullopt;
+  }
+  return std::make_pair(*a_hint, *b_hint);
+}
+
+// torch._check's default message.
+constexpr const char* kCheckFailedMsg =
+    "Expected cond to be True, but got False. (Could this error message be improved? If so, please report an "
+    "enhancement request to PyTorch.)";
 
 c10::SymDimVector _broadcast_shapes(ArrayRef<c10::SymIntArrayRef> shapes) {
   size_t maxlen = 0;
@@ -373,8 +400,21 @@ c10::SymDimVector _broadcast_shapes(ArrayRef<c10::SymIntArrayRef> shapes) {
         if (is_nested_int(common) && TORCH_GUARD_OR_FALSE(s.sym_eq(common))) {
           continue;
         }
-      } else if (TORCH_GUARD_OR_FALSE(s.sym_eq(common))) {
-        continue;
+      } else {
+        // Under backed_size_oblivious, specialize a size to 1 if broadcasting
+        // is the only way to handle the example inputs.
+        if (const auto hints = backed_size_oblivious_hints(s, common)) {
+          const auto [s_hint, common_hint] = *hints;
+          if (s_hint == 1 && common_hint != 1) {
+            TORCH_SYM_CHECK(s.sym_eq(1), kCheckFailedMsg);
+          }
+          if (common_hint == 1 && s_hint != 1) {
+            TORCH_SYM_CHECK(common.sym_eq(1), kCheckFailedMsg);
+          }
+        }
+        if (TORCH_GUARD_OR_FALSE(s.sym_eq(common))) {
+          continue;
+        }
       }
 
       if (TORCH_GUARD_OR_FALSE(common.sym_eq(1))) {
@@ -467,6 +507,10 @@ MetaDesc expand(const MetaDesc& a, c10::SymIntArrayRef shape) {
     if (TORCH_GUARD_OR_FALSE(requested_length.sym_eq(-1))) {
       shape_[offset_idx] = x;
     } else {
+      if (const auto hints = backed_size_oblivious_hints(x, requested_length);
+          hints && hints->first == 1 && hints->second != 1) {
+        TORCH_SYM_CHECK(x.sym_eq(1), kCheckFailedMsg);
+      }
       TORCH_SYM_CHECK(
           x.sym_eq(1).sym_or(requested_length.sym_eq(x)),
           "expand: attempting to expand a dimension of length ", x, " -> ", requested_length, "!");
@@ -491,6 +535,12 @@ MetaDesc aten_expand_desc(const MetaDesc& a, c10::SymIntArrayRef size) {
       ") must be greater or equal to the number of dimensions in the tensor (", a.dim(), ")");
   auto geometry = at::inferExpandGeometry_dimvector(
       c10::asIntArrayRefUnchecked(a.sizes), c10::asIntArrayRefUnchecked(a.strides), c10::asIntArrayRefUnchecked(size));
+  // Raised by TensorImpl when the expanded view is created.
+  uint64_t numel = 1;
+  TORCH_CHECK(
+      !c10::safe_multiplies_u64(geometry.sizes, &numel) &&
+          numel <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max()),
+      "numel: integer multiplication overflow");
   MetaDesc out;
   out.sizes = c10::SymDimVector(geometry.sizes.begin(), geometry.sizes.end());
   out.strides = c10::SymDimVector(geometry.strides.begin(), geometry.strides.end());
@@ -534,6 +584,7 @@ ScalarType get_computation_dtype(ScalarType dtype) {
     case ScalarType::Half:
       return ScalarType::Float;
     case ScalarType::ComplexHalf:
+    case ScalarType::BComplex32:
       return ScalarType::ComplexFloat;
     default:
       return dtype;
@@ -568,15 +619,40 @@ MetaDesc _convert_element_type_meta(const MetaDesc& a, ScalarType dtype) {
 }
 
 // Tensors go through Tensor.to (the _to_copy decomposition), numbers through
-// utils.dtype_to_type_ctor.
-MetaDesc _maybe_convert_to_dtype(const MetaDesc& a, ScalarType dtype) {
+// utils.dtype_to_type_ctor. number is the value of a number when known; bool(),
+// sym_int() and complex() guard on a symbolic one, sym_float() does not.
+MetaDesc _maybe_convert_to_dtype(
+    const MetaDesc& a,
+    ScalarType dtype,
+    const std::optional<Scalar>& number = std::nullopt) {
   if (a.is_number) {
+    const bool symbolic = number.has_value() && number->isSymbolic();
     MetaDesc out = a;
     if (dtype == kBool) {
+      if (symbolic) {
+        if (number->isSymInt()) {
+          number->toSymInt().sym_ne(0).guard_bool(__FILE__, __LINE__);
+        } else if (number->isSymFloat()) {
+          number->toSymFloat().toSymNodeImplUnowned()->bool_();
+        } else {
+          number->toSymBool().guard_bool(__FILE__, __LINE__);
+        }
+      }
       out.dtype = kBool;
     } else if (isIntegralType(dtype, /*includeBool=*/false)) {
+      if (symbolic && number->isSymBool()) {
+        number->toSymBool().guard_bool(__FILE__, __LINE__);
+      }
       out.dtype = kLong;
     } else if (isComplexType(dtype)) {
+      if (symbolic) {
+        TORCH_CHECK_TYPE(!number->isSymBool(), "complex() first argument must be a string or a number, not 'SymBool'");
+        if (number->isSymInt()) {
+          number->toSymInt().guard_int(__FILE__, __LINE__);
+        } else {
+          number->toSymFloat().guard_float(__FILE__, __LINE__);
+        }
+      }
       out.dtype = toComplexType(c10::get_default_dtype_as_scalartype());
     } else {
       out.dtype = c10::get_default_dtype_as_scalartype();
@@ -591,24 +667,17 @@ MetaDesc _prim_elementwise_meta(ArrayRef<MetaDesc> args, ScalarType dtype) {
   check_same_shape(args);
   const auto perm = compute_elementwise_output_logical_to_physical_perm(filter_tensors(args));
 
-  // utils.extract_shape
+  // utils.extract_shape, whose mismatch case check_same_shape has ruled out.
   const MetaDesc* shape = nullptr;
   const MetaDesc* scalar_shape = nullptr;
-  bool shape_mismatch = false;
   for (const auto& arg : args) {
     if (arg.is_number) {
       continue;
     }
     if (arg.is_cpu_scalar_tensor) {
       scalar_shape = &arg;
-      continue;
-    }
-    if (shape == nullptr) {
+    } else if (shape == nullptr) {
       shape = &arg;
-    }
-    if (!is_same_shape(shape->sizes, arg.sizes)) {
-      shape_mismatch = true;
-      break;
     }
   }
 
@@ -618,7 +687,6 @@ MetaDesc _prim_elementwise_meta(ArrayRef<MetaDesc> args, ScalarType dtype) {
     out.is_number = true;
     return out;
   }
-  TORCH_CHECK(!shape_mismatch, "shape must not be None when device is not None");
   const auto& like = shape != nullptr ? *shape : *scalar_shape;
   auto out = empty_permuted(like.sizes, perm, dtype);
   out.device = like.device;
@@ -658,8 +726,6 @@ c10::SymDimVector infer_size(c10::SymIntArrayRef a, c10::SymIntArrayRef b) {
   return expanded_sizes;
 }
 
-} // namespace
-
 // Returns an empty tensor with the sizes, strides and dtype of an elementwise
 // binary op's output. The operands are converted to the computation dtype for
 // kind and broadcast to a common shape. If alpha is set, other is scaled by it;
@@ -667,9 +733,11 @@ c10::SymDimVector infer_size(c10::SymIntArrayRef a, c10::SymIntArrayRef b) {
 // is bool. The output strides follow the operands' memory layout, and the
 // output dtype is the result dtype for kind.
 // is_sub rejects two bool tensors and drops the bool exemption for alpha.
-Tensor binary_ref_meta(
+// other_number is other's value when other wraps a Scalar argument.
+Tensor binary_ref_meta_impl(
     const Tensor& self,
     const Tensor& other,
+    const std::optional<Scalar>& other_number,
     ELEMENTWISE_TYPE_PROMOTION_KIND kind,
     bool fake_devices,
     const std::optional<Scalar>& alpha,
@@ -683,7 +751,7 @@ Tensor binary_ref_meta(
   const auto [compute_dtype, result_dtype] = elementwise_dtypes(self, other, kind);
   auto args = _maybe_broadcast(
       {_maybe_convert_to_dtype(meta_desc(self, fake_devices), compute_dtype),
-       _maybe_convert_to_dtype(meta_desc(other, fake_devices), compute_dtype)});
+       _maybe_convert_to_dtype(meta_desc(other, fake_devices), compute_dtype, other_number)});
   if (is_sub) {
     TORCH_CHECK_NOT_IMPLEMENTED(
         args[0].is_number || args[1].is_number || (args[0].dtype != kBool && args[1].dtype != kBool),
@@ -727,10 +795,11 @@ Tensor binary_ref_meta(
   return Tensor(at::detail::empty_strided_symint_meta(converted.sizes, converted.strides, result_dtype));
 }
 
-Tensor elementwise_binary_ref_meta(
+Tensor elementwise_binary_ref_meta_impl(
     const char* name,
     const Tensor& self,
     const Tensor& other,
+    const std::optional<Scalar>& other_number,
     ELEMENTWISE_TYPE_PROMOTION_KIND kind,
     bool fake_devices,
     bool supports_lhs_python_scalar) {
@@ -741,22 +810,71 @@ Tensor elementwise_binary_ref_meta(
   TORCH_CHECK_VALUE(
       !self_number || !other.unsafeGetTensorImpl()->is_wrapped_number(), name,
       ": Receive two Number inputs to an elementwise binary operation!");
-  return binary_ref_meta(self, other, kind, fake_devices);
+  return binary_ref_meta_impl(self, other, other_number, kind, fake_devices, std::nullopt, /*is_sub=*/false);
 }
 
+// A Scalar argument as the Python number the refs see. The value is only
+// passed along for the conversion guards.
 Tensor python_number(const Scalar& s) {
   auto t = at::detail::scalar_tensor_static(s.isSymbolic() ? Scalar(0) : s, s.type(), kCPU);
   t.unsafeGetTensorImpl()->set_wrapped_number(true);
   return t;
 }
 
+} // namespace
+
+Tensor binary_ref_meta(
+    const Tensor& self,
+    const Tensor& other,
+    ELEMENTWISE_TYPE_PROMOTION_KIND kind,
+    bool fake_devices,
+    const std::optional<Scalar>& alpha,
+    bool is_sub) {
+  return binary_ref_meta_impl(self, other, std::nullopt, kind, fake_devices, alpha, is_sub);
+}
+
+Tensor elementwise_binary_ref_meta(
+    const char* name,
+    const Tensor& self,
+    const Tensor& other,
+    ELEMENTWISE_TYPE_PROMOTION_KIND kind,
+    bool fake_devices,
+    bool supports_lhs_python_scalar) {
+  return elementwise_binary_ref_meta_impl(
+      name, self, other, std::nullopt, kind, fake_devices, supports_lhs_python_scalar);
+}
+
+Tensor elementwise_binary_ref_meta(
+    const char* name,
+    const Tensor& self,
+    const Scalar& other,
+    ELEMENTWISE_TYPE_PROMOTION_KIND kind,
+    bool fake_devices,
+    bool supports_lhs_python_scalar) {
+  return elementwise_binary_ref_meta_impl(
+      name, self, python_number(other), other, kind, fake_devices, supports_lhs_python_scalar);
+}
+
+bool is_symbolic_operand(const Tensor& t) {
+  const auto* impl = t.unsafeGetTensorImpl();
+  if (impl->has_symbolic_sizes_strides()) {
+    return true;
+  }
+  // Python fake counts a SymInt, which is wrapped as kLong, but not a SymFloat
+  // or SymBool.
+  return impl->is_symbolic_wrapped_number() && impl->dtype() == kLong;
+}
+
 void check_inplace_broadcast(c10::SymIntArrayRef self_shape, c10::SymIntArrayRef other_shape) {
   const auto shape = _broadcast_shapes({self_shape, other_shape});
-  // tuple(shape) == self_shape, which stops at the first mismatch
-  bool same = shape.size() == self_shape.size();
-  for (size_t i = 0; same && i < shape.size(); ++i) {
-    same = sym_eq_folded(shape[i], self_shape[i]).guard_bool(__FILE__, __LINE__);
+  // tuple(shape) == self_shape, which torch.Size reflects to self_shape[i] ==
+  // shape[i]: elements up to the shorter length, stopping at the first
+  // mismatch, then the lengths.
+  bool same = true;
+  for (size_t i = 0; same && i < std::min(shape.size(), self_shape.size()); ++i) {
+    same = sym_eq_folded(self_shape[i], shape[i]).guard_bool(__FILE__, __LINE__);
   }
+  same = same && shape.size() == self_shape.size();
   TORCH_CHECK(
       same, "output with shape torch.Size([", c10::Join(", ", self_shape), "]) doesn't match the broadcast shape (",
       c10::Join(", ", shape), shape.size() == 1 ? ",)" : ")");
