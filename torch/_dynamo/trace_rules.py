@@ -1165,6 +1165,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._nested.nested_to_padded_tensor",
         "torch._C._new_symbolic_shape_symbol",
         "torch._C._nn_module_to_mobile",
+        "torch._C._nn._conv2d_local",
         "torch._C._nn._conv_depthwise2d",
         "torch._C._nn._pad_circular",
         "torch._C._nn._pad_enum",

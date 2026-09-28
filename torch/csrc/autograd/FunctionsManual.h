@@ -1091,6 +1091,25 @@ Tensor group_norm_invstd_jvp(
     const Tensor& invstd_p,
     int64_t groups);
 
+Tensor conv2d_local_jvp(
+    const Tensor& input_p,
+    const Tensor& input_t,
+    const Tensor& weight_p,
+    const Tensor& weight_t,
+    const Tensor& bias_p,
+    const Tensor& bias_t,
+    at::SymIntArrayRef stride,
+    at::SymIntArrayRef padding,
+    at::SymIntArrayRef dilation);
+std::tuple<Tensor, Tensor, Tensor> conv2d_local_double_backward(
+    const variable_list& grads,
+    const Tensor& grad_output,
+    const Tensor& input,
+    const Tensor& weight,
+    at::SymIntArrayRef stride,
+    at::SymIntArrayRef padding,
+    at::SymIntArrayRef dilation,
+    std::array<bool, 3> output_mask);
 Tensor convolution_jvp(
     const Tensor& input_p,
     const Tensor& input_t,

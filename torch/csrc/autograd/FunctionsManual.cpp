@@ -1568,6 +1568,77 @@ at::Tensor clamp_jvp(
   }
 }
 
+Tensor conv2d_local_jvp(
+    const Tensor& input_p,
+    const Tensor& input_t,
+    const Tensor& weight_p,
+    const Tensor& weight_t,
+    const Tensor& bias_p,
+    const Tensor& bias_t,
+    at::SymIntArrayRef stride,
+    at::SymIntArrayRef padding,
+    at::SymIntArrayRef dilation) {
+  auto bias_t_opt =
+      bias_t.defined() ? std::optional<at::Tensor>(bias_t) : std::nullopt;
+  return at::_conv2d_local_symint(
+             input_t, weight_p, std::nullopt, stride, padding, dilation) +
+      at::_conv2d_local_symint(
+             input_p, weight_t, bias_t_opt, stride, padding, dilation);
+}
+
+// The backward is bilinear in (grad_output, input) and (grad_output, weight),
+// so each second-order term is itself a conv2d_local forward or backward.
+std::tuple<Tensor, Tensor, Tensor> conv2d_local_double_backward(
+    const variable_list& grads,
+    const Tensor& grad_output,
+    const Tensor& input,
+    const Tensor& weight,
+    at::SymIntArrayRef stride,
+    at::SymIntArrayRef padding,
+    at::SymIntArrayRef dilation,
+    std::array<bool, 3> output_mask) {
+  const auto& ggI = grads[0];
+  const auto& ggW = grads[1];
+  const auto& ggB = grads[2];
+  Tensor gGO, gI, gW;
+  if (output_mask[0]) {
+    if (ggI.defined()) {
+      gGO = at::_conv2d_local_symint(
+          ggI, weight, std::nullopt, stride, padding, dilation);
+    }
+    if (ggW.defined()) {
+      auto term = at::_conv2d_local_symint(
+          input, ggW, std::nullopt, stride, padding, dilation);
+      gGO = gGO.defined() ? gGO + term : term;
+    }
+    if (ggB.defined()) {
+      auto term = ggB.unsqueeze(0).expand_as(grad_output);
+      gGO = gGO.defined() ? gGO + term : term;
+    }
+  }
+  if (output_mask[1] && ggW.defined()) {
+    gI = std::get<0>(at::_conv2d_local_backward_symint(
+        grad_output,
+        input,
+        ggW,
+        stride,
+        padding,
+        dilation,
+        {true, false, false}));
+  }
+  if (output_mask[2] && ggI.defined()) {
+    gW = std::get<1>(at::_conv2d_local_backward_symint(
+        grad_output,
+        ggI,
+        weight,
+        stride,
+        padding,
+        dilation,
+        {false, true, false}));
+  }
+  return std::make_tuple(gGO, gI, gW);
+}
+
 Tensor convolution_jvp(
     const Tensor& input_p,
     const Tensor& input_t,

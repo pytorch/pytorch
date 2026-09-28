@@ -4073,6 +4073,57 @@ def meta_index_Tensor(self, indices):
     return out
 
 
+def _conv2d_local_output_size(input, weight, stride, padding, dilation):
+    torch._check(
+        input.dim() == 4,
+        lambda: f"conv2d_local: expected 4D input (N, C_in, H_in, W_in), got {input.shape}",
+    )
+    torch._check(
+        weight.dim() == 6,
+        lambda: f"conv2d_local: expected 6D weight (H_out, W_out, C_out, C_in, kH, kW), got {weight.shape}",
+    )
+    torch._check(
+        weight.shape[3] == input.shape[1],
+        lambda: f"conv2d_local: weight expects {weight.shape[3]} input channels but input has {input.shape[1]}",
+    )
+    out_hw = []
+    for i in range(2):
+        span = (
+            input.shape[2 + i]
+            + 2 * padding[i]
+            - dilation[i] * (weight.shape[4 + i] - 1)
+            - 1
+        )
+        torch._check(
+            span >= 0, lambda: "conv2d_local: kernel is larger than the padded input"
+        )
+        out_hw.append(span // stride[i] + 1)
+    torch._check(
+        weight.shape[0] == out_hw[0] and weight.shape[1] == out_hw[1],
+        lambda: f"conv2d_local: weight is sized for output ({weight.shape[0]}, {weight.shape[1]}) "
+        f"but the input produces output ({out_hw[0]}, {out_hw[1]})",
+    )
+    return [input.shape[0], weight.shape[2], out_hw[0], out_hw[1]]
+
+
+@register_meta([aten._conv2d_local.default])
+def meta__conv2d_local(input, weight, bias, stride, padding, dilation):
+    return input.new_empty(
+        _conv2d_local_output_size(input, weight, stride, padding, dilation)
+    )
+
+
+@register_meta([aten._conv2d_local_backward.default])
+def meta__conv2d_local_backward(
+    grad_output, input, weight, stride, padding, dilation, output_mask
+):
+    _conv2d_local_output_size(input, weight, stride, padding, dilation)
+    grad_input = input.new_empty(input.shape) if output_mask[0] else None
+    grad_weight = weight.new_empty(weight.shape) if output_mask[1] else None
+    grad_bias = grad_output.new_empty(grad_output.shape[1:]) if output_mask[2] else None
+    return grad_input, grad_weight, grad_bias
+
+
 @register_meta([aten.convolution_backward.default])
 def meta_convolution_backward(
     grad_output_,

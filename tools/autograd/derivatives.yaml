@@ -2455,6 +2455,16 @@
 - name: _slow_conv2d_backward.output_mask(Tensor grad_output, Tensor self, Tensor weight, SymInt[2] kernel_size, SymInt[2] stride, SymInt[2] padding, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
   grad_output, self, weight: _convolution_double_backward_symint(grads[0], grads[1], grads[2], grad_output, weight, self, stride, padding, {{1, 1}}, false, {{0, 0}}, 1, grad_input_mask)
 
+- name: _conv2d_local(Tensor self, Tensor weight, Tensor? bias, SymInt[2] stride, SymInt[2] padding, SymInt[2] dilation) -> Tensor
+  self, weight, bias: "grad.defined() ? _conv2d_local_backward_symint(grad, self, weight, stride, padding, dilation, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
+  result: conv2d_local_jvp(self_p, self_t, weight_p, weight_t, bias_p, bias_t, stride, padding, dilation)
+
+- name: _conv2d_local_backward(Tensor grad_output, Tensor self, Tensor weight, SymInt[2] stride, SymInt[2] padding, SymInt[2] dilation, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
+  grad_output, self, weight: conv2d_local_double_backward(grads, grad_output, self, weight, stride, padding, dilation, grad_input_mask)
+  grad_input: std::get<0>(_conv2d_local_backward_symint(grad_output_p, self_p, weight_t, stride, padding, dilation, {true, false, false})) + std::get<0>(_conv2d_local_backward_symint(grad_output_t, self_p, weight_p, stride, padding, dilation, {true, false, false}))
+  grad_weight: std::get<1>(_conv2d_local_backward_symint(grad_output_p, self_t, weight_p, stride, padding, dilation, {false, true, false})) + std::get<1>(_conv2d_local_backward_symint(grad_output_t, self_p, weight_p, stride, padding, dilation, {false, true, false}))
+  grad_bias: "grad_bias.defined() ? grad_output_t.sum(0) : Tensor()"
+
 - name: _conv_depthwise2d(Tensor self, Tensor weight, SymInt[2] kernel_size, Tensor? bias, SymInt[2] stride, SymInt[2] padding, SymInt[2] dilation) -> Tensor
   self, weight, bias: "grad.defined() ? convolution_backward_symint(grad.contiguous(), self, weight, bias->sym_sizes(), stride, padding, dilation, /*transposed=*/ false, /*output_padding=*/ {{0, 0}}, /*groups=*/ 1, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
 
