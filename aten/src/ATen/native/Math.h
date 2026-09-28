@@ -333,39 +333,63 @@ C10_HOST_DEVICE inline T polevl(const T x, const T A[], size_t len) {
 }
 
 inline double trigamma(double x) __ubsan_ignore_float_divide_by_zero__ {
-  double sign = +1;
-  double result = 0;
+  // Reflection uses sin(pi * {x}) so the argument stays in [-0.5, 0.5].
+  // The series is accumulated on its own and subtracted once: psi_1(x) =
+  // pi^2 / sin^2(pi x) - psi_1(1 - x). Ten shifts put the expansion at
+  // x >= 10.5, where the first omitted term, B_18 / x^19, is below 3e-17.
+  double reflection = 0;
   if (x < 0.5) {
-    sign = -1;
-    const double sin_pi_x = sin(c10::pi<double> * x);
-    result -= (c10::pi<double> * c10::pi<double>) / (sin_pi_x * sin_pi_x);
+    const double frac = x - std::round(x);
+    const double sin_pi_x = sin(c10::pi<double> * frac);
+    if (sin_pi_x == 0.0) {
+      return std::numeric_limits<double>::infinity();
+    }
+    reflection = (c10::pi<double> * c10::pi<double>) / (sin_pi_x * sin_pi_x);
     x = 1 - x;
   }
-  for (int i = 0; i < 6; ++i) {
-    result += 1 / (x * x);
+  double series = 0;
+  for (int i = 0; i < 10; ++i) {
+    series += 1 / (x * x);
     x += 1;
   }
-  const double ixx = 1 / (x*x);
-  result += (1 + 1 / (2*x) + ixx * (1./6 - ixx * (1./30 - ixx * (1./42)))) / x;
-  return sign * result;
+  const double z = 1 / (x * x);
+  // |B_16|, |B_14|, ..., |B_2|, nested as B2 - z*(B4 - z*(...)).
+  double nest = 3617.0 / 510.0;
+  nest = 7.0 / 6.0 - z * nest;
+  nest = 691.0 / 2730.0 - z * nest;
+  nest = 5.0 / 66.0 - z * nest;
+  nest = 1.0 / 30.0 - z * nest;
+  nest = 1.0 / 42.0 - z * nest;
+  nest = 1.0 / 30.0 - z * nest;
+  nest = 1.0 / 6.0 - z * nest;
+  series += (1 + 1 / (2 * x) + z * nest) / x;
+  return reflection == 0.0 ? series : reflection - series;
 }
 
 inline float trigamma(float x) __ubsan_ignore_float_divide_by_zero__ {
-  float sign = +1;
-  float result = 0;
+  // Same reflection reduction as the double path. The asymptotic series stays
+  // at six shifts and B_6: that is about 1e-8 relative, enough for float32.
+  float reflection = 0;
   if (x < 0.5f) {
-    sign = -1;
-    const float sin_pi_x = sinf(c10::pi<float> * x);
-    result -= (c10::pi<float> * c10::pi<float>) / (sin_pi_x * sin_pi_x);
+    const float frac = x - std::round(x);
+    const float sin_pi_x = sinf(c10::pi<float> * frac);
+    if (sin_pi_x == 0.0f) {
+      return std::numeric_limits<float>::infinity();
+    }
+    reflection = (c10::pi<float> * c10::pi<float>) / (sin_pi_x * sin_pi_x);
     x = 1 - x;
   }
+  float series = 0;
   for (int i = 0; i < 6; ++i) {
-    result += 1 / (x * x);
+    series += 1 / (x * x);
     x += 1;
   }
-  const float ixx = 1 / (x*x);
-  result += (1 + 1 / (2*x) + ixx * (1.f/6 - ixx * (1.f/30 - ixx * (1.f/42)))) / x;
-  return sign * result;
+  const float z = 1 / (x * x);
+  float nest = 1.f / 42;
+  nest = 1.f / 30 - z * nest;
+  nest = 1.f / 6 - z * nest;
+  series += (1 + 1 / (2 * x) + z * nest) / x;
+  return reflection == 0.0f ? series : reflection - series;
 }
 
 /*

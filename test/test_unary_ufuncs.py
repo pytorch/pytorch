@@ -1989,6 +1989,25 @@ class TestUnaryUfuncsCUDADevice(TestCase):
         ref = x.cpu().float().to(torch.float8_e5m2)
         self.assertEqual(y.cpu().view(torch.uint8), ref.view(torch.uint8))
 
+    def test_trigamma_double_and_poles(self, device):
+        # mpmath.polygamma(1, 0.9047357242349293) at 50 decimal places.
+        # The previous series, stopped at B_6 after six shifts, was 4020613 ulps off.
+        x = torch.tensor(0.9047357242349293, device=device, dtype=torch.float64)
+        ref = torch.tensor(1.9074856057949192, device=device, dtype=torch.float64)
+        got = torch.polygamma(1, x)
+        tol = 4 * torch.finfo(torch.float64).eps * ref.abs()
+        self.assertLess((got - ref).abs().item(), tol.item())
+
+        for value, dtype in ((-1.0, torch.float32), (-501.0, torch.float32),
+                             (-1.0, torch.float64), (-501.0, torch.float64)):
+            pole = torch.polygamma(1, torch.tensor(value, device=device, dtype=dtype))
+            self.assertTrue(torch.isinf(pole).item())
+
+        # float32 reflection at a large negative argument. The old sine
+        # argument was pi*x and returned 31981.72265625.
+        y = torch.tensor(-60618.9921875, device=device)
+        self.assertEqual(torch.polygamma(1, y), torch.tensor(16387.291015625, device=device))
+
 
 instantiate_device_type_tests(TestUnaryUfuncs, globals())
 instantiate_device_type_tests(TestUnaryUfuncsCpuOnly , globals(), only_for="cpu")
