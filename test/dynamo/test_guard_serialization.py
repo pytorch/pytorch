@@ -1563,6 +1563,59 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertIsNone(out.grad)
         self.assertEqual(out.shape, x.shape)
 
+    def test_literal_on_a_fake_tensor_owned_name_is_not_a_guard_read(self):
+        x = torch.randn(3)
+        x._is_param = True
+        x.constant = 2
+        # Unrelated guards on the same interned values.
+        tree = {id(v): v for v in (x, True, 2)}
+        buf = io.BytesIO()
+        GuardsStatePickler(tree, {}, {}, {}, buf).dump({"x": x})
+        out = load_guards_state(buf.getvalue())["x"]
+        self.assertIs(out._is_param, True)
+        self.assertIsNone(out.constant)
+
+    def test_fake_tensor_setter_names_are_owned(self):
+        x = torch.randn(3)
+        x.fake_device = torch.device("meta")
+        x.item_memo = [5]
+        buf = io.BytesIO()
+        GuardsStatePickler({id(x): x}, {}, {}, {}, buf).dump({"x": x})
+        out = load_guards_state(buf.getvalue())["x"]
+        self.assertEqual(out.fake_device, torch.device("cpu"))
+        self.assertIsNone(out.item_memo)
+        tree = {id(v): v for v in (x, x.item_memo)}
+        with self.assertRaisesRegex(PackageError, "reads 'item_memo' off a tensor"):
+            GuardsStatePickler(tree, {}, {}, {}, io.BytesIO()).dump({"x": x})
+
+    def test_tensor_attributes_carried_through_the_pickle(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        x = torch.randn(3)
+        x.me = x
+        x._cpu_copy = torch.randn(2)
+        x.gen = (i for i in range(3))
+        x._dynamo_dynamic_indices = {0}
+        x._dynamo_weak_dynamic_indices = {1}
+        fake = FakeTensorMode().from_tensor(torch.randn(3))
+        fake.scale = 2
+        tree = {
+            id(v): v for v in (x, x._cpu_copy, x._dynamo_weak_dynamic_indices, fake)
+        }
+        buf = io.BytesIO()
+        GuardsStatePickler(tree, {}, {}, {}, buf).dump({"x": x, "fake": fake})
+        state = load_guards_state(buf.getvalue())
+        out = state["x"]
+        self.assertIs(out.me, out)
+        self.assertEqual(out._cpu_copy.shape, (2,))
+        # The generator does not pickle; its name survives for a HASATTR guard.
+        self.assertIsInstance(out.gen, _Missing)
+        # An unregistered marking is dropped, not left as a _Missing.
+        self.assertFalse(hasattr(out, "_dynamo_dynamic_indices"))
+        self.assertEqual(out._dynamo_weak_dynamic_indices, {1})
+        self.assertEqual(state["fake"].scale, 2)
+        self.assertNotIn(b"FakeTensorMode", buf.getvalue())
+
     def test_symbolic_scalars_are_refused_as_package_errors(self):
         # SymInt was refused with a RuntimeError while SymFloat and SymBool fell
         # through to default pickling; all three are the same serialization
@@ -4637,59 +4690,6 @@ class TestGuardSerialization(TestGuardSerializationBase):
         # The loaded guard compares against the FakeTensor's own constant.
         self.assertTrue(ref.check({"x": x}))
         self.assertFalse(loaded.check({"x": x}))
-
-    def test_literal_on_a_fake_tensor_owned_name_is_not_a_guard_read(self):
-        x = torch.randn(3)
-        x._is_param = True
-        x.constant = 2
-        # Unrelated guards on the same interned values.
-        tree = {id(v): v for v in (x, True, 2)}
-        buf = io.BytesIO()
-        GuardsStatePickler(tree, {}, {}, {}, buf).dump({"x": x})
-        out = load_guards_state(buf.getvalue())["x"]
-        self.assertIs(out._is_param, True)
-        self.assertIsNone(out.constant)
-
-    def test_fake_tensor_setter_names_are_owned(self):
-        x = torch.randn(3)
-        x.fake_device = torch.device("meta")
-        x.item_memo = [5]
-        buf = io.BytesIO()
-        GuardsStatePickler({id(x): x}, {}, {}, {}, buf).dump({"x": x})
-        out = load_guards_state(buf.getvalue())["x"]
-        self.assertEqual(out.fake_device, torch.device("cpu"))
-        self.assertIsNone(out.item_memo)
-        tree = {id(v): v for v in (x, x.item_memo)}
-        with self.assertRaisesRegex(PackageError, "reads 'item_memo' off a tensor"):
-            GuardsStatePickler(tree, {}, {}, {}, io.BytesIO()).dump({"x": x})
-
-    def test_tensor_attributes_carried_through_the_pickle(self):
-        from torch._subclasses.fake_tensor import FakeTensorMode
-
-        x = torch.randn(3)
-        x.me = x
-        x._cpu_copy = torch.randn(2)
-        x.gen = (i for i in range(3))
-        x._dynamo_dynamic_indices = {0}
-        x._dynamo_weak_dynamic_indices = {1}
-        fake = FakeTensorMode().from_tensor(torch.randn(3))
-        fake.scale = 2
-        tree = {
-            id(v): v for v in (x, x._cpu_copy, x._dynamo_weak_dynamic_indices, fake)
-        }
-        buf = io.BytesIO()
-        GuardsStatePickler(tree, {}, {}, {}, buf).dump({"x": x, "fake": fake})
-        state = load_guards_state(buf.getvalue())
-        out = state["x"]
-        self.assertIs(out.me, out)
-        self.assertEqual(out._cpu_copy.shape, (2,))
-        # The generator does not pickle; its name survives for a HASATTR guard.
-        self.assertIsInstance(out.gen, _Missing)
-        # An unregistered marking is dropped, not left as a _Missing.
-        self.assertFalse(hasattr(out, "_dynamo_dynamic_indices"))
-        self.assertEqual(out._dynamo_weak_dynamic_indices, {1})
-        self.assertEqual(state["fake"].scale, 2)
-        self.assertNotIn(b"FakeTensorMode", buf.getvalue())
 
     def test_dim_markings_round_trip(self):
         def fn(x):
