@@ -11608,6 +11608,10 @@ class TestAssociativeScan(TestCase):
         for e, a in zip(expected, actual):
             self.assertEqual(a, e, atol=atol, rtol=rtol)
 
+    @skipIfTorchDynamo(
+        "native dispatch routing is eager-only; under torch.compile the "
+        "associative_scan HOP is lowered directly by the backend"
+    )
     @dtypes(torch.float32, torch.float16, torch.bfloat16)
     def test_associative_scan_functional_dispatch(self, device, dtype):
         import unittest.mock
@@ -11637,6 +11641,10 @@ class TestAssociativeScan(TestCase):
             actual = associative_scan(lambda u, v: torch.add(u, v, alpha=2), x, dim=0)
             mock_scan.assert_not_called()
 
+    @skipIfTorchDynamo(
+        "native combine classification only runs in eager; under torch.compile "
+        "the combine_fn is lowered by the backend"
+    )
     def test_classify_native_combine(self, device):
         from torch._higher_order_ops.associative_scan import _classify_native_combine
 
