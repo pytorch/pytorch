@@ -18,7 +18,6 @@ import pytorch_test_common
 import torch
 from torch import export as torch_export
 from torch.onnx import _constants
-from torch.onnx._internal import _ort_threads
 from torch.onnx._internal.torchscript_exporter import verification
 from torch.testing._internal import common_utils
 from torch.testing._internal.opinfo import core as opinfo_core
@@ -194,7 +193,6 @@ def run_ort(
     # Suppress floods of warnings from ONNX Runtime
     session_options = onnxruntime.SessionOptions()
     session_options.log_severity_level = 3  # Error
-    session_options.intra_op_num_threads = _ort_threads.intra_op_num_threads()
     session = onnxruntime.InferenceSession(
         ort_model, providers=["CPUExecutionProvider"], sess_options=session_options
     )
