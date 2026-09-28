@@ -1,4 +1,4 @@
-"""Process-wide compiler exclusion for precompiled training workers."""
+"""Process-wide compiler exclusion for precompiled workers."""
 
 from __future__ import annotations
 
@@ -13,10 +13,9 @@ if TYPE_CHECKING:
 
 
 _ENV = "TORCH_PRECOMPILE_NO_COMPILATION"
-_POLICY_ENVS = (_ENV,)
 _lock = threading.Lock()
 _depth = 0
-_previous_env: dict[str, str | None] = {}
+_previous_env: str | None = None
 
 
 def is_compilation_forbidden() -> bool:
@@ -25,18 +24,21 @@ def is_compilation_forbidden() -> bool:
 
 @contextlib.contextmanager
 def no_compilation() -> Iterator[None]:
-    """Forbid compiler work on every thread and inherit the policy in workers.
+    """Forbid compiler work on every thread of this process.
 
     This is a worker-lifetime policy, unlike precompile.serving(), which is
     deliberately thread-local. Overlapping owners keep the policy active until
     the last owner exits; callers must drain dispatched work before that exit.
+    While active, TORCH_PRECOMPILE_NO_COMPILATION=1 is exported so child
+    processes started under the policy inherit it; setting exactly "1" before
+    startup enables the policy for the whole process. The environment is only
+    written when the outermost owner enters or exits.
     """
     global _depth, _previous_env
     with _lock:
         if _depth == 0:
-            _previous_env = {name: os.environ.get(name) for name in _POLICY_ENVS}
-            for name in _POLICY_ENVS:
-                os.environ[name] = "1"
+            _previous_env = os.environ.get(_ENV)
+            os.environ[_ENV] = "1"
         _depth += 1
     try:
         yield
@@ -44,12 +46,11 @@ def no_compilation() -> Iterator[None]:
         with _lock:
             _depth -= 1
             if _depth == 0:
-                for name, prior in _previous_env.items():
-                    if prior is None:
-                        os.environ.pop(name, None)
-                    else:
-                        os.environ[name] = prior
-                _previous_env = {}
+                if _previous_env is None:
+                    os.environ.pop(_ENV, None)
+                else:
+                    os.environ[_ENV] = _previous_env
+                _previous_env = None
 
 
 def check_compilation_allowed(operation: str, detail: str | None = None) -> None:

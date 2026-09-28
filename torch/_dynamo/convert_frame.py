@@ -401,7 +401,6 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     return _fn
 
 
-@TorchPatcher.suppress_torch_distributed_warnings
 def nonrecursive_disable_skip(
     caller: types.FrameType | None,
 ) -> ConvertFrameReturn | None:
@@ -419,6 +418,7 @@ def nonrecursive_disable_skip(
     return None
 
 
+@TorchPatcher.suppress_torch_distributed_warnings
 def has_tensor_in_frame(frame: DynamoFrameType) -> bool:
     """Check if the frame has torch.* related bits"""
     # Check if the function was decorated using torch._dynamo.optimize
@@ -2428,6 +2428,12 @@ class ConvertFrame:
                 # eval_frame.py. But re-raising seems to work for now because exceptions from tracing
                 # a nested call that results in a top-level frame compile will be handled by the caller
                 # as an observed exception - we don't expect that exception to be suppressed.
+                raise
+
+            from torch._precompile import PrecompileError
+
+            # no_compilation() violations must surface even under suppress_errors.
+            if isinstance(e, PrecompileError):
                 raise
 
             # These two exception types are "soft" failure, in the sense that

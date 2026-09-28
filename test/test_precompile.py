@@ -5286,7 +5286,6 @@ class TestPrecompileDynamoCapture(TestCase):
 
 
 @skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
-@instantiate_parametrized_tests
 class TestPrecompileNoCompilation(TestCase):
     def test_no_compilation_covers_background_threads_and_restores(self):
         from concurrent.futures import ThreadPoolExecutor
@@ -5317,6 +5316,25 @@ class TestPrecompileNoCompilation(TestCase):
             self.assertEqual(
                 pool.submit(compiled, torch.ones(4)).result(), torch.ones(4).sin()
             )
+
+    def test_no_compilation_is_not_suppressed(self):
+        compiled = torch.compile(lambda x: x.cos(), backend="eager")
+        with (
+            torch._dynamo.config.patch(suppress_errors=True),
+            torch.compiler.precompile.no_compilation(),
+            self.assertRaisesRegex(PrecompileError, "forbids Dynamo graph compilation"),
+        ):
+            compiled(torch.ones(4))
+
+    def test_no_compilation_rejects_inductor_graph_compilation(self):
+        from torch._inductor.compile_fx import compile_fx
+
+        gm = torch.fx.symbolic_trace(lambda x: x.sin())
+        with (
+            torch.compiler.precompile.no_compilation(),
+            self.assertRaisesRegex(PrecompileError, "Inductor graph compilation"),
+        ):
+            compile_fx(gm, [torch.ones(4)])
 
     def test_no_compilation_does_not_disable_triton(self):
         with mock.patch.dict(os.environ):
@@ -5363,11 +5381,15 @@ class TestPrecompileNoCompilation(TestCase):
     def test_no_compilation_rejects_kernel_compile_and_autotune(self):
         from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 
+        autotuner = mock.Mock(spec=CachingAutotuner)
         with torch.compiler.precompile.no_compilation():
             with self.assertRaisesRegex(PrecompileError, "Triton kernel compilation"):
-                CachingAutotuner._precompile_config(None, None)
+                CachingAutotuner._precompile_config(autotuner, mock.Mock())
+            with self.assertRaisesRegex(PrecompileError, "Triton kernel benchmarking"):
+                CachingAutotuner.bench(autotuner, mock.Mock())
             with self.assertRaisesRegex(PrecompileError, "Triton kernel autotuning"):
-                CachingAutotuner.autotune_to_one_config(None)
+                CachingAutotuner.autotune_to_one_config(autotuner)
+        self.assertEqual(autotuner.mock_calls, [])
 
 
 if __name__ == "__main__":
