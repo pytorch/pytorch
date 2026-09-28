@@ -18,9 +18,8 @@ from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_mps import mps_ops_modifier
 from numbers import Number
 from typing import Any
-from packaging import version
 from torch.testing._internal.common_cuda import \
-    (SM80OrLater, TEST_MULTIGPU)
+    (ROCM_VERSION, SM80OrLater)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, dtypesIfCUDA, dtypesIfMPS, onlyCPU, precisionOverride,
      deviceCountAtLeast, OpDTypes, onlyNativeDeviceTypes, skipCUDAIf, expectedFailureMPS, onlyAccelerator,
@@ -135,7 +134,7 @@ CUSPARSE_SPMM_COMPLEX128_SUPPORTED = (
     IS_WINDOWS and torch.version.cuda
 ) or (not IS_WINDOWS and not TEST_WITH_ROCM)
 
-HIPSPARSE_SPMM_COMPLEX128_SUPPORTED = torch.version.hip and version.parse(torch.version.hip.split("-")[0]) >= version.parse("6.0")
+HIPSPARSE_SPMM_COMPLEX128_SUPPORTED = ROCM_VERSION >= (6, 0)
 
 def all_sparse_layouts(test_name='layout', include_strided=False):
     return parametrize(test_name, [
@@ -1060,9 +1059,9 @@ class TestSparse(TestSparseBase):
     @onlyAccelerator
     @deviceCountAtLeast(2)
     @dtypes(torch.double, torch.cdouble)
-    def test_Sparse_to_Sparse_copy_multi_device(self, devices, dtype, coalesced):
+    def test_sparse_to_sparse_copy_multi_device(self, devices, dtype, coalesced):
         # This is for testing torch.copy_(SparseTensor, SparseTensor) across accelerator devices
-        device, secondary_device = devices
+        device, secondary_device = devices[:2]
         sparse_dims = 3
         nnz = 10
         sizes = [2, 3, 4, 5]  # hybrid sparse
@@ -2037,7 +2036,10 @@ class TestSparse(TestSparseBase):
         def test_shape(sparse_dims, nnz, with_size):
             x, _, _ = self._gen_sparse(sparse_dims, nnz, with_size, dtype, device, coalesced)
             y = x.coalesce()
-            self.assertEqual(x.norm(), y._values().norm())
+            self.assertEqual(
+                torch.linalg.vector_norm(x),
+                torch.linalg.vector_norm(y._values()),
+            )
 
         test_shape(3, 10, 100)
         test_shape(4, 10, [100, 100, 100, 5, 5, 5, 0])
@@ -2049,15 +2051,13 @@ class TestSparse(TestSparseBase):
              RuntimeError, r'norm_sparse currently does not support keepdim=True'),
             ({'dim': 0},
              RuntimeError, r'norm_sparse currently only supports full reductions'),
-            ({'dtype': torch.double, 'p': 'fro'},
-             ValueError, r'dtype argument is not supported in frobenius norm'),
-            ({'dtype': torch.double, 'p': 0},
-             RuntimeError, r"norm_sparse currently does not support 'dtype' argument")
+            ({'dtype': torch.double, 'ord': 0},
+             RuntimeError, r"norm_sparse currently does not support 'dtype' argument"),
         ]
         x = self._gen_sparse(3, 10, 100, dtype, device, coalesced)[0]
         for kwargs, err, msg in kwarg_error_pairs:
             with self.assertRaisesRegex(err, msg):
-                x.norm(**kwargs)
+                torch.linalg.vector_norm(x, **kwargs)
 
     @coalescedonoff
     @dtypes(torch.double)
@@ -2965,9 +2965,9 @@ class TestSparse(TestSparseBase):
         self._test_new_device((30, 20, 10, 0), device)
 
     @onlyAccelerator
-    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    def test_new_device_multi_device(self, device):
-        secondary_device = f"{torch.device(device).type}:1"
+    @deviceCountAtLeast(2)
+    def test_new_device_multi_device(self, devices):
+        secondary_device = devices[1]
         self._test_new_device((), secondary_device)
         self._test_new_device((30, 20), secondary_device)
         self._test_new_device((30, 20, 10), secondary_device)
@@ -3285,8 +3285,8 @@ class TestSparse(TestSparseBase):
             self.assertIs(dtype, tensor.dtype)
             self.assertIs(layout, tensor.layout)
             self.assertEqual(tensor.requires_grad, requires_grad)
-            if tensor.is_cuda and device is not None:
-                self.assertEqual(device, tensor.device)
+            if device is not None:
+                self.assertEqual(torch.device(device), tensor.device)
             if value is not None:
                 fill = tensor.empty(shape, dtype=dtype).fill_(value)
                 self.assertEqual(tensor, fill)
@@ -3314,7 +3314,7 @@ class TestSparse(TestSparseBase):
 
         self._test_empty_full("cpu", dtype, requires_grad)
         self._test_empty_full(None, dtype, requires_grad)
-        self._test_empty_full(torch.device(device), dtype, requires_grad)
+        self._test_empty_full(device, dtype, requires_grad)
 
     def test_is_sparse(self, device):
         x = torch.randn(3, 3)
