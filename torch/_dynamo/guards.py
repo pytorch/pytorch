@@ -4878,6 +4878,11 @@ class GuardsStatePickler(FunctionPicklerBase):
         if isinstance(obj, torch.nn.attention.SDPBackend):
             return type(self)._unpickle_sdp_backend, (obj.name,)
 
+        if isinstance(obj, enum.Enum) and _resolves_by_reference(obj):
+            # Enum's own __reduce_ex__ passes _value_ to the class, which may
+            # not round-trip, and a nested enum would hit the check below.
+            return getattr, (type(obj), obj.name)
+
         if type(obj).__qualname__ != type(obj).__name__ and not isinstance(obj, tuple):
             raise_local_type_error(type(obj))
 
