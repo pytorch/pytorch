@@ -9,6 +9,7 @@
 #include <ATen/TensorIterator.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/TensorMeta.h>
+#include <ATen/native/ElementwiseRefMeta.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -1654,6 +1655,98 @@ Tensor special_xlogy(const Scalar& x, const Tensor& y) {
 
 Tensor special_xlogy(const Tensor& x, const Scalar& y) {
   return at::xlogy(x, y);
+}
+
+// Mirrors what Python fake tensor runs for add.Tensor: the fast path for
+// symbolic inputs, then refs.add (registered as the Meta kernel by
+// activate_meta).
+Tensor add_Tensor_meta(const Tensor& self, const Tensor& other, const Scalar& alpha) {
+  // FakeTensorMode's has_symbolic_sizes counts SymInt arguments only.
+  // Symbolic wrapped numbers are not detected here: they carry a dummy value
+  // and keep their SymInt only on the Python side.
+  const bool symbolic = self.unsafeGetTensorImpl()->has_symbolic_sizes_strides() ||
+      other.unsafeGetTensorImpl()->has_symbolic_sizes_strides() || alpha.isSymInt();
+  if (symbolic) {
+    if (auto out = fast_binary_meta(self, other, TypePromotionKind::DEFAULT); out.defined()) {
+      return out;
+    }
+  }
+  // A default alpha is dropped before reaching Python, so the ref sees None.
+  const bool default_alpha = !alpha.isSymbolic() && alpha.type() == kLong && alpha.toLong() == 1;
+  return binary_ref_meta(
+      self, other, TypePromotionKind::DEFAULT, symbolic, default_alpha ? std::nullopt : std::optional<Scalar>(alpha));
+}
+
+// Mirrors what Python fake tensor runs for sub.Tensor: the fast path for
+// symbolic inputs, then refs.sub.
+Tensor sub_Tensor_meta(const Tensor& self, const Tensor& other, const Scalar& alpha) {
+  // FakeTensorMode's has_symbolic_sizes counts SymInt arguments only.
+  const bool symbolic = self.unsafeGetTensorImpl()->has_symbolic_sizes_strides() ||
+      other.unsafeGetTensorImpl()->has_symbolic_sizes_strides() || alpha.isSymInt();
+  if (symbolic) {
+    if (auto out = fast_binary_meta(self, other, TypePromotionKind::DEFAULT); out.defined()) {
+      return out;
+    }
+  }
+  return binary_ref_meta(self, other, TypePromotionKind::DEFAULT, symbolic, alpha, /*is_sub=*/true);
+}
+
+// Mirrors what Python fake tensor runs for mul.Tensor: the fast path for
+// symbolic inputs, then refs.mul.
+Tensor mul_Tensor_meta(const Tensor& self, const Tensor& other) {
+  const bool symbolic = self.unsafeGetTensorImpl()->has_symbolic_sizes_strides() ||
+      other.unsafeGetTensorImpl()->has_symbolic_sizes_strides();
+  if (symbolic) {
+    if (auto out = fast_binary_meta(self, other, TypePromotionKind::DEFAULT); out.defined()) {
+      return out;
+    }
+  }
+  return binary_ref_meta(self, other, TypePromotionKind::DEFAULT, symbolic);
+}
+
+// Mirrors what Python fake tensor runs for div.Tensor: the INT_TO_FLOAT fast
+// path for symbolic inputs, then refs.div (true_divide).
+Tensor div_Tensor_meta(const Tensor& self, const Tensor& other) {
+  const bool symbolic = self.unsafeGetTensorImpl()->has_symbolic_sizes_strides() ||
+      other.unsafeGetTensorImpl()->has_symbolic_sizes_strides();
+  if (symbolic) {
+    if (auto out = fast_binary_meta(self, other, TypePromotionKind::INT_TO_FLOAT); out.defined()) {
+      return out;
+    }
+  }
+  return binary_ref_meta(self, other, TypePromotionKind::INT_TO_FLOAT, symbolic);
+}
+
+// Mirrors meta_binop_inplace_alpha, which ignores alpha. A wrapped number's
+// dtype matches the Python type the checks see there.
+Tensor& add__Tensor_meta(Tensor& self, const Tensor& other, const Scalar& /*alpha*/) {
+  const auto self_dtype = self.scalar_type();
+  const auto other_dtype = other.scalar_type();
+  TORCH_CHECK(
+      !(isIntegralType(self_dtype, /*includeBool=*/false) && isFloatingType(other_dtype)),
+      "Promotion of int.add/sub_(float) in in-place ops are not possible due to element size change.");
+  TORCH_CHECK(
+      self_dtype != kBool || other_dtype == kBool,
+      "Promotion of bool.add/sub_(others) in in-place ops are not possible due to element size change.");
+  if (!other.unsafeGetTensorImpl()->is_wrapped_number()) {
+    check_inplace_broadcast(self.sym_sizes(), other.sym_sizes());
+  }
+  return self;
+}
+
+// Python fake runs the refs for the ops below, under FakeTensorMode for
+// symbolic inputs and as the Meta kernel otherwise.
+Tensor bitwise_and_Tensor_meta(const Tensor& self, const Tensor& other) {
+  const bool symbolic = self.unsafeGetTensorImpl()->has_symbolic_sizes_strides() ||
+      other.unsafeGetTensorImpl()->has_symbolic_sizes_strides();
+  return elementwise_binary_ref_meta("bitwise_and", self, other, TypePromotionKind::DEFAULT, symbolic);
+}
+
+Tensor le_Tensor_meta(const Tensor& self, const Tensor& other) {
+  const bool symbolic = self.unsafeGetTensorImpl()->has_symbolic_sizes_strides() ||
+      other.unsafeGetTensorImpl()->has_symbolic_sizes_strides();
+  return elementwise_binary_ref_meta(
+      "le", self, other, TypePromotionKind::ALWAYS_BOOL, symbolic, /*supports_lhs_python_scalar=*/false);
 }
 
 } // namespace at::native

@@ -2848,6 +2848,22 @@ Call this whenever a new thread is created in order to propagate values from
       py::arg("t"),
       py::arg("device"));
 
+  py_module.def(
+      "_set_real_tensor",
+      [](const at::Tensor& fake, const at::Tensor& real) {
+        fake.unsafeGetTensorImpl()->set_real_tensor(real.getIntrusivePtr());
+      },
+      py::arg("fake"),
+      py::arg("real"));
+
+  py_module.def("_get_real_tensor", [](const at::Tensor& fake) -> py::object {
+    auto real = fake.unsafeGetTensorImpl()->real_tensor();
+    if (!real) {
+      return py::none();
+    }
+    return py::cast(at::Tensor(std::move(real)));
+  });
+
   py_module.def("_get_fake_constant", [](const at::Tensor& t) -> py::object {
     TORCH_CHECK(t.defined(), "Expected a defined tensor");
     TORCH_CHECK(t.is_fake(), "Expected a fake tensor");
