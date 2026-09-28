@@ -600,7 +600,7 @@ class FakeTensorConverter:
         ):
             out.grad_dtype = inner_t.grad_dtype
 
-        from torch._dynamo.source import RandomValueSource
+        from torch._guards import GuardSource
 
         value = None
         if (
@@ -647,7 +647,7 @@ class FakeTensorConverter:
             #
             #   PYTORCH_TEST_WITH_DYNAMO=1 python test/test_reductions.py -k
             #   TestReductionsCPU.test_dim_reduction_fns_fn_name_amax_cpu_bfloat16
-            and (source is None or not isinstance(source, RandomValueSource))
+            and (source is None or source.guard_source is not GuardSource.RANDOM_VALUE)
             # In Dynamo, shape_env is never none (even with static shapes).
             # However, FakeTensorMode can be used by hand and in some cases
             # ShapeEnv is not allocated.
