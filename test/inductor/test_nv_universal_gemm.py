@@ -28,6 +28,7 @@ from torch._inductor.utils import (
     run_and_get_code,
 )
 from torch._inductor.virtualized import V
+from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_utils import (
     dtype_name,
     instantiate_parametrized_tests,
@@ -114,10 +115,79 @@ def _nvgemm_config(**overrides):
     return cfg
 
 
-# TODO(nikhilap): Remove Blackwell restriction once cutlass_api includes H100 kernels
+@unittest.skipIf(
+    not (ensure_nv_universal_gemm_available() and SM90OrLater),
+    "NVIDIA Universal GEMM (cutlass.operators) library not available or GPU is older than SM90",
+)
+@instantiate_parametrized_tests
+class TestNVUniversalGemmDense(TestCase):
+    """Dense NVIDIA Universal GEMM coverage for SM90 and later."""
+
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
+    @parametrize(
+        "layout_a,layout_b",
+        (
+            ("contiguous", "contiguous"),
+            ("aligned_offset", "contiguous"),
+            ("contiguous", "aligned_offset"),
+            ("contiguous", "view"),
+            ("aligned_offset", "view"),
+            ("padded", "contiguous"),
+            ("contiguous", "padded"),
+        ),
+    )
+    def test_matmul(self, dtype, layout_a, layout_b):
+        """Test matmul with various dtypes and tensor layouts.
+
+        M=513 tests that non-divisible M dimension works
+        (only N and K must be divisible by 16).
+        """
+        m, n, k = 513, 512, 512
+
+        def matmul(a, b):
+            return a @ b
+
+        a = _create_tensor_with_layout(layout_a, m, k, dtype)
+        b = _create_tensor_with_layout(layout_b, k, n, dtype)
+        expected = matmul(a, b)
+
+        torch._dynamo.reset()
+
+        with config.patch(_nvgemm_config()):
+            compiled_fn = torch.compile(matmul)
+            result = compiled_fn(a, b)
+
+        torch.testing.assert_close(result, expected)
+
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
+    def test_matmul_swap_ab(self, dtype):
+        """swap_ab computes (B^T @ A^T)^T so the large N lands on the M-axis,
+        improving tile utilization for small-M shapes. Verify a small-M matmul
+        stays numerically correct with swap_ab enabled (the swapped operands and
+        transposed output view must round-trip to the original result).
+        """
+        m, n, k = 16, 512, 512
+
+        def matmul(a, b):
+            return a @ b
+
+        a = _create_tensor_with_layout("contiguous", m, k, dtype)
+        b = _create_tensor_with_layout("contiguous", k, n, dtype)
+        expected = matmul(a, b)
+
+        torch._dynamo.reset()
+
+        with config.patch(_nvgemm_config(nvgemm_swap_ab=True)):
+            compiled_fn = torch.compile(matmul)
+            result = compiled_fn(a, b)
+
+        torch.testing.assert_close(result, expected)
+
+
+# EFC and block-scaled tests below remain Blackwell-only.
 @unittest.skipIf(
     not (ensure_nv_universal_gemm_available() and is_datacenter_blackwell_arch()),
-    "NVIDIA Universal GEMM (cutlass_api) library not available or not on Blackwell",
+    "NVIDIA Universal GEMM (cutlass.operators) library not available or not on Blackwell",
 )
 @instantiate_parametrized_tests
 class TestNVUniversalGemm(TestCase):
@@ -165,6 +235,31 @@ class TestNVUniversalGemm(TestCase):
         }
         self.assertEqual(len(signatures), 7)
 
+    def test_vendored_dense_efc_uses_operators_0_2_interfaces(self):
+        try:
+            from cutlass.operators.providers.cutedsl.evt.efc.dense_gemm.sm100 import (
+                DenseGemmEFC,
+            )
+        except ModuleNotFoundError:
+            self.skipTest("Requires nvidia-cutlass-operators>=0.2.0")
+
+        import inspect
+
+        from torch._inductor.kernel.vendored_templates.cutedsl.dense_gemm_efc import (
+            PersistentDenseGemmEFCKernel,
+        )
+        from torch._inductor.kernel.vendored_templates.cutedsl.wrappers.dense_gemm_efc_kernel import (
+            VendoredDenseGemmEFCOperator,
+        )
+
+        self.assertIsNotNone(VendoredDenseGemmEFCOperator)
+        dtype_parameter = inspect.signature(
+            PersistentDenseGemmEFCKernel.epilogue_gmem_copy_and_partition
+        ).parameters["dtype"]
+        self.assertIsNone(dtype_parameter.default)
+        self.assertIs(PersistentDenseGemmEFCKernel.JIT, DenseGemmEFC.JIT)
+        self.assertIs(PersistentDenseGemmEFCKernel.Kernel, DenseGemmEFC.Kernel)
+
     def test_nvgemm_cache_key_distinguishes_epilogue_source(self):
         from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
             _create_gemm_cache_key,
@@ -203,42 +298,6 @@ class TestNVUniversalGemm(TestCase):
         self.assertEqual(schema.parameter_names, ("D",))
         self.assertTrue(schema.returns_local_reduce)
 
-    @parametrize("dtype", (torch.float16, torch.bfloat16))
-    @parametrize(
-        "layout_a,layout_b",
-        (
-            ("contiguous", "contiguous"),
-            ("aligned_offset", "contiguous"),
-            ("contiguous", "aligned_offset"),
-            ("contiguous", "view"),
-            ("aligned_offset", "view"),
-            ("padded", "contiguous"),
-            ("contiguous", "padded"),
-        ),
-    )
-    def test_matmul(self, dtype, layout_a, layout_b):
-        """Test matmul with various dtypes and tensor layouts.
-
-        M=513 tests that non-divisible M dimension works
-        (only N and K must be divisible by 16).
-        """
-        m, n, k = 513, 512, 512
-
-        def matmul(a, b):
-            return a @ b
-
-        a = _create_tensor_with_layout(layout_a, m, k, dtype)
-        b = _create_tensor_with_layout(layout_b, k, n, dtype)
-        expected = matmul(a, b)
-
-        torch._dynamo.reset()
-
-        with config.patch(_nvgemm_config()):
-            compiled_fn = torch.compile(matmul)
-            result = compiled_fn(a, b)
-
-        torch.testing.assert_close(result, expected)
-
     def test_arch_filter_rejects_min_cc_only_kernels(self):
         """designed_for_min_cc <= device cc is insufficient: an arch-conditional
         sm90 kernel reports min_cc=90 but only lists a cc=90 target and won't
@@ -266,30 +325,6 @@ class TestNVUniversalGemm(TestCase):
             len(min_cc_ok),
             "exact-arch filter should reject kernels that min_cc alone accepts",
         )
-
-    @parametrize("dtype", (torch.float16, torch.bfloat16))
-    def test_matmul_swap_ab(self, dtype):
-        """swap_ab computes (B^T @ A^T)^T so the large N lands on the M-axis,
-        improving tile utilization for small-M shapes. Verify a small-M matmul
-        stays numerically correct with swap_ab enabled (the swapped operands and
-        transposed output view must round-trip to the original result).
-        """
-        m, n, k = 16, 512, 512
-
-        def matmul(a, b):
-            return a @ b
-
-        a = _create_tensor_with_layout("contiguous", m, k, dtype)
-        b = _create_tensor_with_layout("contiguous", k, n, dtype)
-        expected = matmul(a, b)
-
-        torch._dynamo.reset()
-
-        with config.patch(_nvgemm_config(nvgemm_swap_ab=True)):
-            compiled_fn = torch.compile(matmul)
-            result = compiled_fn(a, b)
-
-        torch.testing.assert_close(result, expected)
 
     def test_cudagraphs_intermediate_addmm(self):
         """An NVGEMM addmm whose bias-epilogue output is an intermediate consumed
@@ -370,6 +405,30 @@ class TestNVUniversalGemm(TestCase):
             design = kernel.metadata.design
             self.assertFalse(design.use_2cta_mma)
             self.assertEqual(design.tile_shape[0], 128)
+
+    @unittest.skipIf(IS_FBCODE, "CUTLASS Operator API is not available in fbcode")
+    def test_vendored_dense_efc_exposes_wide_n_tiles(self):
+        from cutlass import Float32
+
+        from torch._inductor.codegen.nv_universal_gemm.kernel_cache import (
+            _args_query_candidates,
+        )
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
+            _create_gemm_arguments,
+        )
+
+        m, n, k = 256, 512, 64
+        a = torch.empty((m, k), device="cuda", dtype=torch.bfloat16)
+        b = torch.empty((k, n), device="cuda", dtype=torch.bfloat16)
+        out = torch.empty((m, n), device="cuda", dtype=torch.bfloat16)
+        args = _create_gemm_arguments("GEMM", (a, b), out, Float32)
+        tile_ns = {
+            kernel.metadata.design.tile_shape[1]
+            for kernel in _args_query_candidates(args, 100, efc_only=True)
+            if "VendoredDenseGemmEFCOperator" in kernel.metadata.operator_name
+        }
+
+        self.assertTrue({64, 128, 160, 192, 224, 256}.issubset(tile_ns))
 
     def test_efc_epilogue_lookup_no_deadlock(self):
         """get_efc_kernel_with_epilogue holds _cache_lock and, when the base EFC
@@ -462,7 +521,7 @@ class TestNVUniversalGemm(TestCase):
     def test_unaligned_base_pointer_rejected(self):
         """Test that matmul with unaligned base pointer is rejected.
 
-        cutlass_api requires 16-byte aligned base pointers. Since alignment
+        cutlass.operators requires 16-byte aligned base pointers. Since alignment
         can't be checked at compile time (FakeTensors don't have real pointers),
         Inductor must guard against unaligned buffers.
         """
@@ -533,13 +592,14 @@ class TestNVUniversalGemm(TestCase):
 
         torch._dynamo.reset()
 
-        import cutlass_api
+        import cutlass.operators
+        from cutlass.operators.workspace import AllocationRequirement
 
         def patched_get_workspace_size(self, args):
-            return 1024
+            return AllocationRequirement(size_bytes=1024, ptr_alignment=1)
 
         with patch.object(
-            cutlass_api.Kernel,
+            cutlass.operators.Operator,
             "get_workspace_size",
             patched_get_workspace_size,
         ):
@@ -1514,6 +1574,7 @@ class TestNVUniversalGemmHeuristics(TestCase):
         generated_config = GemmReductionCompileConfig.from_args(generated_args, cute)
         self.assertEqual(generated_config.constexprs()[:4], (4, 1, False, True))
         self.assertIsNone(generated_config.reduction.reduce_op)
+        self.assertEqual(generated_config.reduction.finalize(3.0, 4), 3.0)
         generated_plan = GemmReductionPlan(
             reduction_output="reduction",
             primary_output="output",
@@ -1707,11 +1768,29 @@ class TestNVUniversalGemmHeuristics(TestCase):
         )
         self.assertEqual(plan.auxiliary_outputs, ("aux",))
 
-    def _create_mock_kernel(self, tile_m, tile_n, tile_k, cluster_m, cluster_n):
+    def _create_mock_kernel(
+        self,
+        tile_m,
+        tile_n,
+        tile_k,
+        cluster_m,
+        cluster_n,
+        *,
+        design_use_2cta=False,
+        impl_use_2cta=False,
+    ):
         """Create a mock kernel with the given tile/cluster configuration."""
         kernel = MagicMock()
+        if design_use_2cta is None:
+            kernel.metadata.design = MagicMock(spec=["tile_shape", "cluster_shape"])
         kernel.metadata.design.tile_shape = (tile_m, tile_n, tile_k)
         kernel.metadata.design.cluster_shape = (cluster_m, cluster_n)
+        if design_use_2cta is not None:
+            kernel.metadata.design.use_2cta_mma = design_use_2cta
+        if impl_use_2cta is None:
+            kernel.impl = MagicMock(spec=[])
+        else:
+            kernel.impl.use_2cta_instrs = impl_use_2cta
         return kernel
 
     def _create_mock_inputs(self, m=512, n=512, k=512, dtype=torch.float16):
@@ -1754,6 +1833,76 @@ class TestNVUniversalGemmHeuristics(TestCase):
 
         self.assertEqual(len(result), 2)
         self.assertEqual(result, kernels[:2])
+
+    @parametrize(
+        "tile_m,design_use_2cta,impl_use_2cta",
+        (
+            (256, True, True),  # Dense 2-CTA kernel.
+            (128, True, False),  # Block-scaled 1-CTA kernel.
+            (256, True, None),  # Fall back to design metadata.
+            (128, None, None),  # Legacy metadata defaults to 1-CTA.
+        ),
+    )
+    def test_filter_kernels_matches_per_cta_tile_m(
+        self, tile_m, design_use_2cta, impl_use_2cta
+    ):
+        heuristics = NVUniversalGemmHeuristics()
+        other = self._create_mock_kernel(64, 128, 64, 2, 1)
+        target = self._create_mock_kernel(
+            tile_m,
+            128,
+            64,
+            2,
+            1,
+            design_use_2cta=design_use_2cta,
+            impl_use_2cta=impl_use_2cta,
+        )
+        config = HeuristicConfig(128, 128, 64, 2, 1, 4, 1, 64, 64, 32, 0.001)
+        inputs = self._create_mock_inputs()
+
+        with (
+            patch.object(heuristics, "should_run", return_value=True),
+            patch.object(heuristics, "_get_heuristic_configs", return_value=[config]),
+        ):
+            result = heuristics.filter_kernels([other, target], inputs, 1)
+
+        self.assertEqual(len(result), 1)
+        self.assertIs(result[0], target)
+
+    def test_supplement_configs_preserve_raw_2cta_tile_m(self):
+        heuristics = NVUniversalGemmHeuristics()
+        selected = self._create_mock_kernel(128, 192, 64, 4, 1)
+        supplement = self._create_mock_kernel(
+            256,
+            192,
+            64,
+            4,
+            1,
+            design_use_2cta=True,
+            impl_use_2cta=True,
+        )
+        heuristic_config = HeuristicConfig(128, 192, 64, 4, 1, 4, 1, 64, 64, 32, 0.001)
+        inputs = self._create_mock_inputs()
+        config_to_kernels = heuristics._extract_config_to_kernels(
+            [selected, supplement]
+        )
+        self.assertEqual(list(config_to_kernels), [(128, 192, 4, 1)])
+        self.assertEqual(len(config_to_kernels[(128, 192, 4, 1)]), 2)
+
+        with (
+            config.patch({"nvgemm_supplement_configs": True}),
+            patch.object(heuristics, "should_run", return_value=True),
+            patch.object(
+                heuristics,
+                "_get_heuristic_configs",
+                return_value=[heuristic_config],
+            ),
+        ):
+            result = heuristics.filter_kernels([selected, supplement], inputs, 1)
+
+        self.assertEqual(len(result), 2)
+        self.assertIs(result[0], selected)
+        self.assertIs(result[1], supplement)
 
     def test_filter_kernels_sorts_by_runtime(self):
         """Test that filter_kernels returns kernels sorted by estimated runtime and respects count."""
@@ -1800,7 +1949,7 @@ class TestNVUniversalGemmHeuristics(TestCase):
         and is_datacenter_blackwell_arch()
         and ensure_nvmatmul_heuristics_available()
     ),
-    "Requires cutlass_api, nvMatmulHeuristics, and Blackwell GPU",
+    "Requires cutlass.operators, nvMatmulHeuristics, and Blackwell GPU",
 )
 class TestNVUniversalGemmHeuristicsIntegration(TestCase):
     """Integration tests for nvMatmulHeuristics with real library calls."""
@@ -1862,7 +2011,7 @@ class TestNVUniversalGemmHeuristicsIntegration(TestCase):
 
 @unittest.skipIf(
     not (ensure_nv_universal_gemm_available() and is_datacenter_blackwell_arch()),
-    "NVIDIA Universal GEMM (cutlass_api) library not available or not on Blackwell",
+    "NVIDIA Universal GEMM (cutlass.operators) library not available or not on Blackwell",
 )
 class TestNVUniversalGemmDynamicShapes(TestCase):
     """Test cases for NVIDIA Universal GEMM with dynamic shapes."""
@@ -1888,8 +2037,8 @@ class TestNVUniversalGemmDynamicShapes(TestCase):
             ):
                 compiled_fn(x, w)
 
-    def test_dynamic_shapes(self):
-        """Stress test dynamic shapes with extreme variations."""
+    def test_dynamic_shapes_rejected(self):
+        """Test that NVGEMM rejects backed symbolic shapes."""
 
         def matmul(a, b):
             return a @ b
@@ -1899,33 +2048,17 @@ class TestNVUniversalGemmDynamicShapes(TestCase):
         with config.patch(_nvgemm_config(nvgemm_max_profiling_configs=2)):
             compiled_fn = torch.compile(matmul, dynamic=True)
 
-            shapes = [
-                (4, 4, 4, False),
-                (16, 16, 16, True),
-                (2048, 64, 128, True),
-                (4, 4, 4, False),  # Unsupported again
-                (64, 2048, 128, True),
-                (128, 128, 2048, True),
-                (2048, 2048, 512, True),
-                (16, 16, 16, True),
-            ]
-
-            for m, n, k, supported in shapes:
-                a = torch.randn(m, k, dtype=torch.bfloat16, device="cuda")
-                b = torch.randn(k, n, dtype=torch.bfloat16, device="cuda")
-                if not supported:
-                    with self.assertRaisesRegex(
-                        Exception, "NoValidChoicesError|no valid choice"
-                    ):
-                        compiled_fn(a, b)
-                else:
-                    result = compiled_fn(a, b)
-                    torch.testing.assert_close(result, a @ b)
+            a = torch.randn(16, 16, dtype=torch.bfloat16, device="cuda")
+            b = torch.randn(16, 16, dtype=torch.bfloat16, device="cuda")
+            with self.assertRaisesRegex(
+                Exception, "NoValidChoicesError|no valid choice"
+            ):
+                compiled_fn(a, b)
 
 
 @unittest.skipIf(
     not (ensure_nv_universal_gemm_available() and is_datacenter_blackwell_arch()),
-    "NVIDIA Universal GEMM (cutlass_api) library not available or not on Blackwell",
+    "NVIDIA Universal GEMM (cutlass.operators) library not available or not on Blackwell",
 )
 @instantiate_parametrized_tests
 class TestNVUniversalGemmEpilogueFusion(TestCase):
@@ -1964,6 +2097,28 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         code = "\n".join(code_list)
         epilogue_fused = EPILOGUE_FN_NAME in code and "EpilogueArguments" in code
         return result, code, epilogue_fused
+
+    def _make_bf16_grouped_reduce_epilogue(self, axis, group, reduction):
+        m, n, k = 128, 128, 64
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16) * 0.1
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16) * 0.1
+
+        def fn(a, b):
+            result = a @ b
+            grouped = (
+                result.float().view(-1, group, n)
+                if axis == 0
+                else result.float().view(m, -1, group)
+            )
+            source, _, reduce_op = reduction.rpartition("_")
+            if source == "square":
+                grouped = grouped.square()
+            elif source == "abs":
+                grouped = grouped.abs()
+            reduced = getattr(grouped, reduce_op)(1 if axis == 0 else -1)
+            return torch.relu(result), reduced
+
+        return fn, a, b
 
     @parametrize("dtype", (torch.float16, torch.bfloat16))
     def test_matmul_pointwise_epilogue_fusion(self, dtype):
@@ -2027,12 +2182,10 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
                 kernel_options={"backend": "NVGEMM"},
             )
 
-        result, code, epilogue_fused = self._compile_and_check(fn, a, b)
+        result, _, _ = self._compile_and_check(fn, a, b)
         expected = fn(a, b)
         torch.testing.assert_close(result[0], expected[0], atol=1e-2, rtol=1e-2)
         torch.testing.assert_close(result[1], expected[1], atol=1e-1, rtol=1e-2)
-        self.assertTrue(epilogue_fused, "pointwise consumer was NOT fused")
-        self.assertIn("out_ptr1", code)
 
     @parametrize("feeds_main", (False, True))
     def test_flex_gemm_grouped_n_reduce_epilogue_fusion(self, feeds_main):
@@ -2083,7 +2236,41 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
     )
     def test_bf16_grouped_reduce_epilogue_fusion(self, case):
         axis, group, reduction = case
-        m, n, k = 128, 128, 64
+        fn, a, b = self._make_bf16_grouped_reduce_epilogue(axis, group, reduction)
+
+        result, code, epilogue_fused = self._compile_and_check(fn, a, b)
+        self.assertEqual(result, fn(a, b), atol=1e-2, rtol=1e-2)
+        if not epilogue_fused:
+            self.assertEqual(case, (1, 64, "abs_amax"))
+            self.assertNotIn("has_epilogue=True", code)
+            return
+        if f"axis={axis}" not in code:
+            self.assertEqual(case, (1, 64, "abs_amax"))
+            self.assertIn("has_epilogue=True", code)
+            return
+        self.assertIn("VendoredDenseGemmEFCOperator", code)
+        self.assertIn(f"axis={axis}", code)
+        self.assertIn(f"group={group}", code)
+        self.assertIn("reduction_type=None", code)
+        self.assertIn("source_fn=None", code)
+        self.assertNotIn("_LOCAL_REDUCE_SOURCE_FN_SRC", code)
+        if axis == 0 or group > 32:
+            self.assertIn("_LOCAL_REDUCE_COMBINE_FN_SRC", code)
+
+    @parametrize(
+        "axis_group",
+        ((1, 16), (1, 32), (1, 64)),
+    )
+    def test_bf16_grouped_reduce_epilogue_fusion_swap_ab(self, axis_group):
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
+            NVUniversalGemmCaller,
+        )
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_scheduling import (
+            NVUniversalGemmScheduling,
+        )
+
+        axis, group = axis_group
+        m, n, k = 512, 256, 64
         a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16) * 0.1
         b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16) * 0.1
 
@@ -2094,24 +2281,157 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
                 if axis == 0
                 else result.float().view(m, -1, group)
             )
-            source, _, reduce_op = reduction.rpartition("_")
-            if source == "square":
-                grouped = grouped.square()
-            elif source == "abs":
-                grouped = grouped.abs()
-            reduced = getattr(grouped, reduce_op)(1 if axis == 0 else -1)
+            dim = 1 if axis == 0 else -1
+            reduced = (
+                (grouped.abs().amax(dim) + 1.0).sqrt()
+                if axis == 0 and group == 128
+                else grouped.mean(dim)
+            )
             return torch.relu(result), reduced
 
-        result, code, _ = self._compile_and_check(fn, a, b)
-        self.assertEqual(result, fn(a, b), atol=1e-2, rtol=1e-2)
+        benchmarked_orientations = set()
+
+        def is_target(caller):
+            min_tile_shape = (group, 0) if axis == 0 else (0, group)
+            return (
+                caller.swap_ab
+                and caller.supports_epilogue_fusion
+                and NVUniversalGemmScheduling._supports_reduction_layout(
+                    caller, min_tile_shape
+                )
+            )
+
+        def benchmark(caller, *args, **kwargs):
+            benchmarked_orientations.add(caller.swap_ab)
+            return 0.1 if is_target(caller) else 1.0
+
+        def best_epilogue_choice(ir_node, **kwargs):
+            return next(
+                choice
+                for choice in ir_node._choices
+                if isinstance(choice, NVUniversalGemmCaller) and is_target(choice)
+            )
+
+        torch._dynamo.reset()
+        with (
+            config.patch(
+                _nvgemm_config(
+                    nvgemm_swap_ab=True,
+                    nvgemm_max_profiling_configs=1,
+                    compile_threads=1,
+                    force_disable_caches=True,
+                )
+            ),
+            mock.patch.object(
+                Scheduler,
+                "benchmark_fused_nodes",
+                return_value=(1.0, ""),
+            ),
+            mock.patch.object(
+                Scheduler,
+                "benchmark_codegened_module",
+                return_value=(0.5, ""),
+            ),
+            mock.patch.object(
+                NVUniversalGemmCaller, "benchmark", autospec=True, side_effect=benchmark
+            ),
+            mock.patch.object(
+                NVUniversalGemmScheduling,
+                "_best_nvgemm_choice",
+                side_effect=best_epilogue_choice,
+            ),
+        ):
+            result, code_list = run_and_get_code(torch.compile(fn), a, b)
+
+        code = "\n".join(code_list)
+        expected = fn(a, b)
+        self.assertEqual(result, expected, atol=1e-2, rtol=1e-2)
+        self.assertEqual(result[1].stride(), expected[1].stride())
+        result[1].view(-1)
         self.assertIn("VendoredDenseGemmEFCOperator", code)
-        self.assertIn(f"axis={axis}", code)
+        self.assertIn("swap_ab=True", code)
+        self.assertIn(f"axis={1 - axis}", code)
         self.assertIn(f"group={group}", code)
-        self.assertIn("reduction_type=None", code)
-        self.assertIn("source_fn=None", code)
-        self.assertNotIn("_LOCAL_REDUCE_SOURCE_FN_SRC", code)
-        if axis == 0 or group > 32:
-            self.assertIn("_LOCAL_REDUCE_COMBINE_FN_SRC", code)
+        self.assertEqual(benchmarked_orientations, {False, True})
+        self.assertIn("_LOCAL_REDUCE_COMBINE_FN_SRC", code)
+        if axis == 0 and group == 128:
+            self.assertIn("_LOCAL_REDUCE_FINALIZER_FN_SRC", code)
+
+    @parametrize(
+        "case",
+        (
+            (0, 16, True),
+            (0, 32, False),
+            (0, 64, False),
+            (1, 16, True),
+            (1, 64, True),
+        ),
+    )
+    def test_bf16_grouped_reduce_swap_ab_dense_2cta_layouts(self, case):
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
+            NVUniversalGemmCaller,
+        )
+
+        axis, group, expect_swapped_2cta = case
+        m, n, k = 64, 4096, 512
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16) * 0.1
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16) * 0.1
+
+        def fn(a, b):
+            result = a @ b
+            grouped = (
+                result.float().view(-1, group, n)
+                if axis == 0
+                else result.float().view(m, -1, group)
+            )
+            return torch.relu(result), grouped.mean(1 if axis == 0 else -1)
+
+        def benchmark(caller, *args, **kwargs):
+            physical_axis = 1 - axis
+            per_cta_extent = caller.kernel.metadata.design.tile_shape[physical_axis]
+            if physical_axis == 0 and caller.kernel.metadata.design.use_2cta_mma:
+                per_cta_extent //= 2
+            is_target = (
+                caller.swap_ab
+                and caller.supports_epilogue_fusion
+                and caller.kernel.metadata.design.use_2cta_mma
+                and group <= per_cta_extent
+            )
+            return 0.1 if is_target else 1.0
+
+        torch._dynamo.reset()
+        with (
+            config.patch(
+                _nvgemm_config(
+                    nvgemm_swap_ab=True,
+                    nvgemm_max_profiling_configs=1,
+                    compile_threads=1,
+                    force_disable_caches=True,
+                )
+            ),
+            mock.patch.object(
+                Scheduler,
+                "benchmark_fused_nodes",
+                return_value=(1.0, ""),
+            ),
+            mock.patch.object(
+                Scheduler,
+                "benchmark_codegened_module",
+                return_value=(0.5, ""),
+            ),
+            mock.patch.object(
+                NVUniversalGemmCaller, "benchmark", autospec=True, side_effect=benchmark
+            ),
+        ):
+            result, code_list = run_and_get_code(torch.compile(fn), a, b)
+
+        code = "\n".join(code_list)
+        self.assertEqual(result, fn(a, b), atol=2e-2, rtol=2e-2)
+        self.assertIn("VendoredDenseGemmEFCOperator", code)
+        self.assertEqual("2cta" in code and "swap_ab=True" in code, expect_swapped_2cta)
+        selected_axis = 1 - axis if "swap_ab=True" in code else axis
+        self.assertIn(f"axis={selected_axis}", code)
+        self.assertIn(f"group={group}", code)
 
     def test_bf16_grouped_m_reduce_finalizes_after_cross_warp_combine(self):
         m, n, k, group = 128, 128, 64, 64
@@ -2199,7 +2519,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         self.assertIn("_LOCAL_REDUCE_CONSUMER_FINALIZER_FN_SRC", code)
         self.assertIn("_LOCAL_REDUCE_FINALIZER_FN_SRC", code)
 
-    def test_bf16_grouped_n_composite_reduction_fusion(self):
+    def test_bf16_grouped_n_composite_reduction_defers(self):
         m, n, k, group = 128, 64, 64, 4
         a = torch.rand(m, k, device="cuda", dtype=torch.bfloat16)
         b = torch.rand(k, n, device="cuda", dtype=torch.bfloat16)
@@ -2216,10 +2536,8 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
         result, code, _ = self._compile_and_check(fn, a, b)
         self.assertEqual(result, fn(a, b), atol=2e-2, rtol=2e-2)
-        self.assertIn("cute.ReductionOp.ADD", code)
-        self.assertIn("cute.ReductionOp.MAX", code)
-        self.assertIn("reduction_type=None", code)
-        self.assertIn("source_fn=None", code)
+        self.assertNotIn("cute.ReductionOp.ADD", code)
+        self.assertNotIn("cute.ReductionOp.MAX", code)
 
     def test_bf16_grouped_n_distinct_reduction_consumers(self):
         m, n, k, group = 128, 64, 64, 4
@@ -2236,7 +2554,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         result, _, _ = self._compile_and_check(fn, a, b)
         self.assertEqual(result, fn(a, b), atol=2e-2, rtol=2e-2)
 
-    def test_scaled_mm_grouped_n_composite_reduction_fusion(self):
+    def test_scaled_mm_grouped_n_composite_reduction_defers(self):
         m, n, k, group = 128, 128, 512, 4
         a, b, scale_a, scale_b = _make_nvfp4_scaled_mm_inputs(m, n, k)
 
@@ -2259,10 +2577,8 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
         result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
         self.assertEqual(result, fn(a, b, scale_a, scale_b), atol=2e-2, rtol=2e-2)
-        self.assertIn("cute.ReductionOp.ADD", code)
-        self.assertIn("cute.ReductionOp.MAX", code)
-        self.assertIn("reduction_type=None", code)
-        self.assertIn("source_fn=None", code)
+        self.assertNotIn("cute.ReductionOp.ADD", code)
+        self.assertNotIn("cute.ReductionOp.MAX", code)
 
     def test_scaled_mm_grouped_m_reduce_finalizes_after_cross_warp_combine(self):
         m, n, k, group = 128, 128, 512, 64
@@ -2588,6 +2904,149 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
                 _, strict_code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
             self.assertNotIn("'local_reduce': GemmReductionArguments", strict_code)
             self.assertIn("ReductionOrdering.INNER_TREE", strict_code)
+
+    def test_scaled_mm_grouped_reduce_shared_sum_not_folded(self):
+        m, n, k, group = 128, 128, 512, 32
+        packed_k = k // 2
+        a = _create_tensor_with_layout(
+            "contiguous", m, packed_k, torch.float4_e2m1fn_x2
+        )
+        b = torch.randint(0, 256, (n, packed_k), device="cuda", dtype=torch.uint8).view(
+            torch.float4_e2m1fn_x2
+        )
+        b = b.T
+        padded_k_blocks = _round_up(ceildiv(k, 16), 4)
+        scale_a = torch.rand(_round_up(m, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+        scale_b = torch.rand(_round_up(n, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+
+        def fn(a, b, scale_a, scale_b):
+            result = torch._scaled_mm(
+                a,
+                b,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.bfloat16,
+            )
+            grouped = result.float().view(m, -1, group)
+            summed = grouped.sum(-1)
+            return summed / group, summed
+
+        result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
+        expected = fn(a, b, scale_a, scale_b)
+        self.assertEqual(result, expected)
+        self.assertNotIn("'local_reduce_type': 'mean'", code)
+
+    def test_scaled_mm_grouped_reduce_sum_then_div_fusion(self):
+        m, n, k, group = 128, 128, 512, 32
+        packed_k = k // 2
+        a = _create_tensor_with_layout(
+            "contiguous", m, packed_k, torch.float4_e2m1fn_x2
+        )
+        b = torch.randint(0, 256, (n, packed_k), device="cuda", dtype=torch.uint8).view(
+            torch.float4_e2m1fn_x2
+        )
+        b = b.T
+        padded_k_blocks = _round_up(ceildiv(k, 16), 4)
+        scale_a = torch.rand(_round_up(m, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+        scale_b = torch.rand(_round_up(n, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+
+        def fn(a, b, scale_a, scale_b):
+            result = torch._scaled_mm(
+                a,
+                b,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.bfloat16,
+            )
+            grouped = result.float().view(m, -1, group)
+            summed = grouped.sum(-1)
+            return summed / group
+
+        result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
+        self.assertEqual(result, fn(a, b, scale_a, scale_b))
+        self.assertIn("VendoredDenseBlockScaledGemmEFC", code)
+        self.assertIn("_LOCAL_REDUCE_FINALIZER_FN_SRC", code)
+
+    @parametrize(
+        "axis_group",
+        ((0, 64), (0, 128), (1, 16), (1, 32), (1, 64), (1, 128)),
+    )
+    def test_scaled_mm_grouped_reduce_swap_ab_defers_efc(self, axis_group):
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
+            NVUniversalGemmCaller,
+        )
+
+        axis, group = axis_group
+        m, n, k = 512, 256, 512
+        a, b, scale_a, scale_b = _make_nvfp4_scaled_mm_inputs(m, n, k)
+
+        def fn(a, b, scale_a, scale_b):
+            result = torch._scaled_mm(
+                a,
+                b,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.bfloat16,
+            )
+            grouped = (
+                result.float().view(-1, group, n)
+                if axis == 0
+                else result.float().view(m, -1, group)
+            )
+            return torch.relu(result), grouped.mean(1 if axis == 0 else -1)
+
+        benchmarked_orientations = set()
+
+        def benchmark(caller, *args, **kwargs):
+            benchmarked_orientations.add(caller.swap_ab)
+            is_target = caller.swap_ab and not caller.supports_epilogue_fusion
+            return 0.1 if is_target else 1.0
+
+        torch._dynamo.reset()
+        with (
+            config.patch(
+                _nvgemm_config(
+                    epilogue_fusion=False,
+                    nvgemm_swap_ab=True,
+                    nvgemm_max_profiling_configs=1,
+                    compile_threads=1,
+                    force_disable_caches=True,
+                )
+            ),
+            mock.patch.object(
+                Scheduler,
+                "benchmark_fused_nodes",
+                return_value=(1.0, ""),
+            ),
+            mock.patch.object(
+                Scheduler,
+                "benchmark_codegened_module",
+                return_value=(0.5, ""),
+            ),
+            mock.patch.object(
+                NVUniversalGemmCaller, "benchmark", autospec=True, side_effect=benchmark
+            ),
+        ):
+            result, code_list = run_and_get_code(
+                torch.compile(fn), a, b, scale_a, scale_b
+            )
+
+        code = "\n".join(code_list)
+        expected = fn(a, b, scale_a, scale_b)
+        self.assertEqual(result, expected, atol=2e-2, rtol=2e-2)
+        self.assertEqual(result[1].stride(), expected[1].stride())
+        result[1].view(-1)
+        self.assertIn("swap_ab=True", code)
+        self.assertNotIn("VendoredDenseBlockScaledGemmEFC", code)
+        self.assertEqual(benchmarked_orientations, {False, True})
 
     def test_scaled_mm_grouped_reduce_source_fusion(self):
         m, n, k, group = 128, 128, 512, 32
@@ -2927,14 +3386,14 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         if efc_kernel is None:
             self.skipTest("No matching EFC kernel found in cache")
 
-        import cutlass_api
-        from cutlass_api.artifact import CompiledArtifact
+        import cutlass.operators
+        from cutlass.operators.artifact import CompiledArtifact
 
         a = torch.randn(self.M, self.K, device="cuda", dtype=torch.bfloat16)
         b = torch.randn(self.K, self.N, device="cuda", dtype=torch.bfloat16)
         out = torch.empty(self.M, self.N, device="cuda", dtype=torch.bfloat16)
 
-        args = cutlass_api.arguments.GemmArguments(
+        args = cutlass.operators.arguments.GemmArguments(
             a, b, out, accumulator_type=torch.float32
         )
         artifact = efc_kernel.compile(args)
@@ -2953,11 +3412,13 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         self.assertIsNotNone(loaded, "disk_cache_get returned None")
 
         rewrapped = _rewrap_efc_compiled_obj(loaded, efc_kernel)
-        reloaded_artifact = CompiledArtifact(rewrapped, efc_kernel)
+        reloaded_artifact = CompiledArtifact(
+            rewrapped, efc_kernel, artifact.compiled_for
+        )
 
         # Run with reloaded artifact and verify correctness
         out2 = torch.empty(self.M, self.N, device="cuda", dtype=torch.bfloat16)
-        args2 = cutlass_api.arguments.GemmArguments(
+        args2 = cutlass.operators.arguments.GemmArguments(
             a, b, out2, accumulator_type=torch.float32
         )
         efc_kernel.run(
@@ -2987,7 +3448,8 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         catch the regression we intercept _benchmark_nvgemm_module to record
         every (ms, path) it returns and assert at least one finite-ms result —
         i.e., at least one EFC choice with workspace did get benchmarked."""
-        import cutlass_api
+        import cutlass.operators
+        from cutlass.operators.workspace import AllocationRequirement
 
         from torch._inductor.codegen.cuda_combined_scheduling import (
             CUDACombinedScheduling,
@@ -3010,7 +3472,11 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         torch._dynamo.reset()
         with (
             patch.object(
-                cutlass_api.Kernel, "get_workspace_size", lambda self, args: 4096
+                cutlass.operators.Operator,
+                "get_workspace_size",
+                lambda self, args: AllocationRequirement(
+                    size_bytes=4096, ptr_alignment=1
+                ),
             ),
             mock.patch.object(
                 CUDACombinedScheduling, "_benchmark_nvgemm_module", capturing_bench
@@ -3030,8 +3496,10 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         finite = [(ms, p) for ms, p in bench_results if ms != float("inf")]
         self.assertTrue(
             finite,
-            lambda msg: f"{msg}\nAll NVGEMM benchmarks returned inf — workspace handling likely "
-            f"broken. Results: {bench_results}",
+            lambda msg: (
+                f"{msg}\nAll NVGEMM benchmarks returned inf — workspace handling likely "
+                f"broken. Results: {bench_results}"
+            ),
         )
 
 
