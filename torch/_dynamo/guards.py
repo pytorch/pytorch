@@ -1025,10 +1025,7 @@ def _saved_tensors_hooks_fingerprint(hooks: Any) -> tuple[str | None, ...] | Non
     A hook graph whose code does not pin down what it computes gets a None part,
     which a serialized guard never accepts.
     """
-    from torch._functorch._aot_autograd.autograd_cache import (
-        BypassAOTAutogradCache,
-        check_node_safe,
-    )
+    from torch._functorch._aot_autograd.autograd_cache import check_node_safe
 
     if not torch._functorch._aot_autograd.utils.saved_tensors_hooks_are_inlineable(
         hooks
@@ -1047,7 +1044,9 @@ def _saved_tensors_hooks_fingerprint(hooks: Any) -> tuple[str | None, ...] | Non
                     check_node_safe(node)
                 if (user_hash := node.meta.get("user_cache_hash")) is not None:
                     h.update(str(user_hash).encode())
-        except BypassAOTAutogradCache:
+        except Exception:
+            # Anything check_node_safe cannot vouch for, including targets it
+            # fails to introspect, is a cache bypass there and unverifiable here.
             parts.append(None)
             continue
         parts.append(h.hexdigest())
@@ -2575,10 +2574,10 @@ class GuardBuilder(GuardBuilderBase):
         get_metadata_fn=lambda guard, value: type(
             value.real_obj if isinstance(value, FakeScriptObject) else value
         ),
-        eval_fn=lambda value, metadata: (
-            type(value.real_obj if isinstance(value, FakeScriptObject) else value)
-            is metadata
-        ),
+        eval_fn=lambda value, metadata: type(
+            value.real_obj if isinstance(value, FakeScriptObject) else value
+        )
+        is metadata,
     )
     def FAKE_SCRIPT_TYPE_MATCH(self, guard: Guard) -> None:
         # Like TYPE_MATCH, but for sources that may resolve to either a
@@ -5773,9 +5772,7 @@ class CheckFunctionManager:
         # TODO: don't do the string rep, do something more structured here
         torch._logging.trace_structured(
             "dynamo_cpp_guards_str",
-            payload_fn=lambda: (
-                f"{self.guard_manager}\nGuard latency = {latency:.2f} us"
-            ),
+            payload_fn=lambda: f"{self.guard_manager}\nGuard latency = {latency:.2f} us",
         )
         # NB - We have to very careful of cleaning up here. Because of the
         # invalidate function, we can create a weakref finalizer that keeps
