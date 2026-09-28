@@ -251,7 +251,7 @@ it.
 from __future__ import annotations
 
 import base64
-import contextlib
+import contextlib  # noqa: TC003
 import dataclasses
 import errno
 import functools
