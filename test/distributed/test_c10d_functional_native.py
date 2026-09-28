@@ -60,6 +60,17 @@ if not dist.is_available():
     sys.exit(0)
 
 
+class InplaceCollectiveRemappingTest(TestCase):
+    def test_async_op_error_explains_work_object_and_alternative(self) -> None:
+        message = (
+            "Dynamo cannot remap an asynchronous in-place collective because "
+            "the returned Work object is not traceable. Use the corresponding "
+            "torch.distributed._functional_collectives operation instead."
+        )
+        with self.assertRaisesRegex(AssertionError, re.escape(message)):
+            funcol.all_reduce_inplace(torch.ones(1), async_op=True)
+
+
 @requires_accelerator_dist_backend()
 class TestWithNCCL(DistributedTestBase):
     @property

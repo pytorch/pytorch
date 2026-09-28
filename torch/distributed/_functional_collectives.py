@@ -1812,6 +1812,15 @@ These schemas intentionally match torch.distributed.distributed_c10d.* ops that 
 """
 
 
+def _raise_if_async_op(async_op: bool) -> None:
+    if async_op:
+        raise AssertionError(
+            "Dynamo cannot remap an asynchronous in-place collective because "
+            "the returned Work object is not traceable. Use the corresponding "
+            "torch.distributed._functional_collectives operation instead."
+        )
+
+
 def all_gather_tensor_inplace(
     output_tensor: torch.Tensor,
     input_tensor: torch.Tensor,
@@ -1820,10 +1829,7 @@ def all_gather_tensor_inplace(
     tag: str = "",
     gather_dim: int = 0,
 ):
-    if async_op:
-        raise AssertionError(
-            "Can't remap async version of inplace op to functional collective"
-        )
+    _raise_if_async_op(async_op)
 
     group = group or dist.group.WORLD
     if group is None:
@@ -1841,10 +1847,7 @@ def reduce_scatter_tensor_inplace(
     scatter_dim: int = 0,
     tag: str = "",
 ):
-    if async_op:
-        raise AssertionError(
-            "Can't remap async version of inplace op to functional collective"
-        )
+    _raise_if_async_op(async_op)
 
     group = group or dist.group.WORLD
     if group is None:
@@ -1872,10 +1875,7 @@ def all_reduce_inplace(
     async_op: bool = False,
     tag: str = "",
 ):
-    if async_op:
-        raise AssertionError(
-            "Can't remap async version of inplace op to functional collective"
-        )
+    _raise_if_async_op(async_op)
 
     group = group or dist.group.WORLD
     if group is None:
@@ -1893,10 +1893,7 @@ def all_to_all_inplace(
     async_op=False,
     tag: str = "",
 ):
-    if async_op:
-        raise AssertionError(
-            "Can't remap async version of inplace op to functional collective"
-        )
+    _raise_if_async_op(async_op)
 
     group = group or dist.group.WORLD
     if group is None:
@@ -1920,10 +1917,7 @@ def all_gather_inplace(
     async_op=False,
     tag: str = "",
 ):
-    if async_op:
-        raise AssertionError(
-            "Can't remap async version of inplace op to functional collective"
-        )
+    _raise_if_async_op(async_op)
     if tensor.dim() != 0 and not all(t.size(0) == tensor.size(0) for t in tensor_list):
         raise AssertionError("Remapping variable size all_gather is not yet supported")
 
@@ -1958,10 +1952,7 @@ def reduce_scatter_inplace(
     async_op: bool = False,
     tag: str = "",
 ):
-    if async_op:
-        raise AssertionError(
-            "Can't remap async version of inplace op to functional collective"
-        )
+    _raise_if_async_op(async_op)
     if not all(t.size() == output.size() for t in input_list):
         raise AssertionError(
             "reduce_scatter requires every input_list element to have the same size as output"
