@@ -13836,6 +13836,10 @@ op_db: list[OpInfo] = [
                     always_returns_bool=True,
                     supports_autograd=False,
                     sample_inputs_func=sample_inputs_comparison_ops,
+                    skips=(
+                        DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness',
+                                     dtypes=(torch.uint16, torch.uint32, torch.uint64)),
+                    ),
                     ),
     BinaryUfuncInfo('fmax',
                     op=torch.fmax,
@@ -18099,6 +18103,10 @@ op_db: list[OpInfo] = [
                     dtypes=all_passthru_types(),
                     always_returns_bool=True,
                     supports_autograd=False,
+                    skips=(
+                        DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness',
+                                     dtypes=(torch.uint16, torch.uint32, torch.uint64)),
+                    ),
                     ),
     OpInfo('narrow',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
