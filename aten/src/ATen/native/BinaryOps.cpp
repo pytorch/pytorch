@@ -1755,4 +1755,11 @@ Tensor le_Scalar_meta(const Tensor& self, const Scalar& other) {
       "le", self, python_number(other), TypePromotionKind::ALWAYS_BOOL, symbolic, /*supports_lhs_python_scalar=*/false);
 }
 
+Tensor eq_Tensor_meta(const Tensor& self, const Tensor& other) {
+  const bool symbolic = self.unsafeGetTensorImpl()->has_symbolic_sizes_strides() ||
+      other.unsafeGetTensorImpl()->has_symbolic_sizes_strides();
+  return elementwise_binary_ref_meta(
+      "eq", self, other, TypePromotionKind::ALWAYS_BOOL, symbolic, /*supports_lhs_python_scalar=*/false);
+}
+
 } // namespace at::native

@@ -3608,7 +3608,7 @@ class TestMetaKernelRegistrations(TestCase):
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     @parametrize("shape_kind", ["static", "backed", "unbacked"])
     @parametrize("layout", ["contiguous", "channels_last", "permuted", "non_contiguous", "expanded"])
-    @parametrize("op", ["le"])
+    @parametrize("op", ["le", "eq"])
     @parametrize("other", [torch.float32, torch.float64, torch.int64, "broadcast_3d", "zero_dim_float64", "zero_dim_int64"])
     def test_compare_tensor_meta_matches_python(self, shape_kind, layout, op, other):
         def make_args(s):
