@@ -17,8 +17,9 @@ jobs:
       id-token: write
     secrets: inherit
     with:
-      # Large reviews were hitting the reusable workflow's 60-minute default.
-      timeout_minutes: 120
+      # The AWS session and Claude's GitHub App token (it posts the review) expire
+      # 1h after job start and are never refreshed; stay a few minutes under 60.
+      timeout_minutes: 55
       # Commenters opt into Fable by including "fable" in the comment (e.g.
       # "@claude fable review"); default stays Opus. Branch on event_name so an
       # issue/PR body mentioning "fable" doesn't affect an unrelated @claude comment.

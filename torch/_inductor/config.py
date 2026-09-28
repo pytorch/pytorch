@@ -985,6 +985,10 @@ fallback_random = False
 # align random/dropout as eager mode(aten) behavior, maintaining fused possibility and faster gpu kernel
 align_random_eager = False
 
+# Use tl.rand4x/randn4x for 1D CUDA Triton random. Disabled pending
+# https://github.com/pytorch/pytorch/issues/198333
+use_rand4x = os.environ.get("TORCHINDUCTOR_USE_RAND4X") == "1"
+
 # fallback embedding_bag_byte_unpack to eager
 fallback_embedding_bag_byte_unpack = False
 
@@ -1058,13 +1062,34 @@ score_fusion_memory_threshold = 10
 fusion_memory_timeline_peak_memory_increase_gb: float | None = None
 fusion_memory_timeline_peak_memory_pct_threshold: float | None = None
 
-# For Triton Templates, select fastest of best template + epilogue vs best template + separate epilogue kernel
-benchmark_epilogue_fusion = (
-    os.environ.get("TORCHINDUCTOR_BENCHMARK_EPILOGUE_FUSION", "1") == "1"
+# Benchmark template choices with legal prologue or epilogue fusion by deferring
+# choice selection from lowering to scheduling, where fused and unfused
+# alternatives can be compared. pipeline_max_autotune_gemm may independently
+# defer selection without benchmarking fusion when this option is disabled.
+benchmark_template_fusion: bool = (
+    os.environ.get(
+        "TORCHINDUCTOR_BENCHMARK_TEMPLATE_FUSION",
+        os.environ.get("TORCHINDUCTOR_BENCHMARK_EPILOGUE_FUSION", "1"),
+    )
+    == "1"
 )
 
-# Take how many of the top triton kernels to benchmark epilogue
-max_epilogue_benchmarked_choices = 1
+# Deprecated compatibility alias for benchmark_template_fusion.
+benchmark_epilogue_fusion: bool = Config(
+    alias="torch._inductor.config.benchmark_template_fusion",
+    deprecated=True,
+    deprecation_message="use benchmark_template_fusion instead",
+)
+
+# Maximum number of top template choices to benchmark with fusion.
+max_template_fusion_benchmarked_choices: int = 1
+
+# Deprecated compatibility alias for max_template_fusion_benchmarked_choices.
+max_epilogue_benchmarked_choices: int = Config(
+    alias="torch._inductor.config.max_template_fusion_benchmarked_choices",
+    deprecated=True,
+    deprecation_message="use max_template_fusion_benchmarked_choices instead",
+)
 
 # how many nodes to allow into a single fusion
 max_fusion_size = 64
@@ -2541,6 +2566,19 @@ class aot_inductor:
     # autotuning. When False (default), tensors are shared across kernels
     # and del'd at their last consumer (faster but higher peak memory).
     autotune_per_kernel_alloc: bool = False
+
+    # Offload graph constants to disk across the autotune block once they occupy
+    # this share of the device. AOT only.
+    #
+    # Defaults to 1.0, which never fires: constants are resident on the card, so
+    # they cannot reach 100% of its capacity. The offload is opt-in until it has
+    # more production mileage; set it to e.g. 0.10 to enable.
+    #
+    # A fraction rather than an absolute size so a chosen threshold scales with
+    # the card: 0.10 is ~9.5 GiB on a 95 GiB H100 but ~29 GiB on a 288 GiB
+    # MI350X, which should not pay the spill for a working set that only
+    # threatens the smaller card.
+    autotune_offload_constants_min_device_fraction: float = 1.0
 
     # AOTInductor output path
     # If an absolute path is specified, the generated lib files will be stored under the directory;
