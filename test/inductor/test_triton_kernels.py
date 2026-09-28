@@ -3905,6 +3905,152 @@ def forward(self, arg0_1, arg1_1):
         self.assertNotIn("maybe_param", ttir_str)
 
 
+class TritonKernelWrapIRTests(torch._inductor.test_case.TestCase):
+    class IRBuilder:
+        def __init__(self):
+            self.next_id = 0
+
+        def _id(self):
+            result = self.next_id
+            self.next_id += 1
+            return result
+
+        def value(self):
+            value = mock.Mock()
+            value.id.return_value = self._id()
+            return value
+
+        def block(self, arguments=(), operations=()):
+            arguments = list(arguments)
+            block = mock.Mock(operations=list(operations))
+            block.id.return_value = self._id()
+            block.get_num_arguments.return_value = len(arguments)
+            block.get_argument.side_effect = arguments.__getitem__
+            block.get_parent.return_value = None
+            for operation in block.operations:
+                operation.get_block.return_value = block
+            return block
+
+        def region(self, blocks):
+            region = mock.Mock(blocks=list(blocks))
+            region.id.return_value = self._id()
+            for block in region.blocks:
+                block.get_parent.return_value = region
+            return region
+
+        def op(self, name, *, operands=(), regions=(), **string_attributes):
+            operands = list(operands)
+            operation = mock.Mock(regions=list(regions))
+            operation.get_name.return_value = name
+            operation.get_num_operands.return_value = len(operands)
+            operation.get_operand.side_effect = operands.__getitem__
+            operation.get_num_results.return_value = 0
+            operation.get_num_regions.return_value = len(operation.regions)
+            operation.get_region.side_effect = operation.regions.__getitem__
+            operation.get_block.return_value = None
+            operation.get_str_attr.side_effect = string_attributes.__getitem__
+            return operation
+
+        def module(self, function_name, parameters, operations):
+            function_block = self.block(parameters, operations)
+            function = self.op(
+                "tt.func",
+                regions=[self.region([function_block])],
+                sym_name=function_name,
+            )
+            module_block = self.block(operations=[function])
+            root = self.op("builtin.module", regions=[self.region([module_block])])
+            module = mock.Mock()
+
+            def walk(callback):
+                def visit(operation):
+                    for region in operation.regions:
+                        for block in region.blocks:
+                            for child in block.operations:
+                                visit(child)
+                    callback(operation)
+
+                visit(root)
+
+            module.walk.side_effect = walk
+            return module
+
+    def _make_warp_return_module(self):
+        builder = self.IRBuilder()
+        parameters = [builder.value(), builder.value()]
+        block_arguments = [builder.value(), builder.value()]
+        partitions = builder.op(
+            "ttg.warp_specialize.partitions",
+            operands=parameters,
+            regions=[
+                builder.region(
+                    [
+                        builder.block(
+                            block_arguments,
+                            operations=[builder.op("ttg.warp_return")],
+                        )
+                    ]
+                )
+            ],
+        )
+        warp_specialize = builder.op(
+            "ttg.warp_specialize",
+            regions=[
+                builder.region(
+                    [builder.block(operations=[builder.op("ttg.warp_yield")])]
+                ),
+                builder.region([builder.block(operations=[partitions])]),
+            ],
+        )
+        return builder.module("warp_kernel", parameters, [warp_specialize])
+
+    def test_warp_return_only_block_has_no_accesses(self):
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            analyze_kernel_access,
+            get_tma_stores,
+            ttir_to_functions,
+        )
+
+        functions = ttir_to_functions(self._make_warp_return_module())
+        analyze_kernel_access.reset()
+        get_tma_stores.reset()
+        accesses = analyze_kernel_access(
+            functions,
+            "warp_kernel",
+            2,
+            ("input", "output"),
+            frozenset({0, 1}),
+        )
+        self.assertEqual(list(accesses.read_writes.reads), [])
+        self.assertEqual(list(accesses.read_writes.writes), [])
+
+    def test_warp_return_only_block_does_not_trigger_fallback(self):
+        from torch._higher_order_ops import triton_kernel_wrap as tkw
+
+        def warp_kernel():
+            pass
+
+        kernel = mock.Mock(fn=warp_kernel)
+        kwargs = {
+            "input": torch.empty(1),
+            "output": torch.empty(1),
+        }
+        with (
+            mock.patch.object(
+                tkw,
+                "generate_ttir",
+                return_value=(self._make_warp_return_module(), list(kwargs)),
+            ),
+            mock.patch.object(tkw.log, "warning") as warning,
+        ):
+            accesses = tkw.identify_accessed_tensors(kernel, kwargs, {})
+
+        warning.assert_not_called()
+        self.assertEqual(list(accesses.read_writes.reads), [])
+        self.assertEqual(list(accesses.read_writes.writes), [])
+        self.assertFalse(accesses.can_fuse_epilogue)
+
+
 def make_mutation_test(fn):
     @requires_gpu
     def test_fn(self):
