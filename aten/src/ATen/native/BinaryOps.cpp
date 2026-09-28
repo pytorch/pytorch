@@ -1667,14 +1667,18 @@ Tensor add_Tensor_meta(const Tensor& self, const Tensor& other, const Scalar& al
   const bool symbolic = self.unsafeGetTensorImpl()->has_symbolic_sizes_strides() ||
       other.unsafeGetTensorImpl()->has_symbolic_sizes_strides() || alpha.isSymInt();
   if (symbolic) {
-    if (auto out = fast_binary_meta(self, other, TypePromotionKind::DEFAULT); out.defined()) {
+    if (auto out = fast_binary_impl(self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::DEFAULT); out.defined()) {
       return out;
     }
   }
   // A default alpha is dropped before reaching Python, so the ref sees None.
   const bool default_alpha = !alpha.isSymbolic() && alpha.type() == kLong && alpha.toLong() == 1;
   return binary_ref_meta(
-      self, other, TypePromotionKind::DEFAULT, symbolic, default_alpha ? std::nullopt : std::optional<Scalar>(alpha));
+      self,
+      other,
+      ELEMENTWISE_TYPE_PROMOTION_KIND::DEFAULT,
+      symbolic,
+      default_alpha ? std::nullopt : std::optional<Scalar>(alpha));
 }
 
 // Mirrors what Python fake tensor runs for sub.Tensor: the fast path for
@@ -1684,11 +1688,11 @@ Tensor sub_Tensor_meta(const Tensor& self, const Tensor& other, const Scalar& al
   const bool symbolic = self.unsafeGetTensorImpl()->has_symbolic_sizes_strides() ||
       other.unsafeGetTensorImpl()->has_symbolic_sizes_strides() || alpha.isSymInt();
   if (symbolic) {
-    if (auto out = fast_binary_meta(self, other, TypePromotionKind::DEFAULT); out.defined()) {
+    if (auto out = fast_binary_impl(self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::DEFAULT); out.defined()) {
       return out;
     }
   }
-  return binary_ref_meta(self, other, TypePromotionKind::DEFAULT, symbolic, alpha, /*is_sub=*/true);
+  return binary_ref_meta(self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::DEFAULT, symbolic, alpha, /*is_sub=*/true);
 }
 
 // Mirrors what Python fake tensor runs for mul.Tensor: the fast path for
@@ -1697,11 +1701,11 @@ Tensor mul_Tensor_meta(const Tensor& self, const Tensor& other) {
   const bool symbolic = self.unsafeGetTensorImpl()->has_symbolic_sizes_strides() ||
       other.unsafeGetTensorImpl()->has_symbolic_sizes_strides();
   if (symbolic) {
-    if (auto out = fast_binary_meta(self, other, TypePromotionKind::DEFAULT); out.defined()) {
+    if (auto out = fast_binary_impl(self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::DEFAULT); out.defined()) {
       return out;
     }
   }
-  return binary_ref_meta(self, other, TypePromotionKind::DEFAULT, symbolic);
+  return binary_ref_meta(self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::DEFAULT, symbolic);
 }
 
 // Mirrors what Python fake tensor runs for div.Tensor: the INT_TO_FLOAT fast
@@ -1710,11 +1714,11 @@ Tensor div_Tensor_meta(const Tensor& self, const Tensor& other) {
   const bool symbolic = self.unsafeGetTensorImpl()->has_symbolic_sizes_strides() ||
       other.unsafeGetTensorImpl()->has_symbolic_sizes_strides();
   if (symbolic) {
-    if (auto out = fast_binary_meta(self, other, TypePromotionKind::INT_TO_FLOAT); out.defined()) {
+    if (auto out = fast_binary_impl(self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::INT_TO_FLOAT); out.defined()) {
       return out;
     }
   }
-  return binary_ref_meta(self, other, TypePromotionKind::INT_TO_FLOAT, symbolic);
+  return binary_ref_meta(self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::INT_TO_FLOAT, symbolic);
 }
 
 // Mirrors meta_binop_inplace_alpha, which ignores alpha. A wrapped number's
@@ -1739,33 +1743,43 @@ Tensor& add__Tensor_meta(Tensor& self, const Tensor& other, const Scalar& /*alph
 Tensor bitwise_and_Tensor_meta(const Tensor& self, const Tensor& other) {
   const bool symbolic = self.unsafeGetTensorImpl()->has_symbolic_sizes_strides() ||
       other.unsafeGetTensorImpl()->has_symbolic_sizes_strides();
-  return elementwise_binary_ref_meta("bitwise_and", self, other, TypePromotionKind::DEFAULT, symbolic);
+  return elementwise_binary_ref_meta("bitwise_and", self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::DEFAULT, symbolic);
 }
 
 Tensor le_Tensor_meta(const Tensor& self, const Tensor& other) {
   const bool symbolic = self.unsafeGetTensorImpl()->has_symbolic_sizes_strides() ||
       other.unsafeGetTensorImpl()->has_symbolic_sizes_strides();
   return elementwise_binary_ref_meta(
-      "le", self, other, TypePromotionKind::ALWAYS_BOOL, symbolic, /*supports_lhs_python_scalar=*/false);
+      "le", self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::ALWAYS_BOOL, symbolic, /*supports_lhs_python_scalar=*/false);
 }
 
 Tensor le_Scalar_meta(const Tensor& self, const Scalar& other) {
   const bool symbolic = self.unsafeGetTensorImpl()->has_symbolic_sizes_strides() || other.isSymInt();
   return elementwise_binary_ref_meta(
-      "le", self, python_number(other), TypePromotionKind::ALWAYS_BOOL, symbolic, /*supports_lhs_python_scalar=*/false);
+      "le",
+      self,
+      python_number(other),
+      ELEMENTWISE_TYPE_PROMOTION_KIND::ALWAYS_BOOL,
+      symbolic,
+      /*supports_lhs_python_scalar=*/false);
 }
 
 Tensor eq_Tensor_meta(const Tensor& self, const Tensor& other) {
   const bool symbolic = self.unsafeGetTensorImpl()->has_symbolic_sizes_strides() ||
       other.unsafeGetTensorImpl()->has_symbolic_sizes_strides();
   return elementwise_binary_ref_meta(
-      "eq", self, other, TypePromotionKind::ALWAYS_BOOL, symbolic, /*supports_lhs_python_scalar=*/false);
+      "eq", self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::ALWAYS_BOOL, symbolic, /*supports_lhs_python_scalar=*/false);
 }
 
 Tensor ne_Scalar_meta(const Tensor& self, const Scalar& other) {
   const bool symbolic = self.unsafeGetTensorImpl()->has_symbolic_sizes_strides() || other.isSymInt();
   return elementwise_binary_ref_meta(
-      "ne", self, python_number(other), TypePromotionKind::ALWAYS_BOOL, symbolic, /*supports_lhs_python_scalar=*/false);
+      "ne",
+      self,
+      python_number(other),
+      ELEMENTWISE_TYPE_PROMOTION_KIND::ALWAYS_BOOL,
+      symbolic,
+      /*supports_lhs_python_scalar=*/false);
 }
 
 } // namespace at::native
