@@ -249,6 +249,7 @@ import operator
 import os
 import pickle
 import stat
+import sys
 import types
 import uuid
 from collections.abc import Callable  # noqa: TC003
@@ -273,6 +274,7 @@ if TYPE_CHECKING:
 
     from torch._functorch._aot_autograd.codegen import PySourceBuilder
     from torch._subclasses.fake_tensor import FakeTensorMode
+    from torch.compiler._precompile_types import PrecompileSummary
 
 
 # The public surface (``capture``, ``load`` and the types they take and return) is
@@ -1786,10 +1788,9 @@ _MULTIGRAPH_GENERATED_HEADER = """\
 #     out = ns["forward"](model, my_input)      # same args as the captured callable
 #
 # Sections below are labelled. What is OPAQUE is base64 of pickled Dynamo state --
-# the guard trees and the transformed bytecode -- because those have no readable
-# source form. The compiled subgraphs DO have one and are emitted as source; only a
-# subgraph the backend could not render (an eager fx graph, a training graph) falls
-# back to the blob. Everything else is meant to be read and reviewed.
+# the guard trees, the transformed bytecode and the compiled subgraphs -- because
+# those have no readable source form here. Everything else is meant to be read and
+# reviewed.
 """
 
 
@@ -1989,6 +1990,185 @@ def _entry_binding(fn: object) -> dict[str, Any]:
         "defaults": getattr(fn, "__defaults__", None),
         "kwdefaults": getattr(fn, "__kwdefaults__", None),
     }
+
+
+def _build_multigraph_python_source(
+    entry: Any,
+    frames: list[dict[str, Any]],
+    backends: Mapping[str, Any],
+    summary: PrecompileSummary,
+    backend: str,
+    entry_binding: dict[str, Any],
+) -> str:
+    """Render a standalone multi-graph capture as ``python_code``.
+
+    The readable half -- what was captured, which frames, how many variants, what
+    guards were dropped -- is emitted as literals so a reviewer can diff it. The
+    guard trees, the transformed bytecode and the compiled subgraphs have no
+    source form here, so they go into the clearly bannered opaque blobs the
+    inlined driver rebuilds from.
+    """
+    from torch._functorch._aot_autograd.codegen import PySourceBuilder
+
+    buf = PySourceBuilder()
+    buf.writeline(_MULTIGRAPH_GENERATED_HEADER)
+    buf.writeline(_SERVING_NOTES["standalone"])
+    buf.writeline("")
+    buf.writeline("# " + "=" * 70)
+    buf.writeline("# 1. What was captured (readable)")
+    buf.writeline("# " + "=" * 70)
+    buf.writeline(f"BACKEND = {backend!r}")
+    buf.writeline('TRACER = "dynamo"')
+    buf.writeline('SERVING_MODE = "standalone"')
+    buf.writeline(f"FN_NAME = {entry.fn_name!r}")
+    buf.writeline(f"_DYNAMO_PYTHON_VERSION = {tuple(sys.version_info[:2])!r}")
+    buf.writeline(f"TORCH_VERSION = {torch.__version__!r}")
+    buf.writeline("")
+    buf.writeline(
+        "# frame name -> number of captured variants. A frame with one variant"
+    )
+    buf.writeline("# serves one specialization; the artifact covers no other.")
+    buf.writeline("FRAMES = [")
+    for frame in frames:
+        buf.writeline(f"    ({frame['code'].co_name!r}, {len(frame['variants'])}),")
+    buf.writeline("]")
+    buf.writeline("")
+    buf.writeline(
+        "# Guards that could NOT be serialized and are therefore not checked at"
+    )
+    buf.writeline("# serve time. Rebinding any of these between capture and load can")
+    buf.writeline(
+        "# silently select the wrong graph -- audit them against your deployment."
+    )
+    buf.writeline(f"DROPPED_GUARDS = {[list(g) for g in summary.dropped_guards]!r}")
+    buf.writeline(
+        f"RISKY_DROPPED_GUARDS = {[list(g) for g in summary.risky_dropped_guards]!r}"
+    )
+    buf.writeline("")
+    buf.writeline("# What a dropped slot above actually checked, where it renders one.")
+    buf.writeline(
+        f"DROPPED_GUARD_CODE = {[list(g) for g in summary.dropped_guard_code]!r}"
+    )
+    buf.writeline("")
+    buf.writeline(
+        "# Values pinned to exactly what capture saw; any other value misses."
+    )
+    buf.writeline(f"WONT_GENERALIZE = {tuple(summary.wont_generalize)!r}")
+    buf.writeline("")
+    buf.writeline(
+        "# The entry's default arguments: a code object carries none, and the"
+    )
+    buf.writeline("# driver rebuilds the entry from one.")
+    try:
+        binding_blob = _b64(entry_binding)
+    except Exception as e:
+        raise PrecompileError(
+            f"precompile cannot carry {entry.fn_name!r}'s default arguments in the "
+            f"artifact; defaults must be picklable ({type(e).__name__}: {e})."
+        ) from e
+    buf.writeline(f"_ENTRY_BINDING = {binding_blob!r}")
+    buf.writeline("")
+    buf.writeline("# " + "=" * 70)
+    buf.writeline("# 2. Guard trees and transformed bytecode -- OPAQUE")
+    buf.writeline("#")
+    buf.writeline(
+        "# base64(pickle) of one record per frame: the frame's code object, its"
+    )
+    buf.writeline(
+        "# variants' serialized guard state and Dynamo bytecode, and the globals"
+    )
+    buf.writeline(
+        "# it reads. Guard trees are a spec for a C++ GuardManager and have no"
+    )
+    buf.writeline(
+        "# readable form; the counts and names above describe what is in here."
+    )
+    buf.writeline("# " + "=" * 70)
+    buf.writeline(f"_FRAMES = {_b64(frames)!r}")
+    buf.writeline("")
+    buf.writeline("# " + "=" * 70)
+    buf.writeline("# 3. Compiled subgraphs -- OPAQUE")
+    buf.writeline("#")
+    buf.writeline(
+        "# base64(pickle) of the backend artifacts the frames call by name: the"
+    )
+    buf.writeline(
+        "# bundled AOTAutograd entries (inductor) or the captured fx graphs (eager)."
+    )
+    buf.writeline("# " + "=" * 70)
+    buf.writeline(f"_BACKENDS = {_b64(dict(backends))!r}")
+    buf.writeline("")
+    buf.writeline("# " + "=" * 70)
+    buf.writeline(
+        "# 4. Driver: rebuild the guards, wire the names, dispatch (readable)"
+    )
+    buf.writeline("# " + "=" * 70)
+    buf.writeline(_emit_multigraph_driver_source())
+    return buf.getvalue()
+
+
+def _build_multigraph_artifact(
+    entry: Any,
+    backends: Mapping[str, Any],
+    summary: PrecompileSummary,
+    backend: str,
+    entry_fn: object,
+) -> tuple[str, bytes]:
+    """``(python_code, cache)`` for a multi-graph capture.
+
+    python_code is self-contained -- it carries the frames, the guard trees and
+    the compiled subgraphs -- so cache is the same acceleration it is for the
+    make_fx form: the inductor bundle that primes the kernel caches, and the tag
+    binding it to this python_code (invariant 7). The bundle is whatever
+    ``CacheArtifactManager`` recorded, so the caller must have run the capture
+    under ``with_fresh_cache()``.
+    """
+    frames = _multigraph_frames(entry)
+    # First: an entry with no variant reaches nothing, which the unreachable
+    # check below would misreport as a graph break to move.
+    _reject_uninstallable_entry(frames, entry)
+    reachable = _reachable_frames(frames)
+    unreachable = sorted(
+        f"{frame['python_module']}.{frame['code'].co_name}"
+        for i, frame in enumerate(frames)
+        if frame["variants"] and i not in reachable
+    )
+    if unreachable:
+        # A reachable frame WITHOUT a variant is served by the driver too: it
+        # raises, naming the gap, if a call reaches it. A frame with variants the
+        # entry cannot reach would instead run eager, silently giving up the
+        # compiled variant, so that capture is refused.
+        raise PrecompileError(
+            f"precompile captured frame(s) a standalone artifact cannot reach from "
+            f"the entry {entry.fn_name!r}: {unreachable}. A source artifact "
+            f"dispatches only the entry frame and the graph-break continuations its "
+            f"bytecode names; a frame entered by an ordinary call -- a graph break "
+            f"inside a child module's forward, say -- would run eager. Move the "
+            f"graph break into the entry, or make the child module compile in one "
+            f"piece."
+        )
+    python_code = _build_multigraph_python_source(
+        entry, frames, backends, summary, backend, _entry_binding(entry_fn)
+    )
+    inductor_bundle = None
+    if backend != "eager":
+        from torch.compiler._cache import CacheArtifactManager
+
+        saved = CacheArtifactManager.serialize()
+        inductor_bundle = None if saved is None else saved[0]
+    buf = io.BytesIO()
+    torch.save(
+        {
+            "format": _CACHE_FORMAT,
+            "version": _CACHE_VERSION,
+            "backend": backend,
+            "tracer": "dynamo",
+            "code_hash": hashlib.sha256(python_code.encode()).hexdigest(),
+            "artifact": inductor_bundle,
+        },
+        buf,
+    )
+    return python_code, buf.getvalue()
 
 
 def _emit_multigraph_driver_source() -> str:
@@ -2296,6 +2476,7 @@ class PrecompiledModule(PrecompiledRunnable):
                 "format": _CACHE_FORMAT,
                 "version": _CACHE_VERSION,
                 "backend": self._backend,
+                "tracer": self._tracer,
                 "code_hash": code_hash,
                 "artifact": self._artifact_bytes,
             },
@@ -2621,13 +2802,17 @@ def _runnable_from_pair(
     # artifact and to read BACKEND for the cache-pairing check below.
     meta = _parse_artifact_metadata(python_code)
     backend = cast(str, meta["BACKEND"])
+    # TRACER is absent on make_fx artifacts predating the tag; the cache envelope
+    # defaults the same way, so an older pair still matches.
+    tracer = cast(str, meta.get("TRACER", "make_fx"))
 
     # weights_only=True is safe (plain str/int/bytes dict). The inner artifact bytes
     # are the inductor save_cache_artifacts bundle, used below to prime the kernel
     # caches. The cache is acceleration only, so an unreadable envelope or a FORMAT /
     # VERSION mismatch degrades to JIT'ing from python_code rather than crashing. A
-    # BACKEND or CODE_HASH mismatch is different -- it signals a wrong (python_code,
-    # cache) pairing -- so it hard-fails rather than running under foreign metadata.
+    # BACKEND, TRACER or CODE_HASH mismatch is different -- it signals a wrong
+    # (python_code, cache) pairing -- so it hard-fails rather than running under
+    # foreign metadata.
     artifact = None
     try:
         blob = torch.load(io.BytesIO(cache), weights_only=True)
@@ -2649,6 +2834,12 @@ def _runnable_from_pair(
                 raise PrecompileError(
                     f"cache backend {blob.get('backend')!r} does not match the "
                     f"python_code backend {backend!r}; the cache and python_code "
+                    "came from different precompile captures."
+                )
+            if blob.get("tracer", "make_fx") != tracer:
+                raise PrecompileError(
+                    f"cache tracer {blob.get('tracer', 'make_fx')!r} does not match "
+                    f"the python_code tracer {tracer!r}; the cache and python_code "
                     "came from different precompile captures."
                 )
             # Reject a cache whose code_hash does not match this python_code (a
@@ -2816,8 +3007,8 @@ def load(
     :class:`torch.compiler.precompile.PrecompiledRunnable`.
 
     Raises ``PrecompileError`` if either file cannot be read, if ``python_code`` is
-    not a ``torch.compiler.precompile`` artifact, or if the cache's ``backend`` or
-    ``code_hash`` does not match ``python_code`` -- the pair came from different
+    not a ``torch.compiler.precompile`` artifact, or if the cache's ``backend``,
+    ``tracer`` or ``code_hash`` does not match ``python_code`` -- the pair came from different
     captures. A cache whose ``format``/``version`` does not match (a foreign or
     different-build envelope) is NOT fatal: the cache is acceleration only, so
     ``load`` degrades to JIT'ing from ``python_code`` rather than crashing.
