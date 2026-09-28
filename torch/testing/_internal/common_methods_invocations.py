@@ -45,7 +45,7 @@ from torch.testing._internal.common_quantized import (
 from torch.testing._internal.common_utils import (
     getRocmVersion,
     make_fullrank_matrices_with_distinct_singular_values,
-    TEST_WITH_ROCM, IS_FBCODE, IS_LINUX, IS_WINDOWS, IS_MACOS, MACOS_VERSION, TEST_SCIPY,
+    TEST_WITH_ROCM, IS_FBCODE, IS_LINUX, IS_WINDOWS, IS_MACOS, MACOS_VERSION, IS_APPLE_M1, TEST_SCIPY,
     torch_to_numpy_dtype_dict, numpy_to_torch_dtype, TEST_WITH_ASAN,
     GRADCHECK_NONDET_TOL, slowTest, TEST_WITH_SLOW,
     TEST_WITH_TORCHINDUCTOR, skipIfNoTritonDSL, skipIfNoCuteDSL, skipIfRocm, TEST_XPU,
@@ -1432,6 +1432,14 @@ def sample_inputs_addcmul_addcdiv(op_info, device, dtype, requires_grad, **kwarg
         yield SampleInput(
             *args, value=3.14 if dtype.is_floating_point or dtype.is_complex else 3
         ).with_metadata(broadcasts_input=broadcasts_input)
+
+    # value=0 must still propagate the non-finite values tensor1 and tensor2 contribute, but skip autograd testing
+    if not requires_grad and (dtype.is_floating_point or dtype.is_complex):
+        make_t = partial(torch.tensor, device=device, dtype=dtype)
+        arg1 = make_t([1.0, 1.0, 1.0, 1.0])
+        arg2 = make_t([float("nan"), float("inf"), -float("inf"), 2.0])
+        arg3 = make_t([1.0, 1.0, 0.0, 2.0])
+        yield SampleInput(arg1, args=(arg2, arg3), kwargs=dict(value=0))
 
 def reference_inputs_addcmul_addcdiv(op_info, device, dtype, requires_grad, **kwargs):
     yield from sample_inputs_addcmul_addcdiv(
@@ -12820,8 +12828,6 @@ op_db: list[OpInfo] = [
            skips=(
                # TODO: update sample inputs with for_inplace_variant kwarg to support this test
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
-               # AssertionError: The supported dtypes for addcmul on device type mps are incorrect!
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
            ),
            sample_inputs_func=sample_inputs_addcmul_addcdiv,
            reference_inputs_func=partial(
@@ -22989,10 +22995,11 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
         dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
-        # MPS: int64 amin requires macOS 15+ (ulong atomic_min intrinsic).
+        # MPS: int64 amin needs the ulong atomic_min intrinsic: macOS 15+, and
+        # not Apple7 (M1), which does not have it at any macOS version.
         dtypesIfMPS=(
             _dispatch_dtypes(t for t in all_types_and(torch.float16, torch.bfloat16, torch.bool) if t != torch.int64)
-            if MACOS_VERSION < 15.0
+            if MACOS_VERSION < 15.0 or IS_APPLE_M1
             else all_types_and(torch.float16, torch.bfloat16, torch.bool)
         ),
         supports_forward_ad=True,
@@ -23006,10 +23013,11 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
         dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
-        # MPS: int64 amax requires macOS 15+ (ulong atomic_max intrinsic).
+        # MPS: int64 amax needs the ulong atomic_max intrinsic: macOS 15+, and
+        # not Apple7 (M1), which does not have it at any macOS version.
         dtypesIfMPS=(
             _dispatch_dtypes(t for t in all_types_and(torch.float16, torch.bfloat16, torch.bool) if t != torch.int64)
-            if MACOS_VERSION < 15.0
+            if MACOS_VERSION < 15.0 or IS_APPLE_M1
             else all_types_and(torch.float16, torch.bfloat16, torch.bool)
         ),
         supports_forward_ad=True,
@@ -25720,19 +25728,6 @@ python_ref_db = [
                          dtypes=(torch.float16,), device_type="cpu"),
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_torch_fallback',
                          dtypes=(torch.float16,), device_type="cpu"),
-            # AssertionError: Tensor-likes are not close!
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps', dtypes=(
-                    torch.uint8, torch.int8, torch.int64, torch.int32,
-                    torch.int16,
-                )
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='mps', dtypes=(
-                    torch.uint8, torch.int8, torch.int64, torch.int32,
-                    torch.int16,
-                )
-            ),
         ),
     ),
     ElementwiseBinaryPythonRefInfo(
@@ -26114,13 +26109,6 @@ python_ref_db = [
         "_refs.diag_embed",
         torch_opinfo_name="diag_embed",
         supports_out=True,
-        skips=(
-            # TypeError: Trying to convert ComplexDouble to the MPS backend but it does not have support for that dtype.
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps',
-                dtypes=(torch.complex32,)
-            ),
-        ),
     ),
     PythonRefInfo(
         "_refs.dstack",
