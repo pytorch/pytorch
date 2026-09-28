@@ -103,6 +103,7 @@
 /test/test_linalg.py @lezcano @nikitaved
 # /test/test_matmul_cuda.py
 /test/test_scaled_matmul_cuda.py @drisspg @slayton58
+/test/test_quantize_tensor.py @vkuzo @slayton58
 # /test/test_spectral_ops.py
 /torch/linalg/ @lezcano @nikitaved
 #
