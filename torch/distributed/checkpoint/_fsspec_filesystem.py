@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 import fsspec
 import fsspec.asyn
 from fsspec.core import url_to_fs
+from fsspec.implementations.cached import CachingFileSystem
 
 import torch
 import torch._weights_only_unpickler as _weights_only_unpickler
@@ -269,24 +270,16 @@ class FsspecReader(FileSystemReader):
     def _supports_batched_cat_ranges(self) -> bool:
         if not (self.fs and self.fs.fs and hasattr(self.fs.fs, "cat_ranges")):
             return False
-        try:
-            from fsspec.implementations.cached import CachingFileSystem
-        except ImportError:
-            CachingFileSystem = None
-
         curr_fs = self.fs.fs
-        while hasattr(curr_fs, "fs") and curr_fs.fs is not None:
-            if CachingFileSystem and isinstance(curr_fs, CachingFileSystem):
+        while True:
+            if isinstance(curr_fs, CachingFileSystem):
                 return False
-            curr_fs = curr_fs.fs
-        if CachingFileSystem and isinstance(curr_fs, CachingFileSystem):
-            return False
-
-        target_fs = curr_fs
-        if target_fs is None:
-            return False
+            inner = getattr(curr_fs, "fs", None)
+            if inner is None:
+                break
+            curr_fs = inner
         if isinstance(self.fs.fs, fsspec.asyn.AsyncFileSystem):
-            return bool(getattr(target_fs, "async_impl", True))
+            return bool(getattr(curr_fs, "async_impl", True))
         cat_ranges_fn = getattr(
             self.fs.fs.cat_ranges, "__func__", self.fs.fs.cat_ranges
         )
@@ -417,12 +410,10 @@ class FsspecReader(FileSystemReader):
                                 c.result()
                             for req, dst, _ in pending:
                                 planner.commit_tensor(req, dst)
-                            del copies
                         else:
                             for req, dst, src in pending:
                                 _copy(dst, src)
                                 planner.commit_tensor(req, dst)
-                        del pending
                     else:
                         for i, req in enumerate(b_reqs):
                             f = decoded[i]
@@ -434,7 +425,6 @@ class FsspecReader(FileSystemReader):
                                 dst = self._resolve_item(req, item, planner)
                                 _copy(dst, item)
                                 planner.commit_tensor(req, dst)
-                        del item, dst
             finally:
                 for fut in inflight:
                     fut.cancel()

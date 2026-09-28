@@ -623,6 +623,27 @@ class TestFileSystem(TestCase):
         for k in state_dict:
             self.assertEqual(state_dict[k], load_dict[k])
 
+        bytes_dir = "memory://test_planner_bytes_only"
+        bytes_state = {"step": 5, "config": [1, 2, 3]}
+        dcp.save(
+            state_dict=bytes_state,
+            storage_writer=FsspecWriter(bytes_dir),
+            planner=dcp.DefaultSavePlanner(),
+            no_dist=True,
+        )
+        loaded_bytes = {"step": None, "config": None}
+        bytes_reader = FsspecReader(bytes_dir, max_batch_size=2)
+        with patch.object(
+            bytes_reader.fs.fs, "cat_ranges", wraps=bytes_reader.fs.fs.cat_ranges
+        ):
+            dcp.load(
+                state_dict=loaded_bytes,
+                storage_reader=bytes_reader,
+                planner=StrictPairingPlanner(),
+                no_dist=True,
+            )
+        self.assertEqual(bytes_state, loaded_bytes)
+
     def test_fsspec_reader_inference_mode(self):
         checkpoint_dir = "memory://test_inference_mode"
         state_dict = {"t1": torch.randn(10), "t2": torch.randn(10)}
