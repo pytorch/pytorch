@@ -251,7 +251,9 @@ class AliasOfInputHandler:
             raise AssertionError("expected info.base_idx to be set")
         self.base_idx = info.base_idx
         self.unwrap_out = (
-            _unwrap_tensoralias if trace_joint and not info.needs_alias_grad else _identity
+            _unwrap_tensoralias
+            if trace_joint and not info.needs_alias_grad
+            else _identity
         )
         self.requires_grad = info.requires_grad
         self.needs_alias_grad = info.needs_alias_grad
