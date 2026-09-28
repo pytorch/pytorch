@@ -3550,7 +3550,12 @@ def _index_copy(
 def log_sigmoid_forward(self: Tensor) -> tuple[Tensor, Tensor]:
     min = torch.minimum(self.new_zeros(()), self)
     z = torch.exp(-torch.abs(self))
-    if self.is_cuda or self.is_xpu:
+    # Feature decoupling: instead of hard-coding CUDA/XPU, also treat the
+    # registered privateuse1 backend (e.g. Ascend NPU) as an accelerator that
+    # saves memory by not caching the intermediate buffer (backward recomputes).
+    private_backend = torch._C._get_privateuse1_backend_name()
+    is_accelerator = self.is_cuda or self.is_xpu or self.device.type == private_backend
+    if is_accelerator:
         buffer = self.new_zeros((0,))
     else:
         buffer = z
