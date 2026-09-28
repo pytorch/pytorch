@@ -209,6 +209,14 @@ class MixOrderReduction:
             and isinstance(subnode.node, ComputedBuffer)
         )
 
+    @staticmethod
+    def supports_noncontiguous_reductions(node: BaseSchedulerNode) -> bool:
+        return all(
+            subnode.node.get_reduction_type() in {"sum", "prod"}  # type: ignore[union-attr]
+            for subnode in node.get_nodes()
+            if subnode.is_reduction()
+        )
+
     @classmethod
     def get_numel_rnumel(cls, node: BaseSchedulerNode) -> tuple[sympy.Expr, sympy.Expr]:
         if cls.is_split_reduction(node):
@@ -454,18 +462,7 @@ class MixOrderReduction:
         if MixOrderReduction.is_split_reduction(contiguous_node):
             return False
 
-        # Other reduction types like max/min is not supported yet.
-        # There are no real use case as well.
-        out = all(
-            subnode.node.get_reduction_type()  # type: ignore[union-attr]
-            in {
-                "sum",
-                "prod",
-            }
-            for subnode in other_node.get_nodes()
-            if subnode.is_reduction()
-        )
-        return out
+        return cls.supports_noncontiguous_reductions(other_node)
 
     @classmethod
     def are_mix_order_reductions(
@@ -4455,9 +4452,10 @@ class FusedMixOrderReductions(FusedSchedulerNode):
 
         # Since node1 is from the current mix order reduction, if node1 is
         # contiguous, the fused node should also be contiguous.
-        if MixOrderReduction.is_contiguous_node(
-            node1
-        ) and not MixOrderReduction.is_contiguous_node(node2):
+        if MixOrderReduction.is_contiguous_node(node1):
+            if not MixOrderReduction.is_contiguous_node(node2):
+                return False
+        elif not MixOrderReduction.supports_noncontiguous_reductions(node2):
             return False
 
         def _get_ancestors(nodes: tuple[BaseSchedulerNode, ...]) -> OrderedSet[str]:

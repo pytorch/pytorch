@@ -258,6 +258,26 @@ class MixOrderReductionTest(TestBase):
         x = torch.randn(32768, 768, dtype=torch.float, device=GPU_TYPE)
         self.check_numeric(f, (x,))
 
+    @parametrize("reduction_type", ("amax", "amin"))
+    @inductor_config.patch(
+        {
+            "benchmark_fusion": False,
+            "split_reductions": False,
+        }
+    )
+    def test_later_fusion_rejects_unsupported_reduction(self, reduction_type):
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        reduction = getattr(torch, reduction_type)
+
+        def f(x):
+            return x.sum(dim=1), x.sum(dim=0), reduction(x, dim=0)
+
+        x = torch.randint(0, 10, (32768, 768), dtype=torch.uint8, device=GPU_TYPE)
+        self.check_numeric(f, (x,))
+        self.assertEqual(metrics.codegen_mix_order_reduction, 1)
+
     @inductor_config.patch(coordinate_descent_tuning=True)
     def test_XBLOCK_coordest_tuning(self):
         """
