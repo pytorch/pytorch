@@ -474,6 +474,11 @@ class FSDPState(_State):
         if self._state_ctx.post_backward_final_callback_queued:
             return
         self._state_ctx.post_backward_final_callback_queued = True
+        # TODO: To support modifying the sharded parameters between forward and
+        # backward, make the all-gather copy-in and all-gather streams
+        # wait_stream(current_stream) here, as _root_pre_forward does. This runs
+        # once per backward before any backward all-gather. The cost is that the
+        # first backward all-gather cannot overlap the forward tail.
         Variable._execution_engine.queue_callback(
             self._root_post_backward_final_callback
         )
