@@ -80,13 +80,18 @@ _ALLOW_EMPTY_GRAPHS = torch._dynamo.config._make_closure_patcher(
 
 
 @contextlib.contextmanager
-def _capture_config(training: bool) -> Iterator[None]:
+def _capture_config() -> Iterator[None]:
     """The compiler configuration a multi-graph capture's calls run under.
 
     Backends serialize into the artifact (``bundled_autograd_cache``) rather
-    than the process-local inductor cache. A training capture lowers its
-    backward eagerly: AOTAutograd otherwise defers it to the first
-    ``.backward()``, and a capture that never makes one records no backend.
+    than the process-local inductor cache. The backward lowers eagerly:
+    AOTAutograd otherwise defers it to the first ``.backward()``, and a graph
+    compiled with grad enabled whose backward was never lowered is never saved,
+    so a capture that never makes one -- a training step, or an inference call
+    made outside ``torch.no_grad()`` -- would record no backend at all. Such an
+    inference call therefore compiles a backward too, and a backward the
+    backend cannot compile fails the capture; capturing under
+    ``torch.no_grad()`` avoids both.
     ``allow_empty_graphs`` keeps an empty graph as a compiled frame so its
     guards reach the artifact; it also extends the lifetime of objects the frame
     holds -- with it on, a weakref callback on a value the frame captured does
@@ -94,8 +99,8 @@ def _capture_config(training: bool) -> Iterator[None]:
     ReproTests.test_weakref_callback).
 
     Every scope patches and restores for itself: ``config.patch`` is re-entrant
-    and per-thread, so nested scopes unwind in order (an inner ``training=True``
-    still lowers the backward) and a worker thread sees only its own.
+    and per-thread, so nested scopes unwind in order and a worker thread sees
+    only its own.
     """
     if torch.compiler.config.force_disable_caches:
         raise PackageError(
@@ -105,6 +110,7 @@ def _capture_config(training: bool) -> Iterator[None]:
         )
     functorch_patch = {
         "bundled_autograd_cache": True,
+        "force_non_lazy_backward_lowering": True,
         # AOTAutogradCache refuses to KEY a graph it cannot address soundly -- a
         # graph calling anything outside its allowlist -- and a refusal means it
         # never saves, so the bundled artifact precompile needs is never
@@ -116,8 +122,6 @@ def _capture_config(training: bool) -> Iterator[None]:
         # aot_compile_joint_with_descriptors already do.
         "bypass_autograd_cache_key": True,
     }
-    if training:
-        functorch_patch["force_non_lazy_backward_lowering"] = True
     # AOTAutogradCache honours strict_precompile when it loads but not when it
     # saves: a bundled entry that fails to pickle is dropped with a warning and
     # the capture is short one backend, so raise where the pickle fails instead.
