@@ -32,7 +32,6 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     IS_FBCODE,
     IS_SANDCASTLE,
-    IS_S390X,
     IS_ARM64,
     instantiate_parametrized_tests,
     parametrize,
@@ -1109,7 +1108,6 @@ class TestTensorCreation(TestCase):
     # nondeterministically fails, warning "invalid value encountered in cast"
     @skipCUDAIf(True, "CUDA diverges on most dtypes, often dramatically.")
     @skipXPU
-    @unittest.skipIf(IS_S390X, "Test fails for int16 on s390x. Needs investigation.")
     @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
     def test_float_to_int_conversion_nonfinite(self, device, dtype):
         vals = (float('-inf'), float('inf'), float('nan'))
