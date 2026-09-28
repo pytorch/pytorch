@@ -4126,6 +4126,14 @@ class CppCodeCache:
                     main_builder.get_target_file_path()
                 )
 
+            from torch.compiler._runtime_cache import (
+                record_cpp_kernel,
+                restore_cpp_kernel,
+            )
+
+            record_cpp_kernel(key, binary_path)
+            restore_cpp_kernel(key, binary_path)
+
             def load_fn() -> Any:
                 nonlocal lib
                 if lib is None:

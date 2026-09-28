@@ -5704,6 +5704,69 @@ class TestPrecompileRuntimeCache(TestCase):
             with fresh_cache():
                 self.assertIsNone(_runtime_cache.load_triton_kernel("source"))
 
+    def test_frozen_cpp_kernel_serves_fresh_cache_without_compiling(self):
+        import ctypes
+        import hashlib
+
+        from torch._inductor.codecache import CppCodeCache
+        from torch._inductor.utils import fresh_cache
+        from torch.compiler import _runtime_cache
+
+        no_compilation = torch.compiler.precompile.no_compilation
+        source = 'extern "C" long frozen_cpp_kernel(long x) { return x + 7; }'
+        with fresh_cache():
+            lib = CppCodeCache.load(source)
+            with open(lib._name, "rb") as binary:
+                payload = pickle.dumps({lib.key: binary.read()})
+        artifact = _runtime_cache.InductorCppCacheArtifact(
+            hashlib.sha256(payload).hexdigest(), payload
+        )
+        with mock.patch.object(_runtime_cache, "_frozen_cpp_kernels", {}):
+            artifact.populate_cache()
+            for submit in (None, lambda fn: self.fail("compiled a frozen C++ kernel")):
+                with fresh_cache(), no_compilation():
+                    loaded = CppCodeCache.load_async(source, submit_fn=submit)()
+                    kernel = loaded.frozen_cpp_kernel
+                    kernel.restype = ctypes.c_long
+                    self.assertEqual(kernel(ctypes.c_long(5)), 12)
+            with (
+                fresh_cache(),
+                no_compilation(),
+                self.assertRaisesRegex(PrecompileError, r"C\+\+ kernel"),
+            ):
+                CppCodeCache.load(source.replace("7", "8"))
+
+    @unittest.skipUnless(TEST_CUDA, "requires Triton")
+    def test_capture_freezes_cpp_kernel_binaries(self):
+        from pathlib import Path
+
+        from torch._inductor.codecache import CppCodeCache
+        from torch._inductor.utils import fresh_cache
+        from torch._precompile import _read_runtime_cache_envelope
+        from torch.compiler._cache import CacheArtifactManager
+
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            _producer_triton_cache(Path(directory) / "producer"),
+            fresh_cache(),
+        ):
+            with torch.compiler.precompile.capture_runtime():
+                source, cache = _capture_files(
+                    _no_compilation_single_graph, [(torch.ones(4),)], backend="eager"
+                )
+                lib = CppCodeCache.load(
+                    'extern "C" long captured_cpp_kernel(long x) { return x; }'
+                )
+                binary = Path(lib._name).read_bytes()
+                torch.compiler.precompile.finalize_cache(
+                    artifact_path=source, cache_path=cache
+                )
+            artifacts = CacheArtifactManager.deserialize(
+                _read_runtime_cache_envelope(source, cache)["artifact"]
+            )
+            (frozen,) = artifacts["inductor_cpp"]
+            self.assertEqual(pickle.loads(frozen.content), {lib.key: binary})
+
     @unittest.skipUnless(TEST_CUDA, "requires Triton")
     def test_capture_releases_static_kernel_instances(self):
         from torch.compiler import _runtime_cache
@@ -5837,6 +5900,9 @@ class TestPrecompileRuntimeCache(TestCase):
                 record_triton_kernel("eligible_duplicate", eligible)
                 with (
                     mock.patch.object(StaticTritonCompileResult, "reload_cubin_path"),
+                    mock.patch(
+                        "torch.compiler._runtime_cache._freeze_cpp_kernels"
+                    ) as export,
                     mock.patch("torch._logging.trace_structured") as trace,
                     self.assertRaisesRegex(
                         PrecompileError, "Could not finalize"
@@ -5882,6 +5948,7 @@ class TestPrecompileRuntimeCache(TestCase):
                     ["object"],
                 )
                 self.assertNotIn("do not include config values", json.dumps(report))
+                export.assert_not_called()
                 trace.assert_called_once()
                 self.assertEqual(trace.call_args.args, ("artifact",))
                 self.assertEqual(
@@ -5900,7 +5967,7 @@ class TestPrecompileRuntimeCache(TestCase):
             self.assertFalse(is_compilation_forbidden())
 
     @unittest.skipUnless(TEST_CUDA, "requires Triton")
-    @parametrize("stage", ("cubin", "pickle"))
+    @parametrize("stage", ("cpp", "cubin", "pickle"))
     def test_finalize_failure_keeps_cache_and_policy(self, stage):
         from pathlib import Path
 
@@ -5914,6 +5981,7 @@ class TestPrecompileRuntimeCache(TestCase):
         live_launchers = kernel.launchers
         live_fn = kernel.fn.fn
         target = {
+            "cpp": "torch.compiler._runtime_cache._freeze_cpp_kernels",
             "cubin": (
                 "torch._inductor.runtime.triton_heuristics."
                 "StaticTritonCompileResult.reload_cubin_path"
