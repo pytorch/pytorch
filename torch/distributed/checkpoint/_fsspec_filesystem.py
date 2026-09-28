@@ -21,6 +21,7 @@ import torch._weights_only_unpickler as _weights_only_unpickler
 from torch import Tensor
 from torch.distributed._shard._utils import narrow_tensor_by_index
 from torch.distributed.checkpoint._extension import StreamTransformExtension
+from torch.distributed.checkpoint.default_planner import DefaultLoadPlanner
 from torch.distributed.checkpoint.filesystem import (
     FileSystemBase,
     FileSystemReader,
@@ -170,23 +171,26 @@ class FsspecWriter(FileSystemWriter):
 
 
 def _destinations_disjoint(targets: list[Tensor]) -> bool:
-    """Whether every destination occupies its own bytes.
+    """Whether every destination occupies its own bytes on CPU.
 
     Copies into disjoint memory can run concurrently no matter what the planner
     does. Overlap means two items would race, which happens when a planner
     resolves several items onto one staging buffer, and it is also the normal
     case when items narrow into different regions of the same tensor.
 
-    Non-contiguous tensors are rejected rather than analyzed, which keeps
-    ``[data_ptr, nbytes)`` an exact extent instead of a bound, so this never
-    reports disjoint for targets that actually share bytes.
+    Non-contiguous or non-CPU tensors are rejected rather than analyzed, which keeps
+    ``[data_ptr, nbytes)`` an exact extent instead of a bound and avoids cross-device
+    address comparisons, so this never reports disjoint for targets that actually share bytes.
     """
     spans = []
     for t in targets:
-        if not t.is_contiguous():
+        try:
+            if not (t.is_cpu and t.is_contiguous()):
+                return False
+            start = t.data_ptr()
+            spans.append((start, start + t.numel() * t.element_size()))
+        except Exception:
             return False
-        start = t.data_ptr()
-        spans.append((start, start + t.numel() * t.element_size()))
     spans.sort()
     return all(end <= nxt for (_, end), (nxt, _) in itertools.pairwise(spans))
 
@@ -202,16 +206,24 @@ def _load_aliased(buf: bytes | bytearray | memoryview) -> Tensor:
             zf.has_record("byteorder")
             and zf.get_record("byteorder") == sys.byteorder.encode()
         ):
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore", UserWarning)
-                storage = torch.frombuffer(buf, dtype=torch.uint8).untyped_storage()
-        return _load(
-            zf,
-            "cpu",
-            _weights_only_unpickler,
-            overall_storage=storage,
-            encoding="utf-8",
-        )
+            storage = torch.frombuffer(buf, dtype=torch.uint8).untyped_storage()
+        try:
+            return _load(
+                zf,
+                "cpu",
+                _weights_only_unpickler,
+                overall_storage=storage,
+                weights_only=True,
+                encoding="utf-8",
+            )
+        except TypeError:
+            return _load(
+                zf,
+                "cpu",
+                _weights_only_unpickler,
+                overall_storage=storage,
+                encoding="utf-8",
+            )
 
 
 class FsspecReader(FileSystemReader):
@@ -247,7 +259,7 @@ class FsspecReader(FileSystemReader):
         self.max_batch_size = max(1, max_batch_size)
         self.max_batch_bytes = max(1, max_batch_bytes)
         if cpu_workers is None:
-            local_world_size = max(1, int(os.environ.get("LOCAL_WORLD_SIZE", 1)))
+            local_world_size = max(1, int(os.environ.get("LOCAL_WORLD_SIZE") or 1))
             total_cpus = os.cpu_count() or 4
             cpu_workers = min(4, max(1, total_cpus // local_world_size))
         self.cpu_workers = max(1, cpu_workers)
@@ -257,12 +269,24 @@ class FsspecReader(FileSystemReader):
     def _supports_batched_cat_ranges(self) -> bool:
         if not (self.fs and self.fs.fs and hasattr(self.fs.fs, "cat_ranges")):
             return False
-        # AsyncFileSystem subclasses (gcsfs, s3fs) bind the sync cat_ranges onto
-        # the instance via mirror_sync_methods, so it is not on the class.
+        try:
+            from fsspec.implementations.cached import CachingFileSystem
+        except ImportError:
+            CachingFileSystem = None
+
+        curr_fs = self.fs.fs
+        while hasattr(curr_fs, "fs") and curr_fs.fs is not None:
+            if CachingFileSystem and isinstance(curr_fs, CachingFileSystem):
+                return False
+            curr_fs = curr_fs.fs
+        if CachingFileSystem and isinstance(curr_fs, CachingFileSystem):
+            return False
+
+        target_fs = curr_fs
+        if target_fs is None:
+            return False
         if isinstance(self.fs.fs, fsspec.asyn.AsyncFileSystem):
-            return True
-        # The AbstractFileSystem fallback reopens the file per range, which is
-        # slower than the single stream per shard in FileSystemReader.read_data.
+            return bool(getattr(target_fs, "async_impl", True))
         cat_ranges_fn = getattr(
             self.fs.fs.cat_ranges, "__func__", self.fs.fs.cat_ranges
         )
@@ -324,22 +348,31 @@ class FsspecReader(FileSystemReader):
             return chunks
 
         def decode(req, chunk):
-            if (
-                req.type == LoadItemType.BYTE_IO
-                or self.storage_data[req.storage_index].transform_descriptors
-            ):
+            if getattr(self.storage_data[req.storage_index], "transform_descriptors", None):
                 return self._decode_item(req, io.BytesIO(chunk))
-            # Storages alias the fetched bytes rather than being copied out of
-            # them under the GIL, so ``dst.copy_`` reads the network buffer.
+            if req.type == LoadItemType.BYTE_IO:
+                return io.BytesIO(chunk)
             tensor = _load_aliased(chunk)
             return narrow_tensor_by_index(tensor, req.storage_offsets, req.lengths)
 
+        inference_mode = torch.is_inference_mode_enabled()
+
+        def _copy(dst: Tensor, src: Tensor) -> None:
+            with torch.inference_mode(inference_mode):
+                dst.copy_(src)
+
         with (
+            warnings.catch_warnings(),
             concurrent.futures.ThreadPoolExecutor(
                 max_workers=self.cpu_workers
             ) as cpu_executor,
             concurrent.futures.ThreadPoolExecutor(max_workers=2) as io_executor,
         ):
+            warnings.filterwarnings(
+                "ignore",
+                message=".*The given buffer is not writable.*",
+                category=UserWarning,
+            )
             # Two fetches run at once, so one batch's slowest streams overlap
             # the next batch's start instead of idling the connection.
             inflight = [io_executor.submit(fetch_batch, b) for b in batches[:2]]
@@ -360,40 +393,53 @@ class FsspecReader(FileSystemReader):
                     # Every planner hook runs on this thread, so planners need
                     # not be thread safe. Only decoding above and the copies
                     # below go to the pool.
-                    pending: list[tuple[ReadItem, Tensor, Tensor]] = []
-                    for i, req in enumerate(b_reqs):
-                        f = decoded[i]
-                        decoded[i] = None
-                        item = f.result()
-                        if req.type == LoadItemType.BYTE_IO:
-                            planner.load_bytes(req, item)
-                        else:
-                            pending.append(
-                                (req, self._resolve_item(req, item, planner), item)
-                            )
+                    if type(planner) is DefaultLoadPlanner:
+                        pending: list[tuple[ReadItem, Tensor, Tensor]] = []
+                        for i, req in enumerate(b_reqs):
+                            f = decoded[i]
+                            decoded[i] = None
+                            item = f.result()
+                            if req.type == LoadItemType.BYTE_IO:
+                                planner.load_bytes(req, item)
+                            else:
+                                pending.append(
+                                    (req, self._resolve_item(req, item, planner), item)
+                                )
 
-                    if len(pending) > 1 and _destinations_disjoint(
-                        [dst for _, dst, _ in pending]
-                    ):
-                        copies = [
-                            cpu_executor.submit(dst.copy_, src)
-                            for _, dst, src in pending
-                        ]
-                        for c in copies:
-                            c.result()
-                        for req, dst, _ in pending:
-                            planner.commit_tensor(req, dst)
+                        if len(pending) > 1 and _destinations_disjoint(
+                            [dst for _, dst, _ in pending]
+                        ):
+                            copies = [
+                                cpu_executor.submit(_copy, dst, src)
+                                for _, dst, src in pending
+                            ]
+                            for c in copies:
+                                c.result()
+                            for req, dst, _ in pending:
+                                planner.commit_tensor(req, dst)
+                            del copies
+                        else:
+                            for req, dst, src in pending:
+                                _copy(dst, src)
+                                planner.commit_tensor(req, dst)
+                        del pending
                     else:
-                        # Overlapping destinations can mean the planner handed
-                        # back one staging buffer, so each item has to be
-                        # copied and committed before the next is touched.
-                        for req, dst, src in pending:
-                            dst.copy_(src)
-                            planner.commit_tensor(req, dst)
+                        for i, req in enumerate(b_reqs):
+                            f = decoded[i]
+                            decoded[i] = None
+                            item = f.result()
+                            if req.type == LoadItemType.BYTE_IO:
+                                planner.load_bytes(req, item)
+                            else:
+                                dst = self._resolve_item(req, item, planner)
+                                _copy(dst, item)
+                                planner.commit_tensor(req, dst)
+                        del item, dst
             finally:
-                # __exit__ calls shutdown(wait=True) without ``cancel_futures``,
-                # so on failure cancel queued decode/copy work before waiting.
+                for fut in inflight:
+                    fut.cancel()
                 cpu_executor.shutdown(wait=False, cancel_futures=True)
+                io_executor.shutdown(wait=False, cancel_futures=True)
 
         fut: Future[None] = Future()
         fut.set_result(None)

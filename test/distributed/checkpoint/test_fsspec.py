@@ -2,6 +2,7 @@
 
 import io
 import math
+import os
 import threading
 from unittest.mock import patch
 
@@ -336,18 +337,23 @@ class TestFileSystem(TestCase):
         self.assertEqual(state_dict["t1"], load_dict["t1"])
         self.assertEqual(state_dict["t2"], load_dict["t2"])
 
-    def test_fsspec_reader_clamp_max_batch_size(self):
+    @parametrize("invalid_val", [0, -1, -100])
+    def test_fsspec_reader_clamp_max_batch_size(self, invalid_val):
         checkpoint_dir = "memory://test_clamp_batch_size"
-        for invalid_val in (0, -1, -100):
-            reader = FsspecReader(
-                checkpoint_dir,
-                max_batch_size=invalid_val,
-                max_batch_bytes=invalid_val,
-                cpu_workers=invalid_val,
-            )
-            self.assertEqual(reader.max_batch_size, 1)
-            self.assertEqual(reader.max_batch_bytes, 1)
-            self.assertEqual(reader.cpu_workers, 1)
+        reader = FsspecReader(
+            checkpoint_dir,
+            max_batch_size=invalid_val,
+            max_batch_bytes=invalid_val,
+            cpu_workers=invalid_val,
+        )
+        self.assertEqual(reader.max_batch_size, 1)
+        self.assertEqual(reader.max_batch_bytes, 1)
+        self.assertEqual(reader.cpu_workers, 1)
+
+    def test_fsspec_reader_empty_local_world_size_env(self):
+        with patch.dict(os.environ, {"LOCAL_WORLD_SIZE": ""}):
+            reader = FsspecReader("memory://test_empty_local_world_size")
+            self.assertGreaterEqual(reader.cpu_workers, 1)
 
     def test_fsspec_reader_concurrent_planner_thread_safety(self):
         checkpoint_dir = "memory://test_concurrent_planner_safety"
@@ -405,14 +411,13 @@ class TestFileSystem(TestCase):
             side_effect=RuntimeError("cat_ranges failed"),
         ):
             load_dict = {"t1": torch.zeros(10)}
-            with self.assertRaises(CheckpointException) as context:
+            with self.assertRaisesRegex(CheckpointException, "cat_ranges failed"):
                 dcp.load(
                     state_dict=load_dict,
                     storage_reader=reader,
                     planner=dcp.DefaultLoadPlanner(),
                     no_dist=True,
                 )
-            self.assertIn("cat_ranges failed", str(context.exception))
 
     def test_fsspec_reader_cpu_exception_propagation(self):
         checkpoint_dir = "memory://test_cpu_exception"
@@ -427,7 +432,6 @@ class TestFileSystem(TestCase):
         reader = FsspecReader(checkpoint_dir)
         load_dict = {"t1": torch.zeros(10)}
 
-        # Patch narrow_tensor_by_index to simulate an unpickling/copying crash on the CPU worker pool
         with (
             patch.object(reader.fs.fs, "cat_ranges", wraps=reader.fs.fs.cat_ranges),
             patch(
@@ -435,14 +439,13 @@ class TestFileSystem(TestCase):
                 side_effect=RuntimeError("simulated cpu crash"),
             ),
         ):
-            with self.assertRaises(CheckpointException) as context:
+            with self.assertRaisesRegex(CheckpointException, "simulated cpu crash"):
                 dcp.load(
                     state_dict=load_dict,
                     storage_reader=reader,
                     planner=dcp.DefaultLoadPlanner(),
                     no_dist=True,
                 )
-            self.assertIn("simulated cpu crash", str(context.exception))
 
     def test_fsspec_reader_concurrent_shutdown(self):
         checkpoint_dir = "memory://test_shutdown"
@@ -464,23 +467,18 @@ class TestFileSystem(TestCase):
                 side_effect=RuntimeError("shutdown test"),
             ),
         ):
-            with self.assertRaises(CheckpointException) as context:
+            with self.assertRaisesRegex(CheckpointException, "shutdown test"):
                 dcp.load(
                     state_dict=load_dict,
                     storage_reader=reader,
                     planner=dcp.DefaultLoadPlanner(),
                     no_dist=True,
                 )
-            self.assertIn("shutdown test", str(context.exception))
 
-        # Verify executor threads have been cleaned up after failure
         self.assertLessEqual(threading.active_count(), initial_threads + 1)
+        self.assertFalse(any("ThreadPoolExecutor" in t.name for t in threading.enumerate()))
 
     def test_fsspec_reader_cat_ranges_inband_exception(self):
-        # fsspec's AsyncFileSystem._cat_ranges only started honoring on_error
-        # recently; older versions (and other backends) hand the exception back
-        # in the result list instead of raising. The reader must surface it
-        # rather than feeding an exception object to io.BytesIO.
         checkpoint_dir = "memory://test_cat_ranges_inband_exception"
         state_dict = {f"t_{i}": torch.randn(4) for i in range(4)}
         dcp.save(
@@ -495,21 +493,273 @@ class TestFileSystem(TestCase):
 
         def cat_ranges_returning_exception(paths, starts, ends, **kwargs):
             chunks = real_cat_ranges(paths, starts, ends, **kwargs)
-            # Simulate a backend that ignores on_error="raise".
             return [OSError("simulated range failure"), *chunks[1:]]
 
         load_dict = {f"t_{i}": torch.zeros(4) for i in range(4)}
         with patch.object(
             reader.fs.fs, "cat_ranges", side_effect=cat_ranges_returning_exception
         ):
-            with self.assertRaises(CheckpointException) as context:
+            with self.assertRaisesRegex(CheckpointException, "Failed to read bytes"):
                 dcp.load(
                     state_dict=load_dict,
                     storage_reader=reader,
                     planner=dcp.DefaultLoadPlanner(),
                     no_dist=True,
                 )
-            self.assertIn("Failed to read bytes", str(context.exception))
+
+    def test_fsspec_reader_destination_disjoint_fallback(self):
+        checkpoint_dir = "memory://test_disjoint_fallback"
+        state_dict = {
+            "t1": torch.randn(10, 10),
+            "t2": torch.randn(20),
+        }
+        dcp.save(
+            state_dict=state_dict,
+            storage_writer=FsspecWriter(checkpoint_dir),
+            planner=dcp.DefaultSavePlanner(),
+            no_dist=True,
+        )
+
+        # Non-contiguous destination: transposed slice
+        base_t1 = torch.zeros(10, 10)
+        non_contig_dst = base_t1.t()
+
+        load_dict = {
+            "t1": non_contig_dst,
+            "t2": torch.zeros(20),
+        }
+        reader = FsspecReader(checkpoint_dir)
+        with patch.object(
+            reader.fs.fs, "cat_ranges", wraps=reader.fs.fs.cat_ranges
+        ):
+            dcp.load(
+                state_dict=load_dict,
+                storage_reader=reader,
+                planner=dcp.DefaultLoadPlanner(),
+                no_dist=True,
+            )
+        self.assertEqual(state_dict["t1"], load_dict["t1"])
+        self.assertEqual(state_dict["t2"], load_dict["t2"])
+
+        # Directly test overlapping vs disjoint slices of the same storage
+        from torch.distributed.checkpoint._fsspec_filesystem import _destinations_disjoint
+
+        base_buf = torch.zeros(30)
+        overlap_a = base_buf[0:15]
+        overlap_b = base_buf[10:25]
+        self.assertFalse(_destinations_disjoint([overlap_a, overlap_b]))
+
+        disjoint_a = base_buf[0:10]
+        disjoint_b = base_buf[10:20]
+        self.assertTrue(_destinations_disjoint([disjoint_a, disjoint_b]))
+
+        # Tensor subclasses that raise on data_ptr() safely fall back to sequential copy
+        class SubclassRaisingDataPtr(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                return super().__torch_function__(func, types, args, kwargs)
+
+            def data_ptr(self):
+                raise RuntimeError("data_ptr not supported for custom tensor subclass")
+
+        subclass_tensor = SubclassRaisingDataPtr(torch.zeros(20))
+        self.assertFalse(_destinations_disjoint([subclass_tensor, torch.zeros(10)]))
+
+        # Verify end-to-end dcp.load succeeds when state_dict contains SubclassRaisingDataPtr
+        load_subclass_dict = {
+            "t1": SubclassRaisingDataPtr(torch.zeros(10, 10)),
+            "t2": torch.zeros(20),
+        }
+        with patch.object(
+            reader.fs.fs, "cat_ranges", wraps=reader.fs.fs.cat_ranges
+        ):
+            dcp.load(
+                state_dict=load_subclass_dict,
+                storage_reader=reader,
+                planner=dcp.DefaultLoadPlanner(),
+                no_dist=True,
+            )
+        self.assertEqual(state_dict["t1"], load_subclass_dict["t1"])
+        self.assertEqual(state_dict["t2"], load_subclass_dict["t2"])
+
+    def test_fsspec_reader_custom_planner_hook_pairing(self):
+        checkpoint_dir = "memory://test_planner_hook_pairing"
+        state_dict = {f"t_{i}": torch.randn(10) for i in range(4)}
+        dcp.save(
+            state_dict=state_dict,
+            storage_writer=FsspecWriter(checkpoint_dir),
+            planner=dcp.DefaultSavePlanner(),
+            no_dist=True,
+        )
+
+        class StrictPairingPlanner(dcp.DefaultLoadPlanner):
+            def __init__(self):
+                super().__init__()
+                self.active_resolve = False
+
+            def resolve_tensor(self, read_item):
+                if self.active_resolve:
+                    raise AssertionError("resolve_tensor called before previous commit_tensor")
+                self.active_resolve = True
+                return super().resolve_tensor(read_item)
+
+            def commit_tensor(self, read_item, tensor):
+                if not self.active_resolve:
+                    raise AssertionError("commit_tensor called without active resolve_tensor")
+                self.active_resolve = False
+                super().commit_tensor(read_item, tensor)
+
+        load_dict = {f"t_{i}": torch.zeros(10) for i in range(4)}
+        reader = FsspecReader(checkpoint_dir, max_batch_size=4)
+        with patch.object(
+            reader.fs.fs, "cat_ranges", wraps=reader.fs.fs.cat_ranges
+        ):
+            dcp.load(
+                state_dict=load_dict,
+                storage_reader=reader,
+                planner=StrictPairingPlanner(),
+                no_dist=True,
+            )
+        for k in state_dict:
+            self.assertEqual(state_dict[k], load_dict[k])
+
+    def test_fsspec_reader_inference_mode(self):
+        checkpoint_dir = "memory://test_inference_mode"
+        state_dict = {"t1": torch.randn(10), "t2": torch.randn(10)}
+        dcp.save(
+            state_dict=state_dict,
+            storage_writer=FsspecWriter(checkpoint_dir),
+            planner=dcp.DefaultSavePlanner(),
+            no_dist=True,
+        )
+
+        with torch.inference_mode():
+            load_dict = {"t1": torch.zeros(10), "t2": torch.zeros(10)}
+            reader = FsspecReader(checkpoint_dir)
+            with patch.object(
+                reader.fs.fs, "cat_ranges", wraps=reader.fs.fs.cat_ranges
+            ):
+                dcp.load(
+                    state_dict=load_dict,
+                    storage_reader=reader,
+                    planner=dcp.DefaultLoadPlanner(),
+                    no_dist=True,
+                )
+            self.assertEqual(state_dict["t1"], load_dict["t1"])
+            self.assertEqual(state_dict["t2"], load_dict["t2"])
+
+    def test_supports_batched_cat_ranges_wrappers(self):
+        from fsspec.implementations.cached import (
+            SimpleCacheFileSystem,
+            WholeFileCacheFileSystem,
+        )
+        from fsspec.implementations.dirfs import DirFileSystem
+
+        mem = fsspec.implementations.memory.MemoryFileSystem()
+        dfs = DirFileSystem(path="test_dir", fs=mem)
+        reader_dfs = FsspecReader("memory://test_dfs")
+        reader_dfs.fs.fs = dfs
+        self.assertFalse(reader_dfs._supports_batched_cat_ranges())
+
+        nested_dfs = DirFileSystem(path="inner", fs=dfs)
+        reader_nested = FsspecReader("memory://test_nested")
+        reader_nested.fs.fs = nested_dfs
+        self.assertFalse(reader_nested._supports_batched_cat_ranges())
+
+        scfs = SimpleCacheFileSystem(fs=mem)
+        dfs_cache = DirFileSystem(path="test_dir", fs=scfs)
+        reader_dfs_cache = FsspecReader("memory://test_dfs_cache")
+        reader_dfs_cache.fs.fs = dfs_cache
+        self.assertFalse(reader_dfs_cache._supports_batched_cat_ranges())
+
+        reader_scfs = FsspecReader("memory://test_scfs")
+        reader_scfs.fs.fs = scfs
+        self.assertFalse(reader_scfs._supports_batched_cat_ranges())
+
+        wfc = WholeFileCacheFileSystem(fs=mem)
+        reader_wfc = FsspecReader("memory://test_wfc")
+        reader_wfc.fs.fs = wfc
+        self.assertFalse(reader_wfc._supports_batched_cat_ranges())
+
+        class DummyAsyncFS(fsspec.asyn.AsyncFileSystem):
+            async_impl = True
+
+            def cat_ranges(self, *args, **kwargs):
+                return []
+
+        dummy = DummyAsyncFS()
+        reader_async = FsspecReader("memory://test_async")
+        reader_async.fs.fs = dummy
+        self.assertTrue(reader_async._supports_batched_cat_ranges())
+
+        nested_async = DirFileSystem(
+            path="inner", fs=DirFileSystem(path="outer", fs=dummy)
+        )
+        reader_nested_async = FsspecReader("memory://test_nested_async")
+        reader_nested_async.fs.fs = nested_async
+        self.assertTrue(reader_nested_async._supports_batched_cat_ranges())
+
+        class SyncAsyncFS(fsspec.asyn.AsyncFileSystem):
+            async_impl = False
+
+            def cat_ranges(self, *args, **kwargs):
+                return []
+
+        sync_dummy = SyncAsyncFS()
+        reader_sync_dummy = FsspecReader("memory://test_sync_dummy")
+        reader_sync_dummy.fs.fs = sync_dummy
+        self.assertFalse(reader_sync_dummy._supports_batched_cat_ranges())
+
+        nested_sync = DirFileSystem(path="dir", fs=sync_dummy)
+        reader_nested_sync = FsspecReader("memory://test_nested_sync")
+        reader_nested_sync.fs.fs = nested_sync
+        self.assertFalse(reader_nested_sync._supports_batched_cat_ranges())
+
+    def test_fsspec_reader_cat_ranges_length_mismatch(self):
+        checkpoint_dir = "memory://test_len_mismatch"
+        state_dict = {"t1": torch.randn(10)}
+        dcp.save(
+            state_dict=state_dict,
+            storage_writer=FsspecWriter(checkpoint_dir),
+            planner=dcp.DefaultSavePlanner(),
+            no_dist=True,
+        )
+
+        reader = FsspecReader(checkpoint_dir)
+        load_dict = {"t1": torch.zeros(10)}
+        with patch.object(
+            reader.fs.fs, "cat_ranges", return_value=[b"too_short"]
+        ):
+            with self.assertRaisesRegex(CheckpointException, "Read .* bytes for"):
+                dcp.load(
+                    state_dict=load_dict,
+                    storage_reader=reader,
+                    planner=dcp.DefaultLoadPlanner(),
+                    no_dist=True,
+                )
+
+    def test_fsspec_reader_cat_ranges_count_mismatch(self):
+        checkpoint_dir = "memory://test_count_mismatch"
+        state_dict = {"t1": torch.randn(10), "t2": torch.randn(10)}
+        dcp.save(
+            state_dict=state_dict,
+            storage_writer=FsspecWriter(checkpoint_dir),
+            planner=dcp.DefaultSavePlanner(),
+            no_dist=True,
+        )
+
+        reader = FsspecReader(checkpoint_dir, max_batch_size=2)
+        load_dict = {"t1": torch.zeros(10), "t2": torch.zeros(10)}
+        with patch.object(
+            reader.fs.fs, "cat_ranges", return_value=[b"dummy"]
+        ):
+            with self.assertRaisesRegex(CheckpointException, "cat_ranges returned 1 chunks for 2 ranges"):
+                dcp.load(
+                    state_dict=load_dict,
+                    storage_reader=reader,
+                    planner=dcp.DefaultLoadPlanner(),
+                    no_dist=True,
+                )
 
     def test_fsspec_reader_workers_config(self):
         checkpoint_dir = "memory://test_workers_config"
