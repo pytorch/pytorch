@@ -2946,6 +2946,8 @@ class TMACompatibilityChecker:
     force: bool
     # Inductor buffer name being loaded from / stored to.
     buffer_name: str | None = None
+    # Triton argument name used to track whether host-side TMA is materializable.
+    arg_name: str | None = None
 
     def __post_init__(self):
         self.failed_debug_prefix = "Cannot use TMA descriptor for load / store since: "
@@ -2993,17 +2995,6 @@ class TMACompatibilityChecker:
             )
             return False
 
-        if (
-            self.kernel.mix_order_reduction
-            and self.kernel.fixed_config
-            and self.kernel.fixed_config["NUM_STAGES"] != 1
-        ):
-            log.debug(
-                "%s fixed mix-order kernels require NUM_STAGES=1 for device-side TMA",
-                self.failed_debug_prefix,
-            )
-            return False
-
         # Strict multirow reductions are forced persistent and can settle on
         # XBLOCK=1 after the initial TMA probe. Their output store must therefore
         # use the scalar fallback rather than a 16-byte tensor descriptor.
@@ -3025,6 +3016,25 @@ class TMACompatibilityChecker:
             return False
 
         return True
+
+    def is_compatible_with_fixed_mix_order(
+        self, indexing: TensorDescriptorOptions
+    ) -> bool:
+        if not (
+            self.kernel.mix_order_reduction
+            and self.kernel.fixed_config
+            and self.kernel.fixed_config["NUM_STAGES"] != 1
+        ):
+            return True
+        if self.arg_name is not None and self.kernel._can_materialize_host_tma(
+            self.arg_name, indexing, self.dtype
+        ):
+            return True
+        log.debug(
+            "%s fixed multi-stage mix-order kernels cannot use device-side TMA",
+            self.failed_debug_prefix,
+        )
+        return False
 
     def are_block_parameters_compatible(
         self,
@@ -3668,6 +3678,21 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             return False
         return True
 
+    def _can_materialize_host_tma(
+        self,
+        var: str,
+        indexing: TensorDescriptorOptions,
+        dtype: torch.dtype,
+    ) -> bool:
+        return (
+            has_triton_stable_tma_api()
+            and config.triton.enable_host_side_tma
+            and not indexing.can_lift
+            and indexing.constant_offset == 0
+            and var not in self._host_tma_non_materializable
+            and self._is_host_tma_materializable(indexing, dtype)
+        )
+
     def _prescan_host_tma_materializability(self) -> None:
         """Populate _host_tma_non_materializable_buffers with buffers that
         can't be expressed as a single host-side TMA descriptor."""
@@ -4244,6 +4269,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         constant_offset=options.constant_offset,
                     ):
                         return None
+                    if not tma_compatibility_checker.is_compatible_with_fixed_mix_order(
+                        options
+                    ):
+                        return None
 
                 return options
 
@@ -4449,14 +4478,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             # Host-side TMA: an aligned, zero-offset, materializable buffer whose
             # descriptor can be built on the host. Register it and return early --
             # no in-kernel tl.make_tensor_descriptor is emitted for it.
-            if (
-                has_triton_stable_tma_api()
-                and config.triton.enable_host_side_tma
-                and not indexing.can_lift
-                and indexing.constant_offset == 0
-                and var not in self._host_tma_non_materializable
-                and self._is_host_tma_materializable(indexing, V.graph.get_dtype(name))
-            ):
+            if self._can_materialize_host_tma(var, indexing, V.graph.get_dtype(name)):
                 if var not in self.host_tma_descriptor_args:
                     self.host_tma_descriptor_args[var] = indexing
                 return var, other
@@ -5015,6 +5037,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 for_store=False,
                 force=getattr(self, "tma_load_for_template_epilogue", False),
                 buffer_name=name,
+                arg_name=var,
             )
         )
         indexing = self.indexing(
@@ -5243,6 +5266,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 for_store=True,
                 force=force,
                 buffer_name=name,
+                arg_name=var,
             )
         indexing = self.indexing(
             index,
@@ -6543,6 +6567,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             raise AssertionError("expected inside_reduction")
         self.inside_reduction = False
         dtype = V.graph.get_dtype(name)
+        var = self.args.output(name)
         indexing = self.indexing(
             index,
             block_ptr=True,
@@ -6551,10 +6576,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 dtype=dtype,
                 for_store=True,
                 force=False,
+                buffer_name=name,
+                arg_name=var,
             ),
         )
         self.inside_reduction = True
-        var = self.args.output(name)
 
         exit_stack = contextlib.ExitStack()
         if self.cooperative_reduction:

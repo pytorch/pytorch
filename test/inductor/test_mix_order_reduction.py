@@ -279,11 +279,32 @@ class MixOrderReductionTest(TestBase):
         reduction = getattr(torch, reduction_type)
 
         def f(x):
+            x = x.float()
             return x.sum(dim=1), x.sum(dim=0), reduction(x, dim=0)
 
         x = torch.randint(0, 10, (32768, 768), dtype=torch.uint8, device=GPU_TYPE)
         self.check_numeric(f, (x,))
         self.assertEqual(metrics.codegen_mix_order_reduction, 1)
+
+    @inductor_config.patch(
+        {
+            "benchmark_fusion": False,
+            "split_reductions": False,
+        }
+    )
+    def test_integer_noncontiguous_reduction_is_not_mix_order(self):
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        def f(x):
+            return x.sum(dim=1), x.sum(dim=0)
+
+        x = torch.full((131073, 129), 255, dtype=torch.uint8, device=GPU_TYPE)
+        expected = f(x)
+        actual = torch.compile(f)(x)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(metrics.codegen_mix_order_reduction, 0)
 
     @inductor_config.patch(coordinate_descent_tuning=True)
     def test_XBLOCK_coordest_tuning(self):
@@ -1661,8 +1682,11 @@ class MixOrderReductionNumericTest(TestBase):
             "assume_aligned_inputs": True,
         }
     )
+    @parametrize("enable_host_side_tma", (False, True))
     @parametrize("num_stages", (1, 2))
-    def test_fixed_config_tma_requires_single_stage(self, device, num_stages):
+    def test_fixed_config_tma_requires_single_stage(
+        self, device, num_stages, enable_host_side_tma
+    ):
         if not _supports_tensor_descriptors(device):
             self.skipTest("requires tensor descriptor support")
 
@@ -1680,17 +1704,27 @@ class MixOrderReductionNumericTest(TestBase):
                     }
                 return kernel_kwargs
 
-        def f(x):
-            return x.sum(dim=1), x.float().sum(dim=0)
+        def f(x, y):
+            return x.sum(dim=1), (x + y).float().sum(dim=0)
 
         x = torch.zeros((40960, 128), dtype=torch.bfloat16, device=device)
-        expected = f(x)
-        with V.set_choices_handler(FixedMixOrderChoices()):
-            actual, (wrapper,) = utils.run_and_get_code(torch.compile(f), x)
+        y = torch.ones_like(x)
+        expected = f(x, y)
+        with (
+            V.set_choices_handler(FixedMixOrderChoices()),
+            inductor_config.patch("triton.enable_host_side_tma", enable_host_side_tma),
+        ):
+            actual, (wrapper,) = utils.run_and_get_code(torch.compile(f), x, y)
 
         self.assertEqual(actual, expected)
         self.assertEqual(metrics.codegen_mix_order_reduction, 1)
-        if num_stages == 1:
+        if enable_host_side_tma:
+            self.assertIn("host_tma_descriptor_args", wrapper)
+            if num_stages == 1:
+                self.assertIn("'uses_device_tma': True", wrapper)
+            else:
+                self.assertNotIn("'uses_device_tma': True", wrapper)
+        elif num_stages == 1:
             FileCheck().check("'uses_device_tma': True").run(wrapper)
         else:
             FileCheck().check_not("'uses_tma': True").run(wrapper)

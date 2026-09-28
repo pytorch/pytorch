@@ -213,6 +213,8 @@ class MixOrderReduction:
     def supports_noncontiguous_reductions(node: BaseSchedulerNode) -> bool:
         return all(
             subnode.node.get_reduction_type() in {"sum", "prod"}  # type: ignore[union-attr]
+            and subnode.node.get_dtype()  # type: ignore[union-attr]
+            in {torch.float16, torch.bfloat16, torch.float32}
             for subnode in node.get_nodes()
             if subnode.is_reduction()
         )

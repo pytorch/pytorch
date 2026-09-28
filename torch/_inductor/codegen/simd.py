@@ -3562,13 +3562,7 @@ class SIMDScheduling(BaseScheduling):
             stride_str = f"({nsplit}) * ({rnumel})"
             start = f"{idx} * {stride_str}"
             end = f"({idx} + 1) * {stride_str}"
-            reduction_type2op = {
-                "min": "amin",
-                "max": "amax",
-            }
-            opname = reduction_type2op.get(
-                partial_accum.reduction_type, partial_accum.reduction_type
-            )
+            opname = partial_accum.reduction_type
             reduced = (
                 f"{ws_name}[{start} : {end}].view({nsplit}, {rnumel}).{opname}(dim=0)"
             )
