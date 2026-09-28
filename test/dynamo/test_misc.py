@@ -19365,6 +19365,37 @@ def forward(self, L_x_ : torch.Tensor):
         with self.assertRaises(RuntimeError):
             fn(torch.randn(3))
 
+    def test_dict_pattern_match(self):
+        def fn(x, payload):
+            match payload:
+                case {"kind": "affine", "values": [weight, bias], "scale": scale}:
+                    return x * weight * scale + bias
+                case {"kind": "shift", "value": value, **rest} if rest.get("enabled", False):
+                    return x + value
+                case {"kind": "shift", "value": value}:
+                    return x - value
+                case _:
+                    return torch.zeros_like(x)
+
+        compiled_fn = torch.compile(fn, backend="eager")
+        x = torch.tensor([1.5, -2.0])
+
+        payloads = [
+            {
+                "kind": "affine",
+                "values": [torch.tensor([2.0, 3.0]), torch.tensor([1.0, -1.0])],
+                "scale": 2,
+            },
+            {"kind": "shift", "value": torch.tensor([4.0, 5.0]), "enabled": True},
+            {"kind": "shift", "value": torch.tensor([4.0, 5.0]), "enabled": False},
+            {"kind": "unknown", "value": torch.tensor([9.0, 9.0])},
+        ]
+
+        for payload in payloads:
+            eager_res = fn(x, payload)
+            comp_res = compiled_fn(x, payload)
+            self.assertEqual(eager_res, comp_res)
+
 
 instantiate_parametrized_tests(MiscTests)
 

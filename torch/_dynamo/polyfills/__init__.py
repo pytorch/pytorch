@@ -213,10 +213,12 @@ def impl_MATCH_CLASS(
 def impl_MATCH_KEYS(obj: Mapping[T, U], keys: tuple[T, ...]) -> tuple[U, ...] | None:
     if not isinstance(obj, Mapping):
         raise AssertionError(f"Expected a Mapping, got {type(obj)}")
-    if all(key in obj for key in keys):
-        return tuple(obj[key] for key in keys)
-    else:
-        return None
+    res = []
+    for key in keys:
+        if key not in obj:
+            return None
+        res.append(obj[key])
+    return tuple(res)
 
 
 def impl_CONTAINS_OP_fallback(a: T, b: Iterable[T]) -> bool:
