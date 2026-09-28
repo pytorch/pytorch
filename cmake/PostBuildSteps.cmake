@@ -83,17 +83,22 @@ if(WIN32 AND BUILD_PYTHON)
 
   # CUDA runtime DLLs - only for CUDA builds.
   if(USE_CUDA AND CUDA_TOOLKIT_ROOT_DIR)
-    # CUDA 13+ moves DLLs to an architecture-specific bin directory.
-    if(CMAKE_SYSTEM_PROCESSOR STREQUAL "ARM64")
-      set(_cuda_windows_arch "arm64")
-    else()
-      set(_cuda_windows_arch "x64")
+    string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _cuda_lib_arch)
+    string(REGEX REPLACE "^(amd64|x86_64)$" "x64" _cuda_lib_arch "${_cuda_lib_arch}")
+    string(REGEX REPLACE "^aarch64$" "arm64" _cuda_lib_arch "${_cuda_lib_arch}")
+
+    set(_cuda_bin "${CUDA_TOOLKIT_ROOT_DIR}/bin")
+    if(IS_DIRECTORY "${CUDA_TOOLKIT_ROOT_DIR}/bin/${_cuda_lib_arch}")
+      set(_cuda_bin "${CUDA_TOOLKIT_ROOT_DIR}/bin/${_cuda_lib_arch}")
     endif()
 
-    if(IS_DIRECTORY "${CUDA_TOOLKIT_ROOT_DIR}/bin/${_cuda_windows_arch}")
-      set(_cuda_bin "${CUDA_TOOLKIT_ROOT_DIR}/bin/${_cuda_windows_arch}")
-    else()
-      set(_cuda_bin "${CUDA_TOOLKIT_ROOT_DIR}/bin")
+    # Use architecture-specific CUPTI DLLs when present, otherwise lib64.
+    set(_cupti_dir "${CUDA_TOOLKIT_ROOT_DIR}/extras/CUPTI/lib64")
+    file(GLOB _cupti_arch_dlls
+      "${CUDA_TOOLKIT_ROOT_DIR}/extras/CUPTI/lib/${_cuda_lib_arch}/cupti64_*.dll"
+      "${CUDA_TOOLKIT_ROOT_DIR}/extras/CUPTI/lib/${_cuda_lib_arch}/nvperf_host*.dll")
+    if(_cupti_arch_dlls)
+      set(_cupti_dir "${CUDA_TOOLKIT_ROOT_DIR}/extras/CUPTI/lib/${_cuda_lib_arch}")
     endif()
 
     set(_cuda_dll_patterns
@@ -106,11 +111,10 @@ if(WIN32 AND BUILD_PYTHON)
       "${_cuda_bin}/nvrtc*64_*.dll"
       "${_cuda_bin}/nvJitLink_*.dll"
       "${CUDA_TOOLKIT_ROOT_DIR}/bin/cudnn*64_*.dll"
-      "${CUDA_TOOLKIT_ROOT_DIR}/extras/CUPTI/lib/${_cuda_windows_arch}/cupti64_*.dll"
-      "${CUDA_TOOLKIT_ROOT_DIR}/extras/CUPTI/lib/${_cuda_windows_arch}/nvperf_host*.dll"
-      "${CUDA_TOOLKIT_ROOT_DIR}/extras/CUPTI/lib64/cupti64_*.dll"
-      "${CUDA_TOOLKIT_ROOT_DIR}/extras/CUPTI/lib64/nvperf_host*.dll"
     )
+    list(APPEND _cuda_dll_patterns
+      "${_cupti_dir}/cupti64_*.dll"
+      "${_cupti_dir}/nvperf_host*.dll")
     foreach(_pattern ${_cuda_dll_patterns})
       file(GLOB _dlls "${_pattern}")
       if(_dlls)
@@ -119,7 +123,7 @@ if(WIN32 AND BUILD_PYTHON)
     endforeach()
 
     # NvToolsExt (legacy, may not exist on all systems).
-    set(_nvtoolsext "C:/Program Files/NVIDIA Corporation/NvToolsExt/bin/x64/nvToolsExt64_1.dll")
+    set(_nvtoolsext "C:/Program Files/NVIDIA Corporation/NvToolsExt/bin/${_cuda_lib_arch}/nvToolsExt64_1.dll")
     if(EXISTS "${_nvtoolsext}")
       install(FILES "${_nvtoolsext}" DESTINATION "${TORCH_INSTALL_LIB_DIR}")
     endif()
