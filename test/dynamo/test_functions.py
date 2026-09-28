@@ -2339,13 +2339,118 @@ partial_fn = functools.partial(fn, scale=2)
             {name for name in globals() if name.startswith("___unnamed_scope_")},
         )
 
+    def test_globals_length_and_iteration_graph_break(self):
+        def length_fn(x):
+            return x + len(globals())
+
+        def iteration_fn(x):
+            return x + len(tuple(globals()))
+
+        x = torch.ones(2)
+        for fn in (length_fn, iteration_fn):
+            with self.assertRaises(Unsupported):
+                torch.compile(fn, backend="eager", fullgraph=True)(x)
+            opt_fn = torch.compile(fn, backend="eager")
+            self.assertEqual(opt_fn(x), fn(x))
+
+    def test_globals_after_global_store_graph_breaks(self):
+        key = "_dynamo_globals_store_test"
+        old_value = globals().get(key)
+        had_value = key in globals()
+
+        def fn(x):
+            global _dynamo_globals_store_test
+            _dynamo_globals_store_test = 2
+            return x + globals()[key]
+
+        def write_global():
+            global _dynamo_globals_store_test
+            _dynamo_globals_store_test = 3
+
+        def fn_after_inlined_store(x):
+            write_global()
+            return x + globals()[key]
+
+        x = torch.ones(2)
+        try:
+            with self.assertRaises(Unsupported):
+                torch.compile(fn, backend="eager", fullgraph=True)(x)
+            expected = fn(x)
+            if had_value:
+                globals()[key] = old_value
+            else:
+                globals().pop(key, None)
+            self.assertEqual(torch.compile(fn, backend="eager")(x), expected)
+
+            with self.assertRaises(Unsupported):
+                torch.compile(fn_after_inlined_store, backend="eager", fullgraph=True)(
+                    x
+                )
+            expected = fn_after_inlined_store(x)
+            if had_value:
+                globals()[key] = old_value
+            else:
+                globals().pop(key, None)
+            self.assertEqual(
+                torch.compile(fn_after_inlined_store, backend="eager")(x), expected
+            )
+        finally:
+            if had_value:
+                globals()[key] = old_value
+            else:
+                globals().pop(key, None)
+
+    def test_globals_mapping_store_graph_breaks(self):
+        old_value = _variable
+
+        def fn(x):
+            globals()["_variable"] = 2
+            return x + _variable
+
+        x = torch.ones(2)
+        try:
+            with self.assertRaises(Unsupported):
+                torch.compile(fn, backend="eager", fullgraph=True)(x)
+            expected = fn(x)
+            globals()["_variable"] = old_value
+            self.assertEqual(torch.compile(fn, backend="eager")(x), expected)
+        finally:
+            globals()["_variable"] = old_value
+
+    def test_globals_in_inlined_function_uses_function_namespace(self):
+        module_name = f"_dynamo_globals_test_{id(self)}"
+        module = types.ModuleType(module_name)
+        sys.modules[module_name] = module
+        exec("def fn(x): return x + 1, globals()", module.__dict__)
+        inlined_fn = module.fn
+
+        def outer(x):
+            return inlined_fn(x)
+
+        try:
+            result = torch.compile(outer, backend="eager", fullgraph=True)(
+                torch.ones(2)
+            )
+            self.assertIs(result[1], module.__dict__)
+        finally:
+            del sys.modules[module_name]
+
     def test_function_globals_are_readonly(self):
-        def target():
-            return None
+        def make_target():
+            captured = None
+
+            def target():
+                return captured
+
+            return target
+
+        target = make_target()
 
         operations = (
             lambda: setattr(target, "__globals__", {}),
             lambda: delattr(target, "__globals__"),
+            lambda: setattr(target, "__closure__", ()),
+            lambda: delattr(target, "__closure__"),
         )
 
         def catch_attribute_error(operation):

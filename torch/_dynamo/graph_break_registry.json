@@ -2631,6 +2631,16 @@
       ]
     }
   ],
+  "GB8057": [
+    {
+      "Gb_type": "unsafe operation on globals() mapping",
+      "Context": "operation",
+      "Explanation": "Dynamo cannot safely trace mutations or shape-dependent operations on the live globals namespace.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB8335": [
     {
       "Gb_type": "Generator reconstruction with mutations",
