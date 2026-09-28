@@ -254,6 +254,26 @@ class _TupleOwner:
         x: int
 
 
+class _EnumOwner:
+    class Level(enum.Enum):
+        LOW = 1
+        HIGH = 2
+
+
+class _Token:
+    def __init__(self, name):
+        self.name = name
+
+
+class _ByObject(enum.Enum):
+    A = _Token("a")
+    B = _Token("b")
+
+
+_LEVEL = _EnumOwner.Level.LOW
+_BY_OBJECT = _ByObject.A
+
+
 def _wrapped_target(x):
     return x
 
@@ -805,6 +825,19 @@ class _Plan:
 pytree.register_constant(_Plan)
 
 
+class _Layout:
+    def __init__(self, scale, blocks):
+        self.scale = scale
+        self.blocks = blocks
+
+    def __eq__(self, other):
+        return (
+            isinstance(other, _Layout)
+            and self.scale == other.scale
+            and self.blocks == other.blocks
+        )
+
+
 class Inputs:
     def __init__(self, x, unused):
         self.x = x
@@ -1159,9 +1192,12 @@ class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
                 if key in kwargs and isinstance(kwargs[key], Iterator):
                     self._frame_state.f_locals[key] = kwargs[key]
 
+        guard_types = (guard_type,) if isinstance(guard_type, str) else guard_type
+
         def guard_filter_fn(guards):
             ret = [
-                g.guard_type == guard_type or guard_type in g.derived_guard_types
+                g.guard_type in guard_types
+                or any(t in g.derived_guard_types for t in guard_types)
                 for g in guards
             ]
             self.assertTrue(any(ret))
@@ -3393,6 +3429,32 @@ class TestGuardSerialization(TestGuardSerializationBase):
         with mock.patch.dict(globals(), {"_MODE": _Mode.SLOW}):
             self._test_check_fn(ref, loaded, {"x": x}, False)
 
+    def test_id_match_on_a_member_of_a_nested_enum(self):
+        def fn(x):
+            if _LEVEL is _EnumOwner.Level.LOW:
+                return x + 1
+            return x - 1
+
+        x = torch.randn(3)
+
+        ref, loaded = self._test_serialization("ID_MATCH", fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        with mock.patch.dict(globals(), {"_LEVEL": _EnumOwner.Level.HIGH}):
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+
+    def test_id_match_on_an_enum_member_whose_value_does_not_round_trip(self):
+        def fn(x):
+            if _BY_OBJECT is _ByObject.A:
+                return x + 1
+            return x - 1
+
+        x = torch.randn(3)
+
+        ref, loaded = self._test_serialization("ID_MATCH", fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        with mock.patch.dict(globals(), {"_BY_OBJECT": _ByObject.B}):
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+
     def test_id_match_on_a_builtin_function(self):
         def fn(x):
             return _torch_add(x, 1)
@@ -3413,6 +3475,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
             (math.sqrt, True),
             (_wrapped_target, True),
             (_Mode.SLOW, True),
+            (_EnumOwner.Level.LOW, True),
             (_NameClash["name"], True),
             (types.ModuleType("_unregistered"), False),
             (Local, False),
@@ -3495,6 +3558,21 @@ class TestGuardSerialization(TestGuardSerializationBase):
         )
         self._test_check_fn(ref, loaded, {"x": x, "plan": _Plan(_Phase(0.1))}, True)
         self._test_check_fn(ref, loaded, {"x": x, "plan": _Plan(_Phase(1.0))}, False)
+
+    def test_tensor_subclass_ctx_object_is_kept_whole(self):
+        def fn(x):
+            return x * x.extra.scale
+
+        def sub(blocks):
+            return SubclassWithMeta(torch.randn(3), extra=_Layout(2, blocks))
+
+        # blocks is read by no guard, but TENSOR_SUBCLASS_METADATA_MATCH
+        # compares the whole __tensor_flatten__ ctx that holds the layout.
+        ref, loaded = self._test_serialization(
+            ("TENSOR_SUBCLASS_METADATA_MATCH", "CONSTANT_MATCH"), fn, sub([4, 4])
+        )
+        self._test_check_fn(ref, loaded, {"x": sub([4, 4])}, True)
+        self._test_check_fn(ref, loaded, {"x": sub([8, 8])}, False)
 
     def test_nested_guarded_user_objects_are_pruned_in_turn(self):
         def fn(x, holder):
