@@ -18578,64 +18578,6 @@ class TestOneOffModelExportResult(TestCase):
             ep = torch.export.export(ScaledDotProductAttention(), (q, k, v))
             ep.run_decompositions()
 
-    @skipIfCrossRef
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
-        "Can't run fused SDPA on this platform",
-    )
-    def test_scaled_dot_product_attention_gpu(self):
-        """
-        This test makes sure we are always getting the same decomposition result for SDPA.
-        As of now a fused SDPA op is expected to show up in export() result (GPU
-        tensors are given); which one depends on the backend. Currently there's no
-        downstream backend relies on this export result so if this test fails, feel
-        free to change it to the latest export() result.
-        """
-
-        class ScaledDotProductAttention(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-
-            def forward(self, q, k, v):
-                attn_output = F.scaled_dot_product_attention(
-                    q, k, v, None, dropout_p=0.0, is_causal=True
-                )
-                return attn_output
-
-        q = torch.randn(1, 16, 16, 64, dtype=torch.bfloat16, device=device_type)
-        k = torch.randn(1, 16, 16, 64, dtype=torch.bfloat16, device=device_type)
-        v = torch.randn(1, 16, 16, 64, dtype=torch.bfloat16, device=device_type)
-
-        ep = torch.export.export(
-            ScaledDotProductAttention(), (q, k, v)
-        ).run_decompositions()
-        # Which fused SDPA op survives decomposition is a property of the backend
-        # (flash or cuDNN on CUDA, the overrideable fused op on XPU), so compare
-        # against the golden graph for whichever op actually shows up.
-        expected_graphs = {
-            "_scaled_dot_product_flash_attention": """\
-def forward(self, q, k, v):
-    _scaled_dot_product_flash_attention_default = torch.ops.aten._scaled_dot_product_flash_attention.default(q, k, v, 0.0, True, scale = 0.125);  q = k = v = None
-    getitem = _scaled_dot_product_flash_attention_default[0];  _scaled_dot_product_flash_attention_default = None
-    return (getitem,)""",  # noqa: B950
-            "_scaled_dot_product_cudnn_attention": """\
-def forward(self, q, k, v):
-    _scaled_dot_product_cudnn_attention_default = torch.ops.aten._scaled_dot_product_cudnn_attention.default(q, k, v, None, False, 0.0, True);  q = k = v = None
-    getitem = _scaled_dot_product_cudnn_attention_default[0];  _scaled_dot_product_cudnn_attention_default = None
-    return (getitem,)""",  # noqa: B950
-            "_scaled_dot_product_fused_attention_overrideable": """\
-def forward(self, q, k, v):
-    _scaled_dot_product_fused_attention_overrideable_default = torch.ops.aten._scaled_dot_product_fused_attention_overrideable.default(q, k, v, None, 0.0, True);  q = k = v = None
-    getitem = _scaled_dot_product_fused_attention_overrideable_default[0];  _scaled_dot_product_fused_attention_overrideable_default = None
-    return (getitem,)""",  # noqa: B950
-        }
-        code = ep.graph_module.code.strip()
-        matched = next((op for op in expected_graphs if op in code), None)
-        self.assertIsNotNone(
-            matched, f"no fused SDPA op in the decomposed graph:\n{code}"
-        )
-        self.assertExpectedInline(code, expected_graphs[matched])
-
     def test_int_list_output(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -19476,6 +19418,66 @@ def forward(self, x):
                 len([node for node in gm.graph.nodes if node.op == "placeholder"]),
                 1,
             )
+
+    @onlyAccelerator
+    @skipIfCrossRef
+    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
+        "Can't run fused SDPA on this platform",
+    )
+    def test_scaled_dot_product_attention_gpu(self, device):
+        """
+        This test makes sure we are always getting the same decomposition result for SDPA.
+        As of now a fused SDPA op is expected to show up in export() result (GPU
+        tensors are given); which one depends on the backend. Currently there's no
+        downstream backend relies on this export result so if this test fails, feel
+        free to change it to the latest export() result.
+        """
+
+        class ScaledDotProductAttention(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, q, k, v):
+                attn_output = F.scaled_dot_product_attention(
+                    q, k, v, None, dropout_p=0.0, is_causal=True
+                )
+                return attn_output
+
+        q = torch.randn(1, 16, 16, 64, dtype=torch.bfloat16, device=device)
+        k = torch.randn(1, 16, 16, 64, dtype=torch.bfloat16, device=device)
+        v = torch.randn(1, 16, 16, 64, dtype=torch.bfloat16, device=device)
+
+        ep = torch.export.export(
+            ScaledDotProductAttention(), (q, k, v)
+        ).run_decompositions()
+        # Which fused SDPA op survives decomposition is a property of the backend
+        # (flash or cuDNN on CUDA, the overrideable fused op on XPU), so compare
+        # against the golden graph for whichever op actually shows up.
+        expected_graphs = {
+            "_scaled_dot_product_flash_attention": """\
+def forward(self, q, k, v):
+    _scaled_dot_product_flash_attention_default = torch.ops.aten._scaled_dot_product_flash_attention.default(q, k, v, 0.0, True, scale = 0.125);  q = k = v = None
+    getitem = _scaled_dot_product_flash_attention_default[0];  _scaled_dot_product_flash_attention_default = None
+    return (getitem,)""",  # noqa: B950
+            "_scaled_dot_product_cudnn_attention": """\
+def forward(self, q, k, v):
+    _scaled_dot_product_cudnn_attention_default = torch.ops.aten._scaled_dot_product_cudnn_attention.default(q, k, v, None, False, 0.0, True);  q = k = v = None
+    getitem = _scaled_dot_product_cudnn_attention_default[0];  _scaled_dot_product_cudnn_attention_default = None
+    return (getitem,)""",  # noqa: B950
+            "_scaled_dot_product_fused_attention_overrideable": """\
+def forward(self, q, k, v):
+    _scaled_dot_product_fused_attention_overrideable_default = torch.ops.aten._scaled_dot_product_fused_attention_overrideable.default(q, k, v, None, 0.0, True);  q = k = v = None
+    getitem = _scaled_dot_product_fused_attention_overrideable_default[0];  _scaled_dot_product_fused_attention_overrideable_default = None
+    return (getitem,)""",  # noqa: B950
+        }
+        code = ep.graph_module.code.strip()
+        matched = next((op for op in expected_graphs if op in code), None)
+        self.assertIsNotNone(
+            matched, f"no fused SDPA op in the decomposed graph:\n{code}"
+        )
+        self.assertExpectedInline(code, expected_graphs[matched])
 
 
 instantiate_device_type_tests(TestExportDevice, globals(), allow_xpu=True)
