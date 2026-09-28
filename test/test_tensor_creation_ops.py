@@ -3799,6 +3799,15 @@ class TestLikeTensorCreation(TestCase):
         res1 = torch.ones_like(expected)
         self.assertEqual(res1, expected)
 
+    # TODO: this test should be updated
+    def test_empty_like(self, device):
+        x = torch.autograd.Variable(torch.tensor([]).to(device))
+        y = torch.autograd.Variable(torch.randn(4, 4).to(device))
+        z = torch.autograd.Variable(torch.IntTensor([1, 2, 3]).to(device))
+        for a in (x, y, z):
+            self.assertEqual(torch.empty_like(a).shape, a.shape)
+            self.assertEqualTypeString(torch.empty_like(a), a)
+
     def test_zeros_like(self, device):
         expected = torch.zeros((100, 100,), device=device)
 
@@ -3959,18 +3968,6 @@ class TestLikeTensorCreation(TestCase):
         tensor0 = torch.randint_like(like_tensor, 0, 10, generator=gen0)
         self.assertNotEqual(tensor0, tensor1)
 
-
-class TestLikeTensorCreationCpuOnly(TestCase):
-    hw_classification = HardwareClassification.CPU
-
-    # TODO: this test should be updated
-    def test_empty_like(self, device):
-        x = torch.autograd.Variable(torch.tensor([]))
-        y = torch.autograd.Variable(torch.randn(4, 4))
-        z = torch.autograd.Variable(torch.IntTensor([1, 2, 3]))
-        for a in (x, y, z):
-            self.assertEqual(torch.empty_like(a).shape, a.shape)
-            self.assertEqualTypeString(torch.empty_like(a), a)
 
 
 # Tests for the `frombuffer` function (only work on CPU):
@@ -4659,7 +4656,6 @@ instantiate_device_type_tests(TestTensorCreationCudaOnly, globals(), only_for="c
 instantiate_device_type_tests(TestRandomTensorCreation, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestRandomTensorCreationCpuOnly, globals(), only_for="cpu")
 instantiate_device_type_tests(TestLikeTensorCreation, globals(), allow_xpu=True)
-instantiate_device_type_tests(TestLikeTensorCreationCpuOnly, globals(), only_for="cpu")
 instantiate_device_type_tests(TestBufferProtocol, globals(), only_for="cpu")
 instantiate_device_type_tests(TestFromBlob, globals(), only_for="cpu")
 instantiate_device_type_tests(TestAsArray, globals(), allow_xpu=True)
