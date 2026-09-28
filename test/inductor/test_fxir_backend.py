@@ -30,6 +30,7 @@ from torch._inductor.codegen.wrapper_fxir import (
     replace_floor_div,
     WrapperFxCodegen,
 )
+from torch._inductor.exc import InductorError
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import fresh_cache
 from torch.export import Dim
@@ -59,7 +60,7 @@ if HAS_GPU:
     import triton
     import triton.language as tl
 
-    from torch.testing._internal.triton_utils import add_kernel_2d_autotuned
+    from torch.testing._internal.triton_utils import add_kernel, add_kernel_2d_autotuned
 
 test_config = {
     "compile_threads": 1,
@@ -1035,6 +1036,23 @@ class AOTFxirTestCase(InductorTestCase):
             dynamic_shapes=({0: Dim.DYNAMIC}, {0: Dim.DYNAMIC}),
         )
 
+    def test_custom_triton_view_arg(self):
+        # The mm output's halves reach the kernel as reinterpret_tensor(...) views.
+        n = 8
+
+        class Model(torch.nn.Module):
+            def forward(self, x, w):
+                t = torch.mm(x, w).view(-1)
+                output = torch.zeros(n, device=x.device)
+                add_kernel[(1,)](t[:n], t[n:], output, n, BLOCK_SIZE=n)
+                return output
+
+        inp = (
+            torch.randn(2 * n, 4, device=self.device),
+            torch.randn(4, 1, device=self.device),
+        )
+        self.check(Model().to(device=self.device), inp, strict=True)
+
     def test_custom_triton_autotune_dynamic(self):
         class Model(torch.nn.Module):
             def forward(self, x, y):
@@ -1372,6 +1390,102 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         offsets = torch.tensor([0, 3, 7, length], dtype=torch.int64, device=self.device)
 
         self.check(TestModule(), (data, offsets))
+
+    def test_compound_symint_graph_input(self):
+        """A compound symbolic graph input binds to a single placeholder.
+
+        The branches close over 2 * y.shape[0] + 1, so the lifted argument
+        reaches the converter as a sympy.Add rather than a single Symbol.
+        """
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                a = 2 * y.shape[0] + 1
+
+                def true_fn(t):
+                    return t + a
+
+                # Identical branches would share one Triton kernel between
+                # two separately converted subgraphs, which FX conversion
+                # cannot resolve.
+                def false_fn(t):
+                    return t + a + 1
+
+                return torch.cond(x.shape[0] > 5, true_fn, false_fn, (x,))
+
+        inp = tuple(torch.randn(numel, device=self.device) for numel in (8, 4))
+        gm = self.check(M(), inp, dynamic_shapes=({0: Dim.DYNAMIC}, {0: Dim.DYNAMIC}))
+
+        # The lifted argument is a placeholder of the branch subgraphs, not of
+        # the parent graph. Check each branch on its own: one symbolic
+        # placeholder holding the whole expression, so neither branch fell back
+        # to taking the constituent symbol instead.
+        branches = [
+            submod
+            for name, submod in gm.named_modules()
+            if name and isinstance(submod, torch.fx.GraphModule)
+        ]
+        self.assertEqual(len(branches), 2, "expected the two cond subgraphs")
+        for branch in branches:
+            symbolic = [
+                node.meta["val"]
+                for node in branch.graph.find_nodes(op="placeholder")
+                if isinstance(node.meta.get("val"), torch.SymInt)
+            ]
+            self.assertEqual(len(symbolic), 1)
+            expr = symbolic[0].node.expr
+            (sym,) = expr.free_symbols
+            self.assertEqual(expr, 2 * sym + 1)
+
+    def test_nonlinear_compound_input_rejected(self):
+        """A compound input the solver cannot invert fails with a clear error.
+
+        y.shape[0] * y.shape[0] lifts as s**2, which the solver does not invert
+        to recover s.
+        """
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                a = y.shape[0] * y.shape[0]
+
+                def true_fn(t):
+                    return t + a
+
+                def false_fn(t):
+                    return t + a + 1
+
+                return torch.cond(x.shape[0] > 5, true_fn, false_fn, (x,))
+
+        inp = tuple(torch.randn(numel, device=self.device) for numel in (8, 4))
+        with self.assertRaisesRegex(InductorError, "Cannot solve input expression"):
+            self.check(M(), inp, dynamic_shapes=({0: Dim.DYNAMIC}, {0: Dim.DYNAMIC}))
+
+    def test_underdetermined_compound_input_rejected(self):
+        """A compound input holding two unknowns fails with a clear error.
+
+        The branches close over y.shape[0] + z.shape[0] but take neither
+        tensor, so one bound value would have to determine both symbols.
+        """
+
+        class M(torch.nn.Module):
+            def forward(self, x, y, z):
+                a = y.shape[0] + z.shape[0]
+
+                def true_fn(t):
+                    return t + a
+
+                def false_fn(t):
+                    return t + a + 1
+
+                return torch.cond(x.shape[0] > 5, true_fn, false_fn, (x,))
+
+        inp = tuple(torch.randn(numel, device=self.device) for numel in (8, 4, 6))
+        with self.assertRaisesRegex(InductorError, "leaves these symbols undefined"):
+            self.check(
+                M(),
+                inp,
+                dynamic_shapes=({0: Dim.DYNAMIC}, {0: Dim.DYNAMIC}, {0: Dim.DYNAMIC}),
+            )
 
 
 class TestReplaceFloorDiv(InductorTestCase):

@@ -43,6 +43,7 @@ import threading
 import time
 import traceback
 import types
+import unittest
 import weakref
 from collections import defaultdict, deque
 from typing import Any, cast, NoReturn, TYPE_CHECKING, TypeAlias, TypeVar
@@ -92,7 +93,7 @@ from .bytecode_transformation import (
     Instruction,
     is_generator,
     is_jump_absolute,
-    unique_id,
+    unique_id_unbound_in,
 )
 from .code_context import code_context
 from .codegen import PyCodegen
@@ -125,7 +126,7 @@ from .polyfills import (
     impl_MATCH_KEYS,
     impl_MATCH_SEQUENCE,
 )
-from .replay_record import DummyModule, ExecutionRecorder
+from .replay_record import ExecutionRecorder
 from .resume_execution import (
     ContinueExecutionCache,
     IS_TRACING_RESUME_PROLOGUE_VARNAME,
@@ -176,14 +177,18 @@ from .variables.functions import (
     NestedUserFunctionVariable,
     SkipFunctionVariable,
     UserFunctionVariable,
+    UserMethodVariable,
 )
 from .variables.iter import MAX_ITERATOR_LIMIT
 from .variables.lazy import LazyVariableTracker
 from .variables.lists import (
     BaseListVariable,
+    DequeIteratorVariable,
+    DequeReverseIteratorVariable,
     ListIteratorVariable,
     ListVariable,
     SliceVariable,
+    TupleIteratorVariable,
     TupleVariable,
 )
 from .variables.misc import (
@@ -547,11 +552,11 @@ def get_assert_bytecode_sequence(with_msg: bool) -> list[str]:
     if with_msg:
 
         def fn(x: Any) -> None:
-            assert x, "msg"  # noqa: S101
+            assert x, "msg"  # noqa: S101  # function is to recognize assert statements in user code
     else:
 
         def fn(x: Any) -> None:
-            assert x  # noqa: S101
+            assert x  # noqa: S101  # function is to recognize assert statements in user code
 
     insts = [inst.opname for inst in dis.get_instructions(fn)]
 
@@ -2269,17 +2274,17 @@ class InstructionTranslatorBase(
             self.is_tracing_resume_prologue = val
 
     def DELETE_FAST(self, inst: Instruction) -> None:
-        name = inst.argval
-        var = self.symbolic_locals.get(name)
+        var = self.symbolic_locals.get(inst.argval)
         if isinstance(var, TensorVariable):
             self._maybe_emit_sync_dealloc(var)
-        del self.symbolic_locals[name]
+        del self.symbolic_locals[inst.argval]
 
     def _maybe_emit_sync_dealloc(self, var: TensorVariable) -> None:
         from .variables.streams import get_current_stream, new_event
 
         device = var.device
-        if device is None or device.type not in ("cuda", "xpu"):
+        acc = torch.accelerator.current_accelerator()
+        if device is None or acc is None or device.type != acc.type:
             return
 
         node = var.proxy.node
@@ -2409,11 +2414,14 @@ class InstructionTranslatorBase(
             )
         self.output.side_effects.store_global(variable, name, value)
 
-    # Cache note: This cache only exists for the duration of this
-    # InstructionTranslator - so it should be safe to do.
-    @cache_method
+    # Keyed by module_name alone, not the whole argument tuple as @cache_method
+    # would key it, so a later argument cannot silently split the memo. Per
+    # translator, as the decorator was, and written only past the alias check.
     def import_source(self, module_name: str) -> GlobalSource:
         """Create an alias to a module for use in guards"""
+        if (memo := self._import_source_memo.get(module_name)) is not None:
+            return memo
+
         if "torch_package" in module_name:
             value = torch.package.package_importer._package_imported_modules[
                 module_name
@@ -2435,7 +2443,9 @@ class InstructionTranslatorBase(
             )
         f_globals[alias] = value
         self.output.update_co_names(alias)
-        return GlobalSource(alias)
+        source = GlobalSource(alias)
+        self._import_source_memo[module_name] = source
+        return source
 
     def resolve_name(self, name: str, package: str, level: int) -> str:
         """
@@ -2507,6 +2517,17 @@ class InstructionTranslatorBase(
                     hints=[*graph_break_hints.USER_ERROR],
                 )
 
+            # A non-module sys.modules entry must not reach import_source, which
+            # binds the result into the traced globals. The replay arm needs no
+            # check: its values are the DummyModules add_local_mod admitted.
+            if not isinstance(value, types.ModuleType):
+                unimplemented(
+                    gb_type="Bad import result",
+                    context=typestr(value),
+                    explanation="Import result is not a Python module.",
+                    hints=[],
+                )
+
             if level != 0:
                 pkg = self.calc_package()
                 module_name = self.resolve_name(module_name, pkg, level)
@@ -2526,18 +2547,8 @@ class InstructionTranslatorBase(
             # pyrefly: ignore [unbound-name]
             self.exec_recorder.add_local_mod(recorded_name, value)
 
-        # pyrefly: ignore [unbound-name]
-        if isinstance(value, (types.ModuleType, DummyModule)):
-            # pyrefly: ignore [unbound-name, bad-argument-type]
-            self.push(PythonModuleVariable(value, source=source))
-        else:
-            unimplemented(
-                gb_type="Bad import result",
-                # pyrefly: ignore [unbound-name]
-                context=typestr(value),
-                explanation="Import result is not a Python module.",
-                hints=[],
-            )
+        # pyrefly: ignore [unbound-name, bad-argument-type]
+        self.push(PythonModuleVariable(value, source=source))
 
     # fb internal 3.12 opcode
     EAGER_IMPORT_NAME = IMPORT_NAME
@@ -2706,7 +2717,7 @@ class InstructionTranslatorBase(
     def _attach_traceback_to_exception(self, exc: ExceptionVals) -> None:
         # based on CPython's PyTraceBack_Here impl
         frame_summary = self.frame_summary()
-        tb = exc.getattro_impl(
+        tb = exc.tp_getattro_impl(
             # pyrefly: ignore [bad-argument-type]
             self,
             "__traceback__",
@@ -2878,7 +2889,7 @@ class InstructionTranslatorBase(
                     "expected _exception_instance_check(val) to be true"
                 )
             typ = BuiltinVariable(val.exc_type)  # type: ignore[attr-defined, union-attr]
-            tb = val.getattro_impl(
+            tb = val.tp_getattro_impl(
                 # pyrefly: ignore[bad-argument-type]
                 self,
                 "__traceback__",
@@ -2897,7 +2908,7 @@ class InstructionTranslatorBase(
                 )
             typ = BuiltinVariable(val.exc_type)  # type: ignore[attr-defined]
 
-            tb = val.getattro_impl(self, "__traceback__")
+            tb = val.tp_getattro_impl(self, "__traceback__")
 
         args += [typ, val, tb]
         self.call_function(fn, args, {})
@@ -2925,7 +2936,20 @@ class InstructionTranslatorBase(
                 raise e.with_traceback(raised_exception.__traceback__) from None
 
             curr_exc = self.exn_vt_stack.get_raised_exception()
-            dynamo_exc = exc.get_dynamo_observed_exception(curr_exc.python_type())
+            exc_python_type = curr_exc.python_type()
+            if (self.one_graph or self.error_on_graph_break) and issubclass(
+                exc_python_type, unittest.SkipTest
+            ):
+                try:
+                    skip_args: list[Any] = [
+                        a.as_python_constant() for a in curr_exc.args
+                    ]
+                except NotImplementedError:
+                    skip_args = []
+                skip_exc = exc_python_type(*skip_args)
+                raise skip_exc from None
+
+            dynamo_exc = exc.get_dynamo_observed_exception(exc_python_type)
             if not isinstance(raised_exception, dynamo_exc):
                 raise AssertionError(
                     "expected isinstance(raised_exception, dynamo_exc) to be true"
@@ -3127,11 +3151,9 @@ class InstructionTranslatorBase(
                 UserDefinedExceptionObjectVariable,
             ),
         ):
-            unimplemented(
-                gb_type="Exception with bad expected type",
-                context=str(expected_exc_types),
-                explanation=f"`except ...` has unsupported type {expected_exc_types}.",
-                hints=[*graph_break_hints.USER_ERROR],
+            exc.raise_type_error(
+                self,
+                "catching classes that do not inherit from BaseException is not allowed",
             )
 
         if sys.version_info >= (3, 11):
@@ -3159,11 +3181,9 @@ class InstructionTranslatorBase(
                     UserDefinedExceptionClassVariable,
                 ),
             ):
-                unimplemented(
-                    gb_type="Exception with non-type expectation",
-                    context=str(expected_type),
-                    explanation=f"`except ...` expects a non-type: {expected_type}.",
-                    hints=[*graph_break_hints.USER_ERROR],
+                exc.raise_type_error(
+                    self,
+                    "catching classes that do not inherit from BaseException is not allowed",
                 )
             if pyexception_instance_check(exc_instance) and issubclass(
                 exc_instance.exc_type,  # type: ignore[union-attr]
@@ -3283,6 +3303,9 @@ class InstructionTranslatorBase(
         # Map to a dictionary of str -> VariableTracker
         # pyrefly: ignore [bad-assignment, unbound-name]
         kwargsvars = kwargsvars.keys_as_python_constant()
+        # pyrefly: ignore [not-iterable]
+        if not all(isinstance(k, str) for k in kwargsvars):
+            exc.raise_type_error(self, "keywords must be strings")
         # pyrefly: ignore [bad-argument-type, unbound-name]
         self.call_function(fn, argsvars.items, kwargsvars)
 
@@ -3360,10 +3383,11 @@ class InstructionTranslatorBase(
 
     def LOAD_ATTR(self, inst: Instruction) -> None:
         if sys.version_info >= (3, 12):
-            assert inst.arg is not None and inst.arg % 2 == 0, (  # noqa: S101
-                "LOAD_ATTR method variant should have been normalized by "
-                "remove_load_attr_method_variant in cleaned_instructions"
-            )
+            if inst.arg is None or inst.arg % 2 != 0:
+                raise AssertionError(
+                    "LOAD_ATTR method variant should have been normalized by "
+                    "remove_load_attr_method_variant in cleaned_instructions"
+                )
         self._load_attr(inst.argval)
 
     @break_graph_if_unsupported(
@@ -3387,9 +3411,17 @@ class InstructionTranslatorBase(
             {},
         )
 
+    def DELETE_DEREF(self, inst: Instruction) -> None:
+        if inst.argval not in self.cell_and_freevars():
+            raise AssertionError(
+                "expected inst.argval in self.cell_and_freevars() to be true"
+            )
+        cell = self._cellvar(inst.argval)
+        self.output.side_effects.store_cell(cell, variables.DeletedVariable())
+
     def _maybe_sync_dealloc_attr(self, obj: VariableTracker, name: str) -> None:
         # Only check side_effects — a pure dict lookup with no observable
-        # side effects. We intentionally avoid getattro_impl here because it
+        # side effects. We intentionally avoid tp_getattro_impl here because it
         # can trigger __getattr__, add graph nodes, or cause graph breaks.
         if self.output.side_effects.has_pending_mutation_of_attr(obj, name):
             attr_var = self.output.side_effects.load_attr(obj, name)
@@ -3513,7 +3545,12 @@ class InstructionTranslatorBase(
                 raise AssertionError("expected resume_inst.target to be true")
             resume_inst = resume_inst.target
 
-        resume_name = unique_id(f"__resume_at_{resume_inst.offset}")
+        # The name is skipped forward here rather than inside
+        # install_global_unsafe, which cannot hand a substitute back to callers
+        # that use the name they passed for more than the install: this one bakes
+        # it into the resume function itself and records it on the package.
+        resume_prefix = f"__resume_at_{resume_inst.offset}"
+        resume_name = unique_id_unbound_in(resume_prefix, self.output.global_scope)
 
         # More locals may have been pruned in the current/leaf frame
         # after the unsupported instruction (e.g. branch).
@@ -3943,8 +3980,7 @@ class InstructionTranslatorBase(
         #         frame N stack + locals,
         #         ...,
         #         frame 2 stack + locals,
-        #     ],
-        #     [frame 1 stack + locals],
+        #     ], *(frame 1 stack + locals)
         # ]
         cg.extend_output(
             [
@@ -3962,25 +3998,17 @@ class InstructionTranslatorBase(
         )
 
         # TOS: resume 1, remaining resumes, frames (popped), frame 1 stack + locals
-        if ContinueExecutionCache.uses_boxed_call(resume_codes[-1]):
-            cg.extend_output(
-                [
-                    # [remaining resumes, frames, [frame 1 stack + locals]]
-                    create_instruction("BUILD_LIST", arg=3),
-                ]
-            )
-        else:
-            cg.extend_output(
-                [
-                    *create_rot_n(3),
-                    create_instruction("BUILD_LIST", arg=2),
-                    *create_swap(2),
-                    # [remaining resumes, frames], frame 1 stack + locals
-                    create_instruction("LIST_EXTEND", arg=1),
-                ]
-            )
+        cg.extend_output(
+            [
+                *create_rot_n(3),
+                create_instruction("BUILD_LIST", arg=2),
+                *create_swap(2),
+                # [resumes, frames (popped)], frame 1 stack + locals
+                create_instruction("LIST_EXTEND", arg=1),
+            ]
+        )
 
-        # TOS: resume 1, resume call args
+        # TOS: resume 1, [remaining resumes, frames, *(frame 1 stack + locals)]
         cg.extend_output(create_call_function_ex(False, True))
 
     def should_compile_partial_graph(self) -> bool:
@@ -4416,6 +4444,10 @@ class InstructionTranslatorBase(
 
         self.call_function(BuiltinVariable(str.format), [fmt_var, value], {})
 
+    @break_graph_if_unsupported(
+        push=True,
+        msg_prefix="Encountered graph break when formatting an f-string value",
+    )
     def FORMAT_VALUE(self, inst: Instruction) -> None:
         flags = inst.arg
         if flags is None:
@@ -5065,14 +5097,26 @@ class InstructionTranslatorBase(
 
         self.push(fn)
 
+    @break_graph_if_unsupported(
+        push=True,
+        msg_prefix="Encountered graph break when converting an f-string value",
+    )
     def CONVERT_VALUE(self, inst: Instruction) -> None:
         if inst.arg is None:
             raise AssertionError("expected inst.arg is not None to be true")
         self.push(self._convert_value(self.pop(), inst.arg))
 
+    @break_graph_if_unsupported(
+        push=True,
+        msg_prefix="Encountered graph break when formatting an f-string value",
+    )
     def FORMAT_SIMPLE(self, inst: Instruction) -> None:
         self._format_value(VariableTracker.build(self, ""), 0)
 
+    @break_graph_if_unsupported(
+        push=True,
+        msg_prefix="Encountered graph break when formatting an f-string value",
+    )
     def FORMAT_WITH_SPEC(self, inst: Instruction) -> None:
         self._format_value(self.pop(), 0)
 
@@ -5191,7 +5235,7 @@ class InstructionTranslatorBase(
         nn_modules_pattern = re.compile(r".*torch/nn/modules.*")
         return nn_modules_pattern.match(filename) is not None
 
-    def store_global_weakref_by_id(self, prefix: str, value: Any) -> str:
+    def store_global_weakref_by_id(self, prefix: str, value: object) -> str:
         global_name = self.output.install_global_by_id(prefix, weakref.ref(value))
         install_guard(
             GlobalWeakRefSource(global_name).make_guard(GuardBuilder.WEAKREF_ALIVE)
@@ -5465,6 +5509,8 @@ class InstructionTranslatorBase(
         )
         # Per-prefix record of the most recently generated pycode varname.
         self._pycode_last_varname: dict[str, str] = {}
+        # Module name -> the alias source import_source minted for it.
+        self._import_source_memo: dict[str, GlobalSource] = {}
 
         # Properties of the input/output code
         self.instructions: list[Instruction] = instructions
@@ -6017,7 +6063,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 hints=[],
             )
 
-        if isinstance(func, UserFunctionVariable) and inspect.getattr_static(
+        if isinstance(
+            func, (UserFunctionVariable, UserMethodVariable)
+        ) and inspect.getattr_static(
             func.get_function(), "_torchdynamo_disable", False
         ):
             msg = inspect.getattr_static(
@@ -6082,12 +6130,13 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             func,
             (
                 UserFunctionVariable,
+                UserMethodVariable,
                 NestedUserFunctionVariable,
                 LocalGeneratorFunctionVariable,
             ),
         ):
             raise AssertionError(
-                "expected isinstance( func, ( UserFunctionVariable, NestedUserFunctionVariable, LocalGeneratorFunctionVariable, ), ) to be true"
+                "expected isinstance( func, ( UserFunctionVariable, UserMethodVariable, NestedUserFunctionVariable, LocalGeneratorFunctionVariable, ), ) to be true"
             )
         code: types.CodeType = func.get_code()
         result = None
@@ -6113,17 +6162,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         sub_locals = None
         try:
             sub_locals = func.bind_args(parent, args, kwargs)
-        except TypeError as e:
-            unimplemented(
-                gb_type="failed to bind arguments when attempting to inline",
-                context=f"func='{func.get_name()}' {func.get_filename()}:{func.get_code().co_firstlineno}; "
-                f"args = {[arg.python_type() for arg in args]}; kwargs = {kwargs}",
-                explanation=f"Argument mismatch when attempting to trace function {func.get_name()}.",
-                hints=[
-                    *graph_break_hints.USER_ERROR,
-                ],
-                from_exc=e,
-            )
+        except variables.functions.BindArgsTypeError as e:
+            exc.raise_type_error(parent, msg=e.args[0])
 
         if sub_locals is None:
             raise AssertionError("expected sub_locals is not None to be true")
@@ -6552,7 +6592,13 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
 
     def GET_YIELD_FROM_ITER(self, inst: Instruction) -> None:
         tos = self.stack[-1]
-        if not isinstance(tos, ListIteratorVariable):
+        iter_vts = (
+            ListIteratorVariable,
+            TupleIteratorVariable,
+            DequeIteratorVariable,
+            DequeReverseIteratorVariable,
+        )
+        if not isinstance(tos, iter_vts):
             self.pop()
             res = VariableTracker.build(self, iter).call_function(self, [tos], {})  # type: ignore[arg-type]
             self.push(res)

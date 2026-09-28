@@ -46,6 +46,7 @@ __all__ = [
     "GradientEdge",
     "get_gradient_edge",
     "increment_version",
+    "queue_callback",
     "region_activation_memory_budget",
     "set_warn_on_accumulate_grad_stream_mismatch",
     "set_override_stale_capture_stream",
@@ -74,6 +75,12 @@ class Node(abc.ABC):
     @property
     @abc.abstractmethod
     def next_functions(self) -> tuple[tuple[Optional["Node"], int], ...]:
+        r"""Return the edges from this node to its input functions.
+
+        Each entry is a ``(Node, int)`` pair. The node is ``None`` for an input
+        that does not require gradients. The integer is the output index of the
+        input function to which this edge connects.
+        """
         raise NotImplementedError
 
     @abc.abstractmethod
@@ -249,7 +256,7 @@ def increment_version(tensor: torch.Tensor | Iterable[torch.Tensor]) -> None:
     This is to enable more accurate error checking within the autograd engine.
     It is already done automatically by PyTorch functions and within custom Function
     when mark_dirty() is called appropriately so you only need to call this explicitly
-    if you are doing inplace operation on the Tensor data in a way that Pytorch doesn't
+    if you are doing inplace operation on the Tensor data in a way that PyTorch doesn't
     know about. For example a custom kernel that reads the Tensor data_ptr and modifies
     the memory inplace based on this pointer. Can accept either a tensor, or a list of tensors.
 
@@ -262,6 +269,29 @@ def increment_version(tensor: torch.Tensor | Iterable[torch.Tensor]) -> None:
     if isinstance(tensor, torch.Tensor):
         tensor = (tensor,)
     torch._C._increment_version(tensor)
+
+
+def queue_callback(callback: Callable[[], None]) -> None:
+    """Queue a callback to run after the current backward pass completes.
+
+    Must be called during a backward pass, for example from a
+    :class:`torch.autograd.Function` backward or a backward hook. The callback
+    runs once the backward pass currently executing on this thread completes
+    successfully; it is not run if the backward pass raises an error.
+    Callbacks queued multiple times run multiple times, in queueing order.
+
+    Example::
+
+        >>> t = torch.rand(3, requires_grad=True)
+        >>>
+        >>> def hook(unused_grad):
+        ...     torch.autograd.graph.queue_callback(lambda: print("backward done"))
+        >>>
+        >>> _ = t.register_hook(hook)
+        >>> t.sum().backward()
+        backward done
+    """
+    Variable._execution_engine.queue_callback(callback)
 
 
 class saved_tensors_hooks:
@@ -329,6 +359,15 @@ class saved_tensors_hooks:
         To avoid reference cycle, the return value of ``pack_hook`` cannot hold a
         reference to the input tensor. For example, use `lambda x: x.detach()`
         instead of `lambda x: x` as the pack hook.
+
+    .. note ::
+        The order in which ``unpack_hook`` calls are made during the backward
+        pass is not specified. It follows the autograd engine's execution
+        order, which is not, in general, the reverse of the order in which
+        ``pack_hook`` was called during the forward pass, and it can differ
+        between graphs, workloads, and releases. Hooks that reconstruct
+        tensors from shared state must therefore not rely on being invoked in
+        reverse packing order.
     """
 
     def __init__(
@@ -535,11 +574,17 @@ class node_creation_hook:
 def region_activation_memory_budget(
     budget: float,
 ) -> contextlib.AbstractContextManager[None]:
-    r"""Context-manager that sets the activation memory budget for the region of
-    a compiled forward traced under it.
+    r"""Set the activation memory budget for the region of a compiled forward
+    traced under this context manager.
 
     .. warning::
         This is a prototype feature and is subject to change.
+
+        Using this API with regions that remain as opaque higher-order operators,
+        such as ``torch.compiler.nested_compile_region``, is not recommended. An
+        opaque higher-order operator and its enclosing graph may be partitioned
+        independently, which can cause unexpected interactions such as duplicated
+        recomputation. This behavior is subject to change.
 
     Under :func:`torch.compile`, the min-cut partitioner chooses which
     activations to save versus recompute in the backward pass to stay under a
@@ -554,11 +599,15 @@ def region_activation_memory_budget(
 
     .. note::
         Today the partitioner only supports a single budget per compiled graph,
-        so the annotation must cover every forward op in the graph (a partial
-        annotation is rejected rather than silently applied graph-wide), and all
-        annotated nodes must agree on the budget. To use different budgets for
-        different parts of a model, separate them with a graph break (e.g.
-        ``torch._dynamo.graph_break()``) so each part becomes its own graph.
+        so all budget contexts within a graph must agree. By default, the context
+        must cover every forward operation in that graph. Set
+        ``torch._functorch.config.activation_memory_budget_require_full_coverage``
+        to ``False`` while compiling to permit unannotated operations; the budget
+        then applies to the whole graph containing the context. To use different
+        budgets for different parts of a model, separate them with a graph break
+        (e.g. ``torch._dynamo.graph_break()``). The context remains active across
+        graph breaks, but a graph with no annotated operations uses the global
+        ``torch._functorch.config.activation_memory_budget``.
 
     This only has an effect under :func:`torch.compile`; using it outside of a
     compiled region raises a ``RuntimeError``.
@@ -592,9 +641,7 @@ def region_activation_memory_budget(
             "torch.autograd.graph.region_activation_memory_budget can only be "
             "used inside a torch.compile region; it has no effect in eager mode."
         )
-    return fx_traceback.annotate(
-        {fx_traceback.MEMORY_BUDGET_ANNOTATION_KEY: float(budget)}
-    )
+    return fx_traceback._dynamo_region_activation_memory_budget(float(budget))
 
 
 def set_warn_on_accumulate_grad_stream_mismatch(enabled: bool) -> None:
