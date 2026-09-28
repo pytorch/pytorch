@@ -395,7 +395,10 @@ xpu_precision = {
     skip("nn.functional.conv_transpose3d", device_type="xpu"),
 }
 
-xpu_unsupported = xpu_fft_stft_crash | xpu_precision
+# torch-xpu-ops does not implement 5-D bicubic grid_sample yet.
+xpu_grid_sample_bicubic_5d = {xfail("nn.functional.grid_sample", device_type="xpu")}
+
+xpu_unsupported = xpu_fft_stft_crash | xpu_precision | xpu_grid_sample_bicubic_5d
 
 aliasing_ops = {
     "T",
@@ -2420,7 +2423,7 @@ class TestOperatorsDevice(TestCase):
             skip("sparse.sampled_addmm", ""),
             skip("sparse.mm", "reduce"),
             skip("native_layer_norm", "", device_type="cpu"),
-        }.union(xpu_fft_stft_crash),
+        }.union(xpu_fft_stft_crash, xpu_grid_sample_bicubic_5d),
     )
     @opsToleranceOverride(
         "TestOperatorsDevice",
