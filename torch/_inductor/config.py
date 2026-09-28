@@ -678,9 +678,11 @@ multi_kernel_hints: list[int] = []
 
 
 # Specify candidate backends for gemm autotune.
-# Possible choices are combinations of: ATen, Triton, CUTLASS, CUTEDSL, FLYDSL, NVGEMM, CK, CKTILE, CPP.
+# Possible choices are combinations of: ATen, Triton, GLUON, CUTLASS,
+# CUTEDSL, FLYDSL, NVGEMM, CK, CKTILE, CPP.
 # ATen: default Pytorch ATen kernels.
 # Triton: Triton templates defined in torch inductor (AMD and NVidia GPUs).
+# GLUON: Gluon kernels from Triton project (NVidia SM100-SM109 only).
 # CUTLASS: Cutlass templates and kernels (NVidia GPUs only).
 # CUTEDSL: CuteDSL templates for Blackwell GPUs (NVidia SM100-SM109 only).
 # FLYDSL: FlyDSL templates for ROCm GPUs (experimental).
@@ -807,6 +809,10 @@ cutedsl_enable_autotuning: bool = (
 )
 
 flydsl_enable_autotuning: bool = os.environ.get("FLYDSL_ENABLE_AUTOTUNING", "0") == "1"
+
+# Emit Proton instrumentation scopes in generated Gluon kernels, for
+# per-scope profiling. Adds significant runtime overhead.
+gluon_enable_proton_profiling: bool = False
 
 # DEPRECATED. This setting is ignored.
 autotune_fallback_to_aten = False
