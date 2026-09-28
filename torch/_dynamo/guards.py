@@ -5753,11 +5753,19 @@ class CheckFunctionManager:
             if name := get_global_source_name(source):
                 if not isinstance(name, str):
                     raise AssertionError(f"Expected str, got {type(name)}")
-                # Leave out the builtins dict key, as we will special handle
-                # it later because the guarded code rarely use the entire
-                # builtin dict in the common case.
+                # The builtins dict is carried only for the keys a guard reads
+                # (used_builtin_vars): guarded code rarely uses the whole dict.
                 if name != builtins_dict_name:
                     used_global_vars.add(name)
+                else:
+                    while isinstance(source, ChainedSource):
+                        if (
+                            isinstance(source, DictGetItemSource)
+                            and isinstance(source.base, GlobalSource)
+                            and isinstance(source.index, str)
+                        ):
+                            self.used_builtin_vars.add(source.index)
+                        source = source.base
             elif name := get_local_source_name(source):
                 if not isinstance(name, str):
                     raise AssertionError(f"Expected str, got {type(name)}")
