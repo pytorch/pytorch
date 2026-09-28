@@ -13,11 +13,14 @@ from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
-from torch._inductor.codegen.flydsl.flydsl_utils import runtime_available
+from torch._inductor.codegen.flydsl.flydsl_utils import (
+    _flydsl_aot_runtime_unavailable_reason,
+    aot_runtime_available,
+)
 from torch.utils._ordered_set import OrderedSet
 
 
-HAS_FLYDSL = runtime_available()
+HAS_FLYDSL = aot_runtime_available()
 if TYPE_CHECKING or HAS_FLYDSL:
     import flydsl.utils as flydsl_utils
     from flydsl._mlir import execution_engine, ir
@@ -42,11 +45,12 @@ _LDD_LIBRARY = re.compile(r"^\s*(\S+)\s+=>\s+(.+?)\s+\(")
 _LDD_NOT_FOUND = re.compile(r"^\s*(\S+)\s+=>\s+not found\s*$")
 
 
-class _FlyDSL03Adapter:
-    """Temporary compatibility adapter for FlyDSL 0.3.x private APIs.
+class _FlyDSLAOTAdapter:
+    """Temporary compatibility adapter for FlyDSL >=0.3.2 private APIs.
 
-    PyTorch CI validates this adapter against its pinned FlyDSL release. Remove
-    it once FlyDSL provides a public AOT compilation and export API.
+    PyTorch CI validates this adapter against FlyDSL 0.3.2. The attribute
+    checks below fail clearly if a later release changes a private API. Remove
+    this adapter once FlyDSL provides a public AOT compilation and export API.
     """
 
     @staticmethod
@@ -54,8 +58,9 @@ class _FlyDSL03Adapter:
         value = getattr(owner, name, None)
         if value is None:
             raise RuntimeError(
-                "PyTorch's FlyDSL AOT adapter requires the FlyDSL 0.3.x "
-                f"private API {name!r}; install a validated FlyDSL version"
+                "PyTorch's temporary FlyDSL AOT adapter was validated with "
+                f"FlyDSL 0.3.2 but requires private API {name!r}; migrate the "
+                "adapter when FlyDSL provides its public AOT API"
             )
         return value
 
@@ -82,6 +87,10 @@ class _FlyDSL03Adapter:
     @classmethod
     def resolve_runtime_libs(cls) -> list[str]:
         return cls._private(jit_executor, "_resolve_runtime_libs")()
+
+    @classmethod
+    def effective_compile_hints(cls, launcher: Any) -> dict[str, Any]:
+        return cls._private(launcher, "_effective_compile_hints")()
 
 
 def _ctype_metadata(ctype: type, *, name: str | None = None) -> dict[str, Any]:
@@ -427,8 +436,8 @@ class CompiledAOTLauncher:
                 f"object output directory does not exist: {object_path.parent}"
             )
 
-        runtime_libraries = _FlyDSL03Adapter.resolve_runtime_libs()
-        ctx = _FlyDSL03Adapter.create_mlir_context()
+        runtime_libraries = _FlyDSLAOTAdapter.resolve_runtime_libs()
+        ctx = _FlyDSLAOTAdapter.create_mlir_context()
         with ctx:
             module = ir.Module.parse(self._ir_text)
             _rename_export_symbols(module, self._entry, function_name)
@@ -458,13 +467,14 @@ class CompiledAOTLauncher:
 def compile_aot(launcher: Any, *args, **kwargs) -> CompiledAOTLauncher:
     """Compile a specialized FlyDSL launcher into an AOT object and ABI."""
     if not HAS_FLYDSL:
-        raise RuntimeError("FlyDSL AOT compilation requires the FlyDSL runtime")
+        reason = _flydsl_aot_runtime_unavailable_reason()
+        raise RuntimeError(f"FlyDSL AOT compilation is unavailable: {reason}")
     if not isinstance(launcher, jit_function.JitFunction):
         raise TypeError(
             f"flyc.compile_aot() expects a @flyc.jit function, got {type(launcher).__name__}"
         )
 
-    sig, has_self_param = _FlyDSL03Adapter.prepare_launcher(launcher)
+    sig, has_self_param = _FlyDSLAOTAdapter.prepare_launcher(launcher)
     bound_self = None
     if has_self_param:
         if not args:
@@ -473,16 +483,17 @@ def compile_aot(launcher: Any, *args, **kwargs) -> CompiledAOTLauncher:
     bound = sig.bind(*args, **kwargs)
     bound.apply_defaults()
 
+    effective_hints = _FlyDSLAOTAdapter.effective_compile_hints(launcher)
     hints = (
-        kernel_function.CompilationContext.compile_hints(launcher.compile_hints)
-        if launcher.compile_hints
+        kernel_function.CompilationContext.compile_hints(effective_hints)
+        if effective_hints
         else nullcontext()
     )
-    with _FlyDSL03Adapter.create_mlir_context() as ctx, hints:
+    with _FlyDSLAOTAdapter.create_mlir_context() as ctx, hints:
         param_names, jit_args, dsl_types, constexpr_values = (
             jit_argument.convert_to_jit_arguments(sig, bound)
         )
-        has_user_stream = _FlyDSL03Adapter.ensure_stream_arg(jit_args)
+        has_user_stream = _FlyDSLAOTAdapter.ensure_stream_arg(jit_args)
         ir_types = protocol.get_ir_types(jit_args)
         loc = kernel_function.func_def_location(launcher.func, ctx)
         module = ir.Module.create(loc=loc)
@@ -549,7 +560,7 @@ def compile_aot(launcher: Any, *args, **kwargs) -> CompiledAOTLauncher:
             raise RuntimeError(
                 "FlyDSL AOT export does not support Python post-load processors"
             )
-        if link_libs and _FlyDSL03Adapter.use_external_binary_codegen():
+        if link_libs and _FlyDSLAOTAdapter.use_external_binary_codegen():
             raise RuntimeError(
                 "FlyDSL external codegen does not support extern-linked AOT launchers"
             )
