@@ -20118,6 +20118,87 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(y, ey)
         self.assertEqual(base, ebase)
 
+    @parametrize("requires_grad", (False, True))
+    def test_preserve_output_aliasing_noop_optimization(self, requires_grad):
+        # https://github.com/pytorch/pytorch/issues/197893
+        def fn(x):
+            return x + 0, x * 1, torch.sin(x)
+
+        eager_input = torch.randn(8, device=self.device, requires_grad=requires_grad)
+        compiled_input = eager_input.detach().clone().requires_grad_(requires_grad)
+        eager_outputs = fn(eager_input)
+        compiled_outputs = torch.compile(fn, fullgraph=True)(compiled_input)
+
+        self.assertEqual(compiled_outputs, eager_outputs)
+        for inputs, outputs in (
+            ((eager_input,), eager_outputs),
+            ((compiled_input,), compiled_outputs),
+        ):
+            for input_tensor, output in itertools.product(inputs, outputs):
+                self.assertFalse(torch._C._is_alias_of(input_tensor, output))
+            for left, right in itertools.combinations(outputs, 2):
+                self.assertFalse(torch._C._is_alias_of(left, right))
+
+    def test_preserve_output_aliasing_kernel_free(self):
+        # https://github.com/pytorch/pytorch/issues/197893
+        def fn(x):
+            return x + 0
+
+        x = torch.randn(8, device=self.device)
+        output = torch.compile(fn, fullgraph=True)(x)
+        self.assertEqual(output, fn(x))
+        self.assertFalse(torch._C._is_alias_of(x, output))
+
+    @parametrize("requires_grad", (False, True))
+    @parametrize("case", ("add_zero", "same", "view", "unbind", "input", "input_view"))
+    def test_preserve_output_output_aliasing_noop_optimization(
+        self, case, requires_grad
+    ):
+        # https://github.com/pytorch/pytorch/issues/197893
+        cases = {
+            "add_zero": lambda x, y: (y, y + 0),
+            "same": lambda x, y: (y, y),
+            "view": lambda x, y: (y, y.view(-1)),
+            "unbind": lambda x, y: (*y.unbind(0), y * 1),
+            "input": lambda x, y: (x, x + 0),
+            "input_view": lambda x, y: (x.view(-1), y, y * 1),
+        }
+
+        def fn(x):
+            return cases[case](x, torch.sin(x))
+
+        def aliasing(x, outputs):
+            tensors = (x, *outputs)
+            pairs = itertools.combinations(tensors, 2)
+            return [torch._C._is_alias_of(a, b) for a, b in pairs]
+
+        eager_input = torch.randn(2, 4, device=self.device, requires_grad=requires_grad)
+        compiled_input = eager_input.detach().clone().requires_grad_(requires_grad)
+        eager_outputs = fn(eager_input)
+        compiled_outputs = torch.compile(fn, fullgraph=True)(compiled_input)
+
+        self.assertEqual(compiled_outputs, eager_outputs)
+        expected = aliasing(eager_input, eager_outputs)
+        self.assertEqual(aliasing(compiled_input, compiled_outputs), expected)
+
+    # https://github.com/pytorch/pytorch/issues/195451
+    def test_preserve_output_aliasing_reinplace(self):
+        def fn(x, src):
+            updated = torch.slice_scatter(x, src, 0, 0, 1)
+            x.copy_(updated)
+            return updated
+
+        eager_input = torch.tensor([1.0, 2.0], device=self.device)
+        compiled_input = eager_input.clone()
+        src = torch.tensor([10.0], device=self.device)
+        eager_output = fn(eager_input, src)
+        compiled_output = torch.compile(fn, fullgraph=True)(compiled_input, src)
+
+        self.assertEqual(compiled_input, eager_input)
+        self.assertEqual(compiled_output, eager_output)
+        self.assertFalse(torch._C._is_alias_of(eager_input, eager_output))
+        self.assertFalse(torch._C._is_alias_of(compiled_input, compiled_output))
+
     # end of class CommonTemplate - add new tests here
 
 
