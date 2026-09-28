@@ -54,10 +54,6 @@ from torch.testing._internal.distributed.checkpoint_utils import (
 )
 
 
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
-backend = torch.distributed.get_default_backend_for_device(device_type)
-
-
 if TEST_WITH_DEV_DBG_ASAN:
     print(
         "Skip dev-asan as torch + multiprocessing spawn have known issues",
@@ -179,14 +175,15 @@ class _CheckpointContinuousTest(MultiProcContinuousTest):
 
     @classmethod
     def backend_str(cls) -> str:
-        return backend
+        return cls.distributed_backend()
 
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file):
-        if torch.accelerator.device_count() < world_size:
+        device_module = torch.get_device_module(cls.device_type)
+        if device_module.device_count() < world_size:
             sys.exit(TEST_SKIPS[f"multi-device-{world_size}"].exit_code)
         super()._init_pg(rank, world_size, rdvz_file)
-        torch.accelerator.set_device_index(rank)
+        device_module.set_device(rank)
 
 
 class TestDistributedStateDictSaveLoadWithSharedTensor(_CheckpointContinuousTest):
@@ -205,8 +202,8 @@ class TestDistributedStateDictSaveLoadWithSharedTensor(_CheckpointContinuousTest
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                f"rank:0/{device_type}:0",
-                f"rank:1/{device_type}:1",
+                f"rank:0/{self.device_type}:0",
+                f"rank:1/{self.device_type}:1",
             ],
         )
 
@@ -253,7 +250,7 @@ class TestDistributedReshardOnLoad(_CheckpointContinuousTest):
 
     def load_tensor(self, tensor: ShardedTensor) -> torch.Tensor:
         res = (
-            torch.zeros(tensor.shape, device=f"{device_type}:0")
+            torch.zeros(tensor.shape, device=f"{self.device_type}:0")
             if dist.get_rank() == 0
             else None
         )
@@ -273,18 +270,18 @@ class TestDistributedReshardOnLoad(_CheckpointContinuousTest):
             ChunkShardingSpec(
                 dim=0,
                 placements=[
-                    f"rank:0/{device_type}:0",
-                    f"rank:1/{device_type}:1",
+                    f"rank:0/{self.device_type}:0",
+                    f"rank:1/{self.device_type}:1",
                 ],
             ),
             # pyre-fixme [28]: Unexpected keyword argument `dim` to call `dist._sharding_spec.api.ChunkShardingSpec.__init__`.
             ChunkShardingSpec(
                 dim=0,
                 placements=[
-                    f"rank:0/{device_type}:0",
-                    f"rank:1/{device_type}:1",
-                    f"rank:1/{device_type}:1",
-                    f"rank:0/{device_type}:0",
+                    f"rank:0/{self.device_type}:0",
+                    f"rank:1/{self.device_type}:1",
+                    f"rank:1/{self.device_type}:1",
+                    f"rank:0/{self.device_type}:0",
                 ],
             ),
             # This requires the tensors to be [10, 20]
@@ -293,27 +290,27 @@ class TestDistributedReshardOnLoad(_CheckpointContinuousTest):
                     ShardMetadata(
                         shard_offsets=[0, 0],
                         shard_sizes=[2, 20],
-                        placement=f"rank:0/{device_type}:0",
+                        placement=f"rank:0/{self.device_type}:0",
                     ),
                     ShardMetadata(
                         shard_offsets=[2, 0],
                         shard_sizes=[1, 20],
-                        placement=f"rank:1/{device_type}:1",
+                        placement=f"rank:1/{self.device_type}:1",
                     ),
                     ShardMetadata(
                         shard_offsets=[3, 0],
                         shard_sizes=[3, 20],
-                        placement=f"rank:0/{device_type}:0",
+                        placement=f"rank:0/{self.device_type}:0",
                     ),
                     ShardMetadata(
                         shard_offsets=[6, 0],
                         shard_sizes=[3, 20],
-                        placement=f"rank:1/{device_type}:1",
+                        placement=f"rank:1/{self.device_type}:1",
                     ),
                     ShardMetadata(
                         shard_offsets=[9, 0],
                         shard_sizes=[1, 20],
-                        placement=f"rank:0/{device_type}:0",
+                        placement=f"rank:0/{self.device_type}:0",
                     ),
                 ]
             ),
@@ -323,12 +320,12 @@ class TestDistributedReshardOnLoad(_CheckpointContinuousTest):
                     ShardMetadata(
                         shard_offsets=[0, 0],
                         shard_sizes=[8, 20],
-                        placement=f"rank:1/{device_type}:1",
+                        placement=f"rank:1/{self.device_type}:1",
                     ),
                     ShardMetadata(
                         shard_offsets=[8, 0],
                         shard_sizes=[2, 20],
-                        placement=f"rank:0/{device_type}:0",
+                        placement=f"rank:0/{self.device_type}:0",
                     ),
                 ]
             ),
@@ -384,8 +381,8 @@ class TestDistributedReshardOnLoad(_CheckpointContinuousTest):
         src_spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                f"rank:0/{device_type}:0",
-                f"rank:1/{device_type}:1",
+                f"rank:0/{self.device_type}:0",
+                f"rank:1/{self.device_type}:1",
             ],
         )
 
@@ -393,8 +390,8 @@ class TestDistributedReshardOnLoad(_CheckpointContinuousTest):
         dst_spec = ChunkShardingSpec(
             dim=1,
             placements=[
-                f"rank:0/{device_type}:0",
-                f"rank:1/{device_type}:1",
+                f"rank:0/{self.device_type}:0",
+                f"rank:1/{self.device_type}:1",
             ],
         )
 
@@ -403,14 +400,18 @@ class TestDistributedReshardOnLoad(_CheckpointContinuousTest):
             os.makedirs(path)
         dist.barrier()
 
-        model_to_save = MyShardedModel3(src_spec).to(dist.get_rank())
+        model_to_save = MyShardedModel3(src_spec).to(
+            torch.device(self.device_type, self.rank)
+        )
         model_to_save._register_state_dict_hook(state_dict_hook)
         state_dict_to_save = model_to_save.state_dict()
 
         fs_writer = FileSystemWriter(path=path)
         save_state_dict(state_dict=state_dict_to_save, storage_writer=fs_writer)
 
-        model_to_load = MyShardedModel3(dst_spec).to(dist.get_rank())
+        model_to_load = MyShardedModel3(dst_spec).to(
+            torch.device(self.device_type, self.rank)
+        )
         model_to_load._register_state_dict_hook(state_dict_hook)
         state_dict_to_load_to = model_to_load.state_dict()
 
@@ -453,17 +454,17 @@ class TestDistributedReshardOnLoad(_CheckpointContinuousTest):
             ChunkShardingSpec(
                 dim=0,
                 placements=[
-                    f"rank:0/{device_type}:0",
-                    f"rank:1/{device_type}:1",
+                    f"rank:0/{self.device_type}:0",
+                    f"rank:1/{self.device_type}:1",
                 ],
             ),
             ChunkShardingSpec(
                 dim=0,
                 placements=[
-                    f"rank:0/{device_type}:0",
-                    f"rank:1/{device_type}:1",
-                    f"rank:1/{device_type}:1",
-                    f"rank:0/{device_type}:0",
+                    f"rank:0/{self.device_type}:0",
+                    f"rank:1/{self.device_type}:1",
+                    f"rank:1/{self.device_type}:1",
+                    f"rank:0/{self.device_type}:0",
                 ],
             ),
             EnumerableShardingSpec(
@@ -471,12 +472,12 @@ class TestDistributedReshardOnLoad(_CheckpointContinuousTest):
                     ShardMetadata(
                         shard_offsets=[0],
                         shard_sizes=[8],
-                        placement=f"rank:1/{device_type}:1",
+                        placement=f"rank:1/{self.device_type}:1",
                     ),
                     ShardMetadata(
                         shard_offsets=[8],
                         shard_sizes=[tensor_size - 8],
-                        placement=f"rank:0/{device_type}:0",
+                        placement=f"rank:0/{self.device_type}:0",
                     ),
                 ]
             ),
@@ -485,12 +486,12 @@ class TestDistributedReshardOnLoad(_CheckpointContinuousTest):
                     ShardMetadata(
                         shard_offsets=[0],
                         shard_sizes=[10],
-                        placement=f"rank:0/{device_type}:0",
+                        placement=f"rank:0/{self.device_type}:0",
                     ),
                     ShardMetadata(
                         shard_offsets=[10],
                         shard_sizes=[tensor_size - 10],
-                        placement=f"rank:1/{device_type}:1",
+                        placement=f"rank:1/{self.device_type}:1",
                     ),
                 ]
             ),
@@ -500,7 +501,9 @@ class TestDistributedReshardOnLoad(_CheckpointContinuousTest):
             for load_spec in specs:
                 save_dict = {
                     "sharded": sharded_tensor.rand(save_spec, tensor_size),
-                    "replicated": torch.rand(tensor_size, device=self.rank),
+                    "replicated": torch.rand(
+                        tensor_size, device=torch.device(self.device_type, self.rank)
+                    ),
                 }
 
                 fs_writer = FileSystemWriter(path=path)
@@ -508,7 +511,9 @@ class TestDistributedReshardOnLoad(_CheckpointContinuousTest):
 
                 # Freaky Friday the tensors
                 load_dict = {
-                    "sharded": torch.zeros(tensor_size, device=self.rank),
+                    "sharded": torch.zeros(
+                        tensor_size, device=torch.device(self.device_type, self.rank)
+                    ),
                     "replicated": sharded_tensor.zeros(load_spec, tensor_size),
                 }
 
@@ -536,7 +541,7 @@ class TestDistributedStateDictSaveLoadWithCaching(ShardedTensorTestBase):
     def world_size(self) -> int:
         return 2
 
-    @with_comms(init_rpc=False, backend=backend)
+    @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(2)
     @requires_capabilities(Capability.distributed.backend)
     @with_temp_dir
@@ -545,8 +550,8 @@ class TestDistributedStateDictSaveLoadWithCaching(ShardedTensorTestBase):
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                f"rank:0/{device_type}:0",
-                f"rank:1/{device_type}:1",
+                f"rank:0/{self.device_type}:0",
+                f"rank:1/{self.device_type}:1",
             ],
         )
 
