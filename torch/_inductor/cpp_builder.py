@@ -2814,9 +2814,6 @@ class CppBuilder:
         It is must need a temporary directory to store object files in Windows.
         After build completed, delete the temporary directory to save disk space.
         """
-        from torch.compiler._no_compile import check_compilation_allowed
-
-        check_compilation_allowed("C++ kernel compilation")
         if self._use_relative_path:
             # remote build uses relative path
             return self.build_fbcode_re()
