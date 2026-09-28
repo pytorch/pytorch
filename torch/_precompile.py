@@ -3024,7 +3024,14 @@ def _read_artifact(
     return python_code, cache
 
 
-def _verified_cache_envelope(cache, *, backend, tracer, code_hash, strict):
+def _verified_cache_envelope(
+    cache: bytes | str | os.PathLike[str],
+    *,
+    backend: str,
+    tracer: str,
+    code_hash: str,
+    strict: bool,
+) -> dict[str, Any] | None:
     # weights_only=True is safe (plain str/int/bytes dict). Outside strict mode the
     # cache is acceleration only, so an unreadable envelope or a FORMAT / VERSION
     # mismatch degrades to JIT'ing from python_code. Under no_compilation() that JIT
@@ -3144,15 +3151,13 @@ def _runnable_from_pair(
         # below loads the precompiled kernels (Triton binaries / autotune results)
         # instead of recompiling them. The composed python_code runs its inlined
         # kernels directly (no compile_fx re-entry, so no FxGraphCache lookup); the
-        # acceleration is the warm kernel cache. This is a pure acceleration: a stale /
-        # cross-torch-version / corrupt bundle that fails to load just leaves the caches
-        # cold, and python_code JITs -- same result, no crash.
+        # acceleration is the warm kernel cache. Outside strict mode this is a pure
+        # acceleration: a stale / cross-torch-version / corrupt bundle that fails to
+        # load just leaves the caches cold, and python_code JITs -- same result, no
+        # crash. Under no_compilation() that JIT is forbidden, so hydration must
+        # succeed.
         try:
             cache_info = torch.compiler.load_cache_artifacts(artifact)
-            if strict and (cache_info is None or cache_info.empty()):
-                raise PrecompileError(
-                    "strict precompile.load could not hydrate the compiled cache"
-                )
         except Exception as e:
             if strict:
                 raise PrecompileError(
@@ -3165,6 +3170,11 @@ def _runnable_from_pair(
                 type(e).__name__,
                 e,
             )
+        else:
+            if strict and (cache_info is None or cache_info.empty()):
+                raise PrecompileError(
+                    "strict precompile.load could not hydrate the compiled cache"
+                )
     # Run the driver inlined in python_code. It carries the full calling convention and
     # runtime safety checks (subclass wrap/unwrap, param/buffer lifting, grad harvest,
     # input/model validation) and JITs the kernels -- which hit the primed cache when

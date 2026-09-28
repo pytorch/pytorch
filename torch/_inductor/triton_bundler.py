@@ -4,6 +4,7 @@ import logging
 import os
 import shutil
 import uuid
+from contextlib import nullcontext
 from pathlib import Path
 
 from torch._dynamo.utils import counters, dynamo_timed, set_feature_use
@@ -358,6 +359,36 @@ class TritonBundler:
             return TritonBundle([], []), None
 
     @staticmethod
+    def _check_existing_kernel(
+        directory: str, artifacts: TritonKernelArtifacts
+    ) -> None:
+        """
+        Under no_compilation(), a kernel directory that is already on disk must
+        match the bundle: read_and_emit keeps the existing files, and Triton
+        would recompile over a mismatched or partial directory.
+        """
+        from torch.compiler._no_compile import is_compilation_forbidden
+
+        if not is_compilation_forbidden():
+            return
+
+        from torch._precompile import PrecompileError
+
+        with FileLock(directory + ".lock") if _IS_WINDOWS else nullcontext():
+            for artifact in artifacts.artifacts:
+                payload = artifact.payload
+                if artifact.filename.endswith(".json"):
+                    payload = payload.replace(
+                        TritonBundler._REPLACE_BYTES, str.encode(directory)
+                    )
+                path = Path(directory) / artifact.filename
+                if not path.is_file() or path.read_bytes() != payload:
+                    raise PrecompileError(
+                        "precompile.no_compilation() found an incomplete or "
+                        f"incompatible Triton kernel file in the cache: {path}"
+                    )
+
+    @staticmethod
     def read_and_emit(bundle: TritonBundle) -> TritonBundlerMetadata | None:
         """
         This is the main function called when a cache read happens. This function
@@ -392,21 +423,7 @@ class TritonBundler:
                 directory = os.path.join(basedir, artifacts.kernel_hash)
 
                 if os.path.exists(directory) and len(os.listdir(directory)) != 0:
-                    from torch.compiler._no_compile import is_compilation_forbidden
-
-                    if is_compilation_forbidden():
-                        for artifact in artifacts.artifacts:
-                            payload = artifact.payload
-                            if artifact.filename.endswith(".json"):
-                                payload = payload.replace(
-                                    TritonBundler._REPLACE_BYTES, str.encode(directory)
-                                )
-                            path = Path(directory) / artifact.filename
-                            if not path.is_file() or path.read_bytes() != payload:
-                                raise RuntimeError(
-                                    "strict precompile cache hydration found an "
-                                    f"incomplete or incompatible kernel file: {path}"
-                                )
+                    TritonBundler._check_existing_kernel(directory, artifacts)
                     # If directory already exists, we bail out and leave
                     # local disk to take care of caching
                     log.debug(
@@ -449,6 +466,7 @@ class TritonBundler:
                         os.replace(tmp_dir, directory)
                     except OSError:
                         log.warning("Directory %s is not empty - skipping!", tmp_dir)
+                        TritonBundler._check_existing_kernel(directory, artifacts)
 
             if config.use_static_triton_launcher:
                 static_kernel_names = TritonBundler.load_autotuners(
