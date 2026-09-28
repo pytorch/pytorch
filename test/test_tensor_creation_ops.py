@@ -3301,6 +3301,7 @@ class TestTensorCreationGeneric(TestCase):
 
 class TestTensorCreationCudaOnly(TestCase):
     hw_classification = HardwareClassification.CUDA
+    exact_dtype = True
 
     # TODO: this test should be updated
     def test_constructor_dtypes(self, device):
