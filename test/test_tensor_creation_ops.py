@@ -2969,6 +2969,10 @@ class TestTensorCreationCpuOnly(TestCase):
                 refs = (torch.iinfo(dtype).min, ) * 3
         _float_to_int_conversion_helper(self, vals, device, dtype, refs)
 
+class TestTensorCreationGeneric(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+    exact_dtype = True
+
     @slowTest
     def test_cat_big(self, device):
         SIZE1 = 6500
@@ -2980,7 +2984,7 @@ class TestTensorCreationCpuOnly(TestCase):
         self.assertEqual(result.size(0), SIZE1 + SIZE2)
 
     # TODO: this test should be updated
-    def test_constructor_dtypes(self, device):
+    def test_constructor_dtypes(self):
         self.assertIs(torch.tensor([]).dtype, torch.get_default_dtype())
 
         self.assertIs(torch.uint8, torch.ByteTensor.dtype)
@@ -3019,7 +3023,7 @@ class TestTensorCreationCpuOnly(TestCase):
                 self.assertRaises(TypeError, lambda: torch.set_default_dtype(t))
 
     # TODO: this test should be updated
-    def test_constructor_device_legacy(self, device):
+    def test_constructor_device_legacy(self):
         self.assertRaises(RuntimeError, lambda: torch.FloatTensor(device='cuda'))
         self.assertRaises(RuntimeError, lambda: torch.FloatTensor(torch.Size([2, 3, 4]), device='cuda'))
         self.assertRaises(RuntimeError, lambda: torch.FloatTensor((2.0, 3.0), device='cuda'))
@@ -3042,7 +3046,7 @@ class TestTensorCreationCpuOnly(TestCase):
 
     # TODO: this test should be updated
     @suppress_warnings
-    def test_tensor_factory(self, device):
+    def test_tensor_factory(self):
         # TODO: This test probably doesn't make too much sense now that
         # torch.tensor has been established for a while; it makes more
         # sense to test the legacy behavior in terms of the new behavior
@@ -4643,7 +4647,6 @@ class TestAsArray(TestCase):
 
 
 instantiate_device_type_tests(TestTensorCreation, globals(), allow_xpu=True)
-instantiate_device_type_tests(TestTensorCreationCpuOnly, globals(), only_for="cpu")
 instantiate_device_type_tests(TestTensorCreationCudaOnly, globals(), only_for="cuda")
 instantiate_device_type_tests(TestRandomTensorCreation, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestLikeTensorCreation, globals(), allow_xpu=True)
