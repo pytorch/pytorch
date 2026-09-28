@@ -244,11 +244,16 @@ class TritonBundler:
                     # Make sure the cubin path exists and is valid
                     for compile_result in result.kernel.compile_results:
                         compile_result.reload_cubin_path()
-                except RuntimeError:
+                except RuntimeError as e:
                     from torch.compiler._no_compile import is_compilation_forbidden
 
                     if is_compilation_forbidden():
-                        raise
+                        from torch._precompile import PrecompileError
+
+                        raise PrecompileError(
+                            "precompile.no_compilation() could not reload the cubin "
+                            f"for {result.kernel_name}"
+                        ) from e
                     log.warning(
                         "Failed to reload cubin file statically launchable autotuner %s",
                         result.kernel_name,
@@ -466,6 +471,7 @@ class TritonBundler:
                         os.replace(tmp_dir, directory)
                     except OSError:
                         log.warning("Directory %s is not empty - skipping!", tmp_dir)
+                        shutil.rmtree(tmp_dir, ignore_errors=True)
                         TritonBundler._check_existing_kernel(directory, artifacts)
 
             if config.use_static_triton_launcher:

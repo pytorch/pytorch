@@ -3025,7 +3025,7 @@ def _read_artifact(
 
 
 def _verified_cache_envelope(
-    cache: bytes | str | os.PathLike[str],
+    cache: bytes,
     *,
     backend: str,
     tracer: str,
@@ -3039,9 +3039,7 @@ def _verified_cache_envelope(
     # CODE_HASH mismatch signals a wrong (python_code, cache) pairing and always
     # raises; see Note [precompile programming model], invariant 7.
     try:
-        blob = torch.load(
-            io.BytesIO(cache) if isinstance(cache, bytes) else cache, weights_only=True
-        )
+        blob = torch.load(io.BytesIO(cache), weights_only=True)
         if blob.get("format") != _CACHE_FORMAT or blob.get("version") != _CACHE_VERSION:
             if strict:
                 raise PrecompileError(
@@ -3262,6 +3260,9 @@ def _runnable_from_pair(
         strict=strict,
     )
     artifact = blob.get("artifact") if blob is not None else None
+    # Only inductor's python_code JITs kernels at load, so other backends run without
+    # the artifact. An inductor capture of an uncacheable graph saves no artifact and
+    # cannot be served strictly.
     if strict and backend == "inductor" and not artifact:
         raise PrecompileError(
             "strict precompile.load requires the compiled cache artifact"
