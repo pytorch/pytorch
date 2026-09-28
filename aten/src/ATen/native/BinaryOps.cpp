@@ -1717,4 +1717,55 @@ Tensor div_Tensor_meta(const Tensor& self, const Tensor& other) {
   return binary_ref_meta(self, other, TypePromotionKind::INT_TO_FLOAT, symbolic);
 }
 
+// Mirrors meta_binop_inplace_alpha, which ignores alpha. A wrapped number's
+// dtype matches the Python type the checks see there.
+Tensor& add__Tensor_meta(Tensor& self, const Tensor& other, const Scalar& /*alpha*/) {
+  const auto self_dtype = self.scalar_type();
+  const auto other_dtype = other.scalar_type();
+  TORCH_CHECK(
+      !(isIntegralType(self_dtype, /*includeBool=*/false) && isFloatingType(other_dtype)),
+      "Promotion of int.add/sub_(float) in in-place ops are not possible due to element size change.");
+  TORCH_CHECK(
+      self_dtype != kBool || other_dtype == kBool,
+      "Promotion of bool.add/sub_(others) in in-place ops are not possible due to element size change.");
+  if (!other.unsafeGetTensorImpl()->is_wrapped_number()) {
+    check_inplace_broadcast(self.sym_sizes(), other.sym_sizes());
+  }
+  return self;
+}
+
+// Python fake runs the refs for the ops below, under FakeTensorMode for
+// symbolic inputs and as the Meta kernel otherwise.
+Tensor bitwise_and_Tensor_meta(const Tensor& self, const Tensor& other) {
+  const bool symbolic = self.unsafeGetTensorImpl()->has_symbolic_sizes_strides() ||
+      other.unsafeGetTensorImpl()->has_symbolic_sizes_strides();
+  return elementwise_binary_ref_meta("bitwise_and", self, other, TypePromotionKind::DEFAULT, symbolic);
+}
+
+Tensor le_Tensor_meta(const Tensor& self, const Tensor& other) {
+  const bool symbolic = self.unsafeGetTensorImpl()->has_symbolic_sizes_strides() ||
+      other.unsafeGetTensorImpl()->has_symbolic_sizes_strides();
+  return elementwise_binary_ref_meta(
+      "le", self, other, TypePromotionKind::ALWAYS_BOOL, symbolic, /*supports_lhs_python_scalar=*/false);
+}
+
+Tensor le_Scalar_meta(const Tensor& self, const Scalar& other) {
+  const bool symbolic = self.unsafeGetTensorImpl()->has_symbolic_sizes_strides() || other.isSymInt();
+  return elementwise_binary_ref_meta(
+      "le", self, python_number(other), TypePromotionKind::ALWAYS_BOOL, symbolic, /*supports_lhs_python_scalar=*/false);
+}
+
+Tensor eq_Tensor_meta(const Tensor& self, const Tensor& other) {
+  const bool symbolic = self.unsafeGetTensorImpl()->has_symbolic_sizes_strides() ||
+      other.unsafeGetTensorImpl()->has_symbolic_sizes_strides();
+  return elementwise_binary_ref_meta(
+      "eq", self, other, TypePromotionKind::ALWAYS_BOOL, symbolic, /*supports_lhs_python_scalar=*/false);
+}
+
+Tensor ne_Scalar_meta(const Tensor& self, const Scalar& other) {
+  const bool symbolic = self.unsafeGetTensorImpl()->has_symbolic_sizes_strides() || other.isSymInt();
+  return elementwise_binary_ref_meta(
+      "ne", self, python_number(other), TypePromotionKind::ALWAYS_BOOL, symbolic, /*supports_lhs_python_scalar=*/false);
+}
+
 } // namespace at::native
