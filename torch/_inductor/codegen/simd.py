@@ -605,11 +605,14 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         template_node,
         epilogue_nodes,
         prologue_nodes,
-        load_input_producer_groups,
+        buf_name_to_prologue_group,
         prologue_preserves_zero_mask_fn,
         render,
     ) -> str:
         """Generate template source code with fused prologues and epilogues.
+
+        ``prologue_nodes`` are upstream of the template node. Their code may be
+        emitted in either the template's load-input or store-output region.
 
         Subclasses override this to implement custom code generation.
         The default implementation raises NotImplementedError — the actual
@@ -4471,6 +4474,9 @@ class SIMDScheduling(BaseScheduling):
     ):
         """Codegen a single template kernel variant.
 
+        ``prologue_nodes`` are upstream of the template node. Their producer groups
+        are routed to either the template's load-input or store-output region.
+
         Template fusion has three codegen placements:
 
         1. Load-input prologue fusion: producers of named template inputs such as
@@ -4482,7 +4488,7 @@ class SIMDScheduling(BaseScheduling):
         3. Output epilogue fusion: consumers of the template result, such as relu
            or multiply, are generated after epilogue_fn and before the final store.
         """
-        load_input_producer_groups = {}
+        buf_name_to_prologue_group = {}
         template_reads = template_node.used_buffer_names()
         prefix_inputs_fusion_names = OrderedSet(
             kernel.input_nodes[index].get_name()
@@ -4498,7 +4504,9 @@ class SIMDScheduling(BaseScheduling):
         for prologue in prologue_nodes:
             names = prologue.get_buffer_names()
             prologue_group.append(prologue)
-            # this must be the end of a prologue group
+            # Scheduler ordering keeps the nodes for each template input
+            # contiguous. Accumulate nodes until one produces a buffer read
+            # directly by the template, which completes the producer group.
             if names & template_reads:
                 if len(names) != 1:
                     raise AssertionError(f"expected len(names) == 1, got {len(names)}")
@@ -4509,7 +4517,7 @@ class SIMDScheduling(BaseScheduling):
                     )
                     kernel.store_output_fused_inputs.add(input_name)
                 if input_name in named_input_names:
-                    load_input_producer_groups[input_name] = prologue_group
+                    buf_name_to_prologue_group[input_name] = prologue_group
                     kernel.load_input_fused_inputs.add(input_name)
                 prologue_group = []
 
@@ -4533,7 +4541,7 @@ class SIMDScheduling(BaseScheduling):
             template_node,
             epilogue_nodes,
             prologue_nodes,
-            load_input_producer_groups,
+            buf_name_to_prologue_group,
             prologue_preserves_zero_mask,
             render,
         )
@@ -4625,7 +4633,10 @@ class SIMDScheduling(BaseScheduling):
         hint_override: int | None = None,
     ) -> str | None:
         """
-        Codegen a triton template with multi-kernel dispatch support
+        Codegen a triton template with multi-kernel dispatch support.
+
+        ``prologue_nodes`` are upstream of the template node. Their code may be
+        emitted in either the template's load-input or store-output region.
 
         If `only_gen_src_code=True` the src code will be returned instead of being
         codegenned into the wrapper

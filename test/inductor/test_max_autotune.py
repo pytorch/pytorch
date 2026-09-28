@@ -2459,21 +2459,25 @@ class TestMaxAutotune(TestCase):
             self.assertEqual(out, expected, atol=1e-3, rtol=1e-3)
 
     def test_triton_template_generated_code_cache_key(self):
-        generate_and_load_args = len(
+        generate_and_load_args = set(
             inspect.signature(
                 torch._inductor.select_algorithm.TritonTemplate.generate_and_load
             ).parameters
         )
-        make_key_args = len(
+        make_key_args = set(
             inspect.signature(
                 torch._inductor.select_algorithm.GeneratedCodeCache.make_key
             ).parameters
         )
 
-        # Make sure all args of generate_and_load_args are passed to make_key_args (Except generate_with_caching)
-        # update this function each time new arg added to generate_and_load and make sure arg is added to make_key
-        self.assertEqual(generate_and_load_args - 1, make_key_args)
-        self.assertEqual(generate_and_load_args, 21)
+        # generate_with_caching controls use of the cache itself. The prefix fusion
+        # indices affect replayed metadata and kernel_options, not cached source.
+        self.assertEqual(
+            generate_and_load_args
+            - {"generate_with_caching", "prefix_inputs_fusion_indices"},
+            make_key_args,
+        )
+        self.assertEqual(len(generate_and_load_args), 22)
 
     @fresh_cache()
     @config.patch(
@@ -2781,13 +2785,13 @@ class TestMaxAutotune(TestCase):
         a = Buffer(name="buf_a", layout=make_layout())
         b = Buffer(name="buf_b", layout=make_layout())
 
-        def key(*input_nodes):
+        def key(*input_nodes, prefix_args=0):
             return GeneratedCodeCache().make_key(
                 input_nodes=input_nodes,
                 num_stages=1,
                 num_warps=4,
                 call_sizes=[8, 8],
-                prefix_args=0,
+                prefix_args=prefix_args,
                 suffix_args=0,
                 epilogue_fn=identity,
                 epilogue_fn_hash=None,
@@ -5222,6 +5226,44 @@ class TestPrologueFusion(TestCase):
             .check("2.0")
             .check("acc +")
             .check_count("tl.store", 1, exactly=True)
+            .run(code[0])
+        )
+
+    @config.patch(
+        {
+            "benchmark_epilogue_fusion": True,
+            "max_epilogue_benchmarked_choices": 3,
+        }
+    )
+    def test_addmm_shared_intermediate_prefix_and_input_prologue_fusion(self):
+        # The shared producer has two users, so it must be materialized. Its two
+        # single-use children can still fuse separately into LOAD_INPUT and
+        # STORE_OUTPUT.
+        M = K = N = 64
+
+        def foo(x, b):
+            shared = x * 100.0
+            computed_bias = shared * 2.0
+            computed_a = shared * 3.0
+            return torch.addmm(computed_bias, computed_a, b)
+
+        x = torch.randn(M, K, device=GPU_TYPE) * 0.01
+        b = torch.randn(K, N, device=GPU_TYPE)
+
+        with self.force_template_fusion_benchmark():
+            out, code = run_and_get_code(torch.compile(foo), x, b)
+
+        self.assertEqual(out, foo(x, b), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=2, num_allocs=1, num_deallocs=3)
+        (
+            FileCheck()
+            .check("100.0")
+            .check("tl.store")
+            .check("3.0")
+            .check("tl.dot")
+            .check("2.0")
+            .check("acc +")
+            .check_count("tl.store", 2, exactly=True)
             .run(code[0])
         )
 

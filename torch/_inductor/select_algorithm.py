@@ -714,7 +714,7 @@ class TritonTemplateKernel(TritonKernel):
         # Producer groups for inputs consumed by store_output().
         self.store_output_input_producer_groups: dict[str, list[Any]] = {}
         # Load-input fused inputs whose producers preserve a zero mask.
-        self.load_input_fused_inputs_preserve_zero: OrderedSet[str] = OrderedSet()
+        self.prologue_fused_inputs_preserve_zero: OrderedSet[str] = OrderedSet()
 
         # The following attributes are all used for triton kernel codegen.
         # They are swapped onto the TritonTemplateKernel object by
@@ -1447,7 +1447,7 @@ class TritonTemplateKernel(TritonKernel):
                 value_dtype = value.dtype
                 value_str = str(value)
                 if template_mask != "None" and (
-                    name not in V.kernel.load_input_fused_inputs_preserve_zero
+                    name not in V.kernel.prologue_fused_inputs_preserve_zero
                     or other != 0
                 ):
                     value_str = f"tl.where({template_mask}, {value_str}, {other})"
@@ -2124,9 +2124,12 @@ class TritonTemplateKernel(TritonKernel):
         return node.get_stride()
 
     def _compute_fusion_metadata(
-        self, scheduling, epilogue_nodes, prologue_nodes, load_input_producer_groups
+        self, scheduling, epilogue_nodes, prologue_nodes, buf_name_to_prologue_group
     ):
         """Prepare epilogue/prologue routing before render().
+
+        ``prologue_nodes`` are upstream of the template node. Their code may be
+        emitted in either the template's load-input or store-output region.
 
         Default: trivial routing — all epilogues broadcast to every subgraph,
         none unfused, no prologue source tracking.  Override in subclasses
@@ -2144,16 +2147,19 @@ class TritonTemplateKernel(TritonKernel):
         template_node,
         epilogue_nodes,
         prologue_nodes,
-        load_input_producer_groups,
+        buf_name_to_prologue_group,
         prologue_preserves_zero_mask_fn,
         render,
     ) -> str:
         """Generate template source code with fused prologues and epilogues.
 
+        ``prologue_nodes`` are upstream of the template node. Their code may be
+        emitted in either the template's load-input or store-output region.
+
         Returns the final source code string.
         """
         self._compute_fusion_metadata(
-            scheduling, epilogue_nodes, prologue_nodes, load_input_producer_groups
+            scheduling, epilogue_nodes, prologue_nodes, buf_name_to_prologue_group
         )
         with self:
             partial_code = render()
@@ -2167,7 +2173,7 @@ class TritonTemplateKernel(TritonKernel):
                     self.cse.invalidate(OrderedSet())
 
             self.codegen_prologues_in_subgraphs(
-                load_input_producer_groups, prologue_preserves_zero_mask_fn
+                buf_name_to_prologue_group, prologue_preserves_zero_mask_fn
             )
 
         partial_code = self._finalize_partial_render(partial_code)
@@ -2206,12 +2212,12 @@ class TritonTemplateKernel(TritonKernel):
         return src_code
 
     def codegen_prologues_in_subgraphs(
-        self, load_input_producer_groups, prologue_preserves_zero_mask_fn
+        self, buf_name_to_prologue_group, prologue_preserves_zero_mask_fn
     ):
         """Run prologue codegen in each load-input subgraph body."""
         for input_name, buffer in self.named_input_nodes.items():
             subgraph_name = f"<LOAD_INPUT_{input_name}>"
-            prologue_group = load_input_producer_groups.get(buffer.get_name(), [])
+            prologue_group = buf_name_to_prologue_group.get(buffer.get_name(), [])
             if not prologue_group:
                 continue
             can_codegen_without_upcast = all(
@@ -2227,7 +2233,7 @@ class TritonTemplateKernel(TritonKernel):
                             and len(prologue_group) == 1
                         ):
                             if prologue_preserves_zero_mask_fn(prologue_node):
-                                self.load_input_fused_inputs_preserve_zero |= (
+                                self.prologue_fused_inputs_preserve_zero |= (
                                     prologue_node.get_buffer_names()
                                 )
                         prologue_node.codegen(
@@ -2350,9 +2356,12 @@ class ExternalTritonTemplateKernel(TritonTemplateKernel):
         return self._unfused_epilogues
 
     def _compute_fusion_metadata(
-        self, scheduling, epilogue_nodes, prologue_nodes, load_input_producer_groups
+        self, scheduling, epilogue_nodes, prologue_nodes, buf_name_to_prologue_group
     ):
         """Compute fusion metadata for external backends.
+
+        ``prologue_nodes`` are upstream of the template node. Their code may be
+        emitted in either the template's load-input or store-output region.
 
         Determines eligible epilogues/prologues, builds epilogue specs,
         and computes prologue sources — all before render().
@@ -2382,7 +2391,7 @@ class ExternalTritonTemplateKernel(TritonTemplateKernel):
             buf_name: frozenset(
                 d.name for d in pro_node.read_writes.reads if isinstance(d, MemoryDep)
             )
-            for buf_name, pro_nodes in load_input_producer_groups.items()
+            for buf_name, pro_nodes in buf_name_to_prologue_group.items()
             for pro_node in pro_nodes
         }
 

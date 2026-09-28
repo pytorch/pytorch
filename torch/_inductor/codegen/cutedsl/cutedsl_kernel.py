@@ -192,7 +192,7 @@ class CuteDSLTemplateKernel(Kernel):
 
         # TODO Additional attributes needed by template system
         self.prologue_fused_inputs: OrderedSet[str] = OrderedSet()
-        self.load_input_fused_inputs_preserve_zero: OrderedSet[str] = OrderedSet()
+        self.prologue_fused_inputs_preserve_zero: OrderedSet[str] = OrderedSet()
         self.named_input_nodes: dict[str, Buffer] = {}
 
         # Create named input nodes mapping

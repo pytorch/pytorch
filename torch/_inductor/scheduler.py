@@ -3532,8 +3532,10 @@ class BaseSchedulerNode:
     def get_prologue_template_epilogue(
         nodes: list[BaseSchedulerNode],
     ) -> tuple[list[BaseSchedulerNode], BaseSchedulerNode, list[BaseSchedulerNode]]:
-        """
-        For the list of nodes, get the prologue, template, and epilogue
+        """Split nodes by graph position around the template.
+
+        Prologue nodes are upstream of the template node. Their code may later be
+        emitted in either the template's load-input or store-output region.
         """
         template_index = next(i for i, n in enumerate(nodes) if n.is_template())
 
@@ -13026,6 +13028,9 @@ class BaseScheduling:  # noqa: docstring_linter
     ) -> str | None:
         """
         Given a template node, generate a kernel.
+
+        ``prologue_nodes`` are upstream of the template node. Their code may be
+        emitted in either the template's load-input or store-output region.
 
         This function is only available for triton now. If the third-party backend behaves as a sub-class
         of TritonScheduling, it can override it or reuse it.

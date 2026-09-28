@@ -53,7 +53,7 @@ class FlyDSLTemplateKernel(Kernel):
         self.output_node = output_node
         self.render_hooks: dict[str, Callable[[], str] | None] = {}
         self.prologue_fused_inputs: OrderedSet[str] = OrderedSet()
-        self.load_input_fused_inputs_preserve_zero: OrderedSet[str] = OrderedSet()
+        self.prologue_fused_inputs_preserve_zero: OrderedSet[str] = OrderedSet()
         self._template_input_args: list[tuple[str, Buffer]] = []
         self._seen_input_args: OrderedSet[str] = OrderedSet()
         self._template_signature_defined = False
