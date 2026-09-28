@@ -6702,6 +6702,19 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual(a.device, b.to(a, non_blocking=non_blocking).device)
                 self.assertEqual(b.device, a.to(b, non_blocking=non_blocking).device)
 
+    @onlyAccelerator
+    @unittest.skipIf(PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property")
+    def test_pin_memory(self, device):
+        x = torch.randn(3, 5)
+
+        pinned = x.pin_memory()
+        self.assertTrue(pinned.is_pinned())
+        self.assertEqual(pinned, x)
+        self.assertNotEqual(pinned.data_ptr(), x.data_ptr())
+        # test that pin_memory on already pinned tensor has no effect
+        self.assertIs(pinned, pinned.pin_memory())
+        self.assertEqual(pinned.data_ptr(), pinned.pin_memory().data_ptr())
+
 
 class TestTorchCUDA(TestCase):
     hw_classification = HardwareClassification.CUDA
@@ -6977,18 +6990,6 @@ class TestTorchCUDA(TestCase):
 
         with self.assertRaisesRegex(NotImplementedError, r'Cannot copy out'):
             s1.copy_(s0)
-
-    @unittest.skipIf(PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property")
-    def test_pin_memory(self, device):
-        x = torch.randn(3, 5)
-
-        pinned = x.pin_memory()
-        self.assertTrue(pinned.is_pinned())
-        self.assertEqual(pinned, x)
-        self.assertNotEqual(pinned.data_ptr(), x.data_ptr())
-        # test that pin_memory on already pinned tensor has no effect
-        self.assertIs(pinned, pinned.pin_memory())
-        self.assertEqual(pinned.data_ptr(), pinned.pin_memory().data_ptr())
 
 
 # Tests that compare a device's computation with the (gold-standard) CPU's.
@@ -11384,6 +11385,15 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         with self.assertRaisesRegex(NotImplementedError, r'Cannot copy out'):
             s1.copy_(s0)
 
+    def test_set_default_tensor_type_warnings(self):
+        msg = '.*is deprecated as of PyTorch 2.1, please use torch.set_default_dtype().*'
+        default_type = torch.tensor([]).type()
+        try:
+            with self.assertWarnsOnceRegex(UserWarning, msg):
+                torch.set_default_tensor_type(torch.FloatTensor)
+        finally:
+            torch.set_default_tensor_type(default_type)
+
 
 class TestTorchCPU(TestCase):
     hw_classification = HardwareClassification.CPU
@@ -11411,15 +11421,6 @@ class TestTorchCPU(TestCase):
         src_bf16 = src.bfloat16()
         self.assertEqual(src.neg().bfloat16(), src_bf16.neg())
         self.assertEqual(src.abs().bfloat16(), src_bf16.abs())
-
-    def test_set_default_tensor_type_warnings(self):
-        msg = '.*is deprecated as of PyTorch 2.1, please use torch.set_default_dtype().*'
-        default_type = torch.tensor([]).type()
-        try:
-            with self.assertWarnsOnceRegex(UserWarning, msg):
-                torch.set_default_tensor_type(torch.FloatTensor)
-        finally:
-            torch.set_default_tensor_type(default_type)
 
 # The following block extends TestTorch with negative dim wrapping tests
 # FIXME: replace these with OpInfo sample inputs or systemic OpInfo tests
