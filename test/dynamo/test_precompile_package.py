@@ -7,6 +7,7 @@ import enum
 import functools
 import importlib.machinery
 import importlib.util
+import io
 import itertools
 import math
 import os
@@ -54,6 +55,49 @@ from torch.testing._internal.common_utils import (
 
 def _user_op(x):
     return x + 1
+
+
+def _act(x):
+    return x.relu()
+
+
+_relu = _act
+
+
+def _act(x):
+    return x.sigmoid()
+
+
+_sigmoid = _act
+
+
+def _through_act(x):
+    return _act(x) + 1
+
+
+# Never registered in sys.modules, so no process can unpickle it by reference.
+_unregistered = types.ModuleType("_unregistered")
+_unregistered.SCALE = 1
+
+
+def _without_module_globals(fn):
+    """A copy of fn whose globals no importable module owns, so a guard on it
+    cannot be rebuilt by value in another process and the default filter drops
+    it."""
+    return types.FunctionType(fn.__code__, dict(fn.__globals__), fn.__name__)
+
+
+def _unportable_op(x):
+    return x + 1
+
+
+_unportable_op = _without_module_globals(_unportable_op)
+
+
+class _Doubling(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x):
+        return x * 2
 
 
 def _stack(*filenames):
@@ -276,9 +320,25 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         keep = precompile_package.default_guard_filter_fn(entries)
         self.assertEqual(list(zip(rows, keep)), [(row, True) for row in rows])
 
+    def test_default_guard_filter_keeps_a_class_bound_builtin(self):
+        class LocalFn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x
+
+        rows = [
+            ("ID_MATCH", _Doubling.apply, True),
+            ("CLOSURE_MATCH", _Doubling.apply, True),
+            ("ID_MATCH", LocalFn.apply, False),
+            ("CLOSURE_MATCH", LocalFn.apply, False),
+        ]
+        entries = [_entry(GlobalSource("apply"), v, t) for t, v, _ in rows]
+        keep = precompile_package.default_guard_filter_fn(entries)
+        self.assertEqual(list(keep), [k for _, _, k in rows])
+
     def test_default_guard_filter_through_serialize_guards(self):
         def fn(x):
-            return _user_op(x) + len(x.shape)
+            return _unportable_op(x) + len(x.shape)
 
         seen = []
         x = torch.randn(3)
@@ -293,15 +353,17 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # pickles, so a kept CLOSURE_MATCH would have thrown above.
         len_slot = f"G['{builtins_key}']['len']"
         verdicts = {(e.guard_type, e.name): keep for e, keep in seen}
-        self.assertIs(verdicts.get(("CLOSURE_MATCH", "G['_user_op']")), False)
+        self.assertIs(verdicts.get(("CLOSURE_MATCH", "G['_unportable_op']")), False)
         self.assertIs(verdicts.get(("BUILTIN_MATCH", len_slot)), True)
         self.assertEqual(kept, {t for (t, _), keep in verdicts.items() if keep})
         data = AOTCompiledFunction.serialize(compiled).serialized_data
         loaded = AOTCompiledFunction.deserialize(data)
         self.assertEqual(loaded(x), fn(x))
-        # What the dropped guard would have noticed: with _user_op rebound the
-        # loaded artifact still passes its guards and serves the old graph.
-        with mock.patch.object(sys.modules[__name__], "_user_op", lambda x: x - 1):
+        # What the dropped guard would have noticed: with _unportable_op rebound
+        # the loaded artifact still passes its guards and serves the old graph.
+        with mock.patch.object(
+            sys.modules[__name__], "_unportable_op", lambda x: x - 1
+        ):
             self.assertEqual(fn(x), x)
             self.assertTrue(loaded.guard_check(x))
             self.assertEqual(loaded(x), x + 2)
@@ -313,6 +375,34 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             with self.assertRaisesRegex(RuntimeError, failed_on_len):
                 loaded(x)
         self.assertTrue(loaded.guard_check(x))
+
+    def test_default_guard_filter_keeps_a_module_function_by_code(self):
+        # A function in a module's globals keeps its CLOSURE_MATCH, which is
+        # serialized as a check of the function's code against the loading
+        # process's module, so the rebinding a dropped guard misses fails it.
+        def fn(x):
+            return _user_op(x) + len(x.shape)
+
+        seen = []
+        x = torch.randn(3)
+        compiled = _aot_compile(fn, x, seen=seen)
+        _, kept = _kept_types(compiled)
+        verdicts = {(e.guard_type, e.name): keep for e, keep in seen}
+        self.assertIs(verdicts.get(("CLOSURE_MATCH", "G['_user_op']")), True)
+        kept_by_filter = {t for (t, _), keep in verdicts.items() if keep}
+        self.assertEqual(
+            kept, kept_by_filter - {"CLOSURE_MATCH"} | {"FUNCTION_CODE_MATCH"}
+        )
+        data = AOTCompiledFunction.serialize(compiled).serialized_data
+        scope = dict(globals())
+        loaded = AOTCompiledFunction.deserialize(data, guard_globals=scope)
+        self.assertEqual(loaded(x), fn(x))
+        with mock.patch.dict(scope, {"_user_op": lambda x: x - 1}):
+            self.assertFalse(loaded.guard_check(x))
+        # An equal but distinct code object stands in for another process's.
+        copy = types.FunctionType(_user_op.__code__.replace(), globals())
+        with mock.patch.dict(scope, {"_user_op": copy}):
+            self.assertTrue(loaded.guard_check(x))
 
     def test_default_guard_filter_keeps_the_pytree_registry_keys_match(self):
         # The DICT_KEYS_MATCH on SUPPORTED_NODES reaches the filter as the
@@ -375,14 +465,33 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         state, kept = _kept_types(compiled)
         data = AOTCompiledFunction.serialize(compiled).serialized_data
         control = _aot_compile(fn_tree, x, guard_filter_fn=dropping)
-        control_state, control_kept = _kept_types(control)
-        # The kept keys-match is all that tells the two artifacts' guards apart:
-        # one type name and one guard more, the count because a set of type names
-        # hides a second divergence in a type that keeps another instance.
+        control_state, _ = _kept_types(control)
+        # The kept keys-match is all that tells the two artifacts' guards apart
+        # beyond the identity guards on objects a load resolves by reference
+        # (G['pytree'], two of its classes and torch), which the pre-check's type
+        # tests drop. Counted per type, because a set of type names hides a
+        # second divergence in a type that keeps another instance.
         self.assertIn("DICT_KEYS_MATCH", kept)
-        self.assertEqual(kept ^ control_kept, {"DICT_KEYS_MATCH"})
-        n_control = len(control_state.output_graph.guards)
-        self.assertEqual(len(state.output_graph.guards), n_control + 1)
+        counts = collections.Counter(
+            g.create_fn_name() for g in state.output_graph.guards
+        )
+        control_counts = collections.Counter(
+            g.create_fn_name() for g in control_state.output_graph.guards
+        )
+        # pytree's classes are TreeSpec and typing.Any, which is a class only
+        # from Python 3.11 on.
+        class_matches = 2 if isinstance(pytree.Any, type) else 1
+        self.assertEqual(
+            counts - control_counts,
+            {
+                "DICT_KEYS_MATCH": 1,
+                "MODULE_MATCH": 1,
+                "CLASS_MATCH": class_matches,
+                "ID_MATCH": 2,
+                "FUNCTION_CODE_MATCH": 4,
+            },
+        )
+        self.assertEqual(control_counts - counts, {})
         control_data = AOTCompiledFunction.serialize(control).serialized_data
         # A node registered before load is baked into either artifact's guards.
         register(Extra)
@@ -2353,6 +2462,163 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertEqual(summary.wont_generalize, ("mode",))
         self.assertEqual(summary.capture_errors, ("boom",))
 
+    def test_precompile_session_captures_variants_and_summarizes(self):
+        def step(model, x):
+            y = model(x)
+            torch._dynamo.graph_break()
+            return y.sum(dim=0) + y.shape[0] * _unregistered.SCALE
+
+        model = torch.nn.Linear(4, 4)
+        x2, x3 = torch.ones(2, 4), torch.ones(3, 4)
+        session = precompile_package.precompile_capture(step, backend="eager")
+        with session as call:
+            self.assertEqual(call(model, x2), step(model, x2))
+            self.assertEqual(call(model, x3), step(model, x3))
+            summary = session.summary()
+        # The entry and its continuation, recompiled for the second shape; the
+        # default filter's drops (the unregistered module's MODULE_MATCH) are
+        # reported, and the MODULE_MATCH on torch, which a load resolves by
+        # reference, is kept.
+        self.assertTrue(summary.complete, str(summary))
+        self.assertEqual((summary.frames, summary.resume_functions), (2, 1))
+        self.assertGreaterEqual(summary.guarded_codes, 3)
+        self.assertIn(("MODULE_MATCH", "G['_unregistered']"), summary.dropped_guards)
+        self.assertIn(("MODULE_MATCH", "G['torch']"), summary.kept_guards)
+        self.assertIn(
+            ("CLOSURE_MATCH", "G['torch']._dynamo.graph_break"), summary.kept_guards
+        )
+        self.assertTrue(summary.kept_guards)
+        self.assertEqual(summary.risky_dropped_guards, ())
+        with self.assertRaisesRegex(PackageError, "not active"):
+            call(model, x2)
+        with self.assertRaisesRegex(PackageError, "cannot be re-entered"):
+            with session:
+                pass
+        # A call that raised is a capture error, and the summary is not complete.
+        failed = precompile_package.precompile_capture(step, backend="eager")
+        with failed as call:
+            with self.assertRaises(RuntimeError):
+                call(model, torch.ones(2, 5))
+        self.assertFalse(failed.summary().complete)
+        self.assertEqual(len(failed.summary().capture_errors), 1)
+        # A second session on the same function compiles into its own cache
+        # region rather than serving the first one's entries.
+        second = precompile_package.precompile_capture(step, backend="eager")
+        with second as call:
+            call(model, x2)
+        self.assertGreaterEqual(second.summary().guarded_codes, 2)
+        # A custom filter's drop the default filter would have kept is risky:
+        # nothing here can say what the caller gave up.
+        custom = precompile_package.precompile_capture(
+            step,
+            backend="eager",
+            guard_filter_fn=lambda es: [e.guard_type != "TENSOR_MATCH" for e in es],
+        )
+        with custom as call:
+            call(model, x2)
+        self.assertIn(("TENSOR_MATCH", "x"), custom.summary().risky_dropped_guards)
+        with self.assertRaisesRegex(PackageError, "partial"):
+            precompile_package.precompile_capture(functools.partial(step, model))
+        with self.assertRaisesRegex(PackageError, "CALLS the model"):
+            precompile_package.precompile_capture(model)
+        with self.assertRaisesRegex(PackageError, "bound method"):
+            precompile_package.precompile_capture(model.forward)
+
+    def test_a_dropped_guard_that_tells_variants_apart_is_risky(self):
+        # The default filter drops the CLOSURE_MATCH on _act when the def bound
+        # there has no module globals. The static shapes recompile either way; a
+        # dropped slot that held a different def in each variant cannot pick
+        # between them at serve time.
+        def capture(acts):
+            session = precompile_package.precompile_capture(
+                _through_act, backend="eager", dynamic=False
+            )
+            with session as call:
+                for n, act in enumerate(acts):
+                    with mock.patch.object(sys.modules[__name__], "_act", act):
+                        call(torch.ones(2 + n))
+            return session.summary()
+
+        slot = ("CLOSURE_MATCH", "G['_act']")
+        relu, sigmoid = (
+            _without_module_globals(_relu),
+            _without_module_globals(_sigmoid),
+        )
+        same = capture([relu, relu])
+        self.assertIn(slot, same.dropped_guards)
+        self.assertGreaterEqual(same.guarded_codes, 2)
+        self.assertNotIn(slot, same.risky_dropped_guards)
+        self.assertIn(slot, capture([relu, sigmoid]).risky_dropped_guards)
+        # Defs in a module's globals are told apart by code at serve time.
+        kept = capture([_relu, _sigmoid])
+        self.assertNotIn(slot, kept.dropped_guards)
+        self.assertIn(slot, kept.kept_guards)
+
+    @parametrize("backend", ["eager", "inductor"])
+    def test_precompile_session_renders_behind_the_gates(self, backend):
+        # Under inductor every backend graph is a bundled entry the session takes
+        # out of PrecompileContext, so the second render still finds the
+        # variants the first one collected.
+        from torch._precompile import _parse_artifact_metadata
+
+        def step(model, x):
+            y = model(x)
+            torch._dynamo.graph_break()
+            return y.sum(dim=0) + y.shape[0] * _unregistered.SCALE
+
+        model = torch.nn.Linear(4, 4)
+        session = precompile_package.precompile_capture(step, backend=backend)
+        with session as call:
+            call(model, torch.ones(2, 4))
+            # Rendering mid-block leaves the session able to capture more.
+            python_code, _ = session.snapshot_artifact()
+            self.assertEqual(len(_parse_artifact_metadata(python_code)["FRAMES"]), 2)
+            call(model, torch.ones(3, 4))
+        summary = session.summary()
+        python_code, cache = session.snapshot_artifact()
+        meta = _parse_artifact_metadata(python_code)
+        self.assertEqual(meta["TRACER"], "dynamo")
+        self.assertEqual(meta["FN_NAME"], step.__qualname__)
+        self.assertEqual(sum(n for _, n in meta["FRAMES"]), summary.guarded_codes)
+        # The default policy renders a capture that dropped harmless guards.
+        self.assertTrue(summary.dropped_guards)
+        self.assertFalse(summary.risky_dropped_guards)
+        self.assertEqual(
+            meta["DROPPED_GUARDS"], [list(s) for s in summary.dropped_guards]
+        )
+        blob = torch.load(io.BytesIO(cache), weights_only=True)
+        self.assertEqual((blob["backend"], blob["tracer"]), (backend, "dynamo"))
+        # A session that never ran its callable has nothing to render, and one
+        # whose call raised is refused as incomplete unless the caller accepts it.
+        empty = precompile_package.precompile_capture(step, backend="eager")
+        with empty:
+            pass
+        with self.assertRaisesRegex(PackageError, "no compiled code"):
+            empty.snapshot_artifact()
+        failed = precompile_package.precompile_capture(step, backend="eager")
+        with failed as call:
+            call(model, torch.ones(2, 4))
+            with self.assertRaises(RuntimeError):
+                call(model, torch.ones(2, 5))
+        with self.assertRaisesRegex(PackageError, "captured call raised"):
+            failed.snapshot_artifact()
+        python_code, _ = failed.snapshot_artifact(require_complete=False)
+        self.assertEqual(_parse_artifact_metadata(python_code)["TRACER"], "dynamo")
+        # The risky-drop gate is on by default; a custom filter's drop is risky.
+        default = precompile_package.default_guard_filter_fn
+        custom = precompile_package.precompile_capture(
+            step,
+            backend="eager",
+            guard_filter_fn=lambda es: [
+                keep and e.name != "x" for keep, e in zip(default(es), es)
+            ],
+        )
+        with custom as call:
+            call(model, torch.ones(2, 4))
+        with self.assertRaisesRegex(PackageError, "can affect dispatch"):
+            custom.snapshot_artifact()
+        custom.snapshot_artifact(require_no_risky_drops=False)
+
     def test_capture_config_is_scoped_per_entry_and_per_thread(self):
         import torch._functorch.config as functorch_config
         from torch._dynamo.precompile_package import _capture_config
@@ -2375,17 +2641,12 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             torch._dynamo.config.patch(allow_empty_graphs=False),
         ):
             self.assertEqual(flags(), ambient)
-            with _capture_config(training=False):
-                self.assertEqual(flags(), (True, True, False, True))
-                # The inner scope's training wins while it is open, and the
-                # outer scope's setting comes back when it closes.
-                with _capture_config(training=True):
-                    self.assertEqual(flags(), (True, True, True, True))
-                self.assertEqual(flags(), (True, True, False, True))
+            with _capture_config():
+                self.assertEqual(flags(), (True, True, True, True))
             self.assertEqual(flags(), ambient)
 
             with self.assertRaisesRegex(RuntimeError, "boom"):
-                with _capture_config(training=True):
+                with _capture_config():
                     raise RuntimeError("boom")
             self.assertEqual(flags(), ambient)
 
@@ -2396,7 +2657,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
 
             def hold():
                 seen.append(flags())
-                with _capture_config(training=False):
+                with _capture_config():
                     seen.append(flags())
                     entered.set()
                     release.wait(10)
@@ -2409,7 +2670,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             release.set()
             worker.join(10)
             self.assertFalse(worker.is_alive())
-            self.assertEqual(seen[1], (True, True, False, True))
+            self.assertEqual(seen[1], (True, True, True, True))
             self.assertEqual(seen[0], seen[2])
             self.assertNotEqual(seen[0], seen[1])
 
@@ -2422,15 +2683,15 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # a capture with caches forced off would record nothing; say so up front.
         with torch.compiler.config.patch(force_disable_caches=True):
             with self.assertRaisesRegex(PackageError, "force_disable_caches"):
-                with _capture_config(training=False):
+                with _capture_config():
                     pass
 
         with functorch_config.patch(strict_autograd_cache=False):
             with torch._dynamo.config.patch(strict_precompile=False):
-                with _capture_config(training=False):
+                with _capture_config():
                     self.assertFalse(functorch_config.strict_autograd_cache)
             with torch._dynamo.config.patch(strict_precompile=True):
-                with _capture_config(training=False):
+                with _capture_config():
                     self.assertTrue(functorch_config.strict_autograd_cache)
             self.assertFalse(functorch_config.strict_autograd_cache)
 
