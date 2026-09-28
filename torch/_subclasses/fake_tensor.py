@@ -3252,7 +3252,7 @@ class FakeTensorMode(TorchDispatchMode):
         except NotImplementedError as not_implemented_error:
             return maybe_run_unsafe_fallback(not_implemented_error)
         except Exception:
-            log.exception("failed while attempting to run meta for %s", func)
+            log.debug("failed while attempting to run meta for %s", func, exc_info=True)
             raise
 
         return maybe_propagate_real_tensors(
