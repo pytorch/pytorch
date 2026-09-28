@@ -1,10 +1,10 @@
 #pragma once
 
-#include <ATen/ATen.h>
 #include <array>
+
+#include <ATen/ATen.h>
 #include <c10/macros/Macros.h>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
-
 
 #define NVSHMEM_CHECK(stmt, msg)                                             \
   do {                                                                       \
