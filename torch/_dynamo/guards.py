@@ -4977,16 +4977,16 @@ class GuardsStatePickler(FunctionPicklerBase):
             and not inspect.ismodule(obj)
             and not inspect.isroutine(obj)
             and not isinstance(obj, (torch.nn.Module, torch.Tensor))
-            and not type(obj).__module__.startswith("torch.")
+            and type(obj).__module__.partition(".")[0] != "torch"
             and _pickles_from_dict(type(obj))
             and id(obj) not in self._whole_compared_values
         ):
             # A guarded user object (a train pipeline, a wrapper holding a
             # dataloader) would otherwise be pickled whole, so one unguarded
             # unpicklable attribute takes the frame down. Last, so the specific
-            # reducers above get first refusal; user types only, since torch's
-            # structural types (DTensorSpec) need fields no guard names.
-            # Nothing a guard compares whole is pruned (_whole_compared_values).
+            # reducers above get first refusal. Nothing a guard compares whole
+            # is pruned (_whole_compared_values); skipping torch's own types on
+            # top of that is only a conservative filter, so they stay whole.
             self._prune_unguarded_attributes(obj)
 
         return NotImplemented
