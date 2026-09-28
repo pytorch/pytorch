@@ -16,12 +16,15 @@ import typing
 from torch._precompile import (
     Capture,
     capture,
+    capture_runtime,
     DynamoTracer,
+    finalize_cache,
     load,
     MakeFxTracer,
     no_compilation,
     PrecompiledRunnable,
     PrecompileError,  # noqa: F401
+    prepare_runtime,
 )
 from torch.compiler._precompile_types import PrecompileSummary
 
@@ -38,6 +41,9 @@ __all__ = [
     "MakeFxTracer",
     "PrecompiledRunnable",
     "PrecompileSummary",
+    "capture_runtime",
+    "finalize_cache",
+    "prepare_runtime",
     "no_compilation",
 ]
 

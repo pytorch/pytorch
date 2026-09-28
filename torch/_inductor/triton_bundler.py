@@ -371,6 +371,7 @@ class TritonBundler:
         Exclusive access means that no other process should be writing to
         or reading from the target directory.
         """
+        import torch
         from torch._inductor import config
 
         if not TritonBundler.is_enabled():
@@ -382,7 +383,12 @@ class TritonBundler:
             kernel_names: list[str] = []
 
             for artifacts in bundle.kernel_artifacts:
-                basedir = triton_cache_dir(artifacts.device)
+                device = (
+                    torch.accelerator.current_device_index()
+                    if torch.compiler.config.compile_on_one_rank
+                    else artifacts.device
+                )
+                basedir = triton_cache_dir(device)
                 directory = os.path.join(basedir, artifacts.kernel_hash)
 
                 if os.path.exists(directory) and len(os.listdir(directory)) != 0:

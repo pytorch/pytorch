@@ -2892,9 +2892,10 @@ class GuardBuilder(GuardBuilderBase):
             return tuple(map(id, hooks))
 
         guard_hooks_ids = hooks_ids_fn(get_hooks())
-        self.saved_tensors_hooks_fingerprint = _saved_tensors_hooks_fingerprint(
-            get_hooks()
-        )
+        if self.save_guards:
+            self.saved_tensors_hooks_fingerprint = _saved_tensors_hooks_fingerprint(
+                get_hooks()
+            )
 
         code = [
             f"torch._functorch.aot_autograd.utils.top_saved_tensors_hooks ids == {guard_hooks_ids}"
@@ -2922,18 +2923,17 @@ class GuardBuilder(GuardBuilderBase):
             f"torch._functorch.aot_autograd.utils.top_saved_tensors_hooks fingerprint == {hooks_fingerprint}"
         ]
         self._set_guard_export_info(guard, code)
-        matched: list[tuple[weakref.ref[Any], ...]] = []
+        last: list[tuple[tuple[weakref.ref[Any], ...], bool]] = []
 
         def fn(x: object) -> bool:
             hooks = get_hooks()
             if not are_inline_hooks(hooks):
                 return hooks_fingerprint is None
-            if matched and all(r() is h for r, h in zip(matched[0], hooks)):
-                return True
-            if _saved_tensors_hooks_fingerprint(hooks) != hooks_fingerprint:
-                return False
-            matched[:] = [tuple(weakref.ref(h) for h in hooks)]
-            return True
+            if last and all(r() is h for r, h in zip(last[0][0], hooks)):
+                return last[0][1]
+            result = _saved_tensors_hooks_fingerprint(hooks) == hooks_fingerprint
+            last[:] = [(tuple(weakref.ref(h) for h in hooks), result)]
+            return result
 
         self.guard_manager.root.add_lambda_guard(
             fn, get_verbose_code_parts(code, guard), guard.user_stack

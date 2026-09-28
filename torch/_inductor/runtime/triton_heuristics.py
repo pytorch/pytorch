@@ -1482,7 +1482,7 @@ class CachingAutotuner(KernelInterface):
         """Measure the performance of a given launcher."""
         from torch.compiler._no_compile import check_compilation_allowed
 
-        check_compilation_allowed("Triton kernel autotuning")
+        check_compilation_allowed("Triton kernel benchmarking")
         # we don't skip configs with spilled registers when auto-tuning custom
         # (user-written) Triton kernels, as (i) we don't have any knowledge or
         # control over the kernel code; (ii) there is empirical evidence that
@@ -3091,11 +3091,25 @@ class StaticTritonCompileResult(CompileResult[_T]):
             binary_ext = GPU_KERNEL_BIN_EXTS.get(
                 triton_meta.get("device_type"), ".cubin"
             )
-            cubin_location = os.path.join(
-                triton_cache_dir(cast(int, triton_meta.get("device", 0))),
-                triton_hash_to_path_key(kernel.hash),
-                f"{kernel.src.fn.__name__}{binary_ext}",
-            )
+            metadata_group = getattr(kernel, "metadata_group", None)
+            if metadata_group is not None:
+                # Triton can truncate cache filenames independently of kernel symbols.
+                binary_paths = [
+                    path
+                    for filename, path in metadata_group.items()
+                    if filename.endswith(binary_ext)
+                ]
+                if len(binary_paths) != 1:
+                    raise CannotStaticallyLaunchKernel(
+                        f"Expected one {binary_ext} artifact, found {len(binary_paths)}"
+                    )
+                cubin_location = binary_paths[0]
+            else:
+                cubin_location = os.path.join(
+                    triton_cache_dir(cast(int, triton_meta.get("device", 0))),
+                    triton_hash_to_path_key(kernel.hash),
+                    f"{kernel.src.fn.__name__}{binary_ext}",
+                )
 
             if not os.path.exists(cubin_location):
                 raise CannotStaticallyLaunchKernel(
@@ -3137,7 +3151,7 @@ class StaticTritonCompileResult(CompileResult[_T]):
                 _resolve_load_device(self.compile_meta.get("device"), device_type)
             ),
             triton_hash_to_path_key(self.kernel.hash),
-            f"{self.kernel.name}{binary_ext}",
+            getattr(self.kernel, "cubin_filename", f"{self.kernel.name}{binary_ext}"),
         )
         if not os.path.exists(cubin_location):
             if self.kernel.cubin_raw is not None:
@@ -3216,6 +3230,7 @@ class StaticTritonCompileResult(CompileResult[_T]):
         launcher.cache_hash = triton_hash_to_path_key(self.kernel.hash)  # type: ignore[attr-defined]
         launcher.store_cubin = False  # type: ignore[attr-defined]
         launcher._is_static = True  # type: ignore[attr-defined]
+        launcher._compile_result = self  # type: ignore[attr-defined]
         return launcher
 
 

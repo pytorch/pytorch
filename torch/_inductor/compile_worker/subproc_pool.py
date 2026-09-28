@@ -591,6 +591,13 @@ class SubprocPool:
     def wakeup(self) -> None:
         self._send(MsgHeader.WAKEUP)
 
+    def drain_pending(self) -> None:
+        """Wait for submitted jobs without cancelling them during shutdown."""
+        with self.futures_lock:
+            futures = [job.future for job in self.pending_jobs.values()]
+        for future in futures:
+            future.result()
+
     def shutdown(self) -> None:
         try:
             with self.write_lock:
