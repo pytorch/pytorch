@@ -2985,6 +2985,8 @@ class TestPrecompile(TestCase):
             guarded_codes=sum(len(c.guarded_codes) for c in entry.codes),
             backend_graphs=len(backends),
             dropped_guards=(("MODULE_MATCH", "model"),),
+            policy_dropped_guards=(("ID_MATCH", "act"),),
+            dropped_guard_code=(("ID_MATCH", "act", "___check_obj_id(act, 1)"),),
         )
         # The records name this module, which is __main__ under a script run and
         # the driver refuses that; serve them from an importable alias of it.
@@ -3007,6 +3009,10 @@ class TestPrecompile(TestCase):
             [c.python_code.co_name for c in entry.codes],
         )
         self.assertEqual(meta["DROPPED_GUARDS"], [["MODULE_MATCH", "model"]])
+        # Every slot DROPPED_GUARD_CODE names is listed above it, policy drops too.
+        self.assertEqual(meta["POLICY_DROPPED_GUARDS"], [["ID_MATCH", "act"]])
+        named = meta["DROPPED_GUARDS"] + meta["POLICY_DROPPED_GUARDS"]
+        self.assertTrue(all(g[:2] in named for g in meta["DROPPED_GUARD_CODE"]))
         blob = torch.load(io.BytesIO(cache), weights_only=True)
         self.assertEqual(blob["tracer"], "dynamo")
         self.assertIsNone(blob["artifact"])
