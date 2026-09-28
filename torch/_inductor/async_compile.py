@@ -806,18 +806,18 @@ class AsyncCompile:
             CuteDSL currently requires source files to do its compilation, there we
             use the PyCodeCache to write the source code to a file and load it.
         """
-        from torch.compiler._no_compile import check_compilation_allowed
-
-        check_compilation_allowed("CuTe DSL runtime JIT")
         from torch._inductor.codegen.cutedsl.cutedsl_kernel import (
             CuteDSLKernelWrapper,
             MAIN_SUFFIX,
         )
+        from torch.compiler._no_compile import is_compilation_forbidden
 
         kernel_code_log.info("CuteDSL Kernel:\n%s", source_code)
         _compile_start()
 
-        is_parallel = self.use_process_pool()
+        # The pool worker compiles eagerly; loading in-process defers any JIT
+        # to the wrapper's first run(), which the policy checks.
+        is_parallel = not is_compilation_forbidden() and self.use_process_pool()
 
         if is_parallel:
             extra_env = _pycodecache_kernel_compile_env()
@@ -867,9 +867,6 @@ class AsyncCompile:
         `{kernel_name}_main` entry point is exposed through the standard
         kernel ``.run()`` interface.
         """
-        from torch.compiler._no_compile import check_compilation_allowed
-
-        check_compilation_allowed("FlyDSL runtime JIT")
         from torch._inductor.codegen.flydsl import flydsl_utils
         from torch._inductor.codegen.flydsl.flydsl_kernel import (
             FlyDSLKernelWrapper,
@@ -879,10 +876,12 @@ class AsyncCompile:
         if not flydsl_utils.runtime_available():
             raise RuntimeError("FlyDSL runtime is unavailable")
 
+        from torch.compiler._no_compile import is_compilation_forbidden
+
         kernel_code_log.info("FlyDSL Kernel:\n%s", source_code)
         _compile_start()
 
-        is_parallel = self.use_process_pool()
+        is_parallel = not is_compilation_forbidden() and self.use_process_pool()
 
         if is_parallel:
             extra_env = _pycodecache_kernel_compile_env()
@@ -940,9 +939,6 @@ class AsyncCompile:
             Pallas kernels are Python code that uses JAX and Pallas APIs.
             We use the PyCodeCache to write the source code to a file and load it.
         """
-        from torch.compiler._no_compile import check_compilation_allowed
-
-        check_compilation_allowed("Pallas runtime JIT")
         from torch._inductor.codegen.pallas import MAIN_SUFFIX, PallasKernelWrapper
 
         kernel_code_log.info("Pallas Kernel:\n%s", source_code)
@@ -983,20 +979,18 @@ class AsyncCompile:
             NVIDIA Universal GEMM kernels are Python code that calls the cutlass.operators library.
             We use the PyCodeCache to write the source code to a file and load it.
         """
-        from torch.compiler._no_compile import check_compilation_allowed
-
-        check_compilation_allowed("NVIDIA Universal GEMM runtime JIT")
         from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
             NVUniversalGemmKernelWrapper,
         )
         from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_scheduling import (
             MAIN_SUFFIX,
         )
+        from torch.compiler._no_compile import is_compilation_forbidden
 
         kernel_code_log.info("NVIDIA Universal GEMM Kernel:\n%s", source_code)
         _compile_start()
 
-        is_parallel = self.use_process_pool()
+        is_parallel = not is_compilation_forbidden() and self.use_process_pool()
 
         if is_parallel:
             extra_env = _pycodecache_kernel_compile_env()
