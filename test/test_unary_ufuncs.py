@@ -1989,6 +1989,32 @@ class TestUnaryUfuncsCUDADevice(TestCase):
         ref = x.cpu().float().to(torch.float8_e5m2)
         self.assertEqual(y.cpu().view(torch.uint8), ref.view(torch.uint8))
 
+    def test_erfcx_negative_square(self, device):
+        # exp(x*x)*erfc(x) from mpmath. The rounded square makes exp too large.
+        x64 = torch.tensor(-23.25459451307119, device=device, dtype=torch.float64)
+        ref64 = torch.tensor(1.4359351282897431e235, device=device, dtype=torch.float64)
+        got64 = torch.special.erfcx(x64)
+        self.assertLess(
+            (got64 - ref64).abs().item(), 4 * torch.finfo(torch.float64).eps * ref64.abs().item()
+        )
+
+        x32 = torch.tensor(-8.44250774383545, device=device)
+        ref32 = torch.tensor(1.80208853710826e31, device=device)
+        got32 = torch.special.erfcx(x32)
+        spacing = torch.nextafter(ref32, torch.tensor(torch.inf, device=device)) - ref32
+        self.assertLess((got32 - ref32).abs().item(), (2 * spacing).item())
+
+        # The positive branch and the overflow cutoff are unchanged.
+        self.assertEqual(
+            torch.special.erfcx(torch.tensor(1.25, device=device, dtype=torch.float64)),
+            torch.tensor(0.3678229164523611, device=device, dtype=torch.float64),
+        )
+        self.assertTrue(
+            torch.isinf(
+                torch.special.erfcx(torch.tensor(-30.0, device=device, dtype=torch.float64))
+            ).item()
+        )
+
 
 instantiate_device_type_tests(TestUnaryUfuncs, globals())
 instantiate_device_type_tests(TestUnaryUfuncsCpuOnly , globals(), only_for="cpu")

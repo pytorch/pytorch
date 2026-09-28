@@ -2178,11 +2178,16 @@ calc_erfcx(T x)
     if (x < -26.7) {
       return std::numeric_limits<T>::infinity();
     }
-    else if (x < -6.1) {
-      return 2*exp(x*x);
-    }
     else {
-      return 2*exp(x*x) - erfcx_y100(400/(4-x));
+      // exp(x*x) turns a rounding error in the square into a relative error
+      // of the same size. Split off the exact remainder of the product.
+      const T xx = x * x;
+      const T lo = std::fma(x, x, -xx);
+      const T two_exp_xx = 2 * exp(xx) * (1 + lo);
+      if (x < -6.1) {
+        return two_exp_xx;
+      }
+      return two_exp_xx - erfcx_y100(400/(4-x));
     }
   }
 }
