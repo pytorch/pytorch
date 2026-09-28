@@ -43,7 +43,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta, instantiate_device_type_tests, deviceCountAtLeast,
     onlyCPU, largeTensorTest, precisionOverride, dtypes,
-    onlyCUDA, skipCPUIf, dtypesIfCUDA, dtypesIfCPU, dtypesIfXPU, skipMeta, onlyAccelerator, expectedFailureXLA)
+    onlyCUDA, skipCPUIf, skipCUDAIf, dtypesIfCUDA, dtypesIfCPU, dtypesIfXPU, skipMeta, onlyAccelerator, expectedFailureXLA)
 from torch.testing._internal.common_dtype import (
     all_types_and_complex, all_types_and_complex_and, all_types_and, floating_and_complex_types, complex_types,
     floating_types, floating_and_complex_types_and, integral_types, integral_types_and, get_all_dtypes,
@@ -1103,6 +1103,27 @@ class TestTensorCreation(TestCase):
             vals = (-2, -1.5, -.5, 0, .5, 1.5, 2)
 
         _float_to_int_conversion_helper(self, vals, device, dtype, refs)
+
+    # Note: This test validates undefined behavior consistency in float-to-ints casts
+    # NB: torch.uint16, torch.uint32, torch.uint64 excluded as this
+    # nondeterministically fails, warning "invalid value encountered in cast"
+    @skipCUDAIf(True, "CUDA diverges on most dtypes, often dramatically.")
+    @unittest.skipIf(IS_S390X, "Test fails for int16 on s390x. Needs investigation.")
+    @parametrize("dtype", [torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64])
+    def test_float_to_int_conversion_nonfinite(self, dtype):
+        vals = (float('-inf'), float('inf'), float('nan'))
+
+        if dtype == torch.bool:
+            refs = (True, True, True)
+        elif IS_ARM64:
+            refs = (torch.iinfo(dtype).min, torch.iinfo(dtype).max, 0)
+            if dtype in (torch.int8, torch.int16):
+                refs = (0, -1, 0)
+        else:
+            refs = (0, 0, 0)
+            if dtype in (torch.int32, torch.int64):
+                refs = (torch.iinfo(dtype).min, ) * 3
+        _float_to_int_conversion_helper(self, vals, "cpu", dtype, refs)
 
     def test_complex_type_conversions(self, device):
         dtypes = [torch.float, torch.complex64, torch.complex128]
@@ -3247,27 +3268,6 @@ class TestTensorCreationGeneric(TestCase):
     def test_storage_filename(self):
         t = torch.randn(2, 5)
         self.assertIsNone(t.untyped_storage().filename)
-
-    # CPU-only: CUDA diverges on most dtypes, often dramatically.
-    # Note: This test validates undefined behavior consistency in float-to-ints casts
-    # NB: torch.uint16, torch.uint32, torch.uint64 excluded as this
-    # nondeterministically fails, warning "invalid value encountered in cast"
-    @unittest.skipIf(IS_S390X, "Test fails for int16 on s390x. Needs investigation.")
-    @parametrize("dtype", [torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64])
-    def test_float_to_int_conversion_nonfinite(self, dtype):
-        vals = (float('-inf'), float('inf'), float('nan'))
-
-        if dtype == torch.bool:
-            refs = (True, True, True)
-        elif IS_ARM64:
-            refs = (torch.iinfo(dtype).min, torch.iinfo(dtype).max, 0)
-            if dtype in (torch.int8, torch.int16):
-                refs = (0, -1, 0)
-        else:
-            refs = (0, 0, 0)
-            if dtype in (torch.int32, torch.int64):
-                refs = (torch.iinfo(dtype).min, ) * 3
-        _float_to_int_conversion_helper(self, vals, "cpu", dtype, refs)
 
 class TestTensorCreationCudaOnly(TestCase):
     hw_classification = HardwareClassification.CUDA
