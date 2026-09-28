@@ -9376,6 +9376,16 @@ def activate_meta():
                 f"op_overload must be OpOverload, got {type(op_overload)}"
             )
 
+        # Use the symint-aware C++ meta kernels; a Python Meta kernel would
+        # shadow them under the Python dispatcher.
+        if op_overload.name() in {
+            "aten::stack",
+            "aten::arange",
+            "aten::arange.start",
+            "aten::arange.start_step",
+        }:
+            continue
+
         op_overload.py_impl(torch._C.DispatchKey.Meta)(fn)
 
         if torch._C._dispatch_has_kernel_for_dispatch_key(
@@ -9406,10 +9416,6 @@ def activate_meta():
                 "aten::constant_pad_nd",  # requires_grad mismatch, test_ops.py -k test_fake_crossref_backward_amp_istft_cuda_float32
                 "aten::rot90",  # requires_grad mismatch! test_ops.py -k test_fake_crossref_backward_amp_rot90_cuda_float32
                 "aten::as_strided_scatter",  # requires_grad mismatch, test_ops.py -k test_fake_crossref_backward_no_amp_as_strided_scatter_cuda_float32
-                "aten::stack",  # use the symint-aware C++ meta kernel (stack_meta)
-                "aten::arange",  # use the symint-aware C++ meta kernel (arange_meta)
-                "aten::arange.start",
-                "aten::arange.start_step",
             }
         ):
             pass
