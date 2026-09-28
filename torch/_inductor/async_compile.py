@@ -300,6 +300,24 @@ class AsyncCompile:
             )
         return ThreadPoolExecutor(get_compile_threads())
 
+    @classmethod
+    def drain_pending(cls) -> None:
+        """Finish compiler work and result callbacks after submissions have stopped."""
+        for future in list(CompiledTritonKernels._cache.values()):
+            if not isinstance(future, StaticAutotunerFuture):
+                future.result()
+        if cls.pool.cache_info().currsize:
+            cls.pool().shutdown(wait=True)
+            cls.pool.cache_clear()
+        if cls._ready_future is not None:
+            cls._ready_future.result()
+        for pool in _pool_set:
+            if isinstance(pool, SubprocPool):
+                pool.drain_pending()
+            else:
+                pool.shutdown(wait=True)
+        shutdown_compile_workers()
+
     @staticmethod
     def _get_ready():
         """No-op function to help mark when the subprocess pool is ready."""
@@ -578,7 +596,10 @@ class AsyncCompile:
             ]
             extra_env = {v: os.environ.get(v) for v in env_vars}
             extra_config = {
-                "use_static_triton_launcher": torch._inductor.config.use_static_triton_launcher
+                "use_static_triton_launcher": torch._inductor.config.use_static_triton_launcher,
+                "static_launch_user_defined_triton_kernels": (
+                    torch._inductor.config.static_launch_user_defined_triton_kernels
+                ),
             }
 
             if len(torch._inductor.config.autotune_lookup_table) > 0:

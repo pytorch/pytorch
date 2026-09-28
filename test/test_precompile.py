@@ -5,6 +5,7 @@ import functools
 import importlib
 import inspect
 import io
+import json
 import os
 import pickle
 import stat
@@ -5553,6 +5554,98 @@ class TestPrecompileNoCompilation(TestCase):
         ):
             cpp_extension._run_ninja_build("missing", False, "extension")
         build.assert_not_called()
+
+
+@skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
+@instantiate_parametrized_tests
+class TestPrecompileRuntimeCache(TestCase):
+    def test_drain_propagates_failed_compiler_future(self):
+        from concurrent.futures import Future
+
+        from torch._inductor.async_compile import AsyncCompile, CompiledTritonKernels
+        from torch._inductor.codecache import LambdaFuture
+
+        pending = Future()
+        pending.set_exception(RuntimeError("producer compile failed"))
+        with (
+            mock.patch.object(
+                CompiledTritonKernels,
+                "_cache",
+                {"pending": LambdaFuture(pending.result)},
+            ),
+            mock.patch(
+                "torch._inductor.async_compile.shutdown_compile_workers"
+            ) as shutdown,
+            self.assertRaisesRegex(RuntimeError, "producer compile failed"),
+        ):
+            AsyncCompile.drain_pending()
+        shutdown.assert_not_called()
+
+    @unittest.skipUnless(TEST_CUDA, "requires Triton")
+    @parametrize("shared", (False, True))
+    @parametrize("explicit_cache", (False, True))
+    def test_strict_hydration_maps_shared_cache_to_current_device(
+        self, shared, explicit_cache
+    ):
+        from pathlib import Path
+
+        from torch._inductor.triton_bundler import (
+            TritonBundle,
+            TritonBundler,
+            TritonKernelArtifact,
+            TritonKernelArtifacts,
+        )
+
+        bundle = TritonBundle(
+            [
+                TritonKernelArtifacts(
+                    "kernel-key",
+                    0,
+                    [
+                        TritonKernelArtifact("kernel.cubin", b"compiled-kernel"),
+                        TritonKernelArtifact(
+                            "__grp__kernel.json",
+                            b'{"child_paths": {"kernel.cubin": "[REPLACE]/kernel.cubin"}}',
+                        ),
+                    ],
+                )
+            ],
+            [],
+        )
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            mock.patch.dict(os.environ, {"TORCHINDUCTOR_CACHE_DIR": directory}),
+            torch.compiler.config.patch(compile_on_one_rank=shared),
+            torch._inductor.config.patch(
+                bundle_triton_into_fx_graph_cache=True,
+                use_static_triton_launcher=False,
+            ),
+            mock.patch("torch.accelerator.current_device_index", return_value=2),
+            torch.compiler.precompile.no_compilation(),
+        ):
+            if explicit_cache:
+                basedir = Path(directory) / "explicit"
+                os.environ["TRITON_CACHE_DIR"] = str(basedir)
+            else:
+                os.environ.pop("TRITON_CACHE_DIR", None)
+                basedir = Path(directory) / "triton" / ("2" if shared else "0")
+            TritonBundler.read_and_emit(bundle)
+            kernel_dir = basedir / "kernel-key"
+            self.assertEqual(
+                (kernel_dir / "kernel.cubin").read_bytes(), b"compiled-kernel"
+            )
+            self.assertEqual(
+                json.loads((kernel_dir / "__grp__kernel.json").read_text())[
+                    "child_paths"
+                ],
+                {"kernel.cubin": str(kernel_dir / "kernel.cubin")},
+            )
+            TritonBundler.read_and_emit(bundle)
+            (kernel_dir / "kernel.cubin").unlink()
+            with self.assertRaisesRegex(
+                RuntimeError, "incomplete or incompatible kernel file"
+            ):
+                TritonBundler.read_and_emit(bundle)
 
 
 if __name__ == "__main__":
