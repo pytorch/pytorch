@@ -1750,7 +1750,9 @@ class DiskDynamoCache(DiskDynamoStore):
                 return result
             except Exception:
                 counters["dynamo_cache"]["dynamo_cache_error"] += 1
-                logger.warning("Failed to load package from path %s", exc_info=True)
+                logger.warning(
+                    "Failed to load package from path %s", path, exc_info=True
+                )
                 return None
         logger.info("No package found for %s", key)
         counters["dynamo_cache"]["dynamo_cache_miss"] += 1

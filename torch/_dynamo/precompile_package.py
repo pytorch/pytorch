@@ -1249,6 +1249,7 @@ _SHAPE_BEARING_GUARD_TYPES = frozenset(
         "EQUALS_MATCH",
         "FAKE_SCRIPT_TYPE_MATCH",
         "HASATTR",
+        "LIST_REVERSEITERATOR_LEN",
         "MAPPING_KEYS_CHECK",
         "NONE_MATCH",
         "NOT_NONE_MATCH",
