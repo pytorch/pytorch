@@ -4961,7 +4961,7 @@ class GuardsStatePickler(FunctionPicklerBase):
                 # The state slot, not a constructor argument: pickle memoizes the
                 # tensor before saving state, so an attribute referring back to
                 # the tensor round-trips instead of recursing.
-                self._carried_tensor_attributes(obj),
+                self._carried_tensor_attributes(obj, is_fake),
                 None,
                 None,
                 type(self)._restore_tensor_attributes,
@@ -5159,7 +5159,26 @@ class GuardsStatePickler(FunctionPicklerBase):
         for name, value in state.items():
             object.__setattr__(tensor, name, value)
 
-    def _carried_tensor_attributes(self, obj: torch.Tensor) -> dict[str, Any] | None:
+    @staticmethod
+    def _warn_dropped_tensor_attribute(name: str, value: object) -> None:
+        message = (
+            f"a tensor's {name!r} attribute holds {value!r}, which a guard may "
+            f"read; the rebuilt FakeTensor keeps its own {name!r}, so such a "
+            f"guard fails after load"
+        )
+        log.warning(message)
+        torch._logging.trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "guard_state_dropped_tensor_attribute",
+                "encoding": "string",
+            },
+            payload_fn=lambda: message,
+        )
+
+    def _carried_tensor_attributes(
+        self, obj: torch.Tensor, is_fake: bool
+    ) -> dict[str, Any] | None:
         """The Python attributes of ``obj``, pruned to what a guard reaches.
 
         A tensor is rebuilt from metadata, so a guard whose source traverses an
@@ -5170,19 +5189,19 @@ class GuardsStatePickler(FunctionPicklerBase):
         state = getattr(obj, "__dict__", None)
         if not state:
             return None
-        is_fake = isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
-            obj, torch._subclasses.FakeTensor
-        )
         carried: dict[str, Any] = {}
         for name, value in state.items():
             if name in _FAKE_TENSOR_OWNED_ATTRIBUTES:
-                # A literal can match an unrelated guard's interned value by id,
-                # so only a non-literal proves a guard reads this name.
-                if not is_fake and not self._is_literal(value) and self._keep(value):
-                    raise torch._dynamo.exc.PackageError(
-                        f"a guard reads {name!r} off a tensor, but a rebuilt "
-                        f"tensor is a FakeTensor, which stores its own state there"
-                    )
+                if not is_fake and self._keep(value):
+                    if not self._is_literal(value):
+                        raise torch._dynamo.exc.PackageError(
+                            f"a guard reads {name!r} off a tensor, but a rebuilt "
+                            f"tensor is a FakeTensor, which stores its own state there"
+                        )
+                    # A literal can match an unrelated guard's interned value by
+                    # id, so this may not be a guard read. If it is, the loaded
+                    # guard sees the FakeTensor's own value and never passes.
+                    self._warn_dropped_tensor_attribute(name, value)
                 continue
             if name.startswith("_dynamo_") and not self._keep(value):
                 # Rebuilding TENSOR_MATCH reads Dynamo's markings off the loaded
