@@ -427,17 +427,18 @@ class TestCheckpointDeviceType(TestCase):
 
             def track(x, idx):
                 def hook(_unused):
-                    # Plain assert: self.assertEqual accesses self.rel_tol
-                    # unconditionally (common_utils.py:4845), which hits
-                    # uninitialized TLS in DeviceTypeTestBase backward hooks.
-                    assert len(stats) == idx
+                    # TestCase assertions access self.rel_tol before TLS is initialized here.
+                    if len(stats) != idx:
+                        raise AssertionError(f"expected {idx} stats, got {len(stats)}")
                     torch.accelerator.synchronize()
                     stats.append(torch.accelerator.memory_allocated())
                     if idx > 0:
+                        curr, prev = stats[idx], stats[idx - 1]
                         if should_free:
-                            assert stats[idx] < stats[idx - 1]
-                        else:
-                            assert stats[idx] == stats[idx - 1]
+                            if curr >= prev:
+                                raise AssertionError(f"expected <{prev}, got {curr}")
+                        elif curr != prev:
+                            raise AssertionError(f"expected {prev}, got {curr}")
 
                 x.register_hook(hook)
 
@@ -1144,6 +1145,7 @@ class TestVerifyDynamoRocm(TestCase):
 
 class TestTraceback(TestCase):
     hw_classification = HardwareClassification.GENERIC
+
     def test_symbolize_mode(self):
         script = "import torch; print(torch._C._get_symbolize_mode())"
         for disable_addr2line, expected in [
@@ -1279,6 +1281,42 @@ class TestTryImport(TestCase):
 
 class TestUtilsInternal(TestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    def test_max_clock_rate_uses_requested_device(self):
+        properties = types.SimpleNamespace(clock_rate=1_980_000)
+        torch._utils_internal.max_clock_rate.cache_clear()
+        try:
+            with (
+                unittest.mock.patch.object(torch.version, "hip", None),
+                unittest.mock.patch.object(
+                    torch.cuda, "get_device_properties", return_value=properties
+                ) as get_device_properties,
+            ):
+                self.assertEqual(torch._utils_internal.max_clock_rate(1), 1980)
+
+            get_device_properties.assert_called_once_with(1)
+        finally:
+            torch._utils_internal.max_clock_rate.cache_clear()
+
+    def test_max_clock_rate_uses_current_rocm_device(self):
+        properties = types.SimpleNamespace(gcnArchName="gfx90a:sramecc+")
+        torch._utils_internal.max_clock_rate.cache_clear()
+        try:
+            with (
+                unittest.mock.patch.object(torch.version, "hip", "6.0"),
+                unittest.mock.patch.object(
+                    torch.cuda, "current_device", return_value=1
+                ) as current_device,
+                unittest.mock.patch.object(
+                    torch.cuda, "get_device_properties", return_value=properties
+                ) as get_device_properties,
+            ):
+                self.assertEqual(torch._utils_internal.max_clock_rate(), 1700)
+
+            current_device.assert_called_once_with()
+            get_device_properties.assert_called_once_with(1)
+        finally:
+            torch._utils_internal.max_clock_rate.cache_clear()
 
     def test_max_clock_rate_falls_back_to_pynvml_when_nvidia_smi_missing(self):
         def nvsmi(_query):

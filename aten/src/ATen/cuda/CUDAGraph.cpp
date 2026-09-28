@@ -8,6 +8,7 @@
 #include <ATen/Functions.h>
 #include <c10/cuda/CUDAAllocatorConfig.h>
 #include <c10/cuda/CUDAFunctions.h>
+#include <c10/cuda/CUDAGuard.h>
 
 #include <cstddef>
 #include <optional>
@@ -440,8 +441,11 @@ CUDAGraph::~CUDAGraph() {
 #if defined(USE_ROCM)
   if (capture_dev_ != UNDEFINED_DEVICE) // check if capture_dev_ contains the real device id
   {
-    AT_CUDA_CHECK(cudaSetDevice(capture_dev_));
-    AT_CUDA_CHECK(cudaDeviceSynchronize());
+    // Guarded, and warning instead of throwing, for the reason reset() gives above:
+    // this runs from the destructor, on whatever thread drops the last reference, so
+    // it must restore that thread's current device and must not throw.
+    c10::cuda::CUDAGuard device_guard(capture_dev_);
+    C10_CUDA_CHECK_WARN(cudaDeviceSynchronize());
   }
 #endif
 }

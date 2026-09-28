@@ -687,12 +687,12 @@ class Node(_NodeBase):
                 self.meta.get("tensor_meta", self.meta.get("example_value", None)),
             )
             type_annotation = ""
-            if (
-                include_tensor_metadata
-                and isinstance(meta_val, torch.Tensor)
-                and not is_sparse_compressed_layout(meta_val.layout)
-            ):
-                stride_annotation = f"{stringify_shape(meta_val.stride())}"
+            if include_tensor_metadata and isinstance(meta_val, torch.Tensor):
+                stride_annotation = (
+                    ""
+                    if is_sparse_compressed_layout(meta_val.layout)
+                    else stringify_shape(meta_val.stride())
+                )
                 device_annotation = _device_annotation(meta_val.device)
                 type_annotation = (
                     f'Tensor "{dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}'
