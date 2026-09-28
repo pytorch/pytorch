@@ -49,7 +49,9 @@ from .wrapper import (
     _get_profiling_args,
     _rewrite_symbol_solution_for_int_codegen,
     codegen_reinterpret_view_helper,
+    EnterKernelProfileScopeLine,
     EnterSubgraphLine,
+    ExitKernelProfileScopeLine,
     ExitSubgraphLine,
     HasWriteLine,
     kernel_profile_enabled,
@@ -393,6 +395,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # which returns a var name whose declaration was written into the dead buffer.
         # Pin the targets for the lifetime of codegen so their ids stay unique.
         self._int_array_writeline_targets: list[Any] = []
+        self._kernel_profile_scope_state: list[dict[Any, Any]] = []
         self.needs_vec_isa = self.device == "cpu"
 
     @contextlib.contextmanager
@@ -4546,17 +4549,42 @@ if (!custom_op_wrapper) {
         """
         if enabled is None:
             enabled = config.cpp.enable_kernel_profile
+        # `config.memory_planning` routes allocations through MemoryPlanner
+        # instead of memory_plan_reuse, and only the latter treats these braces
+        # as a boundary. A pool first created inside a block would be declared
+        # there and named by a line after it, so leave the block unopened
+        # rather than emit code that cannot compile.
+        enabled = enabled and not config.memory_planning
         try:
             if enabled:
                 self.kernel_profile_scope_depth += 1
-                self.writeline("{")
+                before = len(self.lines)
+                self.writeline(EnterKernelProfileScopeLine(self))
+                if self.kernel_profile_scope_depth == 1 and len(self.lines) > before:
+                    # Only meaningful while lines are still being collected.
+                    # Once they are being codegen'd, writeline emits straight
+                    # into the output buffer and there is nothing to insert in
+                    # front of -- nor any caller left that would want to.
+                    self.kernel_profile_scope_hoist_index = before
                 if config.cpp.enable_kernel_context_guard:
                     self.write_kernel_context_guard(kernel_name, node_schedule)
             yield
         finally:
             if enabled:
                 self.kernel_profile_scope_depth -= 1
-                self.writeline("}")
+                self.writeline(ExitKernelProfileScopeLine(self))
+                if self.kernel_profile_scope_depth == 0:
+                    self.kernel_profile_scope_hoist_index = None
+
+    def push_kernel_profile_scope_state(self):
+        # A cache hit returns a var name without redeclaring it, so an entry
+        # first declared inside the block would be handed to a caller after it.
+        # declared_int_array_vars is left alone: names are freshly generated
+        # and the set only dedups, so an extra declaration outside is harmless.
+        self._kernel_profile_scope_state.append(dict(self.codegen_int_array_var_cache))
+
+    def pop_kernel_profile_scope_state(self):
+        self.codegen_int_array_var_cache = self._kernel_profile_scope_state.pop()
 
     def write_kernel_context_guard(
         self,

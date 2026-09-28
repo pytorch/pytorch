@@ -2102,8 +2102,10 @@ class TestFullyShardGradientAccumulation(FSDPTestContinuous):
     def test_manual_backward_finalization_async_before_first_forward(self):
         model = fully_shard(nn.Linear(8, 8, bias=False).to(device_type))
 
-        with self.assertRaisesRegex(RuntimeError, "after the first forward"):
-            model.finalize_backward(async_op=True)
+        handle = model.finalize_backward(async_op=True)
+        self.assertIsInstance(handle, GradientReductionHandle)
+        handle.wait()
+        handle.wait()
 
     @skip_if_lt_x_gpu(2, allow_cpu=True)
     def test_manual_backward_finalization_async(self):
@@ -2131,7 +2133,7 @@ class TestFullyShardGradientAccumulation(FSDPTestContinuous):
         self.assertIsInstance(handle, GradientReductionHandle)
         state = model._get_fsdp_state()
         self.assertTrue(state._state_ctx.gradient_reduction_pending)
-        self.assertEqual(len(state._comm_ctx.reduce_scatter_states), 2)
+        self.assertEqual(len(state._comm_ctx.reduce_scatter_states), 1)
         with self.assertRaisesRegex(RuntimeError, "before finalizing"):
             model.finalize_backward(async_op=True)
         with self.assertRaisesRegex(RuntimeError, "before forward"):
@@ -2214,6 +2216,8 @@ class TestFullyShardGradientAccumulation(FSDPTestContinuous):
         model.zero_grad(set_to_none=True)
         active_handle = start_reduction()
 
+        with self.assertRaisesRegex(RuntimeError, "handle was invalidated"):
+            stale_handle.wait()
         with self.assertRaisesRegex(RuntimeError, "handle was invalidated"):
             stale_handle.wait()
         state = model._get_fsdp_state()
