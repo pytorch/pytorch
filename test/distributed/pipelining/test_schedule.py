@@ -1774,7 +1774,12 @@ class TestSchedulePlan(TestCase):
         def simulation_actions(actions):
             result = []
             for action in actions:
-                if action.computation_type in (UNSHARD, RESHARD, REDUCE_GRAD):
+                if action.computation_type in (
+                    UNSHARD,
+                    RESHARD,
+                    REDUCE_GRAD,
+                    WAIT_REDUCE_GRAD,
+                ):
                     continue
                 if action.computation_type == OVERLAP_F_B:
                     self.assertIsNotNone(action.sub_actions)
@@ -1880,10 +1885,13 @@ class TestSchedulePlan(TestCase):
             [
                 _Action(6, B, 0),
                 _Action(6, REDUCE_GRAD, None),
+                _Action(6, WAIT_REDUCE_GRAD, None),
                 _Action(4, B, 0),
                 _Action(4, REDUCE_GRAD, None),
+                _Action(4, WAIT_REDUCE_GRAD, None),
                 _Action(2, B, 0),
                 _Action(2, REDUCE_GRAD, None),
+                _Action(2, WAIT_REDUCE_GRAD, None),
             ],
         )
 
@@ -1910,7 +1918,6 @@ class TestSchedulePlan(TestCase):
         schedule = _PipelineScheduleRuntime(
             [MockPipelineStage(num_stages=1)],
             n_microbatches=1,
-            defer_reduce_grad_wait=True,
         )
         with self.assertRaisesRegex(ValueError, "REDUCE_GRAD without WAIT_REDUCE_GRAD"):
             schedule._prepare_schedule_with_comms(
@@ -1932,40 +1939,53 @@ class TestSchedulePlan(TestCase):
             n_microbatches=1,
             defer_reduce_grad_wait=True,
         )
-        overlapping_reductions = {
+        ordered_reductions = {
             0: [
                 _Action(0, F, 0),
                 _Action(0, B, 0),
                 _Action(0, REDUCE_GRAD),
+                _Action(0, WAIT_REDUCE_GRAD),
                 _Action(1, F, 0),
                 _Action(1, B, 0),
                 _Action(1, REDUCE_GRAD),
-                _Action(0, WAIT_REDUCE_GRAD),
                 _Action(1, WAIT_REDUCE_GRAD),
             ]
         }
         multi_stage_schedule._prepare_schedule_with_comms(
-            overlapping_reductions,
+            ordered_reductions,
             format="compute_comms",
         )
         self.assertEqual(
             multi_stage_schedule.pipeline_order_with_comms,
-            overlapping_reductions,
+            ordered_reductions,
         )
 
-        with self.assertRaisesRegex(ValueError, "already has a pending REDUCE_GRAD"):
+        with self.assertRaisesRegex(
+            ValueError, "while stage 0 has a pending reduction"
+        ):
             multi_stage_schedule._prepare_schedule_with_comms(
                 {
                     0: [
                         _Action(0, F, 0),
                         _Action(0, B, 0),
                         _Action(0, REDUCE_GRAD),
-                        _Action(0, REDUCE_GRAD),
-                        _Action(0, WAIT_REDUCE_GRAD),
                         _Action(1, F, 0),
                         _Action(1, B, 0),
                         _Action(1, REDUCE_GRAD),
+                        _Action(0, WAIT_REDUCE_GRAD),
                         _Action(1, WAIT_REDUCE_GRAD),
+                    ]
+                },
+                format="compute_comms",
+            )
+
+        with self.assertRaisesRegex(ValueError, "without a pending reduction"):
+            schedule._prepare_schedule_with_comms(
+                {
+                    0: [
+                        _Action(0, F, 0),
+                        _Action(0, B, 0),
+                        _Action(0, WAIT_REDUCE_GRAD),
                     ]
                 },
                 format="compute_comms",
@@ -1994,6 +2014,7 @@ class TestSchedulePlan(TestCase):
                 action
                 for action in default_actions
                 if action.computation_type not in p2p_types
+                and action.computation_type != WAIT_REDUCE_GRAD
             ]
             deferred_compute = [
                 action
@@ -2289,7 +2310,14 @@ class TestScheduleLowering(ScheduleLoweringTestBase):
         [
             {
                 "compute": ["0F0", "0F1", "   ", "0B0", "0B1"],
-                "comms": ["0F0", "0F1", "0B0", "0B1", "0REDUCE_GRAD"],
+                "comms": [
+                    "0F0",
+                    "0F1",
+                    "0B0",
+                    "0B1",
+                    "0REDUCE_GRAD",
+                    "0WAIT_REDUCE_GRAD",
+                ],
             },
             {
                 "compute": ["0F0", "0F1", "1F0", "1F1", "1B0", "1B1", "0B0", "0B1"],
@@ -2301,9 +2329,11 @@ class TestScheduleLowering(ScheduleLoweringTestBase):
                     "1B0",
                     "1B1",
                     "1REDUCE_GRAD",
+                    "1WAIT_REDUCE_GRAD",
                     "0B0",
                     "0B1",
                     "0REDUCE_GRAD",
+                    "0WAIT_REDUCE_GRAD",
                 ],
             },
         ],
