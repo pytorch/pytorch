@@ -734,6 +734,9 @@ class AsyncCompile:
         return self.submit(task)
 
     def halide(self, meta: HalideMeta, source_code: str):
+        from torch.compiler._no_compile import check_compilation_allowed
+
+        check_compilation_allowed("Halide kernel compilation")
         kernel_code_log.info("Halide Kernel:\n%r\n%s", meta, source_code)
         if get_compile_threads() <= 1:
             return HalideCodeCache.generate_halide(meta, source_code)
@@ -763,6 +766,9 @@ class AsyncCompile:
             CuteDSL currently requires source files to do its compilation, there we
             use the PyCodeCache to write the source code to a file and load it.
         """
+        from torch.compiler._no_compile import check_compilation_allowed
+
+        check_compilation_allowed("CuTe DSL runtime JIT")
         from torch._inductor.codegen.cutedsl.cutedsl_kernel import (
             CuteDSLKernelWrapper,
             MAIN_SUFFIX,
@@ -821,6 +827,9 @@ class AsyncCompile:
         `{kernel_name}_main` entry point is exposed through the standard
         kernel ``.run()`` interface.
         """
+        from torch.compiler._no_compile import check_compilation_allowed
+
+        check_compilation_allowed("FlyDSL runtime JIT")
         from torch._inductor.codegen.flydsl import flydsl_utils
         from torch._inductor.codegen.flydsl.flydsl_kernel import (
             FlyDSLKernelWrapper,
@@ -891,6 +900,9 @@ class AsyncCompile:
             Pallas kernels are Python code that uses JAX and Pallas APIs.
             We use the PyCodeCache to write the source code to a file and load it.
         """
+        from torch.compiler._no_compile import check_compilation_allowed
+
+        check_compilation_allowed("Pallas runtime JIT")
         from torch._inductor.codegen.pallas import MAIN_SUFFIX, PallasKernelWrapper
 
         kernel_code_log.info("Pallas Kernel:\n%s", source_code)
