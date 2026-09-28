@@ -3350,6 +3350,7 @@ kernel void unpack_pivots(
 }
 
 template <uint RowsPerThread>
+[[max_total_threads_per_threadgroup(kMaxThreadsPerThreadgroup)]]
 kernel void geqrf_panel(
     device float* A,
     device float* tau,
@@ -3563,7 +3564,7 @@ kernel void geqrf(
 
     // Step 3: apply reflection to trailing columns of R
     uint32_t threads_per_col = c10::metal::simdgroup_size;
-    while (threads_per_col * 2 * max(n - k - 1, 1u) <= group_size) {
+    while (uint64_t(threads_per_col) * 2 * max(n - k - 1, 1u) <= group_size) {
       threads_per_col *= 2;
     }
     uint32_t col_lane = tid % threads_per_col;

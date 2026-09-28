@@ -2081,7 +2081,8 @@ static std::pair<Tensor, Tensor> householder_block(const Tensor& A, const Tensor
       getMPSProfiler().beginProfileKernel(pso, "householder_block", {A, tau}, stream);
       [encoder setComputePipelineState:pso];
       mtl_setArgs(encoder, A, tau, V, W, params);
-      auto threads = A.size(-2) > 8192 ? 1024 : A.size(-2) > 1024 ? 512 : 128;
+      auto max_threads = pso.maxTotalThreadsPerThreadgroup / simd_size * simd_size;
+      auto threads = std::min<NSUInteger>(A.size(-2) > 8192 ? 1024 : A.size(-2) > 1024 ? 512 : 128, max_threads);
       [encoder dispatchThreadgroups:MTLSizeMake(A.size(-1) * batches, 1, 1)
               threadsPerThreadgroup:MTLSizeMake(threads, 1, 1)];
       getMPSProfiler().endProfileKernel(pso, stream);
