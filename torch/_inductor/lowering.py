@@ -8812,7 +8812,9 @@ def nextafter(x, y):
     dtype = x.get_dtype()
     is_low_precision = dtype in (torch.float16, torch.bfloat16)
     device = x.get_device()
-    backend = get_current_backend(device.type)
+    is_halide = (
+        device.type in ("cpu", "cuda") and get_current_backend(device.type) == "halide"
+    )
     if dtype not in (
         torch.float16,
         torch.bfloat16,
@@ -8820,7 +8822,7 @@ def nextafter(x, y):
         torch.float64,
     ) or (
         device.type == "mps"
-        or backend == "halide"
+        or is_halide
         or (is_low_precision and not is_triton(device))
     ):
         return fallback_handler(aten.nextafter.default, add_to_fallback_set=False)(x, y)

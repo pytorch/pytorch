@@ -2647,6 +2647,20 @@ class PallasLoweringTests(TestCase):
 
         self.assertIsInstance(graph.graph_outputs[0].data, FallbackKernel)
 
+    def test_nextafter_halide_config_does_not_affect_mtia(self):
+        fake_mode = FakeTensorMode()
+        with fake_mode:
+            x = torch.ones(2, device="mtia", dtype=torch.float32)
+            y = torch.full((2,), 2.0, device="mtia", dtype=torch.float32)
+            gm = make_fx(torch.ops.prims.nextafter.default, tracing_mode="fake")(x, y)
+
+        with config.patch(cuda_backend="halide"), V.set_fake_mode(fake_mode):
+            graph = GraphLowering(gm, example_inputs=[x, y])
+            with V.set_graph_handler(graph), V.set_extern_kernel_nodes([]):
+                graph.run(x, y)
+
+        self.assertNotIsInstance(graph.graph_outputs[0].data, FallbackKernel)
+
 
 if test_torchinductor.RUN_CPU and has_cpu_pallas():
 
