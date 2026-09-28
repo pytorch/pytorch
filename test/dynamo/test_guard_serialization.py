@@ -270,6 +270,11 @@ class _ByObject(enum.Enum):
     B = _Token("b")
 
 
+class _Perm(enum.Flag):
+    R = 1
+    W = 2
+
+
 _LEVEL = _EnumOwner.Level.LOW
 _BY_OBJECT = _ByObject.A
 
@@ -1378,6 +1383,15 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         out = load_guards_state(buf.getvalue())
         self.assertIsNotNone(out.grad)
         self.assertEqual(out.grad.shape, grad.shape)
+
+    def test_a_composite_flag_member_without_a_name(self):
+        # On Python 3.10 a composite Flag member's name is None.
+        member = _Perm.R | _Perm.W
+        buf = io.BytesIO()
+        with mock.patch.object(member, "_name_", None):
+            self.assertFalse(is_portable_identity_guard("ID_MATCH", (), member))
+            GuardsStatePickler({}, {}, {}, {}, buf).dump({"perms": member})
+        self.assertIs(load_guards_state(buf.getvalue())["perms"], member)
 
     def test_an_unguarded_grad_loads_as_none(self):
         # The .grad of a guarded leaf is a tensor the guard tree may not reach;
@@ -3427,6 +3441,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
             (_wrapped_target, True),
             (_Mode.SLOW, True),
             (_EnumOwner.Level.LOW, True),
+            (_Perm.R | _Perm.W, False),
             (_NameClash["name"], True),
             (types.ModuleType("_unregistered"), False),
             (Local, False),
