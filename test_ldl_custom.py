@@ -507,17 +507,24 @@ class TestLDLCustomKernel(TestCase):
     def test_pivots_match_cpu(self, device, dtype, n, structure):
         """CUDA and CPU Bunch-Kaufman must choose identical pivots for small n.
 
-        This is the one place the suite compares pivots against CPU, and it is
-        confined to n <= 40 deliberately. Up to NB=32 the panel kernel runs the
-        whole factorization with no inter-panel GEMM, so it follows LAPACK's
-        sequential zhetf2 closely enough for the choices to coincide exactly;
-        33..40 add one boundary with a trailing block of at most 8 columns.
-        Beyond that the agreement genuinely breaks down -- the thresholds are
-        tight and a different summation order picks a different, equally valid
-        sequence -- which is why every other test here validates by residual.
+        This is the one place the suite compares pivots against CPU. Up to
+        NB=32 the panel kernel runs the whole factorization with no inter-panel
+        GEMM, so it follows LAPACK's sequential zhetf2 closely enough for the
+        choices to coincide exactly; 33..40 add one boundary with a trailing
+        block of at most 8 columns.
 
-        Verified to hold across all 17 structures and 10 seeds each, so a
-        mismatch means the pivot search changed, not that the input was unlucky.
+        Agreement was measured to hold well past this range -- every structure
+        here matches CPU through n=512, including the all-2x2 cases by both
+        routes (zero_diagonal via the search, block-diagonal patterns by
+        construction). The bound is 40 because integer_valued, whose small
+        integer entries produce exact ties in the pivot search, first diverges
+        at n=100: with two candidates of equal magnitude the two backends can
+        pick either, and both factorizations are valid (residuals 1e-14 and
+        4e-13 at n=100 and 512). Widening the range means excluding that
+        structure, not relaxing the assertion.
+
+        Everything else in this file validates by residual instead, because at
+        large n the pivot sequence is genuinely allowed to differ.
         """
         if structure in _NEEDS_ROOM and n < 4:
             self.skipTest(f"{structure} is singular for n={n}")
