@@ -196,7 +196,7 @@ use_evt_config = config.patch(
         "max_autotune": True,
         "max_autotune_gemm_backends": "CUTLASS",
         "cutlass.cutlass_max_profiling_configs": 1,
-        "benchmark_epilogue_fusion": False,  # EVT doesn't support benchmark fusion yet
+        "benchmark_template_fusion": False,  # EVT doesn't support benchmark fusion yet
         "cutlass.cutlass_tma_only": GPU_TYPE
         == "cuda",  # Only CUDA requires TMA for EVT.
         "cutlass.cutlass_epilogue_fusion_enabled": True,
@@ -208,7 +208,7 @@ fp8_config = config.patch(
         "max_autotune": True,
         "max_autotune_gemm_backends": "CUTLASS",
         "cutlass.cutlass_max_profiling_configs": 1,
-        "benchmark_epilogue_fusion": False,  # EVT doesn't support benchmark fusion yet
+        "benchmark_template_fusion": False,  # EVT doesn't support benchmark fusion yet
         "cutlass.cutlass_tma_only": True,
     }
 )
@@ -788,7 +788,7 @@ class TestCutlassBackend(TestCase):
                     "max_autotune": True,
                     "max_autotune_gemm_backends": max_autotune_gemm_backends,
                     "cutlass.cutlass_max_profiling_configs": 2,
-                    "benchmark_epilogue_fusion": False,  # EVT doesn't support benchmark fusion yet
+                    "benchmark_template_fusion": False,  # EVT doesn't support benchmark fusion yet
                     "cutlass.cutlass_tma_only": True,
                 }
             ),

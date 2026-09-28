@@ -834,6 +834,10 @@ class ViewMetaSpecialization:
         return str(self.f.func.name) == "as_strided"
 
     @property
+    def is_expand(self) -> bool:
+        return str(self.f.func.name) == "expand"
+
+    @property
     def out_index(self) -> str:
         if self.is_multi_output:
             return functionalization.out_index_binding.name
@@ -871,6 +875,7 @@ class ViewMetaSpecialization:
         # operation schema.
         is_multi_output_str = str(self.is_multi_output).lower()
         is_as_strided_str = str(self.is_as_strided).lower()
+        is_expand_str = str(self.is_expand).lower()
 
         base_ctor_bindings = ", ".join(
             [
@@ -881,6 +886,7 @@ class ViewMetaSpecialization:
                 # `out_index` is know if the operation returns only one value. Otherwise,
                 # we also take it as parameter.
                 f"/*out_index=*/{self.out_index}",
+                f"/*is_expand=*/{is_expand_str}",
             ]
         )
 

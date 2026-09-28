@@ -39,6 +39,15 @@ static const Tensor apply_update(const FunctionalStorageImpl::Update& update, co
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(t));
   if (update.view_metas.empty()) { return t; }
 
+  // The view inverses below assume every element of a view is its own memory location.
+  // A broadcasting expand() breaks that assumption.
+  for (const auto& meta : update.view_metas) {
+    TORCH_CHECK(
+        !meta->is_expand,
+        "Functionalization encountered a mutation through a view with internal overlap (e.g. a broadcasting "
+        "expand()). This is not supported yet.");
+  }
+
   std::vector<at::Tensor> tmp_values({base});
   tmp_values.reserve(update.view_metas.size());
   for (size_t i = 0; i < update.view_metas.size() - 1; ++i) {
@@ -48,18 +57,6 @@ static const Tensor apply_update(const FunctionalStorageImpl::Update& update, co
     // If need to, we could probably apply this optimization and only bother computing tmp_values
     // for those necessary view ops.
     tmp_values.push_back(std::move(next_view));
-  }
-  // The view inverses below assume every element of a view is its own memory location.
-  // A view with more elements than its input (e.g. a broadcasting expand) breaks that assumption.
-  // Sizes are used rather than strides because *_copy views (reapply_views=false) don't preserve strides.
-  // as_strided is exempt since it can legitimately reach outside of its input's elements.
-  for (size_t i = 0; i < update.view_metas.size(); ++i) {
-    const auto& out = i + 1 < tmp_values.size() ? tmp_values[i + 1] : update.new_val;
-    TORCH_CHECK(
-        update.view_metas[i]->is_as_strided ||
-            TORCH_STATICALLY_KNOWN_TRUE(out.sym_numel().sym_le(tmp_values[i].sym_numel())),
-        "Functionalization encountered a mutation through a view with internal overlap (e.g. a broadcasting "
-        "expand()). This is not supported yet.");
   }
   for(int64_t i = static_cast<int64_t>(update.view_metas.size()) - 1; i >= 0; --i) {
     // Each view inverse is implemented in ViewInverses.cpp.

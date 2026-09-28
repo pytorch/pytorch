@@ -716,7 +716,7 @@ class FunctionEvent(FormattedTimesMixin):
             used in exported traces. Use
             ``_ExperimentalConfig(expose_kineto_event_metadata=True)`` to expose
             Kineto activity metadata. Available fields vary by activity and backend.
-        event_metadata (EventMetadata): Additional metadata in structured format.
+        event_metadata (EventMetadata): Deprecated. Use metadata instead.
         structured_input_shapes (List[List[int] | List[List[int]]]): Like ``input_shapes``
             but distinguishes TensorList inputs.  Plain tensor inputs are ``List[int]``;
             TensorList inputs are ``List[List[int]]`` containing one shape per tensor in the list.
@@ -834,7 +834,7 @@ class FunctionEvent(FormattedTimesMixin):
         self.external_id: int = external_id
         self.linked_correlation_id: int = linked_correlation_id
         self.metadata: dict[str, Any] | None = typed_metadata
-        self.event_metadata: EventMetadata | None = (
+        self._event_metadata: EventMetadata | None = (
             _build_metadata(extra_meta) if extra_meta else None
         )
         # pyrefly: ignore [bad-assignment]
@@ -898,6 +898,14 @@ class FunctionEvent(FormattedTimesMixin):
         return self.device_memory_usage - sum(
             child.device_memory_usage for child in self.cpu_children
         )
+
+    @property
+    @deprecated(
+        "`event_metadata` is deprecated. Use `metadata` instead.",
+        category=FutureWarning,
+    )
+    def event_metadata(self):
+        return self._event_metadata
 
     @property
     @deprecated(

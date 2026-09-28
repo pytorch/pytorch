@@ -96,10 +96,12 @@ struct ViewMeta {
       bool has_symbolic_inputs,
       bool is_multi_output = false,
       bool is_as_strided = false,
-      int64_t out_idx = 0)
+      int64_t out_idx = 0,
+      bool is_expand = false)
       : out_index(out_idx),
         is_multi_output(is_multi_output),
         is_as_strided(is_as_strided),
+        is_expand(is_expand),
         has_symbolic_inputs(has_symbolic_inputs) {}
 
   virtual ~ViewMeta() = default;
@@ -129,6 +131,10 @@ struct ViewMeta {
   bool is_multi_output;
 
   bool is_as_strided;
+
+  // expand() can broadcast, making several elements of the view alias the
+  // same memory location.
+  bool is_expand;
 
   // Tells us if this view operation has any symbolic inputs
   bool has_symbolic_inputs;
