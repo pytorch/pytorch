@@ -1229,6 +1229,12 @@ static Tensor& addbmm_or_baddbmm_out_mps_impl(const Tensor& input,
               batch1.scalar_type(),
               ", batch2: ",
               batch2.scalar_type());
+  TORCH_CHECK(result.scalar_type() == input.scalar_type(),
+              "Expected out tensor to have dtype ",
+              input.scalar_type(),
+              ", but got ",
+              result.scalar_type(),
+              " instead");
 
   TORCH_CHECK(batch1.dim() == 3, "batch1 must be a 3D tensor");
   TORCH_CHECK(batch2.dim() == 3, "batch2 must be a 3D tensor");
