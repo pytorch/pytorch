@@ -1456,7 +1456,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             # The meta template is a plain tensor, not another fake carrying
             # the mode (without no_dispatch the dump still succeeds, with the
             # mode and its converters pickled along).
-            _, args = pickler.reducer_override(fake)
+            args = pickler.reducer_override(fake)[1]
             self.assertIs(type(args[0]), torch.Tensor)
             pickler.dump({"t": fake})
             self.assertNotIn(b"FakeTensorMode", buf.getvalue())
@@ -1507,6 +1507,59 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         out = load_guards_state(buf.getvalue())
         self.assertIsNone(out.grad)
         self.assertEqual(out.shape, x.shape)
+
+    def test_literal_on_a_fake_tensor_owned_name_is_not_a_guard_read(self):
+        x = torch.randn(3)
+        x._is_param = True
+        x.constant = 2
+        # Unrelated guards on the same interned values.
+        tree = {id(v): v for v in (x, True, 2)}
+        buf = io.BytesIO()
+        GuardsStatePickler(tree, {}, {}, {}, buf).dump({"x": x})
+        out = load_guards_state(buf.getvalue())["x"]
+        self.assertIs(out._is_param, True)
+        self.assertIsNone(out.constant)
+
+    def test_fake_tensor_setter_names_are_owned(self):
+        x = torch.randn(3)
+        x.fake_device = torch.device("meta")
+        x.item_memo = [5]
+        buf = io.BytesIO()
+        GuardsStatePickler({id(x): x}, {}, {}, {}, buf).dump({"x": x})
+        out = load_guards_state(buf.getvalue())["x"]
+        self.assertEqual(out.fake_device, torch.device("cpu"))
+        self.assertIsNone(out.item_memo)
+        tree = {id(v): v for v in (x, x.item_memo)}
+        with self.assertRaisesRegex(PackageError, "reads 'item_memo' off a tensor"):
+            GuardsStatePickler(tree, {}, {}, {}, io.BytesIO()).dump({"x": x})
+
+    def test_tensor_attributes_carried_through_the_pickle(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        x = torch.randn(3)
+        x.me = x
+        x._cpu_copy = torch.randn(2)
+        x.gen = (i for i in range(3))
+        x._dynamo_dynamic_indices = {0}
+        x._dynamo_weak_dynamic_indices = {1}
+        fake = FakeTensorMode().from_tensor(torch.randn(3))
+        fake.scale = 2
+        tree = {
+            id(v): v for v in (x, x._cpu_copy, x._dynamo_weak_dynamic_indices, fake)
+        }
+        buf = io.BytesIO()
+        GuardsStatePickler(tree, {}, {}, {}, buf).dump({"x": x, "fake": fake})
+        state = load_guards_state(buf.getvalue())
+        out = state["x"]
+        self.assertIs(out.me, out)
+        self.assertEqual(out._cpu_copy.shape, (2,))
+        # The generator does not pickle; its name survives for a HASATTR guard.
+        self.assertIsInstance(out.gen, _Missing)
+        # An unregistered marking is dropped, not left as a _Missing.
+        self.assertFalse(hasattr(out, "_dynamo_dynamic_indices"))
+        self.assertEqual(out._dynamo_weak_dynamic_indices, {1})
+        self.assertEqual(state["fake"].scale, 2)
+        self.assertNotIn(b"FakeTensorMode", buf.getvalue())
 
     def test_symbolic_scalars_are_refused_as_package_errors(self):
         # SymInt was refused with a RuntimeError while SymFloat and SymBool fell
@@ -4507,6 +4560,53 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(ref, loaded, {"x": torch.randn(3, 10, 2)}, True)
         self._test_check_fn(ref, loaded, {"x": torch.randn(3, 11, 2)}, False)
         self._test_check_fn(ref, loaded, {"x": torch.randn(3, 2, 2)}, False)
+
+    def test_guarded_tensor_attribute_round_trips(self):
+        def fn(x):
+            return x * x.scale
+
+        x = torch.randn(3)
+        x.scale = 2
+        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, x)
+        same, other = torch.randn(3), torch.randn(3)
+        same.scale = 2
+        other.scale = 3
+        self._test_check_fn(ref, loaded, {"x": same}, True)
+        self._test_check_fn(ref, loaded, {"x": other}, False)
+
+    def test_hasattr_only_tensor_attribute_keeps_its_presence(self):
+        def fn(x):
+            return x + 1 if hasattr(x, "cfg") else x - 1
+
+        x = torch.randn(3)
+        x.cfg = object()
+        ref, loaded = self._test_serialization("HASATTR", fn, x)
+        with_cfg, without_cfg = torch.randn(3), torch.randn(3)
+        with_cfg.cfg = object()
+        self._test_check_fn(ref, loaded, {"x": with_cfg}, True)
+        self._test_check_fn(ref, loaded, {"x": without_cfg}, False)
+
+    def test_guard_reading_a_fake_tensor_owned_name_raises(self):
+        def fn(x):
+            return x * x.constant[0]
+
+        x = torch.randn(3)
+        x.constant = [2]
+        with self.assertRaisesRegex(PackageError, "reads 'constant' off a tensor"):
+            self._test_serialization("EQUALS_MATCH", fn, x)
+
+    def test_guard_reading_a_literal_fake_tensor_owned_name_warns(self):
+        def fn(x):
+            return x * x.constant
+
+        x = torch.randn(3)
+        x.constant = 2
+        with self.assertLogs("torch._dynamo.guards", "WARNING") as logs:
+            ref, loaded = self._test_serialization("EQUALS_MATCH", fn, x)
+        self.assertIn("'constant' attribute holds 2", "\n".join(logs.output))
+        # The loaded guard compares against the FakeTensor's own constant.
+        self.assertTrue(ref.check({"x": x}))
+        self.assertFalse(loaded.check({"x": x}))
 
     def test_builtin_match(self):
         def fn(x):
