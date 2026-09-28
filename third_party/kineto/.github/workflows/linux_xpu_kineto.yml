@@ -1,0 +1,34 @@
+name: Linux XPU Kineto build and test
+
+on:
+  push:
+    tags:
+      - ciflow/xpu/*
+    branches:
+      - main
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  pr-test:
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
+    with:
+      job-name: linux-xpu-kineto-build-and-test
+      runner: linux.idc.xpu
+      timeout: 180
+      # Checkout the Kineto repo at the PR ref with submodules
+      repository: ${{ github.repository }}
+      ref: ${{ github.ref }}
+      submodules: recursive
+      gpu-arch-type: xpu
+      docker-image: pytorch/manylinux2_28-builder:xpu
+      script: |
+        set -eux
+        .github/scripts/setup.sh
+        .github/scripts/kineto_build_test.sh xpu

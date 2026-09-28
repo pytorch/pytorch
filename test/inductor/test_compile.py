@@ -394,7 +394,6 @@ class TestStandaloneInductor(TestCase):
         os.environ,
         {"TORCH_CUDA_ARCH_LIST": "7.0;8.0;8.6;9.0+PTX"},
     )
-    @unittest.skipIf(torch.version.hip is not None, "CUDA-only")
     def test_aoti_cuda_multi_arch_gencode_options(self):
         from torch._inductor.codegen.cuda import compile_utils
 
@@ -416,7 +415,6 @@ class TestStandaloneInductor(TestCase):
         os.environ,
         {"TORCH_CUDA_ARCH_LIST": "9.0;9.0a;10.0"},
     )
-    @unittest.skipIf(torch.version.hip is not None, "CUDA-only")
     def test_aoti_cuda_multi_arch_gencode_options_suffix_arch(self):
         from torch._inductor.codegen.cuda import compile_utils
 
@@ -432,7 +430,6 @@ class TestStandaloneInductor(TestCase):
         "torch._inductor.codegen.cuda.compile_utils._nvcc_arch_as_compile_option",
         return_value="100a",
     )
-    @unittest.skipIf(torch.version.hip is not None, "CUDA-only")
     def test_aoti_cuda_target_arch_preserves_suffix(self, _):
         from torch._inductor.codegen.cuda import compile_utils
 
@@ -447,7 +444,6 @@ class TestStandaloneInductor(TestCase):
         "torch._inductor.codegen.cuda.compile_utils._nvcc_arch_as_compile_option",
         return_value="100a",
     )
-    @unittest.skipIf(torch.version.hip is not None, "CUDA-only")
     def test_aoti_cuda_fatbin_command_uses_nvcc_for_extra_archs(self, _):
         with tempfile.TemporaryDirectory() as tmp_dir:
             raw_cubin = os.path.join(tmp_dir, "kernel.cubin")

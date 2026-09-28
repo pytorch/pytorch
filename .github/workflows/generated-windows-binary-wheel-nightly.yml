@@ -55,36 +55,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - desired_python: "3.10"
-            desired_cuda: "cpu"
-            gpu_arch_version: ""
-            gpu_arch_type: "cpu"
-            build_name: "wheel-py3_10-cpu"
-            pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.26.0.51; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.7.2; platform_system == 'Linux'"
-          - desired_python: "3.10"
-            desired_cuda: "cu130"
-            gpu_arch_version: "13.0"
-            gpu_arch_type: "cuda"
-            build_name: "wheel-py3_10-cuda13_0"
-            pytorch_extra_install_requirements: ""
-          - desired_python: "3.10"
-            desired_cuda: "cu132"
-            gpu_arch_version: "13.2"
-            gpu_arch_type: "cuda"
-            build_name: "wheel-py3_10-cuda13_2"
-            pytorch_extra_install_requirements: ""
-          - desired_python: "3.10"
-            desired_cuda: "cu134"
-            gpu_arch_version: "13.4"
-            gpu_arch_type: "cuda"
-            build_name: "wheel-py3_10-cuda13_4"
-            pytorch_extra_install_requirements: ""
-          - desired_python: "3.10"
-            desired_cuda: "xpu"
-            gpu_arch_version: ""
-            gpu_arch_type: "xpu"
-            build_name: "wheel-py3_10-xpu"
-            pytorch_extra_install_requirements: "intel-cmplr-lib-rt==2026.1.2 | intel-cmplr-lib-ur==2026.1.2 | intel-cmplr-lic-rt==2026.1.2 | intel-sycl-rt==2026.1.2 | oneccl-devel==2022.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2022.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.18.1; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2026.1.0 | onemkl-sycl-blas==2026.1.0 | onemkl-sycl-dft==2026.1.0 | onemkl-sycl-lapack==2026.1.0 | onemkl-sycl-rng==2026.1.0 | onemkl-sycl-sparse==2026.1.0 | dpcpp-cpp-rt==2026.1.2 | intel-opencl-rt==2026.1.2 | mkl==2026.1.0 | intel-openmp==2026.1.2 | tbb==2023.1.0 | tcmlib==1.5.0 | umf==1.1.0 | intel-pti==1.1.0 | pyzes==0.1.2; platform_system == 'Linux' and platform_machine == 'x86_64'"
           - desired_python: "3.11"
             desired_cuda: "cpu"
             gpu_arch_version: ""
@@ -406,36 +376,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - desired_python: "3.10"
-            desired_cuda: "cpu"
-            gpu_arch_version: ""
-            gpu_arch_type: "cpu"
-            build_name: "wheel-py3_10-cpu"
-            runs_on: "${{ needs.get-label-type.outputs.scale-config-label-type }}windows.4xlarge"
-          - desired_python: "3.10"
-            desired_cuda: "cu130"
-            gpu_arch_version: "13.0"
-            gpu_arch_type: "cuda"
-            build_name: "wheel-py3_10-cuda13_0"
-            runs_on: "${{ needs.get-label-type.outputs.scale-config-label-type }}windows.g4dn.xlarge"
-          - desired_python: "3.10"
-            desired_cuda: "cu132"
-            gpu_arch_version: "13.2"
-            gpu_arch_type: "cuda"
-            build_name: "wheel-py3_10-cuda13_2"
-            runs_on: "${{ needs.get-label-type.outputs.scale-config-label-type }}windows.g4dn.xlarge"
-          - desired_python: "3.10"
-            desired_cuda: "cu134"
-            gpu_arch_version: "13.4"
-            gpu_arch_type: "cuda"
-            build_name: "wheel-py3_10-cuda13_4"
-            runs_on: "${{ needs.get-label-type.outputs.scale-config-label-type }}windows.g4dn.xlarge"
-          - desired_python: "3.10"
-            desired_cuda: "xpu"
-            gpu_arch_version: ""
-            gpu_arch_type: "xpu"
-            build_name: "wheel-py3_10-xpu"
-            runs_on: "${{ needs.get-label-type.outputs.scale-config-label-type }}windows.4xlarge"
           - desired_python: "3.11"
             desired_cuda: "cpu"
             gpu_arch_version: ""
@@ -755,31 +695,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - desired_python: "3.10"
-            desired_cuda: "cpu"
-            gpu_arch_version: ""
-            gpu_arch_type: "cpu"
-            build_name: "wheel-py3_10-cpu"
-          - desired_python: "3.10"
-            desired_cuda: "cu130"
-            gpu_arch_version: "13.0"
-            gpu_arch_type: "cuda"
-            build_name: "wheel-py3_10-cuda13_0"
-          - desired_python: "3.10"
-            desired_cuda: "cu132"
-            gpu_arch_version: "13.2"
-            gpu_arch_type: "cuda"
-            build_name: "wheel-py3_10-cuda13_2"
-          - desired_python: "3.10"
-            desired_cuda: "cu134"
-            gpu_arch_version: "13.4"
-            gpu_arch_type: "cuda"
-            build_name: "wheel-py3_10-cuda13_4"
-          - desired_python: "3.10"
-            desired_cuda: "xpu"
-            gpu_arch_version: ""
-            gpu_arch_type: "xpu"
-            build_name: "wheel-py3_10-xpu"
           - desired_python: "3.11"
             desired_cuda: "cpu"
             gpu_arch_version: ""
@@ -993,7 +908,7 @@ jobs:
       - uses: actions/download-artifact@v4.1.7
         name: Download Wheel Artifact
         with:
-          name: wheel-py3_10-cpu
+          name: wheel-py3_11-cpu
           path: "${{ runner.temp }}/wheel_artifact/"
       - name: Extract libtorch from wheel
         shell: bash
@@ -1057,7 +972,7 @@ jobs:
       - uses: actions/download-artifact@v4.1.7
         name: Download Wheel Artifact
         with:
-          name: wheel-py3_10-cuda13_0
+          name: wheel-py3_11-cuda13_0
           path: "${{ runner.temp }}/wheel_artifact/"
       - name: Extract libtorch from wheel
         shell: bash
@@ -1122,7 +1037,7 @@ jobs:
       - uses: actions/download-artifact@v4.1.7
         name: Download Wheel Artifact
         with:
-          name: wheel-py3_10-cuda13_2
+          name: wheel-py3_11-cuda13_2
           path: "${{ runner.temp }}/wheel_artifact/"
       - name: Extract libtorch from wheel
         shell: bash
@@ -1187,7 +1102,7 @@ jobs:
       - uses: actions/download-artifact@v4.1.7
         name: Download Wheel Artifact
         with:
-          name: wheel-py3_10-cuda13_4
+          name: wheel-py3_11-cuda13_4
           path: "${{ runner.temp }}/wheel_artifact/"
       - name: Extract libtorch from wheel
         shell: bash

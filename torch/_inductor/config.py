@@ -265,6 +265,13 @@ alignment_asserts = (
     == "1"
 )
 
+# Strict mode for input alignment: assert alignment of graph inputs which
+# were codegenned under the assumption that they are aligned, instead of the
+# runtime silently realigning misaligned inputs with a clone.
+alignment_asserts_inputs = (
+    os.environ.get("TORCHINDUCTOR_ALIGNMENT_ASSERTS_INPUTS") == "1"
+)
+
 # enable loop reordering based on input orders
 pick_loop_orders = True
 
@@ -1039,6 +1046,17 @@ loop_index_inversion_in_fusion: bool = True
 #
 # For the cases loop ordering after fusion does not help, we don't lose much.
 score_fusion_memory_threshold = 10
+
+# Memory-timeline fusion gating.
+#   None: disable that threshold dimension
+#   0: allow no graph-peak increase
+#   value: allow total graph-peak delta up to that limit
+# The absolute threshold is in GiB: 1 means 1024**3 bytes.
+# The percentage threshold is fractional: 0.1 means 10%.
+# The accepted delta is measured against the original graph peak before fusion.
+# When both thresholds are set, the tighter limit wins.
+fusion_memory_timeline_peak_memory_increase_gb: float | None = None
+fusion_memory_timeline_peak_memory_pct_threshold: float | None = None
 
 # For Triton Templates, select fastest of best template + epilogue vs best template + separate epilogue kernel
 benchmark_epilogue_fusion = (
@@ -2523,6 +2541,19 @@ class aot_inductor:
     # autotuning. When False (default), tensors are shared across kernels
     # and del'd at their last consumer (faster but higher peak memory).
     autotune_per_kernel_alloc: bool = False
+
+    # Offload graph constants to disk across the autotune block once they occupy
+    # this share of the device. AOT only.
+    #
+    # Defaults to 1.0, which never fires: constants are resident on the card, so
+    # they cannot reach 100% of its capacity. The offload is opt-in until it has
+    # more production mileage; set it to e.g. 0.10 to enable.
+    #
+    # A fraction rather than an absolute size so a chosen threshold scales with
+    # the card: 0.10 is ~9.5 GiB on a 95 GiB H100 but ~29 GiB on a 288 GiB
+    # MI350X, which should not pay the spill for a working set that only
+    # threatens the smaller card.
+    autotune_offload_constants_min_device_fraction: float = 1.0
 
     # AOTInductor output path
     # If an absolute path is specified, the generated lib files will be stored under the directory;

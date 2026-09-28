@@ -1,0 +1,72 @@
+name: Linux ROCm Kineto build and test
+
+on:
+  push:
+    tags:
+      - ciflow/rocm/*
+    branches:
+      - main
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  # Compiling libkineto needs the ROCm toolchain but no GPU, so it runs on a
+  # cheap CPU runner and hands the built tree to the GPU job below. Note that
+  # gpu-arch-type must stay cpu here: the rocm setup action fails the job when
+  # rocminfo finds no GPU.
+  build:
+    strategy:
+      matrix:
+        rocm: ["10.0"]
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
+    with:
+      job-name: linux-rocm-${{ matrix.rocm }}-kineto-build
+      runner: linux.4xlarge
+      timeout: 180
+      # Checkout the Kineto repo at the PR ref with submodules
+      repository: ${{ github.repository }}
+      ref: ${{ github.ref }}
+      submodules: recursive
+      gpu-arch-type: cpu
+      # Same image the test job resolves to from gpu-arch-type/gpu-arch-version,
+      # so the binaries built here find the same ROCm libraries there. gpu-arch-type
+      # stays cpu so the ROCm setup action is not run (it fails with no GPU).
+      gpu-arch-version: ${{ matrix.rocm }}
+      docker-image: pytorch/almalinux-builder:rocm${{ matrix.rocm }}
+      upload-artifact: linux-rocm-kineto-build
+      script: |
+        set -eux
+        .github/scripts/setup.sh
+        .github/scripts/kineto_build_test.sh rocm build
+
+  test:
+    needs: build
+    strategy:
+      matrix:
+        rocm: ["10.0"]
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
+    with:
+      job-name: linux-rocm-${{ matrix.rocm }}-kineto-test
+      runner: linux.rocm.gpu.ecosystem.mi350.1
+      timeout: 180
+      # Checkout the Kineto repo at the PR ref with submodules. The build tree
+      # below is unpacked over this checkout so the paths baked into CMake's
+      # cache by the build job still resolve.
+      repository: ${{ github.repository }}
+      ref: ${{ github.ref }}
+      submodules: recursive
+      gpu-arch-type: rocm
+      gpu-arch-version: ${{ matrix.rocm }}
+      download-artifact: linux-rocm-kineto-build
+      script: |
+        set -eux
+        # Reinstall the same cmake the build job used: CMake bakes the absolute
+        # path of its own ctest into the generated makefiles.
+        .github/scripts/setup.sh
+        .github/scripts/kineto_build_test.sh rocm test

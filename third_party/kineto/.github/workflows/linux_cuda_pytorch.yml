@@ -1,0 +1,33 @@
+name: Linux CUDA PyTorch build and test
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  pr-test:
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
+    with:
+      job-name: linux-cuda-pytorch-build-and-test
+      # AWS A10G GPU instance
+      runner: linux.g5.4xlarge.nvidia.gpu
+      timeout: 180
+      # Checkout the Kineto repo at the PR ref with submodules
+      repository: ${{ github.repository }}
+      ref: ${{ github.ref }}
+      submodules: recursive
+      gpu-arch-type: cuda
+      gpu-arch-version: "12.6"
+      script: |
+        set -eux
+        .github/scripts/setup.sh
+        .github/scripts/pytorch_build_test.sh cuda

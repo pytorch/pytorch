@@ -40,7 +40,7 @@ jobs:
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runner: linux.12xlarge.memory
-      build-environment: linux-jammy-cuda13.0-py3.10-gcc11-sm80
+      build-environment: linux-jammy-cuda13.0-py3.11-gcc11-sm80
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       cuda-arch-list: '8.0 9.0'
@@ -49,7 +49,7 @@ jobs:
           { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.h100" },
           { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
         ]}
-      python-version: "3.10"
+      python-version: "3.11"
       compiler: gcc11
       cuda-version: "13.0"
     secrets: inherit
@@ -65,7 +65,7 @@ jobs:
       build-environment: ${{ needs.opmicrobenchmark-build.outputs.build-environment }}
       docker-image: ${{ needs.opmicrobenchmark-build.outputs.docker-image }}
       test-matrix: ${{ needs.opmicrobenchmark-build.outputs.test-matrix }}
-      python-version: "3.10"
+      python-version: "3.11"
       compiler: gcc11
       cuda-version: "13.0"
     secrets: inherit
@@ -125,7 +125,7 @@ jobs:
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-rocm-py3_10
+      build-environment: linux-jammy-rocm-py3_11
       docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3-benchmarks
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |

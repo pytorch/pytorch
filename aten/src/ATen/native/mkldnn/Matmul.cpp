@@ -195,9 +195,24 @@ mkldnn_gemm(
   ideep::tensor a = make_ideep_tensor<scalar_t>({k, m}, idtype, a_strides, const_cast<scalar_t*>(a_data));
   ideep::tensor b = make_ideep_tensor<scalar_t>({n, k}, idtype, b_strides, const_cast<scalar_t*>(b_data));
   ideep::tensor c = make_ideep_tensor<scalar_t>({n, m}, idtype, c_strides, c_data);
+  ideep::tensor src = b;
+
+#if defined(__aarch64__) && AT_MKLDNN_ACL_ENABLED()
+  if constexpr (std::is_same_v<scalar_t, c10::Half>) {
+    const bool src_is_dense = transb == TransposeType::NoTranspose
+        ? n == 1 || ldb == k
+        : k == 1 || ldb == n;
+    // FP16 matmul on AArch64 requires a dense source tensor to pick up the optimized kernel
+    // falls back to ref otherwise
+    if (!src_is_dense) {
+      src.init({n, k}, idtype);
+      b.reorder_to(src);
+    }
+  }
+#endif
 
   ideep::matmul_forward::compute(
-      b, a, c, alpha, beta,
+      src, a, c, alpha, beta,
       ideep::scale_t(), ideep::scale_t(), ideep::scale_t(), op_attr);
 
   if (c.get_data_handle() != c_data){
