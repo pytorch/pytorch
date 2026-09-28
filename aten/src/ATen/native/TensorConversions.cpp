@@ -17,10 +17,6 @@
 #include <ATen/ops/_convert_indices_from_coo_to_csr_native.h>
 #include <ATen/ops/_convert_indices_from_csr_to_coo.h>
 #include <ATen/ops/_convert_indices_from_csr_to_coo_native.h>
-#include <ATen/ops/_sparse_bsc_tensor_unsafe_native.h>
-#include <ATen/ops/_sparse_bsr_tensor_unsafe_native.h>
-#include <ATen/ops/_sparse_compressed_tensor_unsafe_native.h>
-#include <ATen/ops/_sparse_coo_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_coo_tensor_with_dims_native.h>
 #include <ATen/ops/_sparse_csc_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>

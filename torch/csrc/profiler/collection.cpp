@@ -102,8 +102,8 @@ OpArgData parseArgData(
                 shape.emplace_back(t.sizes_);
                 stride.emplace_back(t.strides_);
               }
-              shapes[i] = shape;
-              strides[i] = stride;
+              shapes[i] = std::move(shape);
+              strides[i] = std::move(stride);
               dtypes[i] = "TensorList";
             },
             [&](const c10::IValue&) { dtypes[i] = "Scalar"; },
@@ -134,11 +134,11 @@ OpArgData parseArgData(
 
   return OpArgData{
       .hasData = true,
-      .shapes = shapes,
-      .dtypes = dtypes,
-      .concreteInputs = concrete_inputs_list,
-      .shapesForKinetoEvent = shapesForKinetoEvent,
-      .strides = strides};
+      .shapes = std::move(shapes),
+      .dtypes = std::move(dtypes),
+      .concreteInputs = std::move(concrete_inputs_list),
+      .shapesForKinetoEvent = std::move(shapesForKinetoEvent),
+      .strides = std::move(strides)};
 }
 
 // ============================================================================
@@ -516,11 +516,8 @@ struct StealOrDefault {
 };
 } // namespace
 
-static constexpr std::string_view profilerStepString = "ProfilerStep#";
-
 void ThreadLocalSubqueue::TorchOpStorage::materialize(
     std::vector<std::shared_ptr<Result>>& out,
-    std::vector<ProfilerStepInfo>& step_info,
     const std::function<c10::time_t(c10::approx_time_t)>& time_converter,
     const uint64_t tid,
     const kineto::DeviceAndResource& kineto_info) {
@@ -577,12 +574,6 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
         event->allow_tf32_cublas_,
         std::move(event->counters_)};
 
-    if (e.name_.find(profilerStepString) != std::string::npos) {
-      step_info.emplace_back(
-          time_converter(event->start_time_),
-          time_converter(event->end_time_),
-          out.size());
-    }
     out.emplace_back(Result::create(
         time_converter(event->start_time_), tid, kineto_info, std::move(e)));
   }
@@ -786,7 +777,7 @@ RecordQueue::RecordQueue(
 }
 
 bool RecordQueue::tracePython() const {
-  return config_.with_stack && activities_.count(ActivityType::CPU);
+  return config_.with_stack && activities_.contains(ActivityType::CPU);
 }
 
 bool RecordQueue::getPythonGcEvents() const {
@@ -902,8 +893,10 @@ class IValueMetadataVisitor final : public libkineto::ITypedMetadataVisitor {
   }
 
   void visitValue(
-      const libkineto::MetadataField<libkineto::RawJson>& /*field*/,
-      const libkineto::RawJson& /*value*/) override {}
+      const libkineto::MetadataField<libkineto::RawJson>& field,
+      const libkineto::RawJson& value) override {
+    addValue(field.name, c10::IValue(value.value));
+  }
 
   void visitValue(
       const libkineto::MetadataField<uint64_t>& field,
@@ -1162,16 +1155,6 @@ class TransferEvents {
   }
 
  private:
-  static long long extractIndex(const std::string& metadata_json) {
-    static const auto prefix = fmt::format("\"{}\": ", indexKey);
-    auto pos = metadata_json.find(prefix);
-    return (pos == std::string::npos) ? unmatchedIndex : [&]() {
-      auto end = metadata_json.find(',', pos);
-      end = (end == std::string::npos) ? metadata_json.size() : end;
-      return std::stoll(metadata_json.substr(pos + prefix.size(), end));
-    }();
-  }
-
   std::shared_ptr<Result> lookup(const itrace_t* key) {
     if (key == nullptr) {
       return nullptr;
@@ -1183,10 +1166,10 @@ class TransferEvents {
       return it->second;
     }
 
-    // Then fallback to the encoded metadata.
-    const auto index = extractIndex(key ? key->metadataJson() : "");
-    if (index != unmatchedIndex) {
-      auto out = results_.get().at(index);
+    // Then fallback to the event index metadata.
+    const auto index_str = key->getMetadataValue(indexKey);
+    if (!index_str.empty()) {
+      auto out = results_.get().at(std::stoll(index_str));
       kineto_events_[key] = out;
       return out;
     }
@@ -1433,7 +1416,6 @@ class TransferEvents {
     }
   }
 
-  static constexpr long long unmatchedIndex = -1;
   static constexpr auto noTID = std::numeric_limits<uint64_t>::max();
   std::reference_wrapper<std::vector<std::shared_ptr<Result>>> results_;
   std::reference_wrapper<const ProfilerConfig> config_;
@@ -1715,17 +1697,8 @@ RecordQueue::getRecords(
         : time_converter(t);
   };
 
-  // Lambda that checks that only the right side of the base intersects with
-  // ev_start and ev_end
-  auto right_intersection_only =
-      [&](ProfilerStepInfo base, int64_t ev_start, int64_t ev_end) {
-        return (base.start_time_ns < ev_start) &&
-            (base.end_time_ns <= ev_end && base.end_time_ns > ev_start);
-      };
   std::vector<std::shared_ptr<Result>> out;
   std::vector<python_tracer::CompressedEvent> python_enters;
-  std::vector<ProfilerStepInfo> step_info;
-  long unsigned int step_idx = 0;
   for (auto& subqueue_it : sub_queues_) {
     auto& queue = *subqueue_it.second;
     auto materialize = [&](auto& events) {
@@ -1748,7 +1721,7 @@ RecordQueue::getRecords(
     };
 
     queue.torch_ops_.materialize(
-        out, step_info, converter, queue.tid(), queue.kineto_info());
+        out, converter, queue.tid(), queue.kineto_info());
     materialize(queue.backend_events_);
     materialize_vulkan(
         out, queue.vulkan_events_, converter, queue.tid(), queue.kineto_info());
@@ -1806,34 +1779,7 @@ RecordQueue::getRecords(
       torch::profiler::impl::kineto::stopTrace();
       throw;
     }
-    // Placeholder for if we run out of ProfilerStep annotations
-    ProfilerStepInfo defaultStep = {LLONG_MAX, LLONG_MAX, 0};
-    ProfilerStepInfo step =
-        step_idx < step_info.size() ? step_info[step_idx] : defaultStep;
-    for (const auto& i : ev) {
-      // Only adjust timestamps if experimental config is enabled
-      if (config_.experimental_config.adjust_profiler_step) {
-        // If event has start time after step end time we can continue to the
-        // next step
-        while (i->start_time_ns_ > step.end_time_ns) {
-          step_idx++;
-          step =
-              step_idx < step_info.size() ? step_info[step_idx] : defaultStep;
-        }
-        // If Step annotation starts before event and ends before event ends
-        // with intersection then we move the lefthand side of the step
-        // annotation to the event start time
-        if (right_intersection_only(step, i->start_time_ns_, i->endTimeNS())) {
-          // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
-          auto const& currStepRes = out[step.out_idx];
-          currStepRes->start_time_ns_ = i->start_time_ns_ + 1;
-          step_idx++;
-          step =
-              step_idx < step_info.size() ? step_info[step_idx] : defaultStep;
-        }
-      }
-      out.push_back(i);
-    }
+    out.insert(out.end(), ev.begin(), ev.end());
     python_tracer_.reset();
   }
 

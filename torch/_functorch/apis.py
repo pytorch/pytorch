@@ -182,7 +182,7 @@ def vmap(
         >>> batched_dot(x, y)  # tensor of size [2, 3]
 
     If the inputs are not batched along the first dimension, ``in_dims`` specifies
-    the dimension that each inputs are batched along as
+    the dimension that each input is batched along as
 
         >>> torch.dot  # [N], [N] -> []
         >>> batched_dot = torch.vmap(torch.dot, in_dims=1)  # [N, D], [N, D] -> [D]
