@@ -17,7 +17,7 @@ import tempfile
 from collections.abc import Callable, Iterator
 from enum import Enum
 from itertools import chain, count
-from typing import Any, Literal, Protocol, TYPE_CHECKING
+from typing import Any, cast, Literal, Protocol, TYPE_CHECKING
 
 import sympy
 from sympy import Expr
@@ -336,6 +336,39 @@ class BenchmarkStorageGroup:
     device: Any
     dtype: Any
     inputs: dict[str, tuple[list[int], list[int]]]
+
+
+@dataclasses.dataclass(frozen=True)
+class AutotuneStorageArg:
+    """Storage information for one logical kernel argument."""
+
+    # Supplies the logical argument's size, stride, and offset.
+    tensor: ir.IRNode
+    # Owns the allocation shared by this argument and any aliases.
+    base_buffer: ir.Buffer
+
+
+@dataclasses.dataclass(frozen=True)
+class AutotuneStorage:
+    """Entry in an autotune backing-storage cache."""
+
+    # Python variable holding the generated one-dimensional storage tensor.
+    name: str
+    # The allocation is deleted after this kernel's autotune call.
+    last_kernel: str
+
+
+@dataclasses.dataclass(frozen=True)
+class AutotuneExampleArg:
+    """Entry in the wrapper-wide example-argument cache."""
+
+    # Python variable passed to the generated autotune kernel call.
+    name: str
+    # The logical tensor is deleted after this kernel's autotune call.
+    last_kernel: str
+    # Owning buffer name used to find shared storage, or None when this
+    # argument has its own independent allocation.
+    storage_key: str | None = None
 
 
 def buffer_reuse_key(node: BufferLike) -> ReuseKey:
@@ -771,6 +804,43 @@ class EnterSubgraphLine(WrapperLine):
 
 
 @dataclasses.dataclass
+class EnterKernelProfileScopeLine(WrapperLine):
+    """Opens the `{` of a kernel profiling block.
+
+    The block is a real C++ scope, so everything a kernel call declares inside
+    it dies at the closing brace. Every memo that decides whether a
+    declaration is emitted has to be scoped with it, or a later line outside
+    the block names a variable that no longer exists: the buffer reuse pool
+    (a workspace freed inside would be handed to an allocation outside as
+    `auto new = std::move(inner)`), the precomputed-size memo, and the int
+    array cache.
+    """
+
+    wrapper: PythonWrapperCodegen
+
+    def __post_init__(self) -> None:
+        self.wrapper.push_computed_sizes(self.wrapper.computed_sizes)
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        self.wrapper.push_kernel_profile_scope_state()
+        code.writeline("{")
+
+
+@dataclasses.dataclass
+class ExitKernelProfileScopeLine(WrapperLine):
+    """Closes the `{` that EnterKernelProfileScopeLine opened."""
+
+    wrapper: PythonWrapperCodegen
+
+    def __post_init__(self) -> None:
+        self.wrapper.computed_sizes = self.wrapper.pop_computed_sizes()
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        self.wrapper.pop_kernel_profile_scope_state()
+        code.writeline("}")
+
+
+@dataclasses.dataclass
 class SwitchLine(WrapperLine):
     wrapper: PythonWrapperCodegen
     node: ir.Switch
@@ -920,8 +990,17 @@ def kernel_profile_enabled() -> bool:
     through an include that only these platforms emit. Callers that build
     profiling metadata must use this rather than the config flag alone:
     `_get_profiling_args` emits codegen for ReinterpretView arguments, so
-    building metadata the shim then declines to emit would leak a handle."""
-    return config.cpp.enable_kernel_profile and sys.platform in ("linux", "win32")
+    building metadata the shim then declines to emit would leak a handle.
+
+    `config.memory_planning` disables it: every record sits in a `{}` block,
+    and those blocks are a boundary only to memory_plan_reuse. MemoryPlanner
+    runs in its place and does not see them, so a pool first created inside one
+    would be declared there and named by a line after it."""
+    return (
+        config.cpp.enable_kernel_profile
+        and sys.platform in ("linux", "win32")
+        and not config.memory_planning
+    )
 
 
 def _profiling_arg_entry(value: Any) -> str | None:
@@ -1903,10 +1982,12 @@ class PythonWrapperCodegen(CodeGen):
         self.kernel_autotune_calls = IndentedBuffer()
         self.subgraph_definitions = IndentedBuffer()
         self.kernel_autotune_names: OrderedSet[str] = OrderedSet()
-        # Map key is the kernel argument name; value is a tuple of the resulting example
-        # tensor name with the kernel where that tensor was most recently used.
-        self.kernel_autotune_example_args: dict[str, tuple[str, str]] = {}
+        # Kernel argument name -> cached tensor and its lifetime/storage metadata.
+        self.kernel_autotune_example_arg_cache: dict[str, AutotuneExampleArg] = {}
+        # Base buffer name -> generated backing tensor and its last consuming kernel.
+        self.kernel_autotune_storage_cache: dict[str, AutotuneStorage] = {}
         self.kernel_autotune_tmp_arg_idx: int = 0
+        self.kernel_autotune_storage_idx: int = 0
         # If the generated source code is exactly the same, reuse the
         # pre-existing kernel for it
         self.src_to_kernel: dict[str, str] = {}
@@ -1918,6 +1999,11 @@ class PythonWrapperCodegen(CodeGen):
         # its own braces -- does not register; anything emitting a numel inside
         # one has to maintain the depth too.
         self.kernel_profile_scope_depth: int = 0
+        # Index in self.lines of the `{` opening the outermost profiling block
+        # currently being collected, or None when there is none. A declaration
+        # that has to stay visible after the block closes is inserted there,
+        # which puts it in front of the brace, instead of appended.
+        self.kernel_profile_scope_hoist_index: int | None = None
         self.lines: list[Line] = []
         self.declare = ""
         self.declare_maybe_reference = ""
@@ -2564,6 +2650,30 @@ class PythonWrapperCodegen(CodeGen):
     def pop_codegened_graph(self):
         return self.codegened_graph_stack.pop()
 
+    def push_kernel_profile_scope_state(self):
+        """Save the declaration memos a profiling block is about to shadow.
+
+        Nothing to save for the Python wrapper, which has no block scope.
+        """
+
+    def pop_kernel_profile_scope_state(self):
+        """Restore what push_kernel_profile_scope_state saved."""
+
+    def writeline_outside_kernel_profile_scope(self, line):
+        """Emit a declaration that has to outlive every open profiling block,
+        such as a workspace allocated once per graph and never freed.
+
+        The line is hoisted in front of the outermost block, not the enclosing
+        one, so this is only correct for something whose lifetime is the whole
+        graph. A block-local declaration hoisted this way would be lifted too
+        far."""
+        index = self.kernel_profile_scope_hoist_index
+        if index is None:
+            self.writeline(line)
+        else:
+            self.lines.insert(index, line)
+            self.kernel_profile_scope_hoist_index = index + 1
+
     def push_computed_sizes(self, computed_sizes):
         from copy import deepcopy
 
@@ -3196,6 +3306,15 @@ class PythonWrapperCodegen(CodeGen):
                 past_planning_states.append(planning_states.pop())
                 if config.allow_buffer_reuse:
                     self.estimate_peak = peak_estimate_stack.pop()
+            elif isinstance(line, EnterKernelProfileScopeLine):
+                # A buffer freed inside the block must not be offered to an
+                # allocation after it, and one freed before it must not be
+                # reused inside: either way the ReuseLine declares its new name
+                # on the wrong side of a brace. The state is the same graph's,
+                # so estimate_peak is left alone.
+                planning_states.append(MemoryPlanningState())
+            elif isinstance(line, ExitKernelProfileScopeLine):
+                past_planning_states.append(planning_states.pop())
         past_planning_states.append(planning_states.pop())
         if len(planning_states) != 0:
             raise AssertionError(
@@ -4356,8 +4475,12 @@ class PythonWrapperCodegen(CodeGen):
                 # expand existing allocation
                 prior.node = WorkspaceArg.maximum(prior.node, ws)
             else:
-                self.writeline(line)
-                self.writeline(self.make_zero_buffer(name))
+                # Allocated once at first use and never freed, so it has to be
+                # declared outside any profiling block: the first kernel to
+                # need it may sit inside one, and every later kernel that
+                # names it sits in a different block.
+                self.writeline_outside_kernel_profile_scope(line)
+                self.writeline_outside_kernel_profile_scope(self.make_zero_buffer(name))
                 self.allocated_workspaces[name] = line
         else:
             raise AssertionError(ws.zero_mode)
@@ -4462,37 +4585,238 @@ class PythonWrapperCodegen(CodeGen):
 
         return [wrap_arg(arg) for arg in call_args]
 
-    def generate_example_arg_value(self, arg, arg_type, raw_arg=None):
+    def _get_tensor_arg_ir_node(
+        self,
+        arg: str,
+        raw_arg: ir.IRNode | ir.TMADescriptor | None,
+    ) -> ir.IRNode | None:
+        """Return the IR tensor that supplies storage for a kernel argument."""
+        buffer = self.args_to_buffers.get(arg)
+        if buffer is not None:
+            return buffer
+        # A TMA raw argument is a descriptor, not its underlying tensor, and
+        # descriptor generation requires that tensor to be registered above.
+        if isinstance(raw_arg, ir.TMADescriptor):
+            raise AssertionError(f"No underlying buffer found for TMA argument {arg}")
+        return raw_arg
+
+    @staticmethod
+    def _get_autotune_storage_arg(buf: ir.IRNode, raw_arg) -> AutotuneStorageArg | None:
+        if isinstance(raw_arg, ir.TMADescriptor):
+            return None
+
+        def unwrap_alias_layouts(node: ir.IRNode) -> ir.IRNode:
+            # These layouts describe aliasing without adding a view transform.
+            # Strip them from both the logical-tensor and owner paths.
+            while isinstance(node, ir.Buffer):
+                layout = node.get_layout()
+                if isinstance(layout, ir.MutationLayoutSHOULDREMOVE):
+                    node = layout.target
+                elif isinstance(layout, ir.NonOwningLayout):
+                    node = layout.view
+                else:
+                    break
+            return node
+
+        # The logical tensor supplies the kernel argument's size, stride, and
+        # offset after transparent alias layouts are removed.
+        tensor = unwrap_alias_layouts(buf)
+
+        # torch.as_strided requires the logical tensor to expose an affine
+        # layout. Owner resolution below rejects unsupported view types.
+        if not isinstance(
+            tensor.get_layout(),
+            (ir.FixedLayout, ir.FlexibleLayout),
+        ):
+            return None
+
+        # The owner is the terminal Buffer supplying physical storage. Resolve
+        # it from the logical tensor, stripping alias layouts along the way.
+        # More than one ReinterpretView requires composing their offsets.
+        owner: ir.IRNode = tensor
+        seen_reinterpret_view = False
+        while True:
+            if isinstance(owner, ir.MutableBox):
+                owner = owner.data
+            elif isinstance(owner, ir.ReinterpretView):
+                if seen_reinterpret_view:
+                    return None
+                seen_reinterpret_view = True
+                owner = owner.data
+            elif isinstance(owner, ir.Buffer):
+                break
+            else:
+                return None
+            owner = unwrap_alias_layouts(owner)
+
+        if not isinstance(owner, ir.Buffer):
+            return None
+        # Only an explicitly owning affine layout can back shared storage.
+        if not isinstance(
+            owner.get_layout(),
+            (ir.FixedLayout, ir.FlexibleLayout),
+        ):
+            return None
+        # torch.as_strided interprets offsets in units of the backing dtype.
+        if tensor.get_dtype() != owner.get_dtype():
+            return None
+
+        return AutotuneStorageArg(tensor, owner)
+
+    def _collect_autotune_storage_args(
+        self,
+        call_args: Sequence[Any],
+        arg_types: Sequence[Any],
+        raw_keys: Sequence[Any],
+        raw_args: Sequence[Any],
+        autotune_args: dict[Any, Any] | None,
+    ) -> dict[str, AutotuneStorageArg]:
+        """Collect backing-storage information for supported tensor arguments."""
+        storage_args: dict[str, AutotuneStorageArg] = {}
+        for arg, arg_type, raw_key, raw_arg in zip(
+            call_args, arg_types, raw_keys, raw_args
+        ):
+            # Scalar and symbolic arguments have no tensor storage to collect.
+            if not isinstance(arg_type, torch_dtype):
+                continue
+            # Normalize keyword-style call arguments such as "out=buf0".
+            if isinstance(arg, str) and "=" in arg:
+                _, arg = arg.split("=", 1)
+            # Literal arguments have no stable buffer name, while workspaces and
+            # semaphores are allocated separately by TritonKernel.call_kernel().
+            if not isinstance(arg, str) or re.match(r"^(workspace|semaphore)", arg):
+                continue
+            # TMA descriptors and their underlying tensors are constructed by
+            # the dedicated descriptor-generation path.
+            if isinstance(raw_arg, ir.TMADescriptor):
+                continue
+            # Captured user-defined Triton inputs are bound directly into the
+            # autotuning scope and bypass synthetic storage generation.
+            if autotune_args and raw_key in autotune_args:
+                if self.get_autotuning_input_name(  # type: ignore[attr-defined]
+                    autotune_args[raw_key]
+                ):
+                    continue
+
+            ir_node = self._get_tensor_arg_ir_node(arg, raw_arg)
+            if ir_node is None:
+                continue
+            storage_arg = self._get_autotune_storage_arg(ir_node, raw_arg)
+            if storage_arg is not None:
+                storage_args[arg] = storage_arg
+
+        return storage_args
+
+    def _get_or_create_autotune_storage(
+        self,
+        storage_arg: AutotuneStorageArg,
+        *,
+        kernel_name: str,
+        storage_cache: dict[str, AutotuneStorage],
+    ) -> tuple[str, str]:
+        base_buffer = storage_arg.base_buffer
+        storage_key = base_buffer.get_name()
+        storage: AutotuneStorage | None = storage_cache.get(storage_key)
+        if storage is None:
+            storage_name = f"_autotune_storage_{self.kernel_autotune_storage_idx}"
+            self.kernel_autotune_storage_idx += 1
+            storage_size = V.graph.sizevars.optimization_hint(
+                V.graph.get_allocation_storage_size(base_buffer)
+            )
+            device = base_buffer.get_device()
+            dtype = base_buffer.get_dtype()
+            value = f"generate_example_value(({storage_size},), (1,), '{coor_device_str(device)}', {dtype}, 0, ({storage_size},))"
+            self.kernel_autotune_calls.writeline(f"{storage_name} = {value}")
+        else:
+            storage_name = storage.name
+
+        storage_cache[storage_key] = AutotuneStorage(storage_name, kernel_name)
+        return storage_key, storage_name
+
+    def _get_autotune_tensors_to_delete(self, kernel_name: str) -> OrderedSet[str]:
+        tensors_to_delete = OrderedSet(
+            example_arg.name
+            for example_arg in self.kernel_autotune_example_arg_cache.values()
+            if example_arg.last_kernel == kernel_name
+        )
+        tensors_to_delete.update(
+            storage.name
+            for storage in self.kernel_autotune_storage_cache.values()
+            if storage.last_kernel == kernel_name
+        )
+        return tensors_to_delete
+
+    def generate_example_arg_value(
+        self,
+        arg,
+        arg_type,
+        raw_arg=None,
+        *,
+        kernel_name: str | None = None,
+        storage_cache: dict[str, AutotuneStorage] | None = None,
+        storage_arg: AutotuneStorageArg | None = None,
+    ):
+        """Emit code that creates one synthetic argument for autotuning.
+
+        Tensor arguments use shared backing storage when ``storage_arg`` is
+        provided; unsupported arguments retain independent allocation.
+        """
         if isinstance(arg_type, torch_dtype):
             if isinstance(raw_arg, ir.TMADescriptor):
                 # first we generate the underlying buffer
                 buf_name = raw_arg.get_tensor().get_name()
-                buf = self.args_to_buffers[arg]
             elif self.args_to_buffers.get(arg):
                 buf_name = arg
-                buf = self.args_to_buffers[arg]
             else:
                 if raw_arg is None:
                     raise AssertionError(
                         "V.graph.get_buffer(arg) and raw_arg can't be None at the same time"
                     )
                 buf_name = f"tmp_arg_{self.kernel_autotune_tmp_arg_idx}"
-                buf = raw_arg
                 self.kernel_autotune_tmp_arg_idx += 1
 
+            buf = self._get_tensor_arg_ir_node(arg, raw_arg)
             if buf is None:
                 raise AssertionError(f"Failed to find a buffer for arg {arg}")
-            size = V.graph.sizevars.optimization_hints(buf.get_size())
-            allocation_size = V.graph.sizevars.optimization_hints(
-                V.graph.get_allocation_size(buf)
-            )
-            stride = V.graph.sizevars.optimization_hints(buf.get_stride())
 
-            device = buf.get_device()
-            dtype = buf.get_dtype()
-            offset = V.graph.sizevars.optimization_hint(buf.get_layout().offset)
-            value = f"generate_example_value({size}, {stride}, '{coor_device_str(device)}', {dtype}, {offset}, {allocation_size})"
-            self.kernel_autotune_calls.writeline(f"{buf_name} = {value}")
+            if storage_arg is not None:
+                if kernel_name is None:
+                    raise AssertionError(
+                        "kernel_name is required for shared autotune storage"
+                    )
+                if storage_cache is None:
+                    raise AssertionError(
+                        "storage_cache is required for shared storage arguments"
+                    )
+                _, storage_name = self._get_or_create_autotune_storage(
+                    storage_arg,
+                    kernel_name=kernel_name,
+                    storage_cache=storage_cache,
+                )
+                tensor = storage_arg.tensor
+                size = V.graph.sizevars.optimization_hints(tensor.get_size())
+                stride = V.graph.sizevars.optimization_hints(tensor.get_stride())
+                offset = V.graph.sizevars.optimization_hint(tensor.get_layout().offset)
+                self.kernel_autotune_calls.writeline(
+                    f"{buf_name} = torch.as_strided({storage_name}, {size}, {stride}, {offset})"
+                )
+            else:
+                layout = buf.get_layout()
+                size = V.graph.sizevars.optimization_hints(buf.get_size())
+                allocation_node = cast(
+                    ir.TensorBox | ir.StorageBox | ir.Buffer | ir.TorchBindObject,
+                    buf,
+                )
+                allocation_size = V.graph.sizevars.optimization_hints(
+                    V.graph.get_allocation_size(allocation_node)
+                )
+                stride = V.graph.sizevars.optimization_hints(buf.get_stride())
+
+                device = buf.get_device()
+                dtype = buf.get_dtype()
+                offset = V.graph.sizevars.optimization_hint(layout.offset)
+                value = f"generate_example_value({size}, {stride}, '{coor_device_str(device)}', {dtype}, {offset}, {allocation_size})"
+                self.kernel_autotune_calls.writeline(f"{buf_name} = {value}")
 
             if isinstance(raw_arg, ir.TMADescriptor):
                 # generate another line initializing a host-side TMA
@@ -4660,11 +4984,7 @@ class PythonWrapperCodegen(CodeGen):
 
             def get_autotune_deletion_call() -> str:
                 """Returns del for tensors whose last consumer is this kernel."""
-                tensors_to_delete = [
-                    tensor
-                    for tensor, kn in self.kernel_autotune_example_args.values()
-                    if kn == kernel_name
-                ]
+                tensors_to_delete = self._get_autotune_tensors_to_delete(kernel_name)
                 if tensors_to_delete:
                     return f"del {', '.join(tensors_to_delete)}\n"
                 return ""
@@ -4704,6 +5024,8 @@ class PythonWrapperCodegen(CodeGen):
 
             all_args = []
             tensor_arg_strs = []  # used only when _per_kernel is True
+            # Base buffer name -> backing tensor generated for this kernel.
+            per_kernel_storage_cache: dict[str, AutotuneStorage] = {}
             if raw_args is None:
                 # create a dummy raw_args for uniform behavior in the following loop
                 if raw_keys is not None:
@@ -4711,8 +5033,23 @@ class PythonWrapperCodegen(CodeGen):
                 raw_keys = [None] * len(call_args)
                 raw_args = [None] * len(call_args)
             else:
+                if raw_keys is None:
+                    raise AssertionError("raw_keys must be provided with raw_args")
                 if len(raw_args) != len(call_args):
                     raise AssertionError("call_args and raw_args do not match")
+
+            # Kernel argument name -> its logical tensor and canonical backing buffer.
+            # Arguments omitted from this map use independent synthetic storage and
+            # do not share a backing allocation with other arguments.
+            autotune_storage_args: dict[str, AutotuneStorageArg] = (
+                self._collect_autotune_storage_args(
+                    call_args,
+                    arg_types,
+                    raw_keys,
+                    raw_args,
+                    autotune_args,
+                )
+            )
 
             reused_args = {}
             for i, (arg, arg_type, raw_key, raw_arg) in enumerate(
@@ -4749,18 +5086,60 @@ class PythonWrapperCodegen(CodeGen):
                     if re.match(r"^(workspace|semaphore)", arg):
                         arg_str = arg
                     elif _per_kernel:
+                        # Generate a fresh argument for this kernel.
+                        storage_plan = autotune_storage_args.get(arg)
                         arg_str = self.generate_example_arg_value(
-                            arg, arg_type, raw_arg
+                            arg,
+                            arg_type,
+                            raw_arg,
+                            kernel_name=kernel_name,
+                            storage_cache=per_kernel_storage_cache,
+                            storage_arg=storage_plan,
                         )
                         tensor_arg_strs.append(arg_str)
-                    elif arg not in self.kernel_autotune_example_args:
-                        arg_str = self.generate_example_arg_value(
-                            arg, arg_type, raw_arg
-                        )
                     else:
-                        arg_str = self.kernel_autotune_example_args[arg][0]
-                    if not _per_kernel:
-                        self.kernel_autotune_example_args[arg] = (arg_str, kernel_name)
+                        cached_example_arg = self.kernel_autotune_example_arg_cache.get(
+                            arg
+                        )
+                        if cached_example_arg is not None:
+                            arg_str = cached_example_arg.name
+                            storage_key = cached_example_arg.storage_key
+                            # A cache hit skips _get_or_create_autotune_storage(),
+                            # so record this kernel as the backing allocation's
+                            # last consumer here.
+                            if storage_key is not None:
+                                storage = self.kernel_autotune_storage_cache[
+                                    storage_key
+                                ]
+                                self.kernel_autotune_storage_cache[storage_key] = (
+                                    AutotuneStorage(
+                                        storage.name,
+                                        kernel_name,
+                                    )
+                                )
+                        else:
+                            storage_plan = autotune_storage_args.get(arg)
+                            arg_str = self.generate_example_arg_value(
+                                arg,
+                                arg_type,
+                                raw_arg,
+                                kernel_name=kernel_name,
+                                storage_cache=self.kernel_autotune_storage_cache,
+                                storage_arg=storage_plan,
+                            )
+                            storage_key = (
+                                storage_plan.base_buffer.get_name()
+                                if storage_plan is not None
+                                else None
+                            )
+
+                        self.kernel_autotune_example_arg_cache[arg] = (
+                            AutotuneExampleArg(
+                                arg_str,
+                                kernel_name,
+                                storage_key,
+                            )
+                        )
                 else:
                     arg_str = self.generate_example_arg_value(arg, arg_type, raw_arg)
 
@@ -4786,8 +5165,12 @@ class PythonWrapperCodegen(CodeGen):
             self.kernel_autotune_calls.do_unindent()
 
             if _per_kernel and tensor_arg_strs:
+                tensors_to_delete = OrderedSet(tensor_arg_strs)
+                tensors_to_delete.update(
+                    storage.name for storage in per_kernel_storage_cache.values()
+                )
                 self.kernel_autotune_calls.writeline(
-                    f"del {', '.join(tensor_arg_strs)}"
+                    f"del {', '.join(tensors_to_delete)}"
                 )
             elif not _per_kernel:
                 self.kernel_autotune_calls.writeline(
@@ -5580,6 +5963,10 @@ class PythonWrapperCodegen(CodeGen):
 
         A profiling block is a C++ construct, so this does nothing for the
         Python wrapper; CppWrapperCpu overrides it to emit the real block.
+        There, `enabled` left as None means "read the config", which is not the
+        same as False: a caller that also records a RecordFunction passes
+        kernel_profile_enabled() so the block opens on the same condition as
+        the handle.
         """
         yield
 
