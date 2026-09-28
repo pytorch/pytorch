@@ -219,8 +219,15 @@ def _init_default_fully_shard_mesh() -> DeviceMesh:
 def _get_device_from_mesh(mesh: DeviceMesh) -> torch.device:
     if mesh.device_type == "cpu":
         return torch.device("cpu")
+    if torch.accelerator.is_available():
+        return torch.device(mesh.device_type, torch.accelerator.current_device_index())
     device_handle = _get_device_handle(mesh.device_type)
-    return torch.device(mesh.device_type, device_handle.current_device())
+    device_index = (
+        device_handle.current_device()
+        if device_handle is not None and hasattr(device_handle, "current_device")
+        else 0
+    )
+    return torch.device(mesh.device_type, device_index)
 
 
 def _ignore_module(
