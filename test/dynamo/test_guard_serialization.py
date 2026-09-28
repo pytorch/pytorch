@@ -273,6 +273,11 @@ class _ByObject(enum.Enum):
     B = _Token("b")
 
 
+class _Perm(enum.Flag):
+    R = 1
+    W = 2
+
+
 _LEVEL = _EnumOwner.Level.LOW
 _BY_OBJECT = _ByObject.A
 
@@ -839,6 +844,12 @@ class _Layout:
             and self.scale == other.scale
             and self.blocks == other.blocks
         )
+
+
+class _LayoutHolder:
+    def __init__(self, scale, layout):
+        self.scale = scale
+        self.layout = layout
 
 
 class Inputs:
@@ -1454,6 +1465,15 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         out = load_guards_state(buf.getvalue())
         self.assertIsNotNone(out.grad)
         self.assertEqual(out.grad.shape, grad.shape)
+
+    def test_a_composite_flag_member_without_a_name(self):
+        # On Python 3.10 a composite Flag member's name is None.
+        member = _Perm.R | _Perm.W
+        buf = io.BytesIO()
+        with mock.patch.object(member, "_name_", None):
+            self.assertFalse(is_portable_identity_guard("ID_MATCH", (), member))
+            GuardsStatePickler({}, {}, {}, {}, buf).dump({"perms": member})
+        self.assertIs(load_guards_state(buf.getvalue())["perms"], member)
 
     def test_an_unguarded_grad_loads_as_none(self):
         # The .grad of a guarded leaf is a tensor the guard tree may not reach;
@@ -3516,6 +3536,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
             (_wrapped_target, True),
             (_Mode.SLOW, True),
             (_EnumOwner.Level.LOW, True),
+            (_Perm.R | _Perm.W, False),
             (_NameClash["name"], True),
             (types.ModuleType("_unregistered"), False),
             (Local, False),
@@ -3613,6 +3634,25 @@ class TestGuardSerialization(TestGuardSerializationBase):
         )
         self._test_check_fn(ref, loaded, {"x": sub([4, 4])}, True)
         self._test_check_fn(ref, loaded, {"x": sub([8, 8])}, False)
+
+    def test_tensor_subclass_ctx_object_is_kept_when_another_object_holds_it(self):
+        def fn(holder, x):
+            return x * holder.scale
+
+        def inputs(blocks):
+            layout = _Layout(2, blocks)
+            x = SubclassWithMeta(torch.randn(3), extra=layout)
+            return {"holder": _LayoutHolder(3, layout), "x": x}
+
+        # holder is pickled first, and no guard reads its layout, the very
+        # object the subclass's ctx holds.
+        ref, loaded = self._test_serialization(
+            ("TENSOR_SUBCLASS_METADATA_MATCH", "CONSTANT_MATCH"),
+            fn,
+            *inputs([4, 4]).values(),
+        )
+        self._test_check_fn(ref, loaded, inputs([4, 4]), True)
+        self._test_check_fn(ref, loaded, inputs([8, 8]), False)
 
     def test_nested_guarded_user_objects_are_pruned_in_turn(self):
         def fn(x, holder):
