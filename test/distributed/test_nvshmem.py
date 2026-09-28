@@ -10,7 +10,6 @@ import torch
 import torch.distributed as dist
 import torch.distributed._symmetric_memory as symm_mem
 from torch.distributed.device_mesh import init_device_mesh
-from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     MultiProcessTestCase,
@@ -56,18 +55,6 @@ def requires_nvls():
     return skip_but_pass_in_sandcastle_if(
         not has_nvls_support(),
         "Test requires NVLink SHARP support",
-    )
-
-
-def skip_if_cuda_13_2():
-    """Skip dispatch-combine tests that hang/fail on CUDA 13.2 (B200/sm100).
-
-    See https://github.com/pytorch/pytorch/issues/191201
-    """
-    return skip_but_pass_in_sandcastle_if(
-        _get_torch_cuda_version() == (13, 2),
-        "Dispatch-combine hangs/fails on CUDA 13.2, "
-        "see https://github.com/pytorch/pytorch/issues/191201",
     )
 
 
@@ -415,6 +402,54 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
                     hdl,
                     peer=hdl.world_size,
                 )
+
+        dist.barrier()
+
+    @skip_but_pass_in_sandcastle_if(
+        TEST_WITH_ROCM, "graph capture over rocshmem not supported yet"
+    )
+    def test_cuda_graph_collective(self) -> None:
+        self._init_device()
+        group_name = dist.group.WORLD.group_name
+
+        dtype = torch.float
+        numel = 1024
+
+        # nvshmem_malloc barriers, so allocation cannot happen under capture; a
+        # first rendezvous cannot either, since its team split barriers too.
+        inp = symm_mem.empty(numel, dtype=dtype, device=self.device)
+        out = torch.empty(numel, dtype=dtype, device=self.device)
+        symm_mem.rendezvous(inp, group=group_name)
+
+        # Replays re-run the captured kernels against whatever is in memory, so
+        # the input is driven by a device-side value updated between replays.
+        rank_val = torch.empty((), dtype=dtype, device=self.device)
+
+        def expected(offset: int) -> float:
+            return float(
+                self.world_size * offset + self.world_size * (self.world_size - 1) / 2
+            )
+
+        stream = device_module.Stream(device=self.device)
+        # Warm up on the stream that will be captured.
+        with device_module.stream(stream):
+            rank_val.fill_(self.rank)
+            inp.fill_(rank_val)
+            torch.ops.symm_mem.one_shot_all_reduce_out(inp, "sum", group_name, out)
+            self.assertEqual(out, torch.full_like(out, expected(0)))
+        stream.synchronize()
+        dist.barrier()
+
+        graph = device_module.CUDAGraph()
+        with device_module.graph(graph, stream=stream):
+            inp.fill_(rank_val)
+            torch.ops.symm_mem.one_shot_all_reduce_out(inp, "sum", group_name, out)
+
+        for offset in range(1, 4):
+            rank_val.fill_(self.rank + offset)
+            out.fill_(-1)
+            graph.replay()
+            self.assertEqual(out, torch.full_like(out, expected(offset)))
 
         dist.barrier()
 
@@ -977,7 +1012,6 @@ class DispatchCombineTest(MultiProcContinuousTest):
     def device(self) -> torch.device:
         return torch.device(device_type, self.rank)
 
-    @skip_if_cuda_13_2()
     @parametrize("align", [1, 8, 16])  # `major_align` of output
     def test_dispatch_combine(self, align: int) -> None:
         """
@@ -1002,7 +1036,6 @@ class DispatchCombineInSubgroups(MultiProcContinuousTest):
     def device(self) -> torch.device:
         return torch.device(device_type, self.rank)
 
-    @skip_if_cuda_13_2()
     @skip_if_lt_x_gpu(4)
     def test_dispatch_combine_subgroup(self) -> None:
         """

@@ -12,12 +12,28 @@
 #endif
 
 #include <ATen/ATen.h>
-#include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
 
 namespace c10d::symmetric_memory {
+
+bool should_skip_cuda_cleanup(int device_idx) {
+  if (is_finalizing()) {
+    return true;
+  }
+  try {
+    c10::cuda::CUDAGuard guard(static_cast<c10::DeviceIndex>(device_idx));
+    // VMM unmap/release do not wait for kernels using the allocation.
+    C10_CUDA_CHECK(cudaDeviceSynchronize());
+    return false;
+  } catch (const c10::AcceleratorError& error) {
+    TORCH_WARN(
+        "SymmetricMemory: skipping cleanup after CUDA error: ",
+        error.what_without_backtrace());
+    return true;
+  }
+}
 
 bool device_has_multicast_support(int device_idx) {
   if (c10::utils::check_env("TORCH_SYMM_MEM_DISABLE_MULTICAST") == true) {

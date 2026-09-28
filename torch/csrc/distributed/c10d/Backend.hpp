@@ -158,6 +158,13 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     return false;
   }
 
+  // Most backends initialize their communication resources eagerly. Backends
+  // with lazy initialization must override this method so split() callers can
+  // verify that the parent communicator exists.
+  virtual bool isInitialized() {
+    return true;
+  }
+
   virtual bool supportsCoalescing() const {
     return false;
   }
@@ -687,6 +694,9 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         " is missing implementation of enableCollectivesTiming.");
   }
 
+  // The caller namespaces each child's rendezvous keys, but the Store may use
+  // the parent's live connection. Implementations that block while holding or
+  // mutate connection-global state, such as the timeout, must clone it first.
   virtual c10::intrusive_ptr<Backend> split(
       const c10::intrusive_ptr<Store>& store,
       const std::vector<int>& ranks,
@@ -698,6 +708,9 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         " is missing implementation of split.");
   }
 
+  // Merge implementations receive a Store owned by their caller. They must
+  // retain or clone it as required by their initialization and connection-state
+  // semantics.
   virtual c10::intrusive_ptr<Backend> merge(
       const c10::intrusive_ptr<Store>& store,
       const c10::intrusive_ptr<Options>& opts,

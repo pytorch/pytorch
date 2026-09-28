@@ -18,7 +18,7 @@ from torch.testing._internal.common_distributed import (
     skip_but_pass_in_sandcastle_if,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_fsdp import FSDPTest
+from torch.testing._internal.common_fsdp import FSDPTestContinuous
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     parametrize,
@@ -107,7 +107,7 @@ class DummyHook:
         self.custom_reduce_scatter(output, grad, group=state.process_group)
 
 
-class TestCommunicationHooks(FSDPTest):
+class TestCommunicationHooks(FSDPTestContinuous):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @skip_if_lt_x_gpu(2)
