@@ -559,7 +559,13 @@ class AsyncCompile:
                 return future.result()
 
         # Cache miss
-        check_compilation_allowed("Triton kernel cache miss")
+        check_compilation_allowed(
+            "Triton kernel cache miss",
+            "no_compilation() only serves Triton kernels already in Inductor's "
+            "in-process kernel cache (statically launchable ones restored from a "
+            "cache bundle); loading a kernel through triton.compile, even from "
+            "Triton's on-disk cache, counts as compilation.",
+        )
         if is_parallel:
             # Ensure libdevice path is set in os.environ before passing to workers
             _set_triton_libdevice_path()
@@ -569,7 +575,6 @@ class AsyncCompile:
                 "TORCHINDUCTOR_CACHE_DIR",
                 "TRITON_CACHE_DIR",
                 "TRITON_LIBDEVICE_PATH",
-                "TORCH_PRECOMPILE_NO_COMPILATION",
             ]
             extra_env = {v: os.environ.get(v) for v in env_vars}
             extra_config = {
