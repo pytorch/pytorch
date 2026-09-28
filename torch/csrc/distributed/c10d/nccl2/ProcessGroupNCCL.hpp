@@ -396,7 +396,6 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
 
   friend class WorkNCCL;
   friend class WindowNCCL;
-  friend class NCCL2ReconfigureContractTestAccess;
 
  protected:
   void waitForNcclOperation(
