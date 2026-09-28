@@ -1188,10 +1188,18 @@ class NVUniversalGemmKernelWrapper:
     def __init__(self, kernel_fn, kernel_path: str | None = None):
         self.kernel_fn = kernel_fn
         self.kernel_path = kernel_path
+        self._jitted = False
 
     def run(self, *args, stream=None, **kwargs):
         """Execute the NVIDIA Universal GEMM kernel."""
-        return self.kernel_fn(*args, stream=stream, **kwargs)
+        # kernel_fn JIT-compiles on its first call.
+        if not self._jitted:
+            from torch.compiler._no_compile import check_compilation_allowed
+
+            check_compilation_allowed("NVIDIA Universal GEMM runtime JIT")
+        result = self.kernel_fn(*args, stream=stream, **kwargs)
+        self._jitted = True
+        return result
 
 
 # ── Kernel codegen class ─────────────────────────────────────────────────────
