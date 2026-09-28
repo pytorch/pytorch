@@ -348,9 +348,12 @@ print(eval(f"bbmod.{name}.{path}") is code)
         fn = _mislabeled_holder()
         self.assertIsNone(inspect.getmodule(fn.__code__))
         package = CompilePackage(None)
-        with self.assertRaisesRegex(PackageError, "Cannot resolve"):
+        with self.assertRaisesRegex(
+            PackageError, r"_closureless.*fails with PackageError"
+        ) as cm:
             with package.code_context(fn.__code__, fn.__globals__):
                 pass
+        self.assertIsInstance(cm.exception.__cause__, PackageError)
         self.assertNotIn(fn.__code__, package._codes)
 
     def test_code_source_keeps_the_codes_own_module_over_its_globals(self):
