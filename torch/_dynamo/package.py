@@ -738,7 +738,7 @@ def _get_code_source(
     """
 
     code_module = inspect.getmodule(code)
-    module = module_hint or code_module
+    module = code_module or module_hint
     if module is None:
         raise PackageError(f"Cannot find module for code {code}")
 
@@ -1259,10 +1259,13 @@ class CompilePackage:
         code: types.CodeType,
         global_scope: dict[str, object] | None = None,
     ) -> None:
+        code_module = inspect.getmodule(code)
         module_name = (
-            _globals_module_name(global_scope) if global_scope is not None else None
+            _globals_module_name(global_scope)
+            if code_module is None and global_scope is not None
+            else None
         )
-        module = sys.modules[module_name] if module_name else inspect.getmodule(code)
+        module = sys.modules[module_name] if module_name else code_module
         if module is None:
             raise PackageError(f"Cannot find module for code {code}")
         function_name, code_source = _get_code_source(code, module)
@@ -1272,7 +1275,7 @@ class CompilePackage:
             function_name=_FunctionId(function_name),
             code_source=code_source,
         )
-        if inspect.getmodule(code) is None:
+        if code_module is None:
             # The module search records the found function's __qualname__,
             # which the loader replays with plain getattr. dataclasses rename
             # what they exec() to its attribute path; a helper that does not
