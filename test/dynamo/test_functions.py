@@ -2319,6 +2319,10 @@ partial_fn = functools.partial(fn, scale=2)
         self.assertEqual(fn(x), opt_fn(x))
 
     def test_globals_builtin_returns_function_namespace(self):
+        unnamed_scope_keys = {
+            name for name in globals() if name.startswith("___unnamed_scope_")
+        }
+
         def fn(x):
             return x + 1, globals()
 
@@ -2328,7 +2332,146 @@ partial_fn = functools.partial(fn, scale=2)
         result = opt_fn(x)
         self.assertEqual(result[0], fn(x)[0])
         self.assertIs(result[1], fn.__globals__)
+        self.assertIs(opt_fn(x)[1], fn.__globals__)
         self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(
+            unnamed_scope_keys,
+            {name for name in globals() if name.startswith("___unnamed_scope_")},
+        )
+
+    def test_globals_length_and_iteration_graph_break(self):
+        unnamed_scope_keys = {
+            name for name in globals() if name.startswith("___unnamed_scope_")
+        }
+
+        def length_fn(x):
+            return x + len(globals())
+
+        def iteration_fn(x):
+            return x, tuple(globals())
+
+        x = torch.ones(2)
+        for fn in (length_fn, iteration_fn):
+            opt_fn = torch.compile(fn, backend="eager")
+            result = opt_fn(x)
+            self.assertEqual(result, fn(x))
+            self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(
+            unnamed_scope_keys,
+            {name for name in globals() if name.startswith("___unnamed_scope_")},
+        )
+
+    def test_globals_after_global_store_graph_breaks(self):
+        global _variable
+        previous_value = _variable
+
+        def fn(x):
+            global _variable
+            _variable = 1
+            return x + globals()["_variable"]
+
+        x = torch.ones(2)
+        try:
+            _variable = 0
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            with self.assertRaises(Unsupported):
+                opt_fn(x)
+
+            _variable = 0
+            expected = fn(x)
+            _variable = 0
+            opt_fn = torch.compile(fn, backend="eager")
+            self.assertEqual(opt_fn(x), expected)
+        finally:
+            _variable = previous_value
+
+    def test_globals_mapping_store_graph_breaks(self):
+        global _variable
+        previous_value = _variable
+
+        def fn(x):
+            globals()["_variable"] = 2
+            return x + _variable
+
+        x = torch.ones(2)
+        try:
+            _variable = 0
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            with self.assertRaises(Unsupported):
+                opt_fn(x)
+
+            _variable = 0
+            expected = fn(x)
+            _variable = 0
+            opt_fn = torch.compile(fn, backend="eager")
+            self.assertEqual(opt_fn(x), expected)
+        finally:
+            _variable = previous_value
+
+    def test_globals_in_inlined_function_uses_function_namespace(self):
+        module_name = "dynamo_globals_namespace_test"
+        self.assertNotIn(module_name, sys.modules)
+        module = types.ModuleType(module_name)
+        module.__dict__["__builtins__"] = getattr(
+            __builtins__, "__dict__", __builtins__
+        )
+
+        def inner(x):
+            return x + 1, globals()
+
+        module.inner = types.FunctionType(inner.__code__, module.__dict__, "inner")
+        sys.modules[module_name] = module
+        unnamed_scope_keys = {
+            name for name in globals() if name.startswith("___unnamed_scope_")
+        }
+        try:
+
+            def fn(x):
+                return module.inner(x)
+
+            x = torch.ones(2)
+            result = torch.compile(fn, backend="eager", fullgraph=True)(x)
+            self.assertEqual(result[0], x + 1)
+            self.assertIs(result[1], module.__dict__)
+            self.assertEqual(
+                unnamed_scope_keys,
+                {name for name in globals() if name.startswith("___unnamed_scope_")},
+            )
+        finally:
+            del sys.modules[module_name]
+
+    def test_function_globals_and_closure_are_readonly(self):
+        closed_value = 1
+
+        def target():
+            return closed_value
+
+        operations = (
+            lambda: setattr(target, "__globals__", {}),
+            lambda: delattr(target, "__globals__"),
+            lambda: setattr(target, "__closure__", target.__closure__),
+            lambda: delattr(target, "__closure__"),
+        )
+
+        def catch_attribute_error(operation):
+            def fn():
+                try:
+                    operation()
+                except AttributeError:
+                    return "readonly attribute"
+                return None
+
+            return fn
+
+        for operation in operations:
+            self.assertEqual(
+                torch.compile(
+                    catch_attribute_error(operation),
+                    backend="eager",
+                    fullgraph=True,
+                )(),
+                "readonly attribute",
+            )
 
     def test_instance_dunder_class(self):
         # A user-defined instance's __class__ under compile.

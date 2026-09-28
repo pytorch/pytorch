@@ -39,6 +39,7 @@ from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
     DictGetItemSource,
+    GlobalSource,
     is_constant_source,
     is_from_local_source,
 )
@@ -867,6 +868,102 @@ class ConstDictVariable(VariableTracker):
         if type_attr is not NO_SUCH_SUBOBJ and _is_method_type(type_attr):
             return variables.CallMethodVariable(self, name)
         return super().tp_getattro_impl(tx, name)
+
+
+class GlobalsDictVariable(ConstDictVariable):
+    def _reject_namespace_specialization(
+        self, tx: "InstructionTranslatorBase", operation: str
+    ) -> VariableTracker:
+        unimplemented(
+            gb_type="specialization of globals() dictionary",
+            context=operation,
+            explanation=(
+                "Dynamo cannot safely specialize the size or order of globals "
+                "while tracing may still install internal globals."
+            ),
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    def _reject_mutation(
+        self, tx: "InstructionTranslatorBase", operation: str
+    ) -> VariableTracker:
+        unimplemented(
+            gb_type="mutation of globals() dictionary",
+            context=operation,
+            explanation=(
+                "Dynamo cannot safely trace writes through globals() because "
+                "global reads and replayed writes use separate state."
+            ),
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    def call_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name in {"clear", "pop", "popitem", "update", "setdefault"}:
+            return self._reject_mutation(tx, name)
+        if name in {"items", "keys", "values", "copy", "__reversed__"}:
+            return self._reject_namespace_specialization(tx, name)
+        if name in {"__setitem__", "__delitem__", "__ior__"}:
+            return self._reject_mutation(tx, name)
+        return super().call_method(tx, name, args, kwargs)
+
+    def tp_init_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return self._reject_mutation(tx, "__init__")
+
+    def mp_ass_subscript_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        key: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        operation = "__delitem__" if value is None else "__setitem__"
+        return self._reject_mutation(tx, operation)
+
+    def nb_inplace_or_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker
+    ) -> VariableTracker:
+        return self._reject_mutation(tx, "__ior__")
+
+    def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return self._reject_namespace_specialization(tx, "iteration")
+
+    def sq_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return self._reject_namespace_specialization(tx, "len")
+
+    def mp_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return self._reject_namespace_specialization(tx, "len")
+
+
+def globals_dict_variable(
+    tx: "InstructionTranslatorBase", f_globals: dict[str, Any]
+) -> GlobalsDictVariable:
+    from ..symbolic_convert import _registered_module_for_globals
+    from .builder import VariableBuilder
+
+    registered_module = _registered_module_for_globals(
+        f_globals.get("__name__"), f_globals
+    )
+    if registered_module is not None:
+        module_name, _ = registered_module
+        source = AttrSource(tx.import_source(module_name), "__dict__")
+    else:
+        globals_name = tx.output.install_global_by_id("___unnamed_scope", f_globals)
+        source = GlobalSource(globals_name)
+
+    return cast(
+        GlobalsDictVariable,
+        VariableBuilder(tx, source, dict_variable_class=GlobalsDictVariable)(f_globals),
+    )
 
 
 class OrderedDictVariable(ConstDictVariable):

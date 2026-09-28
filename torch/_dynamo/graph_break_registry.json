@@ -3219,6 +3219,46 @@
       ]
     }
   ],
+  "GB6939": [
+    {
+      "Gb_type": "globals() in function with global writes",
+      "Context": "tx.f_code.co_name",
+      "Explanation": "Dynamo cannot safely read globals() after or before a STORE_GLOBAL in the same function.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB9914": [
+    {
+      "Gb_type": "globals() namespace specialization",
+      "Context": "tx.f_code.co_name",
+      "Explanation": "Dynamo cannot safely specialize the size or order of globals while tracing may still install internal globals.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB7716": [
+    {
+      "Gb_type": "specialization of globals() dictionary",
+      "Context": "operation",
+      "Explanation": "Dynamo cannot safely specialize the size or order of globals while tracing may still install internal globals.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB9280": [
+    {
+      "Gb_type": "mutation of globals() dictionary",
+      "Context": "operation",
+      "Explanation": "Dynamo cannot safely trace writes through globals() because global reads and replayed writes use separate state.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0192": [
     {
       "Gb_type": "input iterator to itertools.cycle has too many items",

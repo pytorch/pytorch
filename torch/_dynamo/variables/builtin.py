@@ -23,6 +23,7 @@ import abc
 import ast
 import builtins
 import contextlib
+import dis
 import functools
 import inspect
 import itertools
@@ -1631,10 +1632,45 @@ class BuiltinVariable(BaseBuiltinVariable):
     ) -> VariableTracker:
         if args or kwargs:
             raise_observed_exception(TypeError, tx)
-        from .builder import VariableBuilder
+        instructions = list(dis.get_instructions(tx.f_code))
+        if any(inst.opname == "STORE_GLOBAL" for inst in instructions):
+            unimplemented(
+                gb_type="globals() in function with global writes",
+                context=tx.f_code.co_name,
+                explanation=(
+                    "Dynamo cannot safely read globals() after or before a "
+                    "STORE_GLOBAL in the same function."
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        for index, inst in enumerate(instructions):
+            if inst.opname != "LOAD_GLOBAL" or inst.argval != "globals":
+                continue
+            call_index = next(
+                (
+                    next_index
+                    for next_index in range(index + 1, len(instructions))
+                    if instructions[next_index].opname == "CALL"
+                ),
+                None,
+            )
+            if call_index is not None and call_index + 1 < len(instructions):
+                following = instructions[call_index + 1].opname
+                if following in {"CALL", "GET_ITER"}:
+                    unimplemented(
+                        gb_type="globals() namespace specialization",
+                        context=tx.f_code.co_name,
+                        explanation=(
+                            "Dynamo cannot safely specialize the size or order "
+                            "of globals while tracing may still install internal globals."
+                        ),
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                        skip_frame=True,
+                    )
 
-        globals_name = tx.output.install_global_by_id("___unnamed_scope", tx.f_globals)
-        return VariableBuilder(tx, GlobalSource(globals_name))(tx.f_globals)
+        from .dicts import globals_dict_variable
+
+        return globals_dict_variable(tx, tx.f_globals)
 
     @staticmethod
     def _call_frame_locals_snapshot(tx: "InstructionTranslatorBase") -> VariableTracker:
@@ -3845,18 +3881,20 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
         name_var: VariableTracker,
         val: VariableTracker,
     ) -> VariableTracker | None:
-        if (
-            isinstance(obj, variables.BaseUserFunctionVariable)
-            and obj.python_type() is types.FunctionType
-            and name_var.is_constant_match("__globals__")
-        ):
-            raise_observed_exception(AttributeError, tx, args=["readonly attribute"])
+        if isinstance(obj, variables.BaseUserFunctionVariable):
+            if name_var.is_python_constant():
+                name = name_var.as_python_constant()
+                if isinstance(name, str):
+                    member = obj.lookup_tp_getset_member(name)
+                    if member is not None:
+                        member.setter(obj, tx, val)
+                        return ConstantVariable.create(None)
+            return obj.call_method(tx, "__setattr__", [name_var, val], {})
         elif isinstance(
             obj,
             (
                 variables.DefaultDictVariable,
                 variables.UserDefinedObjectVariable,
-                variables.NestedUserFunctionVariable,
                 variables.ExceptionVariable,
                 variables.TracebackVariable,
                 variables.DequeVariable,
