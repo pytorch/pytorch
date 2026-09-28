@@ -833,6 +833,29 @@ class _Plan:
 pytree.register_constant(_Plan)
 
 
+class _Stage:
+    def __init__(self, lr, steps):
+        self.lr = lr
+        self.steps = steps
+
+    def __eq__(self, other):
+        return isinstance(other, _Stage) and (self.lr, self.steps) == (
+            other.lr,
+            other.steps,
+        )
+
+    def __hash__(self):
+        return hash(self.lr)
+
+
+@dataclasses.dataclass(frozen=True)
+class _StagedPlan:
+    stage: _Stage
+
+
+pytree.register_constant(_StagedPlan)
+
+
 class _Layout:
     def __init__(self, scale, blocks):
         self.scale = scale
@@ -3606,6 +3629,24 @@ class TestGuardSerialization(TestGuardSerializationBase):
         )
         self._test_check_fn(ref, loaded, {"x": x, "plan": _Plan(_Phase(0.1))}, True)
         self._test_check_fn(ref, loaded, {"x": x, "plan": _Plan(_Phase(1.0))}, False)
+
+    def test_object_inside_a_constant_class_is_kept_whole(self):
+        def fn(x, plan, stage):
+            if isinstance(plan, _StagedPlan):
+                return x * stage.lr
+            return x
+
+        def inputs(steps):
+            stage = _Stage(2.0, steps)
+            return {"x": torch.ones(3), "plan": _StagedPlan(stage), "stage": stage}
+
+        # A guard reads stage.lr, but plan's EQUALS_MATCH compares stage whole,
+        # steps included.
+        ref, loaded = self._test_serialization(
+            ("EQUALS_MATCH", "CONSTANT_MATCH"), fn, *inputs([4, 4]).values()
+        )
+        self._test_check_fn(ref, loaded, inputs([4, 4]), True)
+        self._test_check_fn(ref, loaded, inputs([8, 8]), False)
 
     def test_tensor_subclass_ctx_object_is_kept_whole(self):
         def fn(x):
