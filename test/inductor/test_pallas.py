@@ -13,7 +13,7 @@ import torch._inductor.async_compile
 from torch._dynamo.testing import make_test_cls_with_patches
 from torch._inductor import config
 from torch._inductor.graph import GraphLowering
-from torch._inductor.ir import ComputedBuffer, Pointwise
+from torch._inductor.ir import FallbackKernel
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
@@ -2633,7 +2633,7 @@ class PallasTestsMixin:
 
 
 class PallasLoweringTests(TestCase):
-    def test_low_precision_nextafter_is_pointwise(self):
+    def test_low_precision_nextafter_falls_back(self):
         fake_mode = FakeTensorMode()
         with fake_mode:
             x = torch.ones(2, dtype=torch.float16)
@@ -2645,9 +2645,7 @@ class PallasLoweringTests(TestCase):
             with V.set_graph_handler(graph), V.set_extern_kernel_nodes([]):
                 graph.run(x, y)
 
-        output = graph.graph_outputs[0].data
-        self.assertIsInstance(output, ComputedBuffer)
-        self.assertIsInstance(output.data, Pointwise)
+        self.assertIsInstance(graph.graph_outputs[0].data, FallbackKernel)
 
 
 if test_torchinductor.RUN_CPU and has_cpu_pallas():

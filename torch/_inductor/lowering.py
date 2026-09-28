@@ -8813,7 +8813,6 @@ def nextafter(x, y):
     is_low_precision = dtype in (torch.float16, torch.bfloat16)
     device = x.get_device()
     backend = get_current_backend(device.type)
-    supports_low_precision = is_triton(device) or backend == "pallas"
     if dtype not in (
         torch.float16,
         torch.bfloat16,
@@ -8822,7 +8821,7 @@ def nextafter(x, y):
     ) or (
         device.type == "mps"
         or backend == "halide"
-        or (is_low_precision and not supports_low_precision)
+        or (is_low_precision and not is_triton(device))
     ):
         return fallback_handler(aten.nextafter.default, add_to_fallback_set=False)(x, y)
 

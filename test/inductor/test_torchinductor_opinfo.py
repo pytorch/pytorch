@@ -1300,7 +1300,6 @@ def _inductor_extra_samples(op_name, device, dtype, requires_grad):
 
 if NEXTAFTER_IN_RANGE:
 
-    @wrapper_noop_set_seed_decorator
     class TestInductorNextafter(TestCase):
         @device_dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
         @parametrize("noncontiguous", (False, True))
