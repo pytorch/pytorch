@@ -36,6 +36,7 @@ from torch._dynamo.guards import (
     CheckFunctionManager,
     CompileId,
     GuardsStatePickler,
+    is_portable_function_guard,
     is_portable_identity_guard,
     pickle_guards_state,
 )
@@ -952,6 +953,30 @@ class PlainMethods:
         return cls()
 
 
+class _DoubleFn(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x):
+        return x * 2
+
+    @staticmethod
+    def backward(ctx, grad):
+        return grad * 2
+
+
+class _TripleFn(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x):
+        return x * 3
+
+    @staticmethod
+    def backward(ctx, grad):
+        return grad * 3
+
+
+# A builtin bound to a class: every read of _DoubleFn.apply makes a new object.
+double_apply = _DoubleFn.apply
+
+
 def _global_func_wrong_fqn(x):
     return x + 1
 
@@ -1298,6 +1323,7 @@ class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
                 guards_state = check_fn_manager.guards_state
                 self._cached_guards_state = guards_state
                 self._cached_f_code = self._frame_state.f_code
+                self._cached_saved_gm = check_fn_manager.guard_manager
                 self.assertIsNotNone(guards_state)
                 guards_state = torch._dynamo.package.load_guards_state(guards_state)
 
@@ -3762,6 +3788,52 @@ class TestGuardSerialization(TestGuardSerializationBase):
             ),
         ):
             self._test_serialization("CLOSURE_MATCH", fn, torch.randn(3))
+
+    def test_native_method_match(self):
+        def fn(x):
+            return double_apply(x)
+
+        self.assertTrue(is_portable_function_guard("ID_MATCH", double_apply))
+        x = torch.randn(3)
+        ref, loaded = self._test_serialization("ID_MATCH", fn, x)
+        # The capture process installs the same rewritten guard.
+        saved = self._cached_saved_gm
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        with mock.patch.dict(globals(), {"double_apply": _DoubleFn.apply}):
+            self.assertFalse(ref.check({"x": x}))
+            self.assertTrue(loaded.check({"x": x}))
+            self.assertTrue(saved.check({"x": x}))
+        with mock.patch.dict(globals(), {"double_apply": _TripleFn.apply}):
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+            self.assertFalse(saved.check({"x": x}))
+        for gm in (loaded, saved):
+            # An object whose __eq__ always answers True is still rejected.
+            with mock.patch.dict(globals(), {"double_apply": mock.ANY}):
+                self.assertFalse(gm.check({"x": x}))
+            # A repeat of the last matched object is accepted without comparing.
+            self.assertTrue(gm.check({"x": x}))
+            with mock.patch(
+                "torch._dynamo.guards._native_method_matches",
+                side_effect=AssertionError,
+            ):
+                self.assertTrue(gm.check({"x": x}))
+
+    def test_native_method_match_needs_a_receiver_by_reference(self):
+        class LocalFn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 2
+
+        local_apply = LocalFn.apply
+
+        def fn(x):
+            return local_apply(x)
+
+        self.assertTrue(is_portable_function_guard("CLOSURE_MATCH", double_apply))
+        self.assertFalse(is_portable_function_guard("ID_MATCH", local_apply))
+        self.assertFalse(is_portable_function_guard("CLOSURE_MATCH", local_apply))
+        with self.assertRaises(PackageError):
+            self._test_serialization("ID_MATCH", fn, torch.randn(3))
 
     def test_sequence_length(self):
         # tuple input installs a SEQUENCE_LENGTH guard

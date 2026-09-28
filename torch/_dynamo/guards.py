@@ -294,6 +294,34 @@ def _function_code_matches(value: object, expected: FunctionCodeMetadata) -> boo
     )
 
 
+class NativeMethodMetadata(NamedTuple):
+    # Pickled by reference, so it is the loading process's class.
+    receiver: type
+    name: str
+
+
+def _native_method_metadata(value: object) -> NativeMethodMetadata | None:
+    # A builtin bound to a class, like an autograd Function's ``apply``: every
+    # attribute read makes a new bound object, so only equality is portable.
+    if type(value) is not types.BuiltinMethodType:
+        return None
+    receiver = value.__self__
+    if not isinstance(receiver, type) or not _resolves_by_reference(receiver):
+        return None
+    if getattr(receiver, value.__name__, None) != value:
+        return None
+    return NativeMethodMetadata(receiver, value.__name__)
+
+
+def _native_method_matches(value: object, expected: NativeMethodMetadata) -> bool:
+    # The type check first: == would otherwise run the new value's __eq__.
+    return (
+        type(value) is types.BuiltinMethodType
+        and value.__self__ is expected.receiver
+        and value == getattr(expected.receiver, expected.name)
+    )
+
+
 def _cow_tensor_matches(value: object, expected: object) -> bool:
     if not isinstance(expected, bool):
         return False
@@ -3230,6 +3258,34 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: _guard_create_fn_keyword(
+            guard, "expected"
+        ),
+        eval_fn=_native_method_matches,
+    )
+    def NATIVE_METHOD_MATCH(self, guard: Guard, expected: NativeMethodMetadata) -> None:
+        last_match: list[object] = []
+
+        def guard_fn(value: object) -> bool:
+            # The object ID_MATCH would have pinned; holding it keeps its id
+            # from being reused.
+            if last_match and value is last_match[0]:
+                return True
+            if not _native_method_matches(value, expected):
+                return False
+            last_match[:] = [value]
+            return True
+
+        code = (
+            f"___check_native_method({self.arg_ref(guard)}, "
+            f"{expected.receiver.__module__}.{expected.receiver.__qualname__}.{expected.name})"
+        )
+        self._set_guard_export_info(guard, [code])
+        self.get_guard_manager(guard).add_lambda_guard(
+            guard_fn, get_verbose_code_parts(code, guard), guard.user_stack
+        )
+
+    @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: value,
         eval_fn=lambda value, metadata: value is metadata,
     )
@@ -5154,7 +5210,7 @@ def _guard_value(builder: GuardBuilder, guard: Guard) -> object:
         return None
 
 
-_PORTABLE_FUNCTION_GUARD_TYPES = ("CLOSURE_MATCH",)
+_PORTABLE_FUNCTION_GUARD_TYPES = ("CLOSURE_MATCH", "ID_MATCH")
 
 
 def _portable_function_metadata(
@@ -5163,12 +5219,16 @@ def _portable_function_metadata(
     if guard_type == "CLOSURE_MATCH":
         if (code := _function_code_metadata(value)) is not None:
             return GuardBuilder.FUNCTION_CODE_MATCH, code
+    if guard_type in _PORTABLE_FUNCTION_GUARD_TYPES:
+        if (method := _native_method_metadata(value)) is not None:
+            return GuardBuilder.NATIVE_METHOD_MATCH, method
     return None
 
 
 def is_portable_function_guard(guard_type: str, value: object) -> bool:
-    """An identity guard on a function that ``to_portable_function_guard``
-    rewrites into a by-value check for serialization."""
+    """An identity guard on a function, or on a builtin bound to a class, that
+    ``to_portable_function_guard`` rewrites into a by-value check for
+    serialization."""
     return _portable_function_metadata(guard_type, value) is not None
 
 
