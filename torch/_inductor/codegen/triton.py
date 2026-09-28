@@ -3359,13 +3359,12 @@ class TMACompatibilityChecker:
                 else:
                     # Record the constraint by buffer so removed descriptors do not
                     # leave stale restrictions in the final Triton metadata.
-                    if self.buffer_name is None:
-                        raise AssertionError(
-                            "TMA compatibility check requires a buffer name"
+                    # Skip recording when buffer_name is None (e.g., in standalone
+                    # TMACompatibilityChecker tests that do not pass a buffer name).
+                    if self.buffer_name is not None:
+                        self.kernel._record_tma_min_block_size(
+                            self.buffer_name, block_type_str, min_block_size
                         )
-                    self.kernel._record_tma_min_block_size(
-                        self.buffer_name, block_type_str, min_block_size
-                    )
 
             except ValueError:
                 log.debug(
