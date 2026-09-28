@@ -75,6 +75,11 @@ def _through_act(x):
     return _act(x) + 1
 
 
+# Never registered in sys.modules, so no process can unpickle it by reference.
+_unregistered = types.ModuleType("_unregistered")
+_unregistered.SCALE = 1
+
+
 def _stack(*filenames):
     """A guard's user_stack, outermost frame first."""
     return traceback.StackSummary.from_list([(f, 1, "forward", "") for f in filenames])
@@ -394,14 +399,32 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         state, kept = _kept_types(compiled)
         data = AOTCompiledFunction.serialize(compiled).serialized_data
         control = _aot_compile(fn_tree, x, guard_filter_fn=dropping)
-        control_state, control_kept = _kept_types(control)
-        # The kept keys-match is all that tells the two artifacts' guards apart:
-        # one type name and one guard more, the count because a set of type names
-        # hides a second divergence in a type that keeps another instance.
+        control_state, _ = _kept_types(control)
+        # The kept keys-match is all that tells the two artifacts' guards apart
+        # beyond the identity guards on objects a load resolves by reference
+        # (G['pytree'], two of its classes and torch), which the pre-check's type
+        # tests drop. Counted per type, because a set of type names hides a
+        # second divergence in a type that keeps another instance.
         self.assertIn("DICT_KEYS_MATCH", kept)
-        self.assertEqual(kept ^ control_kept, {"DICT_KEYS_MATCH"})
-        n_control = len(control_state.output_graph.guards)
-        self.assertEqual(len(state.output_graph.guards), n_control + 1)
+        counts = collections.Counter(
+            g.create_fn_name() for g in state.output_graph.guards
+        )
+        control_counts = collections.Counter(
+            g.create_fn_name() for g in control_state.output_graph.guards
+        )
+        # pytree's classes are TreeSpec and typing.Any, which is a class only
+        # from Python 3.11 on.
+        class_matches = 2 if isinstance(pytree.Any, type) else 1
+        self.assertEqual(
+            counts - control_counts,
+            {
+                "DICT_KEYS_MATCH": 1,
+                "MODULE_MATCH": 1,
+                "CLASS_MATCH": class_matches,
+                "ID_MATCH": 2,
+            },
+        )
+        self.assertEqual(control_counts - counts, {})
         control_data = AOTCompiledFunction.serialize(control).serialized_data
         # A node registered before load is baked into either artifact's guards.
         register(Extra)
@@ -2376,7 +2399,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         def step(model, x):
             y = model(x)
             torch._dynamo.graph_break()
-            return y.sum(dim=0) + y.shape[0]
+            return y.sum(dim=0) + y.shape[0] * _unregistered.SCALE
 
         model = torch.nn.Linear(4, 4)
         x2, x3 = torch.ones(2, 4), torch.ones(3, 4)
@@ -2386,11 +2409,14 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             self.assertEqual(call(model, x3), step(model, x3))
             summary = session.summary()
         # The entry and its continuation, recompiled for the second shape; the
-        # default filter's drops (the model's MODULE_MATCH) are reported.
+        # default filter's drops (the unregistered module's MODULE_MATCH) are
+        # reported, and the MODULE_MATCH on torch, which a load resolves by
+        # reference, is kept.
         self.assertTrue(summary.complete, str(summary))
         self.assertEqual((summary.frames, summary.resume_functions), (2, 1))
         self.assertGreaterEqual(summary.guarded_codes, 3)
-        self.assertIn("MODULE_MATCH", summary.dropped_guard_types)
+        self.assertIn(("MODULE_MATCH", "G['_unregistered']"), summary.dropped_guards)
+        self.assertIn(("MODULE_MATCH", "G['torch']"), summary.kept_guards)
         self.assertIn(
             ("CLOSURE_MATCH", "G['torch']._dynamo.graph_break"), summary.dropped_guards
         )
@@ -2463,7 +2489,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         def step(model, x):
             y = model(x)
             torch._dynamo.graph_break()
-            return y.sum(dim=0) + y.shape[0]
+            return y.sum(dim=0) + y.shape[0] * _unregistered.SCALE
 
         model = torch.nn.Linear(4, 4)
         session = precompile_package.precompile_capture(step, backend=backend)

@@ -1,13 +1,16 @@
 # Owner(s): ["module: dynamo"]
 
 import builtins
+import cmath
 import collections
 import dataclasses
 import enum
 import functools
 import io
 import itertools
+import math
 import pickle
+import random
 import sys
 import tempfile
 import threading
@@ -33,6 +36,7 @@ from torch._dynamo.guards import (
     CheckFunctionManager,
     CompileId,
     GuardsStatePickler,
+    is_portable_identity_guard,
     pickle_guards_state,
 )
 from torch._dynamo.package import (
@@ -230,6 +234,58 @@ def keep_annotations(func):
         return func(self, x)
 
     return wrapper
+
+
+class _Mode(enum.Enum):
+    FAST = 1
+    SLOW = 2
+
+
+class _NameClash(enum.Enum):
+    name = 1
+
+
+_MODE = _Mode.FAST
+_torch_add = torch.add
+
+
+class _TupleOwner:
+    class Point(NamedTuple):
+        x: int
+
+
+class _EnumOwner:
+    class Level(enum.Enum):
+        LOW = 1
+        HIGH = 2
+
+
+class _Token:
+    def __init__(self, name):
+        self.name = name
+
+
+class _ByObject(enum.Enum):
+    A = _Token("a")
+    B = _Token("b")
+
+
+class _Perm(enum.Flag):
+    R = 1
+    W = 2
+
+
+_LEVEL = _EnumOwner.Level.LOW
+_BY_OBJECT = _ByObject.A
+
+
+def _wrapped_target(x):
+    return x
+
+
+@functools.wraps(_wrapped_target)
+def _wraps_wrapper(x):
+    return _wrapped_target(x)
 
 
 class UnpicklableDefault:
@@ -1327,6 +1383,15 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         out = load_guards_state(buf.getvalue())
         self.assertIsNotNone(out.grad)
         self.assertEqual(out.grad.shape, grad.shape)
+
+    def test_a_composite_flag_member_without_a_name(self):
+        # On Python 3.10 a composite Flag member's name is None.
+        member = _Perm.R | _Perm.W
+        buf = io.BytesIO()
+        with mock.patch.object(member, "_name_", None):
+            self.assertFalse(is_portable_identity_guard("ID_MATCH", (), member))
+            GuardsStatePickler({}, {}, {}, {}, buf).dump({"perms": member})
+        self.assertIs(load_guards_state(buf.getvalue())["perms"], member)
 
     def test_an_unguarded_grad_loads_as_none(self):
         # The .grad of a guarded leaf is a tensor the guard tree may not reach;
@@ -3285,12 +3350,129 @@ class TestGuardSerialization(TestGuardSerializationBase):
 
         x = torch.randn(3)
 
-        # we don't support FUNCTION_MATCH because it adds an ID_MATCH guard, and we don't
-        # support that in serialization
+        ref, loaded = self._test_serialization("CLASS_MATCH", fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        with mock.patch.object(torch, "no_grad", torch.enable_grad):
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+
+    def test_class_match_on_a_local_class(self):
+        class Local:
+            pass
+
+        def fn(x):
+            if isinstance(x, Local):
+                return x
+            return x + 1
+
+        # A <locals> class does not unpickle to the loading process's class.
         with self.assertRaisesRegex(
             PackageError, "CLASS_MATCH guard cannot be serialized."
         ):
-            self._test_serialization("CLASS_MATCH", fn, x)
+            self._test_serialization("CLASS_MATCH", fn, torch.randn(3))
+
+    def test_module_match(self):
+        def fn(x):
+            return x + math.sqrt(2)
+
+        x = torch.randn(3)
+
+        ref, loaded = self._test_serialization("MODULE_MATCH", fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        with mock.patch.dict(globals(), {"math": cmath}):
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+
+    def test_id_match_on_an_enum_member(self):
+        def fn(x):
+            if _MODE is _Mode.FAST:
+                return x + 1
+            return x - 1
+
+        x = torch.randn(3)
+
+        ref, loaded = self._test_serialization("ID_MATCH", fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        with mock.patch.dict(globals(), {"_MODE": _Mode.SLOW}):
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+
+    def test_id_match_on_a_member_of_a_nested_enum(self):
+        def fn(x):
+            if _LEVEL is _EnumOwner.Level.LOW:
+                return x + 1
+            return x - 1
+
+        x = torch.randn(3)
+
+        ref, loaded = self._test_serialization("ID_MATCH", fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        with mock.patch.dict(globals(), {"_LEVEL": _EnumOwner.Level.HIGH}):
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+
+    def test_id_match_on_an_enum_member_whose_value_does_not_round_trip(self):
+        def fn(x):
+            if _BY_OBJECT is _ByObject.A:
+                return x + 1
+            return x - 1
+
+        x = torch.randn(3)
+
+        ref, loaded = self._test_serialization("ID_MATCH", fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        with mock.patch.dict(globals(), {"_BY_OBJECT": _ByObject.B}):
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+
+    def test_id_match_on_a_builtin_function(self):
+        def fn(x):
+            return _torch_add(x, 1)
+
+        x = torch.randn(3)
+
+        ref, loaded = self._test_serialization("ID_MATCH", fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        with mock.patch.dict(globals(), {"_torch_add": torch.sub}):
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+
+    def test_portable_identity_guard_values(self):
+        class Local:
+            pass
+
+        cases = [
+            (math, True),
+            (math.sqrt, True),
+            (_wrapped_target, True),
+            (_Mode.SLOW, True),
+            (_EnumOwner.Level.LOW, True),
+            (_Perm.R | _Perm.W, False),
+            (_NameClash["name"], True),
+            (types.ModuleType("_unregistered"), False),
+            (Local, False),
+            # Its __qualname__ leads to _wrapped_target instead.
+            (_wraps_wrapper, False),
+            (_TupleOwner.Point, False),
+            # Bound to the module's Random instance, with no __module__.
+            (random.random, False),
+            # pybind11: bound to an instance, so its __qualname__ names the
+            # instance's type and leads to a different object.
+            (torch._C._get_tracing_state, False),
+        ]
+        for value, expected in cases:
+            with self.subTest(value=value):
+                self.assertEqual(
+                    is_portable_identity_guard("ID_MATCH", (), value), expected
+                )
+                if expected and not isinstance(value, types.ModuleType):
+                    self.assertIs(pickle.loads(pickle.dumps(value)), value)
+
+    def test_class_match_on_a_named_tuple_nested_in_a_class(self):
+        def fn(x):
+            if isinstance(x, _TupleOwner.Point):
+                return x
+            return x + 1
+
+        # The guard-state pickler rebuilds a nested NamedTuple as a fresh class.
+        with self.assertRaisesRegex(
+            PackageError, "CLASS_MATCH guard cannot be serialized."
+        ):
+            self._test_serialization("CLASS_MATCH", fn, torch.randn(3))
 
     def test_closure_match(self):
         def fn(x):
