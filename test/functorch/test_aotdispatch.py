@@ -281,9 +281,9 @@ def _unwrap_exact_dict(c):
 
 
 class TestPythonKey(AOTTestCase):
-    hw_classification = HardwareClassification.CPU
+    hw_classification = HardwareClassification.GENERIC
 
-    def test_make_fx(self, device):
+    def test_make_fx(self):
         def f(x):
             return torch.sin(x)
 
@@ -293,7 +293,7 @@ class TestPythonKey(AOTTestCase):
         new_inp = torch.randn(3)
         self.assertEqual(fx_f(new_inp), f(new_inp))
 
-    def test_make_fx_grad(self, device):
+    def test_make_fx_grad(self):
         def f(x):
             return torch.sin(x).sum()
 
@@ -304,15 +304,15 @@ class TestPythonKey(AOTTestCase):
         new_inp = torch.randn(3)
         self.assertEqual(fx_f(new_inp), f(new_inp))
 
-    def test_scalar_device(self, device):
+    def test_scalar_device(self):
         def f(a, b):
             return a + b
 
-        inps = [torch.randn(3, device=device), torch.tensor(5)]
+        inps = [torch.randn(3, device="cpu"), torch.tensor(5)]
         fx_f = make_fx(f)(*inps)
         self.assertEqual(fx_f(*inps), f(*inps))
 
-    def test_make_fx_vmap(self, device):
+    def test_make_fx_vmap(self):
         def f(x):
             return torch.sin(x)
 
@@ -322,7 +322,7 @@ class TestPythonKey(AOTTestCase):
         new_inp = torch.randn(5, 3)
         self.assertEqual(fx_f(new_inp), f(new_inp))
 
-    def test_make_fx_jacrev(self, device):
+    def test_make_fx_jacrev(self):
         def f(x):
             return x.sin().sum()
 
@@ -332,7 +332,7 @@ class TestPythonKey(AOTTestCase):
         new_inp = torch.randn(3)
         self.assertEqual(fx_f(new_inp), f(new_inp))
 
-    def test_make_fx_vjp(self, device):
+    def test_make_fx_vjp(self):
         def f(x):
             return torch.sin(x).sum()
 
@@ -343,7 +343,7 @@ class TestPythonKey(AOTTestCase):
         new_cotangent = torch.randn(())
         self.assertEqual(fx_f(new_cotangent, True, True), vjp_fn(new_cotangent))
 
-    def test_make_fx_functionalize(self, device):
+    def test_make_fx_functionalize(self):
         from functorch.experimental import functionalize
 
         def fn(a):
@@ -351,7 +351,7 @@ class TestPythonKey(AOTTestCase):
             a.relu_()
             return a
 
-        a = torch.randn(3, device=device)
+        a = torch.randn(3, device="cpu")
         symbolic_gm = torch.fx.symbolic_trace(fn)
         includes_method_relu_ = any(
             str(n.target) == "relu_" for n in symbolic_gm.graph.nodes
@@ -364,7 +364,7 @@ class TestPythonKey(AOTTestCase):
         )
         self.assertTrue(includes_aten_relu)
 
-    def test_make_fx_no_decompose(self, device):
+    def test_make_fx_no_decompose(self):
         # FIXME
         return self.skipTest("error: maximum recursion reached")
 
@@ -380,7 +380,7 @@ class TestPythonKey(AOTTestCase):
         ops = {i.target for i in fx_f.graph.nodes}
         self.assertEqual(torch.ops.aten.tanh_backward in ops, False)
 
-    def test_nnc_jit(self, device):
+    def test_nnc_jit(self):
         def f(x):
             return torch.sin(x)
 
@@ -389,7 +389,7 @@ class TestPythonKey(AOTTestCase):
         inp = torch.randn(3)
         self.assertEqual(jit_f(inp), f(inp))
 
-    def test_nnc_scalar(self, device):
+    def test_nnc_scalar(self):
         def f(x):
             return torch.sin(x)
 
@@ -398,7 +398,7 @@ class TestPythonKey(AOTTestCase):
         inp = torch.randn(())
         self.assertEqual(jit_f(inp), f(inp))
 
-    def test_nnc_pytrees(self, device):
+    def test_nnc_pytrees(self):
         def f(x):
             return [torch.sin(x[0])]
 
@@ -407,7 +407,7 @@ class TestPythonKey(AOTTestCase):
         inp = [torch.randn(3)]
         self.assertEqual(jit_f(inp), f(inp))
 
-    def test_external_calls(self, device):
+    def test_external_calls(self):
         def f(a, b):
             return torch.mv(a, b)
 
@@ -415,7 +415,7 @@ class TestPythonKey(AOTTestCase):
         inp = [torch.randn(3, 3), torch.randn(3)]
         self.assertEqual(jit_f(*inp), f(*inp))
 
-    def test_nnc_passthrough(self, device):
+    def test_nnc_passthrough(self):
         def f(x, y):
             return x + y, y
 
@@ -432,7 +432,7 @@ class TestPythonKey(AOTTestCase):
         self.assertEqual(jit_f(*inp), f(*inp))
 
     @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
-    def test_resnet18_backward_trace(self, device):
+    def test_resnet18_backward_trace(self):
         mod = torchvision.models.resnet18()
 
         def f(x):
@@ -7080,7 +7080,7 @@ def forward(self, primals_1, tangents_1):
 
         import networkx as nx
 
-        from torch._functorch.partitioners import _find_infinite_capacity_path
+        from torch._functorch.partitioners import _find_infinite_capacity_path, INT_INF
 
         # Test 1: Verify _find_infinite_capacity_path finds a path with edge reasons
         nx_graph = nx.DiGraph()
@@ -7111,6 +7111,9 @@ def forward(self, primals_1, tangents_1):
         self.assertEqual(path[-1][1], "sink")  # last edge ends at sink
         self.assertIn("must be computed in backward", path[-1][2])
 
+        del nx_graph["source"]["node1_in"]["capacity"]
+        self.assertIsNotNone(_find_infinite_capacity_path(nx_graph))
+
         # Test 2: Verify path not found when there's no infinite capacity path
         nx_graph2 = nx.DiGraph()
         nx_graph2.add_edge(
@@ -7128,6 +7131,10 @@ def forward(self, primals_1, tangents_1):
 
         path2 = _find_infinite_capacity_path(nx_graph2)
         self.assertIsNone(path2)
+
+        # INT_INF is a large finite penalty, so the specialized solver can cut it.
+        nx_graph2["node1_in"]["node1_out"]["capacity"] = INT_INF
+        self.assertIsNone(_find_infinite_capacity_path(nx_graph2))
 
         # Test 3: Verify data dependency edges have reasons
         nx_graph3 = nx.DiGraph()
@@ -7523,6 +7530,76 @@ def forward(self, primals_1, tangents_1):
             )
         finally:
             handle.destroy()
+
+    @parametrize("unlift_effect_tokens", [False, True])
+    def test_static_input_indices_after_effect_token_removal(
+        self, unlift_effect_tokens
+    ):
+        from torch._dynamo.backends.common import aot_autograd
+        from torch._higher_order_ops.effects import _register_effectful_op
+        from torch._library.effects import EffectType
+
+        @torch.library.custom_op(
+            "test::effectful_static_indices_unlift", mutates_args=()
+        )
+        def log(x: torch.Tensor) -> None:
+            pass
+
+        @log.register_fake
+        def _(x):
+            pass
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.randn(3))
+                self.register_buffer("bias", torch.randn(5))
+
+            def forward(self, x):
+                log(x)
+                return x.sum() + self.weight.sum() + self.bias.sum()
+
+        captured = []
+
+        def compiler(gm, example_inputs):
+            metadata = torch._guards.TracingContext.get().fw_metadata
+            if metadata is None:
+                raise AssertionError("Expected forward metadata in compiler")
+            captured.append(
+                (
+                    list(metadata.static_input_indices),
+                    [tuple(x.shape) for x in example_inputs],
+                    len(metadata.tokens),
+                )
+            )
+            return make_boxed_func(gm.forward)
+
+        handle = _register_effectful_op(log, EffectType.ORDERED)
+        torch._dynamo.reset()
+        try:
+            with (
+                torch.no_grad(),
+                torch._functorch.config.patch(
+                    unlift_effect_tokens=unlift_effect_tokens,
+                    enable_autograd_cache=False,
+                ),
+            ):
+                compiled = torch.compile(
+                    Model(),
+                    backend=aot_autograd(fw_compiler=compiler),
+                    fullgraph=True,
+                    dynamic=False,
+                )
+                compiled(torch.randn(7))
+        finally:
+            handle.destroy()
+            torch._dynamo.reset()
+
+        self.assertEqual(len(captured), 1)
+        indices, shapes, num_tokens = captured[0]
+        self.assertEqual(num_tokens, int(not unlift_effect_tokens))
+        self.assertTrue(all(0 <= i < len(shapes) for i in indices))
+        self.assertEqual(sorted(shapes[i] for i in indices), [(3,), (5,)])
 
     def _make_effectful_op(self, name):
         @torch.library.custom_op(f"test::{name}", mutates_args=())
@@ -9818,6 +9895,7 @@ class TestAOTDispatch(AOTTestCase):
     # - metadata mutation? (TBD)
     # - guard tests (fw guards *and* bw guards)
     # - subclass test involving _indices_of_inps_to_detach
+
     def test_aminmax_out_dtype_mismatch_errors(self):
         def f(inp, out_min, out_max):
             return torch.aminmax(inp, dim=-1, out=(out_min, out_max))
@@ -11510,7 +11588,7 @@ def _test_aot_autograd_module_helper(
 
 
 class TestEagerFusionOpInfo(AOTTestCase):
-    hw_classification = HardwareClassification.CPU
+    hw_classification = HardwareClassification.GENERIC
 
     @ops(op_db + hop_db, allowed_dtypes=(torch.float,))
     @skipOps(aot_autograd_failures)
@@ -11583,7 +11661,7 @@ symbolic_aot_autograd_module_failures = {
 
 
 class TestEagerFusionModuleInfo(AOTTestCase):
-    hw_classification = HardwareClassification.CPU
+    hw_classification = HardwareClassification.GENERIC
 
     @modules(module_db, allowed_dtypes=(torch.float,))
     @decorateForModules(unittest.expectedFailure, aot_autograd_module_failures)
@@ -11604,12 +11682,8 @@ class TestEagerFusionModuleInfo(AOTTestCase):
 
 
 instantiate_parametrized_tests(TestAOTAutograd)
+instantiate_parametrized_tests(TestPartitioning)
 instantiate_parametrized_tests(TestAOTModuleSimplified)
-instantiate_device_type_tests(
-    TestPythonKey,
-    globals(),
-    only_for="cpu",
-)
 instantiate_device_type_tests(TestEagerFusionOpInfo, globals(), only_for="cpu")
 instantiate_device_type_tests(TestEagerFusionModuleInfo, globals(), only_for="cpu")
 
