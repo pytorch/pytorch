@@ -7,7 +7,6 @@ import torch
 import torch._dynamo
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch._dynamo.variables.user_defined import _safe_c_slots
 from torch._library.opaque_object import register_custom_class
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import HardwareClassification
@@ -885,8 +884,7 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.reset()
 
         # After registration: works
-        safe_slots = _safe_c_slots()
-        self.addCleanup(safe_slots.intersection_update, set(safe_slots))
+        self.addCleanup(torch._dynamo.decorators._disallow_c_slot, sqlite3.Row)
         torch._dynamo.allow_c_slot(sqlite3.Row)
         self._assert_cmp_equals(row1, row1, operator.eq)
         self._assert_cmp_equals(row1, row2, operator.eq)

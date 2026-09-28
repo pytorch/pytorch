@@ -2021,3 +2021,13 @@ def allow_c_slot(
         if fn is not None and fn is not getattr(object, dunder, None):
             safe.add(fn)
     return tp
+
+
+def _disallow_c_slot(tp: type) -> None:
+    from .variables.user_defined import _safe_c_slots
+
+    safe = _safe_c_slots()
+    for dunder in _HASH_SLOTS + _RICHCOMPARE_SLOTS:
+        fn = getattr(tp, dunder, None)
+        if fn is not getattr(object, dunder, None):
+            safe.discard(fn)

@@ -937,6 +937,29 @@ if "optree" in sys.modules:
                 )
             )
 
+    @unittest.skipIf(IS_FBCODE, "optree is not enabled in fbcode")
+    def test_deregister_before_cxx_pytree_import(self):
+        script = """
+import torch.utils._pytree as pytree
+
+class Foo:
+    pass
+
+pytree.register_pytree_node(Foo, lambda f: ([1], None), lambda v, c: Foo())
+pytree._deregister_pytree_node(Foo)
+
+import torch.utils._cxx_pytree as cxx_pytree
+
+foo = Foo()
+if cxx_pytree.tree_leaves(foo) != [foo]:
+    raise RuntimeError("deregistered node was registered in optree on import")
+"""
+        subprocess.check_output(
+            [sys.executable, "-c", script],
+            stderr=subprocess.STDOUT,
+            cwd=os.path.dirname(os.path.realpath(__file__)),
+        )
+
     def test_treespec_equality(self):
         self.assertEqual(
             python_pytree.treespec_leaf(),

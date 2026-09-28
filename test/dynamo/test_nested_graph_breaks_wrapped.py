@@ -101,7 +101,7 @@ del test
 # Wrap the class under its @config.patch decorator and reapply that patch per test
 make_nested_cls(
     test_unspec.UnspecTests.__bases__[0],
-    (torch._dynamo.config, "assume_static_by_default", False),
+    *((torch._dynamo.config, k, v) for k, v in test_unspec.UNSPEC_CONFIG.items()),
 )
 
 # Bind generated classes so static checkers see the names.
