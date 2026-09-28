@@ -110,7 +110,10 @@ from torch._guards import (
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import get_opaque_obj_info, is_opaque_constant_type
 from torch._logging import structured
-from torch._subclasses.fake_tensor import _FAKE_TENSOR_CONSTRUCTOR_IGNORED_STATE_ATTRS
+from torch._subclasses.fake_tensor import (
+    _FAKE_TENSOR_CONSTRUCTOR_IGNORED_STATE_ATTRS,
+    FakeTensor,
+)
 from torch._subclasses.meta_utils import safe_grad
 from torch._utils_internal import justknobs_check
 from torch.fx.experimental.symbolic_shapes import (
@@ -3265,8 +3268,17 @@ class GuardBuilder(GuardBuilderBase):
         eval_fn=_native_method_matches,
     )
     def NATIVE_METHOD_MATCH(self, guard: Guard, expected: NativeMethodMetadata) -> None:
+        last_match: list[object] = []
+
         def guard_fn(value: object) -> bool:
-            return _native_method_matches(value, expected)
+            # The object ID_MATCH would have pinned; holding it keeps its id
+            # from being reused.
+            if last_match and value is last_match[0]:
+                return True
+            if not _native_method_matches(value, expected):
+                return False
+            last_match[:] = [value]
+            return True
 
         code = (
             f"___check_native_method({self.arg_ref(guard)}, "
@@ -4325,16 +4337,25 @@ class _LiveBuiltins:
 _live_builtins = _LiveBuiltins()
 
 
-# FakeTensor state held in __dict__, never carried off a fake. _is_param is
-# not here: FakeTensor sets it only when asked, so restoring it is correct.
-_FAKE_TENSOR_OWNED_ATTRIBUTES = _FAKE_TENSOR_CONSTRUCTOR_IGNORED_STATE_ATTRS | {
-    "_fake_device",
-    "fake_mode",
-    "constant",
-    "pytype",
-    "dispatch_keys",
-    "real_tensor",
-}
+# FakeTensor state held in __dict__, and the setters on FakeTensor that write
+# it (fake_device, the memo descriptors); never carried off a fake. _is_param
+# is not here: FakeTensor sets it only when asked, so restoring it is correct.
+_FAKE_TENSOR_OWNED_ATTRIBUTES = (
+    _FAKE_TENSOR_CONSTRUCTOR_IGNORED_STATE_ATTRS
+    | {
+        "_fake_device",
+        "fake_mode",
+        "constant",
+        "pytype",
+        "dispatch_keys",
+        "real_tensor",
+    }
+    | {
+        name
+        for name, attr in vars(FakeTensor).items()
+        if hasattr(attr, "__set__") and not hasattr(torch.Tensor, name)
+    }
+)
 
 
 @functools.cache
