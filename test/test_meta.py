@@ -3589,6 +3589,22 @@ class TestMetaKernelRegistrations(TestCase):
         with in_kernel_invocation_manager(mode), self.assertRaisesRegex(RuntimeError, msg):
             add_(a, b)
 
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @parametrize("shape_kind", ["static", "backed", "unbacked"])
+    @parametrize("layout", ["contiguous", "channels_last", "permuted", "non_contiguous", "expanded"])
+    @parametrize("other", [torch.int32, torch.int64, torch.bool, "broadcast_3d", "zero_dim_int64"])
+    def test_bitwise_and_meta_matches_python(self, shape_kind, layout, other):
+        def make_args(s):
+            a = self._add_meta_input(s, layout, torch.int32)
+            if isinstance(other, torch.dtype):
+                return a, self._add_meta_input(s, layout, other)
+            if other == "broadcast_3d":
+                return a, torch.empty(s, 1, 5, dtype=torch.int32)
+            return a, torch.empty((), dtype=torch.int64)
+
+        cpp, python = self._add_meta_results(shape_kind, make_args, op="bitwise_and")
+        self.assertEqual(cpp, python)
+
 
 instantiate_device_type_tests(TestMeta, globals())
 
