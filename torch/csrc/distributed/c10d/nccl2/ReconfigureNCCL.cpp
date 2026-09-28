@@ -120,7 +120,10 @@ c10::intrusive_ptr<::c10d::Work> makeCompletedWork() {
 
 c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reconfigure(
     const ::c10d::ReconfigureOptions& opts) {
-  std::lock_guard reconfigureLock(reconfigure_mutex_);
+  std::unique_lock reconfigureLock(reconfigure_mutex_);
+  TORCH_CHECK(
+      !reconfiguring_.load(std::memory_order_acquire),
+      "ProcessGroupNCCL reconfigure is already in progress");
   TORCH_CHECK(
       init_state_ != InitializationState::FINALIZED,
       "ProcessGroupNCCL has been finalized");
@@ -180,44 +183,106 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reconfigure(
     std::memcpy(&uniqueId, vec.data(), sizeof(ncclUniqueId));
   }
 
-  // Tear down the previous communicator generation: revoke in-flight work,
-  // stop the watchdog, drain the work queue, and abort the comm. Port of the
-  // pre-reconfigure cleanup in torchcomms' TorchCommNCCL::reconfigure.
+  // Close admission before waiting for already admitted collectives to finish
+  // enqueueing. Those operations hold a shared admission lock from createWork
+  // through queue insertion; this exclusive lock therefore makes the following
+  // queue snapshot complete for all work launched before the transition.
+  reconfiguring_.store(true, std::memory_order_release);
+  reconfigure_epoch_.fetch_add(1, std::memory_order_acq_rel);
+  std::unique_lock<std::shared_mutex> admissionLock(
+      collective_admission_mutex_);
+
+  // This generation mutex is the success/cancel linearization point. A work
+  // completion that owns it first may commit success; otherwise this marker
+  // makes every subsequent event-query success ineligible.
+  {
+    std::lock_guard<std::mutex> generationLock(work_generation_state_->mutex);
+    work_generation_state_->invalidated = true;
+  }
+
+  // Tear down the previous communicator generation. Stop the watchdog before
+  // taking ownership of revoke; if it already started a revoke, revoked_ tells
+  // us to wait for that operation rather than issuing a second revoke.
   if (init_state_ == InitializationState::INITIALIZED) {
-    auto workStatus = workq_.garbageCollect();
-    if (nccl_comm_ &&
-        (workStatus == WorkNCCL::WorkStatus::NOT_STARTED ||
-         workStatus == WorkNCCL::WorkStatus::INPROGRESS)) {
-      NCCL_CHECK_IGNORE(
-          nccl_api_,
-          nccl_api_->commRevoke(nccl_comm_),
-          "NCCL commRevoke failed during reconfigure");
-    }
-
-    detachMemoryHook();
-    retireComm();
-
-    if (timeout_thread_.joinable()) {
-      shutdown_ = true;
-      {
-        std::lock_guard<std::mutex> lock(timeout_mutex_);
-        timeout_cv_.notify_all();
-      }
-      timeout_thread_.join();
-    }
-
-    workq_.finalize();
+    // Queue collection and cancellation resolve Futures and can synchronously
+    // run user callbacks. The generation is already closed, so temporarily
+    // release both transition locks while those callbacks execute; a nested
+    // reconfigure will observe reconfiguring_ and fail instead of deadlocking.
+    reconfigureLock.unlock();
+    admissionLock.unlock();
+    stopWatchdog();
+    workq_.garbageCollect();
+    failPendingGeneration(reconfigure_uuid_);
+    reconfigureLock.lock();
+    admissionLock.lock();
 
     if (nccl_comm_) {
-      auto oldComm = std::exchange(nccl_comm_, nullptr);
-      init_state_ = InitializationState::UNINITIALIZED;
+      const auto oldComm = nccl_comm_;
+      bool alreadyRevoked = revoked_.load(std::memory_order_acquire);
+      if (!alreadyRevoked) {
+        // Abort hooks are user callbacks. Run them outside transition locks,
+        // then re-check ownership because a hook may itself abort the group.
+        reconfigureLock.unlock();
+        admissionLock.unlock();
+        runAbortHooks();
+        reconfigureLock.lock();
+        admissionLock.lock();
+      }
+      alreadyRevoked = revoked_.exchange(true);
+      if (!alreadyRevoked) {
+        detachMemoryHook();
+        retireComm();
+      }
+
+      // Revoke is nonblocking on a nonblocking communicator. If the watchdog
+      // already initiated it, query the current async state; otherwise issue
+      // the revoke now. Revoke errors remain best-effort because the following
+      // abort is the final resource cleanup step.
+      try {
+        ncclResult_t revokeStatus = ncclSuccess;
+        if (alreadyRevoked) {
+          revokeStatus = ncclInProgress;
+          const auto queryStatus =
+              nccl_api_->commGetAsyncError(oldComm, &revokeStatus);
+          if (queryStatus != ncclSuccess) {
+            throw NCCLException(
+                *nccl_api_,
+                "NCCL async error query failed while waiting for revoke "
+                "during reconfigure",
+                queryStatus,
+                oldComm);
+          }
+        } else {
+          revokeStatus = nccl_api_->commRevoke(oldComm);
+        }
+        waitForNcclCompletion(
+            *nccl_api_,
+            oldComm,
+            revokeStatus,
+            timeout,
+            "NCCL commRevoke failed during reconfigure");
+      } catch (const std::exception& e) {
+        LOG(ERROR) << e.what();
+      }
+
       waitForNcclCompletion(
           *nccl_api_,
           oldComm,
           nccl_api_->commAbort(oldComm),
           timeout,
           "NCCL commAbort failed during reconfigure");
+      nccl_comm_ = nullptr;
+      init_state_ = InitializationState::UNINITIALIZED;
     }
+    // Keep queued tensor shelves alive until revoke/abort has settled.
+    // finalize() may notify successful Works that were not popped by the
+    // earlier queue poll, so keep user completion hooks outside transition
+    // locks as well.
+    reconfigureLock.unlock();
+    admissionLock.unlock();
+    workq_.finalize();
+    reconfigureLock.lock();
+    admissionLock.lock();
   }
   init_state_ = InitializationState::UNINITIALIZED;
 
@@ -286,10 +351,33 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reconfigure(
     throw;
   }
   nccl_comm_ = new_comm;
-
-  initNcclResources();
-  init_state_ = InitializationState::INITIALIZED;
+  try {
+    initNcclResources();
+  } catch (...) {
+    const auto initException = std::current_exception();
+    try {
+      stopWatchdog();
+      detachMemoryHook();
+      retireComm();
+      waitForNcclCompletion(
+          *nccl_api_,
+          new_comm,
+          nccl_api_->commAbort(new_comm),
+          timeout,
+          "NCCL commAbort failed after resource initialization failure");
+    } catch (const std::exception& e) {
+      LOG(ERROR) << "Failed to clean up replacement NCCL communicator: "
+                 << e.what();
+    }
+    comm_state_ = CommState::ERROR;
+    nccl_comm_ = nullptr;
+    init_state_ = InitializationState::UNINITIALIZED;
+    std::rethrow_exception(initException);
+  }
   reconfigure_uuid_ = opts.uuid;
+  work_generation_state_ = std::make_shared<WorkGenerationState>();
+  init_state_ = InitializationState::INITIALIZED;
+  reconfiguring_.store(false, std::memory_order_release);
 
   TC_LOG(INFO, this) << "ProcessGroupNCCL reconfigure completed for rank: "
                      << rank_;

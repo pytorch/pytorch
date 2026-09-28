@@ -22,6 +22,7 @@
 #include <optional>
 #include <queue>
 #include <set>
+#include <shared_mutex>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -375,6 +376,12 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   const at::Device& getDevice() const {
     return device_;
   }
+  bool isReconfiguring() const {
+    return reconfiguring_.load(std::memory_order_acquire);
+  }
+  std::shared_ptr<WorkGenerationState> getWorkGenerationState() const {
+    return work_generation_state_;
+  }
   std::string_view getCommName() const {
     return name_;
   }
@@ -389,6 +396,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
 
   friend class WorkNCCL;
   friend class WindowNCCL;
+  friend class NCCL2ReconfigureContractTestAccess;
 
  protected:
   void waitForNcclOperation(
@@ -426,6 +434,14 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
 
   std::atomic<CommState> comm_state_{CommState::NORMAL};
   std::atomic<bool> revoked_{false};
+  // Set before canceling old-generation work and cleared only after a new
+  // generation is initialized. This also rejects work submissions during the
+  // teardown interval.
+  std::atomic<bool> reconfiguring_{false};
+  std::atomic<uint64_t> reconfigure_epoch_{0};
+  std::shared_mutex collective_admission_mutex_;
+  std::shared_ptr<WorkGenerationState> work_generation_state_{
+      std::make_shared<WorkGenerationState>()};
 
   ncclDataType_t getNcclDataType(const at::Tensor& tensor);
   c10::intrusive_ptr<WorkNCCL> createWork(
@@ -598,6 +614,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   void checkInitialized() const;
   void checkAndAbortIfTimedOutOrError();
   void checkWorkQueue();
+  void failPendingGeneration(int64_t reconfigure_uuid);
   std::pair<std::chrono::milliseconds, std::chrono::milliseconds>
   applyEphemeralTimeout(std::chrono::milliseconds timeout);
   void releaseEphemeralTimeout(std::chrono::milliseconds timeout);

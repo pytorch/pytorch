@@ -8,6 +8,7 @@
 #include <c10/core/DeviceGuard.h>
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
+#include <c10/util/Exception.h>
 
 #include <iterator>
 #include <thread>
@@ -129,7 +130,8 @@ WorkNCCL::State::State(
       events(std::make_shared<Events>(comm->getEventPool(), timingEnabled)),
       durationStartEvents(events),
       futureWorkResult(
-          c10::make_intrusive<c10::ivalue::Future>(c10::AnyEnumType::get())) {}
+          c10::make_intrusive<c10::ivalue::Future>(c10::AnyEnumType::get())),
+      generationState(comm->getWorkGenerationState()) {}
 
 WorkNCCL::WorkNCCL(
     ProcessGroupNCCL* comm,
@@ -184,13 +186,23 @@ void WorkNCCL::recordEnd() {
   }
 }
 
-bool WorkNCCL::State::setTerminalStatus(WorkStatus terminal_status) {
+bool WorkNCCL::State::setTerminalStatus(
+    WorkStatus terminal_status,
+    std::exception_ptr terminal_exception) {
   TORCH_INTERNAL_ASSERT(
       terminal_status == WorkStatus::COMPLETED ||
       terminal_status == WorkStatus::TIMEDOUT ||
       terminal_status == WorkStatus::ERROR);
 
   WorkResult result = WorkResult::SUCCESS;
+  std::unique_lock<std::mutex> generationLock(
+      generationState->mutex, std::defer_lock);
+  if (terminal_status == WorkStatus::COMPLETED) {
+    generationLock.lock();
+    if (generationState->invalidated) {
+      return false;
+    }
+  }
   {
     std::lock_guard<std::mutex> lock(terminalStatusMutex);
     WorkStatus current = status();
@@ -201,16 +213,23 @@ bool WorkNCCL::State::setTerminalStatus(WorkStatus terminal_status) {
 
     if (terminal_status == WorkStatus::TIMEDOUT) {
       result = WorkResult::TIMEOUT;
-      workException = std::make_exception_ptr(C10_BUILD_ERROR(
-          DistBackendError,
-          "Watchdog caught collective operation timeout: NCCL operation "
-          "timed out"));
+      workException = terminal_exception
+          ? std::move(terminal_exception)
+          : std::make_exception_ptr(C10_BUILD_ERROR(
+                DistBackendError,
+                "Watchdog caught collective operation timeout: NCCL operation "
+                "timed out"));
     } else if (terminal_status == WorkStatus::ERROR) {
       result = WorkResult::COMM_ERROR;
-      workException = std::make_exception_ptr(
-          C10_BUILD_ERROR(DistBackendError, "NCCL operation failed"));
+      workException = terminal_exception
+          ? std::move(terminal_exception)
+          : std::make_exception_ptr(
+                C10_BUILD_ERROR(DistBackendError, "NCCL operation failed"));
     }
     workStatus.store(terminal_status, std::memory_order_release);
+  }
+  if (generationLock.owns_lock()) {
+    generationLock.unlock();
   }
   futureWorkResult->markCompleted(c10::IValue(static_cast<uint8_t>(result)));
   return true;

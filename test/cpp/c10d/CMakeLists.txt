@@ -72,6 +72,30 @@ if(USE_CUDA)
       LINK_LIBRARIES torch_cpu c10d_cuda_test gtest_main __caffe2_nccl INSTALL_TEST ${INSTALL_TEST})
     target_compile_definitions(ProcessGroupNCCLTest PRIVATE USE_CUDA USE_NCCL)
     c10d_add_test(
+      NCCL2ReconfigureContractTest.cpp
+      LINK_LIBRARIES torch_cpu torch_cuda c10d_cuda_test gtest_main __caffe2_nccl INSTALL_TEST ${INSTALL_TEST})
+    target_compile_definitions(NCCL2ReconfigureContractTest PRIVATE USE_CUDA USE_NCCL USE_C10D_NCCL)
+    # nccl2 implementation symbols are intentionally hidden in libtorch_cuda.
+    # Compile the backend implementation into this focused test executable so
+    # it can exercise the internal generation/queue transition without
+    # exporting those symbols from the production library.
+    target_sources(NCCL2ReconfigureContractTest PRIVATE
+      ${TORCH_SRC_DIR}/csrc/distributed/c10d/nccl2/NCCLBootstrap.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/c10d/nccl2/NCCLCachingAllocatorHook.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/c10d/nccl2/NcclApi.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/c10d/nccl2/ProcessGroupNCCLBackend.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/c10d/nccl2/ProcessGroupNCCLUtils.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/c10d/nccl2/ReconfigureNCCL.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/c10d/nccl2/ShrinkNCCL.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/c10d/nccl2/TracingGuard.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/c10d/nccl2/Utils.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/c10d/nccl2/WindowNCCL.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/c10d/nccl2/WorkNCCL.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/c10d/nccl2/WorkNCCLQueue.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/c10d/cuda/utils.cpp
+    )
+    c10d_add_test(
       ProcessGroupNCCLErrorsTest.cpp
       LINK_LIBRARIES torch_cpu c10d_cuda_test gtest_main __caffe2_nccl INSTALL_TEST ${INSTALL_TEST})
     target_compile_definitions(ProcessGroupNCCLErrorsTest PRIVATE USE_CUDA USE_NCCL)
