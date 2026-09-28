@@ -83,6 +83,8 @@ class TeamManager {
       team_pool_dev = reinterpret_cast<nvshmem_team_t*>(
           c10::cuda::CUDACachingAllocator::raw_alloc(pool_bytes));
       team_pool_devptrs_[group_name] = team_pool_dev;
+      // Rendezvous may already have populated or reused the host pool.
+      pool_updated = true;
     } else {
       team_pool_dev = it->second;
     }

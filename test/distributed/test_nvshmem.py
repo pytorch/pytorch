@@ -4,7 +4,6 @@
 # python test/distributed/test_nvshmem.py
 
 
-import faulthandler
 import os
 
 import torch
@@ -1054,10 +1053,9 @@ class DispatchCombineInSubgroups(MultiProcContinuousTest):
         dispatch_then_combine(self.device, align=8, group=subgroup)
 
 
-@instantiate_parametrized_tests
 @requires_nvshmem()
 @requires_cuda_p2p_access()
-class NVSHMEMTileCommTest(MultiProcContinuousTest):
+class NVSHMEMTeamPoolTest(MultiProcContinuousTest):
     def _init_device(self) -> None:
         # TODO: relieve this (seems to hang if without)
         device_module.set_device(self.device)
@@ -1070,37 +1068,54 @@ class NVSHMEMTileCommTest(MultiProcContinuousTest):
 
     @requires_nvls()
     def test_team_pool_released_on_process_group_destroy(self) -> None:
-        # Dump each worker's blocking Python frame before the outer CI timeout.
-        # Keep the timer local to this test: these workers run other tests too.
-        faulthandler.dump_traceback_later(120)
-        try:
-            self._init_device()
-            ranks = list(range(self.world_size))
+        self._init_device()
+        ranks = list(range(self.world_size))
+        # Keep allocations alive across groups so this tests team reuse without
+        # interleaving the allocator's collective nvshmem_free with tile kernels.
+        full_inp = symm_mem.empty(
+            1024, 1024, dtype=torch.float, device=self.device
+        ).fill_(self.rank)
+        full_out = symm_mem.empty(1024, 1024, dtype=torch.float, device=self.device)
+        expected = torch.zeros_like(full_out)
+        if self.rank == 0:
+            expected[:512, :512].fill_(self.world_size * (self.world_size - 1) / 2)
 
-            # tile_reduce creates 24 duplicate teams for this tensor size. Repeat
-            # with fresh process groups to exceed NVSHMEM's default team limit if
-            # destroy_process_group() does not release each group's team pool.
-            for _ in range(16):
-                group = dist.new_group(ranks)
+        # Use fresh workers: the tile tests keep a 24-team WORLD pool live, and
+        # NVSHMEM's internal duplicate teams can make a second pool exceed the
+        # limit even without a leak. Only one pool is live here at a time.
+        for _ in range(32):
+            group = dist.new_group(ranks)
+            try:
                 group_name = group.group_name
-                full_inp = symm_mem.empty(
-                    1024, 1024, dtype=torch.float, device=self.device
-                ).fill_(self.rank)
-                full_out = symm_mem.empty(
-                    1024, 1024, dtype=torch.float, device=self.device
-                ).zero_()
-
+                full_out.zero_()
+                # Populate the host pool first, including on the reuse path.
+                # get_n_teams must still initialize its new device array.
+                symm_mem.rendezvous(full_inp, group)
                 torch.ops.symm_mem.tile_reduce(
                     full_inp[:512, :512],
                     full_out[:512, :512],
                     0,
                     group_name,
                 )
-                torch.cuda.synchronize()
-                del full_inp, full_out
+                self.assertEqual(full_out, expected)
+                device_module.synchronize()
+                dist.barrier()
+            finally:
                 dist.destroy_process_group(group)
-        finally:
-            faulthandler.cancel_dump_traceback_later()
+
+
+@instantiate_parametrized_tests
+@requires_nvshmem()
+@requires_cuda_p2p_access()
+class NVSHMEMTileCommTest(MultiProcContinuousTest):
+    def _init_device(self) -> None:
+        # TODO: relieve this (seems to hang if without)
+        device_module.set_device(self.device)
+        symm_mem.set_backend("NVSHMEM")
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device(device_type, self.rank)
 
     @requires_nvls()
     @parametrize("tile_size", [32, 128, 512])
