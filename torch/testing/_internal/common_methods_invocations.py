@@ -1433,6 +1433,14 @@ def sample_inputs_addcmul_addcdiv(op_info, device, dtype, requires_grad, **kwarg
             *args, value=3.14 if dtype.is_floating_point or dtype.is_complex else 3
         ).with_metadata(broadcasts_input=broadcasts_input)
 
+    # value=0 must still propagate the non-finite values tensor1 and tensor2 contribute, but skip autograd testing
+    if not requires_grad and (dtype.is_floating_point or dtype.is_complex):
+        make_t = partial(torch.tensor, device=device, dtype=dtype)
+        arg1 = make_t([1.0, 1.0, 1.0, 1.0])
+        arg2 = make_t([float("nan"), float("inf"), -float("inf"), 2.0])
+        arg3 = make_t([1.0, 1.0, 0.0, 2.0])
+        yield SampleInput(arg1, args=(arg2, arg3), kwargs=dict(value=0))
+
 def reference_inputs_addcmul_addcdiv(op_info, device, dtype, requires_grad, **kwargs):
     yield from sample_inputs_addcmul_addcdiv(
         op_info, device, dtype, requires_grad, **kwargs)
@@ -12820,8 +12828,6 @@ op_db: list[OpInfo] = [
            skips=(
                # TODO: update sample inputs with for_inplace_variant kwarg to support this test
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
-               # AssertionError: The supported dtypes for addcmul on device type mps are incorrect!
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
            ),
            sample_inputs_func=sample_inputs_addcmul_addcdiv,
            reference_inputs_func=partial(
@@ -25722,19 +25728,6 @@ python_ref_db = [
                          dtypes=(torch.float16,), device_type="cpu"),
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_torch_fallback',
                          dtypes=(torch.float16,), device_type="cpu"),
-            # AssertionError: Tensor-likes are not close!
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps', dtypes=(
-                    torch.uint8, torch.int8, torch.int64, torch.int32,
-                    torch.int16,
-                )
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='mps', dtypes=(
-                    torch.uint8, torch.int8, torch.int64, torch.int32,
-                    torch.int16,
-                )
-            ),
         ),
     ),
     ElementwiseBinaryPythonRefInfo(
@@ -26116,13 +26109,6 @@ python_ref_db = [
         "_refs.diag_embed",
         torch_opinfo_name="diag_embed",
         supports_out=True,
-        skips=(
-            # TypeError: Trying to convert ComplexDouble to the MPS backend but it does not have support for that dtype.
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps',
-                dtypes=(torch.complex32,)
-            ),
-        ),
     ),
     PythonRefInfo(
         "_refs.dstack",

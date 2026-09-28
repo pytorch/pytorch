@@ -280,7 +280,7 @@ scipy==1.18.1 ; python_version >= "3.15"
 #test that import:
 
 # needed by torchgen utils
-typing-extensions==4.12.2 ; python_version < "3.14"
+typing-extensions==4.13.2 ; python_version < "3.14"
 typing-extensions==4.15.0 ; python_version >= "3.14"
 #Description: type hints for python
 #Pinned versions:
