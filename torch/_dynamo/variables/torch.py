@@ -3312,6 +3312,25 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         backend_fn, privateuse1_backend_name
                     )
 
+            # trace_rules routes torch.* functions through its static rule map,
+            # and torch.<backend>.* is not listed there, so the handlers above
+            # would be unreachable: those calls would be inlined as
+            # UserFunctionVariable instead. allow_in_graph registers the
+            # backend functions so routing dispatches them to this handler
+            # table. It survives trace_rules cache clears (e.g. from
+            # torch.distributed.init_process_group) and is weakref-managed.
+            from ..decorators import allow_in_graph
+
+            for fn_name in (
+                "current_stream",
+                "synchronize",
+                "_exchange_device",
+                "_maybe_exchange_device",
+            ):
+                backend_fn = getattr(privateuse1_backend_mod, fn_name, None)
+                if callable(backend_fn):
+                    allow_in_graph(backend_fn)
+
         @register(torch._dynamo.decorators.override_optimization_hint)
         def handle_override_optimization_hint(
             self,
