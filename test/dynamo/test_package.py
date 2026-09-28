@@ -148,6 +148,16 @@ class _DescriptorCodeOwner:
         return 2
 
 
+class _RaisingClassAttribute:
+    def __get__(self, obj, owner=None):
+        raise RuntimeError("not available on the class")
+
+
+class _ClassWithRaisingAttribute:
+    # Visited by the module search before _ExecGeneratedCodeOwner.
+    value = _RaisingClassAttribute()
+
+
 @dataclasses.dataclass
 class _ExecGeneratedCodeOwner:
     x: int = 0
@@ -171,6 +181,29 @@ class _UnrenamedExecOwner:
     # exec()'d like a dataclass __init__, but its __qualname__ is left as
     # "__create_fn__.<locals>.f", which is not a path from this module.
     f = _exec_without_renaming()
+
+
+def _exec_function():
+    namespace = {}
+    exec("def g(self):\n    return 1\n", globals(), namespace)
+    return namespace["g"]
+
+
+def _closureless():
+    return None
+
+
+def _hold(fn):
+    def holder():
+        return fn
+
+    # Found through holder's closure, but the recorded qualname leads to a
+    # function with no closure, so replaying the path raises PackageError.
+    holder.__qualname__ = "_closureless"
+    return holder
+
+
+_mislabeled_holder = _hold(_exec_function())
 
 
 def _package_op(x):
@@ -310,6 +343,24 @@ print(eval(f"bbmod.{name}.{path}") is code)
             with package.code_context(fn.__code__, fn.__globals__):
                 pass
         self.assertNotIn(fn.__code__, package._codes)
+
+    def test_code_source_refuses_a_path_whose_replay_raises(self):
+        fn = _mislabeled_holder()
+        self.assertIsNone(inspect.getmodule(fn.__code__))
+        package = CompilePackage(None)
+        with self.assertRaisesRegex(PackageError, "Cannot resolve"):
+            with package.code_context(fn.__code__, fn.__globals__):
+                pass
+        self.assertNotIn(fn.__code__, package._codes)
+
+    def test_code_source_search_skips_class_attributes_that_raise(self):
+        with self.assertRaises(RuntimeError):
+            _ClassWithRaisingAttribute.value
+        init = _ExecGeneratedCodeOwner.__init__
+        package = CompilePackage(None)
+        with package.code_context(init.__code__, init.__globals__):
+            pass
+        self.assertIs(_lookup_code(package._codes[init.__code__]), init.__code__)
 
     def test_dataclass_init_frame_saves_and_loads(self):
         # The graph break under the constructor makes the exec()'d __init__ a

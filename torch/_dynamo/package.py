@@ -830,7 +830,9 @@ def _get_code_source(
             for name in itertools.chain(obj.__dict__.keys(), dir(obj)):
                 try:
                     value = getattr(obj, name)
-                except AttributeError:
+                except Exception:
+                    # Class-level descriptors and metaclass __getattr__ may
+                    # raise anything, and the module search visits every class.
                     continue
                 # A descriptor is what getattr on the CLASS returns for
                 # anything defined under @property or @cached_property, so
@@ -1277,7 +1279,9 @@ class CompilePackage:
             # would otherwise only fail at load.
             try:
                 resolves = _lookup_code(self._codes[code]) is code
-            except AttributeError:
+            except Exception:
+                # A replay can fail in many ways (a missing attribute, a None
+                # __closure__, an index out of range); each means unreplayable.
                 resolves = False
             if not resolves:
                 del self._codes[code]
