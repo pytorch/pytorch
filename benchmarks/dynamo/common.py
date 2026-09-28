@@ -23,6 +23,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import traceback
 import weakref
 from contextlib import contextmanager
 from typing import Any, NamedTuple, overload, TYPE_CHECKING, TypeVar
@@ -51,6 +52,7 @@ from torch._dynamo.testing import (
     same,
 )
 from torch._dynamo.utils import bitwise_same
+from torch._logging import trace_structured
 from torch._logging.scribe import open_source_signpost
 
 
@@ -2522,7 +2524,16 @@ class BenchmarkRunner:
                     ):
                         run_passed = False
                 except Exception:
-                    # Sometimes torch.allclose may throw RuntimeError
+                    log.exception("Accuracy comparison failed for %s", name)
+                    trace_structured(
+                        "artifact",
+                        metadata_fn=lambda: {
+                            "name": "accuracy_comparison_exception",
+                            "encoding": "string",
+                        },
+                        payload_fn=lambda: f"{name}\n{traceback.format_exc()}",
+                        expect_trace_id=False,
+                    )
                     run_passed = False
 
                 if run_passed:
