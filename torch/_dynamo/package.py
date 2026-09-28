@@ -644,15 +644,12 @@ class _DynamoCodeCacheEntry:
 
 
 def _globals_module_name(namespace: dict[str, object]) -> str | None:
-    for name in (
-        namespace.get("__name__"),
-        getattr(namespace.get("__spec__"), "name", None),
-    ):
-        if not isinstance(name, str):
-            continue
-        module = sys.modules.get(name)
-        if isinstance(module, types.ModuleType) and vars(module) is namespace:
-            return name
+    name = namespace.get("__name__")
+    if not isinstance(name, str):
+        return None
+    module = sys.modules.get(name)
+    if isinstance(module, types.ModuleType) and vars(module) is namespace:
+        return name
     return None
 
 
