@@ -1657,13 +1657,8 @@ Tensor special_xlogy(const Tensor& x, const Scalar& y) {
   return at::xlogy(x, y);
 }
 
-// Mirrors what Python fake tensor runs for add.Tensor: the fast path for
-// symbolic inputs, then refs.add (registered as the Meta kernel by
-// activate_meta).
+// add.Tensor meta kernel
 Tensor add_Tensor_meta(const Tensor& self, const Tensor& other, const Scalar& alpha) {
-  // FakeTensorMode's has_symbolic_sizes counts SymInt arguments only.
-  // Symbolic wrapped numbers are not detected here: they carry a dummy value
-  // and keep their SymInt only on the Python side.
   const bool symbolic = self.unsafeGetTensorImpl()->has_symbolic_sizes_strides() ||
       other.unsafeGetTensorImpl()->has_symbolic_sizes_strides() || alpha.isSymInt();
   if (symbolic) {
