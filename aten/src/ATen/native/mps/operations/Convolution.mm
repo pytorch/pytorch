@@ -490,6 +490,91 @@ static void conv3d_im2col_matmul(const Tensor& input,
                    .permute({0, 4, 1, 2, 3}));
 }
 
+static void conv1d_metal_forward(const Tensor& input_t,
+                                 const Tensor& weight_t,
+                                 const std::optional<Tensor>& bias_opt,
+                                 int64_t padding,
+                                 int64_t stride,
+                                 int64_t dilation,
+                                 int64_t groups,
+                                 const Tensor& output_t) {
+  using namespace mps;
+  constexpr int64_t kInt32Max = std::numeric_limits<int32_t>::max();
+  const int64_t length = input_t.size(3);
+  const int64_t kernel_size = weight_t.size(3);
+  const bool depthwise = weight_t.size(1) == 1 && (groups > 1 || std::min(output_t.size(1), output_t.size(3)) < 64);
+  const bool use_mpp = !depthwise && weight_t.size(1) > 0 && has_mpp();
+  if ((!depthwise && !use_mpp) || (length + 2 * padding) * input_t.size(1) > kInt32Max ||
+      output_t.size(1) * output_t.size(3) > kInt32Max) {
+    conv3d_metal_forward(input_t.unsqueeze(2),
+                         weight_t.unsqueeze(2),
+                         bias_opt,
+                         {0, 0, padding},
+                         {1, 1, stride},
+                         {1, 1, dilation},
+                         groups,
+                         output_t.unsqueeze(2));
+    return;
+  }
+  const bool nlc = !depthwise &&
+      (stride > 1 || input_t.is_contiguous(MemoryFormat::ChannelsLast) ||
+       (dilation == 1 && groups == 1 && output_t.size(1) >= 8 * input_t.size(1)));
+  const auto input = !nlc ? input_t.contiguous()
+      : padding > 0       ? at::constant_pad_nd(input_t.squeeze(2).transpose(1, 2), {0, 0, padding, padding})
+                          : conv3d_to_ndhwc(input_t.unsqueeze(2));
+  const int64_t head_length =
+      std::min(length + padding, c10::metal::ceil_div(padding, int64_t(64)) * 64 + (kernel_size - 1) * dilation);
+  const auto head = !depthwise && !nlc && padding > 0
+      ? at::constant_pad_nd(input.narrow(3, 0, head_length - padding), {padding, 0})
+      : input;
+  const bool merged = nlc && dilation == 1 && groups == 1;
+  const auto tap_major = weight_t.permute({3, 0, 1, 2});
+  const auto weight = depthwise   ? weight_t.contiguous()
+      : merged                    ? weight_t.squeeze(2).transpose(1, 2).contiguous()
+      : tap_major.is_contiguous() ? tap_major
+                                  : conv3d_weights_to_dhwio(weight_t.transpose(0, 1).unsqueeze(2));
+  const bool out_nlc = !output_t.is_contiguous();
+  const bool has_bias = bias_opt && bias_opt->defined();
+  const auto bias = has_bias ? bias_opt->to(input_t.scalar_type()).contiguous() : input;
+  const Conv2DParams params{
+      .C_in = static_cast<int32_t>(input_t.size(1)),
+      .C_out = static_cast<int32_t>(output_t.size(1)),
+      .W = static_cast<int32_t>(nlc ? length + 2 * padding : length),
+      .outW = static_cast<int32_t>(output_t.size(3)),
+      .kW = static_cast<int32_t>(kernel_size),
+      .sW = static_cast<int32_t>(stride),
+      .padW = static_cast<int32_t>(padding),
+      .dW = static_cast<int32_t>(dilation),
+      .C_in_per_group = static_cast<int32_t>(weight_t.size(1)),
+      .C_out_per_group = static_cast<int32_t>(output_t.size(1) / groups),
+      .has_bias = has_bias,
+  };
+  const int simdgroups = weight_t.size(1) * kernel_size >= 1536 ? 2 : 4;
+  const auto kernel = depthwise
+      ? fmt::format("depthwise_{}", out_nlc ? "nlc" : "ncl")
+      : fmt::format("mpp_{}_{}_s{}", nlc ? "nlc" : "ncl", out_nlc ? "nlc" : "ncl", simdgroups);
+  auto pipeline = lib.getPipelineStateForFunc(fmt::format("conv1d_{}_{}", kernel, scalarToMetalTypeString(input_t)));
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto encoder = stream->commandEncoder();
+      getMPSProfiler().beginProfileKernel(pipeline, "conv1d", {input, weight}, stream);
+      [encoder setComputePipelineState:pipeline];
+      mtl_setArgs(encoder, input, weight, output_t, params, bias, head);
+      if (depthwise) {
+        [encoder dispatchThreads:MTLSizeMake(params.outW, params.C_out, input_t.size(0))
+            threadsPerThreadgroup:MTLSizeMake(std::min(params.outW, 256), 1, 1)];
+      } else {
+        [encoder dispatchThreadgroups:MTLSizeMake(c10::metal::ceil_div(params.C_out_per_group, 64) * groups,
+                                                  c10::metal::ceil_div(params.outW, 64),
+                                                  input_t.size(0))
+                threadsPerThreadgroup:MTLSizeMake(simdgroups * 32, 1, 1)];
+      }
+      getMPSProfiler().endProfileKernel(pipeline, stream);
+    }
+  });
+}
+
 static void fill_depthwise_conv_desc(MPSGraphDepthwiseConvolution3DOpDescriptor* descriptor_,
                                      NSUInteger strideInX,
                                      NSUInteger strideInY,
@@ -629,6 +714,7 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
   const bool is_macos_15_plus = is_macos_at_least(MacOSVersion::MACOS_15_0);
 
   const bool is3DConv = input_t.dim() == 5;
+  const bool is1DConv = input_t.dim() == 4 && input_t.size(2) == 1 && weight_t.size(2) == 1 && padding[0] == 0;
   const auto memory_format = input_t.suggest_memory_format(/*channels_last_strides_exact_match=*/true);
   const bool is_cl_input = is_macos_15_plus && memory_format == kChannelsLast && !is3DConv;
   const auto input_suggested_layout = is_cl_input ? kChannelsLast : kContiguous;
@@ -680,6 +766,10 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
     } else {
       conv3d_metal_forward(input_t, weight_t, bias_opt, padding, stride, dilation, groups, output_t);
     }
+    return output_t;
+  }
+  if (is1DConv) {
+    conv1d_metal_forward(input_t, weight_t, bias_opt, padding[1], stride[1], dilation[1], groups, output_t);
     return output_t;
   }
 
