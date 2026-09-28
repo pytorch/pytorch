@@ -246,8 +246,7 @@ class TestIBVerbsTransport(TransportTestMixin, TestCase):
         memory = transport.register_memory(tensor)
         reused = transport.register_memory(tensor)
 
-        self.assertFalse(memory.reused_registration())
-        self.assertTrue(reused.reused_registration())
+        self.assertIs(memory._registration, reused._registration)
         self.assertEqual(memory.to_view(3, 7).size(), 7)
         self.assertEqual(memory.to_mutable_view(5).size(), 11)
         self.assertEqual(memory.to_remote_buffer().length, 16)

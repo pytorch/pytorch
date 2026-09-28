@@ -89,13 +89,11 @@ class UCXXMemory:
         tensor: torch.Tensor,
         remote: UCXXRemoteBuffer,
         registered: _RegisteredMemory,
-        reused: bool,
     ) -> None:
         self._transport = transport
         self._tensor = tensor
         self._remote = remote
         self._registered = registered
-        self._reused = reused
 
     def _range(self, offset: int | None, length: int | None) -> tuple[int, int]:
         offset = 0 if offset is None else offset
@@ -122,9 +120,6 @@ class UCXXMemory:
                 "per-call timeout is not supported by this prototype"
             )
         return self._remote
-
-    def reused_registration(self) -> bool:
-        return self._reused
 
 
 class _CudaBuffer:
@@ -363,7 +358,6 @@ class UCXXTransport(_BlockingTransport):
             if self._closed:
                 raise RuntimeError("transport is closed")
             remote = self._registrations.get(registration_key)
-            reused = remote is not None
             if remote is None:
                 while True:
                     remote = UCXXRemoteBuffer(
@@ -377,7 +371,7 @@ class UCXXTransport(_BlockingTransport):
                 self._registered[key] = registered
             else:
                 registered = self._registered[(remote.buffer_id, remote.access_key)]
-        return UCXXMemory(self, tensor, remote, registered, reused)
+        return UCXXMemory(self, tensor, remote, registered)
 
     def write(
         self,

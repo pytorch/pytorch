@@ -63,14 +63,11 @@ class MooncakeMutableMemoryView(MooncakeMemoryView):
 class MooncakeMemory:
     """A tensor registered with a Mooncake transport."""
 
-    def __init__(
-        self, transport: MooncakeTransport, tensor: torch.Tensor, reused: bool
-    ) -> None:
+    def __init__(self, transport: MooncakeTransport, tensor: torch.Tensor) -> None:
         self._transport = transport
         self._address = tensor.data_ptr()
         self._length = tensor.nbytes
         self._device = tensor.device
-        self._reused = reused
 
     def _range(self, offset: int | None, length: int | None) -> tuple[int, int]:
         offset = 0 if offset is None else int(offset)
@@ -100,9 +97,6 @@ class MooncakeMemory:
         return MooncakeRemoteBuffer(
             self._transport._endpoint, self._address, self._length
         )
-
-    def reused_registration(self) -> bool:
-        return self._reused
 
 
 class MooncakeTransport(_BlockingTransport):
@@ -196,14 +190,13 @@ class MooncakeTransport(_BlockingTransport):
                 torch.cuda.current_stream(tensor.device).synchronize()
             storage = tensor.untyped_storage()
             address = storage.data_ptr()
-            reused = address in self._registrations
-            if not reused:
+            if address not in self._registrations:
                 # Register the allocation once, including overlapping tensor views.
                 _check_status(
                     engine.register_memory(address, storage.nbytes()), "registration"
                 )
                 self._registrations[address] = storage
-            return MooncakeMemory(self, tensor, reused)
+            return MooncakeMemory(self, tensor)
 
     def _transfer(
         self,

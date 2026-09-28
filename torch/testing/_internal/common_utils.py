@@ -1751,7 +1751,7 @@ MACOS_VERSION = float('.'.join(platform.mac_ver()[0].split('.')[:2]) or -1)
 # macOS release, so MACOS_VERSION on its own no longer tells the two apart.
 # Tests that need the memory or the Metal feature set have to say so.
 # Covers M1 Pro/Max/Ultra too: all are Apple7 and share the feature set.
-IS_APPLE_M1 = LazyVal(lambda: TEST_MPS and torch.backends.mps.get_name().startswith("Apple M1"))  # type: ignore[call-arg]
+IS_APPLE_M1 = TEST_MPS and torch.backends.mps.get_name().startswith("Apple M1")
 TEST_XPU = torch.xpu.is_available()
 TEST_HPU = bool(hasattr(torch, "hpu") and torch.hpu.is_available())
 TEST_MTIA = LazyVal(lambda: hasattr(torch, "mtia") and torch.mtia.is_available())  # type: ignore[call-arg]

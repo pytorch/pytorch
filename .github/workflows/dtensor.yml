@@ -45,7 +45,7 @@ jobs:
       cuda-arch-list: '7.5 8.6 8.9'
       test-matrix: |
         { include: [
-          { config: "dtensor", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.12xlarge.nvidia.gpu" },
+          { config: "dtensor", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-45-167-a10g-4" },
         ]}
       python-version: "3.11"
       compiler: gcc11
@@ -77,7 +77,7 @@ jobs:
       cuda-arch-list: '7.5 8.6 8.9'
       test-matrix: |
         { include: [
-          { config: "dtensor", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.12xlarge.nvidia.gpu" },
+          { config: "dtensor", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-45-167-a10g-4" },
         ]}
       python-version: "3.11"
       compiler: gcc11
