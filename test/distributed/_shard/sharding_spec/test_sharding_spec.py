@@ -24,7 +24,6 @@ from torch.distributed._shard.sharding_spec._internals import (
     get_split_size,
     validate_non_overlapping_shards_metadata,
 )
-from torch.testing._internal.common_device_type import onlyAccelerator
 from torch.testing._internal.common_distributed import (
     requires_accelerator_dist_backend,
     skip_if_lt_x_gpu,
@@ -41,6 +40,7 @@ from torch.testing._internal.distributed._shard.sharded_tensor import (
 )
 from torch.testing._internal.distributed._shard.sharded_tensor._test_st_common import (
     _chunk_sharding_specs_list_for_test,
+    _placement,
 )
 
 
@@ -299,7 +299,6 @@ class TestShardingSpec(TestCase):
         with self.assertRaisesRegex(ValueError, "does not match tensor volume"):
             check_tensor(spec.shards, torch.Size([10, 10]))
 
-    @onlyAccelerator
     def test_get_split_size(self):
         self.assertEqual(3, get_split_size(11, 4))
         self.assertEqual(3, get_split_size(12, 4))
@@ -309,7 +308,6 @@ class TestShardingSpec(TestCase):
         self.assertEqual(11, get_split_size(11, 1))
         self.assertEqual(1, get_split_size(11, 11))
 
-    @onlyAccelerator
     def test_get_chunked_dim_size(self):
         self.assertEqual(3, get_chunked_dim_size(11, 3, 0))
         self.assertEqual(2, get_chunked_dim_size(11, 3, 3))
@@ -317,14 +315,8 @@ class TestShardingSpec(TestCase):
         self.assertEqual(1, get_chunked_dim_size(13, 4, 3))
         self.assertEqual(0, get_chunked_dim_size(5, 2, 3))
 
-    @onlyAccelerator
     def test_get_chunk_sharding_params(self):
-        ranks = [
-            f"rank:0/{DEVICE_TYPE}:0",
-            f"rank:1/{DEVICE_TYPE}:1",
-            f"rank:2/{DEVICE_TYPE}:2",
-            f"rank:3/{DEVICE_TYPE}:3",
-        ]
+        ranks = [_placement(rank) for rank in range(4)]
         spec = ChunkShardingSpec(
             dim=0,
             placements=ranks,
@@ -350,12 +342,12 @@ class TestShardingSpec(TestCase):
             ShardMetadata(
                 shard_offsets=[0, 0],
                 shard_sizes=[5, 5],
-                placement=f"{DEVICE_TYPE}:0",
+                placement=_placement(0),
             ),
             ShardMetadata(
                 shard_offsets=[5, 0],
                 shard_sizes=[10, 5],
-                placement=f"{DEVICE_TYPE}:1",
+                placement=_placement(1),
             ),
         ]
         spec = _infer_sharding_spec_from_shards_metadata(shards_metadata)
@@ -366,12 +358,12 @@ class TestShardingSpec(TestCase):
             ShardMetadata(
                 shard_offsets=[0],
                 shard_sizes=[16],
-                placement=f"{DEVICE_TYPE}:0",
+                placement=_placement(0),
             ),
             ShardMetadata(
                 shard_offsets=[16],
                 shard_sizes=[9],
-                placement=f"{DEVICE_TYPE}:1",
+                placement=_placement(1),
             ),
         ]
         spec = _infer_sharding_spec_from_shards_metadata(shards_metadata)
@@ -382,22 +374,22 @@ class TestShardingSpec(TestCase):
             ShardMetadata(
                 shard_offsets=[0, 0],
                 shard_sizes=[5, 5],
-                placement=f"rank:0/{DEVICE_TYPE}:0",
+                placement=_placement(0),
             ),
             ShardMetadata(
                 shard_offsets=[5, 0],
                 shard_sizes=[5, 5],
-                placement=f"rank:1/{DEVICE_TYPE}:1",
+                placement=_placement(1),
             ),
             ShardMetadata(
                 shard_offsets=[0, 5],
                 shard_sizes=[5, 5],
-                placement=f"rank:2/{DEVICE_TYPE}:2",
+                placement=_placement(2),
             ),
             ShardMetadata(
                 shard_offsets=[5, 5],
                 shard_sizes=[5, 5],
-                placement=f"rank:3/{DEVICE_TYPE}:3",
+                placement=_placement(3),
             ),
         ]
         spec = _infer_sharding_spec_from_shards_metadata(shards_metadata)
@@ -426,7 +418,6 @@ class TestShardingSpec(TestCase):
         self.assertEqual(spec.dim, sharding_dim)
         self.assertEqual(spec.placements, placements)
 
-    @onlyAccelerator
     def test_infer_sharding_spec_from_shards_metadata(self):
         self._infer_enum_sharding_spec_case()
         chunk_specs = _chunk_sharding_specs_list_for_test([0, 0, 1, 1], seed=31)
@@ -440,18 +431,17 @@ class TestShardingSpec(TestCase):
                 spec.placements, 4, [50, 4, 18, 15, 77]
             )
 
-    @onlyAccelerator
     def test_check_overlapping(self):
         shards = [
             ShardMetadata(
                 shard_offsets=[0, 0],
                 shard_sizes=[5, 5],
-                placement=f"{DEVICE_TYPE}:0",
+                placement=_placement(0),
             ),
             ShardMetadata(
                 shard_offsets=[5, 0],
                 shard_sizes=[5, 5],
-                placement=f"{DEVICE_TYPE}:1",
+                placement=_placement(1),
             ),
         ]
         validate_non_overlapping_shards_metadata(shards)
@@ -460,12 +450,12 @@ class TestShardingSpec(TestCase):
             ShardMetadata(
                 shard_offsets=[0, 0],
                 shard_sizes=[5, 5],
-                placement=f"{DEVICE_TYPE}:0",
+                placement=_placement(0),
             ),
             ShardMetadata(
                 shard_offsets=[4, 0],
                 shard_sizes=[5, 5],
-                placement=f"{DEVICE_TYPE}:1",
+                placement=_placement(1),
             ),
         ]
         with self.assertRaisesRegex(ValueError, "overlap"):
@@ -475,12 +465,12 @@ class TestShardingSpec(TestCase):
             ShardMetadata(
                 shard_offsets=[0, 0],
                 shard_sizes=[5, 5],
-                placement=f"{DEVICE_TYPE}:0",
+                placement=_placement(0),
             ),
             ShardMetadata(
                 shard_offsets=[0, 4],
                 shard_sizes=[5, 5],
-                placement=f"{DEVICE_TYPE}:1",
+                placement=_placement(1),
             ),
         ]
         with self.assertRaisesRegex(ValueError, "overlap"):
@@ -490,12 +480,12 @@ class TestShardingSpec(TestCase):
             ShardMetadata(
                 shard_offsets=[5, 0, 5],
                 shard_sizes=[5, 5, 5],
-                placement=f"{DEVICE_TYPE}:0",
+                placement=_placement(0),
             ),
             ShardMetadata(
                 shard_offsets=[5, 5, 5],
                 shard_sizes=[5, 5, 5],
-                placement=f"{DEVICE_TYPE}:1",
+                placement=_placement(1),
             ),
         ]
         validate_non_overlapping_shards_metadata(shards)
@@ -504,12 +494,12 @@ class TestShardingSpec(TestCase):
             ShardMetadata(
                 shard_offsets=[5, 0, 5],
                 shard_sizes=[5, 5, 5],
-                placement=f"{DEVICE_TYPE}:0",
+                placement=_placement(0),
             ),
             ShardMetadata(
                 shard_offsets=[5, 4, 5],
                 shard_sizes=[5, 5, 5],
-                placement=f"{DEVICE_TYPE}:1",
+                placement=_placement(1),
             ),
         ]
         with self.assertRaisesRegex(ValueError, "overlap"):
@@ -519,12 +509,12 @@ class TestShardingSpec(TestCase):
             ShardMetadata(
                 shard_offsets=[5, 0, 5],
                 shard_sizes=[5, 5, 5],
-                placement=f"{DEVICE_TYPE}:0",
+                placement=_placement(0),
             ),
             ShardMetadata(
                 shard_offsets=[5, 4, 9],
                 shard_sizes=[5, 5, 5],
-                placement=f"{DEVICE_TYPE}:1",
+                placement=_placement(1),
             ),
         ]
         with self.assertRaisesRegex(ValueError, "overlap"):
@@ -534,22 +524,22 @@ class TestShardingSpec(TestCase):
             ShardMetadata(
                 shard_offsets=[0, 0],
                 shard_sizes=[5, 5],
-                placement="cuda:0",
+                placement=_placement(0),
             ),
             ShardMetadata(
                 shard_offsets=[0, 5],
                 shard_sizes=[5, 5],
-                placement="cuda:1",
+                placement=_placement(1),
             ),
             ShardMetadata(
                 shard_offsets=[5, 0],
                 shard_sizes=[5, 5],
-                placement="cuda:2",
+                placement=_placement(2),
             ),
             ShardMetadata(
                 shard_offsets=[5, 5],
                 shard_sizes=[5, 5],
-                placement="cuda:3",
+                placement=_placement(3),
             ),
         ]
         validate_non_overlapping_shards_metadata(shards)
@@ -558,12 +548,12 @@ class TestShardingSpec(TestCase):
             ShardMetadata(
                 shard_offsets=[0, 0],
                 shard_sizes=[5, 5],
-                placement="cuda:0",
+                placement=_placement(0),
             ),
             ShardMetadata(
                 shard_offsets=[5, 5],
                 shard_sizes=[5, 5],
-                placement="cuda:1",
+                placement=_placement(1),
             ),
         ]
         validate_non_overlapping_shards_metadata(shards)
@@ -572,22 +562,22 @@ class TestShardingSpec(TestCase):
             ShardMetadata(
                 shard_offsets=[0, 0, 0],
                 shard_sizes=[5, 5, 5],
-                placement="cuda:0",
+                placement=_placement(0),
             ),
             ShardMetadata(
                 shard_offsets=[5, 0, 0],
                 shard_sizes=[5, 5, 5],
-                placement="cuda:1",
+                placement=_placement(1),
             ),
             ShardMetadata(
                 shard_offsets=[10, 0, 0],
                 shard_sizes=[5, 5, 5],
-                placement="cuda:2",
+                placement=_placement(2),
             ),
             ShardMetadata(
                 shard_offsets=[10, 3, 0],
                 shard_sizes=[5, 5, 5],
-                placement="cuda:3",
+                placement=_placement(3),
             ),
         ]
         with self.assertRaisesRegex(ValueError, "overlap"):
@@ -655,14 +645,8 @@ class GridShardingSpec(ShardingSpec):
 class TestCustomShardingSpec(ShardedTensorTestBase):
     device_type = DEVICE_TYPE
 
-    @onlyAccelerator
     def test_custom_sharding_spec(self):
-        ranks = [
-            f"rank:0/{DEVICE_TYPE}:0",
-            f"rank:1/{DEVICE_TYPE}:1",
-            f"rank:2/{DEVICE_TYPE}:2",
-            f"rank:3/{DEVICE_TYPE}:3",
-        ]
+        ranks = [_placement(rank) for rank in range(4)]
 
         grid_spec = GridShardingSpec(grid_size=4, placements=ranks)
 
