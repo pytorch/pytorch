@@ -478,6 +478,18 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         out = f(inp)
         self.assertTrue(torch.equal(out, inp + 1))
 
+    def test_observed_exception_with_non_string_args(self):
+        def fn(x):
+            try:
+                type("A", (), {"__doc__": "x\udcdcy"})
+            except UnicodeEncodeError:
+                return x + 1
+            return x
+
+        x = torch.ones(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
     @make_dynamo_test
     def test_isinstance_CustomException(self):
         assert isinstance(CustomException, type)  # noqa: S101
