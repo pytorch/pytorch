@@ -1255,6 +1255,21 @@ class ProcessGroupNCCL2UninitializedCudaTest(TestCase):
     torch.cuda.set_device in setUp, which hides uninitialized-allocator bugs.
     """
 
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
+    @requires_nccl()
+    @unittest.skipIf(torch.cuda.device_count() < 2, "requires at least 2 GPUs")
+    def test_watchdog_uses_group_device(self) -> None:
+        self._run_child(
+            """
+import time
+# Let the watchdog initialize and poll the work queue.
+time.sleep(2)
+assert torch._C._cuda_hasPrimaryContext(1)
+assert not torch._C._cuda_hasPrimaryContext(0), "watchdog created a CUDA context on GPU 0"
+""",
+            device_id='torch.device("cuda:1")',
+        )
+
     def _run_child(
         self,
         extra: str = "",

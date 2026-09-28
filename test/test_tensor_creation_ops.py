@@ -43,7 +43,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta, instantiate_device_type_tests, deviceCountAtLeast,
     largeTensorTest, precisionOverride, dtypes, onlyCPU, onlyCUDA,
-    skipCPUIf, skipCUDAIf, dtypesIfCUDA, dtypesIfCPU, dtypesIfXPU, skipMeta, onlyAccelerator, expectedFailureXLA)
+    skipCPUIf, skipCUDAIf, skipXPU, dtypesIfCUDA, dtypesIfCPU, dtypesIfXPU, skipMeta, onlyAccelerator, expectedFailureXLA)
 from torch.testing._internal.common_dtype import (
     all_types_and_complex, all_types_and_complex_and, all_types_and, floating_and_complex_types, complex_types,
     floating_types, floating_and_complex_types_and, integral_types, integral_types_and, get_all_dtypes,
@@ -1107,6 +1107,7 @@ class TestTensorCreation(TestCase):
     # NB: torch.uint16, torch.uint32, torch.uint64 excluded as this
     # nondeterministically fails, warning "invalid value encountered in cast"
     @skipCUDAIf(True, "CUDA diverges on most dtypes, often dramatically.")
+    @skipXPU
     @unittest.skipIf(IS_S390X, "Test fails for int16 on s390x. Needs investigation.")
     @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
     def test_float_to_int_conversion_nonfinite(self, device, dtype):
@@ -3309,10 +3310,10 @@ class TestTensorCreationCudaOnly(TestCase):
         with set_default_tensor_type(torch.cuda.DoubleTensor):
             with set_default_dtype(torch.float32):
                 self.assertIs(torch.float32, torch.tensor(0.).dtype)
-                self.assertEqual(torch.device("cuda"), torch.tensor(0.).device)
+                self.assertEqual(torch.device("cuda:0"), torch.tensor(0.).device)
             with set_default_dtype(torch.float64):
                 self.assertIs(torch.float64, torch.tensor(0.).dtype)
-                self.assertEqual(torch.device("cuda"), torch.tensor(0.).device)
+                self.assertEqual(torch.device("cuda:0"), torch.tensor(0.).device)
 
     def test_tensor_factory_gpu_type(self):
         with set_default_tensor_type(torch.cuda.FloatTensor):
