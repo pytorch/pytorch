@@ -9376,6 +9376,11 @@ def activate_meta():
                 f"op_overload must be OpOverload, got {type(op_overload)}"
             )
 
+        # Use the symint-aware C++ meta kernels; a Python Meta kernel would
+        # shadow them under the Python dispatcher and in C++ FakeTensor.
+        if op_overload.name() in {"aten::add.Tensor"}:
+            continue
+
         op_overload.py_impl(torch._C.DispatchKey.Meta)(fn)
 
         if torch._C._dispatch_has_kernel_for_dispatch_key(
@@ -9410,7 +9415,6 @@ def activate_meta():
                 "aten::arange",  # use the symint-aware C++ meta kernel (arange_meta)
                 "aten::arange.start",
                 "aten::arange.start_step",
-                "aten::add.Tensor",  # use the symint-aware C++ meta kernel (add_Tensor_meta)
             }
         ):
             pass
