@@ -657,6 +657,15 @@ MetaDesc prim_elementwise_desc(ArrayRef<MetaDesc> args, ScalarType dtype) {
   return out;
 }
 
+// refs.is_noncontiguous_supported for the device handle_noncontiguous_outputs
+// picks: that of the first fake input. Wrapped numbers are Python numbers there.
+// Python fake keeps its device on the subclass, so read the backend key both
+// fakes carry (Note [Fake Tensor Dispatch Keys]).
+bool is_noncontiguous_supported(const Tensor& self, const Tensor& other) {
+  const auto& first = self.unsafeGetTensorImpl()->is_wrapped_number() ? other : self;
+  return !first.key_set().has_backend(BackendComponent::HPUBit);
+}
+
 // fake_impls.infer_size. Unlike at::infer_size_symdimvector, it compares
 // sizeA == sizeB in Python's operand order.
 c10::SymDimVector fake_infer_size(c10::SymIntArrayRef a, c10::SymIntArrayRef b) {
@@ -717,7 +726,12 @@ Tensor binary_ref_meta(
       b = prim_elementwise_desc({b, alpha_desc}, b.dtype);
     }
   }
-  const auto out = prim_elementwise_desc(args, compute_dtype);
+  auto out = prim_elementwise_desc(args, compute_dtype);
+  if (!is_noncontiguous_supported(self, other) && !is_contiguous_or_false(out)) {
+    DimVector identity(out.dim());
+    std::iota(identity.begin(), identity.end(), 0);
+    out.strides = empty_permuted_desc(out.sizes, identity, out.dtype).strides;
+  }
   if (out.dtype == result_dtype) {
     // torch.empty_permuted: contiguous physical allocation, then restrided
     auto result = at::detail::empty_symint_meta(out.sizes, out.dtype, std::nullopt, kMeta, std::nullopt, std::nullopt);
@@ -787,9 +801,12 @@ Tensor fast_binary_meta(const Tensor& self, const Tensor& other, TypePromotionKi
 
   bool contiguous = true;
   bool channels_last = true;
-  for (const auto& desc : descs) {
-    contiguous = contiguous && is_contiguous_or_false(desc);
-    channels_last = channels_last && is_channels_last_contiguous_or_false(desc);
+  // fake_impls.is_noncontiguous_supported; HPU outputs stay contiguous.
+  if (common_device.type() != kHPU) {
+    for (const auto& desc : descs) {
+      contiguous = contiguous && is_contiguous_or_false(desc);
+      channels_last = channels_last && is_channels_last_contiguous_or_false(desc);
+    }
   }
   if (!contiguous && !channels_last) {
     return {};
