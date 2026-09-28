@@ -240,6 +240,8 @@ from .functions import (
     MethodWrapperVariable,
     PropertyVariable,
     SysFunctionVariable,
+    TritonConstexprClassVariable,
+    TritonConstexprVariable,
     TritonKernelVariable,
     TritonSetAllocatorVariable,
     UserFunctionVariable,
@@ -1119,9 +1121,13 @@ class VariableBuilder:
 
         # Triton runtime types are shared across backends, including CPU.
         if has_triton(include_cpu=True):
+            from triton.language import constexpr as TritonConstexpr
             from triton.runtime.autotuner import Autotuner
             from triton.runtime.jit import JITFunction
         else:
+
+            class TritonConstexpr:
+                pass
 
             class JITFunction:
                 pass
@@ -1818,6 +1824,21 @@ class VariableBuilder:
             )  # cast it back to symbool for tracing
             return SymNodeVariable(sym_node_proxy, tracing_symint)
 
+        elif value is TritonConstexpr:
+            # A tl.constexpr(...) call during tracing reaches the class before
+            # any Python instance exists.
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return TritonConstexprClassVariable(value, source=self.source)
+        elif isinstance(value, TritonConstexpr):
+            # An existing instance needs its payload tracked at the attribute
+            # source so changes to the payload invalidate its guards.
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            value_source = AttrSource(self.get_source(), "value")
+            constexpr_value = VariableBuilder(self.tx, value_source)(value.value)
+            return TritonConstexprVariable(
+                constexpr_value,
+                source=self.source,
+            )
         elif isinstance(value, (JITFunction, Autotuner)):
             self.install_guards(GuardBuilder.ID_MATCH)
             return TritonKernelVariable(

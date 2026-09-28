@@ -142,6 +142,7 @@ class TestHOPInfra(TestCase):
             constant_args_idx=0,
             grid=[(1,)],
             tma_descriptor_metadata={},
+            aggregate_type_metadata={},
             kwargs={"out_ptr": fake_output},
             tensors_to_clone=["out_ptr"],
         )
@@ -169,6 +170,7 @@ class TestHOPInfra(TestCase):
             constant_args_idx=0,
             grid=[(1,)],
             tma_descriptor_metadata={},
+            aggregate_type_metadata={},
             kwargs={"out_ptr": fake_output},
         )
 
