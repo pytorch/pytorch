@@ -2429,9 +2429,6 @@ def _jit_compile(name,
     # by the next process instead of leaving waiters to load a partial module.
     with FileLock(os.path.join(build_directory, 'lock')):
         if version != old_version:
-            from torch.compiler._no_compile import check_compilation_allowed
-
-            check_compilation_allowed("C++ extension runtime JIT")
             if IS_HIP_EXTENSION and (with_cuda or with_cudnn):
                 from .hipify import hipify_python
                 from .hipify.hipify_python import GeneratedFileCleaner
@@ -2953,9 +2950,6 @@ def _get_vc_env(vc_arch: str) -> dict[str, str]:
             return msvc._get_vc_env(vc_arch)  # type: ignore[attr-defined]
 
 def _run_ninja_build(build_directory: str, verbose: bool, error_prefix: str) -> None:
-    from torch.compiler._no_compile import check_compilation_allowed
-
-    check_compilation_allowed("C++ extension compilation")
     command = ['ninja', '-v']
     num_workers = _get_num_workers(verbose)
     if num_workers is not None:
@@ -2973,6 +2967,27 @@ def _run_ninja_build(build_directory: str, verbose: bool, error_prefix: str) -> 
             if uk not in vc_env:
                 vc_env[uk] = v
         env = vc_env
+    from torch.compiler._no_compile import (
+        check_compilation_allowed,
+        is_compilation_forbidden,
+    )
+
+    if is_compilation_forbidden():
+        # Every fresh process reaches this even for a prebuilt extension, since
+        # JIT_EXTENSION_VERSIONER starts empty; only ninja knows whether the
+        # build is up to date.
+        dry_run = subprocess.run(
+            ['ninja', '-n'],
+            shell=IS_WINDOWS and IS_HIP_EXTENSION,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            cwd=build_directory,
+            env=env)
+        if dry_run.returncode == 0 and b'no work to do' in dry_run.stdout:
+            return
+        check_compilation_allowed(
+            "C++ extension compilation",
+            dry_run.stdout.decode(*SUBPROCESS_DECODE_ARGS).strip())
     try:
         sys.stdout.flush()
         sys.stderr.flush()
