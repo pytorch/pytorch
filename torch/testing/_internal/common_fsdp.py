@@ -1427,7 +1427,12 @@ class FSDPTestMixin:
             elif device_type == "cpu":
                 ref_model = DDP(model)
             else:
-                ref_model = DDP(model, device_ids=[rank], output_device=rank)
+                ref_device = (
+                    next(model.parameters()).device
+                    if isinstance(getattr(type(self), "device_type", None), str)
+                    else rank
+                )
+                ref_model = DDP(model, device_ids=[ref_device], output_device=ref_device)
         else:
             ref_model = ref_init_fn(model)
         if use_pure_fp16:
