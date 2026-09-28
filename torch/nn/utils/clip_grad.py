@@ -74,8 +74,8 @@ def _get_total_norm(
             accumulated in this dtype and the result is returned in it. Otherwise, inputs accumulate
             in their own dtype by default, which may be undesirable for lower precision inputs
             (e.g. ``bfloat16``). It must be a floating point dtype that the inputs promote to
-            (``torch.promote_types(input.dtype, dtype) == dtype``), the constraint
-            :func:`torch.linalg.vector_norm` places on its ``dtype``; anything else raises.
+            (``torch.promote_types(input.dtype, dtype) == dtype``) which is a constraint
+            of passing ``dtype`` to :func:`torch.linalg.vector_norm`.
             Default: ``None``.
 
     Returns:
