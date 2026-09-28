@@ -3416,9 +3416,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self._host_tma_non_materializable_buffers: OrderedSet[str] | None = None
         self._host_tma_descriptor_buffers: dict[str, OrderedSet[str]] = {}
         self._device_tma_buffers: OrderedSet[str] = OrderedSet()
-        # Unscoped device TMA is retained for template kernels and tests that
-        # do not associate descriptor generation with an Inductor buffer.
-        self._emitted_device_tma = False
         self.hint_override = hint_override
         self._load_counts: collections.Counter[str] = collections.Counter()
         self._pdl_load_index = 0
@@ -3455,9 +3452,19 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
     @property
     def uses_device_tma(self) -> bool:
-        return self._emitted_device_tma or any(
-            not is_buffer_removed(name)
-            for name in getattr(self, "_device_tma_buffers", ())
+        return any(
+            not self._is_tma_buffer_removed(name) for name in self._device_tma_buffers
+        )
+
+    def _is_tma_buffer_removed(self, name: str) -> bool:
+        return any(
+            name in removed
+            for removed in (
+                V.graph.removed_buffers,
+                self.removed_buffers,
+                V.graph.inplaced_to_remove,
+                self.inplaced_to_remove,
+            )
         )
 
     def _active_host_tma_descriptor_args(
@@ -3466,27 +3473,21 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return {
             var: options
             for var, options in self.host_tma_descriptor_args.items()
-            if not (
-                buffer_names := getattr(self, "_host_tma_descriptor_buffers", {}).get(
-                    var
-                )
-            )
-            or any(not is_buffer_removed(name) for name in buffer_names)
+            if not (buffer_names := self._host_tma_descriptor_buffers.get(var))
+            or any(not self._is_tma_buffer_removed(name) for name in buffer_names)
         }
 
     def _active_tma_buffer_names(self) -> OrderedSet[str]:
         names = OrderedSet(
             name
-            for name in getattr(self, "_device_tma_buffers", ())
-            if not is_buffer_removed(name)
+            for name in self._device_tma_buffers
+            if not self._is_tma_buffer_removed(name)
         )
         for var in self._active_host_tma_descriptor_args():
             names.update(
                 name
-                for name in getattr(self, "_host_tma_descriptor_buffers", {}).get(
-                    var, ()
-                )
-                if not is_buffer_removed(name)
+                for name in self._host_tma_descriptor_buffers.get(var, ())
+                if not self._is_tma_buffer_removed(name)
             )
         return names
 

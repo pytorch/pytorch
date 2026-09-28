@@ -11,7 +11,7 @@ from torch import nn
 from torch._dynamo.utils import same
 from torch._inductor import metrics, utils
 from torch._inductor.choices import InductorChoices
-from torch._inductor.codegen.triton import FixedTritonConfig, TritonKernel
+from torch._inductor.codegen.triton import FixedTritonConfig
 from torch._inductor.runtime.hints import DeviceProperties
 from torch._inductor.runtime.triton_heuristics import persistent_reduction
 from torch._inductor.scheduler import MixOrderReduction
@@ -1799,18 +1799,6 @@ class MixOrderReductionHeuristicTest(TestBase):
     heuristic. These exercise the config generation logic directly (via
     ``return_configs=True``) without needing a GPU.
     """
-
-    def test_uses_tma_tracks_emitted_descriptors(self):
-        for source in (None, "host", "device"):
-            with self.subTest(source=source):
-                kernel = object.__new__(TritonKernel)
-                host_descriptors = {}
-                if source == "host":
-                    host_descriptors["arg"] = mock.sentinel.descriptor
-                kernel.host_tma_descriptor_args = host_descriptors
-                kernel._emitted_device_tma = source == "device"
-                self.assertEqual(kernel.uses_tma, source is not None)
-                self.assertEqual(kernel.uses_device_tma, source == "device")
 
     def _gen_num_stages(
         self, *, tma, allow_multi_stages, device_tma=False, rsplit_size=256, rnumel=256

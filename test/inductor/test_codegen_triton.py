@@ -429,6 +429,34 @@ def helper(x):
         self.assertFalse(compatible)
         self.assertEqual(kernel.tma_min_block_sizes, {})
 
+    def test_tma_metadata_uses_own_removed_buffers(self):
+        xnumel = sympy.Integer(4096)
+        rnumel = sympy.Integer(128)
+        with self._graph.set_current_device(torch.device("cpu")):
+            kernel = TritonKernel(
+                {"x": xnumel, "r0_": rnumel},
+                features=SIMDKernelFeatures([], xnumel, rnumel),
+                mix_order_reduction=True,
+                override_persistent_reduction=True,
+                override_cooperative_reduction=False,
+            )
+            ambient_kernel = TritonKernel(
+                {"x": xnumel},
+                features=SIMDKernelFeatures([], xnumel, sympy.Integer(1)),
+                override_cooperative_reduction=False,
+            )
+
+        removed_name = "buf0"
+        kernel._device_tma_buffers.add(removed_name)
+        kernel._record_tma_min_block_size(removed_name, "XBLOCK", 4)
+        kernel.removed_buffers.add(removed_name)
+        with V.set_kernel_handler(ambient_kernel):
+            metadata = kernel.inductor_meta_per_kernel()
+
+        self.assertNotIn("uses_tma", metadata)
+        self.assertNotIn("uses_device_tma", metadata)
+        self.assertNotIn("tma_min_block_sizes", metadata)
+
     @parametrize(
         "split_size,fixed_config,error",
         (
