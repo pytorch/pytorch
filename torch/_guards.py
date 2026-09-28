@@ -1540,7 +1540,6 @@ def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
           have to be flattened)
     """
     from torch._subclasses.fake_tensor import (
-        FakeTensor,
         FakeTensorMode,
         get_plain_tensors,
         is_fake_tensor,
@@ -1570,11 +1569,7 @@ def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
         if is_traceable_wrapper_subclass(flat_input):
             out: list[torch.Tensor | int | torch.SymInt] = []
             get_plain_tensors(flat_input, out=out)  # type: ignore[arg-type]
-            fake_tensors: list[FakeTensor] = [
-                x
-                for x in out
-                if isinstance(x, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
-            ]
+            fake_tensors = [x for x in out if is_fake_tensor(x)]
             fake_modes.extend(
                 [
                     (maybe_get_fake_mode(tensor), f"subclass input {i}", ix)
