@@ -339,6 +339,7 @@ class FSDPModule:
         """
         orig_cls = cls.__mro__[cls._orig_cls_mro_index]
         if _fsdp_module_new_init_disabled.get():
+            # pyrefly: ignore [no-matching-overload]
             return orig_cls.__new__(cls)
         self = orig_cls.__new__(orig_cls, *args, **kwargs)
         self.__init__(*args, **kwargs)
