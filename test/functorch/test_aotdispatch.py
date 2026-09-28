@@ -627,7 +627,7 @@ class _TestAOTAutogradBase(AOTTestCase):
             check_results(
                 ref_results, test_results, graph_inps, test_graph_inps, inp, test_inp
             )
-            if isinstance(self, TestAOTAutogradWithCache):
+            if isinstance(self, _AOTAutogradCacheMixin):
                 # When testing with cache, run compiled_f a second time
                 cached_inp, cached_graph_inps = make_inputs(inp_)
                 cached_results = outs_and_grads(
@@ -12943,17 +12943,10 @@ instantiate_device_type_tests(TestEagerFusionOpInfo, globals(), only_for="cpu")
 instantiate_device_type_tests(TestEagerFusionModuleInfo, globals(), only_for="cpu")
 
 
-@xfail_inherited_tests(
-    [
-        "test_set__and_data_mutation_bad",
-    ]
-)
-class TestAOTAutogradWithDynamo(TestAOTAutograd):
+class _AOTAutogradDynamoMixin:
     """
-    These are the same as TestAOTAutograd tests, but we run dynamo first to get a graph module.
+    Runs dynamo first to get a graph module, then runs aot_autograd on it.
     """
-
-    hw_classification = HardwareClassification.GENERIC
 
     def assertExpectedInline(self, *args, **kwargs):
         # These will have different outputs because dynamo returns a different graph module
@@ -13000,6 +12993,19 @@ class TestAOTAutogradWithDynamo(TestAOTAutograd):
             return result
 
         return torch_compile_wrapper
+
+
+@xfail_inherited_tests(
+    [
+        "test_set__and_data_mutation_bad",
+    ]
+)
+class TestAOTAutogradWithDynamo(_AOTAutogradDynamoMixin, TestAOTAutograd):
+    """
+    These are the same as TestAOTAutograd tests, but we run dynamo first to get a graph module.
+    """
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_inputs_overlapping_unsqueeze_with_mutation(self):
         def f(x, y):
@@ -13222,13 +13228,10 @@ FAILING_CACHE_TESTS = (
 )
 
 
-@xfail_inherited_tests(FAILING_CACHE_TESTS)
-class TestAOTAutogradWithCache(TestAOTAutogradWithDynamo):
+class _AOTAutogradCacheMixin(_AOTAutogradDynamoMixin):
     """
     In memory version of FXGraphCache so we can isolate testing for FXGraphCache
     """
-
-    hw_classification = HardwareClassification.GENERIC
 
     def make_compiler(self, fw_graph_cell):
         mock_inductor_cache = self.inductor_cache
@@ -13297,11 +13300,38 @@ class TestAOTAutogradWithCache(TestAOTAutogradWithDynamo):
                 make_inputs_subclasses=make_inputs_subclasses,
             )
 
+
+@xfail_inherited_tests(FAILING_CACHE_TESTS)
+class TestAOTAutogradWithCache(_AOTAutogradCacheMixin, TestAOTAutogradWithDynamo):
+    """
+    In memory version of FXGraphCache so we can isolate testing for FXGraphCache
+    """
+
+    hw_classification = HardwareClassification.GENERIC
+
     def test_input_mutation_false_aliasing(self):
         # This test is disabled because it fails in strict cache mode
         # But also can't be xfailed because it causes undefined behavior for
         # ASAN
         self.skipTest("Skipping because it fails in strict cache mode")
+
+
+class TestAOTAutogradDeviceWithDynamo(_AOTAutogradDynamoMixin, TestAOTAutogradDevice):
+    """
+    These are the same as TestAOTAutogradDevice tests, but we run dynamo first to get a graph module.
+    """
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+
+class TestAOTAutogradDeviceWithCache(
+    _AOTAutogradCacheMixin, TestAOTAutogradDeviceWithDynamo
+):
+    """
+    In memory version of FXGraphCache so we can isolate testing for FXGraphCache
+    """
+
+    hw_classification = HardwareClassification.ACCELERATOR
 
 
 if __name__ == "__main__":
