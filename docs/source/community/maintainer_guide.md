@@ -60,6 +60,9 @@ working on.
 - When a contributor removes one of these labels and comments to request re-evaluation, look at the new information
   and pick the label again. Contributors who abuse this can lose the ability to change labels, up to being banned.
 
+**TEMPORARY:** `@pytorchbot` cannot remove labels yet, so contributors cannot remove a label themselves to request
+re-evaluation. They comment on the issue and mention the maintainer who applied the label instead.
+
 ## Pre-reviewing Pull Requests
 
 Pre-review is a quick review of the direction of the PR, to ensure it is worth the author's time to get it through
