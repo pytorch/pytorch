@@ -41,7 +41,7 @@ from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, r
     IS_PPC, IS_ARM64, IS_MACOS, IS_WINDOWS, IS_CPU_CAPABILITY_SVE, IS_CPU_EXT_SVE_SUPPORTED, xfailIf, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
     skipIfTorchDynamo, gcIfJetson, set_default_dtype, skipIfNoCuteDSL, isRocmArchAnyOf, MI200_ARCH, \
-    TEST_WITH_TORCHDYNAMO
+    TEST_WITH_TORCHDYNAMO, HardwareClassification
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN, \
     SM80OrLater, SM90OrLater, has_device_side_assert
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
@@ -96,6 +96,8 @@ def _graph_node_names(grad_fn):
 # CI.
 
 class TestNN(NNTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 
@@ -5901,6 +5903,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             msg="Conv3d initialization is inconsistent between memory formats"
         )
 class TestFusionEval(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @set_default_dtype(torch.double)
     @given(X=hu.tensor(shapes=((5, 3, 5, 5),), dtype=np.double),
            running_mean=hu.tensor(shapes=(6,), dtype=np.double),
@@ -5941,6 +5945,8 @@ class TestFusionEval(TestCase):
 
 
 class TestConstantPadNd(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_constant_pad_nd(self):
         a = torch.tensor([[1, 2], [3, 4]])
         res = torch.constant_pad_nd(a, [1, 2, 1, 0], 9)
@@ -5962,6 +5968,8 @@ class TestConstantPadNd(TestCase):
 
 
 class TestAddRelu(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_add_relu(self):
         a = torch.rand((7, 11))
         b = torch.rand((7, 11))
@@ -6414,6 +6422,7 @@ def _buildEquivalentAffineTransforms3d(device, input_size, output_size, angle_ra
 
 
 class TestNNDeviceType(NNTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def test_grid_sample_backward_error_checking(self, device):
         input = torch.empty(1, 1, 2, 2, device=device)
@@ -16074,6 +16083,8 @@ class TestNNDeviceType(NNTestCase):
 
 
 class TestNNCPU(NNTestCase):
+    hw_classification = HardwareClassification.CPU
+
     @dtypes(torch.float)
     def test_slow_conv3d_empty_stride(self, device, dtype):
         # https://github.com/pytorch/pytorch/issues/121095
@@ -16293,6 +16304,8 @@ class TestNNCPU(NNTestCase):
 
 
 class TestNNCUDA(NNTestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @skipCUDAIfNoCudnn
     @deviceCountAtLeast(2)
     def test_cudnn_rnn_dropout_states_device(self, devices):
@@ -16999,6 +17012,7 @@ if __name__ == '__main__':
 
 
 class TestFunctionalPickle(TestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     # issue gh-38137
     def test_pickle_softsign(self):
@@ -17007,6 +17021,8 @@ class TestFunctionalPickle(TestCase):
 
 
 class TestFusionUtils(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_fuse_conv_bn_requires_grad(self):
         conv = torch.nn.Conv2d(3, 3, 3)
         bn = torch.nn.BatchNorm2d(3)
@@ -17034,6 +17050,8 @@ class TestFusionUtils(TestCase):
             self.assertEqual(bias.requires_grad, b_rg)
 
 class TestUtils(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_consume_prefix_in_state_dict_if_present(self):
         class Block(nn.Module):
             def __init__(self) -> None:
@@ -17100,6 +17118,7 @@ class TestFusedRMSNormOverrideRouting(TestCase):
     The registry's contract that a True cond actually routes to the impl is
     covered by test/python_native/.
     """
+    hw_classification = HardwareClassification.CUDA
 
     def test_sm12x_supported(self):
         from torch._native.ops.norm.rmsnorm_impl import _is_supported
@@ -17389,6 +17408,7 @@ class TestFusedRMSNormOverrideNumerics(TestCase):
     Generic per-dtype numerics across many shapes are covered by the OpInfo
     entry in torch/testing/_internal/common_methods_invocations.py.
     """
+    hw_classification = HardwareClassification.CUDA
 
     def test_fwd_preserves_cow_inputs(self):
         x = torch.randn(8, 128, dtype=torch.float16, device="cuda")._lazy_clone()
