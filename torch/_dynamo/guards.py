@@ -25,6 +25,7 @@ import copyreg
 import dataclasses
 import enum
 import functools
+import hashlib
 import importlib
 import inspect
 import io
@@ -1014,6 +1015,26 @@ def get_verbose_code_part(code_part: str, guard: Guard | None) -> str:
     return f"{code_part:<60}{extra}"
 
 
+_LIVE_SAVED_TENSORS_HOOKS = object()
+
+
+def _saved_tensors_hooks_fingerprint(hooks: Any) -> tuple[str, ...] | None:
+    """What AUTOGRAD_SAVED_TENSORS_HOOKS compares, named by content rather than id."""
+    if not torch._functorch._aot_autograd.utils.saved_tensors_hooks_are_inlineable(
+        hooks
+    ):
+        return None
+    parts = []
+    for gm in hooks:
+        h = hashlib.sha256(gm.code.encode())
+        # An fx.wrap call renders only its name; the user's hash names its body.
+        for node in gm.graph.nodes:
+            if (user_hash := node.meta.get("user_cache_hash")) is not None:
+                h.update(str(user_hash).encode())
+        parts.append(h.hexdigest())
+    return tuple(parts)
+
+
 def get_verbose_code_parts(
     code_parts: str | list[str],
     guard: Guard | None,
@@ -1486,6 +1507,7 @@ class GuardBuilder(GuardBuilderBase):
         # the value so the id stays live; see Note [Reconstructing a function a
         # guard is rooted at] in GuardsStatePickler. Save-path only.
         self.value_guarded_containers: dict[int, Any] = {}
+        self.saved_tensors_hooks_fingerprint: object = _LIVE_SAVED_TENSORS_HOOKS
         self.save_guards = save_guards
         self.guard_filter_fn = guard_filter_fn
 
@@ -2847,11 +2869,19 @@ class GuardBuilder(GuardBuilderBase):
 
     # Global state guard — not source-specific, checked separately at runtime.
     @skip_guard_check_spec
-    def AUTOGRAD_SAVED_TENSORS_HOOKS(self, guard: Guard) -> None:
+    def AUTOGRAD_SAVED_TENSORS_HOOKS(
+        self, guard: Guard, hooks_fingerprint: object = _LIVE_SAVED_TENSORS_HOOKS
+    ) -> None:
         get_hooks = torch._functorch._aot_autograd.utils.top_saved_tensors_hooks
         are_inline_hooks = (
             torch._functorch._aot_autograd.utils.saved_tensors_hooks_are_inlineable
         )
+
+        if hooks_fingerprint is not _LIVE_SAVED_TENSORS_HOOKS:
+            self._portable_saved_tensors_hooks_guard(
+                guard, hooks_fingerprint, get_hooks, are_inline_hooks
+            )
+            return
 
         def hooks_ids_fn(
             hooks: tuple[Callable[[torch.Tensor], Any], Callable[[Any], torch.Tensor]],
@@ -2862,6 +2892,9 @@ class GuardBuilder(GuardBuilderBase):
             return tuple(map(id, hooks))
 
         guard_hooks_ids = hooks_ids_fn(get_hooks())
+        self.saved_tensors_hooks_fingerprint = _saved_tensors_hooks_fingerprint(
+            get_hooks()
+        )
 
         code = [
             f"torch._functorch.aot_autograd.utils.top_saved_tensors_hooks ids == {guard_hooks_ids}"
@@ -2870,6 +2903,37 @@ class GuardBuilder(GuardBuilderBase):
 
         def fn(x: object) -> bool:
             return guard_hooks_ids == hooks_ids_fn(get_hooks())
+
+        self.guard_manager.root.add_lambda_guard(
+            fn, get_verbose_code_parts(code, guard), guard.user_stack
+        )
+
+    def _portable_saved_tensors_hooks_guard(
+        self,
+        guard: Guard,
+        hooks_fingerprint: object,
+        get_hooks: Callable[[], Any],
+        are_inline_hooks: Callable[[Any], bool],
+    ) -> None:
+        # The capturing process's hook ids mean nothing here, and the hooks
+        # active while loading need not be the ones active while serving, so
+        # the hooks are compared by content against the capture's.
+        code = [
+            f"torch._functorch.aot_autograd.utils.top_saved_tensors_hooks fingerprint == {hooks_fingerprint}"
+        ]
+        self._set_guard_export_info(guard, code)
+        matched: list[tuple[weakref.ref[Any], ...]] = []
+
+        def fn(x: object) -> bool:
+            hooks = get_hooks()
+            if not are_inline_hooks(hooks):
+                return hooks_fingerprint is None
+            if matched and all(r() is h for r, h in zip(matched[0], hooks)):
+                return True
+            if _saved_tensors_hooks_fingerprint(hooks) != hooks_fingerprint:
+                return False
+            matched[:] = [tuple(weakref.ref(h) for h in hooks)]
+            return True
 
         self.guard_manager.root.add_lambda_guard(
             fn, get_verbose_code_parts(code, guard), guard.user_stack
@@ -5807,6 +5871,16 @@ class CheckFunctionManager:
 
             return x
 
+        def portable_create_fn(x: Callable[..., None]) -> Callable[..., None]:
+            if x is GuardBuilder.AUTOGRAD_SAVED_TENSORS_HOOKS:
+                fingerprint = builder.saved_tensors_hooks_fingerprint
+                if fingerprint is _LIVE_SAVED_TENSORS_HOOKS:
+                    raise AssertionError(
+                        "AUTOGRAD_SAVED_TENSORS_HOOKS was serialized without being built"
+                    )
+                return functools.partial(x, hooks_fingerprint=fingerprint)
+            return normalize_create_fn(x)
+
         global_scope_state = {
             k: v
             for k, v in output_graph_guards_state.global_scope.items()
@@ -5834,7 +5908,7 @@ class CheckFunctionManager:
                         guard,
                         obj_weakref=None,
                         guarded_class_weakref=None,
-                        create_fn=normalize_create_fn(guard.create_fn),
+                        create_fn=portable_create_fn(guard.create_fn),
                     )
                     for guard in sorted_guards
                 )
