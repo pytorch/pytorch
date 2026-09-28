@@ -363,8 +363,8 @@ def forward(self, args_0):
             _dynamo_graph_capture_for_export(module)(x)
 
     @unittest.skipUnless(
-        IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED and not torch.version.hip,
-        "Requires CUDA with SM >= 8.0, Triton, and not ROCm",
+        IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED,
+        "Requires CUDA with SM >= 8.0, and Triton",
     )
     def test_aot_export_flex_attention_callable_mask_mod(self):
         """Test flex_attention AOT export with callable class as mask_mod.
@@ -435,8 +435,8 @@ def forward(self, args_0):
         self.assertTrue(torch.allclose(out_eager, out_export, atol=1e-5))
 
     @unittest.skipUnless(
-        IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED and not torch.version.hip,
-        "Requires CUDA with SM >= 8.0, Triton, and not ROCm",
+        IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED,
+        "Requires CUDA with SM >= 8.0, and Triton",
     )
     def test_aot_export_flex_attention_with_blockmask_placeholders(self):
         from torch._subclasses.fake_tensor import FakeTensorMode
