@@ -7,7 +7,7 @@ import math
 import os
 from functools import partial
 from threading import Lock
-from typing import Any, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
 
 import sympy
 
@@ -18,12 +18,10 @@ from torch.utils._sympy.functions import Min, Mod
 from torch.utils._triton import has_triton_stable_tma_api
 
 from ... import config
-from ...autows_utils import meta_ws_enabled
+from ...autows_utils import has_two_ctas, meta_ws_enabled
 from ...kernel.bmm import bmm_template
 from ...kernel.mm import (
     blackwell_ws_persistent_tma_mm_template,
-    get_scaling_options,
-    get_tile_size,
     mm_template,
     persistent_mm_template,
     persistent_tdm_mm_template,
@@ -277,6 +275,7 @@ class BlackwellGPUGemmConfig(GemmConfig):
     use_meta_ws: bool = dataclasses.field(kw_only=True, default=False)
     data_partition_factor: int = dataclasses.field(kw_only=True, default=1)
     separate_epilogue_store: bool = dataclasses.field(kw_only=True, default=False)
+    two_ctas: bool = dataclasses.field(kw_only=True, default=False)
 
 
 # FlexAttention Configs
@@ -998,6 +997,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                     conf.use_meta_ws,
                     conf.data_partition_factor,
                     conf.separate_epilogue_store,
+                    conf.two_ctas,
                 )
 
             extra_key, extra_kwargs = self._get_extra_config_key_and_kwargs(conf)
@@ -1024,6 +1024,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                     kwargs["USE_META_WS"] = conf.use_meta_ws
                     kwargs["DATA_PARTITION_FACTOR"] = conf.data_partition_factor
                     kwargs["SEPARATE_EPILOGUE_STORE"] = conf.separate_epilogue_store
+                    kwargs["TWO_CTAS"] = conf.two_ctas
 
                 kwargs.update(extra_kwargs)
 
@@ -2056,7 +2057,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         """
         Finalizes configs after scaling, applying additional constraints.
         """
-        used: OrderedSet[tuple[int, ...]] = OrderedSet()
+        used: OrderedSet[tuple[int | None, ...]] = OrderedSet()
 
         max_mm_configs = config.test_configs.max_mm_configs
 
@@ -2079,7 +2080,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                 continue
 
             # Construct key for finding duplicate configs
-            key: tuple[int, ...] = (
+            key: tuple[int | None, ...] = (
                 conf.block_m,
                 conf.block_n,
                 conf.block_k,
@@ -2088,6 +2089,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                 waves_per_eu,
                 matrix_instr_nonkdim,
                 kpack,
+                conf.hint_override,
             )
 
             # Check if gemm specific arg exists - add to key if does
@@ -2114,6 +2116,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                     "matrix_instr_nonkdim": matrix_instr_nonkdim,
                     "waves_per_eu": waves_per_eu,
                     "kpack": kpack,
+                    "hint_override": conf.hint_override,
                 }
                 if group_m is not None:
                     kwargs["GROUP_M"] = group_m
@@ -2391,6 +2394,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
     default_num_stages: int
     exhaustive_configs: list[BaseConfig]
     uses_tdm_configs: bool
+    blackwell_persistent_mm_configs: list[BaseConfig]
     _get_exceeding_shared_memory_checker: Callable[
         [bool, int], Callable[[BaseConfig, int], bool] | None
     ]
@@ -2935,7 +2939,12 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
             # TMA needs the contiguous dim last. Use the same inner-dim rule as
             # can_use_tma, which already accepted these operands -- deriving it
             # separately here is how a [1, K] operand ended up transposed.
-            stride = node.layout.stride
+            # Resolve symbols the way can_use_tma does: tma_inner_dim compares
+            # against 1, and an unhinted backed symbol never compares equal.
+            stride = [
+                V.graph.sizevars.replace_backed_symbols_with_hints(st)
+                for st in node.layout.stride
+            ]
             inner = tma_inner_dim(stride)
             if inner is None:
                 raise AssertionError(
@@ -2982,6 +2991,11 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
         """
         Generate TMA template configs by calling super and adding TMA-specific options.
         """
+        if not isinstance(kernel_inputs, MMKernelInputs):
+            raise AssertionError("Blackwell GEMM requires MMKernelInputs")
+        _, mat2 = kernel_inputs.mat1mat2()
+        element_size = mat2.get_dtype().itemsize
+
         # Get base template configs from superclass
         for template_kwargs in super()._get_template_configs_impl(
             kernel_inputs,
@@ -2991,7 +3005,9 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
             use_meta_ws = template_kwargs.get("USE_META_WS", False)
             # autoWS configs come from a full sweep; drop combos the lowering
             # does not support so no invalid config reaches codegen.
-            if use_meta_ws and not self._autows_constraints_ok(template_kwargs):
+            if use_meta_ws and not self._autows_constraints_ok(
+                template_kwargs, element_size=element_size
+            ):
                 continue
             # Some Triton versions requires num_warps >= 4 for WS
             # to avoid compilation issues. Triton disables WS if num_warps < 4
@@ -3009,43 +3025,73 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
                 and not constraints_violated
                 and not use_meta_ws
             )
-            yield {
+            two_ctas = template_kwargs.get("TWO_CTAS", False)
+            out = {
                 **template_kwargs,
-                "NUM_SMS": get_num_sms(),
+                "NUM_SMS": get_num_sms(two_ctas=two_ctas),
                 "WARP_SPECIALIZE": ws,
                 "FLATTEN": flatten,
                 "HOST_SIDE_TMA": config.triton.enable_host_side_tma,
             }
+            if two_ctas:
+                out["ctas_per_cga"] = (2, 1, 1)
+            yield out
 
     @staticmethod
-    def _autows_constraints_ok(template_kwargs: dict[str, Any]) -> bool:
+    def _autows_constraints_ok(
+        template_kwargs: dict[str, Any], *, element_size: int
+    ) -> bool:
         """autoWS lowering constraints; swept configs violating these are pruned."""
         block_m = template_kwargs["BLOCK_M"]
         block_n = template_kwargs["BLOCK_N"]
         subtile = template_kwargs.get("EPILOGUE_SUBTILE", 1)
+        dp = template_kwargs.get("DATA_PARTITION_FACTOR", 1)
         # each epilogue subtile is BLOCK_N // EPILOGUE_SUBTILE wide
         if block_n // subtile < 32:
             return False
         # dp=2 splits the row tile into two MMA partitions; BLOCK_M=64 fails in
         # the fb-triton WS pass pipeline, so keep the tile at 128 or 256
-        dp = template_kwargs.get("DATA_PARTITION_FACTOR", 1)
         if dp == 2 and block_m not in (128, 256):
             return False
+        if template_kwargs.get("TWO_CTAS", False):
+            # This MetaWS 2CTA template currently requires TMA epilogue stores.
+            if not (has_two_ctas() and config.triton.enable_template_tma_store):
+                return False
+            # 2CTA halves B along N. Each CTA's slice must still span at least
+            # 128 bytes to use the required swizzle.
+            if block_m < 128 or (block_n // 2) * element_size < 128:
+                return False
         return True
 
-    def _get_config_generator(
-        self,
-    ) -> partial[Generator[TritonConfig, None, None]]:
-        # No curated autoWS set yet: sweep the full autoWS space for both default
-        # and exhaustive search, and let _get_template_configs_impl prune it.
+    def _get_config_generator(self) -> partial[Generator[TritonConfig, None, None]]:
         if _use_template_autows():
-            return partial(
-                self.preprocess_mm_configs, configs=self._generate_autows_configs()
+            configs = (
+                self._generate_autows_exhaustive_configs()
+                if config.max_autotune_gemm_search_space == "EXHAUSTIVE"
+                else self._generate_autows_configs()
             )
+            return partial(self.preprocess_mm_configs, configs=configs)
         return super()._get_config_generator()
 
+    def _generate_autows_configs(self) -> list[BaseConfig]:
+        """The Blackwell persistent set crossed with the autoWS-specific knobs."""
+        base = cast(list[BlackwellGPUGemmConfig], self.blackwell_persistent_mm_configs)
+        return [
+            dataclasses.replace(
+                cfg,
+                use_meta_ws=True,
+                flatten=False,
+                separate_epilogue_store=True,
+                data_partition_factor=data_partition_factor,
+                two_ctas=two_ctas,
+            )
+            for cfg in base
+            for data_partition_factor in [1, 2]
+            for two_ctas in [False, True]
+        ]
+
     @staticmethod
-    def _generate_autows_configs() -> list[BaseConfig]:
+    def _generate_autows_exhaustive_configs() -> list[BaseConfig]:
         configs: list[BaseConfig] = []
         for BLOCK_M, BLOCK_N, BLOCK_K in itertools.product(
             [32, 64, 128, 256], repeat=3
@@ -3056,22 +3102,24 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
                     for epilogue_subtile in [1, 2, 4, 8]:
                         for data_partition_factor in [1, 2]:
                             for separate_epilogue_store in [False, True]:
-                                configs.append(
-                                    BlackwellGPUGemmConfig(
-                                        block_m=BLOCK_M,
-                                        block_n=BLOCK_N,
-                                        block_k=BLOCK_K,
-                                        num_stages=num_stages,
-                                        num_warps=num_warps,
-                                        group_m=8,
-                                        epilogue_subtile=epilogue_subtile,
-                                        use_meta_ws=True,
-                                        data_partition_factor=data_partition_factor,
-                                        separate_epilogue_store=separate_epilogue_store,
-                                        warp_specialize=True,
-                                        flatten=False,
+                                for two_ctas in [False, True]:
+                                    configs.append(
+                                        BlackwellGPUGemmConfig(
+                                            block_m=BLOCK_M,
+                                            block_n=BLOCK_N,
+                                            block_k=BLOCK_K,
+                                            num_stages=num_stages,
+                                            num_warps=num_warps,
+                                            group_m=8,
+                                            epilogue_subtile=epilogue_subtile,
+                                            use_meta_ws=True,
+                                            data_partition_factor=data_partition_factor,
+                                            separate_epilogue_store=separate_epilogue_store,
+                                            two_ctas=two_ctas,
+                                            warp_specialize=True,
+                                            flatten=False,
+                                        )
                                     )
-                                )
         return configs
 
     @staticmethod
@@ -3608,10 +3656,7 @@ class CUDAScaledTMAEpilogueScalingTemplateConfigHeuristic(
 class CUDAScaledTMAMainLoopScalingTemplateConfigHeuristic(
     ScaledTMAConfigMixin, CUDAConfigHeuristic
 ):
-    """
-    Scaled TMA template heuristic for CUDA:
-        main loop scaling variants (BlockWise1x128, BlockWise1x32, BlockWise1x16, BlockWise128x128)
-    """
+    """Scaled TMA configurations for 128-element main-loop scale blocks."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -3627,14 +3672,9 @@ class CUDAScaledTMAMainLoopScalingTemplateConfigHeuristic(
         """
         Generate main loop scaling kernel inputs.
         """
-        mat_a, mat_b, scale_a, scale_b = kernel_inputs._input_nodes
-        scale_a_size, scale_b_size = scale_a.get_size(), scale_b.get_size()
-
-        scale_option_a, scale_option_b = get_scaling_options(
-            mat_a, mat_b, scale_a_size, scale_b_size
-        )
-        tile_size_a = get_tile_size(scale_option_a)
-        tile_size_b = get_tile_size(scale_option_b)
+        # Both main-loop recipes scale 128 elements along K. Inferring them
+        # again from shapes misclassifies single-K-block inputs as rowwise.
+        tile_size_a = tile_size_b = 128
 
         # Get base scaled MM template configs from superclass
         for template_kwargs in super()._get_template_configs_impl(
@@ -3645,11 +3685,17 @@ class CUDAScaledTMAMainLoopScalingTemplateConfigHeuristic(
             # Add scaling-specific options for main loop scaling variants
 
             # Inductor templates require compile-time constants passed in as tl.constexpr values.
-            # In cases in which the block size (BLOCK_*) is smaller than the tile size (128, 32, 16),
-            # scales must be broadcasted to BLOCK_* (rather than to a tile_sizextile_size chunk).
+            # When BLOCK_* is smaller than 128, broadcast scales to BLOCK_*
+            # rather than to a full 128x128 tile.
 
             template_kwargs["TILE_SIZE_A"] = tile_size_a
             template_kwargs["TILE_SIZE_B"] = tile_size_b
+
+            # Scaling the operands promotes them to fp32, where tl.dot defaults to
+            # tf32 and drops most of the fp8 mantissa. Quoted because template
+            # kwargs render verbatim. This heuristic is CUDA-and-not-ROCm only, so
+            # tf32x3 is always available.
+            template_kwargs["DOT_PRECISION"] = '"tf32x3"'
 
             template_kwargs["MIN_BLOCK_TILE_AM"] = min(
                 template_kwargs["BLOCK_M"], tile_size_a
