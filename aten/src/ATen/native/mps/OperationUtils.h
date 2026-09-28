@@ -54,6 +54,7 @@ struct MPSScalar {
     c10::complex<float> cf;
     c10::complex<at::Half> ch;
     at::BFloat16 bf16;
+    c10::Float8_e4m3fn f8;
   } value{};
 };
 
@@ -105,9 +106,6 @@ NSArray<NSNumber*>* getTensorAxes(const TensorBase& t);
 NSArray<NSNumber*>* getTensorAxes(const IntArrayRef& sizes, at::OptionalIntArrayRef dim);
 std::string getTensorsStringKey(const TensorList& tensors, bool short_dtype = true, bool exclude_shape = false);
 std::string getArrayRefString(const IntArrayRef s);
-// use has_storage() on the returned tensor to determine if src actually is a view
-Tensor gatherViewTensor(const Tensor& src, Tensor& dst);
-Tensor& scatterViewTensor(const Tensor& src, Tensor& output);
 
 MPSNDArray* getStridedMPSNDArray(const TensorBase& src, MPSNDArray* srcNDArray);
 MPSNDArray* getMPSNDArray(const TensorBase& t, const IntArrayRef& sizes = {}, const IntArrayRef& strides = {});
@@ -118,7 +116,7 @@ MPSShape* getMPSShape(const TensorBase& t, c10::MemoryFormat memory_format = Mem
 MPSShape* getMPSShape(IntArrayRef sizes, c10::MemoryFormat memory_format = MemoryFormat::Contiguous);
 
 // Determines whether a tensor is too large to use MPSGraph
-bool isTooLargeForMPSGraph(const Tensor& tensor, bool useMPSStridedAPI = true);
+bool isTooLargeForMPSGraph(const Tensor& tensor, bool useMPSStridedAPI = true, bool checkLinearOffset = false);
 
 static inline id<MTLBuffer> getMTLBufferStorage(const TensorBase& tensor) {
   return __builtin_bit_cast(id<MTLBuffer>, tensor.storage().data());
@@ -406,7 +404,7 @@ struct MPSGraphCache {
 
     MPSCacheKey hash = std::hash<std::string>{}(key);
 
-    dispatch_sync(serialQueue_, ^() {
+    dispatch_sync_with_rethrow(serialQueue_, ^() {
       auto it = cache_.find(hash);
       if (it != cache_.end()) {
         auto& entry = it->second;
@@ -424,7 +422,7 @@ struct MPSGraphCache {
   }
 
   void clear() {
-    dispatch_sync(serialQueue_, ^() {
+    dispatch_sync_with_rethrow(serialQueue_, ^() {
       for (const auto& i : cache_) {
         delete i.second.cachedGraph_;
       }
@@ -463,9 +461,6 @@ inline T* LookUpOrCreateCachedGraph(const std::string& key, std::function<void(M
     return newCachedGraph;
   });
 }
-
-// Common math operations
-MPSGraphTensor* log1p(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor);
 
 /**
  * Returns distance from lowest to highest element offset in given tensor.
@@ -604,6 +599,8 @@ static inline void mtl_dispatch1DJob(id<MTLComputeCommandEncoder> encoder,
                                      id<MTLComputePipelineState> cplState,
                                      NSUInteger length) {
   static_assert(sizeof(NSUInteger) == sizeof(uint64_t));
+  // thread_position_in_grid is at most 32-bit per axis; Metal silently truncates larger grids
+  TORCH_CHECK(length <= std::numeric_limits<uint32_t>::max(), "MPS 1D dispatch of ", length, " threads exceeds 2^32");
   const auto maxThreadsPerGroup = [cplState maxTotalThreadsPerThreadgroup];
   auto size = MTLSizeMake(length, 1, 1);
   auto threadGroupSize = MTLSizeMake(std::clamp(length, 1UL, maxThreadsPerGroup), 1, 1);
@@ -618,18 +615,44 @@ static inline void mtl_dispatch1DJob(id<MTLComputeCommandEncoder> encoder,
 // vs the 1D dispatch. The kernel reads thread_position_in_grid as uint
 // per-axis, so each dim must fit in uint32; the product can exceed UINT32_MAX
 // (i.e. >4G total threads are fine as long as neither inner nor outer alone
-// overflow). Like mtl_dispatch1DJob, caller is responsible for the per-axis
-// bound; TensorIterator's 32-bit decomposition keeps both within range today.
+// overflow).
 static inline void mtl_dispatch2DJob(id<MTLComputeCommandEncoder> encoder,
                                      id<MTLComputePipelineState> cplState,
                                      NSUInteger inner_len,
                                      NSUInteger outer_len) {
+  TORCH_CHECK(inner_len <= std::numeric_limits<uint32_t>::max() && outer_len <= std::numeric_limits<uint32_t>::max(),
+              "MPS 2D dispatch of ",
+              inner_len,
+              "x",
+              outer_len,
+              " threads exceeds 2^32 along one axis");
   const auto maxThreadsPerGroup = [cplState maxTotalThreadsPerThreadgroup];
   auto size = MTLSizeMake(inner_len, outer_len, 1);
   auto tg_x = std::min(maxThreadsPerGroup, inner_len);
   auto tg_y = std::clamp(outer_len, 1UL, maxThreadsPerGroup / tg_x);
   auto threadGroupSize = MTLSizeMake(tg_x, tg_y, 1);
   [encoder dispatchThreads:size threadsPerThreadgroup:threadGroupSize];
+}
+
+static inline void mtl_dispatch3DJob(id<MTLComputeCommandEncoder> encoder,
+                                     id<MTLComputePipelineState> cplState,
+                                     NSUInteger dim0,
+                                     NSUInteger dim1,
+                                     NSUInteger dim2) {
+  constexpr NSUInteger max_dim = std::numeric_limits<uint32_t>::max();
+  TORCH_CHECK(dim0 <= max_dim && dim1 <= max_dim && dim2 <= max_dim,
+              "MPS 3D dispatch of ",
+              dim0,
+              "x",
+              dim1,
+              "x",
+              dim2,
+              " threads exceeds 2^32 along one axis");
+  const auto maxThreadsPerGroup = [cplState maxTotalThreadsPerThreadgroup];
+  auto tg_x = std::min(maxThreadsPerGroup, dim0);
+  auto tg_y = std::clamp(dim1, 1UL, maxThreadsPerGroup / tg_x);
+  auto tg_z = std::clamp(dim2, 1UL, maxThreadsPerGroup / (tg_x * tg_y));
+  [encoder dispatchThreads:MTLSizeMake(dim0, dim1, dim2) threadsPerThreadgroup:MTLSizeMake(tg_x, tg_y, tg_z)];
 }
 
 inline NSDictionary* dictionaryFromPlaceholders(Placeholder& p1) {
@@ -726,7 +749,7 @@ void MetalShaderLibrary::exec_unary_kernel_with_params(TensorIteratorBase& iter,
     auto cplState = getPipelineStateForFunc(kernel_name);
 
     MPSStream* mpsStream = getCurrentMPSStream();
-    dispatch_sync(mpsStream->queue(), ^() {
+    dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
       auto computeEncoder = mpsStream->commandEncoder();
 
       getMPSProfiler().beginProfileKernel(cplState, name, {inputTensor}, mpsStream);

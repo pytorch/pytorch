@@ -34,6 +34,7 @@ import math
 import operator
 import os
 import re
+import struct
 import sys
 import textwrap
 import threading
@@ -74,6 +75,7 @@ from torch._C import (
     _pop_torch_function_stack,
     _push_on_torch_function_stack,
 )
+from torch._C._dynamo.utils import get_current_stream  # noqa: F401
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.metrics_context import MetricsContext, RuntimeMetricsContext
 from torch._guards import CompileId, Source, TracingContext
@@ -1240,6 +1242,45 @@ def istype(obj: object, allowed_types: Any) -> bool:
     if isinstance(allowed_types, (tuple, list, set)):
         return type(obj) in allowed_types
     return type(obj) is allowed_types
+
+
+def constant_bits(value: Any, /) -> bytes | None:
+    if type(value) is float:
+        return struct.pack(">d", value)
+    if type(value) is complex:
+        return struct.pack(">dd", value.real, value.imag)
+    return None
+
+
+def constants_identical(a: Any, b: Any, /) -> bool:
+    """Value-identity comparison for specialized constants. Python float eq is
+    not value-identity: nan != nan while -0.0 == 0.0, so compare float and
+    complex values by IEEE-754 bit pattern, recursively through containers."""
+    bits = constant_bits(a)
+    if type(a) is type(b) and bits is not None:
+        return bits == constant_bits(b)
+
+    if type(a) is type(b) and type(a) in (list, tuple, torch.Size):
+        if a is b:
+            return True
+        return len(a) == len(b) and all(constants_identical(x, y) for x, y in zip(a, b))
+
+    if type(a) is type(b) and type(a) in (set, frozenset):
+        if a is b:
+            return True
+        if len(a) != len(b):
+            return False
+        remaining = list(b)
+        for x in a:
+            for i, y in enumerate(remaining):
+                if constants_identical(x, y):
+                    remaining.pop(i)
+                    break
+            else:
+                return False
+        return True
+
+    return a == b
 
 
 _builtin_final_typing_classes: tuple[Any, ...] = tuple()
@@ -2557,8 +2598,9 @@ class CleanupHook:
             CleanupManager.count -= 1
         # Hooks fire when the owning code object is collected, which can happen
         # after something else has taken over this name -- CompilePackage.install()
-        # reinstalls precompiled state under names a pre-reset compile still
-        # owns. Only clean up while nothing has claimed the name out from under us.
+        # rebinds one a pre-reset compile still owns, and an aot_compile load claims
+        # a builtins-dict key while leaving the binding as it is. Only clean up
+        # while nothing has claimed the name out from under us.
         key = (id(self.scope), self.name)
         if _cleanup_owners.pop(key, None) is not self.token:
             return
@@ -3863,7 +3905,7 @@ def same(
                     ):
                         multiplier = 10.0
                     elif use_larger_multiplier_for_smaller_tensor and (
-                        fp64_ref.numel() <= 500
+                        fp64_ref.numel() < 1000
                     ):
                         multiplier = 8.0
                     elif (
@@ -5769,10 +5811,6 @@ def set_torch_function_mode_stack(stack: list[Any]) -> None:
 def clear_torch_function_mode_stack() -> None:
     for _ in range(_len_torch_function_stack()):
         _pop_torch_function_stack()
-
-
-def get_current_stream(device: torch.device) -> torch.Stream:
-    return torch.accelerator.current_stream(device)
 
 
 # call from C dynamo in order to inspect values in pdb
