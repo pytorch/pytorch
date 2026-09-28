@@ -9060,6 +9060,9 @@ class TestMPS(TestCaseMPS):
         helper(6)
         helper(3)
         helper(8)
+        # both sides of the n <= 4 register-kernel cutoff
+        helper(4)
+        helper(5)
         helper(1025, atol=1e-4)
 
     # Test tril
