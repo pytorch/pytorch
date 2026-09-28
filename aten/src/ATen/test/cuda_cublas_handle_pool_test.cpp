@@ -12,7 +12,6 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAGraph.h>
 #include <ATen/cuda/Sleep.h>
-#include <c10/util/env.h>
 #include <rocblas/rocblas.h>
 
 #include <array>
@@ -101,26 +100,22 @@ size_t rocblasWorkspaceSize(cublasHandle_t handle) {
 
 } // namespace
 
-// ATen binds its eager workspaces to an internal handle, so the public handle
-// keeps the arena rocBLAS allocated at creation, as a cuBLAS handle keeps its
-// default workspace.
-TEST(CUDABlasHandlePoolTest, EagerWorkspaceLeavesPublicHandleArena) {
+// ATen binds its eager workspaces to an internal handle. The public handle is
+// bound at creation to a caching-allocator buffer that replaces the arena
+// rocBLAS allocated, so its workspace is counted by the allocator.
+TEST(CUDABlasHandlePoolTest, EagerWorkspaceBindsPublicHandleToAllocator) {
   if (!at::cuda::is_available()) {
     return;
   }
   if (at::cuda::isCUDABlasWorkspaceCachingEnabled()) {
     GTEST_SKIP() << "requires eager workspaces";
   }
-  if (c10::utils::has_env("ROCBLAS_DEVICE_MEMORY_SIZE")) {
-    GTEST_SKIP() << "rocBLAS reports an arena sized by "
-                    "ROCBLAS_DEVICE_MEMORY_SIZE as not its own";
-  }
 
   at::cuda::CUDAGuard device_guard(0);
   const auto public_handle = at::cuda::getCurrentCUDABlasHandle();
-  ASSERT_TRUE(rocblasOwnsWorkspace(public_handle));
-  const size_t arena_size = rocblasWorkspaceSize(public_handle);
-  ASSERT_GT(arena_size, 0);
+  EXPECT_FALSE(rocblasOwnsWorkspace(public_handle));
+  const size_t bound_size = rocblasWorkspaceSize(public_handle);
+  EXPECT_GE(bound_size, at::cuda::getChosenWorkspaceSize());
 
   cublasHandle_t internal_handle = nullptr;
   {
@@ -136,8 +131,8 @@ TEST(CUDABlasHandlePoolTest, EagerWorkspaceLeavesPublicHandleArena) {
   EXPECT_TRUE(rocblasOwnsWorkspace(internal_handle));
   EXPECT_EQ(rocblasWorkspaceSize(internal_handle), 0);
   EXPECT_EQ(at::cuda::getCurrentCUDABlasHandle(), public_handle);
-  EXPECT_TRUE(rocblasOwnsWorkspace(public_handle));
-  EXPECT_EQ(rocblasWorkspaceSize(public_handle), arena_size);
+  EXPECT_FALSE(rocblasOwnsWorkspace(public_handle));
+  EXPECT_EQ(rocblasWorkspaceSize(public_handle), bound_size);
 }
 
 // ATen binds its workspaces to separate handles, so a workspace the caller
@@ -155,7 +150,7 @@ TEST(CUDABlasHandlePoolTest, EagerCallerWorkspaceSurvivesAtenOps) {
   at::globalContext().setBlasPreferredBackend(at::BlasBackend::Cublas);
 
   at::cuda::CUDAGuard device_guard(0);
-  // Unbinding at the end leaves this stream's public handle without an arena,
+  // Unbinding at the end leaves this stream's public handle without a workspace,
   // so the test uses a high-priority stream, which no other test here does.
   c10::cuda::CUDAStreamGuard stream_guard(
       c10::cuda::getStreamFromPool(/*isHighPriority=*/true));
@@ -179,7 +174,7 @@ TEST(CUDABlasHandlePoolTest, EagerCallerWorkspaceSurvivesAtenOps) {
   at::globalContext().setBlasPreferredBackend(prev_backend);
 }
 
-// A rocBLAS arena must not be used by two streams at once, and
+// A rocBLAS workspace must not be used by two streams at once, and
 // rocblas_set_stream does not wait for the old stream, so each stream gets its
 // own public handle.
 TEST(CUDABlasHandlePoolTest, EagerPublicHandleIsPerStream) {
@@ -203,7 +198,7 @@ TEST(CUDABlasHandlePoolTest, EagerPublicHandleIsPerStream) {
 }
 
 // The kernel Tensile picks for this shape uses the handle's workspace on gfx942
-// and gfx950, so GEMMs from two streams that share one arena corrupt each
+// and gfx950, so GEMMs from two streams that share one workspace corrupt each
 // other's results. Where the kernel uses no workspace the test cannot fail.
 TEST(CUDABlasHandlePoolTest, EagerPublicHandleStreamsDoNotShareArena) {
   if (!at::cuda::is_available()) {

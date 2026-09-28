@@ -1115,7 +1115,13 @@ print(public_active, active, allocated)
                 [sys.executable, "-c", test_script], env=env, text=True
             ).split()
         )
-        self.assertEqual(eager_public, 0)
+        if TEST_WITH_ROCM:
+            # ROCm binds each public handle to a caching-allocator buffer.
+            self.assertGreaterEqual(
+                eager_public, torch.backends.cuda.cublas_workspace_size()
+            )
+        else:
+            self.assertEqual(eager_public, 0)
         self.assertEqual(eager_active, 0)
         self.assertGreater(eager_allocated, 0)
         self.assertGreater(cached_public, 0)

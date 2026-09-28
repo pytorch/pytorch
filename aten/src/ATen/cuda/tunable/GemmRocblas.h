@@ -177,7 +177,7 @@ class RocblasGemmOp : public Callable<GemmParams<T>> {
 template <typename T>
 auto GetRocBlasGemmTypeStringAndOps() {
   // getCurrentCUDABlasHandle() would create a public handle, with its own
-  // rocBLAS arena, for each stream this runs on.
+  // workspace, for each stream this runs on.
   auto scoped_handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   rocblas_handle handle = (rocblas_handle)(cublasHandle_t)scoped_handle;
   rocblas_int solution_size;
@@ -255,7 +255,7 @@ class RocblasGemmStridedBatchedOp : public Callable<GemmStridedBatchedParams<T>>
 template <typename T>
 auto GetRocBlasGemmStridedBatchedTypeStringAndOps() {
   // getCurrentCUDABlasHandle() would create a public handle, with its own
-  // rocBLAS arena, for each stream this runs on.
+  // workspace, for each stream this runs on.
   auto scoped_handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   rocblas_handle handle = (rocblas_handle)(cublasHandle_t)scoped_handle;
   rocblas_int solution_size;

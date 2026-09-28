@@ -125,20 +125,24 @@ Persistent workspaces must not be used when capturing multiple HIP graphs on the
 
 When ATen workspace caching is disabled, ATen operations bind their workspaces to handles that
 ``torch.cuda.current_blas_handle()`` never returns. That function returns a separate handle for each
-thread and stream, because a rocBLAS handle's workspace must not be used by two streams at once. Each
-handle keeps the workspace rocBLAS allocates when it is created, outside the HIP caching allocator:
-128 MiB on MI355X, and the size depends on the GPU and the rocBLAS version. Handles are never
-destroyed. When a thread exits, its handles pass to other threads and streams, so that memory stays
-allocated for the life of the process. rocBLAS grows a handle's workspace when a call needs more than
-it holds, and frees it when a workspace is bound; neither is legal while a stream is capturing, so
-bind before capture begins. ``ROCBLAS_DEVICE_MEMORY_SIZE`` fixes the size and rocBLAS then never grows
-it: GEMMs that need more fall back to kernels that use less, and other calls that need more fail.
+thread and stream, because a rocBLAS handle's workspace must not be used by two streams at once. When
+the handle is created, ATen replaces the workspace rocBLAS allocated for it with a buffer from the HIP
+caching allocator on that stream, so ``torch.cuda.memory_allocated()`` counts it. The buffer is as
+large as the workspace rocBLAS allocated (128 MiB on MI355X; the size depends on the GPU, the rocBLAS
+version and ``ROCBLAS_DEVICE_MEMORY_SIZE``), and at least the hipBLAS workspace size described below.
+rocBLAS never grows a bound workspace: GEMMs that need more fall back to kernels that use less, and
+other calls that need more fail with ``rocblas_status_memory_error``. Handles are never destroyed.
+When a thread exits, its handles pass to other threads and streams, so the buffer stays allocated for
+the life of the process, and ``torch.cuda.empty_cache()`` does not release it. Where rocBLAS runs
+GEMMs through hipBLASLt, as on MI355X, each rocBLAS handle also holds about 25 MiB that hipBLASLt
+allocates when the handle is created, outside the caching allocator, and no API replaces it.
 
 A workspace bound with ``rocblas_set_workspace`` stays bound, even after the buffer is freed, and
 after the thread exits and the handle passes to another thread. Unbind it with
 ``rocblas_set_workspace(handle, nullptr, 0)`` before freeing the buffer. The handle then has no
-workspace of its own, so GEMMs on it use kernels that need none and other calls make rocBLAS allocate
-one, which is not allowed during capture. A caller that needs its own workspace can create its own
+workspace, and ATen does not bind its own buffer again, so GEMMs on it use kernels that need none and
+other calls make rocBLAS allocate a workspace outside the caching allocator, which is not allowed
+during capture. A caller that needs its own workspace can create its own
 rocBLAS handle instead. Synchronize a handle's stream before its thread exits, and before moving the
 handle to another stream with ``rocblas_set_stream``, as rocBLAS requires.
 
@@ -151,8 +155,8 @@ With caching disabled, while the current stream is capturing, ``torch.cuda.curre
 returns a capture handle instead. There is one per thread, and it serves every stream in the capture:
 each request points it at the current stream and binds a workspace for that stream allocated from the
 capture's memory pool, so a graph shares its rocBLAS scratch memory neither with eager work nor with
-other graphs. It has no rocBLAS arena of its own. Request the handle inside the capture instead of
-using one obtained before it, whose arena eager work on that stream keeps using. When the capture
+other graphs. Request the handle inside the capture instead of using one obtained before it, whose
+workspace eager work on that stream keeps using. When the capture
 ends, its workspaces return to the pool and the handle is unbound, so do not use it afterwards. Once a
 device's handle has been requested, graph capture creates the capturing thread's capture handle and
 one spare for another thread, such as an autograd worker, so side streams that first appear inside a

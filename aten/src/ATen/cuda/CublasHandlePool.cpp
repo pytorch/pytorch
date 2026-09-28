@@ -13,6 +13,7 @@
 #include <shared_mutex>
 #include <string>
 #include <tuple>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -142,11 +143,52 @@ void destroyCublasHandle(cublasHandle_t handle) {
 }
 
 #ifdef USE_ROCM
-// ATen binds a per-call workspace on its handle, and rocBLAS cannot hand a
-// handle back its managed arena once bound, so public callers get separate
-// handles, one per (device, stream), whose arenas are never touched.
+// Buffers bound to public handles, keyed by handle.
+struct PublicWorkspaces {
+  std::mutex mutex;
+  std::unordered_map<cublasHandle_t, at::DataPtr> map;
+};
+
+PublicWorkspaces& publicWorkspaces() {
+  static auto& instance = *new PublicWorkspaces;
+  return instance;
+}
+
+// Replaces the arena rocBLAS allocates at creation with a caching-allocator
+// buffer on the current stream, so the handle's workspace is counted by the
+// allocator. rocBLAS never grows a bound workspace, so it is at least as large
+// as the arena, which honors ROCBLAS_DEVICE_MEMORY_SIZE.
+void createPublicCublasHandle(cublasHandle_t *handle) {
+  createCublasHandle(handle);
+  try {
+    size_t arena_size = 0;
+    TORCH_CUDABLAS_CHECK(rocBLASStatusToHIPStatus(rocblas_get_device_memory_size(
+        (rocblas_handle)*handle, &arena_size)));
+    const size_t workspace_size = std::max(arena_size, getChosenWorkspaceSize());
+    auto workspace = allocateCUDABlasWorkspace(workspace_size);
+    TORCH_CUDABLAS_CHECK(
+        cublasSetWorkspace(*handle, workspace.get(), workspace_size));
+    auto& workspaces = publicWorkspaces();
+    std::lock_guard<std::mutex> lock(workspaces.mutex);
+    workspaces.map.insert_or_assign(*handle, std::move(workspace));
+  } catch (...) {
+    destroyCublasHandle(*handle);
+    *handle = nullptr;
+    throw;
+  }
+}
+
+void destroyPublicCublasHandle(cublasHandle_t handle) {
+  destroyCublasHandle(handle);
+  auto& workspaces = publicWorkspaces();
+  std::lock_guard<std::mutex> lock(workspaces.mutex);
+  workspaces.map.erase(handle);
+}
+
+// ATen binds a per-call workspace on its handle, so public callers get
+// separate handles, one per (device, stream), each bound to its own buffer.
 using CuBlasPoolType = DeviceThreadHandlePool<cublasHandle_t, createInternalCublasHandle, destroyCublasHandle>;
-using CuBlasPublicPoolType = DeviceThreadHandlePool<cublasHandle_t, createCublasHandle, destroyCublasHandle>;
+using CuBlasPublicPoolType = DeviceThreadHandlePool<cublasHandle_t, createPublicCublasHandle, destroyPublicCublasHandle>;
 
 // A distinct create function keeps the capture pool a separate type, and so a
 // separate singleton, from CuBlasPoolType.
@@ -552,9 +594,9 @@ static void setupCUDABlasHandle(
       break;
     case WorkspaceMode::Default:
       // cuBLAS: cublasSetStream above resets the handle to its default
-      // workspace. rocBLAS: public handles keep the arena rocBLAS allocated at
-      // creation because ATen never binds them, and capture handles keep the
-      // capture workspace getCaptureCublasHandle bound.
+      // workspace. rocBLAS: public handles keep the buffer bound at creation,
+      // and capture handles keep the capture workspace getCaptureCublasHandle
+      // bound.
       break;
   }
 
@@ -697,12 +739,12 @@ cublasHandle_t getCurrentCUDABlasHandle(bool setup) {
   cudaStream_t raw_stream = stream;
   cublasHandle_t handle = nullptr;
   if (auto capture_id = c10::cuda::captureIdMayInitCtx(raw_stream)) {
-    // Captured kernels keep the address of the arena they used, so a graph
+    // Captured kernels keep the address of the workspace they used, so a graph
     // must not share its scratch memory with eager work or with other graphs
     // captured on this stream.
     handle = getCaptureCublasHandle(device, raw_stream, *capture_id);
   } else {
-    // A rocBLAS arena must not be used by two streams at once, and
+    // A rocBLAS workspace must not be used by two streams at once, and
     // rocblas_set_stream does not wait for the old stream, so each stream gets
     // its own public handle.
     handle = getCuBlasPoolWindow<CuBlasPublicPoolType>().reserve(
