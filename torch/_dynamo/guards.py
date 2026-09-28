@@ -4380,25 +4380,30 @@ class GuardsStatePickler(FunctionPicklerBase):
                 if isinstance(element, (list, tuple, set, frozenset)):
                     stack.append(element)
                 elif isinstance(element, dict):
-                    # Values only: no pruned type is hashable, so a key can
-                    # neither be one nor contain one.
-                    stack.append(list(element.values()))
-        # What __tensor_unflatten__ gets back through a traceable wrapper
-        # subclass's ctx, which TENSOR_SUBCLASS_METADATA_MATCH compares whole:
-        # a pruned field would fail it after load. Held, not just ids, since
+                    stack.append([*element.keys(), *element.values()])
+        # Everything reachable from a value a guard compares whole: a constant
+        # or opaque value type under EQUALS_MATCH, and what __tensor_unflatten__
+        # gets back through a traceable wrapper subclass's ctx under
+        # TENSOR_SUBCLASS_METADATA_MATCH. A pruned field anywhere inside would
+        # fail the guard after load. Held, not just ids, since
         # __tensor_flatten__ may build the ctx afresh.
-        self._unflatten_ctx_values: dict[int, Any] = {}
-        self._collect_unflatten_ctx_values()
+        self._whole_compared_values: dict[int, Any] = {}
+        self._collect_whole_compared_values()
 
-    def _collect_unflatten_ctx_values(self) -> None:
+    def _collect_whole_compared_values(self) -> None:
         from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
+        stack = [
+            value
+            for value in self.guard_tree_values.values()
+            if pytree.is_constant_class(type(value))
+            or is_opaque_constant_type(type(value))
+        ]
         subclasses = [
             value
             for value in self.guard_tree_values.values()
             if is_traceable_wrapper_subclass(value)
         ]
-        stack = []
         while subclasses:
             subclass = subclasses.pop()
             attrs, ctx = subclass.__tensor_flatten__()
@@ -4409,12 +4414,13 @@ class GuardsStatePickler(FunctionPicklerBase):
                     subclasses.append(inner)
         while stack:
             value = stack.pop()
-            if id(value) in self._unflatten_ctx_values:
+            if id(value) in self._whole_compared_values:
                 continue
-            self._unflatten_ctx_values[id(value)] = value
+            self._whole_compared_values[id(value)] = value
             if isinstance(value, (list, tuple, set, frozenset)):
                 stack.extend(value)
             elif isinstance(value, dict):
+                stack.extend(value.keys())
                 stack.extend(value.values())
             elif (
                 hasattr(value, "__dict__")
@@ -5039,19 +5045,15 @@ class GuardsStatePickler(FunctionPicklerBase):
             and not inspect.isroutine(obj)
             and not isinstance(obj, (torch.nn.Module, torch.Tensor))
             and not type(obj).__module__.startswith("torch.")
-            and not pytree.is_constant_class(type(obj))
-            and not is_opaque_constant_type(type(obj))
             and _pickles_from_dict(type(obj))
-            and id(obj) not in self._unflatten_ctx_values
+            and id(obj) not in self._whole_compared_values
         ):
             # A guarded user object (a train pipeline, a wrapper holding a
             # dataloader) would otherwise be pickled whole, so one unguarded
             # unpicklable attribute takes the frame down. Last, so the specific
             # reducers above get first refusal; user types only, since torch's
             # structural types (DTensorSpec) need fields no guard names.
-            # Constant and opaque value types are compared whole by
-            # EQUALS_MATCH, and a tensor subclass's ctx by
-            # TENSOR_SUBCLASS_METADATA_MATCH, so they are never pruned.
+            # Nothing a guard compares whole is pruned (_whole_compared_values).
             self._prune_unguarded_attributes(obj)
 
         return NotImplemented
@@ -5082,7 +5084,7 @@ class GuardsStatePickler(FunctionPicklerBase):
                 continue
             if id(attr) in self._verbatim_elements:
                 continue
-            if id(attr) in self._unflatten_ctx_values:
+            if id(attr) in self._whole_compared_values:
                 continue
             self.missing_values[id(attr)] = attr
 
