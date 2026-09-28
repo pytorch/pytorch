@@ -7,11 +7,14 @@ orphan: true
 This page describes what is expected from module maintainers when handling issues and pull requests.
 The contributor side of this process, including which parts of it are still being rolled out, is described in the
 [Issue and PR Workflow](https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md#issue-and-pr-workflow).
+Parts of this process that are not automated yet are marked with **TEMPORARY:** below.
 
 ## Expectations of Module Maintainers
 
 - Ensure owned modules follow the PyTorch [design principles](design.md)
-- Fully triage issues and triage pull requests within 1 week of creation
+- Fully triage issues within 1 week of creation
+- Ensure PRs assigned to your module or to you are moved through the review process (pre-review, review, or closed
+  while further discussion happens on the issue)
 - Provide guidance, reviews, as well as assistance in closing high priority issues and pull requests
 - Ensure proper documentation related to newly added APIs for owned modules
 - Respond within 1 week for cross module issues from other module maintainers
@@ -19,8 +22,8 @@ The contributor side of this process, including which parts of it are still bein
 
 ## Definitions
 
-- **Module**: a GitHub repository within the PyTorch GitHub organization, or a directory within
-  [pytorch/pytorch](https://github.com/pytorch/pytorch) that is mapped to a `module: *` or `oncall: *` label.
+- **Module**: a subset of [pytorch/pytorch](https://github.com/pytorch/pytorch) that is mapped to a `module: *` or
+  `oncall: *` label, or a GitHub repository within the PyTorch GitHub organization.
 - **Fully triaged issue**: an issue that is closed or has one of the following labels:
   - `needs reproduction`: waiting for anyone to reproduce the issue, and for a maintainer to validate the reproduction.
   - `needs research`: waiting for anyone to provide evidence that the feature is useful or the bug is valid,
@@ -38,9 +41,18 @@ The contributor side of this process, including which parts of it are still bein
   are not high priority by default, but the maintainer can still make them high priority if they think it is important.
   An issue is high priority if it is high priority for any of the modules it is labeled with.
 
+## Module and Oncall Labels
+
+Both `module: *` and `oncall: *` labels map to a module. Issues and pull requests with a `module: *` label are
+discussed in the main triage meeting of the maintainers, while `oncall: *` labels correspond to larger areas that have
+their own dedicated team running a regular triage discussion for them.
+
 ## Triaging Issues
 
 An issue labeled `triaged` and with one of your module labels, but with none of the labels above, needs your attention.
+For example, [this search](https://github.com/pytorch/pytorch/issues?q=is%3Aissue%20is%3Aopen%20label%3Atriaged%20label%3A%22module%3A%20autograd%22%20-label%3A%22needs%20reproduction%22%20-label%3A%22needs%20research%22%20-label%3A%22needs%20design%22%20-label%3Aactionable%20-label%3A%22won%27t%20fix%22)
+lists the issues waiting for triage for `module: autograd`. Update the `module: autograd` filter to the module you are
+working on.
 
 - Only mark an issue `actionable` if you are ok with reviewing the fix.
 - Also mark especially simple `actionable` issues as `good first issue`.
@@ -50,11 +62,16 @@ An issue labeled `triaged` and with one of your module labels, but with none of 
 
 ## Pre-reviewing Pull Requests
 
-Pre-review is a quick review of the direction of the PR, to ensure it is worth the author's time to finalize it.
-Until the automation for it lands, a maintainer with write access adds the `in progress` label once they accept the pre-review.
+Pre-review is a quick review of the direction of the PR, to ensure it is worth the author's time to get it through
+automated review and finalize it.
+
+**TEMPORARY:** the pre-review automation is not live yet. A maintainer with write access adds the `in progress` label
+once they accept the pre-review.
 
 - It is the responsibility of the author to provide all the information needed for a quick assessment.
-- You should be able to do a pre-review in under a minute. It is always ok to reject a PR at pre-review.
+- As the maintainer, you should be able to do a pre-review in under a minute. It is always ok to reject a PR at
+  pre-review, including on the basis that the description is not clear enough and the assessment would be too time
+  consuming. Any longer discussion must happen on the issue before the PR is opened.
 - PRs from authors without write access either have a corresponding `actionable` issue or name the maintainer who
   pre-approved them. Authors with write access may send PRs without one.
 
@@ -62,14 +79,14 @@ To assess a PR:
 
 - Is the PR description clear, concise and reflective of the change?
 - Is this PR solving a problem that is important?
-- Is the approach of the PR clear and agreeable?
-- Is this PR modular and simple enough to review, or does it need a design discussion?
+- Is the approach of the PR clear and in line with the discussion on the issue and the PR description?
+- Is this PR modular and simple enough to review, or does it need a design discussion first?
 
 Based on that:
 
-- A design discussion is needed: close the PR and move the discussion to an issue.
-- The author didn't provide succinct justifications to enable a fast pre-review: close the PR or move it to draft.
-- A minor discussion or clarification in the PR description is needed: move the PR to draft.
+- A design discussion is needed: the PR is closed and the discussion moves to the issue.
+- The description lacks the justification needed for a quick decision: the PR is closed or moved back to draft.
+- Only a minor clarification is needed: the PR is moved back to draft.
 
 Every reviewer assigned to the PR must accept the pre-review. Only one of them needs to do the full review at the end.
 
@@ -78,21 +95,28 @@ Every reviewer assigned to the PR must accept the pre-review. Only one of them n
 PRs labeled `ready for review` have passed the automated review, or have the `no automated review` label, and are
 waiting for one of their assigned reviewers.
 
-- If the PR requires significant changes, use "Request changes". Until this is automated, also add the `in progress`
-  label back so that the PR goes through the automated review again.
-- Apart from this and the pre-review acceptance above, do not add `in progress` or `ready for review` by hand.
-- Once you approve the PR, the author fixes CI and merges it with `@pytorchbot merge`.
+Do your review as usual. Once you accept the PR, the author is able to merge it.
+If the PR requires significant changes, use "Request changes".
+If you see patterns that shouldn't happen, update the
+[pr-review skill](https://github.com/pytorch/pytorch/blob/main/.claude/skills/pr-review/SKILL.md) so that the
+automated review catches them in other PRs.
 
-If you are listed in [`.github/merge_rules.yaml`](https://github.com/pytorch/pytorch/blob/main/.github/merge_rules.yaml),
-your own PRs may also be approved by [GreenLight](https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md#greenlight).
+Do not add `in progress` or `ready for review` by hand, except as described in the **TEMPORARY:** notes.
+
+**TEMPORARY:** "Request changes" does not move the PR back to `in progress` automatically yet. Also add the
+`in progress` label back so that the PR goes through the automated review again.
 
 ## Closing Issues and Pull Requests
 
-Always give the reason when closing an issue or a pull request and, when it applies, link to
+PRs that do not meet the pre-conditions are closed by the triage automation, with a comment giving the reason.
+When you close an issue or a pull request yourself, for example when rejecting a pre-review, always give the reason
+and, when it applies, link to
 [Why was my issue or PR closed?](https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md#why-was-my-issue-or-pr-closed).
 For example:
 
 - "Closing this PR because it requires a design discussion that we should continue on the issue.
   Please comment on the linked issue with a summary of the status and approach to further discuss."
-- "Closing this PR as it is not linked to an issue labeled `actionable`.
-  See https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md#why-was-my-issue-or-pr-closed for more details."
+
+**TEMPORARY:** the PR triage automation is not live yet, so PRs that do not meet the pre-conditions are closed by
+hand. For example: "Closing this PR as it is not linked to an issue labeled `actionable`.
+See https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md#why-was-my-issue-or-pr-closed for more details."

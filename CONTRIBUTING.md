@@ -82,7 +82,7 @@ Issues are where we receive all feedback and decide what should be done about it
 PRs are only the place to discuss the implementation of a change and make sure it is correct.
 
 Labels track the state of every issue and PR, so that both contributors and maintainers can tell what the next step is and who is expected to take it.
-What we expect from maintainers is described in the [maintainer guide](docs/source/community/maintainer_guide.md).
+What we expect from maintainers is described in the [maintainer guide](https://docs.pytorch.org/docs/main/community/maintainer_guide.html).
 
 ### Current status
 
@@ -102,12 +102,21 @@ This workflow is being rolled out. The following parts are still in progress:
 
 ```mermaid
 flowchart LR
-    new[New issue] --> ai[AI triage]
-    ai -- success --> triaged["Triaged<br/>triaged + module: * / oncall: * labels"]
+    new([New issue]) --> ai[AI triage]
+    ai -- success --> triaged(["Triaged<br/>triaged + module: * / oncall: * labels"])
     ai -- "fails, or 'no automated triage'" --> manual[Manual triage] --> triaged
-    triaged -- any module maintainer --> full["Fully triaged<br/>needs reproduction / needs research /<br/>needs design / actionable / won't fix"]
+    triaged --> mtriage["Module-level triage<br/>any module maintainer"]
+    mtriage --> full(["Fully triaged<br/>needs reproduction / needs research /<br/>needs design / actionable / won't fix"])
     full -- "remove the label to request<br/>re-evaluation" --> triaged
+    classDef state fill:#f3f4f6,stroke:#6b7280,color:#000
+    classDef aiproc fill:#dbeafe,stroke:#2563eb,color:#000
+    classDef humanproc fill:#fef3c7,stroke:#d97706,color:#000
+    class new,triaged,full state
+    class ai aiproc
+    class manual,mtriage humanproc
 ```
+
+Rounded boxes are states. Rectangles are processes that move an item between states: blue for AI-based processes and orange for human-based ones.
 
 1. **Triage**: a bot triages every new issue. A maintainer does it instead if the bot fails or the issue has the `no automated triage` label. A triaged issue has the `triaged` label and one or more `module: *` or `oncall: *` labels.
 2. **Module-level triage**: a maintainer of one of these modules closes the issue or adds one of the labels below, at which point the issue is fully triaged.
@@ -135,30 +144,38 @@ Two other labels are orthogonal to the states above:
 
 ```mermaid
 flowchart TD
-    draft[Draft PR] -- author marks ready --> ready[Ready PR]
+    draft([Draft PR]) -- author marks ready --> ready([Ready PR])
     ready --> ai["AI triage<br/>CODEOWNERS, module: *, linked issue"]
-    ai -- fails pre-conditions --> closed[Closed]
-    ai -- success --> triaged["Triaged PR<br/>triaged, one reviewer per module"]
+    ai -- fails pre-conditions --> closed([Closed])
+    ai -- success --> triaged(["Triaged PR<br/>triaged, one reviewer per module"])
     ai -- "fails, or 'no automated triage'" --> htriage[Manual triage] --> triaged
     triaged --> pre[Pre-review]
     pre -- any assigned reviewer rejects --> closed
     pre -- needs clarification --> draft
-    pre -- every assigned reviewer accepts --> dev["In progress<br/>in progress"]
-    dev --> auto[Automated review] -- passes --> rfr["Ready for review<br/>ready for review"]
+    pre -- every assigned reviewer accepts --> dev(["In progress<br/>in progress"])
+    dev --> auto[Automated review] -- passes --> rfr(["Ready for review<br/>ready for review"])
     auto -- changes needed --> dev
     dev -- "'no automated review'" --> rfr
     rfr --> review[Human review]
     review -- needs significant changes --> dev
-    review -- any reviewer accepts --> accepted[Accepted]
-    ready -- "GreenLight (merge_rules.yaml authors only)" --> accepted
-    accepted -- "@pytorchbot merge" --> merged[Merged]
+    review -- any reviewer accepts --> accepted([Accepted])
+    ready --> gl["GreenLight<br/>merge_rules.yaml authors only"] --> accepted
+    accepted -- "@pytorchbot merge" --> merged([Merged])
+    classDef state fill:#f3f4f6,stroke:#6b7280,color:#000
+    classDef aiproc fill:#dbeafe,stroke:#2563eb,color:#000
+    classDef humanproc fill:#fef3c7,stroke:#d97706,color:#000
+    class draft,ready,closed,triaged,dev,rfr,accepted,merged state
+    class ai,auto,gl aiproc
+    class htriage,pre,review humanproc
 ```
+
+Rounded boxes are states. Rectangles are processes that move an item between states: blue for AI-based processes and orange for human-based ones.
 
 | Stage | Label | Who acts next | How to move on |
 |---|---|---|---|
-| Draft | (GitHub draft) | Author | Mark the PR as ready for review once the description and tests are complete. |
+| Draft | (GitHub draft) | Author | Mark the PR as ready for review once the description and code are ready to be looked at. |
 | Ready | | Triage bot, or a maintainer if the bot fails or the PR has `no automated triage` | PRs that do not meet the pre-conditions below are closed. Otherwise one reviewer per module or team is assigned and `triaged` is added. |
-| Pre-review | `triaged` | Assigned reviewers | Every assigned reviewer must accept the PR for it to move to `in progress`. If any rejects it, it is closed or moved back to draft. |
+| Pre-review | `triaged` | Assigned reviewers | Every assigned reviewer must accept the pre-review for the PR to move to `in progress`. If any rejects it, it is closed or moved back to draft. |
 | In progress | `in progress` | Author | Iterate until the automated review passes; `in progress` is then replaced by `ready for review`. With the `no automated review` label, this step is skipped. |
 | Ready for review | `ready for review` | Assigned reviewers | One of the assigned reviewers does the full review. If significant changes are needed, they request changes and the PR goes back to `in progress`. |
 | Accepted | (approved review) | Author | Fix all CI failures and comment `@pytorchbot merge`. |
@@ -167,18 +184,23 @@ The `in progress` and `ready for review` labels are managed by bots: authors sho
 
 **Pre-conditions**: the PR is linked to an issue labeled `actionable`, unless the author has write access to the repo or names the maintainer who pre-approved the change (see the [pre-approved PR template](.github/PULL_REQUEST_TEMPLATE/preapproved.md)), and it follows the [AI policy](AI_POLICY.md).
 
-**Pre-review** is a quick check of the direction of the PR, to make sure it is worth the author's time to finish it.
-It is the author's responsibility to give the reviewers all the information they need to decide in under a minute, and it is always ok for a reviewer to reject a PR at this stage.
-Reviewers look at:
+**Pre-review** is a quick review of the direction of the PR, to ensure it is worth the author's time to get it through automated review and finalize it.
+It is the author's responsibility to give the reviewers all the information they need to decide in under a minute.
+It is always ok for a reviewer to reject a PR at pre-review, including on the basis that the description is not clear enough and the assessment would be too time consuming.
+Any longer discussion must happen on the issue before the PR is opened.
+
+To assess a PR:
 
 - Is the PR description clear, concise and reflective of the change?
 - Is this PR solving a problem that is important?
-- Is the approach of the PR clear and agreeable?
+- Is the approach of the PR clear and in line with the discussion on the issue and the PR description?
 - Is this PR modular and simple enough to review, or does it need a design discussion first?
 
-If a design discussion is needed, the PR is closed and the discussion moves to the issue.
-If the description lacks the justification needed for a quick decision, the PR is closed or moved back to draft.
-If only a minor clarification is needed, the PR is moved back to draft.
+Based on that:
+
+- A design discussion is needed: the PR is closed and the discussion moves to the issue.
+- The description lacks the justification needed for a quick decision: the PR is closed or moved back to draft.
+- Only a minor clarification is needed: the PR is moved back to draft.
 
 **GreenLight**: PRs from authors listed in [`.github/merge_rules.yaml`](.github/merge_rules.yaml) can also be approved directly by [GreenLight](#greenlight).
 

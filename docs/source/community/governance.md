@@ -235,7 +235,9 @@ Pull requests from contributors without write access to the repository need to b
 `actionable` by a maintainer, or pre-approved by a maintainer, as described in the
 [Issue and PR Workflow](https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md#issue-and-pr-workflow).
 
-Every pull request needs to be reviewed by either the [CODEOWNERS](https://github.com/pytorch/pytorch/blob/main/CODEOWNERS) or by an appropriate [core reviewer](https://github.com/pytorch/pytorch/blob/main/.github/merge_rules.yaml) who is able to review any changes in the repo. A core reviewer is an individual chosen by the core maintainers who has the authority to approve changes across the repository.
+Every pull request needs to be reviewed by the appropriate maintainer. The list of maintainers is in
+[Persons of Interest](persons_of_interest.md), and merge approval rights are defined in
+[`.github/merge_rules.yaml`](https://github.com/pytorch/pytorch/blob/main/.github/merge_rules.yaml).
 
 ### Controversial Decision Process
 
