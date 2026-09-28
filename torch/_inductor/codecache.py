@@ -5049,10 +5049,32 @@ def _load_triton_kernel_from_source(
     return getattr(PyCodeCache.load(source_code), kernel_name)
 
 
-@torch_key_cache
-def cutlass_key() -> bytes:
+def _cutlass_dir_for_device(device_type: str) -> str:
     """
-    Compute a key representing the state of the CUTLASS library.
+    Return the CUTLASS checkout that ``device_type`` compiles against.
+
+    ``config.cutlass.cutlass_dir`` and ``config.xpu.cutlass_dir`` are both derived from
+    ``TORCHINDUCTOR_CUTLASS_DIR``, but they used to diverge when it was unset: the
+    former falls back to the bundled ``third_party/cutlass``, the latter to
+    ``os.path.realpath("")`` - i.e. the current working directory. Hashing the wrong
+    one produces a cache key that is blind to the toolkit the sources came from. Only
+    use an XPU override when it really holds a CUTLASS checkout.
+    """
+    if device_type == "xpu":
+        xpu_cutlass_dir = config.xpu.cutlass_dir
+        if os.path.isdir(os.path.join(xpu_cutlass_dir, "python")):
+            return xpu_cutlass_dir
+    return config.cutlass.cutlass_dir
+
+
+# NOTE: this used to be @torch_key_cache (prefetchable_cache), which only wraps
+# zero-argument callables and so cannot key on device_type. Nothing called
+# cutlass_key.prefetch()/.set(), so a plain cache keeps the same behaviour.
+@functools.cache
+def cutlass_key(device_type: str) -> bytes:
+    """
+    Compute a key representing the state of the CUTLASS library that ``device_type``
+    compiles against.
 
     Note: OSS and fbcode will have different keys.
     """
@@ -5066,7 +5088,7 @@ def cutlass_key() -> bytes:
             return resource_file.read().encode()
 
     combined_hash = hashlib.sha256()
-    build_code_hash([config.cutlass.cutlass_dir], "", combined_hash)
+    build_code_hash([_cutlass_dir_for_device(device_type)], "", combined_hash)
     return combined_hash.digest()
 
 
@@ -5470,7 +5492,7 @@ class CUDACodeCache(CUTLASSCodeCache):
                 # flags
                 cuda_compile_utils._nvcc_host_compiler_options(),
                 # cutlass key
-                cutlass_key(),
+                cutlass_key("cuda"),
                 # hack to deal with AOTI .o compilation
             ]
         )
@@ -5514,7 +5536,7 @@ class XPUCodeCache(CUTLASSCodeCache):
             [
                 xpu_compile_utils._sycl_compiler(),
                 xpu_compile_utils._sycl_compiler_options(),
-                cutlass_key(),
+                cutlass_key("xpu"),
             ]
         )
         return extra
