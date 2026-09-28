@@ -353,6 +353,15 @@ print(eval(f"bbmod.{name}.{path}") is code)
                 pass
         self.assertNotIn(fn.__code__, package._codes)
 
+    def test_code_source_keeps_the_codes_own_module_over_its_globals(self):
+        code = _closureless.__code__
+        package = CompilePackage(None)
+        with package.code_context(code, vars(functools)):
+            pass
+        entry = package._codes[code]
+        self.assertEqual(entry.python_module, __name__)
+        self.assertIs(_lookup_code(entry), code)
+
     def test_code_source_search_skips_class_attributes_that_raise(self):
         with self.assertRaises(RuntimeError):
             _ClassWithRaisingAttribute.value
