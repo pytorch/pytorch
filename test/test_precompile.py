@@ -39,6 +39,8 @@ from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_FBCODE,
+    IS_WINDOWS,
     parametrize,
     run_tests,
     skipIfCrossRef,
@@ -4604,6 +4606,32 @@ class TestPrecompileCapture(TestCase):
         self.assertFalse(os.path.exists(self.artifact))
 
 
+_EXTENSION_SOURCE = """
+#include <torch/extension.h>
+
+int add_one(int x) {
+  return x + 1;
+}
+
+PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+  m.def("add_one", &add_one);
+}
+"""
+
+_EXTENSION_LOADER = """
+import os
+import sys
+
+from torch.compiler import precompile
+from torch.utils import cpp_extension
+
+name, source = sys.argv[1:]
+with precompile.no_compilation():
+    ext = cpp_extension.load(name, [source], build_directory=os.path.dirname(source))
+print("loaded", ext.add_one(2))
+"""
+
+
 _GOLDEN_MODULE = """
 import types
 
@@ -5292,14 +5320,15 @@ class TestPrecompileDynamoCapture(TestCase):
             load(other_artifact, self.cache)
 
 
-def _capture_files(fn, example_inputs, backend, dynamic=None):
-    """Capture ``fn`` with the Dynamo tracer and return (artifact_path, cache_path)."""
+def _capture_files(fn, example_inputs, backend, dynamic=None, tracer=None):
+    """Capture ``fn`` (Dynamo tracer by default) and return (artifact_path, cache_path)."""
     temp_dir = tempfile.TemporaryDirectory()
     unittest.addModuleCleanup(temp_dir.cleanup)
     directory = temp_dir.name
     artifact_path = os.path.join(directory, "artifact.py")
     cache_path = os.path.join(directory, "artifact.cache")
-    tracer = DynamoTracer(dynamic=dynamic, require_no_risky_drops=False)
+    if tracer is None:
+        tracer = DynamoTracer(dynamic=dynamic, require_no_risky_drops=False)
     with (
         torch.no_grad(),
         capture(
@@ -5324,6 +5353,10 @@ def _rewrite_envelope(cache_path, **fields):
 
 def _no_compilation_single_graph(x):
     return x.sin() + 1
+
+
+def _no_compilation_inductor_graph(x):
+    return x * 2 + 1
 
 
 @skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
@@ -5352,7 +5385,7 @@ class TestPrecompileNoCompilation(TestCase):
         from torch.compiler._cache import CacheInfo
 
         artifact, cache = _capture_files(
-            lambda x: x.sin(), [(torch.ones(4),)], backend="inductor"
+            _no_compilation_inductor_graph, [(torch.ones(4),)], backend="inductor"
         )
         if failure == "missing":
             _rewrite_envelope(cache, artifact=None)
@@ -5371,6 +5404,63 @@ class TestPrecompileNoCompilation(TestCase):
             load(artifact, cache)
         execute.assert_not_called()
 
+    @parametrize("tracer", ("make_fx", "dynamo"))
+    def test_strict_load_runs_inductor_artifact_on_warm_disk_cache(self, tracer):
+        from torch._inductor.utils import clear_caches, fresh_cache
+
+        x = torch.ones(2, 8)
+        with fresh_cache():
+            artifact, cache = _capture_files(
+                _no_compilation_inductor_graph,
+                [(x,)],
+                backend="inductor",
+                dynamic=False,
+                tracer=MakeFxTracer() if tracer == "make_fx" else None,
+            )
+            # A new process on the capture host: kernel binaries on disk, none in
+            # memory. A cold host needs the frozen kernels of finalize_cache().
+            clear_caches()
+            with torch.compiler.precompile.no_compilation(), torch.no_grad():
+                self.assertEqual(
+                    load(artifact, cache)(x), _no_compilation_inductor_graph(x)
+                )
+
+    @unittest.skipUnless(TEST_CUDA and HAS_TRITON, "requires CUDA and Triton")
+    def test_strict_load_emits_and_rechecks_triton_bundle_from_cold_cache(self):
+        from torch._inductor import triton_bundler
+        from torch._inductor.utils import fresh_cache
+
+        x = torch.ones(2, 8, device="cuda")
+        with fresh_cache():
+            artifact, cache = _capture_files(
+                _no_compilation_inductor_graph,
+                [(x,)],
+                backend="inductor",
+                dynamic=False,
+            )
+        check = triton_bundler.TritonBundler._check_existing_kernel
+        with (
+            fresh_cache(),
+            mock.patch.object(
+                triton_bundler.TritonBundler, "_check_existing_kernel", wraps=check
+            ) as checked,
+            torch.compiler.precompile.no_compilation(),
+            torch.no_grad(),
+        ):
+            # The second load finds the kernel directories the first one emitted.
+            for _ in range(2):
+                self.assertEqual(
+                    load(artifact, cache)(x), _no_compilation_inductor_graph(x)
+                )
+        self.assertTrue(checked.called)
+        self.assertTrue(
+            any(
+                a.filename.endswith(".json")
+                for call in checked.call_args_list
+                for a in call.args[1].artifacts
+            )
+        )
+
     def test_strict_loaded_artifact_rejects_shape_miss(self):
         expected = _no_compilation_single_graph(torch.ones(2, 8))
         artifact, cache = _capture_files(
@@ -5385,23 +5475,30 @@ class TestPrecompileNoCompilation(TestCase):
             with self.assertRaisesRegex(RuntimeError, "no captured variant"):
                 loaded(torch.ones(3, 8))
 
-    def _emit_triton_bundle(self, existing_payload):
+    def _emit_triton_bundle(self, existing_payload, cache_dir=None):
         from torch._inductor import config, triton_bundler
 
-        temp_dir = tempfile.TemporaryDirectory()
-        self.addCleanup(temp_dir.cleanup)
-        cache_dir = temp_dir.name
+        if cache_dir is None:
+            temp_dir = tempfile.TemporaryDirectory()
+            self.addCleanup(temp_dir.cleanup)
+            cache_dir = temp_dir.name
         directory = os.path.join(cache_dir, "kernel_hash")
-        os.makedirs(directory)
+        os.makedirs(directory, exist_ok=True)
         with open(os.path.join(directory, "kernel.cubin"), "wb") as f:
             f.write(existing_payload)
+        # The bundle stores the kernel directory in .json files as [REPLACE].
+        with open(os.path.join(directory, "kernel.json"), "wb") as f:
+            f.write(b'{"path": "' + directory.encode() + b'/kernel.cubin"}')
         bundle = triton_bundler.TritonBundle(
             kernel_artifacts=[
                 triton_bundler.TritonKernelArtifacts(
                     kernel_hash="kernel_hash",
                     device=0,
                     artifacts=[
-                        triton_bundler.TritonKernelArtifact("kernel.cubin", b"binary")
+                        triton_bundler.TritonKernelArtifact("kernel.cubin", b"binary"),
+                        triton_bundler.TritonKernelArtifact(
+                            "kernel.json", b'{"path": "[REPLACE]/kernel.cubin"}'
+                        ),
                     ],
                 )
             ],
@@ -5427,18 +5524,21 @@ class TestPrecompileNoCompilation(TestCase):
     def test_strict_triton_bundle_rejects_mismatched_kernel_dir(self, race):
         from torch._inductor import triton_bundler
 
-        if race:
+        temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(temp_dir.cleanup)
+        cache_dir = temp_dir.name
+        with (
             # The directory looks empty at the check, then another process fills
             # it before os.replace.
-            listdir = mock.patch.object(triton_bundler.os, "listdir", return_value=[])
-            listdir.start()
-            self.addCleanup(listdir.stop)
-        with (
+            mock.patch.object(triton_bundler.os, "listdir", return_value=[])
+            if race
+            else contextlib.nullcontext(),
             torch.compiler.precompile.no_compilation(),
             self.assertRaisesRegex(PrecompileError, "kernel.cubin"),
         ):
-            self._emit_triton_bundle(b"stale")
-        self.assertIsNotNone(self._emit_triton_bundle(b"stale"))
+            self._emit_triton_bundle(b"stale", cache_dir)
+        self.assertEqual(os.listdir(cache_dir), ["kernel_hash"])
+        self.assertIsNotNone(self._emit_triton_bundle(b"stale", cache_dir))
 
     def test_strict_static_autotuner_load_raises_on_missing_cubin(self):
         from torch._inductor import triton_bundler
@@ -5450,9 +5550,10 @@ class TestPrecompileNoCompilation(TestCase):
         self.assertEqual(triton_bundler.TritonBundler.load_autotuners([autotuner]), [])
         with (
             torch.compiler.precompile.no_compilation(),
-            self.assertRaisesRegex(RuntimeError, "missing cubin"),
+            self.assertRaisesRegex(PrecompileError, "cubin for kernel") as raised,
         ):
             triton_bundler.TritonBundler.load_autotuners([autotuner])
+        self.assertIsInstance(raised.exception.__cause__, RuntimeError)
 
     def test_no_compilation_covers_background_threads_and_restores(self):
         from concurrent.futures import ThreadPoolExecutor
@@ -5769,6 +5870,41 @@ class TestPrecompileNoCompilation(TestCase):
         run.assert_called_once()
         self.assertEqual(run.call_args.args[0], ["ninja", "-n"])
         self.assertEqual(load.call_count, int(up_to_date))
+
+    @unittest.skipIf(
+        IS_FBCODE or IS_WINDOWS, "needs a host compiler and the torch headers"
+    )
+    def test_no_compilation_loads_prebuilt_extension_in_a_fresh_process(self):
+        from torch.utils import cpp_extension
+
+        if not cpp_extension.is_ninja_available():
+            self.skipTest("requires ninja")
+        name = f"precompile_no_compilation_ext_{uuid.uuid4().hex}"
+        with tempfile.TemporaryDirectory() as build_directory:
+            source = os.path.join(build_directory, "ext.cpp")
+            with open(source, "w") as f:
+                f.write(_EXTENSION_SOURCE)
+            cpp_extension.load(name, [source], build_directory=build_directory)
+
+            def load_in_a_fresh_process():
+                return subprocess.run(
+                    [sys.executable, "-c", _EXTENSION_LOADER, name, source],
+                    capture_output=True,
+                    text=True,
+                    timeout=600,
+                )
+
+            # A new process's extension versioner is empty, so this reaches
+            # ninja, which must find the library up to date.
+            out = load_in_a_fresh_process()
+            self.assertEqual(out.returncode, 0, out.stderr)
+            self.assertIn("loaded 3", out.stdout)
+
+            with open(source, "a") as f:
+                f.write("// changed\n")
+            out = load_in_a_fresh_process()
+            self.assertNotEqual(out.returncode, 0, out.stdout)
+            self.assertIn("forbids C++ extension compilation", out.stderr)
 
     def test_no_compilation_allows_unchanged_extension_reload(self):
         from torch.utils import cpp_extension
