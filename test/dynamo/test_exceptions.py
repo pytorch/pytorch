@@ -1637,6 +1637,9 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    @unittest.skipIf(
+        sys.version_info < (3, 11), "frame.f_lineno needs instruction positions"
+    )
     def test_exception_traceback_frame_lineno(self):
         class ExitFails:
             def __enter__(self):
