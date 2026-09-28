@@ -906,8 +906,10 @@ Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`
 and float inputs.
 
 .. note::
-    The backward pass with respect to :attr:`input` is not yet supported.
-    Please open an issue on PyTorch's Github to request it.
+    First-order differentiation with respect to :attr:`input` is supported on
+    CPU and CUDA for positive :attr:`input`. Differentiating that gradient
+    again is not supported. Its value is ``nan`` when :attr:`input` is zero
+    or when the numerical approximation does not converge.
 
 """
     + r"""
@@ -955,8 +957,10 @@ Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`
 and float inputs.
 
 .. note::
-    The backward pass with respect to :attr:`input` is not yet supported.
-    Please open an issue on PyTorch's Github to request it.
+    First-order differentiation with respect to :attr:`input` is supported on
+    CPU and CUDA for positive :attr:`input`. Differentiating that gradient
+    again is not supported. Its value is ``nan`` when :attr:`input` is zero
+    or when the numerical approximation does not converge.
 
 """
     + r"""
