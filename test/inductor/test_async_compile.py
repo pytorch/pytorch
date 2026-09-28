@@ -8,6 +8,7 @@ import sys
 import tempfile
 import textwrap
 import traceback
+import types
 import unittest
 import warnings
 from concurrent.futures import Future
@@ -20,6 +21,7 @@ from torch._inductor.compile_worker.subproc_pool import SubprocException
 from torch._inductor.runtime.triton_compat import Config
 from torch._inductor.runtime.triton_heuristics import (
     generate_lookup_hash_from_source_code,
+    lookup_autotune_config,
 )
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import ensure_nv_universal_gemm_available, fresh_cache
@@ -468,6 +470,34 @@ def triton_fused_fake_name(in_ptr0, out_ptr0, xnumel, r0_numel, XBLOCK : tl.cons
         self.assertEqual(args[1].kwargs, autotune_config.kwargs)
         self.assertEqual(args[1].num_warps, autotune_config.num_warps)
         self.assertEqual(args[1].num_stages, autotune_config.num_stages)
+
+    @parametrize(
+        "cached_rsplit,xblock,accepted",
+        ((18, 2, True), (32, 2, False), (18, 4, False)),
+    )
+    def test_mix_order_autotune_lookup_table(self, cached_rsplit, xblock, accepted):
+        size_hints = {"x": 4096, "r0_": 768}
+        fn = types.SimpleNamespace(src="def triton_fused_mix_order(): pass")
+        fn_hash = generate_lookup_hash_from_source_code(str(size_hints), fn.src)
+        cached_config = {
+            "XBLOCK": xblock,
+            "RSPLIT_SIZE": cached_rsplit,
+            "NUM_STAGES": 1,
+            "num_warps": 4,
+            "num_stages": 1,
+        }
+
+        with config.patch(autotune_lookup_table={fn_hash: cached_config}):
+            result = lookup_autotune_config(size_hints, fn, {"RSPLIT_SIZE": 18})
+
+        if accepted:
+            self.assertIsNotNone(result)
+            self.assertEqual(
+                result.kwargs,
+                {"XBLOCK": 2, "RSPLIT_SIZE": 18, "NUM_STAGES": 1},
+            )
+        else:
+            self.assertIsNone(result)
 
     def test_wait_futures_timeout(self):
         """A compile future that doesn't finish within

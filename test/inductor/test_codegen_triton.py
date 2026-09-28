@@ -450,10 +450,9 @@ def helper(x):
             V.set_choices_handler(CustomChoices()),
             self.assertRaisesRegex(ValueError, error),
         ):
-            TritonScheduling(None)._generate_kernel_code_for_mix_order_reduction(
+            TritonScheduling(None)._create_kernel_for_mix_order_reduction(
                 SIMDKernelFeatures([], xnumel, rnumel),
                 split_size=split_size,
-                for_benchmark=False,
             )
 
     @parametrize(

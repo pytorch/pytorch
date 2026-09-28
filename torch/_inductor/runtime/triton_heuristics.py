@@ -175,19 +175,26 @@ def generate_lookup_hash_from_source_code(size_hints_str: str, source_code: str)
     return fn_hash
 
 
-def lookup_autotune_config(size_hints, fn) -> Config | None:
+def lookup_autotune_config(
+    size_hints, fn, inductor_meta: InductorMeta
+) -> Config | None:
     lookup_table = torch._inductor.config.autotune_lookup_table
     cached_config = None
     if len(lookup_table) > 0 and "_fused_" in fn.src:
         fn_hash = generate_lookup_hash_from_source_code(str(size_hints), fn.src)
         if fn_hash in lookup_table:
             config_dict = lookup_table[fn_hash]
-            block_configs = {k: v for k, v in config_dict.items() if "BLOCK" in k}
-            cached_config = Config(
-                block_configs,
-                num_warps=config_dict["num_warps"],
-                num_stages=config_dict["num_stages"],
-            )
+            rsplit_size = inductor_meta.get("RSPLIT_SIZE")
+            if rsplit_size is not None:
+                cached_rsplit_size = config_dict.get("RSPLIT_SIZE")
+                xblock = config_dict.get("XBLOCK")
+                if (
+                    cached_rsplit_size != rsplit_size
+                    or not xblock
+                    or rsplit_size % xblock != 0
+                ):
+                    return None
+            cached_config = config_from_dict(config_dict)
 
     return cached_config
 
@@ -609,7 +616,7 @@ class CachingAutotuner(KernelInterface):
             [] if reset_to_zero_arg_names is None else reset_to_zero_arg_names
         )
         self.optimize_mem = optimize_mem
-        cached_config = lookup_autotune_config(size_hints, fn)
+        cached_config = lookup_autotune_config(size_hints, fn, self.inductor_meta)
         self.configs = [cached_config] if cached_config else configs
 
         self.heuristic_type = heuristic_type

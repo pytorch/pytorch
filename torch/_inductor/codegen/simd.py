@@ -3365,19 +3365,13 @@ class SIMDScheduling(BaseScheduling):
                 )
         return kernel
 
-    def _generate_kernel_code_for_mix_order_reduction(
-        self, kernel_features, split_size, for_benchmark, kernel=None
-    ):
+    def _generate_kernel_code_for_mix_order_reduction(self, kernel, for_benchmark):
         """
         for_benchmark:
             True if the generated code is for benchmarking. We need make
             sure benchmark harness code is generated.
         """
-        if kernel is None:
-            kernel = self._create_kernel_for_mix_order_reduction(
-                kernel_features, split_size
-            )
-        node_schedule = kernel_features.node_schedule
+        node_schedule = kernel.features.node_schedule
         self.codegen_node_schedule_with_kernel(node_schedule, kernel)
 
         # allocate workspace for this kernel
@@ -3475,9 +3469,11 @@ class SIMDScheduling(BaseScheduling):
         ):
 
             def _bench(candidate_split_size):
+                candidate_kernel = self._create_kernel_for_mix_order_reduction(
+                    kernel_features, candidate_split_size
+                )
                 _, _, src_code = self._generate_kernel_code_for_mix_order_reduction(
-                    kernel_features,
-                    split_size=candidate_split_size,
+                    candidate_kernel,
                     for_benchmark=True,
                 )
                 mod = PyCodeCache.load(src_code)
@@ -3492,10 +3488,8 @@ class SIMDScheduling(BaseScheduling):
             kernel.rsplit_size = split_size
 
         kernel, ws_name, src_code = self._generate_kernel_code_for_mix_order_reduction(
-            kernel_features,
-            split_size=split_size,
+            kernel,
             for_benchmark=False,
-            kernel=kernel,
         )
 
         # rename intermediate reduction output to final reduction
