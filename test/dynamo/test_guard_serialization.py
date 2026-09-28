@@ -3682,6 +3682,43 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(ref, loaded, inputs([4, 4]), True)
         self._test_check_fn(ref, loaded, inputs([8, 8]), False)
 
+    def test_object_inside_an_opaque_constant_is_kept_whole(self):
+        def fn(x, const, stage):
+            if isinstance(const, CustomConstantType):
+                return x * stage.lr
+            return x
+
+        def inputs(steps):
+            stage = _Stage(2.0, steps)
+            const = CustomConstantType(stage, 0)
+            return {"x": torch.ones(3), "const": const, "stage": stage}
+
+        # A guard reads stage.lr, but const's EQUALS_MATCH compares const.a,
+        # which is stage, whole.
+        ref, loaded = self._test_serialization(
+            ("EQUALS_MATCH", "CONSTANT_MATCH"), fn, *inputs([4, 4]).values()
+        )
+        self._test_check_fn(ref, loaded, inputs([4, 4]), True)
+        self._test_check_fn(ref, loaded, inputs([8, 8]), False)
+
+    def test_tensor_subclass_ctx_dict_key_is_kept_whole(self):
+        def fn(x, stage):
+            return x * stage.lr
+
+        def inputs(steps):
+            stage = _Stage(2.0, steps)
+            x = SubclassWithMeta(torch.randn(3), extra={stage: "warmup"})
+            return {"x": x, "stage": stage}
+
+        # stage is only a key of the ctx dict, which the guard compares whole.
+        ref, loaded = self._test_serialization(
+            ("TENSOR_SUBCLASS_METADATA_MATCH", "CONSTANT_MATCH"),
+            fn,
+            *inputs([4, 4]).values(),
+        )
+        self._test_check_fn(ref, loaded, inputs([4, 4]), True)
+        self._test_check_fn(ref, loaded, inputs([8, 8]), False)
+
     def test_nested_guarded_user_objects_are_pruned_in_turn(self):
         def fn(x, holder):
             return x * holder.scale.scale
