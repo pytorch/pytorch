@@ -893,8 +893,10 @@ class IValueMetadataVisitor final : public libkineto::ITypedMetadataVisitor {
   }
 
   void visitValue(
-      const libkineto::MetadataField<libkineto::RawJson>& /*field*/,
-      const libkineto::RawJson& /*value*/) override {}
+      const libkineto::MetadataField<libkineto::RawJson>& field,
+      const libkineto::RawJson& value) override {
+    addValue(field.name, c10::IValue(value.value));
+  }
 
   void visitValue(
       const libkineto::MetadataField<uint64_t>& field,
@@ -1153,16 +1155,6 @@ class TransferEvents {
   }
 
  private:
-  static long long extractIndex(const std::string& metadata_json) {
-    static const auto prefix = fmt::format("\"{}\": ", indexKey);
-    auto pos = metadata_json.find(prefix);
-    return (pos == std::string::npos) ? unmatchedIndex : [&]() {
-      auto end = metadata_json.find(',', pos);
-      end = (end == std::string::npos) ? metadata_json.size() : end;
-      return std::stoll(metadata_json.substr(pos + prefix.size(), end));
-    }();
-  }
-
   std::shared_ptr<Result> lookup(const itrace_t* key) {
     if (key == nullptr) {
       return nullptr;
@@ -1174,10 +1166,10 @@ class TransferEvents {
       return it->second;
     }
 
-    // Then fallback to the encoded metadata.
-    const auto index = extractIndex(key ? key->metadataJson() : "");
-    if (index != unmatchedIndex) {
-      auto out = results_.get().at(index);
+    // Then fallback to the event index metadata.
+    const auto index_str = key->getMetadataValue(indexKey);
+    if (!index_str.empty()) {
+      auto out = results_.get().at(std::stoll(index_str));
       kineto_events_[key] = out;
       return out;
     }
@@ -1424,7 +1416,6 @@ class TransferEvents {
     }
   }
 
-  static constexpr long long unmatchedIndex = -1;
   static constexpr auto noTID = std::numeric_limits<uint64_t>::max();
   std::reference_wrapper<std::vector<std::shared_ptr<Result>>> results_;
   std::reference_wrapper<const ProfilerConfig> config_;
