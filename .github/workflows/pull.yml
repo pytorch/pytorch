@@ -374,7 +374,17 @@ jobs:
           { config: "dynamo_wrapped", shard: 6, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
           { config: "einops", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
           { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
-          { config: "onnx", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-46-85" },
+          # onnx stays off until onnxruntime is told how many threads it may
+          # use. It sizes its intra-op pool from hardware_concurrency(), which
+          # reports the node rather than the pod's cpuset, then fails to pin
+          # every thread past the cpuset edge -- 19k lines of
+          # "pthread_setaffinity_np failed" in a 24k-line log, and a
+          # bidirectional-RNN accuracy failure that a thread pool in that state
+          # is a plausible cause of. A bigger pod does not help: Karpenter is
+          # free to place it on a larger node, so the ratio does not improve.
+          # The fix is intra_op_num_threads in the session options, which is
+          # what ORT's own error message asks for.
+          # { config: "onnx", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128" },
         ]}
       python-version: "3.11"
       compiler: clang21
