@@ -603,7 +603,7 @@ class TritonTemplateKernel(TritonKernel):
         epilogue_fn=identity,
         subgraphs: list[ir.ComputedBuffer] | None = None,
         workspace_arg: WorkspaceArg | None = None,
-        prologue_loads_all_inputs=False,
+        prologue_loads_all_named_inputs=False,
         hint_override: int | None = None,
         triton_meta: TritonMeta | None = None,
         always_freeze_layout: bool = False,
@@ -677,14 +677,14 @@ class TritonTemplateKernel(TritonKernel):
         # for templates with fixed epilogues
         self.prefix_args = prefix_args
         self.suffix_args = suffix_args
-        # Indices are absolute in input_nodes and must identify prefix inputs.
+        # Prefix input indices allowed to use store-output input-producer fusion.
         self.prefix_inputs_fusion_indices = prefix_inputs_fusion_indices
-        if any(
-            index < 0 or index >= prefix_args for index in prefix_inputs_fusion_indices
-        ):
-            raise AssertionError(
-                "prefix_inputs_fusion_indices must reference prefix inputs"
-            )
+        for index in prefix_inputs_fusion_indices:
+            if index < 0 or index >= prefix_args:
+                raise AssertionError(
+                    f"prefix input fusion index {index} is out of bounds "
+                    f"for {prefix_args} prefix inputs"
+                )
         # pyrefly: ignore [invalid-type-var]
         self.epilogue_fn = epilogue_fn
         self.render_hooks = {}  # type: ignore[var-annotated]
@@ -704,16 +704,17 @@ class TritonTemplateKernel(TritonKernel):
         # `set_subgraph_body`
         self.subgraph_bodies: dict[str, SubgraphInfo] = {}
 
-        # Inputs eligible for producer fusion, separated by codegen destination.
-        self.load_input_supported_inputs: OrderedSet[str] = OrderedSet()
-        self.store_output_supported_inputs: OrderedSet[str] = OrderedSet()
+        # Inputs allowed to use producer fusion, separated by codegen destination.
+        self.load_input_fusion_allowed_inputs: OrderedSet[str] = OrderedSet()
+        self.store_output_fusion_allowed_inputs: OrderedSet[str] = OrderedSet()
 
-        # input buffers which we are fusing into
-        self.prologue_fused_inputs: OrderedSet[str] = OrderedSet()
+        # Inputs whose producers are actually fused, separated by destination.
+        self.load_input_fused_inputs: OrderedSet[str] = OrderedSet()
+        self.store_output_fused_inputs: OrderedSet[str] = OrderedSet()
         # Producer groups for inputs consumed by store_output().
         self.store_output_input_producer_groups: dict[str, list[Any]] = {}
-        # input buffers which we are fusing into, which preserve a zero mask
-        self.prologue_fused_inputs_preserve_zero: OrderedSet[str] = OrderedSet()
+        # Load-input fused inputs whose producers preserve a zero mask.
+        self.load_input_fused_inputs_preserve_zero: OrderedSet[str] = OrderedSet()
 
         # The following attributes are all used for triton kernel codegen.
         # They are swapped onto the TritonTemplateKernel object by
@@ -742,10 +743,9 @@ class TritonTemplateKernel(TritonKernel):
         # Update each time an input is marked frozen, used to replay the freezing of inputs on a cache hit.
         self.frozen_layouts_cnt = 0
 
-        # def_kernel adds prefix inputs selected by prefix_inputs_fusion_indices to
-        # store_output_supported_inputs. When this flag is true, it also adds every
-        # named template input to load_input_supported_inputs.
-        self.prologue_loads_all_inputs = prologue_loads_all_inputs
+        # The template prologue loads all named inputs, so def_kernel can mark
+        # them all as eligible for load-input fusion.
+        self.prologue_loads_all_named_inputs = prologue_loads_all_named_inputs
 
         # When always_freeze_layout is True, get_stride_and_maybe_freeze_layout will
         # always freeze the layout immediately, bypassing layout constraints.
@@ -767,6 +767,12 @@ class TritonTemplateKernel(TritonKernel):
     def _gen_tmp_var(self) -> str:
         return f"_tmp_var{next(self.tmp_var_ctr)}"
 
+    def _is_input_fused(self, input_name: str) -> bool:
+        return (
+            input_name in self.load_input_fused_inputs
+            or input_name in self.store_output_fused_inputs
+        )
+
     def input_dependent_preserved_state(self) -> str:
         # Not adding self.args.output_buffers on purpose. But we do not need to reproduce it on a cache hit.
         # (never accessed).
@@ -775,8 +781,8 @@ class TritonTemplateKernel(TritonKernel):
                 self.args.input_buffers,
                 self.args.sizevars,
                 self.args.workspace_args,
-                self.load_input_supported_inputs,
-                self.store_output_supported_inputs,
+                self.load_input_fusion_allowed_inputs,
+                self.store_output_fusion_allowed_inputs,
                 self.frozen_layouts_cnt,
             ]
         )
@@ -1080,16 +1086,16 @@ class TritonTemplateKernel(TritonKernel):
                 )
             )
 
-        # Prefix inputs occupy the leading positions in input_nodes and are
-        # consumed by store_output(). For example, addmm uses [bias, A, B]
-        # with prefix_args=1, so this slice contains bias.
-        for input_index, input_node in enumerate(self.input_nodes[: self.prefix_args]):
+        # Prefix input indices opt into store-output input-producer fusion.
+        for input_index in self.prefix_inputs_fusion_indices:
+            input_name = self.input_nodes[input_index].get_name()
+            self.store_output_fusion_allowed_inputs.add(input_name)
+
+        for input_node in self.input_nodes[: self.prefix_args]:
             input_name = input_node.get_name()
-            if input_index in self.prefix_inputs_fusion_indices:
-                self.store_output_supported_inputs.add(input_name)
             if input_name in V.graph.removed_buffers:
                 continue
-            if input_name in self.prologue_fused_inputs:
+            if self._is_input_fused(input_name):
                 continue
             # get args in correct order
             self.args.input(input_name)
@@ -1099,7 +1105,7 @@ class TritonTemplateKernel(TritonKernel):
             self.named_input_nodes[name] = input_node
             if input_node.get_name() in V.graph.removed_buffers:
                 continue
-            if input_node.get_name() in self.prologue_fused_inputs:
+            if self._is_input_fused(input_node.get_name()):
                 continue
 
             self.args.input_buffers[input_node.get_name()] = arg_name
@@ -1107,11 +1113,11 @@ class TritonTemplateKernel(TritonKernel):
         # The args may be duplicated, so renaming must be after args are de-duplicated.
         for name in argnames:
             input_node = self.named_input_nodes[name]
-            if self.prologue_loads_all_inputs:
-                self.load_input_supported_inputs.add(input_node.get_name())
+            if self.prologue_loads_all_named_inputs:
+                self.load_input_fusion_allowed_inputs.add(input_node.get_name())
             if input_node.get_name() in V.graph.removed_buffers:
                 continue
-            if input_node.get_name() in self.prologue_fused_inputs:
+            if self._is_input_fused(input_node.get_name()):
                 continue
 
             arg_name = self.args.input_buffers[input_node.get_name()]
@@ -1125,7 +1131,7 @@ class TritonTemplateKernel(TritonKernel):
             # get args in correct order
             if input_node.get_name() in V.graph.removed_buffers:
                 continue
-            if input_node.get_name() in self.prologue_fused_inputs:
+            if self._is_input_fused(input_node.get_name()):
                 continue
 
             self.args.input(input_node.get_name())
@@ -1379,8 +1385,8 @@ class TritonTemplateKernel(TritonKernel):
         """
 
         input_node = self.named_input_nodes[input_name]
-        if not self.prologue_loads_all_inputs:
-            self.load_input_supported_inputs.add(input_node.get_name())
+        if not self.prologue_loads_all_named_inputs:
+            self.load_input_fusion_allowed_inputs.add(input_node.get_name())
 
         tilings = (sympy_product(input_node.get_size()), sympy.Integer(1))
         groups = {
@@ -1436,7 +1442,7 @@ class TritonTemplateKernel(TritonKernel):
             template_mask = self.template_mask
 
             def capture_prologue_output(name: str, value: CSEVariable) -> None:
-                if name not in V.kernel.prologue_fused_inputs:
+                if name not in V.kernel.load_input_fused_inputs:
                     return
 
                 # We load masked out values with 0, then apply a prologue. The
@@ -1444,7 +1450,7 @@ class TritonTemplateKernel(TritonKernel):
                 value_dtype = value.dtype
                 value_str = str(value)
                 if template_mask != "None" and (
-                    name not in V.kernel.prologue_fused_inputs_preserve_zero
+                    name not in V.kernel.load_input_fused_inputs_preserve_zero
                     or other != 0
                 ):
                     value_str = f"tl.where({template_mask}, {value_str}, {other})"
@@ -1518,7 +1524,7 @@ class TritonTemplateKernel(TritonKernel):
                 self.cse.invalidate(OrderedSet())
                 self.codegen_body()
                 self.cse.invalidate(OrderedSet())
-                if input_node.get_name() not in self.prologue_fused_inputs:
+                if input_node.get_name() not in self.load_input_fused_inputs:
                     if load_code is None:
                         raise AssertionError("load_code must not be None")
                     self.body.writeline(load_code)
@@ -2121,7 +2127,7 @@ class TritonTemplateKernel(TritonKernel):
         return node.get_stride()
 
     def _compute_fusion_metadata(
-        self, scheduling, epilogue_nodes, prologue_nodes, buf_name_to_prologue_group
+        self, scheduling, epilogue_nodes, prologue_nodes, load_input_producer_groups
     ):
         """Prepare epilogue/prologue routing before render().
 
@@ -2141,7 +2147,7 @@ class TritonTemplateKernel(TritonKernel):
         template_node,
         epilogue_nodes,
         prologue_nodes,
-        buf_name_to_prologue_group,
+        load_input_producer_groups,
         prologue_preserves_zero_mask_fn,
         render,
     ) -> str:
@@ -2150,7 +2156,7 @@ class TritonTemplateKernel(TritonKernel):
         Returns the final source code string.
         """
         self._compute_fusion_metadata(
-            scheduling, epilogue_nodes, prologue_nodes, buf_name_to_prologue_group
+            scheduling, epilogue_nodes, prologue_nodes, load_input_producer_groups
         )
         with self:
             partial_code = render()
@@ -2164,7 +2170,7 @@ class TritonTemplateKernel(TritonKernel):
                     self.cse.invalidate(OrderedSet())
 
             self.codegen_prologues_in_subgraphs(
-                buf_name_to_prologue_group, prologue_preserves_zero_mask_fn
+                load_input_producer_groups, prologue_preserves_zero_mask_fn
             )
 
         partial_code = self._finalize_partial_render(partial_code)
@@ -2203,12 +2209,12 @@ class TritonTemplateKernel(TritonKernel):
         return src_code
 
     def codegen_prologues_in_subgraphs(
-        self, buf_name_to_prologue_group, prologue_preserves_zero_mask_fn
+        self, load_input_producer_groups, prologue_preserves_zero_mask_fn
     ):
         """Run prologue codegen in each load-input subgraph body."""
         for input_name, buffer in self.named_input_nodes.items():
             subgraph_name = f"<LOAD_INPUT_{input_name}>"
-            prologue_group = buf_name_to_prologue_group.get(buffer.get_name(), [])
+            prologue_group = load_input_producer_groups.get(buffer.get_name(), [])
             if not prologue_group:
                 continue
             can_codegen_without_upcast = all(
@@ -2224,7 +2230,7 @@ class TritonTemplateKernel(TritonKernel):
                             and len(prologue_group) == 1
                         ):
                             if prologue_preserves_zero_mask_fn(prologue_node):
-                                self.prologue_fused_inputs_preserve_zero |= (
+                                self.load_input_fused_inputs_preserve_zero |= (
                                     prologue_node.get_buffer_names()
                                 )
                         prologue_node.codegen(
@@ -2347,7 +2353,7 @@ class ExternalTritonTemplateKernel(TritonTemplateKernel):
         return self._unfused_epilogues
 
     def _compute_fusion_metadata(
-        self, scheduling, epilogue_nodes, prologue_nodes, buf_name_to_prologue_group
+        self, scheduling, epilogue_nodes, prologue_nodes, load_input_producer_groups
     ):
         """Compute fusion metadata for external backends.
 
@@ -2379,7 +2385,7 @@ class ExternalTritonTemplateKernel(TritonTemplateKernel):
             buf_name: frozenset(
                 d.name for d in pro_node.read_writes.reads if isinstance(d, MemoryDep)
             )
-            for buf_name, pro_nodes in buf_name_to_prologue_group.items()
+            for buf_name, pro_nodes in load_input_producer_groups.items()
             for pro_node in pro_nodes
         }
 
@@ -2816,7 +2822,8 @@ class GeneratedCodeCache:
         # arg) vs mm(a, b) (two). Key the aliasing structure name-insensitively.
         #
         # def_kernel also drops inputs found in V.graph.removed_buffers or in
-        # kernel.prologue_fused_inputs, but neither needs keying: the cache is
+        # kernel.load_input_fused_inputs/store_output_fused_inputs, but none need
+        # keying: the cache is
         # only read and written while lowering generates autotune choices, and
         # both sets are populated only later, during scheduling, whose template
         # renders (SIMDScheduling.codegen_template via make_kernel_render)
@@ -2892,7 +2899,7 @@ class TritonTemplate(KernelTemplate):
         source: str,
         debug=False,
         cache_codegen_enabled_for_template=False,
-        prologue_loads_all_inputs=False,
+        prologue_loads_all_named_inputs=False,
         always_freeze_layout: bool = False,
     ) -> None:
         super().__init__(name, hash=hashlib.sha256(source.encode("utf-8")).hexdigest())
@@ -2910,10 +2917,9 @@ class TritonTemplate(KernelTemplate):
         self._cache_codegen_enabled_for_template = cache_codegen_enabled_for_template
         self._generated_code_cache: GeneratedCodeCache = GeneratedCodeCache()
         clear_on_fresh_cache(self._generated_code_cache)
-        # When true, def_kernel adds every named template input to
-        # load_input_supported_inputs. Prefix inputs are controlled independently
-        # by prefix_inputs_fusion_indices passed to generate().
-        self.prologue_loads_all_inputs = prologue_loads_all_inputs
+        # The template prologue loads all named inputs, so def_kernel can mark
+        # them all as eligible for load-input fusion.
+        self.prologue_loads_all_named_inputs = prologue_loads_all_named_inputs
         # When always_freeze_layout is True, the kernel will always freeze layouts
         # immediately instead of using layout constraints. This is used by
         # FlexAttention templates which require frozen layouts.
@@ -3047,7 +3053,7 @@ class TritonTemplate(KernelTemplate):
             "prefix_inputs_fusion_indices": prefix_inputs_fusion_indices,
             "epilogue_fn": epilogue_fn,
             "subgraphs": subgraphs,
-            "prologue_loads_all_inputs": self.prologue_loads_all_inputs,
+            "prologue_loads_all_named_inputs": self.prologue_loads_all_named_inputs,
             "always_freeze_layout": self.always_freeze_layout,
             "index_dtype_override": index_dtype,
         }
@@ -3123,10 +3129,10 @@ class TritonTemplate(KernelTemplate):
                         code == code_test
                         and extra == extra_test
                         and kernel.args.input_buffers == kernel_test.args.input_buffers
-                        and kernel.load_input_supported_inputs
-                        == kernel_test.load_input_supported_inputs
-                        and kernel.store_output_supported_inputs
-                        == kernel_test.store_output_supported_inputs
+                        and kernel.load_input_fusion_allowed_inputs
+                        == kernel_test.load_input_fusion_allowed_inputs
+                        and kernel.store_output_fusion_allowed_inputs
+                        == kernel_test.store_output_fusion_allowed_inputs
                         and kernel.args.sizevars == kernel_test.args.sizevars
                     ):
                         raise AssertionError(
@@ -3165,7 +3171,8 @@ class TritonTemplate(KernelTemplate):
 
         input_call_args = tuple(kernel.args.input_buffers.keys())
         allowed_prologue_inputs = (
-            kernel.load_input_supported_inputs | kernel.store_output_supported_inputs
+            kernel.load_input_fusion_allowed_inputs
+            | kernel.store_output_fusion_allowed_inputs
         )
         kernel_args_sizevars_keys = tuple(kernel.args.sizevars.keys())
 
@@ -3221,9 +3228,8 @@ class TritonTemplate(KernelTemplate):
             suffix_args: Number of trailing input nodes consumed exclusively by
                 store_output(). They are loaded over the output iteration domain and
                 passed to epilogue_fn after the prefix inputs.
-            prefix_inputs_fusion_indices: Absolute input_nodes indices allowed to
-                use store-output input-producer fusion. Every index must identify a
-                prefix input.
+            prefix_inputs_fusion_indices: Prefix input indices allowed to use
+                store-output input-producer fusion.
             epilogue_fn: Optional function called as
                 epilogue_fn(accumulator, *prefix_inputs, *suffix_inputs).
             subgraphs: Optional subgraphs to be passed as arguments, these will be inlined

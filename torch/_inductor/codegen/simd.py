@@ -605,7 +605,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         template_node,
         epilogue_nodes,
         prologue_nodes,
-        buf_name_to_prologue_group,
+        load_input_producer_groups,
         prologue_preserves_zero_mask_fn,
         render,
     ) -> str:
@@ -4482,7 +4482,7 @@ class SIMDScheduling(BaseScheduling):
         3. Output epilogue fusion: consumers of the template result, such as relu
            or multiply, are generated after epilogue_fn and before the final store.
         """
-        buf_name_to_prologue_group = {}
+        load_input_producer_groups = {}
         template_reads = template_node.used_buffer_names()
         prefix_inputs_fusion_names = OrderedSet(
             kernel.input_nodes[index].get_name()
@@ -4507,9 +4507,10 @@ class SIMDScheduling(BaseScheduling):
                     kernel.store_output_input_producer_groups[input_name] = (
                         prologue_group
                     )
+                    kernel.store_output_fused_inputs.add(input_name)
                 if input_name in named_input_names:
-                    buf_name_to_prologue_group[input_name] = prologue_group
-                kernel.prologue_fused_inputs.add(input_name)
+                    load_input_producer_groups[input_name] = prologue_group
+                    kernel.load_input_fused_inputs.add(input_name)
                 prologue_group = []
 
         # all prologue groups should have finalized with use in template
@@ -4518,9 +4519,10 @@ class SIMDScheduling(BaseScheduling):
                 f"expected empty prologue_group, got {len(prologue_group)}"
             )
 
-        # Remove prologue-fused inputs from input_buffers so that
+        # Remove producer-fused inputs from input_buffers so that
         # remove_kernel_local_buffers can remove them.
-        for buf_name in kernel.prologue_fused_inputs:
+        fused_inputs = kernel.load_input_fused_inputs | kernel.store_output_fused_inputs
+        for buf_name in fused_inputs:
             kernel.args.input_buffers.pop(buf_name, None)
 
         # Dispatch to the kernel for source generation.  TritonTemplateKernel
@@ -4531,7 +4533,7 @@ class SIMDScheduling(BaseScheduling):
             template_node,
             epilogue_nodes,
             prologue_nodes,
-            buf_name_to_prologue_group,
+            load_input_producer_groups,
             prologue_preserves_zero_mask,
             render,
         )
