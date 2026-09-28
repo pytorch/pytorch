@@ -439,17 +439,35 @@ class BaseUserFunctionVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name == "__setattr__":
+            if args[0].is_python_constant():
+                attr = args[0].as_python_constant()
+                getset = self.lookup_tp_getset_member(attr)
+                if getset is not None and getset.setter is readonly_setter:
+                    getset.setter(self, tx, args[1])
+
             if args[0].is_constant_match("__annotations__"):
                 self.annotations = args[1]
                 return ConstantVariable.create(None)
+
             return self.get_dict_vt(tx).call_method(
                 tx, "__setitem__", list(args), kwargs
             )
+
         elif name == "__delattr__":
+            if args[0].is_python_constant():
+                attr = args[0].as_python_constant()
+                getset = self.lookup_tp_getset_member(attr)
+                if getset is not None and getset.setter is readonly_setter:
+                    getset.setter(self, tx, None)
+
             if args[0].is_constant_match("__annotations__"):
                 self.annotations = None
                 return ConstantVariable.create(None)
-            return self.get_dict_vt(tx).call_method(tx, "__delitem__", list(args), {})
+
+            return self.get_dict_vt(tx).call_method(
+                tx, "__delitem__", list(args), {}
+            )
+
         return super().call_method(tx, name, list(args), kwargs)
 
     def _set_annotations(
