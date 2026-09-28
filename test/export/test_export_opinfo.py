@@ -71,12 +71,13 @@ fake_export_no_gpu_failures = {
     xfail("nonzero"),
 }
 
+# CUDA-specific skip set generation
 fake_export_failures_cuda = fake_export_failures.copy()
-fake_export_failures_xpu = fake_export_failures.copy()
-
 if not torch.backends.cuda.is_built():
     fake_export_failures_cuda |= fake_export_no_gpu_failures
 
+# XPU-specific skip set generation
+fake_export_failures_xpu = fake_export_failures.copy()
 if not torch.xpu._is_compiled():
     fake_export_failures_xpu |= fake_export_no_gpu_failures
     fake_export_failures_xpu |= {
@@ -86,10 +87,6 @@ if not torch.xpu._is_compiled():
         # https://github.com/intel/torch-xpu-ops/issues/5277
         xfail("nn.functional.scaled_dot_product_attention"),
     }
-
-if torch.xpu.is_available():
-    # https://github.com/intel/torch-xpu-ops/issues/5283
-    fake_export_failures_xpu -= {xfail("histogram")}
 
 fake_decomposition_failures = {
     xfail("linalg.matrix_rank"),
@@ -276,6 +273,7 @@ import torch
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 
 def accelerator_calls_behavior_unchanged():
+    device_module = torch.get_device_module("{device}")
     exception_count = 0
 
     try:
@@ -290,22 +288,22 @@ def accelerator_calls_behavior_unchanged():
         exception_count += 1
 
     try:
-        torch.accelerator.get_device_capability()
+        device_module.get_device_capability()
     except Exception as e:
         exception_count += 1
 
     try:
-        torch.accelerator.set_device_index(1)
+        device_module.set_device(1)
     except Exception as e:
         exception_count += 1
 
     try:
-        torch.get_device_module("{device}").current_device()
+        device_module.current_device()
     except Exception as e:
         exception_count += 1
 
-    assert torch.accelerator.is_available() == False
-    assert torch.accelerator.device_count() == 0
+    assert device_module.is_available() == False
+    assert device_module.device_count() == 0
     assert exception_count == 5
 
 accelerator_calls_behavior_unchanged()
