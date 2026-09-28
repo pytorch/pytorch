@@ -2340,7 +2340,7 @@ class PythonWrapperCodegen(CodeGen):
         if compile_wrapper is not None:
             if not compile_wrapper.contains("import collections"):
                 compile_wrapper.writeline("import collections")
-            if not compile_wrapper.contains(type_name):
+            if not compile_wrapper.contains(type_def):
                 compile_wrapper.writelines(definition_lines)
                 # Allow aggregate constants captured by the autotuner to be pickled
                 # without importing this dynamically generated class.
@@ -2348,6 +2348,12 @@ class PythonWrapperCodegen(CodeGen):
                     f"{type_name}.__reduce__ = "
                     "triton_heuristics.CachingAutotuner.reduce_udtk_aggregate"
                 )
+                # Structural names have the form _udtk_<digest>_<original name>.
+                # The user kernel may have type annotations in the signature,
+                # so create an alias that uses the original type name in this
+                # embedded compilation scope
+                original_type_name = type_name.split("_", 3)[3]
+                compile_wrapper.writeline(f"{original_type_name} = {type_name}")
 
         if key in self.udtk_aggregate_var_names:
             return type_name

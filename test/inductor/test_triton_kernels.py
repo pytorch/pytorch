@@ -276,13 +276,21 @@ class KernelTests(torch._inductor.test_case.TestCase):
         Config = collections.namedtuple("Config", ("source", "metadata"))
 
         @triton.jit
-        def namedtuple_kernel(config, out, n_elements, BLOCK_SIZE: tl.constexpr):
+        def get_scale(metadata: Metadata):
+            return metadata.scale
+
+        @triton.jit
+        def namedtuple_kernel(
+            config: Config, out, n_elements, BLOCK_SIZE: tl.constexpr
+        ):
             tl.static_assert(len(config) == 2)
             tl.static_assert(len(config.metadata) == 1)
             offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
             mask = offsets < n_elements
             values = tl.load(config.source + offsets, mask=mask)
-            tl.store(out + offsets, values * config.metadata.scale, mask=mask)
+            # Metadata is nested in the root Config argument, but only the
+            # transitive helper source names it in an annotation.
+            tl.store(out + offsets, values * get_scale(config.metadata), mask=mask)
 
         def fn(config, source):
             external_out = torch.empty_like(config.source)
@@ -419,8 +427,16 @@ class KernelTests(torch._inductor.test_case.TestCase):
                 "Config", ScaleConfig._fields
             ),
         )
-        self.assertIn(f"{scale_name} = collections.namedtuple", code)
-        self.assertIn(f"{bias_name} = collections.namedtuple", code)
+        # Each type is defined once in the wrapper and once in the embedded
+        # compilation scope, regardless of how many arguments reuse it.
+        self.assertEqual(
+            code.count(f"{scale_name} = collections.namedtuple"),
+            2,
+        )
+        self.assertEqual(
+            code.count(f"{bias_name} = collections.namedtuple"),
+            2,
+        )
         self.assertGreaterEqual(code.count(f"{scale_name}(source="), 2)
 
     @requires_cuda_tma
