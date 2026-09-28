@@ -1867,6 +1867,10 @@ TEST_WITH_UBSAN: bool = TestEnvironment.def_flag(
     "TEST_WITH_UBSAN",
     env_var="PYTORCH_TEST_WITH_UBSAN",
 )
+TEST_WITH_DEBUG_BUILD: bool = TestEnvironment.def_flag(
+    "TEST_WITH_DEBUG_BUILD",
+    env_var="PYTORCH_TEST_WITH_DEBUG_BUILD",
+)
 TEST_WITH_ROCM: bool = TestEnvironment.def_flag(
     "TEST_WITH_ROCM",
     env_var="PYTORCH_TEST_WITH_ROCM",

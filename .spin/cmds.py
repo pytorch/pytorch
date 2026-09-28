@@ -326,8 +326,11 @@ def lazy_setup_lint(ctx, parent_callback, **kwargs):
         click.echo("Linting tools set up and hashes updated.")
     else:
         click.echo("No changes detected in lint configuration files. Skipping setup.")
-    click.echo("Regenerating version...")
-    ctx.invoke(regenerate_version)
+    # Lint only needs version.py to exist. Regenerating it would drop the CUDA/ROCm
+    # versions a build wrote, and a build in progress would install that copy.
+    if not (CWD / "torch" / "version.py").exists():
+        click.echo("Generating version...")
+        ctx.invoke(regenerate_version)
     click.echo("Regenerating type stubs...")
     ctx.invoke(regenerate_type_stubs)
     click.echo("Done.")

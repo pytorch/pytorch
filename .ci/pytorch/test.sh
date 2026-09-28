@@ -393,6 +393,7 @@ fi
 # 2. The value 424242 is passed in
 # This tests that the debug asserts are working correctly.
 if [[ "$BUILD_ENVIRONMENT" == *-debug* ]]; then
+    export PYTORCH_TEST_WITH_DEBUG_BUILD=1
     echo "We are in debug mode: $BUILD_ENVIRONMENT. Expect the python assertion to fail"
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_debug_asserts_fail(424242)")
 else
@@ -1801,16 +1802,8 @@ test_libtorch_api() {
   MNIST_DIR="${PWD}/test/cpp/api/mnist"
   python tools/download_mnist.py --quiet -d "${MNIST_DIR}"
 
-  if [[ "$BUILD_ENVIRONMENT" == *asan* || "$BUILD_ENVIRONMENT" == *slow-gradcheck* ]]; then
-    TEST_REPORTS_DIR=test/test-reports/cpp-unittest/test_libtorch
-    mkdir -p $TEST_REPORTS_DIR
-
-    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="${MNIST_DIR}" "$TORCH_BIN_DIR"/test_api --gtest_filter='-IMethodTest.*' --gtest_output=xml:$TEST_REPORTS_DIR/test_api.xml
-  else
-    # Exclude IMethodTest that relies on torch::deploy, which will instead be ran in test_deploy
-    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="${MNIST_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_api -k "not IMethodTest"
-
-  fi
+  # Exclude IMethodTest that relies on torch::deploy, which will instead be ran in test_deploy
+  OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="${MNIST_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_api -k "not IMethodTest"
 
   # quantization is not fully supported on s390x yet
   if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* && "${BUILD_ENVIRONMENT}" != *asan* && "${BUILD_ENVIRONMENT}" != *s390x* ]]; then
