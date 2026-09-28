@@ -19,15 +19,15 @@ Intel GPUs support (Prototype) is ready from PyTorch\* 2.5 for Intel® Client GP
 
 ## Software Prerequisite
 
-To use PyTorch on Intel GPUs, you need to install the Intel GPUs driver first. For installation guide, visit [Intel GPUs Driver Installation](https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu.html).
+To use PyTorch on Intel GPUs, you need to complete the Intel GPU prerequisites first. For the installation guide, visit [Intel GPU Prerequisites](https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu.html).
 
-Please skip the Intel® Deep Learning Essentials installation section if you install from binaries. For building from source, please refer to [PyTorch Installation Prerequisites for Intel GPUs](https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu.html) for both Intel GPU Driver and Intel® Deep Learning Essentials Installation.
+Please skip the Intel® Deep Learning Essentials installation section if you install from binaries. For building from source, please refer to [PyTorch Installation Prerequisites for Intel GPUs](https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu.html) for the full prerequisites, including Intel® Deep Learning Essentials.
 
 ## Installation
 
 ### Binaries
 
-See the [Intel GPU prerequisites](https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu.html) for driver setup. Install `pytorch`, `torchvision`, `torchaudio` using the following commands.
+See the [Intel GPU prerequisites](https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu.html) to set up your GPU. Install `pytorch`, `torchvision`, `torchaudio` using the following commands.
 
 #### Stable Releases
 
@@ -55,7 +55,7 @@ pip3 install torch==TORCH_VERSION torchvision==TORCHVISION_VERSION torchaudio==T
 
 ### From Source
 
-See the [Intel GPU prerequisites](https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu.html) for Intel GPU Driver and Intel® Deep Learning Essentials setup. Follow the guides below to build `pytorch`, `torchvision`, `torchaudio` from source.
+See the [Intel GPU prerequisites](https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu.html) for the full setup, including Intel® Deep Learning Essentials. Follow the guides below to build `pytorch`, `torchvision`, `torchaudio` from source.
 
 Build from source for `torch` refer to [PyTorch Installation Build from source](https://github.com/pytorch/pytorch?tab=readme-ov-file#from-source).
 
