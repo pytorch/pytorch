@@ -437,7 +437,6 @@ build_image() {
        --build-arg "ROCM_VERSION=${ROCM_VERSION:-}" \
        --build-arg "THEROCK_INDEX_URL=${THEROCK_INDEX_URL:-}" \
        --build-arg "USE_MSLK=${USE_MSLK:-}" \
-       --build-arg "PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH}" \
        --build-arg "IMAGE_NAME=${IMAGE_NAME}" \
        --build-arg "TRITON=${TRITON}" \
        --build-arg "TRITON_CPU=${TRITON_CPU}" \

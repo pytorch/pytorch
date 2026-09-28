@@ -333,18 +333,7 @@ function install_torchcomms() {
   else
     export USE_NCCL=0
   fi
-  if [[ "${BUILD_ENVIRONMENT}" == *rocm* && -z "${PYTORCH_ROCM_ARCH:-}" ]]; then
-    local runtime_rocm_arch
-    runtime_rocm_arch=$(rocminfo | awk '$1 == "Name:" && $2 ~ /^gfx[0-9]/ {print $2}' | sort -u | paste -sd';' -)
-    if [[ -z "${runtime_rocm_arch}" ]]; then
-      echo "Could not detect a ROCm architecture for the torchcomms build" >&2
-      return 1
-    fi
-    PYTORCH_ROCM_ARCH="${runtime_rocm_arch}" \
-      pip_build_and_install "git+https://github.com/meta-pytorch/torchcomms.git@${commit}" dist/torchcomms
-  else
-    pip_build_and_install "git+https://github.com/meta-pytorch/torchcomms.git@${commit}" dist/torchcomms
-  fi
+  pip_build_and_install "git+https://github.com/meta-pytorch/torchcomms.git@${commit}" dist/torchcomms
 }
 
 function install_spmd_types() {
