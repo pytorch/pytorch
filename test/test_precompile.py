@@ -2855,6 +2855,7 @@ class TestPrecompile(TestCase):
             "Capture",
             "DynamoTracer",
             "MakeFxTracer",
+            "no_compilation",
             "PrecompiledRunnable",
             "PrecompileSummary",
         }
@@ -5282,6 +5283,164 @@ class TestPrecompileDynamoCapture(TestCase):
             load(self.artifact, other_cache)
         with self.assertRaisesRegex(PrecompileError, "tracer|does not match"):
             load(other_artifact, self.cache)
+
+
+@skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
+@instantiate_parametrized_tests
+class TestPrecompileNoCompilation(TestCase):
+    def test_no_compilation_covers_background_threads_and_restores(self):
+        from concurrent.futures import ThreadPoolExecutor
+
+        from torch.compiler._no_compile import is_compilation_forbidden
+
+        env = "TORCH_PRECOMPILE_NO_COMPILATION"
+        previous = os.environ.get(env)
+        compiled = torch.compile(lambda x: x.sin(), backend="eager")
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            first = torch.compiler.precompile.no_compilation()
+            second = torch.compiler.precompile.no_compilation()
+            first.__enter__()
+            second.__enter__()
+            try:
+                first.__exit__(None, None, None)
+                self.assertTrue(is_compilation_forbidden())
+                self.assertEqual(os.environ.get(env), "1")
+                future = pool.submit(compiled, torch.ones(4))
+                with self.assertRaisesRegex(
+                    PrecompileError, "forbids Dynamo graph compilation"
+                ):
+                    future.result()
+            finally:
+                second.__exit__(None, None, None)
+            self.assertFalse(is_compilation_forbidden())
+            self.assertEqual(os.environ.get(env), previous)
+            self.assertEqual(
+                pool.submit(compiled, torch.ones(4)).result(), torch.ones(4).sin()
+            )
+
+    def test_no_compilation_does_not_disable_triton(self):
+        with mock.patch.dict(os.environ):
+            os.environ.pop("TRITON_DISABLE_COMPILATION", None)
+            with torch.compiler.precompile.no_compilation():
+                self.assertNotIn("TRITON_DISABLE_COMPILATION", os.environ)
+
+    @unittest.skipUnless(TEST_CUDA, "requires Triton")
+    def test_no_compilation_rejects_late_triton_cache_miss_before_dispatch(self):
+        from torch._inductor.async_compile import AsyncCompile, CompiledTritonKernels
+
+        with (
+            torch.compiler.precompile.no_compilation(),
+            mock.patch.object(CompiledTritonKernels, "get", return_value=None),
+            mock.patch.object(AsyncCompile, "use_process_pool") as readiness,
+            mock.patch.object(AsyncCompile, "process_pool") as pool,
+            self.assertRaisesRegex(PrecompileError, "Triton kernel cache miss"),
+        ):
+            AsyncCompile().triton("missing_kernel", "missing bundled kernel")
+        readiness.assert_not_called()
+        pool.assert_not_called()
+
+    @unittest.skipUnless(TEST_CUDA, "requires Triton")
+    def test_no_compilation_loads_cached_kernel_without_compile_pool(self):
+        from torch._inductor.async_compile import AsyncCompile, CompiledTritonKernels
+        from torch._inductor.codecache import CodeCacheFuture
+
+        future = mock.Mock(spec=CodeCacheFuture)
+        with (
+            torch.compiler.precompile.no_compilation(),
+            mock.patch.object(CompiledTritonKernels, "get", return_value=future),
+            mock.patch.object(AsyncCompile, "use_process_pool") as readiness,
+            mock.patch.object(AsyncCompile, "process_pool") as pool,
+        ):
+            self.assertIs(
+                AsyncCompile().triton("cached_kernel", "bundled kernel"),
+                future.result.return_value,
+            )
+        future.result.assert_called_once_with()
+        readiness.assert_not_called()
+        pool.assert_not_called()
+
+    @unittest.skipUnless(TEST_CUDA, "requires Triton")
+    def test_no_compilation_rejects_kernel_compile_and_autotune(self):
+        from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+
+        with torch.compiler.precompile.no_compilation():
+            with self.assertRaisesRegex(PrecompileError, "Triton kernel compilation"):
+                CachingAutotuner._precompile_config(None, None)
+            with self.assertRaisesRegex(PrecompileError, "Triton kernel autotuning"):
+                CachingAutotuner.autotune_to_one_config(None)
+
+    def test_no_compilation_rejects_multi_kernel_autotuning(self):
+        from torch._inductor.codegen.multi_kernel import MultiKernelCall
+
+        with (
+            torch.compiler.precompile.no_compilation(),
+            mock.patch(
+                "torch._inductor.codegen.multi_kernel.benchmarker.benchmark"
+            ) as benchmark,
+            self.assertRaisesRegex(PrecompileError, "multi-kernel autotuning"),
+        ):
+            MultiKernelCall.benchmark_sub_kernels(None)
+        benchmark.assert_not_called()
+
+    @parametrize("backend", ("cutedsl", "flydsl", "pallas", "halide"))
+    def test_no_compilation_rejects_alternate_runtime_jit_before_dispatch(
+        self, backend
+    ):
+        from torch._inductor.async_compile import AsyncCompile
+
+        with (
+            torch.compiler.precompile.no_compilation(),
+            mock.patch.object(AsyncCompile, "process_pool") as pool,
+            self.assertRaisesRegex(PrecompileError, "precompile.no_compilation"),
+        ):
+            getattr(AsyncCompile(), backend)("missing_kernel", "missing source")
+        pool.assert_not_called()
+
+    @parametrize("backend", ("cutedsl", "flydsl", "pallas"))
+    def test_no_compilation_rejects_existing_alternate_runtime_jit(self, backend):
+        modules = {
+            "cutedsl": ("cutedsl.cutedsl_kernel", "CuteDSLKernelWrapper"),
+            "flydsl": ("flydsl.flydsl_kernel", "FlyDSLKernelWrapper"),
+            "pallas": ("pallas", "PallasKernelWrapper"),
+        }
+        module_name, class_name = modules[backend]
+        module = importlib.import_module(f"torch._inductor.codegen.{module_name}")
+        kernel = mock.Mock()
+        wrapper = getattr(module, class_name)(kernel)
+        with (
+            torch.compiler.precompile.no_compilation(),
+            self.assertRaisesRegex(PrecompileError, "runtime JIT"),
+        ):
+            wrapper.run()
+        kernel.assert_not_called()
+
+    @parametrize("inline", (False, True))
+    def test_no_compilation_rejects_extension_jit_before_build_setup(self, inline):
+        from torch.utils import cpp_extension
+
+        with (
+            torch.compiler.precompile.no_compilation(),
+            mock.patch.object(cpp_extension, "_get_build_directory") as directory,
+            self.assertRaisesRegex(PrecompileError, r"C\+\+ extension runtime JIT"),
+        ):
+            if inline:
+                cpp_extension.load_inline(
+                    "missing_extension", "missing source", use_pch=True
+                )
+            else:
+                cpp_extension.load("missing_extension", ["missing.cpp"])
+        directory.assert_not_called()
+
+    def test_no_compilation_rejects_extension_build_before_subprocess(self):
+        from torch.utils import cpp_extension
+
+        with (
+            torch.compiler.precompile.no_compilation(),
+            mock.patch.object(cpp_extension.subprocess, "run") as build,
+            self.assertRaisesRegex(PrecompileError, r"C\+\+ extension compilation"),
+        ):
+            cpp_extension._run_ninja_build("missing", False, "extension")
+        build.assert_not_called()
 
 
 if __name__ == "__main__":
