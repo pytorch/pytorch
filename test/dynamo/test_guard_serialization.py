@@ -291,6 +291,14 @@ def _wraps_wrapper(x):
     return _wrapped_target(x)
 
 
+class _AllocatingLinear(torch.nn.Linear):
+    allocations = 0
+
+    def __new__(cls, *args, **kwargs):
+        _AllocatingLinear.allocations += 1
+        return super().__new__(cls)
+
+
 class UnpicklableDefault:
     def __reduce__(self):
         raise RuntimeError("unrelated default cannot pickle")
@@ -1482,32 +1490,41 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             get_cls_to_fsdp_cls,
         )
 
-        m = torch.nn.Linear(2, 2)
+        m = _AllocatingLinear(2, 2)
         _apply_to_module(
             (m,), get_cls_to_fsdp_cls(), FSDPModule, "FSDP", _unimplemented_deepcopy
         )
         fsdp_cls = type(m)
         buf = io.BytesIO()
         GuardsStatePickler({id(m): m}, {}, {}, {}, buf).dump({"m": m})
+        allocations = _AllocatingLinear.allocations
         loaded = load_guards_state(buf.getvalue())["m"]
         # A TYPE_MATCH on the live module compares against the wrapper class.
         self.assertIs(type(loaded), fsdp_cls)
+        self.assertEqual(loaded.reshard.__func__, FSDPModule.reshard)
+        self.assertEqual(_AllocatingLinear.allocations, allocations + 1)
         # Outside a load, calling the wrapper class builds the original module,
         # including in a thread that was already running when a load started.
-        self.assertIs(type(fsdp_cls(2, 2)), torch.nn.Linear)
+        self.assertIs(type(fsdp_cls(2, 2)), _AllocatingLinear)
         built = []
+        errors = []
         loading = threading.Event()
 
         def build():
-            loading.wait()
-            built.append(fsdp_cls(2, 2))
+            try:
+                loading.wait()
+                built.append(fsdp_cls(2, 2))
+            except Exception as e:
+                errors.append(e)
 
         worker = threading.Thread(target=build)
         worker.start()
         with disable_fsdp_module_new_init():
             loading.set()
             worker.join()
-        self.assertIs(type(built[0]), torch.nn.Linear)
+        if errors:
+            raise errors[0]
+        self.assertIs(type(built[0]), _AllocatingLinear)
         self.assertEqual(built[0].weight.shape, (2, 2))
 
     def test_retained_grad_non_leaf_survives_pickle(self):
@@ -3874,6 +3891,23 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self.assertTrue(_native_method_matches(_DoubleFn.apply, expected))
         self.assertFalse(_native_method_matches(mock.ANY, expected))
 
+    def test_native_method_match_needs_a_receiver_by_reference(self):
+        class LocalFn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 2
+
+        local_apply = LocalFn.apply
+
+        def fn(x):
+            return local_apply(x)
+
+        self.assertTrue(is_portable_function_guard("CLOSURE_MATCH", double_apply))
+        self.assertFalse(is_portable_function_guard("ID_MATCH", local_apply))
+        self.assertFalse(is_portable_function_guard("CLOSURE_MATCH", local_apply))
+        with self.assertRaises(PackageError):
+            self._test_serialization("ID_MATCH", fn, torch.randn(3))
+
     def test_sequence_length(self):
         # tuple input installs a SEQUENCE_LENGTH guard
         def fn(t, x):
@@ -4574,12 +4608,24 @@ class TestGuardSerialization(TestGuardSerializationBase):
 
     def test_guard_reading_a_fake_tensor_owned_name_raises(self):
         def fn(x):
-            return x * x.constant
+            return x * x.constant[0]
 
         x = torch.randn(3)
-        x.constant = 2
+        x.constant = [2]
         with self.assertRaisesRegex(PackageError, "reads 'constant' off a tensor"):
             self._test_serialization("EQUALS_MATCH", fn, x)
+
+    def test_literal_on_a_fake_tensor_owned_name_is_not_a_guard_read(self):
+        x = torch.randn(3)
+        x._is_param = True
+        x.constant = 2
+        # Unrelated guards on the same interned values.
+        tree = {id(v): v for v in (x, True, 2)}
+        buf = io.BytesIO()
+        GuardsStatePickler(tree, {}, {}, {}, buf).dump({"x": x})
+        out = load_guards_state(buf.getvalue())["x"]
+        self.assertIs(out._is_param, True)
+        self.assertIsNone(out.constant)
 
     def test_tensor_attributes_carried_through_the_pickle(self):
         from torch._subclasses.fake_tensor import FakeTensorMode
