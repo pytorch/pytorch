@@ -9410,7 +9410,7 @@ def activate_meta():
             )
 
         # Use the symint-aware C++ meta kernels; a Python Meta kernel would
-        # shadow them under the Python dispatcher and in C++ FakeTensor.
+        # shadow them under the Python dispatcher.
         if op_overload in cpp_meta_supports_symint_ops:
             continue
 
