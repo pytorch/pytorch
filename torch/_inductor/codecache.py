@@ -4742,6 +4742,9 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         need_compile = not os.path.exists(donefile)
         jobs: list[Any] = []
         if need_compile:
+            from torch.compiler._no_compile import check_compilation_allowed
+
+            check_compilation_allowed("Halide kernel compilation")
             write_atomic(genfile, source_code)
             cmd = [
                 sys.executable,
@@ -4827,6 +4830,9 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
 
             with FileLock(lock_file, LOCK_TIMEOUT):
                 if not os.path.exists(done_file):
+                    from torch.compiler._no_compile import check_compilation_allowed
+
+                    check_compilation_allowed("Halide runtime compilation")
                     with open(hook_file, "w") as f:
                         if device_type == "cuda":
                             f.write(

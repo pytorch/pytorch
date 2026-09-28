@@ -1989,9 +1989,6 @@ def load(name,
         ...     extra_cflags=['-O2'],
         ...     verbose=True)
     """
-    from torch.compiler._no_compile import check_compilation_allowed
-
-    check_compilation_allowed("C++ extension runtime JIT")
     return _jit_compile(
         name,
         [sources] if isinstance(sources, str) else sources,
@@ -2290,9 +2287,6 @@ def load_inline(name,
         can control the number of workers by setting the `MAX_JOBS` environment
         variable to a non-negative number.
     '''
-    from torch.compiler._no_compile import check_compilation_allowed
-
-    check_compilation_allowed("C++ extension runtime JIT")
     build_directory = build_directory or _get_build_directory(name, verbose)
 
     if isinstance(cpp_sources, str):
@@ -2435,6 +2429,9 @@ def _jit_compile(name,
     # by the next process instead of leaving waiters to load a partial module.
     with FileLock(os.path.join(build_directory, 'lock')):
         if version != old_version:
+            from torch.compiler._no_compile import check_compilation_allowed
+
+            check_compilation_allowed("C++ extension runtime JIT")
             if IS_HIP_EXTENSION and (with_cuda or with_cudnn):
                 from .hipify import hipify_python
                 from .hipify.hipify_python import GeneratedFileCleaner
