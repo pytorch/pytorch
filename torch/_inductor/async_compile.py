@@ -535,7 +535,12 @@ class AsyncCompile:
                 torch._inductor.codecache.PyCodeCache.load(source_code), kernel_name
             )
 
-        is_parallel = self.use_process_pool()
+        from torch.compiler._no_compile import (
+            check_compilation_allowed,
+            is_compilation_forbidden,
+        )
+
+        is_parallel = not is_compilation_forbidden() and self.use_process_pool()
         set_feature_use("parallel_compile_post_warmup", is_parallel)
 
         compile_id = torch._guards.CompileContext.current_compile_id()
@@ -554,6 +559,7 @@ class AsyncCompile:
                 return future.result()
 
         # Cache miss
+        check_compilation_allowed("Triton kernel cache miss")
         if is_parallel:
             # Ensure libdevice path is set in os.environ before passing to workers
             _set_triton_libdevice_path()
@@ -563,6 +569,7 @@ class AsyncCompile:
                 "TORCHINDUCTOR_CACHE_DIR",
                 "TRITON_CACHE_DIR",
                 "TRITON_LIBDEVICE_PATH",
+                "TORCH_PRECOMPILE_NO_COMPILATION",
             ]
             extra_env = {v: os.environ.get(v) for v in env_vars}
             extra_config = {
