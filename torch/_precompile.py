@@ -3091,11 +3091,110 @@ def _verified_cache_envelope(cache, *, backend, tracer, code_hash, strict):
         return None
 
 
+def _read_runtime_cache_envelope(artifact_path, cache_path):
+    """Verify source identity without materializing or executing the captured program."""
+    import ast
+
+    digest = hashlib.sha256()
+    metadata = {}
+    header_size = 0
+    with open(artifact_path, "rb") as source:
+        for expected in ("BACKEND", "TRACER"):
+            while True:
+                line = source.readline(65537)
+                header_size += len(line)
+                if not line or header_size > 65536:
+                    raise PrecompileError(
+                        "Runtime-cache preparation requires a generated Dynamo artifact header"
+                    )
+                digest.update(line)
+                if line.strip() and not line.lstrip().startswith(b"#"):
+                    break
+            try:
+                statements = ast.parse(line.decode("utf-8")).body
+                if len(statements) != 1 or not isinstance(statements[0], ast.Assign):
+                    raise ValueError("Expected an artifact metadata assignment")
+                assignment = statements[0]
+                if len(assignment.targets) != 1 or not isinstance(
+                    assignment.targets[0], ast.Name
+                ):
+                    raise ValueError("Expected one metadata name")
+                if assignment.targets[0].id != expected:
+                    raise ValueError(f"Expected {expected}")
+                value = ast.literal_eval(assignment.value)
+                if not isinstance(value, str):
+                    raise ValueError("Expected string metadata")
+                metadata[expected] = value
+            except (SyntaxError, UnicodeDecodeError, ValueError) as exc:
+                raise PrecompileError(
+                    "Runtime-cache preparation requires a generated Dynamo artifact header"
+                ) from exc
+        if metadata["TRACER"] != "dynamo":
+            raise PrecompileError("Runtime-cache preparation supports Dynamo artifacts")
+        while chunk := source.read(1024 * 1024):
+            digest.update(chunk)
+    return _verified_cache_envelope(
+        cache_path,
+        backend=metadata["BACKEND"],
+        tracer=metadata["TRACER"],
+        code_hash=digest.hexdigest(),
+        strict=True,
+    )
+
+
 def no_compilation() -> contextlib.AbstractContextManager[None]:
     """Forbid graph/kernel compilation and autotuning across the process."""
     from torch.compiler._no_compile import no_compilation as _no_compilation
 
     return _no_compilation()
+
+
+def capture_runtime() -> contextlib.AbstractContextManager[None]:
+    """Own capture, exact-byte validation, and cleanup for a precompiled worker."""
+    from torch.compiler._runtime_cache import capture_runtime as _capture_runtime
+
+    return _capture_runtime()
+
+
+def finalize_cache(
+    *, artifact_path: str | os.PathLike[str], cache_path: str | os.PathLike[str]
+) -> None:
+    """Freeze the runtime dependencies into an existing Dynamo capture."""
+    from torch.compiler._runtime_cache import finalize_runtime_cache
+
+    blob = _read_runtime_cache_envelope(artifact_path, cache_path)
+    try:
+        blob["artifact"] = finalize_runtime_cache(blob.get("artifact"))
+    except Exception as exc:
+        raise PrecompileError(
+            "Could not finalize precompile runtime dependencies"
+        ) from exc
+    temporary = os.fspath(cache_path) + ".tmp"
+    try:
+        with open(temporary, "wb") as output:
+            torch.save(blob, output)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, cache_path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def prepare_runtime(
+    *, artifact_path: str | os.PathLike[str], cache_path: str | os.PathLike[str]
+) -> None:
+    """Hydrate verified runtime dependencies before application initialization."""
+    from torch.compiler._runtime_cache import prepare_runtime_cache
+
+    with no_compilation():
+        blob = _read_runtime_cache_envelope(artifact_path, cache_path)
+        try:
+            prepare_runtime_cache(blob.get("artifact"))
+        except Exception as exc:
+            raise PrecompileError(
+                "Could not prepare precompile runtime dependencies"
+            ) from exc
 
 
 def _runnable_from_pair(

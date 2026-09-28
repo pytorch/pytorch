@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: pt2"]
+import contextlib
 import copy
 import errno
 import functools
@@ -2852,7 +2853,10 @@ class TestPrecompile(TestCase):
         # export list would otherwise generate no cases and pass vacuously.
         exported = {
             "capture",
+            "capture_runtime",
+            "finalize_cache",
             "load",
+            "prepare_runtime",
             "Capture",
             "DynamoTracer",
             "MakeFxTracer",
@@ -5556,9 +5560,130 @@ class TestPrecompileNoCompilation(TestCase):
         build.assert_not_called()
 
 
+@contextlib.contextmanager
+def _producer_triton_cache(directory):
+    import triton
+
+    with (
+        triton.knobs.cache.scope(),
+        triton.knobs.autotuning.scope(),
+        mock.patch.dict(
+            os.environ,
+            {"TRITON_CACHE_AUTOTUNING": "1", "TRITON_CACHE_DIR": str(directory)},
+        ),
+    ):
+        triton.knobs.cache.dir = str(directory)
+        triton.knobs.cache.manager_class = None
+        triton.knobs.autotuning.cache = True
+        yield
+
+
 @skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
 @instantiate_parametrized_tests
 class TestPrecompileRuntimeCache(TestCase):
+    @unittest.skipUnless(TEST_CUDA, "requires Triton")
+    def test_finalize_seals_capture_and_prepare_skips_graph(self):
+        from pathlib import Path
+
+        from torch.compiler._no_compile import (
+            check_compilation_allowed,
+            is_compilation_forbidden,
+        )
+
+        pc = torch.compiler.precompile
+        env = "TORCH_PRECOMPILE_NO_COMPILATION"
+        previous = os.environ.get(env)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with _producer_triton_cache(root / "producer"):
+                with pc.capture_runtime():
+                    with self.assertRaisesRegex(RuntimeError, "already active"):
+                        with pc.capture_runtime():
+                            self.fail("Nested runtime capture was accepted")
+                    source, cache = _capture_files(
+                        _no_compilation_single_graph,
+                        [(torch.ones(4),)],
+                        backend="eager",
+                    )
+                    cache = Path(cache)
+                    pc.finalize_cache(artifact_path=source, cache_path=cache)
+                    frozen = cache.read_bytes()
+                    self.assertTrue(is_compilation_forbidden())
+                    with self.assertRaisesRegex(PrecompileError, "Could not finalize"):
+                        pc.finalize_cache(artifact_path=source, cache_path=cache)
+                    self.assertEqual(cache.read_bytes(), frozen)
+                    with self.assertRaisesRegex(
+                        PrecompileError, "forbids cleanup compiler"
+                    ):
+                        check_compilation_allowed("cleanup compiler")
+                self.assertEqual(os.environ.get(env), previous)
+            with (
+                _producer_triton_cache(root / "consumer"),
+                mock.patch(
+                    "torch._precompile._make_inlined_forward",
+                    side_effect=AssertionError("graph installed"),
+                ),
+                mock.patch(
+                    "torch.cuda.init", side_effect=AssertionError("CUDA initialized")
+                ),
+            ):
+                pc.prepare_runtime(artifact_path=source, cache_path=cache)
+                pc.prepare_runtime(artifact_path=source, cache_path=cache)
+
+    @parametrize(
+        "damage", ("none", "format", "version", "backend", "tracer", "code_hash")
+    )
+    def test_prepare_streams_and_verifies_before_hydration(self, damage):
+        import hashlib
+        from pathlib import Path
+
+        from torch._precompile import _CACHE_FORMAT, _CACHE_VERSION
+
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "artifact.py"
+            cache = Path(directory) / "artifact.cache"
+            code = (
+                'BACKEND = "eager"\nTRACER = "dynamo"\n'
+                + "# payload\n" * 200000
+                + "this is not valid Python ("
+            )
+            source.write_text(code)
+            blob = {
+                "format": _CACHE_FORMAT,
+                "version": _CACHE_VERSION,
+                "backend": "eager",
+                "tracer": "dynamo",
+                "code_hash": hashlib.sha256(code.encode()).hexdigest(),
+                "artifact": b"runtime payload",
+            }
+            if damage != "none":
+                blob[damage] = "incompatible"
+            torch.save(blob, cache)
+            with (
+                mock.patch(
+                    "torch.compiler._runtime_cache.prepare_runtime_cache"
+                ) as hydrate,
+                mock.patch(
+                    "torch._precompile._parse_artifact_metadata",
+                    side_effect=AssertionError("parsed full program"),
+                ),
+                mock.patch(
+                    "torch._precompile._make_inlined_forward",
+                    side_effect=AssertionError("executed source"),
+                ),
+            ):
+                if damage == "none":
+                    torch.compiler.precompile.prepare_runtime(
+                        artifact_path=source, cache_path=cache
+                    )
+                    hydrate.assert_called_once_with(b"runtime payload")
+                else:
+                    with self.assertRaises(PrecompileError):
+                        torch.compiler.precompile.prepare_runtime(
+                            artifact_path=source, cache_path=cache
+                        )
+                    hydrate.assert_not_called()
+
     def test_drain_propagates_failed_compiler_future(self):
         from concurrent.futures import Future
 
