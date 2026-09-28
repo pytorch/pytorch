@@ -129,6 +129,58 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    @unittest.skipIf(sys.version_info < (3, 12), "requires LOAD_FAST_CHECK")
+    def test_exception_target_cleanup(self):
+        def fn(x):
+            try:
+                raise ValueError
+            except ValueError as exc:  # noqa: F841
+                pass
+            try:
+                return exc  # noqa: F821
+            except UnboundLocalError:
+                return x + 1
+
+        x = torch.ones(1)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_exception_target_cleanup_double_delete(self):
+        def fn(x):
+            try:
+                raise ValueError
+            except ValueError as exc:  # noqa: F841
+                pass
+            try:
+                del exc  # noqa: F821
+            except UnboundLocalError:
+                return x + 1
+            return x
+
+        x = torch.ones(1)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    @unittest.skipIf(sys.version_info < (3, 12), "requires LOAD_FAST_CHECK")
+    def test_exception_target_cleanup_graph_break(self):
+        def fn(x):
+            try:
+                raise ValueError
+            except ValueError as exc:  # noqa: F841
+                pass
+            x = x * 2
+            torch._dynamo.graph_break()
+            try:
+                return exc  # noqa: F821
+            except UnboundLocalError:
+                return x + 1
+
+        x = torch.ones(1)
+        cnt = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnt.frame_count, 2)
+
     def test_exception4(self):
         def fn(x):
             for i in range(10):
