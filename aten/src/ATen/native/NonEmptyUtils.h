@@ -12,6 +12,10 @@ inline int64_t ensure_nonempty_size(const TensorBase &t, int64_t dim) {
   return t.dim() == 0 ? 1 : t.size(dim);
 }
 
+inline c10::SymInt ensure_nonempty_sym_size(const TensorBase &t, int64_t dim) {
+  return t.dim() == 0 ? c10::SymInt(1) : t.sym_size(dim);
+}
+
 inline int64_t ensure_nonempty_stride(const TensorBase &t, int64_t dim) {
   return t.dim() == 0 ? 1 : t.stride(dim);
 }
