@@ -19,6 +19,14 @@ void MPSEvent::recordLocked(bool syncEvent, MPSStream* stream) {
   if (stream) {
     m_stream = stream;
   }
+  // If the stream has been changed since the last `record` and there are still
+  // pending signals on the previous stream, create a new Metal event so that
+  // pending waits stay bound to the old Metal event.
+  if (m_signal_stream && m_signal_stream != m_stream && m_event.signaledValue < m_signalCounter.load()) {
+    [m_event release];
+    m_event = [m_stream->device() newSharedEvent];
+  }
+  m_signal_stream = m_stream;
   // active encoders must end before encoding or waiting
   m_stream->endKernelCoalescing();
   const uint64_t signalCounter = ++m_signalCounter;
@@ -54,7 +62,7 @@ bool MPSEvent::waitLocked(bool syncEvent, MPSStream* stream) {
   id<MTLCommandBuffer> commandBuffer = wait_stream->commandBuffer();
   [commandBuffer encodeWaitForEvent:m_event value:signalCounter];
   if (syncEvent) {
-    m_stream->synchronize(SyncType::COMMIT);
+    wait_stream->synchronize(SyncType::COMMIT);
   }
   return true;
 }
