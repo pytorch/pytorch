@@ -26,6 +26,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     parametrize,
     instantiate_parametrized_tests,
+    set_default_dtype,
     xfailIfTorchDynamo,
     skipIfXpu,
 )
@@ -2870,6 +2871,739 @@ class TestMetaKernelRegistrations(TestCase):
         expected_bias_shape = torch.Size([4 * hidden_size])
         self.assertEqual(diff_b1.shape, expected_bias_shape)
         self.assertEqual(diff_b2.shape, expected_bias_shape)
+
+    @staticmethod
+    def _add_meta_input(s, layout, dtype=torch.float32):
+        if layout == "contiguous":
+            return torch.empty(2, s, 3, 5, dtype=dtype)
+        if layout == "channels_last":
+            return torch.empty(2, s, 3, 5, dtype=dtype, memory_format=torch.channels_last)
+        if layout == "permuted":
+            return torch.empty(3, s, 5, 2, dtype=dtype).permute(3, 1, 0, 2)
+        if layout == "non_contiguous":
+            return torch.empty(2, s, 3, 10, dtype=dtype)[..., ::2]
+        if layout == "expanded":
+            return torch.empty(1, s, 1, 5, dtype=dtype).expand(2, s, 3, 5)
+        raise AssertionError(f"unknown layout {layout}")
+
+    def _add_meta_results(self, shape_kind, make_args, op="add", overload="Tensor", py_meta=None, **kwargs):
+        # Runs <op>.<overload> on identically built inputs, each time with a
+        # fresh ShapeEnv so symbol names line up: once through the C++ Meta
+        # kernel, and once through what Python fake runs: py_meta if the op has
+        # a Python Meta kernel, else the ref as the Meta kernel for static
+        # inputs and, for symbolic ones, the fast binary impl if there is one,
+        # else the ref under the mode.
+        from torch._dynamo.source import ConstantSource
+        from torch._subclasses.fake_impls import get_fast_op_impls
+        from torch._subclasses.fake_tensor import FakeTensorMode, in_kernel_invocation_manager
+        from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
+
+        aten_op = getattr(getattr(torch.ops.aten, op), overload)
+        # The dispatcher drops a default alpha before Python sees the call.
+        py_kwargs = {} if type(kwargs.get("alpha")) is int and kwargs["alpha"] == 1 else kwargs
+        results = []
+        for impl in ("cpp", "python"):
+            shape_env = ShapeEnv()
+            if shape_kind == "backed":
+                source = ConstantSource("size")
+                symbol = shape_env.create_symbol(8, source=source, dynamic_dim=DimDynamic.DYNAMIC)
+                size = shape_env.create_symintnode(symbol, hint=8, source=source)
+            elif shape_kind == "unbacked":
+                size = shape_env.create_unbacked_symint()
+            else:
+                size = 8
+            mode = FakeTensorMode(shape_env=shape_env)
+            with mode:
+                args = make_args(size)
+            if impl == "cpp":
+                with in_kernel_invocation_manager(mode):
+                    out = aten_op(*args, **kwargs)
+            elif py_meta is not None:
+                with in_kernel_invocation_manager(mode):
+                    out = py_meta(*args, **py_kwargs)
+            elif shape_kind == "static":
+                with in_kernel_invocation_manager(mode):
+                    out = getattr(torch._refs, op)(*args, **py_kwargs)
+            elif aten_op in get_fast_op_impls():
+                out = get_fast_op_impls()[aten_op](mode, *args, **py_kwargs)
+            else:
+                with mode:
+                    out = getattr(torch._refs, op)(*args, **py_kwargs)
+            with in_kernel_invocation_manager(mode):
+                meta = ([str(s) for s in out.shape], [str(s) for s in out.stride()], out.dtype, out.device)
+            guards = [str(g.expr) for g in shape_env.guards]
+            asserts = [str(ra.expr) for ras in shape_env.deferred_runtime_asserts.values() for ra in ras]
+            results.append((meta, guards, asserts))
+        return results
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @parametrize("shape_kind", ["static", "backed", "unbacked"])
+    @parametrize("layout", ["contiguous", "channels_last", "permuted", "non_contiguous", "expanded"])
+    @parametrize("other", ["same_layout", "contiguous", "broadcast_3d", "broadcast_1d", "zero_dim", "number"])
+    def test_add_meta_matches_python(self, shape_kind, layout, other):
+        def make_args(s):
+            a = self._add_meta_input(s, layout)
+            if other == "same_layout":
+                return a, self._add_meta_input(s, layout)
+            if other == "contiguous":
+                return a, self._add_meta_input(s, "contiguous")
+            if other == "broadcast_3d":
+                return a, torch.empty(s, 1, 5)
+            if other == "broadcast_1d":
+                return a, torch.empty(5)
+            if other == "zero_dim":
+                return a, torch.empty((), dtype=torch.float64)
+            return a, 2
+
+        cpp, python = self._add_meta_results(shape_kind, make_args)
+        self.assertEqual(cpp, python)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @parametrize("shape_kind", ["static", "backed", "unbacked"])
+    @parametrize("layout", ["contiguous", "channels_last", "permuted"])
+    @parametrize(
+        "dtype,other",
+        [
+            (torch.float32, torch.float64),
+            (torch.float16, torch.bfloat16),
+            (torch.int32, torch.int64),
+            (torch.bool, torch.bool),
+            (torch.int32, 2.5),
+            (torch.float16, 2.5),
+            (torch.int64, True),
+            (torch.bool, True),
+            (torch.bool, 2),
+            (torch.uint8, 300),
+            (torch.float32, 1j),
+            (torch.bfloat16, "zero_dim_float64"),
+            (torch.int32, "zero_dim_float64"),
+            (torch.float32, "zero_dim_int64"),
+            (torch.complex64, "zero_dim_float64"),
+        ],
+    )
+    def test_add_meta_dtype_promotion(self, shape_kind, layout, dtype, other):
+        def make_args(s):
+            a = self._add_meta_input(s, layout, dtype)
+            if isinstance(other, torch.dtype):
+                return a, self._add_meta_input(s, "contiguous", other)
+            if isinstance(other, str):
+                return a, torch.empty((), dtype=getattr(torch, other.removeprefix("zero_dim_")))
+            return a, other
+
+        cpp, python = self._add_meta_results(shape_kind, make_args)
+        self.assertEqual(cpp, python)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @parametrize("shape_kind", ["static", "backed", "unbacked"])
+    @parametrize("layout", ["contiguous", "permuted"])
+    @parametrize(
+        "dtype,alpha",
+        [
+            (torch.float32, 1),
+            (torch.float32, 1.0),
+            (torch.float32, 2.5),
+            (torch.int64, 3),
+            (torch.int32, True),
+            (torch.bool, True),
+            (torch.bool, 2.5),
+            (torch.complex64, 1j),
+        ],
+    )
+    def test_add_meta_alpha(self, shape_kind, layout, dtype, alpha):
+        def make_args(s):
+            return self._add_meta_input(s, layout, dtype), torch.empty(s, 1, 5, dtype=dtype)
+
+        cpp, python = self._add_meta_results(shape_kind, make_args, alpha=alpha)
+        self.assertEqual(cpp, python)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @parametrize("impl", ["cpp", "python"])
+    def test_add_meta_alpha_type_error(self, impl):
+        from torch._subclasses.fake_tensor import FakeTensorMode, in_kernel_invocation_manager
+
+        mode = FakeTensorMode()
+        with mode:
+            a = torch.empty(2, 3, dtype=torch.int64)
+        add = torch.ops.aten.add.Tensor if impl == "cpp" else torch._refs.add
+        msg = "alpha argument of type <class 'float'> cannot be safely cast to type <class 'int'>!"
+        with in_kernel_invocation_manager(mode), self.assertRaisesRegex(ValueError, msg):
+            add(a, a, alpha=2.5)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @parametrize("backed", [False, True])
+    def test_add_meta_symbolic_alpha(self, backed):
+        from torch._dynamo.source import ConstantSource
+        from torch._subclasses.fake_tensor import FakeTensorMode, in_kernel_invocation_manager
+        from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
+
+        shape_env = ShapeEnv()
+        if backed:
+            source = ConstantSource("alpha")
+            symbol = shape_env.create_symbol(3, source=source, dynamic_dim=DimDynamic.DYNAMIC)
+            alpha = shape_env.create_symintnode(symbol, hint=3, source=source)
+        else:
+            alpha = shape_env.create_unbacked_symint()
+        mode = FakeTensorMode(shape_env=shape_env)
+        with mode:
+            a = self._add_meta_input(4, "permuted")
+            b = torch.empty(4, 1, 5)
+        with in_kernel_invocation_manager(mode):
+            out = torch.ops.aten.add.Tensor(a, b, alpha=alpha)
+            expected = torch._refs.add(a, b, alpha=alpha)
+            self.assertEqual(out.shape, expected.shape)
+            self.assertEqual(out.stride(), expected.stride())
+            self.assertEqual(out.dtype, expected.dtype)
+            self.assertEqual(out.device, expected.device)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_add_meta_symfloat_alpha_type_error(self):
+        # Python fake only takes the fast path for SymInt arguments, so static
+        # tensors with a SymFloat alpha get the ref's alpha type check.
+        from torch._dynamo.source import ConstantSource
+        from torch._subclasses.fake_tensor import FakeTensorMode, in_kernel_invocation_manager
+        from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
+
+        shape_env = ShapeEnv()
+        source = ConstantSource("alpha")
+        symbol = shape_env.create_symbol(3, source=source, dynamic_dim=DimDynamic.DYNAMIC)
+        alpha = shape_env.create_symintnode(symbol, hint=3, source=source) * 0.5
+        mode = FakeTensorMode(shape_env=shape_env)
+        with mode:
+            a = torch.empty(2, 3, dtype=torch.int64)
+        # Python names the alpha type torch.SymFloat, the C++ kernel float.
+        msg = "cannot be safely cast to type <class 'int'>!"
+        for add in (torch.ops.aten.add.Tensor, torch._refs.add):
+            with in_kernel_invocation_manager(mode), self.assertRaisesRegex(ValueError, msg):
+                add(a, a, alpha=alpha)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @parametrize("shape_kind", ["backed", "unbacked"])
+    @parametrize("layout", ["contiguous", "non_contiguous", "sliced"])
+    def test_add_meta_static_then_symbolic(self, shape_kind, layout):
+        # A static size meeting a symbolic one records guards like Eq(s, 8),
+        # with the symbol first, the way Python compares int == SymInt.
+        def make_args(s):
+            if layout == "contiguous":
+                return torch.empty(8, 3), torch.empty(s, 3)
+            if layout == "non_contiguous":
+                return torch.empty(8, 6)[:, ::2], torch.empty(s, 3)
+            return torch.empty(3, 10)[:, :s], torch.empty(3, s)
+
+        cpp, python = self._add_meta_results(shape_kind, make_args)
+        self.assertEqual(cpp, python)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @parametrize("impl", ["cpp", "python"])
+    def test_add_meta_device_mismatch(self, impl):
+        add = torch.ops.aten.add.Tensor if impl == "cpp" else torch._refs.add
+        meta = torch.empty(3, device="meta")
+        cpu = torch.empty(3)
+        with self.assertRaisesRegex(RuntimeError, "Tensor on device cpu is not on the expected device meta!"):
+            add(meta, cpu)
+        with self.assertRaisesRegex(RuntimeError, "Tensor on device meta is not on the expected device cpu!"):
+            add(cpu, meta)
+        out = add(meta, torch.tensor(2.0, dtype=torch.float64))
+        self.assertEqual((out.shape, out.dtype, out.device), (meta.shape, torch.float32, meta.device))
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @parametrize("backed", [False, True])
+    def test_add_symbolic_fake_tensor(self, backed):
+        # End to end through Python fake, mixing a CPU scalar tensor with meta
+        # device tensors. Only the static add reaches the C++ kernel there.
+        from torch._dynamo.source import ConstantSource
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
+
+        shape_env = ShapeEnv()
+        if backed:
+            source = ConstantSource("size")
+            symbol = shape_env.create_symbol(8, source=source, dynamic_dim=DimDynamic.DYNAMIC)
+            size = shape_env.create_symintnode(symbol, hint=8, source=source)
+        else:
+            size = shape_env.create_unbacked_symint()
+        with FakeTensorMode(shape_env=shape_env):
+            a = torch.empty(2, size, 3, 5, device="meta", memory_format=torch.channels_last)
+            static = torch.empty(3, 4, 5, 2, device="meta").permute(3, 1, 0, 2)
+            scalar = torch.tensor(2.0, dtype=torch.float64)
+            results = (torch.add(a, 2), torch.add(a, scalar, alpha=2), torch.add(static, scalar))
+
+        for result, inp in zip(results, (a, a, static)):
+            self.assertEqual(result.shape, inp.shape)
+            # The ref gives unbacked channels_last results Max(1, u0) strides.
+            if backed or inp is static:
+                self.assertEqual(result.stride(), inp.stride())
+            self.assertEqual(result.dtype, torch.float32)
+            self.assertEqual(result.device, torch.device("meta"))
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @parametrize("shape_kind", ["static", "backed", "unbacked"])
+    @parametrize("layout", ["contiguous", "channels_last", "permuted", "non_contiguous"])
+    @parametrize("other", ["same_layout", "broadcast_3d", "number"])
+    def test_sub_meta_matches_python(self, shape_kind, layout, other):
+        def make_args(s):
+            a = self._add_meta_input(s, layout)
+            if other == "same_layout":
+                return a, self._add_meta_input(s, layout)
+            if other == "broadcast_3d":
+                return a, torch.empty(s, 1, 5)
+            return a, 2
+
+        cpp, python = self._add_meta_results(shape_kind, make_args, op="sub")
+        self.assertEqual(cpp, python)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @parametrize("shape_kind", ["static", "backed", "unbacked"])
+    @parametrize("layout", ["contiguous", "permuted"])
+    @parametrize(
+        "dtype,other",
+        [
+            (torch.float32, torch.float64),
+            (torch.float16, torch.bfloat16),
+            (torch.int32, torch.int64),
+            (torch.int32, 2.5),
+            (torch.int64, True),
+            (torch.bool, True),
+            (torch.bool, 2),
+            (torch.float32, 1j),
+            (torch.int32, "zero_dim_float64"),
+        ],
+    )
+    def test_sub_meta_dtype_promotion(self, shape_kind, layout, dtype, other):
+        def make_args(s):
+            a = self._add_meta_input(s, layout, dtype)
+            if isinstance(other, torch.dtype):
+                return a, self._add_meta_input(s, "contiguous", other)
+            if isinstance(other, str):
+                return a, torch.empty((), dtype=getattr(torch, other.removeprefix("zero_dim_")))
+            return a, other
+
+        cpp, python = self._add_meta_results(shape_kind, make_args, op="sub")
+        self.assertEqual(cpp, python)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @parametrize("shape_kind", ["static", "backed", "unbacked"])
+    @parametrize("layout", ["contiguous", "permuted"])
+    @parametrize(
+        "dtype,alpha",
+        [
+            (torch.float32, 1),
+            (torch.float32, 2.5),
+            (torch.int64, 3),
+            (torch.int64, 1.0),
+            (torch.int32, True),
+            (torch.complex64, 1j),
+        ],
+    )
+    def test_sub_meta_alpha(self, shape_kind, layout, dtype, alpha):
+        def make_args(s):
+            return self._add_meta_input(s, layout, dtype), torch.empty(s, 1, 5, dtype=dtype)
+
+        cpp, python = self._add_meta_results(shape_kind, make_args, op="sub", alpha=alpha)
+        self.assertEqual(cpp, python)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @parametrize("impl", ["cpp", "python"])
+    @parametrize(
+        "dtype,other,alpha,error,msg",
+        [
+            (torch.int64, "tensor", 2.5, ValueError, "alpha argument of type <class 'float'> cannot be safely cast to type <class 'int'>!"),
+            (torch.bool, True, 2, ValueError, "alpha argument of type <class 'int'> cannot be safely cast to type <class 'bool'>!"),
+            (torch.bool, "tensor", 1, NotImplementedError, "Subtraction, the `-` operator, with two bool tensors is not supported."),
+        ],
+    )
+    def test_sub_meta_errors(self, impl, dtype, other, alpha, error, msg):
+        from torch._subclasses.fake_tensor import FakeTensorMode, in_kernel_invocation_manager
+
+        mode = FakeTensorMode()
+        with mode:
+            a = torch.empty(2, 3, dtype=dtype)
+        sub = torch.ops.aten.sub.Tensor if impl == "cpp" else torch._refs.sub
+        with in_kernel_invocation_manager(mode), self.assertRaisesRegex(error, re.escape(msg)):
+            sub(a, a if other == "tensor" else other, alpha=alpha)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @parametrize("backed", [False, True])
+    @parametrize("alpha_type", ["SymInt", "SymFloat"])
+    def test_sub_meta_symbolic_alpha(self, backed, alpha_type):
+        # Static tensors with a SymInt alpha take the fast path, which bails on
+        # the permuted input; refs.sub then guards on alpha != 1. A SymFloat
+        # alpha does not make the call symbolic, so even contiguous inputs skip
+        # the fast path and refs.sub guards on alpha != 1.0.
+        from torch._dynamo.source import ConstantSource
+        from torch._subclasses.fake_impls import get_fast_op_impls
+        from torch._subclasses.fake_tensor import FakeTensorMode, in_kernel_invocation_manager
+        from torch.fx.experimental.symbolic_shapes import DimDynamic, GuardOnDataDependentSymNode, ShapeEnv
+
+        sub = torch.ops.aten.sub.Tensor
+        is_int = alpha_type == "SymInt"
+
+        def run(impl):
+            shape_env = ShapeEnv()
+            if backed:
+                source = ConstantSource("alpha")
+                hint = 3 if is_int else 2.5
+                symbol = shape_env.create_symbol(hint, source=source, dynamic_dim=DimDynamic.DYNAMIC, positive=None)
+                make_node = shape_env.create_symintnode if is_int else shape_env.create_symfloatnode
+                alpha = make_node(symbol, hint=hint, source=source)
+            else:
+                alpha = shape_env.create_unbacked_symint() if is_int else shape_env.create_unbacked_symfloat()
+            mode = FakeTensorMode(shape_env=shape_env)
+            with mode:
+                a = self._add_meta_input(4, "permuted" if is_int else "contiguous")
+                b = torch.empty(4, 1, 5)
+            if impl == "cpp":
+                with in_kernel_invocation_manager(mode):
+                    out = sub(a, b, alpha=alpha)
+            elif is_int:
+                out = get_fast_op_impls()[sub](mode, a, b, alpha=alpha)
+            else:
+                with in_kernel_invocation_manager(mode):
+                    out = torch._refs.sub(a, b, alpha=alpha)
+            with in_kernel_invocation_manager(mode):
+                meta = (out.shape, out.stride(), out.dtype, out.device)
+            return meta, [str(g.expr) for g in shape_env.guards]
+
+        if backed:
+            cpp, python = run("cpp"), run("python")
+            self.assertEqual(cpp, python)
+            self.assertEqual(len(cpp[1]), 1)
+            self.assertRegex(cpp[1][0], r"^Ne\(\w+, 1\)$" if is_int else r"^Ne\(\w+, 1\.0\)$")
+        else:
+            for impl in ("cpp", "python"):
+                with self.assertRaises(GuardOnDataDependentSymNode):
+                    run(impl)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @parametrize("shape_kind", ["static", "backed", "unbacked"])
+    @parametrize("layout", ["contiguous", "channels_last", "permuted", "non_contiguous", "expanded"])
+    @parametrize(
+        "other",
+        [torch.float32, torch.float64, torch.int64, "broadcast_3d", "zero_dim_float64", "zero_dim_int64", 2, 2.5, True],
+    )
+    def test_mul_meta_matches_python(self, shape_kind, layout, other):
+        def make_args(s):
+            a = self._add_meta_input(s, layout)
+            if isinstance(other, torch.dtype):
+                return a, self._add_meta_input(s, layout, other)
+            if other == "broadcast_3d":
+                return a, torch.empty(s, 1, 5)
+            if isinstance(other, str):
+                return a, torch.empty((), dtype=getattr(torch, other.removeprefix("zero_dim_")))
+            return a, other
+
+        cpp, python = self._add_meta_results(shape_kind, make_args, op="mul")
+        self.assertEqual(cpp, python)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @parametrize("shape_kind", ["static", "backed", "unbacked"])
+    def test_mul_meta_broadcast_both(self, shape_kind):
+        # Both operands broadcast, so the symbolic fast path bails to the ref.
+        cpp, python = self._add_meta_results(shape_kind, lambda s: (torch.empty(s, 1), torch.empty(1, s)), op="mul")
+        self.assertEqual(cpp, python)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @parametrize("shape_kind", ["static", "backed", "unbacked"])
+    @parametrize(
+        "dtype,other",
+        [
+            (torch.float16, torch.bfloat16),
+            (torch.bfloat16, 2.5),
+            (torch.int32, torch.int64),
+            (torch.int32, 2.5),
+            (torch.bool, torch.bool),
+            (torch.bool, True),
+            (torch.bool, 2),
+            (torch.uint8, 300),
+            (torch.float32, 1j),
+        ],
+    )
+    def test_mul_meta_dtype_promotion(self, shape_kind, dtype, other):
+        def make_args(s):
+            a = self._add_meta_input(s, "permuted", dtype)
+            if isinstance(other, torch.dtype):
+                return a, torch.empty(s, 1, 5, dtype=other)
+            return a, other
+
+        cpp, python = self._add_meta_results(shape_kind, make_args, op="mul")
+        self.assertEqual(cpp, python)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @parametrize("shape_kind", ["static", "backed", "unbacked"])
+    @parametrize("layout", ["contiguous", "channels_last", "permuted", "non_contiguous", "expanded"])
+    @parametrize("other", ["same_layout", "contiguous", "broadcast_3d", "number"])
+    def test_div_meta_matches_python(self, shape_kind, layout, other):
+        def make_args(s):
+            a = self._add_meta_input(s, layout)
+            if other == "same_layout":
+                return a, self._add_meta_input(s, layout)
+            if other == "contiguous":
+                return a, self._add_meta_input(s, "contiguous")
+            if other == "broadcast_3d":
+                return a, torch.empty(s, 1, 5)
+            return a, 2
+
+        cpp, python = self._add_meta_results(shape_kind, make_args, op="div")
+        self.assertEqual(cpp, python)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @parametrize("shape_kind", ["static", "backed", "unbacked"])
+    @parametrize("layout", ["contiguous", "channels_last", "permuted"])
+    @parametrize(
+        "dtype,other",
+        [
+            (torch.int64, torch.int64),
+            (torch.int32, torch.int64),
+            (torch.bool, torch.bool),
+            (torch.float16, torch.float16),
+            (torch.float16, torch.bfloat16),
+            (torch.int32, 2),
+            (torch.int64, 2.5),
+            (torch.float16, 2),
+            (torch.uint8, True),
+            (torch.bool, 2),
+            (torch.int32, 1j),
+            (torch.int32, "zero_dim_int64"),
+            (torch.int32, "zero_dim_float64"),
+            (torch.bfloat16, "zero_dim_float64"),
+        ],
+    )
+    def test_div_meta_dtype_promotion(self, shape_kind, layout, dtype, other):
+        def make_args(s):
+            a = self._add_meta_input(s, layout, dtype)
+            if isinstance(other, torch.dtype):
+                return a, self._add_meta_input(s, "contiguous", other)
+            if isinstance(other, str):
+                return a, torch.empty((), dtype=getattr(torch, other.removeprefix("zero_dim_")))
+            return a, other
+
+        cpp, python = self._add_meta_results(shape_kind, make_args, op="div")
+        self.assertEqual(cpp, python)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @parametrize("shape_kind", ["static", "backed", "unbacked"])
+    @parametrize("other", [torch.int32, 2, 2.5])
+    def test_div_meta_default_dtype(self, shape_kind, other):
+        def make_args(s):
+            a = self._add_meta_input(s, "permuted", torch.int32)
+            return a, self._add_meta_input(s, "contiguous", other) if isinstance(other, torch.dtype) else other
+
+        with set_default_dtype(torch.float64):
+            cpp, python = self._add_meta_results(shape_kind, make_args, op="div")
+        self.assertEqual(cpp, python)
+        self.assertEqual(cpp[0][2], torch.float64)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @parametrize("shape_kind", ["static", "backed", "unbacked"])
+    @parametrize("operands", ["static_first", "symbolic_first", "static_first_non_contiguous"])
+    def test_div_meta_static_and_symbolic_dims(self, shape_kind, operands):
+        # Python compares sizes as sizeA == sizeB, so an int sizeA reflects to
+        # SymInt.__eq__ and records Eq(s, 8) rather than Eq(8, s).
+        def make_args(s):
+            if operands == "static_first":
+                return torch.empty(8, 3), torch.empty(s, 3)
+            if operands == "symbolic_first":
+                return torch.empty(s, 3), torch.empty(8, 3)
+            return torch.empty(8, 6)[:, ::2], torch.empty(s, 3)
+
+        cpp, python = self._add_meta_results(shape_kind, make_args, op="div")
+        self.assertEqual(cpp, python)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @parametrize("impl", ["cpp", "python"])
+    @parametrize("devices", [("meta", "cpu"), ("cpu", "meta")])
+    def test_div_meta_device_mismatch(self, impl, devices):
+        div = torch.ops.aten.div.Tensor if impl == "cpp" else torch._refs.div
+        a, b = (torch.empty(3, device=d) for d in devices)
+        with self.assertRaisesRegex(RuntimeError, f"Tensor on device {devices[1]} is not on the expected device {devices[0]}!"):
+            div(a, b)
+        meta = a if a.is_meta else b
+        scalar = torch.empty((), dtype=torch.int64)
+        for args in ((meta, scalar), (scalar, meta)):
+            out = div(*args)
+            self.assertEqual((out.shape, out.dtype, out.device), (meta.shape, torch.float32, meta.device))
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @parametrize("backed", [False, True])
+    def test_div_symbolic_fake_tensor(self, backed):
+        # End to end through Python fake. Only the static div reaches the C++
+        # kernel there.
+        from torch._dynamo.source import ConstantSource
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
+
+        shape_env = ShapeEnv()
+        if backed:
+            source = ConstantSource("size")
+            symbol = shape_env.create_symbol(8, source=source, dynamic_dim=DimDynamic.DYNAMIC)
+            size = shape_env.create_symintnode(symbol, hint=8, source=source)
+        else:
+            size = shape_env.create_unbacked_symint()
+        with FakeTensorMode(shape_env=shape_env):
+            a = torch.empty(2, size, 3, 5, dtype=torch.int32, device="meta", memory_format=torch.channels_last)
+            static = torch.empty(3, 4, 5, 2, dtype=torch.int64, device="meta").permute(3, 1, 0, 2)
+            scalar = torch.tensor(2, dtype=torch.int64)
+            results = (torch.div(a, 2), torch.div(a, scalar), torch.div(static, scalar))
+
+        for result, inp in zip(results, (a, a, static)):
+            self.assertEqual(result.shape, inp.shape)
+            # The ref gives unbacked channels_last results Max(1, u0) strides.
+            if backed or inp is static:
+                self.assertEqual(result.stride(), inp.stride())
+            self.assertEqual(result.dtype, torch.float32)
+            self.assertEqual(result.device, torch.device("meta"))
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @parametrize("shape_kind", ["static", "backed", "unbacked"])
+    def test_alias_fake_tensor(self, shape_kind):
+        # The CompositeExplicitAutograd alias kernel is symint-aware. Check that
+        # FakeTensorMode and the raw kernel both keep the input geometry, share
+        # its storage and record no guards.
+        from torch._dynamo.source import ConstantSource
+        from torch._subclasses.fake_tensor import (
+            FakeTensorMode,
+            in_kernel_invocation_manager,
+        )
+        from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
+
+        shape_env = ShapeEnv()
+
+        def make_size(name, hint):
+            if shape_kind == "static":
+                return hint
+            if shape_kind == "unbacked":
+                return shape_env.create_unbacked_symint()
+            source = ConstantSource(name)
+            symbol = shape_env.create_symbol(
+                hint, source=source, dynamic_dim=DimDynamic.DYNAMIC
+            )
+            return shape_env.create_symintnode(symbol, hint=hint, source=source)
+
+        mode = FakeTensorMode(shape_env=shape_env)
+        self.assertTrue(mode.cpp_meta_supports_symint(torch.ops.aten.alias.default))
+        s0, s1 = make_size("s0", 4), make_size("s1", 6)
+        with mode:
+            base = torch.empty(s0, s1, 3)
+            inputs = (
+                base,
+                base.permute(2, 0, 1),
+                base[:, 1:],
+                torch.empty(2, 3, s0, s1, memory_format=torch.channels_last),
+            )
+
+        num_guards = len(shape_env.guards)
+        results = []
+        for x in inputs:
+            with mode:
+                out = torch.ops.aten.alias.default(x)
+            with in_kernel_invocation_manager(mode):
+                kernel_out = torch.ops.aten.alias.default(x)
+            results.append((x, out, kernel_out))
+        self.assertEqual(len(shape_env.guards), num_guards)
+
+        for x, out, kernel_out in results:
+            self.assertEqual(out.device, x.device)
+            for r in (out, kernel_out):
+                self.assertEqual(r.shape, x.shape)
+                self.assertEqual(r.stride(), x.stride())
+                self.assertEqual(r.storage_offset(), x.storage_offset())
+                self.assertEqual(r.dtype, x.dtype)
+                self.assertTrue(torch._C._is_alias_of(r, x))
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @parametrize("shape_kind", ["static", "backed", "unbacked"])
+    @parametrize("layout", ["contiguous", "permuted", "non_contiguous", "expanded"])
+    @parametrize("other", ["same_shape", "broadcast_3d", "broadcast_1d", "zero_dim", "number"])
+    def test_add__meta_matches_python(self, shape_kind, layout, other):
+        from torch._meta_registrations import meta_binop_inplace_alpha
+
+        def make_args(s):
+            a = self._add_meta_input(s, layout)
+            if other == "same_shape":
+                return a, self._add_meta_input(s, "contiguous")
+            if other == "broadcast_3d":
+                return a, torch.empty(s, 1, 5)
+            if other == "broadcast_1d":
+                return a, torch.empty(5)
+            if other == "zero_dim":
+                return a, torch.empty((), dtype=torch.float64)
+            return a, 2
+
+        cpp, python = self._add_meta_results(shape_kind, make_args, op="add_", py_meta=meta_binop_inplace_alpha)
+        self.assertEqual(cpp, python)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @parametrize("shape_kind", ["backed", "unbacked"])
+    @parametrize("static_self", [False, True])
+    def test_add__meta_static_and_symbolic_dims(self, shape_kind, static_self):
+        from torch._meta_registrations import meta_binop_inplace_alpha
+
+        def make_args(s):
+            args = (torch.empty(8, 3), torch.empty(s, 3))
+            return args if static_self else args[::-1]
+
+        cpp, python = self._add_meta_results(shape_kind, make_args, op="add_", py_meta=meta_binop_inplace_alpha)
+        self.assertEqual(cpp, python)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @parametrize("impl", ["cpp", "python"])
+    @parametrize(
+        "dtype,other,msg",
+        [
+            (torch.int64, 2.5, r"Promotion of int.add/sub_\(float\)"),
+            (torch.int32, torch.float16, r"Promotion of int.add/sub_\(float\)"),
+            (torch.bool, 2, r"Promotion of bool.add/sub_\(others\)"),
+            (torch.bool, torch.uint8, r"Promotion of bool.add/sub_\(others\)"),
+            (torch.float32, "bigger", r"output with shape torch.Size\(\[3\]\) doesn't match the broadcast shape \(2, 3\)"),
+            (torch.float32, "wider", r"output with shape torch.Size\(\[1\]\) doesn't match the broadcast shape \(3,\)"),
+        ],
+    )
+    def test_add__meta_errors(self, impl, dtype, other, msg):
+        from torch._meta_registrations import meta_binop_inplace_alpha
+
+        add_ = torch.ops.aten.add_.Tensor if impl == "cpp" else meta_binop_inplace_alpha
+        a = torch.empty(1 if other == "wider" else 3, dtype=dtype, device="meta")
+        if isinstance(other, torch.dtype):
+            other = torch.empty(3, dtype=other, device="meta")
+        elif isinstance(other, str):
+            other = torch.empty((2, 3) if other == "bigger" else (3,), device="meta")
+        with self.assertRaisesRegex(RuntimeError, msg):
+            add_(a, other)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @parametrize("impl", ["cpp", "python"])
+    def test_add__meta_symbolic_shape_error(self, impl):
+        from torch._dynamo.source import ConstantSource
+        from torch._meta_registrations import meta_binop_inplace_alpha
+        from torch._subclasses.fake_tensor import FakeTensorMode, in_kernel_invocation_manager
+        from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
+
+        shape_env = ShapeEnv()
+        source = ConstantSource("size")
+        symbol = shape_env.create_symbol(8, source=source, dynamic_dim=DimDynamic.DYNAMIC)
+        size = shape_env.create_symintnode(symbol, hint=8, source=source)
+        mode = FakeTensorMode(shape_env=shape_env)
+        with mode:
+            a, b = torch.empty(size), torch.empty(2, size)
+        add_ = torch.ops.aten.add_.Tensor if impl == "cpp" else meta_binop_inplace_alpha
+        msg = r"output with shape torch.Size\(\[s\d+\]\) doesn't match the broadcast shape \(2, s\d+\)"
+        with in_kernel_invocation_manager(mode), self.assertRaisesRegex(RuntimeError, msg):
+            add_(a, b)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @parametrize("shape_kind", ["static", "backed", "unbacked"])
+    @parametrize("layout", ["contiguous", "channels_last", "permuted", "non_contiguous", "expanded"])
+    @parametrize("other", [torch.int32, torch.int64, torch.bool, "broadcast_3d", "zero_dim_int64"])
+    def test_bitwise_and_meta_matches_python(self, shape_kind, layout, other):
+        def make_args(s):
+            a = self._add_meta_input(s, layout, torch.int32)
+            if isinstance(other, torch.dtype):
+                return a, self._add_meta_input(s, layout, other)
+            if other == "broadcast_3d":
+                return a, torch.empty(s, 1, 5, dtype=torch.int32)
+            return a, torch.empty((), dtype=torch.int64)
+
+        cpp, python = self._add_meta_results(shape_kind, make_args, op="bitwise_and")
+        self.assertEqual(cpp, python)
 
 
 instantiate_device_type_tests(TestMeta, globals())
