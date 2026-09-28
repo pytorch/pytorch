@@ -77,6 +77,7 @@ from torch._C._dynamo.guards import (
     TypeMROGuardAccessor,
 )
 from torch._dynamo.package import (
+    _globals_module_name,
     _Missing,
     _PRUNED_VALUE_PID,
     FunctionPicklerBase,
@@ -273,8 +274,6 @@ class FunctionCodeMetadata(NamedTuple):
 
 
 def _function_code_metadata(value: object) -> FunctionCodeMetadata | None:
-    from .package import _globals_module_name
-
     if type(value) is not types.FunctionType:
         return None
     module_name = _globals_module_name(value.__globals__)
@@ -284,7 +283,13 @@ def _function_code_metadata(value: object) -> FunctionCodeMetadata | None:
 
 
 def _function_code_matches(value: object, expected: FunctionCodeMetadata) -> bool:
-    return _function_code_metadata(value) == expected
+    # The code first: a different function fails there, before the globals
+    # module is resolved.
+    return (
+        type(value) is types.FunctionType
+        and value.__code__ == expected.code
+        and _function_code_metadata(value) == expected
+    )
 
 
 class MethodCodeMetadata(NamedTuple):
@@ -300,7 +305,9 @@ def _method_code_metadata(value: object) -> MethodCodeMetadata | None:
 
 
 def _method_code_matches(value: object, expected: MethodCodeMetadata) -> bool:
-    return _method_code_metadata(value) == expected
+    return type(value) is types.MethodType and _function_code_matches(
+        value.__func__, expected.func
+    )
 
 
 class NativeMethodMetadata(NamedTuple):
@@ -4494,6 +4501,47 @@ class GuardsStatePickler(FunctionPicklerBase):
                     # Values only: no pruned type is hashable, so a key can
                     # neither be one nor contain one.
                     stack.append(list(element.values()))
+        # What __tensor_unflatten__ gets back through a traceable wrapper
+        # subclass's ctx, which TENSOR_SUBCLASS_METADATA_MATCH compares whole:
+        # a pruned field would fail it after load. Held, not just ids, since
+        # __tensor_flatten__ may build the ctx afresh.
+        self._unflatten_ctx_values: dict[int, Any] = {}
+        self._collect_unflatten_ctx_values()
+
+    def _collect_unflatten_ctx_values(self) -> None:
+        from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
+        subclasses = [
+            value
+            for value in self.guard_tree_values.values()
+            if is_traceable_wrapper_subclass(value)
+        ]
+        stack = []
+        while subclasses:
+            subclass = subclasses.pop()
+            attrs, ctx = subclass.__tensor_flatten__()
+            stack.append(ctx)
+            for attr in attrs:
+                inner = getattr(subclass, attr)
+                if is_traceable_wrapper_subclass(inner):
+                    subclasses.append(inner)
+        while stack:
+            value = stack.pop()
+            if id(value) in self._unflatten_ctx_values:
+                continue
+            self._unflatten_ctx_values[id(value)] = value
+            if isinstance(value, (list, tuple, set, frozenset)):
+                stack.extend(value)
+            elif isinstance(value, dict):
+                stack.extend(value.values())
+            elif (
+                hasattr(value, "__dict__")
+                and not inspect.isclass(value)
+                and not inspect.ismodule(value)
+                and not inspect.isroutine(value)
+                and not isinstance(value, (torch.nn.Module, torch.Tensor))
+            ):
+                stack.extend(vars(value).values())
 
     @classmethod
     def _unpickle_module(cls, state: Any) -> torch.nn.Module:
@@ -5084,6 +5132,11 @@ class GuardsStatePickler(FunctionPicklerBase):
         if isinstance(obj, torch.nn.attention.SDPBackend):
             return type(self)._unpickle_sdp_backend, (obj.name,)
 
+        if isinstance(obj, enum.Enum) and _resolves_by_reference(obj):
+            # Enum's own __reduce_ex__ passes _value_ to the class, which may
+            # not round-trip, and a nested enum would hit the check below.
+            return getattr, (type(obj), obj.name)
+
         if type(obj).__qualname__ != type(obj).__name__ and not isinstance(obj, tuple):
             raise_local_type_error(type(obj))
 
@@ -5118,6 +5171,7 @@ class GuardsStatePickler(FunctionPicklerBase):
             and not pytree.is_constant_class(type(obj))
             and not is_opaque_constant_type(type(obj))
             and _pickles_from_dict(type(obj))
+            and id(obj) not in self._unflatten_ctx_values
         ):
             # A guarded user object (a train pipeline, a wrapper holding a
             # dataloader) would otherwise be pickled whole, so one unguarded
@@ -5125,7 +5179,8 @@ class GuardsStatePickler(FunctionPicklerBase):
             # reducers above get first refusal; user types only, since torch's
             # structural types (DTensorSpec) need fields no guard names.
             # Constant and opaque value types are compared whole by
-            # EQUALS_MATCH, so they are never pruned.
+            # EQUALS_MATCH, and a tensor subclass's ctx by
+            # TENSOR_SUBCLASS_METADATA_MATCH, so they are never pruned.
             self._prune_unguarded_attributes(obj)
 
         return NotImplemented
