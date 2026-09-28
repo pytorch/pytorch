@@ -87,6 +87,17 @@ except ImportError:
     )
 
 
+class _FixedConfigChoices(InductorChoices):
+    def __init__(self, fixed_config):
+        self.fixed_config = fixed_config
+
+    def triton_kernel_kwargs(self, kernel_cls, features, groups, kernel_kwargs):
+        return {
+            **kernel_kwargs,
+            "fixed_config": FixedTritonConfig(self.fixed_config),
+        }
+
+
 @instantiate_parametrized_tests
 class TestCodegenTriton(InductorTestCase):
     def setUp(self):
@@ -441,18 +452,11 @@ def helper(x):
     def test_mix_order_rejects_incompatible_fixed_config(
         self, split_size, fixed_config, error
     ):
-        class CustomChoices(InductorChoices):
-            def triton_kernel_kwargs(self, kernel_cls, features, groups, kernel_kwargs):
-                return {
-                    **kernel_kwargs,
-                    "fixed_config": FixedTritonConfig(fixed_config),
-                }
-
         xnumel = sympy.Integer(40961)
         rnumel = sympy.Integer(129)
         with (
             self._graph.set_current_device(torch.device("cpu")),
-            V.set_choices_handler(CustomChoices()),
+            V.set_choices_handler(_FixedConfigChoices(fixed_config)),
             self.assertRaisesRegex(ValueError, error),
         ):
             TritonScheduling(None)._create_kernel_for_mix_order_reduction(
@@ -468,18 +472,11 @@ def helper(x):
         ),
     )
     def test_mix_order_normalizes_fixed_config(self, fixed_config):
-        class CustomChoices(InductorChoices):
-            def triton_kernel_kwargs(self, kernel_cls, features, groups, kernel_kwargs):
-                return {
-                    **kernel_kwargs,
-                    "fixed_config": FixedTritonConfig(fixed_config),
-                }
-
         xnumel = sympy.Integer(40961)
         rnumel = sympy.Integer(129)
         with (
             self._graph.set_current_device(torch.device("cpu")),
-            V.set_choices_handler(CustomChoices()),
+            V.set_choices_handler(_FixedConfigChoices(fixed_config)),
         ):
             kernel = TritonScheduling(None)._create_kernel_for_mix_order_reduction(
                 SIMDKernelFeatures([], xnumel, rnumel),

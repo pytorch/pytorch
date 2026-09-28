@@ -54,6 +54,19 @@ def _supports_tensor_descriptors(device):
     )
 
 
+class _FixedMixOrderChoices(InductorChoices):
+    def __init__(self, fixed_config):
+        self.fixed_config = fixed_config
+
+    def triton_kernel_kwargs(self, kernel_cls, features, groups, kernel_kwargs):
+        if kernel_kwargs.get("mix_order_reduction"):
+            return {
+                **kernel_kwargs,
+                "fixed_config": FixedTritonConfig(self.fixed_config),
+            }
+        return kernel_kwargs
+
+
 class SkipPatternTest(TestBase):
     """
     Illustate the cases that we skip mix-order reduction. We skip in cases
@@ -1637,20 +1650,6 @@ class MixOrderReductionNumericTest(TestBase):
 
         rows = 40961
 
-        class FixedMixOrderChoices(InductorChoices):
-            def triton_kernel_kwargs(self, kernel_cls, features, groups, kernel_kwargs):
-                if kernel_kwargs.get("mix_order_reduction"):
-                    return {
-                        **kernel_kwargs,
-                        "fixed_config": FixedTritonConfig(
-                            {
-                                "XBLOCK": 1,
-                                "NUM_STAGES": 1,
-                            }
-                        ),
-                    }
-                return kernel_kwargs
-
         def f(x):
             y = x * 2 + 0.25
             return y.max(dim=-1).values, y.float().sum(dim=0)
@@ -1658,7 +1657,9 @@ class MixOrderReductionNumericTest(TestBase):
         x = torch.zeros((rows, 129), dtype=torch.bfloat16, device=device)
         expected = f(x)
         with (
-            V.set_choices_handler(FixedMixOrderChoices()),
+            V.set_choices_handler(
+                _FixedMixOrderChoices({"XBLOCK": 1, "NUM_STAGES": 1})
+            ),
             inductor_config.patch(
                 {
                     "triton.use_tensor_descriptor": use_tensor_descriptor,
@@ -1690,20 +1691,6 @@ class MixOrderReductionNumericTest(TestBase):
         if not _supports_tensor_descriptors(device):
             self.skipTest("requires tensor descriptor support")
 
-        class FixedMixOrderChoices(InductorChoices):
-            def triton_kernel_kwargs(self, kernel_cls, features, groups, kernel_kwargs):
-                if kernel_kwargs.get("mix_order_reduction"):
-                    return {
-                        **kernel_kwargs,
-                        "fixed_config": FixedTritonConfig(
-                            {
-                                "XBLOCK": 8,
-                                "NUM_STAGES": num_stages,
-                            }
-                        ),
-                    }
-                return kernel_kwargs
-
         def f(x, y):
             return x.sum(dim=1), (x + y).float().sum(dim=0)
 
@@ -1711,7 +1698,9 @@ class MixOrderReductionNumericTest(TestBase):
         y = torch.ones_like(x)
         expected = f(x, y)
         with (
-            V.set_choices_handler(FixedMixOrderChoices()),
+            V.set_choices_handler(
+                _FixedMixOrderChoices({"XBLOCK": 8, "NUM_STAGES": num_stages})
+            ),
             inductor_config.patch("triton.enable_host_side_tma", enable_host_side_tma),
         ):
             actual, (wrapper,) = utils.run_and_get_code(torch.compile(f), x, y)
@@ -1728,6 +1717,39 @@ class MixOrderReductionNumericTest(TestBase):
             FileCheck().check("'uses_device_tma': True").run(wrapper)
         else:
             FileCheck().check_not("'uses_tma': True").run(wrapper)
+
+    @inductor_config.patch(
+        {
+            "split_reductions": False,
+            "triton.cooperative_reductions": False,
+            "triton.force_cooperative_reductions": False,
+            "triton.mix_order_reduction": True,
+            "triton.mix_order_reduction_autotune_split_size": True,
+            "triton.use_tensor_descriptor": True,
+            "triton.enable_host_side_tma": True,
+            "assume_aligned_inputs": True,
+        }
+    )
+    def test_fixed_multistage_host_tma_reduction_store(self, device):
+        if not _supports_tensor_descriptors(device):
+            self.skipTest("requires tensor descriptor support")
+
+        def f(x):
+            y = x.float()
+            return y.sum(dim=1), y.sum(dim=0)
+
+        x = torch.ones((40960, 128), dtype=torch.bool, device=device)
+        expected = f(x)
+        with V.set_choices_handler(
+            _FixedMixOrderChoices({"XBLOCK": 8, "NUM_STAGES": 2})
+        ):
+            actual, (wrapper,) = utils.run_and_get_code(torch.compile(f), x)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(metrics.codegen_mix_order_reduction, 1)
+        self.assertIn("host_tma_descriptor_args", wrapper)
+        self.assertNotIn("tl.make_tensor_descriptor", wrapper)
+        self.assertNotIn("'uses_device_tma': True", wrapper)
 
 
 instantiate_device_type_tests(

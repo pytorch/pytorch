@@ -51,11 +51,7 @@ from ..optimize_indexing import (
     indexing_dtype_strength_reduction,
 )
 from ..runtime.coordinate_descent_tuner import CoordescTuner
-from ..runtime.hints import (
-    DeviceProperties,
-    InductorMeta,
-    is_valid_mix_order_reduction_xblock,
-)
+from ..runtime.hints import DeviceProperties, InductorMeta
 from ..runtime.runtime_utils import (
     green_text,
     last_power_of_2,
@@ -3362,11 +3358,11 @@ class SIMDScheduling(BaseScheduling):
                     f"match scheduled RSPLIT_SIZE={split_size}"
                 )
             xblock = kernel.fixed_config["XBLOCK"]
-            if not is_valid_mix_order_reduction_xblock(xblock, split_size):
-                if type(xblock) is not int or xblock <= 0 or xblock & (xblock - 1):
-                    raise ValueError(
-                        f"fixed XBLOCK={xblock} must be a positive power of two"
-                    )
+            if type(xblock) is not int or xblock <= 0 or xblock & (xblock - 1):
+                raise ValueError(
+                    f"fixed XBLOCK={xblock} must be a positive power of two"
+                )
+            if split_size % xblock:
                 raise ValueError(
                     f"RSPLIT_SIZE={split_size} is incompatible with fixed "
                     f"XBLOCK={xblock}"
