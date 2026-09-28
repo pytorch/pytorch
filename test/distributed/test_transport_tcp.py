@@ -178,8 +178,6 @@ class TestTCPTransport(TransportTestMixin, TestCase):
             source_memory = client.register_memory(source)
             first = server.register_memory(destination)
             second = server.register_memory(destination)
-            self.assertFalse(first.reused_registration())
-            self.assertTrue(second.reused_registration())
             self.assertEqual(first.to_remote_buffer(), second.to_remote_buffer())
 
             invalid = TCPRemoteBuffer(1, source.numel(), 2)

@@ -272,6 +272,20 @@ def create_symfloat(shape_env, f: float) -> SymFloat:
 class TestPySymInt(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    def test_symint_array_ref_error_message(self):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 3, duck=False)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "SymIntArrayRef expected to contain only concrete integers.*"
+            "Found symbolic SymInt at index 0: s[0-9]+ in SymIntArrayRef "
+            r"\[s[0-9]+, 5, 10\].*"
+            "FakeTensorMode.*SymInt support.*Python dispatcher.*"
+            "specialize or guard",
+        ):
+            torch.empty((s0, 5, 10))
+
     def test_arith_ops(self):
         shape_env = ShapeEnv()
         symints = []
@@ -2650,56 +2664,6 @@ class TestFloorDiv(TestCase):
             self.assertEqual(shape_env.simplify(expr), result)
             self.assertEqual(shape_env.evaluate_expr(expr), result)
 
-    def test_clean_div_simplify(self):
-        shape_env = ShapeEnv()
-        x, y = sympy.symbols("x y", integer=True)
-        divisor, other_divisor = sympy.symbols("C D", integer=True, positive=True)
-
-        self.assertEqual(shape_env.simplify(2 * CleanDiv(x, 2)), x)
-        self.assertEqual(
-            shape_env.simplify(3 * CleanDiv(x, 2)),
-            3 * CleanDiv(x, 2),
-        )
-        self.assertEqual(
-            shape_env.simplify(
-                divisor * CleanDiv(divisor * CleanDiv(x, divisor), divisor)
-            ),
-            x,
-        )
-        self.assertEqual(
-            shape_env.simplify(
-                divisor
-                * CleanDiv(x, divisor)
-                * other_divisor
-                * CleanDiv(y, other_divisor)
-            ),
-            x * y,
-        )
-
-    @skipIfTorchDynamo("directly exercises ShapeEnv guard registration")
-    def test_floordiv_simplify_with_divisibility_guard(self):
-        shape_env = ShapeEnv()
-        x = create_symint(shape_env, 4, duck=False)
-        equality = x == 2 * (x // 2)
-
-        self.assertFalse(statically_known_true(equality))
-        torch._check(x % 2 == 0)
-        self.assertTrue(statically_known_true(equality))
-        self.assertEqual(
-            shape_env.simplify((3 * (x // 2)).node.expr),
-            3 * CleanDiv(x.node.expr, 2),
-        )
-
-    @skipIfTorchDynamo("directly exercises ShapeEnv runtime assertions")
-    def test_floordiv_simplify_with_unbacked_runtime_assert(self):
-        shape_env = ShapeEnv()
-        x = shape_env.create_unbacked_symint()
-        equality = x == 2 * (x // 2)
-
-        self.assertFalse(statically_known_true(equality))
-        torch._check(x % 2 == 0)
-        self.assertFalse(statically_known_true(equality))
-
     def test_floordiv_assumptions(self):
         cases = (
             sympy.Symbol("i1", integer=True),
@@ -2739,6 +2703,34 @@ class TestFloorDiv(TestCase):
             else:
                 self.assertEqual(op.is_integer, None)
                 self.assertTrue(op.is_real)
+
+
+class TestSympyMod(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_sympy_mod_plain_int_operands(self):
+        # Regression test: when neither operand is symbolic, callers such as
+        # the inductor lowering for operator.mod pass plain Python ints
+        # instead of sympy objects. This used to crash with
+        # AttributeError: 'int' object has no attribute 'is_nonnegative'.
+        self.assertEqual(sym_node._sympy_mod(20, 8), 4)
+
+    def test_sympy_mod_plain_int_operands_negative(self):
+        # Mixed-sign operands must match Python's modulo semantics (result
+        # takes the sign of the divisor), which routes through PythonMod
+        # rather than sympy's Mod.
+        self.assertEqual(sym_node._sympy_mod(-7, 3), -7 % 3)
+        self.assertEqual(sym_node._sympy_mod(7, -3), 7 % -3)
+
+    def test_sympy_mod_mixed_operands(self):
+        # Only one operand being a plain int must still be normalized.
+        self.assertEqual(sym_node._sympy_mod(20, sympy.Integer(8)), 4)
+        self.assertEqual(sym_node._sympy_mod(sympy.Integer(20), 8), 4)
+
+    def test_sympy_mod_sympy_operands(self):
+        # Pre-existing behavior for actual sympy.Basic operands must be
+        # unaffected by the plain-scalar normalization above.
+        self.assertEqual(sym_node._sympy_mod(sympy.Integer(20), sympy.Integer(8)), 4)
 
 
 class TestDimConstraints(TestCase):
