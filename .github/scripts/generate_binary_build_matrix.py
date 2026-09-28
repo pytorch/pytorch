@@ -32,7 +32,7 @@ CUDA_STABLE = "13.2"
 CUDA_ARCHES_FULL_VERSION = {
     "12.6": "12.6.3",
     "13.2": "13.2.2",
-    "13.4": "13.4.1",
+    "13.4": "13.4.2",
 }
 # CUDA versions that can only produce the runtime docker image. The devel image
 # apt-installs cuda-toolkit-<major>-<minor> from NVIDIA's repo.
@@ -67,7 +67,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-nvshmem-cu13==3.7.2; platform_system == 'Linux'"
     ),
     "13.4": (
-        "cuda-toolkit[nvrtc,cudart,cupti,cufft,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.4.1; platform_system == 'Linux' | "
+        "cuda-toolkit[nvrtc,cudart,cupti,cufft,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.4.2; platform_system == 'Linux' | "
         "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | "
         "cupti-python==13.4.0; platform_system == 'Linux' and python_version < '3.15' | "
         "nvidia-cudnn-cu13==9.26.0.51; platform_system == 'Linux' | "
