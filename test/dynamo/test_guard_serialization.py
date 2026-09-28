@@ -289,6 +289,14 @@ def _wraps_wrapper(x):
     return _wrapped_target(x)
 
 
+class _AllocatingLinear(torch.nn.Linear):
+    allocations = 0
+
+    def __new__(cls, *args, **kwargs):
+        _AllocatingLinear.allocations += 1
+        return super().__new__(cls)
+
+
 class UnpicklableDefault:
     def __reduce__(self):
         raise RuntimeError("unrelated default cannot pickle")
@@ -1470,6 +1478,53 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertEqual(
             load_guards_state(buf.getvalue())["t"].dispatch_keys.raw_repr(), real_keys
         )
+
+    @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
+    def test_loaded_fsdp_module_keeps_its_wrapper_type(self):
+        from torch.distributed.fsdp import FSDPModule
+        from torch.distributed.fsdp._fully_shard._fsdp_init import _apply_to_module
+        from torch.distributed.fsdp._fully_shard._fully_shard import (
+            _unimplemented_deepcopy,
+            disable_fsdp_module_new_init,
+            get_cls_to_fsdp_cls,
+        )
+
+        m = _AllocatingLinear(2, 2)
+        _apply_to_module(
+            (m,), get_cls_to_fsdp_cls(), FSDPModule, "FSDP", _unimplemented_deepcopy
+        )
+        fsdp_cls = type(m)
+        buf = io.BytesIO()
+        GuardsStatePickler({id(m): m}, {}, {}, {}, buf).dump({"m": m})
+        allocations = _AllocatingLinear.allocations
+        loaded = load_guards_state(buf.getvalue())["m"]
+        # A TYPE_MATCH on the live module compares against the wrapper class.
+        self.assertIs(type(loaded), fsdp_cls)
+        self.assertEqual(loaded.reshard.__func__, FSDPModule.reshard)
+        self.assertEqual(_AllocatingLinear.allocations, allocations + 1)
+        # Outside a load, calling the wrapper class builds the original module,
+        # including in a thread that was already running when a load started.
+        self.assertIs(type(fsdp_cls(2, 2)), _AllocatingLinear)
+        built = []
+        errors = []
+        loading = threading.Event()
+
+        def build():
+            try:
+                loading.wait()
+                built.append(fsdp_cls(2, 2))
+            except Exception as e:
+                errors.append(e)
+
+        worker = threading.Thread(target=build)
+        worker.start()
+        with disable_fsdp_module_new_init():
+            loading.set()
+            worker.join()
+        if errors:
+            raise errors[0]
+        self.assertIs(type(built[0]), _AllocatingLinear)
+        self.assertEqual(built[0].weight.shape, (2, 2))
 
     def test_retained_grad_non_leaf_survives_pickle(self):
         # A plain non-leaf's .grad is None (and reading it warns), but a
