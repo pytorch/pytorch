@@ -300,6 +300,24 @@ class AsyncCompile:
             )
         return ThreadPoolExecutor(get_compile_threads())
 
+    @classmethod
+    def drain_pending(cls) -> None:
+        """Finish compiler work and result callbacks after submissions have stopped."""
+        for future in list(CompiledTritonKernels._cache.values()):
+            if not isinstance(future, StaticAutotunerFuture):
+                future.result()
+        if cls.pool.cache_info().currsize:
+            cls.pool().shutdown(wait=True)
+            cls.pool.cache_clear()
+        if cls._ready_future is not None:
+            cls._ready_future.result()
+        for pool in _pool_set:
+            if isinstance(pool, SubprocPool):
+                pool.drain_pending()
+            else:
+                pool.shutdown(wait=True)
+        shutdown_compile_workers()
+
     @staticmethod
     def _get_ready():
         """No-op function to help mark when the subprocess pool is ready."""
@@ -535,7 +553,12 @@ class AsyncCompile:
                 torch._inductor.codecache.PyCodeCache.load(source_code), kernel_name
             )
 
-        is_parallel = self.use_process_pool()
+        from torch.compiler._no_compile import (
+            check_compilation_allowed,
+            is_compilation_forbidden,
+        )
+
+        is_parallel = not is_compilation_forbidden() and self.use_process_pool()
         set_feature_use("parallel_compile_post_warmup", is_parallel)
 
         compile_id = torch._guards.CompileContext.current_compile_id()
@@ -554,6 +577,13 @@ class AsyncCompile:
                 return future.result()
 
         # Cache miss
+        check_compilation_allowed(
+            "Triton kernel cache miss",
+            "no_compilation() only serves Triton kernels already in Inductor's "
+            "in-process kernel cache (statically launchable ones restored from a "
+            "cache bundle); loading a kernel through triton.compile, even from "
+            "Triton's on-disk cache, counts as compilation.",
+        )
         if is_parallel:
             # Ensure libdevice path is set in os.environ before passing to workers
             _set_triton_libdevice_path()
@@ -566,7 +596,10 @@ class AsyncCompile:
             ]
             extra_env = {v: os.environ.get(v) for v in env_vars}
             extra_config = {
-                "use_static_triton_launcher": torch._inductor.config.use_static_triton_launcher
+                "use_static_triton_launcher": torch._inductor.config.use_static_triton_launcher,
+                "static_launch_user_defined_triton_kernels": (
+                    torch._inductor.config.static_launch_user_defined_triton_kernels
+                ),
             }
 
             if len(torch._inductor.config.autotune_lookup_table) > 0:
@@ -727,6 +760,9 @@ class AsyncCompile:
         return self.submit(task)
 
     def halide(self, meta: HalideMeta, source_code: str):
+        from torch.compiler._no_compile import check_compilation_allowed
+
+        check_compilation_allowed("Halide kernel compilation")
         kernel_code_log.info("Halide Kernel:\n%r\n%s", meta, source_code)
         if get_compile_threads() <= 1:
             return HalideCodeCache.generate_halide(meta, source_code)
@@ -756,6 +792,9 @@ class AsyncCompile:
             CuteDSL currently requires source files to do its compilation, there we
             use the PyCodeCache to write the source code to a file and load it.
         """
+        from torch.compiler._no_compile import check_compilation_allowed
+
+        check_compilation_allowed("CuTe DSL runtime JIT")
         from torch._inductor.codegen.cutedsl.cutedsl_kernel import (
             CuteDSLKernelWrapper,
             MAIN_SUFFIX,
@@ -814,6 +853,9 @@ class AsyncCompile:
         `{kernel_name}_main` entry point is exposed through the standard
         kernel ``.run()`` interface.
         """
+        from torch.compiler._no_compile import check_compilation_allowed
+
+        check_compilation_allowed("FlyDSL runtime JIT")
         from torch._inductor.codegen.flydsl import flydsl_utils
         from torch._inductor.codegen.flydsl.flydsl_kernel import (
             FlyDSLKernelWrapper,
@@ -884,6 +926,9 @@ class AsyncCompile:
             Pallas kernels are Python code that uses JAX and Pallas APIs.
             We use the PyCodeCache to write the source code to a file and load it.
         """
+        from torch.compiler._no_compile import check_compilation_allowed
+
+        check_compilation_allowed("Pallas runtime JIT")
         from torch._inductor.codegen.pallas import MAIN_SUFFIX, PallasKernelWrapper
 
         kernel_code_log.info("Pallas Kernel:\n%s", source_code)
