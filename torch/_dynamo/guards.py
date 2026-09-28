@@ -1042,7 +1042,9 @@ def _saved_tensors_hooks_fingerprint(hooks: Any) -> tuple[str | None, ...] | Non
                 # gm.code names a call_function target only by name; the
                 # AOTAutograd cache's safety rule says which names that is
                 # enough for, and an fx.wrap user_cache_hash names the body.
-                check_node_safe(node)
+                # A call_method's name and receiver are both in gm.code.
+                if node.op == "call_function":
+                    check_node_safe(node)
                 if (user_hash := node.meta.get("user_cache_hash")) is not None:
                     h.update(str(user_hash).encode())
         except BypassAOTAutogradCache:

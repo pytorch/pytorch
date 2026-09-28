@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: pt2"]
+import contextlib
 import copy
 import errno
 import functools
@@ -14,6 +15,7 @@ import sys
 import tempfile
 import textwrap
 import threading
+import types
 import typing
 import unittest
 import uuid
@@ -5587,23 +5589,36 @@ class TestPrecompileNoCompilation(TestCase):
         self.assertEqual(multi_kernel.mock_calls, [])
 
     @parametrize("backend", ("cutedsl", "flydsl", "pallas", "nv_universal_gemm"))
-    def test_no_compilation_rejects_alternate_runtime_jit_before_dispatch(
-        self, backend
-    ):
+    def test_no_compilation_loads_alternate_runtime_kernel_in_process(self, backend):
+        from torch._inductor import async_compile
         from torch._inductor.async_compile import AsyncCompile
         from torch._inductor.codecache import PyCodeCache
+        from torch._inductor.codegen.flydsl import flydsl_utils
 
+        kernel = mock.Mock()
         with (
             torch.compiler.precompile.no_compilation(),
+            mock.patch.object(AsyncCompile, "use_process_pool") as readiness,
             mock.patch.object(AsyncCompile, "process_pool") as pool,
             mock.patch.object(AsyncCompile, "submit") as submit,
-            mock.patch.object(PyCodeCache, "write") as write,
-            self.assertRaisesRegex(PrecompileError, "runtime JIT"),
+            mock.patch.object(async_compile, "get_compile_threads", return_value=1),
+            mock.patch.object(flydsl_utils, "runtime_available", return_value=True),
+            mock.patch.object(PyCodeCache, "write", return_value=("key", "path")),
+            mock.patch.object(
+                PyCodeCache,
+                "load_by_key_path",
+                return_value=types.SimpleNamespace(k_main=kernel),
+            ),
         ):
-            getattr(AsyncCompile(), backend)("missing_kernel", "missing source")
+            # A compiled module calls these at import; loading its Python
+            # source is not compilation, the kernel's first run() is.
+            wrapper = getattr(AsyncCompile(), backend)("k", "source")
+            with self.assertRaisesRegex(PrecompileError, "runtime JIT"):
+                wrapper.run()
+        readiness.assert_not_called()
         pool.assert_not_called()
         submit.assert_not_called()
-        write.assert_not_called()
+        kernel.assert_not_called()
 
     def test_no_compilation_rejects_halide_build_but_not_built_kernel(self):
         from torch._inductor import codecache
@@ -5694,22 +5709,51 @@ class TestPrecompileNoCompilation(TestCase):
             [mock.call(1, stream=None), mock.call(2, stream=None)],
         )
 
+    @parametrize("up_to_date", (False, True))
     @parametrize("inline", (False, True))
-    def test_no_compilation_rejects_extension_jit_before_build(self, inline):
+    def test_no_compilation_gates_fresh_process_extension_load_on_ninja(
+        self, inline, up_to_date
+    ):
         from torch.utils import cpp_extension
+        from torch.utils._cpp_extension_versioner import ExtensionVersioner
 
         name = f"precompile_no_compilation_ext_{uuid.uuid4().hex}"
+        dry_run = subprocess.CompletedProcess(
+            ["ninja", "-n"],
+            0,
+            stdout=b"ninja: no work to do.\n"
+            if up_to_date
+            else b"[1/2] c++ main.cpp\n",
+        )
+
+        def build(**kwargs):
+            cpp_extension._run_ninja_build(
+                kwargs["build_directory"], kwargs["verbose"], "extension"
+            )
+
         with (
             tempfile.TemporaryDirectory() as build_directory,
+            # What a new process starts with, even when build_directory
+            # already holds an up-to-date library.
             mock.patch.object(
-                cpp_extension, "_write_ninja_file_and_build_library"
-            ) as build,
+                cpp_extension, "JIT_EXTENSION_VERSIONER", ExtensionVersioner()
+            ),
+            mock.patch.object(
+                cpp_extension, "_write_ninja_file_and_build_library", side_effect=build
+            ),
+            mock.patch.object(
+                cpp_extension.subprocess, "run", return_value=dry_run
+            ) as run,
             mock.patch.object(cpp_extension, "_import_module_from_library") as load,
+            torch.compiler.precompile.no_compilation(),
         ):
-            with (
-                torch.compiler.precompile.no_compilation(),
-                self.assertRaisesRegex(PrecompileError, r"C\+\+ extension runtime JIT"),
-            ):
+            with contextlib.ExitStack() as stack:
+                if not up_to_date:
+                    stack.enter_context(
+                        self.assertRaisesRegex(
+                            PrecompileError, r"C\+\+ extension compilation"
+                        )
+                    )
                 if inline:
                     cpp_extension.load_inline(
                         name, "int f() { return 0; }", build_directory=build_directory
@@ -5719,8 +5763,9 @@ class TestPrecompileNoCompilation(TestCase):
                     with open(source, "w") as f:
                         f.write("int f() { return 0; }\n")
                     cpp_extension.load(name, [source], build_directory=build_directory)
-        build.assert_not_called()
-        load.assert_not_called()
+        run.assert_called_once()
+        self.assertEqual(run.call_args.args[0], ["ninja", "-n"])
+        self.assertEqual(load.call_count, int(up_to_date))
 
     def test_no_compilation_allows_unchanged_extension_reload(self):
         from torch.utils import cpp_extension
@@ -5742,16 +5787,26 @@ class TestPrecompileNoCompilation(TestCase):
         build.assert_called_once()
         self.assertEqual(load.call_count, 2)
 
-    def test_no_compilation_rejects_extension_build_before_subprocess(self):
+    @parametrize(
+        "returncode,output",
+        ((0, b"[1/1] c++ main.o\n"), (1, b"ninja: error: loading 'build.ninja'\n")),
+    )
+    def test_no_compilation_rejects_extension_build_before_subprocess(
+        self, returncode, output
+    ):
         from torch.utils import cpp_extension
 
+        dry_run = subprocess.CompletedProcess(["ninja", "-n"], returncode, output)
         with (
             torch.compiler.precompile.no_compilation(),
-            mock.patch.object(cpp_extension.subprocess, "run") as build,
+            mock.patch.object(
+                cpp_extension.subprocess, "run", return_value=dry_run
+            ) as run,
             self.assertRaisesRegex(PrecompileError, r"C\+\+ extension compilation"),
         ):
             cpp_extension._run_ninja_build("missing", False, "extension")
-        build.assert_not_called()
+        run.assert_called_once()
+        self.assertEqual(run.call_args.args[0], ["ninja", "-n"])
 
     def test_no_compilation_rejects_only_a_cpp_kernel_cache_miss(self):
         from torch._inductor import codecache
