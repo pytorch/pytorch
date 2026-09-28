@@ -501,6 +501,38 @@ class TestLDLCustomKernel(TestCase):
         )
 
     @onlyCUDA
+    @parametrize("structure", list(STRUCTURES))
+    @parametrize("n", list(range(2, 41)))
+    @dtypes(torch.float64, torch.complex128)
+    def test_pivots_match_cpu(self, device, dtype, n, structure):
+        """CUDA and CPU Bunch-Kaufman must choose identical pivots for small n.
+
+        This is the one place the suite compares pivots against CPU, and it is
+        confined to n <= 40 deliberately. Up to NB=32 the panel kernel runs the
+        whole factorization with no inter-panel GEMM, so it follows LAPACK's
+        sequential zhetf2 closely enough for the choices to coincide exactly;
+        33..40 add one boundary with a trailing block of at most 8 columns.
+        Beyond that the agreement genuinely breaks down -- the thresholds are
+        tight and a different summation order picks a different, equally valid
+        sequence -- which is why every other test here validates by residual.
+
+        Verified to hold across all 17 structures and 10 seeds each, so a
+        mismatch means the pivot search changed, not that the input was unlucky.
+        """
+        if structure in _NEEDS_ROOM and n < 4:
+            self.skipTest(f"{structure} is singular for n={n}")
+        for seed in range(10):
+            torch.manual_seed(seed)
+            A = STRUCTURES[structure](n, (), dtype, device)
+            _, piv_cuda, _ = torch.linalg.ldl_factor_ex(A, hermitian=True)
+            _, piv_cpu, _ = torch.linalg.ldl_factor_ex(A.cpu(), hermitian=True)
+            with self.subTest(seed=seed):
+                self.assertTrue(
+                    torch.equal(piv_cuda.cpu(), piv_cpu),
+                    f"n={n} seed={seed}: cuda={piv_cuda.cpu().tolist()} cpu={piv_cpu.tolist()}",
+                )
+
+    @onlyCUDA
     @parametrize("structure", ["indefinite", "zero_diagonal", "out_of_panel_heavy"])
     @dtypes(torch.float64, torch.complex128)
     def test_many_seeds(self, device, dtype, structure):
