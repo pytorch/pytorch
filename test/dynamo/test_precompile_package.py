@@ -94,6 +94,12 @@ def _unportable_op(x):
 _unportable_op = _without_module_globals(_unportable_op)
 
 
+class _Doubling(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x):
+        return x * 2
+
+
 def _stack(*filenames):
     """A guard's user_stack, outermost frame first."""
     return traceback.StackSummary.from_list([(f, 1, "forward", "") for f in filenames])
@@ -313,6 +319,22 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         entries = [_entry(LocalSource("obj"), None, t, derived=d) for t, d in rows]
         keep = precompile_package.default_guard_filter_fn(entries)
         self.assertEqual(list(zip(rows, keep)), [(row, True) for row in rows])
+
+    def test_default_guard_filter_keeps_a_class_bound_builtin(self):
+        class LocalFn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x
+
+        rows = [
+            ("ID_MATCH", _Doubling.apply, True),
+            ("CLOSURE_MATCH", _Doubling.apply, True),
+            ("ID_MATCH", LocalFn.apply, False),
+            ("CLOSURE_MATCH", LocalFn.apply, False),
+        ]
+        entries = [_entry(GlobalSource("apply"), v, t) for t, v, _ in rows]
+        keep = precompile_package.default_guard_filter_fn(entries)
+        self.assertEqual(list(keep), [k for _, _, k in rows])
 
     def test_default_guard_filter_through_serialize_guards(self):
         def fn(x):

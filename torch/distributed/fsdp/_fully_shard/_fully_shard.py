@@ -311,7 +311,11 @@ _fsdp_module_new_init_disabled: ContextVar[bool] = ContextVar(
 @contextmanager
 def disable_fsdp_module_new_init() -> Iterator[None]:
     """Make ``FSDPModule.__new__`` return an uninitialized instance of the
-    wrapper class itself, for rebuilding a module from saved state."""
+    wrapper class itself, for rebuilding a module from saved state.
+
+    Do not call an FSDP class inside this context: Python would run the original
+    ``__init__`` on that instance, returning a wrapper with no FSDP state.
+    """
     token = _fsdp_module_new_init_disabled.set(True)
     try:
         yield
@@ -329,12 +333,13 @@ class FSDPModule:
         """
         Override ``__new__`` to remove the FSDP class and directly construct
         the original class for cases like indexing into a container module.
-        Guard-state deserialization disables initialization and preserves the
-        wrapper class so its type guards match the live FSDP module.
+        Under ``disable_fsdp_module_new_init``, return an uninitialized
+        instance of ``cls`` itself, so a module rebuilt from guard state keeps
+        the wrapper type its guards match.
         """
-        if _fsdp_module_new_init_disabled.get():
-            return object.__new__(cls)
         orig_cls = cls.__mro__[cls._orig_cls_mro_index]
+        if _fsdp_module_new_init_disabled.get():
+            return orig_cls.__new__(cls)
         self = orig_cls.__new__(orig_cls, *args, **kwargs)
         self.__init__(*args, **kwargs)
         return self
