@@ -21,6 +21,7 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     isRocmArchAnyOf,
     MI200_ARCH,
+    recover_orig_fp32_precision,
     skipIfXpu,
     TEST_WITH_ROCM,
 )
@@ -778,6 +779,277 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             self._check_common(
                 model, args1=args, contains=False, atol=1e-3, has_fuse_pattern=False
             )
+
+    def _test_pattern_fails_with_tensor_scale(self):
+        # https://github.com/pytorch/pytorch/issues/191203
+        def model(query, key, value, attn_mask, scale):
+            # Dividing by scale makes the scale gradients very unstable
+            scale = scale.detach()
+            scores = query @ key.transpose(-2, -1) / scale
+            weights = torch.softmax(scores + attn_mask, dim=-1)
+            return weights @ value
+
+        tensor_shape = (2, 4, 4, 4)
+        args = [
+            torch.randn(tensor_shape, device=self.device),
+            torch.randn(tensor_shape, device=self.device),
+            torch.randn(tensor_shape, device=self.device),
+            torch.randn((1, 1, 4, 4), device=self.device),
+            torch.tensor(0.5, device=self.device),
+        ]
+        self._check_common(
+            model, args1=args, contains=False, atol=1e-3, has_fuse_pattern=False
+        )
+        self.assertEqual(counters["inductor"]["fuse_attention"], 0)
+
+    def _test_pattern_fails_with_batch_permuted_key(self):
+        # https://github.com/pytorch/pytorch/issues/195320
+        def dot_prod_attention(query, key, value):
+            # key arrives as (B, T, H, D); permute(0, 2, 3, 1) also moves
+            # batch axes, so it is not key.transpose(-2, -1) and must not
+            # fuse as attention.
+            return (
+                torch.matmul(query, key.permute(0, 2, 3, 1))
+                .mul(1.0 / math.sqrt(key.shape[-1]))
+                .softmax(dim=-1)
+                .matmul(value)
+            )
+
+        def control_dot_prod_attention(query, key, value):
+            return (
+                torch.matmul(query, key.transpose(-2, -1))
+                .mul(1.0 / math.sqrt(key.shape[-1]))
+                .softmax(dim=-1)
+                .matmul(value)
+            )
+
+        # batch 1 keeps the permuted key viewable (no clone in the matmul
+        # decomposition) and T == H keeps the mis-bound replacement shape
+        # consistent, so before the fix this silently fused and produced
+        # wrong results instead of crashing.
+        tensor_shape = (1, 8, 8, 8)
+
+        def make_args():
+            return [torch.randn(tensor_shape, device=self.device) for _ in range(3)]
+
+        self._check_common(
+            dot_prod_attention,
+            args1=make_args(),
+            contains=False,
+            has_fuse_pattern=False,
+        )
+        self.assertEqual(counters["inductor"]["fuse_attention"], 0)
+        # the same shapes spelled with a genuine transpose must still fuse
+        self._check_common(control_dot_prod_attention, args1=make_args())
+
+        # a negative-dim spelling of the same transpose must also fuse
+        def negative_dims_dot_prod_attention(query, key, value):
+            return (
+                torch.matmul(query, key.permute(0, 1, -1, -2))
+                .mul(1.0 / math.sqrt(key.shape[-1]))
+                .softmax(dim=-1)
+                .matmul(value)
+            )
+
+        self._check_common(negative_dims_dot_prod_attention, args1=make_args())
+
+    def _test_pattern_fails_with_non_last_dim_softmax(self):
+        # https://github.com/pytorch/pytorch/issues/195320
+        def dot_prod_attention(query, key, value):
+            # softmax over dim=-2 is a different computation and must not
+            # fuse as attention
+            scores = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(
+                query.shape[-1]
+            )
+            return scores.softmax(dim=-2).matmul(value)
+
+        def positive_dim_dot_prod_attention(query, key, value):
+            scores = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(
+                query.shape[-1]
+            )
+            return scores.softmax(dim=3).matmul(value)
+
+        # T == H keeps the mis-bound replacement shape consistent, so before
+        # the fix this silently fused and produced wrong results.
+        tensor_shape = (1, 8, 8, 8)
+
+        def make_args():
+            return [torch.randn(tensor_shape, device=self.device) for _ in range(3)]
+
+        self._check_common(
+            dot_prod_attention,
+            args1=make_args(),
+            contains=False,
+            has_fuse_pattern=False,
+        )
+        self.assertEqual(counters["inductor"]["fuse_attention"], 0)
+        # softmax over the last dim spelled positively must still fuse
+        self._check_common(positive_dim_dot_prod_attention, args1=make_args())
+
+    @recover_orig_fp32_precision
+    def _test_pattern_fails_with_mismatched_view_grouping(self):
+        if self.device == GPU_TYPE and TEST_WITH_ROCM:
+            # setUp sets fp32_precision="tf32", which hipBLASLt honors as XF32 on
+            # gfx942 and gfx950, degrading the eager bmm reference while the fused
+            # path runs full fp32. Unlike its neighbours, _sfdp_pattern_24 registers
+            # _sfdp_extra_check uncalled, so it fuses whatever fp32_precision says and
+            # this test can compare two exact results instead of an exact one against
+            # a degraded reference.
+            torch.backends.cuda.matmul.fp32_precision = "ieee"
+
+        # The view sizes of _sfdp_pattern_24 are wildcards in the serialized
+        # pattern; grouping the scores heads-major instead of batch-major
+        # before the mask add coarse-matched anyway and crashed while tracing
+        # the replacement (the #195282 failure mode).  The match-time re-trace
+        # must reject it.
+        def dot_prod_attention(query, key, value, attn_mask, heads_major):
+            bs, n_head, seq_len, embed_dim = query.shape
+            q = query.view(bs * n_head, seq_len, embed_dim)
+            k = key.reshape(bs * n_head, seq_len, embed_dim)
+            v = value.reshape(bs * n_head, seq_len, embed_dim)
+            attn_weights = torch.bmm(q, k.transpose(1, 2))
+            grouping = (n_head, bs) if heads_major else (bs, n_head)
+            attn_weights = attn_weights.view(*grouping, seq_len, seq_len) + attn_mask
+            attn_weights = attn_weights.view(bs * n_head, seq_len, seq_len)
+            attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1)
+            return torch.bmm(attn_weights, v).view(bs, n_head, seq_len, embed_dim)
+
+        bs, n_head, seq_len, embed_dim = 4, 2, 16, 32
+        tensor_shape = (bs, n_head, seq_len, embed_dim)
+
+        def make_args(mask_shape):
+            return [
+                *[torch.randn(tensor_shape, device=self.device) for _ in range(3)],
+                torch.randn(mask_shape, device=self.device),
+            ]
+
+        self._check_common(
+            functools.partial(dot_prod_attention, heads_major=True),
+            args1=make_args((n_head, 1, seq_len, seq_len)),
+            contains=False,
+            has_fuse_pattern=False,
+            has_dropout=False,
+            check_train=False,
+        )
+        self.assertEqual(counters["inductor"]["fuse_attention"], 0)
+        # the batch-major grouping the pattern was traced from must still fuse
+        self._check_common(
+            functools.partial(dot_prod_attention, heads_major=False),
+            args1=make_args((1, 1, seq_len, seq_len)),
+            has_dropout=False,
+            check_train=False,
+        )
+
+    def _test_pattern_fails_with_lower_rank_inputs(self):
+        # Rank-3 inputs whose views mirror _sfdp_pattern_24's op structure
+        # coarse-match the 4-D-traced pattern (its view sizes are wildcards),
+        # so the match-time re-trace runs search_fn on them and indexes
+        # query.size(3).  The candidate must be rejected, not crash compile.
+        n_head, seq_len, head_size = 2, 16, 32
+
+        def dot_prod_attention(query, key, value, attn_mask):
+            bs_heads = query.size(0) * n_head
+            q = query.view(bs_heads, seq_len, head_size)
+            k = key.view(bs_heads, seq_len, head_size)
+            v = value.view(bs_heads, seq_len, head_size)
+            attn_weights = torch.bmm(q, k.transpose(1, 2))
+            attn_weights = attn_weights.view(-1, n_head, seq_len, seq_len) + attn_mask
+            attn_weights = attn_weights.view(bs_heads, seq_len, seq_len)
+            attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1)
+            return torch.bmm(attn_weights, v).view(-1, n_head, seq_len * head_size)
+
+        tensor_shape = (4, n_head, seq_len * head_size)
+        args = [
+            *[torch.randn(tensor_shape, device=self.device) for _ in range(3)],
+            torch.randn((1, 1, seq_len, seq_len), device=self.device),
+        ]
+        self._check_common(
+            dot_prod_attention,
+            args1=args,
+            contains=False,
+            has_fuse_pattern=False,
+            has_dropout=False,
+            check_train=False,
+        )
+        self.assertEqual(counters["inductor"]["fuse_attention"], 0)
+
+    def _test_pattern_fuses_with_symint_scale(self):
+        # A SymInt scale is a scalar the fused kernel accepts. _check_common
+        # only marks dim 0 dynamic, so the scale is taken from that dim.
+        if self.use_static_shapes:
+            self.skipTest("the scale is only symbolic under dynamic shapes")
+
+        # The mask is built inside the model: a mask input would require grad
+        # in the training run, which blocks the fusion for any scale.
+        def model(query, key, value):
+            scale = query.size(0) // 2
+            attn_mask = torch.ones(
+                query.size(-2), key.size(-2), dtype=torch.bool, device=query.device
+            ).tril(diagonal=0)
+            attn_mask = attn_mask.masked_fill(
+                torch.logical_not(attn_mask), -float("inf")
+            )
+            scores = query @ key.transpose(-2, -1) / scale
+            weights = torch.softmax(scores + attn_mask, dim=-1)
+            return weights @ value
+
+        tensor_shape = (8, 4, 4, 4)
+        args = [
+            torch.randn(tensor_shape, device=self.device),
+            torch.randn(tensor_shape, device=self.device),
+            torch.randn(tensor_shape, device=self.device),
+        ]
+        self._check_common(model, args1=args, contains=False)
+
+    def _test_pattern_fuses_with_symint_scale_div(self):
+        # Same SymInt scale, reaching the guard through _sfdp_extra_check
+        # instead of _sfdp_params_check.
+        if self.use_static_shapes:
+            self.skipTest("the scale is only symbolic under dynamic shapes")
+
+        def model(query, key, value):
+            scale = query.size(0) // 2
+            return (
+                torch.matmul(query, key.transpose(-2, -1))
+                .div(scale)
+                .softmax(dim=-1)
+                .matmul(value)
+            )
+
+        tensor_shape = (8, 4, 4, 4)
+        args = [
+            torch.randn(tensor_shape, device=self.device),
+            torch.randn(tensor_shape, device=self.device),
+            torch.randn(tensor_shape, device=self.device),
+        ]
+        self._check_common(model, args1=args)
+
+    def _test_pattern_fails_with_symfloat_scale(self):
+        # tensorify_python_scalars turns the SymFloat scale into a 0-d tensor
+        # before the pattern check, so the fusion is skipped.
+        # TODO: the scalar behind a tensorified SymFloat scale (e.g.
+        # head_dim**0.5 under dynamic shapes) could be recovered from the
+        # aten.scalar_tensor node to keep the fusion - tracked in #194444.
+        if self.use_static_shapes:
+            self.skipTest("the scale is only symbolic under dynamic shapes")
+
+        def model(query, key, value, attn_mask):
+            scale = query.size(0) ** 0.5
+            scores = query @ key.transpose(-2, -1) / scale
+            weights = torch.softmax(scores + attn_mask, dim=-1)
+            return weights @ value
+
+        tensor_shape = (8, 4, 4, 4)
+        args = [
+            torch.randn(tensor_shape, device=self.device),
+            torch.randn(tensor_shape, device=self.device),
+            torch.randn(tensor_shape, device=self.device),
+            torch.randn((1, 1, 4, 4), device=self.device),
+        ]
+        self._check_common(
+            model, args1=args, contains=False, atol=1e-3, has_fuse_pattern=False
+        )
+        self.assertEqual(counters["inductor"]["fuse_attention"], 0)
 
     def _test_pattern_fails_with_unsupported_mask(self):
         if not self.use_static_shapes:
@@ -1869,8 +2141,28 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
         test_pattern_fails_with_tensor_factor_gpu = (
             TestSDPAPatternRewriterTemplate._test_pattern_fails_with_tensor_factor
         )
+        test_pattern_fails_with_tensor_scale_gpu = (
+            TestSDPAPatternRewriterTemplate._test_pattern_fails_with_tensor_scale
+        )
+        test_pattern_fuses_with_symint_scale_gpu = (
+            TestSDPAPatternRewriterTemplate._test_pattern_fuses_with_symint_scale
+        )
+        test_pattern_fuses_with_symint_scale_div_gpu = (
+            TestSDPAPatternRewriterTemplate._test_pattern_fuses_with_symint_scale_div
+        )
+        test_pattern_fails_with_symfloat_scale_gpu = (
+            TestSDPAPatternRewriterTemplate._test_pattern_fails_with_symfloat_scale
+        )
         test_pattern_fails_with_unsupported_mask_gpu = (
             TestSDPAPatternRewriterTemplate._test_pattern_fails_with_unsupported_mask
+        )
+        test_pattern_fails_with_batch_permuted_key_gpu = (
+            TestSDPAPatternRewriterTemplate._test_pattern_fails_with_batch_permuted_key
+        )
+        test_pattern_fails_with_non_last_dim_softmax_gpu = TestSDPAPatternRewriterTemplate._test_pattern_fails_with_non_last_dim_softmax
+        test_pattern_fails_with_mismatched_view_grouping_gpu = TestSDPAPatternRewriterTemplate._test_pattern_fails_with_mismatched_view_grouping
+        test_pattern_fails_with_lower_rank_inputs_gpu = (
+            TestSDPAPatternRewriterTemplate._test_pattern_fails_with_lower_rank_inputs
         )
         test_sdpa_rewriter_11_gpu = (
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_11
@@ -2004,8 +2296,28 @@ if HAS_CPU:
         test_pattern_fails_with_tensor_factor_cpu = (
             TestSDPAPatternRewriterTemplate._test_pattern_fails_with_tensor_factor
         )
+        test_pattern_fails_with_tensor_scale_cpu = (
+            TestSDPAPatternRewriterTemplate._test_pattern_fails_with_tensor_scale
+        )
+        test_pattern_fuses_with_symint_scale_cpu = (
+            TestSDPAPatternRewriterTemplate._test_pattern_fuses_with_symint_scale
+        )
+        test_pattern_fuses_with_symint_scale_div_cpu = (
+            TestSDPAPatternRewriterTemplate._test_pattern_fuses_with_symint_scale_div
+        )
+        test_pattern_fails_with_symfloat_scale_cpu = (
+            TestSDPAPatternRewriterTemplate._test_pattern_fails_with_symfloat_scale
+        )
         test_pattern_fails_with_unsupported_mask_cpu = (
             TestSDPAPatternRewriterTemplate._test_pattern_fails_with_unsupported_mask
+        )
+        test_pattern_fails_with_batch_permuted_key_cpu = (
+            TestSDPAPatternRewriterTemplate._test_pattern_fails_with_batch_permuted_key
+        )
+        test_pattern_fails_with_non_last_dim_softmax_cpu = TestSDPAPatternRewriterTemplate._test_pattern_fails_with_non_last_dim_softmax
+        test_pattern_fails_with_mismatched_view_grouping_cpu = TestSDPAPatternRewriterTemplate._test_pattern_fails_with_mismatched_view_grouping
+        test_pattern_fails_with_lower_rank_inputs_cpu = (
+            TestSDPAPatternRewriterTemplate._test_pattern_fails_with_lower_rank_inputs
         )
         test_sdpa_rewriter_11_cpu = (
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_11

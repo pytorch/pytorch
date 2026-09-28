@@ -14,7 +14,6 @@ import itertools
 import pprint
 import typing
 import warnings
-import weakref
 from collections.abc import Callable, Generator, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
@@ -27,8 +26,16 @@ from torch import Tensor
 from torch._custom_class_base import CustomClassBase
 from torch._dynamo import config as dynamo_config
 from torch._dynamo.callback import callback_handler, CallbackTrigger
-from torch._dynamo.graph_bytecode_inputs import index_to_external_object_weakref
-from torch._dynamo.utils import CompileEventLogger, dynamo_timed, get_metrics_context
+from torch._dynamo.graph_bytecode_inputs import (
+    index_to_external_object_weakref,
+    set_external_object_by_index,
+)
+from torch._dynamo.utils import (
+    CompileEventLogger,
+    deferred_full_gc,
+    dynamo_timed,
+    get_metrics_context,
+)
 from torch._guards import (
     compile_context,
     CompileContext,
@@ -44,8 +51,8 @@ from torch._ops import OpOverload
 from torch._prims_common import CUDARngStateHelper
 from torch._subclasses.fake_tensor import is_fake_tensor
 from torch.fx.experimental._backward_state import BackwardState
-from torch.fx.experimental.proxy_tensor import HANDLED_TYPES
 from torch.multiprocessing.reductions import StorageWeakRef
+from torch.types import IntLikeType
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     TorchDispatchMode,
@@ -112,7 +119,7 @@ def _snapshot_external_objects(ctx: Any) -> None:
     """Snapshot the external object registry onto ctx for backward restore."""
     ctx._external_objects = {
         k: ref()
-        for k, ref in index_to_external_object_weakref.items()
+        for k, ref in enumerate(index_to_external_object_weakref)
         if ref() is not None
     }
 
@@ -471,7 +478,15 @@ class _AnalyzeCustomOpInputOutputMode(TorchDispatchMode):
             underlying_tensor = tensor
             if isinstance(tensor, torch.nn.Parameter):
                 underlying_tensor = tensor.data
-            if type(underlying_tensor) not in HANDLED_TYPES:
+            # A subclass with no __torch_dispatch__ has no handler to defer to, so
+            # returning NotImplemented for it makes the dispatch fail outright.
+            # `types` cannot replace the check because HigherOrderOperator.dispatch
+            # passes it empty and this mode accepts HOPs.
+            if (
+                not is_fake_tensor(underlying_tensor)
+                and type(underlying_tensor).__torch_dispatch__
+                is not torch._C._disabled_torch_dispatch_impl
+            ):
                 return NotImplemented
 
         res = func(*args, **kwargs)
@@ -1316,7 +1331,8 @@ class FakifiedOutWrapper(InductorWrapper):
     # TracingContext.fwd_output_strides
     # Generated from actually doing compile
     # NB: an entry is None if it's not a Tensor
-    fwd_output_strides: list[list[int] | None] | None = None
+    # NB: an inner element may be a SymInt under dynamic shapes
+    fwd_output_strides: list[list[IntLikeType] | None] | None = None
     needs_post_compile: bool = True
 
     def pre_compile(
@@ -1367,7 +1383,7 @@ class FakifiedOutWrapper(InductorWrapper):
 
     # To be called post compile
     def set_fwd_output_strides(
-        self, fwd_output_strides: list[list[int] | None]
+        self, fwd_output_strides: list[list[IntLikeType] | None]
     ) -> None:
         self.fwd_output_strides = fwd_output_strides
 
@@ -2879,6 +2895,10 @@ class _AutogradBackwardCompiler:
         context = torch._C._DisableAutocast if self.disable_amp else nullcontext
         metrics_context = get_metrics_context()
         with (
+            # Lazily compiling the backward builds as much graph as the forward
+            # did, and it runs outside Dynamo's compile, so it needs its own
+            # deferral of full collections.
+            deferred_full_gc(),
             tracing(saved_context),
             compile_context(saved_compile_context),
             context(),
@@ -3608,7 +3628,7 @@ class _AOTDispatchAutogradFunctionFactory:
                     )
 
                 for idx, obj in getattr(ctx, "_external_objects", {}).items():
-                    index_to_external_object_weakref[idx] = weakref.ref(obj)
+                    set_external_object_by_index(idx, obj)
 
                 return call_func_at_runtime_with_args(
                     compiled_bw,
@@ -3626,12 +3646,12 @@ class AOTDispatchAutograd:
     @staticmethod
     def _raise_tangent_metadata_error(
         expected_type: type | None,
-        expected_meta: Any,
+        expected_meta: object,
         runtime_type: type,
-        runtime_meta: Any,
+        runtime_meta: object,
         orig_x: torch.Tensor,
         tangent_idx: int | None,
-        tangent_desc: Any | None,
+        tangent_desc: AOTInput | None,
         compile_id_str: str | None,
         tangent_stack_trace: str | None,
     ) -> RuntimeError:
@@ -3703,7 +3723,7 @@ Your tensor subclass must implement __coerce_same_metadata_as_tangent__."""
         x: Any,
         meta: PlainTensorMeta | SubclassCreationMeta,
         tangent_idx: int | None = None,
-        tangent_desc: Any | None = None,
+        tangent_desc: AOTInput | None = None,
         compile_id_str: str | None = None,
         tangent_stack_trace: str | None = None,
     ) -> tuple[Any, list[Any]]:

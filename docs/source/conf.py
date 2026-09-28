@@ -653,7 +653,6 @@ coverage_ignore_functions = [
     "rebuild_tensor",
     "rebuild_typed_storage",
     "rebuild_typed_storage_child",
-    "reduce_event",
     "reduce_storage",
     "reduce_tensor",
     "reduce_typed_storage",
@@ -2358,7 +2357,7 @@ def coverage_post_process(app, exception):
     if "torch" not in modules:
         missing.add("torch")
 
-    for _, modname, ispkg in pkgutil.walk_packages(
+    for _, modname, _ in pkgutil.walk_packages(
         path=torch.__path__, prefix=torch.__name__ + "."
     ):
         if is_not_internal(modname):

@@ -956,6 +956,11 @@ def nan_to_num(
     if utils.is_boolean_dtype(a.dtype) or utils.is_integer_dtype(a.dtype):
         return a.clone()
 
+    if utils.is_complex_dtype(a.dtype):
+        real = nan_to_num(torch.real(a), nan, posinf, neginf)
+        imag = nan_to_num(torch.imag(a), nan, posinf, neginf)
+        return torch.complex(real, imag)
+
     if nan is None:
         nan = 0.0
 
@@ -6250,7 +6255,14 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
         # `masked_fill` allows cpu scalar to be moved to cuda, xpu and hpu but not otherwise.
         is_cpu_scalar = (
             a.device.type
-            in ["cuda", "xpu", "mps", torch._C._get_privateuse1_backend_name(), "hpu"]
+            in [
+                "cuda",
+                "xpu",
+                "mps",
+                torch._C._get_privateuse1_backend_name(),
+                "hpu",
+                "mtia",
+            ]
             and value.device.type == "cpu"
         )
         torch._check(

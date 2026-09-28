@@ -153,6 +153,50 @@ class TestShardedTensorMetadata(TestCase):
             st_metadata = pickle.loads(pickled_obj)
             self.assertEqual(expected_st_metadata, st_metadata)
 
+    def test_wrapper_subclass_preserves_strides(self):
+        spec = ChunkShardingSpec(dim=0, placements=["rank:0/cpu"])
+        strides = (1, 4)
+        st = ShardedTensorBase.__new__(
+            ShardedTensor,
+            spec,
+            4,
+            1,
+            dtype=torch.float32,
+            layout=torch.strided,
+            pin_memory=False,
+            requires_grad=False,
+            strides=strides,
+        )
+        with torch._C.DisableTorchFunction():
+            self.assertEqual(st.stride(), strides)
+        self.assertEqual(st.metadata().tensor_properties.strides, strides)
+
+    def test_wrapper_subclass_defaults_to_contiguous_strides(self):
+        shard_metadata = ShardMetadata(
+            shard_offsets=[0, 0],
+            shard_sizes=[4, 2],
+            placement="rank:0/cpu",
+        )
+        metadata = ShardedTensorMetadata(
+            shards_metadata=[shard_metadata],
+            size=torch.Size([4, 2]),
+            tensor_properties=TensorProperties(
+                dtype=torch.float32,
+                layout=torch.strided,
+                requires_grad=False,
+                pin_memory=False,
+                strides=None,
+            ),
+        )
+        st = ShardedTensorBase._init_from_local_shards_and_global_metadata(
+            [Shard(torch.empty(4, 2), shard_metadata)],
+            metadata,
+        )
+
+        self.assertIsNone(st.metadata().tensor_properties.strides)
+        with torch._C.DisableTorchFunction():
+            self.assertEqual(st.stride(), (2, 1))
+
 
 class TestCreateTensorFromParams(TestCase):
     @skip_but_pass_in_sandcastle_if(not TEST_ACCELERATOR, "Accelerator is needed")
@@ -2548,7 +2592,7 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
                 shard = remote_shard.to_here()
                 self.assertEqual((5, 5), shard.tensor.size())
 
-    @skipIfRocm
+
     @with_comms(init_rpc=False, backend=BACKEND)
     @skip_if_lt_x_gpu(4)
     @requires_accelerator_dist_backend(["nccl", "xccl"])
@@ -2605,7 +2649,7 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
             with self.assertRaises(ValueError):
                 st = sharded_tensor.init_from_local_shards(local_shards)
 
-    @skipIfRocm
+
     @with_comms(init_rpc=False, backend=BACKEND)
     @skip_if_lt_x_gpu(4)
     @requires_accelerator_dist_backend(["nccl", "xccl"])
@@ -2640,7 +2684,7 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
         with self.assertRaises(ValueError):
             sharded_tensor.init_from_local_shards(local_shards, 0, 0)
 
-    @skipIfRocm
+
     @with_comms(init_rpc=False, backend=BACKEND)
     @skip_if_lt_x_gpu(4)
     @requires_accelerator_dist_backend(["nccl", "xccl"])
@@ -2739,7 +2783,7 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
                 f"rank:{rank}/{DEVICE_TYPE}:{rank}", str(shard_metadata.placement)
             )
 
-    @skipIfRocm
+
     @with_comms(init_rpc=False, backend=BACKEND)
     @skip_if_lt_x_gpu(4)
     @requires_accelerator_dist_backend(["nccl", "xccl"])
@@ -2820,7 +2864,7 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
                 f"rank:{rank}/{DEVICE_TYPE}:{rank}", str(shard_metadata.placement)
             )
 
-    @skipIfRocm
+
     @with_comms(init_rpc=False, backend=BACKEND)
     @skip_if_lt_x_gpu(4)
     @requires_accelerator_dist_backend(["nccl", "xccl"])

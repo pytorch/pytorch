@@ -9,7 +9,6 @@
 #include <torch/csrc/dynamo/extra_state.h>
 #include <torch/csrc/dynamo/framelocals_mapping.h>
 #include <torch/csrc/dynamo/stackref_bridge.h>
-#include <torch/csrc/utils/python_compat.h>
 
 #include <algorithm>
 #include <optional>
@@ -507,9 +506,9 @@ PyObject* dynamo__custom_eval_frame(
 
   // Resolve strategy per isolate_recompiles scope. For non-isolated
   // frames (id < 0) this returns extra->strategy; for isolated regions
-  // it returns the region's own strategy if set, otherwise inherits
-  // global SKIP (deliberate "do not trace" marks must apply across
-  // regions) but not RUN_ONLY (recompile-limit hits are per-region).
+  // it returns the region's own strategy with global SKIP applied
+  // (deliberate "do not trace" marks must apply across regions), but
+  // does not inherit RUN_ONLY (recompile-limit hits are per-region).
   int64_t isolate_recompiles_id = get_current_isolate_recompiles_id();
   FrameExecStrategy strategy =
       extra_state_get_region_exec_strategy(extra, isolate_recompiles_id);

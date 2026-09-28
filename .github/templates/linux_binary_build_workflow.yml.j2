@@ -20,7 +20,7 @@ name: !{{ build_environment }}
     invalidation handles the per-Python ABI bits). Everything else still runs
     on the per-Python matrix below. Add more arch types here as their inline
     build job is wired up. -#}
-{%- set unified_arch_types = ['cpu', 'cpu-aarch64', 'cuda', 'cuda-aarch64'] %}
+{%- set unified_arch_types = ['cpu', 'cpu-aarch64', 'cuda', 'cuda-aarch64', 'xpu'] %}
 {%- set unified_build_configs = build_configs | selectattr('gpu_arch_type', 'in', unified_arch_types) | list %}
 {%- set matrix_build_configs = build_configs | rejectattr('gpu_arch_type', 'in', unified_arch_types) | list %}
 
@@ -79,10 +79,11 @@ name: !{{ build_environment }}
 {%- if pin_docker_image %}
   {%- set docker_image_suffix = "${{ needs.get-docker-tag.outputs.docker_image_suffix }}" %}
   {#- Registry host prefix (with trailing slash) for the builder image. Blank
-      (-> Docker Hub) on nightly/release; on ciflow/binaries PR test runs
-      get-docker-tag sets it to the ECR host so build/test pull the
-      content-addressed image the PR just published. A skipped get-docker-tag
-      reads blank, preserving the Docker Hub floating tag. -#}
+      (-> Docker Hub) on nightly/release and on ciflow/binaries PR test runs
+      whose .ci/docker tree main has already published; get-docker-tag sets it
+      to the ECR host only when the tree is one the PR's own ciflow/docker run
+      built. A skipped get-docker-tag reads blank, preserving the Docker Hub
+      floating tag. -#}
   {%- set docker_registry_host = "${{ needs.get-docker-tag.outputs.docker_registry_host }}" %}
   {#- get-docker-tag only runs on tag pushes, so jobs that need it must tolerate
       it being skipped (a skipped need skips dependents by default). !failure()
@@ -151,14 +152,18 @@ jobs:
   #   - release-candidate tag (v1.2.3-rc4): suffix = "-<.ci/docker tree hash>",
   #     host = "" -> the reproducible image binary-docker-build pinned on Docker
   #     Hub.
-  #   - ciflow/binaries PR test: the PR builds its own .ci/docker and
-  #     binary-docker-build pushes the content-addressed image to ECR, so
-  #     suffix = "-<hash>" and host = the ECR host. Because build-manywheel-images
-  #     runs in parallel on the same PR, this job WAITS (polls ECR) until those
-  #     images are pushed before the build/test jobs start pulling them.
+  #   - ciflow/binaries PR test: suffix = "-<hash>". Main publishes every
+  #     .ci/docker tree it builds to Docker Hub under that tag, so a PR that
+  #     leaves .ci/docker untouched finds its image there and host = "". A PR
+  #     that changes .ci/docker has a tree only its own ciflow/docker run has
+  #     built, pushed to ECR by binary-docker-build, so host = the ECR host.
+  #     Because build-manywheel-images runs in parallel on the same PR, this
+  #     job then WAITS (polls ECR) until those images are pushed before the
+  #     build/test jobs start pulling them.
   #   - otherwise (nightly branch, etc.): skipped; outputs read blank -> Docker
   #     Hub floating tag, unchanged.
   get-docker-tag:
+    needs: get-label-type
     # Runs on tag pushes only (release candidates + ciflow/binaries). On branch
     # (nightly) runs it is skipped and its outputs read blank, so the floating
     # Docker Hub tag is used.
@@ -191,25 +196,40 @@ jobs:
           suffix=""
           registry_host=""
           if [[ "${GITHUB_REF}" == refs/tags/ciflow/binaries* ]]; then
-            # PR test run: the content-addressed image lives in ECR.
+            # PR test run: content-addressed image, from Docker Hub if main has
+            # published this tree, else from ECR via the PR's ciflow/docker run.
             suffix="-$(git rev-parse HEAD:.ci/docker)"
             registry_host="308535385114.dkr.ecr.us-east-1.amazonaws.com/"
+{%- if ns.groups %}
+            # build-manywheel-images builds and pushes all variants together, so
+            # probe a single representative image. The tag API needs no login;
+            # any failure (404, outage) keeps the ECR path.
+            repo="pytorch/!{{ ns.groups[0]['configs'][0]['container_image'] }}"
+            tag="!{{ ns.groups[0]['configs'][0]['container_image_tag_prefix'] }}${suffix}"
+            if curl -fsS --retry 3 -o /dev/null "https://hub.docker.com/v2/repositories/${repo}/tags/${tag}"; then
+              echo "docker.io/${repo}:${tag} exists; using Docker Hub"
+              registry_host=""
+            else
+              echo "docker.io/${repo}:${tag} not on Docker Hub; using ECR"
+            fi
+{%- endif %}
           elif [[ "${REF_TYPE}" == "tag" && "${REF_NAME}" == v* ]]; then
             # Release candidate: pin the Docker Hub image.
             suffix="-$(git rev-parse HEAD:.ci/docker)"
           fi
           echo "docker_image_suffix=${suffix}" >> "${GITHUB_OUTPUT}"
           echo "docker_registry_host=${registry_host}" >> "${GITHUB_OUTPUT}"
-      # ciflow/binaries only: the builder images are pushed to ECR by
-      # build-manywheel-images / build-almalinux-images, which run concurrently
-      # on the same PR. Log in (read-only) and wait for the content-addressed
-      # tags to appear before the build/test jobs try to pull them.
+      # ciflow/binaries with a tree Docker Hub lacks: the builder images are
+      # pushed to ECR by build-manywheel-images / build-almalinux-images, which
+      # run concurrently on the same PR. Log in (read-only) and wait for the
+      # content-addressed tags to appear before the build/test jobs try to pull
+      # them.
       - name: Login to ECR
-        if: ${{ startsWith(github.ref, 'refs/tags/ciflow/binaries') }}
+        if: ${{ startsWith(github.ref, 'refs/tags/ciflow/binaries') && steps.calc.outputs.docker_registry_host != '' }}
         uses: pytorch/pytorch/.github/actions/ecr-login@main
 {%- if ns.groups %}
       - name: Wait for content-addressed builder image in ECR
-        if: ${{ startsWith(github.ref, 'refs/tags/ciflow/binaries') }}
+        if: ${{ startsWith(github.ref, 'refs/tags/ciflow/binaries') && steps.calc.outputs.docker_registry_host != '' }}
         env:
           DOCKER_IMAGE_SUFFIX: ${{ steps.calc.outputs.docker_image_suffix }}
         shell: bash
@@ -255,7 +275,7 @@ jobs:
   {%- set first = group[0] %}
   {#- Job name: keep cpu/cpu-aarch64 names stable; for cuda, include the
       desired_cuda variant so cu126/cu130/cu132 each get a distinct job. -#}
-  {%- if desired_cuda == 'cpu' %}
+  {%- if desired_cuda == 'cpu' or desired_cuda == arch_type %}
     {%- set job_name = "manywheel-" ~ arch_type ~ "-build" %}
   {%- else %}
     {%- set job_name = "manywheel-" ~ arch_type ~ "-" ~ desired_cuda ~ "-build" %}
@@ -264,17 +284,19 @@ jobs:
       E.g. "manywheel-py3_10-cuda-aarch64-12_6" -> "-cuda-aarch64-12_6". -#}
   {%- set py_dotless = first['python_version'] | replace('.', '_') %}
   {%- set build_name_suffix = first['build_name'] | replace('manywheel-py' ~ py_dotless, '') %}
+  {%- if arch_type != 'xpu' %}
   {%- set _ = unified_upload_groups.append({
         'job_name': job_name,
         'test_name': job_name | replace('-build', '-test'),
         'configs': group}) %}
+  {%- endif %}
 
   !{{ job_name }}:
     name: !{{ job_name }}
     if: !{{ owner_if }}
     needs: [get-label-type{%- if pin_docker_image %}, get-docker-tag{%- endif %}]
     runs-on: "!{{ runner_prefix }}!{{ build_runs_on }}"
-    timeout-minutes: !{{ timeout_minutes }}
+    timeout-minutes: !{{ 420 if arch_type == 'xpu' else timeout_minutes }}
     container:
       image: !{{ docker_registry_host }}pytorch/!{{ first['container_image'] }}:!{{ first['container_image_tag_prefix'] }}!{{ docker_image_suffix }}
     env:
@@ -314,9 +336,9 @@ jobs:
       - name: Build all wheels
         shell: bash
         run: |
-          # shellcheck disable=SC1091
+          # shellcheck disable=SC1090,SC1091
           source "${BINARY_ENV_FILE}"
-          bash .ci/manywheel/build_all.sh
+          bash .ci/wheel/linux/build_all.sh
       # One artifact per built Python -- names must match what the test/upload
       # matrix below downloads.
   {%- for config in group %}
@@ -492,7 +514,7 @@ jobs:
   manywheel-test-xpu:
     name: ${{ matrix.build_name }}-test
     if: !{{ owner_if }}
-    needs: [get-label-type{%- if pin_docker_image %}, get-docker-tag{%- endif %}, manywheel-build]
+    needs: [get-label-type{%- if pin_docker_image %}, get-docker-tag{%- endif %}, manywheel-xpu-build]
     uses: ./.github/workflows/_binary-test-xpu-linux.yml
     strategy:
       fail-fast: false
@@ -552,7 +574,7 @@ jobs:
 {%- if xpu_configs %}
   {%- set _ = upload_jobs.append({
         'name': 'manywheel-xpu-upload',
-        'needs': ['manywheel-build', 'manywheel-test-xpu'],
+        'needs': ['manywheel-xpu-build', 'manywheel-test-xpu'],
         'configs': xpu_configs}) %}
 {%- endif %}
 {%- for job in upload_jobs %}
@@ -600,7 +622,7 @@ jobs:
 
   libtorch-extract:
     name: ${{ matrix.build_name }}-extract
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: !{{ owner_if }}
     needs: [manywheel-build]
     runs-on: "mt-l-x86iavx512-16-128"
     container:
