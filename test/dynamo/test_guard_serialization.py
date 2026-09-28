@@ -3282,10 +3282,12 @@ class TestGuardSerialization(TestGuardSerializationBase):
                         "HINT: type",
                         verbose_str,
                         (
-                            lambda msg: f"{msg}\n"
-                            + (
-                                "TYPE_MATCH guard should include 'HINT: type' "
-                                f"annotation.\nGuard: {verbose_str}"
+                            lambda msg: (
+                                f"{msg}\n"
+                                + (
+                                    "TYPE_MATCH guard should include 'HINT: type' "
+                                    f"annotation.\nGuard: {verbose_str}"
+                                )
                             )
                         ),
                     )
@@ -3293,10 +3295,12 @@ class TestGuardSerialization(TestGuardSerializationBase):
                         "GlobalModule",
                         verbose_str,
                         (
-                            lambda msg: f"{msg}\n"
-                            + (
-                                "TYPE_MATCH guard should include type name "
-                                f"'GlobalModule'.\nGuard: {verbose_str}"
+                            lambda msg: (
+                                f"{msg}\n"
+                                + (
+                                    "TYPE_MATCH guard should include type name "
+                                    f"'GlobalModule'.\nGuard: {verbose_str}"
+                                )
                             )
                         ),
                     )
@@ -4671,6 +4675,73 @@ class TestGuardSerialization(TestGuardSerializationBase):
         with torch.autograd.graph.saved_tensors_hooks(*hooks("v1")):
             self._test_check_fn(loaded, loaded, {"x": x}, True)
         with torch.autograd.graph.saved_tensors_hooks(*hooks("v2")):
+            self._test_check_fn(loaded, loaded, {"x": x}, False)
+
+    def test_autograd_saved_tensors_hooks_reuses_result_per_hook_set(self):
+        def fn(x):
+            return x + 1
+
+        def trace(*fns):
+            return tuple(torch.fx.symbolic_trace(f) for f in fns)
+
+        x = torch.randn(3, 2)
+        with torch.autograd.graph.saved_tensors_hooks(
+            *trace(lambda x: x * 2, lambda x: x / 2)
+        ):
+            _, loaded = self._test_serialization("AUTOGRAD_SAVED_TENSORS_HOOKS", fn, x)
+        matching = trace(lambda x: x * 2, lambda x: x / 2)
+        other = trace(lambda x: x * 3, lambda x: x / 3)
+        for hooks, expected in ((matching, True), (other, False), (matching, True)):
+            with torch.autograd.graph.saved_tensors_hooks(*hooks):
+                for _ in range(2):
+                    self._test_check_fn(loaded, loaded, {"x": x}, expected)
+
+    def test_autograd_saved_tensors_hooks_rejects_opaque_call(self):
+        def fn(x):
+            return x + 1
+
+        def hook_calling(target, user_hash=None):
+            graph = torch.fx.Graph()
+            node = graph.call_function(target, (graph.placeholder("x"),))
+            node.meta["is_wrapped"] = True
+            if user_hash is not None:
+                node.meta["user_cache_hash"] = user_hash
+            graph.output(node)
+            return torch.fx.GraphModule(torch.nn.Module(), graph)
+
+        def double():
+            def scale(x):
+                return x * 2
+
+            return scale
+
+        def triple():
+            def scale(x):
+                return x * 3
+
+            return scale
+
+        def hooks(target, user_hash=None):
+            return (
+                hook_calling(target, user_hash),
+                torch.fx.symbolic_trace(lambda x: x / 2),
+            )
+
+        x = torch.randn(3, 2)
+        self.assertEqual(hooks(double())[0].code, hooks(triple())[0].code)
+        with torch.autograd.graph.saved_tensors_hooks(*hooks(double())):
+            _, loaded = self._test_serialization("AUTOGRAD_SAVED_TENSORS_HOOKS", fn, x)
+        # The rendered code names scale but not its body, so nothing tells
+        # these two apart; the loaded guard accepts neither.
+        for target in (double(), triple()):
+            with torch.autograd.graph.saved_tensors_hooks(*hooks(target)):
+                self._test_check_fn(loaded, loaded, {"x": x}, False)
+
+        with torch.autograd.graph.saved_tensors_hooks(*hooks(double(), "v1")):
+            _, loaded = self._test_serialization("AUTOGRAD_SAVED_TENSORS_HOOKS", fn, x)
+        with torch.autograd.graph.saved_tensors_hooks(*hooks(double(), "v1")):
+            self._test_check_fn(loaded, loaded, {"x": x}, True)
+        with torch.autograd.graph.saved_tensors_hooks(*hooks(triple(), "v2")):
             self._test_check_fn(loaded, loaded, {"x": x}, False)
 
     def test_autograd_saved_tensors_hooks_not_inlineable_at_capture(self):
