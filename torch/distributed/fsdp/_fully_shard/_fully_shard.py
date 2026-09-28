@@ -19,7 +19,6 @@ from ._fsdp_api import (
     OffloadPolicy,
     ReduceScatter,
 )
-from ._fsdp_collectives import DefaultReduceScatter, ProcessGroupAllocReduceScatter
 from ._fsdp_common import _dynamo_disable, FSDPMeshInfo, ShardPlacementFnResult
 from ._fsdp_init import (
     _apply_to_module,
@@ -200,10 +199,12 @@ def fully_shard(
             - After forward, the parameters registered to the module depend on
               to this: The registered parameters are the sharded parameters if
               ``True``; unsharded parameters if ``False``; and the parameters
-              resharded to the smaller mesh otherwise. To modify the parameters
-              between forward and backward, the registered parameters must be
-              the sharded parameters. For ``False`` or an ``int``, this can be
-              done by manually resharding via :meth:`reshard`.
+              resharded to the smaller mesh otherwise. For ``False`` or an
+              ``int``, the sharded parameters can be registered by manually
+              resharding via :meth:`reshard`.
+            - Modifying the parameters between forward and backward is not
+              supported: the backward all-gather is not ordered after such
+              writes, so backward may see the old values.
         shard_placement_fn (Optional[Callable[[nn.Parameter], Optional[Shard | ShardPlacementResult]]]):
             This callable can be used to override the sharding placement and/or
             mesh for a parameter. It can return:
@@ -493,15 +494,6 @@ class FSDPModule:
         Partial gradient reduction for ``replicate()`` and HSDP is not
         supported. Enable all-reduce before finalization.
 
-        With ``async_op=True``, built-in reduce-scatter allocators temporarily
-        raise the input-buffer cap while pending reductions are launched. This
-        avoids placing buffer-reuse waits on the calling stream, which allows
-        later computation to overlap the reductions. It may retain one input
-        buffer per pending parameter group and increase peak memory until the
-        returned handle is waited. The configured cap is restored before this
-        method returns. Other reduce-scatter allocators preserve the configured
-        cap and may serialize.
-
         Finalization follows these call paths::
 
             automatic final backward
@@ -532,6 +524,8 @@ class FSDPModule:
                 wait before returning.
         """
         state = self._get_fsdp_state()
+        if state._is_root is None:
+            return _GradientReductionHandleImpl(None, None) if async_op else None
         if state._state_ctx.gradient_reduction_pending:
             raise RuntimeError(
                 "The previous gradient reduction must be waited on before "
@@ -564,26 +558,7 @@ class FSDPModule:
             )
         reduction = _GradientReductionState(state._state_ctx)
         state._comm_ctx.active_gradient_reduction = reduction
-        max_input_buffers = state._comm_ctx.reduce_scatter_max_input_buffers
-        try:
-            # Custom allocators may reuse one persistent buffer. Only known
-            # built-ins may bypass the configured cap for asynchronous work.
-            if all(
-                type(group._reduce_scatter_comm)
-                in (DefaultReduceScatter, ProcessGroupAllocReduceScatter)
-                for group in param_groups
-            ):
-                num_pending_reductions = sum(
-                    group._post_backward_pending and group.reduce_grads
-                    for group in param_groups
-                )
-                state._comm_ctx.reduce_scatter_max_input_buffers = max(
-                    max_input_buffers,
-                    len(state._comm_ctx.reduce_scatter_states) + num_pending_reductions,
-                )
-            state.finalize_backward(wait_for_gradient_reduction=False)
-        finally:
-            state._comm_ctx.reduce_scatter_max_input_buffers = max_input_buffers
+        state.finalize_backward(wait_for_gradient_reduction=False)
         state._state_ctx.gradient_reduction_pending = True
         return _GradientReductionHandleImpl(state, reduction)
 
@@ -1092,8 +1067,8 @@ class GradientReductionHandle:
 class _GradientReductionHandleImpl(GradientReductionHandle):
     def __init__(
         self,
-        state: FSDPState,
-        reduction: _GradientReductionState,
+        state: FSDPState | None,
+        reduction: _GradientReductionState | None,
     ):
         self._state: FSDPState | None = state
         self._reduction: _GradientReductionState | None = reduction
@@ -1102,9 +1077,9 @@ class _GradientReductionHandleImpl(GradientReductionHandle):
         if self._state is not None and self._reduction is not None:
             state = self._state
             reduction = self._reduction
+            state.wait_for_gradient_reduction(reduction)
             self._state = None
             self._reduction = None
-            state.wait_for_gradient_reduction(reduction)
 
 
 class UnshardHandle:
