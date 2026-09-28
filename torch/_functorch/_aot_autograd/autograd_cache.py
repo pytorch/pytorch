@@ -5,6 +5,7 @@ Utils for caching the outputs of AOTAutograd
 from __future__ import annotations
 
 import base64
+import collections
 import contextlib
 import dataclasses
 import functools
@@ -17,6 +18,7 @@ import shutil
 import time
 import traceback
 import uuid
+import weakref
 from copy import copy
 from typing import Any, TYPE_CHECKING
 from typing_extensions import override
@@ -92,6 +94,10 @@ from .schemas import (
     ViewAndMutationMeta,
 )
 
+
+_CanonicalSetMetadata = collections.namedtuple(
+    "_CanonicalSetMetadata", ["container_type", "elements"]
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator, Sequence
@@ -805,10 +811,27 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
             return tuple(self._stabilize_tensor_subclass_metadata(x) for x in obj)
         if isinstance(obj, list):
             return [self._stabilize_tensor_subclass_metadata(x) for x in obj]
-        if isinstance(obj, dict):
+        if isinstance(
+            obj, (dict, weakref.WeakValueDictionary, weakref.WeakKeyDictionary)
+        ):
             return {
-                k: self._stabilize_tensor_subclass_metadata(v) for k, v in obj.items()
+                self._stabilize_tensor_subclass_metadata(
+                    k
+                ): self._stabilize_tensor_subclass_metadata(v)
+                for k, v in obj.items()
             }
+        if isinstance(obj, (set, frozenset)):
+            return _CanonicalSetMetadata(
+                container_type=type(obj),
+                elements=tuple(
+                    sorted(
+                        (self._stabilize_tensor_subclass_metadata(x) for x in obj),
+                        key=pickle.dumps,
+                    )
+                ),
+            )
+        if isinstance(obj, weakref.WeakSet):
+            return {self._stabilize_tensor_subclass_metadata(x) for x in obj}
         return obj
 
     def _default_stable_hash_for_caching(self, tensor: torch.Tensor) -> str:
