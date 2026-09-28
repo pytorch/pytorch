@@ -117,18 +117,16 @@ def sumprod(p: Iterable[Any], q: Iterable[Any], /) -> Any:
     while True:
         try:
             p_i = next(p_it)
-            p_stopped = False
         except StopIteration:
-            p_stopped = True
+            try:
+                next(q_it)
+            except StopIteration:
+                return total
+            raise ValueError("Inputs are not the same length")
         try:
             q_i = next(q_it)
-            q_stopped = False
         except StopIteration:
-            q_stopped = True
-        if p_stopped != q_stopped:
             raise ValueError("Inputs are not the same length")
-        if p_stopped:
-            return total
         total = total + p_i * q_i
 
 
