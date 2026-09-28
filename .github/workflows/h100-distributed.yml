@@ -46,7 +46,7 @@ jobs:
       cuda-arch-list: '9.0'
       test-matrix: |
         { include: [
-          { config: "h100_distributed", shard: 1, num_shards: 1, runner: "linux.aws.h100.8" },
+          { config: "h100_distributed", shard: 1, num_shards: 1, runner: "mt-l-bx86iamx-176-1800-h100-8" },
         ]}
       python-version: "3.11"
       compiler: gcc11
@@ -80,7 +80,7 @@ jobs:
       cuda-arch-list: '9.0'
       test-matrix: |
         { include: [
-          { config: "h100_distributed", shard: 1, num_shards: 1, runner: "linux.aws.h100.8" },
+          { config: "h100_distributed", shard: 1, num_shards: 1, runner: "mt-l-bx86iamx-176-1800-h100-8" },
         ]}
       python-version: "3.11"
       compiler: gcc11
