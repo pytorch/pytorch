@@ -1537,6 +1537,14 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
             return {}
         elif isinstance(vt, variables.LocalGeneratorFunctionVariable):
             return SideEffectsProxyDict.get_example_value_dict(vt.vt)
+        elif isinstance(vt, variables.UserMethodVariable):
+            # method_getattro forwards __dict__ to __func__; a bound method has
+            # no __dict__ of its own. Read-only: CPython rejects writes through
+            # a method ("'method' object has no attribute 'x'"), and Dynamo
+            # matches that because UserMethodVariable does not override
+            # get_value_for_setattr, so the VT default declines the store
+            # rather than mutating the function's shared __dict__.
+            return object.__getattribute__(vt.get_function(), "__dict__")
         elif istype(vt, variables.ExceptionVariable):
             # Synthetic exceptions created during tracing have no backing
             # Python object; their __dict__ starts empty and any custom
@@ -1598,6 +1606,17 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
             # contents explicitly.
 
         example_value_dict = SideEffectsProxyDict.get_example_value_dict(vt)
+
+        for key in example_value_dict:
+            # DictGetItemSource and ConstantVariable model instance dict keys as
+            # literals, which excludes the str subclasses PyUnicode_Check allows.
+            if not variables.ConstantVariable.is_literal(key):
+                unimplemented(
+                    gb_type="non-literal key in object __dict__",
+                    context=f"key={key!r}, type={type(key)}",
+                    explanation="Dynamo models object __dict__ keys as literal constants.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
 
         return {
             key: VariableTracker.build(

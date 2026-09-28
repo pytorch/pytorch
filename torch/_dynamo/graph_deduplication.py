@@ -10,7 +10,7 @@ structures across different parts of the network.
 import logging
 import operator
 from collections import defaultdict, deque
-from collections.abc import Generator, Iterable
+from collections.abc import Generator, Iterable, Iterator
 
 import torch
 import torch.fx
@@ -343,6 +343,9 @@ def _stable_topological_sort_impl(
     #   dependency.
     waiting = defaultdict(list)
 
+    # Resume dependency scans where a node last blocked so traversal stays linear.
+    dep_iters: dict[Node, Iterator[Node]] = {}
+
     # - `outputs` are always at the end of the graph
     outputs = OrderedSet[Node]()
 
@@ -360,21 +363,21 @@ def _stable_topological_sort_impl(
                 raise AssertionError("output nodes should have no users")
             continue
 
-        # node._input_nodes is maintained by FX and already contains the
-        # unique set of input nodes — avoid rebuilding it via map_arg.
-        if has_additional_deps:
-            deps = _get_flat_args_unique(node, node_to_additional_deps)
-        else:
-            deps = node._input_nodes
+        dep_iter = dep_iters.pop(node, None)
+        if dep_iter is None:
+            # node._input_nodes is maintained by FX and already contains the
+            # unique set of input nodes — avoid rebuilding it via map_arg.
+            if has_additional_deps:
+                deps = _get_flat_args_unique(node, node_to_additional_deps)
+            else:
+                deps = node._input_nodes
+            dep_iter = reversed(deps)
 
-        last_unready = None
-        for x in deps:
-            if x not in ready and (region is None or x in region):
-                last_unready = x
-        if last_unready is not None:
-            # We have unprocessed input nodes. Wait for the last unready
-            # arg so an already sorted list will only recheck this node once.
-            waiting[last_unready].append(node)
+        for dep in dep_iter:
+            if dep not in ready and (region is None or dep in region):
+                dep_iters[node] = dep_iter
+                waiting[dep].append(node)
+                break
         else:
             ready.add(node)
             if cursor and cursor.next is not node and do_sort:
