@@ -290,12 +290,9 @@ class TestSparseGeneric(TestSparseBase):
         t = torch.sparse_coo_tensor(torch.tensor(([0, 0], [2, 0])), torch.tensor([1, 4]))
         self.assertRaises(TypeError, lambda: t.numpy())
 
-class TestSparseOnlyCPU(TestSparseBase):
-    hw_classification = HardwareClassification.CPU
-
     @dtypes(torch.float32)
     # test_warn_on_sparse_tensor_invariant_checks_disabled must be called exactly once
-    def test_warn_on_sparse_tensor_invariant_checks_disabled(self, device, dtype):
+    def test_warn_on_sparse_tensor_invariant_checks_disabled(self):
         indices = torch.tensor([[0, 1, 2], [2, 0, 1]])
         values = torch.tensor([1, 2, 3])
         shape = torch.Size([3, 3])
@@ -303,6 +300,9 @@ class TestSparseOnlyCPU(TestSparseBase):
             msg = "Sparse invariant checks are implicitly disabled."
             with self.assertWarnsRegex(UserWarning, msg):
                 x = torch.sparse_coo_tensor(indices, values, shape)
+
+class TestSparseOnlyCPU(TestSparseBase):
+    hw_classification = HardwareClassification.CPU
 
     @dtypes(torch.float16, torch.float32, torch.float64, torch.cfloat, torch.cdouble, torch.int64)
     def test_factory_type_inference(self, device, dtype):
@@ -319,107 +319,6 @@ class TestSparseOnlyCPU(TestSparseBase):
         self.assertEqual(torch.float64, t.dtype)
         t = torch.sparse_coo_tensor(torch.tensor(([0], [2])), torch.LongTensor(1, 0))
         self.assertEqual(torch.int64, t.dtype)
-
-    @dtypes(torch.float64, torch.float32, torch.float16, torch.cfloat, torch.cdouble)
-    def test_factory(self, device, dtype):
-        for test_empty_tensor in [True, False]:
-            if test_empty_tensor:
-                default_size = torch.Size([1, 3, 0])
-                size = torch.Size([3, 3, 0])
-            else:
-                default_size = torch.Size([1, 3])
-                size = torch.Size([3, 3])
-            for include_size in [True, False]:
-                for use_tensor_idx in [True, False]:
-                    for use_tensor_val in [True, False]:
-                        for use_cuda in ([False] if not torch.cuda.is_available() else [True, False]):
-                            # have to include size with cuda sparse tensors
-                            include_size = include_size or use_cuda
-                            long_dtype = torch.int64
-                            device = torch.device('cpu') if not use_cuda else \
-                                torch.device(torch.cuda.device_count() - 1)
-                            indices = torch.tensor(([0], [2]), dtype=long_dtype) if use_tensor_idx else ([0], [2])
-                            if test_empty_tensor:
-                                values = torch.empty(1, 0).to(dtype)
-                            else:
-                                if use_tensor_val:
-                                    values = torch.tensor([1.], dtype=dtype)
-                                else:
-                                    values = 1.
-                            if include_size:
-                                sparse_tensor = torch.sparse_coo_tensor(indices, values, size, dtype=dtype,
-                                                                        device=device, requires_grad=True)
-                            else:
-                                sparse_tensor = torch.sparse_coo_tensor(indices, values, dtype=dtype,
-                                                                        device=device, requires_grad=True)
-                            self.assertEqual(indices, sparse_tensor._indices())
-                            self.assertEqual(values, sparse_tensor._values())
-                            self.assertEqual(size if include_size else default_size, sparse_tensor.size())
-                            self.assertEqual(dtype, sparse_tensor.dtype)
-                            if use_cuda:
-                                self.assertEqual(device, sparse_tensor._values().device)
-                            self.assertEqual(True, sparse_tensor.requires_grad)
-
-    def test_factory_copy(self, device):
-        def test_tensor(indices, values, indices_equal, values_equal):
-            sparse_tensor = torch.sparse_coo_tensor(indices, values, dtype=torch.float64, device=device)
-            if indices_equal:
-                self.assertEqual(indices.data_ptr(), sparse_tensor._indices().data_ptr())
-            else:
-                self.assertNotEqual(indices.data_ptr(), sparse_tensor._indices().data_ptr())
-            if values_equal:
-                self.assertEqual(values.data_ptr(), sparse_tensor._values().data_ptr())
-            else:
-                self.assertNotEqual(values.data_ptr(), sparse_tensor._values().data_ptr())
-
-        # both correct
-        indices = torch.tensor(([0], [2]), dtype=torch.int64)
-        values = torch.tensor([1.], dtype=torch.float64)
-        test_tensor(indices, values, True, True)
-
-        indices = torch.tensor(([0], [2]), dtype=torch.int64)
-        values = torch.DoubleTensor(1, 0)
-        test_tensor(indices, values, True, True)
-
-        # only indices correct
-        indices = torch.tensor(([0], [2]), dtype=torch.int64)
-        values = torch.tensor([1.], dtype=torch.float32)
-        test_tensor(indices, values, True, False)
-
-        indices = torch.tensor(([0], [2]), dtype=torch.int64)
-        values = torch.tensor([1.], dtype=torch.float16)
-        test_tensor(indices, values, True, False)
-
-        indices = torch.tensor(([0], [2]), dtype=torch.int64)
-        values = torch.FloatTensor(1, 0)
-        test_tensor(indices, values, True, True)  # An empty tensor's data_ptr is always equal to 0
-
-        # only values correct
-        indices = torch.tensor(([0], [2]), dtype=torch.int32)
-        values = torch.tensor([1.], dtype=torch.float64)
-        test_tensor(indices, values, False, True)
-
-        indices = torch.tensor(([0], [2]), dtype=torch.int32)
-        values = torch.DoubleTensor(1, 0)
-        test_tensor(indices, values, False, True)
-
-        # neither correct
-        indices = torch.tensor(([0], [2]), dtype=torch.int32)
-        values = torch.tensor([1.], dtype=torch.float32)
-        test_tensor(indices, values, False, False)
-
-        indices = torch.tensor(([0], [2]), dtype=torch.int32)
-        values = torch.FloatTensor(1, 0)
-        test_tensor(indices, values, False, True)  # An empty tensor's data_ptr is always equal to 0
-
-        # complex support
-        indices = torch.tensor(([0], [2]), dtype=torch.int64)
-        values = make_tensor([1, ], dtype=torch.cdouble, device=device)
-        test_tensor(indices, values, True, False)
-
-        indices = torch.tensor(([0], [2]), dtype=torch.int32)
-        values = make_tensor([1, 1], dtype=torch.cdouble, device=device)
-        test_tensor(indices, values, False, False)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy is not available")
     @dtypes(*all_types_and_complex_and(torch.bool))
@@ -480,7 +379,7 @@ class TestSparseOnlyCPU(TestSparseBase):
             yield (make_diags((0, 3)), make_offsets([]), (3, 3))
             # forward rotation of upper diagonals
             yield (make_diags((3, 8)), make_offsets([1, 2, 3]), (4, 4))
-            # rotation exausts input space to read from
+            # rotation exhausts input space to read from
             yield (make_diags((2, 3)), make_offsets([2, 1]), (3, 3))
             # Simple cases repeated with special output format
             yield (make_diags((1, 5)), make_offsets([0]), (5, 5), torch.sparse_csc)
@@ -3220,6 +3119,48 @@ class TestSparse(TestSparseBase):
         test_shape(3, 10, 100)
         test_shape(3, 0, [100, 100, 0])
 
+    @onlyAccelerator
+    @skipIfMPS
+    @dtypes(torch.float64, torch.float32, torch.float16, torch.cfloat, torch.cdouble)
+    def test_factory(self, device, dtype):
+        for test_empty_tensor in [True, False]:
+            if test_empty_tensor:
+                default_size = torch.Size([1, 3, 0])
+                size = torch.Size([3, 3, 0])
+            else:
+                default_size = torch.Size([1, 3])
+                size = torch.Size([3, 3])
+            for include_size in [True, False]:
+                for use_tensor_idx in [True, False]:
+                    for use_tensor_val in [True, False]:
+                        for use_cuda in ([False] if not torch.cuda.is_available() else [True, False]):
+                            # have to include size with cuda sparse tensors
+                            include_size = include_size or use_cuda
+                            long_dtype = torch.int64
+                            device = torch.device('cpu') if not use_cuda else \
+                                torch.device(torch.cuda.device_count() - 1)
+                            indices = torch.tensor(([0], [2]), dtype=long_dtype) if use_tensor_idx else ([0], [2])
+                            if test_empty_tensor:
+                                values = torch.empty(1, 0).to(dtype)
+                            else:
+                                if use_tensor_val:
+                                    values = torch.tensor([1.], dtype=dtype)
+                                else:
+                                    values = 1.
+                            if include_size:
+                                sparse_tensor = torch.sparse_coo_tensor(indices, values, size, dtype=dtype,
+                                                                        device=device, requires_grad=True)
+                            else:
+                                sparse_tensor = torch.sparse_coo_tensor(indices, values, dtype=dtype,
+                                                                        device=device, requires_grad=True)
+                            self.assertEqual(indices, sparse_tensor._indices())
+                            self.assertEqual(values, sparse_tensor._values())
+                            self.assertEqual(size if include_size else default_size, sparse_tensor.size())
+                            self.assertEqual(dtype, sparse_tensor.dtype)
+                            if use_cuda:
+                                self.assertEqual(device, sparse_tensor._values().device)
+                            self.assertEqual(True, sparse_tensor.requires_grad)
+
     @dtypes(torch.double, torch.cdouble)
     @dtypesIfMPS(torch.float32, torch.complex64)
     def test_factory_size_check(self, device, dtype):
@@ -3368,6 +3309,68 @@ class TestSparse(TestSparseBase):
                 self.assertEqual(torch.device(should_be_device).type, t.device.type)
                 self.assertEqual(t.device.type, t_empty.device.type)
 
+    @onlyAccelerator
+    @skipIfMPS
+    def test_factory_copy(self, device):
+        def test_tensor(indices, values, indices_equal, values_equal):
+            sparse_tensor = torch.sparse_coo_tensor(indices, values, dtype=torch.float64, device=device)
+            if indices_equal:
+                self.assertEqual(indices.data_ptr(), sparse_tensor._indices().data_ptr())
+            else:
+                self.assertNotEqual(indices.data_ptr(), sparse_tensor._indices().data_ptr())
+            if values_equal:
+                self.assertEqual(values.data_ptr(), sparse_tensor._values().data_ptr())
+            else:
+                self.assertNotEqual(values.data_ptr(), sparse_tensor._values().data_ptr())
+
+        # both correct
+        indices = torch.tensor(([0], [2]), dtype=torch.int64, device=device)
+        values = torch.tensor([1.], dtype=torch.float64, device=device)
+        test_tensor(indices, values, True, True)
+
+        indices = torch.tensor(([0], [2]), dtype=torch.int64, device=device)
+        values = torch.DoubleTensor(1, 0).to(device)
+        test_tensor(indices, values, True, True)
+
+        # only indices correct
+        indices = torch.tensor(([0], [2]), dtype=torch.int64, device=device)
+        values = torch.tensor([1.], dtype=torch.float32, device=device)
+        test_tensor(indices, values, True, False)
+
+        indices = torch.tensor(([0], [2]), dtype=torch.int64, device=device)
+        values = torch.tensor([1.], dtype=torch.float16, device=device)
+        test_tensor(indices, values, True, False)
+
+        indices = torch.tensor(([0], [2]), dtype=torch.int64, device=device)
+        values = torch.FloatTensor(1, 0).to(device)
+        test_tensor(indices, values, True, True)  # An empty tensor's data_ptr is always equal to 0
+
+        # only values correct
+        indices = torch.tensor(([0], [2]), dtype=torch.int32, device=device)
+        values = torch.tensor([1.], dtype=torch.float64, device=device)
+        test_tensor(indices, values, False, True)
+
+        indices = torch.tensor(([0], [2]), dtype=torch.int32, device=device)
+        values = torch.DoubleTensor(1, 0).to(device)
+        test_tensor(indices, values, False, True)
+
+        # neither correct
+        indices = torch.tensor(([0], [2]), dtype=torch.int32, device=device)
+        values = torch.tensor([1.], dtype=torch.float32, device=device)
+        test_tensor(indices, values, False, False)
+
+        indices = torch.tensor(([0], [2]), dtype=torch.int32, device=device)
+        values = torch.FloatTensor(1, 0).to(device)
+        test_tensor(indices, values, False, True)  # An empty tensor's data_ptr is always equal to 0
+
+        # complex support
+        indices = torch.tensor(([0], [2]), dtype=torch.int64, device=device)
+        values = make_tensor([1, ], dtype=torch.cdouble, device=device)
+        test_tensor(indices, values, True, False)
+
+        indices = torch.tensor(([0], [2]), dtype=torch.int32, device=device)
+        values = make_tensor([1, 1], dtype=torch.cdouble, device=device)
+        test_tensor(indices, values, False, False)
 
     @onlyAccelerator
     def test_legacy_new_device(self, device):
