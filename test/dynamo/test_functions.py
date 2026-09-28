@@ -562,7 +562,11 @@ partial_fn = functools.partial(fn, scale=2)
     def test_itertools_islice_basic_ops(self):
         # Test cases taken from the CPython test TestBasicOps.test_islice. That test has a lot of
         # cases that we can't realistically support, whence we copy the sensible cases here.
+        # fn collects (actual, expected) pairs instead of asserting inline: tracing
+        # TestCase.assertEqual costs seconds and tests nothing about islice.
         def fn():
+            checks = []
+
             for args in [  # islice(args) should agree with range(args)
                 (10, 20, 3),
                 (10, 3, 20),
@@ -571,8 +575,8 @@ partial_fn = functools.partial(fn, scale=2)
                 (10, 3),
                 (20,),
             ]:
-                self.assertEqual(
-                    list(itertools.islice(range(100), *args)), list(range(*args))
+                checks.append(
+                    (list(itertools.islice(range(100), *args)), list(range(*args)))
                 )
 
             for args, tgtargs in [  # Stop when seqn is exhausted
@@ -580,41 +584,44 @@ partial_fn = functools.partial(fn, scale=2)
                 ((10, 110), ((10, 100))),
                 ((110,), (100,)),
             ]:
-                self.assertEqual(
-                    list(itertools.islice(range(100), *args)), list(range(*tgtargs))
+                checks.append(
+                    (list(itertools.islice(range(100), *args)), list(range(*tgtargs)))
                 )
 
             # Test stop=None
-            self.assertEqual(list(itertools.islice(range(10), None)), list(range(10)))
-            self.assertEqual(
-                list(itertools.islice(range(10), None, None)), list(range(10))
+            checks.append((list(itertools.islice(range(10), None)), list(range(10))))
+            checks.append(
+                (list(itertools.islice(range(10), None, None)), list(range(10)))
             )
-            self.assertEqual(
-                list(itertools.islice(range(10), None, None, None)), list(range(10))
+            checks.append(
+                (list(itertools.islice(range(10), None, None, None)), list(range(10)))
             )
-            self.assertEqual(
-                list(itertools.islice(range(10), 2, None)), list(range(2, 10))
+            checks.append(
+                (list(itertools.islice(range(10), 2, None)), list(range(2, 10)))
             )
-            self.assertEqual(
-                list(itertools.islice(range(10), 1, None, 2)), list(range(1, 10, 2))
+            checks.append(
+                (list(itertools.islice(range(10), 1, None, 2)), list(range(1, 10, 2)))
             )
 
             # Test number of items consumed     SF #1171417
             it = iter(range(10))
-            self.assertEqual(list(itertools.islice(it, 3)), list(range(3)))
-            self.assertEqual(list(it), list(range(3, 10)))
+            checks.append((list(itertools.islice(it, 3)), list(range(3))))
+            checks.append((list(it), list(range(3, 10))))
 
             it = iter(range(10))
-            self.assertEqual(list(itertools.islice(it, 3, 3)), [])
-            self.assertEqual(list(it), list(range(3, 10)))
+            checks.append((list(itertools.islice(it, 3, 3)), []))
+            checks.append((list(it), list(range(3, 10))))
 
             # Issue #10323:  Less islice in a predictable state
             c = itertools.count()
-            self.assertEqual(list(itertools.islice(c, 1, 3, 50)), [1])
-            self.assertEqual(next(c), 3)
+            checks.append((list(itertools.islice(c, 1, 3, 50)), [1]))
+            checks.append((next(c), 3))
+
+            return checks
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        opt_fn()
+        for actual, expected in opt_fn():
+            self.assertEqual(actual, expected)
 
     @unittest.expectedFailure
     def test_itertools_islice_intlike(self):
@@ -5646,6 +5653,57 @@ class GraphModule(torch.nn.Module):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_wrapper_user_method_not_a_wrapper_user_function(self):
+        """WrapperUserMethodVariable must not subclass WrapperUserFunctionVariable.
+
+        In CPython, MethodType is not a subclass of FunctionType; the VTs
+        should mirror that.
+        """
+        import types
+
+        from torch._dynamo.variables.functions import (
+            BaseUserFunctionVariable,
+            WrapperUserFunctionVariable,
+            WrapperUserMethodVariable,
+        )
+
+        self.assertFalse(
+            issubclass(WrapperUserMethodVariable, WrapperUserFunctionVariable)
+        )
+        self.assertTrue(
+            issubclass(WrapperUserFunctionVariable, BaseUserFunctionVariable)
+        )
+        self.assertTrue(issubclass(WrapperUserMethodVariable, BaseUserFunctionVariable))
+        self.assertIs(WrapperUserMethodVariable._cpython_type, types.MethodType)
+        self.assertIs(WrapperUserFunctionVariable._cpython_type, types.FunctionType)
+
+    def test_wrapper_user_method_torchdynamo_inline(self):
+        # Dynamo traces the _torchdynamo_inline target instead of meth, so the
+        # targets return different values to prove that path was taken.
+        def mod_inline(self, x):
+            return x + 1
+
+        def plain_inline(self, x):
+            return x + 2
+
+        class Mod(torch.nn.Module):
+            def meth(self, x):
+                return x + 100
+
+        class Plain:
+            def meth(self, x):
+                return x + 200
+
+        Mod.meth._torchdynamo_inline = mod_inline
+        Plain.meth._torchdynamo_inline = plain_inline
+
+        def fn(mod, plain, x):
+            return mod.meth(x) + plain.meth(x)
+
+        x = torch.randn(2, 2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(Mod(), Plain(), x), (x + 1) + (x + 2))
+
     def test_wraps_stacked_on_lru_cache(self):
         # Stacking two functools.wraps layers over an lru_cache-wrapped fn.
         @functools.lru_cache
@@ -6233,6 +6291,12 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         compiled function
         """
 
+        f = global_func_with_default_tensor_args
+        defaults = tuple(t.clone() for t in f.__defaults__)
+        kwdefaults = {k: t.clone() for k, t in f.__kwdefaults__.items()}
+        self.addCleanup(setattr, f, "__defaults__", defaults)
+        self.addCleanup(setattr, f, "__kwdefaults__", kwdefaults)
+
         def func():
             return global_func_with_default_tensor_args()
 
@@ -6276,6 +6340,11 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         stored on the globally allocated function object, both from the orig and
         compiled function
         """
+        fwd = ModuleWithDefaultTensorArgsMethod.forward
+        defaults = tuple(t.clone() for t in fwd.__defaults__)
+        kwdefaults = {k: t.clone() for k, t in fwd.__kwdefaults__.items()}
+        self.addCleanup(setattr, fwd, "__defaults__", defaults)
+        self.addCleanup(setattr, fwd, "__kwdefaults__", kwdefaults)
         mod = WrapperModule()
         cnts = torch._dynamo.testing.CompileCounter()
         compiled_mod = torch.compile(mod, backend=cnts)

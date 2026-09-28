@@ -43,7 +43,6 @@ if torch.backends.mps.is_available():
             "ormqr",
             "renorm",
             "sparse.sampled_addmm",
-            "to_sparse",
         }
 
         MACOS_BEFORE_14_4_XFAILLIST = {
@@ -67,7 +66,6 @@ if torch.backends.mps.is_available():
             "linalg.eig": None,
             "linalg.eigvals": None,
             "hash_tensor": None,
-            "heaviside": None,
             # "kthvalue": None,
             "linalg.ldl_factor": None,
             "linalg.ldl_factor_ex": None,
