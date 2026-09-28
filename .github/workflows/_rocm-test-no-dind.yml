@@ -1,7 +1,6 @@
 # Owner(s): ["module: rocm"]
 #
-# Kubernetes-container counterpart to _rocm-test.yml. The selected CI image is
-# the job pod itself; there is no host setup, image pull action, or docker exec.
+# Removes the Docker-in-Docker (DinD) requirement. The CI image is the job pod.
 name: test-kubernetes
 
 on:
@@ -66,12 +65,16 @@ permissions:
   contents: read
 
 jobs:
-  # kubelet pulls the job image before any step runs, so the in-job ECR login
-  # _rocm-test.yml performs is too late here. docker-builds copies each image it
-  # pushes to ECR onto the public GHCR mirror under the same tag, server-side,
-  # so the mirror carries the same digest. Resolve it on a CPU runner: a hash
-  # that was never mirrored fails here in seconds instead of holding a GPU
-  # until the hook's prepare_job timeout expires.
+  # This image resolution applies only to CI images built from main, not to
+  # images produced by pull requests. The GHCR mirror is the main CI image tag.
+  # The wheel still comes from this PR's build job; only the container image is
+  # the main-branch CI image. kubelet pulls the job image before any step runs,
+  # so the in-job ECR login _rocm-test.yml performs is too late here.
+  # docker-builds copies each main image it pushes to ECR onto the public GHCR
+  # mirror under the same tag, server-side, so the mirror carries the same
+  # digest. Resolve it on a CPU runner: a hash that was never mirrored fails
+  # here in seconds instead of holding a GPU until the hook's prepare_job
+  # timeout expires.
   resolve-image:
     if: github.repository_owner == 'pytorch' && toJSON(fromJSON(inputs.test-matrix).include) != '[]'
     runs-on: ubuntu-24.04
