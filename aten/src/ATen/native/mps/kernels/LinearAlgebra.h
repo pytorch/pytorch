@@ -69,9 +69,9 @@ struct EighParams {
 
 // Per-thread small-matrix inverse kernel: up to this size one thread inverts a
 // whole matrix from registers. LinearAlgebra.metal instantiates exact sizes
-// 1..16 and static_asserts the list against this constant. Strides are in
+// 1..4 and static_asserts the list against this constant. Strides are in
 // elements.
-C10_METAL_CONSTEXPR int64_t kLUSmallInvMax = 16;
+C10_METAL_CONSTEXPR int64_t kLUSmallInvMax = 4;
 
 template <typename index_t = int64_t>
 struct LUSmallInvParams {
