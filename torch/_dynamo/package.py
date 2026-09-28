@@ -1280,15 +1280,21 @@ class CompilePackage:
             # which the loader replays with plain getattr. dataclasses rename
             # what they exec() to its attribute path; a helper that does not
             # would otherwise only fail at load.
+            cause: Exception | None = None
             try:
                 resolves = _lookup_code(self._codes[code]) is code
-            except Exception:
+            except Exception as e:
                 # A replay can fail in many ways (a missing attribute, a None
                 # __closure__, an index out of range); each means unreplayable.
-                resolves = False
+                resolves, cause = False, e
             if not resolves:
                 del self._codes[code]
-                _raise_resolution_error(code, module)
+                outcome = f"fails with {cause!r}" if cause else "finds other code"
+                raise PackageError(
+                    f"Cannot resolve a fully qualified name for {code}: replaying "
+                    f"the recorded path {module.__name__}:{function_name} "
+                    f"({code_source}) {outcome}"
+                ) from cause
 
     @property
     def current_entry(self) -> _DynamoCodeCacheEntry | None:
