@@ -5044,7 +5044,6 @@ class TestSDPAAccelerator(NNTestCase):
         self.assertEqual(actual, expected, atol=2e-2, rtol=2e-2)
 
     @unittest.skipIf(not PLATFORM_FUSED_ATTENTION_SUPPORTS_HDIM512, "hdim=512 fused attention is unsupported.")
-    @unittest.skipIf(not SM80OrLater, "bfloat16 requires SM80 or later")
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @unittest.skipIf(not SM80OrLater, "bfloat16 requires SM80 or later")
     @parametrize("kv_len,num_heads,is_causal", [(289, 40, False), (400, 16, True)])
