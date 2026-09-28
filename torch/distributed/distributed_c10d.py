@@ -230,7 +230,22 @@ def _use_torchcomms_enabled() -> bool:
     return _TORCHCOMM_AVAILABLE and dist_config.use_torchcomms
 
 
+def _resolve_torchcomms_backend(backend: str) -> str:
+    backend = backend.lower()
+    if (
+        backend == "nccl"
+        and torch.version.hip is not None
+        and (
+            _torchcomms_is_backend_registered("rccl")
+            or _torchcomms_is_backend_built("rccl")
+        )
+    ):
+        return "rccl"
+    return backend
+
+
 def _is_torchcomms_backend(backend: str) -> bool:
+    backend = _resolve_torchcomms_backend(backend)
     return _use_torchcomms_enabled() and (
         _torchcomms_is_backend_registered(backend)
         or _torchcomms_is_backend_built(backend)
@@ -262,6 +277,7 @@ def _torchcomms_handles_backend(backend) -> bool:
         name = part.split(":", 1)[1] if ":" in part else part
         if not name:
             continue
+        name = _resolve_torchcomms_backend(name)
         if not (
             _torchcomms_is_backend_registered(name)
             or _torchcomms_is_backend_built(name)
@@ -365,7 +381,7 @@ def _create_torchcomms_backend(
     os.environ["TORCHCOMM_SIZE"] = str(group_size)
     try:
         comm = new_comm(
-            backend,
+            _resolve_torchcomms_backend(backend),
             torch_device,
             name=group_name,
             store=store,
@@ -2504,7 +2520,7 @@ def init_process_group(
             When TORCH_NCCL_BLOCKING_WAIT is set, the process will block and wait for this timeout.
 
         group_name (str, optional, deprecated): Group name. This argument is ignored
-        pg_options (ProcessGroupOptions, optional): process group options
+        pg_options (``Backend.Options``, optional): process group options
             specifying what additional options need to be passed in during
             the construction of specific process groups. As of now, the only
             options we support is ``ProcessGroupNCCL.Options`` for the ``nccl``
@@ -2514,7 +2530,10 @@ def init_process_group(
             See https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/types.html#ncclconfig-t
         device_id (torch.device | int, optional): a single, specific device
             this process will work on, allowing for backend-specific
-            optimizations.  Currently this has two effects, only under
+            optimizations. Both accelerator devices (e.g. ``cuda:0``) and
+            CPU devices (e.g. ``cpu:0``) are accepted; on CPU, this currently
+            only validates and records the device, without any of the NCCL-specific
+            optimizations described below. Currently this has two effects, only under
             NCCL: the communicator is immediately formed (calling
             ``ncclCommInit*`` immediately rather than the normal lazy
             call) and sub-groups will use ``ncclCommSplit`` when
@@ -2943,9 +2962,10 @@ def _new_process_group_helper(
             "created, please use a different group name"
         )
 
-    if device_id is not None and (device_id.index is None or device_id.type == "cpu"):
+    if device_id is not None and device_id.index is None:
         raise ValueError(
-            "init_process_group device_id parameter must be an accelerator with an index"
+            "init_process_group device_id parameter must be a device with a "
+            "valid index, e.g. cpu:0 or cuda:0"
         )
 
     # Note: _new_process_group_helper is only called from init_process_group, which always provides a timeout value
@@ -3043,7 +3063,7 @@ def _new_process_group_helper(
                 if os.environ.get("TORCH_DISTRIBUTED_USE_TORCHCOMMS")
                 else "dist_config.use_torchcomms",
                 _resolve_torchcomms_device(device, device_id),
-                backend_str,
+                _resolve_torchcomms_backend(backend_str),
             )
             backend_class = _create_torchcomms_backend(
                 backend_str,
@@ -6794,7 +6814,7 @@ def split_group(
             list determines the group rank in the new group. All ranks must pass
             the same ordering.
         timeout (timedelta, optional): see `init_process_group` for details and default value.
-        pg_options (ProcessGroupOptions, optional): Additional options need to be passed in during
+        pg_options (``Backend.Options``, optional): Additional options need to be passed in during
             the construction of specific process groups. i.e.``is_high_priority_stream``
             can be specified so that process group can pick up high priority cuda streams.
         group_desc (str, optional): a string to describe the process group.
@@ -7070,7 +7090,7 @@ def new_group(
             ``Backend.GLOO``). If ``None`` is passed in, the backend
             corresponding to the default process group will be used. Default is
             ``None``.
-        pg_options (ProcessGroupOptions, optional): process group options
+        pg_options (``Backend.Options``, optional): process group options
             specifying what additional options need to be passed in during
             the construction of specific process groups. i.e. for the ``nccl``
             backend, ``is_high_priority_stream`` can be specified so that
@@ -7345,7 +7365,7 @@ def new_subgroups(
             ``Backend.GLOO``). If ``None`` is passed in, the backend
             corresponding to the default process group will be used. Default is
             ``None``.
-        pg_options (ProcessGroupOptions, optional): process group options
+        pg_options (``Backend.Options``, optional): process group options
             specifying what additional options need to be passed in during
             the construction of specific process groups. i.e. for the ``nccl``
             backend, ``is_high_priority_stream`` can be specified so that
@@ -7445,7 +7465,7 @@ def new_subgroups_by_enumeration(
              ``Backend.GLOO``). If ``None`` is passed in, the backend
              corresponding to the default process group will be used. Default is
              ``None``.
-        pg_options (ProcessGroupOptions, optional): process group options
+        pg_options (``Backend.Options``, optional): process group options
             specifying what additional options need to be passed in during
             the construction of specific process groups. i.e. for the ``nccl``
             backend, ``is_high_priority_stream`` can be specified so that
@@ -7612,7 +7632,7 @@ def shrink_group(
             ``SHRINK_ABORT`` will attempt to terminate ongoing operations
             in the parent communicator before shrinking.
             Defaults to ``SHRINK_DEFAULT``.
-        pg_options (ProcessGroupOptions, optional): Backend-specific options to apply
+        pg_options (``Backend.Options``, optional): Backend-specific options to apply
             to the shrunken process group. If provided, the backend will use
             these options when creating the new group. If omitted, the new group
             inherits defaults from the parent.

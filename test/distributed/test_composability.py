@@ -651,6 +651,7 @@ class ComposabilityTest(MultiProcContinuousTest):
                 _ComputationType.FORWARD,
                 _ComputationType.FULL_BACKWARD,
                 _ComputationType.REDUCE_GRAD,
+                _ComputationType.WAIT_REDUCE_GRAD,
             ],
             microbatch_index=0,
         )
