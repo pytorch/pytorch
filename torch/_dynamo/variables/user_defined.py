@@ -1161,6 +1161,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 or self.value.__new__ is not collections.OrderedDict.__new__
                 or self.value.__init__ is not collections.OrderedDict.__init__
                 or self.value.__setitem__ is not collections.OrderedDict.__setitem__
+                # fromkeys constructs through cls(), i.e. the metaclass __call__
+                or type(self.value).__call__ is not type.__call__
             ):
                 unimplemented(
                     gb_type="OrderedDict subclass fromkeys override",

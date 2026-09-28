@@ -1293,6 +1293,28 @@ class DictTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(fn(), ("OD", ["b", "c", "a"]))
             self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
 
+    def test_ordered_dict_subclass_fromkeys_metaclass_call(self):
+        calls = []
+
+        class Meta(type):
+            def __call__(cls, *args, **kwargs):
+                calls.append(cls.__name__)
+                return super().__call__(*args, **kwargs)
+
+        class OD(OrderedDict, metaclass=Meta):
+            pass
+
+        def fn():
+            d = OD.fromkeys("ab")
+            return type(d).__name__, list(d)
+
+        self.assertEqual(fn(), ("OD", ["a", "b"]))
+        self.assertEqual(calls, ["OD"])
+        # fromkeys constructs through the metaclass __call__, which Dynamo
+        # does not model here; it must graph break rather than bypass it.
+        with self.assertRaisesRegex(Unsupported, "fromkeys override"):
+            torch.compile(fn, backend="eager", fullgraph=True)()
+
     def test_mapping_proxy_ban_muation_on_dict_realization(self):
         def fn(x):
             class Foo:
