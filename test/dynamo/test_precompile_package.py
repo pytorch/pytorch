@@ -2192,6 +2192,8 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertEqual([f.value for f in ordered], sorted(rendered))
 
     def test_saved_hooks_fingerprint_mirrors_what_the_guard_stores(self):
+        from torch._dynamo.guards import _saved_tensors_hooks_fingerprint
+
         fingerprint = precompile_package._saved_hooks_fingerprint
         self.assertEqual(fingerprint(), "hooks=None")
         # The guard stores None for hooks it cannot inline, so plain-Python
@@ -2206,10 +2208,11 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         unpack = torch.fx.symbolic_trace(identity)
         with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
             rendered = fingerprint()
-        # Named by rendered graph, never by address: two GraphModules with one
-        # code read the same here although the guard compares their ids.
-        digest = precompile_package._hash_text(pack.code)
+        digest = _saved_tensors_hooks_fingerprint((pack, unpack))[0][:12]
         self.assertEqual(rendered, f"hooks=({digest}, {digest})")
+        next(iter(pack.graph.nodes)).meta["user_cache_hash"] = "v2"
+        with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
+            self.assertNotEqual(fingerprint(), rendered)
 
     def test_wont_generalize_cancels_pins_only_within_a_frame(self):
         from torch._dynamo.precompile_package import (
