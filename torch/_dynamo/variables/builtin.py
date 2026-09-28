@@ -471,10 +471,6 @@ class BaseBuiltinVariable(VariableTracker):
     def as_python_constant(self) -> Any:
         return self._fn
 
-    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        # A builtin type or function reprs to a fixed string, e.g. "<class 'int'>". type_repr / func_repr:
-        return VariableTracker.build(tx, repr(self.as_python_constant()))
-
     def reconstruct(self, codegen: "PyCodegen") -> None:
         name = self.as_python_constant().__name__
         if name in codegen.tx.f_globals:
@@ -1949,9 +1945,13 @@ class BuiltinVariable(BaseBuiltinVariable):
             # object.__init__ is a no-op
             return variables.ConstantVariable.create(None)
 
-        if self.fn in (set, frozenset, list, tuple, int, str, float, complex):
+        if self.fn in (set, frozenset, list, tuple):
             if isinstance(args[0], variables.UserDefinedObjectVariable):
-                return args[0].call_base_method(tx, name, args[1:], kwargs)
+                if args[0]._base_vt is None:
+                    raise AssertionError(
+                        "UserDefinedObjectVariable._base_vt must not be None"
+                    )
+                return args[0]._base_vt.call_method(tx, name, args[1:], kwargs)
             else:
                 return args[0].call_method(tx, name, args[1:], kwargs)
 
@@ -2037,7 +2037,11 @@ class BuiltinVariable(BaseBuiltinVariable):
 
         if name == "__hash__" and len(args) == 1 and not kwargs:
             arg = args[0]
-            generic_hash(tx, arg)
+            if (
+                isinstance(arg, variables.UserDefinedConstantVariable)
+                and arg._base_vt is not None
+            ):
+                return generic_hash(tx, arg._base_vt)
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -3395,12 +3399,6 @@ class BuiltinVariable(BaseBuiltinVariable):
         # Unwrap the underlying ConstDictVariable
         if isinstance(a, DictViewVariable):
             a = a.dv_dict
-        # Must precede the container fast path below: a user subclass now also
-        # satisfies those isinstance checks, but its __bool__/__len__ override
-        # has to win.
-        if isinstance(a, UserDefinedObjectVariable):
-            bool_result = self.call_bool(tx, a)
-            return VariableTracker.build(tx, not bool_result.value)  # type: ignore[missing-attribute]
         if isinstance(
             a,
             (
@@ -3413,6 +3411,9 @@ class BuiltinVariable(BaseBuiltinVariable):
             ),
         ):
             return VariableTracker.build(tx, len(a.items) == 0)
+        if isinstance(a, UserDefinedObjectVariable):
+            bool_result = self.call_bool(tx, a)
+            return VariableTracker.build(tx, not bool_result.value)  # type: ignore[missing-attribute]
 
         return None
 
@@ -3480,10 +3481,14 @@ class DictBuiltinVariable(BaseBuiltinVariable):
 
         resolved_fn = getattr(dict, name, None)
         if resolved_fn is not None and resolved_fn in dict_methods:
-            obj = args[0]
-            if isinstance(obj, UserDefinedObjectVariable):
-                return obj.call_base_method(tx, name, args[1:], kwargs)
-            return obj.call_method(tx, name, args[1:], kwargs)
+            if isinstance(args[0], variables.UserDefinedDictVariable):
+                if args[0]._base_vt is None:
+                    raise AssertionError(
+                        "UserDefinedDictVariable._base_vt must not be None for dict method dispatch"
+                    )
+                return args[0]._base_vt.call_method(tx, name, args[1:], kwargs)
+            elif isinstance(args[0], ConstDictVariable):
+                return args[0].call_method(tx, name, args[1:], kwargs)
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -3573,10 +3578,9 @@ class DictBuiltinVariable(BaseBuiltinVariable):
                     raise AssertionError(
                         f"Expected DefaultDictVariable, got {type(result)}"
                     )
-                # Route through ConstDictVariable to wrap raw VT keys into
-                # HashableTrackers before populating the defaultdict's storage.
-                wrapped = ConstDictVariable(items, mutation_type=ValueMutationNew())
-                result.items.update(wrapped.items)
+                result._base_vt = ConstDictVariable(
+                    items, mutation_type=ValueMutationNew()
+                )
                 return result
             else:
                 return ConstDictVariable(items, mutation_type=ValueMutationNew())

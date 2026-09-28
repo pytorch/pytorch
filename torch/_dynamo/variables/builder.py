@@ -213,7 +213,7 @@ from .base import (
     AttributeMutationExisting,
     AttributeMutationNew,
     typestr,
-    ValueAndAttributeMutationExisting,
+    ValueMutationExisting,
     ValueMutationNew,
     VariableTracker,
     VariableTrackerMeta,
@@ -257,6 +257,7 @@ from .iter import CountIteratorVariable, ItertoolsVariable
 from .lazy import LazyConstantVariable, LazyVariableTracker
 from .lists import (
     BaseListVariable,
+    DequeVariable,
     ListIteratorVariable,
     ListReverseIteratorVariable,
     ListVariable,
@@ -344,14 +345,11 @@ from .user_defined import (
     SourcelessGraphModuleVariable,
     UserDefinedClassVariable,
     UserDefinedConstantVariable,
-    UserDefinedDefaultDictVariable,
     UserDefinedDequeVariable,
     UserDefinedDictVariable,
     UserDefinedExceptionClassVariable,
-    UserDefinedFrozensetVariable,
     UserDefinedListVariable,
     UserDefinedObjectVariable,
-    UserDefinedOrderedDictVariable,
     UserDefinedSetVariable,
     UserDefinedTupleVariable,
 )
@@ -1211,10 +1209,15 @@ class VariableBuilder:
                 for name in namedtuple_fields(type(value))
             ]
 
+            tuple_vt = TupleVariable(
+                output,
+                source=self.source,
+                mutation_type=ValueMutationExisting(),
+            )
             result = UserDefinedTupleVariable.get_vt_cls(type(value))(
                 value,
                 source=self.source,
-                items=output,
+                tuple_vt=tuple_vt,
             )
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
@@ -1268,16 +1271,20 @@ class VariableBuilder:
 
             if istype(value, collections.defaultdict):
                 factory_source = AttrSource(self.source, "default_factory")
-                result = DefaultDictVariable(
+                dict_vt = ConstDictVariable(
                     result,  # type: ignore[arg-type]
+                    mutation_type=ValueMutationExisting(),
+                    source=self.source,
+                )
+                result = DefaultDictVariable(
+                    value,
                     default_factory=VariableBuilder(self.tx, factory_source)(
                         value.default_factory
                     ),
+                    dict_vt=dict_vt,
                     source=self.source,
                 )
-                return self.tx.output.side_effects.track_object_existing(
-                    value, result, mutation_type_cls=ValueAndAttributeMutationExisting
-                )
+                return self.tx.output.side_effects.track_object_existing(value, result)
             elif istype(value, collections.OrderedDict):
                 result = OrderedDictVariable(
                     result,  # type: ignore[arg-type]
@@ -2221,31 +2228,27 @@ class VariableBuilder:
 
                 return key, res_value
 
-            kv_items = dict(
+            result = dict(
                 build_key_value(i, k, v)
                 for i, k, v in enumerate_items_with_dict_position(value)
             )
 
-            if isinstance(value, collections.defaultdict):
-                factory_source = AttrSource(self.source, "default_factory")
-                result = UserDefinedDefaultDictVariable(
-                    value,
-                    default_factory=VariableBuilder(self.tx, factory_source)(
-                        value.default_factory
-                    ),
-                    items=kv_items,
-                    source=self.source,
-                )
-            else:
-                udf_cls = (
-                    UserDefinedOrderedDictVariable
-                    if isinstance(value, collections.OrderedDict)
-                    else UserDefinedDictVariable
-                )
-                result = udf_cls(value, items=kv_items, source=self.source)
-            return self.tx.output.side_effects.track_object_existing(
-                value, result, mutation_type_cls=ValueAndAttributeMutationExisting
+            dict_vt_cls = (
+                OrderedDictVariable
+                if isinstance(value, collections.OrderedDict)
+                else ConstDictVariable
             )
+            dict_vt = dict_vt_cls(
+                result,
+                mutation_type=ValueMutationExisting(),
+                source=self.source,
+            )
+            # Force this to reconstruct on mutation to keep the reconstruction
+            # bytecode simple
+            dict_vt.should_reconstruct_all = True
+
+            result = UserDefinedDictVariable(value, dict_vt=dict_vt, source=self.source)
+            return self.tx.output.side_effects.track_object_existing(value, result)
         elif isinstance(value, tuple):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
@@ -2261,10 +2264,13 @@ class VariableBuilder:
                 for i in range(tuple.__len__(value))
             ]
 
-            result = UserDefinedTupleVariable(
-                value,
-                items=output,  # type: ignore[arg-type]
+            tuple_vt = TupleVariable(
+                output,  # type: ignore[arg-type]
                 source=self.source,
+                mutation_type=ValueMutationExisting(),
+            )
+            result = UserDefinedTupleVariable(
+                value, tuple_vt=tuple_vt, source=self.source
             )
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif isinstance(value, list):
@@ -2281,14 +2287,13 @@ class VariableBuilder:
                 )
                 for i in range(list.__len__(value))
             ]
-            result = UserDefinedListVariable(
-                value,
-                items=output,  # type: ignore[arg-type]
+            list_vt = ListVariable(
+                output,  # type: ignore[arg-type]
                 source=self.source,
+                mutation_type=ValueMutationExisting(),
             )
-            return self.tx.output.side_effects.track_object_existing(
-                value, result, mutation_type_cls=ValueAndAttributeMutationExisting
-            )
+            result = UserDefinedListVariable(value, list_vt=list_vt, source=self.source)
+            return self.tx.output.side_effects.track_object_existing(value, result)
         elif isinstance(value, collections.deque):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
@@ -2307,15 +2312,16 @@ class VariableBuilder:
                 )
                 for i in range(collections.deque.__len__(value))
             ]
-            result = UserDefinedDequeVariable(
-                value,
-                items=output,  # type: ignore[arg-type]
+            deque_vt = DequeVariable(
+                output,  # type: ignore[arg-type]
                 maxlen=ConstantVariable.create(value.maxlen),
                 source=self.source,
+                mutation_type=ValueMutationExisting(),
             )
-            return self.tx.output.side_effects.track_object_existing(
-                value, result, mutation_type_cls=ValueAndAttributeMutationExisting
+            result = UserDefinedDequeVariable(
+                value, deque_vt=deque_vt, source=self.source
             )
+            return self.tx.output.side_effects.track_object_existing(value, result)
         elif isinstance(value, (set, frozenset)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
@@ -2330,16 +2336,17 @@ class VariableBuilder:
                 for i in range(list.__len__(L))
             ]
             if isinstance(value, set):
-                result = UserDefinedSetVariable(value, items=output, source=self.source)
+                set_vt_cls = SetVariable
             else:
                 if not isinstance(value, frozenset):
                     raise AssertionError(f"Expected frozenset, got {type(value)}")
-                result = UserDefinedFrozensetVariable(
-                    value, items=output, source=self.source
-                )
-            return self.tx.output.side_effects.track_object_existing(
-                value, result, mutation_type_cls=ValueAndAttributeMutationExisting
+                set_vt_cls = FrozensetVariable
+
+            set_vt = set_vt_cls(
+                output, source=self.source, mutation_type=ValueMutationExisting()
             )
+            result = UserDefinedSetVariable(value, set_vt=set_vt, source=self.source)
+            return self.tx.output.side_effects.track_object_existing(value, result)
         elif issubclass(type(value), MutableMapping):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             result = MutableMappingVariable(value, source=self.source)
@@ -4233,12 +4240,14 @@ def handle_traced_output(
                 raise AssertionError(
                     f"expected namedtuple or structseq but got {type(example_value)}"
                 )
+            tuple_vt = TupleVariable(
+                unpacked,
+                mutation_type=options.get("mutation_type", ValueMutationNew()),
+            )
             return UserDefinedTupleVariable.get_vt_cls(type(example_value))(
                 example_value,
-                items=unpacked,
-                # options may carry mutation_type; default matches the old
-                # sourceless tuple_vt.
-                **{"mutation_type": ValueMutationNew(), **options},  # type: ignore[arg-type]
+                tuple_vt=tuple_vt,
+                **options,  # type: ignore[arg-type]
             )
     elif example_value is None or proxy.node.target is torch.manual_seed:
         return ConstantVariable.create(None, **options)
@@ -5535,8 +5544,9 @@ class SourcelessBuilder:
                 SourcelessBuilder.create(tx, getattr(value, name))
                 for name in namedtuple_fields(type(value))
             ]
+            tuple_vt = TupleVariable(output, mutation_type=ValueMutationNew())
             return UserDefinedTupleVariable.get_vt_cls(type(value))(
-                value, items=output, mutation_type=ValueMutationNew()
+                value, tuple_vt=tuple_vt
             )
         elif (
             isinstance(value, torch.SymInt)
