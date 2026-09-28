@@ -21,6 +21,7 @@
 #include <nccl.h>
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
 #include <torch/csrc/distributed/c10d/NCCLCommRegistrationHook.hpp>
+#include <torch/csrc/distributed/c10d/hooks/FlightRecorderHook.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/NCCLBootstrap.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/TracingGuard.hpp>
@@ -631,6 +632,8 @@ void ProcessGroupNCCL::abortProcess(const std::string& reason) {
   TC_LOG(ERROR, this) << "Aborting process on rank " << rank_ << " due to "
                       << reason;
   runAbortHooks();
+  // Only here, not on revoke: a reconfigurable job must not stall on failure.
+  ::c10d::FlightRecorderHook::waitForPeerDumps();
   ::abort();
 }
 
