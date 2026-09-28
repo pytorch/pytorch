@@ -88,12 +88,10 @@ class DictTest(__TestCase):
     def test_literal_constructor(self):
         # check literal constructor for different sized dicts
         # (to exercise the BUILD_MAP oparg).
-        from random import Random
-        rng = Random(0)
         for n in (0, 1, 6, 256, 400):
-            items = [(''.join(rng.sample(string.ascii_letters, 8)), i)
+            items = [(''.join(random.sample(string.ascii_letters, 8)), i)
                      for i in range(n)]
-            rng.shuffle(items)
+            random.shuffle(items)
             formatted_items = ('{!r}: {:d}'.format(k, v) for k, v in items)
             dictliteral = '{' + ', '.join(formatted_items) + '}'
             self.assertEqual(eval(dictliteral), dict(items))

@@ -116,11 +116,9 @@ class OrderedDictTests:
             [('a', 1), ('b', 2), ('c', 3), ('d', 4), ('e', 5), ('f', 6), ('g', 7)])
 
     def test_468(self):
-        from random import Random
-        rng = Random(0)
         OrderedDict = self.OrderedDict
         items = [('a', 1), ('b', 2), ('c', 3), ('d', 4), ('e', 5), ('f', 6), ('g', 7)]
-        rng.shuffle(items)
+        shuffle(items)
         argdict = OrderedDict(items)
         d = OrderedDict(**argdict)
         self.assertEqual(list(d.items()), items)
@@ -210,11 +208,9 @@ class OrderedDictTests:
         self.assertTrue(issubclass(OrderedDict, MutableMapping))
 
     def test_clear(self):
-        from random import Random
-        rng = Random(0)
         OrderedDict = self.OrderedDict
         pairs = [('c', 1), ('b', 2), ('a', 3), ('d', 4), ('e', 5), ('f', 6)]
-        rng.shuffle(pairs)
+        shuffle(pairs)
         od = OrderedDict(pairs)
         self.assertEqual(len(od), len(pairs))
         od.clear()
@@ -239,11 +235,9 @@ class OrderedDictTests:
                          [('d', 1), ('b', 2), ('c', 10), ('a', 4), ('e', 5), ('f', 20)])
 
     def test_iterators(self):
-        from random import Random
-        rng = Random(0)
         OrderedDict = self.OrderedDict
         pairs = [('c', 1), ('b', 2), ('a', 3), ('d', 4), ('e', 5), ('f', 6)]
-        rng.shuffle(pairs)
+        shuffle(pairs)
         od = OrderedDict(pairs)
         self.assertEqual(list(od), [t[0] for t in pairs])
         self.assertEqual(list(od.keys()), [t[0] for t in pairs])
@@ -295,11 +289,9 @@ class OrderedDictTests:
         self.assertEqual(list(reversed(od.items())), empty)
 
     def test_popitem(self):
-        from random import Random
-        rng = Random(0)
         OrderedDict = self.OrderedDict
         pairs = [('c', 1), ('b', 2), ('a', 3), ('d', 4), ('e', 5), ('f', 6)]
-        rng.shuffle(pairs)
+        shuffle(pairs)
         od = OrderedDict(pairs)
         while pairs:
             self.assertEqual(od.popitem(), pairs.pop())
@@ -319,13 +311,11 @@ class OrderedDictTests:
         self.assertEqual(len(obj), 20)
 
     def test_pop(self):
-        from random import Random
-        rng = Random(0)
         OrderedDict = self.OrderedDict
         pairs = [('c', 1), ('b', 2), ('a', 3), ('d', 4), ('e', 5), ('f', 6)]
-        rng.shuffle(pairs)
+        shuffle(pairs)
         od = OrderedDict(pairs)
-        rng.shuffle(pairs)
+        shuffle(pairs)
         while pairs:
             k, v = pairs.pop()
             self.assertEqual(od.pop(k), v)
@@ -347,11 +337,9 @@ class OrderedDictTests:
             m.pop('a')
 
     def test_equality(self):
-        from random import Random
-        rng = Random(0)
         OrderedDict = self.OrderedDict
         pairs = [('c', 1), ('b', 2), ('a', 3), ('d', 4), ('e', 5), ('f', 6)]
-        rng.shuffle(pairs)
+        shuffle(pairs)
         od1 = OrderedDict(pairs)
         od2 = OrderedDict(pairs)
         self.assertEqual(od1, od2)          # same order implies equality
@@ -472,11 +460,9 @@ class OrderedDictTests:
         self.assertIsInstance(r, str)
 
     def test_setdefault(self):
-        from random import Random
-        rng = Random(0)
         OrderedDict = self.OrderedDict
         pairs = [('c', 1), ('b', 2), ('a', 3), ('d', 4), ('e', 5), ('f', 6)]
-        rng.shuffle(pairs)
+        shuffle(pairs)
         od = OrderedDict(pairs)
         pair_order = list(od.items())
         self.assertEqual(od.setdefault('a', 10), 3)

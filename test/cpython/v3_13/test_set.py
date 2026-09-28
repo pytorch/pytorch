@@ -755,10 +755,8 @@ class TestFrozenSet(_TestJointOps, __TestCase):
         n = 100
         seq = [randrange(n) for i in range(n)]
         results = set()
-        from random import Random
-        rng = Random(0)
         for i in range(200):
-            rng.shuffle(seq)
+            shuffle(seq)
             results.add(hash(self.thetype(seq)))
         self.assertEqual(len(results), 1)
 
