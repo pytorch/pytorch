@@ -197,10 +197,12 @@ def fully_shard(
             - After forward, the parameters registered to the module depend on
               to this: The registered parameters are the sharded parameters if
               ``True``; unsharded parameters if ``False``; and the parameters
-              resharded to the smaller mesh otherwise. To modify the parameters
-              between forward and backward, the registered parameters must be
-              the sharded parameters. For ``False`` or an ``int``, this can be
-              done by manually resharding via :meth:`reshard`.
+              resharded to the smaller mesh otherwise. For ``False`` or an
+              ``int``, the sharded parameters can be registered by manually
+              resharding via :meth:`reshard`.
+            - Modifying the parameters between forward and backward is not
+              supported: the backward all-gather is not ordered after such
+              writes, so backward may see the old values.
         shard_placement_fn (Optional[Callable[[nn.Parameter], Optional[Shard | ShardPlacementResult]]]):
             This callable can be used to override the sharding placement and/or
             mesh for a parameter. It can return:
