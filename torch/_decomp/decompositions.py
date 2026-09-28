@@ -3802,7 +3802,16 @@ def _upsample_nearest(
 
         # following "heuristic: only use channels_last path when it's faster than the contiguous path"
         n_channels = input.shape[1]
-        if result.ndim == 4 and input.device.type == "cuda" and n_channels < 4:
+        # Feature decoupling: also treat the registered privateuse1 backend
+        # (e.g. Ascend NPU) as an accelerator following the same contiguous
+        # memory-format path as CUDA. CUDA behavior is unchanged.
+        private_backend = torch._C._get_privateuse1_backend_name()
+        is_accelerator = input.device.type == private_backend
+        if (
+            result.ndim == 4
+            and (input.device.type == "cuda" or is_accelerator)
+            and n_channels < 4
+        ):
             memory_format = torch.contiguous_format
 
         result = result.contiguous(memory_format=memory_format)
