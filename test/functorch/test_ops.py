@@ -385,7 +385,12 @@ xpu_fft_stft_crash = {
     skip("stft", device_type="xpu"),
 }
 
-xpu_unsupported = xpu_fft_stft_crash
+# torch-xpu-ops does not implement 5-D bicubic grid_sample yet. The xfail is op-wide,
+# so every mode and rank is expected to fail and XPU has no grid_sample coverage here.
+# https://github.com/intel/torch-xpu-ops/issues/5542
+xpu_grid_sample_bicubic_5d = {xfail("nn.functional.grid_sample", device_type="xpu")}
+
+xpu_unsupported = xpu_fft_stft_crash | xpu_grid_sample_bicubic_5d
 
 aliasing_ops = {
     "T",
@@ -1379,7 +1384,7 @@ class TestOperatorsDevice(TestCase):
         # TODO: implement batching rule
         xfail("_batch_norm_with_update"),
         # ----------------------------------------------------------------------
-    }.union(xpu_fft_stft_crash)
+    }.union(xpu_unsupported)
 
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
@@ -2429,7 +2434,7 @@ class TestOperatorsDevice(TestCase):
             skip("sparse.sampled_addmm", ""),
             skip("sparse.mm", "reduce"),
             skip("native_layer_norm", "", device_type="cpu"),
-        }.union(xpu_fft_stft_crash),
+        }.union(xpu_unsupported),
     )
     @opsToleranceOverride(
         "TestOperatorsDevice",
