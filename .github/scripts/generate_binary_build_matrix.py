@@ -85,7 +85,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
             "nvidia-nvshmem-cu13==3.7.2; platform_system == 'Linux'"
         ),
         "windows": (
-            "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.4.1; platform_system == 'Windows' and platform_machine == 'AMD64' | "
+            "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.4.2; platform_system == 'Windows' and platform_machine == 'AMD64' | "
             "cuda-pathfinder>=1.7.0; platform_system == 'Windows' and platform_machine == 'AMD64' | "
             "nvidia-cudnn-cu13==9.26.0.51; platform_system == 'Windows' and platform_machine == 'AMD64' | "
             "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Windows' and platform_machine == 'AMD64'"
@@ -164,7 +164,8 @@ NIGHTLY_SOURCE_MATRIX.update(XPU_NIGHTLY_SOURCE_MATRIX)
 
 def get_nccl_wheel_version(arch_version: str) -> str:
     requirements = map(
-        str.strip, re.split("[;|]", PYTORCH_EXTRA_INSTALL_REQUIREMENTS[arch_version]["linux"])
+        str.strip,
+        re.split("[;|]", PYTORCH_EXTRA_INSTALL_REQUIREMENTS[arch_version]["linux"]),
     )
     return next(x for x in requirements if x.startswith("nvidia-nccl")).split("==")[1]
 
