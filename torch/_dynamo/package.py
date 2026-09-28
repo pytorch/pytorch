@@ -643,13 +643,13 @@ class _DynamoCodeCacheEntry:
     bypassed: bool = False
 
 
-def _globals_module_name(namespace: dict[str, object]) -> str | None:
+def _globals_module(namespace: dict[str, object]) -> types.ModuleType | None:
     name = namespace.get("__name__")
     if not isinstance(name, str):
         return None
     module = sys.modules.get(name)
     if isinstance(module, types.ModuleType) and vars(module) is namespace:
-        return name
+        return module
     return None
 
 
@@ -1257,18 +1257,15 @@ class CompilePackage:
         global_scope: dict[str, object] | None = None,
     ) -> None:
         code_module = inspect.getmodule(code)
-        module_name = (
-            _globals_module_name(global_scope)
-            if code_module is None and global_scope is not None
-            else None
+        module = code_module or (
+            _globals_module(global_scope) if global_scope is not None else None
         )
-        module = sys.modules[module_name] if module_name else code_module
         if module is None:
             raise PackageError(f"Cannot find module for code {code}")
         function_name, code_source = _get_code_source(code, module)
         self._add_function(
             code,
-            module_name or module.__name__,
+            module.__name__,
             function_name=_FunctionId(function_name),
             code_source=code_source,
         )
