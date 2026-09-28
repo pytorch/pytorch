@@ -1706,6 +1706,7 @@ class CppFlexAttentionTemplate(CppTemplate):
             1,
             True,
             True,
+            pow2_m_tails=True,
         )
 
         micro_gemm = CppMicroGemmFP32Vec(
@@ -1718,6 +1719,7 @@ class CppFlexAttentionTemplate(CppTemplate):
             1,
             True,
             False,
+            pow2_m_tails=True,
         )
 
         with V.set_graph_handler(V.graph):
