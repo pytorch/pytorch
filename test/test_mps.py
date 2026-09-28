@@ -1168,6 +1168,58 @@ class TestMPS(TestCaseMPS):
                 mismatches += 1
         self.assertEqual(mismatches, 0)
 
+    # Tests that re-recording an event on another stream doesn't release a
+    # wait on the previous, still-pending record.
+    def test_stream_event_rerecord_other_stream(self):
+        producer = torch.mps.Stream()
+        consumer = torch.mps.Stream()
+        other = torch.mps.Stream()
+        numel = 4_000_000
+        mismatches = 0
+        e = torch.Event("mps")
+        for i in range(20):
+            with torch.mps.stream(producer):
+                x = torch.full((numel,), float(i), device="mps") * 2
+            e.record(producer)
+            e.wait(consumer)
+            e.record(other)
+            with torch.mps.stream(consumer):
+                y = x.clone()
+            consumer.synchronize()
+            if not torch.equal(y.cpu(), torch.full((numel,), float(i) * 2)):
+                mismatches += 1
+        self.assertEqual(mismatches, 0)
+
+    # Tests that a cross-stream event wait doesn't commit the recording stream's
+    # command buffer outside of its queue, which races with another thread
+    # encoding work on the recording stream.
+    def test_stream_event_wait_while_producer_encodes(self):
+        producer = torch.mps.Stream()
+        consumer = torch.mps.Stream()
+        numel = 200_000
+        num_ops = 10
+        num_iters = 10
+        results = []
+
+        def worker():
+            with torch.mps.stream(producer):
+                for i in range(num_iters):
+                    x = torch.full((numel,), float(i), device="mps")
+                    for _ in range(num_ops):
+                        x = x + 1
+                    producer.synchronize()
+                    results.append(torch.equal(x.cpu(), torch.full((numel,), float(i + num_ops))))
+
+        thread = threading.Thread(target=worker)
+        thread.start()
+        e = torch.Event("mps")
+        while thread.is_alive():
+            e.record(producer)
+            e.wait(consumer)
+        thread.join()
+        consumer.synchronize()
+        self.assertEqual(results, [True] * num_iters)
+
     # Tests that autograd's gradient accumulation is correct when a tensor is
     # used by forward ops on two different streams, and backward() is called
     # on a third stream.
@@ -5950,6 +6002,53 @@ class TestMPS(TestCaseMPS):
             error_type = TypeError if dtype == torch.float8_e4m3fn else RuntimeError
             self.assertRaises(error_type, lambda: loss(a_mps, a_mps))
             self.assertRaises(RuntimeError, lambda: loss(a_cpu, a_cpu))
+
+    # MPSGraph refuses to mix element types across an operand pair and aborts the process rather
+    # than raising, so a mixed-dtype input/target used to crash. OpInfo cannot reach this: every
+    # sample_inputs_loss operand is built from a single dtype.
+    MIXED_DTYPES = [(torch.float32, torch.float16), (torch.float16, torch.float32),
+                    (torch.float32, torch.bfloat16), (torch.bfloat16, torch.float32),
+                    (torch.float16, torch.bfloat16), (torch.bfloat16, torch.float16)]
+
+    @parametrize("dtypes", MIXED_DTYPES)
+    @parametrize("reduction", ["mean", "sum", "none"])
+    def test_loss_mixed_dtype(self, dtypes, reduction):
+        in_dtype, target_dtype = dtypes
+        for fn in (F.mse_loss, F.smooth_l1_loss, F.huber_loss, F.l1_loss):
+            cpu_x = torch.tensor([0.5, 2.0, -3.0, 1.25], dtype=in_dtype)
+            cpu_t = torch.tensor([1.0, 1.0, 1.0, 1.0], dtype=target_dtype)
+            res = fn(cpu_x.to("mps"), cpu_t.to("mps"), reduction=reduction)
+            ref = fn(cpu_x, cpu_t, reduction=reduction)
+            self.assertEqual(res.dtype, ref.dtype, f"{fn.__name__} result dtype")
+            self.assertEqual(res, ref, f"{fn.__name__} with {in_dtype}/{target_dtype}")
+
+    @parametrize("dtypes", MIXED_DTYPES)
+    @parametrize("reduction", ["mean", "sum", "none"])
+    def test_loss_mixed_dtype_backward(self, dtypes, reduction):
+        # huber is excluded: its backward builds a plain TensorIterator, so mismatched operands
+        # are rejected rather than promoted (see test_huber_loss_backward_mixed_dtype_errors).
+        in_dtype, target_dtype = dtypes
+        for fn in (F.mse_loss, F.smooth_l1_loss, F.l1_loss):
+            def grad_of(device):
+                x = torch.tensor([0.5, 2.0, -3.0, 1.25], dtype=in_dtype, device=device, requires_grad=True)
+                t = torch.tensor([1.0, 1.0, 1.0, 1.0], dtype=target_dtype, device=device)
+                out = fn(x, t, reduction=reduction)
+                out.backward(torch.ones_like(out))
+                return x.grad
+            self.assertEqual(grad_of("mps"), grad_of("cpu"), f"{fn.__name__} grad")
+
+    @parametrize("dtypes", MIXED_DTYPES)
+    def test_addr_mixed_dtype(self, dtypes):
+        # addr also took its result dtype from `self` instead of the promoted type
+        self_dtype, vec_dtype = dtypes
+        cpu_self = torch.tensor([[1.0, 1.0], [1.0, 1.0]], dtype=self_dtype)
+        cpu_v1 = torch.tensor([1.0, 2.0], dtype=vec_dtype)
+        cpu_v2 = torch.tensor([3.0, 4.0], dtype=vec_dtype)
+        for beta, alpha in ((1, 1), (0.6, 0.2), (0, 1)):
+            res = torch.addr(cpu_self.to("mps"), cpu_v1.to("mps"), cpu_v2.to("mps"), beta=beta, alpha=alpha)
+            ref = torch.addr(cpu_self, cpu_v1, cpu_v2, beta=beta, alpha=alpha)
+            self.assertEqual(res.dtype, ref.dtype)
+            self.assertEqual(res, ref)
 
     # Binary Cross Enropy
     def test_bce_loss_simple(self):
