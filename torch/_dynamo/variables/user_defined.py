@@ -1585,7 +1585,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             # that Dynamo doesn't play well with today (i.e. contextlib.suppress)
             if self.value in (
                 contextlib._AsyncGeneratorContextManager,
-                contextlib.closing,
                 contextlib.redirect_stdout,
                 contextlib.redirect_stderr,
                 contextlib.AsyncExitStack,
