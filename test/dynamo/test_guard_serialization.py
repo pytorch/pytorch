@@ -3282,12 +3282,10 @@ class TestGuardSerialization(TestGuardSerializationBase):
                         "HINT: type",
                         verbose_str,
                         (
-                            lambda msg: (
-                                f"{msg}\n"
-                                + (
-                                    "TYPE_MATCH guard should include 'HINT: type' "
-                                    f"annotation.\nGuard: {verbose_str}"
-                                )
+                            lambda msg: f"{msg}\n"
+                            + (
+                                "TYPE_MATCH guard should include 'HINT: type' "
+                                f"annotation.\nGuard: {verbose_str}"
                             )
                         ),
                     )
@@ -3295,12 +3293,10 @@ class TestGuardSerialization(TestGuardSerializationBase):
                         "GlobalModule",
                         verbose_str,
                         (
-                            lambda msg: (
-                                f"{msg}\n"
-                                + (
-                                    "TYPE_MATCH guard should include type name "
-                                    f"'GlobalModule'.\nGuard: {verbose_str}"
-                                )
+                            lambda msg: f"{msg}\n"
+                            + (
+                                "TYPE_MATCH guard should include type name "
+                                f"'GlobalModule'.\nGuard: {verbose_str}"
                             )
                         ),
                     )
@@ -4742,6 +4738,18 @@ class TestGuardSerialization(TestGuardSerializationBase):
         with torch.autograd.graph.saved_tensors_hooks(*hooks(double(), "v1")):
             self._test_check_fn(loaded, loaded, {"x": x}, True)
         with torch.autograd.graph.saved_tensors_hooks(*hooks(triple(), "v2")):
+            self._test_check_fn(loaded, loaded, {"x": x}, False)
+
+        # A target check_node_safe fails to introspect is unverifiable too, not
+        # an error at capture or guard evaluation.
+        with (
+            torch.autograd.graph.saved_tensors_hooks(*hooks(double(), "v1")),
+            mock.patch(
+                "torch._functorch._aot_autograd.autograd_cache.check_node_safe",
+                side_effect=AttributeError("__name__"),
+            ),
+        ):
+            _, loaded = self._test_serialization("AUTOGRAD_SAVED_TENSORS_HOOKS", fn, x)
             self._test_check_fn(loaded, loaded, {"x": x}, False)
 
     def test_autograd_saved_tensors_hooks_matches_traced_tensor_methods(self):
