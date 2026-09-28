@@ -2270,9 +2270,10 @@ not that the remote application consumed or acknowledged the data. Asyncio calle
 can use ``read_async``, ``write_async``, or ``wait_all``. Registration remains valid
 until unregistration or close, and tensors must not be resized or have their storage replaced.
 
-CUDA stream semantics, graph capture, tracing, batching, remote slicing, and
-rank-based bootstrap helpers are outside this initial API. Rank-to-endpoint
-lookup belongs in a separate control-plane adapter. Descriptor classes define explicit ``serialize()``/``deserialize()`` methods.
+The base API does not order operations on CUDA streams or provide tracing,
+batching, or remote slicing. The experimental NIXL stream adapter below provides
+pinned-host staging and graph capture. Descriptor classes define explicit
+``serialize()``/``deserialize()`` methods.
 The built-in backends declare their fields in a versioned JSON envelope; binary
 metadata is base64-encoded. Unknown fields, versions, backends, and invalid field
 types are rejected. Tensor contents and native handles are never serialized.
@@ -2343,10 +2344,55 @@ cannot interrupt a blocked native call, even when it releases the GIL.
 .. autoclass:: torch.distributed._transport.nixl.NIXLTransport
    :members: close_async
 
-```
+CUDA streams and graphs (prototype)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-```{toctree}
-:hidden:
+``torch.distributed._transport.nixl._cuda_host.CudaHostTransport`` queues
+``producer -> transfer -> consumer`` on a CUDA stream without explicit caller
+synchronization. This private Linux prototype supports the UCX plugin and pinned
+CPU buffers only. Direct VRAM transfers are rejected because UCX can call CUDA
+APIs, which CUDA forbids inside host callbacks.
 
-distributed/transport_cuda_streams
+Connect and register buffers beforehand. Queue a nonblocking GPU-to-pinned-CPU
+copy, then call the bridge's ``write`` or ``read``. The host callback submits a
+fresh NIXL Work, checks completion with a 1 ms backoff, and returns before later
+stream operations, including pinned-CPU-to-GPU copies, execute. This still uses
+CPU progress; native calls may block and callbacks on different streams may
+serialize. Prewarm kernels and copies before enqueueing; lazy CUDA module loading
+and allocation can introduce synchronization.
+
+Eager calls return a ``threading.Event`` for optional host observation. Captured
+calls return ``None``: a one-shot event cannot represent repeated graph completion.
+Use ``bridge.capture()`` rather than an external graph-capture context:
+
+.. code-block:: python
+
+    from torch.distributed._transport.nixl._cuda_host import CudaHostTransport
+
+    bridge = CudaHostTransport(transport, stream)
+    with bridge.capture() as graph:
+        pinned_source.copy_(gpu_source, non_blocking=True)
+        bridge.write(source_view, remote_destination)
+    graph.replay()
+
+Capture records nodes without submitting transfers. Each replay submits new Work;
+producer copies precede transfers, and consumers wait for local completion.
+Buffers, views, and remote addresses stay fixed for the graph lifetime; contents
+may change between replays. Replays may use another stream but must be serialized.
+Do not clone graph executables or race capture/replay with close.
+
+The bridge retains callbacks and operands across all replays. ``bridge.close()``
+synchronizes the device, resets its graphs, and releases resources; subsequent
+replay is invalid. Close the bridge before unregistering memory or closing the
+underlying transport. Do not reuse buffers while operations remain queued.
+
+Local write completion does not establish remote-consumer readiness. Coordinate
+with peers before consuming incoming data, modifying a remote read source, or
+unregistering exposed memory. The bridge adds no remote notification protocol.
+
+Callback failures and timeouts terminate the process so GPU consumers cannot run
+after failed DMA. Timeout starts when the callback runs, not when it is enqueued;
+native calls can block beyond it. Use an external watchdog. Recoverable errors,
+cancellation, tracing, and direct GPU DMA are unsupported.
+
 ```
