@@ -1751,6 +1751,39 @@ class MixOrderReductionNumericTest(TestBase):
         self.assertNotIn("tl.make_tensor_descriptor", wrapper)
         self.assertNotIn("'uses_device_tma': True", wrapper)
 
+    @inductor_config.patch(
+        {
+            "split_reductions": False,
+            "triton.cooperative_reductions": False,
+            "triton.force_cooperative_reductions": False,
+            "triton.mix_order_reduction": True,
+            "triton.use_tensor_descriptor": True,
+            "assume_aligned_inputs": True,
+        }
+    )
+    @parametrize("enable_host_side_tma", (False, True))
+    def test_removed_reduction_store_drops_tma_metadata(
+        self, device, enable_host_side_tma
+    ):
+        if not _supports_tensor_descriptors(device):
+            self.skipTest("requires tensor descriptor support")
+
+        def f(x):
+            y = x.float()
+            return y.sum(dim=1) > 0, y.sum(dim=0)
+
+        x = torch.ones((40960, 128), dtype=torch.bool, device=device)
+        expected = f(x)
+        with inductor_config.patch("triton.enable_host_side_tma", enable_host_side_tma):
+            actual, (wrapper,) = utils.run_and_get_code(torch.compile(f), x)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(metrics.codegen_mix_order_reduction, 1)
+        self.assertNotIn("tl.make_tensor_descriptor", wrapper)
+        self.assertNotIn("'uses_tma': True", wrapper)
+        self.assertNotIn("'tma_min_block_sizes':", wrapper)
+        self.assertNotIn("host_tma_descriptor_args", wrapper)
+
 
 instantiate_device_type_tests(
     MixOrderReductionNumericTest,

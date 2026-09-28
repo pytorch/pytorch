@@ -3314,11 +3314,10 @@ class TMACompatibilityChecker:
                         )
                         return False
                 else:
-                    # Update the minimum block sizes that are passed to triton
-                    # heuristics
-                    self.kernel.tma_min_block_sizes[block_type_str] = max(
+                    self.kernel._record_tma_min_block_size(
+                        self.buffer_name,
+                        block_type_str,
                         min_block_size,
-                        self.kernel.tma_min_block_sizes.get(block_type_str, 1),
                     )
 
             except ValueError:
@@ -3406,7 +3405,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.pointer_advancements: dict[SymT, dict[str, list[sympy.Expr]]] = (
             collections.defaultdict(dict)
         )
-        self.tma_min_block_sizes = dict[str, int]()
+        self._tma_min_block_sizes_by_buffer: dict[str | None, dict[str, int]] = {}
         # TensorDescriptorOptions for pointwise/reduction kernels; template
         # kernels set a resolved {block_shape, shape, strides} dict directly
         # (see TritonTemplateKernel.tma_descriptor).
@@ -3415,6 +3414,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         ] = {}
         self._host_tma_non_materializable: OrderedSet[str] = OrderedSet()
         self._host_tma_non_materializable_buffers: OrderedSet[str] | None = None
+        self._host_tma_descriptor_buffers: dict[str, OrderedSet[str]] = {}
+        self._device_tma_buffers: OrderedSet[str] = OrderedSet()
+        # Unscoped device TMA is retained for template kernels and tests that
+        # do not associate descriptor generation with an Inductor buffer.
         self._emitted_device_tma = False
         self.hint_override = hint_override
         self._load_counts: collections.Counter[str] = collections.Counter()
@@ -3448,11 +3451,65 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
     @property
     def uses_tma(self) -> bool:
-        return bool(self.host_tma_descriptor_args or self._emitted_device_tma)
+        return bool(self._active_host_tma_descriptor_args() or self.uses_device_tma)
 
     @property
     def uses_device_tma(self) -> bool:
-        return self._emitted_device_tma
+        return self._emitted_device_tma or any(
+            not is_buffer_removed(name)
+            for name in getattr(self, "_device_tma_buffers", ())
+        )
+
+    def _active_host_tma_descriptor_args(
+        self,
+    ) -> dict[str, TensorDescriptorOptions | dict[str, Any]]:
+        return {
+            var: options
+            for var, options in self.host_tma_descriptor_args.items()
+            if not (
+                buffer_names := getattr(self, "_host_tma_descriptor_buffers", {}).get(
+                    var
+                )
+            )
+            or any(not is_buffer_removed(name) for name in buffer_names)
+        }
+
+    def _active_tma_buffer_names(self) -> OrderedSet[str]:
+        names = OrderedSet(
+            name
+            for name in getattr(self, "_device_tma_buffers", ())
+            if not is_buffer_removed(name)
+        )
+        for var in self._active_host_tma_descriptor_args():
+            names.update(
+                name
+                for name in getattr(self, "_host_tma_descriptor_buffers", {}).get(
+                    var, ()
+                )
+                if not is_buffer_removed(name)
+            )
+        return names
+
+    @property
+    def tma_min_block_sizes(self) -> dict[str, int]:
+        result: dict[str, int] = {}
+        active_buffers = self._active_tma_buffer_names()
+        for buffer_name, requirements in self._tma_min_block_sizes_by_buffer.items():
+            if buffer_name is not None and buffer_name not in active_buffers:
+                continue
+            for block_type, min_block_size in requirements.items():
+                result[block_type] = max(min_block_size, result.get(block_type, 1))
+        return result
+
+    def _record_tma_min_block_size(
+        self, buffer_name: str | None, block_type: str, min_block_size: int
+    ) -> None:
+        requirements = self._tma_min_block_sizes_by_buffer.setdefault(buffer_name, {})
+        requirements[block_type] = max(min_block_size, requirements.get(block_type, 1))
+
+    def _discard_host_tma_descriptor(self, var: str) -> None:
+        self.host_tma_descriptor_args.pop(var, None)
+        self._host_tma_descriptor_buffers.pop(var, None)
 
     def triton_tensor_ndim(self) -> int:
         return sum(int(tree.tensor_dim is not None) for tree in self.range_trees)
@@ -3772,7 +3829,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if V.graph.sizevars.statically_known_multiple_of(offset_bytes, TMA_ALIGNMENT):
             return False
         self._host_tma_non_materializable.add(var)
-        self.host_tma_descriptor_args.pop(var, None)
+        self._discard_host_tma_descriptor(var)
         return True
 
     @property
@@ -4481,6 +4538,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             if self._can_materialize_host_tma(var, indexing, V.graph.get_dtype(name)):
                 if var not in self.host_tma_descriptor_args:
                     self.host_tma_descriptor_args[var] = indexing
+                self._host_tma_descriptor_buffers.setdefault(var, OrderedSet()).add(
+                    name
+                )
                 return var, other
             # A non-zero constant offset can't be host-TMA'd: mark it
             # non-materializable and fall through to device-side TMA below.
@@ -4491,13 +4551,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 and indexing.constant_offset != 0
             ):
                 self._host_tma_non_materializable.add(var)
-                if var in self.host_tma_descriptor_args:
-                    del self.host_tma_descriptor_args[var]
+                self._discard_host_tma_descriptor(var)
 
             # Device-side TMA: reached for every case except the host-TMA branch
             # above (which returned) -- emit an in-kernel tl.make_tensor_descriptor.
             self._reject_if_template_host_tma(var)
-            self._emitted_device_tma = True
+            self._device_tma_buffers.add(name)
 
         else:
             if not check:
@@ -5155,14 +5214,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             elif is_sympy_integer_like(original_index):
                 self._reject_if_template_host_tma(var)
                 self._host_tma_non_materializable.add(var)
-                self.host_tma_descriptor_args.pop(var, None)
+                self._discard_host_tma_descriptor(var)
                 line = f"tl.load({var} + ({original_index}))"
                 append_broadcast = indexing.expand_str
                 shape = ()
             else:
                 self._reject_if_template_host_tma(var)
                 self._host_tma_non_materializable.add(var)
-                self.host_tma_descriptor_args.pop(var, None)
+                self._discard_host_tma_descriptor(var)
                 line = f"tl.load({var} + ({indexing.index_str}), {indexing.mask_str}{ep}{other}{cachemod})"
 
                 # The block shape of tl.load depends on the indexing expression.
@@ -5318,7 +5377,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     indexing_str += f".broadcast_to({value_shape})"
             self._reject_if_template_host_tma(var)
             self._host_tma_non_materializable.add(var)
-            self.host_tma_descriptor_args.pop(var, None)
+            self._discard_host_tma_descriptor(var)
             line = f"tl.store({var} + ({indexing_str}), {value}, {indexing.mask_str})"
         elif mode == "atomic_add":
             self.atomic_add_found = True
@@ -7589,7 +7648,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             flops = self.estimate_flops()
             if flops is not None:
                 out["kernel_flop"] = flops
-        if self.host_tma_descriptor_args:
+        host_tma_descriptor_args = self._active_host_tma_descriptor_args()
+        if host_tma_descriptor_args:
             _, _, signature, _ = self.args.python_argdefs()
             sig_arg_names = OrderedSet(
                 arg.name for arg in signature if hasattr(arg, "name")
@@ -7626,7 +7686,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     return str(s)
 
             resolved = {}
-            for inner, opts in self.host_tma_descriptor_args.items():
+            for inner, opts in host_tma_descriptor_args.items():
                 if isinstance(opts, dict):
                     resolved[inner] = opts
                     continue
