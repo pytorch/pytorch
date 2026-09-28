@@ -29,9 +29,18 @@ Tensor elementwise_binary_ref_meta(
     bool fake_devices,
     bool supports_lhs_python_scalar = true);
 
-// A Scalar argument as the Python number the refs see. Symbolic values are not
-// kept; the refs only look at the Python type.
-Tensor python_number(const Scalar& s);
+// other is a Scalar argument, which the ref sees as a Python number.
+Tensor elementwise_binary_ref_meta(
+    const char* name,
+    const Tensor& self,
+    const Scalar& other,
+    ELEMENTWISE_TYPE_PROMOTION_KIND kind,
+    bool fake_devices,
+    bool supports_lhs_python_scalar = true);
+
+// Whether Python fake sees the operand as symbolic: symbolic sizes, or a SymInt
+// passed for a Tensor argument.
+bool is_symbolic_operand(const Tensor& t);
 
 void check_inplace_broadcast(c10::SymIntArrayRef self_shape, c10::SymIntArrayRef other_shape);
 
