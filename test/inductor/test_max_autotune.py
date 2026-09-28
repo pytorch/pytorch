@@ -5236,9 +5236,9 @@ class TestPrologueFusion(TestCase):
         }
     )
     def test_addmm_shared_intermediate_prefix_and_input_prologue_fusion(self):
-        # The shared producer and its two branches form a multi-output pointwise
-        # group. It must remain separate from the template rather than being
-        # incorrectly routed to one template input's producer group.
+        # The shared producer has two users, so it must be materialized. Its two
+        # single-use children can still fuse separately into LOAD_INPUT and
+        # STORE_OUTPUT.
         M = K = N = 64
 
         def foo(x, b):
@@ -5254,18 +5254,18 @@ class TestPrologueFusion(TestCase):
             out, code = run_and_get_code(torch.compile(foo), x, b)
 
         self.assertEqual(out, foo(x, b), atol=0.05, rtol=0.05)
-        self.check_code(code[0], num_kernels=2, num_allocs=3, num_deallocs=4)
+        self.check_code(code[0], num_kernels=2, num_allocs=1, num_deallocs=3)
         (
             FileCheck()
             .check("100.0")
-            .check("2.0")
-            .check("3.0")
             .check("tl.store")
+            .check("3.0")
             .check("tl.dot")
+            .check("2.0")
             .check("acc +")
+            .check_count("tl.store", 2, exactly=True)
             .run(code[0])
         )
-        FileCheck().check_count("tl.store", 3, exactly=True).run(code[0])
 
     @config.patch(
         {

@@ -6015,7 +6015,7 @@ class TemplateBuffer(OperationBuffer):
         inputs: Sequence[IRNode],
         make_kernel_render: Callable[..., Any] | None,
         mutated_inputs: Iterable[IRNode] | None = None,
-        allowed_prologue_inps: OrderedSet[str] | None = None,
+        allowed_fused_inputs: OrderedSet[str] | None = None,
         named_inputs: dict[str, IRNode] | None = None,
     ) -> None:
         super().__init__(name=None, layout=layout)
@@ -6051,9 +6051,11 @@ class TemplateBuffer(OperationBuffer):
                 MutationOutput(NoneLayout(device=device), buf, self)
                 for buf in mutated_inputs
             ]
-        # Input buffer names eligible for prologue fusion.
-        self.allowed_prologue_inps: OrderedSet[str] = (
-            allowed_prologue_inps or OrderedSet()
+        # Input buffer names eligible for producer fusion. The scheduler calls
+        # these upstream nodes "prologue" inputs, but codegen may emit their
+        # producers in either the load-input prologue or store-output epilogue.
+        self.allowed_fused_inputs: OrderedSet[str] = (
+            allowed_fused_inputs or OrderedSet()
         )
         # Per-template fusion overrides.  None means fall back to global
         # config.epilogue_fusion / config.prologue_fusion.
@@ -6157,8 +6159,8 @@ class TemplateBuffer(OperationBuffer):
         """Whether this template produces multiple outputs via MultiOutputLayout."""
         return isinstance(self.layout, MultiOutputLayout)
 
-    def get_allowed_prologue_inps(self) -> OrderedSet[str]:
-        return self.allowed_prologue_inps
+    def get_allowed_fused_inputs(self) -> OrderedSet[str]:
+        return self.allowed_fused_inputs
 
     def has_aliasing_or_mutation_for_prologue_fusion(
         self, scheduler_node: _HasAliasingOrMutation
@@ -6249,7 +6251,7 @@ class TritonTemplateBuffer(TemplateBuffer):
         inputs: Sequence[IRNode],
         make_kernel_render: Callable[_P, _T] | None,
         mutated_inputs: Iterable[IRNode] | None = None,
-        allowed_prologue_inps: OrderedSet[str] | None = None,
+        allowed_fused_inputs: OrderedSet[str] | None = None,
     ) -> None:
         """
         NOTE:[TritonTemplates with multiple outputs]
@@ -6265,7 +6267,7 @@ class TritonTemplateBuffer(TemplateBuffer):
             inputs,
             make_kernel_render,
             mutated_inputs=mutated_inputs,
-            allowed_prologue_inps=allowed_prologue_inps,
+            allowed_fused_inputs=allowed_fused_inputs,
         )
         if self.name is None:
             raise AssertionError("Expected self.name is not None")
@@ -6425,13 +6427,13 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         inputs: Sequence[IRNode],
         choice_timings_fn: Callable[[int | None], dict[ChoiceCaller, float]],
         unfiltered_choices: list[ChoiceCaller],
-        allowed_prologue_inps: OrderedSet[str],
+        allowed_fused_inputs: OrderedSet[str],
     ) -> None:
         super().__init__(
             layout=layout,
             inputs=inputs,
             make_kernel_render=None,
-            allowed_prologue_inps=allowed_prologue_inps,
+            allowed_fused_inputs=allowed_fused_inputs,
         )
         self._choice_timings_fn = choice_timings_fn
         self._choice_timings: dict[int | None, dict[ChoiceCaller, float]] = {}

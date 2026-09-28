@@ -158,7 +158,7 @@ class _DistributedAutotuneBuffer(MultiTemplateBuffer):
             inputs,
             choice_timings_fn=self._dummy_choice_timings,
             unfiltered_choices=[],
-            allowed_prologue_inps=OrderedSet({}),
+            allowed_fused_inputs=OrderedSet({}),
         )
 
         self._kernel_name = kernel_name

@@ -1090,6 +1090,8 @@ class TritonTemplateKernel(TritonKernel):
             self.store_output_fusion_allowed_inputs.add(input_name)
 
         for input_node in self.input_nodes[: self.prefix_args]:
+            if input_node.get_name() in V.graph.removed_buffers:
+                continue
             if self._is_input_fused(input_node.get_name()):
                 continue
             # get args in correct order
@@ -2710,7 +2712,7 @@ class GenerateAndLoadResult(NamedTuple):
     mod: ModuleType
     extra: str
     input_call_args: tuple[str, ...]
-    allowed_prologue_inputs: OrderedSet[str]
+    allowed_fused_inputs: OrderedSet[str]
     kernel_args_sizevars_keys: tuple[sympy.Expr, ...]
     kernel_options: dict[str, Any]
 
@@ -3174,7 +3176,7 @@ class TritonTemplate(KernelTemplate):
         mod = PyCodeCache.load(code, extra, set_sys_modules=False)
 
         input_call_args = tuple(kernel.args.input_buffers.keys())
-        allowed_prologue_inputs = (
+        allowed_fused_inputs = (
             kernel.load_input_fusion_allowed_inputs
             | kernel.store_output_fusion_allowed_inputs
         )
@@ -3187,7 +3189,7 @@ class TritonTemplate(KernelTemplate):
             mod,
             extra,
             input_call_args,
-            allowed_prologue_inputs,
+            allowed_fused_inputs,
             kernel_args_sizevars_keys,
             kernel_options,
         )
@@ -3445,7 +3447,7 @@ class TritonTemplate(KernelTemplate):
             },
             mutated_inputs=mutated_inputs,
             workspace_arg=workspace_arg,
-            allowed_prologue_inps=result.allowed_prologue_inputs,
+            allowed_fused_inputs=result.allowed_fused_inputs,
             hint_override=hint_override,
         )
 
@@ -3587,7 +3589,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         log_info: dict[str, PrimitiveInfoType | list[PrimitiveInfoType]] | None = None,
         mutated_inputs=None,
         workspace_arg: WorkspaceArg | None = None,
-        allowed_prologue_inps: OrderedSet[str] | None = None,
+        allowed_fused_inputs: OrderedSet[str] | None = None,
         hint_override: int | None = None,
     ) -> None:
         super().__init__(name, input_nodes, layout, description)
@@ -3605,8 +3607,8 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         )
         self.mutated_inputs = mutated_inputs
         self.workspace_arg = workspace_arg
-        self.allowed_prologue_inps = (
-            allowed_prologue_inps if allowed_prologue_inps is not None else OrderedSet()
+        self.allowed_fused_inputs = (
+            allowed_fused_inputs if allowed_fused_inputs is not None else OrderedSet()
         )
         self.hint_override = hint_override
 
@@ -3651,7 +3653,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
             inputs=self.input_nodes,
             make_kernel_render=self.make_kernel_render,
             mutated_inputs=self.mutated_inputs,
-            allowed_prologue_inps=self.allowed_prologue_inps,
+            allowed_fused_inputs=self.allowed_fused_inputs,
         )
         # Pass KTC annotation to the buffer for encoding
         if "ktc" in self.annotations:
@@ -4427,13 +4429,13 @@ class AlgorithmSelectorCache(PersistentCache):
 
                     return timings
 
-            # We take the union of allowed prologue inputs from all choices,
-            # and, within benchmark fusion, don't allow prologue fusion for
-            # choices which don't support the whole union.
-            allowed_prologue_inps: OrderedSet[str] = OrderedSet()
+            # Expose every input that any template choice allows for fusion.
+            # When benchmarking a fused kernel, skip choices that do not support
+            # the multi-template buffer's complete allowed-input set.
+            allowed_fused_inputs: OrderedSet[str] = OrderedSet()
             for c in choices:
                 if isinstance(c, TritonTemplateCaller):
-                    allowed_prologue_inps |= c.allowed_prologue_inps
+                    allowed_fused_inputs |= c.allowed_fused_inputs
 
             # No single winning choice yet; selection is deferred to benchmark fusion
             return (
@@ -4443,7 +4445,7 @@ class AlgorithmSelectorCache(PersistentCache):
                         input_nodes,
                         get_timings,
                         choices,
-                        allowed_prologue_inps,
+                        allowed_fused_inputs,
                     )
                 ),
                 None,
