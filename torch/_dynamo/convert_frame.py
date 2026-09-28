@@ -402,6 +402,23 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
 
 
 @TorchPatcher.suppress_torch_distributed_warnings
+def nonrecursive_disable_skip(
+    caller: types.FrameType | None,
+) -> ConvertFrameReturn | None:
+    """How to skip a frame whose caller is a disable(recursive=False) wrapper.
+
+    Only that frame is skipped; its callees are still offered to the callback.
+    """
+    if caller is not None and (
+        caller.f_code is decorators._nonrecursive_disable_wrapper_code
+    ):
+        return ConvertFrameReturn(
+            apply_to_code=False,
+            skip_reason="tracing is non-recursively disabled for this frame",
+        )
+    return None
+
+
 def has_tensor_in_frame(frame: DynamoFrameType) -> bool:
     """Check if the frame has torch.* related bits"""
     # Check if the function was decorated using torch._dynamo.optimize
@@ -730,14 +747,8 @@ class ConvertFrameAssert:
             and "torch/_dynamo/convert_frame.py" in prev_frame.f_code.co_filename
         ):
             prev_frame = prev_frame.f_back  # type: ignore[assignment]
-        if (
-            prev_frame
-            and prev_frame.f_code is decorators._nonrecursive_disable_wrapper_code
-        ):
-            return ConvertFrameReturn(
-                apply_to_code=False,
-                skip_reason="tracing is non-recursively disabled for this frame",
-            )
+        if (disabled := nonrecursive_disable_skip(prev_frame)) is not None:
+            return disabled
 
         global initial_global_state
         # Save the previous initial_global_state to handle nested compilations
@@ -1714,6 +1725,9 @@ def _compile(
         BisectValidationException,
         ValidationException,
     )
+    from torch.compiler._no_compile import check_compilation_allowed
+
+    check_compilation_allowed("Dynamo graph compilation")
 
     # Only nonlocal defs here please!
     # Time spent compiling this frame before restarting or failing analysis
@@ -2000,7 +2014,9 @@ def _compile(
 
     metrics_context = get_metrics_context()
     package_code_context = (
-        package.code_context(code) if package is not None else contextlib.nullcontext()
+        package.code_context(code, globals)
+        if package is not None
+        else contextlib.nullcontext()
     )
     with (
         _use_lazy_graph_module(config.use_lazy_graph_module),
