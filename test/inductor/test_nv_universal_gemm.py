@@ -1170,7 +1170,7 @@ class TestNVUniversalGemm(TestCase):
                 a, b, scale_a, scale_b, scale_result, output_scale
             )
 
-        torch.testing.assert_close(actual, expected, equal_nan=True)
+        torch.testing.assert_close(actual, expected, equal_nan=True, atol=0, rtol=0)
         self.assertEqual(counters["inductor"]["scaled_mm_output_scale_fused"], 0)
 
     def test_scaled_mm_output_scale_does_not_duplicate_shared_gemm(self):
@@ -1191,7 +1191,12 @@ class TestNVUniversalGemm(TestCase):
                 a, b, scale_a, scale_b, alpha
             )
 
-        torch.testing.assert_close(actual, expected, equal_nan=True)
+        torch.testing.assert_close(
+            actual[0], expected[0], equal_nan=True, atol=0, rtol=0
+        )
+        torch.testing.assert_close(
+            actual[1], expected[1], equal_nan=True, atol=0, rtol=1e-2
+        )
         self.assertEqual(counters["inductor"]["scaled_mm_output_scale_fused"], 0)
 
     def test_scaled_mm_output_scale_aten_fallback_uses_matching_policy(self):
@@ -1233,7 +1238,7 @@ class TestNVUniversalGemm(TestCase):
                 alpha,
             )
 
-        torch.testing.assert_close(actual, expected, equal_nan=True)
+        torch.testing.assert_close(actual, expected, equal_nan=True, atol=0, rtol=0)
         self.assertEqual(counters["inductor"]["scaled_mm_output_scale_fused"], 1)
         self.assertIn("extern_kernels.scaled_mm_with_output_scale", code)
         benchmark_policy = add_aten_choice.call_args.kwargs["benchmark_request_kwargs"]
@@ -1273,7 +1278,7 @@ class TestNVUniversalGemm(TestCase):
                 a, b, scale_a, scale_b, alpha
             )
 
-        torch.testing.assert_close(actual, expected, equal_nan=True)
+        torch.testing.assert_close(actual, expected, equal_nan=True, atol=0, rtol=1e-2)
         self.assertGreaterEqual(select_calls, 2)
 
     @parametrize(
@@ -4524,7 +4529,9 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
                 result, reference, equal_nan=True, atol=0, rtol=0
             )
         else:
-            torch.testing.assert_close(result, reference, equal_nan=True)
+            torch.testing.assert_close(
+                result, reference, equal_nan=True, atol=0, rtol=1e-2
+            )
         expected_folds = int(nonpointwise_consumer)
         self.assertEqual(
             counters["inductor"]["scaled_mm_output_scale_fused"], expected_folds
