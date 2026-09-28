@@ -6,6 +6,19 @@
 
 namespace c10d::symmetric_memory {
 
+// Validates a peer rank used to index the per-peer arrays of buffer/signal
+// pad pointers. An out-of-range rank reads or writes through a wild pointer,
+// or lands past the signal pad in the peer's tensor data.
+inline void check_rank(int rank, int world_size) {
+  TORCH_CHECK(
+      rank >= 0 && rank < world_size,
+      "rank must be in [0, ",
+      world_size,
+      ") (got ",
+      rank,
+      ")");
+}
+
 // SymmetricMemory represents symmetric allocations across a group of devices.
 // The allocations represented by a SymmetricMemory object are accessible by
 // all devices in the group. The class can be used for op-level custom
@@ -154,9 +167,13 @@ struct GroupInfo {
 C10_EXPORT GroupInfo& get_group_info(const std::string& group_name);
 
 // Identical to empty_strided, but allows symmetric memory access to be
-// established for the allocated tensor via SymmetricMemory::rendezvous(). This
-// function itself is not a collective operation. It invokes
-// SymmetricMemoryAllocator::alloc() for the requested device under the hood.
+// established for the allocated tensor via SymmetricMemory::rendezvous(). It
+// invokes SymmetricMemoryAllocator::alloc() for the requested device under the
+// hood.
+//
+// Whether this is a collective operation is backend-dependent. The NVSHMEM
+// allocator calls nvshmem_malloc and barriers inside alloc(), so with that
+// backend every rank must call this the same number of times in the same order.
 //
 // NOTE [symmetric memory persistent allocation]
 // If an `alloc_id` is supplied, empty_strided_p2p will perform persistent
