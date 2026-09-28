@@ -5369,6 +5369,79 @@ class TestPrecompileNoCompilation(TestCase):
             with self.assertRaisesRegex(PrecompileError, "Triton kernel autotuning"):
                 CachingAutotuner.autotune_to_one_config(None)
 
+    def test_no_compilation_rejects_multi_kernel_autotuning(self):
+        from torch._inductor.codegen.multi_kernel import MultiKernelCall
+
+        with (
+            torch.compiler.precompile.no_compilation(),
+            mock.patch(
+                "torch._inductor.codegen.multi_kernel.benchmarker.benchmark"
+            ) as benchmark,
+            self.assertRaisesRegex(PrecompileError, "multi-kernel autotuning"),
+        ):
+            MultiKernelCall.benchmark_sub_kernels(None)
+        benchmark.assert_not_called()
+
+    @parametrize("backend", ("cutedsl", "flydsl", "pallas", "halide"))
+    def test_no_compilation_rejects_alternate_runtime_jit_before_dispatch(
+        self, backend
+    ):
+        from torch._inductor.async_compile import AsyncCompile
+
+        with (
+            torch.compiler.precompile.no_compilation(),
+            mock.patch.object(AsyncCompile, "process_pool") as pool,
+            self.assertRaisesRegex(PrecompileError, "precompile.no_compilation"),
+        ):
+            getattr(AsyncCompile(), backend)("missing_kernel", "missing source")
+        pool.assert_not_called()
+
+    @parametrize("backend", ("cutedsl", "flydsl", "pallas"))
+    def test_no_compilation_rejects_existing_alternate_runtime_jit(self, backend):
+        modules = {
+            "cutedsl": ("cutedsl.cutedsl_kernel", "CuteDSLKernelWrapper"),
+            "flydsl": ("flydsl.flydsl_kernel", "FlyDSLKernelWrapper"),
+            "pallas": ("pallas", "PallasKernelWrapper"),
+        }
+        module_name, class_name = modules[backend]
+        module = importlib.import_module(f"torch._inductor.codegen.{module_name}")
+        kernel = mock.Mock()
+        wrapper = getattr(module, class_name)(kernel)
+        with (
+            torch.compiler.precompile.no_compilation(),
+            self.assertRaisesRegex(PrecompileError, "runtime JIT"),
+        ):
+            wrapper.run()
+        kernel.assert_not_called()
+
+    @parametrize("inline", (False, True))
+    def test_no_compilation_rejects_extension_jit_before_build_setup(self, inline):
+        from torch.utils import cpp_extension
+
+        with (
+            torch.compiler.precompile.no_compilation(),
+            mock.patch.object(cpp_extension, "_get_build_directory") as directory,
+            self.assertRaisesRegex(PrecompileError, r"C\+\+ extension runtime JIT"),
+        ):
+            if inline:
+                cpp_extension.load_inline(
+                    "missing_extension", "missing source", use_pch=True
+                )
+            else:
+                cpp_extension.load("missing_extension", ["missing.cpp"])
+        directory.assert_not_called()
+
+    def test_no_compilation_rejects_extension_build_before_subprocess(self):
+        from torch.utils import cpp_extension
+
+        with (
+            torch.compiler.precompile.no_compilation(),
+            mock.patch.object(cpp_extension.subprocess, "run") as build,
+            self.assertRaisesRegex(PrecompileError, r"C\+\+ extension compilation"),
+        ):
+            cpp_extension._run_ninja_build("missing", False, "extension")
+        build.assert_not_called()
+
 
 if __name__ == "__main__":
     run_tests()
