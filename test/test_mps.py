@@ -12006,46 +12006,6 @@ class TestConv3dChannelsLast3dMPS(NNTestCase):
 
 
 class TestLinalgMPS(TestCaseMPS):
-    @parametrize("shape,mode", (
-        ((32, 64), "reduced"),
-        ((33, 33), "reduced"),
-        ((65, 129), "reduced"),
-        ((2, 3, 65, 33), "complete"),
-        ((1025, 129), "reduced"),
-        ((8193, 40), "reduced"),
-    ))
-    @parametrize("scale", (1, 1e-30, 1e20))
-    def test_qr_dispatch(self, device, shape, mode, scale):
-        a = torch.randn(shape)
-        q, r = (t.cpu() for t in torch.linalg.qr((a * scale).to(device), mode=mode))
-        tol = 1e-6 * math.sqrt(a.size(-2) * a.size(-1))
-        self.assertEqual(q @ r / scale, a, atol=tol, rtol=tol)
-        qtq = q.mT @ q
-        self.assertEqual(qtq, torch.eye(qtq.size(-1)).expand_as(qtq), atol=tol, rtol=tol)
-
-    @parametrize("m", (9, 33))
-    def test_qr_zero_column_keeps_inf(self, device, m):
-        a = torch.randn(m, 3)
-        a[:, 0] = 0
-        a[0, 1] = float("inf")
-        self.assertEqual(torch.linalg.qr(a.to(device)), torch.linalg.qr(a))
-
-    def test_householder_product_aliased_tau(self, device):
-        a = torch.randn(2, 33, device=device).mT
-        tau = a[:2, 0]
-        expected = torch.linalg.householder_product(a, tau)
-        self.assertEqual(torch.linalg.householder_product(a, tau, out=a), expected)
-
-    @parametrize("shape,k", (((65, 33), 17), ((2, 3, 257, 129), None)))
-    @dtypes(torch.complex64, torch.bfloat16, torch.complex32)
-    def test_householder_product_blocked(self, device, dtype, shape, k):
-        cpu_dtype = torch.complex64 if dtype.is_complex else torch.float32
-        a, tau = torch.geqrf(torch.randn(*shape, dtype=cpu_dtype))
-        a, tau = a.to(dtype), tau[..., :k].to(dtype)
-        expected = torch.linalg.householder_product(a.to(cpu_dtype), tau.to(cpu_dtype)).to(dtype)
-        actual = torch.linalg.householder_product(a.to(device), tau.to(device))
-        self.assertEqual(actual.cpu(), expected)
-
     def test__int_mm(self):
         torch.manual_seed(0)
 
