@@ -288,7 +288,8 @@ def _function_code_matches(value: object, expected: FunctionCodeMetadata) -> boo
     return (
         type(value) is types.FunctionType
         and value.__code__ == expected.code
-        and _function_code_metadata(value) == expected
+        and value.__builtins__ is builtins.__dict__
+        and _globals_module_name(value.__globals__) == expected.globals_module
     )
 
 
@@ -5243,6 +5244,10 @@ class GuardsStatePickler(FunctionPicklerBase):
                 continue
             if _is_shared_constant(attr):
                 continue
+            if id(attr) in self._verbatim_elements:
+                continue
+            if id(attr) in self._unflatten_ctx_values:
+                continue
             self.missing_values[id(attr)] = attr
 
 
@@ -5269,9 +5274,12 @@ def _resolves_by_reference(value: object) -> bool:
     if isinstance(value, enum.Enum):
         owner = type(value)
         # Not owner.__dict__: a member named like an Enum attribute (name,
-        # value) is stored behind a descriptor there.
+        # value) is stored behind a descriptor there. A composite Flag member
+        # has no name on Python 3.10.
         return (
-            _resolves_by_reference(owner) and getattr(owner, value.name, None) is value
+            _resolves_by_reference(owner)
+            and isinstance(value.name, str)
+            and getattr(owner, value.name, None) is value
         )
     if _is_nested_named_tuple_type(value):
         # GuardsStatePickler.reducer_override rebuilds it as a fresh class.
