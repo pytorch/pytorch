@@ -1059,7 +1059,7 @@ class TestSparse(TestSparseBase):
     @onlyAccelerator
     @deviceCountAtLeast(2)
     @dtypes(torch.double, torch.cdouble)
-    def test_Sparse_to_Sparse_copy_multi_device(self, devices, dtype, coalesced):
+    def test_sparse_to_sparse_copy_multi_device(self, devices, dtype, coalesced):
         # This is for testing torch.copy_(SparseTensor, SparseTensor) across accelerator devices
         device, secondary_device = devices[:2]
         sparse_dims = 3
