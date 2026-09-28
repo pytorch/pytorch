@@ -2242,7 +2242,7 @@ def _validate_device(query: Tensor, key: Tensor, value: Tensor) -> None:
         raise NotImplementedError(
             "FlexAttention does not support backward on MPS. Please set the input requires_grad to False or use another device."
         )
-    supported_devices = {"cuda", "cpu", "xpu", "hpu", "mps"}
+    supported_devices = {"cuda", "cpu", "xpu", "hpu", "mps", "npu"}
     if query.device.type not in supported_devices:
         raise ValueError(
             "FlexAttention is only supported on CUDA, CPU, HPU, or MPS devices. "
