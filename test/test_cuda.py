@@ -6176,10 +6176,31 @@ with torch.cuda.graph(g):
         VISIBLE_DEVICES = (
             "HIP_VISIBLE_DEVICES" if TEST_WITH_ROCM else "CUDA_VISIBLE_DEVICES"
         )
-        test_script = f"import os; import torch;os.environ['{VISIBLE_DEVICES}']='32';torch.get_device_module().device_count();print(torch.cuda.device_count())"
+        test_script = f"import os; import torch;os.environ['{VISIBLE_DEVICES}']='1024';torch.get_device_module().device_count();print(torch.cuda.device_count())"
         rc = check_output(test_script)
         self.assertEqual(rc, "0")
-        if not TEST_WITH_ROCM:
+        if TEST_WITH_ROCM and not IS_WINDOWS:
+            # hipGetDeviceCount initializes the runtime, so it cannot report
+            # hipErrorNotInitialized. hsa_system_get_info returns
+            # HSA_STATUS_ERROR_NOT_INITIALIZED (0x100B) until hsa_init.
+            # RTLD_NOLOAD uses the libhsa-runtime64 torch already loaded. A
+            # second copy would stay uninitialized and the check would pass
+            # even if import had called hsa_init.
+            hsa_call = (
+                "lib=ctypes.CDLL('libhsa-runtime64.so.1', mode=os.RTLD_NOLOAD);"
+                "lib.hsa_system_get_info.argtypes=[ctypes.c_int, ctypes.c_void_p];"
+                "lib.hsa_system_get_info.restype=ctypes.c_uint32;"
+                "x=ctypes.c_uint32(0);"
+                "print('HSA status after import:', hex(lib.hsa_system_get_info(0, ctypes.byref(x))));"
+                "torch.cuda.init();"
+                "print('HSA status after init:', hex(lib.hsa_system_get_info(0, ctypes.byref(x))))"
+            )
+            rc = check_output(f"import torch; import ctypes; import os;{hsa_call}")
+            # Not initialized after import, initialized after torch.cuda.init().
+            self.assertEqual(
+                rc, "HSA status after import: 0x100b\nHSA status after init: 0x0"
+            )
+        elif not TEST_WITH_ROCM:
             # Check that `cuInit` was not called during the import
             # By using ctypes and calling cuDeviceCountGet() and expect CUDA_ERROR_NOT_INITIALIZED == 3
             # See https://github.com/pytorch/pytorch/issues/116276 for more details
