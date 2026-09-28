@@ -35,6 +35,9 @@ class FlyDSLKernelWrapper:
         kernel_code_log.info("FlyDSL kernel path: %s", kernel_path)
 
     def run(self, *args, stream=None, **kwargs):
+        from torch.compiler._no_compile import check_compilation_allowed
+
+        check_compilation_allowed("FlyDSL runtime JIT")
         return self.kernel_fn(*args, stream=stream, **kwargs)
 
 
