@@ -3435,24 +3435,6 @@ class FakeTensorMode(TorchDispatchMode):
         )
         return ret
 
-    _cpp_meta_supports_symint = ordered_set(
-        aten.empty.memory_format,
-        aten.empty_strided.default,
-        aten.as_strided_scatter.default,
-        aten.as_strided.default,
-        aten.as_strided_.default,
-        aten.zeros.default,
-        aten.detach.default,
-        aten.view_as_real.default,
-        aten.view_as_complex.default,
-        aten.set_.source_Storage_storage_offset,
-        aten._sparse_coo_tensor_with_dims_and_tensors.default,
-        aten.stack.default,
-        aten.arange.default,
-        aten.arange.start,
-        aten.arange.start_step,
-    )
-
     _unbacked_special_fake_handling_ops = ordered_set(
         aten.view.default,
         aten._unsafe_view.default,
@@ -3460,9 +3442,11 @@ class FakeTensorMode(TorchDispatchMode):
     )
 
     def cpp_meta_supports_symint(self, func: OpOverload) -> bool:
+        from torch._meta_registrations import cpp_meta_supports_symint_ops
+
         if torch.Tag.view_copy in func.tags:
             return True
-        return func in self._cpp_meta_supports_symint
+        return func in cpp_meta_supports_symint_ops
 
     lift_fns = ordered_set(aten.lift_fresh.default, aten.lift_fresh_copy.default)
 
