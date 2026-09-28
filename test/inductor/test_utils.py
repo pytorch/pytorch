@@ -553,6 +553,37 @@ class TestDeviceTflops(TestCase):
         self.assertTrue(type(ret) is float)
 
 
+class TestDeviceTflopsTritonFallback(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def setUp(self):
+        super().setUp()
+        _get_device_tflops.cache_clear()
+        self.addCleanup(_get_device_tflops.cache_clear)
+
+    @unittest.skipIf(
+        not triton_utils.has_triton_package(),
+        "requires Triton",
+    )
+    @unittest.skipIf(not torch.cuda.is_available(), "skip if no device")
+    def test_get_device_tflops_triton_fallback_magnitude(self, device):
+        # The Triton fallback feeds max_clock_rate() (MHz) into triton's tflops
+        # helpers, which are dimensioned in kHz. Getting that wrong under-reports
+        # peak throughput by 1000x, which a type-only assertion cannot catch, so
+        # pin the magnitude too. Measured fp16 values: the worst pre-fix case is
+        # ~1.06 (MI300X) and the smallest post-fix case is ~312 (A100), so 10.0
+        # clears the former by ~10x and sits far below the latter.
+        with (
+            torch.cuda.device(device),
+            mock.patch.object(inductor_utils, "datasheet_tops", return_value=None),
+        ):
+            ret = get_device_tflops(torch.float16)
+        self.assertGreater(ret, 10.0)
+
+
+instantiate_device_type_tests(TestUtils, globals(), allow_xpu=True)
+
+
 class TestLoadTemplate(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -674,7 +705,7 @@ class TestRuntimeEstimation(_TestDeviceInfoTestCase):
             )
 
         max_clock_rate.assert_called_once_with(1)
-        get_max_tensorcore_tflops.assert_called_once_with(torch.float16, 123.0, 1)
+        get_max_tensorcore_tflops.assert_called_once_with(torch.float16, 123000.0, 1)
 
     @unittest.skipIf(
         not triton_utils.has_triton_package(),
@@ -708,7 +739,7 @@ class TestRuntimeEstimation(_TestDeviceInfoTestCase):
 
         current_device.assert_called_once_with()
         max_clock_rate.assert_called_once_with(1)
-        get_max_tensorcore_tflops.assert_called_once_with(torch.float16, 123.0, 1)
+        get_max_tensorcore_tflops.assert_called_once_with(torch.float16, 123000.0, 1)
 
     def test_get_device_tflops_unindexed_device_tracks_current_device(self):
         device_interface = mock.Mock()
@@ -888,6 +919,23 @@ class TestRuntimeEstimation(_TestDeviceInfoTestCase):
             )
 
         get_tflops.assert_called_once_with(torch.float32, device=device)
+
+
+class TestFP4ImportError(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_ensure_nv_universal_gemm_import_error(self):
+        from torch._inductor import utils
+
+        utils.ensure_nv_universal_gemm_available.cache_clear()
+        self.addCleanup(utils.ensure_nv_universal_gemm_available.cache_clear)
+        with (
+            mock.patch.object(utils.importlib.util, "find_spec", return_value=object()),
+            mock.patch.object(
+                utils, "_ensure_fp4_dtype_registered", side_effect=ImportError
+            ),
+        ):
+            self.assertFalse(utils.ensure_nv_universal_gemm_available())
 
 
 class TestFP4Support(TestCase):
@@ -2054,6 +2102,9 @@ class TestScaleSwizzleInference(TestCase):
 
 
 instantiate_device_type_tests(TestDeviceTflops, globals(), only_for=("cuda",))
+instantiate_device_type_tests(
+    TestDeviceTflopsTritonFallback, globals(), only_for=("cuda",)
+)
 instantiate_device_type_tests(TestFP4Support, globals(), only_for=("cuda",))
 instantiate_device_type_tests(TestRandStridedFP4, globals(), only_for=("cuda",))
 
