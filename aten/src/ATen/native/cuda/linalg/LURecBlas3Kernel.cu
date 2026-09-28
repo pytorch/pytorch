@@ -826,6 +826,9 @@ void lu_batched_blas3_kernel(const Tensor& input, const Tensor& pivots, const Te
 
 namespace ldl {
 
+// Max possible (diagonal) panel for the LDL kernel
+constexpr int MAX_LDL_NB = 32;
+
 // LDL factorization is square-root-free, hence,
 // as in LAPACK, abs(a + ib) = abs(a) + abs(b).
 template <typename scalar_t>
@@ -1220,12 +1223,9 @@ void ldl_factor_blas3_kernel(const Tensor& LD, const Tensor& pivots, const Tenso
     // Right-Down-Diagonal-looking blocked LDLT/LDLH:
     // step through columns/rows in blocks of NB or NB-1 (pivots are 1x1 or 2x2)
     // and factor diagonal panels, then update the trailing matrix with a GEMM
-    //
-    // Max possible (diagonal) panel for the LDL kernel
-    constexpr int MAX_LDL_NB = 32;
     while (step < n - 1) {
       // 1. Panel factorization {
-      const auto curr_nb = std::min(n - step, MAX_LDL_NB);
+      const auto curr_nb = std::min(n - step, ldl::MAX_LDL_NB);
       ldl_diagonal_panel(
         dLD, n, lda,
         curr_nb, step, dstep,
