@@ -33,12 +33,12 @@ from torch.compiler._precompile_types import PrecompileSummary
 __all__ = [
     "capture",
     "load",
+    "no_compilation",
     "Capture",
     "DynamoTracer",
     "MakeFxTracer",
     "PrecompiledRunnable",
     "PrecompileSummary",
-    "no_compilation",
 ]
 
 # These objects are defined in torch._precompile / torch.compiler._precompile_types

@@ -42,6 +42,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TestCase,
 )
+from torch.testing._internal.inductor_utils import HAS_TRITON
 
 
 # A module-level (global) model + a function referencing it, to exercise the
@@ -5326,6 +5327,24 @@ class TestPrecompileNoCompilation(TestCase):
         ):
             compiled(torch.ones(4))
 
+    def test_backend_no_compilation_error_is_not_suppressed(self):
+        # Another thread can enter no_compilation() after this frame passed
+        # Dynamo's check, so Inductor raises from inside the backend.
+        def backend(gm, example_inputs):
+            raise PrecompileError(
+                "precompile.no_compilation() forbids Inductor graph compilation"
+            )
+
+        compiled = torch.compile(lambda x: x.cos(), backend=backend)
+        with (
+            torch._dynamo.config.patch(suppress_errors=True),
+            self.assertRaisesRegex(
+                torch._dynamo.exc.BackendCompilerFailed,
+                "forbids Inductor graph compilation",
+            ),
+        ):
+            compiled(torch.ones(4))
+
     def test_no_compilation_rejects_inductor_graph_compilation(self):
         from torch._inductor.compile_fx import compile_fx
 
@@ -5342,7 +5361,7 @@ class TestPrecompileNoCompilation(TestCase):
             with torch.compiler.precompile.no_compilation():
                 self.assertNotIn("TRITON_DISABLE_COMPILATION", os.environ)
 
-    @unittest.skipUnless(TEST_CUDA, "requires Triton")
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_no_compilation_rejects_late_triton_cache_miss_before_dispatch(self):
         from torch._inductor.async_compile import AsyncCompile, CompiledTritonKernels
 
@@ -5357,7 +5376,7 @@ class TestPrecompileNoCompilation(TestCase):
         readiness.assert_not_called()
         pool.assert_not_called()
 
-    @unittest.skipUnless(TEST_CUDA, "requires Triton")
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_no_compilation_loads_cached_kernel_without_compile_pool(self):
         from torch._inductor.async_compile import AsyncCompile, CompiledTritonKernels
         from torch._inductor.codecache import CodeCacheFuture
@@ -5377,7 +5396,7 @@ class TestPrecompileNoCompilation(TestCase):
         readiness.assert_not_called()
         pool.assert_not_called()
 
-    @unittest.skipUnless(TEST_CUDA, "requires Triton")
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_no_compilation_rejects_kernel_compile_and_autotune(self):
         from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 
