@@ -410,3 +410,5 @@ CLAUDE.local.md
 /debug_*.py
 CLAUDE_CONTEXT/
 /.claude/settings.local.json
+
+CODING_GUIDANCE.md
