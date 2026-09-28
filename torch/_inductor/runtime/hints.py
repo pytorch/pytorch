@@ -62,12 +62,15 @@ def is_valid_mix_order_reduction_config(
     rnumel_hint: int | None,
     inductor_meta: InductorMeta,
 ) -> bool:
+    xblock = config.get("XBLOCK")
+    min_xblock = inductor_meta.get("tma_min_block_sizes", {}).get("XBLOCK", 1)
     num_stages = config.get("NUM_STAGES")
     max_num_stages = mix_order_reduction_max_num_stages(rnumel_hint, inductor_meta)
     return (
         is_valid_mix_order_reduction_xblock(
-            config.get("XBLOCK"), rsplit_size, TRITON_MAX_MIX_ORDER_XBLOCK
+            xblock, rsplit_size, TRITON_MAX_MIX_ORDER_XBLOCK
         )
+        and xblock >= min_xblock
         and type(num_stages) is int
         and 1 <= num_stages <= max_num_stages
     )

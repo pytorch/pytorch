@@ -2993,6 +2993,17 @@ class TMACompatibilityChecker:
             )
             return False
 
+        if (
+            self.kernel.mix_order_reduction
+            and self.kernel.fixed_config
+            and self.kernel.fixed_config["NUM_STAGES"] != 1
+        ):
+            log.debug(
+                "%s fixed mix-order kernels require NUM_STAGES=1 for device-side TMA",
+                self.failed_debug_prefix,
+            )
+            return False
+
         # Strict multirow reductions are forced persistent and can settle on
         # XBLOCK=1 after the initial TMA probe. Their output store must therefore
         # use the scalar fallback rather than a 16-byte tensor descriptor.

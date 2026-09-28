@@ -1650,6 +1650,51 @@ class MixOrderReductionNumericTest(TestBase):
         self.assertEqual(actual, expected)
         self.assertEqual(metrics.codegen_mix_order_reduction, 1)
 
+    @inductor_config.patch(
+        {
+            "split_reductions": False,
+            "triton.cooperative_reductions": False,
+            "triton.force_cooperative_reductions": False,
+            "triton.mix_order_reduction": True,
+            "triton.mix_order_reduction_autotune_split_size": True,
+            "triton.use_tensor_descriptor": True,
+            "assume_aligned_inputs": True,
+        }
+    )
+    @parametrize("num_stages", (1, 2))
+    def test_fixed_config_tma_requires_single_stage(self, device, num_stages):
+        if not _supports_tensor_descriptors(device):
+            self.skipTest("requires tensor descriptor support")
+
+        class FixedMixOrderChoices(InductorChoices):
+            def triton_kernel_kwargs(self, kernel_cls, features, groups, kernel_kwargs):
+                if kernel_kwargs.get("mix_order_reduction"):
+                    return {
+                        **kernel_kwargs,
+                        "fixed_config": FixedTritonConfig(
+                            {
+                                "XBLOCK": 8,
+                                "NUM_STAGES": num_stages,
+                            }
+                        ),
+                    }
+                return kernel_kwargs
+
+        def f(x):
+            return x.sum(dim=1), x.float().sum(dim=0)
+
+        x = torch.zeros((40960, 128), dtype=torch.bfloat16, device=device)
+        expected = f(x)
+        with V.set_choices_handler(FixedMixOrderChoices()):
+            actual, (wrapper,) = utils.run_and_get_code(torch.compile(f), x)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(metrics.codegen_mix_order_reduction, 1)
+        if num_stages == 1:
+            FileCheck().check("'uses_device_tma': True").run(wrapper)
+        else:
+            FileCheck().check_not("'uses_tma': True").run(wrapper)
+
 
 instantiate_device_type_tests(
     MixOrderReductionNumericTest,

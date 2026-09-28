@@ -3407,7 +3407,7 @@ class SIMDScheduling(BaseScheduling):
             # should be decided differently with node type, fx node name
             # etc.
             src_code = src_code.replace(str(Placeholder.KERNEL_NAME), "triton_")
-        return kernel, ws_name, src_code
+        return ws_name, src_code
 
     # pyrefly: ignore [bad-override]
     def benchmark_codegened_module(
@@ -3440,7 +3440,7 @@ class SIMDScheduling(BaseScheduling):
             split_size = min(split_size, 128)
             return split_size
 
-        split_size = _pick_split_size()
+        initial_split_size = _pick_split_size()
 
         # pyrefly: ignore [bad-assignment]
         metrics.codegen_mix_order_reduction += 1
@@ -3461,7 +3461,7 @@ class SIMDScheduling(BaseScheduling):
         )
         kernel_features = SIMDKernelFeatures(node_schedule, numel, rnumel)
         kernel = self._create_kernel_for_mix_order_reduction(
-            kernel_features, split_size
+            kernel_features, initial_split_size
         )
 
         # The autotuning is skipped in deterministic mode
@@ -3480,7 +3480,7 @@ class SIMDScheduling(BaseScheduling):
                 candidate_kernel = self._create_kernel_for_mix_order_reduction(
                     kernel_features, candidate_split_size
                 )
-                _, _, src_code = self._generate_kernel_code_for_mix_order_reduction(
+                _, src_code = self._generate_kernel_code_for_mix_order_reduction(
                     candidate_kernel,
                     for_benchmark=True,
                 )
@@ -3488,14 +3488,13 @@ class SIMDScheduling(BaseScheduling):
                 ms, _ = self.benchmark_codegened_module(mod)
                 return ms
 
-            split_size = CoordescTuner.autotune_single_field(
+            kernel.rsplit_size = CoordescTuner.autotune_single_field(
                 _bench,
-                split_size,
+                kernel.rsplit_size,
                 8,
             )
-            kernel.rsplit_size = split_size
 
-        kernel, ws_name, src_code = self._generate_kernel_code_for_mix_order_reduction(
+        ws_name, src_code = self._generate_kernel_code_for_mix_order_reduction(
             kernel,
             for_benchmark=False,
         )
@@ -3553,7 +3552,7 @@ class SIMDScheduling(BaseScheduling):
                 f"{len(converted_nodes)} and {len(kernel.saved_partial_accumulate)}"
             )
         nsplit = V.graph.wrapper_code.codegen_python_sizevar(
-            (numel + split_size - 1) // split_size
+            (numel + kernel.rsplit_size - 1) // kernel.rsplit_size
         )
         for idx, partial_accum in enumerate(kernel.saved_partial_accumulate):
             buffer_name = partial_accum.buffer_name

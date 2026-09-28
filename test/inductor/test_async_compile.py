@@ -484,6 +484,7 @@ def triton_fused_fake_name(in_ptr0, out_ptr0, xnumel, r0_numel, XBLOCK : tl.cons
             (18, 18, 2, 4, {}, False),
             (18, 18, 2, 2, {"mix_order_reduction_allow_multi_stages": False}, False),
             (18, 18, 2, 2, {"uses_device_tma": True}, False),
+            (18, 18, 2, 1, {"tma_min_block_sizes": {"XBLOCK": 4}}, False),
         ),
     )
     def test_mix_order_autotune_lookup_table(
