@@ -2490,9 +2490,7 @@ class ConvertFrame:
                                 "name": "dynamo_graph_break_reason",
                                 "encoding": "string",
                             },
-                            payload_fn=lambda: (
-                                f"{user_stack_trace}\n{traceback.format_exc()}"
-                            ),
+                            payload_fn=lambda: f"{user_stack_trace}\n{traceback.format_exc()}",
                         )
                         graph_break_log.debug(
                             user_stack_trace,
