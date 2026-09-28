@@ -301,22 +301,6 @@ class TestSparseGeneric(TestSparseBase):
             with self.assertWarnsRegex(UserWarning, msg):
                 x = torch.sparse_coo_tensor(indices, values, shape)
 
-    def test_legacy_new_device(self):
-        i = torch.tensor([[0, 1, 1], [2, 0, 2]])
-        v = torch.tensor([3., 4., 5.])
-        size = torch.Size([2, 3])
-
-        x = torch.sparse_coo_tensor(i, v, size, device='cpu')
-        self.assertRaises(RuntimeError, lambda: x.new(device='cuda'))
-        self.assertRaises(RuntimeError, lambda: x.new(i, v, device='cuda'))
-        self.assertRaises(RuntimeError, lambda: x.new(i, v, size, device='cuda'))
-        self.assertRaises(RuntimeError, lambda: x.new(torch.Size([2, 3, 4]), device='cuda'))
-
-        x = torch.sparse_coo_tensor(i, v, size, device='cuda')
-        self.assertRaises(RuntimeError, lambda: x.new(device='cpu'))
-        self.assertRaises(RuntimeError, lambda: x.new(i, v, device='cpu'))
-        self.assertRaises(RuntimeError, lambda: x.new(i, v, size, device='cpu'))
-        self.assertRaises(RuntimeError, lambda: x.new(torch.Size([2, 3, 4]), device='cpu'))
 
 class TestSparseOnlyCPU(TestSparseBase):
     hw_classification = HardwareClassification.CPU
@@ -3387,6 +3371,24 @@ class TestSparse(TestSparseBase):
         indices = torch.tensor(([0], [2]), dtype=torch.int32, device=device)
         values = make_tensor([1, 1], dtype=torch.cdouble, device=device)
         test_tensor(indices, values, False, False)
+
+    @onlyAccelerator
+    def test_legacy_new_device(self, device):
+        i = torch.tensor([[0, 1, 1], [2, 0, 2]])
+        v = torch.tensor([3., 4., 5.])
+        size = torch.Size([2, 3])
+
+        x = torch.sparse_coo_tensor(i, v, size, device='cpu')
+        self.assertRaises(RuntimeError, lambda: x.new(device=device))
+        self.assertRaises(RuntimeError, lambda: x.new(i, v, device=device))
+        self.assertRaises(RuntimeError, lambda: x.new(i, v, size, device=device))
+        self.assertRaises(RuntimeError, lambda: x.new(torch.Size([2, 3, 4]), device=device))
+
+        x = torch.sparse_coo_tensor(i, v, size, device=device)
+        self.assertRaises(RuntimeError, lambda: x.new(device='cpu'))
+        self.assertRaises(RuntimeError, lambda: x.new(i, v, device='cpu'))
+        self.assertRaises(RuntimeError, lambda: x.new(i, v, size, device='cpu'))
+        self.assertRaises(RuntimeError, lambda: x.new(torch.Size([2, 3, 4]), device='cpu'))
 
     def test_legacy_new(self, device):
         i = torch.tensor([[0, 1, 1], [2, 0, 2]])
