@@ -811,7 +811,6 @@ class VariableBuilder:
         tx: "InstructionTranslatorBase",
         source: Source,
         allow_lazy_constant: bool = True,
-        dict_variable_class: type[ConstDictVariable] = ConstDictVariable,
     ) -> None:
         if source is None:
             raise AssertionError(
@@ -827,7 +826,6 @@ class VariableBuilder:
         # for int/float/bool/str. Set to False when called from LazyCache.realize()
         # to prevent double-wrapping (LazyVariableTracker containing LazyConstantVariable).
         self.allow_lazy_constant = allow_lazy_constant
-        self.dict_variable_class = dict_variable_class
 
     def __call__(self, value: object) -> VariableTracker:
         _t0 = time.time_ns()
@@ -1287,7 +1285,7 @@ class VariableBuilder:
                     source=self.source,
                 )
             else:
-                result = self.dict_variable_class(
+                result = ConstDictVariable(
                     result,  # type: ignore[arg-type]
                     source=self.source,
                 )

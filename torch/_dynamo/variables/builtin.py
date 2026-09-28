@@ -23,7 +23,6 @@ import abc
 import ast
 import builtins
 import contextlib
-import dis
 import functools
 import inspect
 import itertools
@@ -1632,42 +1631,6 @@ class BuiltinVariable(BaseBuiltinVariable):
     ) -> VariableTracker:
         if args or kwargs:
             raise_observed_exception(TypeError, tx)
-        instructions = list(dis.get_instructions(tx.f_code))
-        if any(inst.opname == "STORE_GLOBAL" for inst in instructions):
-            unimplemented(
-                gb_type="globals() in function with global writes",
-                context=tx.f_code.co_name,
-                explanation=(
-                    "Dynamo cannot safely read globals() after or before a "
-                    "STORE_GLOBAL in the same function."
-                ),
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
-        for index, inst in enumerate(instructions):
-            if inst.opname != "LOAD_GLOBAL" or inst.argval != "globals":
-                continue
-            call_index = next(
-                (
-                    next_index
-                    for next_index in range(index + 1, len(instructions))
-                    if instructions[next_index].opname == "CALL"
-                ),
-                None,
-            )
-            if call_index is not None and call_index + 1 < len(instructions):
-                following = instructions[call_index + 1].opname
-                if following in {"CALL", "GET_ITER"}:
-                    unimplemented(
-                        gb_type="globals() namespace specialization",
-                        context=tx.f_code.co_name,
-                        explanation=(
-                            "Dynamo cannot safely specialize the size or order "
-                            "of globals while tracing may still install internal globals."
-                        ),
-                        hints=[*graph_break_hints.SUPPORTABLE],
-                        skip_frame=True,
-                    )
-
         from .dicts import globals_dict_variable
 
         return globals_dict_variable(tx, tx.f_globals)
