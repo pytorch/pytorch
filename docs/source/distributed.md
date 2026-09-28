@@ -2344,3 +2344,9 @@ cannot interrupt a blocked native call, even when it releases the GIL.
    :members: close_async
 
 ```
+
+```{toctree}
+:hidden:
+
+distributed/transport_cuda_streams
+```
