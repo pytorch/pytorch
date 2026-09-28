@@ -604,6 +604,9 @@ class ComputedLazyConstantVariable(LazyVariableTracker):
             value = op(*values)
         except Exception:
             return None
+        # min/max return an operand; mixed types make the result type value-dependent
+        if op in (min, max) and len({type(v) for v in values}) > 1:
+            return None
         if not ConstantVariable.is_base_literal(value):
             return None
         if not lazy_vars:

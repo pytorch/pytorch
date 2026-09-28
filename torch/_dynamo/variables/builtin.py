@@ -286,10 +286,8 @@ _MISSING_SENTINEL = object()
 
 # Runtime-raising ops (e.g. truediv) excluded: recompute escapes traced handlers
 _COMPUTED_LAZY_CONSTANT_OPS_BY_ARITY: dict[int, frozenset[Callable[..., Any]]] = {
-    # invert is excluded: SymNodeVariable has no nb_invert_impl for symbolic realization
-    1: frozenset(
-        [operator.neg, operator.pos, operator.abs, operator.not_, len, str, bool]
-    ),
+    # invert/str excluded: SymNodeVariable lacks nb_invert_impl/tp_repr_impl
+    1: frozenset([operator.neg, operator.pos, operator.abs, operator.not_, len, bool]),
     2: frozenset(
         [
             operator.add,
