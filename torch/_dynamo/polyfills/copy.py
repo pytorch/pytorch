@@ -62,4 +62,7 @@ def reduce_ex_user_defined_object(obj: T, protocol: int, /) -> tuple:  # type: i
         except AttributeError:
             state = None
 
-    return (func, newargs, state, None, None)
+    listitems = iter(obj) if issubclass(cls, list) else None
+    dictitems = iter(obj.items()) if issubclass(cls, dict) else None
+
+    return (func, newargs, state, listitems, dictitems)
