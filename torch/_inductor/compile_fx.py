@@ -2971,7 +2971,7 @@ def compile_fx_forward(
             not is_inference
             and isinstance(result, CompiledFxGraph)
             and result.partition_maps
-            and len(result.partition_maps) > 1
+            and result.has_uncaptured_partition
         ):
             compiler_config_extra.forward_is_cudagraph_partitioned.value = True
 

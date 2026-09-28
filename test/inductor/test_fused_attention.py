@@ -21,6 +21,7 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     isRocmArchAnyOf,
     MI200_ARCH,
+    recover_orig_fp32_precision,
     skipIfXpu,
     TEST_WITH_ROCM,
 )
@@ -885,7 +886,17 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         # softmax over the last dim spelled positively must still fuse
         self._check_common(positive_dim_dot_prod_attention, args1=make_args())
 
+    @recover_orig_fp32_precision
     def _test_pattern_fails_with_mismatched_view_grouping(self):
+        if self.device == GPU_TYPE and TEST_WITH_ROCM:
+            # setUp sets fp32_precision="tf32", which hipBLASLt honors as XF32 on
+            # gfx942 and gfx950, degrading the eager bmm reference while the fused
+            # path runs full fp32. Unlike its neighbours, _sfdp_pattern_24 registers
+            # _sfdp_extra_check uncalled, so it fuses whatever fp32_precision says and
+            # this test can compare two exact results instead of an exact one against
+            # a degraded reference.
+            torch.backends.cuda.matmul.fp32_precision = "ieee"
+
         # The view sizes of _sfdp_pattern_24 are wildcards in the serialized
         # pattern; grouping the scores heads-major instead of batch-major
         # before the mask add coarse-matched anyway and crashed while tracing

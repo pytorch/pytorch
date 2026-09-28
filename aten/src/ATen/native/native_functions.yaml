@@ -9406,8 +9406,7 @@
   structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA, MTIA, XPU: addcmul_out
-    MPS: addcmul_out_mps
+    CPU, CUDA, MPS, MTIA, XPU: addcmul_out
   tags: pointwise
 
 - func: addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor
@@ -9427,8 +9426,7 @@
   structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA, MTIA, XPU: addcdiv_out
-    MPS: addcdiv_out_mps
+    CPU, CUDA, MPS, MTIA, XPU: addcdiv_out
   tags: pointwise
 
 - func: addcdiv(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor
@@ -11439,6 +11437,7 @@
   dispatch:
     CompositeExplicitAutograd: foreach_tensor_powsum_slow
     CUDA: foreach_tensor_powsum_cuda
+    XPU: foreach_tensor_powsum_xpu
   autogen: _foreach_powsum.Scalar_out
 
 - func: _foreach_pow.List(Tensor[] self, Tensor[] exponent) -> Tensor[]
@@ -14585,7 +14584,7 @@
   variants: function
   dispatch:
     CompositeExplicitAutograd: linalg__powsum_slow
-    CPU, CUDA: linalg__powsum
+    CPU, CUDA, XPU: linalg__powsum
   tags: reduction
 
 - func: linalg_matrix_norm(Tensor self, Scalar ord, int[] dim=[-2,-1], bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
