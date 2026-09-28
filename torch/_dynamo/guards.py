@@ -21,6 +21,7 @@ import ast
 import builtins
 import collections
 import contextlib
+import copyreg
 import dataclasses
 import enum
 import functools
@@ -4225,6 +4226,22 @@ def _get_unsupported_types() -> tuple[type, ...]:
     return ret
 
 
+def _pickles_from_dict(cls: type) -> bool:
+    """Whether pickle rebuilds an instance of cls by restoring its ``__dict__``,
+    with no hook that could read a pruned attribute (an Enum member's
+    ``__reduce_ex__`` passes ``_value_`` to the class, for one)."""
+    object_getstate = getattr(object, "__getstate__", None)
+    return (
+        cls not in copyreg.dispatch_table
+        and cls.__reduce_ex__ is object.__reduce_ex__
+        and cls.__reduce__ is object.__reduce__
+        and getattr(cls, "__getstate__", None) is object_getstate
+        and not hasattr(cls, "__setstate__")
+        and not hasattr(cls, "__getnewargs_ex__")
+        and not hasattr(cls, "__getnewargs__")
+    )
+
+
 def _is_shared_constant(value: Any) -> bool:
     """Whether pruning ``value`` by id would poison unrelated references to it.
 
@@ -4296,9 +4313,56 @@ class GuardsStatePickler(FunctionPicklerBase):
                 if isinstance(element, (list, tuple, set, frozenset)):
                     stack.append(element)
                 elif isinstance(element, dict):
-                    # Values only: no pruned type is hashable, so a key can
-                    # neither be one nor contain one.
-                    stack.append(list(element.values()))
+                    stack.append([*element.keys(), *element.values()])
+        # Everything reachable from a value a guard compares whole: a constant
+        # or opaque value type under EQUALS_MATCH, and what __tensor_unflatten__
+        # gets back through a traceable wrapper subclass's ctx under
+        # TENSOR_SUBCLASS_METADATA_MATCH. A pruned field anywhere inside would
+        # fail the guard after load. Held, not just ids, since
+        # __tensor_flatten__ may build the ctx afresh.
+        self._whole_compared_values: dict[int, Any] = {}
+        self._collect_whole_compared_values()
+
+    def _collect_whole_compared_values(self) -> None:
+        from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
+        stack = [
+            value
+            for value in self.guard_tree_values.values()
+            if pytree.is_constant_class(type(value))
+            or is_opaque_constant_type(type(value))
+        ]
+        subclasses = [
+            value
+            for value in self.guard_tree_values.values()
+            if is_traceable_wrapper_subclass(value)
+        ]
+        while subclasses:
+            subclass = subclasses.pop()
+            attrs, ctx = subclass.__tensor_flatten__()
+            stack.append(ctx)
+            for attr in attrs:
+                inner = getattr(subclass, attr)
+                if is_traceable_wrapper_subclass(inner):
+                    subclasses.append(inner)
+        while stack:
+            value = stack.pop()
+            if id(value) in self._whole_compared_values:
+                continue
+            self._whole_compared_values[id(value)] = value
+            if isinstance(value, (list, tuple, set, frozenset)):
+                stack.extend(value)
+            elif isinstance(value, dict):
+                stack.extend(value.keys())
+                stack.extend(value.values())
+            elif (
+                hasattr(value, "__dict__")
+                and not inspect.isclass(value)
+                and not inspect.ismodule(value)
+                and not inspect.isroutine(value)
+                and not isinstance(value, (torch.nn.Module, torch.Tensor))
+            ):
+                stack.extend(vars(value).values())
 
     @classmethod
     def _unpickle_module(cls, state: Any) -> torch.nn.Module:
@@ -4906,18 +4970,39 @@ class GuardsStatePickler(FunctionPicklerBase):
                     )
                 return type(self)._unpickle_fsdp_module_type, (original_type,)
 
+        if (
+            id(obj) in self.guard_tree_values
+            and hasattr(obj, "__dict__")
+            and not inspect.isclass(obj)
+            and not inspect.ismodule(obj)
+            and not inspect.isroutine(obj)
+            and not isinstance(obj, (torch.nn.Module, torch.Tensor))
+            and type(obj).__module__.partition(".")[0] != "torch"
+            and _pickles_from_dict(type(obj))
+            and id(obj) not in self._whole_compared_values
+        ):
+            # A guarded user object (a train pipeline, a wrapper holding a
+            # dataloader) would otherwise be pickled whole, so one unguarded
+            # unpicklable attribute takes the frame down. Last, so the specific
+            # reducers above get first refusal. Nothing a guard compares whole
+            # is pruned (_whole_compared_values); skipping torch's own types on
+            # top of that is only a conservative filter, so they stay whole.
+            self._prune_unguarded_attributes(obj)
+
         return NotImplemented
 
-    def _prune_unguarded_attributes(self, obj: torch.nn.Module) -> None:
+    def _prune_unguarded_attributes(self, obj: Any) -> None:
         """Mark every ``__dict__`` value nothing guards as prunable.
 
-        Reaching a module through the guard tree does not mean its whole state
+        Reaching an object through the guard tree does not mean its whole state
         is needed, only the attributes a guard actually reads. The rest becomes
         the _Missing sentinel, which is what keeps an unpicklable bystander (a
         generator, a live iterator, a C handle) from taking the frame down.
-        What the module itself reads back at load stays: the containers in
-        _NN_MODULE_STATE_ATTRS. Precondition: the caller has checked that the
-        module's __setstate__ is nn.Module's, since any other may read anything.
+        What an nn.Module itself reads back at load stays: the containers in
+        _NN_MODULE_STATE_ATTRS. Precondition: the caller has checked that
+        unpickling obj reads nothing but its ``__dict__`` back (nn.Module's
+        __setstate__, or ``_pickles_from_dict``), since any other hook may read
+        anything.
         """
         for name, attr in obj.__dict__.items():
             if isinstance(attr, (torch.Tensor, torch.nn.Module)):
@@ -4929,6 +5014,10 @@ class GuardsStatePickler(FunctionPicklerBase):
             if callable(attr):
                 continue
             if _is_shared_constant(attr):
+                continue
+            if id(attr) in self._verbatim_elements:
+                continue
+            if id(attr) in self._whole_compared_values:
                 continue
             self.missing_values[id(attr)] = attr
 

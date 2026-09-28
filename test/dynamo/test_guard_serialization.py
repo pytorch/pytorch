@@ -797,6 +797,81 @@ class MyClassNotSerializable:
         return x + 1
 
 
+class LockHolder:
+    def __init__(self, scale):
+        self.scale = scale
+        self.lock = threading.Lock()
+
+
+class ReducedHolder:
+    def __init__(self, scale, cfg):
+        self.scale = scale
+        self.cfg = dict(cfg)
+
+    def __reduce__(self):
+        return (ReducedHolder, (self.scale, self.cfg))
+
+
+@dataclasses.dataclass(frozen=True)
+class _Phase:
+    lr: float
+
+
+class _Schedule(enum.Enum):
+    WARMUP = _Phase(0.1)
+    STEADY = _Phase(1.0)
+
+
+@dataclasses.dataclass(frozen=True)
+class _Plan:
+    phase: _Phase
+
+
+pytree.register_constant(_Plan)
+
+
+class _Stage:
+    def __init__(self, lr, steps):
+        self.lr = lr
+        self.steps = steps
+
+    def __eq__(self, other):
+        return isinstance(other, _Stage) and (self.lr, self.steps) == (
+            other.lr,
+            other.steps,
+        )
+
+    def __hash__(self):
+        return hash(self.lr)
+
+
+@dataclasses.dataclass(frozen=True)
+class _StagedPlan:
+    stage: _Stage
+
+
+pytree.register_constant(_StagedPlan)
+
+
+class _Layout:
+    def __init__(self, scale, blocks):
+        self.scale = scale
+        self.blocks = blocks
+
+    def __eq__(self, other):
+        return (
+            isinstance(other, _Layout)
+            and self.scale == other.scale
+            and self.blocks == other.blocks
+        )
+
+
+class _LayoutHolder:
+    def __init__(self, scale, layout):
+        self.scale = scale
+        self.layout = layout
+
+
 class Inputs:
     def __init__(self, x, unused):
         self.x = x
@@ -1151,9 +1226,12 @@ class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
                 if key in kwargs and isinstance(kwargs[key], Iterator):
                     self._frame_state.f_locals[key] = kwargs[key]
 
+        guard_types = (guard_type,) if isinstance(guard_type, str) else guard_type
+
         def guard_filter_fn(guards):
             ret = [
-                g.guard_type == guard_type or guard_type in g.derived_guard_types
+                g.guard_type in guard_types
+                or any(t in g.derived_guard_types for t in guard_types)
                 for g in guards
             ]
             self.assertTrue(any(ret))
@@ -3473,6 +3551,182 @@ class TestGuardSerialization(TestGuardSerializationBase):
             PackageError, "CLASS_MATCH guard cannot be serialized."
         ):
             self._test_serialization("CLASS_MATCH", fn, torch.randn(3))
+
+    def test_guarded_user_object_prunes_unguarded_attributes(self):
+        def fn(x, holder):
+            return x * holder.scale
+
+        x = torch.randn(3)
+
+        ref, loaded = self._test_serialization("CONSTANT_MATCH", fn, x, LockHolder(2))
+        self._test_check_fn(ref, loaded, {"x": x, "holder": LockHolder(2)}, True)
+        self._test_check_fn(ref, loaded, {"x": x, "holder": LockHolder(3)}, False)
+
+    def test_guarded_user_object_with_a_reducer_is_pickled_whole(self):
+        def fn(x, holder):
+            return x * holder.scale
+
+        x = torch.randn(3)
+        holder = ReducedHolder(2, {"mode": "eval"})
+
+        # __reduce__ passes the unguarded cfg to __init__, which would fail on
+        # the pruning sentinel at load.
+        ref, loaded = self._test_serialization("CONSTANT_MATCH", fn, x, holder)
+        self._test_check_fn(ref, loaded, {"x": x, "holder": holder}, True)
+        self._test_check_fn(
+            ref, loaded, {"x": x, "holder": ReducedHolder(3, {})}, False
+        )
+
+    def test_guarded_enum_member_keeps_its_value(self):
+        def fn(x, mode):
+            if mode is _Schedule.WARMUP:
+                return x + 1
+            return x - 1
+
+        x = torch.randn(3)
+
+        ref, loaded = self._test_serialization("ID_MATCH", fn, x, _Schedule.WARMUP)
+        self._test_check_fn(ref, loaded, {"x": x, "mode": _Schedule.WARMUP}, True)
+        self._test_check_fn(ref, loaded, {"x": x, "mode": _Schedule.STEADY}, False)
+
+    def test_constant_class_is_kept_whole_for_its_equals_match(self):
+        def fn(x, plan):
+            if isinstance(plan, _Plan):
+                return x * 2
+            return x
+
+        x = torch.randn(3)
+
+        ref, loaded = self._test_serialization(
+            "EQUALS_MATCH", fn, x, _Plan(_Phase(0.1))
+        )
+        self._test_check_fn(ref, loaded, {"x": x, "plan": _Plan(_Phase(0.1))}, True)
+        self._test_check_fn(ref, loaded, {"x": x, "plan": _Plan(_Phase(1.0))}, False)
+
+    def test_object_inside_a_constant_class_is_kept_whole(self):
+        def fn(x, plan, stage):
+            if isinstance(plan, _StagedPlan):
+                return x * stage.lr
+            return x
+
+        def inputs(steps):
+            stage = _Stage(2.0, steps)
+            return {"x": torch.ones(3), "plan": _StagedPlan(stage), "stage": stage}
+
+        # A guard reads stage.lr, but plan's EQUALS_MATCH compares stage whole,
+        # steps included.
+        ref, loaded = self._test_serialization(
+            ("EQUALS_MATCH", "CONSTANT_MATCH"), fn, *inputs([4, 4]).values()
+        )
+        self._test_check_fn(ref, loaded, inputs([4, 4]), True)
+        self._test_check_fn(ref, loaded, inputs([8, 8]), False)
+
+    def test_tensor_subclass_ctx_object_is_kept_whole(self):
+        def fn(x):
+            return x * x.extra.scale
+
+        def sub(blocks):
+            return SubclassWithMeta(torch.randn(3), extra=_Layout(2, blocks))
+
+        # blocks is read by no guard, but TENSOR_SUBCLASS_METADATA_MATCH
+        # compares the whole __tensor_flatten__ ctx that holds the layout.
+        ref, loaded = self._test_serialization(
+            ("TENSOR_SUBCLASS_METADATA_MATCH", "CONSTANT_MATCH"), fn, sub([4, 4])
+        )
+        self._test_check_fn(ref, loaded, {"x": sub([4, 4])}, True)
+        self._test_check_fn(ref, loaded, {"x": sub([8, 8])}, False)
+
+    def test_tensor_subclass_ctx_object_is_kept_when_another_object_holds_it(self):
+        def fn(holder, x):
+            return x * holder.scale
+
+        def inputs(blocks):
+            layout = _Layout(2, blocks)
+            x = SubclassWithMeta(torch.randn(3), extra=layout)
+            return {"holder": _LayoutHolder(3, layout), "x": x}
+
+        # holder is pickled first, and no guard reads its layout, the very
+        # object the subclass's ctx holds.
+        ref, loaded = self._test_serialization(
+            ("TENSOR_SUBCLASS_METADATA_MATCH", "CONSTANT_MATCH"),
+            fn,
+            *inputs([4, 4]).values(),
+        )
+        self._test_check_fn(ref, loaded, inputs([4, 4]), True)
+        self._test_check_fn(ref, loaded, inputs([8, 8]), False)
+
+    def test_object_inside_an_opaque_constant_is_kept_whole(self):
+        def fn(x, const, stage):
+            if isinstance(const, CustomConstantType):
+                return x * stage.lr
+            return x
+
+        def inputs(steps):
+            stage = _Stage(2.0, steps)
+            const = CustomConstantType(stage, 0)
+            return {"x": torch.ones(3), "const": const, "stage": stage}
+
+        # A guard reads stage.lr, but const's EQUALS_MATCH compares const.a,
+        # which is stage, whole.
+        ref, loaded = self._test_serialization(
+            ("EQUALS_MATCH", "CONSTANT_MATCH"), fn, *inputs([4, 4]).values()
+        )
+        self._test_check_fn(ref, loaded, inputs([4, 4]), True)
+        self._test_check_fn(ref, loaded, inputs([8, 8]), False)
+
+    def test_tensor_subclass_ctx_dict_key_is_kept_whole(self):
+        def fn(x, stage):
+            return x * stage.lr
+
+        def inputs(steps):
+            stage = _Stage(2.0, steps)
+            x = SubclassWithMeta(torch.randn(3), extra={stage: "warmup"})
+            return {"x": x, "stage": stage}
+
+        # stage is only a key of the ctx dict, which the guard compares whole.
+        ref, loaded = self._test_serialization(
+            ("TENSOR_SUBCLASS_METADATA_MATCH", "CONSTANT_MATCH"),
+            fn,
+            *inputs([4, 4]).values(),
+        )
+        self._test_check_fn(ref, loaded, inputs([4, 4]), True)
+        self._test_check_fn(ref, loaded, inputs([8, 8]), False)
+
+    def test_nested_guarded_user_objects_are_pruned_in_turn(self):
+        def fn(x, holder):
+            return x * holder.scale.scale
+
+        x = torch.randn(3)
+
+        ref, loaded = self._test_serialization(
+            "CONSTANT_MATCH", fn, x, LockHolder(LockHolder(2))
+        )
+        self._test_check_fn(
+            ref, loaded, {"x": x, "holder": LockHolder(LockHolder(2))}, True
+        )
+        self._test_check_fn(
+            ref, loaded, {"x": x, "holder": LockHolder(LockHolder(3))}, False
+        )
+
+    def test_attribute_guarded_through_another_object_is_kept(self):
+        def fn(x, a, b):
+            return x * a.scale + b.scale.scale
+
+        def inputs(inner):
+            shared = LockHolder(inner)
+            a = LockHolder(2)
+            a.shared = shared
+            return {"x": x, "a": a, "b": LockHolder(shared)}
+
+        x = torch.randn(3)
+        args = inputs(3)
+
+        # a.shared is unguarded through a but guarded through b.
+        ref, loaded = self._test_serialization(
+            "CONSTANT_MATCH", fn, x, args["a"], args["b"]
+        )
+        self._test_check_fn(ref, loaded, inputs(3), True)
+        self._test_check_fn(ref, loaded, inputs(4), False)
 
     def test_closure_match(self):
         def fn(x):
