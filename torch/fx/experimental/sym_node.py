@@ -247,6 +247,14 @@ class SymNode:
     def has_hint(self) -> bool:
         return self._hint is not None
 
+    def backed_size_oblivious_hint(self) -> int | None:
+        from torch.fx.experimental import _config
+        from torch.fx.experimental.symbolic_shapes import guarding_hint_or_throw
+
+        if not _config.backed_size_oblivious or not self.has_hint():
+            return None
+        return guarding_hint_or_throw(self)
+
     def maybe_as_int(self) -> int | None:
         if self.expr.is_number:
             return int(self.expr)
