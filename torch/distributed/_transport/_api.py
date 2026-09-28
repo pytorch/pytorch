@@ -56,8 +56,6 @@ class Memory(Protocol):
 
     def to_remote_buffer(self, *, timeout: float | None = None) -> RemoteBuffer: ...
 
-    def reused_registration(self) -> bool: ...
-
 
 class Transport(ABC):
     """Base class for one-sided tensor transports.

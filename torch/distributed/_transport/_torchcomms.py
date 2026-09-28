@@ -74,9 +74,6 @@ class _Memory:
         descriptor.serialize()  # Validate the native field types.
         return descriptor
 
-    def reused_registration(self) -> bool:
-        return self.native.reused_registration()
-
 
 class TorchCommsTransport(_BlockingTransport):
     """Adapter for torchcomms' RDMA transport."""

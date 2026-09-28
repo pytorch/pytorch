@@ -51,8 +51,10 @@ class TransportTestMixin:
             source_memory = first.register_memory(source)
             destination_memory = second.register_memory(destination)
 
-            self.assertFalse(source_memory.reused_registration())
-            self.assertTrue(first.register_memory(source).reused_registration())
+            self.assertEqual(
+                source_memory.to_remote_buffer(),
+                first.register_memory(source).to_remote_buffer(),
+            )
             self.assertEqual(
                 first.write(
                     source_memory.to_view(16, 16),
