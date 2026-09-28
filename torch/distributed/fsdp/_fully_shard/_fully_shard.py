@@ -303,18 +303,20 @@ def _unimplemented_deepcopy(*args: Any, **kwargs: Any) -> NoReturn:
     )
 
 
-_disable_fsdp_module_new_init: ContextVar[bool] = ContextVar(
-    "_disable_fsdp_module_new_init", default=False
+_fsdp_module_new_init_disabled: ContextVar[bool] = ContextVar(
+    "_fsdp_module_new_init_disabled", default=False
 )
 
 
 @contextmanager
 def disable_fsdp_module_new_init() -> Iterator[None]:
-    token = _disable_fsdp_module_new_init.set(True)
+    """Make ``FSDPModule.__new__`` return an uninitialized instance of the
+    wrapper class itself, for rebuilding a module from saved state."""
+    token = _fsdp_module_new_init_disabled.set(True)
     try:
         yield
     finally:
-        _disable_fsdp_module_new_init.reset(token)
+        _fsdp_module_new_init_disabled.reset(token)
 
 
 class FSDPModule:
@@ -330,20 +332,12 @@ class FSDPModule:
         Guard-state deserialization disables initialization and preserves the
         wrapper class so its type guards match the live FSDP module.
         """
-        if _disable_fsdp_module_new_init.get():
+        if _fsdp_module_new_init_disabled.get():
             return object.__new__(cls)
         orig_cls = cls.__mro__[cls._orig_cls_mro_index]
         self = orig_cls.__new__(orig_cls, *args, **kwargs)
         self.__init__(*args, **kwargs)
         return self
-
-    def __init__(self, *args, **kwargs):
-        # When __new__ preserves the dynamic wrapper type, type.__call__ follows
-        # it with __init__. Guard-state loading restores state separately.
-        if _disable_fsdp_module_new_init.get():
-            return
-        orig_cls = type(self).__mro__[self._orig_cls_mro_index]
-        orig_cls.__init__(self, *args, **kwargs)
 
     def reshard(self) -> None:
         """

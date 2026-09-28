@@ -295,24 +295,6 @@ def _function_code_matches(value: object, expected: FunctionCodeMetadata) -> boo
     )
 
 
-class MethodCodeMetadata(NamedTuple):
-    func: FunctionCodeMetadata
-
-
-def _method_code_metadata(value: object) -> MethodCodeMetadata | None:
-    # The receiver is not pinned: its own guards, if any, check it.
-    if type(value) is not types.MethodType:
-        return None
-    func = _function_code_metadata(value.__func__)
-    return None if func is None else MethodCodeMetadata(func)
-
-
-def _method_code_matches(value: object, expected: MethodCodeMetadata) -> bool:
-    return type(value) is types.MethodType and _function_code_matches(
-        value.__func__, expected.func
-    )
-
-
 class NativeMethodMetadata(NamedTuple):
     # Pickled by reference, so it is the loading process's class.
     receiver: type
@@ -333,7 +315,12 @@ def _native_method_metadata(value: object) -> NativeMethodMetadata | None:
 
 
 def _native_method_matches(value: object, expected: NativeMethodMetadata) -> bool:
-    return value == getattr(expected.receiver, expected.name)
+    # The type check first: == would otherwise run the new value's __eq__.
+    return (
+        type(value) is types.BuiltinMethodType
+        and value.__self__ is expected.receiver
+        and value == getattr(expected.receiver, expected.name)
+    )
 
 
 def _cow_tensor_matches(value: object, expected: object) -> bool:
@@ -3337,25 +3324,6 @@ class GuardBuilder(GuardBuilderBase):
         get_metadata_fn=lambda guard, value: _guard_create_fn_keyword(
             guard, "expected"
         ),
-        eval_fn=_method_code_matches,
-    )
-    def METHOD_CODE_MATCH(self, guard: Guard, expected: MethodCodeMetadata) -> None:
-        def guard_fn(value: object) -> bool:
-            return _method_code_matches(value, expected)
-
-        code = (
-            f"___check_method_code({self.arg_ref(guard)}, "
-            f"{expected.func.qualified_name()})"
-        )
-        self._set_guard_export_info(guard, [code])
-        self.get_guard_manager(guard).add_lambda_guard(
-            guard_fn, get_verbose_code_parts(code, guard), guard.user_stack
-        )
-
-    @register_guard_check_spec(
-        get_metadata_fn=lambda guard, value: _guard_create_fn_keyword(
-            guard, "expected"
-        ),
         eval_fn=_native_method_matches,
     )
     def NATIVE_METHOD_MATCH(self, guard: Guard, expected: NativeMethodMetadata) -> None:
@@ -4161,7 +4129,7 @@ class GuardBuilder(GuardBuilderBase):
 
             def read_marking(attr_name: str) -> Any:
                 marking = getattr(value, attr_name, None)
-                if marking is not None:
+                if self.save_guards and marking is not None:
                     self.guard_tree_values[id(marking)] = marking
                 return marking
 
@@ -4170,7 +4138,7 @@ class GuardBuilder(GuardBuilderBase):
             for attr_name in dim_marking_attrs:
                 if hasattr(value, attr_name):
                     expected_attrs[attr_name] = read_marking(attr_name)
-                    code_part = f"((getattr({tensor_name}, '{attr_name}', set()).issubset({getattr(value, attr_name)!r})) if hasattr({tensor_name}, '{attr_name}') else True)"
+                    code_part = f"((getattr({tensor_name}, '{attr_name}', set()).issubset({expected_attrs[attr_name]!r})) if hasattr({tensor_name}, '{attr_name}') else True)"
                     code.append(code_part)
                 else:
                     absent_attrs.append(attr_name)
@@ -4190,6 +4158,7 @@ class GuardBuilder(GuardBuilderBase):
             for gate_attr, dep_attr_names in gated_attrs:
                 if not hasattr(value, gate_attr):
                     continue
+                read_marking(gate_attr)
                 for attr_name in dep_attr_names:
                     attr_value = read_marking(attr_name)
                     dependent_attrs[attr_name] = (attr_value, gate_attr)
@@ -4443,13 +4412,9 @@ _FAKE_TENSOR_OWNED_ATTRIBUTES = frozenset(
         "_nested_int_memo",
         "_nested_int_memo_vc",
         "_nested_int_memo_epoch",
+        "_is_param",
+        "_debug_trace",
     }
-)
-
-# The subset a rebuilt FakeTensor needs to be one; a user attribute of the same
-# name would overwrite it.
-_FAKE_TENSOR_RESERVED_ATTRIBUTES = frozenset(
-    {"_fake_device", "fake_mode", "pytype", "dispatch_keys"}
 )
 
 
@@ -5261,11 +5226,12 @@ class GuardsStatePickler(FunctionPicklerBase):
             object.__setattr__(tensor, name, value)
 
     def _carried_tensor_attributes(self, obj: torch.Tensor) -> dict[str, Any] | None:
-        """The Python attributes of ``obj`` a guard reaches.
+        """The Python attributes of ``obj``, pruned to what a guard reaches.
 
         A tensor is rebuilt from metadata, so a guard whose source traverses an
         attribute assigned onto it cannot be rebuilt unless the attribute is
-        carried. Unguarded ones are left behind: they may not pickle.
+        carried. An unguarded value becomes the _Missing sentinel, since it may
+        not pickle; its name stays, as a HASATTR guard reads only presence.
         """
         state = getattr(obj, "__dict__", None)
         if not state:
@@ -5275,16 +5241,18 @@ class GuardsStatePickler(FunctionPicklerBase):
         )
         carried: dict[str, Any] = {}
         for name, value in state.items():
-            if is_fake and name in _FAKE_TENSOR_OWNED_ATTRIBUTES:
+            if name in _FAKE_TENSOR_OWNED_ATTRIBUTES:
+                if not is_fake and self._keep(value):
+                    raise torch._dynamo.exc.PackageError(
+                        f"a guard reads {name!r} off a tensor, but a rebuilt "
+                        f"tensor is a FakeTensor, which stores its own state there"
+                    )
                 continue
-            if id(value) not in self.guard_tree_values:
+            if name.startswith("_dynamo_") and not self._keep(value):
+                # Rebuilding TENSOR_MATCH reads Dynamo's markings off the loaded
+                # tensor, and its check cannot take a _Missing in place of one.
                 continue
-            if name in _FAKE_TENSOR_RESERVED_ATTRIBUTES:
-                raise torch._dynamo.exc.PackageError(
-                    f"a guard reads {name!r} off a tensor, but a rebuilt tensor "
-                    f"is a FakeTensor, which stores its own state there"
-                )
-            carried[name] = value
+            carried[name] = self._prune(value, "unguarded tensor attribute")
         return carried or None
 
     def _prune_unguarded_attributes(self, obj: Any) -> None:
@@ -5381,7 +5349,7 @@ def _guard_value(builder: GuardBuilder, guard: Guard) -> object:
         return None
 
 
-_PORTABLE_FUNCTION_GUARD_TYPES = ("CLOSURE_MATCH", "ID_MATCH", "FUNCTION_MATCH")
+_PORTABLE_FUNCTION_GUARD_TYPES = ("CLOSURE_MATCH", "ID_MATCH")
 
 
 def _portable_function_metadata(
@@ -5393,14 +5361,13 @@ def _portable_function_metadata(
     if guard_type in _PORTABLE_FUNCTION_GUARD_TYPES:
         if (method := _native_method_metadata(value)) is not None:
             return GuardBuilder.NATIVE_METHOD_MATCH, method
-        if (bound := _method_code_metadata(value)) is not None:
-            return GuardBuilder.METHOD_CODE_MATCH, bound
     return None
 
 
 def is_portable_function_guard(guard_type: str, value: object) -> bool:
-    """An identity guard on a function that ``to_portable_function_guard``
-    rewrites into a by-value check for serialization."""
+    """An identity guard on a function, or on a builtin bound to a class, that
+    ``to_portable_function_guard`` rewrites into a by-value check for
+    serialization."""
     return _portable_function_metadata(guard_type, value) is not None
 
 
@@ -5831,15 +5798,16 @@ class CheckFunctionManager:
             if name := get_global_source_name(source):
                 if not isinstance(name, str):
                     raise AssertionError(f"Expected str, got {type(name)}")
-                # Leave out the builtins dict key, as we will special handle
-                # it later because the guarded code rarely use the entire
-                # builtin dict in the common case.
+                # The builtins dict is carried only for the keys a guard reads
+                # (used_builtin_vars): guarded code rarely uses the whole dict.
                 if name != builtins_dict_name:
                     used_global_vars.add(name)
                 else:
                     while isinstance(source, ChainedSource):
-                        if isinstance(source, DictGetItemSource) and isinstance(
-                            source.base, GlobalSource
+                        if (
+                            isinstance(source, DictGetItemSource)
+                            and isinstance(source.base, GlobalSource)
+                            and isinstance(source.index, str)
                         ):
                             self.used_builtin_vars.add(source.index)
                         source = source.base
