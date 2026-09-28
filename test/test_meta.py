@@ -26,6 +26,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     parametrize,
     instantiate_parametrized_tests,
+    set_default_dtype,
     xfailIfTorchDynamo,
     skipIfXpu,
 )
@@ -3317,6 +3318,131 @@ class TestMetaKernelRegistrations(TestCase):
 
         cpp, python = self._add_meta_results(shape_kind, make_args, op="mul")
         self.assertEqual(cpp, python)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @parametrize("shape_kind", ["static", "backed", "unbacked"])
+    @parametrize("layout", ["contiguous", "channels_last", "permuted", "non_contiguous", "expanded"])
+    @parametrize("other", ["same_layout", "contiguous", "broadcast_3d", "number"])
+    def test_div_meta_matches_python(self, shape_kind, layout, other):
+        def make_args(s):
+            a = self._add_meta_input(s, layout)
+            if other == "same_layout":
+                return a, self._add_meta_input(s, layout)
+            if other == "contiguous":
+                return a, self._add_meta_input(s, "contiguous")
+            if other == "broadcast_3d":
+                return a, torch.empty(s, 1, 5)
+            return a, 2
+
+        cpp, python = self._add_meta_results(shape_kind, make_args, op="div")
+        self.assertEqual(cpp, python)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @parametrize("shape_kind", ["static", "backed", "unbacked"])
+    @parametrize("layout", ["contiguous", "channels_last", "permuted"])
+    @parametrize(
+        "dtype,other",
+        [
+            (torch.int64, torch.int64),
+            (torch.int32, torch.int64),
+            (torch.bool, torch.bool),
+            (torch.float16, torch.float16),
+            (torch.float16, torch.bfloat16),
+            (torch.int32, 2),
+            (torch.int64, 2.5),
+            (torch.float16, 2),
+            (torch.uint8, True),
+            (torch.bool, 2),
+            (torch.int32, 1j),
+            (torch.int32, "zero_dim_int64"),
+            (torch.int32, "zero_dim_float64"),
+            (torch.bfloat16, "zero_dim_float64"),
+        ],
+    )
+    def test_div_meta_dtype_promotion(self, shape_kind, layout, dtype, other):
+        def make_args(s):
+            a = self._add_meta_input(s, layout, dtype)
+            if isinstance(other, torch.dtype):
+                return a, self._add_meta_input(s, "contiguous", other)
+            if isinstance(other, str):
+                return a, torch.empty((), dtype=getattr(torch, other.removeprefix("zero_dim_")))
+            return a, other
+
+        cpp, python = self._add_meta_results(shape_kind, make_args, op="div")
+        self.assertEqual(cpp, python)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @parametrize("shape_kind", ["static", "backed", "unbacked"])
+    @parametrize("other", [torch.int32, 2, 2.5])
+    def test_div_meta_default_dtype(self, shape_kind, other):
+        def make_args(s):
+            a = self._add_meta_input(s, "permuted", torch.int32)
+            return a, self._add_meta_input(s, "contiguous", other) if isinstance(other, torch.dtype) else other
+
+        with set_default_dtype(torch.float64):
+            cpp, python = self._add_meta_results(shape_kind, make_args, op="div")
+        self.assertEqual(cpp, python)
+        self.assertEqual(cpp[0][2], torch.float64)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @parametrize("shape_kind", ["static", "backed", "unbacked"])
+    @parametrize("operands", ["static_first", "symbolic_first", "static_first_non_contiguous"])
+    def test_div_meta_static_and_symbolic_dims(self, shape_kind, operands):
+        # Python compares sizes as sizeA == sizeB, so an int sizeA reflects to
+        # SymInt.__eq__ and records Eq(s, 8) rather than Eq(8, s).
+        def make_args(s):
+            if operands == "static_first":
+                return torch.empty(8, 3), torch.empty(s, 3)
+            if operands == "symbolic_first":
+                return torch.empty(s, 3), torch.empty(8, 3)
+            return torch.empty(8, 6)[:, ::2], torch.empty(s, 3)
+
+        cpp, python = self._add_meta_results(shape_kind, make_args, op="div")
+        self.assertEqual(cpp, python)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @parametrize("impl", ["cpp", "python"])
+    @parametrize("devices", [("meta", "cpu"), ("cpu", "meta")])
+    def test_div_meta_device_mismatch(self, impl, devices):
+        div = torch.ops.aten.div.Tensor if impl == "cpp" else torch._refs.div
+        a, b = (torch.empty(3, device=d) for d in devices)
+        with self.assertRaisesRegex(RuntimeError, f"Tensor on device {devices[1]} is not on the expected device {devices[0]}!"):
+            div(a, b)
+        meta = a if a.is_meta else b
+        scalar = torch.empty((), dtype=torch.int64)
+        for args in ((meta, scalar), (scalar, meta)):
+            out = div(*args)
+            self.assertEqual((out.shape, out.dtype, out.device), (meta.shape, torch.float32, meta.device))
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @parametrize("backed", [False, True])
+    def test_div_symbolic_fake_tensor(self, backed):
+        # End to end through Python fake. Only the static div reaches the C++
+        # kernel there.
+        from torch._dynamo.source import ConstantSource
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
+
+        shape_env = ShapeEnv()
+        if backed:
+            source = ConstantSource("size")
+            symbol = shape_env.create_symbol(8, source=source, dynamic_dim=DimDynamic.DYNAMIC)
+            size = shape_env.create_symintnode(symbol, hint=8, source=source)
+        else:
+            size = shape_env.create_unbacked_symint()
+        with FakeTensorMode(shape_env=shape_env):
+            a = torch.empty(2, size, 3, 5, dtype=torch.int32, device="meta", memory_format=torch.channels_last)
+            static = torch.empty(3, 4, 5, 2, dtype=torch.int64, device="meta").permute(3, 1, 0, 2)
+            scalar = torch.tensor(2, dtype=torch.int64)
+            results = (torch.div(a, 2), torch.div(a, scalar), torch.div(static, scalar))
+
+        for result, inp in zip(results, (a, a, static)):
+            self.assertEqual(result.shape, inp.shape)
+            # The ref gives unbacked channels_last results Max(1, u0) strides.
+            if backed or inp is static:
+                self.assertEqual(result.stride(), inp.stride())
+            self.assertEqual(result.dtype, torch.float32)
+            self.assertEqual(result.device, torch.device("meta"))
 
 
 instantiate_device_type_tests(TestMeta, globals())
