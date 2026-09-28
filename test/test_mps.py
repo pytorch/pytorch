@@ -5706,6 +5706,24 @@ class TestMPS(TestCaseMPS):
             self.assertEqual(res.dtype, ref.dtype)
             self.assertEqual(res, ref)
 
+    def test_huber_loss_backward_mixed_dtype_errors(self):
+        x = torch.tensor([0.5, 2.0], device="mps")
+        t = torch.tensor([1.0, 1.0], dtype=torch.float16, device="mps")
+        with self.assertRaisesRegex(RuntimeError, "expected all tensors to have the same dtype"):
+            torch.ops.aten.huber_loss_backward(torch.ones_like(x), x, t, 1, 1.0)
+
+    def test_addbmm_mixed_dtype_errors(self):
+        # addbmm has no promotion on any backend, so it must raise rather than abort
+        m = torch.ones(2, 2, device="mps")
+        b = torch.ones(1, 2, 2, dtype=torch.float16, device="mps")
+        with self.assertRaisesRegex(RuntimeError, "must have the same dtype|Input dtypes must be the same"):
+            torch.addbmm(m, b, b)
+        with self.assertRaisesRegex(RuntimeError, "must have the same dtype|Input dtypes must be the same"):
+            torch.addbmm(m, torch.ones(1, 2, 2, device="mps"), b)
+        # without the check a mismatched out= silently reinterprets the result bytes
+        with self.assertRaisesRegex(RuntimeError, "Expected out tensor to have dtype"):
+            torch.addbmm(m, torch.ones(1, 2, 2, device="mps"), torch.ones(1, 2, 2, device="mps"), out=b)
+
     # Binary Cross Enropy
     def test_bce_loss_simple(self):
         def helper(shape, reduction):
