@@ -4926,6 +4926,8 @@ class GuardsStatePickler(FunctionPicklerBase):
             and not inspect.isroutine(obj)
             and not isinstance(obj, (torch.nn.Module, torch.Tensor))
             and not type(obj).__module__.startswith("torch.")
+            and not pytree.is_constant_class(type(obj))
+            and not is_opaque_constant_type(type(obj))
             and _pickles_from_dict(type(obj))
         ):
             # A guarded user object (a train pipeline, a wrapper holding a
@@ -4933,6 +4935,8 @@ class GuardsStatePickler(FunctionPicklerBase):
             # unpicklable attribute takes the frame down. Last, so the specific
             # reducers above get first refusal; user types only, since torch's
             # structural types (DTensorSpec) need fields no guard names.
+            # Constant and opaque value types are compared whole by
+            # EQUALS_MATCH, so they are never pruned.
             self._prune_unguarded_attributes(obj)
 
         return NotImplemented
