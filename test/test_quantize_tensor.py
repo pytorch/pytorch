@@ -1,18 +1,66 @@
 # Owner(s): ["module: linear algebra"]
 
+from unittest import SkipTest
+
 import torch
+from torch.nn.functional import SwizzleType
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_quantized import (
     _f32_to_e8m0_rceil,
     compute_error,
+    from_blocked,
     from_blocked_format,
-    to_mxfp,
+    mxfp8_32x32_swizzle_f,
+    to_mxfp as to_mxfp8_reference,
 )
-from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    parametrize,
+    run_tests,
+    subtest,
+    TestCase,
+)
 from torch.testing._internal.mxfp8_test_utils import (
     assert_mxfp8_semantics,
     make_f32_to_e8m0_rceil_cases,
     make_mxfp8_semantic_cases,
+)
+
+
+def _quantize_mxfp8_reference(
+    input: torch.Tensor,
+    quant_orientation: str,
+    is_square_scaling: bool,
+    is_scale_swizzled: bool,
+):
+    if quant_orientation != "dim_k" or is_square_scaling:
+        raise ValueError("unsupported MXFP8 reference configuration")
+    swizzle_type = (
+        SwizzleType.SWIZZLE_32_4_4 if is_scale_swizzled else SwizzleType.NO_SWIZZLE
+    )
+    scales, qdata = to_mxfp8_reference(input, format="mxfp8", swizzle_type=swizzle_type)
+    return qdata, scales
+
+
+def _quantize_mxfp8_tma(
+    input: torch.Tensor,
+    quant_orientation: str,
+    is_square_scaling: bool,
+    is_scale_swizzled: bool,
+):
+    if torch.cuda.get_device_capability(input.device) < (10, 0):
+        raise SkipTest("MXFP8 TMA requires SM100 or newer")
+    from torch._native.ops.quantize_tensor.blockscaled_tma.blockscaled_tma_impl import (
+        _blockscaled_tma_impl,
+    )
+
+    return _blockscaled_tma_impl(
+        input, quant_orientation, is_square_scaling, is_scale_swizzled
+    )
+
+
+_MXFP8_IMPLEMENTATIONS = (
+    subtest(_quantize_mxfp8_reference, name="reference"),
+    subtest(_quantize_mxfp8_tma, name="tma"),
 )
 
 
@@ -23,24 +71,119 @@ class TestMXFP8ReferenceNumerics(TestCase):
         values, expected = make_f32_to_e8m0_rceil_cases(device=device)
         self.assertEqual(_f32_to_e8m0_rceil(values), expected.to(device))
 
+    @parametrize("quantize_fn", _MXFP8_IMPLEMENTATIONS)
     @parametrize("input_dtype", (torch.float32, torch.bfloat16))
-    def test_mxfp8_corner_case_bytes(self, input_dtype, device):
+    def test_mxfp8_corner_case_bytes(self, quantize_fn, input_dtype, device):
         # copied from
         # https://github.com/pytorch/ao/blob/3972ed015091f659418dedf12edb980a8ca56b53/test/prototype/mx_formats/test_mx_tensor.py#L264
         cases = make_mxfp8_semantic_cases(input_dtype, "rceil", device=device)
-        scales, qdata = to_mxfp(cases.inputs, format="mxfp8")
+        qdata, scales = quantize_fn(cases.inputs, "dim_k", False, False)
         assert_mxfp8_semantics(qdata, scales, cases)
 
-    @parametrize("input_dtype", (torch.float32, torch.bfloat16))
-    def test_to_mx_rceil_randn_sqnr(self, input_dtype, device):
-        data_hp = torch.randn(128, 128, device=device, dtype=input_dtype)
-        scales, qdata = to_mxfp(data_hp, format="mxfp8")
+    @parametrize(
+        "swizzle_type",
+        (SwizzleType.NO_SWIZZLE, SwizzleType.SWIZZLE_32_4_4),
+        name_fn=lambda swizzle_type: swizzle_type.name,
+    )
+    @parametrize("input_dtype", (torch.float32, torch.bfloat16, torch.float16))
+    @parametrize(
+        "shape",
+        ((1, 32), (31, 96), (128, 64), (128, 128), (129, 160), (256, 256)),
+        name_fn=lambda shape: f"M{shape[0]}_K{shape[1]}",
+    )
+    def test_to_mx_rceil_randn_sqnr(self, swizzle_type, input_dtype, shape, device):
+        swizzled = swizzle_type == SwizzleType.SWIZZLE_32_4_4
+        data_hp = torch.randn(shape, device=device, dtype=input_dtype)
+        qdata_ref, scales_ref = _quantize_mxfp8_reference(
+            data_hp, "dim_k", False, swizzled
+        )
         original = data_hp.float()
+        ref_scales = from_blocked(qdata_ref, scales_ref, 32) if swizzled else scales_ref
+        dequantized_ref = from_blocked_format(qdata_ref, ref_scales).float()
+        self.assertGreater(compute_error(original, dequantized_ref).item(), 18.0)
+        qdata, scales = _quantize_mxfp8_tma(data_hp, "dim_k", False, swizzled)
+        self.assertEqual(qdata.view(torch.uint8), qdata_ref.view(torch.uint8))
+        if swizzled:
+            scale_bytes = scales.view(torch.uint8).flatten()
+            self.assertEqual(scale_bytes, scales_ref.view(torch.uint8))
+            scales = from_blocked(qdata, scales.flatten(), 32)
+        else:
+            self.assertEqual(scales.view(torch.uint8), scales_ref.view(torch.uint8))
         dequantized = from_blocked_format(qdata, scales).float()
         sqnr = compute_error(original, dequantized)
         self.assertGreater(sqnr.item(), 18.0)
 
-    def test_to_mx_rceil(self, device):
+    @parametrize("input_dtype", (torch.float32, torch.bfloat16, torch.float16))
+    @parametrize(
+        "shape",
+        ((32, 16), (64, 128), (160, 144)),
+        name_fn=lambda shape: f"M{shape[0]}_K{shape[1]}",
+    )
+    def test_to_mx_rceil_dim_m(self, input_dtype, shape, device):
+        data_hp = torch.randn(shape, device=device, dtype=input_dtype)
+        qdata_ref, scales_ref = _quantize_mxfp8_reference(
+            data_hp.t().contiguous(), "dim_k", False, True
+        )
+        qdata, scales = _quantize_mxfp8_tma(data_hp, "dim_m", False, True)
+        self.assertEqual(qdata.view(torch.uint8), qdata_ref.view(torch.uint8))
+        scale_bytes = scales.view(torch.uint8).flatten()
+        self.assertEqual(scale_bytes, scales_ref.view(torch.uint8))
+
+    @parametrize("input_dtype", (torch.float32, torch.bfloat16, torch.float16))
+    @parametrize(
+        "shape",
+        ((32, 32), (64, 128), (160, 160)),
+        name_fn=lambda shape: f"M{shape[0]}_K{shape[1]}",
+    )
+    def test_to_mx_rceil_dim_km(self, input_dtype, shape, device):
+        data_hp = torch.randn(shape, device=device, dtype=input_dtype)
+        qdata_k_ref, scales_k_ref = _quantize_mxfp8_reference(
+            data_hp, "dim_k", False, True
+        )
+        qdata_m_ref, scales_m_ref = _quantize_mxfp8_reference(
+            data_hp.t().contiguous(), "dim_k", False, True
+        )
+        qdata_k, scales_k, qdata_m, scales_m = _quantize_mxfp8_tma(
+            data_hp, "dim_km", False, True
+        )
+        self.assertEqual(qdata_k.view(torch.uint8), qdata_k_ref.view(torch.uint8))
+        self.assertEqual(qdata_m.view(torch.uint8), qdata_m_ref.view(torch.uint8))
+        scale_k_bytes = scales_k.view(torch.uint8).flatten()
+        scale_m_bytes = scales_m.view(torch.uint8).flatten()
+        self.assertEqual(scale_k_bytes, scales_k_ref.view(torch.uint8))
+        self.assertEqual(scale_m_bytes, scales_m_ref.view(torch.uint8))
+
+    @parametrize("input_dtype", (torch.float32, torch.bfloat16, torch.float16))
+    @parametrize(
+        "shape",
+        ((32, 32), (64, 128), (160, 160)),
+        name_fn=lambda shape: f"M{shape[0]}_K{shape[1]}",
+    )
+    def test_to_mx_rceil_dim_k_square(self, input_dtype, shape, device):
+        data_hp = torch.randn(shape, device=device, dtype=input_dtype)
+        qdata_ref, scales_ref = mxfp8_32x32_swizzle_f(data_hp)
+        qdata, scales = _quantize_mxfp8_tma(data_hp, "dim_k", True, True)
+        self.assertEqual(qdata.view(torch.uint8), qdata_ref.view(torch.uint8))
+        self.assertEqual(
+            scales.view(torch.uint8).flatten(), scales_ref.view(torch.uint8)
+        )
+
+    @parametrize("input_dtype", (torch.float32, torch.bfloat16, torch.float16))
+    def test_to_mx_rceil_dim_k_square_nan(self, input_dtype, device):
+        data_hp = torch.ones((32, 32), device=device, dtype=input_dtype)
+        data_hp[0, 0] = float("nan")
+        qdata_ref, scales_ref = mxfp8_32x32_swizzle_f(data_hp)
+        self.assertTrue(torch.isnan(qdata_ref).all())
+        self.assertEqual(scales_ref.view(torch.uint8)[0], 255)
+
+        qdata, scales = _quantize_mxfp8_tma(data_hp, "dim_k", True, True)
+        self.assertEqual(qdata.view(torch.uint8), qdata_ref.view(torch.uint8))
+        self.assertEqual(
+            scales.view(torch.uint8).flatten(), scales_ref.view(torch.uint8)
+        )
+
+    @parametrize("quantize_fn", _MXFP8_IMPLEMENTATIONS)
+    def test_to_mx_rceil(self, quantize_fn, device):
         # copied from
         # https://github.com/pytorch/ao/blob/3972ed015091f659418dedf12edb980a8ca56b53/test/prototype/mx_formats/test_mx_tensor.py#L276
         # TODO(future PR): refactor below to make it look more like
@@ -59,7 +202,8 @@ class TestMXFP8ReferenceNumerics(TestCase):
         ).view(torch.float32)
 
         # fmt: on
-        scales, qdata = to_mxfp(data_hp.to(device), format="mxfp8")
+        data = data_hp.to(device).view(1, -1)
+        qdata, scales = quantize_fn(data, "dim_k", False, False)
         self.assertTrue(torch.isnan(scales))
         # When any element in block is NaN, entire quantized block becomes NaN
         self.assertTrue(torch.all(torch.isnan(qdata)))
@@ -91,9 +235,10 @@ class TestMXFP8ReferenceNumerics(TestCase):
             dtype=torch.uint8,
         ).view(torch.float8_e4m3fn)
         # fmt: on
-        scales, qdata = to_mxfp(data_hp.to(device), format="mxfp8")
-        self.assertEqual(scales, ground_truth_scale.to(device))
-        self.assertEqual(qdata, ground_truth_fp8.to(device))
+        data = data_hp.to(device).view(1, -1)
+        qdata, scales = quantize_fn(data, "dim_k", False, False)
+        self.assertEqual(scales, ground_truth_scale.to(device).view(1, -1))
+        self.assertEqual(qdata, ground_truth_fp8.to(device).view(1, -1))
         # bf16 denorm
         # fmt: off
         data_hp = torch.tensor(
@@ -120,9 +265,10 @@ class TestMXFP8ReferenceNumerics(TestCase):
             dtype=torch.uint8,
         ).view(torch.float8_e4m3fn)
         # fmt: on
-        scales, qdata = to_mxfp(data_hp.to(device), format="mxfp8")
-        self.assertEqual(scales, ground_truth_scale.to(device))
-        self.assertEqual(qdata, ground_truth_fp8.to(device))
+        data = data_hp.to(device).view(1, -1)
+        qdata, scales = quantize_fn(data, "dim_k", False, False)
+        self.assertEqual(scales, ground_truth_scale.to(device).view(1, -1))
+        self.assertEqual(qdata, ground_truth_fp8.to(device).view(1, -1))
         # fp32 some denorm
         # fmt: off
         data_hp = torch.tensor(
@@ -149,9 +295,10 @@ class TestMXFP8ReferenceNumerics(TestCase):
             dtype=torch.uint8,
         ).view(torch.float8_e4m3fn)
         # fmt: on
-        scales, qdata = to_mxfp(data_hp.to(device), format="mxfp8")
-        self.assertEqual(scales, ground_truth_scale.to(device))
-        self.assertEqual(qdata, ground_truth_fp8.to(device))
+        data = data_hp.to(device).view(1, -1)
+        qdata, scales = quantize_fn(data, "dim_k", False, False)
+        self.assertEqual(scales, ground_truth_scale.to(device).view(1, -1))
+        self.assertEqual(qdata, ground_truth_fp8.to(device).view(1, -1))
         # bf16 some denorm
         # fmt: off
         data_hp = torch.tensor(
@@ -178,9 +325,10 @@ class TestMXFP8ReferenceNumerics(TestCase):
             dtype=torch.uint8,
         ).view(torch.float8_e4m3fn)
         # fmt: on
-        scales, qdata = to_mxfp(data_hp.to(device), format="mxfp8")
-        self.assertEqual(scales, ground_truth_scale.to(device))
-        self.assertEqual(qdata, ground_truth_fp8.to(device))
+        data = data_hp.to(device).view(1, -1)
+        qdata, scales = quantize_fn(data, "dim_k", False, False)
+        self.assertEqual(scales, ground_truth_scale.to(device).view(1, -1))
+        self.assertEqual(qdata, ground_truth_fp8.to(device).view(1, -1))
         # zero
         data_hp = torch.tensor([0] * 32, dtype=torch.uint32).view(torch.float32)
         ground_truth_scale = torch.tensor([0], dtype=torch.uint8).view(
@@ -189,9 +337,10 @@ class TestMXFP8ReferenceNumerics(TestCase):
         ground_truth_fp8 = torch.tensor([0] * 32, dtype=torch.uint8).view(
             torch.float8_e4m3fn
         )
-        scales, qdata = to_mxfp(data_hp.to(device), format="mxfp8")
-        self.assertEqual(scales, ground_truth_scale.to(device))
-        self.assertEqual(qdata, ground_truth_fp8.to(device))
+        data = data_hp.to(device).view(1, -1)
+        qdata, scales = quantize_fn(data, "dim_k", False, False)
+        self.assertEqual(scales, ground_truth_scale.to(device).view(1, -1))
+        self.assertEqual(qdata, ground_truth_fp8.to(device).view(1, -1))
         # fp32 normal
         # fmt: off
         data_hp = torch.tensor(
@@ -218,9 +367,10 @@ class TestMXFP8ReferenceNumerics(TestCase):
             dtype=torch.uint8,
         ).view(torch.float8_e4m3fn)
         # fmt: on
-        scales, qdata = to_mxfp(data_hp.to(device), format="mxfp8")
-        self.assertEqual(scales, ground_truth_scale.to(device))
-        self.assertEqual(qdata, ground_truth_fp8.to(device))
+        data = data_hp.to(device).view(1, -1)
+        qdata, scales = quantize_fn(data, "dim_k", False, False)
+        self.assertEqual(scales, ground_truth_scale.to(device).view(1, -1))
+        self.assertEqual(qdata, ground_truth_fp8.to(device).view(1, -1))
         # bf16 normal
         # fmt: off
         data_hp = torch.tensor(
@@ -247,9 +397,10 @@ class TestMXFP8ReferenceNumerics(TestCase):
             dtype=torch.uint8,
         ).view(torch.float8_e4m3fn)
         # fmt: on
-        scales, qdata = to_mxfp(data_hp.to(device), format="mxfp8")
-        self.assertEqual(scales, ground_truth_scale.to(device))
-        self.assertEqual(qdata, ground_truth_fp8.to(device))
+        data = data_hp.to(device).view(1, -1)
+        qdata, scales = quantize_fn(data, "dim_k", False, False)
+        self.assertEqual(scales, ground_truth_scale.to(device).view(1, -1))
+        self.assertEqual(qdata, ground_truth_fp8.to(device).view(1, -1))
 
 
 instantiate_device_type_tests(TestMXFP8ReferenceNumerics, globals(), only_for="cuda")
