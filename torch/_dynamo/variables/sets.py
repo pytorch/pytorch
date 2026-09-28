@@ -588,6 +588,9 @@ class SetVariable(BaseSetVariable):
         items = ", ".join(tracked_repr(tx, item.vt) for item in self.set_items)
         return VariableTracker.build(tx, "{" + items + "}")
 
+    def repr_recursive_sentinel(self) -> str:
+        return f"{self.python_type_name()}(...)"
+
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.foreach([x.vt for x in self.set_items])
         codegen.append_output(create_instruction("BUILD_SET", arg=len(self.set_items)))
@@ -1161,6 +1164,9 @@ class FrozensetVariable(BaseSetVariable):
             return VariableTracker.build(tx, f"{self.python_type_name()}()")
         items = ", ".join(tracked_repr(tx, item.vt) for item in self.set_items)
         return VariableTracker.build(tx, f"{self.python_type_name()}({{{items}}})")
+
+    def repr_recursive_sentinel(self) -> str:
+        return f"{self.python_type_name()}(...)"
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
