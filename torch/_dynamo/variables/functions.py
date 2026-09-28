@@ -3860,6 +3860,22 @@ class TritonConstexprVariable(VariableTracker):
     def as_python_constant(self) -> Any:
         return self.constexpr_value.as_python_constant()
 
+    def call_function(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # TODO(mwizak): This requires support for preserving the constexpr
+        # wrapper on user-defined types.
+        unimplemented(
+            gb_type="tl.constexpr-wrapped user-defined type",
+            context="call to a user-defined type wrapped in tl.constexpr",
+            explanation="Dynamo does not yet support preserving the tl.constexpr "
+            "wrapper when constructing an instance of a wrapped user-defined type.",
+            hints=[],
+        )
+
     def python_type(self) -> type:
         import triton.language as tl
 
