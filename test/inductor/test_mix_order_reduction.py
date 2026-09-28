@@ -31,7 +31,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.common_xpu import PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
-from torch.utils._triton import has_triton_tma_device
+from torch.utils._triton import has_triton_stable_tma_api, has_triton_tma_device
 
 
 class TestBase(TestCase):
@@ -44,6 +44,14 @@ class TestBase(TestCase):
         ref = f(*args)
         act = torch.compile(f)(*args)
         self.assertTrue(same(ref, act, tol=tol))
+
+
+def _supports_tensor_descriptors(device):
+    device_type = torch.device(device).type
+    return has_triton_stable_tma_api() and (
+        device_type == "xpu"
+        or (device_type == "cuda" and torch.cuda.get_device_capability()[0] >= 9)
+    )
 
 
 class SkipPatternTest(TestBase):
@@ -1572,6 +1580,9 @@ class MixOrderReductionNumericTest(TestBase):
     def test_split_column_reduction_masks_padded_rows(
         self, device, use_tensor_descriptor
     ):
+        if use_tensor_descriptor and not _supports_tensor_descriptors(device):
+            self.skipTest("requires tensor descriptor support")
+
         def f(x):
             y = x * 2 + 0.25
             return y.max(dim=-1).values, y.float().sum(dim=0)
@@ -1600,6 +1611,9 @@ class MixOrderReductionNumericTest(TestBase):
     )
     @parametrize("use_tensor_descriptor", (False, True))
     def test_fixed_config_skips_split_autotuning(self, device, use_tensor_descriptor):
+        if use_tensor_descriptor and not _supports_tensor_descriptors(device):
+            self.skipTest("requires tensor descriptor support")
+
         rows = 40961
 
         class FixedMixOrderChoices(InductorChoices):

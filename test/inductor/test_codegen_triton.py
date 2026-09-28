@@ -431,6 +431,11 @@ def helper(x):
                 {"XBLOCK": 2, "RSPLIT_SIZE": 32, "NUM_STAGES": 1},
                 "fixed RSPLIT_SIZE=32 does not match scheduled RSPLIT_SIZE=18",
             ),
+            (
+                18,
+                {"XBLOCK": 3, "NUM_STAGES": 1},
+                "fixed XBLOCK=3 must be a positive power of two",
+            ),
         ),
     )
     def test_mix_order_rejects_incompatible_fixed_config(

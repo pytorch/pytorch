@@ -16,6 +16,7 @@ from torch._inductor.heuristics.registry import (
 )
 from torch._inductor.runtime.hints import (
     AutotuneHint,
+    mix_order_reduction_max_num_stages,
     ReductionHint,
     TRITON_MAX_BLOCK,
     TRITON_MAX_MIX_ORDER_XBLOCK,
@@ -673,16 +674,11 @@ class ReductionHeuristic(CodegenConfigHeuristics):
 
             num_iters = rsplit_size // x_block
 
-            if inductor_meta.get("mix_order_reduction_allow_multi_stages", True):
-                MAX_NUM_STAGES = 2 if rnumel_hint > 8192 else 3
-            else:
-                MAX_NUM_STAGES = 1
-            # Triton's tl.range pipeliner cannot predicate the ttng.tensormap_create
-            # emitted by device-side descriptors.
-            if inductor_meta.get("uses_device_tma"):
-                MAX_NUM_STAGES = 1
+            max_num_stages = mix_order_reduction_max_num_stages(
+                rnumel_hint, inductor_meta
+            )
             c.kwargs["NUM_STAGES"] = min(  # type: ignore[union-attr]
-                max(num_iters // 4, 1), MAX_NUM_STAGES
+                max(num_iters // 4, 1), max_num_stages
             )
 
             if rnumel_hint <= 1024:

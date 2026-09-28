@@ -18,6 +18,7 @@ import torch
 from torch._inductor import config
 from torch._inductor.async_compile import AsyncCompile, shutdown_compile_workers
 from torch._inductor.compile_worker.subproc_pool import SubprocException
+from torch._inductor.runtime.hints import HeuristicType
 from torch._inductor.runtime.triton_compat import Config
 from torch._inductor.runtime.triton_heuristics import (
     generate_lookup_hash_from_source_code,
@@ -472,23 +473,45 @@ def triton_fused_fake_name(in_ptr0, out_ptr0, xnumel, r0_numel, XBLOCK : tl.cons
         self.assertEqual(args[1].num_stages, autotune_config.num_stages)
 
     @parametrize(
-        "cached_rsplit,xblock,accepted",
-        ((18, 2, True), (32, 2, False), (18, 4, False)),
+        "scheduled_rsplit,cached_rsplit,xblock,num_stages,extra_meta,accepted",
+        (
+            (18, 18, 2, 1, {}, True),
+            (18, 32, 2, 1, {}, False),
+            (18, 18, 4, 1, {}, False),
+            (18, 18, 3, 1, {}, False),
+            (64, 64, 32, 1, {}, False),
+            (18, 18, 2, None, {}, False),
+            (18, 18, 2, 4, {}, False),
+            (18, 18, 2, 2, {"mix_order_reduction_allow_multi_stages": False}, False),
+            (18, 18, 2, 2, {"uses_device_tma": True}, False),
+        ),
     )
-    def test_mix_order_autotune_lookup_table(self, cached_rsplit, xblock, accepted):
+    def test_mix_order_autotune_lookup_table(
+        self,
+        scheduled_rsplit,
+        cached_rsplit,
+        xblock,
+        num_stages,
+        extra_meta,
+        accepted,
+    ):
         size_hints = {"x": 4096, "r0_": 768}
         fn = types.SimpleNamespace(src="def triton_fused_mix_order(): pass")
         fn_hash = generate_lookup_hash_from_source_code(str(size_hints), fn.src)
         cached_config = {
             "XBLOCK": xblock,
             "RSPLIT_SIZE": cached_rsplit,
-            "NUM_STAGES": 1,
             "num_warps": 4,
             "num_stages": 1,
         }
+        if num_stages is not None:
+            cached_config["NUM_STAGES"] = num_stages
+        inductor_meta = {"RSPLIT_SIZE": scheduled_rsplit, **extra_meta}
 
         with config.patch(autotune_lookup_table={fn_hash: cached_config}):
-            result = lookup_autotune_config(size_hints, fn, {"RSPLIT_SIZE": 18})
+            result = lookup_autotune_config(
+                size_hints, fn, inductor_meta, HeuristicType.PERSISTENT_REDUCTION
+            )
 
         if accepted:
             self.assertIsNotNone(result)
@@ -498,6 +521,28 @@ def triton_fused_fake_name(in_ptr0, out_ptr0, xnumel, r0_numel, XBLOCK : tl.cons
             )
         else:
             self.assertIsNone(result)
+
+    def test_fixed_config_skips_autotune_lookup_table(self):
+        size_hints = None
+        fn = types.SimpleNamespace(src="def triton_fused_mix_order(): pass")
+        fn_hash = generate_lookup_hash_from_source_code(str(size_hints), fn.src)
+        cached_config = {
+            "XBLOCK": 2,
+            "RSPLIT_SIZE": 18,
+            "NUM_STAGES": 1,
+            "num_warps": 4,
+            "num_stages": 1,
+        }
+
+        with config.patch(autotune_lookup_table={fn_hash: cached_config}):
+            result = lookup_autotune_config(
+                size_hints,
+                fn,
+                {"RSPLIT_SIZE": 18},
+                HeuristicType.FIXED,
+            )
+
+        self.assertIsNone(result)
 
     def test_wait_futures_timeout(self):
         """A compile future that doesn't finish within

@@ -60,6 +60,7 @@ from .hints import (
     DeviceProperties,
     HeuristicType,
     InductorMeta,
+    is_valid_mix_order_reduction_config,
     native_matmul_block_numel,
     ReductionHint,
     TileHint,
@@ -176,8 +177,14 @@ def generate_lookup_hash_from_source_code(size_hints_str: str, source_code: str)
 
 
 def lookup_autotune_config(
-    size_hints, fn, inductor_meta: InductorMeta
+    size_hints,
+    fn,
+    inductor_meta: InductorMeta,
+    heuristic_type: HeuristicType | None = None,
 ) -> Config | None:
+    if heuristic_type == HeuristicType.FIXED:
+        return None
+
     lookup_table = torch._inductor.config.autotune_lookup_table
     cached_config = None
     if len(lookup_table) > 0 and "_fused_" in fn.src:
@@ -187,11 +194,14 @@ def lookup_autotune_config(
             rsplit_size = inductor_meta.get("RSPLIT_SIZE")
             if rsplit_size is not None:
                 cached_rsplit_size = config_dict.get("RSPLIT_SIZE")
-                xblock = config_dict.get("XBLOCK")
+                rnumel_hint = (
+                    size_hints.get("r0_") if isinstance(size_hints, dict) else None
+                )
                 if (
                     cached_rsplit_size != rsplit_size
-                    or not xblock
-                    or rsplit_size % xblock != 0
+                    or not is_valid_mix_order_reduction_config(
+                        config_dict, rsplit_size, rnumel_hint, inductor_meta
+                    )
                 ):
                     return None
             cached_config = config_from_dict(config_dict)
@@ -616,7 +626,9 @@ class CachingAutotuner(KernelInterface):
             [] if reset_to_zero_arg_names is None else reset_to_zero_arg_names
         )
         self.optimize_mem = optimize_mem
-        cached_config = lookup_autotune_config(size_hints, fn, self.inductor_meta)
+        cached_config = lookup_autotune_config(
+            size_hints, fn, self.inductor_meta, heuristic_type
+        )
         self.configs = [cached_config] if cached_config else configs
 
         self.heuristic_type = heuristic_type
