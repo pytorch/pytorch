@@ -11,6 +11,7 @@ from pathlib import Path
 
 import yaml
 from tools.autograd import gen_autograd_functions, load_derivatives
+from tools.autograd.gen_python_functions import should_generate_py_binding
 from tools.pyi.gen_pyi import gen_pyi, generate_type_hints
 
 from torchgen import dest
@@ -31,6 +32,7 @@ from torchgen.gen import (
     get_native_function_declarations,
     get_native_function_schema_registrations,
     LineLoader,
+    parse_native_yaml,
     static_dispatch,
 )
 from torchgen.model import (
@@ -42,6 +44,7 @@ from torchgen.model import (
     NativeFunction,
     OperatorName,
     Type,
+    Variant,
 )
 from torchgen.native_function_generation import add_generated_native_functions
 from torchgen.selective_build.selector import SelectiveBuilder
@@ -123,11 +126,17 @@ class TestGenPyi(unittest.TestCase):
                             if arg.arg == "out"
                         )
                         out_arg = overload.args.kwonlyargs[out_index]
+                        annotation = out_arg.annotation
+                        return_annotation = overload.returns
+                        if annotation is None or return_annotation is None:
+                            raise AssertionError(
+                                "Expected annotated out and return types"
+                            )
                         contracts.add(
                             (
-                                ast.unparse(out_arg.annotation),
+                                ast.unparse(annotation),
                                 overload.args.kw_defaults[out_index] is None,
-                                ast.unparse(overload.returns),
+                                ast.unparse(return_annotation),
                             )
                         )
                     self.assertEqual(
@@ -155,6 +164,41 @@ class TestGenPyi(unittest.TestCase):
                             method=method, use_sequence=use_sequence
                         ).split(":", 1)[0]
                         self.assertEqual(stub_name, parser_name)
+
+    def test_native_parameter_names_match_parser(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        native_functions = parse_native_yaml(
+            str(root / "aten/src/ATen/native/native_functions.yaml"),
+            str(root / "aten/src/ATen/native/tags.yaml"),
+        ).native_functions
+        for native in native_functions:
+            if not should_generate_py_binding(native):
+                continue
+            for method, variant in ((False, Variant.function), (True, Variant.method)):
+                if variant not in native.variants:
+                    continue
+                parser_args = signature(native, method=method).arguments()
+                stub_args = signature(native, method=method, pyi=True).arguments()
+                self.assertEqual(len(parser_args), len(stub_args))
+                for parser_arg, stub_arg in zip(parser_args, stub_args):
+                    with self.subTest(
+                        function=str(native.func.name), method=method, arg=stub_arg.name
+                    ):
+                        parser_name = (
+                            parser_arg.argument_str(method=method)
+                            .split("=", 1)[0]
+                            .rsplit(" ", 1)[1]
+                        )
+                        # Python source must escape the reserved keyword "from".
+                        if parser_name == "from":
+                            parser_name = "from_"
+                        for use_sequence in (False, True):
+                            self.assertEqual(
+                                stub_arg.argument_str_pyi(
+                                    method=method, use_sequence=use_sequence
+                                ).split(":", 1)[0],
+                                parser_name,
+                            )
 
     def test_native_module_symbolic_dimensions(self) -> None:
         for schema, expected, legacy in (
