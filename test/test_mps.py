@@ -5750,6 +5750,22 @@ class TestMPS(TestCaseMPS):
         op = torch.ops.aten._native_batch_norm_legit_no_training.default
         self.assertEqual(op(*mps_args, 0.1, 1e-5)[0], op(*cpu_args, 0.1, 1e-5)[0])
 
+    def test_batch_norm_backward_mixed_dtype_stats(self):
+        x = torch.randn(2, 3, 4, dtype=torch.half, requires_grad=True)
+        # Same shapes, different running-stat dtypes: must not share a cached backward graph
+        for dtype in (torch.float32, torch.float16):
+            mps_x = x.detach().to("mps").requires_grad_()
+            F.batch_norm(mps_x, torch.zeros(3, device="mps", dtype=dtype), torch.ones(3, device="mps", dtype=dtype)).sum().backward()
+            self.assertEqual(mps_x.grad, torch.ones_like(mps_x) / (1 + 1e-5) ** 0.5)
+        # float32 save_mean/save_invstd against a half input in training mode
+        args = (x.detach(), x.detach(), torch.ones(3), None, None, torch.zeros(3), torch.ones(3), True, 1e-5, [True] * 3)
+        mps_args = tuple(a.to("mps") if isinstance(a, torch.Tensor) else a for a in args)
+        ref_args = tuple(a.float() if isinstance(a, torch.Tensor) else a for a in args)
+        res = torch.ops.aten.native_batch_norm_backward(*mps_args)
+        ref = torch.ops.aten.native_batch_norm_backward(*ref_args)
+        for r, e in zip(res, ref):
+            self.assertEqual(r.float(), e, atol=2e-3, rtol=2e-3)
+
     def test_addbmm_mixed_dtype_errors(self):
         # addbmm has no promotion on any backend, so it must raise rather than abort
         m = torch.ones(2, 2, device="mps")
@@ -5758,6 +5774,9 @@ class TestMPS(TestCaseMPS):
             torch.addbmm(m, b, b)
         with self.assertRaisesRegex(RuntimeError, "must have the same dtype|Input dtypes must be the same"):
             torch.addbmm(m, torch.ones(1, 2, 2, device="mps"), b)
+        # without the check a mismatched out= silently reinterprets the result bytes
+        with self.assertRaisesRegex(RuntimeError, "Expected out tensor to have dtype"):
+            torch.addbmm(m, torch.ones(1, 2, 2, device="mps"), torch.ones(1, 2, 2, device="mps"), out=b)
 
     # Binary Cross Enropy
     def test_bce_loss_simple(self):

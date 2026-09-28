@@ -666,7 +666,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
 
     auto input_mps_dtype = getMPSDataType(input);
     auto weight_mps_dtype = has_weight ? getMPSDataType(weight_opt.value()) : input_mps_dtype;
-    std::string key = fmt::format("batch_norm_backward_mps:{}:{}:{}:{}:{}:{}:{}:{}:{}",
+    std::string key = fmt::format("batch_norm_backward_mps:{}:{}:{}:{}:{}:{}:{}:{}",
                                   get_mem_string(memory_format),
                                   epsilon,
                                   train,
@@ -674,8 +674,13 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
                                   has_weight,
                                   [ns_shape_key UTF8String],
                                   c10::Join(",", grad_input_mask),
-                                  getMPSTypeString(input),
-                                  has_weight ? getMPSTypeString(weight_opt.value()) : "none");
+                                  getTensorsStringKey({grad_out,
+                                                       input,
+                                                       weight_opt.value_or(Tensor()),
+                                                       running_mean_opt.value_or(Tensor()),
+                                                       running_var_opt.value_or(Tensor()),
+                                                       save_mean_opt.value_or(Tensor()),
+                                                       save_var_opt.value_or(Tensor())}));
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       // NCHW - Channels dim is 1
       int channelsDim = 1;
@@ -702,11 +707,13 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
       // Mean and inv std tensors to be saved and returned
       MPSGraphTensor* saveMeanTensor = nil;
       MPSGraphTensor* saveVarTensor = nil;
+      MPSGraphTensor* saveMeanTensorCasted = nil;
+      MPSGraphTensor* saveVarTensorCasted = nil;
       if (has_save_mean) {
         saveMeanTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(save_mean_opt.value()), new_mean_shape);
         saveVarTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(save_var_opt.value()), new_mean_shape);
-        saveMeanTensor = castMPSTensor(mpsGraph, saveMeanTensor, input_mps_dtype);
-        saveVarTensor = castMPSTensor(mpsGraph, saveVarTensor, input_mps_dtype);
+        saveMeanTensorCasted = castMPSTensor(mpsGraph, saveMeanTensor, input_mps_dtype);
+        saveVarTensorCasted = castMPSTensor(mpsGraph, saveVarTensor, input_mps_dtype);
       }
 
       MPSGraphTensor* gradInputTensor = nil;
@@ -746,7 +753,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
       if (train) {
         // Use save_mean and save_var
         MPSGraphTensor* epsilonTensor = [mpsGraph constantWithScalar:(float)epsilon dataType:input_mps_dtype];
-        MPSGraphTensor* revertSaveVarTensor = saveVarTensor;
+        MPSGraphTensor* revertSaveVarTensor = saveVarTensorCasted;
         revertSaveVarTensor = [mpsGraph reciprocalWithTensor:revertSaveVarTensor name:nil];
         revertSaveVarTensor = [mpsGraph multiplicationWithPrimaryTensor:revertSaveVarTensor
                                                         secondaryTensor:revertSaveVarTensor
@@ -757,7 +764,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
         if (grad_input_mask[1]) {
           gradWeightTensor = [mpsGraph normalizationGammaGradientWithIncomingGradientTensor:gradOutputTensor
                                                                                sourceTensor:inputTensor
-                                                                                 meanTensor:saveMeanTensor
+                                                                                 meanTensor:saveMeanTensorCasted
                                                                              varianceTensor:revertSaveVarTensor
                                                                               reductionAxes:axes
                                                                                     epsilon:(float)epsilon
@@ -772,7 +779,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
         if (grad_input_mask[0]) {
           gradInputTensor = [mpsGraph normalizationGradientWithIncomingGradientTensor:gradOutputTensor
                                                                          sourceTensor:inputTensor
-                                                                           meanTensor:saveMeanTensor
+                                                                           meanTensor:saveMeanTensorCasted
                                                                        varianceTensor:revertSaveVarTensor
                                                                           gammaTensor:weightTensorCasted
                                                                   gammaGradientTensor:gradWeightTensor
