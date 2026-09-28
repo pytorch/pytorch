@@ -15,7 +15,6 @@
 #include <ATen/ops/acos_native.h>
 #include <ATen/ops/asin_native.h>
 #include <ATen/ops/atan_native.h>
-#include <ATen/ops/conj_physical_native.h>
 #include <ATen/ops/cos_native.h>
 #include <ATen/ops/cosh_native.h>
 #include <ATen/ops/cumprod_native.h>
@@ -123,12 +122,6 @@ static void unary_op(const Tensor& self,
   unary_op_noresize(self, output_, op_name, unaryBlock);
 }
 
-MPSGraphTensor* log1p(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
-  MPSGraphTensor* oneTensor = [mpsGraph constantWithScalar:1.0 dataType:inputTensor.dataType];
-  MPSGraphTensor* addedTensor = [mpsGraph additionWithPrimaryTensor:inputTensor secondaryTensor:oneTensor name:nil];
-  return [mpsGraph logarithmWithTensor:addedTensor name:nil];
-}
-
 static MPSGraphTensor* lengthOfComplexAsReal(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
   auto squares = [mpsGraph squareWithTensor:inputTensor name:nil];
   auto sumSquares = [mpsGraph reductionSumWithTensor:squares axis:-1 name:nil];
@@ -177,9 +170,6 @@ TORCH_IMPL_FUNC(sign_out_mps)(const Tensor& self, const Tensor& output) {
 REGISTER_MPS_UNARY_STUB(acosh, acosh);
 REGISTER_MPS_UNARY_STUB(asinh, asinh);
 REGISTER_MPS_UNARY_STUB(atanh, atanh);
-REGISTER_MPS_UNARY_STUB(ceil, ceil);
-REGISTER_MPS_UNARY_STUB(floor, floor);
-REGISTER_MPS_UNARY_STUB(trunc, truncate);
 
 TORCH_IMPL_FUNC(frac_out_mps)(const Tensor& self, const Tensor& output) {
   TORCH_CHECK(isFloatingType(self.scalar_type()), "frac_out_mps is only implemented for floating types");
@@ -341,15 +331,6 @@ TORCH_IMPL_FUNC(sgn_out_mps)(const Tensor& self, const Tensor& output) {
   };
 
   mps::unary_op(realInput, realOutput, "sgn_out_mps", complex_sgn_op);
-}
-
-Tensor& conj_physical_out_mps(const Tensor& self, Tensor& result) {
-  TORCH_CHECK(self.is_complex());
-  TORCH_CHECK(self.dtype() != at::kComplexDouble);
-  mps::unary_op(self, result, "conj", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
-    return [mpsGraph conjugateWithTensor:inputTensor name:nil];
-  });
-  return result;
 }
 
 } // namespace at::native

@@ -19,11 +19,16 @@ from torch._prims.context import TorchRefsMode
 from torch._prims_common.wrappers import _maybe_remove_out_wrapper
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch._subclasses.fake_utils import outputs_alias_inputs
+from torch.fx.experimental.symbolic_shapes import (
+    constrain_range,
+    ShapeEnv as SymbolicShapeEnv,
+)
 from torch.testing import make_tensor
 from torch.testing._internal import composite_compliance, opinfo
 from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
+    dtypes,
     instantiate_device_type_tests,
     onlyAccelerator,
     onlyCPU,
@@ -61,6 +66,7 @@ from torch.testing._internal.common_utils import (
     IS_CI,
     IS_FBCODE,
     is_iterable_of_tensors,
+    IS_S390X,
     IS_SANDCASTLE,
     MACOS_VERSION,
     noncontiguous_like,
@@ -143,7 +149,6 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("diag"),
     xfail("geqrf"),
     xfail("heaviside"),
-    xfail("histc"),
     xfail("isin"),
     xfail("kthvalue"),
     xfail("lerp"),
@@ -468,6 +473,23 @@ class TestCommon(TestCase):
                     op, op.ref, sample_input, exact_dtype=(dtype is not torch.long)
                 )
 
+    @dtypes(torch.float32)
+    @parametrize("sign", [-1, 1])
+    def test_expm1_small(self, device, dtype, sign):
+        x = torch.logspace(-8, -1, 100, dtype=dtype)
+        cutoffs = torch.tensor([1e-5, 0.1], dtype=dtype)
+        values = (
+            x,
+            torch.tensor([0.0, 0.0074433], dtype=dtype),
+            torch.nextafter(cutoffs, torch.zeros_like(cutoffs)),
+            cutoffs,
+            torch.nextafter(cutoffs, torch.ones_like(cutoffs)),
+        )
+        x = torch.cat(values) * sign
+        expected = torch.expm1(x.double())
+        actual = torch.expm1(x.to(device)).cpu().double()
+        self.assertEqual(actual, expected, atol=0, rtol=1e-6)
+
     # Tests that the cpu and gpu results are consistent
     @onlyAccelerator
     @skipIfMPS
@@ -707,7 +729,6 @@ class TestCommon(TestCase):
     # Tests that experimental Python References perform the same computation
     # as the operators they reference, when operator calls in the torch
     # namespace are remapped to the refs namespace (torch.foo becomes refs.foo).
-    @skipXPU
     @onlyNativeDeviceTypesAnd(["hpu"])
     @ops(python_ref_db)
     @skipIfTorchInductor("Takes too long for inductor")
@@ -720,7 +741,6 @@ class TestCommon(TestCase):
     # Tests that experimental Python References perform the same computation
     # as the operators they reference, when operator calls in the torch
     # namespace are preserved (torch.foo remains torch.foo).
-    @skipXPU
     @onlyNativeDeviceTypesAnd(["hpu"])
     @ops(python_ref_db)
     @skipIfTorchInductor("Takes too long for inductor")
@@ -813,6 +833,11 @@ class TestCommon(TestCase):
     @with_tf32_off
     @onlyNativeDeviceTypesAnd(["hpu"])
     @suppress_warnings
+    @skipOps(
+        {skip("grid_sampler_2d", device_type="cpu", dtypes=(torch.float32,))}
+        if IS_S390X
+        else set()
+    )
     @ops(op_db, allowed_dtypes=(torch.float32, torch.long, torch.complex64))
     def test_noncontiguous_samples(self, device, dtype, op):
         test_grad = dtype in op.supported_backward_dtypes(torch.device(device).type)
@@ -1945,6 +1970,7 @@ class TestCompositeCompliance(TestCase):
             skip("topk", variant_name="cutedsl_optimized"),
             skip("topk", variant_name="cutedsl_optimized_deterministic"),
             skip("nn.functional.linear_cross_entropy", variant_name="chunked_none"),
+            skip("nn.functional.linear_cross_entropy", variant_name="cutedsl_none"),
         }
     )
     @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
@@ -2240,6 +2266,62 @@ class TestCompositeCompliance(TestCase):
 @unMarkDynamoStrictTest
 class TestMathBits(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
+
+    def _symbolic_meta(self, dtype):
+        shape_env = SymbolicShapeEnv()
+        size = shape_env.create_unbacked_symint()
+        constrain_range(size, min=1, max=10)
+        result = torch.empty_strided((size, 7), (7, 1), dtype=dtype, device="meta")
+        self.assertIsInstance(result.shape[0], torch.SymInt)
+        return result
+
+    @onlyCPU
+    def test_prims_as_strided_conjugate(self, device):
+        x = torch.randn(4, dtype=torch.cfloat, device=device).conj()
+        result = torch.ops.prims.as_strided(x, (2, 2), (2, 1), 0)
+
+        self.assertTrue(result.is_conj())
+        self.assertEqual(result, x.view(2, 2))
+
+        base = self._symbolic_meta(torch.cfloat)
+        torch._C._set_conj(base, True)
+        view = torch.ops.prims.as_strided(
+            base,
+            (base.shape[1], base.shape[0]),
+            (1, base.stride(0)),
+            0,
+        )
+        with torch.autograd.forward_ad.dual_level():
+            dual = torch.autograd.forward_ad.make_dual(view.clone(), view.clone())
+            view.copy_(dual)
+            tangent = torch.autograd.forward_ad.unpack_dual(view).tangent
+
+        self.assertTrue(tangent.is_conj())
+        self.assertEqual(tangent.shape, view.shape)
+
+    @onlyCPU
+    def test_prims_as_strided_negative(self, device):
+        x = torch._neg_view(torch.arange(4, dtype=torch.float, device=device))
+        result = torch.ops.prims.as_strided(x, (2, 2), (2, 1), 0)
+
+        self.assertTrue(result.is_neg())
+        self.assertEqual(result, x.view(2, 2))
+
+        base = self._symbolic_meta(torch.float)
+        torch._C._set_neg(base, True)
+        view = torch.ops.prims.as_strided(
+            base,
+            (base.shape[1], base.shape[0]),
+            (1, base.stride(0)),
+            0,
+        )
+        with torch.autograd.forward_ad.dual_level():
+            dual = torch.autograd.forward_ad.make_dual(base.clone(), base.clone())
+            base.copy_(dual)
+            tangent = torch.autograd.forward_ad.unpack_dual(view).tangent
+
+        self.assertTrue(tangent.is_neg())
+        self.assertEqual(tangent.shape, view.shape)
 
     # Tests that
     # 1. The operator's output for physically conjugated/negated tensors and conjugate/negative view tensors
