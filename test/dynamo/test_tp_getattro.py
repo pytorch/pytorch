@@ -557,6 +557,7 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
             calls.clear()
             self.assertEqual(opt_fn(x), expected)
             self.assertEqual(calls, expected_calls)
+
     def test_class_attribute_shadow_recompilation_message(self):
         class Base:
             scale = 2
