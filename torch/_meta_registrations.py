@@ -9371,6 +9371,7 @@ cpp_meta_supports_symint_ops = {
     aten.arange.default,
     aten.arange.start,
     aten.arange.start_step,
+    aten.add.Tensor,
 }
 
 
@@ -9399,7 +9400,7 @@ def activate_meta():
             )
 
         # Use the symint-aware C++ meta kernels; a Python Meta kernel would
-        # shadow them under the Python dispatcher.
+        # shadow them under the Python dispatcher and in C++ FakeTensor.
         if op_overload in cpp_meta_supports_symint_ops:
             continue
 
