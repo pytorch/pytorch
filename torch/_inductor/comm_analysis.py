@@ -2,6 +2,7 @@ import functools
 import logging
 import math
 import operator
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import IntEnum
 from typing import Any
@@ -10,6 +11,7 @@ import sympy
 
 import torch
 import torch.utils._pytree as pytree
+from torch._logging import warning_once
 from torch.fx.experimental.symbolic_shapes import optimization_hint
 from torch.fx.operator_schemas import normalize_function
 
@@ -21,15 +23,32 @@ from .virtualized import V
 log = logging.getLogger(__name__)
 
 
+@functools.lru_cache
 def _get_device_type_str() -> str:
-    """Return the current accelerator device type string (e.g. "cuda", "npu")."""
-    acc = torch.accelerator.current_accelerator(check_available=False)
+    """Return the device type of the current accelerator (e.g. "cuda", "npu").
+
+    ``check_available=True`` ensures a backend that is merely imported (e.g.
+    an out-of-tree backend registered on a CUDA machine without its hardware)
+    does not shadow the actually-available accelerator. When no accelerator
+    is available, fall back to "cuda" to preserve the pre-existing CUDA
+    fallback semantics.
+    """
+    try:
+        acc = torch.accelerator.current_accelerator(check_available=True)
+    except RuntimeError:
+        # Accelerator without a usable torch.<type> device module.
+        return "cuda"
     return acc.type if acc is not None else "cuda"
 
 
 def _get_device_module() -> Any:
-    """Return the device module of the current accelerator (e.g. ``torch.cuda``)."""
-    return getattr(torch, _get_device_type_str(), torch.cuda)
+    """Return the device module of the current device type (e.g. ``torch.cuda``)."""
+    try:
+        return torch.get_device_module(_get_device_type_str())
+    except RuntimeError:
+        # Device type without a registered torch.<type> module; keep the
+        # pre-existing CUDA fallback semantics.
+        return torch.cuda
 
 
 class NCCL_COLL(IntEnum):
@@ -107,7 +126,11 @@ _GPU_TO_INTER: dict[NVIDIA_GPU_TYPE, InterconnectType] = {
 
 @functools.lru_cache
 def _has_nvlink() -> bool:
-    """Detect NVLink via nvidia-smi topology, falling back to peer access check."""
+    """Detect NVLink via nvidia-smi topology, falling back to peer access check.
+
+    For non-CUDA backends there is no nvidia-smi topology to inspect, so peer
+    device access is used as the NVLink-equivalent fast-interconnect probe.
+    """
     import subprocess
 
     device_module = _get_device_module()
@@ -487,7 +510,12 @@ def estimate_nccl_collective_runtime_nccl_estimator(snode) -> float | None:  # t
     # TODO(ivankobzarev): Figure out how we can use time estimations,
     # without cuda allocations.
     device = torch.device(f"{_get_device_type_str()}:{rank}")
-    backend = pg._get_backend(device)
+    try:
+        backend = pg._get_backend(device)
+    except RuntimeError:
+        # No backend registered for this device (e.g. a CPU-only process
+        # group queried with an accelerator device).
+        return None
     if not getattr(backend, "_supports_time_estimate", False):
         return None
 
@@ -697,24 +725,46 @@ def estimate_nccl_collective_runtime_impl(
     coll: NCCL_COLL,
     device_type: str | None = None,
 ) -> float:
-    """Returns estimated NCCL collective runtime in milliseconds (ms).
+    """Returns estimated collective runtime in milliseconds (ms).
 
-    Uses a multi-algorithm, multi-protocol model aligned with NCCL's
-    ncclTopoTuneModel and ncclTopoGetAlgoTime (tuning.cc). Evaluates
-    Ring and Tree algorithms across LL, LL128, and SIMPLE protocols,
-    selecting the (algo, proto) pair that minimizes estimated time.
+    A backend-specific estimator registered for ``device_type`` (see
+    ``register_collective_cost_estimator``) takes precedence for that device
+    type. Otherwise this uses the built-in analytical model aligned with
+    NCCL's ncclTopoTuneModel and ncclTopoGetAlgoTime (tuning.cc), evaluating
+    Ring and Tree algorithms across LL, LL128, and SIMPLE protocols and
+    selecting the (algo, proto) pair that minimizes estimated time. The
+    built-in model is calibrated against NCCL on NVIDIA topologies; on other
+    backends it is only a rough approximation unless a backend-specific
+    estimator is registered.
+
+    Args:
+        tensor_storage_size_bytes: total bytes of the collective input.
+        group_size: number of ranks in the collective.
+        coll: collective type.
+        device_type: device type the collective runs on (e.g. "cuda", "npu").
+            Defaults to the current Inductor device type.
     """
+    if group_size <= 1:
+        return 0
+
+    if coll == NCCL_COLL.UNSUPPORTED:
+        return 0
+
     if device_type is None:
         device_type = _get_device_type_str()
     estimator = _collective_cost_estimators.get(device_type)
     if estimator is not None:
         return estimator(tensor_storage_size_bytes, group_size, coll)
 
-    if group_size <= 1:
-        return 0
-
-    if coll == NCCL_COLL.UNSUPPORTED:
-        return 0
+    if device_type != "cuda":
+        warning_once(
+            log,
+            "No collective cost estimator registered for device type %r; "
+            "falling back to the NCCL-calibrated analytical model, which may "
+            "be inaccurate on this backend. Register a backend-specific "
+            "estimator via register_collective_cost_estimator().",
+            device_type,
+        )
 
     time_us, _, _ = _nccl_best_algo_time(tensor_storage_size_bytes, group_size, coll)
     if time_us < 0 or time_us == float("inf"):
@@ -763,23 +813,33 @@ def compute_min_saturation_bytes(
 ################################################################################################################
 
 
-# Registry of third-party collective cost estimators, keyed by device type.
-# An estimator receives (tensor_storage_size_bytes, group_size, coll) and
-# returns the estimated runtime in milliseconds, replacing the built-in NCCL
+# A backend-specific collective runtime estimator: called as
+# estimator(tensor_storage_size_bytes, group_size, coll), returns the
+# estimated runtime in milliseconds.
+CollectiveCostEstimator = Callable[[int, int, NCCL_COLL], float]
+
+# Registry of backend-specific collective cost estimators, keyed by device
+# type. A registered estimator takes precedence over the built-in NCCL
 # analytical model for that device type.
-_collective_cost_estimators: dict[str, Any] = {}
+_collective_cost_estimators: dict[str, CollectiveCostEstimator] = {}
 
 
-def register_collective_cost_estimator(device_type: str, estimator: Any) -> None:
+def register_collective_cost_estimator(
+    device_type: str, estimator: CollectiveCostEstimator | None
+) -> None:
     """Register a collective runtime estimator for ``device_type``.
 
     The estimator is called as ``estimator(tensor_storage_size_bytes,
     group_size, coll)`` and must return the estimated runtime in
-    milliseconds. It replaces the built-in NCCL analytical model for the
-    given device type, which is useful for backends whose collective library
-    (e.g. HCCL) has tuning characteristics that differ from NCCL.
+    milliseconds. It takes precedence over the built-in NCCL analytical
+    model for the given device type, which is useful for backends whose
+    collective library (e.g. HCCL) has tuning characteristics that differ
+    from NCCL. Pass ``None`` to unregister the estimator for ``device_type``.
     """
-    _collective_cost_estimators[device_type] = estimator
+    if estimator is None:
+        _collective_cost_estimators.pop(device_type, None)
+    else:
+        _collective_cost_estimators[device_type] = estimator
 
 
 def estimate_nccl_collective_runtime(node: ir.IRNode) -> float:
@@ -916,7 +976,8 @@ def estimate_nccl_collective_runtime_from_fx_node(
             backend = pg._get_backend(device)
         except RuntimeError:
             return None
-        if not backend._supports_time_estimate:
+        # getattr: out-of-tree backends may not expose the property.
+        if not getattr(backend, "_supports_time_estimate", False):
             return None
 
         flat_args, flat_args_pytree_spec = pytree.tree_flatten((args, kwargs))
