@@ -129,13 +129,8 @@ class MicroPipelineTPTest(TestCase):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "Test requires FP8 support")
     @fresh_cache()
-    @parametrize(
-        "with_reshape,expected_folds,expect_fusion",
-        ((False, 0, True), (True, 1, False)),
-    )
-    def test_scaled_mm_output_scale_preserves_all_gather_fusion(
-        self, with_reshape, expected_folds, expect_fusion
-    ):
+    @parametrize("with_reshape", (False, True))
+    def test_scaled_mm_output_scale_preserves_all_gather_fusion(self, with_reshape):
         group = dist.group.WORLD
 
         def func(A_shard, B, A_scale, B_scale, output_scale):
@@ -152,14 +147,14 @@ class MicroPipelineTPTest(TestCase):
         A_shard_shape = (2, 16, packed_k) if with_reshape else (32, packed_k)
         inputs = self._make_nvfp4_inputs(A_shard_shape, packed_k)
         gm = _make_post_grad_fx(func, *inputs)
-        self._apply_scaled_mm_output_scale_fold(gm, expected_folds=expected_folds)
+        self._apply_scaled_mm_output_scale_fold(gm, expected_folds=int(with_reshape))
         with (
             _test_mode(),
             mock.patch.object(dist, "is_nccl_available", return_value=True),
         ):
             micro_pipeline_tp_pass(gm.graph)
 
-        if not expect_fusion:
+        if with_reshape:
             # The existing collective pattern does not cross the explicit
             # multiply and reshape.
             self.assertNotIn("fused_all_gather_scaled_matmul", str(gm.graph))
