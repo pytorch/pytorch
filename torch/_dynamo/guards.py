@@ -3246,9 +3246,10 @@ class GuardBuilder(GuardBuilderBase):
         last_match: list[tuple[types.CodeType, dict[str, object]]] = []
 
         def guard_fn(value: object) -> bool:
+            if type(value) is not types.FunctionType:
+                return False
             if (
                 last_match
-                and type(value) is types.FunctionType
                 and value.__code__ is last_match[0][0]
                 and value.__globals__ is last_match[0][1]
                 and value.__builtins__ is builtins.__dict__
@@ -5548,6 +5549,7 @@ class CheckFunctionManager:
         # before the guard sanity check so GlobalStateGuard.check() sees
         # the true runtime state.
         with torch._C.DisableTorchFunction():
+            builder: GuardBuilder | None = None
             if guard_filter_fn:
                 # If we're filtering guards, we need to build it an extra time first
                 # because filtering depends on the builder/guard_manager results
@@ -5576,7 +5578,7 @@ class CheckFunctionManager:
                 guard.create_fn_name() in _PORTABLE_FUNCTION_GUARD_TYPES
                 for guard in sorted_guards
             ):
-                if not guard_filter_fn:
+                if builder is None:
                     # The rewrite only reads guarded values from the scope,
                     # so a builder with no guards built is enough.
                     builder, _ = self.build_guards(
