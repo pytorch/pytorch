@@ -53,6 +53,7 @@ from ..bytecode_transformation import create_call_function
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
 from ..device_interface import get_registered_device_interfaces
 from ..exc import (
+    CompileOnOneRankUnsupported,
     handle_observed_exception,
     ObservedAttributeError,
     ObservedKeyError,
@@ -867,15 +868,14 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
 
         # User-defined descriptor with Python __get__.
-        # For torch-internal classes or attributes in the class's own __dict__,
-        # defer descriptor invocation to runtime via VariableTracker.build to
-        # avoid compile-time side effects (e.g. deprecation warnings from
-        # _ClassPropertyDescriptor on torch.FloatStorage.dtype).
+        # For torch-internal classes, defer descriptor invocation to runtime via
+        # VariableTracker.build to avoid compile-time side effects (e.g.
+        # deprecation warnings from _ClassPropertyDescriptor on
+        # torch.FloatStorage.dtype).
         get_fn = inspect.getattr_static(type(cls_attr), "__get__", None)
         if isinstance(get_fn, types.FunctionType):
             if source and (
-                name in getattr(self.value, "__dict__", {})
-                or self.value.__module__.startswith("torch.")
+                self.value.__module__.startswith("torch.")
                 or self.value.__module__ == "torch"
             ):
                 return VariableTracker.build(tx, cls_attr, source)
@@ -930,7 +930,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         descriptor_source = None
         descriptor_get_source = None
         if self.source:
-            descriptor_source = AttrSource(self.source, name)
+            descriptor_source = self.get_source_by_walking_mro(tx, name)
             descriptor_get_source = AttrSource(TypeSource(descriptor_source), "__get__")
             descriptor_var = VariableTracker.build(tx, descriptor, descriptor_source)
         else:
@@ -1291,9 +1291,15 @@ class UserDefinedClassVariable(UserDefinedVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        from torch.fx.experimental.proxy_tensor import (
+            _coor_current_accelerator,
+            _coor_enabled,
+        )
+
         from ..side_effects import SideEffects
         from .builder import SourcelessBuilder, wrap_fx_proxy
         from .ctx_manager import (
+            CurrentDeviceContextVariable,
             GenericContextWrappingVariable,
             get_device_context_manager,
         )
@@ -1494,12 +1500,49 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and len(args) == 1
             and (variable_cls := get_device_context_manager(self.value)) is not None
         ):
+            name = f"{self.value.__module__}.{self.value.__qualname__}"
+            if variable_cls._accepts_device_object and isinstance(
+                args[0], CurrentDeviceVariable
+            ):
+                # Validation only: raises when the device type does not match the
+                # context manager, as eager does. The index it returns is the
+                # compiling rank's, so it must not be captured.
+                variable_cls._get_device_index_fn(args[0].value, optional=True)
+                return CurrentDeviceContextVariable(args[0].value.type, self.value)
             if not args[0].is_python_constant():
-                raise_type_error(
-                    tx,
-                    f"{self.value.__module__}.{self.value.__qualname__} requires a constant argument",
-                )
-            return variable_cls.create(tx, args[0].as_python_constant())
+                raise_type_error(tx, f"{name} requires a constant argument")
+            arg = args[0].as_python_constant()
+            if _coor_enabled():
+                # The artifact runs on every rank, so an explicit index -- even the
+                # compiling rank's own -- names a GPU that is wrong on other ranks.
+                # Only an index-less device, which means the current one, may be
+                # entered.
+                dev = torch.device(arg) if isinstance(arg, str) else arg
+                index = dev.index if isinstance(dev, torch.device) else dev
+                if index is not None:
+                    raise CompileOnOneRankUnsupported(
+                        f"Cannot enter {name}({arg}) under compile_on_one_rank: an "
+                        "explicit device index names a specific GPU, but the compiled "
+                        "artifact runs on every rank.\n"
+                        "Next steps: pass a tensor's `.device` or an index-less device "
+                        "to follow the current device, or turn off "
+                        "compile_on_one_rank for this region."
+                    )
+                cur = _coor_current_accelerator()
+                if (
+                    cur is not None
+                    and variable_cls._accepts_device_object
+                    and getattr(torch.get_device_module(cur.type), "device", None)
+                    is self.value
+                ):
+                    # Validation only, as in the CurrentDeviceVariable case above.
+                    variable_cls._get_device_index_fn(arg, optional=True)
+                    # Keep it rank-relative rather than resolving cur.index into the
+                    # graph. Dynamo's own reconstruct at a graph break re-enters
+                    # through here, so this is what stops a resumed frame from
+                    # pinning the compiling rank.
+                    return CurrentDeviceContextVariable(cur.type, self.value)
+            return variable_cls.create(tx, arg)
         elif (
             issubclass(type(self.value), type)
             and hasattr(
@@ -1685,13 +1728,49 @@ class UserDefinedClassVariable(UserDefinedVariable):
             if issubclass(self.value, torch.Stream):
                 from .lists import TupleVariable
 
+                if _coor_enabled():
+                    # As with device contexts, an explicit index names a GPU that
+                    # is wrong on every other rank.
+                    device_arg = args[0] if args else kwargs.get("device")
+                    index = None
+                    if device_arg is not None and device_arg.is_python_constant():
+                        dev = device_arg.as_python_constant()
+                        dev = torch.device(dev) if isinstance(dev, str) else dev
+                        index = dev.index if isinstance(dev, torch.device) else dev
+                    if index is not None or "device_index" in kwargs:
+                        name = f"{self.value.__module__}.{self.value.__qualname__}"
+                        raise CompileOnOneRankUnsupported(
+                            f"Cannot construct {name} with an explicit device index "
+                            "under compile_on_one_rank: the index names a specific "
+                            "GPU, but the compiled artifact runs on every rank.\n"
+                            "Next steps: pass a tensor's `.device` or an index-less "
+                            "device to follow the current device, or turn off "
+                            "compile_on_one_rank for this region."
+                        )
+
                 var_kwargs = ConstDictVariable(
                     {VariableTracker.build(tx, k): v for k, v in kwargs.items()}
                 )
                 var_args = TupleVariable(list(args))
+                # Use the tracing rank for the example stream, but retain the
+                # CurrentDeviceVariable for rank-relative reconstruction.
+                example_args: list[Any] = [
+                    arg.value
+                    if isinstance(arg, CurrentDeviceVariable)
+                    else arg.as_python_constant()
+                    for arg in args
+                ]
+                example_kwargs: dict[str, Any] = {
+                    key: (
+                        value.value
+                        if isinstance(value, CurrentDeviceVariable)
+                        else value.as_python_constant()
+                    )
+                    for key, value in kwargs.items()
+                }
                 stream = self.value(
-                    *(var_args.as_python_constant()),
-                    **(var_kwargs.as_python_constant()),
+                    *example_args,
+                    **example_kwargs,
                 )
                 from ..graph_bytecode_inputs import register_graph_created_object
                 from .streams import StreamVariable
@@ -5295,6 +5374,19 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
         if self._base_vt is None:
             raise AssertionError("_base_vt must not be None in items")
         return self._base_vt.items  # pyrefly: ignore[missing-attribute]
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # https://github.com/python/cpython/blob/v3.13.3/Objects/setobject.c#L517-L568
+        if self._maybe_get_baseclass_method("__repr__") not in self._base_methods:
+            return super().tp_repr_impl(tx)
+        name = self.python_type_name()
+        if not self.items:
+            return VariableTracker.build(tx, f"{name}()")
+        items = ", ".join(tracked_repr(tx, item.vt) for item in self.set_items)
+        return VariableTracker.build(tx, f"{name}({{{items}}})")
+
+    def repr_recursive_sentinel(self) -> str:
+        return f"{self.python_type_name()}(...)"
 
 
 class UserDefinedListVariable(UserDefinedObjectVariable):
