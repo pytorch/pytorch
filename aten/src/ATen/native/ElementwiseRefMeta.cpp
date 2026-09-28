@@ -660,9 +660,13 @@ c10::SymDimVector infer_size(c10::SymIntArrayRef a, c10::SymIntArrayRef b) {
 
 } // namespace
 
-// _make_elementwise_binary_reference / refs.add (alpha is None when unset) /
-// refs.sub: elementwise_type_promotion_wrapper -> _maybe_broadcast ->
-// [prims.mul(b, alpha)] -> prim -> conversion to the result dtype.
+// Returns an empty tensor with the sizes, strides and dtype of an elementwise
+// binary op's output. The operands are converted to the computation dtype for
+// kind and broadcast to a common shape. If alpha is set, other is scaled by it;
+// alpha must not be a wider number type than the computation dtype unless that
+// is bool. The output strides follow the operands' memory layout, and the
+// output dtype is the result dtype for kind.
+// is_sub rejects two bool tensors and drops the bool exemption for alpha.
 Tensor binary_ref_meta(
     const Tensor& self,
     const Tensor& other,
@@ -686,7 +690,6 @@ Tensor binary_ref_meta(
         "Subtraction, the `-` operator, with two bool tensors is not supported. "
         "Use the `^` or `logical_xor()` operator instead.");
   }
-  // refs.sub has no bool exemption in the type check below.
   if (alpha.has_value()) {
     // utils.is_weakly_lesser_type over bool < int < float < complex
     auto python_type_rank = [](ScalarType t) {
