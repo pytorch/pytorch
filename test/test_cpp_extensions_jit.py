@@ -90,8 +90,11 @@ with tempfile.TemporaryDirectory() as tmpdir:
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
-class _CppExtensionJITMixin(common.TestCase):
-    """Shared set up and tear down functions for device-specific test classes."""
+class _TestCppExtensionJITBase(common.TestCase):
+    """Shared set up and tear down functions for device-specific test classes
+    that test just-in-time cpp extensions. Don't confuse this with the PyTorch JIT
+    (aka TorchScript).
+    """
 
     old_working_dir: str
 
@@ -118,11 +121,7 @@ class _CppExtensionJITMixin(common.TestCase):
 
 # There's only one test that runs gradcheck, run slow mode manually
 @torch.testing._internal.common_utils.markDynamoStrictTest
-class TestCppExtensionJIT(_CppExtensionJITMixin):
-    """Tests just-in-time cpp extensions.
-    Don't confuse this with the PyTorch JIT (aka TorchScript).
-    """
-
+class TestCppExtensionJIT(_TestCppExtensionJITBase):
     def test_jit_compile_extension(self):
         module = torch.utils.cpp_extension.load(
             name="jit_extension",
@@ -1319,11 +1318,7 @@ except RuntimeError as e:
 
 @unittest.skipIf(not (TEST_CUDA or TEST_ROCM), "CUDA not found")
 @torch.testing._internal.common_utils.markDynamoStrictTest
-class TestCppExtensionJITCUDA(_CppExtensionJITMixin):
-    """Tests just-in-time cpp extensions.
-    Don't confuse this with the PyTorch JIT (aka TorchScript).
-    """
-
+class TestCppExtensionJITCUDA(_TestCppExtensionJITBase):
     hw_classification = HardwareClassification.CUDA
 
     def test_jit_cuda_extension(self):
