@@ -33,8 +33,6 @@ from torch._dynamo.bytecode_transformation import transform_code_object
 from torch._dynamo.exc import PackageError
 from torch._dynamo.guards import (
     _Missing,
-    _native_method_matches,
-    _native_method_metadata,
     CheckFunctionManager,
     CompileId,
     GuardsStatePickler,
@@ -3832,9 +3830,14 @@ class TestGuardSerialization(TestGuardSerializationBase):
         with mock.patch.dict(globals(), {"double_apply": _TripleFn.apply}):
             self._test_check_fn(ref, loaded, {"x": x}, False)
         # An object whose __eq__ always answers True is still rejected.
-        expected = _native_method_metadata(double_apply)
-        self.assertTrue(_native_method_matches(_DoubleFn.apply, expected))
-        self.assertFalse(_native_method_matches(mock.ANY, expected))
+        with mock.patch.dict(globals(), {"double_apply": mock.ANY}):
+            self.assertFalse(loaded.check({"x": x}))
+        # A repeat of the last matched object is accepted without comparing.
+        self.assertTrue(loaded.check({"x": x}))
+        with mock.patch(
+            "torch._dynamo.guards._native_method_matches", side_effect=AssertionError
+        ):
+            self.assertTrue(loaded.check({"x": x}))
 
     def test_native_method_match_needs_a_receiver_by_reference(self):
         class LocalFn(torch.autograd.Function):
@@ -4572,6 +4575,19 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self.assertIs(out._is_param, True)
         self.assertIsNone(out.constant)
 
+    def test_fake_tensor_setter_names_are_owned(self):
+        x = torch.randn(3)
+        x.fake_device = torch.device("meta")
+        x.item_memo = [5]
+        buf = io.BytesIO()
+        GuardsStatePickler({id(x): x}, {}, {}, {}, buf).dump({"x": x})
+        out = load_guards_state(buf.getvalue())["x"]
+        self.assertEqual(out.fake_device, torch.device("cpu"))
+        self.assertIsNone(out.item_memo)
+        tree = {id(v): v for v in (x, x.item_memo)}
+        with self.assertRaisesRegex(PackageError, "reads 'item_memo' off a tensor"):
+            GuardsStatePickler(tree, {}, {}, {}, io.BytesIO()).dump({"x": x})
+
     def test_tensor_attributes_carried_through_the_pickle(self):
         from torch._subclasses.fake_tensor import FakeTensorMode
 
@@ -4579,9 +4595,14 @@ class TestGuardSerialization(TestGuardSerializationBase):
         x.me = x
         x._cpu_copy = torch.randn(2)
         x.gen = (i for i in range(3))
+        x._dynamo_dynamic_indices = {0}
+        x._dynamo_weak_dynamic_indices = {1}
         fake = FakeTensorMode().from_tensor(torch.randn(3))
         fake.scale = 2
-        tree = {id(v): v for v in (x, x._cpu_copy, fake)}
+        tree = {
+            id(v): v
+            for v in (x, x._cpu_copy, x._dynamo_weak_dynamic_indices, fake)
+        }
         buf = io.BytesIO()
         GuardsStatePickler(tree, {}, {}, {}, buf).dump({"x": x, "fake": fake})
         state = load_guards_state(buf.getvalue())
@@ -4590,6 +4611,9 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self.assertEqual(out._cpu_copy.shape, (2,))
         # The generator does not pickle; its name survives for a HASATTR guard.
         self.assertIsInstance(out.gen, _Missing)
+        # An unregistered marking is dropped, not left as a _Missing.
+        self.assertFalse(hasattr(out, "_dynamo_dynamic_indices"))
+        self.assertEqual(out._dynamo_weak_dynamic_indices, {1})
         self.assertEqual(state["fake"].scale, 2)
         self.assertNotIn(b"FakeTensorMode", buf.getvalue())
 
