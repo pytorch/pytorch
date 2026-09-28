@@ -1677,4 +1677,18 @@ Tensor add_Tensor_meta(const Tensor& self, const Tensor& other, const Scalar& al
       self, other, TypePromotionKind::DEFAULT, symbolic, default_alpha ? std::nullopt : std::optional<Scalar>(alpha));
 }
 
+// Mirrors what Python fake tensor runs for sub.Tensor: the fast path for
+// symbolic inputs, then refs.sub.
+Tensor sub_Tensor_meta(const Tensor& self, const Tensor& other, const Scalar& alpha) {
+  // FakeTensorMode's has_symbolic_sizes counts SymInt arguments only.
+  const bool symbolic = self.unsafeGetTensorImpl()->has_symbolic_sizes_strides() ||
+      other.unsafeGetTensorImpl()->has_symbolic_sizes_strides() || alpha.isSymInt();
+  if (symbolic) {
+    if (auto out = fast_binary_meta(self, other, TypePromotionKind::DEFAULT); out.defined()) {
+      return out;
+    }
+  }
+  return binary_ref_meta(self, other, TypePromotionKind::DEFAULT, symbolic, alpha, /*is_sub=*/true);
+}
+
 } // namespace at::native

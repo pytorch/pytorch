@@ -668,6 +668,21 @@ bool is_noncontiguous_supported(const Tensor& self, const Tensor& other) {
   return !first.key_set().has_backend(BackendComponent::HPUBit);
 }
 
+// alpha != 1 in Python
+bool python_ne_one(const Scalar& s) {
+  if (s.isSymInt()) {
+    return s.toSymInt().sym_ne(1).guard_bool(__FILE__, __LINE__);
+  }
+  if (s.isSymFloat()) {
+    return s.toSymFloat().sym_ne(1.0).guard_bool(__FILE__, __LINE__);
+  }
+  if (s.isSymBool()) {
+    // Python evaluates SymBool != 1 to True without guarding.
+    return true;
+  }
+  return s.isComplex() ? s.toComplexDouble() != c10::complex<double>(1, 0) : s.toDouble() != 1;
+}
+
 // fake_impls.infer_size. Unlike at::infer_size_symdimvector, it compares
 // sizeA == sizeB in Python's operand order.
 c10::SymDimVector fake_infer_size(c10::SymIntArrayRef a, c10::SymIntArrayRef b) {
@@ -694,15 +709,16 @@ c10::SymDimVector fake_infer_size(c10::SymIntArrayRef a, c10::SymIntArrayRef b) 
 
 } // namespace
 
-// _make_elementwise_binary_reference / refs.add (alpha is None when unset):
-// elementwise_type_promotion_wrapper -> _maybe_broadcast -> [prims.mul(b,
-// alpha)] -> prim -> conversion to the result dtype.
+// _make_elementwise_binary_reference / refs.add (alpha is None when unset) /
+// refs.sub: elementwise_type_promotion_wrapper -> _maybe_broadcast ->
+// [prims.mul(b, alpha)] -> prim -> conversion to the result dtype.
 Tensor binary_ref_meta(
     const Tensor& self,
     const Tensor& other,
     TypePromotionKind kind,
     bool fake_devices,
-    const std::optional<Scalar>& alpha) {
+    const std::optional<Scalar>& alpha,
+    bool is_sub) {
   // A kernel running under the Meta key (e.g. a composite) can mix its own meta
   // tensors with fakes; every tensor then reports meta, as in Python fake.
   const auto real_meta = [](const Tensor& t) {
@@ -713,7 +729,15 @@ Tensor binary_ref_meta(
   auto args = maybe_broadcast(
       {maybe_convert_desc(meta_desc(self, fake_devices), compute_dtype),
        maybe_convert_desc(meta_desc(other, fake_devices), compute_dtype)});
-  if (alpha.has_value()) {
+  if (is_sub) {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        args[0].is_number || args[1].is_number || (args[0].dtype != kBool && args[1].dtype != kBool),
+        "Subtraction, the `-` operator, with two bool tensors is not supported. "
+        "Use the `^` or `logical_xor()` operator instead.");
+  }
+  // refs.sub applies alpha when alpha != 1, after broadcasting (the check may
+  // guard), and has no bool exemption in the type check below.
+  if (alpha.has_value() && (!is_sub || python_ne_one(*alpha))) {
     // utils.is_weakly_lesser_type over bool < int < float < complex
     auto python_type_rank = [](ScalarType t) {
       return t == kBool ? 0 : isIntegralType(t, /*includeBool=*/false) ? 1 : isFloatingType(t) ? 2 : 3;
@@ -723,7 +747,7 @@ Tensor binary_ref_meta(
     const auto rank = python_type_rank(compute_dtype);
     const auto alpha_rank = python_type_rank(alpha->type());
     TORCH_CHECK_VALUE(
-        rank == 0 || alpha_rank <= rank,
+        (rank == 0 && !is_sub) || alpha_rank <= rank,
         "alpha argument of type ", python_type_names[alpha_rank], " cannot be safely cast to type ",
         python_type_names[rank], "!");
     auto& b = args[1];
