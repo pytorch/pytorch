@@ -22394,13 +22394,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                          dtypes=(torch.float16,)),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_ref_duplicate_values',
                          dtypes=(torch.float16,)),
-<<<<<<< HEAD
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'), 'TestReductionsDevice', 'test_ref_small_input',
-                device_type='xpu',
-                dtypes=[torch.float64]),
-=======
             # MPS: std does not support automatic differentiation for outputs with complex dtype
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
             DecorateInfo(
@@ -22411,7 +22404,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                 unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
                 device_type='mps', dtypes=(torch.complex64,)
             ),
->>>>>>> 22e8b919249 (test: remove obsolete reductions skips tied to xpu issue 2295)
             # The operator 'aten::std.correction_out' is not currently implemented for the MPS device
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
@@ -26429,13 +26421,6 @@ python_ref_db = [
                 unittest.skip("Skipped!"), 'TestReductionsDevice',
                 'test_ref_duplicate_values',
                 dtypes=(torch.float16,)),
-<<<<<<< HEAD
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'), 'TestReductionsDevice', 'test_ref_small_input',
-                device_type='xpu',
-                dtypes=[torch.float64]),
-=======
             # Exception: Dtypes torch.float32 and torch.complex64 are not equal!
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps', dtypes=(torch.complex64,)),
@@ -26443,7 +26428,6 @@ python_ref_db = [
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
                 device_type='mps', dtypes=(torch.complex64,)
             ),
->>>>>>> 22e8b919249 (test: remove obsolete reductions skips tied to xpu issue 2295)
         ),
     ),
     # std_mean and var_mean are not ReductionInfos
