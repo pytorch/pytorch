@@ -751,3 +751,6 @@ package = 'torch'
 "Type" = [
     ".spin/cmds.py:pyrefly",
 ]
+
+[project.entry-points."torch.distributed.transports"]
+nixl = "torch.distributed._transport.nixl:NIXLTransport"
