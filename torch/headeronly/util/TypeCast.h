@@ -10,6 +10,8 @@
 #include <torch/headeronly/util/complex.h>
 #include <torch/headeronly/util/overflows.h>
 
+#include <cmath>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <type_traits>
@@ -67,6 +69,20 @@ struct maybe_bool<true, src_t> {
 template <typename dest_t, typename src_t>
 C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline dest_t
 unchecked_cast_to_int(src_t src) {
+#if defined(__s390x__)
+  // if float/double is +infinity, a different result is returned on s390x.
+  // Process such case specially to get same behaviour as on x86.
+  if constexpr (
+      std::is_floating_point_v<src_t> && !std::is_floating_point_v<dest_t>) {
+    if (std::isinf(src)) {
+      if constexpr (std::is_same_v<dest_t, int>) {
+        return static_cast<dest_t>(std::numeric_limits<int>::min());
+      } else {
+        return static_cast<dest_t>(std::numeric_limits<int64_t>::min());
+      }
+    }
+  }
+#endif /* defined(__s390x__) */
   return static_cast<dest_t>(src);
 }
 
