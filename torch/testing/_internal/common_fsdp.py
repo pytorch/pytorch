@@ -266,6 +266,7 @@ class TransformerWithSharedParams(FSDPTestModel):
         device_init_mode: DEVICEInitMode,
         add_bn: bool,
         deterministic: bool,
+        device: str = DEVICE_TYPE,
     ):
         super().__init__()
         self.rank = group.rank()
@@ -298,7 +299,7 @@ class TransformerWithSharedParams(FSDPTestModel):
         self.bs = 2
         self.bn = torch.nn.BatchNorm1d(self.bs) if add_bn else torch.nn.Identity()
         if device_init_mode == DEVICEInitMode.DEVICE_BEFORE:
-            self = self.to(DEVICE_TYPE)
+            self = self.to(device)
         if deterministic:
             self.eval()
 
@@ -333,6 +334,7 @@ class TransformerWithSharedParams(FSDPTestModel):
         fsdp_kwargs: dict[str, Any] | None = None,
         deterministic: bool = False,
         add_bn: bool = True,
+        device: str = DEVICE_TYPE,
     ) -> nn.Module | FSDP:
         """
         Initializes a :class:`TransformerWithSharedParams` instance.
@@ -360,7 +362,7 @@ class TransformerWithSharedParams(FSDPTestModel):
             else:
                 pg = group
             return TransformerWithSharedParams(
-                pg, device_init_mode, add_bn, deterministic
+                pg, device_init_mode, add_bn, deterministic, device
             )
         elif fsdp_init_mode == FSDPInitMode.RECURSIVE:
             # Default to the `ModuleWrapPolicy`
@@ -390,7 +392,7 @@ class TransformerWithSharedParams(FSDPTestModel):
                 tformer_pg = group
 
             m = TransformerWithSharedParams(
-                tformer_pg, device_init_mode, add_bn, deterministic
+                tformer_pg, device_init_mode, add_bn, deterministic, device
             )
             fsdp_model = FSDP(
                 m,
@@ -399,7 +401,7 @@ class TransformerWithSharedParams(FSDPTestModel):
                 **fsdp_kwargs,
             )
             if device_init_mode == DEVICEInitMode.DEVICE_AFTER:
-                fsdp_model = fsdp_model.to(DEVICE_TYPE)
+                fsdp_model = fsdp_model.to(device)
             return fsdp_model
         raise ValueError(f"Unsupported FSDP init mode: {fsdp_init_mode}")
 
@@ -1190,6 +1192,15 @@ class FSDPTestMixin:
     Provides common helper methods for both FSDPTest and FSDPTestContinuous.
     """
 
+    @classmethod
+    def _selected_device_type(cls) -> str:
+        device_type = getattr(cls, "device_type", DEVICE_TYPE)
+        if not isinstance(device_type, str):
+            device_type = DEVICE_TYPE
+        if device_type == "privateuse1":
+            return torch._C._get_privateuse1_backend_name()
+        return device_type
+
     def _check_cpu_offload(self, fsdp_model, cpu_offload):
         self.assertEqual(cpu_offload, fsdp_model.cpu_offload)
 
@@ -1270,11 +1281,17 @@ class FSDPTestMixin:
         use_pure_fp16: bool = False,
         sharded_grad_scaler_kwargs: dict[str, Any] | None = None,
     ):
+        device_type = self._selected_device_type()
         cpu_offload_params = fsdp_cpu_offload and fsdp_cpu_offload.offload_params
 
         model_device = next(model.parameters()).device
         if sharded_grad_scaler_kwargs is None:
             sharded_grad_scaler_kwargs = {}
+        if isinstance(getattr(type(self), "device_type", None), str):
+            sharded_grad_scaler_kwargs = {
+                "device": device_type,
+                **sharded_grad_scaler_kwargs,
+            }
         sharded_grad_scaler = ShardedGradScaler(
             enabled=enable_sharded_grad_scaler, **sharded_grad_scaler_kwargs
         )
@@ -1283,9 +1300,9 @@ class FSDPTestMixin:
         optim = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9)
         for _ in range(num_steps):
             optim.zero_grad()
-            with torch.amp.autocast(DEVICE_TYPE, enabled=autocast):
-                # Inputs always cuda regardless of cpu offloading, or model.device
-                input = model.module.get_input(torch.device(DEVICE_TYPE))  # type: ignore[operator, union-attr]
+            with torch.amp.autocast(device_type, enabled=autocast):
+                # Inputs use the selected device even when parameters are offloaded.
+                input = model.module.get_input(torch.device(device_type))  # type: ignore[operator, union-attr]
                 if use_pure_fp16 or (mixed_precision and not isinstance(model, FSDP)):
                     if isinstance(input, torch.Tensor):
                         input = input.half()
@@ -1382,10 +1399,15 @@ class FSDPTestMixin:
                 wrapper should provide data parallel semantics. If ``None``,
                 then the callable defaults to the DDP constructor.
         """
+        device_type = self._selected_device_type()
         if fsdp_init_mode == FSDPInitMode.NO_FSDP:
             raise AssertionError("Expects an FSDP init mode that wraps with FSDP")
         if init_kwargs is None:
             init_kwargs = {}
+        if isinstance(getattr(type(self), "device_type", None), str) and issubclass(
+            model_class, TransformerWithSharedParams
+        ):
+            init_kwargs = {"device": device_type, **init_kwargs}
         lr = 1e-2
         rank = self.process_group.rank()
         # Establish reference behavior with DDP
@@ -1397,12 +1419,12 @@ class FSDPTestMixin:
             **init_kwargs,
         )
         if ref_init_fn is None:
-            if TEST_HPU:
+            if TEST_HPU and not isinstance(getattr(type(self), "device_type", None), str):
                 # _get_device_index cannot resolve bare "hpu" to an index;
                 # re-add ":0" for backward compatibility.
-                hpu = f"{DEVICE_TYPE}:0"
+                hpu = f"{device_type}:0"
                 ref_model = DDP(model, device_ids=[hpu], output_device=hpu)
-            elif DEVICE_TYPE == "cpu":
+            elif device_type == "cpu":
                 ref_model = DDP(model)
             else:
                 ref_model = DDP(model, device_ids=[rank], output_device=rank)
@@ -1453,7 +1475,7 @@ class FSDPTestMixin:
             # Change the model parameter dtype after FSDP initialization
             fsdp_model = fsdp_model.half()
         if device_init_mode == DEVICEInitMode.DEVICE_AFTER:
-            fsdp_model = fsdp_model.to(DEVICE_TYPE)
+            fsdp_model = fsdp_model.to(device_type)
         offload_params = cpu_offload is not None and cpu_offload.offload_params
         # Offloading parameters with `DEVICE_AFTER` should raise an error during
         # lazy initialization due to the parameter devices not being CPU;
@@ -1472,7 +1494,7 @@ class FSDPTestMixin:
             self.assertRaisesRegex(
                 RuntimeError,
                 "An FSDP-managed module with parameter CPU offloading enabled "
-                f"has parameters on {DEVICE_TYPE}",
+                f"has parameters on {device_type}",
             )
             if expects_device_error
             else nullcontext()
@@ -1499,7 +1521,7 @@ class FSDPTestMixin:
             cpu_device = torch.device("cpu")
             for param in fsdp_model.parameters():
                 self.assertEqual(param.device, cpu_device)
-            fsdp_loss = fsdp_loss.to(DEVICE_TYPE)
+            fsdp_loss = fsdp_loss.to(device_type)
         fsdp_unsharded_params = get_full_params(fsdp_model)
         # Do not check dtype since the reference DDP loss may not be the same
         # dtype as the FSDP loss in the case of mixed precision
@@ -1554,8 +1576,22 @@ class FSDPTest(FSDPTestMixin, MultiProcessTestCase):
         fake_pg = kwargs.get("fake_pg", False)
 
         print(f"dist init r={self.rank}, world={self.world_size}")
-        if torch.accelerator.device_count() < self.world_size:
-            sys.exit(TEST_SKIPS[f"multi-device-{self.world_size}"].exit_code)
+        if isinstance(getattr(cls, "device_type", None), str):
+            device_type = cls._selected_device_type()
+            device_module = torch.get_device_module(device_type)
+            device_count = device_module.device_count()
+            backend = dist.get_default_backend_for_device(device_type)
+            device_ids = None
+            if device_type != "cpu":
+                if device_count < self.world_size:
+                    sys.exit(TEST_SKIPS[f"multi-device-{self.world_size}"].exit_code)
+                device_id = self.rank % device_count
+                device_module.set_device(device_id)
+                device_ids = [device_id]
+        else:
+            if torch.accelerator.device_count() < self.world_size:
+                sys.exit(TEST_SKIPS[f"multi-device-{self.world_size}"].exit_code)
+            backend = DISTRIBUTED_BACKEND
 
         # Specify gloo backend to make 'init_process_group()' succeed,
         # Actual tests will be skipped if there are not enough GPUs.
@@ -1571,7 +1607,7 @@ class FSDPTest(FSDPTestMixin, MultiProcessTestCase):
             else:
                 dist.init_process_group(
                     init_method=self.init_method,
-                    backend=DISTRIBUTED_BACKEND,
+                    backend=backend,
                     world_size=int(self.world_size),
                     rank=self.rank,
                 )
@@ -1581,11 +1617,11 @@ class FSDPTest(FSDPTestMixin, MultiProcessTestCase):
 
             raise
 
-        device_ids = None
-        device_id = self.rank % DEVICE_COUNT
-        if torch.accelerator.is_available():
-            torch.accelerator.set_device_index(device_id)
-        device_ids = [device_id]
+        if not isinstance(getattr(cls, "device_type", None), str):
+            device_id = self.rank % DEVICE_COUNT
+            if torch.accelerator.is_available():
+                torch.accelerator.set_device_index(device_id)
+            device_ids = [device_id]
 
         # Execute barrier prior to running test to ensure that every process
         # has finished initialization and that the following test
@@ -1613,6 +1649,8 @@ class FSDPTestContinuous(FSDPTestMixin, MultiProcContinuousTest):
 
     @classmethod
     def backend_str(cls) -> str:
+        if isinstance(getattr(cls, "device_type", None), str):
+            return dist.get_default_backend_for_device(cls._selected_device_type())
         return DISTRIBUTED_BACKEND
 
     @classmethod
@@ -1626,12 +1664,20 @@ class FSDPTestContinuous(FSDPTestMixin, MultiProcContinuousTest):
         # https://github.com/pytorch/pytorch/issues/90848
         os.environ["TORCH_NCCL_DESYNC_DEBUG"] = "0"
 
-        if torch.accelerator.device_count() < world_size:
-            sys.exit(TEST_SKIPS[f"multi-device-{world_size}"].exit_code)
-
-        device_id = rank % DEVICE_COUNT
-        if torch.accelerator.is_available():
-            torch.accelerator.set_device_index(device_id)
+        if isinstance(getattr(cls, "device_type", None), str):
+            device_type = cls._selected_device_type()
+            device_module = torch.get_device_module(device_type)
+            device_count = device_module.device_count()
+            if device_type != "cpu":
+                if device_count < world_size:
+                    sys.exit(TEST_SKIPS[f"multi-device-{world_size}"].exit_code)
+                device_module.set_device(rank % device_count)
+        else:
+            if torch.accelerator.device_count() < world_size:
+                sys.exit(TEST_SKIPS[f"multi-device-{world_size}"].exit_code)
+            device_id = rank % DEVICE_COUNT
+            if torch.accelerator.is_available():
+                torch.accelerator.set_device_index(device_id)
 
         super()._init_pg(rank, world_size, rdvz_file)
 
