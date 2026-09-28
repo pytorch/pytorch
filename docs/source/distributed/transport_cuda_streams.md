@@ -56,6 +56,34 @@ Receivers must exchange a completion notification before using incoming data.
 Reads require the remote source to be ready and retained before submission.
 The prototype does not provide a remote notification protocol.
 
+### CUDA graph capture and replay
+
+Use `with bridge.capture() as graph:` on a warmed-up bridge, then call
+`graph.replay()`. Copies and host functions become graph nodes; capture does not
+submit transfers. Every replay submits a fresh NIXL Work after its producer copy
+and gates subsequent consumers until completion. Buffers, views, and remote
+addresses are fixed for the graph lifetime; contents may change between replays.
+Captured `read`/`write` return `None`, not a stale one-shot completion event.
+
+```python
+with bridge.capture() as graph:
+    pinned_source.copy_(gpu_source, non_blocking=True)
+    bridge.write(source_view, remote_destination)
+graph.replay()
+```
+
+The prototype calls `cuLaunchHostFunc` directly through `libcuda.so.1`;
+one-shot binding wrappers must not free host-node userdata after first replay.
+The bridge owns the graphs and retains callback trampolines and registrations
+across all replays, including intervening eager operations. `bridge.close()`
+synchronizes the device, resets the graphs, then releases callbacks. Replays can
+use a different stream, but must be serialized; do not race close with launches,
+clone graph executables, or capture these callbacks outside `bridge.capture()`.
+Destroy/close the bridge before unregistering buffers or closing the transport.
+Graph reset invalidates subsequent replay. Remote readiness remains an external
+protocol, not something graph capture supplies. Graph callback errors retain the
+same process-termination policy as eager callbacks.
+
 ### Failure and limitations
 
 Callback errors and polling timeouts terminate the process with `_exit(1)` so
@@ -65,8 +93,8 @@ runs; it does not bound producer execution or callback scheduling delay.
 
 Only the UCX pinned-host path was exercised. Other plugin/configuration paths need
 an audit for indirect CUDA calls. Host callbacks may serialize across streams;
-this is not a general-purpose overlap scheduler. There is no graph capture,
-tracing, cancellation, recoverable asynchronous failure, or automatic protection
+this is not a general-purpose overlap scheduler. There is no tracing,
+cancellation, recoverable asynchronous failure, or automatic protection
 against explicit unregister/close while queued.
 
 Prewarm kernels and allocate buffers before measurement. Lazy CUDA module loading
@@ -92,10 +120,12 @@ API where available and proven safe over a generic host bridge.
 Opt-in tests run in bounded subprocesses:
 - Real two-process NIXL/UCX host-memory writes and reads between pinned buffers,
   ordered with CUDA staging copies on two GPUs.
+- Three native graph replays with changing data, separate read/write graphs,
+  different replay stream, intervening eager operations, and garbage collection.
 - Enqueue returns while a deliberately blocked callback remains incomplete.
 - An injected callback failure terminates only the test child with exit code 1.
 
-Run with `TORCH_TEST_CUDA_TRANSPORT=1` and `CUDA_MODULE_LOADING=EAGER`, with NIXL,
-its CUDA/UCX dependencies, and `cuda-bindings` installed. The native test does not
+Run with `TORCH_TEST_CUDA_TRANSPORT=1` and `CUDA_MODULE_LOADING=EAGER`, on Linux with NIXL
+and its CUDA/UCX dependencies installed. The native test does not
 establish multihost RDMA performance or direct-VRAM support. Report host enqueue
 latency separately from end-to-end transfer throughput; no speedup is claimed.

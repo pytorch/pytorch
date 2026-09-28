@@ -10,6 +10,7 @@ import ctypes
 import os
 import threading
 import time
+from contextlib import contextmanager
 from typing import Any, TYPE_CHECKING
 
 import torch
@@ -24,11 +25,6 @@ if TYPE_CHECKING:
 _LIVE_BRIDGES: set[CudaHostTransport] = set()
 
 
-def _check(result: Any) -> None:
-    if int(result[0]):
-        raise RuntimeError(f"CUDA driver error: {result[0]}")
-
-
 class CudaHostTransport:
     """Experimental stream-ordered transport between pinned CPU buffers.
 
@@ -40,17 +36,42 @@ class CudaHostTransport:
     """
 
     def __init__(self, transport: NIXLTransport, stream: torch.cuda.Stream):
-        from cuda.bindings import driver
-
         if transport._plugin != "UCX":
             raise ValueError("only the UCX pinned-host path is supported")
         self.transport = transport
         self.stream = stream
-        self.driver = driver
+        # Call the driver directly: binding-level one-shot callback userdata
+        # must not be released after the first execution of a captured node.
+        self._cuda = ctypes.CDLL("libcuda.so.1")
+        self._launch = self._cuda.cuLaunchHostFunc
+        self._launch.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+        self._launch.restype = ctypes.c_int
         self._lock = threading.Lock()
         self._closed = False
         self._pending: list[tuple[Any, ...]] = []
+        self._graphs: list[torch.cuda.CUDAGraph] = []
+        self._captured: list[tuple[Any, ...]] = []
+        self._capturing = False
         _LIVE_BRIDGES.add(self)
+
+    @contextmanager
+    def capture(self):
+        """Capture on the bridge stream; close invalidates all returned graphs.
+
+        Register and warm up first. Replay serially, with fixed buffers and
+        descriptors. Do not clone graphs, recapture externally, or race close
+        with capture/replay. Captured read/write return None, not a one-shot event.
+        """
+        if self._closed or self._capturing:
+            raise RuntimeError("bridge is closed or already capturing")
+        graph = torch.cuda.CUDAGraph()
+        self._graphs.append(graph)
+        self._capturing = True
+        try:
+            with torch.cuda.graph(graph, stream=self.stream):
+                yield graph
+        finally:
+            self._capturing = False
 
     def write(self, local: NIXLMemoryView, remote: NIXLRemoteBuffer, *, timeout=30.0):
         return self._enqueue("write", local, remote, timeout)
@@ -60,7 +81,7 @@ class CudaHostTransport:
     ):
         return self._enqueue("read", local, remote, timeout)
 
-    def _enqueue(self, operation, local, remote, timeout) -> threading.Event:
+    def _enqueue(self, operation, local, remote, timeout) -> threading.Event | None:
         from .._work import _validate_timeout
 
         _validate_timeout(timeout)
@@ -90,11 +111,13 @@ class CudaHostTransport:
         ):
             if self._closed:
                 raise RuntimeError("bridge is closed")
-            if torch.cuda.is_current_stream_capturing():
-                raise RuntimeError("graph capture is unsupported")
-            self._pending = [item for item in self._pending if not item[0].query()]
-            done = threading.Event()
-            retired = torch.cuda.Event()
+            capturing = torch.cuda.is_current_stream_capturing()
+            if capturing and not self._capturing:
+                raise RuntimeError("use bridge.capture() to retain graph callbacks")
+            if not capturing:
+                self._pending = [item for item in self._pending if not item[0].query()]
+            done = None if capturing else threading.Event()
+            retired = None if capturing else torch.cuda.Event()
 
             @ctypes.CFUNCTYPE(None, ctypes.c_void_p)
             def callback(_):
@@ -108,7 +131,8 @@ class CudaHostTransport:
                             raise TimeoutError("CUDA callback transport timed out")
                         time.sleep(0.001)
                     work.wait()  # Complete: read a terminal error, no pending wait.
-                    done.set()  # No user Future callbacks can run on this thread.
+                    if done is not None:
+                        done.set()  # No user Future callbacks on this thread.
                 except BaseException as error:
                     os.write(2, f"CUDA transport callback failed: {error}\n".encode())
                     os._exit(1)  # Never run GPU consumers after failed DMA.
@@ -116,17 +140,19 @@ class CudaHostTransport:
             # Keep the ctypes trampoline and operands alive until CUDA confirms
             # the callback returned, not merely until done.set() executes.
             item = (retired, callback, local, remote, done)
-            self._pending.append(item)
-            result = self.driver.cuLaunchHostFunc(
-                self.driver.CUstream(self.stream.cuda_stream),
-                self.driver.CUhostFn(ctypes.cast(callback, ctypes.c_void_p).value),
-                0,
+            pending = self._captured if capturing else self._pending
+            pending.append(item)
+            result = self._launch(
+                self.stream.cuda_stream,
+                ctypes.cast(callback, ctypes.c_void_p),
+                None,
             )
-            if int(result[0]):
-                self._pending.remove(item)
-                _check(result)
+            if result:
+                pending.remove(item)
+                raise RuntimeError(f"CUDA driver error: {result}")
             try:
-                retired.record(self.stream)
+                if retired is not None:
+                    retired.record(self.stream)
             except BaseException:
                 # The callback may already be running: retain its trampoline and
                 # reject further use rather than reclaim it from an unrecorded event.
@@ -138,7 +164,15 @@ class CudaHostTransport:
         with self._lock:
             if self._closed:
                 return
-            self.stream.synchronize()  # Teardown only; callbacks must have returned.
+            if self._capturing:
+                raise RuntimeError("cannot close during capture")
+            # Replays may run on a different stream. Keep callbacks alive until
+            # all launches finish and graph executables have been destroyed.
+            torch.cuda.synchronize(self.stream.device)
+            for graph in self._graphs:
+                graph.reset()
+            self._graphs.clear()
+            self._captured.clear()
             self._pending.clear()
             self._closed = True
             _LIVE_BRIDGES.discard(self)

@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import gc
 import multiprocessing
 import os
 import threading
@@ -15,7 +16,7 @@ from torch.distributed._transport.nixl._memory import NIXLRemoteBuffer
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
-def _worker(rank, pipe):
+def _worker(rank, pipe, capture=False):
     torch.cuda.set_device(rank)
     transport = NIXLTransport("cpu")
     stream = torch.cuda.Stream()
@@ -37,28 +38,68 @@ def _worker(rank, pipe):
     remote_source = NIXLRemoteBuffer.deserialize(pipe.recv_bytes())
     remote_destination = NIXLRemoteBuffer.deserialize(pipe.recv_bytes())
     bridge = CudaHostTransport(transport, stream)
-    with torch.cuda.stream(stream):
-        source.copy_(producer, non_blocking=True)
-        done = bridge.write(local_source.to_view(), remote_destination)
-    if not done.wait(15):
-        raise TimeoutError("callback completion")
-    # Local write completion does not imply peer write completion.
-    pipe.send_bytes(b"written")
-    if pipe.recv_bytes() != b"written":
-        raise RuntimeError("unexpected control message")
-    torch.testing.assert_close(destination, torch.full_like(destination, 2 - rank))
-    with torch.cuda.stream(stream):
-        bridge.read(local_destination.to_mutable_view(), remote_source)
-        consumer.copy_(destination, non_blocking=True)
-    stream.synchronize()  # Verify results only; no synchronization in enqueue.
-    torch.testing.assert_close(consumer, torch.full_like(consumer, 2 - rank))
+    if capture:
+        with bridge.capture() as write_graph:
+            source.copy_(producer, non_blocking=True)
+            if bridge.write(local_source.to_view(), remote_destination) is not None:
+                raise AssertionError("unexpected capture result or peer message")
+        with bridge.capture() as read_graph:
+            if (
+                bridge.read(local_destination.to_mutable_view(), remote_source)
+                is not None
+            ):
+                raise AssertionError("captured read returned a one-shot event")
+            consumer.copy_(destination, non_blocking=True)
+        torch.testing.assert_close(source, torch.zeros_like(source))
+        torch.testing.assert_close(destination, torch.zeros_like(destination))
+        pipe.send_bytes(b"captured")
+        if not (pipe.recv_bytes() == b"captured"):
+            raise AssertionError("unexpected capture result or peer message")
+        for iteration in range(3):
+            producer.fill_(rank + 1.0 + 10 * iteration)
+            # Replay on the default stream, not the original capture stream.
+            write_graph.replay()
+            torch.cuda.synchronize()
+            pipe.send_bytes(b"written")
+            if not (pipe.recv_bytes() == b"written"):
+                raise AssertionError("unexpected capture result or peer message")
+            read_graph.replay()
+            torch.cuda.synchronize()
+            torch.testing.assert_close(
+                consumer, torch.full_like(consumer, 2 - rank + 10 * iteration)
+            )
+            # Eager completion/reaping and GC must not free graph callbacks.
+            bridge.read(local_destination.to_mutable_view(), remote_source)
+            stream.synchronize()
+            gc.collect()
+            pipe.send_bytes(b"iteration")
+            if not (pipe.recv_bytes() == b"iteration"):
+                raise AssertionError("unexpected capture result or peer message")
+    else:
+        with torch.cuda.stream(stream):
+            source.copy_(producer, non_blocking=True)
+            done = bridge.write(local_source.to_view(), remote_destination)
+        if not done.wait(15):
+            raise TimeoutError("callback completion")
+        # Local write completion does not imply peer write completion.
+        pipe.send_bytes(b"written")
+        if pipe.recv_bytes() != b"written":
+            raise RuntimeError("unexpected control message")
+        torch.testing.assert_close(destination, torch.full_like(destination, 2 - rank))
+        with torch.cuda.stream(stream):
+            bridge.read(local_destination.to_mutable_view(), remote_source)
+            consumer.copy_(destination, non_blocking=True)
+        stream.synchronize()  # Verify results only; no synchronization in enqueue.
+        torch.testing.assert_close(consumer, torch.full_like(consumer, 2 - rank))
     bridge.close()
+    if bridge._captured or bridge._graphs:
+        raise AssertionError("graph resources retained after close")
     pipe.send_bytes(b"finished")
     pipe.recv_bytes()
     transport.close()
 
 
-def _callback_worker(fail):
+def _callback_worker(fail, capture=False):
     torch.cuda.set_device(0)
     transport = NIXLTransport("cpu")
     tensor = torch.zeros(8, pin_memory=True)
@@ -83,9 +124,15 @@ def _callback_worker(fail):
         return SimpleNamespace(is_completed=lambda: True, wait=lambda: None)
 
     with patch.object(transport, "write", side_effect=transfer):
-        done = bridge.write(memory.to_view(), remote)
+        if capture:
+            with bridge.capture() as graph:
+                bridge.write(memory.to_view(), remote)
+            graph.replay()
+            done = None
+        else:
+            done = bridge.write(memory.to_view(), remote)
         if fail:
-            stream.synchronize()  # The child must terminate before this returns.
+            torch.cuda.synchronize()  # Includes graph replays on the default stream.
             raise AssertionError("failed callback returned successfully")
         if not entered.wait(5) or done.is_set():
             raise AssertionError("expected pending callback after enqueue returned")
@@ -107,9 +154,12 @@ class TestCudaHostTransport(TestCase):
     def test_callback_failure_terminates_process(self):
         self._check_callback_worker(True, 1)
 
-    def _check_callback_worker(self, fail, exitcode):
+    def test_graph_callback_failure_terminates_process(self):
+        self._check_callback_worker(True, 1, capture=True)
+
+    def _check_callback_worker(self, fail, exitcode, capture=False):
         process = multiprocessing.get_context("spawn").Process(
-            target=_callback_worker, args=(fail,)
+            target=_callback_worker, args=(fail, capture)
         )
         process.start()
         try:
@@ -121,10 +171,17 @@ class TestCudaHostTransport(TestCase):
             process.join()
 
     def test_native_staged_write_and_read(self):
+        self._check_native(False)
+
+    def test_native_cuda_graph_replay(self):
+        self._check_native(True)
+
+    def _check_native(self, capture):
         ctx = multiprocessing.get_context("spawn")
         pipes = ctx.Pipe()
         processes = [
-            ctx.Process(target=_worker, args=(rank, pipes[rank])) for rank in range(2)
+            ctx.Process(target=_worker, args=(rank, pipes[rank], capture))
+            for rank in range(2)
         ]
         try:
             for process in processes:
