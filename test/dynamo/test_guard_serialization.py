@@ -33,8 +33,6 @@ from torch._dynamo.bytecode_transformation import transform_code_object
 from torch._dynamo.exc import PackageError
 from torch._dynamo.guards import (
     _Missing,
-    _native_method_matches,
-    _native_method_metadata,
     CheckFunctionManager,
     CompileId,
     GuardsStatePickler,
@@ -3804,9 +3802,14 @@ class TestGuardSerialization(TestGuardSerializationBase):
         with mock.patch.dict(globals(), {"double_apply": _TripleFn.apply}):
             self._test_check_fn(ref, loaded, {"x": x}, False)
         # An object whose __eq__ always answers True is still rejected.
-        expected = _native_method_metadata(double_apply)
-        self.assertTrue(_native_method_matches(_DoubleFn.apply, expected))
-        self.assertFalse(_native_method_matches(mock.ANY, expected))
+        with mock.patch.dict(globals(), {"double_apply": mock.ANY}):
+            self.assertFalse(loaded.check({"x": x}))
+        # A repeat of the last matched object is accepted without comparing.
+        self.assertTrue(loaded.check({"x": x}))
+        with mock.patch(
+            "torch._dynamo.guards._native_method_matches", side_effect=AssertionError
+        ):
+            self.assertTrue(loaded.check({"x": x}))
 
     def test_native_method_match_needs_a_receiver_by_reference(self):
         class LocalFn(torch.autograd.Function):

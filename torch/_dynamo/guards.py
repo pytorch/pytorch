@@ -3264,8 +3264,17 @@ class GuardBuilder(GuardBuilderBase):
         eval_fn=_native_method_matches,
     )
     def NATIVE_METHOD_MATCH(self, guard: Guard, expected: NativeMethodMetadata) -> None:
+        last_match: list[object] = []
+
         def guard_fn(value: object) -> bool:
-            return _native_method_matches(value, expected)
+            # The object ID_MATCH would have pinned; holding it keeps its id
+            # from being reused.
+            if last_match and value is last_match[0]:
+                return True
+            if not _native_method_matches(value, expected):
+                return False
+            last_match[:] = [value]
+            return True
 
         code = (
             f"___check_native_method({self.arg_ref(guard)}, "
