@@ -148,6 +148,17 @@ class TestFlopCounter(TestCase):
         # NB: I don't think this properly accounts for padding?
         self.assertExpectedInline(get_total_flops(mode), """1440""")
 
+    def test_flop_counter_autograd_grad(self):
+        # FlopCounterMode uses register_multi_grad_hook via ModuleTracker.
+        # That used to crash autograd.grad() on leaves (issue #131753).
+        mod = torch.nn.Linear(5, 7)
+        a = torch.randn(3, 4, 5, requires_grad=True)
+        with FlopCounterMode() as mode:
+            b = mod(a)
+            (g,) = torch.autograd.grad(b, a, torch.ones_like(b))
+        self.assertEqual(g.shape, a.shape)
+        self.assertTrue(int(get_total_flops(mode)) > 0)
+
     def test_backward(self):
         with FlopCounterMode() as mode:
             a = T(4, 5, requires_grad=True)
