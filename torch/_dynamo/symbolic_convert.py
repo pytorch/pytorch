@@ -1489,6 +1489,7 @@ class InstructionTranslatorBase(
 ):
     output: OutputGraph
     symbolic_locals: dict[str, VariableTracker]
+    symbolic_deleted_cells: set[str]
     # Registry of this frame's cells (cellvars + freevars), recorded at frame
     # setup. `symbolic_locals` models localsplus slot contents, which
     # fast-local ops may legitimately clobber (LOAD_FAST_AND_CLEAR in inlined
@@ -3543,6 +3544,17 @@ class InstructionTranslatorBase(
                 "expected inst.argval in self.cell_and_freevars() to be true"
             )
         cell = self._cellvar(inst.argval)
+        if (
+            cell.is_immutable()
+            and inst.argval == "__class__"
+            and self.instruction_pointer is not None
+            and self.instruction_pointer < len(self.instructions)
+            and self.instructions[self.instruction_pointer].opname == "LOAD_GLOBAL"
+            and self.instructions[self.instruction_pointer].argval == "super"
+        ):
+            # Preserve the empty-cell state for an immediately following super() call.
+            self.symbolic_deleted_cells.add(inst.argval)
+            return
         self.output.side_effects.store_cell(cell, variables.DeletedVariable())
 
     def _maybe_sync_dealloc_attr(self, obj: VariableTracker, name: str) -> None:
@@ -5605,6 +5617,7 @@ class InstructionTranslatorBase(
         # Mutable state checkpointed by copy_graphstate()
         self.output = output
         self.symbolic_locals = symbolic_locals
+        self.symbolic_deleted_cells = set()
         self.symbolic_cellvars = {}
         self.symbolic_globals = symbolic_globals
         self.symbolic_torch_function_state = symbolic_torch_function_state
