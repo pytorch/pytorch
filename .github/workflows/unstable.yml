@@ -77,6 +77,21 @@ jobs:
       cuda-version: "13.2"
     secrets: inherit
 
+  linux-jammy-aarch64-cuda13_2-gpu-sanity:
+    if: github.repository_owner == 'pytorch'
+    name: linux-jammy-aarch64-cuda13.2-gpu-sanity
+    needs: get-label-type
+    runs-on: nvidia-oss-pytorch-gb300-1gpu
+    timeout-minutes: 10
+    container:
+      image: ghcr.io/pytorch/ci-image:pytorch-linux-jammy-aarch64-cuda13.2-cudnn9-py3.12-gcc13-${{ needs.get-label-type.outputs.ci-docker-hash }}
+    steps:
+      - name: Verify GPU runner
+        run: |
+          test "$(uname -m)" = "aarch64"
+          nvidia-smi
+          test "$(nvidia-smi --query-gpu=uuid --format=csv,noheader | wc -l)" -eq 1
+
   # B200 CUDA 13.2 sm100 smoke coverage, staged here to gauge B200 runner
   # reliability/availability on every main commit before it graduates to trunk.
   linux-jammy-cuda13_2-py3_12-gcc11-sm100-build:
