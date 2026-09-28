@@ -2508,7 +2508,9 @@ static void lstsq_kernel_mps(const Tensor& a,
 } // namespace mps
 
 Tensor addr_mps(const Tensor& self, const Tensor& vec1, const Tensor& vec2, const Scalar& beta, const Scalar& alpha) {
-  Tensor result = at::empty({0}, self.options());
+  // The reference builds a TensorIterator, so the result takes the promoted dtype, not self's.
+  const auto dtype = c10::promoteTypes(c10::promoteTypes(self.scalar_type(), vec1.scalar_type()), vec2.scalar_type());
+  Tensor result = at::empty({0}, self.options().dtype(dtype));
   addr_out_mps(self, vec1, vec2, beta, alpha, result);
   return result;
 }
@@ -2527,6 +2529,15 @@ Tensor& addr_out_mps(const Tensor& self,
 
   TensorArg args[]{{result, "out", 0}, {self, "self", 1}, {vec1, "vec1", 2}, {vec2, "vec2", 3}};
   checkAllSameGPU(__func__, args);
+
+  // The reference computes at the promoted input dtype and only then casts into `result`.
+  const auto opmathType =
+      c10::promoteTypes(c10::promoteTypes(self.scalar_type(), vec1.scalar_type()), vec2.scalar_type());
+  TORCH_CHECK(c10::canCast(opmathType, result.scalar_type()),
+              "result type ",
+              opmathType,
+              " can't be cast to the desired output type ",
+              result.scalar_type());
 
   IntArrayRef vec1_sizes = vec1.sizes();
   IntArrayRef vec2_sizes = vec2.sizes();
@@ -2570,12 +2581,16 @@ Tensor& addr_out_mps(const Tensor& self,
   };
 
   @autoreleasepool {
-    std::string key = "addr_out_mps_impl" + getTensorsStringKey({vec1, vec2, *self_}) + ":" +
+    std::string key = "addr_out_mps_impl" + getTensorsStringKey({vec1, vec2, *self_, result}) + ":" +
         std::to_string(beta.toDouble()) + ":" + std::to_string(alpha.toDouble());
+    const auto computeType = getMPSDataType(opmathType);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* t1 = mps::mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(vec1), inputShape);
-      MPSGraphTensor* t2 = mps::mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(vec2), otherShape);
-      MPSGraphTensor* selfTensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, *self_);
+      auto vec1Placeholder = mps::mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(vec1), inputShape);
+      auto vec2Placeholder = mps::mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(vec2), otherShape);
+      auto selfPlaceholder = mps::mpsGraphRankedPlaceHolder(mpsGraph, *self_);
+      auto t1 = castMPSTensor(mpsGraph, vec1Placeholder, computeType);
+      auto t2 = castMPSTensor(mpsGraph, vec2Placeholder, computeType);
+      auto selfTensor = castMPSTensor(mpsGraph, selfPlaceholder, computeType);
 
       // Intermediate as placeholder
       MPSGraphTensor* productTensor = [mpsGraph matrixMultiplicationWithPrimaryTensor:t1
@@ -2583,10 +2598,8 @@ Tensor& addr_out_mps(const Tensor& self,
                                                                                  name:@"MM/(vec1Xvec2)"];
 
       // Intermediates for beta and alpha
-      MPSGraphTensor* betaTensor = [mpsGraph constantWithScalar:beta.toDouble()
-                                                       dataType:getMPSScalarType((*self_).scalar_type())];
-      MPSGraphTensor* alphaTensor = [mpsGraph constantWithScalar:alpha.toDouble()
-                                                        dataType:getMPSScalarType(vec1.scalar_type())];
+      MPSGraphTensor* betaTensor = [mpsGraph constantWithScalar:beta.toDouble() dataType:computeType];
+      MPSGraphTensor* alphaTensor = [mpsGraph constantWithScalar:alpha.toDouble() dataType:computeType];
 
       // Intermediates for multiplying by beta and alpha
       MPSGraphTensor* productTimesAlphaTensor = [mpsGraph multiplicationWithPrimaryTensor:productTensor
@@ -2606,10 +2619,10 @@ Tensor& addr_out_mps(const Tensor& self,
                                                       name:@"MM/beta*input+alpha*(vec1@vec2)"];
       }
 
-      newCachedGraph->vec1Tensor_ = t1;
-      newCachedGraph->vec2Tensor_ = t2;
-      newCachedGraph->selfTensor_ = selfTensor;
-      newCachedGraph->resultTensor_ = resultTensor;
+      newCachedGraph->vec1Tensor_ = vec1Placeholder;
+      newCachedGraph->vec2Tensor_ = vec2Placeholder;
+      newCachedGraph->selfTensor_ = selfPlaceholder;
+      newCachedGraph->resultTensor_ = castMPSTensor(mpsGraph, resultTensor, getMPSDataType(result));
     });
 
     Placeholder vec1Placeholder = Placeholder(cachedGraph->vec1Tensor_, vec1, inputShape);
