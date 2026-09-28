@@ -1507,6 +1507,7 @@ class GuardBuilder(GuardBuilderBase):
         # the value so the id stays live; see Note [Reconstructing a function a
         # guard is rooted at] in GuardsStatePickler. Save-path only.
         self.value_guarded_containers: dict[int, Any] = {}
+        self.saved_tensors_hooks_fingerprint: object = _LIVE_SAVED_TENSORS_HOOKS
         self.save_guards = save_guards
         self.guard_filter_fn = guard_filter_fn
 
@@ -5872,7 +5873,11 @@ class CheckFunctionManager:
 
         def portable_create_fn(x: Callable[..., None]) -> Callable[..., None]:
             if x is GuardBuilder.AUTOGRAD_SAVED_TENSORS_HOOKS:
-                fingerprint = getattr(builder, "saved_tensors_hooks_fingerprint", None)
+                fingerprint = builder.saved_tensors_hooks_fingerprint
+                if fingerprint is _LIVE_SAVED_TENSORS_HOOKS:
+                    raise AssertionError(
+                        "AUTOGRAD_SAVED_TENSORS_HOOKS was serialized without being built"
+                    )
                 return functools.partial(x, hooks_fingerprint=fingerprint)
             return normalize_create_fn(x)
 
