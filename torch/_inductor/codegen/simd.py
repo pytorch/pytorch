@@ -3489,9 +3489,7 @@ class SIMDScheduling(BaseScheduling):
                 split_size,
                 8,
             )
-            kernel = self._create_kernel_for_mix_order_reduction(
-                kernel_features, split_size
-            )
+            kernel.rsplit_size = split_size
 
         kernel, ws_name, src_code = self._generate_kernel_code_for_mix_order_reduction(
             kernel_features,
