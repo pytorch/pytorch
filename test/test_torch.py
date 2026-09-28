@@ -11352,10 +11352,15 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         # This is OK, it changes the meta storage size without allocating
         s0.resize_(10)
 
+
+class TestTorchCPU(TestCase):
+    hw_classification = HardwareClassification.CPU
+    exact_dtype = True
+
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @parametrize("dtype", get_all_qint_dtypes())
-    def test_nondeterministic_resize_quantized(self, dtype):
-        a = torch.tensor([-1, 0, 1, 2, 3], dtype=torch.float)
+    @dtypes(*get_all_qint_dtypes())
+    def test_nondeterministic_resize_quantized(self, device, dtype):
+        a = torch.tensor([-1, 0, 1, 2, 3], dtype=torch.float, device=device)
         b = torch.quantize_per_tensor(a, 0.1, 10, dtype)
         self.check_nondeterministic_alert(
             lambda: b.resize_((10,)),
@@ -11501,6 +11506,7 @@ instantiate_device_type_tests(TestTensorDeviceOps, globals())
 instantiate_device_type_tests(TestTorchDeviceType, globals())
 instantiate_device_type_tests(TestTorchCUDA, globals(), only_for="cuda")
 instantiate_device_type_tests(TestDevicePrecision, globals(), except_for='cpu', allow_xpu=True)
+instantiate_device_type_tests(TestTorchCPU, globals(), only_for="cpu")
 instantiate_parametrized_tests(TestTorch)
 
 if __name__ == '__main__':
