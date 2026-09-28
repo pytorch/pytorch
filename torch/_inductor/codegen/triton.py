@@ -7042,6 +7042,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             accumulators = []
             for idx, partial_accum in enumerate(self.saved_partial_accumulate):
                 reduction_type = partial_accum.reduction_type
+                if reduction_type not in ("sum", "prod"):
+                    raise AssertionError(
+                        f"unsupported mix-order reduction type: {reduction_type}"
+                    )
                 default = ir.Reduction.default_accumulator(reduction_type, torch.float)
                 default = self._map_tuple_or_scalar(constant_repr, default)
                 name = f"accum{idx}"
@@ -7086,6 +7090,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     name = f"accum{idx}"
                     accumulator, default = accumulators[idx]
                     if not has_constant_xmask:
+                        # TODO: Peel the final partial tile so full tiles skip this mask.
                         # Pointwise compute can transform masked load values.
                         var = self.cse.generate(
                             self.body,

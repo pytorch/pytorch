@@ -3324,18 +3324,23 @@ class SIMDScheduling(BaseScheduling):
                 epilogues.append(node)
         return reductions, epilogues
 
-    def _create_kernel_for_mix_order_reduction(self, kernel_features, split_size):
+    def _create_kernel_for_mix_order_reduction(
+        self, kernel_features, split_size
+    ) -> TritonKernel:
         numel, rnumel = kernel_features.numel, kernel_features.reduction_numel
-        kernel = self.create_kernel_choices(
-            kernel_features,
-            [{"x": numel, "r0_": rnumel}],
-            {
-                "features": kernel_features,
-                "tiling_scores": None,
-                "mix_order_reduction": True,
-                "override_persistent_reduction": True,
-            },
-        )[0]
+        kernel = cast(
+            "TritonKernel",
+            self.create_kernel_choices(
+                kernel_features,
+                [{"x": numel, "r0_": rnumel}],
+                {
+                    "features": kernel_features,
+                    "tiling_scores": None,
+                    "mix_order_reduction": True,
+                    "override_persistent_reduction": True,
+                },
+            )[0],
+        )
         kernel.rsplit_size = split_size
         if not kernel.persistent_reduction:
             raise AssertionError("expected kernel.persistent_reduction")
