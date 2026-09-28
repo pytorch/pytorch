@@ -9,9 +9,11 @@
 
 #include <ATen/EmptyTensor.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/ScalarOps.h>
 #include <ATen/native/TypeProperties.h>
 #include <c10/core/DefaultDtype.h>
 #include <c10/core/SymNodeImpl.h>
+#include <c10/util/StringUtil.h>
 #include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -581,7 +583,7 @@ std::pair<ScalarType, ScalarType> elementwise_dtypes(const Tensor& a, const Tens
   if (kind == TypePromotionKind::INT_TO_FLOAT && isIntegralType(result_dtype, /*includeBool=*/true)) {
     result_dtype = c10::get_default_dtype_as_scalartype();
   }
-  return {get_computation_dtype(result_dtype), result_dtype};
+  return {get_computation_dtype(result_dtype), kind == TypePromotionKind::ALWAYS_BOOL ? kBool : result_dtype};
 }
 
 // prims.convert_element_type meta. A non-dense tensor gets
@@ -701,6 +703,12 @@ Tensor binary_ref_meta(
     TypePromotionKind kind,
     bool fake_devices,
     const std::optional<Scalar>& alpha) {
+  // A kernel running under the Meta key (e.g. a composite) can mix its own meta
+  // tensors with fakes; every tensor then reports meta, as in Python fake.
+  const auto real_meta = [](const Tensor& t) {
+    return t.is_meta() && !t.unsafeGetTensorImpl()->fake_device().has_value();
+  };
+  fake_devices = fake_devices && !real_meta(self) && !real_meta(other);
   const auto [compute_dtype, result_dtype] = elementwise_dtypes(self, other, kind);
   auto args = maybe_broadcast(
       {maybe_convert_desc(meta_desc(self, fake_devices), compute_dtype),
@@ -726,7 +734,7 @@ Tensor binary_ref_meta(
       b = prim_elementwise_desc({b, alpha_desc}, b.dtype);
     }
   }
-  auto out = prim_elementwise_desc(args, compute_dtype);
+  auto out = prim_elementwise_desc(args, kind == TypePromotionKind::ALWAYS_BOOL ? kBool : compute_dtype);
   if (!is_noncontiguous_supported(self, other) && !is_contiguous_or_false(out)) {
     DimVector identity(out.dim());
     std::iota(identity.begin(), identity.end(), 0);
@@ -740,6 +748,41 @@ Tensor binary_ref_meta(
   }
   const auto converted = convert_element_type_desc(out, result_dtype);
   return Tensor(at::detail::empty_strided_symint_meta(converted.sizes, converted.strides, result_dtype));
+}
+
+Tensor elementwise_binary_ref_meta(
+    const char* name,
+    const Tensor& self,
+    const Tensor& other,
+    TypePromotionKind kind,
+    bool fake_devices,
+    bool supports_lhs_python_scalar) {
+  const bool self_number = self.unsafeGetTensorImpl()->is_wrapped_number();
+  TORCH_CHECK_VALUE(
+      supports_lhs_python_scalar || !self_number, name,
+      ": Received a lhs Python scalar to an elementwise binary operation that does not accept lhs scalars!");
+  TORCH_CHECK_VALUE(
+      !self_number || !other.unsafeGetTensorImpl()->is_wrapped_number(), name,
+      ": Receive two Number inputs to an elementwise binary operation!");
+  return binary_ref_meta(self, other, kind, fake_devices);
+}
+
+Tensor python_number(const Scalar& s) {
+  auto t = at::detail::scalar_tensor_static(s.isSymbolic() ? Scalar(0) : s, s.type(), kCPU);
+  t.unsafeGetTensorImpl()->set_wrapped_number(true);
+  return t;
+}
+
+void check_inplace_broadcast(c10::SymIntArrayRef self_shape, c10::SymIntArrayRef other_shape) {
+  const auto shape = broadcast_shapes({self_shape, other_shape});
+  // tuple(shape) == self_shape, which stops at the first mismatch
+  bool same = shape.size() == self_shape.size();
+  for (size_t i = 0; same && i < shape.size(); ++i) {
+    same = sym_eq_folded(shape[i], self_shape[i]).guard_bool(__FILE__, __LINE__);
+  }
+  TORCH_CHECK(
+      same, "output with shape torch.Size([", c10::Join(", ", self_shape), "]) doesn't match the broadcast shape (",
+      c10::Join(", ", shape), shape.size() == 1 ? ",)" : ")");
 }
 
 // fake_impls.make_fast_binary_impl, which Python fake tries first when the
