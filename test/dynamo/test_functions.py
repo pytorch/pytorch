@@ -5337,6 +5337,18 @@ class GraphModule(torch.nn.Module):
                 return "TypeError"
             return "no error"
 
+        class NoRound:
+            pass
+
+        def keyword_error(f):
+            # Newer CPython appends a "Did you mean" suggestion; compare the
+            # message up to the offending keyword.
+            try:
+                f()
+            except TypeError as e:
+                return str(e).split("'digits'")[0]
+            return "no error"
+
         cases = [
             lambda: round(NoArgRound(), None),
             lambda: round(NoArgRound(), ndigits=None),
@@ -5346,6 +5358,8 @@ class GraphModule(torch.nn.Module):
             lambda: type_error(lambda: round(OtherName(), 2, 3)),
             lambda: type_error(lambda: round(OtherName(), 2, ndigits=3)),
             lambda: type_error(lambda: round(OtherName(), digits=2)),
+            # Arguments are checked before __round__ is looked up.
+            lambda: keyword_error(lambda: round(NoRound(), digits=2)),
         ]
         for case in cases:
             torch._dynamo.reset()

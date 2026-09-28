@@ -2314,13 +2314,9 @@ class BuiltinVariable(BaseBuiltinVariable):
         from .builder import SourcelessBuilder
 
         if isinstance(arg, UserDefinedObjectVariable):
-            round_method = arg._maybe_lookup_method(tx, "__round__")
-            if round_method is None:
-                raise_type_error(
-                    tx, f"type {arg.python_type_name()} doesn't define __round__ method"
-                )
-            # Mirror CPython's builtin_round_impl: __round__() when ndigits is
-            # None, otherwise __round__(ndigits) positionally.
+            # Mirror CPython's builtin_round_impl: arguments are parsed before
+            # __round__ is looked up; then __round__() when ndigits is None,
+            # otherwise __round__(ndigits) positionally.
             num_given = 1 + len(args) + len(kwargs)
             if num_given > 2:
                 raise_type_error(
@@ -2331,6 +2327,11 @@ class BuiltinVariable(BaseBuiltinVariable):
                     raise_type_error(
                         tx, f"round() got an unexpected keyword argument '{name}'"
                     )
+            round_method = arg._maybe_lookup_method(tx, "__round__")
+            if round_method is None:
+                raise_type_error(
+                    tx, f"type {arg.python_type_name()} doesn't define __round__ method"
+                )
             ndigits = args[0] if args else kwargs.get("ndigits")
             if ndigits is None or ndigits.is_constant_none():
                 return round_method.call_function(tx, [], {})
