@@ -12798,9 +12798,6 @@ op_db: list[OpInfo] = [
                             dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16)),
                # FIXME: AssertionError: UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
-               # FIXME: AssertionError: RuntimeError not raised : Expected RuntimeError when doing an unsafe cast
-               # from a result of dtype torch.float32 into an out= with dtype torch.long
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
                # FIXME: RuntimeError: value cannot be converted to type double without overflow
                DecorateInfo(
                    unittest.expectedFailure,
