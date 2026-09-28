@@ -1657,13 +1657,8 @@ Tensor special_xlogy(const Tensor& x, const Scalar& y) {
   return at::xlogy(x, y);
 }
 
-// Mirrors what Python fake tensor runs for add.Tensor: the fast path for
-// symbolic inputs, then refs.add (registered as the Meta kernel by
-// activate_meta).
+// add.Tensor meta kernel
 Tensor add_Tensor_meta(const Tensor& self, const Tensor& other, const Scalar& alpha) {
-  // FakeTensorMode's has_symbolic_sizes counts SymInt arguments only.
-  // Symbolic wrapped numbers are not detected here: they carry a dummy value
-  // and keep their SymInt only on the Python side.
   const bool symbolic = self.unsafeGetTensorImpl()->has_symbolic_sizes_strides() ||
       other.unsafeGetTensorImpl()->has_symbolic_sizes_strides() || alpha.isSymInt();
   if (symbolic) {
@@ -1681,10 +1676,8 @@ Tensor add_Tensor_meta(const Tensor& self, const Tensor& other, const Scalar& al
       default_alpha ? std::nullopt : std::optional<Scalar>(alpha));
 }
 
-// Mirrors what Python fake tensor runs for sub.Tensor: the fast path for
-// symbolic inputs, then refs.sub.
+// sub.Tensor meta kernel
 Tensor sub_Tensor_meta(const Tensor& self, const Tensor& other, const Scalar& alpha) {
-  // FakeTensorMode's has_symbolic_sizes counts SymInt arguments only.
   const bool symbolic = self.unsafeGetTensorImpl()->has_symbolic_sizes_strides() ||
       other.unsafeGetTensorImpl()->has_symbolic_sizes_strides() || alpha.isSymInt();
   if (symbolic) {
@@ -1692,7 +1685,25 @@ Tensor sub_Tensor_meta(const Tensor& self, const Tensor& other, const Scalar& al
       return out;
     }
   }
-  return binary_ref_meta(self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::DEFAULT, symbolic, alpha, /*is_sub=*/true);
+  // refs.sub applies alpha only when alpha != 1. Python evaluates SymBool != 1
+  // to True without guarding.
+  bool apply_alpha = true;
+  if (alpha.isSymInt()) {
+    apply_alpha = alpha.toSymInt().sym_ne(1).guard_bool(__FILE__, __LINE__);
+  } else if (alpha.isSymFloat()) {
+    apply_alpha = alpha.toSymFloat().sym_ne(1.0).guard_bool(__FILE__, __LINE__);
+  } else if (alpha.isComplex()) {
+    apply_alpha = alpha.toComplexDouble() != c10::complex<double>(1, 0);
+  } else if (!alpha.isSymBool()) {
+    apply_alpha = alpha.toDouble() != 1;
+  }
+  return binary_ref_meta(
+      self,
+      other,
+      ELEMENTWISE_TYPE_PROMOTION_KIND::DEFAULT,
+      symbolic,
+      apply_alpha ? std::optional<Scalar>(alpha) : std::nullopt,
+      /*is_sub=*/true);
 }
 
 } // namespace at::native
