@@ -3,6 +3,7 @@
 import importlib
 import json
 import os
+import unittest
 
 import torch
 import torch.distributed.checkpoint as dist_cp
@@ -16,19 +17,27 @@ from torch.distributed.checkpoint._consolidate_hf_safetensors import (
 from torch.distributed.checkpoint._hf_utils import _metadata_fn
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import DTensor, Shard
-from torch.testing._internal.common_utils import run_tests
-from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorContinuousTestBase,
-    DTensorTestBase,
-    NUM_DEVICES,
-    skip_if_lt_x_gpu,
-    with_comms,
+from torch.testing._internal.common_distributed import MultiProcContinuousTest
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
 )
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
 
-class TestConsolidateHFSafeTensors(DTensorContinuousTestBase):
-    world_size = NUM_DEVICES
+HAS_SAFETENSORS = importlib.util.find_spec("safetensors") is not None
+
+
+@unittest.skipUnless(HAS_SAFETENSORS, "requires safetensors")
+class TestConsolidateHFSafeTensors(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.GENERIC
+    device_type = "cpu"
+    world_size = 2
+
+    @classmethod
+    def backend_str(cls) -> str:
+        return dist.get_default_backend_for_device(cls.device_type)
 
     def _create_d_tensors(self) -> None:
         global_tensor = torch.arange(16, dtype=torch.float).view(4, 4)
@@ -75,13 +84,8 @@ class TestConsolidateHFSafeTensors(DTensorContinuousTestBase):
         dist.barrier()
         os.sync()
 
-    @with_comms
     @with_temp_dir
-    @skip_if_lt_x_gpu(2)
     def test_consolidate_to_one_file(self) -> None:
-        if importlib.util.find_spec("safetensors") is None:
-            print("safetensors not installed")
-            return
         import safetensors
 
         checkpoint_dir = self.temp_dir
@@ -118,13 +122,8 @@ class TestConsolidateHFSafeTensors(DTensorContinuousTestBase):
 
         dist.barrier()
 
-    @with_comms
     @with_temp_dir
-    @skip_if_lt_x_gpu(2)
     def test_consolidate_to_two_files(self):
-        if importlib.util.find_spec("safetensors") is None:
-            print("safetensors not installed")
-            return
         import safetensors
 
         checkpoint_dir = self.temp_dir
@@ -164,13 +163,8 @@ class TestConsolidateHFSafeTensors(DTensorContinuousTestBase):
                 )
         dist.barrier()
 
-    @with_comms
     @with_temp_dir
-    @skip_if_lt_x_gpu(2)
     def test_consolidate_with_two_ranks(self):
-        if importlib.util.find_spec("safetensors") is None:
-            print("safetensors not installed")
-            return
         import safetensors
 
         checkpoint_dir = self.temp_dir
@@ -212,13 +206,8 @@ class TestConsolidateHFSafeTensors(DTensorContinuousTestBase):
 
         dist.barrier()
 
-    @with_comms
     @with_temp_dir
-    @skip_if_lt_x_gpu(2)
     def test_consolidate_one_file_with_two_ranks(self):
-        if importlib.util.find_spec("safetensors") is None:
-            print("safetensors not installed")
-            return
         import safetensors
 
         # this is testing the case where one rank has no data to write
@@ -245,7 +234,9 @@ class TestConsolidateHFSafeTensors(DTensorContinuousTestBase):
         self.assertTrue(torch.equal(loaded_dict["dtensor_col"], global_tensor))
 
 
-class TestConsolidateHFSafeTensorsNoProcessGroup(DTensorTestBase):
+class TestConsolidateHFSafeTensorsNoProcessGroup(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_calculate_max_contiguous_elements_validations(self) -> None:
         """Test validation logic in _calculate_max_contiguous_elements function."""
 
