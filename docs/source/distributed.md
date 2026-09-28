@@ -2278,6 +2278,7 @@ metadata is base64-encoded. Unknown fields, versions, backends, and invalid fiel
 types are rejected. Tensor contents and native handles are never serialized.
 
 .. autofunction:: torch.distributed._transport.new_transport
+.. autofunction:: torch.distributed._transport.new_transport_rank
 .. autoclass:: torch.distributed._transport.Transport
    :members:
 .. autoclass:: torch.distributed._transport.Memory
