@@ -38,6 +38,8 @@ from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_FBCODE,
+    IS_WINDOWS,
     parametrize,
     run_tests,
     skipIfCrossRef,
@@ -4600,6 +4602,32 @@ class TestPrecompileCapture(TestCase):
         self.assertFalse(os.path.exists(self.artifact))
 
 
+_EXTENSION_SOURCE = """
+#include <torch/extension.h>
+
+int add_one(int x) {
+  return x + 1;
+}
+
+PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+  m.def("add_one", &add_one);
+}
+"""
+
+_EXTENSION_LOADER = """
+import os
+import sys
+
+from torch.compiler import precompile
+from torch.utils import cpp_extension
+
+name, source = sys.argv[1:]
+with precompile.no_compilation():
+    ext = cpp_extension.load(name, [source], build_directory=os.path.dirname(source))
+print("loaded", ext.add_one(2))
+"""
+
+
 _GOLDEN_MODULE = """
 import types
 
@@ -5606,6 +5634,41 @@ class TestPrecompileNoCompilation(TestCase):
         run.assert_called_once()
         self.assertEqual(run.call_args.args[0], ["ninja", "-n"])
         self.assertEqual(load.call_count, int(up_to_date))
+
+    @unittest.skipIf(
+        IS_FBCODE or IS_WINDOWS, "needs a host compiler and the torch headers"
+    )
+    def test_no_compilation_loads_prebuilt_extension_in_a_fresh_process(self):
+        from torch.utils import cpp_extension
+
+        if not cpp_extension.is_ninja_available():
+            self.skipTest("requires ninja")
+        name = f"precompile_no_compilation_ext_{uuid.uuid4().hex}"
+        with tempfile.TemporaryDirectory() as build_directory:
+            source = os.path.join(build_directory, "ext.cpp")
+            with open(source, "w") as f:
+                f.write(_EXTENSION_SOURCE)
+            cpp_extension.load(name, [source], build_directory=build_directory)
+
+            def load_in_a_fresh_process():
+                return subprocess.run(
+                    [sys.executable, "-c", _EXTENSION_LOADER, name, source],
+                    capture_output=True,
+                    text=True,
+                    timeout=600,
+                )
+
+            # A new process's extension versioner is empty, so this reaches
+            # ninja, which must find the library up to date.
+            out = load_in_a_fresh_process()
+            self.assertEqual(out.returncode, 0, out.stderr)
+            self.assertIn("loaded 3", out.stdout)
+
+            with open(source, "a") as f:
+                f.write("// changed\n")
+            out = load_in_a_fresh_process()
+            self.assertNotEqual(out.returncode, 0, out.stdout)
+            self.assertIn("forbids C++ extension compilation", out.stderr)
 
     def test_no_compilation_allows_unchanged_extension_reload(self):
         from torch.utils import cpp_extension
