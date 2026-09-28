@@ -742,9 +742,10 @@ def get_lf_runners_output(
         allowlist = (data or {}).get("lf_allowlist") or {}
         mode = allowlist.get("mode", "all")
         if mode not in LF_ALLOWLIST_MODES:
-            # Fail open but loud: map_ec2_to_arc.py validates the same field
-            # and will hard-exit every build job on this typo. Logging here
-            # points at the root cause from the one place that only runs once.
+            # Fail open but loud: enforce_lf_allowlist.py validates the same
+            # field and will hard-exit every build job on this typo. Logging
+            # here points at the root cause from the one place that only runs
+            # once.
             log.error(
                 f"{arc_yaml_path}: lf_allowlist.mode must be one of "
                 f"{LF_ALLOWLIST_MODES}, got '{mode}'; treating as unrestricted"
