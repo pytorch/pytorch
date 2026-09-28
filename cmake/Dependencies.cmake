@@ -111,7 +111,7 @@ if(USE_ASAN OR USE_LSAN OR USE_TSAN)
         # through hiprtc and we haven't set up an ASAN-aware hiprtc
         # runtime. Read by the AT_USE_JITERATOR() gate in
         # aten/src/ATen/jit_macros.h.
-        add_definitions(-DAT_DISABLE_JITERATOR)
+        add_compile_definitions(AT_DISABLE_JITERATOR)
       endif()
     else()
       message(WARNING "ASAN not found. Suppress this warning with -DUSE_ASAN=OFF.")
@@ -1004,7 +1004,7 @@ if(USE_LLVM)
     message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 
     include_directories(${LLVM_INCLUDE_DIRS})
-    add_definitions(-DTORCH_ENABLE_LLVM)
+    add_compile_definitions(TORCH_ENABLE_LLVM)
   endif(LLVM_FOUND)
 endif(USE_LLVM)
 
@@ -1093,7 +1093,7 @@ if(USE_ROCM)
     if(USE_ROCM_CK_GEMM)
       list(APPEND HIP_CXX_FLAGS -DUSE_ROCM_CK_GEMM)
     endif()
-    # add_definitions(-DAT_DISABLE_JITERATOR) above doesn't reliably
+    # add_compile_definitions(AT_DISABLE_JITERATOR) above doesn't reliably
     # propagate to HIP TUs; mirror the pattern used for USE_ROCM and
     # add it explicitly so the AT_USE_JITERATOR() gate in
     # aten/src/ATen/jit_macros.h fires under hipified .cu/.cuh TUs.
@@ -1112,13 +1112,13 @@ if(USE_ROCM)
       string(APPEND CMAKE_HIP_FLAGS " --rocm-device-lib-path=${_rocm_device_lib_path}")
     endif()
     if(WIN32)
-      add_definitions(-DROCM_ON_WINDOWS)
+      add_compile_definitions(ROCM_ON_WINDOWS)
       list(APPEND HIP_CXX_FLAGS -fms-extensions)
       # Suppress warnings about dllexport.
       list(APPEND HIP_CXX_FLAGS -Wno-ignored-attributes)
     endif()
-    add_definitions(-DROCM_VERSION=${ROCM_VERSION_DEV_INT})
-    add_definitions(-DTORCH_HIP_VERSION=${TORCH_HIP_VERSION})
+    add_compile_definitions(ROCM_VERSION=${ROCM_VERSION_DEV_INT})
+    add_compile_definitions(TORCH_HIP_VERSION=${TORCH_HIP_VERSION})
     message("TORCH_HIP_VERSION=${TORCH_HIP_VERSION} is added as a compiler defines")
 
     if(CMAKE_BUILD_TYPE MATCHES Debug)
@@ -1135,7 +1135,7 @@ if(USE_ROCM)
     endif()
 
     if(USE_LAYERNORM_FAST_RECIPROCAL)
-      add_definitions(-DUSE_LAYERNORM_FAST_RECIPROCAL)
+      add_compile_definitions(USE_LAYERNORM_FAST_RECIPROCAL)
     endif()
 
     # needed for compat with newer versions of hip-clang that introduced C++20 mangling rules
@@ -1148,6 +1148,12 @@ if(USE_ROCM)
 
     set(Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
       hip::host MIOpen hiprtc::hiprtc)
+
+    # intra_node_comm.cpp is the only consumer, and -Wl,--no-as-needed would
+    # stamp the DT_NEEDED on even when it is not built.
+    if(USE_DISTRIBUTED AND ROCM_VERSION_DEV VERSION_GREATER_EQUAL "7.14.0" AND amd_smi_FOUND)
+      list(APPEND Caffe2_HIP_DEPENDENCY_LIBS amd_smi)
+    endif()
 
     # Math libraries
     list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
@@ -1262,7 +1268,7 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
       set(TP_ENABLE_CUDA_IPC ON CACHE BOOL "" FORCE)
     endif()
     set(TP_BUILD_LIBUV ON CACHE BOOL "" FORCE)
-    add_compile_options(-DTORCH_USE_LIBUV)
+    add_compile_definitions(TORCH_USE_LIBUV)
     include_directories(BEFORE SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/tensorpipe/third_party/libuv/include)
     set(TP_STATIC_OR_SHARED STATIC CACHE STRING "" FORCE)
 
@@ -1408,7 +1414,7 @@ if(USE_GLOO)
     elseif(USE_ROCM)
       list(APPEND Caffe2_HIP_DEPENDENCY_LIBS gloo_hip)
     endif()
-    add_compile_options(-DCAFFE2_USE_GLOO)
+    add_compile_definitions(CAFFE2_USE_GLOO)
   endif()
 endif()
 
@@ -1428,15 +1434,15 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
     set(ONNX_PROTO_POST_BUILD_SCRIPT ${PROJECT_SOURCE_DIR}/cmake/ProtoBufPatch.cmake)
   endif()
   if(ONNX_ML)
-    add_definitions(-DONNX_ML=1)
+    add_compile_definitions(ONNX_ML=1)
   endif()
-  add_definitions(-DONNXIFI_ENABLE_EXT=1)
+  add_compile_definitions(ONNXIFI_ENABLE_EXT=1)
   set(Python3_EXECUTABLE "${Python_EXECUTABLE}")
   if(NOT USE_SYSTEM_ONNX)
     add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx EXCLUDE_FROM_ALL)
   endif()
 
-  add_definitions(-DONNX_NAMESPACE=${ONNX_NAMESPACE})
+  add_compile_definitions(ONNX_NAMESPACE=${ONNX_NAMESPACE})
   if(NOT USE_SYSTEM_ONNX)
     # In mobile build we care about code size, and so we need drop
     # everything (e.g. checker) in onnx but the pb definition.
@@ -1494,7 +1500,7 @@ if(NOT INTERN_BUILD_MOBILE)
 
   if(MSVC)
     # we want to respect the standard, and we are bored of those **** .
-    add_definitions(-D_CRT_SECURE_NO_DEPRECATE=1)
+    add_compile_definitions(_CRT_SECURE_NO_DEPRECATE=1)
     string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler=/wd4819,/wd4503,/wd4190,/wd4244,/wd4251,/wd4275,/wd4522")
   else()
     if(WERROR)
@@ -1504,6 +1510,12 @@ if(NOT INTERN_BUILD_MOBILE)
       if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
         string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-extra-semi ")
         string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-error=pass-failed ")
+        # third_party/cutlass is included as a plain (non-SYSTEM) include dir
+        # for torch_cuda (caffe2/CMakeLists.txt), so -Wunused-function fires on
+        # cutlass header-only helpers (e.g. cutlassGetStatusString, cute's
+        # prefetch) that a given translation unit's CUDA-version-gated
+        # instantiation path happens not to reference.
+        string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-error=unused-function ")
       endif()
       if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND ${CMAKE_CXX_COMPILER_VERSION} VERSION_GREATER_EQUAL 13))
         string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Werror -Xcompiler -Wno-error=sign-compare ")
@@ -1631,31 +1643,31 @@ if(NOT INTERN_BUILD_MOBILE)
     set(CMAKE_EXTRA_INCLUDE_FILES "sys/mman.h")
     CHECK_FUNCTION_EXISTS(mmap HAVE_MMAP)
     if(HAVE_MMAP)
-      add_definitions(-DHAVE_MMAP=1)
+      add_compile_definitions(HAVE_MMAP=1)
     endif(HAVE_MMAP)
     # done for lseek: https://www.gnu.org/software/libc/manual/html_node/File-Position-Primitive.html
-    add_definitions(-D_FILE_OFFSET_BITS=64)
+    add_compile_definitions(_FILE_OFFSET_BITS=64)
     CHECK_FUNCTION_EXISTS(shm_open HAVE_SHM_OPEN)
     if(HAVE_SHM_OPEN)
-      add_definitions(-DHAVE_SHM_OPEN=1)
+      add_compile_definitions(HAVE_SHM_OPEN=1)
     endif(HAVE_SHM_OPEN)
     CHECK_FUNCTION_EXISTS(shm_unlink HAVE_SHM_UNLINK)
     if(HAVE_SHM_UNLINK)
-      add_definitions(-DHAVE_SHM_UNLINK=1)
+      add_compile_definitions(HAVE_SHM_UNLINK=1)
     endif(HAVE_SHM_UNLINK)
     CHECK_FUNCTION_EXISTS(malloc_usable_size HAVE_MALLOC_USABLE_SIZE)
     if(HAVE_MALLOC_USABLE_SIZE)
-      add_definitions(-DHAVE_MALLOC_USABLE_SIZE=1)
+      add_compile_definitions(HAVE_MALLOC_USABLE_SIZE=1)
     endif(HAVE_MALLOC_USABLE_SIZE)
     set(CMAKE_EXTRA_INCLUDE_FILES "fcntl.h")
     CHECK_FUNCTION_EXISTS(posix_fallocate HAVE_POSIX_FALLOCATE)
     if(HAVE_POSIX_FALLOCATE)
-      add_definitions(-DHAVE_POSIX_FALLOCATE=1)
+      add_compile_definitions(HAVE_POSIX_FALLOCATE=1)
     endif(HAVE_POSIX_FALLOCATE)
   endif(UNIX)
 
-  add_definitions(-DUSE_EXTERNAL_MZCRC)
-  add_definitions(-DMINIZ_DISABLE_ZIP_READER_CRC32_CHECKS)
+  add_compile_definitions(USE_EXTERNAL_MZCRC)
+  add_compile_definitions(MINIZ_DISABLE_ZIP_READER_CRC32_CHECKS)
 
   find_package(ZVECTOR) # s390x simd support
 endif()
@@ -1725,12 +1737,35 @@ if(USE_KINETO)
 
   set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party" CACHE STRING "")
   set(KINETO_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/kineto/libkineto" CACHE STRING "")
-  set(KINETO_BUILD_TESTS OFF CACHE BOOL "")
   set(KINETO_LIBRARY_TYPE "static" CACHE STRING "")
+
+  # Kineto's unit tests need gtest, which only exists when BUILD_TEST is on.
+  # The xpu backend is excluded because its tests compile SYCL device code
+  # through an ExternalProject, which does not fit inside this build.
+  if(BUILD_TEST AND NOT KINETO_BACKEND STREQUAL "xpu")
+    set(KINETO_BUILD_TESTS ON CACHE BOOL "" FORCE)
+  else()
+    set(KINETO_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+  endif()
+  # Install alongside PyTorch's own test binaries, where the Windows CI
+  # runner looks for C++ tests.
+  set(KINETO_INSTALL_TESTS ${INSTALL_TEST} CACHE BOOL "" FORCE)
+  set(KINETO_TEST_INSTALL_DIR "test" CACHE STRING "" FORCE)
+
+  # Kineto's tests link nlohmann_json. Create the target from PyTorch's copy
+  # so Kineto skips adding its own; both pin the same version. This mirrors
+  # how fmt is already shared with Kineto above.
+  if(KINETO_BUILD_TESTS AND NOT TARGET nlohmann_json)
+    set(JSON_BuildTests OFF CACHE INTERNAL "")
+    set(JSON_Install OFF CACHE INTERNAL "")
+    add_subdirectory("${CAFFE2_THIRD_PARTY_ROOT}/nlohmann"
+                     "${CMAKE_BINARY_DIR}/third_party/nlohmann")
+  endif()
 
   message(STATUS "Configuring Kineto dependency:")
   message(STATUS "  KINETO_SOURCE_DIR = ${KINETO_SOURCE_DIR}")
   message(STATUS "  KINETO_BUILD_TESTS = ${KINETO_BUILD_TESTS}")
+  message(STATUS "  KINETO_INSTALL_TESTS = ${KINETO_INSTALL_TESTS}")
   message(STATUS "  KINETO_LIBRARY_TYPE = ${KINETO_LIBRARY_TYPE}")
   message(STATUS "  KINETO_BACKEND = ${KINETO_BACKEND}")
 
@@ -1741,7 +1776,23 @@ if(USE_KINETO)
   endif()
 
   if(NOT TARGET kineto)
+    # Send Kineto's test binaries to their own subdirectory of build/bin so
+    # the CI runner can glob them without sweeping up PyTorch's tests too.
+    set(_kineto_saved_runtime_output_dir "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/kineto")
+    # Kineto registers its tests with gtest_discover_tests, which defaults to
+    # running every test binary during the build to enumerate its cases. Those
+    # binaries link CUPTI, whose DLL is not on PATH while a Windows build runs,
+    # so each one fails to start and takes the build down with it. Defer
+    # discovery to test time instead. Nothing is lost: PyTorch finds these
+    # tests by listing the built binaries rather than through CTest.
+    set(_kineto_saved_discovery_mode "${CMAKE_GTEST_DISCOVER_TESTS_DISCOVERY_MODE}")
+    set(CMAKE_GTEST_DISCOVER_TESTS_DISCOVERY_MODE PRE_TEST)
     add_subdirectory("${KINETO_SOURCE_DIR}")
+    set(CMAKE_GTEST_DISCOVER_TESTS_DISCOVERY_MODE "${_kineto_saved_discovery_mode}")
+    unset(_kineto_saved_discovery_mode)
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${_kineto_saved_runtime_output_dir}")
+    unset(_kineto_saved_runtime_output_dir)
     set_property(TARGET kineto PROPERTY POSITION_INDEPENDENT_CODE ON)
   endif()
   list(APPEND Caffe2_DEPENDENCY_LIBS kineto)

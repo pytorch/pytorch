@@ -330,6 +330,17 @@ class Vectorized<double> {
   Vectorized<double> pow(const Vectorized<double>& b) const {
     return Vectorized<double>(Sleef_powd8_u10(values, b));
   }
+  double reduce_add() const {
+    return _mm512_reduce_add_pd(values);
+  }
+  // Propagates NaN, matching maximum() and torch.max; the vmaxpd sequence
+  // behind _mm512_reduce_max_pd drops it. See Vectorized<double> in vec256.
+  double reduce_max() const {
+    const double m = _mm512_reduce_max_pd(values);
+    return _mm512_cmp_pd_mask(values, values, _CMP_UNORD_Q)
+        ? std::numeric_limits<double>::quiet_NaN()
+        : m;
+  }
   // Comparison using the _CMP_**_OQ predicate.
   //   `O`: get false if an operand is NaN
   //   `Q`: do not raise if an operand is NaN

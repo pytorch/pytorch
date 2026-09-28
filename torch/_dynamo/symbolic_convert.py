@@ -93,7 +93,7 @@ from .bytecode_transformation import (
     Instruction,
     is_generator,
     is_jump_absolute,
-    unique_id,
+    unique_id_unbound_in,
 )
 from .code_context import code_context
 from .codegen import PyCodegen
@@ -126,7 +126,7 @@ from .polyfills import (
     impl_MATCH_KEYS,
     impl_MATCH_SEQUENCE,
 )
-from .replay_record import DummyModule, ExecutionRecorder
+from .replay_record import ExecutionRecorder
 from .resume_execution import (
     ContinueExecutionCache,
     IS_TRACING_RESUME_PROLOGUE_VARNAME,
@@ -157,7 +157,13 @@ from .utils import (
     PySendResult,
     unpack_iterable,
 )
-from .variables.base import SourceLocation, typestr, ValueMutationNew, VariableTracker
+from .variables.base import (
+    AttributeMutationNew,
+    SourceLocation,
+    typestr,
+    ValueMutationNew,
+    VariableTracker,
+)
 from .variables.builder import FrameStateSizeEntry, VariableBuilder, wrap_fx_proxy
 from .variables.builtin import BuiltinVariable, DictBuiltinVariable
 from .variables.constant import ConstantVariable
@@ -177,6 +183,7 @@ from .variables.functions import (
     NestedUserFunctionVariable,
     SkipFunctionVariable,
     UserFunctionVariable,
+    UserMethodVariable,
 )
 from .variables.iter import MAX_ITERATOR_LIMIT
 from .variables.lazy import LazyVariableTracker
@@ -185,6 +192,7 @@ from .variables.lists import (
     DequeIteratorVariable,
     DequeReverseIteratorVariable,
     ListIteratorVariable,
+    ListReverseIteratorVariable,
     ListVariable,
     SliceVariable,
     TupleIteratorVariable,
@@ -209,7 +217,12 @@ from .variables.object_protocol import (
 )
 from .variables.sets import SetVariable
 from .variables.streams import SymbolicStreamState
-from .variables.tensor import supported_comparison_ops, SymNodeVariable, TensorVariable
+from .variables.tensor import (
+    _contains_graph_intermediate,
+    supported_comparison_ops,
+    SymNodeVariable,
+    TensorVariable,
+)
 from .variables.torch_function import (
     SymbolicTorchFunctionState,
     TorchFunctionModeVariable,
@@ -1117,6 +1130,9 @@ def break_graph_if_unsupported(
                     # If there is, we roll back to the checkpoint and fall back.
                     if isinstance(excp, Unsupported):
                         excp.remove_from_stats()
+                    preserve_skip_frame = (
+                        excp.skip_frame and excp.preserve_skip_frame_after_inline
+                    )
                     unimplemented(
                         gb_type="Graph break under GenericContextWrappingVariable",
                         context=f"Active generic context managers: {self.active_generic_context_managers}",
@@ -1126,9 +1142,16 @@ def break_graph_if_unsupported(
                             *graph_break_hints.CAUSED_BY_EARLIER_GRAPH_BREAK,
                         ],
                         from_exc=excp,
+                        skip_frame=preserve_skip_frame,
+                        preserve_skip_frame_after_inline=preserve_skip_frame,
+                        # Only a preserved whole-frame skip may remain
+                        # invocation-scoped; replacement graph breaks are cached.
+                        apply_to_code=(
+                            excp.apply_to_code if preserve_skip_frame else True
+                        ),
                     )
 
-                if getattr(excp, "skip_frame", False):
+                if excp.skip_frame:
                     raise
 
                 if not self.should_compile_partial_graph():
@@ -1611,6 +1634,102 @@ class InstructionTranslatorBase(
         self.symbolic_locals = {
             k: v for k, v in self.symbolic_locals.items() if k in normalized_reads
         }
+
+    def has_live_graph_intermediate(self) -> bool:
+        """Return whether a differentiable intermediate must cross this break."""
+
+        # Note [Liveness scan for eager autograd graph breaks]
+        # AOTAutograd does not preserve edges between differentiably related
+        # outputs of the current compiled prefix. A false negative here can
+        # therefore silently change gradients. These roots cover the persistent
+        # stores currently known to carry values across the break: the current and
+        # inlined parent frames, active exception state, modified pre-existing
+        # objects (including globals), active context managers, backward state,
+        # tensor hooks, saved tensors, and suspended local generators. New
+        # persistent VariableTracker storage must extend this list.
+
+        def get_live_values(tx: InstructionTranslatorBase) -> list[Any]:
+            values: list[Any] = [
+                tx.stack,
+                tx.symbolic_cellvars,
+                [tx.exn_vt_stack[i] for i in range(len(tx.exn_vt_stack))],
+                tx.active_generic_context_managers,
+                [
+                    entry.with_context
+                    for entry in tx.block_stack
+                    if entry.with_context is not None
+                ],
+            ]
+            if tx.exn_vt_stack._current_exception is not None:
+                values.append(tx.exn_vt_stack._current_exception)
+            if isinstance(tx, InliningGeneratorInstructionTranslator):
+                # A suspended generator detaches its exception segment from the
+                # shared stack, but those exception values remain live in the
+                # generator frame.
+                values.append(tx.gi_exc_state.items)
+            instruction = tx.current_instruction
+            if instruction not in tx.instructions:
+                # Before Python 3.11, creating a local generator does not run its
+                # inline tracer, so it still points at the synthetic initial NOP.
+                instruction = tx.instructions[0]
+            reads = livevars_analysis(tx.instructions, instruction)
+            for name in reads:
+                key = name.replace(".", "implicit") if name.startswith(".") else name
+                if key in tx.symbolic_locals:
+                    values.append(tx.symbolic_locals[key])
+            return values
+
+        live_values: list[Any] = []
+        cur_tx: InstructionTranslatorBase | None = self
+        while cur_tx is not None:
+            live_values.extend(get_live_values(cur_tx))
+            cur_tx = cur_tx.parent
+
+        side_effects = self.output.side_effects
+        modified_existing_vars = [
+            var
+            for var in side_effects.id_to_variable.values()
+            if not isinstance(var.mutation_type, AttributeMutationNew)
+            and side_effects.is_modified(var)
+        ]
+        live_values.extend(
+            [
+                modified_existing_vars,
+                self.output.backward_state,
+                side_effects.tensor_hooks,
+                side_effects.save_for_backward,
+            ]
+        )
+
+        # LocalGeneratorObjectVariable deliberately excludes its instruction
+        # translator from generic VariableTracker traversal. Its created or
+        # suspended frame can nevertheless keep graph intermediates live here.
+        pending_values = list(live_values)
+        visit_cache: dict[int, Any] = {}
+        seen_generator_tracers: set[int] = set()
+        while pending_values:
+            generators: list[LocalGeneratorObjectVariable] = []
+
+            def collect_generator(vt: VariableTracker) -> None:
+                if isinstance(vt, LocalGeneratorObjectVariable):
+                    generators.append(vt)
+
+            VariableTracker.visit(
+                collect_generator,
+                pending_values.pop(),
+                cache=visit_cache,
+                side_effects=side_effects,
+            )
+            for generator in generators:
+                tracer = generator.inline_tracer
+                if id(tracer) in seen_generator_tracers:
+                    continue
+                seen_generator_tracers.add(id(tracer))
+                generator_values = get_live_values(tracer)
+                live_values.extend(generator_values)
+                pending_values.extend(generator_values)
+
+        return _contains_graph_intermediate(live_values, side_effects)
 
     def call_function(
         self,
@@ -2272,17 +2391,34 @@ class InstructionTranslatorBase(
                 raise AssertionError("expected type(val) is bool to be true")
             self.is_tracing_resume_prologue = val
 
+    def _raise_unbound_local_error(self, name: str) -> NoReturn:
+        raise_observed_exception(
+            UnboundLocalError,
+            self,
+            args=[
+                f"cannot access local variable '{name}' where it is not associated with a value"
+            ],
+        )
+
     def DELETE_FAST(self, inst: Instruction) -> None:
-        var = self.symbolic_locals.get(inst.argval)
+        name = inst.argval
+        var = self.symbolic_locals.get(name)
+        if var is None or istype(var, NullVariable):
+            self._raise_unbound_local_error(name)
         if isinstance(var, TensorVariable):
             self._maybe_emit_sync_dealloc(var)
-        del self.symbolic_locals[inst.argval]
+        if sys.version_info >= (3, 12):
+            # LOAD_FAST_CHECK handles NULL locals on Python 3.12 and newer.
+            self.symbolic_locals[name] = NullVariable()
+        else:
+            del self.symbolic_locals[name]
 
     def _maybe_emit_sync_dealloc(self, var: TensorVariable) -> None:
         from .variables.streams import get_current_stream, new_event
 
         device = var.device
-        if device is None or device.type not in ("cuda", "mtia", "xpu"):
+        acc = torch.accelerator.current_accelerator()
+        if device is None or acc is None or device.type != acc.type:
             return
 
         node = var.proxy.node
@@ -2412,11 +2548,14 @@ class InstructionTranslatorBase(
             )
         self.output.side_effects.store_global(variable, name, value)
 
-    # Cache note: This cache only exists for the duration of this
-    # InstructionTranslator - so it should be safe to do.
-    @cache_method
+    # Keyed by module_name alone, not the whole argument tuple as @cache_method
+    # would key it, so a later argument cannot silently split the memo. Per
+    # translator, as the decorator was, and written only past the alias check.
     def import_source(self, module_name: str) -> GlobalSource:
         """Create an alias to a module for use in guards"""
+        if (memo := self._import_source_memo.get(module_name)) is not None:
+            return memo
+
         if "torch_package" in module_name:
             value = torch.package.package_importer._package_imported_modules[
                 module_name
@@ -2438,7 +2577,9 @@ class InstructionTranslatorBase(
             )
         f_globals[alias] = value
         self.output.update_co_names(alias)
-        return GlobalSource(alias)
+        source = GlobalSource(alias)
+        self._import_source_memo[module_name] = source
+        return source
 
     def resolve_name(self, name: str, package: str, level: int) -> str:
         """
@@ -2510,6 +2651,17 @@ class InstructionTranslatorBase(
                     hints=[*graph_break_hints.USER_ERROR],
                 )
 
+            # A non-module sys.modules entry must not reach import_source, which
+            # binds the result into the traced globals. The replay arm needs no
+            # check: its values are the DummyModules add_local_mod admitted.
+            if not isinstance(value, types.ModuleType):
+                unimplemented(
+                    gb_type="Bad import result",
+                    context=typestr(value),
+                    explanation="Import result is not a Python module.",
+                    hints=[],
+                )
+
             if level != 0:
                 pkg = self.calc_package()
                 module_name = self.resolve_name(module_name, pkg, level)
@@ -2529,18 +2681,8 @@ class InstructionTranslatorBase(
             # pyrefly: ignore [unbound-name]
             self.exec_recorder.add_local_mod(recorded_name, value)
 
-        # pyrefly: ignore [unbound-name]
-        if isinstance(value, (types.ModuleType, DummyModule)):
-            # pyrefly: ignore [unbound-name, bad-argument-type]
-            self.push(PythonModuleVariable(value, source=source))
-        else:
-            unimplemented(
-                gb_type="Bad import result",
-                # pyrefly: ignore [unbound-name]
-                context=typestr(value),
-                explanation="Import result is not a Python module.",
-                hints=[],
-            )
+        # pyrefly: ignore [unbound-name, bad-argument-type]
+        self.push(PythonModuleVariable(value, source=source))
 
     # fb internal 3.12 opcode
     EAGER_IMPORT_NAME = IMPORT_NAME
@@ -3367,6 +3509,15 @@ class InstructionTranslatorBase(
         except Unsupported:
             if not obj.is_python_constant():
                 raise
+            # An eager getattr would run a user-defined __get__ at trace time
+            # and bake its result into the graph.
+            if isinstance(obj, variables.UserDefinedClassVariable) and isinstance(
+                inspect.getattr_static(
+                    type(obj.lookup_cls_mro_attr(attr)), "__get__", None
+                ),
+                types.FunctionType,
+            ):
+                raise
             source = AttrSource(obj.source, attr) if obj.source else None
             result = VariableTracker.build(
                 self, getattr(obj.as_python_constant(), attr), source=source
@@ -3537,7 +3688,12 @@ class InstructionTranslatorBase(
                 raise AssertionError("expected resume_inst.target to be true")
             resume_inst = resume_inst.target
 
-        resume_name = unique_id(f"__resume_at_{resume_inst.offset}")
+        # The name is skipped forward here rather than inside
+        # install_global_unsafe, which cannot hand a substitute back to callers
+        # that use the name they passed for more than the install: this one bakes
+        # it into the resume function itself and records it on the package.
+        resume_prefix = f"__resume_at_{resume_inst.offset}"
+        resume_name = unique_id_unbound_in(resume_prefix, self.output.global_scope)
 
         # More locals may have been pruned in the current/leaf frame
         # after the unsupported instruction (e.g. branch).
@@ -4938,13 +5094,9 @@ class InstructionTranslatorBase(
                 self._comprehension_depth -= 1
 
     def LOAD_FAST_CHECK(self, inst: Instruction) -> None:
-        if istype(self.symbolic_locals.get(inst.argval, None), NullVariable):
-            unimplemented(
-                gb_type="LOAD_FAST_CHECK on uninitialized variable",
-                context=inst.argval,
-                explanation=f"Attempted to load uninitialized local variable {inst.argval}",
-                hints=[*graph_break_hints.USER_ERROR],
-            )
+        name = inst.argval
+        if istype(self.symbolic_locals.get(name), NullVariable):
+            self._raise_unbound_local_error(name)
         self.LOAD_FAST(inst)
 
     def LOAD_FAST_AND_CLEAR(self, inst: Instruction) -> None:
@@ -5496,6 +5648,8 @@ class InstructionTranslatorBase(
         )
         # Per-prefix record of the most recently generated pycode varname.
         self._pycode_last_varname: dict[str, str] = {}
+        # Module name -> the alias source import_source minted for it.
+        self._import_source_memo: dict[str, GlobalSource] = {}
 
         # Properties of the input/output code
         self.instructions: list[Instruction] = instructions
@@ -6048,7 +6202,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 hints=[],
             )
 
-        if isinstance(func, UserFunctionVariable) and inspect.getattr_static(
+        if isinstance(
+            func, (UserFunctionVariable, UserMethodVariable)
+        ) and inspect.getattr_static(
             func.get_function(), "_torchdynamo_disable", False
         ):
             msg = inspect.getattr_static(
@@ -6113,12 +6269,13 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             func,
             (
                 UserFunctionVariable,
+                UserMethodVariable,
                 NestedUserFunctionVariable,
                 LocalGeneratorFunctionVariable,
             ),
         ):
             raise AssertionError(
-                "expected isinstance( func, ( UserFunctionVariable, NestedUserFunctionVariable, LocalGeneratorFunctionVariable, ), ) to be true"
+                "expected isinstance( func, ( UserFunctionVariable, UserMethodVariable, NestedUserFunctionVariable, LocalGeneratorFunctionVariable, ), ) to be true"
             )
         code: types.CodeType = func.get_code()
         result = None
@@ -6275,9 +6432,11 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             # bubble up the exception to the parent frame.
             raise
         except (Unsupported, UserError) as e:
-            # If this graph break has skip_frame set, unset it
-            # since it refers to the current frame and not the parent.
-            e.skip_frame = False
+            if not e.preserve_skip_frame_after_inline:
+                # If this graph break has skip_frame set, unset it
+                # since it refers to the current frame and not the parent.
+                e.skip_frame = False
+                e.apply_to_code = True
             raise
         except Exception:
             log.debug("FAILED INLINING %s", code)
@@ -6579,6 +6738,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
             TupleIteratorVariable,
             DequeIteratorVariable,
             DequeReverseIteratorVariable,
+            ListReverseIteratorVariable,
         )
         if not isinstance(tos, iter_vts):
             self.pop()
