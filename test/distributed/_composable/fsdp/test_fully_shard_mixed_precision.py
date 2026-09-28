@@ -1336,7 +1336,7 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
             loss.backward()
 
     @skip_if_lt_x_gpu(1)
-    def test_grad_dtype_none_requires_reduce_dtype(self):
+    def test_reduce_scatter_unused_params_rejects_grad_dtype_none(self):
         model = nn.Linear(2, 2, device=device_type)
         model.weight.grad_dtype = None
         model.weight.requires_grad_(False)
