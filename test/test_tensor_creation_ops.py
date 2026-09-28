@@ -1108,8 +1108,8 @@ class TestTensorCreation(TestCase):
     # nondeterministically fails, warning "invalid value encountered in cast"
     @skipCUDAIf(True, "CUDA diverges on most dtypes, often dramatically.")
     @unittest.skipIf(IS_S390X, "Test fails for int16 on s390x. Needs investigation.")
-    @parametrize("dtype", [torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64])
-    def test_float_to_int_conversion_nonfinite(self, dtype):
+    @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
+    def test_float_to_int_conversion_nonfinite(self, device, dtype):
         vals = (float('-inf'), float('inf'), float('nan'))
 
         if dtype == torch.bool:
@@ -1122,7 +1122,7 @@ class TestTensorCreation(TestCase):
             refs = (0, 0, 0)
             if dtype in (torch.int32, torch.int64):
                 refs = (torch.iinfo(dtype).min, ) * 3
-        _float_to_int_conversion_helper(self, vals, "cpu", dtype, refs)
+        _float_to_int_conversion_helper(self, vals, device, dtype, refs)
 
     def test_complex_type_conversions(self, device):
         dtypes = [torch.float, torch.complex64, torch.complex128]
@@ -1953,11 +1953,7 @@ class TestTensorCreation(TestCase):
         device_type = torch_device.type
 
         dtypes = get_all_dtypes(include_half=False, include_bfloat16=False, include_complex32=True)
-        if device_type == 'cpu':
-            do_test_empty_full(self, dtypes, torch.strided, torch_device)
-        if torch.accelerator.is_available() and device_type == torch.accelerator.current_accelerator().type:
-            do_test_empty_full(self, dtypes, torch.strided, None)
-            do_test_empty_full(self, dtypes, torch.strided, torch_device)
+        do_test_empty_full(self, dtypes, torch.strided, torch_device)
 
     # TODO: this test should be updated
     @suppress_warnings
@@ -2643,27 +2639,6 @@ class TestTensorCreation(TestCase):
         self.assertEqual((1, 1, 0), torch.tensor([[[]]], device=device).shape)
         self.assertEqual((1, 1, 0), torch.as_tensor([[[]]], device=device).shape)
 
-    @onlyAccelerator
-    def test_tensor_factory_device_type_inference(self, device):
-        with set_default_dtype(torch.float64), torch.device(device):
-            with set_default_dtype(torch.float32):
-                self.assertIs(torch.float32, torch.tensor(0.).dtype)
-                self.assertEqual(torch.device(device), torch.tensor(0.).device)
-            with set_default_dtype(torch.float64):
-                self.assertIs(torch.float64, torch.tensor(0.).dtype)
-                self.assertEqual(torch.device(device), torch.tensor(0.).device)
-
-    @onlyAccelerator
-    def test_tensor_factory_device_type(self, device):
-        with set_default_dtype(torch.float), torch.device(device):
-            x = torch.zeros((5, 5))
-            self.assertIs(torch.float32, x.dtype)
-            self.assertEqual(x.device, torch.device(device))
-        with set_default_dtype(torch.float64), torch.device(device):
-            x = torch.zeros((5, 5))
-            self.assertIs(torch.float64, x.dtype)
-            self.assertEqual(x.device, torch.device(device))
-
     @skipCPUIf(True, 'compares device with cpu')
     @dtypes(torch.int, torch.long, torch.float, torch.double)
     def test_arange_device_vs_cpu(self, device, dtype):
@@ -3330,6 +3305,24 @@ class TestTensorCreationCudaOnly(TestCase):
             self.assertIs(torch.int, res1.dtype)
             self.assertEqual(res1.get_device(), expected.get_device())
 
+    def test_tensor_factory_gpu_type_inference(self):
+        with set_default_tensor_type(torch.cuda.DoubleTensor):
+            with set_default_dtype(torch.float32):
+                self.assertIs(torch.float32, torch.tensor(0.).dtype)
+                self.assertEqual(torch.device("cuda"), torch.tensor(0.).device)
+            with set_default_dtype(torch.float64):
+                self.assertIs(torch.float64, torch.tensor(0.).dtype)
+                self.assertEqual(torch.device("cuda"), torch.tensor(0.).device)
+
+    def test_tensor_factory_gpu_type(self):
+        with set_default_tensor_type(torch.cuda.FloatTensor):
+            x = torch.zeros((5, 5))
+            self.assertIs(torch.float32, x.dtype)
+            self.assertTrue(x.is_cuda)
+        with set_default_tensor_type(torch.cuda.DoubleTensor):
+            x = torch.zeros((5, 5))
+            self.assertIs(torch.float64, x.dtype)
+            self.assertTrue(x.is_cuda)
 # Class for testing random tensor creation ops, like torch.randint
 class TestRandomTensorCreation(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
