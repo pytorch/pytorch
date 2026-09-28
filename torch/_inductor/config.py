@@ -2984,7 +2984,14 @@ class xpu(cutlass):
     # Path to Intel OneAPI.
     oneapi_root: str | None = None
 
-    cutlass_dir = os.path.realpath(os.environ.get("TORCHINDUCTOR_CUTLASS_DIR", ""))
+    # Path to the CUTLASS repo root. Same default as `cutlass`:
+    # TORCHINDUCTOR_CUTLASS_DIR when it is set, otherwise the bundled
+    # third_party/cutlass. It used to be
+    # `os.path.realpath(os.environ.get("TORCHINDUCTOR_CUTLASS_DIR", ""))`, i.e. the
+    # current working directory when the env var is unset, which made
+    # try_import_cutlass() look for CUTLASS in the CWD and silently disable the backend
+    # on any build that had XPU compiled in.
+    cutlass_dir = cutlass.cutlass_dir
 
 
 class rocm:
