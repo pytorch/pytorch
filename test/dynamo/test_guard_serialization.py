@@ -32,9 +32,9 @@ from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
 from torch._dynamo.bytecode_transformation import transform_code_object
 from torch._dynamo.exc import PackageError
 from torch._dynamo.guards import (
-    _method_code_matches,
-    _method_code_metadata,
     _Missing,
+    _native_method_matches,
+    _native_method_metadata,
     CheckFunctionManager,
     CompileId,
     GuardsStatePickler,
@@ -3790,35 +3790,11 @@ class TestGuardSerialization(TestGuardSerializationBase):
         ):
             self._test_serialization("CLOSURE_MATCH", fn, torch.randn(3))
 
-    def test_bound_method_closure_match(self):
-        def fn(x, m):
-            return m(x) + 1
-
-        x = torch.randn(3)
-        ref, loaded = self._test_serialization(
-            "CLOSURE_MATCH", fn, x, PlainMethods().add
-        )
-        self._test_check_fn(ref, loaded, {"x": x, "m": PlainMethods().add}, True)
-        other = types.MethodType(lambda self, x: x, PlainMethods())
-        self._test_check_fn(ref, loaded, {"x": x, "m": other}, False)
-
-    def test_method_code_match_round_trips(self):
-        # An identity guard on a bound method is saved as its function's code
-        # and globals module; the receiver keeps its own guards.
-        self.assertTrue(is_portable_function_guard("ID_MATCH", PlainMethods().add))
-        buf = io.BytesIO()
-        GuardsStatePickler({}, {}, {}, {}, buf).dump(
-            _method_code_metadata(PlainMethods().add)
-        )
-        expected = load_guards_state(buf.getvalue())
-        self.assertTrue(_method_code_matches(PlainMethods().add, expected))
-        self.assertFalse(_method_code_matches(PlainMethods.make, expected))
-        self.assertFalse(_method_code_matches(PlainMethods.add, expected))
-
     def test_native_method_match(self):
         def fn(x):
             return double_apply(x)
 
+        self.assertTrue(is_portable_function_guard("ID_MATCH", double_apply))
         x = torch.randn(3)
         ref, loaded = self._test_serialization("ID_MATCH", fn, x)
         self._test_check_fn(ref, loaded, {"x": x}, True)
@@ -3827,6 +3803,10 @@ class TestGuardSerialization(TestGuardSerializationBase):
             self.assertTrue(loaded.check({"x": x}))
         with mock.patch.dict(globals(), {"double_apply": _TripleFn.apply}):
             self._test_check_fn(ref, loaded, {"x": x}, False)
+        # An object whose __eq__ always answers True is still rejected.
+        expected = _native_method_metadata(double_apply)
+        self.assertTrue(_native_method_matches(_DoubleFn.apply, expected))
+        self.assertFalse(_native_method_matches(mock.ANY, expected))
 
     def test_sequence_length(self):
         # tuple input installs a SEQUENCE_LENGTH guard
@@ -4513,6 +4493,48 @@ class TestGuardSerialization(TestGuardSerializationBase):
         other.scale = 3
         self._test_check_fn(ref, loaded, {"x": same}, True)
         self._test_check_fn(ref, loaded, {"x": other}, False)
+
+    def test_hasattr_only_tensor_attribute_keeps_its_presence(self):
+        def fn(x):
+            return x + 1 if hasattr(x, "cfg") else x - 1
+
+        x = torch.randn(3)
+        x.cfg = object()
+        ref, loaded = self._test_serialization("HASATTR", fn, x)
+        with_cfg, without_cfg = torch.randn(3), torch.randn(3)
+        with_cfg.cfg = object()
+        self._test_check_fn(ref, loaded, {"x": with_cfg}, True)
+        self._test_check_fn(ref, loaded, {"x": without_cfg}, False)
+
+    def test_guard_reading_a_fake_tensor_owned_name_raises(self):
+        def fn(x):
+            return x * x.constant
+
+        x = torch.randn(3)
+        x.constant = 2
+        with self.assertRaisesRegex(PackageError, "reads 'constant' off a tensor"):
+            self._test_serialization("EQUALS_MATCH", fn, x)
+
+    def test_tensor_attributes_carried_through_the_pickle(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        x = torch.randn(3)
+        x.me = x
+        x._cpu_copy = torch.randn(2)
+        x.gen = (i for i in range(3))
+        fake = FakeTensorMode().from_tensor(torch.randn(3))
+        fake.scale = 2
+        tree = {id(v): v for v in (x, x._cpu_copy, fake)}
+        buf = io.BytesIO()
+        GuardsStatePickler(tree, {}, {}, {}, buf).dump({"x": x, "fake": fake})
+        state = load_guards_state(buf.getvalue())
+        out = state["x"]
+        self.assertIs(out.me, out)
+        self.assertEqual(out._cpu_copy.shape, (2,))
+        # The generator does not pickle; its name survives for a HASATTR guard.
+        self.assertIsInstance(out.gen, _Missing)
+        self.assertEqual(state["fake"].scale, 2)
+        self.assertNotIn(b"FakeTensorMode", buf.getvalue())
 
     def test_builtin_match(self):
         def fn(x):
