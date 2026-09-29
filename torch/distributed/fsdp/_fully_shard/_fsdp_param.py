@@ -1171,6 +1171,28 @@ class FSDPParam:
                         self._module_info.module,
                         self.mp_policy,
                     )
+                    # AllGatherInput payloads declare their own gathered layout
+                    legacy_input_sizes = [
+                        t.size()
+                        for t in all_gather_inputs
+                        if isinstance(t, torch.Tensor)
+                    ]
+                    if (
+                        sharded_local_tensor.size() != self.padded_sharded_param_size
+                        and any(
+                            size != self.padded_sharded_param_size
+                            for size in legacy_input_sizes
+                        )
+                    ):
+                        # NOTE: Since this error can only be raised on the
+                        # ranks that have padding, this can manifest as a NCCL
+                        # watchdog timeout, as the other ranks will not error.
+                        raise AssertionError(
+                            "When a parameter is unevenly sharded by FSDP "
+                            f"(orig size={self._orig_size}, FSDP world size={self.mesh_info.mesh.size()}), "
+                            "fsdp_pre_all_gather must return all-gather inputs with the padded sharded size "
+                            f"{self.padded_sharded_param_size} but got {legacy_input_sizes}"
+                        )
                 world_size = (
                     self.mesh_info.shard_mesh_size
                     if isinstance(self.mesh_info, FSDPMeshInfo)
@@ -1182,11 +1204,6 @@ class FSDPParam:
                         world_size=world_size,
                         shard_dim=self.fsdp_placement.dim,
                         padded_sharded_size=self.padded_sharded_param_size,
-                        require_padding=(
-                            num_fn_params == 5
-                            and sharded_local_tensor.size()
-                            != self.padded_sharded_param_size
-                        ),
                         all_gather_outputs=self.all_gather_outputs,
                     )
                 )
@@ -1414,7 +1431,6 @@ def _normalize_all_gather_inputs(
     world_size: int,
     shard_dim: int,
     padded_sharded_size: torch.Size,
-    require_padding: bool,
     all_gather_outputs: Sequence[torch.Tensor] = (),
 ) -> tuple[list[torch.Tensor], tuple[_AllGatherOutputLayout, ...]]:
     gather_inputs: list[torch.Tensor | AllGatherInput] = []
@@ -1449,11 +1465,6 @@ def _normalize_all_gather_inputs(
                 input_size, inp.dim, world_size, inp.output_size
             )
         else:
-            if require_padding and input_size != padded_sharded_size:
-                raise AssertionError(
-                    "fsdp_pre_all_gather must return all-gather inputs with the padded sharded size "
-                    f"{padded_sharded_size} but got {input_size}"
-                )
             input_numel = input_size.numel()
             if validate_legacy_outputs:
                 output_numel = (

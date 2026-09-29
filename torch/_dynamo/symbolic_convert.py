@@ -126,7 +126,7 @@ from .polyfills import (
     impl_MATCH_KEYS,
     impl_MATCH_SEQUENCE,
 )
-from .replay_record import DummyModule, ExecutionRecorder
+from .replay_record import ExecutionRecorder
 from .resume_execution import (
     ContinueExecutionCache,
     IS_TRACING_RESUME_PROLOGUE_VARNAME,
@@ -2283,7 +2283,8 @@ class InstructionTranslatorBase(
         from .variables.streams import get_current_stream, new_event
 
         device = var.device
-        if device is None or device.type not in ("cuda", "mtia", "xpu"):
+        acc = torch.accelerator.current_accelerator()
+        if device is None or acc is None or device.type != acc.type:
             return
 
         node = var.proxy.node
@@ -2413,11 +2414,14 @@ class InstructionTranslatorBase(
             )
         self.output.side_effects.store_global(variable, name, value)
 
-    # Cache note: This cache only exists for the duration of this
-    # InstructionTranslator - so it should be safe to do.
-    @cache_method
+    # Keyed by module_name alone, not the whole argument tuple as @cache_method
+    # would key it, so a later argument cannot silently split the memo. Per
+    # translator, as the decorator was, and written only past the alias check.
     def import_source(self, module_name: str) -> GlobalSource:
         """Create an alias to a module for use in guards"""
+        if (memo := self._import_source_memo.get(module_name)) is not None:
+            return memo
+
         if "torch_package" in module_name:
             value = torch.package.package_importer._package_imported_modules[
                 module_name
@@ -2439,7 +2443,9 @@ class InstructionTranslatorBase(
             )
         f_globals[alias] = value
         self.output.update_co_names(alias)
-        return GlobalSource(alias)
+        source = GlobalSource(alias)
+        self._import_source_memo[module_name] = source
+        return source
 
     def resolve_name(self, name: str, package: str, level: int) -> str:
         """
@@ -2511,6 +2517,17 @@ class InstructionTranslatorBase(
                     hints=[*graph_break_hints.USER_ERROR],
                 )
 
+            # A non-module sys.modules entry must not reach import_source, which
+            # binds the result into the traced globals. The replay arm needs no
+            # check: its values are the DummyModules add_local_mod admitted.
+            if not isinstance(value, types.ModuleType):
+                unimplemented(
+                    gb_type="Bad import result",
+                    context=typestr(value),
+                    explanation="Import result is not a Python module.",
+                    hints=[],
+                )
+
             if level != 0:
                 pkg = self.calc_package()
                 module_name = self.resolve_name(module_name, pkg, level)
@@ -2530,18 +2547,8 @@ class InstructionTranslatorBase(
             # pyrefly: ignore [unbound-name]
             self.exec_recorder.add_local_mod(recorded_name, value)
 
-        # pyrefly: ignore [unbound-name]
-        if isinstance(value, (types.ModuleType, DummyModule)):
-            # pyrefly: ignore [unbound-name, bad-argument-type]
-            self.push(PythonModuleVariable(value, source=source))
-        else:
-            unimplemented(
-                gb_type="Bad import result",
-                # pyrefly: ignore [unbound-name]
-                context=typestr(value),
-                explanation="Import result is not a Python module.",
-                hints=[],
-            )
+        # pyrefly: ignore [unbound-name, bad-argument-type]
+        self.push(PythonModuleVariable(value, source=source))
 
     # fb internal 3.12 opcode
     EAGER_IMPORT_NAME = IMPORT_NAME
@@ -5502,6 +5509,8 @@ class InstructionTranslatorBase(
         )
         # Per-prefix record of the most recently generated pycode varname.
         self._pycode_last_varname: dict[str, str] = {}
+        # Module name -> the alias source import_source minted for it.
+        self._import_source_memo: dict[str, GlobalSource] = {}
 
         # Properties of the input/output code
         self.instructions: list[Instruction] = instructions

@@ -71,7 +71,7 @@ Following is the Release Compatibility Matrix for PyTorch releases:
 
 ### PyTorch CUDA Support Matrix
 
-For Release 2.12, 2.13 and 2.14 PyTorch Supports following CUDA Architectures:
+For Release 2.14 PyTorch Supports following CUDA Architectures:
 
 | CUDA | architectures supported for Linux x86 and Windows builds | notes |
 | --- | --- | --- |

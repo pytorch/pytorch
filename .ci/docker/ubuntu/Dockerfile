@@ -69,8 +69,14 @@ ENV DESIRED_CUDA=${CUDA_VERSION}
 ENV PATH=/usr/local/nvidia/bin:/usr/local/cuda/bin:$PATH
 
 # Install MAGMA into the CUDA toolkit dir (was previously pulled in via conda)
+ARG TARGETARCH
 COPY ./common/install_magma.sh install_magma.sh
-RUN if [ -n "${CUDA_VERSION}" ]; then bash ./install_magma.sh $(echo ${CUDA_VERSION} | cut -f1-2 -d'.'); fi
+RUN if [ -n "${CUDA_VERSION}" ]; then \
+      case "${TARGETARCH:-$(uname -m)}" in \
+        arm64|aarch64) ;; \
+        *) bash ./install_magma.sh $(echo ${CUDA_VERSION} | cut -f1-2 -d'.') ;; \
+      esac; \
+    fi
 RUN rm -f install_magma.sh
 ENV MAGMA_HOME=/usr/local/cuda/magma
 # No effect if cuda not installed
@@ -202,7 +208,6 @@ RUN bash ./install_rust.sh && rm install_rust.sh rust.txt
 # Install ccache/sccache (do this last, so we get priority in PATH)
 ARG SKIP_SCCACHE_INSTALL
 COPY ./common/install_cache.sh install_cache.sh
-COPY ./common/patches /opt/cache/patches
 ENV PATH=/opt/cache/bin:$PATH
 RUN if [ -z "${SKIP_SCCACHE_INSTALL}" ]; then bash ./install_cache.sh; fi
 RUN rm install_cache.sh

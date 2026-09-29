@@ -69,6 +69,42 @@ return(%o2, %baz)
       ContainerEq(std::vector<std::string>({"bar", "baz", "foo", "o1", "o2"})));
 }
 
+TEST(GraphTest, UnusedListPackElements) {
+  static constexpr std::string_view source =
+      R"(graph(%foo, %bar):
+%packed[] = prim.ListPack(l0=%foo, l1=%bar)
+return(%foo)
+)";
+  auto graph = stringToGraph(source);
+  auto* packed = graph->getValue("packed");
+  ASSERT_TRUE(packed->users().empty());
+  ASSERT_NE(packed->producer(), nullptr);
+  EXPECT_EQ(packed->producer()->target(), "prim.ListPack");
+
+  const auto elements = packed->getListElements();
+  std::vector<std::string> elementNames;
+  elementNames.reserve(elements.size());
+  for (const auto* element : elements) {
+    elementNames.emplace_back(element->name());
+  }
+  EXPECT_THAT(
+      elementNames, ContainerEq(std::vector<std::string>({"foo", "bar"})));
+}
+
+TEST(GraphTest, UnusedNonListPackHasNoStructuralElements) {
+  static constexpr std::string_view source =
+      R"(graph(%foo, %bar):
+%used, %unused[] = aten.foo(self=%foo, target=%bar)
+return(%used)
+)";
+  auto graph = stringToGraph(source);
+  auto* unused = graph->getValue("unused");
+  ASSERT_TRUE(unused->users().empty());
+  ASSERT_NE(unused->producer(), nullptr);
+  EXPECT_NE(unused->producer()->target(), "prim.ListPack");
+  EXPECT_TRUE(unused->getListElements().empty());
+}
+
 TEST(GraphTest, ValueProducer) {
   static constexpr std::string_view source =
       R"(graph(%foo, %bar, %baz):

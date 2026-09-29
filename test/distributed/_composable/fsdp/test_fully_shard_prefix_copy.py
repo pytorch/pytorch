@@ -11,8 +11,9 @@ from torch.distributed.fsdp._fully_shard._fsdp_api import AllGatherInput
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _default_all_gather_output_fn,
     _default_reduce_scatter_input_fn,
+    _get_padded_sharded_numels,
     AllGatherResult,
-    foreach_reduce_scatter_copy_in,
+    foreach_all_gather_copy_out,
 )
 from torch.distributed.fsdp._fully_shard._fsdp_common import FSDPMeshInfo
 from torch.distributed.fsdp._fully_shard._fsdp_param import (
@@ -36,6 +37,11 @@ from torch.testing._internal.common_utils import (
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
+def _copy_out(params, result, world_size, copy_out_fn=_default_all_gather_output_fn):
+    group = Mock(**{"size.return_value": world_size})
+    foreach_all_gather_copy_out(result, params, group, all_gather_output_fn=copy_out_fn)
+
+
 class _OpCounter(TorchDispatchMode):
     def __init__(self):
         super().__init__()
@@ -49,16 +55,31 @@ class _OpCounter(TorchDispatchMode):
 @unittest.skipIf(IS_WINDOWS, "FSDP2 is not supported on Windows")
 @unittest.skipIf(not dist.is_available(), "distributed not available")
 class TestPrefixCopy(TestCase):
-    def _make_extension_param(self, world_size, shard_dim, padded_size, inputs):
+    def _make_extension_param(
+        self, world_size, shard_dim, padded_size, inputs, local_size=None
+    ):
         param = FSDPParam.__new__(FSDPParam)
         param.mesh_info = Mock(spec=FSDPMeshInfo, shard_mesh_size=world_size)
+        param.mesh_info.mesh = Mock(**{"size.return_value": world_size})
         param.fsdp_placement = Shard(shard_dim)
         param.padded_sharded_param_size = torch.Size(padded_size)
         param.sharded_state = ShardedState.SHARDED
         param.offload_to_cpu = False
         param._shard_mesh = Mock()
-        local_tensor = Mock(spec=["fsdp_pre_all_gather", "fsdp_post_all_gather"])
-        local_tensor.fsdp_pre_all_gather = lambda mesh: (inputs, None)
+        local_tensor = Mock(
+            spec=["fsdp_pre_all_gather", "fsdp_post_all_gather", "size"]
+        )
+        if local_size is None:
+            local_tensor.fsdp_pre_all_gather = lambda mesh: (inputs, None)
+        else:
+            param._orig_size = torch.Size((local_size[0] * world_size, *local_size[1:]))
+            param._contiguous_orig_stride = None
+            param._module_info = Mock()
+            param.mp_policy = None
+            local_tensor.size.return_value = torch.Size(local_size)
+            local_tensor.fsdp_pre_all_gather = (
+                lambda mesh, outer_size, outer_stride, module, mp_policy: (inputs, None)
+            )
         param.sharded_param = Mock(_local_tensor=local_tensor)
         param._init_extensions()
         param.all_gather_outputs = []
@@ -81,26 +102,29 @@ class TestPrefixCopy(TestCase):
                 world_size=2,
                 shard_dim=1,
                 padded_sharded_size=tensor.size(),
-                require_padding=False,
             )
 
     @parametrize("explicit_layout", [False, True])
     def test_all_gather_input_padding(self, device, explicit_layout):
         tensor = torch.empty(2, 3, device=device)
         inputs = (AllGatherInput(tensor, dim=1) if explicit_layout else tensor,)
-        kwargs = {
-            "world_size": 2,
-            "shard_dim": 0,
-            "padded_sharded_size": torch.Size((4, 3)),
-            "require_padding": True,
-        }
+        param = self._make_extension_param(2, 0, (4, 3), inputs, local_size=(3, 3))
         if explicit_layout:
-            tensors, layouts = _normalize_all_gather_inputs(inputs, **kwargs)
-            self.assertIs(tensors[0], tensor)
-            self.assertEqual(layouts[0].output_size, (2, 6))
+            (flat_input,) = param.all_gather_inputs
+            self.assertEqual(flat_input.data_ptr(), tensor.data_ptr())
+            self.assertEqual(param.all_gather_copy_layouts[0].output_size, (2, 6))
         else:
-            with self.assertRaisesRegex(AssertionError, "padded sharded size"):
-                _normalize_all_gather_inputs(inputs, **kwargs)
+            with self.assertRaisesRegex(
+                AssertionError,
+                r"unevenly sharded by FSDP \(orig size=torch.Size\(\[6, 3\]\), "
+                r"FSDP world size=2\).*padded sharded size",
+            ):
+                _ = param.all_gather_inputs
+
+    def test_all_gather_input_type(self, device):
+        param = self._make_extension_param(2, 0, (2, 3), (Mock(),))
+        with self.assertRaisesRegex(TypeError, "Expected an all-gather input Tensor"):
+            _ = param.all_gather_inputs
 
     @parametrize("world_size", [1, 2])
     def test_legacy_all_gather_input_size(self, device, world_size):
@@ -109,7 +133,6 @@ class TestPrefixCopy(TestCase):
             "world_size": world_size,
             "shard_dim": 1,
             "padded_sharded_size": torch.Size((4, 3)),
-            "require_padding": False,
         }
         if world_size == 1:
             tensors, layouts = _normalize_all_gather_inputs((tensor,), **kwargs)
@@ -128,7 +151,6 @@ class TestPrefixCopy(TestCase):
             "world_size": 2,
             "shard_dim": 1,
             "padded_sharded_size": torch.Size((4, 3)),
-            "require_padding": False,
         }
         if input_size is None:
             self.assertEqual(_normalize_all_gather_inputs((), **kwargs), ([], ()))
@@ -152,7 +174,6 @@ class TestPrefixCopy(TestCase):
             world_size=world_size,
             shard_dim=1,
             padded_sharded_size=shards[0].size(),
-            require_padding=False,
         )
         self.assertIs(tensors[0], shards[0])
         self.assertIs(tensors[1], empty)
@@ -172,7 +193,7 @@ class TestPrefixCopy(TestCase):
             [shards[0].numel(), 0],
         )
         with torch.no_grad(), _OpCounter() as counter:
-            _default_all_gather_output_fn([param], result, world_size)
+            _copy_out([param], result, world_size)
         output, empty_output = param.all_gather_outputs
         self.assertEqual(output.view_as(expected), expected, atol=0, rtol=0)
         self.assertEqual(empty_output.view(layouts[1].output_size).size(), (0, 3))
@@ -204,15 +225,12 @@ class TestPrefixCopy(TestCase):
         expected = torch.cat(
             [shard[rank].flatten() for rank in range(world_size) for shard in shards]
         ).float()
-        params = [Mock(fsdp_placement=Shard(dim)) for dim in shard_dims]
-        prepared = _default_reduce_scatter_input_fn(params, grads, world_size)
-        sizes = prepared.padded_unsharded_sizes
-        self.assertIs(prepared.copy_in, foreach_reduce_scatter_copy_in)
-        self.assertEqual(len(sizes), len(params))
-        self.assertEqual(sum(size.numel() for size in sizes), expected.numel())
+        numels = _get_padded_sharded_numels(grads, shard_dims, world_size)
+        self.assertEqual(sum(numels) * world_size, expected.numel())
+        copy_in = _default_reduce_scatter_input_fn(grads, shard_dims, world_size)
         output = torch.empty_like(expected)
         with _OpCounter() as counter:
-            prepared.copy_in(grads, output, world_size)
+            copy_in(output)
         self.assertEqual(output, expected, atol=0, rtol=0)
         self.assertEqual(counter.counts[torch.ops.fsdp.chunk_cat.default], 1)
 
@@ -323,7 +341,7 @@ class TestPrefixCopy(TestCase):
         )
         versions = [output._version for output in outputs]
         with torch.no_grad(), _OpCounter() as counter:
-            _default_all_gather_output_fn(params, result, world_size)
+            _copy_out(params, result, world_size)
 
         self.assertEqual(
             [output.view(tensor.shape) for output, tensor in zip(outputs, expected)],
@@ -336,7 +354,7 @@ class TestPrefixCopy(TestCase):
             counter.counts[torch.ops.fsdp.split_with_sizes_copy.default],
             int(packed.numel() > 0),
         )
-        reorder_layouts = ("shard1", "singleton_outer_size", "extension")
+        reorder_layouts = ("shard1", "extension")
         num_reorders = sum(kind in reorder_layouts for kind in layouts)
         self.assertEqual(counter.counts[torch.ops.aten.cat.out], num_reorders)
 
@@ -387,7 +405,7 @@ class TestPrefixCopy(TestCase):
         _ = param.all_gather_inputs
         self.assertEqual(param._unflatten_all_gather_outputs()[0].size(), output.size())
         with torch.no_grad(), _OpCounter() as counter:
-            _default_all_gather_output_fn([param], result, world_size)
+            _copy_out([param], result, world_size)
         self.assertIs(param.all_gather_outputs[0], output)
         self.assertEqual(output.dtype, dtype)
         self.assertEqual(output.view_as(expected), expected, atol=0, rtol=0)
@@ -440,7 +458,7 @@ class TestPrefixCopy(TestCase):
                 [payload.numel()],
             )
             with torch.no_grad():
-                _default_all_gather_output_fn([param], result, world_size)
+                _copy_out([param], result, world_size)
                 param.init_unsharded_param()
             self.assertEqual(param.unsharded_param, expected, atol=0, rtol=0)
             if output is None:

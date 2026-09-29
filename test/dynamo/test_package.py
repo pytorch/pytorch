@@ -18,6 +18,7 @@ import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
+from torch._dynamo.exc import Unsupported
 from torch._dynamo.guards import CheckFunctionManager
 from torch._dynamo.package import (
     _collapse_device_types,
@@ -26,6 +27,7 @@ from torch._dynamo.package import (
     DynamoCache,
 )
 from torch._dynamo.precompile_context import PrecompileContext
+from torch._dynamo.symbolic_convert import _import_module
 from torch._dynamo.testing import reduce_to_scalar_loss
 from torch._dynamo.utils import CleanupManager
 from torch._functorch import config as functorch_config
@@ -1068,6 +1070,41 @@ def add(x, y):
         source = ImportSource("torch")
         reloaded = pickle.loads(pickle.dumps(source))
         self.assertEqual(reloaded, source)
+
+    def test_import_alias_is_not_bound_to_a_non_module_import(self):
+        # sys.modules accepts any object and __import__ hands it back verbatim.
+        # IMPORT_NAME rejects it before import_source binds the alias, so the
+        # traced globals never hold the non-module, and a later trace after a
+        # real module has replaced the entry binds the alias to that module
+        # rather than tracing it through a slot still holding the non-module.
+        name = "torch_test_package_import_alias_non_module"
+        alias = f"__import_{name}"
+        module = types.ModuleType(name)
+        module.VALUE = 1
+        args = (torch.randn(3, 2),)
+
+        def fn(x):
+            import torch_test_package_import_alias_non_module as taken
+
+            return x + taken.VALUE
+
+        try:
+            sys.modules[name] = object()
+            with self.assertRaisesRegex(Unsupported, "Bad import result"):
+                torch.compile(fn, backend="eager", fullgraph=True)(*args)
+            self.assertNotIn(alias, fn.__globals__)
+            torch._dynamo.reset()
+            sys.modules[name] = module
+            compiled = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(fn(*args), compiled(*args))
+            self.assertIs(fn.__globals__[alias], module)
+        finally:
+            sys.modules.pop(name, None)
+            fn.__globals__.pop(alias, None)
+            # The memo outlives the sys.modules entry: a same-process rerun would
+            # otherwise resolve this run's module from it.
+            _import_module.cache_clear()
+            torch._dynamo.reset()
 
     @parametrize("device", ("cpu", "cuda", "xpu"))
     @torch._dynamo.config.patch(caching_precompile=True)
