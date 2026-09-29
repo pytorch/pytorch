@@ -41,6 +41,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <deque>
 #include <functional>
 #include <memory>
@@ -51,6 +52,7 @@
 #include <set>
 #include <stack>
 #include <thread>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -690,11 +692,11 @@ struct ExpandableSegment {
     auto begin = segmentLeft(range.ptr);
     auto end = segmentRight(range.ptr + range.size);
 
-    // header.pid needs to be padded with 4 bytes and initialized with
-    // 0 values ​​to avoid random padding of different bytes each time,
-    // thereby ensuring that the handle can be correctly matched in
-    // ipcMemHandle_to_devptr.
-    ShareHeader header{};
+    // The header is sent as raw bytes and the resulting handle is the key of
+    // ipcMemHandle_to_devptr in the receiver, so zero the padding as well:
+    // `ShareHeader header{}` only initializes the members.
+    ShareHeader header;
+    std::memset(static_cast<void*>(&header), 0, sizeof(header));
     header.pid = get_self_pid();
     header.segment_size = segment_size_;
     header.num_handles = end - begin;
@@ -5349,10 +5351,12 @@ class NativeCachingAllocator : public CUDAAllocator {
   // to the other process to sort the object. Then we recreate part of the
   // exandable segment necessary to load the allocation.
 
-  // ipcMemHandle_to_devptr caches the mapping from shareable handle to
-  // this process' memory mapping information for that share to ensure we do not
-  // create it twice. When the shared_ptr is no longer in use we clean up the
-  // cache.
+  // ipcMemHandle_to_devptr caches the mapping from (shareable handle, device)
+  // to this process' memory mapping information for that share to ensure we do
+  // not create it twice. A mapping is only usable from the device it was opened
+  // on, so the same share requested from another device (e.g. a tensor rebuilt
+  // on a peer GPU) gets its own mapping there. When the shared_ptr is no longer
+  // in use we clean up the cache.
 
   std::mutex IpcMutex;
   struct MemHandleCacheEntry {
@@ -5415,11 +5419,16 @@ class NativeCachingAllocator : public CUDAAllocator {
     std::weak_ptr<void> wp_;
   };
 
-  ska::flat_hash_map<std::string, MemHandleCacheEntry> ipcMemHandle_to_devptr;
+  using IpcCacheKey = std::tuple<std::string, c10::DeviceIndex>;
+  ska::flat_hash_map<IpcCacheKey, MemHandleCacheEntry, c10::hash<IpcCacheKey>>
+      ipcMemHandle_to_devptr;
   std::shared_ptr<void> getIpcDevPtr(std::string handle) override {
+    c10::DeviceIndex curr_device = 0;
+    C10_CUDA_CHECK(c10::cuda::GetDevice(&curr_device));
+    IpcCacheKey key{handle, curr_device};
     std::lock_guard<std::mutex> lock(IpcMutex);
 
-    auto iter = ipcMemHandle_to_devptr.find(handle);
+    auto iter = ipcMemHandle_to_devptr.find(key);
     if (iter != ipcMemHandle_to_devptr.end()) {
       auto devptr = iter->second.wp_.lock();
       // the weak_ptr should always be valid because we delete the entry from
@@ -5428,18 +5437,16 @@ class NativeCachingAllocator : public CUDAAllocator {
       TORCH_INTERNAL_ASSERT(devptr, "entry in cache has missing shared_ptr");
       return devptr;
     }
-    c10::DeviceIndex curr_device = 0;
-    C10_CUDA_CHECK(c10::cuda::GetDevice(&curr_device));
     auto inserted = ipcMemHandle_to_devptr.insert(
         iter,
-        {handle,
+        {key,
          MemHandleCacheEntry(
              curr_device, handle, *device_allocator[curr_device])});
-    auto sp = std::shared_ptr<void>(
-        inserted->second.ptr(), [handle, this](void* ptr) {
+    auto sp =
+        std::shared_ptr<void>(inserted->second.ptr(), [key, this](void* ptr) {
           std::unique_lock<std::mutex> deleter_lock(IpcMutex);
 
-          auto it = ipcMemHandle_to_devptr.find(handle);
+          auto it = ipcMemHandle_to_devptr.find(key);
           TORCH_INTERNAL_ASSERT(it != ipcMemHandle_to_devptr.end());
           auto entry = std::move(it->second);
           ipcMemHandle_to_devptr.erase(it);

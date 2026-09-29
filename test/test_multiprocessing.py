@@ -185,6 +185,18 @@ def sum_tensors(inq, outq):
             )
 
 
+def rebuild_on_peer_device(inq, outq):
+    # Rebuild tensors sharing one block on cuda:0 and then on cuda:1, by
+    # overriding the device argument like test/distributed/test_p2p_ipc.py.
+    (func, a), (_, b), (_, a_again) = inq.get(), inq.get(), inq.get()
+    tensors = [
+        func(*a),
+        func(*b[:6], 1, *b[7:]),  # other offset: C++ mapping cache
+        func(*a_again[:6], 1, *a_again[7:]),  # same offset: Python storage cache
+    ]
+    outq.put([(str(t.device), t.sum().item()) for t in tensors])
+
+
 def queue_get_exception(device, inqueue, outqueue):
     os.close(2)  # hide expected error message
     try:
@@ -944,6 +956,24 @@ class TestMultiprocessingCUDA(_MultiprocessingTestMixin, TestCase):
         # We need to collect, as CUDA MP implementation holds one shared
         # memory 'file' for performance reason
         torch.cuda.ipc_collect()
+
+    @unittest.skipIf(not TEST_MULTIGPU, "found only 1 GPU")
+    def test_cuda_ipc_rebuild_on_peer_device(self):
+        # A block already opened on cuda:0 must also work when tensors from it
+        # are rebuilt on cuda:1 (#198305).
+        if not torch.cuda.can_device_access_peer(1, 0):
+            self.skipTest("cuda:1 has no peer access to cuda:0")
+        ctx = mp.get_context("spawn")
+        inq, outq = ctx.Queue(), ctx.Queue()
+        p = ctx.Process(target=rebuild_on_peer_device, args=(inq, outq))
+        p.start()
+        a = torch.full((5,), 1.0, device="cuda:0")
+        b = torch.full((5,), 2.0, device="cuda:0")
+        for t in (a, b, a):  # one reduction per rebuild keeps IPC refcounts exact
+            inq.put(torch.multiprocessing.reductions.reduce_tensor(t))
+        result = outq.get(timeout=60)
+        p.join()
+        self.assertEqual(result, [("cuda:0", 5.0), ("cuda:1", 10.0), ("cuda:1", 5.0)])
 
     def test_rebuild_cuda_tensor(self):
         ctx = mp.get_context("spawn")
