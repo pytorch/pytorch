@@ -452,8 +452,9 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         def fake_legacy_autocast(dtype, enabled=True, cache_enabled=None):
             pass
 
-        with mock.patch.dict(dynamo_torch._autocast_entries, {}), mock.patch.dict(
-            dynamo_torch._extra_ctx_manager_classes, {}
+        with (
+            mock.patch.dict(dynamo_torch._autocast_entries, {}),
+            mock.patch.dict(dynamo_torch._extra_ctx_manager_classes, {}),
         ):
             dynamo_torch.register_device_autocast_entry(fake_legacy_autocast, "npu")
             var = AutocastModeVariable.create(
@@ -479,8 +480,9 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
                     "cpu", enabled=enabled, dtype=dtype, cache_enabled=cache_enabled
                 )
 
-        with mock.patch.dict(dynamo_torch._autocast_entries, {}), mock.patch.dict(
-            dynamo_torch._extra_ctx_manager_classes, {}
+        with (
+            mock.patch.dict(dynamo_torch._autocast_entries, {}),
+            mock.patch.dict(dynamo_torch._extra_ctx_manager_classes, {}),
         ):
             dynamo_torch.register_device_autocast_entry(LegacyAutocast, "cpu")
             cnt = torch._dynamo.testing.CompileCounter()
@@ -508,8 +510,11 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
 
         var = AutocastModeVariable.create(
             torch.cuda.amp.autocast,
-            (ConstantVariable.create(torch.float16),),
-            {"enabled": ConstantVariable.create(False)},
+            (),
+            {
+                "dtype": ConstantVariable.create(torch.float16),
+                "enabled": ConstantVariable.create(False),
+            },
         )
         self.assertEqual(var.target_values[0], "cuda")
         self.assertEqual(var.target_values[2], False)
