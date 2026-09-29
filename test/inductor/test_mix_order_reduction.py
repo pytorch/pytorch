@@ -1564,57 +1564,34 @@ class MixOrderReductionTest(TestBase):
         self.assertEqual(list(act[1].shape), list(ref[1].shape))
         self.assertTrue(same(ref, act, tol=1e-3))
 
-    def test_unmasked_tail_with_uneven_row_count(self):
-        """
-        Regression test for https://github.com/pytorch/pytorch/issues/195845
-
-        The mix-order-reduction split loop generates ``xmask`` whenever xnumel
-        isn't a multiple of XBLOCK, but never applied it before reducing: the
-        tail iteration read garbage lanes past xnumel straight into the
-        running accumulator. Checked via absolute error against a float64
-        reference, since ``same()``'s relative tolerance is too loose to
-        catch a small fixed offset against column sums in the thousands.
-        """
+    # nrows values are not multiples of XBLOCK, so the split loop has a tail
+    # iteration that reads rows >= xnumel. Regression for
+    # https://github.com/pytorch/pytorch/issues/195845
+    @parametrize("nrows", (40959, 40961, 40962))
+    def test_unmasked_tail_with_uneven_row_count(self, nrows):
         if not inductor_config.triton.mix_order_reduction:
             self.skipTest("Mix order reduction not enabled")
 
+        # `+ 1` turns a masked-load 0 into a non-identity value, so any tail
+        # row folded into the sum shifts the column sum by a whole 1.0.
         def f(x):
-            y = x * 2 + 0.25
-            return y.max(dim=-1).values, y.float().sum(dim=0)
+            y = x + 1
+            return y.sum(dim=0), y.sum(dim=1)
 
-        def check(nrows, ncols=129, atol=0.05):
-            torch._dynamo.reset()
-            x = torch.randn(nrows, ncols, dtype=torch.bfloat16, device=GPU_TYPE)
-            ref_y = x.double() * 2 + 0.25
-            ref_rowmax = ref_y.max(dim=-1).values
-            ref_colsum = ref_y.sum(dim=0)
+        x = torch.randn(nrows, 768, device=GPU_TYPE)
+        ref = f(x)
+        act = torch.compile(
+            f, options={"triton.mix_order_reduction_initial_xblock": 2}
+        )(x)
 
-            act_rowmax, act_colsum = torch.compile(f)(x)
-
-            sum_diff = (act_colsum.double() - ref_colsum).abs().max().item()
-            max_diff = (act_rowmax.double() - ref_rowmax).abs().max().item()
-            self.assertLess(
-                sum_diff,
-                atol,
-                f"nrows={nrows}: column-sum abs diff {sum_diff} exceeds the "
-                "bf16 noise floor -- unmasked tail rows corrupting the "
-                "accumulator",
-            )
-            self.assertLess(
-                max_diff, atol, f"nrows={nrows}: row-max abs diff {max_diff}"
-            )
-
-        # 40961 is not a multiple of any typical XBLOCK (32/64/128/...); the
-        # padded/offset rows around it exercise both a mismatched tail and
-        # the evenly-divisible control in one parametrized sweep. metrics
-        # accumulate across compiles, so just confirm mix-order codegen was
-        # actually exercised at least once rather than resetting every lap.
-        for offset in (-1, 0, 1, 2):
-            check(40960 + offset)
-        self.assertGreaterEqual(
+        # atol=1e-2 sits above fp32 reduction-order noise but well below the
+        # 1.0-per-tail-row corruption the bug produces.
+        self.assertEqual(act, ref, atol=1e-2, rtol=0)
+        # confirm mix-order codegen actually ran for this row count (metrics
+        # are reset per test by TestBase.setUp).
+        self.assertEqual(
+            inductor_config.triton.mix_order_reduction,
             metrics.codegen_mix_order_reduction,
-            1,
-            "mix-order reduction was never exercised by this test",
         )
 
 

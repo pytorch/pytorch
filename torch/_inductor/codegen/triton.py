@@ -7364,18 +7364,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         partial_accum.reduction_type,
                     )
                     if not self._has_constant_xmask():
-                        # xnumel is not necessarily a multiple of XBLOCK, so the
-                        # last iteration of the split loop can read out-of-range
-                        # x rows into var. Those lanes are otherwise summed
-                        # (or maxed/etc.) into the accumulator unmasked, silently
-                        # corrupting the result -- mask them out with the
-                        # reduction's own identity value first, same as the
-                        # established pattern in reduction()/dot() above.
-                        mask_default = ir.Reduction.default_value(
-                            partial_accum.reduction_type, torch.float
-                        )
+                        # tail iteration of the split loop may read rows >= xnumel
                         mask_default = self._map_tuple_or_scalar(
-                            constant_repr, mask_default
+                            constant_repr,
+                            ir.Reduction.default_value(
+                                partial_accum.reduction_type, torch.float
+                            ),
                         )
                         var = self.cse.generate(
                             self.body,
