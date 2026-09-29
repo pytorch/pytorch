@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import collections
 import contextlib
+import copy
 import dataclasses
 import enum
 import functools
@@ -3970,6 +3971,19 @@ class SchedulerNode(BaseSchedulerNode):
         with self.node.with_original_inner_fn():
             self._compute_attrs()
 
+    def unsplit_reduction(self) -> SchedulerNode:
+        """For the first stage of a split reduction, a copy that computes the
+        whole reduction; this node is left unchanged."""
+        if not MixOrderReduction.is_split_reduction(self):
+            return self
+        if not isinstance(self.node, ir.ComputedBuffer):
+            raise AssertionError("expected self.node to be an ir.ComputedBuffer")
+        node = copy.copy(self)
+        with self.node.with_original_inner_fn():
+            node._compute_attrs()
+        self.node.get_default_sizes_body.clear_cache(self.node)
+        return node
+
     def expand_dimension_for_pointwise_node(
         self, dimension: int, new_range: int
     ) -> None:
@@ -7423,6 +7437,8 @@ class Scheduler:
             if self._has_layout_conflict_for_template(multi_node):
                 return FusionResult.fuse(False)
 
+            from torch._inductor.codegen.simd import CantSplit
+
             hint_override_best_fusion_choice: dict[int | None, ir.ChoiceCaller] = {}
             if not has_atomic_add:
                 for hint_override in config.multi_kernel_hints:
@@ -7436,16 +7452,19 @@ class Scheduler:
                             torch._inductor.select_algorithm.TritonTemplateCaller,
                         ):
                             continue
-                        with multi_node.swap_as_triton_caller(choice):
-                            future_choices.append(
-                                (
-                                    choice,
-                                    *self.compile_kernel(
-                                        node_list_fused,
-                                        hint_override=choice.hint_override,
-                                    ),
+                        try:
+                            with multi_node.swap_as_triton_caller(choice):
+                                future_choices.append(
+                                    (
+                                        choice,
+                                        *self.compile_kernel(
+                                            node_list_fused,
+                                            hint_override=choice.hint_override,
+                                        ),
+                                    )
                                 )
-                            )
+                        except CantSplit:
+                            continue
 
                     min_ms_fused = float("inf")
                     ms_fused_choice: TritonTemplateCallerBase | None = None
@@ -7508,8 +7527,6 @@ class Scheduler:
                 # Use 0 for unfused time, won't be used as bench_epilogue
                 # is guaranteed to be False here
                 choice_timings_iter = [(c, 0) for c in multi_node.choices]
-
-            from torch._inductor.codegen.simd import CantSplit
 
             def choice_supports_fusion(choice: ir.ChoiceCaller) -> bool:
                 if not isinstance(
@@ -7635,8 +7652,7 @@ class Scheduler:
                 if bench_epilogue and unfused_time >= ms1 + ms2:
                     break
 
-                template_choices += 1
-                if template_choices > config.max_epilogue_benchmarked_choices:
+                if template_choices >= config.max_epilogue_benchmarked_choices:
                     break
 
                 try:
@@ -7662,6 +7678,7 @@ class Scheduler:
                             )
                 except CantSplit:
                     continue
+                template_choices += 1
 
             if len(future_choices) == 0:
                 return FusionResult.fuse(False)
@@ -10623,6 +10640,7 @@ class Scheduler:
                 or (
                     node2.is_reduction()
                     and not backend.can_fuse_reduction_epilogue(node1, node2)
+                    and not backend.can_fuse_template_reduction_epilogue(node1, node2)
                 )
                 or not _is_epilogue_fusion_enabled(node1)
             ):
@@ -10777,6 +10795,25 @@ class Scheduler:
         if node1.get_operation_names() & node2.ancestors:
             # node2 depends on node1 outputs
             backend = self.get_backend(device)
+            if (
+                staged_matches is None
+                and node1.is_template()
+                and node2.is_reduction()
+                and backend.can_fuse_template_reduction_epilogue(node1, node2)
+            ):
+                # Reductions in a template epilogue read the output tile from
+                # registers, so they may traverse it in any loop order.
+                staged_matches = tuple(
+                    MemoryDepMatch(write, read)
+                    for write in node1.read_writes.writes
+                    for snode in node2.get_nodes()
+                    if snode.is_reduction()
+                    for read in snode.read_writes.reads
+                    if isinstance(write, MemoryDep)
+                    and isinstance(read, MemoryDep)
+                    and write.normalize_with_stride_order()
+                    == read.normalize_with_stride_order()
+                )
             vertical_fusion_legal = (
                 self.can_fuse_vertical(node1, node2)
                 if staged_matches is None
@@ -12940,6 +12977,13 @@ class BaseScheduling:  # noqa: docstring_linter
     def can_fuse_reduction_epilogue(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
+        return False
+
+    def can_fuse_template_reduction_epilogue(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> bool:
+        """Whether reductions in node2 may join template node1's epilogue,
+        subject to the ordinary vertical fusion checks."""
         return False
 
     def can_fuse_reduction_pair(
