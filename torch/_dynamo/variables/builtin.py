@@ -1915,7 +1915,11 @@ class BuiltinVariable(BaseBuiltinVariable):
             and args
             and isinstance(args[0], variables.UserDefinedExceptionObjectVariable)
         ):
-            return args[0].exc_vt.call_method(tx, name, args[1:], kwargs)
+            result = args[0].exc_vt.call_method(tx, name, args[1:], kwargs)
+            tx.output.side_effects.store_attr(
+                args[0], "args", variables.TupleVariable(args[1:])
+            )
+            return result
 
         if self.fn in (set, frozenset, list, tuple):
             if isinstance(args[0], variables.UserDefinedObjectVariable):

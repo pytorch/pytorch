@@ -1465,6 +1465,26 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(opt_fn(x), fn(x))
 
+    def test_user_exception_base_init_returned_object(self):
+        class Explicit(BaseException):
+            def __init__(self, value):
+                BaseException.__init__(self, value)
+
+        class ViaSuper(BaseException):
+            def __init__(self, value):
+                super().__init__(value)
+
+        def fn(x):
+            return x + 1, Explicit(value=x), ViaSuper(value=x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        for x in (torch.ones(2), torch.ones(3) + 1):
+            actual, *actual_exc = opt_fn(x)
+            expected, *expected_exc = fn(x)
+            self.assertEqual(actual, expected)
+            for actual_e, expected_e in zip(actual_exc, expected_exc):
+                self.assertEqual(actual_e.args, expected_e.args)
+
     def test_stack_trace_from_observed_exception(self):
         class Model(torch.nn.Module):
             def __init__(self):
