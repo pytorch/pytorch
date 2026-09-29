@@ -197,6 +197,48 @@ class XpuScopeProfilerTest(TestCase):
         )
         self.assertEqual(count_metrics, 0)
 
+    @unittest.skipIf(not TEST_XPU, "test requires XPU")
+    def test_available_metrics(self):
+        if not self.required_env_setting():
+            self.skipTest("ZET_ENABLE_METRICS not set")
+
+        groups = torch.xpu.profiler.available_metrics()
+        self.assertEqual(
+            groups, torch.xpu.profiler.available_metrics(torch.xpu.current_device())
+        )
+        for group in groups:
+            self.assertIsInstance(group, torch.xpu.profiler.XpuMetricGroup)
+            self.assertTrue(group.name)
+            for metric in group.metrics:
+                self.assertIsInstance(metric, torch.xpu.profiler.XpuMetric)
+                self.assertTrue(metric.name)
+
+        with self.assertRaisesRegex(RuntimeError, "does not support metrics"):
+            torch._C._profiler._xpu_available_metrics(bytes(16))
+
+        if not self.required_paranoid_settings():
+            self.skipTest("paranoid settings missing")
+
+        scope_groups = [g for g in groups if g.scope_compatible and g.metrics]
+        if not scope_groups:
+            self.skipTest("device has no event-based metric group")
+
+        names = [metric.name for metric in scope_groups[0].metrics[:2]]
+        a = torch.rand([100, 200]).to("xpu")
+        b = torch.rand([200, 300]).to("xpu")
+        with torch.profiler.profile(
+            activities=[
+                torch.profiler.ProfilerActivity.CPU,
+                {torch.profiler.ProfilerActivity.XPU: names},
+            ],
+        ) as p:
+            torch.matmul(a, b)
+
+        count_metrics = sum(
+            event.key.startswith("metrics: ") for event in p.key_averages()
+        )
+        self.assertGreater(count_metrics, 0)
+
 
 if __name__ == "__main__":
     run_tests()
