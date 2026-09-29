@@ -5,8 +5,8 @@ import logging
 
 import torch
 from torch.utils._ordered_set import OrderedSet
-from ..._dynamo.device_interface import get_interface_for_device
 
+from ..._dynamo.device_interface import get_interface_for_device
 from ..._dynamo.utils import counters
 from ..pattern_matcher import (
     filter_nodes,
