@@ -17,6 +17,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 
+
 class TestShapeInference(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
