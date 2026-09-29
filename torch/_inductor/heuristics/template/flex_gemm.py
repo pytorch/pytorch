@@ -25,11 +25,13 @@ _MAX_UNRANKED_CANDIDATES = 12
 
 def _sm100_priority_rank(
     order: tuple[tuple[int, int, int, int, bool], ...],
+    *,
+    swap_ab: bool = False,
 ) -> dict[tuple[Any, ...], int]:
     # Keys are tile M/N, cluster M/N, pingpong, swap_ab, dynamic persistence,
     # and device capacity.
     return {
-        (tile_m, tile_n, cluster_m, cluster_n, False, False, dynamic, 10): rank
+        (tile_m, tile_n, cluster_m, cluster_n, False, swap_ab, dynamic, 10): rank
         for rank, (tile_m, tile_n, cluster_m, cluster_n, dynamic) in enumerate(order)
     }
 
@@ -51,6 +53,12 @@ _PRIORITY_RANK = _sm100_priority_rank(
         (128, 224, 1, 1, True),
         (128, 160, 1, 1, True),
     )
+)
+
+# Swapping puts skinny M on the 32-wide N tile. Measured on GB200 dense SiLU;
+# keep these out of larger shapes, where the expanded search can regress.
+_SKINNY_PRIORITY_RANK = _sm100_priority_rank(
+    ((128, 32, 2, 1, True), (128, 32, 2, 2, False)), swap_ab=True
 )
 
 # Measured varlen-M (grouped_mm) order on SM100 over DeepSeek-V3 16B/671B
@@ -120,7 +128,10 @@ def _prioritized(
 
 
 def flex_gemm_search_space(
-    legal_configs: tuple[QuackConfigKey, ...], *, varlen: bool = False
+    legal_configs: tuple[QuackConfigKey, ...],
+    *,
+    varlen: bool = False,
+    dense_shape: tuple[int, int] | None = None,
 ) -> tuple[QuackConfigKey, ...]:
     """Return the legal configs Inductor benchmarks, best-known first.
 
@@ -131,12 +142,20 @@ def flex_gemm_search_space(
     benchmark QuACK's order, capped at ``_MAX_UNRANKED_CANDIDATES``. Varlen-M
     calls rank by the grouped_mm order and only add QuACK's dense default when
     it is measured (it is the slowest common choice for ragged groups).
+    Dense mm shape hints additionally admit two small-N swapped configs for M <= 128.
     """
     if inductor_config.max_autotune_gemm_search_space == "EXHAUSTIVE":
         return legal_configs
     prioritized = _prioritized(legal_configs, varlen=varlen)
     if not prioritized:
         return legal_configs[:_MAX_UNRANKED_CANDIDATES]
+    if not varlen and dense_shape is not None and dense_shape[0] <= 128:
+        skinny = {
+            config: rank
+            for config in legal_configs
+            if (rank := _SKINNY_PRIORITY_RANK.get(_rank_key(config))) is not None
+        }
+        prioritized.extend(sorted(skinny, key=skinny.__getitem__))
     default = legal_configs[0]
     if default not in prioritized and not varlen:
         prioritized.insert(0, default)
