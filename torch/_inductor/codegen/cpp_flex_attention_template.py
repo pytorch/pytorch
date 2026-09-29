@@ -392,8 +392,6 @@ FLEX_ATTENTION_TEMPLATE = r"""
   // Check criteria for enabling AMX + AVX512 interleave in QK and Softmax
 {%- if amx_supported %}
   static const bool amx_ok = at::cpu::init_amx();
-  // need_pack implies could_pack(scalar_t), so this CPU also has the AMX tile
-  // dot-product for scalar_t (amx-bf16 / amx-fp16) that the helpers issue.
   bool use_amx_overlap = amx_ok
       && need_pack
       && (headSize % 32 == 0)
@@ -1345,8 +1343,7 @@ class CppFlexAttentionTemplate(CppTemplate):
             else None
         )
         self.other_ptr_data = {}
-        # Gate every AMX region on the ISA inductor will compile with, which must
-        # also have the tile dot-product instruction for this dtype.
+        # Gate every AMX region on the ISA inductor will compile with.
         vec_isa = pick_vec_isa()
         self.amx_supported = isinstance(vec_isa, VecAMX) and (
             layout.dtype == torch.bfloat16

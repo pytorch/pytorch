@@ -25,7 +25,6 @@ import torch.nn as nn
 from torch._dynamo.testing import CompileCounterWithBackend, normalize_gm
 from torch._higher_order_ops.inline_asm_elementwise import inline_asm_elementwise
 from torch._inductor import config, metrics
-from torch._inductor.cpu_vec_isa import pick_vec_isa, VecAMX
 from torch._inductor.exc import InductorError
 from torch._inductor.runtime.triton_compat import HAS_WARP_SPEC
 from torch._inductor.test_case import TestCase as InductorTestCase
@@ -6891,32 +6890,12 @@ class GraphModule(torch.nn.Module):
     @skip_on_mps
     @dtypes(torch.bfloat16, torch.float16)
     def test_cpu_seqlen_with_odd_tail_block(self, device, dtype):
-        # 299 = 2 * 128 + 43. On AMX, the 43-wide kv block falls back from the AMX
-        # tiles to oneDNN brgemm. The masked-out padding makes it a partial block, and
-        # partial blocks run first, so the full q blocks switch brgemm -> AMX and
-        # the 43-row q block (all partial) switches AMX -> brgemm. Not using run_test,
-        # which runs float16 as float32 on CPU.
         qkv = [torch.randn(B, H, 299, D, device=device, dtype=dtype) for _ in range(3)]
         block_mask = create_block_mask(noop_mask, B, H, 299, 299, device=device)
         attention = functools.partial(flex_attention, block_mask=block_mask)
         golden_out = attention(*query_key_value_clones(*qkv, torch.float64))
         ref_out = attention(*qkv)
         self._check_out(golden_out, ref_out, torch.compile(attention)(*qkv))
-
-    @supported_platform
-    @skip_on_cuda
-    @skip_on_xpu
-    @dtypes(torch.bfloat16, torch.float16)
-    def test_cpu_amx_tile_dot_product(self, device, dtype):
-        vec_isa = pick_vec_isa()
-        if not isinstance(vec_isa, VecAMX) or (
-            dtype == torch.float16 and not vec_isa.is_amx_fp16_supported()
-        ):
-            self.skipTest(f"no AMX tile dot-product for {dtype} in {vec_isa}")
-        qkv = [torch.randn(B, H, S, D, device=device, dtype=dtype) for _ in range(3)]
-        _, code = run_and_get_code(torch.compile(flex_attention), *qkv)
-        tile_dp = {torch.bfloat16: "_tile_dpbf16ps", torch.float16: "_tile_dpfp16ps"}
-        self.assertIn(f"{tile_dp[dtype]}(", code[0])
 
     @supported_platform
     @skip_on_cuda

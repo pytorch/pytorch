@@ -8,9 +8,8 @@ that follow ``AMXState``'s slot order (C tiles, then A, then B).
 import torch
 
 
-# The C++ is a Jinja template to substitute the kernel-name prefix, so the
-# symbols do not collide across multiple compiled kernels in one process, and
-# the tile dot-product instruction for the input dtype.
+# The C++ is a Jinja template only to substitute the kernel-name prefix so the
+# symbols do not collide across multiple compiled kernels in one process.
 FLEX_ATTENTION_AMX_HELPERS = r"""
 // AMX bf16/fp16 accumulator block. C[NROWS,32] (+)= A[NROWS,K] @ Bp[K,32] (VNNI2).
 //
