@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import collections
 import contextlib
 import copy
 import hashlib
@@ -9,6 +10,7 @@ import json
 import os
 import pickle
 import threading
+import types
 from typing import cast, TYPE_CHECKING
 
 from torch.compiler._cache import (
@@ -22,14 +24,28 @@ from torch.utils._appending_byte_serializer import AppendingByteSerializer
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
     from types import ModuleType
 
-    from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+    from torch._inductor.runtime.triton_heuristics import (
+        CachingAutotuner,
+        StaticTritonCompileResult,
+    )
 
 
+def _precompile_error(message: str) -> Exception:
+    from torch._precompile import PrecompileError
+
+    return PrecompileError(message)
+
+
+# Process-wide: once prepared, a frozen kernel serves every later compile of the
+# same Triton source in this process until Inductor's kernel caches are cleared.
 _frozen_triton_kernels: dict[str, bytes] = {}
+_loaded_triton_kernels: dict[str, CachingAutotuner] = {}
 _frozen_triton_kernels_lock = threading.Lock()
+# Keyed like CppCodeCache: by source and full build command, which includes the
+# producer's absolute include and library paths.
 _frozen_cpp_kernels: dict[str, bytes] = {}
 _frozen_cpp_kernels_lock = threading.Lock()
 
@@ -90,6 +106,8 @@ class InductorTritonCacheArtifact(CacheArtifact):
             raise RuntimeError("Invalid Inductor Triton runtime artifact")
         with _frozen_triton_kernels_lock:
             _frozen_triton_kernels.update(records)
+            for key in records:
+                _loaded_triton_kernels.pop(key, None)
 
 
 @CacheArtifactFactory.register
@@ -109,6 +127,11 @@ class InductorCppCacheArtifact(CacheArtifact):
             raise RuntimeError("Invalid Inductor C++ runtime artifact")
         with _frozen_cpp_kernels_lock:
             _frozen_cpp_kernels.update(records)
+
+
+def clear_cpp_kernels() -> None:
+    with _frozen_cpp_kernels_lock:
+        _frozen_cpp_kernels.clear()
 
 
 def record_cpp_kernel(key: str, binary_path: str) -> None:
@@ -159,16 +182,25 @@ def record_triton_kernel(key: str, kernel: CachingAutotuner) -> None:
 def clear_triton_kernels() -> None:
     with _frozen_triton_kernels_lock:
         _frozen_triton_kernels.clear()
+        _loaded_triton_kernels.clear()
 
 
 def load_triton_kernel(key: str) -> CachingAutotuner | None:
+    with _frozen_triton_kernels_lock:
+        if (kernel := _loaded_triton_kernels.get(key)) is not None:
+            return kernel
+        payload = _frozen_triton_kernels.get(key)
+        if payload is None:
+            return None
+        kernel = _load_frozen_triton_kernel(key, payload)
+        _loaded_triton_kernels[key] = kernel
+        return kernel
+
+
+def _load_frozen_triton_kernel(key: str, payload: bytes) -> CachingAutotuner:
     from torch._inductor.runtime.triton_heuristics import StaticTritonCompileResult
     from torch._inductor.triton_bundler import StaticallyLaunchedAutotuner
 
-    with _frozen_triton_kernels_lock:
-        payload = _frozen_triton_kernels.get(key)
-    if payload is None:
-        return None
     record = pickle.loads(payload)
     if not isinstance(record, StaticallyLaunchedAutotuner) or record.cache_key != key:
         raise RuntimeError("Invalid Inductor Triton source identity")
@@ -251,6 +283,32 @@ def _triton_export_diagnostic(
     }
 
 
+def _detached_copy(fn: object) -> object:
+    # A shallow copy's bound methods (and cache factories) still point at the live
+    # object, so pickling the copy would pickle the live object too.
+    saved = copy.copy(fn)
+    for name, value in vars(fn).items():
+        if getattr(value, "__self__", None) is fn:
+            setattr(saved, name, types.MethodType(value.__func__, saved))
+        elif (
+            isinstance(value, collections.defaultdict)
+            and getattr(value.default_factory, "__self__", None) is fn
+        ):
+            factory = types.MethodType(value.default_factory.__func__, saved)
+            setattr(saved, name, collections.defaultdict(factory, value))
+    return saved
+
+
+def _retain_cubin(result: StaticTritonCompileResult) -> None:
+    # A launched kernel has dropped its cubin bytes, and pickling drops its cubin
+    # path, so the frozen record must carry the bytes itself.
+    static_kernel = result.kernel
+    if static_kernel.cubin_raw is None:
+        result.reload_cubin_path()
+        with open(static_kernel.cubin_path, "rb") as f:
+            static_kernel.cubin_raw = f.read()
+
+
 def _freeze_triton_kernel(key: str, instances: list[CachingAutotuner]) -> bytes:
     from torch._inductor.runtime.triton_heuristics import StaticTritonCompileResult
     from torch._inductor.triton_bundler import StaticallyLaunchedAutotuner
@@ -266,28 +324,22 @@ def _freeze_triton_kernel(key: str, instances: list[CachingAutotuner]) -> bytes:
             result = cast(
                 StaticTritonCompileResult, kernel.launchers[0]._compile_result
             )
-            old_results = kernel.compile_results
-            old_cached_launcher = kernel._cached_launcher
-            old_values = kernel.prepare_for_pickle()
-            try:
-                kernel.compile_results = [result]
-                saved = copy.deepcopy(kernel)
-                saved._reload_kernel = None
-                cast(
-                    StaticTritonCompileResult, saved.compile_results[0]
-                ).reload_cubin_path()
-                saved.prepare_for_caching()
-                return pickle.dumps(
-                    StaticallyLaunchedAutotuner(
-                        key,
-                        saved.inductor_meta.get("kernel_name", "unknown_kernel"),
-                        saved,
-                    )
-                )
-            finally:
-                kernel.compile_results = old_results
-                kernel.restore_after_unpickle(old_values)
-                kernel._cached_launcher = old_cached_launcher
+            # run() reads the live kernel's launchers without taking its lock, so
+            # freeze a copy and leave the live kernel untouched.
+            saved = type(kernel).__new__(type(kernel))
+            saved.__dict__.update(kernel.__dict__)
+            saved.fn = _detached_copy(kernel.fn)
+            saved_result = copy.copy(result)
+            saved_result.kernel = copy.copy(result.kernel)
+        saved.prepare_for_pickle()
+        saved.compile_results = [saved_result]
+        saved._reload_kernel = None
+        _retain_cubin(saved_result)
+        return pickle.dumps(
+            StaticallyLaunchedAutotuner(
+                key, saved.inductor_meta.get("kernel_name", "unknown_kernel"), saved
+            )
+        )
     raise _UnresolvedTritonExport(
         [{"source_key": key, "instance_count": len(instances), "instances": rejected}]
     )
@@ -311,9 +363,20 @@ class _RuntimeCapture:
         self.policy.enter_context(no_compilation())
         self.sealed = True
 
+    def unseal(self) -> None:
+        self.policy.close()
+        self.policy = contextlib.ExitStack()
+        self.sealed = False
+
 
 _capture: _RuntimeCapture | None = None
 _capture_lock = threading.Lock()
+
+
+def _active_capture() -> _RuntimeCapture | None:
+    # A forked child inherits the parent's scope object; it is not the child's.
+    owner = _capture
+    return owner if owner is not None and owner.pid == os.getpid() else None
 
 
 @contextlib.contextmanager
@@ -326,6 +389,10 @@ def capture_runtime() -> Iterator[None]:
     outer application cleanup has returned.
     """
     global _capture
+    if is_compilation_forbidden():
+        raise _precompile_error(
+            "precompile.capture_runtime cannot start while compilation is forbidden"
+        )
     cache_root = None
     if (cache := _triton_runtime_cache()) is not None:
         from triton import knobs
@@ -336,19 +403,17 @@ def capture_runtime() -> Iterator[None]:
             not knobs.autotuning.cache
             or os.environ.get("TRITON_CACHE_AUTOTUNING") != "1"
         ):
-            raise RuntimeError(
-                "Runtime capture requires TRITON_CACHE_AUTOTUNING=1 before "
-                "application imports"
+            raise _precompile_error(
+                "precompile.capture_runtime requires TRITON_CACHE_AUTOTUNING=1 "
+                "before application imports"
             )
         cache_root = str(root)
-    if is_compilation_forbidden():
-        raise RuntimeError(
-            "Runtime capture cannot start while compilation is forbidden"
-        )
     owner = _RuntimeCapture(cache_root)
     with _capture_lock:
-        if _capture is not None:
-            raise RuntimeError("Another precompile runtime capture is already active")
+        if _active_capture() is not None:
+            raise _precompile_error(
+                "Another precompile runtime capture is already active"
+            )
         _capture = owner
     try:
         yield
@@ -359,17 +424,27 @@ def capture_runtime() -> Iterator[None]:
             with _capture_lock:
                 owner.triton_kernels.clear()
                 owner.cpp_kernels.clear()
-                _capture = None
+                if _capture is owner:
+                    _capture = None
 
 
-def finalize_runtime_cache(artifact: bytes | None) -> bytes:
+def finalize_runtime_cache(
+    artifact: bytes | None, write: Callable[[bytes | None], None]
+) -> None:
+    """Freeze the scope's static Triton kernels into the cache artifact, pass it
+    to ``write``, then keep the scope sealed.
+
+    The scope is sealed before kernels are frozen, so a compile racing
+    finalization raises instead of being left out, and unsealed again if freezing
+    or ``write`` raises so the caller can retry.
+    """
     import torch
     from torch._inductor.async_compile import AsyncCompile
 
     cache = _triton_runtime_cache()
 
-    owner = _capture
-    if owner is None or owner.pid != os.getpid():
+    owner = _active_capture()
+    if owner is None:
         raise RuntimeError(
             "precompile.finalize_cache requires the worker's capture_runtime scope"
         )
@@ -407,46 +482,53 @@ def finalize_runtime_cache(artifact: bytes | None) -> bytes:
             owner.seal()
             kernels = dict(owner.triton_kernels)
             cpp_kernels = dict(owner.cpp_kernels)
-        static_kernels: dict[str, bytes] = {}
-        rejected_sources: list[dict[str, object]] = []
-        for key, instances in kernels.items():
-            try:
-                static_kernels[key] = _freeze_triton_kernel(key, instances)
-            except _UnresolvedTritonExport as exc:
-                rejected_sources.extend(exc.sources)
-        if rejected_sources:
-            error = _UnresolvedTritonExport(rejected_sources)
-            torch._logging.trace_structured(
-                "artifact",
-                metadata_fn=lambda: {
-                    "name": "precompile_triton_export_failures",
-                    "encoding": "json",
-                },
-                payload_fn=lambda: error.report,
-                expect_trace_id=False,
-                record_logging_overhead=False,
-            )
-            raise error
-        static_payload = pickle.dumps(static_kernels)
-        cpp_payload = _freeze_cpp_kernels(cpp_kernels)
-        if cache is not None:
-            payload = cache.export_runtime_cache(context=_runtime_context())
-            artifacts[TritonRuntimeCacheArtifact.type()] = [
-                TritonRuntimeCacheArtifact(hashlib.sha256(payload).hexdigest(), payload)
+        try:
+            static_kernels: dict[str, bytes] = {}
+            rejected_sources: list[dict[str, object]] = []
+            for key, instances in kernels.items():
+                try:
+                    static_kernels[key] = _freeze_triton_kernel(key, instances)
+                except _UnresolvedTritonExport as exc:
+                    rejected_sources.extend(exc.sources)
+            if rejected_sources:
+                error = _UnresolvedTritonExport(rejected_sources)
+                torch._logging.trace_structured(
+                    "artifact",
+                    metadata_fn=lambda: {
+                        "name": "precompile_triton_export_failures",
+                        "encoding": "json",
+                    },
+                    payload_fn=lambda: error.report,
+                    expect_trace_id=False,
+                    record_logging_overhead=False,
+                )
+                raise error
+            static_payload = pickle.dumps(static_kernels)
+            cpp_payload = _freeze_cpp_kernels(cpp_kernels)
+            if cache is not None:
+                payload = cache.export_runtime_cache(context=_runtime_context())
+                artifacts[TritonRuntimeCacheArtifact.type()] = [
+                    TritonRuntimeCacheArtifact(
+                        hashlib.sha256(payload).hexdigest(), payload
+                    )
+                ]
+            artifacts[InductorTritonCacheArtifact.type()] = [
+                InductorTritonCacheArtifact(
+                    hashlib.sha256(static_payload).hexdigest(), static_payload
+                )
             ]
-        artifacts[InductorTritonCacheArtifact.type()] = [
-            InductorTritonCacheArtifact(
-                hashlib.sha256(static_payload).hexdigest(), static_payload
-            )
-        ]
-        artifacts[InductorCppCacheArtifact.type()] = [
-            InductorCppCacheArtifact(
-                hashlib.sha256(cpp_payload).hexdigest(), cpp_payload
-            )
-        ]
-        serializer = AppendingByteSerializer(serialize_fn=_serialize_single_cache)
-        serializer.extend(artifacts.items())
-        return serializer.to_bytes()
+            artifacts[InductorCppCacheArtifact.type()] = [
+                InductorCppCacheArtifact(
+                    hashlib.sha256(cpp_payload).hexdigest(), cpp_payload
+                )
+            ]
+            serializer = AppendingByteSerializer(serialize_fn=_serialize_single_cache)
+            serializer.extend(artifacts.items())
+            write(serializer.to_bytes())
+        except BaseException:
+            with _capture_lock:
+                owner.unseal()
+            raise
 
 
 def prepare_runtime_cache(artifact: bytes | None) -> None:

@@ -304,19 +304,33 @@ class AsyncCompile:
         return ThreadPoolExecutor(get_compile_threads())
 
     @classmethod
-    def drain_pending(cls) -> None:
-        """Finish compiler work and result callbacks after submissions have stopped."""
+    def drain_pending(cls, timeout: float | None = 600) -> None:
+        """Wait for all submitted compile work, then shut down the compile workers.
+
+        Call this only after submissions have stopped. It waits on every cached
+        Triton kernel future (running its result callback), joins the thread
+        pool, and waits on every job still queued in a subprocess pool.
+        ``timeout`` bounds the total time spent waiting on those futures and
+        jobs; exceeding it raises ``concurrent.futures.TimeoutError``. A failed
+        future re-raises its error. On either error the subprocess pools and
+        compile workers are left running.
+        """
+        deadline = None if timeout is None else time() + timeout
+
+        def remaining() -> float | None:
+            return None if deadline is None else max(0.0, deadline - time())
+
         for future in list(CompiledTritonKernels._cache.values()):
             if not isinstance(future, StaticAutotunerFuture):
-                future.result()
+                future.result(timeout=remaining())
         if cls.pool.cache_info().currsize:
             cls.pool().shutdown(wait=True)
             cls.pool.cache_clear()
         if cls._ready_future is not None:
-            cls._ready_future.result()
+            cls._ready_future.result(timeout=remaining())
         for pool in _pool_set:
             if isinstance(pool, SubprocPool):
-                pool.drain_pending()
+                pool.drain_pending(timeout=remaining())
             else:
                 pool.shutdown(wait=True)
         shutdown_compile_workers()
@@ -574,6 +588,7 @@ class AsyncCompile:
         source_key = CompiledTritonKernels.key(source_code)
         if (kernel := load_triton_kernel(source_key)) is not None:
             counters["inductor"]["async_compile_cache_hit"] += 1
+            kernel.set_compile_info(compile_id, is_backward)
             kernel._reload_kernel = reload_kernel_in_parent
             record_triton_kernel(source_key, kernel)
             return kernel
