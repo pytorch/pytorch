@@ -154,21 +154,6 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Initialize job directories
-        shell: bash
-        run: |
-          set -euo pipefail
-          for name in artifacts test-results docs; do
-            path="${RUNNER_TEMP}/${name}"
-            rm -rf "${path}"
-            mkdir -p "${path}"
-            case "${name}" in
-              artifacts) echo "RUNNER_ARTIFACT_DIR=${path}" >> "${GITHUB_ENV}" ;;
-              test-results) echo "RUNNER_TEST_RESULTS_DIR=${path}" >> "${GITHUB_ENV}" ;;
-              docs) echo "RUNNER_DOCS_DIR=${path}" >> "${GITHUB_ENV}" ;;
-            esac
-          done
-
       - name: Start monitoring script
         id: monitor-script
         if: ${{ !inputs.disable-monitor }}
