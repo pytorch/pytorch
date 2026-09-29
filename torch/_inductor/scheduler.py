@@ -1791,15 +1791,6 @@ class NestedReduction:
             parent_index = sympy_subs(next(iter(source_parent_indices)), extent_subs)
             requires_live_source = not parent_writes.isdisjoint(source_deps)
             for dep, child_index in source_child_accesses:
-                if V.graph.sizevars.statically_known_equals(child_index, parent_index):
-                    access_relations.add(
-                        SubParentAccessRelation(
-                            source_accesses=source_deps,
-                            consumer_access=dep,
-                            requires_live_source=requires_live_source,
-                        )
-                    )
-                    continue
                 lane = cls.interleaved_sub_parent_lane(
                     child_index,
                     sub_parent_factor,
@@ -1818,31 +1809,14 @@ class NestedReduction:
                     expected = parent_index.subs(
                         parent_r, sub_parent_factor * child_r + lane_value
                     )
-                    lane_extent = cls._sub_parent_logical_extent(
-                        dep, parent_numel, extent_subs
-                    )
-                    if (
-                        lane_extent is not None
-                        and V.graph.sizevars.statically_known_equals(
-                            child_index, expected
-                        )
-                        and cls._sub_parent_affine_relation_is_admissible(
-                            sub_parent_factor,
-                            sympy.Integer(lane_value),
-                            lane_extent,
-                            V.graph.sizevars.simplify(
-                                sympy_subs(parent_rnumel, extent_subs)
-                            ),
-                            sub_parent_factor,
-                        )
-                    ):
+                    if V.graph.sizevars.statically_known_equals(child_index, expected):
                         access_relations.add(
                             SubParentAccessRelation(
                                 source_accesses=source_deps,
                                 consumer_access=dep,
                                 access_stride=sub_parent_factor,
                                 base_offset=sympy.Integer(lane_value),
-                                extent=lane_extent,
+                                extent=sympy_subs(child_rnumel, extent_subs),
                                 requires_live_source=requires_live_source,
                             )
                         )
@@ -1850,6 +1824,15 @@ class NestedReduction:
 
                 if not config.polyhedral_fusion:
                     return None
+                if V.graph.sizevars.statically_known_equals(child_index, parent_index):
+                    access_relations.add(
+                        SubParentAccessRelation(
+                            source_accesses=source_deps,
+                            consumer_access=dep,
+                            requires_live_source=requires_live_source,
+                        )
+                    )
+                    continue
                 proof = cls.prove_sub_parent_translation(
                     source_deps,
                     dep,
@@ -1989,7 +1972,7 @@ class NestedReduction:
 
     @staticmethod
     def sub_parent_layout_access(
-        output: Any, source: MemoryDep
+        output: ir.IRNode, source: MemoryDep
     ) -> MemoryDep | None:
         """Express a graph-output view in the source loop-variable frame.
 
@@ -2000,17 +1983,9 @@ class NestedReduction:
         Returns:
             A matching memory dependency, or None if the view is unsupported.
         """
-        layout = getattr(output, "get_layout", lambda: None)()
-        if (
-            layout is None
-            or not hasattr(layout, "size")
-            or not hasattr(layout, "stride")
-        ):
-            return None
+        layout = output.get_layout()
         sizes = tuple(layout.size)
         strides = tuple(layout.stride)
-        if len(sizes) != len(strides):
-            return None
         active_axes = tuple(
             index
             for index, size in enumerate(sizes)
@@ -2018,14 +1993,9 @@ class NestedReduction:
         )
         if len(active_axes) != source.num_vars:
             return None
-        if not callable(getattr(output, "get_name", None)):
-            return None
         if output.get_name() != source.name:
             return None
-        offset = getattr(layout, "offset", sympy.S.Zero)
-        if offset is None:
-            return None
-        index = offset + sum(
+        index = layout.offset + sum(
             (
                 stride * var
                 for stride, var in zip(
@@ -2072,7 +2042,7 @@ class NestedReduction:
 
         relations: list[SubParentAccessRelation] = []
         for output in V.graph.graph_outputs:
-            name = getattr(output, "get_name", lambda: None)()
+            name = output.get_name()
             writes = writes_by_name.get(name, ())
             if not writes:
                 continue
@@ -2441,19 +2411,18 @@ class NestedReduction:
                 domain_context.grouped_numel,
                 grouped_reduction.get_ranges()[0],
             )
-            sub_parent_compatible = (
-                is_consumer
-                and cls._nested_sub_parent_rate(sn, domain_context) is not None
+            sub_parent_rate = (
+                cls._nested_sub_parent_rate(sn, domain_context) if is_consumer else None
             )
             # Reachable only when group_size equals a sub-parent factor, so
             # G is 2 or 4. unroll_reductions_threshold turns groups that small
             # into pointwise ops, so this needs a lowered threshold to fire.
-            if reduced_compatible and sub_parent_compatible:
+            if reduced_compatible and sub_parent_rate in cls.SUB_PARENT_RATES:
                 return None
-            if sub_parent_compatible:
-                domain = cls.PointwiseDomain.SUB_PARENT
-            elif reduced_compatible:
+            if reduced_compatible:
                 domain = cls.PointwiseDomain.REDUCED
+            elif sub_parent_rate is not None:
+                domain = cls.PointwiseDomain.SUB_PARENT
             elif cls._pointwise_node_matches_domain(
                 sn,
                 full_numel,
@@ -2567,7 +2536,9 @@ class NestedReduction:
                 else {}
             ),
         )
-        if not source_relations:
+        if not source_relations or any(
+            relation.access_stride == 1 for relation in source_relations
+        ):
             return None
         live_source_names = OrderedSet(
             relation.consumer_access.name

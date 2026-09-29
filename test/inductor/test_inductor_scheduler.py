@@ -312,20 +312,32 @@ class TestScheduler(TestCase):
             self.assertIsNotNone(relation.access_stride)
             return relation
 
-        self.assertEqual(
-            tuple(
-                (
-                    relation.access_stride,
-                    relation.base_offset,
-                    relation.extent,
-                )
-                for relation in (
-                    plan_relation(256 * row + 4 * feature + lane, 64)
-                    for lane in range(4)
-                )
+        with (
+            patch.object(
+                NestedReduction,
+                "_sub_parent_logical_extent",
+                side_effect=AssertionError("legacy lanes must not check logical extent"),
             ),
-            ((4, 0, 64), (4, 1, 64), (4, 2, 64), (4, 3, 64)),
-        )
+            patch.object(
+                NestedReduction,
+                "_sub_parent_affine_relation_is_admissible",
+                side_effect=AssertionError("legacy lanes must not check geometry"),
+            ),
+        ):
+            self.assertEqual(
+                tuple(
+                    (
+                        relation.access_stride,
+                        relation.base_offset,
+                        relation.extent,
+                    )
+                    for relation in (
+                        plan_relation(256 * row + 4 * feature + lane, 64)
+                        for lane in range(4)
+                    )
+                ),
+                ((4, 0, 64), (4, 1, 64), (4, 2, 64), (4, 3, 64)),
+            )
         self.assertEqual(
             {
                 (
@@ -1943,6 +1955,94 @@ class TestScheduler(TestCase):
         self.assertEqual(rate, (2, 1))
         self.assertIsNone(cross_group_rate)
         self.assertIsNone(x_grouped_rate)
+
+    def test_nested_sub_parent_declines_translated_relation(self):
+        row, feature = sympy.symbols(
+            "nested_translation_row nested_translation_feature",
+            integer=True,
+            nonnegative=True,
+        )
+        source = MemoryDep(
+            "source", 256 * row + feature, (row, feature), (4, 256)
+        )
+        consumer = MemoryDep(
+            "source", 256 * row + feature + 64, (row, feature), (4, 64)
+        )
+        parent = Mock(
+            read_writes=ReadWrites(OrderedSet([source]), OrderedSet(), OrderedSet())
+        )
+        parent.is_reduction.return_value = False
+        parent.get_buffer_names.return_value = OrderedSet()
+        epilogue = Mock(
+            read_writes=ReadWrites(OrderedSet([consumer]), OrderedSet(), OrderedSet())
+        )
+        outer = Mock()
+        outer.get_nodes.return_value = (parent,)
+        outer.group = (None, (4, 256))
+        grouped_reduction = Mock()
+        grouped_reduction.get_buffer_names.return_value = OrderedSet()
+        context = Mock(grouped_reduction=grouped_reduction, grouped_rnumel=4)
+        domains = [(epilogue, NestedReduction.PointwiseDomain.SUB_PARENT)]
+        grouping = Mock(output_groups=(Mock(output_lanes=1, nodes=(epilogue,)),))
+        grouping.factor = 4
+        graph = Mock(sizevars=SizeVarAllocator())
+        with (
+            V.set_graph_handler(graph),
+            inductor_config.patch(polyhedral_fusion=True),
+        ):
+            candidate = NestedReduction._try_get_sub_parent_access_relations(
+                (parent,),
+                (epilogue,),
+                4,
+                256,
+                OrderedSet(["source"]),
+                4,
+            )
+            with (
+                patch.object(
+                    NestedReduction,
+                    "_mutations_survive_hoisting",
+                    return_value=True,
+                ),
+                patch.object(
+                    NestedReduction,
+                    "_nested_sub_parent_rate",
+                    return_value=(4, 1),
+                ),
+                patch.object(
+                    NestedReduction,
+                    "_group_sub_parent_epilogue_nodes",
+                    return_value=grouping,
+                ),
+                patch.object(
+                    NestedReduction,
+                    "_sub_parent_internal_access_relations",
+                    return_value=(),
+                ),
+                patch.object(
+                    NestedReduction,
+                    "_sub_parent_epilogue_outputs_unread",
+                    return_value=True,
+                ),
+                patch.object(
+                    NestedReduction,
+                    "prove_sub_parent_translation",
+                    wraps=NestedReduction.prove_sub_parent_translation,
+                ) as translation_proof,
+            ):
+                stage = NestedReduction._plan_nested_sub_parent_stage(
+                    outer, (epilogue,), context, domains
+                )
+
+        self.assertEqual(
+            tuple(
+                (relation.access_stride, relation.base_offset, relation.extent)
+                for relation in candidate or ()
+            ),
+            ((1, 64, 64),),
+        )
+        translation_proof.assert_called_once()
+        self.assertIsNone(stage)
 
     def test_nested_reduction_rejects_ambiguous_pointwise_domain(self):
         grouped = self._mock_schedule_node(
