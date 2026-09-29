@@ -249,7 +249,8 @@ def pairwise(iterable: Iterable[_T], /) -> Iterator[tuple[_T, _T]]:
     def _pairwise() -> Iterator[tuple[_T, _T]]:
         a = None
         first = True
-        for b in iterator:
+        sentinel = object()
+        while (b := next(iterator, sentinel)) is not sentinel:
             if first:
                 first = False
             else:

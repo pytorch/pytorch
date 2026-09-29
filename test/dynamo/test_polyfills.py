@@ -11,6 +11,31 @@ from torch.testing._internal.common_utils import HardwareClassification
 class TestPairwise(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    def test_iterator_iter_called_once(self):
+        class Iterator:
+            def __init__(self):
+                self.index = 0
+                self.iter_calls = 0
+
+            def __iter__(self):
+                self.iter_calls += 1
+                return self
+
+            def __next__(self):
+                if self.index == 3:
+                    raise StopIteration
+                self.index += 1
+                return self.index
+
+        def fn(iterator):
+            return list(itertools.pairwise(iterator))
+
+        eager_iterator = Iterator()
+        compiled_iterator = Iterator()
+        self.assertEqual(fn(eager_iterator), torch.compile(fn, backend="eager", fullgraph=True)(compiled_iterator))
+        self.assertEqual(eager_iterator.iter_calls, 1)
+        self.assertEqual(compiled_iterator.iter_calls, eager_iterator.iter_calls)
+
     def test_call_time_iteration(self):
         def fn(iterable):
             try:
