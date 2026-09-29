@@ -2288,7 +2288,7 @@ class ExternalTritonTemplateKernel(TritonTemplateKernel):
         # relevant for standalone Triton kernel codegen (grid, warps, etc.).
         super().__init__(
             kernel_name="",
-            input_nodes=(),
+            input_nodes=tuple(template_buffer._named_inputs.values()),
             output_node=_RealOutputNode(),
             defines={},
             num_stages=0,
@@ -2712,9 +2712,17 @@ class GenerateAndLoadResult(NamedTuple):
     mod: ModuleType
     extra: str
     input_call_args: tuple[str, ...]
-    allowed_fused_inputs: OrderedSet[str]
+    load_input_fusion_allowed_inputs: OrderedSet[str]
+    store_output_fusion_allowed_inputs: OrderedSet[str]
     kernel_args_sizevars_keys: tuple[sympy.Expr, ...]
     kernel_options: dict[str, Any]
+
+    @property
+    def producer_fusion_allowed_inputs(self) -> OrderedSet[str]:
+        return (
+            self.load_input_fusion_allowed_inputs
+            | self.store_output_fusion_allowed_inputs
+        )
 
 
 class GeneratedCodeCacheEntry(NamedTuple):
@@ -3176,10 +3184,8 @@ class TritonTemplate(KernelTemplate):
         mod = PyCodeCache.load(code, extra, set_sys_modules=False)
 
         input_call_args = tuple(kernel.args.input_buffers.keys())
-        allowed_fused_inputs = (
-            kernel.load_input_fusion_allowed_inputs
-            | kernel.store_output_fusion_allowed_inputs
-        )
+        load_input_fusion_allowed_inputs = kernel.load_input_fusion_allowed_inputs
+        store_output_fusion_allowed_inputs = kernel.store_output_fusion_allowed_inputs
         kernel_args_sizevars_keys = tuple(kernel.args.sizevars.keys())
 
         if cache_hit:
@@ -3189,7 +3195,8 @@ class TritonTemplate(KernelTemplate):
             mod,
             extra,
             input_call_args,
-            allowed_fused_inputs,
+            load_input_fusion_allowed_inputs,
+            store_output_fusion_allowed_inputs,
             kernel_args_sizevars_keys,
             kernel_options,
         )
@@ -3447,7 +3454,10 @@ class TritonTemplate(KernelTemplate):
             },
             mutated_inputs=mutated_inputs,
             workspace_arg=workspace_arg,
-            allowed_fused_inputs=result.allowed_fused_inputs,
+            load_input_fusion_allowed_inputs=result.load_input_fusion_allowed_inputs,
+            store_output_fusion_allowed_inputs=(
+                result.store_output_fusion_allowed_inputs
+            ),
             hint_override=hint_override,
         )
 
@@ -3589,7 +3599,8 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         log_info: dict[str, PrimitiveInfoType | list[PrimitiveInfoType]] | None = None,
         mutated_inputs=None,
         workspace_arg: WorkspaceArg | None = None,
-        allowed_fused_inputs: OrderedSet[str] | None = None,
+        load_input_fusion_allowed_inputs: OrderedSet[str] | None = None,
+        store_output_fusion_allowed_inputs: OrderedSet[str] | None = None,
         hint_override: int | None = None,
     ) -> None:
         super().__init__(name, input_nodes, layout, description)
@@ -3607,12 +3618,26 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         )
         self.mutated_inputs = mutated_inputs
         self.workspace_arg = workspace_arg
-        self.allowed_fused_inputs = (
-            allowed_fused_inputs if allowed_fused_inputs is not None else OrderedSet()
+        self.load_input_fusion_allowed_inputs = (
+            load_input_fusion_allowed_inputs
+            if load_input_fusion_allowed_inputs is not None
+            else OrderedSet()
+        )
+        self.store_output_fusion_allowed_inputs = (
+            store_output_fusion_allowed_inputs
+            if store_output_fusion_allowed_inputs is not None
+            else OrderedSet()
         )
         self.hint_override = hint_override
 
         self.n_regs = None
+
+    @property
+    def producer_fusion_allowed_inputs(self) -> OrderedSet[str]:
+        return (
+            self.load_input_fusion_allowed_inputs
+            | self.store_output_fusion_allowed_inputs
+        )
 
     def benchmark(self, *args, out):
         if self.bmreq is None:
@@ -3653,7 +3678,10 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
             inputs=self.input_nodes,
             make_kernel_render=self.make_kernel_render,
             mutated_inputs=self.mutated_inputs,
-            allowed_fused_inputs=self.allowed_fused_inputs,
+            load_input_fusion_allowed_inputs=self.load_input_fusion_allowed_inputs,
+            store_output_fusion_allowed_inputs=(
+                self.store_output_fusion_allowed_inputs
+            ),
         )
         # Pass KTC annotation to the buffer for encoding
         if "ktc" in self.annotations:
@@ -4429,13 +4457,17 @@ class AlgorithmSelectorCache(PersistentCache):
 
                     return timings
 
-            # Expose every input that any template choice allows for fusion.
-            # When benchmarking a fused kernel, skip choices that do not support
-            # the multi-template buffer's complete allowed-input set.
-            allowed_fused_inputs: OrderedSet[str] = OrderedSet()
+            # Preserve placement-specific eligibility across all template choices.
+            load_input_fusion_allowed_inputs: OrderedSet[str] = OrderedSet()
+            store_output_fusion_allowed_inputs: OrderedSet[str] = OrderedSet()
             for c in choices:
                 if isinstance(c, TritonTemplateCaller):
-                    allowed_fused_inputs |= c.allowed_fused_inputs
+                    load_input_fusion_allowed_inputs |= (
+                        c.load_input_fusion_allowed_inputs
+                    )
+                    store_output_fusion_allowed_inputs |= (
+                        c.store_output_fusion_allowed_inputs
+                    )
 
             # No single winning choice yet; selection is deferred to benchmark fusion
             return (
@@ -4445,7 +4477,8 @@ class AlgorithmSelectorCache(PersistentCache):
                         input_nodes,
                         get_timings,
                         choices,
-                        allowed_fused_inputs,
+                        load_input_fusion_allowed_inputs,
+                        store_output_fusion_allowed_inputs,
                     )
                 ),
                 None,

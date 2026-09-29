@@ -5690,6 +5690,52 @@ def _is_prologue_fusion_enabled(template_node: BaseSchedulerNode) -> bool:
     return config.prologue_fusion
 
 
+def _effective_producer_fusion_allowed_inputs(
+    template_node: BaseSchedulerNode,
+    choice: Any | None = None,
+) -> OrderedSet[str]:
+    """Return producer inputs enabled by their required codegen placements."""
+    template = template_node.get_template_node()
+    if template is None:
+        return OrderedSet()
+
+    prologue_enabled = _is_prologue_fusion_enabled(template_node)
+    epilogue_enabled = _is_epilogue_fusion_enabled(template_node)
+
+    def enabled_inputs(candidate: Any) -> OrderedSet[str]:
+        load_inputs = candidate.load_input_fusion_allowed_inputs
+        store_inputs = candidate.store_output_fusion_allowed_inputs
+        enabled = load_inputs | store_inputs
+        if not prologue_enabled:
+            enabled -= load_inputs
+        if not epilogue_enabled:
+            enabled -= store_inputs
+        return enabled
+
+    if choice is not None:
+        return enabled_inputs(choice)
+
+    if isinstance(template, ir.MultiTemplateBuffer):
+        if template._render_caller is not None:
+            if hasattr(
+                template._render_caller, "load_input_fusion_allowed_inputs"
+            ) and hasattr(
+                template._render_caller, "store_output_fusion_allowed_inputs"
+            ):
+                return enabled_inputs(template._render_caller)
+            return OrderedSet()
+
+        result: OrderedSet[str] = OrderedSet()
+        for candidate in template.choices:
+            if hasattr(candidate, "load_input_fusion_allowed_inputs") and hasattr(
+                candidate, "store_output_fusion_allowed_inputs"
+            ):
+                result |= enabled_inputs(candidate)
+        return result
+
+    return enabled_inputs(template)
+
+
 def is_epilogue_fusion(node1: BaseSchedulerNode, node2: BaseSchedulerNode):
     return (
         node1.is_template()
@@ -5702,7 +5748,7 @@ def is_prologue_fusion(node1: BaseSchedulerNode, node2: BaseSchedulerNode):
     return (
         node2.is_template()
         and not node1.is_template()
-        and _is_prologue_fusion_enabled(node2)
+        and bool(_effective_producer_fusion_allowed_inputs(node2))
     )
 
 
@@ -7411,16 +7457,20 @@ class Scheduler:
         if is_multi_template and any(
             n.get_template_node() is not None for n in (node1, node2)
         ):
-            epilogue_fusion = node1.get_template_node() is not None
+            consumer_fusion = node1.get_template_node() is not None
             multi_node = (
                 node1.get_template_node()
-                if epilogue_fusion
+                if consumer_fusion
                 else node2.get_template_node()
             )
             if not isinstance(multi_node, ir.MultiTemplateBuffer):
                 raise AssertionError(
                     "expected multi_node to be an ir.MultiTemplateBuffer"
                 )
+            template_scheduler_node = node1 if consumer_fusion else node2
+            enabled_multi_inputs = _effective_producer_fusion_allowed_inputs(
+                template_scheduler_node
+            )
             # Check for layout conflicts before committing to Triton template
             if self._has_layout_conflict_for_template(multi_node):
                 return FusionResult.fuse(False)
@@ -7460,7 +7510,7 @@ class Scheduler:
                             if fusion_log.isEnabledFor(logging.DEBUG):
                                 fusion_log.debug(
                                     "Exception in compiling %s: %s",
-                                    "prologue" if not epilogue_fusion else "epilogue",
+                                    "producer" if not consumer_fusion else "consumer",
                                     e,
                                 )
                             continue
@@ -7523,9 +7573,12 @@ class Scheduler:
                 # TODO: Remove this check after all Triton templates support prologue fusion.
                 # Currently, persistent+TMA Triton template does not due to the TMA-based loads.
                 return not (
-                    not epilogue_fusion
-                    and hasattr(choice, "allowed_fused_inputs")
-                    and choice.allowed_fused_inputs != multi_node.allowed_fused_inputs
+                    not consumer_fusion
+                    and hasattr(choice, "load_input_fusion_allowed_inputs")
+                    and _effective_producer_fusion_allowed_inputs(
+                        template_scheduler_node, choice
+                    )
+                    != enabled_multi_inputs
                 )
 
             def compile_without_benchmarking(
@@ -7546,14 +7599,14 @@ class Scheduler:
                         if fusion_log.isEnabledFor(logging.DEBUG):
                             fusion_log.debug(
                                 "Exception in compiling %s: %s",
-                                "prologue" if not epilogue_fusion else "epilogue",
+                                "producer" if not consumer_fusion else "consumer",
                                 e,
                             )
                         return False
                 return True
 
             if has_atomic_add:
-                if not epilogue_fusion:
+                if not consumer_fusion:
                     return FusionResult.fuse(False)
 
                 for hint_override in [*config.multi_kernel_hints, None]:
@@ -7588,12 +7641,12 @@ class Scheduler:
             if bench_epilogue:
                 ms2, path2 = (
                     self.benchmark_fused_nodes(node_list_2)
-                    if epilogue_fusion
+                    if consumer_fusion
                     else self.benchmark_fused_nodes(node_list_1)
                 )
             else:
-                # By default, don't do prologue fusion. Generally slower
-                if not epilogue_fusion:
+                # By default, don't do producer fusion. Generally slower
+                if not consumer_fusion:
                     return FusionResult.fuse(False)
 
                 ms2 = node2._get_estimated_runtime()
@@ -7614,10 +7667,9 @@ class Scheduler:
                 if is_nvgemm and not choice.supports_epilogue_fusion:
                     continue
 
-                # NVGEMM doesn't support prologue fusion. Skip NVGEMM choices in
-                # the prologue direction (epilogue_fusion is False when node1 is
-                # the pointwise prologue, node2 is the template).
-                if is_nvgemm and not epilogue_fusion:
+                # NVGEMM doesn't support producer fusion. Skip NVGEMM choices
+                # when node1 is the input producer and node2 is the template.
+                if is_nvgemm and not consumer_fusion:
                     continue
 
                 # For producer fusion, the choice must support every input in
@@ -7626,9 +7678,12 @@ class Scheduler:
                 # Currently, persistent+TMA Triton template does not due to the TMA-based loads.
                 if (
                     is_triton
-                    and not epilogue_fusion
-                    and hasattr(choice, "allowed_fused_inputs")
-                    and choice.allowed_fused_inputs != multi_node.allowed_fused_inputs
+                    and not consumer_fusion
+                    and hasattr(choice, "load_input_fusion_allowed_inputs")
+                    and _effective_producer_fusion_allowed_inputs(
+                        template_scheduler_node, choice
+                    )
+                    != enabled_multi_inputs
                 ):
                     continue
 
@@ -7708,12 +7763,12 @@ class Scheduler:
                             res = None
 
                     # Ideally we would more narrowly catch Exceptions here but
-                    # triton  will unpredictably error with valid prologue fusions
+                    # Triton will unpredictably error with valid producer fusions.
                     except Exception as e:
                         if fusion_log.isEnabledFor(logging.DEBUG):
                             fusion_log.debug(
                                 "Exception in compiling %s: %s",
-                                "prologue" if not epilogue_fusion else "epilogue",
+                                "producer" if not consumer_fusion else "consumer",
                                 e,
                             )
                         continue
@@ -10552,27 +10607,23 @@ class Scheduler:
             return False
 
         if node2.is_template():
-            if not _is_prologue_fusion_enabled(node2):
-                why("prologue fusion turned off")
-                return False
-
             if node1.is_reduction() or node1.is_template():
-                why("prologue fusion only supported for pointwise nodes")
+                why("producer fusion only supported for pointwise nodes")
                 return False
 
             template = node2.get_template_node_or_throw()
-            allowed_fused_inputs = template.get_allowed_fused_inputs()
-            if not allowed_fused_inputs:
-                why("template has no inputs allowed for producer fusion")
+            enabled_producer_inputs = _effective_producer_fusion_allowed_inputs(node2)
+            if not enabled_producer_inputs:
+                why("template has no inputs enabled for producer fusion")
                 return False
 
-            unsupported_prologue_args = (
+            unsupported_producer_args = (
                 OrderedSet(inp.get_name() for inp in template.inputs)  # type: ignore[union-attr]
-                - allowed_fused_inputs
+                - enabled_producer_inputs
             )
 
-            if node1.get_buffer_names() & unsupported_prologue_args:
-                why("prologue fusion not implemented for kernel for these inputs")
+            if node1.get_buffer_names() & unsupported_producer_args:
+                why("producer fusion not enabled for these template inputs")
                 return False
 
             if node1.has_aliasing_or_mutation() or (
@@ -11361,7 +11412,7 @@ class Scheduler:
           (resulting in 2 kernels instead of 1).
 
         We allow buffer overlap scoring when:
-        - The node outputs are not in the template's allowed_fused_inputs,
+        - The node outputs are not in the template's producer_fusion_allowed_inputs,
           meaning they can't be producer-fused anyway, so horizontal fusion doesn't
           prevent any optimization opportunity.
         """
@@ -11391,16 +11442,18 @@ class Scheduler:
                     if (
                         isinstance(user.node, BaseSchedulerNode)
                         and user.node.is_template()
-                        and _is_prologue_fusion_enabled(user.node)
+                        and _effective_producer_fusion_allowed_inputs(user.node)
                     ):
                         # Check if this output is actually in the template's
-                        # allowed_fused_inputs. If not, fusing horizontally
+                        # producer_fusion_allowed_inputs. If not, fusing horizontally
                         # won't prevent any producer-fusion opportunity.
                         template_node = user.node.get_template_node()
                         if template_node is not None and isinstance(
                             template_node, ir.TritonTemplateBuffer
                         ):
-                            allowed_inps = template_node.get_allowed_fused_inputs()
+                            allowed_inps = _effective_producer_fusion_allowed_inputs(
+                                user.node
+                            )
                             if node1_output_names & allowed_inps:
                                 node1_prologue_eligible_template_users.add(user.node)
                         else:
@@ -11422,7 +11475,9 @@ class Scheduler:
                             if template_node is not None and isinstance(
                                 template_node, ir.TritonTemplateBuffer
                             ):
-                                allowed_inps = template_node.get_allowed_fused_inputs()
+                                allowed_inps = (
+                                    _effective_producer_fusion_allowed_inputs(user.node)
+                                )
                                 if node2_output_names & allowed_inps:
                                     return False
                             else:

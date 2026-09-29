@@ -6015,7 +6015,8 @@ class TemplateBuffer(OperationBuffer):
         inputs: Sequence[IRNode],
         make_kernel_render: Callable[..., Any] | None,
         mutated_inputs: Iterable[IRNode] | None = None,
-        allowed_fused_inputs: OrderedSet[str] | None = None,
+        load_input_fusion_allowed_inputs: OrderedSet[str] | None = None,
+        store_output_fusion_allowed_inputs: OrderedSet[str] | None = None,
         named_inputs: dict[str, IRNode] | None = None,
     ) -> None:
         super().__init__(name=None, layout=layout)
@@ -6051,11 +6052,13 @@ class TemplateBuffer(OperationBuffer):
                 MutationOutput(NoneLayout(device=device), buf, self)
                 for buf in mutated_inputs
             ]
-        # Input buffer names eligible for producer fusion. The scheduler calls
-        # these upstream nodes "prologue" inputs, but codegen may emit their
-        # producers in either the load-input prologue or store-output epilogue.
-        self.allowed_fused_inputs: OrderedSet[str] = (
-            allowed_fused_inputs or OrderedSet()
+        # Input buffer names eligible for producer fusion, separated by where
+        # the producer code is emitted inside the template.
+        self.load_input_fusion_allowed_inputs: OrderedSet[str] = (
+            load_input_fusion_allowed_inputs or OrderedSet()
+        )
+        self.store_output_fusion_allowed_inputs: OrderedSet[str] = (
+            store_output_fusion_allowed_inputs or OrderedSet()
         )
         # Per-template fusion overrides.  None means fall back to global
         # config.epilogue_fusion / config.prologue_fusion.
@@ -6159,8 +6162,17 @@ class TemplateBuffer(OperationBuffer):
         """Whether this template produces multiple outputs via MultiOutputLayout."""
         return isinstance(self.layout, MultiOutputLayout)
 
-    def get_allowed_fused_inputs(self) -> OrderedSet[str]:
-        return self.allowed_fused_inputs
+    def get_load_input_fusion_allowed_inputs(self) -> OrderedSet[str]:
+        return self.load_input_fusion_allowed_inputs
+
+    def get_store_output_fusion_allowed_inputs(self) -> OrderedSet[str]:
+        return self.store_output_fusion_allowed_inputs
+
+    def get_producer_fusion_allowed_inputs(self) -> OrderedSet[str]:
+        return (
+            self.load_input_fusion_allowed_inputs
+            | self.store_output_fusion_allowed_inputs
+        )
 
     def has_aliasing_or_mutation_for_prologue_fusion(
         self, scheduler_node: _HasAliasingOrMutation
@@ -6251,7 +6263,8 @@ class TritonTemplateBuffer(TemplateBuffer):
         inputs: Sequence[IRNode],
         make_kernel_render: Callable[_P, _T] | None,
         mutated_inputs: Iterable[IRNode] | None = None,
-        allowed_fused_inputs: OrderedSet[str] | None = None,
+        load_input_fusion_allowed_inputs: OrderedSet[str] | None = None,
+        store_output_fusion_allowed_inputs: OrderedSet[str] | None = None,
     ) -> None:
         """
         NOTE:[TritonTemplates with multiple outputs]
@@ -6267,7 +6280,8 @@ class TritonTemplateBuffer(TemplateBuffer):
             inputs,
             make_kernel_render,
             mutated_inputs=mutated_inputs,
-            allowed_fused_inputs=allowed_fused_inputs,
+            load_input_fusion_allowed_inputs=load_input_fusion_allowed_inputs,
+            store_output_fusion_allowed_inputs=store_output_fusion_allowed_inputs,
         )
         if self.name is None:
             raise AssertionError("Expected self.name is not None")
@@ -6427,13 +6441,15 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         inputs: Sequence[IRNode],
         choice_timings_fn: Callable[[int | None], dict[ChoiceCaller, float]],
         unfiltered_choices: list[ChoiceCaller],
-        allowed_fused_inputs: OrderedSet[str],
+        load_input_fusion_allowed_inputs: OrderedSet[str],
+        store_output_fusion_allowed_inputs: OrderedSet[str],
     ) -> None:
         super().__init__(
             layout=layout,
             inputs=inputs,
             make_kernel_render=None,
-            allowed_fused_inputs=allowed_fused_inputs,
+            load_input_fusion_allowed_inputs=load_input_fusion_allowed_inputs,
+            store_output_fusion_allowed_inputs=store_output_fusion_allowed_inputs,
         )
         self._choice_timings_fn = choice_timings_fn
         self._choice_timings: dict[int | None, dict[ChoiceCaller, float]] = {}
@@ -6482,15 +6498,23 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         render = self.make_kernel_render
         prev_kind = self._render_kind
         prev_caller = self._render_caller
+        prev_load_inputs = self.load_input_fusion_allowed_inputs
+        prev_store_inputs = self.store_output_fusion_allowed_inputs
         self.make_kernel_render = caller.get_make_kernel_render()
         self._render_kind = "triton"
         self._render_caller = caller
+        self.load_input_fusion_allowed_inputs = caller.load_input_fusion_allowed_inputs
+        self.store_output_fusion_allowed_inputs = (
+            caller.store_output_fusion_allowed_inputs
+        )
         try:
             yield
         finally:
             self.make_kernel_render = render
             self._render_kind = prev_kind
             self._render_caller = prev_caller
+            self.load_input_fusion_allowed_inputs = prev_load_inputs
+            self.store_output_fusion_allowed_inputs = prev_store_inputs
 
     def finalize_as_triton_caller(self, caller: TritonTemplateCallerBase) -> None:
         if not isinstance(
@@ -6504,6 +6528,10 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         self.make_kernel_render = caller.get_make_kernel_render()
         self._render_kind = "triton"
         self._render_caller = caller
+        self.load_input_fusion_allowed_inputs = caller.load_input_fusion_allowed_inputs
+        self.store_output_fusion_allowed_inputs = (
+            caller.store_output_fusion_allowed_inputs
+        )
 
     @contextlib.contextmanager
     def swap_as_nvgemm_caller(self, caller: ChoiceCaller) -> Iterator[None]:
@@ -6517,15 +6545,21 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         render = self.make_kernel_render
         prev_kind = self._render_kind
         prev_caller = self._render_caller
+        prev_load_inputs = self.load_input_fusion_allowed_inputs
+        prev_store_inputs = self.store_output_fusion_allowed_inputs
         self.make_kernel_render = caller.get_make_kernel_render()
         self._render_kind = "nvgemm"
         self._render_caller = caller
+        self.load_input_fusion_allowed_inputs = OrderedSet()
+        self.store_output_fusion_allowed_inputs = OrderedSet()
         try:
             yield
         finally:
             self.make_kernel_render = render
             self._render_kind = prev_kind
             self._render_caller = prev_caller
+            self.load_input_fusion_allowed_inputs = prev_load_inputs
+            self.store_output_fusion_allowed_inputs = prev_store_inputs
 
     def finalize_as_nvgemm_caller(self, caller: ChoiceCaller) -> None:
         from torch._inductor.codegen.nv_universal_gemm import NVUniversalGemmCaller
@@ -6539,6 +6573,8 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         self.make_kernel_render = caller.get_make_kernel_render()
         self._render_kind = "nvgemm"
         self._render_caller = caller
+        self.load_input_fusion_allowed_inputs = OrderedSet()
+        self.store_output_fusion_allowed_inputs = OrderedSet()
 
     def get_min_choice(
         self, hint_override: int | None = None
@@ -6555,9 +6591,20 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
             self._make_kernel_renders[hint_override] = caller.get_make_kernel_render()
 
         # Set the default to be the one without hint override
+        default_caller = callers[None]
+        if not isinstance(
+            default_caller, torch._inductor.select_algorithm.TritonTemplateCaller
+        ):
+            raise AssertionError(type(default_caller))
         self.make_kernel_render = self._make_kernel_renders[None]
         self._render_kind = "triton"
-        self._render_caller = callers[None]
+        self._render_caller = default_caller
+        self.load_input_fusion_allowed_inputs = (
+            default_caller.load_input_fusion_allowed_inputs
+        )
+        self.store_output_fusion_allowed_inputs = (
+            default_caller.store_output_fusion_allowed_inputs
+        )
 
 
 class CUTLASSTemplateBuffer(TemplateBuffer):
