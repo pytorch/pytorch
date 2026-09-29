@@ -16,7 +16,13 @@ from torch.utils._appending_byte_serializer import AppendingByteSerializer
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
+
+
+def _precompile_error(message: str) -> Exception:
+    from torch._precompile import PrecompileError
+
+    return PrecompileError(message)
 
 
 class _RuntimeCapture:
@@ -34,9 +40,20 @@ class _RuntimeCapture:
         self.policy.enter_context(no_compilation())
         self.sealed = True
 
+    def unseal(self) -> None:
+        self.policy.close()
+        self.policy = contextlib.ExitStack()
+        self.sealed = False
+
 
 _capture: _RuntimeCapture | None = None
 _capture_lock = threading.Lock()
+
+
+def _active_capture() -> _RuntimeCapture | None:
+    # A forked child inherits the parent's scope object; it is not the child's.
+    owner = _capture
+    return owner if owner is not None and owner.pid == os.getpid() else None
 
 
 @contextlib.contextmanager
@@ -48,13 +65,15 @@ def capture_runtime() -> Iterator[None]:
     """
     global _capture
     if is_compilation_forbidden():
-        raise RuntimeError(
-            "Runtime capture cannot start while compilation is forbidden"
+        raise _precompile_error(
+            "precompile.capture_runtime cannot start while compilation is forbidden"
         )
     owner = _RuntimeCapture()
     with _capture_lock:
-        if _capture is not None:
-            raise RuntimeError("Another precompile runtime capture is already active")
+        if _active_capture() is not None:
+            raise _precompile_error(
+                "Another precompile runtime capture is already active"
+            )
         _capture = owner
     try:
         yield
@@ -63,15 +82,24 @@ def capture_runtime() -> Iterator[None]:
             owner.policy.close()
         finally:
             with _capture_lock:
-                _capture = None
+                if _capture is owner:
+                    _capture = None
 
 
-def finalize_runtime_cache(artifact: bytes | None) -> bytes:
+def finalize_runtime_cache(
+    artifact: bytes | None, write: Callable[[bytes | None], None]
+) -> None:
+    """Pass the finalized cache artifact to ``write``, then keep the scope sealed.
+
+    The scope is sealed before the artifact is serialized, so a compile racing
+    finalization raises instead of being left out, and unsealed again if
+    ``write`` raises so the caller can retry.
+    """
     import torch
     from torch._inductor.async_compile import AsyncCompile
 
-    owner = _capture
-    if owner is None or owner.pid != os.getpid():
+    owner = _active_capture()
+    if owner is None:
         raise RuntimeError(
             "precompile.finalize_cache requires the worker's capture_runtime scope"
         )
@@ -90,9 +118,19 @@ def finalize_runtime_cache(artifact: bytes | None) -> bytes:
             torch.cuda.synchronize()
         with _capture_lock:
             owner.seal()
-        serializer = AppendingByteSerializer(serialize_fn=_serialize_single_cache)
-        serializer.extend(artifacts.items())
-        return serializer.to_bytes()
+        try:
+            finalized = None
+            if artifacts:
+                serializer = AppendingByteSerializer(
+                    serialize_fn=_serialize_single_cache
+                )
+                serializer.extend(artifacts.items())
+                finalized = serializer.to_bytes()
+            write(finalized)
+        except BaseException:
+            with _capture_lock:
+                owner.unseal()
+            raise
 
 
 def prepare_runtime_cache(artifact: bytes | None) -> None:

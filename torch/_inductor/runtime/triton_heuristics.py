@@ -633,7 +633,9 @@ class CachingAutotuner(KernelInterface):
         self.benchmark_failure_reasons: dict[Any, BenchmarkFailureReason] = {}
         if os.getenv("TRITON_CACHE_DIR") is None:
             os.environ["TRITON_CACHE_DIR"] = triton_cache_dir(
-                cast(int, self.triton_meta.get("device", 0))
+                _resolve_load_device(
+                    self.triton_meta.get("device"), self.device_props.type
+                )
             )
         log.debug("Triton cache dir: %s", os.environ["TRITON_CACHE_DIR"])
 
@@ -3145,13 +3147,12 @@ class StaticTritonCompileResult(CompileResult[_T]):
         device_type = (
             "hip" if torch.version.hip else self.compile_meta.get("device_type", "cuda")
         )
-        binary_ext = GPU_KERNEL_BIN_EXTS.get(device_type, "cubin")
         cubin_location = os.path.join(
             triton_cache_dir(
                 _resolve_load_device(self.compile_meta.get("device"), device_type)
             ),
             triton_hash_to_path_key(self.kernel.hash),
-            getattr(self.kernel, "cubin_filename", f"{self.kernel.name}{binary_ext}"),
+            self.kernel.cubin_filename,
         )
         if not os.path.exists(cubin_location):
             if self.kernel.cubin_raw is not None:
