@@ -55,6 +55,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     scoped_load_inline,
     skipIfCrossRef,
+    skipIfMPS,
     skipIfTorchDynamo,
     skipIfXpu,
     subtest,
@@ -2074,6 +2075,8 @@ TORCH_LIBRARY(_test_pyobject_dispatch_cpp_fallback_torch_function, m) {
 
     @skipIfXpu(msg="Deprecated torch.custom_ops API")
     @unittest.skipIf(not TEST_ACCELERATOR, "requires accelerator")
+    # ValueError on MPS.
+    @skipIfMPS
     def test_impl_separate(self):
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
         def foo(x: torch.Tensor) -> torch.Tensor:
@@ -6537,6 +6540,8 @@ opcheck(op, args, kwargs, test_utils="test_schema")
         self.assertEqual(len(seen_inputs), 2)
         self.assertEqual(seen_inputs[-1][1], x.data_ptr())
 
+    # NotImplementedError on MPS.
+    @skipIfMPS
     def test_opcheck_customopdef(self):
         sample_inputs = [
             (torch.randn(3),),
