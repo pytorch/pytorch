@@ -13,6 +13,11 @@ from torch.types import IntLikeType
 from torch.utils import _pytree
 
 
+__all__ = [
+    "infer_shape",
+    "mksym",
+]
+
 """
 This is the function that runs shape inference. It will modify the input graph module so that shapes are annotated.
 """
