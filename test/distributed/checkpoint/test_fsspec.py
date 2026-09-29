@@ -22,11 +22,11 @@ import torch.distributed.checkpoint as dcp
 import torch.nn as nn
 from torch.distributed._shard.metadata import ShardMetadata
 from torch.distributed._shard.sharded_tensor import init_from_local_shards, Shard
-from torch.distributed.checkpoint import _fsspec_filesystem
-from torch.distributed.checkpoint._fsspec_filesystem import (
+from torch.distributed.checkpoint import fsspec_filesystem
+from torch.distributed.checkpoint.fsspec_filesystem import (
     _destinations_disjoint,
+    _FileSystem,
     _load_aliased,
-    FileSystem,
     FsspecReader,
     FsspecWriter,
 )
@@ -191,7 +191,7 @@ class TestFSSpec(ShardedTensorTestBase):
 class TestFileSystem(TestCase):
     @with_temp_dir
     def test_remove_on_fail(self):
-        fs = FileSystem()
+        fs = _FileSystem()
         path = fs.init_path(self.temp_dir)
 
         write_file = fs.concat_path(path, "writeable")
@@ -253,6 +253,35 @@ class TestFileSystem(TestCase):
 
         # os.sync() may be called on backends that don't support per-file fsync
         self.assertLessEqual(mock_os_sync.call_count, 2)
+
+    def test_fsspec_async_save(self):
+        from concurrent.futures import Future
+
+        checkpoint_dir = "memory://test_checkpoint_async"
+        state_dict = {"tensor": torch.randn(10)}
+
+        # Save using FsspecWriter with async_save
+        future = dcp.async_save(
+            state_dict=state_dict,
+            storage_writer=FsspecWriter(checkpoint_dir),
+            planner=dcp.DefaultSavePlanner(),
+            no_dist=True,
+        )
+        self.assertIsInstance(future, Future)
+
+        # Wait for the async save to complete
+        future.result()
+
+        # Verify it saved properly and can be loaded
+        load_dict = {"tensor": torch.zeros(10)}
+        dcp.load(
+            state_dict=load_dict,
+            storage_reader=FsspecReader(checkpoint_dir),
+            planner=dcp.DefaultLoadPlanner(),
+            no_dist=True,
+        )
+
+        self.assertTrue(torch.allclose(state_dict["tensor"], load_dict["tensor"]))
 
     @parametrize("batch_size", [1, 2, 64])
     def test_fsspec_reader_batched_cat_ranges(self, batch_size):
@@ -489,7 +518,7 @@ class TestFileSystem(TestCase):
         load_dict = {"t1": torch.zeros(10)}
 
         with patch.object(
-            _fsspec_filesystem,
+            fsspec_filesystem,
             "narrow_tensor_by_index",
             side_effect=RuntimeError("simulated cpu crash"),
         ):
@@ -520,7 +549,7 @@ class TestFileSystem(TestCase):
             raise RuntimeError("shutdown test")
 
         with patch.object(
-            _fsspec_filesystem, "narrow_tensor_by_index", side_effect=failing_narrow
+            fsspec_filesystem, "narrow_tensor_by_index", side_effect=failing_narrow
         ):
             with self.assertRaisesRegex(CheckpointException, "shutdown test"):
                 dcp.load(
@@ -583,7 +612,7 @@ class TestFileSystem(TestCase):
             return results[-1]
 
         with patch.object(
-            _fsspec_filesystem, "_destinations_disjoint", side_effect=spy_disjoint
+            fsspec_filesystem, "_destinations_disjoint", side_effect=spy_disjoint
         ):
             dcp.load(
                 state_dict=load_dict,
@@ -622,7 +651,7 @@ class TestFileSystem(TestCase):
             return results[-1]
 
         with patch.object(
-            _fsspec_filesystem, "_destinations_disjoint", side_effect=spy_disjoint
+            fsspec_filesystem, "_destinations_disjoint", side_effect=spy_disjoint
         ):
             dcp.load(
                 state_dict=load_dict,
@@ -755,7 +784,7 @@ class TestFileSystem(TestCase):
         # commit_tensor unchanged (such as _EmptyStateDictLoadPlanner) should
         # take the batched disjoint-copy fast path.
         with patch.object(
-            _fsspec_filesystem, "_destinations_disjoint", wraps=_destinations_disjoint
+            fsspec_filesystem, "_destinations_disjoint", wraps=_destinations_disjoint
         ) as mock_disjoint:
             empty_load_dict = _load_state_dict_from_keys(storage_reader=reader)
             self.assertGreaterEqual(mock_disjoint.call_count, 1)
@@ -916,7 +945,7 @@ class TestFileSystem(TestCase):
         # A TypeError inside _load must propagate without a second _load
         # attempt using weights_only=False.
         with patch.object(
-            _fsspec_filesystem,
+            fsspec_filesystem,
             "_load",
             side_effect=[TypeError("corrupt rebuild"), expected],
         ) as mock_load:
@@ -931,7 +960,7 @@ class TestFileSystem(TestCase):
         with (
             patch.object(sys, "byteorder", foreign_order),
             patch.object(
-                _fsspec_filesystem, "_load", wraps=torch.serialization._load
+                fsspec_filesystem, "_load", wraps=torch.serialization._load
             ) as spy_load,
         ):
             loaded = _load_aliased(raw_bytes)

@@ -854,12 +854,16 @@ def _get_zes_temperature_handle(device: Device = None) -> c_void_p:
     # For tiled dGPUs, pick the handle whose subdeviceId matches.
     # For non-tiled devices, pick the root-level (non-subdevice) handle.
     temp_count = c_uint32(0)
-    _zes_check(
-        pyzes.zesDeviceEnumTemperatureSensors(device_handle, byref(temp_count), None),
-        "Can't get Level Zero Sysman temperature sensor count.",
-    )
-    if temp_count.value == 0:
-        raise RuntimeError("No Level Zero Sysman temperature sensors found.")
+    # TODO: zesDeviceEnumTemperatureSensors does not return ZE_RESULT_ERROR_INSUFFICIENT_PERMISSIONS on privilege errors on Xe2+.
+    rc = pyzes.zesDeviceEnumTemperatureSensors(device_handle, byref(temp_count), None)
+    if rc == pyzes.ZE_RESULT_ERROR_INSUFFICIENT_PERMISSIONS or temp_count.value == 0:
+        raise RuntimeError(
+            "No Level Zero Sysman temperature sensors found. The GPU may not support temperature monitoring, or try running with elevated privileges (e.g. sudo).",
+        )
+    if rc != pyzes.ZE_RESULT_SUCCESS:
+        raise RuntimeError(
+            "Can't get Level Zero Sysman temperature sensor count.",
+        )
     temp_handles = (pyzes.zes_temp_handle_t * temp_count.value)()
     _zes_check(
         pyzes.zesDeviceEnumTemperatureSensors(
@@ -1335,7 +1339,12 @@ def memory_usage(device: Device = None) -> float:
 
     bandwidth_start = pyzes.zes_mem_bandwidth_t()
     rc = pyzes.zesMemoryGetBandwidth(memory_handle, byref(bandwidth_start))
-    if rc == pyzes.ZE_RESULT_ERROR_NOT_AVAILABLE:
+    # TODO: zesMemoryGetBandwidth does not return ZE_RESULT_ERROR_INSUFFICIENT_PERMISSIONS on privilege errors on Xe2+.
+    if (
+        rc == pyzes.ZE_RESULT_ERROR_NOT_AVAILABLE
+        or rc == pyzes.ZE_RESULT_ERROR_UNSUPPORTED_FEATURE
+        or rc == pyzes.ZE_RESULT_ERROR_INSUFFICIENT_PERMISSIONS
+    ):
         raise RuntimeError(
             "GPU memory bandwidth usage querying is not available. Try running with elevated privileges (e.g. sudo)."
         )

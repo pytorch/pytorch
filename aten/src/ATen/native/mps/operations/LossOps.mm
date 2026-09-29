@@ -3,6 +3,7 @@
 #include <ATen/native/CanUse32BitIndexMath.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/LossOps.h>
+#include <limits>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -73,6 +74,7 @@ static Tensor& mse_loss_backward_out_impl(const Tensor& grad_output,
                                           const std::string& op_name) {
   TORCH_CHECK(target.is_same_size(input), op_name + ": target and input tensors must have identical shapes")
   auto norm = reduction == Reduction::Mean ? 2. / static_cast<double>(input.numel()) : 2.;
+  const auto computeType = getMPSDataType(c10::promoteTypes(input.scalar_type(), target.scalar_type()));
 
   if ((input.numel() == 0) || (target.numel() == 0) || (grad_output.numel() == 0)) {
     reduction == Reduction::Mean ? grad_input.fill_(std::numeric_limits<float>::quiet_NaN()) : grad_input.zero_();
@@ -86,22 +88,25 @@ static Tensor& mse_loss_backward_out_impl(const Tensor& grad_output,
 
   @autoreleasepool {
     std::string key = op_name + reductionToString(reduction) + ":" + std::to_string(grad_input.sizes()[1]) +
-        getTensorsStringKey({input, target, grad_output});
+        getTensorsStringKey({input, target, grad_output, grad_input});
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       newCachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input);
       newCachedGraph->targetTensor = mpsGraphRankedPlaceHolder(mpsGraph, target);
       newCachedGraph->gradOutputTensor = mpsGraphRankedPlaceHolder(mpsGraph, grad_output);
 
-      MPSGraphTensor* normTensor = [mpsGraph constantWithScalar:norm dataType:[newCachedGraph->inputTensor dataType]];
-      MPSGraphTensor* diffTensor = [mpsGraph subtractionWithPrimaryTensor:newCachedGraph->inputTensor
-                                                          secondaryTensor:newCachedGraph->targetTensor
-                                                                     name:nil];
-      MPSGraphTensor* diffGradientTensor = [mpsGraph multiplicationWithPrimaryTensor:diffTensor
-                                                                     secondaryTensor:newCachedGraph->gradOutputTensor
-                                                                                name:nil];
-      newCachedGraph->gradInputTensor = [mpsGraph multiplicationWithPrimaryTensor:diffGradientTensor
-                                                                  secondaryTensor:normTensor
-                                                                             name:nil];
+      MPSGraphTensor* normTensor = [mpsGraph constantWithScalar:norm dataType:computeType];
+      MPSGraphTensor* diffTensor =
+          [mpsGraph subtractionWithPrimaryTensor:castMPSTensor(mpsGraph, newCachedGraph->inputTensor, computeType)
+                                 secondaryTensor:castMPSTensor(mpsGraph, newCachedGraph->targetTensor, computeType)
+                                            name:nil];
+      MPSGraphTensor* diffGradientTensor = [mpsGraph
+          multiplicationWithPrimaryTensor:diffTensor
+                          secondaryTensor:castMPSTensor(mpsGraph, newCachedGraph->gradOutputTensor, computeType)
+                                     name:nil];
+      auto gradTensor = [mpsGraph multiplicationWithPrimaryTensor:diffGradientTensor
+                                                  secondaryTensor:normTensor
+                                                             name:nil];
+      newCachedGraph->gradInputTensor = castMPSTensor(mpsGraph, gradTensor, getMPSDataType(grad_input.scalar_type()));
     });
     Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor, input);
     Placeholder targetPlaceholder = Placeholder(cachedGraph->targetTensor, target);
@@ -223,6 +228,16 @@ static Tensor& bce_loss_out_impl(const Tensor& input,
 
   loss.resize_((reduction == Reduction::None || grad_output.defined()) ? target.sizes() : IntArrayRef({}));
   TORCH_CHECK(loss.is_mps());
+
+  // A zero-sized input has no Metal buffer to bind, so the graph below cannot run
+  // on it at all. CPU returns an empty tensor for Reduction::None, 0 for Sum and
+  // NaN for Mean; reproduce that rather than tripping the placeholder assert.
+  if (input.numel() == 0) {
+    if (loss.numel() != 0) {
+      loss.fill_(reduction == at::Reduction::Mean ? std::numeric_limits<double>::quiet_NaN() : 0.0);
+    }
+    return loss;
+  }
 
   @autoreleasepool {
     std::string key = op_name + reductionToString(reduction) + getTensorsStringKey({input, target, weight});
@@ -600,21 +615,25 @@ static void smooth_l1_loss_impl(const Tensor& input,
     MPSShape* input_shape = getMPSShape(input);
     NSString* ns_shape_key = [[input_shape valueForKey:@"description"] componentsJoinedByString:@","];
 
+    const auto computeType = getMPSDataType(c10::promoteTypes(input.scalar_type(), target.scalar_type()));
     std::string key = "smooth_l1_loss_impl:" + reductionToString(reduction) + ":" + [ns_shape_key UTF8String] + ":" +
-        std::to_string(beta) + ":" + getMPSTypeString(input) + ":" + getMPSTypeString(target);
+        std::to_string(beta) + ":" + getMPSTypeString(input) + ":" + getMPSTypeString(target) + ":" +
+        getMPSTypeString(output);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       // smooth_l1_loss_mps:
       // ln = 0.5 * ( xn - yn ) ^ 2 / beta,       if |xn - yn| < beta
       //    = | xn - yn | - 0.5 * beta,           otherwise
 
-      MPSGraphTensor* inputTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(input));
-      MPSGraphTensor* targetTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(target));
+      auto inputPlaceholder = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(input));
+      auto targetPlaceholder = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(target));
+      auto inputTensor = castMPSTensor(mpsGraph, inputPlaceholder, computeType);
+      auto targetTensor = castMPSTensor(mpsGraph, targetPlaceholder, computeType);
 
       // Setup tensors
-      MPSGraphTensor* mpsGraphHalfTensor = [mpsGraph constantWithScalar:0.5 dataType:inputTensor.dataType];
-      MPSGraphTensor* betaTensor = [mpsGraph constantWithScalar:beta dataType:inputTensor.dataType];
+      MPSGraphTensor* mpsGraphHalfTensor = [mpsGraph constantWithScalar:0.5 dataType:computeType];
+      MPSGraphTensor* betaTensor = [mpsGraph constantWithScalar:beta dataType:computeType];
       // 0.5 * beta
-      MPSGraphTensor* halfTensorMulBetaTensor = [mpsGraph constantWithScalar:beta * 0.5 dataType:inputTensor.dataType];
+      MPSGraphTensor* halfTensorMulBetaTensor = [mpsGraph constantWithScalar:beta * 0.5 dataType:computeType];
       // Calculating first part of the equation:
       // ln = 0.5(xn - yn)^2/beta, if |xn - yn| < beta
 
@@ -659,9 +678,9 @@ static void smooth_l1_loss_impl(const Tensor& input,
 
       MPSGraphTensor* outputTensor = reduceTensor(lossTensor, reduction, mpsGraph, 1);
 
-      newCachedGraph->inputTensor_ = inputTensor;
-      newCachedGraph->targetTensor_ = targetTensor;
-      newCachedGraph->outputTensor_ = outputTensor;
+      newCachedGraph->inputTensor_ = inputPlaceholder;
+      newCachedGraph->targetTensor_ = targetPlaceholder;
+      newCachedGraph->outputTensor_ = castMPSTensor(mpsGraph, outputTensor, getMPSDataType(output.scalar_type()));
     });
 
     Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input, mpsInputShape);
@@ -740,15 +759,19 @@ static void smooth_l1_loss_backward_impl(const Tensor& grad_output,
   };
 
   @autoreleasepool {
+    const auto computeType = getMPSDataType(c10::promoteTypes(input.scalar_type(), target.scalar_type()));
     std::string key = "smooth_l1_loss_backward" + getTensorsStringKey({input, grad_output, grad_input, target}) + ":" +
         reductionToString(reduction) + ":" + std::to_string(beta);
 
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input);
-      MPSGraphTensor* targetTensor = mpsGraphRankedPlaceHolder(mpsGraph, target);
-      MPSGraphTensor* gradOutputTensor = mpsGraphRankedPlaceHolder(mpsGraph, grad_output);
+      auto inputPlaceholder = mpsGraphRankedPlaceHolder(mpsGraph, input);
+      auto targetPlaceholder = mpsGraphRankedPlaceHolder(mpsGraph, target);
+      auto gradOutputPlaceholderTensor = mpsGraphRankedPlaceHolder(mpsGraph, grad_output);
+      auto inputTensor = castMPSTensor(mpsGraph, inputPlaceholder, computeType);
+      auto targetTensor = castMPSTensor(mpsGraph, targetPlaceholder, computeType);
+      auto gradOutputTensor = castMPSTensor(mpsGraph, gradOutputPlaceholderTensor, computeType);
 
-      MPSGraphTensor* betaTensor = [mpsGraph constantWithScalar:beta dataType:[inputTensor dataType]];
+      MPSGraphTensor* betaTensor = [mpsGraph constantWithScalar:beta dataType:computeType];
       // xn - yn
       MPSGraphTensor* diffTensor = [mpsGraph subtractionWithPrimaryTensor:inputTensor
                                                           secondaryTensor:targetTensor
@@ -781,10 +804,11 @@ static void smooth_l1_loss_backward_impl(const Tensor& grad_output,
       MPSGraphTensor* gradInputTensor = [mpsGraph multiplicationWithPrimaryTensor:outputTensor
                                                                   secondaryTensor:gradOutputTensor
                                                                              name:nil];
-      newCachedGraph->inputTensor_ = inputTensor;
-      newCachedGraph->targetTensor_ = targetTensor;
-      newCachedGraph->gradInputTensor_ = gradInputTensor;
-      newCachedGraph->gradOutputTensor_ = gradOutputTensor;
+      newCachedGraph->inputTensor_ = inputPlaceholder;
+      newCachedGraph->targetTensor_ = targetPlaceholder;
+      newCachedGraph->gradInputTensor_ =
+          castMPSTensor(mpsGraph, gradInputTensor, getMPSDataType(grad_input.scalar_type()));
+      newCachedGraph->gradOutputTensor_ = gradOutputPlaceholderTensor;
     });
     Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input);
     Placeholder targetPlaceholder = Placeholder(cachedGraph->targetTensor_, target);
@@ -827,15 +851,18 @@ Tensor& huber_loss_out_mps(const Tensor& input, const Tensor& target, int64_t re
   };
 
   @autoreleasepool {
+    // huber's output keeps input's dtype even when the pair promotes, so the result is cast back.
+    const auto computeType = getMPSDataType(c10::promoteTypes(input.scalar_type(), target.scalar_type()));
     std::string key = op_name + ":" + reductionToString(reduction) + ":" + std::to_string(delta) + ":" +
-        getTensorsStringKey({input, target});
+        getTensorsStringKey({input, target, output});
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input);
-      MPSGraphTensor* targetTensor = mpsGraphRankedPlaceHolder(mpsGraph, target);
+      auto inputPlaceholder = mpsGraphRankedPlaceHolder(mpsGraph, input);
+      auto targetPlaceholder = mpsGraphRankedPlaceHolder(mpsGraph, target);
+      auto inputTensor = castMPSTensor(mpsGraph, inputPlaceholder, computeType);
+      auto targetTensor = castMPSTensor(mpsGraph, targetPlaceholder, computeType);
 
-      MPSDataType input_type = getMPSScalarType(input.scalar_type());
-      MPSGraphTensor* deltaTensor = [mpsGraph constantWithScalar:delta shape:@[ @1 ] dataType:input_type];
-      MPSGraphTensor* halfTensor = [mpsGraph constantWithScalar:.5f shape:@[ @1 ] dataType:input_type];
+      MPSGraphTensor* deltaTensor = [mpsGraph constantWithScalar:delta shape:@[ @1 ] dataType:computeType];
+      MPSGraphTensor* halfTensor = [mpsGraph constantWithScalar:.5f shape:@[ @1 ] dataType:computeType];
 
       MPSGraphTensor* diffTensor = [mpsGraph subtractionWithPrimaryTensor:inputTensor
                                                           secondaryTensor:targetTensor
@@ -862,9 +889,12 @@ Tensor& huber_loss_out_mps(const Tensor& input, const Tensor& target, int64_t re
                          falsePredicateTensor:secondCondTensor
                                          name:nil];
 
-      newCachedGraph->inputTensor_ = inputTensor;
-      newCachedGraph->targetTensor_ = targetTensor;
-      newCachedGraph->outputTensor_ = reduceTensor(outputTensor, reduction, mpsGraph, input.sizes().size());
+      newCachedGraph->inputTensor_ = inputPlaceholder;
+      newCachedGraph->targetTensor_ = targetPlaceholder;
+      newCachedGraph->outputTensor_ =
+          castMPSTensor(mpsGraph,
+                        reduceTensor(outputTensor, reduction, mpsGraph, input.sizes().size()),
+                        getMPSDataType(output.scalar_type()));
     });
     Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input);
     Placeholder targetPlaceholder = Placeholder(cachedGraph->targetTensor_, target);
@@ -889,6 +919,18 @@ Tensor& huber_loss_backward_out_mps(const Tensor& grad_output,
                                     double delta,
                                     Tensor& grad_input) {
   using namespace mps;
+  // Unlike the forward, the reference builds a plain TensorIterator with no promotion, so every
+  // operand must already agree; MPSGraph would abort rather than raise.
+  TORCH_CHECK(input.scalar_type() == target.scalar_type() && input.scalar_type() == grad_output.scalar_type() &&
+                  input.scalar_type() == grad_input.scalar_type(),
+              "huber_loss_backward: expected all tensors to have the same dtype, but got input ",
+              input.scalar_type(),
+              ", target ",
+              target.scalar_type(),
+              ", grad_output ",
+              grad_output.scalar_type(),
+              " and grad_input ",
+              grad_input.scalar_type());
   auto is_mean_reduction = reduction == Reduction::Mean;
   auto input_numel = input.numel();
 
@@ -1007,17 +1049,23 @@ TORCH_IMPL_FUNC(mse_loss_out_mps)(const Tensor& input, const Tensor& target, int
     MPSGraphTensor* outputTensor = nil;
   };
 
+  // MPSGraph cannot mix element types across an operand pair, so promote the way the reference
+  // TensorIterator does rather than letting its verifier abort.
+  const auto computeType = getMPSDataType(c10::promoteTypes(input.scalar_type(), target.scalar_type()));
+
   @autoreleasepool {
-    std::string key = op_name + reductionToString(reduction) + getTensorsStringKey({input, target});
+    std::string key = op_name + reductionToString(reduction) + getTensorsStringKey({input, target, output});
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       newCachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input);
       newCachedGraph->targetTensor = mpsGraphRankedPlaceHolder(mpsGraph, target);
 
-      MPSGraphTensor* diffTensor = [mpsGraph subtractionWithPrimaryTensor:newCachedGraph->inputTensor
-                                                          secondaryTensor:newCachedGraph->targetTensor
-                                                                     name:nil];
+      MPSGraphTensor* diffTensor =
+          [mpsGraph subtractionWithPrimaryTensor:castMPSTensor(mpsGraph, newCachedGraph->inputTensor, computeType)
+                                 secondaryTensor:castMPSTensor(mpsGraph, newCachedGraph->targetTensor, computeType)
+                                            name:nil];
       MPSGraphTensor* diffSquareTensor = [mpsGraph squareWithTensor:diffTensor name:nil];
-      newCachedGraph->outputTensor = reduceTensor(diffSquareTensor, reduction, mpsGraph, input.sizes().size());
+      MPSGraphTensor* lossTensor = reduceTensor(diffSquareTensor, reduction, mpsGraph, input.sizes().size());
+      newCachedGraph->outputTensor = castMPSTensor(mpsGraph, lossTensor, getMPSDataType(output.scalar_type()));
     });
     Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor, input);
     Placeholder targetPlaceholder = Placeholder(cachedGraph->targetTensor, target);
