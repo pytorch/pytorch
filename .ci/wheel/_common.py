@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import importlib.metadata
 import importlib.util
+import os
 import re
 import subprocess
 import sys
@@ -57,6 +58,11 @@ NUMPY_PINS: dict[str, str] = {
     "3.14": "2.3.4",
     "3.15": "2.5.2",
 }
+
+
+def get_env_flag_or_set_default(name: str, default: str) -> bool:
+    value = os.environ.setdefault(name, default)
+    return value.upper() in ("ON", "1", "YES", "TRUE", "Y")
 
 
 def shell_quote(value: str) -> str:
