@@ -663,6 +663,7 @@ class ComputedLazyConstantTests(TestCase):
         t = torch.ones(2)
         cases = [
             ("len_str", lambda t, a: (t.sin(), len(a)), [(t, "xy"), (t, "pqr")]),
+            ("str_int", lambda t, a: (t.sin(), str(a)), [(t, 5), (t, 9)]),
             ("bool_int", lambda t, a: (t.sin(), bool(a)), [(t, 5), (t, 0)]),
             ("min_int", lambda t, a, b: (t.sin(), min(a, b)), [(t, 1, 2), (t, 9, 3)]),
             ("max_int", lambda t, a, b: (t.sin(), max(a, b)), [(t, 1, 2), (t, 9, 3)]),
