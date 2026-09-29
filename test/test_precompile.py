@@ -7515,6 +7515,43 @@ class TestPrecompileRuntimeCache(TestCase):
                 self.assertEqual(len(fake.imports), int(missing == "autotuning"))
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    @parametrize("failure", ("_runtime_cache_root", "import_runtime_cache"))
+    def test_failed_triton_runtime_import_keeps_other_artifacts_when_not_strict(
+        self, failure
+    ):
+        from pathlib import Path
+
+        from torch._inductor.utils import clear_caches
+        from torch.compiler import _runtime_cache
+
+        pc = torch.compiler.precompile
+        fn = _no_compilation_inductor_graph
+        x = torch.randn(8, 16)
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            _fake_triton_runtime_cache(Path(directory) / "producer") as fake,
+        ):
+            clear_caches()
+            try:
+                with pc.capture_runtime():
+                    source, cache = _capture_files(self, fn, [(x,)], backend="inductor")
+                    pc.finalize_cache(artifact_path=source, cache_path=cache)
+                clear_caches()
+                fake.root = Path(directory) / "consumer"
+                with (
+                    mock.patch.object(fake, failure, side_effect=OSError("disk full")),
+                    self.assertLogs(_runtime_cache.log, "WARNING") as logs,
+                ):
+                    runnable = pc.load(source, cache)
+                self.assertIn("disk full", "\n".join(logs.output))
+                self.assertEqual(fake.imports, [])
+                self.assertTrue(_runtime_cache._frozen_cpp_kernels)
+                with torch.no_grad():
+                    self.assertEqual(runnable(x), fn(x))
+            finally:
+                clear_caches()
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_triton_runtime_cache_requires_the_expected_api(self):
         import triton.runtime
 

@@ -127,7 +127,7 @@ class TritonRuntimeCacheArtifact(CacheArtifact):
 
             try:
                 root = str(cache._runtime_cache_root())
-            except RuntimeError as exc:
+            except Exception as exc:
                 problem = f"Triton has no cache directory to import it into ({exc})"
             if root is not None and not knobs.autotuning.cache:
                 problem = (
@@ -149,9 +149,21 @@ class TritonRuntimeCacheArtifact(CacheArtifact):
         with _imported_triton_runtime_lock:
             if imported in _imported_triton_runtime:
                 return
-            if hashlib.sha256(self.content).hexdigest() != self.key:
-                raise RuntimeError("Corrupt Triton runtime-cache artifact")
-            cache.import_runtime_cache(self.content, context=_runtime_context())
+            try:
+                if hashlib.sha256(self.content).hexdigest() != self.key:
+                    raise RuntimeError("Corrupt Triton runtime-cache artifact")
+                cache.import_runtime_cache(self.content, context=_runtime_context())
+            except Exception as exc:
+                if strict:
+                    raise
+                # Raising here would stop the artifacts populated after this one
+                # (populate_first), leaving the frozen Inductor kernels cold too.
+                log.warning(
+                    "Could not import the precompile cache's Triton runtime cache "
+                    "(%s); Triton JIT kernels will compile or autotune on first use",
+                    exc,
+                )
+                return
             _imported_triton_runtime.add(imported)
 
 
