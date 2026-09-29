@@ -83,18 +83,21 @@ void MPSHooks::deviceSynchronize() const {
 
 // torch::mps::commit() and get_command_buffer() are encoding-time calls: per
 // torch/mps.h the caller drives them from inside a dispatch_sync() on
-// get_dispatch_queue(), so they must not dispatch again. Assert that contract
+// get_dispatch_queue(), so they must not dispatch again. Check that contract
 // rather than leave it to the docs -- dispatching here would trap on re-entry,
 // and running off-queue would race whoever owns the encoder.
 void MPSHooks::commitStream() const {
   auto stream = at::mps::getDefaultMPSStream();
-  dispatch_assert_queue(stream->queue());
+  TORCH_CHECK(stream->isOnQueue(),
+              "torch::mps::commit() must be called from a block running on torch::mps::get_dispatch_queue()");
   stream->synchronize(SyncType::COMMIT);
 }
 
 void* MPSHooks::getCommandBuffer() const {
   auto stream = at::mps::getDefaultMPSStream();
-  dispatch_assert_queue(stream->queue());
+  TORCH_CHECK(
+      stream->isOnQueue(),
+      "torch::mps::get_command_buffer() must be called from a block running on torch::mps::get_dispatch_queue()");
   // Release pending computeCommandEncoder, as extensions is likely to allocate new one
   stream->endKernelCoalescing();
   return stream->commandBuffer();
