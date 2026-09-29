@@ -150,7 +150,12 @@ class DeviceInterface:
         raise NotImplementedError
 
     @staticmethod
-    def get_compile_command() -> Any:
+    def get_compile_command(
+        src_files: list[str],
+        dst_file: str,
+        dst_file_ext: str,
+        extra_args: list[str] | None = None,
+    ) -> str:
         raise NotImplementedError
 
     @staticmethod
@@ -282,7 +287,11 @@ class CudaInterface(DeviceInterface):
     maybe_exchange_device = staticmethod(torch.cuda._maybe_exchange_device)  # type: ignore[arg-type, has-type]
     memory_allocated = staticmethod(torch.cuda.memory_allocated)
     get_compile_command = staticmethod(torch._inductor.codegen.cuda.compile_utils.cuda_compile_command)
-    get_code_cache = torch._inductor.codecache.CUDACodeCache
+
+    @staticmethod
+    def get_code_cache() -> Any:
+        return torch._inductor.codecache.CUDACodeCache
+
     is_bf16_supported = staticmethod(torch.cuda.is_bf16_supported)  # type: ignore[arg-type]
 
     # Can be mock patched by @patch decorator.
@@ -325,10 +334,10 @@ class CudaInterface(DeviceInterface):
                 raise TritonUnavailableError("triton not built with the 'amd' backend")
         elif "nvidia" not in triton.backends.backends:
             raise TritonUnavailableError("triton not built with the 'nvidia' backend")
-        
+
     @staticmethod
     def get_config() -> Any:
-        from ...config import cutlass as inductor_cutlass_config
+        from torch._inductor.config import cutlass as inductor_cutlass_config
         return inductor_cutlass_config
 
 
@@ -480,7 +489,10 @@ class XpuInterface(DeviceInterface):
     maybe_exchange_device = staticmethod(torch.xpu._maybe_exchange_device)  # type: ignore[arg-type, has-type]
     memory_allocated = staticmethod(torch.xpu.memory_allocated)
     get_compile_command = staticmethod(torch._inductor.codegen.xpu.compile_utils.xpu_compile_command)
-    get_code_cache = staticmethod(torch._inductor.codecache.XPUCodeCache)
+
+    @staticmethod
+    def get_code_cache() -> Any:
+        return torch._inductor.codecache.XPUCodeCache
 
     @staticmethod
     def support_debug_trace() -> bool:
@@ -515,7 +527,7 @@ class XpuInterface(DeviceInterface):
 
     @staticmethod
     def get_config() -> Any:
-        from ... import config
+        from torch._inductor import config
         return config
 
 @dataclass

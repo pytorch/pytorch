@@ -574,9 +574,7 @@ class CUTLASSCompileSourceCapturingContext:
 
         from torch._dynamo.device_interface import get_interface_for_device
         iface = get_interface_for_device(self.device_type)
-        codecache_cls = (
-            iface.get_code_cache
-        )
+        codecache_cls = iface.get_code_cache()
         _compile_method_orig = codecache_cls.compile
 
         def my_compile(source_code, dst_file_ext, extra_args: list[str] | None = None):
