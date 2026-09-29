@@ -99,6 +99,7 @@ runner_mapping:
   # No B200 capacity on OSDC.
   linux.dgx.b200: linux.dgx.b200
   linux.dgx.b200.8: linux.dgx.b200.8
+  nvidia-oss-pytorch-gb300-1gpu: nvidia-oss-pytorch-gb300-1gpu
   linux.idc.xpu: linux.idc.xpu
   linux.client.xpu: linux.client.xpu
   linux.google.tpuv7x.1: linux.google.tpuv7x.1

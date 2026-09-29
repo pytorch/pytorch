@@ -480,6 +480,7 @@ test_python_smoke() {
 # shellcheck disable=SC2086
 test_python_smoke_b200() {
   # Targeted smoke tests for B200 including FlashAttention CuTe coverage
+  local PYTHON_TEST_EXTRA_OPTION="${EXCLUDE_CLAUSE:-} ${PYTHON_TEST_EXTRA_OPTION:-}"
   install_flash_attn_cute
   install_cutlass_operators
   time python test/run_test.py \
