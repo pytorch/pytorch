@@ -1149,15 +1149,11 @@ static void linalg_inv_ex_out_mps_impl(const Tensor& A, bool check_errors, const
   auto A_sizes = A.sizes();
   int ndim = A.dim();
 
-  Tensor LU = empty_like(A, MemoryFormat::Contiguous);
+  // F-contiguous LU lets lu_factor factor in place
+  Tensor LU = empty(A.mT().sizes(), A.options()).mT();
   Tensor identity = eye(A.size(-2), A.size(-1), A.scalar_type(), A.options().layout(), A.device()).expand_as(A);
   Tensor pivots = empty({A_sizes.begin(), A_sizes.end() - 1}, A.options().dtype(kInt));
-  // need to do this to keep the strides of the result tensor
-  // mps's solve expects row major layout, while inductor
-  // expects result to be column major
-  Tensor tmp = empty_like(A, MemoryFormat::Contiguous);
-  linalg_solve_out_mps_impl(A, identity, true, check_errors, tmp, LU, pivots, info);
-  result.copy_(tmp);
+  linalg_solve_out_mps_impl(A, identity, true, check_errors, result, LU, pivots, info);
 }
 
 static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& output) {
@@ -1906,7 +1902,14 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
               out.scalar_type());
   Tensor A_t, B_t;
   std::tie(B_t, A_t) = _linalg_broadcast_batch_dims(B, A, /*don't check errors*/ nullptr);
-  at::native::resize_output(out, B_t.sizes());
+  // Same layout as linalg_solve_triangular_out on CPU/CUDA and the meta: F-contiguous
+  // unless A is a conjugate transpose.
+  if (A_t.mT().is_contiguous() && A_t.is_conj()) {
+    at::native::resize_output(out, B_t.sizes());
+  } else if (at::native::resize_output_check(out, B_t.sizes())) {
+    out.resize_(B_t.mT().sizes(), MemoryFormat::Contiguous);
+    out.transpose_(-2, -1);
+  }
 
   if (A.numel() == 0 || B.numel() == 0 || out.numel() == 0) {
     out.zero_();
@@ -1915,29 +1918,28 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
 
   // The substitution kernel reads raw elements, so materialize conjugated views.
   Tensor A_ = A_t.is_conj() ? A_t.resolve_conj() : A_t;
-  Tensor B_ = B_t.is_conj() ? B_t.resolve_conj() : B_t;
   if (!A_.is_contiguous()) {
     A_ = A_.clone(at::MemoryFormat::Contiguous);
   }
-  if (!B_.is_contiguous()) {
-    B_ = B_.clone(at::MemoryFormat::Contiguous);
-  }
-
-  // Both solvers write a dense row-major solution, so a strided out needs a temporary.
-  // It is fully overwritten, hence empty rather than a copy of out.
-  Tensor out_ = out.is_contiguous() ? out : at::empty_like(out, at::MemoryFormat::Contiguous);
 
   // Fold the side into the transpose rather than materializing op(A): solving
   // X op(A) = B is the same as solving op(A)^T X^T = B^T, so the right case only
   // costs the O(nk) transposes of B and X, never an O(n^2) copy of A.
   const bool kernel_transpose = transpose != !left;
-  // clone, not contiguous(): when B^T is already contiguous the latter aliases
-  // B, and the solve below writes into this buffer.
-  const Tensor Brhs = left ? B_ : B_.mT().clone(at::MemoryFormat::Contiguous);
-  // Brhs is a private temporary in the right case, so the solve runs in place:
-  // the blocked path already works in place, and the kernel reads b[t] before
+  // Both solvers write the solution Y of op(A) Y = B as a dense row-major
+  // matrix. That is out itself for a left solve, and out^T for a right one, so
+  // a C-contiguous left or F-contiguous right out is written directly, and any
+  // other layout goes through a temporary.
+  const Tensor Y = left ? out : out.mT();
+  Tensor X = Y.is_contiguous() && !Y.is_conj() && !Y.is_neg() ? Y : at::empty(Y.sizes(), Y.options());
+  // A right-hand side the solvers cannot read directly is staged in X and solved
+  // in place: the blocked path works in place, and the kernel reads b[t] before
   // writing x[t] at every step, taking everything else from threadgroup memory.
-  Tensor X = left ? out_ : Brhs;
+  Tensor Brhs = left ? B_t : B_t.mT();
+  if (!Brhs.is_contiguous() || Brhs.is_conj() || Brhs.is_neg()) {
+    X.copy_(Brhs);
+    Brhs = X;
+  }
 
   // Substitution reads all of A once per right-hand side and runs a chain of n
   // dependent steps; the blocked solve shortens that chain to nb and turns the
@@ -1958,11 +1960,8 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
   } else {
     triangular_solve_metal(A_, Brhs, upper, kernel_transpose, conjugate, unitriangular, X);
   }
-  if (!left) {
-    out_.copy_(X.mT());
-  }
-  if (!out_.is_same(out)) {
-    out.copy_(out_);
+  if (!X.is_same(Y)) {
+    Y.copy_(X);
   }
   return out;
 }
@@ -2765,13 +2764,14 @@ Tensor& linalg_solve_triangular_mps_out(const Tensor& A,
 }
 
 Tensor linalg_solve_triangular_mps(const Tensor& A, const Tensor& B, bool upper, bool left, bool unitriangular) {
-  Tensor out = at::empty({0}, A.scalar_type(), std::nullopt, kMPS, std::nullopt, MemoryFormat::Contiguous);
+  Tensor out = at::empty({0}, A.options());
   mps::linalg_solve_triangular_mps_impl(A, B, upper, /*transpose=*/false, left, unitriangular, out);
   return out;
 }
 
 Tensor _cholesky_solve_helper_mps(const Tensor& self, const Tensor& A, bool upper) {
-  auto out = at::empty({0}, self.options().memory_format(MemoryFormat::Contiguous));
+  // Solve in place in a row-major buffer, then lay the result out F-contiguous like on CPU/CUDA.
+  auto tmp = at::empty(self.sizes(), self.options());
   const bool first_transpose = upper;
   const bool second_transpose = !upper;
 
@@ -2783,16 +2783,18 @@ Tensor _cholesky_solve_helper_mps(const Tensor& self, const Tensor& A, bool uppe
                                         first_transpose,
                                         /*left=*/true,
                                         /*unitriangular=*/false,
-                                        out,
+                                        tmp,
                                         /*conjugate=*/first_transpose);
   mps::linalg_solve_triangular_mps_impl(A,
-                                        out,
+                                        tmp,
                                         upper,
                                         second_transpose,
                                         /*left=*/true,
                                         /*unitriangular=*/false,
-                                        out,
+                                        tmp,
                                         /*conjugate=*/second_transpose);
+  auto out = at::empty(self.mT().sizes(), self.options()).mT();
+  out.copy_(tmp);
   return out;
 }
 
@@ -2805,10 +2807,8 @@ TORCH_IMPL_FUNC(triangular_solve_mps_out)
  const Tensor& result,
  const Tensor& clone_A) {
   clone_A.copy_(A);
-  Tensor out = at::empty({0}, A.scalar_type(), std::nullopt, kMPS, std::nullopt, MemoryFormat::Contiguous);
+  Tensor out = result;
   mps::linalg_solve_triangular_mps_impl(A, self, upper, transpose, /*left=*/true, unitriangular, out);
-  result.resize_(out.sizes());
-  result.copy_(out);
 }
 
 TORCH_IMPL_FUNC(_linalg_solve_ex_out_mps)
