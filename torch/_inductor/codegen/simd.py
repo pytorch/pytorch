@@ -459,9 +459,25 @@ def codegen_reduced_buffer(buffer_name: str, reduced: str) -> None:
         )
 
 
-# Column reductions finish in the wrapper by reducing per-tile partials with
-# these torch ops.
-COLUMN_REDUCTION_OPS = {"sum": "sum", "max": "amax", "min": "amin"}
+# Reductions that don't fit an output tile finish in the wrapper by reducing
+# per-tile partials with these torch ops.
+PARTIAL_REDUCTION_OPS = {"sum": "sum", "max": "amax", "min": "amin"}
+
+
+def finishes_from_partials(
+    node: scheduler.BaseSchedulerNode, m: sympy.Expr, n: sympy.Expr
+) -> bool:
+    """Whether reduction node over an (m, n) template output can store fp32
+    per-tile partials. Python wrapper code finishes them, so buffer sizes must
+    be static."""
+    return (
+        not V.graph.cpp_wrapper
+        and isinstance(m, sympy.Integer)
+        and isinstance(n, sympy.Integer)
+        and isinstance(node.node, ir.ComputedBuffer)
+        and node.node.get_reduction_type() in PARTIAL_REDUCTION_OPS
+        and node.node.get_dtype() in (torch.float32, torch.bfloat16, torch.float16)
+    )
 
 
 def template_reduction_axis(
@@ -502,20 +518,46 @@ def template_reduction_axis(
         users = node.get_outputs()[0].users
         if not (len(users) == 1 and users[0].node.is_reduction()):
             return None
-    # The partials are fp32 and are finished by Python wrapper code, whose
-    # buffer sizes must be static.
     if (
-        not V.graph.cpp_wrapper
-        and isinstance(m, sympy.Integer)
-        and isinstance(n, sympy.Integer)
-        and unsplit.group[1] == (n, m)
-        and isinstance(unsplit.node, ir.ComputedBuffer)
-        and unsplit.node.get_reduction_type() in COLUMN_REDUCTION_OPS
-        and unsplit.node.get_dtype() in (torch.float32, torch.bfloat16, torch.float16)
+        unsplit.group[1] == (n, m)
+        and finishes_from_partials(unsplit, m, n)
         and reads(unsplit, col_major)
     ):
         return 1
     return None
+
+
+def finished_after_kernel(
+    tile: tuple[int, int, int],
+    template: ir.Buffer,
+    epilogue_nodes: Sequence[scheduler.BaseSchedulerNode],
+) -> tuple[list[scheduler.BaseSchedulerNode], list[scheduler.BaseSchedulerNode]]:
+    """The epilogue reductions that store per-tile partials, which the wrapper
+    finishes after the kernel: column reductions, and row reductions when tile
+    doesn't span the output's columns. Also the epilogue nodes that read their
+    results, which run after that as separate kernels."""
+    m, n = template.get_size()
+    produced = OrderedSet([template.get_name()]).union(
+        *(node.get_buffer_names() for node in epilogue_nodes)
+    )
+    axes = (1,)
+    if not V.graph.sizevars.statically_known_geq(tile[1] * tile[2], n):
+        axes = (0, 1)
+    partials = [
+        node
+        for node in epilogue_nodes
+        if node.is_reduction()
+        and template_reduction_axis(node, template, produced) in axes
+    ]
+    results = OrderedSet().union(*(node.get_buffer_names() for node in partials))
+    after = []
+    for node in epilogue_nodes:
+        if node not in partials and any(
+            dep.name in results for dep in node.read_writes.reads
+        ):
+            after.append(node)
+            results |= node.get_buffer_names()
+    return partials, after
 
 
 def tile_fits_reduction_epilogue(
@@ -535,14 +577,17 @@ def tile_fits_reduction_epilogue(
         produced |= node.get_buffer_names()
     reductions = [node for node in epilogue_nodes if node.is_reduction()]
     axes = [template_reduction_axis(node, template, produced) for node in reductions]
+    if any(axis not in (0, 1) for axis in axes):
+        return False
+    partials, after = finished_after_kernel(tile, template, epilogue_nodes)
+    if any(node.is_reduction() for node in after) or not all(
+        finishes_from_partials(node, m, n) for node in partials
+    ):
+        return False
+    epilogue_nodes = [node for node in epilogue_nodes if node not in after]
     columns = [node for node, axis in zip(reductions, axes) if axis == 1]
     if columns:
-        # Column results are only complete after the wrapper reduces the
-        # partials, so no epilogue node may read them.
-        results = OrderedSet().union(*(node.get_buffer_names() for node in columns))
         epilogue_nodes = [node for node in epilogue_nodes if node not in columns]
-        if any(node.used_buffer_names() & results for node in epilogue_nodes):
-            return False
         # Column reductions run after the row ones and read only the template
         # output and the nodes before the first row reduction.
         first_row = next(
@@ -560,11 +605,7 @@ def tile_fits_reduction_epilogue(
             return False
         if first_row == len(epilogue_nodes):
             return True
-    # A row reduction must see whole rows in one store. Reducing across column
-    # tiles isn't supported yet.
-    return not OrderedSet(axes) - OrderedSet([0, 1]) and (
-        V.graph.sizevars.statically_known_geq(tile[1], n)
-    )
+    return True
 
 
 class DerivedIterationRangesRoot(IterationRangesRoot):
@@ -777,8 +818,9 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         be excluded from ``mark_run`` in ``_codegen_single_template``.
 
         The standard path fuses all epilogues, so this returns ``[]``.
-        ``ExternalTritonTemplateKernel`` overrides this for epilogues that
-        don't read exactly one template output and cannot be fused.
+        Triton templates override this for epilogues that read reduction
+        results finished after the kernel, and ``ExternalTritonTemplateKernel``
+        for epilogues that don't read exactly one template output.
         """
         return []
 
@@ -4706,10 +4748,10 @@ class SIMDScheduling(BaseScheduling):
         if only_gen_src_code:
             return src_code
 
-        # Unfused epilogues are codegen'd separately in call_kernel, and column
+        # Unfused epilogues are codegen'd separately in call_kernel, and partial
         # reduction outputs are written after it; exclude them from mark_run.
         unfused_set = OrderedSet([id(n) for n in kernel.get_unfused_epilogues()])
-        for node, *_ in kernel.column_reductions:
+        for node, *_ in kernel.partial_reductions:
             unfused_set.add(id(node))
             if node.node._split_size is not None:
                 if not self.scheduler:
