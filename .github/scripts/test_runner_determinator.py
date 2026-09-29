@@ -962,7 +962,7 @@ class TestGetLfRunnersOutput(TestCase):
 
     def test_missing_lf_allowlist_section_defaults_to_all(self) -> None:
         with tempfile.TemporaryDirectory() as d:
-            arc_yaml = self._arc_yaml(d, "runner_mapping: {}\n")
+            arc_yaml = self._arc_yaml(d, "unrelated_key: {}\n")
             self.assertEqual("", rd.get_lf_runners_output(arc_yaml, lf_enabled=True))
 
     def test_missing_arc_yaml_file_returns_empty(self) -> None:
