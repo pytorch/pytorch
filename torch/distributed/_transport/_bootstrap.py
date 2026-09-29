@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import base64
 import json
-import time
 import uuid
 from datetime import timedelta
 from typing import Any, TYPE_CHECKING
@@ -26,7 +25,7 @@ def new_transport_rank(
     store: dist.Store | None = None,
     peer_rank: int,
     rank: int | None = None,
-    bootstrap_timeout: float = 30.0,
+    bootstrap_timeout: float | timedelta = 30.0,
     **kwargs: Any,
 ) -> Transport:
     """Construct, bind, and connect a transport through a Store.
@@ -41,9 +40,9 @@ def new_transport_rank(
         rank: Local identity; defaults to ``torch.distributed.get_rank()``. An
             explicit override requires no initialized process group. Identities
             need not be contiguous, but must be distinct for the two peers.
-        bootstrap_timeout: Bind, endpoint exchange, and connect wait budget in
-            seconds. Native calls and Store network operations may exceed this
-            budget. Does not change the Store's timeout.
+        bootstrap_timeout: Timeout for each of bind, the Store waits, connect,
+            and cleanup, in seconds or as a ``timedelta``. Does not change the
+            Store's timeout.
         **kwargs: Forwarded to ``new_transport`` and the backend constructor.
 
     Example::
@@ -67,9 +66,10 @@ def new_transport_rank(
     accepting stale peer publications. Bootstrap failures attempt to close the
     partially created transport.
     """
-    _validate_timeout(bootstrap_timeout)
-    if bootstrap_timeout is None:
-        raise ValueError("bootstrap_timeout must be finite")
+    if not isinstance(bootstrap_timeout, timedelta):
+        bootstrap_timeout = timedelta(seconds=bootstrap_timeout)
+    timeout = bootstrap_timeout.total_seconds()
+    _validate_timeout(timeout)
     rank = dist.get_rank() if rank is None else rank
     store = dist.distributed_c10d._get_default_store() if store is None else store
     if type(rank) is not int or rank < 0:
@@ -82,29 +82,21 @@ def new_transport_rank(
     attempt = store.add(json.dumps([*pair, "attempts", rank]), 1)
     store = dist.PrefixStore(json.dumps([*pair, attempt]), store)
     transport = new_transport(backend, device, **kwargs)
-    deadline = time.monotonic() + bootstrap_timeout
-
-    def remaining() -> float:
-        seconds = deadline - time.monotonic()
-        if seconds <= 0:
-            raise TimeoutError("transport bootstrap timed out")
-        return seconds
-
     try:
-        endpoint = transport.bind(timeout=remaining())
+        endpoint = transport.bind(timeout=timeout)
         nonce = uuid.uuid4().hex
         store.set(f"endpoint/{nonce}", base64.b64encode(endpoint).decode("ascii"))
         store.set(str(rank), nonce)
-        store.wait([str(peer_rank)], timedelta(seconds=remaining()))
+        store.wait([str(peer_rank)], bootstrap_timeout)
         peer_nonce = store.get(str(peer_rank)).decode("ascii")
         endpoint = base64.b64decode(store.get(f"endpoint/{peer_nonce}"), validate=True)
         # Confirm the peer observed this attempt, not a stale publication.
         store.set(f"ack/{nonce}/{peer_nonce}", "ready")
-        store.wait([f"ack/{peer_nonce}/{nonce}"], timedelta(seconds=remaining()))
-        transport.connect(endpoint, timeout=remaining())
+        store.wait([f"ack/{peer_nonce}/{nonce}"], bootstrap_timeout)
+        transport.connect(endpoint, timeout=timeout)
     except BaseException as error:
         try:
-            transport.close(timeout=max(0.0, deadline - time.monotonic()))
+            transport.close(timeout=timeout)
         except Exception as cleanup_error:
             error.add_note(f"transport bootstrap cleanup failed: {cleanup_error}")
         raise
