@@ -5,7 +5,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from tempfile import mktemp
+from tempfile import gettempdir, mktemp
 
 import click
 import spin
@@ -623,12 +623,11 @@ def install():
 def test(ctx, ci, args):
     """Run tests.
 
-    `spin test ARGS` is `python -m pytest ARGS` from the repository root, so
-    test files, `-k` expressions and any pytest option pass through unchanged.
-    `spin test --ci ARGS` is `python test/run_test.py ARGS` instead: the
-    orchestrator CI uses, with suite selection by name, sharding, the
-    distributed and cpp_extension handlers, retries and the CI pytest
-    plugins. Examples:
+    `spin test ARGS` is `pytest ARGS`, so test files, `-k` expressions and
+    any pytest option pass through unchanged. `spin test --ci ARGS` is
+    `python test/run_test.py ARGS` instead: the orchestrator CI uses, with
+    suite selection by name, sharding, the distributed and cpp_extension
+    handlers, retries and the CI pytest plugins. Examples:
 
     \b
         spin test test/test_nn.py                  # one file
@@ -639,28 +638,45 @@ def test(ctx, ci, args):
         spin test --ci                             # the runner's help, which lists the suites
 
     Without arguments this prints this help; the full suite takes hours.
-    Needs an importable torch (`spin develop`). The runner checks for its
-    pytest plugins itself and names the requirements file that provides them.
+    Needs an importable torch (`spin develop` or `spin install`). The runner
+    checks for its pytest plugins itself and names the requirements file that
+    provides them.
     """
     if not args and not ci:
         click.echo(ctx.get_help())
         return
-    # Both runners import torch while collecting, so a missing build would
-    # surface as a bare traceback; run_test.py even needs it for --help.
+    if ci:
+        cmd = [sys.executable, "test/run_test.py", *(args or ("--help",))]
+    else:
+        # The pytest entry point, not `python -m pytest`: `-m` puts the cwd
+        # first on sys.path, so from the repository root the source tree would
+        # shadow a non-editable install of torch.
+        pytest_exe = shutil.which("pytest", path=str(Path(sys.executable).parent))
+        if pytest_exe is None:
+            raise click.ClickException(
+                "pytest is not installed in this environment; install the dev "
+                "dependencies with `pip install --group dev`."
+            )
+        cmd = [pytest_exe, *args]
+    p = spin.util.run(cmd, sys_exit=False)
+    if p.returncode == 0:
+        return
+    # Both runners import torch while collecting, so a missing build surfaces
+    # as a bare traceback; run_test.py even needs it for --help. Probe from
+    # outside the checkout so the source tree cannot shadow an installed torch.
     probe = subprocess.run(
-        [sys.executable, "-c", "import torch"], capture_output=True, text=True
+        [sys.executable, "-c", "import torch"],
+        cwd=gettempdir(),
+        capture_output=True,
+        text=True,
     )
     if probe.returncode != 0:
         last = probe.stderr.strip().splitlines()[-1:]
         raise click.ClickException(
             "torch is not importable in this environment; build it first with "
-            "`spin develop`.\n" + "\n".join(last)
+            "`spin develop` or `spin install`." + "".join(f"\n{line}" for line in last)
         )
-    if ci:
-        cmd = [sys.executable, "test/run_test.py", *(args or ("--help",))]
-    else:
-        cmd = [sys.executable, "-m", "pytest", *args]
-    spin.util.run(cmd)
+    raise SystemExit(p.returncode)
 
 
 PYREFLY_LINTER_SCRIPT = CWD / "tools" / "linter" / "adapters" / "pyrefly_linter.py"
