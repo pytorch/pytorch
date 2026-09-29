@@ -59,9 +59,10 @@ namespace {
 
 #if defined(USE_ROCM)
 void createCublasLtHandle(cublasLtHandle_t *handle) {
-  // hipblasLtCreate allocates device memory. Under stream capture that
-  // allocation fails and hipBLASLt exits the process, which can hang in
-  // teardown instead of reporting an error.
+  // hipblasLtCreate allocates device memory and uses the legacy stream. Under
+  // stream capture in any mode, including relaxed, that fails and hipBLASLt
+  // exits the process, which can hang in teardown instead of reporting an
+  // error.
   TORCH_CHECK(
       c10::cuda::currentStreamCaptureStatusMayInitCtx() ==
           c10::cuda::CaptureStatus::None,
@@ -231,9 +232,14 @@ using CuBlasCapturePoolType = DeviceThreadHandlePool<cublasHandle_t, createCaptu
 // and hipBLASLt workspaces handed out by getCUDABlasLtWorkspace under capture,
 // keyed by (capture id, stream). They are freed by
 // releaseCaptureCublasWorkspaces when the capture ends.
+struct CaptureWorkspace {
+  at::DataPtr workspace;
+  cublasPointerMode_t pointer_mode;
+};
+
 struct CaptureWorkspaces {
   std::mutex mutex;
-  std::map<std::tuple<c10::CaptureId_t, cublasHandle_t, void*>, at::DataPtr>
+  std::map<std::tuple<c10::CaptureId_t, cublasHandle_t, void*>, CaptureWorkspace>
       map;
   // The last entry is the largest. Earlier, smaller entries stay alive because
   // kernels captured with them still use them at replay.
@@ -714,42 +720,52 @@ static cublasHandle_t getCaptureCublasHandle(
     c10::CaptureId_t capture_id) {
   // One capture handle per thread serves every stream in the capture, because
   // a stream that first appears mid-capture cannot create a handle. Each
-  // stream gets its own workspace, so the handle is pointed at the current
-  // stream and its workspace on every request.
+  // stream gets its own workspace and pointer mode, so the handle is pointed
+  // at the current stream's on every request.
   cublasHandle_t handle =
       getCuBlasPoolWindow<CuBlasCapturePoolType>().reserve(device);
+  cudaStream_t prev_stream = nullptr;
+  TORCH_CUDABLAS_CHECK(cublasGetStream(handle, &prev_stream));
+  cublasPointerMode_t prev_mode = CUBLAS_POINTER_MODE_HOST;
+  TORCH_CUDABLAS_CHECK(cublasGetPointerMode(handle, &prev_mode));
   void* stream_key = static_cast<void*>(stream);
   auto key = std::make_tuple(capture_id, handle, stream_key);
   auto& workspaces = captureWorkspaces();
   size_t workspace_size = getChosenWorkspaceSize();
   void* workspace_ptr = nullptr;
+  cublasPointerMode_t pointer_mode = CUBLAS_POINTER_MODE_HOST;
   {
     std::lock_guard<std::mutex> lock(workspaces.mutex);
+    // Keep the pointer mode the caller left for the stream the handle was
+    // last pointed at.
+    auto prev = workspaces.map.find(
+        std::make_tuple(capture_id, handle, static_cast<void*>(prev_stream)));
+    if (prev != workspaces.map.end()) {
+      prev->second.pointer_mode = prev_mode;
+    }
     auto it = workspaces.map.find(key);
     if (it != workspaces.map.end()) {
-      workspace_ptr = it->second.get();
+      workspace_ptr = it->second.workspace.get();
+      pointer_mode = it->second.pointer_mode;
     }
   }
-  const bool first_use = workspace_ptr == nullptr;
-  if (first_use) {
-    // Allocated while capturing, so it comes from the capture's private pool.
-    auto workspace = allocateCUDABlasWorkspace(workspace_size);
-    workspace_ptr = workspace.get();
-    std::lock_guard<std::mutex> lock(workspaces.mutex);
-    workspaces.map.emplace(key, std::move(workspace));
-  }
-  TORCH_CUDABLAS_CHECK(cublasSetStream(handle, stream));
-  TORCH_CUDABLAS_CHECK(
-      cublasSetWorkspace(handle, workspace_ptr, workspace_size));
-  if (first_use) {
+  if (workspace_ptr == nullptr) {
     // Carry over a pointer mode the caller set on this stream's eager handle.
-    cublasPointerMode_t pointer_mode = CUBLAS_POINTER_MODE_HOST;
     if (auto eager_handle = getCuBlasPoolWindow<CuBlasPublicPoolType>().find(
             device, stream_key)) {
       TORCH_CUDABLAS_CHECK(cublasGetPointerMode(eager_handle, &pointer_mode));
     }
-    TORCH_CUDABLAS_CHECK(cublasSetPointerMode(handle, pointer_mode));
+    // Allocated while capturing, so it comes from the capture's private pool.
+    auto workspace = allocateCUDABlasWorkspace(workspace_size);
+    workspace_ptr = workspace.get();
+    std::lock_guard<std::mutex> lock(workspaces.mutex);
+    workspaces.map.emplace(
+        key, CaptureWorkspace{std::move(workspace), pointer_mode});
   }
+  TORCH_CUDABLAS_CHECK(cublasSetStream(handle, stream));
+  TORCH_CUDABLAS_CHECK(
+      cublasSetWorkspace(handle, workspace_ptr, workspace_size));
+  TORCH_CUDABLAS_CHECK(cublasSetPointerMode(handle, pointer_mode));
   return handle;
 }
 #endif
@@ -914,7 +930,7 @@ void releaseCaptureCublasWorkspaces(c10::CaptureId_t capture_id) {
     std::lock_guard<std::mutex> lock(workspaces.mutex);
     for (auto it = workspaces.map.begin(); it != workspaces.map.end();) {
       if (std::get<0>(it->first) == capture_id) {
-        released[std::get<1>(it->first)].push_back(std::move(it->second));
+        released[std::get<1>(it->first)].push_back(std::move(it->second.workspace));
         it = workspaces.map.erase(it);
       } else {
         ++it;

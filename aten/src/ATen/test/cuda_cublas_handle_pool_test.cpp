@@ -3,6 +3,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/ScopeExit.h>
 
 #include <atomic>
 #include <thread>
@@ -10,6 +11,7 @@
 
 #ifdef USE_ROCM
 #include <ATen/ATen.h>
+#include <ATen/cuda/CUDAEvent.h>
 #include <ATen/cuda/CUDAGraph.h>
 #include <ATen/cuda/Sleep.h>
 #include <rocblas/rocblas.h>
@@ -148,6 +150,8 @@ TEST(CUDABlasHandlePoolTest, EagerCallerWorkspaceSurvivesAtenOps) {
   // The legacy backend is the one whose operations bind a rocBLAS workspace.
   const auto prev_backend = at::globalContext().blasPreferredBackend();
   at::globalContext().setBlasPreferredBackend(at::BlasBackend::Cublas);
+  auto restore_backend = c10::make_scope_exit(
+      [&] { at::globalContext().setBlasPreferredBackend(prev_backend); });
 
   at::cuda::CUDAGuard device_guard(0);
   // Unbinding at the end leaves this stream's public handle without a workspace,
@@ -171,7 +175,6 @@ TEST(CUDABlasHandlePoolTest, EagerCallerWorkspaceSurvivesAtenOps) {
   EXPECT_EQ(rocblasWorkspaceSize(handle), static_cast<size_t>(size));
 
   EXPECT_EQ(rocblas_set_workspace(rocblas, nullptr, 0), rocblas_status_success);
-  at::globalContext().setBlasPreferredBackend(prev_backend);
 }
 
 // A rocBLAS workspace must not be used by two streams at once, and
@@ -328,6 +331,8 @@ TEST(CUDABlasHandlePoolTest, EagerWorkspaceBindIsCaptureSafe) {
   // handle, so the legacy backend is the only one that exercises this.
   const auto prev_backend = at::globalContext().blasPreferredBackend();
   at::globalContext().setBlasPreferredBackend(at::BlasBackend::Cublas);
+  auto restore_backend = c10::make_scope_exit(
+      [&] { at::globalContext().setBlasPreferredBackend(prev_backend); });
 
   // Only split-K / stream-K kernels touch the workspace on gfx9, and those need
   // a large K. A square shape writes zero workspace bytes. Tensile picks per
@@ -362,11 +367,54 @@ TEST(CUDABlasHandlePoolTest, EagerWorkspaceBindIsCaptureSafe) {
   });
   worker.join();
 
-  at::globalContext().setBlasPreferredBackend(prev_backend);
   if (failure) {
     std::rethrow_exception(failure);
   }
   EXPECT_TRUE(at::allclose(captured, expected, 1e-2, 2e-1));
+}
+
+// One capture handle serves all of a thread's capturing streams, so it must
+// switch pointer modes with them.
+TEST(CUDABlasHandlePoolTest, CaptureHandleKeepsPointerModePerStream) {
+  if (!at::cuda::is_available()) {
+    return;
+  }
+  if (at::cuda::isCUDABlasWorkspaceCachingEnabled()) {
+    GTEST_SKIP() << "requires eager workspaces";
+  }
+  at::cuda::CUDAGuard device_guard(0);
+  auto s1 = c10::cuda::getStreamFromPool();
+  auto s2 = c10::cuda::getStreamFromPool();
+  auto t = at::zeros({1}, at::TensorOptions().device(at::kCUDA));
+  const auto mode = [](cublasHandle_t handle) {
+    rocblas_pointer_mode m = rocblas_pointer_mode_host;
+    EXPECT_EQ(rocblas_get_pointer_mode(reinterpret_cast<rocblas_handle>(handle), &m), rocblas_status_success);
+    return m;
+  };
+  // Handles cannot be created under capture.
+  {
+    c10::cuda::CUDAStreamGuard guard(s2);
+    (void)at::cuda::getCurrentCUDABlasHandle();
+  }
+  c10::cuda::CUDAStreamGuard stream_guard(s1);
+  (void)at::cuda::getCurrentCUDABlasHandle();
+  at::cuda::CUDAGraph graph;
+  graph.capture_begin();
+  t.add_(1);
+  auto h1 = reinterpret_cast<rocblas_handle>(at::cuda::getCurrentCUDABlasHandle());
+  EXPECT_EQ(rocblas_set_pointer_mode(h1, rocblas_pointer_mode_device), rocblas_status_success);
+  at::cuda::CUDAEvent fork, join;
+  fork.record(s1);
+  fork.block(s2);
+  {
+    c10::cuda::CUDAStreamGuard guard(s2);
+    EXPECT_EQ(mode(at::cuda::getCurrentCUDABlasHandle()), rocblas_pointer_mode_host);
+    join.record(s2);
+  }
+  join.block(s1);
+  EXPECT_EQ(mode(at::cuda::getCurrentCUDABlasHandle()), rocblas_pointer_mode_device);
+  EXPECT_EQ(rocblas_set_pointer_mode(h1, rocblas_pointer_mode_host), rocblas_status_success);
+  graph.capture_end();
 }
 
 #endif // USE_ROCM
