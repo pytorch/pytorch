@@ -4660,7 +4660,12 @@ def _upsample_linear(
     memory_format = utils.suggest_memory_format(input)
 
     # following "heuristic: only use channels_last path when it's faster than the contiguous path"
-    if input.device.type == "cuda" and n_channels < 16:
+    # Feature decoupling: also treat the registered privateuse1 backend
+    # (e.g. Ascend NPU) as an accelerator following the same contiguous
+    # memory-format path as CUDA. CUDA behavior is unchanged.
+    private_backend = torch._C._get_privateuse1_backend_name()
+    is_accelerator = input.device.type == private_backend
+    if (input.device.type == "cuda" or is_accelerator) and n_channels < 16:
         memory_format = torch.contiguous_format
 
     if not isinstance(result, torch.Tensor):
