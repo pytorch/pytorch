@@ -2904,7 +2904,7 @@ fake_autocast_backward_xfails = {
 }
 
 # TODO: triage. Most of these ops are either not implemented on MPS or need float64;
-# the rest are real meta vs. MPS mismatches (fft, batch_norm, embedding_bag, linear,
+# the rest are real meta vs. MPS mismatches (batch_norm, embedding_bag, linear,
 # logsigmoid, max_unpool2d).
 fake_backward_mps_xfails = {
     xfail(name, variant, device_type="mps")
@@ -2914,20 +2914,6 @@ fake_backward_mps_xfails = {
         ("_segment_reduce", "offsets"),
         ("cdouble", ""),
         ("double", ""),
-        ("fft.fft", ""),
-        ("fft.fft2", ""),
-        ("fft.fftn", ""),
-        ("fft.hfft2", ""),
-        ("fft.hfftn", ""),
-        ("fft.ifft", ""),
-        ("fft.ifft2", ""),
-        ("fft.ifftn", ""),
-        ("fft.ihfft", ""),
-        ("fft.ihfft2", ""),
-        ("fft.ihfftn", ""),
-        ("fft.rfft", ""),
-        ("fft.rfft2", ""),
-        ("fft.rfftn", ""),
         ("float_power", ""),
         ("linalg.eig", ""),
         ("linalg.eigvals", ""),
