@@ -339,6 +339,51 @@ class TestObserver(QuantizationTestCase):
                 model_device = next(iter(model_devices))
                 self.assertEqual(model_device, device_target)
 
+    def test_per_channel_observer_reset_min_max_vals_respects_dtype_and_device(self):
+        """
+        Regression test for a bug where PerChannelMinMaxObserver (and its
+        subclass MovingAveragePerChannelMinMaxObserver)'s
+        reset_min_max_vals() replaced the min_val/max_val buffers with a
+        freshly constructed `torch.rand(0,)` CPU float32 tensor, silently
+        discarding any dtype/device configured via factory_kwargs at
+        construction time. MinMaxObserver's reset_min_max_vals() has always
+        preserved dtype/device (it uses an in-place `copy_`), and
+        test_state_dict_respects_device_affinity above enforces the same
+        contract for state_dict load/save, so reset should honor it too.
+        """
+        for obs_cls in (PerChannelMinMaxObserver, MovingAveragePerChannelMinMaxObserver):
+            for dtype in (torch.float32, torch.float64):
+                obs = obs_cls(
+                    ch_axis=0,
+                    dtype=torch.qint8,
+                    qscheme=torch.per_channel_symmetric,
+                    factory_kwargs={"dtype": dtype},
+                )
+                obs(torch.randn(4, 8, dtype=dtype))
+                obs.reset_min_max_vals()
+                self.assertEqual(obs.min_val.dtype, dtype)
+                self.assertEqual(obs.max_val.dtype, dtype)
+                self.assertEqual(obs.min_val.numel(), 0)
+                self.assertEqual(obs.max_val.numel(), 0)
+                # min_val/max_val must stay distinct tensor objects (the
+                # original CSE-aliasing concern this code was guarding
+                # against), not just equal in value.
+                self.assertIsNot(obs.min_val, obs.max_val)
+
+            if TEST_CUDA:
+                obs = obs_cls(
+                    ch_axis=0,
+                    dtype=torch.qint8,
+                    qscheme=torch.per_channel_symmetric,
+                ).to("cuda")
+                obs(torch.randn(4, 8, device="cuda"))
+                obs.reset_min_max_vals()
+                self.assertEqual(obs.min_val.device.type, "cuda")
+                self.assertEqual(obs.max_val.device.type, "cuda")
+                # would previously raise a device-mismatch RuntimeError here,
+                # since reset silently moved the buffers back to cpu
+                obs(torch.randn(4, 8, device="cuda"))
+
     def test_histogram_observer_consistent_buffer_shape(self):
         """
         Ensures that the buffer shapes do not change from uninitialized to

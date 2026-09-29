@@ -883,15 +883,25 @@ class PerChannelMinMaxObserver(UniformQuantizationObserverBase):
     @torch.jit.export
     def reset_min_max_vals(self):
         """Resets the min/max values."""
-        # This used to be torch.ones but that does not work because
-        # JIT compiler can optimize it via common subexpression elimination
-        # in which case both min_val and max_val point to the same tensor.
-        self.min_val = torch.rand(
-            0,
-        )
-        self.max_val = torch.rand(
-            0,
-        )
+        # Resize the existing buffers in place instead of assigning new
+        # tensors (as this used to do via `torch.rand(0,)`). Assigning a
+        # freshly constructed CPU float32 tensor silently discarded the
+        # buffers' configured dtype/device (e.g. `factory_kwargs={"dtype":
+        # ..., "device": ...}` passed at construction time), unlike
+        # MinMaxObserver.reset_min_max_vals() and the state_dict loading
+        # path (_load_from_state_dict above), both of which preserve the
+        # buffers' dtype/device via in-place ops. See also gh-44537, which
+        # fixed the same class of device-affinity bug for state_dict
+        # load/save on these observers.
+        #
+        # `torch.ones` was avoided historically because the JIT compiler
+        # could optimize identical-looking tensor constructors via common
+        # subexpression elimination, aliasing min_val and max_val to the
+        # same tensor. Resizing the two pre-existing (already distinct)
+        # buffer tensors in place sidesteps that as well, since no new
+        # tensors are constructed at all.
+        self.min_val.resize_(0)
+        self.max_val.resize_(0)
 
 
 class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
