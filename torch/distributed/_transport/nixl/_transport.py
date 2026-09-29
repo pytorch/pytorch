@@ -48,17 +48,6 @@ class NIXLTransport(Transport):
     to NIXL's ``create_backend``. NIXL is an optional dependency, imported only
     when selected. Transfers require registered views; raw tensors are rejected
     rather than allocated or registered implicitly.
-
-    Lifecycle: open -> closing -> closed. Binding and connecting leave the
-    transport open. Once close starts, new operations are rejected. Failed
-    transfer-handle or peer-metadata cleanup also starts closing. A failed/timed-out close retains unreleased resources;
-    retry ``close`` or ``close_async`` to finish cleanup. A closed transport cannot
-    reopen; construct a new one instead.
-
-    Registrations retain the transport independently of outgoing Work completion,
-    since peers may still access them. Coordinate remote access before unregistering
-    or closing. Each Work is single-use: a wait timeout does not cancel its DMA,
-    and retrying that wait observes the same operation rather than resubmitting it.
     """
 
     def __init__(
@@ -113,6 +102,11 @@ class NIXLTransport(Transport):
         self._transfers: dict[int, Any] = {}
         self._pending: dict[int, _NIXLWork] = {}
         self._operation_lock = RLock()
+        # Lifecycle: open -> closing -> closed. Closing rejects new operations and
+        # is terminal; a failed or timed-out close retains unreleased resources
+        # and retrying close only finishes cleanup. Failed transfer-handle or
+        # peer-metadata cleanup also starts closing. Registrations are released
+        # only by unregister or close, independent of Work completion.
         self._closed = False
         self._closing = False
 
