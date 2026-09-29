@@ -231,8 +231,8 @@ runs:
         retention-days: 14
         if-no-files-found: warn
         path: |
-          test/**/*.xml
-          test/**/*.csv
+          test/test-reports/**/*.xml
+          test/test-reports/**/*.csv
 
     - name: Store Usage Logs on Github (fallback)
       uses: actions/upload-artifact@v4
