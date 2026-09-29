@@ -187,7 +187,7 @@ Tensor _dim_arange(const Tensor& like, int64_t dim) {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ complex / polar ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 static void complex_check_floating(const Tensor& a, const Tensor& b) {
-  TORCH_CHECK(
+  TORCH_CHECK_NOT_IMPLEMENTED(
       (a.scalar_type() == kFloat || a.scalar_type() == kDouble ||
        a.scalar_type() == kHalf) &&
           (b.scalar_type() == kFloat || b.scalar_type() == kDouble ||
@@ -1733,7 +1733,8 @@ Tensor zeros_symint(
     std::optional<Device> device,
     std::optional<bool> pin_memory) {
   for (const auto& dim_size : size) {
-    TORCH_CHECK(dim_size >= 0, "zeros: Dimension size must be non-negative.");
+    TORCH_SYM_CHECK(
+        dim_size.sym_ge(0), "zeros: Dimension size must be non-negative.");
   }
   Layout layout_ = layout.value_or(Layout::Strided);
   if (at::sparse_csr::is_sparse_compressed(layout_)) {

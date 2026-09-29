@@ -15,7 +15,7 @@ from typing import Any, TYPE_CHECKING
 
 import torch
 from torch._guards import detect_fake_mode
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, is_fake_tensor
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx._utils import first_call_function_nn_module_stack
 from torch.fx.experimental.proxy_tensor import PreDispatchTorchFunctionMode
@@ -469,7 +469,7 @@ def _check_input_constraints_for_graph(
     unification_map: dict[sympy.Symbol, Any] = {}
     for (key_path, arg), node in zip(flat_args_with_path, input_placeholders):
         node_val = node.meta.get("val")
-        if isinstance(node_val, FakeTensor):
+        if is_fake_tensor(node_val):
             if not isinstance(arg, torch.Tensor):
                 raise RuntimeError(
                     f"Expected input at {get_keystr(key_path)} to be a tensor, but got {type(arg)}",
@@ -1361,7 +1361,7 @@ def _special_op_to_preserve_cia(*args: Any, **kwargs: Any) -> Any:
     return NotImplemented
 
 
-# Our strategy for deciding if we can preserve a op is following:
+# Our strategy for deciding if we can preserve an op is following:
 # 1. The op should be known statically that it is functional
 # 2. If it is maybe aliasing, we decompose because we must know if an op
 #    is mutating or aliasing.
@@ -1511,10 +1511,7 @@ def register_module_as_pytree_input_node(cls: type[torch.nn.Module]) -> None:
     Registers a module as a valid input type for :func:`torch.export.export`.
 
     Args:
-        mod: the module instance
-        serialized_type_name: The serialized name for the module. This is
-        required if you want to serialize the pytree TreeSpec containing this
-        module.
+        cls: the module type to register
 
     Example::
 
@@ -1530,7 +1527,7 @@ def register_module_as_pytree_input_node(cls: type[torch.nn.Module]) -> None:
                 return self.linear(x)
 
 
-        torch._export.utils.register_module_as_pytree_node(InputDataClass)
+        torch._export.utils.register_module_as_pytree_input_node(Module)
 
 
         class Mod(torch.nn.Module):

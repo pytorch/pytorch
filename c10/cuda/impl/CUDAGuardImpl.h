@@ -58,7 +58,18 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     C10_CUDA_CHECK(c10::cuda::SetDevice(d.index()));
   }
   void uncheckedSetDevice(Device d) const noexcept override {
-    C10_CUDA_CHECK_WARN(c10::cuda::MaybeSetDevice(d.index()));
+    // noexcept, but MaybeSetDevice() -> SetDevice() can throw via
+    // C10_CUDA_CHECK(cudaGetDevice) on a device carrying a sticky error, and
+    // the throw escapes while evaluating the argument, before
+    // C10_CUDA_CHECK_WARN can demote it. Catch it so a device restore warns
+    // instead of std::terminate.
+    try {
+      C10_CUDA_CHECK_WARN(c10::cuda::MaybeSetDevice(d.index()));
+    } catch (const std::exception& e) {
+      TORCH_WARN("uncheckedSetDevice() ignoring error: ", e.what());
+    } catch (...) {
+      TORCH_WARN("uncheckedSetDevice() ignoring unknown error");
+    }
   }
   Stream getStream(Device d) const override {
     return getCurrentCUDAStream(d.index()).unwrap();
@@ -115,17 +126,28 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       const noexcept override {
     if (!event)
       return;
-    auto cuda_event = static_cast<cudaEvent_t>(event);
-    DeviceIndex orig_device{-1};
-    C10_CUDA_CHECK_WARN(c10::cuda::GetDevice(&orig_device));
-    C10_CUDA_CHECK_WARN(c10::cuda::SetDevice(device_index));
-    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-    if (C10_UNLIKELY(interp)) {
-      (*interp)->trace_gpu_event_deletion(
-          c10::kCUDA, reinterpret_cast<uintptr_t>(cuda_event));
+    // noexcept: SetDevice() can throw on a device carrying a sticky error (see
+    // uncheckedSetDevice), and SetDevice(orig_device) can also throw via
+    // TORCH_CHECK(device >= 0) if the GetDevice above failed and left
+    // orig_device == -1. Guard the whole body so we warn instead of
+    // terminating.
+    try {
+      auto cuda_event = static_cast<cudaEvent_t>(event);
+      DeviceIndex orig_device{-1};
+      C10_CUDA_CHECK_WARN(c10::cuda::GetDevice(&orig_device));
+      C10_CUDA_CHECK_WARN(c10::cuda::SetDevice(device_index));
+      const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+      if (C10_UNLIKELY(interp)) {
+        (*interp)->trace_gpu_event_deletion(
+            c10::kCUDA, reinterpret_cast<uintptr_t>(cuda_event));
+      }
+      C10_CUDA_CHECK_WARN(cudaEventDestroy(cuda_event));
+      C10_CUDA_CHECK_WARN(c10::cuda::SetDevice(orig_device));
+    } catch (const std::exception& e) {
+      TORCH_WARN("destroyEvent() ignoring error: ", e.what());
+    } catch (...) {
+      TORCH_WARN("destroyEvent() ignoring unknown error");
     }
-    C10_CUDA_CHECK_WARN(cudaEventDestroy(cuda_event));
-    C10_CUDA_CHECK_WARN(c10::cuda::SetDevice(orig_device));
   }
 
   void record(

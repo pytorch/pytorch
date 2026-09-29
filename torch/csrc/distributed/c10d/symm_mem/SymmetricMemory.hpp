@@ -6,6 +6,19 @@
 
 namespace c10d::symmetric_memory {
 
+// Validates a peer rank used to index the per-peer arrays of buffer/signal
+// pad pointers. An out-of-range rank reads or writes through a wild pointer,
+// or lands past the signal pad in the peer's tensor data.
+inline void check_rank(int rank, int world_size) {
+  TORCH_CHECK(
+      rank >= 0 && rank < world_size,
+      "rank must be in [0, ",
+      world_size,
+      ") (got ",
+      rank,
+      ")");
+}
+
 // SymmetricMemory represents symmetric allocations across a group of devices.
 // The allocations represented by a SymmetricMemory object are accessible by
 // all devices in the group. The class can be used for op-level custom
@@ -17,7 +30,7 @@ namespace c10d::symmetric_memory {
 // identical-sized memory via SymmetricMemoryAllocator::alloc(), then invokes
 // SymmetricMemoryAllocator::rendezvous() on the memory to establish the
 // association across peer buffers. The rendezvous is a one-time process, and
-// the mapping between a local memory memory and the associated SymmetricMemory
+// the mapping between a local memory and the associated SymmetricMemory
 // object is unique.
 //
 // NOTE [symmetric memory signal pad]
@@ -35,7 +48,13 @@ namespace c10d::symmetric_memory {
 // different purposes. Without the concept of channels, we cannot guarantee the
 // correctness of the barriers since signals issued from barrier on stream A
 // can be received by the barrier on stream B. By specifying different channels
-// for these two barriers, they can operate correctly in parallel.
+// for these two barriers, their signals stay separate.
+//
+// NOTE [symmetric memory stream ordering]
+// The built-in operations that touch the signal pad are ordered across CUDA
+// streams per process group by GroupStreamGuard, so different channels do not
+// give them concurrency across streams. User kernels launched on a raw
+// get_signal_pad() tensor are not covered.
 class TORCH_API SymmetricMemory : public torch::CustomClassHolder {
  public:
   ~SymmetricMemory() override = default;
@@ -154,9 +173,13 @@ struct GroupInfo {
 C10_EXPORT GroupInfo& get_group_info(const std::string& group_name);
 
 // Identical to empty_strided, but allows symmetric memory access to be
-// established for the allocated tensor via SymmetricMemory::rendezvous(). This
-// function itself is not a collective operation. It invokes
-// SymmetricMemoryAllocator::alloc() for the requested device under the hood.
+// established for the allocated tensor via SymmetricMemory::rendezvous(). It
+// invokes SymmetricMemoryAllocator::alloc() for the requested device under the
+// hood.
+//
+// Whether this is a collective operation is backend-dependent. The NVSHMEM
+// allocator calls nvshmem_malloc and barriers inside alloc(), so with that
+// backend every rank must call this the same number of times in the same order.
 //
 // NOTE [symmetric memory persistent allocation]
 // If an `alloc_id` is supplied, empty_strided_p2p will perform persistent

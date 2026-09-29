@@ -654,7 +654,7 @@ def create_fw_bw_graph(
     from torch._dispatch.python import suspend_functionalization
     from torch._dynamo._trace_wrapped_higher_order_op import mod_index
     from torch._functorch.aot_autograd import AOTConfig, create_joint
-    from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+    from torch._subclasses.fake_tensor import FakeTensorMode, is_fake_tensor
     from torch._subclasses.functional_tensor import disable_functional_mode
     from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
 
@@ -698,7 +698,7 @@ def create_fw_bw_graph(
                 unwrapped_other_buffers = pytree.tree_map(_from_fun, other_buffers)
 
             if not all(
-                isinstance(t, (FakeTensor, int, torch.SymInt))
+                is_fake_tensor(t) or isinstance(t, (int, torch.SymInt))
                 for t in unwrapped_score_mod_indexes + unwrapped_other_buffers
             ):
                 raise AssertionError(

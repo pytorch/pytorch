@@ -14,7 +14,7 @@ from collections.abc import (
 from dataclasses import dataclass
 from functools import partial
 from itertools import chain
-from typing import Any
+from typing import Any, cast
 
 import sympy
 
@@ -72,8 +72,8 @@ def matches_module_function_pattern(
 
 
 def _is_fake_tensor_same(
-    new: Any,
-    old: Any,
+    new: object,
+    old: object,
     existing_storages: Mapping[int, int],
     *,
     check_strides: bool = True,
@@ -92,6 +92,15 @@ def _is_fake_tensor_same(
     be supplied by users of this function."""
 
     def is_intlist_same(new, old):
+        # sym_eq builds a symbolic conjunction and statically_known_true then
+        # evaluates it, which is a lot of work for the common case where the
+        # two sizes/strides are the very same objects. Identity, or equality
+        # between concrete ints, already implies equality.
+        if len(new) == len(old) and all(
+            a is b or (type(a) is int and type(b) is int and a == b)
+            for a, b in zip(new, old)
+        ):
+            return True
         return statically_known_true(sym_eq(new, old))
 
     if type(new) is not type(old):
@@ -102,6 +111,7 @@ def _is_fake_tensor_same(
             return old is None
 
         if isinstance(new, Collection):
+            old_collection = cast(Collection[object], old)
             if recursive_ids is None:
                 recursive_ids = OrderedSet()
 
@@ -113,7 +123,7 @@ def _is_fake_tensor_same(
             # this collection have already been validated (or will be validated in the
             # future) by a call at a different layer of recursion.
             return visited or (
-                len(new) == len(old)
+                len(new) == len(old_collection)
                 and all(
                     _is_fake_tensor_same(
                         new_i,
@@ -124,14 +134,15 @@ def _is_fake_tensor_same(
                         node=node,
                         recursive_ids=recursive_ids,
                     )
-                    for new_i, old_i in zip(new, old)
+                    for new_i, old_i in zip(new, old_collection)
                 )
             )
 
         if isinstance(new, torch.types.py_sym_types):
+            old_sym = cast(torch.types.PySymType, old)
             return (
                 not_none(new.node.shape_env)._maybe_evaluate_static(
-                    sympy.Eq(new.node.expr, old.node.expr)
+                    sympy.Eq(new.node.expr, old_sym.node.expr)
                 )
                 == sympy.true
             )
@@ -141,20 +152,22 @@ def _is_fake_tensor_same(
         # implemented __eq__ method will compare IDs.
         return new == old
 
+    old_tensor = cast(torch.Tensor, old)
+
     if (
-        new.layout != old.layout
-        or new.dtype != old.dtype
-        or not is_intlist_same(new.shape, old.shape)
+        new.layout != old_tensor.layout
+        or new.dtype != old_tensor.dtype
+        or not is_intlist_same(new.shape, old_tensor.shape)
     ):
         return False
 
-    if new.device != old.device:
+    if new.device != old_tensor.device:
         return False
 
     if (
         check_strides
         and new.layout == torch.strided
-        and not is_intlist_same(new.stride(), old.stride())
+        and not is_intlist_same(new.stride(), old_tensor.stride())
     ):
         return False
 
@@ -162,8 +175,8 @@ def _is_fake_tensor_same(
         return True
 
     if not statically_known_true(
-        new.storage_offset() == old.storage_offset()
-    ) or get_storage(new) != get_storage(old):
+        new.storage_offset() == old_tensor.storage_offset()
+    ) or get_storage(new) != get_storage(old_tensor):
         return False
 
     def any_user_may_alias(node):
@@ -216,7 +229,7 @@ def _is_fake_tensor_same(
     # else.  If the FakeTensor's storage is fresh and none of the node's users can alias
     # it, then we don't need to update this node.
     if (
-        existing_storages[get_storage(old)] == 1
+        existing_storages[get_storage(old_tensor)] == 1
         and get_storage(new) not in existing_storages
         and not any_user_may_alias(node)
     ):
@@ -251,8 +264,11 @@ def _extract_subgraphs_and_args(
     if node.target is torch.ops.higher_order.associative_scan:
         # Associative scan operates on slices of xs (see: scan), but multiple slices.
         # Use the same slice twice to account for cases where only a single slice is
-        # input.
-        yield args[0], (*(a[0] for a in args[1]), *(a[0] for a in args[1]), *args[2])
+        # input. first_slice_copy tolerates a zero-length scan dim.
+        from torch._higher_order_ops.utils import first_slice_copy
+
+        sliced = [first_slice_copy(a) for a in args[1]]
+        yield args[0], (*sliced, *sliced, *args[2])
     elif node.target is torch.ops.higher_order.cond:
         subgraph_args = tuple(args[3])
         yield args[1], subgraph_args
@@ -342,7 +358,10 @@ def _extract_subgraphs_and_args(
     elif node.target is torch.ops.higher_order.scan:
         # Scans accept a dim keyword, but the dimensions will be reordered so that at
         # this point we always scan over dim 0.
-        yield args[0], (*args[1], *(a[0] for a in args[2]), *args[3])
+        # first_slice_copy tolerates a zero-length scan dim.
+        from torch._higher_order_ops.utils import first_slice_copy
+
+        yield args[0], (*args[1], *(first_slice_copy(a) for a in args[2]), *args[3])
     elif node.target in (
         torch.ops.higher_order.while_loop,
         torch.ops.higher_order.while_loop_stack_output,
@@ -350,6 +369,11 @@ def _extract_subgraphs_and_args(
         subgraph_args = (*args[2], *args[3])
         yield args[0], subgraph_args
         yield args[1], subgraph_args
+    elif node.target is torch.ops.higher_order.switch:
+        # args: (index, [branch_gm_0, ...], operands)
+        subgraph_args = tuple(args[2])
+        for branch_gm in args[1]:
+            yield branch_gm, subgraph_args
     elif node.target is control_deps:
         if kwargs:
             raise AssertionError(
@@ -383,7 +407,7 @@ def _extract_subgraphs_and_args(
                 )
             wrapped_node = wrapped_nodes[0]
 
-            def replace_placeholder(item: Any) -> Any:
+            def replace_placeholder(item: object) -> object:
                 if isinstance(item, torch.fx.Node):
                     return placeholder_to_arg.get(item, item)
                 return item

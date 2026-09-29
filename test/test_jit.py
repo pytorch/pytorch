@@ -2837,7 +2837,12 @@ graph(%Ra, %Rb):
         with warnings.catch_warnings(record=True) as warns:
             fn_script = torch.jit.script(fn)
             fn_script(torch.tensor(0))
-        warns = [str(w.message) for w in warns]
+        # torch.jit.script now emits a visible deprecation warning; ignore it.
+        warns = [
+            str(w.message)
+            for w in warns
+            if "Please switch to `torch." not in str(w.message)
+        ]
         self.assertEqual(len(warns), 0)
 
     @unittest.skipIf(True, "TODO: re-enable with https://github.com/pytorch/pytorch/pull/29339")
@@ -3743,6 +3748,8 @@ def foo(x):
 
         with warnings.catch_warnings(record=True) as warns:
             scripted = torch.jit.script(check_subclass_warn)
+        # torch.jit.script now emits a visible deprecation warning; ignore it.
+        warns = [w for w in warns if "Please switch to `torch." not in str(w.message)]
         FileCheck().check("TorchScript will treat type annotations of Tensor").run(str(warns[0]))
 
     def test_first_class_module(self):
@@ -5249,6 +5256,41 @@ a")
 
         graph_str = str(test.graph)
         self.assertTrue(graph_str.count("NoneType = prim::Constant") == 1)
+
+    def test_constant_pooling_float_bitwise(self):
+        # Constant pooling must compare float constants bitwise: identical
+        # nan constants pool into one node (IEEE nan != nan would keep both),
+        # while 0.0 and -0.0 stay distinct (IEEE -0.0 == 0.0 would merge
+        # them, flipping the sign of 1/x downstream).
+        @torch.jit.script
+        def nan_fn(x):
+            a = x.clamp(min=float("nan"))
+            b = x.clamp(min=float("nan"))
+            return a + b
+
+        self.run_pass("constant_pooling", nan_fn.graph)
+        nan_consts = [
+            n
+            for n in nan_fn.graph.findAllNodes("prim::Constant")
+            if n.hasAttribute("value") and n.kindOf("value") == "f"
+        ]
+        self.assertEqual(len(nan_consts), 1)
+
+        @torch.jit.script
+        def zero_fn(x):
+            a = x * 0.0
+            b = x * (-0.0)
+            return a.reciprocal() + b.reciprocal()
+
+        self.run_pass("constant_pooling", zero_fn.graph)
+        zero_consts = [
+            n
+            for n in zero_fn.graph.findAllNodes("prim::Constant")
+            if n.hasAttribute("value") and n.kindOf("value") == "f"
+        ]
+        self.assertEqual(len(zero_consts), 2)
+        # 1/(1*0.0) + 1/(1*-0.0) = inf + -inf = nan; a wrong merge gives inf
+        self.assertTrue(torch.isnan(zero_fn(torch.ones(2))).all())
 
     def test_constant_pooling_same_identity(self):
         def foo():
@@ -15224,6 +15266,9 @@ dedent """
                 def ignored_code(self, x):
                     self.some_state = torch.tensor((100,))
 
+        # script_method now emits a visible deprecation warning; ignore it (but
+        # keep the FutureWarning this test checks for).
+        warns = [w for w in warns if "Please switch to `torch." not in str(w.message)]
         FileCheck().check("TorchScript will now drop the function").run(str(warns[0]))
 
         # Assert ignored code is run

@@ -25,7 +25,7 @@ autotuning_log = getArtifactLogger(__name__, "autotuning")
 
 # Type alias for kernel config key tuple.
 # Currently matches on (tile_m, tile_n, cluster_m, cluster_n).
-# tile_k excluded because nvMatmulHeuristics and cutlass_api use it to mean different things.
+# tile_k excluded because nvMatmulHeuristics and cutlass.operators use it to mean different things.
 # TODO(nikhilap): Extend config key for stages/split_k https://github.com/pytorch/pytorch/issues/177578
 ConfigKey = tuple[int, int, int, int]
 
@@ -53,7 +53,7 @@ def _make_config_key_from_heuristic(cfg: HeuristicConfig) -> ConfigKey:
 
 
 def _make_config_key_from_kernel_design(design) -> ConfigKey | None:
-    """Build config key from cutlass_api kernel metadata.design."""
+    """Build a raw config key from cutlass.operators kernel metadata.design."""
     if (
         hasattr(design, "tile_shape")
         and len(design.tile_shape) >= 2
@@ -65,6 +65,27 @@ def _make_config_key_from_kernel_design(design) -> ConfigKey | None:
             design.tile_shape[1],
             design.cluster_shape[0],
             design.cluster_shape[1],
+        )
+    return None
+
+
+def _make_config_key_from_kernel(kernel) -> ConfigKey | None:
+    """Build a per-CTA config key from a cutlass.operators kernel."""
+    design = kernel.metadata.design
+    key = _make_config_key_from_kernel_design(design)
+    if key is not None:
+        use_2cta_instrs = getattr(
+            getattr(kernel, "impl", None),
+            "use_2cta_instrs",
+            None,
+        )
+        if use_2cta_instrs is None:
+            use_2cta_instrs = bool(getattr(design, "use_2cta_mma", False))
+        return (
+            key[0] // (2 if use_2cta_instrs else 1),
+            key[1],
+            key[2],
+            key[3],
         )
     return None
 
@@ -109,7 +130,7 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         returns the first `count` kernels without heuristic ranking.
 
         Args:
-            kernels: List of cutlass_api.Kernel objects
+            kernels: List of cutlass.operators.Operator objects
             inputs: MMKernelInputs with matrix shapes, dtypes, and strides
             count: Maximum number of kernels to return
             accumulator_type: Accumulator dtype
@@ -154,15 +175,21 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
             log.debug("No heuristic configs found, using first %d kernels", count)
             return kernels[:count]
 
-        # Match kernels to heuristic configs
-        matched: list[tuple] = []
+        # Match kernels to each distinct heuristic config at its best estimate.
+        config_runtimes: dict[ConfigKey, float] = {}
         for cfg in heuristic_configs:
             key = _make_config_key_from_heuristic(cfg)
+            config_runtimes[key] = min(
+                cfg.estimated_runtime, config_runtimes.get(key, float("inf"))
+            )
+
+        matched: list[tuple] = []
+        for key, runtime in config_runtimes.items():
             kernels_for_key = config_to_kernels.get(key)
             if not kernels_for_key:
                 continue
             for kernel in kernels_for_key:
-                matched.append((kernel, cfg.estimated_runtime))
+                matched.append((kernel, runtime))
 
         if not matched:
             log.debug(
@@ -176,7 +203,7 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
 
         # Supplement with hand-picked configs in the space nvMatmulHeuristics doesn't currently explore.
         if config.nvgemm_supplement_configs:
-            _SUPPLEMENT_CONFIGS: OrderedSet[ConfigKey] = OrderedSet(
+            _SUPPLEMENT_DESIGN_CONFIGS: OrderedSet[ConfigKey] = OrderedSet(
                 [
                     (64, 128, 1, 1),
                     (64, 128, 1, 2),
@@ -188,17 +215,27 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
                     (64, 32, 1, 2),
                     (64, 32, 1, 4),
                     (128, 64, 1, 1),
+                    (128, 64, 1, 4),
                     (128, 64, 2, 1),
                     (128, 128, 1, 8),
                     (128, 128, 1, 16),
                     (128, 128, 2, 2),
                     (128, 128, 2, 4),
                     (128, 128, 2, 8),
+                    (128, 192, 1, 1),
+                    (128, 192, 1, 2),
+                    (128, 192, 1, 4),
+                    (128, 192, 2, 1),
+                    (128, 192, 2, 2),
                     (128, 256, 1, 4),
                     (128, 256, 1, 8),
                     (128, 256, 1, 16),
                     (128, 256, 2, 1),
                     (128, 256, 2, 8),
+                    (256, 192, 1, 1),
+                    (256, 192, 1, 2),
+                    (256, 192, 1, 4),
+                    (256, 192, 2, 1),
                     (256, 256, 2, 1),
                     (256, 256, 2, 4),
                     (256, 256, 4, 2),
@@ -207,14 +244,33 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
                     (256, 256, 8, 2),
                     (256, 128, 2, 1),
                     (256, 128, 2, 2),
+                    # NVFP4 oracle-best configs (per-shape autotune winners over
+                    # an 83-shape LLM sweep) that nvMatmulHeuristics does not
+                    # propose; adding them lets autotune reach the oracle-best
+                    # config on 73/83 of those shapes.
+                    (128, 64, 1, 2),
+                    (128, 128, 1, 1),
+                    (128, 128, 1, 4),
+                    (128, 256, 1, 1),
+                    (256, 64, 2, 1),
+                    (256, 128, 4, 1),
+                    (256, 192, 2, 2),
+                    (256, 192, 4, 1),
+                    (256, 192, 4, 2),
+                    (256, 256, 4, 1),
                 ]
             )
-            selected_keys = OrderedSet(
+            selected_design_keys = OrderedSet(
                 [_make_config_key_from_kernel_design(k.metadata.design) for k in result]
             )
-            for key, key_kernels in config_to_kernels.items():
-                if key not in selected_keys and key in _SUPPLEMENT_CONFIGS:
-                    result.append(key_kernels[0])
+            for kernel in kernels:
+                design_key = _make_config_key_from_kernel_design(kernel.metadata.design)
+                if (
+                    design_key not in selected_design_keys
+                    and design_key in _SUPPLEMENT_DESIGN_CONFIGS
+                ):
+                    result.append(kernel)
+                    selected_design_keys.add(design_key)
 
         log.debug(
             "Heuristic filtered to %d kernels from %d total", len(result), len(kernels)
@@ -249,7 +305,7 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         config_to_kernels: dict[ConfigKey, list] = defaultdict(list)
 
         for kernel in kernels:
-            key = _make_config_key_from_kernel_design(kernel.metadata.design)
+            key = _make_config_key_from_kernel(kernel)
             if key is not None:
                 config_to_kernels[key].append(kernel)
 
@@ -270,7 +326,7 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
     ):
         """
         Create callback for nvMatmulHeuristics that only accepts configurations
-        matching the available cutlass_api kernel tile/cluster shapes.
+        matching the available cutlass.operators kernel tile/cluster shapes.
         """
 
         def validity_check(kernel_config_ptr, problem_ptr):
@@ -298,7 +354,7 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         """
         Get kernel configurations recommended by nvMatmulHeuristics.
 
-        Uses validity callback to filter to cutlass_api-compatible configs.
+        Uses validity callback to filter to cutlass.operators-compatible configs.
         """
         import nvMatmulHeuristics
 

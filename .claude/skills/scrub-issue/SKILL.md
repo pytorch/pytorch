@@ -1,7 +1,7 @@
 ---
 name: scrub-issue
 disable-model-invocation: true
-description: Fetch, analyze, reproduce, and minimize GitHub issue reproductions. Use when asked to check if an issue reproduces, minimize a repro, analyze a bug report, or scrub/triage an issue for reproducibility.
+description: Fetch, analyze, reproduce, and minimize GitHub issue reproductions. Use only when the user asks to check whether a GitHub issue reproduces, minimize a GitHub issue's repro, analyze a GitHub bug report, or scrub/triage a GitHub issue for reproducibility. Do not use for standalone reproduction requests without a GitHub issue.
 ---
 
 # Minimize Issue Reproduction

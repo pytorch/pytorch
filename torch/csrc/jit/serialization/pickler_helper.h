@@ -120,7 +120,7 @@ bool checkHasValidSetGetState(const c10::ClassType& cls);
 using BackendMetaPtr = std::function<
     void(const at::Tensor&, std::unordered_map<std::string, bool>&)>;
 
-// A allowlist of device type, currently available is PrivateUse1
+// An allowlist of device type, currently available is PrivateUse1
 TORCH_API std::unordered_set<c10::DeviceType>& GetBackendMetaAllowlist();
 
 // Dynamically obtain serialization function pairs
