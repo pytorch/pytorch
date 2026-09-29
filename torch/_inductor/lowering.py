@@ -7742,14 +7742,15 @@ def mutate_to(changed, val, unsafe_alias=False, share_value=True):
     while isinstance(src_data, MutableBox):
         src_data = src_data.data
     changed_name = changed.maybe_get_name()
-    realize_src = (
+    if (
         isinstance(src_data, BaseView)
         and changed_name is not None
         and changed_name in val.get_read_names()
-    )
-    # A destination-backed view may read different indices than the mutation writes.
-    if realize_src:
+    ):
+        # A destination-backed view may read different indices than the mutation writes.
         val = clone(val)
+        val.realize()
+
     if isinstance(changed, TensorBox):
         changed_data = changed.data
     else:
@@ -7796,9 +7797,6 @@ def mutate_to(changed, val, unsafe_alias=False, share_value=True):
         val = node.data
         if not (isinstance(val, ir.StorageBox)):
             raise AssertionError("expected: isinstance(val, ir.StorageBox)")
-
-    if realize_src:
-        val.realize()
 
     if swing is not None:
         val.realize()
