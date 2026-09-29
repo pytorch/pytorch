@@ -109,7 +109,15 @@ class StudentT(Distribution):
             + torch.lgamma(0.5 * self.df)
             - torch.lgamma(0.5 * (self.df + 1.0))
         )
-        return -0.5 * (self.df + 1.0) * torch.log1p(y**2.0 / self.df) - Z
+        # Compute log(1 + y^2/df) via logaddexp instead of log1p(y^2/df): the
+        # square overflows to inf for large |y|, which made log_prob return
+        # -inf (and backprop produce NaN gradients) for in-support points with
+        # a finite density (#198578). logaddexp(0, 2*log|y| - log(df)) ==
+        # log(1 + y^2/df) exactly, but stays finite.
+        log_y_sq_over_df_term = torch.logaddexp(
+            torch.zeros_like(y), 2 * torch.abs(y).log() - self.df.log()
+        )
+        return -0.5 * (self.df + 1.0) * log_y_sq_over_df_term - Z
 
     def entropy(self):
         lbeta = (

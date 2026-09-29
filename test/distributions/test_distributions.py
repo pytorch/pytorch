@@ -7468,3 +7468,57 @@ instantiate_device_type_tests(
 if __name__ == "__main__" and torch._C.has_lapack:
     TestCase._default_dtype_check_enabled = True
     run_tests()
+
+
+class TestCauchyStudentTNumericalStability(unittest.TestCase):
+    """log(1 + z^2) in Cauchy/StudentT log_prob must not overflow (#198578)."""
+
+    dtype = torch.float64
+
+    def test_cauchy_log_prob_finite_for_large_values(self):
+        loc = torch.tensor(0.0, dtype=self.dtype)
+        scale = torch.tensor(1.0, dtype=self.dtype)
+        dist = torch.distributions.Cauchy(loc, scale)
+        for value in [1e18, 1e20, 1e30, 1e150]:
+            log_prob = dist.log_prob(torch.tensor(value, dtype=self.dtype))
+            self.assertTrue(torch.isfinite(log_prob))
+            # asymptotic: log_prob ~ -log(pi * scale) - 2 * log(|z|)
+            expected = -math.log(math.pi) - 2 * math.log(value)
+            self.assertLess(abs(log_prob.item() - expected), 1e-9)
+
+    def test_cauchy_log_prob_grad_finite_for_large_values(self):
+        scale = torch.tensor(1.0, dtype=self.dtype, requires_grad=True)
+        dist = torch.distributions.Cauchy(
+            torch.tensor(0.0, dtype=self.dtype), scale
+        )
+        dist.log_prob(torch.tensor(1e20, dtype=self.dtype)).backward()
+        self.assertTrue(torch.isfinite(scale.grad))
+
+    def test_student_t_log_prob_finite_for_large_values(self):
+        dist = torch.distributions.StudentT(
+            3.0, loc=torch.tensor(0.0, dtype=self.dtype), scale=torch.tensor(1.0, dtype=self.dtype)
+        )
+        for value in [1e18, 1e20, 1e30, 1e150]:
+            log_prob = dist.log_prob(torch.tensor(value, dtype=self.dtype))
+            self.assertTrue(torch.isfinite(log_prob))
+
+    def test_student_t_nu1_matches_cauchy(self):
+        loc = torch.tensor(0.0, dtype=self.dtype)
+        scale = torch.tensor(1.0, dtype=self.dtype)
+        student = torch.distributions.StudentT(1.0, loc=loc, scale=scale)
+        cauchy = torch.distributions.Cauchy(loc, scale)
+        for value in [0.0, 1.0, 1e20, 1e150]:
+            self.assertAlmostEqual(
+                student.log_prob(torch.tensor(value, dtype=self.dtype)).item(),
+                cauchy.log_prob(torch.tensor(value, dtype=self.dtype)).item(),
+                places=12,
+            )
+
+    def test_ordinary_values_match_closed_form(self):
+        loc = torch.tensor(0.0, dtype=self.dtype)
+        scale = torch.tensor(1.0, dtype=self.dtype)
+        dist = torch.distributions.Cauchy(loc, scale)
+        for value in [0.0, 0.5, 1.0, 3.0, 100.0]:
+            log_prob = dist.log_prob(torch.tensor(value, dtype=self.dtype)).item()
+            expected = -math.log(math.pi) - math.log1p(value * value)
+            self.assertLess(abs(log_prob - expected), 1e-12)

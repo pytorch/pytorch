@@ -81,11 +81,16 @@ class Cauchy(Distribution):
     def log_prob(self, value):
         if self._validate_args:
             self._validate_sample(value)
-        return (
-            -math.log(math.pi)
-            - self.scale.log()
-            - (((value - self.loc) / self.scale) ** 2).log1p()
+        # Compute log(1 + z^2) via logaddexp instead of log1p(z^2): the square
+        # overflows to inf for large |z| (|z| > ~1.8e19 in float32), which made
+        # log_prob return -inf — and backprop produce NaN gradients — for
+        # in-support points with a perfectly finite density (#198578).
+        # logaddexp(0, 2*log|z|) == log(1 + z^2) exactly, but stays finite.
+        z = (value - self.loc) / self.scale
+        log_z_sq_term = torch.logaddexp(
+            torch.zeros_like(z), 2 * torch.abs(z).log()
         )
+        return -math.log(math.pi) - self.scale.log() - log_z_sq_term
 
     def cdf(self, value):
         if self._validate_args:
