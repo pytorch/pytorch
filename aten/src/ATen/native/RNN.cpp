@@ -653,9 +653,9 @@ template<typename T>
 std::vector<T> unpair_vec(std::vector<pair_of<T>>&& vals) {
   std::vector<T> result;
   result.reserve(vals.size() * 2);
-  for (const auto i : c10::irange(vals.size())) {
-    result.push_back(std::move(vals[i].first));
-    result.push_back(std::move(vals[i].second));
+  for (auto& val : vals) {
+    result.push_back(std::move(val.first));
+    result.push_back(std::move(val.second));
   }
   return result;
 }
@@ -745,11 +745,20 @@ tpair_of<Tensor> hidden_slice(const tpair_of<Tensor>& t, int64_t start, int64_t 
 
 void check_rnn_cell_forward_input(const Tensor& input, const c10::SymInt& input_size) {
   TORCH_CHECK(
+    input.dim() == 2,
+    "Expected 2D input (batch x feature), but got ", input.dim(), "D input");
+
+  TORCH_CHECK(
     input.sym_size(1) == input_size,
     "input has inconsistent input_size: got ", input.sym_size(1), " expected ", input_size);
 }
 
 void check_rnn_cell_forward_hidden(const Tensor& input, const Tensor& hx, const c10::SymInt& hidden_size, const c10::SymInt& hidden_label) {
+  TORCH_CHECK(
+    hx.dim() == 2,
+    "Expected 2D hidden", hidden_label, " (batch x hidden_size), but got ",
+    hx.dim(), "D tensor");
+
   TORCH_CHECK(
     input.sym_size(0) == hx.sym_size(0),
     "Input batch size ", input.sym_size(0), " doesn't match hidden", hidden_label, " batch size ", hx.sym_size(0));
@@ -1267,6 +1276,14 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backwar
 // PUBLIC FUNCTIONS
 ////////////////////////////////////////////////////////////////////////////////
 
+inline void check_rnn_batch_sizes(const Tensor& batch_sizes) {
+  TORCH_CHECK(batch_sizes.dim() == 1, "batch_sizes tensor should be 1D");
+  TORCH_CHECK(
+      batch_sizes.is_cpu(),
+      "batch_sizes tensor should be on CPU, but got ",
+      batch_sizes.device());
+}
+
 #define ONE_HIDDEN_RNN(NAME, CELL)                                          \
   DEFINE_DISPATCH(NAME##_cudnn_stub);                                       \
   DEFINE_DISPATCH(NAME##_miopen_stub);                                      \
@@ -1356,6 +1373,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backwar
       double dropout_p,                                                     \
       bool train,                                                           \
       bool bidirectional) {                                                 \
+    check_rnn_batch_sizes(batch_sizes);                                     \
     if (use_cudnn(data)) {                                                  \
       Tensor output, hy;                                                    \
       NAME##_packed_cudnn_stub(                                             \
@@ -1453,6 +1471,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backwar
       double dropout_p,                                                     \
       bool train,                                                           \
       bool bidirectional) {                                                 \
+    check_rnn_batch_sizes(batch_sizes);                                     \
     std::vector<QRNNCellParamsWrapper> params;                              \
     for (c10::intrusive_ptr<CellParamsBase> x : _params) {                  \
       params.emplace_back(std::move(x));                                    \
@@ -1602,6 +1621,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
       TensorList _params, bool has_biases,
       int64_t num_layers, double dropout_p, bool train, bool bidirectional) {
   TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
+  check_rnn_batch_sizes(batch_sizes);
   if (use_cudnn(data)) {
     Tensor output, hy, cy;
     lstm_packed_cudnn_stub(data.device().type(), output, hy, cy, data, batch_sizes, hx,
@@ -1907,6 +1927,7 @@ static std::tuple<Tensor, Tensor, Tensor> quantized_lstm_data(
   }
   TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
   TORCH_CHECK(hx[0].size(2) == hx[1].size(2), "quantized LSTM with projections is not supported");
+  check_rnn_batch_sizes(batch_sizes);
 
   PackedSequence input { data, batch_sizes };
   auto results = _lstm_impl<PackedLayer, PackedBidirectionalLayer>(

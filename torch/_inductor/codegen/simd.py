@@ -967,7 +967,13 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                     )
             return_getters_groups.append(return_getters)
 
-        if not all(V.graph.sizevars.guarding_hint_or_throw(s) == 1 for s in remaining):
+        # is_size_one_or_false rather than guarding_hint_or_throw: a leftover
+        # extent can be an unbacked size-like symbol, and guarding_hint_or_throw
+        # raises GuardOnDataDependentSymNode on those. That escapes the
+        # `except CantSplit` in is_compatible and Scheduler.speedup_by_fusion and
+        # hard-fails the whole compile. Treating "cannot prove it is 1" as
+        # not-splittable keeps every exit from this function a CantSplit.
+        if not all(sv.is_size_one_or_false(s) for s in remaining):
             # Non-unit leftover extents mean the node's iteration space does not
             # tile onto the kernel groups -- e.g. fusing an epilogue whose row
             # count is a strict sub-multiple of a template's tiling ([s, N] into
@@ -4659,7 +4665,10 @@ class SIMDScheduling(BaseScheduling):
             multi_kernel = SizeHintMultiKernel(kernels)
             node_schedule = [*prologue_nodes, template_node, *epilogue_nodes]
             self.codegen_comment(node_schedule, multi_kernel.kernel_name)
-            multi_kernel.call_kernel(multi_kernel.kernel_name)
+            with V.graph.wrapper_code.kernel_profile_scope(
+                multi_kernel.launched_kernel_name(), node_schedule
+            ):
+                multi_kernel.call_kernel(multi_kernel.kernel_name)
             V.graph.removed_buffers |= multi_kernel.removed_buffers
             V.graph.inplaced_to_remove |= multi_kernel.inplaced_to_remove
             self.free_buffers_in_scheduler()
@@ -4690,7 +4699,10 @@ class SIMDScheduling(BaseScheduling):
 
                 node_schedule = [*prologue_nodes, template_node, *epilogue_nodes]
                 self.codegen_comment(node_schedule, kernel.kernel_name)
-                kernel.call_kernel(kernel.kernel_name, template_node.node)
+                with V.graph.wrapper_code.kernel_profile_scope(
+                    kernel.kernel_name, node_schedule
+                ):
+                    kernel.call_kernel(kernel.kernel_name, template_node.node)
 
                 V.graph.removed_buffers |= kernel.removed_buffers
                 V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
@@ -5293,7 +5305,10 @@ class SIMDScheduling(BaseScheduling):
             kernel_name = self.define_kernel(src_code, [combo_kernel_node], kernel)
             self.codegen_comment(combo_kernel_node.snodes, kernel_name)
             log.debug("ComboKernels: generated kernel %s.", kernel_name)
-            kernel.call_kernel(kernel_name)
+            with V.graph.wrapper_code.kernel_profile_scope(
+                kernel_name, combo_kernel_node.snodes
+            ):
+                kernel.call_kernel(kernel_name)
 
         self.free_buffers_in_scheduler()
 
