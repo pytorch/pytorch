@@ -4,6 +4,7 @@ import re
 import shutil
 import subprocess
 import sys
+import sysconfig
 from pathlib import Path
 from tempfile import gettempdir, mktemp
 
@@ -651,7 +652,7 @@ def test(ctx, ci, args):
         # The pytest entry point, not `python -m pytest`: `-m` puts the cwd
         # first on sys.path, so from the repository root the source tree would
         # shadow a non-editable install of torch.
-        pytest_exe = shutil.which("pytest", path=str(Path(sys.executable).parent))
+        pytest_exe = shutil.which("pytest", path=sysconfig.get_path("scripts"))
         if pytest_exe is None:
             raise click.ClickException(
                 "pytest is not installed in this environment; install the dev "
