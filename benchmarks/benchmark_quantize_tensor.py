@@ -1,5 +1,6 @@
 import argparse
 import os
+import sys
 
 
 os.environ["KINETO_LOG_LEVEL"] = "6"
@@ -11,11 +12,11 @@ from torch.testing._internal.common_quantized import mxfp8_32x32_swizzle_f, to_m
 
 
 _KERNELS = {
-    "mxfp8_dim_k": ("dim_k", False, False),
     "mxfp8_dim_k_swizzle": ("dim_k", False, True),
-    "mxfp8_dim_k_32x32_swizzle": ("dim_k", True, True),
     "mxfp8_dim_m_swizzle": ("dim_m", False, True),
     "mxfp8_dim_km_swizzle": ("dim_km", False, True),
+    "mxfp8_dim_k_32x32_swizzle": ("dim_k", True, True),
+    "mxfp8_dim_k": ("dim_k", False, False),
 }
 _DTYPES = {
     "bfloat16": torch.bfloat16,
@@ -106,9 +107,15 @@ def _print_table(headers, rows):
         max(len(str(header)), *(len(str(row[index])) for row in rows))
         for index, header in enumerate(headers)
     ]
-    print("  ".join(str(header).rjust(width) for header, width in zip(headers, widths)))
+
+    def format_row(values):
+        cells = (str(value).rjust(width) for value, width in zip(values, widths))
+        return "| " + " | ".join(cells) + " |"
+
+    print(format_row(headers))
+    print("|" + "|".join("-" * (width + 2) for width in widths) + "|")
     for row in rows:
-        print("  ".join(str(value).rjust(width) for value, width in zip(row, widths)))
+        print(format_row(row))
 
 
 def main():
@@ -165,22 +172,27 @@ def main():
             print()
         print(f"kernel: {kernel}  dtype: {args.dtype}")
         print(f"device: {device}")
-        for metric_index, metric in enumerate(metrics):
-            if metric_index:
-                print()
-            print(f"metric: {metric}")
-            if mk_mode == "pair":
-                rows = [
-                    (f"({m}, {k})", _format_metric(results[(m, k)], metric))
-                    for m, k in shapes
+        if mk_mode == "pair":
+            headers = ["(M, K)", *metrics]
+            rows = [
+                [
+                    f"({m}, {k})",
+                    *(_format_metric(results[(m, k)], metric) for metric in metrics),
                 ]
-                _print_table(("(M, K)", metric), rows)
-            else:
+                for m, k in shapes
+            ]
+            _print_table(headers, rows)
+        else:
+            for metric_index, metric in enumerate(metrics):
+                if metric_index:
+                    print()
+                print(f"metric: {metric}")
                 rows = [
                     [m, *(_format_metric(results[(m, k)], metric) for k in k_values)]
                     for m in m_values
                 ]
                 _print_table(("M \\ K", *k_values), rows)
+        sys.stdout.flush()
 
 
 if __name__ == "__main__":
