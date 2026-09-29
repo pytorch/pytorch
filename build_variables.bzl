@@ -1063,6 +1063,7 @@ libtorch_python_core_sources = [
     "torch/csrc/utils/object_ptr.cpp",
     "torch/csrc/utils/python_arg_parser.cpp",
     "torch/csrc/utils/python_dispatch.cpp",
+    "torch/csrc/utils/python_fake_tensor.cpp",
     "torch/csrc/utils/python_symnode.cpp",
     "torch/csrc/utils/pybind.cpp",
     "torch/csrc/utils/pyobject_preservation.cpp",
