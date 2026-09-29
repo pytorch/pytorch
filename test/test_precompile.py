@@ -5433,11 +5433,14 @@ class TestPrecompileNoCompilation(TestCase):
 
     @unittest.skipUnless(TEST_CUDA and HAS_TRITON, "requires CUDA and Triton")
     def test_strict_load_emits_and_rechecks_triton_bundle_from_cold_cache(self):
+        import torch._inductor.config as ind_config
         from torch._inductor import triton_bundler
         from torch._inductor.utils import fresh_cache
 
         x = torch.ones(2, 8, device="cuda")
-        with fresh_cache():
+        # Capture records no runtime autotuning decision, so a kernel with more
+        # than one config (ROCm's pointwise default) would autotune at strict load.
+        with fresh_cache(), ind_config.patch({"triton.autotune_pointwise": False}):
             artifact, cache = _capture_files(
                 self,
                 _no_compilation_inductor_graph,
