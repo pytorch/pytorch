@@ -12,7 +12,7 @@
 #include <ATen/EmptyTensor.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/ScalarOps.h>
-#include <ATen/native/TypeProperties.h>
+#include <c10/core/Contiguity.h>
 #include <c10/core/DefaultDtype.h>
 #include <c10/core/SymNodeImpl.h>
 #include <c10/util/StringUtil.h>
@@ -137,48 +137,11 @@ std::vector<const MetaDesc*> filter_tensors(ArrayRef<MetaDesc> args) {
   return tensors;
 }
 
-// With false_if_dde=True.
-bool check_contiguous_sizes_strides(c10::SymIntArrayRef sizes, c10::SymIntArrayRef strides) {
-  c10::SymInt expected_stride = 1;
-  c10::SymInt expected_stride_max = 1;
-  for (int64_t i = static_cast<int64_t>(std::min(sizes.size(), strides.size())) - 1; i >= 0; --i) {
-    const auto& x = sizes[i];
-    const auto& y = strides[i];
-    if (TORCH_GUARD_OR_FALSE(x.sym_eq(1))) {
-      continue;
-    }
-    if (TORCH_GUARD_OR_TRUE(y.sym_ne(expected_stride)) && TORCH_GUARD_OR_TRUE(y.sym_ne(expected_stride_max))) {
-      return false;
-    }
-    expected_stride_max = expected_stride_max * (is_nested_int(x) ? x : x.max(1));
-    expected_stride = expected_stride * x;
-  }
-  return true;
-}
-
 bool is_contiguous_or_false(const MetaDesc& a) {
   if (TORCH_GUARD_OR_FALSE(sym_numel(a.sizes).sym_lt(2))) {
     return true;
   }
-  return check_contiguous_sizes_strides(a.sizes, a.strides);
-}
-
-bool is_channels_last_contiguous_or_false_2d(const MetaDesc& a) {
-  if (a.dim() != 4) {
-    return false;
-  }
-  c10::SymInt expected_stride = 1;
-  for (const int64_t idx : {1, 3, 2, 0}) {
-    const auto& length = a.sizes[idx];
-    if (TORCH_GUARD_OR_FALSE(length.sym_eq(1))) {
-      continue;
-    }
-    if (TORCH_GUARD_OR_TRUE(a.strides[idx].sym_ne(expected_stride))) {
-      return false;
-    }
-    expected_stride = expected_stride * length;
-  }
-  return true;
+  return c10::_compute_contiguous_or_false(a.sizes, a.strides);
 }
 
 // K.__lt__ in _prims_common, on strides only.
@@ -245,7 +208,7 @@ bool is_non_overlapping_and_dense_or_false(const MetaDesc& a) {
     sorted_sizes.push_back(a.sizes[*it]);
     sorted_strides.push_back(a.strides[*it]);
   }
-  return check_contiguous_sizes_strides(sorted_sizes, sorted_strides);
+  return c10::_compute_contiguous_or_false(sorted_sizes, sorted_strides);
 }
 
 // a >= b assuming a >= 0, b >= 0.
@@ -275,7 +238,7 @@ DimVector compute_elementwise_output_logical_to_physical_perm(const std::vector<
   bool is_channels_last = true;
   for (const auto* t : tensors) {
     is_contiguous = is_contiguous && is_contiguous_or_false(*t);
-    is_channels_last = is_channels_last && is_channels_last_contiguous_or_false_2d(*t);
+    is_channels_last = is_channels_last && c10::_compute_channels_last_contiguous_2d_or_false(t->sizes, t->strides);
   }
 
   DimVector perm(ndim);
@@ -354,28 +317,22 @@ MetaDesc empty_permuted(c10::SymIntArrayRef shape, IntArrayRef l2p_perm, ScalarT
   return out;
 }
 
-// The hints of a and b when backed_size_oblivious is set and both have one.
 // Plain ints are their own hint; nested ints have none.
-std::optional<std::pair<int64_t, int64_t>> backed_size_oblivious_hints(const c10::SymInt& a, const c10::SymInt& b) {
-  if (!a.is_heap_allocated() && !b.is_heap_allocated()) {
-    return std::nullopt;
-  }
-  const auto hint = [](const c10::SymInt& s) -> std::optional<int64_t> {
-    if (!s.is_heap_allocated()) {
-      return s.as_int_unchecked();
+std::optional<int64_t> guarding_hint(const c10::SymInt& s) {
+  return s.is_heap_allocated() ? s.toSymNodeImplUnowned()->guarding_hint() : s.as_int_unchecked();
+}
+
+// Whether backed_size_oblivious is set, asked through any symbolic size since
+// it only matters when there is one.
+bool backed_size_oblivious(ArrayRef<c10::SymIntArrayRef> shapes) {
+  for (const auto& shape : shapes) {
+    for (const auto& s : shape) {
+      if (s.is_heap_allocated()) {
+        return s.toSymNodeImplUnowned()->backed_size_oblivious();
+      }
     }
-    auto* node = s.toSymNodeImplUnowned();
-    return node->is_nested_int() ? std::nullopt : node->backed_size_oblivious_hint();
-  };
-  const auto a_hint = hint(a);
-  if (!a_hint.has_value()) {
-    return std::nullopt;
   }
-  const auto b_hint = hint(b);
-  if (!b_hint.has_value()) {
-    return std::nullopt;
-  }
-  return std::make_pair(*a_hint, *b_hint);
+  return false;
 }
 
 // torch._check's default message.
@@ -390,6 +347,7 @@ c10::SymDimVector _broadcast_shapes(ArrayRef<c10::SymIntArrayRef> shapes) {
   }
   const int64_t common_len = static_cast<int64_t>(maxlen);
   c10::SymDimVector common_shape(maxlen, c10::SymInt(1));
+  const bool backed_so = backed_size_oblivious(shapes);
   for (const auto arg_idx : c10::irange(shapes.size())) {
     const auto& shape = shapes[arg_idx];
     const int64_t len = static_cast<int64_t>(shape.size());
@@ -403,12 +361,13 @@ c10::SymDimVector _broadcast_shapes(ArrayRef<c10::SymIntArrayRef> shapes) {
       } else {
         // Under backed_size_oblivious, specialize a size to 1 if broadcasting
         // is the only way to handle the example inputs.
-        if (const auto hints = backed_size_oblivious_hints(s, common)) {
-          const auto [s_hint, common_hint] = *hints;
-          if (s_hint == 1 && common_hint != 1) {
+        const auto s_hint = backed_so ? guarding_hint(s) : std::nullopt;
+        const auto common_hint = backed_so ? guarding_hint(common) : std::nullopt;
+        if (s_hint && common_hint) {
+          if (*s_hint == 1 && *common_hint != 1) {
             TORCH_SYM_CHECK(s.sym_eq(1), kCheckFailedMsg);
           }
-          if (common_hint == 1 && s_hint != 1) {
+          if (*common_hint == 1 && *s_hint != 1) {
             TORCH_SYM_CHECK(common.sym_eq(1), kCheckFailedMsg);
           }
         }
@@ -500,6 +459,7 @@ MetaDesc expand(const MetaDesc& a, c10::SymIntArrayRef shape) {
   TORCH_CHECK(static_cast<int64_t>(shape.size()) >= ndim, "expand: the requested shape has too few dimensions!");
   const int64_t offset = static_cast<int64_t>(shape.size()) - ndim;
   c10::SymDimVector shape_(shape.begin(), shape.end());
+  const bool backed_so = backed_size_oblivious({a.sizes, shape});
   for (const auto idx : c10::irange(ndim)) {
     const auto& x = a.sizes[idx];
     const int64_t offset_idx = idx + offset;
@@ -507,9 +467,12 @@ MetaDesc expand(const MetaDesc& a, c10::SymIntArrayRef shape) {
     if (TORCH_GUARD_OR_FALSE(requested_length.sym_eq(-1))) {
       shape_[offset_idx] = x;
     } else {
-      if (const auto hints = backed_size_oblivious_hints(x, requested_length);
-          hints && hints->first == 1 && hints->second != 1) {
-        TORCH_SYM_CHECK(x.sym_eq(1), kCheckFailedMsg);
+      if (backed_so) {
+        const auto x_hint = guarding_hint(x);
+        const auto requested_hint = guarding_hint(requested_length);
+        if (x_hint == 1 && requested_hint && *requested_hint != 1) {
+          TORCH_SYM_CHECK(x.sym_eq(1), kCheckFailedMsg);
+        }
       }
       TORCH_SYM_CHECK(
           x.sym_eq(1).sym_or(requested_length.sym_eq(x)),
@@ -591,16 +554,73 @@ ScalarType get_computation_dtype(ScalarType dtype) {
   }
 }
 
-std::pair<ScalarType, ScalarType> elementwise_dtypes(
-    const Tensor& a,
-    const Tensor& b,
-    ELEMENTWISE_TYPE_PROMOTION_KIND kind) {
-  auto result_dtype = result_type(update_result_type_state(b, update_result_type_state(a, ResultTypeState{})));
-  if (kind == ELEMENTWISE_TYPE_PROMOTION_KIND::INT_TO_FLOAT && isIntegralType(result_dtype, /*includeBool=*/true)) {
-    result_dtype = c10::get_default_dtype_as_scalartype();
+// utils.dtype_to_type, as a rank over bool < int < float < complex
+int python_type_rank(ScalarType t) {
+  if (t == kBool) {
+    return 0;
   }
-  const auto out_dtype = kind == ELEMENTWISE_TYPE_PROMOTION_KIND::ALWAYS_BOOL ? kBool : result_dtype;
-  return {get_computation_dtype(result_dtype), out_dtype};
+  if (isIntegralType(t, /*includeBool=*/false)) {
+    return 1;
+  }
+  if (isFloatingType(t)) {
+    return 2;
+  }
+  TORCH_CHECK_VALUE(isComplexType(t), "Invalid dtype!");
+  return 3;
+}
+
+// utils.get_higher_dtype. Unlike promoteTypes it never rejects a pair: a dtype
+// outside the ordering below (e.g. uint16 or float8) wins over any dtype in it.
+ScalarType get_higher_dtype(std::optional<ScalarType> a, ScalarType b) {
+  if (!a.has_value() || *a == b) {
+    return b;
+  }
+  const auto order = [](ScalarType t) -> std::optional<int> {
+    switch (t) {
+      case kBool:
+        return 0;
+      case kByte:
+      case kChar:
+        return 1;
+      case kShort:
+        return 2;
+      case kInt:
+        return 3;
+      case kLong:
+        return 4;
+      case kHalf:
+      case kBFloat16:
+        return 5;
+      case kFloat:
+        return 6;
+      case kDouble:
+        return 7;
+      case kComplexHalf:
+      case ScalarType::BComplex32:
+        return 8;
+      case kComplexFloat:
+        return 9;
+      case kComplexDouble:
+        return 10;
+      default:
+        return std::nullopt;
+    }
+  };
+  const auto oa = order(*a);
+  const auto ob = order(b);
+  TORCH_CHECK(oa.has_value() || ob.has_value(), "Unexpected termination!");
+  if (!oa.has_value()) {
+    return *a;
+  }
+  if (!ob.has_value()) {
+    return b;
+  }
+  if (*oa == *ob) {
+    static constexpr std::array<ScalarType, 10> next = {
+        kByte, kShort, kInt, kLong, kHalf, kFloat, kDouble, kComplexHalf, kComplexFloat, kComplexDouble};
+    return next[*oa];
+  }
+  return *oa < *ob ? b : *a;
 }
 
 // A non-dense tensor gets compute_elementwise_output_strides(a), which for one
@@ -726,6 +746,26 @@ c10::SymDimVector infer_size(c10::SymIntArrayRef a, c10::SymIntArrayRef b) {
   return expanded_sizes;
 }
 
+// The SymInt, SymFloat or SymBool a symbolic wrapped number stands for, which
+// the refs see as the Python number. Its placeholder value has the matching
+// dtype: kLong, kDouble or kBool.
+std::optional<Scalar> symbolic_number(const Tensor& t) {
+  const auto* impl = t.unsafeGetTensorImpl();
+  auto* node = impl->symbolic_wrapped_number();
+  if (node == nullptr) {
+    return std::nullopt;
+  }
+  auto sym_node = c10::SymNode::reclaim_copy(node);
+  switch (impl->dtype().toScalarType()) {
+    case kLong:
+      return c10::SymInt(std::move(sym_node));
+    case kDouble:
+      return c10::SymFloat(std::move(sym_node));
+    default:
+      return c10::SymBool(std::move(sym_node));
+  }
+}
+
 // Returns an empty tensor with the sizes, strides and dtype of an elementwise
 // binary op's output. The operands are converted to the computation dtype for
 // kind and broadcast to a common shape. If alpha is set, other is scaled by it;
@@ -748,13 +788,11 @@ Tensor binary_ref_meta_impl(
   fake_devices = fake_devices && !real_meta(self) && !real_meta(other);
   const auto [compute_dtype, result_dtype] = elementwise_dtypes(self, other, kind);
   auto args = _maybe_broadcast(
-      {_maybe_convert_to_dtype(meta_desc(self, fake_devices), compute_dtype),
-       _maybe_convert_to_dtype(meta_desc(other, fake_devices), compute_dtype, other_number)});
+      {_maybe_convert_to_dtype(meta_desc(self, fake_devices), compute_dtype, symbolic_number(self)),
+       _maybe_convert_to_dtype(
+           meta_desc(other, fake_devices), compute_dtype, other_number ? other_number : symbolic_number(other))});
   if (alpha.has_value()) {
-    // utils.is_weakly_lesser_type over bool < int < float < complex
-    auto python_type_rank = [](ScalarType t) {
-      return t == kBool ? 0 : isIntegralType(t, /*includeBool=*/false) ? 1 : isFloatingType(t) ? 2 : 3;
-    };
+    // utils.is_weakly_lesser_type
     static constexpr std::array<const char*, 4> python_type_names = {
         "<class 'bool'>", "<class 'int'>", "<class 'float'>", "<class 'complex'>"};
     const auto rank = python_type_rank(compute_dtype);
@@ -814,6 +852,52 @@ Tensor python_number(const Scalar& s) {
 }
 
 } // namespace
+
+// utils.elementwise_dtypes. Wrapped numbers are Python numbers there: they only
+// pick the type kind, and never the dtype within it.
+std::pair<ScalarType, ScalarType> elementwise_dtypes(
+    const Tensor& a,
+    const Tensor& b,
+    ELEMENTWISE_TYPE_PROMOTION_KIND kind) {
+  const std::array<const Tensor*, 2> args = {&a, &b};
+  int highest_type = 0;
+  for (const auto* x : args) {
+    highest_type = std::max(highest_type, python_type_rank(x->scalar_type()));
+  }
+  // _find_highest_dtype_filtered: prefers the dtype of tensors with one or
+  // more dimensions.
+  const auto find_highest_dtype = [&](int min_rank, bool float_as_complex = false) -> std::optional<ScalarType> {
+    std::optional<ScalarType> zero_dim_dtype;
+    std::optional<ScalarType> one_plus_dim_dtype;
+    for (const auto* x : args) {
+      auto dtype = x->scalar_type();
+      const auto rank = python_type_rank(dtype);
+      if (x->unsafeGetTensorImpl()->is_wrapped_number() || rank < min_rank) {
+        continue;
+      }
+      if (float_as_complex && rank == 2) {
+        dtype = toComplexType(dtype);
+      }
+      auto& slot = x->dim() == 0 ? zero_dim_dtype : one_plus_dim_dtype;
+      slot = get_higher_dtype(slot, dtype);
+    }
+    return one_plus_dim_dtype.has_value() ? one_plus_dim_dtype : zero_dim_dtype;
+  };
+  const auto default_dtype = c10::get_default_dtype_as_scalartype();
+  ScalarType result_dtype = kBool;
+  if (highest_type == 1) {
+    result_dtype = find_highest_dtype(1).value_or(kLong);
+  } else if (highest_type == 2) {
+    result_dtype = find_highest_dtype(2).value_or(default_dtype);
+  } else if (highest_type == 3) {
+    result_dtype = find_highest_dtype(2, /*float_as_complex=*/true).value_or(toComplexType(default_dtype));
+  }
+  if (kind == ELEMENTWISE_TYPE_PROMOTION_KIND::INT_TO_FLOAT && isIntegralType(result_dtype, /*includeBool=*/true)) {
+    result_dtype = default_dtype;
+  }
+  const auto out_dtype = kind == ELEMENTWISE_TYPE_PROMOTION_KIND::ALWAYS_BOOL ? kBool : result_dtype;
+  return {get_computation_dtype(result_dtype), out_dtype};
+}
 
 Tensor binary_ref_meta(
     const Tensor& self,
@@ -933,7 +1017,7 @@ Tensor fast_binary_impl(const Tensor& self, const Tensor& other, ELEMENTWISE_TYP
   if (common_device.type() != kHPU) {
     for (const auto& desc : descs) {
       contiguous = contiguous && is_contiguous_or_false(desc);
-      channels_last = channels_last && is_channels_last_contiguous_or_false_2d(desc);
+      channels_last = channels_last && c10::_compute_channels_last_contiguous_2d_or_false(desc.sizes, desc.strides);
     }
   }
   if (!contiguous && !channels_last) {

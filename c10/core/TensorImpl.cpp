@@ -642,8 +642,6 @@ void TensorImpl::copy_generic_tensor_metadata(
   dest_impl->is_non_overlapping_and_dense_ =
       src_impl->is_non_overlapping_and_dense_;
   dest_impl->is_wrapped_number_ = src_impl->is_wrapped_number_;
-  dest_impl->is_symbolic_wrapped_number_ =
-      src_impl->is_symbolic_wrapped_number_;
   dest_impl->reserved_ = src_impl->reserved_;
   dest_impl->numel_ = src_impl->numel_;
   if (dest_impl->extra_meta_ != nullptr &&
