@@ -14,6 +14,7 @@ import torch
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._inductor.codecache import PyCodeCache
 from torch._inductor.runtime import triton_helpers
+from torch._inductor.runtime.runtime_utils import triton_hash_to_path_key
 from torch._inductor.runtime.static_triton_launcher import (
     statically_launched_kernel_by_device,
     StaticallyLaunchedCudaKernel,
@@ -26,7 +27,6 @@ from torch._inductor.runtime.triton_compat import (
     triton,
 )
 from torch._inductor.runtime.triton_helpers import libdevice
-from torch._inductor.runtime.runtime_utils import triton_hash_to_path_key
 from torch._inductor.runtime.triton_heuristics import (
     CachingAutotuner,
     StaticTritonCompileResult,
@@ -266,7 +266,12 @@ class TestStaticTritonLauncherUnit(TestCase):
                 f.write(b"binary")
             metadata_group[filename] = path
         fn = SimpleNamespace(__name__=kernel_name, arg_names=["out"], params=[])
-        compiled_kernel = SimpleNamespace(
+
+        class FakeCompiledKernel(SimpleNamespace):
+            launch_enter_hook = None
+            launch_exit_hook = None
+
+        compiled_kernel = FakeCompiledKernel(
             src=SimpleNamespace(fn=fn, signature={0: "*fp32"}, constants={}),
             metadata=SimpleNamespace(num_warps=4, shared=0, num_ctas=1),
             metadata_group=metadata_group,
