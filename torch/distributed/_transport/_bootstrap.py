@@ -23,21 +23,21 @@ def new_transport_rank(
     backend: str,
     device: torch.device | str | None = None,
     *,
-    store: dist.Store,
+    store: dist.Store | None = None,
     peer_rank: int,
     rank: int | None = None,
     bootstrap_tag: str,
     bootstrap_timeout: float = 30.0,
     **kwargs: Any,
 ) -> Transport:
-    """Construct, bind, and connect a transport through a supplied Store.
+    """Construct, bind, and connect a transport through a Store.
 
     Args:
         backend: Registered transport backend name.
         device: Optional tensor device restriction, as in ``new_transport``.
-        store: Shared rendezvous Store, such as ``torch.distributed.TCPStore``.
-            The caller owns its lifetime and supplies it to both peers. No process
-            group Store is used and no collectives are performed.
+        store: Shared rendezvous Store, such as ``torch.distributed.TCPStore``;
+            defaults to the default process group's Store. No collectives are
+            performed.
         peer_rank: Nonnegative integer identifying the peer in this Store namespace.
         rank: Local identity; defaults to ``torch.distributed.get_rank()``. An
             explicit override requires no initialized process group. Identities
@@ -47,23 +47,20 @@ def new_transport_rank(
             concurrently with reciprocal rank/peer_rank values.
         bootstrap_timeout: Bind, endpoint exchange, and connect wait budget in
             seconds. Native calls and Store network operations may exceed this
-            budget. Does not change the supplied Store's timeout.
+            budget. Does not change the Store's timeout.
         **kwargs: Forwarded to ``new_transport`` and the backend constructor.
 
     Example::
 
-        from torch.distributed import TCPStore
+        import torch.distributed as dist
         from torch.distributed._transport import new_transport_rank
 
-        # Run on two processes, assigning rank=0 and rank=1 respectively.
-        # The Store server must remain alive while both peers bootstrap.
-        store = TCPStore("server-host", 29501, world_size=2, is_master=(rank == 0))
+        dist.init_process_group("gloo")
+        # Pair ranks 0 and 1; other ranks need not participate.
         transport = new_transport_rank(
             "nixl",
             "cpu",
-            store=store,
-            rank=rank,
-            peer_rank=1 - rank,
+            peer_rank=1 - dist.get_rank(),
             bootstrap_tag="checkpoint-channel-0",
         )
         # Exchange registered-memory descriptors separately. Coordinate with
@@ -80,6 +77,7 @@ def new_transport_rank(
     if not isinstance(bootstrap_tag, str) or not bootstrap_tag:
         raise ValueError("bootstrap_tag must be a nonempty, unique string")
     rank = dist.get_rank() if rank is None else rank
+    store = dist.distributed_c10d._get_default_store() if store is None else store
     if type(rank) is not int or rank < 0:
         raise ValueError("rank must be a nonnegative integer")
     if type(peer_rank) is not int or peer_rank < 0:
