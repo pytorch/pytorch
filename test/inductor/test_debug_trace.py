@@ -80,6 +80,65 @@ class TestDebugTrace(test_torchinductor.TestCase):
         self.assertIn("buf1[p0] = acc_0", output)
         self.assertNotIn("unimplemented", output)
 
+    @unittest.skipIf(not HAS_GPU, "requires a SIMD backend for generate_node_schedule")
+    def test_ir_post_fusion_pretty(self):
+        def fn(x):
+            y = x.relu()
+            total = y.amax(dim=1) + y.sum(dim=1)
+            return y, total.sqrt(), y / total[:, None]
+
+        log_stream, ctx = logs_to_string(
+            "torch._inductor.debug", "ir_post_fusion_pretty"
+        )
+        inp = torch.randn(4, 8, device=GPU_TYPE)
+        with config.patch("force_disable_caches", True), ctx():
+            actual = torch.compile(fn, fullgraph=True)(inp)
+
+        self.assertEqual(actual, fn(inp))
+        # op0 runs inside the first r0 loop, op1 and op2 share it, op4 reads
+        # their results in a second r0 loop, and op3 runs once per row.
+        self.assertExpectedInline(
+            log_stream.getvalue().strip(),
+            """\
+POST-FUSION PRETTY IR
+kernel op0_op1_op2_op4_op3(
+    arg0_1: f32[4, 8]
+) -> (buf0: f32[4, 8], buf4: f32[4, 8], buf3: f32[4]):
+    for p0 in [0, 4):
+        acc_0: f32 = -inf
+        acc_1: f32 = 0
+        for r0 in [0, 8):
+            # op0
+            tmp0: f32 = arg0_1[r0 + 8*p0]
+            tmp1: f32 = relu(tmp0)
+            buf0[r0 + 8*p0] = tmp1
+
+            # op1
+            tmp2: f32 = buf0[r0 + 8*p0]
+            acc_0 max= tmp2
+
+            # op2
+            tmp3: f32 = buf0[r0 + 8*p0]
+            acc_1 += tmp3
+        buf1[p0] = acc_0
+        buf2[p0] = acc_1
+
+        for r0 in [0, 8):
+            # op4
+            tmp4: f32 = buf0[r0 + 8*p0]
+            tmp5: f32 = buf1[p0]
+            tmp6: f32 = buf2[p0]
+            tmp7: f32 = tmp5 + tmp6
+            tmp8: f32 = tmp4 / tmp7
+            buf4[r0 + 8*p0] = tmp8
+        # op3
+        tmp9: f32 = buf1[p0]
+        tmp10: f32 = buf2[p0]
+        tmp11: f32 = tmp9 + tmp10
+        tmp12: f32 = sqrt(tmp11)
+        buf3[p0] = tmp12""",
+        )
+
     def test_ir_post_lowering_pretty_unsupported(self):
         class UnsupportedOperation:
             @staticmethod

@@ -248,6 +248,7 @@ def set_logs(
     ir_post_lowering_pretty: bool = False,
     ir_pre_fusion_pretty: bool = False,
     ir_post_fusion: bool = False,
+    ir_post_fusion_pretty: bool = False,
     onnx_diagnostics: bool = False,
     fusion: bool = False,
     overlap: bool = False,
@@ -435,6 +436,9 @@ def set_logs(
         ir_post_fusion (:class:`bool`):
             Whether to emit the graphs after inductor fusion passes. Default: ``False``
 
+        ir_post_fusion_pretty (:class:`bool`):
+            Whether to emit readable loop IR after inductor fusion passes. Default: ``False``
+
         onnx_diagnostics (:class:`bool`):
             Whether to emit the ONNX exporter diagnostics in logging. Default: ``False``
 
@@ -606,6 +610,7 @@ def set_logs(
         ir_post_lowering_pretty=ir_post_lowering_pretty,
         ir_pre_fusion_pretty=ir_pre_fusion_pretty,
         ir_post_fusion=ir_post_fusion,
+        ir_post_fusion_pretty=ir_post_fusion_pretty,
         onnx=onnx,
         onnx_diagnostics=onnx_diagnostics,
         fusion=fusion,
