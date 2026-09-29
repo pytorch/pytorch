@@ -2155,18 +2155,22 @@ class TritonTemplateKernel(TritonKernel):
                         and template_reduction_axis(node, template_node.node, produced)
                         == 1
                     ]
-                    if columns:
-                        # Nothing reads a column result, so they can go last.
-                        nodes = [n for n in nodes if not n.is_reduction()] + columns
+                    nodes = [n for n in nodes if n not in columns]
                     first_red = next(
                         (j for j, n in enumerate(nodes) if n.is_reduction()), len(nodes)
                     )
                     for node in nodes[:first_red]:
                         node.codegen(self.split_and_set_ranges(node.get_ranges()))
+                    row_loads = {}
                     if first_red < len(nodes):
-                        self.codegen_tile_reduction_epilogue(
-                            nodes[first_red:], i, bool(columns)
+                        row_loads = self.codegen_tile_reduction_epilogue(
+                            nodes[first_red:], i
                         )
+                    if columns:
+                        # Nothing reads a column result, so they go last, in a
+                        # pass whose range trees reuse the row pass's names.
+                        self.cse.invalidate(OrderedSet(self.cse.store_cache.values()))
+                        self.codegen_tile_reduction_epilogue(columns, i, row_loads)
                     self.cse.invalidate(OrderedSet())
 
             self.codegen_prologues_in_subgraphs(
@@ -2209,8 +2213,11 @@ class TritonTemplateKernel(TritonKernel):
         return src_code
 
     def codegen_tile_reduction_epilogue(
-        self, nodes, subgraph_idx: int, columns: bool = False
-    ) -> None:
+        self,
+        nodes,
+        subgraph_idx: int,
+        row_loads: dict[tuple[str, sympy.Expr], CSEVariable] | None = None,
+    ) -> dict[tuple[str, sympy.Expr], CSEVariable]:
         """Codegen row reductions of the output, and the nodes after them, as a
         persistent reduction over the output tile: x spans the tile's rows and
         r0_ its columns, so loads of the output buffer resolve to the
@@ -2219,7 +2226,11 @@ class TritonTemplateKernel(TritonKernel):
         Column reductions swap the roles (x spans columns, r0_ rows) and store
         fp32 partials per row tile to the workspace, which the wrapper reduces
         after the kernel (see _emit_post_kernel_code). Split column reductions
-        are generated whole."""
+        are generated whole.
+
+        A row pass returns its loads keyed by buffer and tile position; the
+        column pass takes them as row_loads and reuses them transposed."""
+        columns = row_loads is not None
         m, n = self.output_node.get_size()
         origin, (rows, cols, _) = self.output_tiles[subgraph_idx]
         numels = {"x": m, "r0_": n}
@@ -2285,6 +2296,28 @@ class TritonTemplateKernel(TritonKernel):
                 f"{value}, {indexing.mask_str})"
             )
 
+        tile_syms = [tree.index_sym() for tree in range_trees]
+        tile_loads: dict[tuple[str, sympy.Expr], CSEVariable] = {}
+        load = self.load
+
+        def tile_load(record, name, index):
+            key = index.xreplace({s: e.expr for s, e in self.range_tree_nodes.items()})
+            if columns:
+                key = key.xreplace(dict(zip(tile_syms, tile_syms[::-1])))
+                if (v := row_loads.get((name, key))) is not None:
+                    shape = v.shape[::-1] if v.shape is not None else None
+                    return self.cse.generate(
+                        self.loads,
+                        f"tl.trans({v})",
+                        bounds=v.bounds,
+                        dtype=v.dtype,
+                        shape=shape,
+                    )
+            var = load(name, index)
+            if record:
+                tile_loads[(name, key)] = var
+            return var
+
         codegen_nodes = [
             node.unsplit_reduction() if columns else node for node in nodes
         ]
@@ -2312,18 +2345,24 @@ class TritonTemplateKernel(TritonKernel):
                 # Nodes over rows only (e.g. mean's division) run outside the reduction.
                 self.inside_reduction = node.group[1] != (numels["x"], sympy.S.One)
                 with (
+                    (
+                        patch.object(
+                            self,
+                            "store_reduction",
+                            functools.partial(
+                                store_partials, original, node.node.get_reduction_type()
+                            ),
+                        )
+                        if columns
+                        else contextlib.nullcontext()
+                    ),
                     patch.object(
-                        self,
-                        "store_reduction",
-                        functools.partial(
-                            store_partials, original, node.node.get_reduction_type()
-                        ),
-                    )
-                    if columns
-                    else contextlib.nullcontext()
+                        self, "load", functools.partial(tile_load, not columns)
+                    ),
                 ):
                     node.codegen(self.split_and_set_ranges(node.get_ranges()))
             self.codegen_body()
+        return tile_loads
 
     def codegen_prologues_in_subgraphs(
         self, buf_name_to_prologue_group, prologue_preserves_zero_mask_fn
