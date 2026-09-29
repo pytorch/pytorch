@@ -407,13 +407,15 @@ class _StoreOutputCapture(V.WrapperHandler):  # type: ignore[name-defined]
 
     This handler instead:
       - skips the tl.store, so buf0 is never written or allocated.
-      - records buf0 -> tmp3 in cse.store_cache, so the template's later load
-        of buf0 returns tmp3 instead of emitting a tl.load. This is required:
-        with the store skipped, that load would read memory never written.
-
-    Only install it while generating the fused producer group: every store in
-    that window is to a kernel-local buffer (can_fuse guarantees this).
+      - records every store in cse.store_cache for loads by later producer nodes.
+      - records terminal prefix-input stores in captured_values for the explicit
+        handoff to the template epilogue.
     """
+
+    def __init__(self, inner: Any, capture_names: OrderedSet[str]):
+        super().__init__(inner)
+        self.capture_names = capture_names
+        self.captured_values: dict[str, CSEVariable] = {}
 
     def store(
         self,
@@ -424,6 +426,8 @@ class _StoreOutputCapture(V.WrapperHandler):  # type: ignore[name-defined]
     ):
         V.kernel.store_buffer_names.add(name)
         V.kernel.cse.store_cache[name] = value
+        if name in self.capture_names:
+            self.captured_values[name] = value
 
 
 class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
@@ -675,7 +679,7 @@ class TritonTemplateKernel(TritonKernel):
         # for templates with fixed epilogues
         self.prefix_args = prefix_args
         self.suffix_args = suffix_args
-        # Prefix input indices allowed to use store-output input-producer fusion.
+        # Prefix input indices that are allowed to use store-output input-producer fusion.
         self.prefix_inputs_fusion_indices = prefix_inputs_fusion_indices
         for index in prefix_inputs_fusion_indices:
             if index < 0 or index >= prefix_args:
@@ -702,7 +706,7 @@ class TritonTemplateKernel(TritonKernel):
         # `set_subgraph_body`
         self.subgraph_bodies: dict[str, SubgraphInfo] = {}
 
-        # Inputs allowed to use producer fusion, separated by codegen destination.
+        # Inputs that are allowed to use producer fusion, separated by codegen destination.
         self.load_input_fusion_allowed_inputs: OrderedSet[str] = OrderedSet()
         self.store_output_fusion_allowed_inputs: OrderedSet[str] = OrderedSet()
 
@@ -768,6 +772,9 @@ class TritonTemplateKernel(TritonKernel):
             input_name in self.load_input_fused_inputs
             or input_name in self.store_output_fused_inputs
         )
+
+    def _is_input_arg_omitted(self, input_name: str) -> bool:
+        return input_name in V.graph.removed_buffers or self._is_input_fused(input_name)
 
     def input_dependent_preserved_state(self) -> str:
         # Not adding self.args.output_buffers on purpose. But we do not need to reproduce it on a cache hit.
@@ -1082,15 +1089,12 @@ class TritonTemplateKernel(TritonKernel):
                 )
             )
 
-        # Prefix input indices opt into store-output input-producer fusion.
         for input_index in self.prefix_inputs_fusion_indices:
             input_name = self.input_nodes[input_index].get_name()
             self.store_output_fusion_allowed_inputs.add(input_name)
 
         for input_node in self.input_nodes[: self.prefix_args]:
-            if input_node.get_name() in V.graph.removed_buffers:
-                continue
-            if self._is_input_fused(input_node.get_name()):
+            if self._is_input_arg_omitted(input_node.get_name()):
                 continue
             # get args in correct order
             self.args.input(input_node.get_name())
@@ -1098,9 +1102,7 @@ class TritonTemplateKernel(TritonKernel):
         for name, input_node in zip(argnames, named_args):
             arg_name = f"arg_{name}"
             self.named_input_nodes[name] = input_node
-            if input_node.get_name() in V.graph.removed_buffers:
-                continue
-            if self._is_input_fused(input_node.get_name()):
+            if self._is_input_arg_omitted(input_node.get_name()):
                 continue
 
             self.args.input_buffers[input_node.get_name()] = arg_name
@@ -1110,9 +1112,7 @@ class TritonTemplateKernel(TritonKernel):
             input_node = self.named_input_nodes[name]
             if self.uses_load_input_for_all_named_inputs:
                 self.load_input_fusion_allowed_inputs.add(input_node.get_name())
-            if input_node.get_name() in V.graph.removed_buffers:
-                continue
-            if self._is_input_fused(input_node.get_name()):
+            if self._is_input_arg_omitted(input_node.get_name()):
                 continue
 
             arg_name = self.args.input_buffers[input_node.get_name()]
@@ -1124,9 +1124,7 @@ class TritonTemplateKernel(TritonKernel):
 
         for input_node in self.input_nodes[len(self.input_nodes) - self.suffix_args :]:
             # get args in correct order
-            if input_node.get_name() in V.graph.removed_buffers:
-                continue
-            if self._is_input_fused(input_node.get_name()):
+            if self._is_input_arg_omitted(input_node.get_name()):
                 continue
 
             self.args.input(input_node.get_name())
@@ -1621,7 +1619,8 @@ class TritonTemplateKernel(TritonKernel):
         val_shape: tuple[str] | None = None,
         block_indexing: bool = False,
     ):
-        """Stores the final output and appends any epilogue fusions if the buffer hasn't been optimized away.
+        """Generates store-output input producers, applies output epilogue fusions,
+        and stores the final output unless it has been optimized away.
 
         Args:
             indices (Union[List, Tuple]): The index for each dimension of the output. The dot product of
@@ -1796,32 +1795,40 @@ class TritonTemplateKernel(TritonKernel):
             )
             output_dtype = self.output_node.get_dtype()
 
+            # Generate fused prefix-input producers and capture their values for
+            # the template epilogue. The store cache connects nodes within a group.
+            capture_names = self.store_output_fused_inputs
+            store_output_capture = _StoreOutputCapture(
+                V.get_ops_handler(), capture_names
+            )
             for input_index in self.prefix_inputs_fusion_indices:
                 input_node = self.input_nodes[input_index]
                 input_name = input_node.get_name()
-                prologue_group = self.store_output_input_producer_groups.get(input_name)
-                if not prologue_group:
+                producer_group = self.store_output_input_producer_groups.get(input_name)
+                if not producer_group:
                     continue
 
+                # Preserve standalone pointwise numerics by upcasting low-precision
+                # arithmetic unless every producer is safe without upcasts.
+                # Load-input prologue fusion uses the same policy below.
                 can_codegen_without_upcast = all(
-                    node.can_codegen_without_upcasts() for node in prologue_group
+                    node.can_codegen_without_upcasts() for node in producer_group
                 )
                 with (
                     config.patch(
                         "triton.codegen_upcast_to_fp32",
                         not can_codegen_without_upcast,
                     ),
-                    V.set_ops_handler(_StoreOutputCapture(V.get_ops_handler())),
+                    V.set_ops_handler(store_output_capture),
                 ):
-                    for prologue_node in prologue_group:
-                        prologue_node.codegen(
-                            self.split_and_set_ranges(prologue_node.get_ranges())
+                    for producer_node in producer_group:
+                        producer_node.codegen(
+                            self.split_and_set_ranges(producer_node.get_ranges())
                         )
 
-                # The epilogue loads below hit this store_cache entry.
-                if input_name not in V.kernel.cse.store_cache:
+                if input_name not in store_output_capture.captured_values:
                     raise AssertionError(
-                        f"failed to capture store-output prologue for {input_name}"
+                        f"failed to capture store-output input producer for {input_name}"
                     )
 
             epilogue_args = [
@@ -1840,9 +1847,15 @@ class TritonTemplateKernel(TritonKernel):
                 self.input_nodes[len(self.input_nodes) - self.suffix_args :],
             ):
                 input_node.freeze_layout()
+                input_name = input_node.get_name()
+                if input_name in store_output_capture.captured_values:
+                    input_value = store_output_capture.captured_values[input_name]
+                else:
+                    input_value = input_node.make_loader()(index_symbols)
+                # For captured values, this only updates CSE use-count bookkeeping.
                 epilogue_arg = V.kernel.cse.generate(
                     self.compute,
-                    input_node.make_loader()(index_symbols),
+                    input_value,
                     dtype=acc_dtype,
                     shape=input_node.get_size(),
                 )
@@ -2216,6 +2229,8 @@ class TritonTemplateKernel(TritonKernel):
             prologue_group = buf_name_to_prologue_group.get(buffer.get_name(), [])
             if not prologue_group:
                 continue
+            # Preserve standalone pointwise numerics by upcasting low-precision
+            # arithmetic unless every producer is safe without upcasts.
             can_codegen_without_upcast = all(
                 p_n.can_codegen_without_upcasts() for p_n in prologue_group
             )

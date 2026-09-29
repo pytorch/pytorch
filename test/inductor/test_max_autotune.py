@@ -5381,8 +5381,8 @@ class TestPrologueFusion(TestCase):
         (
             FileCheck()
             .check("100.0")
-            .check("2.0")
-            .check("3.0")
+            .check_dag("2.0")
+            .check_dag("3.0")
             .check("tl.store")
             .check("tl.dot")
             .check("acc +")

@@ -28,8 +28,8 @@ from torch._inductor.dependencies import Dep, MemoryDep, ReadWrites, StarDep, We
 from torch._inductor.ir import GraphPartitionSignature
 from torch._inductor.loop_body import MemoryEntry, MemoryUsageType
 from torch._inductor.scheduler import (
-    _producer_fusion_enabled_inputs,
     _get_benchmarkable_extern_fn,
+    _producer_fusion_enabled_inputs,
     BaseSchedulerNode,
     ExternKernelSchedulerNode,
     ForeachKernelSchedulerNode,
