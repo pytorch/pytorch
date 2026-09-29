@@ -38,8 +38,9 @@ def _precompile_error(message: str) -> Exception:
     return PrecompileError(message)
 
 
-# Process-wide: once prepared, a frozen kernel serves every later compile of the
-# same Triton source in this process until Inductor's kernel caches are cleared.
+# Process-wide: once precompile.load installs them, a frozen kernel serves every
+# later compile of the same Triton source in this process until fresh_cache() /
+# clear_caches() (see FrozenTritonKernels).
 _frozen_triton_kernels: dict[str, bytes] = {}
 _loaded_triton_kernels: dict[str, CachingAutotuner] = {}
 _frozen_triton_kernels_lock = threading.Lock()
@@ -94,12 +95,12 @@ def clear_cpp_kernels() -> None:
         _frozen_cpp_kernels.clear()
 
 
-def record_cpp_kernel(key: str, binary_path: str) -> None:
+def record_cpp_kernel(key: str, binary_path: str, load: Callable[[], object]) -> None:
     with _capture_lock:
         owner = _capture
         if owner is None or owner.pid != os.getpid() or owner.sealed:
             return
-        owner.cpp_kernels[key] = binary_path
+        owner.cpp_kernels[key] = (binary_path, load)
 
 
 def restore_cpp_kernel(key: str, binary_path: str) -> None:
@@ -120,12 +121,13 @@ def restore_cpp_kernel(key: str, binary_path: str) -> None:
 
 
 def _freeze_cpp_kernels(kernels: dict[str, str]) -> bytes:
+    missing = sorted(key for key, path in kernels.items() if not os.path.exists(path))
+    if missing:
+        raise RuntimeError(f"Cannot export C++ kernels with no binary: {missing}")
     binaries: dict[str, bytes] = {}
     for key, binary_path in kernels.items():
-        # Unforced synchronous loads never build; replay fails on them at load.
-        if os.path.exists(binary_path):
-            with open(binary_path, "rb") as binary:
-                binaries[key] = binary.read()
+        with open(binary_path, "rb") as binary:
+            binaries[key] = binary.read()
     return pickle.dumps(binaries)
 
 
@@ -294,7 +296,13 @@ def _freeze_triton_kernel(key: str, instances: list[CachingAutotuner]) -> bytes:
         saved.prepare_for_pickle()
         saved.compile_results = [saved_result]
         saved._reload_kernel = None
-        _retain_cubin(saved_result)
+        try:
+            _retain_cubin(saved_result)
+        except (OSError, RuntimeError) as exc:
+            diagnostic = _triton_export_diagnostic(kernel, "cubin_unavailable")
+            diagnostic["error"] = str(exc)
+            rejected.append(diagnostic)
+            continue
         return pickle.dumps(
             StaticallyLaunchedAutotuner(
                 key, saved.inductor_meta.get("kernel_name", "unknown_kernel"), saved
@@ -312,7 +320,7 @@ class _RuntimeCapture:
         self.policy = contextlib.ExitStack()
         self.finalize_lock = threading.Lock()
         self.triton_kernels: dict[str, list[CachingAutotuner]] = {}
-        self.cpp_kernels: dict[str, str] = {}
+        self.cpp_kernels: dict[str, tuple[str, Callable[[], object]]] = {}
 
     def seal(self) -> None:
         if self.sealed:
@@ -373,12 +381,16 @@ def capture_runtime() -> Iterator[None]:
 def finalize_runtime_cache(
     artifact: bytes | None, write: Callable[[bytes | None], None]
 ) -> None:
-    """Freeze the scope's static Triton kernels into the cache artifact, pass it
-    to ``write``, then keep the scope sealed.
+    """Freeze the scope's static Triton kernels and C++ kernel binaries into the
+    cache artifact, pass it to ``write``, then keep the scope sealed.
 
-    The scope is sealed before kernels are frozen, so a compile racing
-    finalization raises instead of being left out, and unsealed again if freezing
-    or ``write`` raises so the caller can retry.
+    Pending async compiles are waited on and every recorded C++ kernel is built
+    first, then the scope is sealed so any
+    later compile raises before kernels are frozen, and it is unsealed again if
+    freezing, serialization or ``write`` raises so the caller can retry. The
+    caller must stop compiling before calling this: a kernel submitted on
+    another thread after the wait but before the seal is neither waited on nor
+    rejected, and is left out of the cache.
     """
     import torch
     from torch._inductor.async_compile import AsyncCompile
@@ -408,13 +420,21 @@ def finalize_runtime_cache(
             raise RuntimeError(
                 "The precompile cache already contains frozen runtime dependencies"
             )
+        # Drain before sealing: compile result callbacks re-check
+        # check_compilation_allowed, so draining under the seal rejects them.
         AsyncCompile.drain_pending()
+        with _capture_lock:
+            cpp_loads = [load for _, load in owner.cpp_kernels.values()]
+        # Finishes pending C++ builds and builds loads that were never forced, so
+        # no binary is missing or partially written when it is frozen.
+        for load in cpp_loads:
+            load()
         if torch.cuda.is_initialized():
             torch.cuda.synchronize()
         with _capture_lock:
             owner.seal()
             kernels = dict(owner.triton_kernels)
-            cpp_kernels = dict(owner.cpp_kernels)
+            cpp_kernels = {key: path for key, (path, _) in owner.cpp_kernels.items()}
         try:
             static_kernels: dict[str, bytes] = {}
             rejected_sources: list[dict[str, object]] = []

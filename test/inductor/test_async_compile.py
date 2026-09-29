@@ -574,6 +574,26 @@ def triton_fused_fake_name(in_ptr0, out_ptr0, xnumel, r0_numel, XBLOCK : tl.cons
             AsyncCompile.drain_pending(timeout=0.01)
         shutdown.assert_not_called()
 
+    @skipIfWindows(msg="SubprocPool uses pass_fds, which is not supported on Windows.")
+    def test_drain_pending_finishes_subprocess_jobs_then_shuts_down(self):
+        import time
+
+        from torch._inductor.async_compile import _pool_set, CompiledTritonKernels
+
+        shutdown_compile_workers()
+        with (
+            config.patch(worker_start_method="subprocess", compile_threads=2),
+            patch.object(CompiledTritonKernels, "_cache", {}),
+        ):
+            AsyncCompile.wait_pool_ready()
+            pool = AsyncCompile.process_pool()
+            jobs = [pool.submit(time.sleep, 0.2) for _ in range(4)]
+            AsyncCompile.drain_pending()
+        self.assertTrue(all(job.done() and not job.cancelled() for job in jobs))
+        self.assertEqual([job.result() for job in jobs], [None] * 4)
+        self.assertNotIn(pool, _pool_set)
+        self.assertIsNone(AsyncCompile._ready_future)
+
     def test_subproc_pool_drain_pending(self):
         import threading
         from concurrent.futures import TimeoutError as FuturesTimeoutError
