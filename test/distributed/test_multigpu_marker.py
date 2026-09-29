@@ -1,5 +1,16 @@
 # Owner(s): ["oncall: distributed"]
 
+"""
+Tests the collection-time GPU requirement resolver and MultiGpuMinFilterPlugin
+used by --multigpu-min-gpus.
+
+The requirement comes only from decorator stamps (including through
+__wrapped__), not from class world_size. world_size on capacity-scaled bases
+follows the machine, so a skip_if_lt_x_gpu(2) test must stay at 2 rather than
+scale up. distributed_4gpu relies on that: --multigpu-min-gpus 3 keeps tests
+that declare >= 3 GPUs and drops the rest.
+"""
+
 import os
 import sys
 import tempfile
