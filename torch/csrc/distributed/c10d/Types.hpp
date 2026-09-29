@@ -19,6 +19,9 @@
 
 namespace c10d {
 
+class Backend;
+class ProcessGroup;
+
 // Base class for supplementary data potentially needed by ReduceOps
 struct TORCH_API _SupplementBase : torch::CustomClassHolder {
   ~_SupplementBase() override = default;
@@ -188,6 +191,9 @@ struct DistributedBackendOptions {
   std::chrono::duration<float> timeout;
   std::string group_id;
   std::vector<int64_t> global_ranks_in_group;
+  c10::intrusive_ptr<ProcessGroup> process_group;
+  c10::intrusive_ptr<Backend> split_from;
+  bool enable_reconfigure = false;
 };
 
 // Fault tolerance / reconfigure API. A ReconfigureHandle is an opaque,

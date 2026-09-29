@@ -1,13 +1,13 @@
 # mypy: allow-untyped-defs
 import functools
 import itertools
+import logging
 from collections.abc import Iterable
 from typing import Any
 from unittest.mock import patch
 
 from torch._inductor.utils import Placeholder, unique
 from torch._inductor.virtualized import V
-from torch._logging import getArtifactLogger
 
 from ...autotune_process import CuteDSLBenchmarkRequest, TensorMeta
 from ...ir import Buffer, ChoiceCaller, CuteDSLTemplateBuffer, IRNode, Layout, TensorBox
@@ -15,7 +15,7 @@ from ..common import KernelTemplate
 from .cutedsl_kernel import CuteDSLTemplateKernel
 
 
-log = getArtifactLogger(__name__, "output_code")
+log = logging.getLogger(__name__)
 
 
 class CuteDSLTemplate(KernelTemplate):
@@ -43,7 +43,12 @@ class CuteDSLTemplate(KernelTemplate):
         self.subgraph_fn = subgraph_fn
         self.mask_fn = mask_fn
         self.template = CuteDSLTemplate._template_from_string(source)
-        if name in self.all_templates:
+        # A module that registers templates can be initialized more than once in
+        # a single process (e.g. a double-import path). Tolerate re-registration
+        # under an existing name as long as the template source matches, but
+        # reject a genuine name collision between different templates.
+        existing = self.all_templates.get(name)
+        if existing is not None and existing.source != self.source:
             raise AssertionError(f"duplicate template name, {name}")
         CuteDSLTemplate.all_templates[name] = self
 
@@ -95,8 +100,6 @@ class CuteDSLTemplate(KernelTemplate):
                 subgraphs=subgraphs,
             )
             code = kernel.render(self.template, **kwargs)
-
-            log.debug("Generated CuteDSL Code:\n%s", code)
 
             input_call_args = tuple(kernel.args.input_buffers.keys())
             expected_input_args = tuple(unique(x.get_name() for x in input_nodes))

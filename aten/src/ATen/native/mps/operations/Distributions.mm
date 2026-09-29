@@ -19,6 +19,7 @@
 #include <ATen/ops/_standard_gamma_native.h>
 #include <ATen/ops/argsort.h>
 #include <ATen/ops/bernoulli_native.h>
+#include <ATen/ops/binomial_native.h>
 #include <ATen/ops/clamp.h>
 #include <ATen/ops/cumsum.h>
 #include <ATen/ops/poisson_native.h>
@@ -207,11 +208,15 @@ static Tensor& bernoulli_tensor_mps_impl(Tensor& self, const Tensor& p_, std::op
 // still the inplace target (TensorIterator uses the same idiom).
 static void bernoulli_scalar_kernel_mps(const TensorBase& self, double p, std::optional<Generator> gen) {
   // 0 <= p <= 1 is already enforced by `bernoulli_impl_` before the stub is dispatched.
+  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(self.scalar_type()),
+                              "bernoulli is not implemented for complex types on MPS");
   auto iter = at::TensorIterator::borrowing_nullary_op(self);
   distribution_kernel_mps_impl(iter, p, 0.0, "bernoulli_scalar", 1, gen);
 }
 
 static void bernoulli_tensor_kernel_mps(const TensorBase& self, const TensorBase& p_, std::optional<Generator> gen) {
+  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(self.scalar_type()),
+                              "bernoulli is not implemented for complex types on MPS");
   Tensor& self_t = const_cast<Tensor&>(static_cast<const Tensor&>(self));
   const Tensor& p_t = static_cast<const Tensor&>(p_);
   bernoulli_tensor_mps_impl(self_t, p_t, gen);
@@ -504,6 +509,54 @@ Tensor _dirichlet_grad_mps(const Tensor& x, const Tensor& alpha, const Tensor& t
         auto computeEncoder = stream->commandEncoder();
         [computeEncoder setComputePipelineState:pso];
         mtl_setArgs(computeEncoder, ret, x_contig, alpha_contig, total_contig);
+        mtl_dispatch1DJob(computeEncoder, pso, ret.numel());
+      }
+    });
+  }
+
+  return ret;
+}
+
+Tensor _s_binomial_mps(const Tensor& count, const Tensor& prob, std::optional<Generator> gen_) {
+  using namespace mps;
+
+  TORCH_CHECK_VALUE(at::isFloatingType(count.scalar_type()),
+                    "binomial only supports floating-point dtypes for count, got: ",
+                    count.scalar_type());
+  TORCH_CHECK_VALUE(at::isFloatingType(prob.scalar_type()),
+                    "binomial only supports floating-point dtypes for prob, got: ",
+                    prob.scalar_type());
+  Tensor ret = at::empty_like(count, count.options(), at::MemoryFormat::Contiguous);
+  if (count.numel() == 0) {
+    return ret;
+  }
+
+  auto count_contig = count.contiguous();
+  auto prob_contig = prob.expand(count.sizes())
+                         .to(count.scalar_type(), /*non_blocking=*/false, /*copy=*/false, MemoryFormat::Contiguous)
+                         .contiguous();
+  auto mps_gen = get_generator_or_default<MPSGeneratorImpl>(gen_, at::mps::detail::getDefaultMPSGenerator());
+  auto stream = getCurrentMPSStream();
+
+  @autoreleasepool {
+    auto pso = lib.getPipelineStateForFunc("standard_binomial_" + scalarToMetalTypeString(ret));
+
+    int64_t seed;
+    int64_t base_offset;
+    constexpr int64_t BINOMIAL_RANDOMS_STRIDE = 32;
+    {
+      // See Note [Acquire lock when using random generators]
+      std::lock_guard<std::mutex> lock(mps_gen->mutex_);
+      seed = static_cast<int64_t>(mps_gen->current_seed());
+      base_offset = static_cast<int64_t>(mps_gen->get_offset());
+      mps_gen->set_offset(base_offset + BINOMIAL_RANDOMS_STRIDE * ret.numel());
+    }
+
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      @autoreleasepool {
+        auto computeEncoder = stream->commandEncoder();
+        [computeEncoder setComputePipelineState:pso];
+        mtl_setArgs(computeEncoder, ret, count_contig, prob_contig, std::array<long, 2>{seed, base_offset});
         mtl_dispatch1DJob(computeEncoder, pso, ret.numel());
       }
     });

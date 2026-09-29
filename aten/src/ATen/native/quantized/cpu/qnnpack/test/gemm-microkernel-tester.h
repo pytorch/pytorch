@@ -357,6 +357,7 @@ class GemmMicrokernelTester {
         packedN() * packedK() + biasN() * sizeof(uint32_t) / sizeof(uint8_t));
     std::vector<float> c((m() - 1) * cStride() + n());
     std::vector<float> acc(m() * n());
+    std::vector<float> tolerance(m() * n());
 
     const uint8_t* aPtr = a.data() + 8;
 
@@ -416,10 +417,11 @@ class GemmMicrokernelTester {
                  int32_t(aZeroPoint())) *
                 (int32_t(b[nIndex * k() + kIndex]) - int32_t(kernel_zero_points[nIndex]));
           }
-          acc[mIndex * n() + nIndex] =
-            acc[mIndex * n() + nIndex] *
-            dequantization_scales[nIndex] +
-            bias[nIndex];
+          const float product =
+              acc[mIndex * n() + nIndex] * dequantization_scales[nIndex];
+          acc[mIndex * n() + nIndex] = product + bias[nIndex];
+          tolerance[mIndex * n() + nIndex] =
+              (std::abs(product) + std::abs(bias[nIndex])) * 1.0e-4f;
         }
       }
 
@@ -447,7 +449,7 @@ class GemmMicrokernelTester {
           ASSERT_NEAR(
               c[mIndex * cStride() + nIndex],
               acc[mIndex * n() + nIndex],
-              std::abs(acc[mIndex * n() + nIndex]) * 1.0e-4f)
+              tolerance[mIndex * n() + nIndex])
               << "at " << mIndex << ", " << nIndex
               << ": reference = " << acc[mIndex * n() + nIndex]
               << ", optimized = " << c[mIndex * cStride() + nIndex]
@@ -869,7 +871,7 @@ class GemmMicrokernelTester {
       for (size_t mIndex = 0; mIndex < m(); mIndex++) {
         for (size_t nIndex = 0; nIndex < n(); nIndex++) {
           cRef[mIndex * n() + nIndex] =
-              std::max(std::min(cRef[mIndex * n() + nIndex], cMax), cMin);
+              std::clamp(cRef[mIndex * n() + nIndex], cMin, cMax);
         }
       }
 
@@ -971,7 +973,7 @@ class GemmMicrokernelTester {
       for (size_t mIndex = 0; mIndex < m(); mIndex++) {
         for (size_t nIndex = 0; nIndex < n(); nIndex++) {
           cRef[mIndex * n() + nIndex] =
-              std::max(std::min(cRef[mIndex * n() + nIndex], cMax), cMin);
+              std::clamp(cRef[mIndex * n() + nIndex], cMin, cMax);
         }
       }
 

@@ -1,6 +1,6 @@
 #include <ATen/native/transformers/xpu/flash_attn/flash_api.h>
 #include <ATen/native/transformers/xpu/sdp_utils.h>
-#include <c10/util/Array.h>
+#include <array>
 
 namespace sdp {
 
@@ -26,11 +26,11 @@ bool check_flash_attention_hardware_support(
   }
 
   constexpr auto supported_architectures =
-      c10::array_of<sycl::ext::oneapi::experimental::architecture>(
+      std::to_array<sycl::ext::oneapi::experimental::architecture>({
           sycl::ext::oneapi::experimental::architecture::intel_gpu_pvc,
           sycl::ext::oneapi::experimental::architecture::intel_gpu_pvc_vg,
           sycl::ext::oneapi::experimental::architecture::intel_gpu_bmg_g21,
-          sycl::ext::oneapi::experimental::architecture::intel_gpu_bmg_g31);
+          sycl::ext::oneapi::experimental::architecture::intel_gpu_bmg_g31});
   auto* device_prop = at::xpu::getCurrentDeviceProperties();
   auto device_architecture = device_prop->architecture;
 
@@ -52,9 +52,9 @@ inline bool check_flash_attention_datatype(
     sdp_params const& params,
     bool debug) {
   constexpr auto supported_dtypes =
-      c10::array_of<at::ScalarType>(at::kBFloat16, at::kHalf);
+      std::to_array<at::ScalarType>({at::kBFloat16, at::kHalf});
 
-  auto query_dtype = params.query.dtype();
+  const auto query_dtype = params.query.dtype();
   if (!(query_dtype == params.key.dtype() &&
         query_dtype == params.value.dtype() &&
         (std::find(
@@ -88,8 +88,9 @@ inline bool check_flash_attention_head_dim_size(
   const auto key_size_last = params.key.sym_size(-1);
   const auto value_size_last = params.value.sym_size(-1);
 
-  const bool head_dims_equal = (query_size_last == key_size_last) &&
-      (query_size_last == value_size_last);
+  const bool head_dims_equal =
+      TORCH_GUARD_OR_FALSE(query_size_last.sym_eq(key_size_last)) &&
+      TORCH_GUARD_OR_FALSE(query_size_last.sym_eq(value_size_last));
   if (!head_dims_equal) {
     if (debug) {
       TORCH_WARN(
@@ -107,7 +108,7 @@ inline bool check_flash_attention_head_dim_size(
 
   constexpr int64_t kXPUFlashAttentionMaxHeadDim = 256;
   const auto max_supported_headdim = c10::SymInt(kXPUFlashAttentionMaxHeadDim);
-  if (query_size_last > max_supported_headdim) {
+  if (!TORCH_GUARD_OR_FALSE(query_size_last.sym_le(max_supported_headdim))) {
     if (debug) {
       TORCH_WARN(
           "FlashAttentionXPU supports head dimension up to ",
@@ -134,18 +135,21 @@ inline bool check_flash_causal_non_square_seqlens(
   // for non-square masks. We will not support non-square masks for causal w/
   // FAV2
   if (params.is_causal && !params.query.is_nested() &&
-      !params.key.is_nested() &&
-      params.query.sym_size(-2) != params.key.sym_size(-2)) {
-    if (debug) {
-      TORCH_WARN(
-          "Flash attention XPU does not support the is_causal flag when seqlen_q != seqlen_k. ",
-          "Got seqlen_q: ",
-          params.query.sym_size(-2),
-          " seqlen_k: ",
-          params.key.sym_size(-2),
-          ". If you would like to use causal attention with non-square masks, please see CausalAttnMask.");
+      !params.key.is_nested()) {
+    const auto query_seq_len = params.query.sym_size(-2);
+    const auto key_seq_len = params.key.sym_size(-2);
+    if (!TORCH_GUARD_OR_FALSE(query_seq_len.sym_eq(key_seq_len))) {
+      if (debug) {
+        TORCH_WARN(
+            "Flash attention XPU does not support the is_causal flag when seqlen_q != seqlen_k. ",
+            "Got seqlen_q: ",
+            query_seq_len,
+            " seqlen_k: ",
+            key_seq_len,
+            ". If you would like to use causal attention with non-square masks, please see CausalAttnMask.");
+      }
+      return false;
     }
-    return false;
   }
   return true;
 }

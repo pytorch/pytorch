@@ -47,7 +47,7 @@ class AHOperation:
 
 class AHContext:
     """
-    This class is used to specify which information AutoHeuristic should store. For each choice, AutoHeursitic will
+    This class is used to specify which information AutoHeuristic should store. For each choice, AutoHeuristic will
     store the context and the collected feedback. The context could be something like the shape of a tensor, i.e.,
     information that will help to learn a heuristic.
     """
@@ -137,17 +137,6 @@ def pad_mm_precondition(metadata: AHMetadata, context: AHContext) -> bool:
     return True
 
 
-def get_mixedmm_precondition(metadata: AHMetadata, context: AHContext) -> bool:
-    m = context.get_value("m")
-    k = context.get_value("k")
-    n = context.get_value("n")
-    if m > 128 or k < 1024 or n < 1024:
-        return False
-    mat1_iscontig = context.get_value("mat1_iscontig")
-    mat2_iscontig = context.get_value("mat2_iscontig")
-    return mat1_iscontig and not mat2_iscontig
-
-
 def get_mult_dims_ops() -> list[AHOperation]:
     m_times_k_op = AHOperation("m*k", lambda data: data["m"] * data["k"])
     m_times_n_op = AHOperation("m*n", lambda data: data["m"] * data["n"])
@@ -197,27 +186,6 @@ def pad_mm_operations() -> list[AHOperation]:
     return ah_operations
 
 
-def between_op(data: Any, dim: str, lower: int, upper: int) -> bool:
-    return data[dim] >= lower and data[dim] <= upper
-
-
-def between_ops() -> list[AHOperation]:
-    dims = ["m", "k", "n"]
-    limits = [(1, 16), (17, 32), (33, 64), (65, 128), (129, 256)]
-    ah_operations = []
-    for dim in dims:
-        for lower, upper in limits:
-            between_op_fn = functools.partial(
-                between_op, dim=dim, lower=lower, upper=upper
-            )
-            # using 'LEQ' instead of '<=' because '<=' cannot be exported to dot
-            between_op_name = f"{lower}LEQ{dim}LEQ{upper}"
-            ah_operations.append(
-                AHOperation(between_op_name, between_op_fn, is_categorical=True)
-            )
-    return ah_operations
-
-
 def pow2_op(data: Any, dim: str, exponent: int) -> bool:
     return data[dim] == 2**exponent
 
@@ -226,10 +194,6 @@ def mm_operations() -> list[AHOperation]:
     mult_dims_ops = get_mult_dims_ops()
     arith_intensity_op = AHOperation("arith_intensity", get_arith_intensity)
     return mult_dims_ops + [arith_intensity_op]
-
-
-def mixed_mm_operations() -> list[AHOperation]:
-    return mm_operations() + between_ops()
 
 
 def is_multiple(data: Any, dim: str, mult: int) -> bool:

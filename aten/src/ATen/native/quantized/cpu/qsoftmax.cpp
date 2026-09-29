@@ -75,7 +75,7 @@ Tensor qsoftmax_qnnpack(const Tensor& qx, const int64_t dim) {
   const uint32_t flags = 0;
   const size_t batch_size = qx.numel() / channels;
   const uint8_t* input =
-      reinterpret_cast<const uint8_t*>(qx_contig_ptr->data_ptr<c10::quint8>());
+      reinterpret_cast<const uint8_t*>(qx_contig_ptr->const_data_ptr<c10::quint8>());
   const size_t input_stride = channels;
   uint8_t* output = reinterpret_cast<uint8_t*>(qy.data_ptr<c10::quint8>());
   const size_t output_stride = channels;

@@ -17,7 +17,7 @@ at::Tensor* tensor_handle_to_tensor_pointer(AtenTensorHandle handle) {
 bool has_key(
     const std::unordered_map<std::string, c10::IValue>& map,
     const std::string& key) {
-  return map.find(key) != map.end();
+  return map.contains(key);
 }
 
 using torch::aot_inductor::convertSerializedLayout;
@@ -129,8 +129,10 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
       break;
     }
     case c10::TypeKind::NumberType: {
-      if (serialized_arg_type == "as_int") {
-        // Only int Scalar is treated as dynamic arg for now
+      if (serialized_arg_type == "as_int" ||
+          serialized_arg_type == "as_sym_int") {
+        // An int (or symbolic int, from a dynamic shape) Scalar is treated as a
+        // dynamic arg, mirroring the SymIntType case above.
         dynamic_args.emplace_back(index, DynamicArgType::IntType, 1);
       } else if (serialized_arg_type == "as_float") {
         stack.at(index) = serialized_arg_val.get<double>();
@@ -211,9 +213,8 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
       std::string device_string = serialized_arg_val["type"].get<std::string>();
       if (serialized_arg_val.contains("index") &&
           serialized_arg_val["index"].is_number()) {
-        auto index = serialized_arg_val["index"].get<int>();
-        device_string += ":" + std::to_string(index);
-        device_->set_index(static_cast<int8_t>(index));
+        device_string +=
+            ":" + std::to_string(serialized_arg_val["index"].get<int>());
       }
 
       c10::Device device(device_string);
@@ -615,14 +616,9 @@ std::unique_ptr<OSSCallTorchBindKernel> OSSProxyExecutor::
 
 OSSProxyExecutor::OSSProxyExecutor(
     const std::string& json_path,
-    bool is_cpu,
+    const std::string& device_str,
     std::optional<std::unordered_map<std::string, c10::IValue>> custom_objs) {
-  if (is_cpu) {
-    device_ = std::make_unique<c10::Device>(c10::DeviceType::CPU);
-  } else {
-    int device_idx = -1;
-    device_ = std::make_unique<c10::Device>(c10::DeviceType::CUDA, device_idx);
-  }
+  device_ = std::make_unique<c10::Device>(device_str);
 
   // If custom_objs is provided, use it instead of loading from
   // custom_objs_config.json If custom_objs is not provided, try to load from
@@ -764,6 +760,17 @@ void OSSProxyExecutor::call_function(
     int length = dynamic_arg.length;
 
     if (length == 0) {
+      // An empty (Sym)IntList contributes no runtime ints, so the switch below
+      // never writes its slot and the op would see the default None and abort
+      // in toIntList()/toSymIntList(). An empty list is what the caller meant
+      // -- an empty size/stride is exactly a 0-d tensor. A genuinely-None
+      // optional list does not reach here: the as_none branch above registers a
+      // zero-length ListIntType only for a bare List[SymInt], which an Optional
+      // never is.
+      if (dynamic_arg_type == DynamicArgType::ListIntType &&
+          stack[arg_index].isNone()) {
+        stack[arg_index] = c10::List<int64_t>{};
+      }
       continue;
     }
 

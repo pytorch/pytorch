@@ -74,7 +74,7 @@ def get_supported_dtypes(op, sample_inputs_fn, device_type):
     for dtype in all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half):
         try:
             samples = sample_inputs_fn(op, device_type, dtype, False)
-        except RuntimeError:
+        except (RuntimeError, TypeError):
             # If `sample_inputs_fn` doesn't support sampling for a given
             # `dtype`, we assume that the `dtype` is not supported.
             # We raise a warning, so that user knows that this was the case
@@ -91,7 +91,9 @@ def get_supported_dtypes(op, sample_inputs_fn, device_type):
         for sample in samples:
             try:
                 op(sample.input, *sample.args, **sample.kwargs)
-            except RuntimeError:
+            # TODO: Replace RuntimeError with NotImplementedError once unsupported
+            # dtypes consistently use it.
+            except (RuntimeError, TypeError):
                 # dtype is not supported
                 supported = False
                 break
@@ -198,7 +200,7 @@ def reference_reduction_numpy(f, supports_keepdims=True):
 
     The wrapper function will forward dim, keepdim, mask, and identity
     kwargs to the wrapped function as the NumPy equivalent axis,
-    keepdims, where, and initiak kwargs, respectively.
+    keepdims, where, and initial kwargs, respectively.
 
     Args:
         f: NumPy reduction operator to wrap

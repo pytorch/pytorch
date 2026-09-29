@@ -674,7 +674,7 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
     # Make the compiled methods available to the Python ScriptModule class.
     for method_stub in method_stubs:
         if method_stub.original_method is None:
-            # define()'d methods don't have an Python original_method, so we
+            # define()'d methods don't have a Python original_method, so we
             # don't need to do any Python re-wrapping stuff
             continue
 
