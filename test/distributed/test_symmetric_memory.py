@@ -1504,6 +1504,9 @@ class AsyncTPTest(MultiProcContinuousTest):
         "_fused_all_gather_matmul_native currently only supports sm>=90",
     )
     @skip_if_lt_x_gpu(2)
+    # ROCm < 10.2 segfaults on >1 MiB peer copies out of symmetric memory while
+    # memory-copy tracing is active (ROCM-30947).
+    @skip_if_rocm_ver_lessthan_multiprocess((10, 2))
     @parametrize("symm_mem_input", [True, False])
     @parametrize("is_b_row_major", [True, False])
     @skipIf(

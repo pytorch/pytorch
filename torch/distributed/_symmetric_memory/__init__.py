@@ -1005,6 +1005,8 @@ def _fused_all_gather_matmul(
 # of 256 rows.
 _ROCM_ASYNC_MM_ARCHS = ("gfx942", "gfx950")
 _ROCM_ASYNC_MM_TILE_M = 256
+# N and K must be multiples of the kernel's 16-byte bf16 vector loads.
+_ROCM_ASYNC_MM_VECTOR = 8
 # On ROCm, native loses to the decomposition fallback from K=2048 up. Latency
 # relative to the fallback on MI350 (ws=4, bf16): ~0.5-0.65x at K=512,
 # ~0.84-0.96x at K=1024, ~1.17-1.34x at K=2048, ~1.8x at K=4096.
@@ -1012,12 +1014,17 @@ _ROCM_ASYNC_MM_MAX_K = 2048
 
 
 def _rocm_supports_fused_all_gather_matmul_native(
-    A_shard: torch.Tensor, local_M: int
+    A_shard: torch.Tensor, B: torch.Tensor, local_M: int
 ) -> bool:
     arch = torch.cuda.get_device_properties(A_shard.device).gcnArchName.split(":")[0]
     return (
         arch in _ROCM_ASYNC_MM_ARCHS
+        and A_shard.dtype == torch.bfloat16
+        and B.dtype == torch.bfloat16
+        and (B.is_contiguous() or B.t().is_contiguous())
         and local_M % _ROCM_ASYNC_MM_TILE_M == 0
+        and A_shard.shape[-1] % _ROCM_ASYNC_MM_VECTOR == 0
+        and B.shape[-1] % _ROCM_ASYNC_MM_VECTOR == 0
         and A_shard.shape[-1] < _ROCM_ASYNC_MM_MAX_K
     )
 
@@ -1046,7 +1053,7 @@ def _should_use_fused_all_gather_matmul_native(
         and len(Bs) == 1
         and (
             torch.version.hip is None
-            or _rocm_supports_fused_all_gather_matmul_native(A_shard, local_M)
+            or _rocm_supports_fused_all_gather_matmul_native(A_shard, Bs[0], local_M)
         )
     )
 
