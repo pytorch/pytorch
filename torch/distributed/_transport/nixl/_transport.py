@@ -348,7 +348,7 @@ class NIXLTransport(Transport):
         return self._cuda_bridges[key]
 
     def cuda_graph(self, stream=None):
-        """Capture automatic CUDA transfers; close resets the returned graphs.
+        """Capture CUDA stream transfers; close resets the returned graphs.
 
         Warm up and register buffers first. Use this context instead of external
         capture so callbacks remain alive. Serialize replay and close. Captured
@@ -356,15 +356,73 @@ class NIXLTransport(Transport):
         """
         return self._cuda_bridge(stream or torch.cuda.current_stream()).capture()
 
-    def _start(
-        self, operation, local_buffer, remote_buffer, *, mutable, async_op, timeout
+    def write_stream(
+        self,
+        local_buffer: MemoryView,
+        remote_buffer: RemoteBuffer,
+        *,
+        stream=None,
+        async_op: bool = False,
+        timeout: float | None = None,
+    ) -> int | Work:
+        """Write with CUDA producer/completion dependencies on stream (current by default).
+
+        CUDA calls return after enqueueing; async_op returns optional host Work.
+        CPU views use ordinary write behavior. See the prototype restrictions in
+        the distributed transport documentation.
+        """
+        return self._start_stream(
+            "WRITE",
+            local_buffer,
+            remote_buffer,
+            mutable=False,
+            stream=stream,
+            async_op=async_op,
+            timeout=timeout,
+        )
+
+    def read_stream(
+        self,
+        local_buffer: MutableMemoryView,
+        remote_buffer: RemoteBuffer,
+        *,
+        stream=None,
+        async_op: bool = False,
+        timeout: float | None = None,
+    ) -> int | Work:
+        """Read with CUDA stream ordering; CPU views use ordinary read behavior."""
+        return self._start_stream(
+            "READ",
+            local_buffer,
+            remote_buffer,
+            mutable=True,
+            stream=stream,
+            async_op=async_op,
+            timeout=timeout,
+        )
+
+    def _start_stream(
+        self,
+        operation,
+        local_buffer,
+        remote_buffer,
+        *,
+        mutable,
+        async_op,
+        timeout,
+        stream,
     ):
         if (
             isinstance(local_buffer, NIXLMemoryView)
             and local_buffer._memory._registration.tensor.is_cuda
         ):
             tensor = local_buffer._memory._registration.tensor
-            bridge = self._cuda_bridge(torch.cuda.current_stream(tensor.device))
+            stream = stream or torch.cuda.current_stream(tensor.device)
+            if stream.device != tensor.device:
+                raise ValueError(
+                    "stream and local tensor must use the same CUDA device"
+                )
+            bridge = self._cuda_bridge(stream)
             work = bridge._enqueue(
                 operation.lower(),
                 local_buffer,
@@ -373,7 +431,7 @@ class NIXLTransport(Transport):
             )
             # CUDA callers get stream ordering rather than a submitting-thread wait.
             return work if async_op else 0
-        return self._start_unordered(
+        return self._start(
             operation,
             local_buffer,
             remote_buffer,
@@ -382,7 +440,7 @@ class NIXLTransport(Transport):
             timeout=timeout,
         )
 
-    def _start_unordered(
+    def _start(
         self,
         operation: str,
         local_buffer: MemoryView,
@@ -449,20 +507,6 @@ class NIXLTransport(Transport):
         mutable: bool,
         timeout: float | None,
     ) -> None:
-        if (
-            isinstance(local_buffer, NIXLMemoryView)
-            and local_buffer._memory._registration.tensor.is_cuda
-        ):
-            work = self._start(
-                operation,
-                local_buffer,
-                remote_buffer,
-                mutable=mutable,
-                async_op=True,
-                timeout=timeout,
-            )
-            await wait_all([work], timeout=timeout)
-            return
         timeout = self._timeout if timeout is None else timeout
         _validate_timeout(timeout)
         deadline = time.monotonic() + timeout

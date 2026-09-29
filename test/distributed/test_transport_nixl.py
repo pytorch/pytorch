@@ -457,6 +457,8 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
         ):
             self.assertEqual(first.write(memory.to_view(), remote), 0)
             first.read(memory.to_mutable_view(), remote, async_op=True).wait()
+            self.assertEqual(first.write_stream(memory.to_view(), remote), 0)
+            first.read_stream(memory.to_mutable_view(), remote, async_op=True).wait()
         self.assertFalse(first._cuda_bridges)
 
     def test_native_setup_runs_on_calling_thread(self):

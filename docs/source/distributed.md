@@ -2272,7 +2272,7 @@ until unregistration or close, and tensors must not be resized or have their sto
 
 The base API does not order operations on CUDA streams or provide tracing,
 batching, or remote slicing. The experimental NIXL CUDA path below provides
-automatic stream ordering and graph capture. Descriptor classes define explicit
+explicit stream ordering and graph capture. Descriptor classes define explicit
 ``serialize()``/``deserialize()`` methods.
 The built-in backends declare their fields in a versioned JSON envelope; binary
 metadata is base64-encoded. Unknown fields, versions, backends, and invalid field
@@ -2347,8 +2347,10 @@ cannot interrupt a blocked native call, even when it releases the GIL.
 CUDA streams and graphs (prototype)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-For a registered CUDA tensor, NIXL ``read`` and ``write`` automatically order the
-transfer on that device's current stream. Previous producer work finishes before
+For a registered CUDA tensor, NIXL ``read_stream`` and ``write_stream`` order the
+transfer on the supplied ``stream`` or that device's current stream by default.
+Ordinary ``read``, ``write``, ``read_async``, and ``write_async`` retain their
+existing behavior and insert no CUDA dependencies. Previous producer work finishes before
 native submission; subsequent consumers wait for transfer completion. CPU tensors
 use the existing direct path without CUDA events, gates, or progress threads.
 Remote readiness is still the application's responsibility.
@@ -2357,14 +2359,13 @@ Remote readiness is still the application's responsibility.
 
     with torch.cuda.stream(stream):
         source_tensor.copy_(producer)
-        transport.write(source_view, remote_destination)
-        transport.read(destination_view, remote_source)
+        transport.write_stream(source_view, remote_destination)
+        transport.read_stream(destination_view, remote_source)
         consume(destination_tensor)
 
-CUDA calls return after enqueueing, not after a submitting-thread wait.
+CUDA stream-variant calls return after enqueueing, not after a submitting-thread wait.
 ``async_op=True`` returns a Work for optional host completion observation; the
-stream dependency is inserted regardless of that flag. ``read_async`` and
-``write_async`` await host completion as usual. CUDA transfer timeouts must be
+stream dependency is inserted regardless of that flag. Asyncio callers can await the returned Work with ``wait_all``. CUDA transfer timeouts must be
 positive; zero-timeout polling is available on returned Work via
 ``is_completed()``. CPU timeout and waiting behavior is unchanged.
 
@@ -2388,7 +2389,7 @@ Use ``transport.cuda_graph(stream)`` to retain callbacks and buffers across repl
 
     with transport.cuda_graph(stream) as graph:
         source_tensor.copy_(producer)
-        transport.write(source_view, remote_destination)
+        transport.write_stream(source_view, remote_destination)
     graph.replay()
 
 Capture records producer, submission, completion-gate, and consumer nodes without

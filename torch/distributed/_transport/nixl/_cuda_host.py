@@ -38,7 +38,7 @@ class _CudaWork(_PollingWork):
 
 
 class _CudaStreamBridge:
-    """Private per-stream callback lifetime owner for automatic CUDA transfers."""
+    """Private per-stream callback lifetime owner for explicit CUDA stream transfers."""
 
     def __init__(self, transport: NIXLTransport, stream: torch.cuda.Stream):
         if transport._plugin != "UCX":
@@ -191,7 +191,7 @@ class _CudaStreamBridge:
             def transfer():
                 try:
                     # This thread, unlike CUDA's callback thread, may call CUDA.
-                    work = self.transport._start_unordered(
+                    work = self.transport._start(
                         operation.upper(),
                         local,
                         remote,
