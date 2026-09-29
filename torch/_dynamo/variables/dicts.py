@@ -438,9 +438,7 @@ class ConstDictVariable(VariableTracker):
 
     def maybe_getitem_const(self, arg: VariableTracker) -> VariableTracker | None:
         key = HashableTracker(arg)
-        if key not in self.items:
-            return None
-        return self.items[key]
+        return self.items.get(key)
 
     def realize_key_vt(self, arg: VariableTracker) -> None:
         # Realize the LazyVT on a particular index

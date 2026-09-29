@@ -1280,6 +1280,30 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
 
+    def test_ordered_dict_setdefault_keyword_key_eq_once(self):
+        class Key:
+            calls = []
+
+            def __hash__(self):
+                self.calls.append("hash")
+                return 7
+
+            def __eq__(self, other):
+                self.calls.append("eq")
+                return isinstance(other, Key)
+
+        def fn():
+            Key.calls.clear()
+            d = OrderedDict()
+            d[Key()] = 1
+            return d.setdefault(key=Key(), default=2), list(Key.calls)
+
+        expected = (1, ["hash", "hash", "eq"])
+        self.assertEqual(fn(), expected)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(), expected)
+        self.assertEqual(compiled(), expected)
+
     def test_ordered_dict_subclass_fromkeys(self):
         def fn():
             class OD(OrderedDict):
