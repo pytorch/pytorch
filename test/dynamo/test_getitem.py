@@ -899,6 +899,43 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(fn(), self._compile(fn))
 
+    def test_slice_index_object_side_effect_order(self):
+        class Index:
+            def __init__(self):
+                self.calls = 0
+
+            def __index__(self):
+                self.calls += 1
+                return (1, 4, 2)[self.calls - 1]
+
+        def fn(value, index):
+            return value[index:index:index], index.calls
+
+        for value in ("abcdef", b"abcdef", list(range(6)), range(6)):
+            self.assertEqual(fn(value, Index()), self._compile(fn, value, Index()))
+
+    def test_slice_index_object_zero_step_effects(self):
+        class Index:
+            def __init__(self, value):
+                self.value = value
+                self.calls = 0
+
+            def __index__(self):
+                self.calls += 1
+                return self.value
+
+        def fn():
+            results = []
+            for value in ("abcdef", b"abcdef", list(range(6)), range(6)):
+                start, stop, step = Index(1), Index(4), Index(0)
+                try:
+                    value[start:stop:step]
+                except ValueError as exc:
+                    results.append((str(exc), start.calls, stop.calls, step.calls))
+            return results
+
+        self.assertEqual(fn(), self._compile(fn))
+
     def test_str_subscript_symbolic_index(self):
         # A non-constant key must fall through to the generic "unsupported
         # subscript" graph break, not leak AsPythonConstantNotImplementedError.
