@@ -2428,6 +2428,7 @@ class TestTensorCreation(TestCase):
             self.assertEqual(t[steps - 1], a[steps - 1])
 
     @onlyAccelerator
+    @skipXPU
     @largeTensorTest('16GB')
     def test_range_factories_64bit_indexing(self, device):
         bigint = 2 ** 31 + 1
@@ -2922,6 +2923,7 @@ class TestTensorCreation(TestCase):
     def test_refs_tensor(self, device, dtype):
         self.assertEqual(torch._refs.tensor([], device=device, dtype=dtype), torch.tensor([], device=device, dtype=dtype))
 
+    @onlyAccelerator
     def test_as_tensor(self, device):
         # from python data
         x = [[0, 1], [2, 3]]
@@ -2950,11 +2952,11 @@ class TestTensorCreation(TestCase):
         y = torch.tensor(x)
         self.assertIs(y, torch.as_tensor(y))
         self.assertIsNot(y, torch.as_tensor(y, dtype=torch.float32))
-        if torch.accelerator.is_available():
-            self.assertIsNot(y, torch.as_tensor(y, device=device))
-            y_acc = y.to(device)
-            self.assertIs(y_acc, torch.as_tensor(y_acc))
-            self.assertIs(y_acc, torch.as_tensor(y_acc, device=device))
+
+        self.assertIsNot(y, torch.as_tensor(y, device=device))
+        y_acc = y.to(device)
+        self.assertIs(y_acc, torch.as_tensor(y_acc))
+        self.assertIs(y_acc, torch.as_tensor(y_acc, device=device))
 
         # doesn't copy
         for dtype in [np.float64, np.int64, np.int8, np.uint8]:
@@ -2972,12 +2974,11 @@ class TestTensorCreation(TestCase):
         self.assertNotEqual(torch.tensor(n, dtype=torch.float64), n_astensor)
 
         # changing device causes copy
-        if torch.accelerator.is_available():
-            n = np.random.randn(5, 6)
-            n_astensor = torch.as_tensor(n, device=device)
-            self.assertEqual(torch.tensor(n, device=device), n_astensor)
-            n_astensor[0][2] = 250.9
-            self.assertNotEqual(torch.tensor(n, device=device), n_astensor)
+        n = np.random.randn(5, 6)
+        n_astensor = torch.as_tensor(n, device=device)
+        self.assertEqual(torch.tensor(n, device=device), n_astensor)
+        n_astensor[0][2] = 250.9
+        self.assertNotEqual(torch.tensor(n, device=device), n_astensor)
 
 
 @instantiate_parametrized_tests
@@ -3242,6 +3243,50 @@ class TestTensorCreationGeneric(TestCase):
     def test_storage_filename(self):
         t = torch.randn(2, 5)
         self.assertIsNone(t.untyped_storage().filename)
+
+    def test_as_tensor(self):
+        # from python data
+        x = [[0, 1], [2, 3]]
+        self.assertEqual(torch.tensor(x), torch.as_tensor(x))
+        self.assertEqual(torch.tensor(x, dtype=torch.float32), torch.as_tensor(x, dtype=torch.float32))
+
+        # python data with heterogeneous types
+        z = [0, 'torch']
+        with self.assertRaisesRegex(TypeError, "invalid data type"):
+            torch.tensor(z)
+            torch.as_tensor(z)
+
+        # python data with self-referential lists
+        z = [0]
+        z += [z]
+        with self.assertRaisesRegex(TypeError, "self-referential lists are incompatible"):
+            torch.tensor(z)
+            torch.as_tensor(z)
+
+        z = [[1, 2], z]
+        with self.assertRaisesRegex(TypeError, "self-referential lists are incompatible"):
+            torch.tensor(z)
+            torch.as_tensor(z)
+
+        # from tensor (doesn't copy unless type is different)
+        y = torch.tensor(x)
+        self.assertIs(y, torch.as_tensor(y))
+        self.assertIsNot(y, torch.as_tensor(y, dtype=torch.float32))
+
+        # doesn't copy
+        for dtype in [np.float64, np.int64, np.int8, np.uint8]:
+            n = np.random.rand(5, 6).astype(dtype)
+            n_astensor = torch.as_tensor(n)
+            self.assertEqual(torch.tensor(n), n_astensor)
+            n_astensor[0][0] = 25.7
+            self.assertEqual(torch.tensor(n), n_astensor)
+
+        # changing dtype causes copy
+        n = np.random.rand(5, 6).astype(np.float32)
+        n_astensor = torch.as_tensor(n, dtype=torch.float64)
+        self.assertEqual(torch.tensor(n, dtype=torch.float64), n_astensor)
+        n_astensor[0][1] = 250.8
+        self.assertNotEqual(torch.tensor(n, dtype=torch.float64), n_astensor)
 
 class TestTensorCreationCudaOnly(TestCase):
     hw_classification = HardwareClassification.CUDA
