@@ -1455,6 +1455,7 @@ jobs:
             build_name: "manywheel-py3_11-rocm10_0"
           - desired_python: "3.11"
             desired_cuda: "rocmpreview"
+            upload_subfolder: "rocm-preview"
             gpu_arch_version: "preview"
             gpu_arch_type: "rocm"
             docker_image: "manylinux2_28-builder"
@@ -1476,6 +1477,7 @@ jobs:
             build_name: "manywheel-py3_12-rocm10_0"
           - desired_python: "3.12"
             desired_cuda: "rocmpreview"
+            upload_subfolder: "rocm-preview"
             gpu_arch_version: "preview"
             gpu_arch_type: "rocm"
             docker_image: "manylinux2_28-builder"
@@ -1497,6 +1499,7 @@ jobs:
             build_name: "manywheel-py3_13-rocm10_0"
           - desired_python: "3.13"
             desired_cuda: "rocmpreview"
+            upload_subfolder: "rocm-preview"
             gpu_arch_version: "preview"
             gpu_arch_type: "rocm"
             docker_image: "manylinux2_28-builder"
@@ -1518,6 +1521,7 @@ jobs:
             build_name: "manywheel-py3_14-rocm10_0"
           - desired_python: "3.14"
             desired_cuda: "rocmpreview"
+            upload_subfolder: "rocm-preview"
             gpu_arch_version: "preview"
             gpu_arch_type: "rocm"
             docker_image: "manylinux2_28-builder"
@@ -1539,6 +1543,7 @@ jobs:
             build_name: "manywheel-py3_14t-rocm10_0"
           - desired_python: "3.14t"
             desired_cuda: "rocmpreview"
+            upload_subfolder: "rocm-preview"
             gpu_arch_version: "preview"
             gpu_arch_type: "rocm"
             docker_image: "manylinux2_28-builder"
@@ -1560,6 +1565,7 @@ jobs:
             build_name: "manywheel-py3_15-rocm10_0"
           - desired_python: "3.15"
             desired_cuda: "rocmpreview"
+            upload_subfolder: "rocm-preview"
             gpu_arch_version: "preview"
             gpu_arch_type: "rocm"
             docker_image: "manylinux2_28-builder"
@@ -1581,6 +1587,7 @@ jobs:
             build_name: "manywheel-py3_15t-rocm10_0"
           - desired_python: "3.15t"
             desired_cuda: "rocmpreview"
+            upload_subfolder: "rocm-preview"
             gpu_arch_version: "preview"
             gpu_arch_type: "rocm"
             docker_image: "manylinux2_28-builder"
@@ -1667,6 +1674,7 @@ jobs:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       DESIRED_CUDA: ${{ matrix.desired_cuda }}
+      UPLOAD_SUBFOLDER: ${{ matrix.upload_subfolder || '' }}
       GPU_ARCH_VERSION: ${{ matrix.gpu_arch_version }}
       GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
       DOCKER_IMAGE: ${{ matrix.docker_image }}
@@ -1830,6 +1838,7 @@ jobs:
             libtorch_config: "release"
             build_name: "libtorch-rocm10_0-shared-with-deps-release"
           - desired_cuda: "rocmpreview"
+            upload_subfolder: "rocm-preview"
             gpu_arch_type: "rocm"
             gpu_arch_version: "preview"
             libtorch_variant: "shared-with-deps"
@@ -1839,6 +1848,7 @@ jobs:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: libtorch
       DESIRED_CUDA: ${{ matrix.desired_cuda }}
+      UPLOAD_SUBFOLDER: ${{ matrix.upload_subfolder || '' }}
       GPU_ARCH_VERSION: ${{ matrix.gpu_arch_version }}
       GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
       LIBTORCH_CONFIG: ${{ matrix.libtorch_config }}

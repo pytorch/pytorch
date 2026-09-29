@@ -594,6 +594,9 @@ jobs:
         {%- for config in job['configs'] %}
           - desired_python: "!{{ config['python_version'] }}"
             desired_cuda: "!{{ config['desired_cuda'] }}"
+          {%- if config.get('upload_subfolder') %}
+            upload_subfolder: "!{{ config['upload_subfolder'] }}"
+          {%- endif %}
             gpu_arch_version: "!{{ config['gpu_arch_version'] | default('') }}"
             gpu_arch_type: "!{{ config['gpu_arch_type'] }}"
             docker_image: "!{{ config['container_image'] }}"
@@ -604,6 +607,9 @@ jobs:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: !{{ build_configs[0]['package_type'] }}
       DESIRED_CUDA: ${{ matrix.desired_cuda }}
+{%- if job['name'] == 'manywheel-rocm-upload' %}
+      UPLOAD_SUBFOLDER: ${{ matrix.upload_subfolder || '' }}
+{%- endif %}
       GPU_ARCH_VERSION: ${{ matrix.gpu_arch_version }}
       GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
       DOCKER_IMAGE: ${{ matrix.docker_image }}
@@ -703,6 +709,9 @@ jobs:
         include:
         {%- for lt_config in libtorch_extraction_configs %}
           - desired_cuda: "!{{ lt_config['desired_cuda'] }}"
+          {%- if lt_config.get('upload_subfolder') %}
+            upload_subfolder: "!{{ lt_config['upload_subfolder'] }}"
+          {%- endif %}
             gpu_arch_type: "!{{ lt_config['gpu_arch_type'] }}"
             gpu_arch_version: "!{{ lt_config['gpu_arch_version'] }}"
             libtorch_variant: "!{{ lt_config['libtorch_variant'] }}"
@@ -713,6 +722,9 @@ jobs:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: libtorch
       DESIRED_CUDA: ${{ matrix.desired_cuda }}
+{%- if rocm_configs %}
+      UPLOAD_SUBFOLDER: ${{ matrix.upload_subfolder || '' }}
+{%- endif %}
       GPU_ARCH_VERSION: ${{ matrix.gpu_arch_version }}
       GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
       LIBTORCH_CONFIG: ${{ matrix.libtorch_config }}

@@ -134,12 +134,15 @@ def _rocm_channel(arch: str, separator: str = "") -> str:
     return f"rocm{separator}{arch}"
 
 
-# Display names keep a hyphen (rocm-preview); index_url matches UPLOAD_SUBFOLDER
-# (DESIRED_CUDA), which is hyphen-free (rocmpreview). Mixing them 404s nightly.py.
+# Preview uses a hyphenated display, upload, and index channel; desired_cuda
+# stays hyphen-free for wheel metadata and stable HUD job names.
 ROCM_NIGHTLY_SOURCE_MATRIX = {
     _rocm_channel(arch, "-"): dict(
         name=_rocm_channel(arch, "-"),
-        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/{_rocm_channel(arch)}",
+        index_url=(
+            f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/"
+            f"{_rocm_channel(arch, '-' if arch == 'preview' else '')}"
+        ),
         supported_platforms=["Linux"],
         accelerator="rocm",
     )
@@ -506,6 +509,9 @@ def generate_wheels_matrix(
                             arch_version
                         ].split(":")[1],
                         "package_type": package_type,
+                        "upload_subfolder": (
+                            "rocm-preview" if gpu_arch_version == "preview" else ""
+                        ),
                         "build_name": f"{package_type}-py{python_version}-{build_name_arch}".replace(
                             ".", "_"
                         ),
@@ -589,6 +595,8 @@ def generate_libtorch_extraction_configs(
             lt_config["container_image_tag_prefix"] = source_config[
                 "container_image_tag_prefix"
             ]
+        if source_config.get("upload_subfolder"):
+            lt_config["upload_subfolder"] = source_config["upload_subfolder"]
         ret.append(lt_config)
 
     return ret
