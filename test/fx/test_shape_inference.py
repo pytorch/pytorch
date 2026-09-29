@@ -3,6 +3,7 @@
 import copy
 from collections import defaultdict
 
+import sympy as sp
 import torch
 import torch.fx as fx
 from torch._dynamo.source import LocalSource
@@ -83,6 +84,39 @@ class TestShapeInference(TestCase):
         self.assertEqual(symints[5], 40)
         self.assertEqual(symints[6], 160)
         self.assertEqual(symints[7], 4258)
+
+    def test_infer_symbol_values_batch_cancellation(self):
+        # Regression test for infer_symbol_values.py:65. In the
+        # "is invalid for input of size" branch, the batch symbol must be
+        # divided out using str(init_symints[0]); reverting to a literal "s0"
+        # leaves the batch symbol in the right-hand expression, so the resolved
+        # var becomes PYTHONHASHSEED-dependent and the batch symbol leaks into
+        # padding_constraints. Unlike test_infer_symbol_values, the batch symbol
+        # here does not cancel algebraically against the left side, so this
+        # exercises the loop at lines 64-67 directly. Checking the stored
+        # equation's content (not just the key) makes the failure deterministic
+        # regardless of which free_symbol is iterated first.
+        shape_env = ShapeEnv()
+        init_symints = [
+            mksym(shape_env, 2, LocalSource("b"), DimDynamic.DYNAMIC),
+            mksym(shape_env, 2, LocalSource("s"), DimDynamic.DYNAMIC),
+        ]
+        symints = copy.deepcopy(init_symints)
+        name = [str(sym) for sym in init_symints]
+        symbol_to_idx_dict = {n: i for i, n in enumerate(name)}
+        padding_constraints = defaultdict(list)
+
+        infer_symbol_values(
+            symints,
+            init_symints,
+            symbol_to_idx_dict,
+            padding_constraints,
+            f"shape '[-1, 47]' is invalid for input of size 32*{name[0]}*{name[1]} + 1344*{name[0]}",
+        )
+
+        self.assertEqual({str(k) for k in padding_constraints}, {name[1]})
+        s_key = sp.sympify(name[1])
+        self.assertEqual(padding_constraints[s_key][0], 32 * s_key + 1344)
 
     def test_infer_shape(self):
         class TestModule(torch.nn.Module):
