@@ -1,0 +1,79 @@
+name: Setup Linux rootless
+description: Prepare a Linux ARC test container without sudo
+
+inputs:
+  python-version:
+    description: Python version of the image virtual environment
+    required: true
+  github-token:
+    description: Token used to look up the workflow job ID
+    required: false
+    default: ''
+
+outputs:
+  branch:
+    description: Parsed branch name from GITHUB_REF
+    value: ${{ steps.parse-ref.outputs.branch }}
+  tag:
+    description: Parsed tag name from GITHUB_REF
+    value: ${{ steps.parse-ref.outputs.tag }}
+  job-id:
+    description: Workflow job ID
+    value: ${{ steps.get-job-id.outputs.job-id }}
+  job-name:
+    description: Workflow job name
+    value: ${{ steps.get-job-id.outputs.job-name }}
+
+runs:
+  using: composite
+  steps:
+    - name: Prepare writable Python environment
+      shell: bash
+      run: |
+        set -euo pipefail
+        test -w "$GITHUB_WORKSPACE"
+
+        BASE_VENV="/opt/python-${{ inputs.python-version }}-venv"
+        SITE_PACKAGES=$("$BASE_VENV/bin/python3" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')
+        if [[ -w "$SITE_PACKAGES" ]]; then
+          exit 0
+        fi
+
+        WRITABLE_VENV="${RUNNER_TEMP}/python-venv"
+        "$BASE_VENV/bin/python3" -m venv "$WRITABLE_VENV"
+        WRITABLE_SITE_PACKAGES=$("$WRITABLE_VENV/bin/python3" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')
+        printf '%s\n' "$SITE_PACKAGES" > "$WRITABLE_SITE_PACKAGES/pytorch-ci-base.pth"
+        cp -R "$SITE_PACKAGES/numba" "$WRITABLE_SITE_PACKAGES/numba"
+        chmod -R u+w "$WRITABLE_SITE_PACKAGES/numba"
+        test -w "$WRITABLE_SITE_PACKAGES/numba/cuda/cudadrv/driver.py"
+        {
+          echo "VIRTUAL_ENV=$WRITABLE_VENV"
+          echo "VENV_PATH=$WRITABLE_VENV"
+        } >> "$GITHUB_ENV"
+        echo "$WRITABLE_VENV/bin" >> "$GITHUB_PATH"
+
+    - name: Ack Git cache ownership
+      shell: bash
+      run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+    - name: Parse ref
+      id: parse-ref
+      shell: bash
+      run: python3 .github/scripts/parse_ref.py
+
+    - name: Get workflow job ID
+      id: get-job-id
+      if: ${{ inputs.github-token != '' }}
+      uses: pytorch/pytorch/.github/actions/get-workflow-job-id@main
+      with:
+        github-token: ${{ inputs.github-token }}
+
+    - name: Print GPU info
+      shell: bash
+      run: if [[ -x /usr/bin/nvidia-smi ]]; then nvidia-smi; fi
+
+    - name: Preserve GitHub environment
+      shell: bash
+      run: |
+        env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+        env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
