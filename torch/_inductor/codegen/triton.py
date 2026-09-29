@@ -3323,7 +3323,7 @@ class TMACompatibilityChecker:
                 )
 
                 if (
-                    self.kernel.mix_order_reduction
+                    self.kernel.mix_order_reduction is True
                     and innermost_block_symt == SymT.XBLOCK
                     and (
                         self.kernel.rsplit_size % min_block_size != 0
