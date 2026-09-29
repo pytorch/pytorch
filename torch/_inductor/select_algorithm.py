@@ -394,19 +394,35 @@ class SubgraphInfo:
 
 
 class _StoreOutputCapture(V.WrapperHandler):  # type: ignore[name-defined]
-    """Capture selected stores as kernel-local values during fused codegen."""
+    """Ops handler used while generating code for producers fused into a template.
+
+    Example: addmm(bias * 2.0 - 1.0, a, b) with the bias producer fused. The
+    default handler would emit:
+
+        tmp3 = tmp1 * 2.0 - 1.0
+        tl.store(buf0 + idx, tmp3)   # write computed bias to memory
+        ...
+        bias = tl.load(buf0 + idx)   # template reads it back
+        out = acc + bias
+
+    This handler instead:
+      - skips the tl.store, so buf0 is never written or allocated.
+      - records buf0 -> tmp3 in cse.store_cache, so the template's later load
+        of buf0 returns tmp3 instead of emitting a tl.load. This is required:
+        with the store skipped, that load would read memory never written.
+      - calls on_store(name, value), if given (e.g. to assign it to a variable).
+
+    If capture_names is set, only those buffers are handled this way; stores to
+    other buffers go through normally.
+    """
 
     def __init__(
         self,
         inner,
         *,
-        captured_values: dict[str, CSEVariable] | None = None,
-        capture_names: OrderedSet[str] | None = None,
         on_store: Callable[[str, CSEVariable], None] | None = None,
     ) -> None:
         super().__init__(inner)
-        self.captured_values = captured_values
-        self.capture_names = capture_names
         self.on_store = on_store
 
     def store(
@@ -416,13 +432,8 @@ class _StoreOutputCapture(V.WrapperHandler):  # type: ignore[name-defined]
         value: CSEVariable,
         mode: StoreMode = None,
     ):
-        if self.capture_names is not None and name not in self.capture_names:
-            return self._inner.store(name, index, value, mode)
-
         V.kernel.store_buffer_names.add(name)
         V.kernel.cse.store_cache[name] = value
-        if self.captured_values is not None:
-            self.captured_values[name] = value
         if self.on_store is not None:
             self.on_store(name, value)
         return None
@@ -1790,7 +1801,6 @@ class TritonTemplateKernel(TritonKernel):
             )
             output_dtype = self.output_node.get_dtype()
 
-            captured_store_output_input_values: dict[str, CSEVariable] = {}
             for input_index in self.prefix_inputs_fusion_indices:
                 input_node = self.input_nodes[input_index]
                 input_name = input_node.get_name()
@@ -1798,30 +1808,23 @@ class TritonTemplateKernel(TritonKernel):
                 if not prologue_group:
                     continue
 
-                capture_names: OrderedSet[str] = OrderedSet()
-                for prologue_node in prologue_group:
-                    capture_names |= prologue_node.get_buffer_names()
                 can_codegen_without_upcast = all(
                     node.can_codegen_without_upcasts() for node in prologue_group
-                )
-                capture_handler = _StoreOutputCapture(
-                    V.get_ops_handler(),
-                    captured_values=captured_store_output_input_values,
-                    capture_names=capture_names,
                 )
                 with (
                     config.patch(
                         "triton.codegen_upcast_to_fp32",
                         not can_codegen_without_upcast,
                     ),
-                    V.set_ops_handler(capture_handler),
+                    V.set_ops_handler(_StoreOutputCapture(V.get_ops_handler())),
                 ):
                     for prologue_node in prologue_group:
                         prologue_node.codegen(
                             self.split_and_set_ranges(prologue_node.get_ranges())
                         )
 
-                if input_name not in captured_store_output_input_values:
+                # The epilogue loads below hit this store_cache entry.
+                if input_name not in V.kernel.cse.store_cache:
                     raise AssertionError(
                         f"failed to capture store-output prologue for {input_name}"
                     )
@@ -1842,16 +1845,12 @@ class TritonTemplateKernel(TritonKernel):
                 self.input_nodes[len(self.input_nodes) - self.suffix_args :],
             ):
                 input_node.freeze_layout()
-                input_name = input_node.get_name()
-                if input_name in captured_store_output_input_values:
-                    epilogue_arg = captured_store_output_input_values[input_name]
-                else:
-                    epilogue_arg = V.kernel.cse.generate(
-                        self.compute,
-                        input_node.make_loader()(index_symbols),
-                        dtype=acc_dtype,
-                        shape=input_node.get_size(),
-                    )
+                epilogue_arg = V.kernel.cse.generate(
+                    self.compute,
+                    input_node.make_loader()(index_symbols),
+                    dtype=acc_dtype,
+                    shape=input_node.get_size(),
+                )
                 epilogue_args.append(epilogue_arg)
                 # We update frozen_layouts_cnt in order to replay this function on a cache hit.
                 self.frozen_layouts_cnt += 1
@@ -2620,16 +2619,13 @@ class ExternalTritonTemplateKernel(TritonTemplateKernel):
             "result": result_var,
         }
 
-        class _CaptureStoreHandler(V.WrapperHandler):  # type: ignore[name-defined]
-            def store(self, name, index, value, mode=None):
-                V.kernel.store_buffer_names.add(name)
-                V.kernel.cse.store_cache[name] = value
-                V.kernel.compute.writeline(f"{result_var} = {value}")
+        def write_result(name: str, value: CSEVariable) -> None:
+            V.kernel.compute.writeline(f"{result_var} = {value}")
 
         self._make_independent_subgraph(
             subgraph_name,
             sympy_product(ir_node.get_size()),
-            ops_handler=_CaptureStoreHandler,
+            ops_handler=functools.partial(_StoreOutputCapture, on_store=write_result),
             root_var_renames=renames,
         )
 
