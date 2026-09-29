@@ -12621,6 +12621,14 @@ aot_autograd_failures = {
         decorator=toleranceOverride({torch.float32: tol(atol=1e-02, rtol=1e-02)}),
     ),
     decorate(
+        "linalg.pinv",
+        "hermitian",
+        # Small gradient entries come from cancellation against much larger ones
+        # (max |grad| ~3e4 for cond ~7e2), so eager vs compiled rounding
+        # differences are absolute rather than relative to each entry
+        decorator=toleranceOverride({torch.float32: tol(atol=1e-03, rtol=1e-05)}),
+    ),
+    decorate(
         "cholesky_inverse",
         # Numerical differences due to tangent stride differences between
         # eager (.sum().backward() uses contiguous tangent) and compiled
