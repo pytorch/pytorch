@@ -2754,7 +2754,7 @@ class TestMPS(TestCaseMPS):
         # Compare against CPU using a copy of the model
         import copy
         y_cpu = copy.deepcopy(model).cpu()(x.detach().cpu())
-        self.assertEqual(y_cpu, y_mps.cpu(), atol=1e-3, rtol=1e-3)
+        self.assertEqual(y_cpu, y_mps.cpu())
         y_mps.sum().backward()
         self.assertIsNotNone(x.grad)
 
