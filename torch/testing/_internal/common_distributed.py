@@ -261,20 +261,20 @@ def skip_if_odd_worldsize(func):
     return wrapper
 
 
-def require_n_gpus_for_nccl_backend(n, backend):
+def require_n_gpus_for_nccl_backend(n: int, backend: str):
+    """Skip the test for the NCCL/XCCL backend if there are not enough accelerators"""
+
     needs_accelerator = backend in ("nccl", "xccl")
 
     def decorator(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            if needs_accelerator and torch.accelerator.device_count() < n:
-                sys.exit(TEST_SKIPS[f"multi-device-{n}"].exit_code)
-            else:
-                return func(*args, **kwargs)
+        decorated = unittest.skipIf(
+            needs_accelerator and torch.accelerator.device_count() < n,
+            TEST_SKIPS[f"multi-device-{n}"].message,
+        )(func)
 
         if needs_accelerator:
-            wrapper._min_gpus_required = n
-        return wrapper
+            decorated._min_gpus_required = n
+        return decorated
 
     return decorator
 
@@ -317,8 +317,7 @@ def skip_if_lt_x_gpu(x, *, allow_cpu=False):
 
     def decorator(func):
         decorated = unittest.skipUnless(
-            at_least_x_gpu(x)
-            or (allow_cpu and not torch.accelerator.is_available()),
+            at_least_x_gpu(x) or (allow_cpu and not torch.accelerator.is_available()),
             TEST_SKIPS[f"multi-device-{x}"].message,
         )(func)
 
@@ -373,26 +372,6 @@ def get_required_world_size(obj: Any, default: int) -> int:
         return int(value)
     except Exception:
         return default
-
-
-# This decorator helps avoiding initializing cuda while testing other backends
-def nccl_skip_if_lt_x_gpu(backend, x):
-    def decorator(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            if backend != "nccl":
-                return func(*args, **kwargs)
-            if torch.cuda.is_available() and torch.cuda.device_count() >= x:
-                return func(*args, **kwargs)
-            test_skip = TEST_SKIPS[f"multi-device-{x}"]
-            if not _maybe_handle_skip_if_lt_x_gpu(args, test_skip.message):
-                sys.exit(test_skip.exit_code)
-
-        if backend == "nccl":
-            wrapper._min_gpus_required = x
-        return wrapper
-
-    return decorator
 
 
 def verify_ddp_error_logged(model_DDP, err_substr):
