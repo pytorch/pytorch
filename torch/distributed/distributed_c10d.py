@@ -21,7 +21,6 @@ import warnings
 from collections.abc import Callable, Sequence
 from datetime import timedelta
 from typing import (
-    Any,
     cast,
     Final,
     Literal,
@@ -200,10 +199,22 @@ _XCCL_AVAILABLE = True
 _TORCHCOMM_AVAILABLE = importlib.util.find_spec("torchcomms") is not None
 _torchcomms_loaded: dict[str, Callable[..., object]] | None = None
 _torchcomms_natives_bound = False
-# None until torchcomms is used. Tests may patch these before that.
-_BackendWrapper: Any = None
-new_comm: Any = None
-_TorchCommsFlightRecorderHook: Any = None
+if TYPE_CHECKING:
+    # Real types for checkers only. These imports are not executed, so they
+    # do not dlopen torchcomms.
+    # pyrefly: ignore [missing-import]
+    from torchcomms import new_comm
+
+    # pyrefly: ignore [missing-import]
+    from torchcomms._backend_wrapper import _BackendWrapper
+
+    # pyrefly: ignore [missing-import]
+    from torchcomms.hooks import FlightRecorderHook as _TorchCommsFlightRecorderHook
+else:
+    # None until torchcomms is used. Tests may patch these before that.
+    _BackendWrapper = None
+    new_comm = None
+    _TorchCommsFlightRecorderHook = None
 
 
 def _import_torchcomms() -> dict[str, Callable[..., object]]:
