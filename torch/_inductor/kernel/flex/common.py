@@ -325,6 +325,14 @@ def set_head_dim_values(
         "QK_HEAD_DIM_ROUNDED", next_power_of_two(qk_head_dim_static)
     )
 
+    chunks = exact_power_of_2_split(qk_head_dim_static) if torch.xpu.is_available() else None
+    kernel_options.setdefault("USE_HEAD_DIM_TILING", chunks is not None)
+    if chunks is None:
+        kernel_options["USE_HEAD_DIM_TILING"] = False
+    else:
+        kernel_options.setdefault("QK_HEAD_DIM_CHUNK0", chunks[0])
+        kernel_options.setdefault("QK_HEAD_DIM_CHUNK1", chunks[1])
+
     # V dimensions
     v_head_dim_static = graph_sizevars.guard_int(v_head_dim)
     kernel_options.setdefault("V_HEAD_DIM", v_head_dim_static)
@@ -341,6 +349,19 @@ def set_head_dim_values(
 
 def is_power_of_2(n):
     return n != 0 and ((n & (n - 1)) == 0)
+
+
+MIN_HEAD_DIM_CHUNK = 16
+
+
+def exact_power_of_2_split(n):
+    if n <= 0 or is_power_of_2(n):
+        return None
+    c0 = 1 << (n.bit_length() - 1)
+    c1 = n - c0
+    if not is_power_of_2(c1) or c1 < MIN_HEAD_DIM_CHUNK:
+        return None
+    return (c0, c1)
 
 
 def next_power_of_two(n):

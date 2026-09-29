@@ -16,6 +16,9 @@ def forward_block_mn(
     # Strides for K and V
     stride_kk, stride_kn, stride_vn, stride_vk,
     IS_FULL_BLOCKS, CHECK_BLOCK_BOUNDARY=False,
+    {%- if USE_HEAD_DIM_TILING and USE_TMA %}
+    q1=None, desc_k1=None,
+    {%- endif %}
 
 ):
     # Redefines all kernel parameters (BLOCK_M, etc.) so we don't need to plumb them all through
@@ -24,22 +27,32 @@ def forward_block_mn(
     # -- load k --
     # NB reversed order to since K is transposed
     kv_base_offset = kv_start + kv_offset
-    {%- if USE_TMA %}
+    {%- if USE_HEAD_DIM_TILING and USE_TMA %}
+    k0 = tl.load_tensor_descriptor(desc_k, [kv_base_offset, 0])
+    k1 = tl.load_tensor_descriptor(desc_k1, [kv_base_offset, QK_HEAD_DIM_CHUNK0])
+    k0 = tl.trans(k0)
+    k1 = tl.trans(k1)
+    # -- compute qk ---
+    qk = (tl.dot(q, k0, input_precision=FLOAT32_PRECISION)
+          + tl.dot(q1, k1, input_precision=FLOAT32_PRECISION))
+    {%- elif USE_TMA %}
     k = tl.load_tensor_descriptor(
         desc_k,
         [kv_base_offset, 0],
     )
+    k = tl.trans(k)
+    # -- compute qk ---
+    qk = tl.dot(q, k, input_precision=FLOAT32_PRECISION) # TODO: use cuda matmul when q_len <= 2.
     {%- else %}
 
     # Load K as [BLOCK_N, QK_HEAD_DIM_ROUNDED] then transpose to [QK_HEAD_DIM_ROUNDED, BLOCK_N]
     offs_k = tl.arange(0, QK_HEAD_DIM_ROUNDED)
     offs_n_load = kv_base_offset + tl.arange(0, BLOCK_N)
     k = load_checked_2d(K, offs_n_load, offs_k, stride_kn, stride_kk, IS_DIVISIBLE, SAFE_HEAD_DIM, KV_LEN, QK_HEAD_DIM)
-    {%- endif %}
-
     k = tl.trans(k)
     # -- compute qk ---
     qk = tl.dot(q, k, input_precision=FLOAT32_PRECISION) # TODO: use cuda matmul when q_len <= 2.
+    {%- endif %}
     if not PRESCALE_QK:
         qk *= SM_SCALE
     # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
@@ -138,6 +151,9 @@ def forward_inner(
     # Strides for K and V
     stride_kk, stride_kn, stride_vn, stride_vk,
     IS_FULL_BLOCKS,
+    {%- if USE_HEAD_DIM_TILING and USE_TMA %}
+    q1=None, desc_k1=None,
+    {%- endif %}
 ):
     # Redefines all kernel parameters (BLOCK_M, etc.) so we don't need to plumb them all through
     {{gen_defines() | indent_except_first(1)}}
@@ -147,6 +163,9 @@ def forward_inner(
 
     if PRESCALE_QK:
         q = (q * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
+        {%- if USE_HEAD_DIM_TILING and USE_TMA %}
+        q1 = (q1 * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
+        {%- endif %}
 
     kv_offset = 0
 
@@ -168,6 +187,9 @@ def forward_inner(
                 # Strides for K and V
                 stride_kk, stride_kn, stride_vn, stride_vk,
                 IS_FULL_BLOCKS,
+                {%- if USE_HEAD_DIM_TILING and USE_TMA %}
+                q1=q1, desc_k1=desc_k1,
+                {%- endif %}
             )
         else:
             # Benchmark shows even we applied mod & mask to each block for non divisible seqlen,
@@ -188,6 +210,9 @@ def forward_inner(
                 # Strides for K and V
                 stride_kk, stride_kn, stride_vn, stride_vk,
                 IS_FULL_BLOCKS, CHECK_BLOCK_BOUNDARY=True,
+                {%- if USE_HEAD_DIM_TILING and USE_TMA %}
+                q1=q1, desc_k1=desc_k1,
+                {%- endif %}
             )
 
 

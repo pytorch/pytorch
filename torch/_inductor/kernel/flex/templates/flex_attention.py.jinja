@@ -67,7 +67,40 @@
     desc_q = None
     desc_k = None
     desc_v = None
+    {%- if USE_HEAD_DIM_TILING and USE_TMA %}
+    desc_q1 = None
+    desc_k1 = None
+    {%- endif %}
     {%- if USE_TMA %}
+    {%- if USE_HEAD_DIM_TILING %}
+    desc_q = tl.make_tensor_descriptor(
+        base=Q,
+        shape=[Q_LEN, QK_HEAD_DIM],
+        strides=[stride_qm, 1],
+        block_shape=[BLOCK_M, QK_HEAD_DIM_CHUNK0],
+    )
+
+    desc_q1 = tl.make_tensor_descriptor(
+        base=Q,
+        shape=[Q_LEN, QK_HEAD_DIM],
+        strides=[stride_qm, 1],
+        block_shape=[BLOCK_M, QK_HEAD_DIM_CHUNK1],
+    )
+
+    desc_k = tl.make_tensor_descriptor(
+        base=K,
+        shape=[KV_LEN, QK_HEAD_DIM],
+        strides=[stride_kn, 1],
+        block_shape=[BLOCK_N, QK_HEAD_DIM_CHUNK0],
+    )
+
+    desc_k1 = tl.make_tensor_descriptor(
+        base=K,
+        shape=[KV_LEN, QK_HEAD_DIM],
+        strides=[stride_kn, 1],
+        block_shape=[BLOCK_N, QK_HEAD_DIM_CHUNK1],
+    )
+    {%- else %}
     desc_q = tl.make_tensor_descriptor(
         base=Q,
         shape=[Q_LEN, QK_HEAD_DIM],
@@ -81,6 +114,7 @@
         strides=[stride_kn, 1],
         block_shape=[BLOCK_N, QK_HEAD_DIM_ROUNDED],
     )
+    {%- endif %}
 
     desc_v = tl.make_tensor_descriptor(
         base=V,
@@ -115,7 +149,16 @@
     sparse_kv_num_blks_offset = sparse_hz_offset * stride_kv_num_blks_h + q_start // SPARSE_Q_MULTIPLE
     sparse_kv_idx_offset = sparse_hz_offset * stride_kv_idx_h + (q_start // SPARSE_Q_MULTIPLE) * stride_kv_idx_m  # noqa: B950
 
-    {%- if USE_TMA %}
+    {%- if USE_HEAD_DIM_TILING and USE_TMA %}
+    q = tl.load_tensor_descriptor(
+        desc_q,
+        [(q_start * BLOCK_M).to(tl.int32), 0],
+    )
+    q1 = tl.load_tensor_descriptor(
+        desc_q1,
+        [(q_start * BLOCK_M).to(tl.int32), QK_HEAD_DIM_CHUNK0],
+    )
+    {%- elif USE_TMA %}
     q = tl.load_tensor_descriptor(
         desc_q,
         [(q_start * BLOCK_M).to(tl.int32), 0],
@@ -152,6 +195,9 @@
         MATMUL_PRECISION,
         stride_kk, stride_kn, stride_vn, stride_vk,
         IS_FULL_BLOCKS=False,
+        {%- if USE_HEAD_DIM_TILING and USE_TMA %}
+        q1=q1, desc_k1=desc_k1,
+        {%- endif %}
     )
 
     # ~~~~~~~~~~~~~~ "full" blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -178,6 +224,9 @@
             MATMUL_PRECISION,
             stride_kk, stride_kn, stride_vn, stride_vk,
             IS_FULL_BLOCKS=True,
+            {%- if USE_HEAD_DIM_TILING and USE_TMA %}
+            q1=q1, desc_k1=desc_k1,
+            {%- endif %}
         )
 
 

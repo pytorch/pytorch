@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 """Triton Implementation of the flex_attention Kernel for short query length (FlexDecoding)"""
 
-from typing import Any
+from typing import Any, Optional
 
 import sympy
 
@@ -103,8 +103,9 @@ flex_decoding_template = TritonTemplate(
 )
 
 
-def get_split_k(B: int, H: int, Mk: int) -> int:
-    if torch.xpu.is_available():
+def get_split_k(B: int, H: int, Mk: int, block_n: Optional[int] = None) -> int:
+    is_xpu = torch.xpu.is_available()
+    if is_xpu:
         num_SM = torch.xpu.get_device_properties("xpu").gpu_subslice_count
     else:
         num_SM = torch.cuda.get_device_properties("cuda").multi_processor_count
@@ -114,6 +115,9 @@ def get_split_k(B: int, H: int, Mk: int) -> int:
     # TODO: workload evening at runtime for splits fully masked out.
     # Before we have runtime workload evening, assign 2 splits per SM.
     split_k = max(split_k, 1)
+
+    if is_xpu and block_n is not None and isinstance(Mk, (int, sympy.Integer)):
+        split_k = max(min(split_k, ceildiv(int(Mk), block_n)), 1)
 
     return split_k
 
@@ -222,7 +226,10 @@ def create_flex_decoding_kernel(*args, **kwargs):
     # TODO: fix autotuning.
 
     kernel_options.setdefault("SM_SCALE", scale)
-    kernel_options.setdefault("SPLIT_KV", get_split_k(B, Hkv, seq_len_kv))
+    min_block_n = min((c.block_n for c in configs), default=None)
+    kernel_options.setdefault(
+        "SPLIT_KV", get_split_k(B, Hkv, seq_len_kv, block_n=min_block_n)
+    )
     MAX_SPLIT_KV = kernel_options["SPLIT_KV"]
 
     # create config dependent intermediate buffers

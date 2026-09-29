@@ -101,6 +101,23 @@
     block_n_start = off_t * TILE_KV_MULTIPLE                        # n_offset inside sparse block
     block_n_end = block_n_start + TILE_KV_MULTIPLE                  # end BLOCK_N
 
+    {%- if USE_HEAD_DIM_TILING and USE_TMA %}
+    offs_d0 = tl.arange(0, QK_HEAD_DIM_CHUNK0)
+    offs_d1 = QK_HEAD_DIM_CHUNK0 + tl.arange(0, QK_HEAD_DIM_CHUNK1)
+    q_range_zh = stride_qg * off_g[:, None, None] + stride_qm * off_m[None, :, None]
+    q_range0 = q_range_zh + stride_qk * offs_d0[None, None, :]
+    q_range1 = q_range_zh + stride_qk * offs_d1[None, None, :]
+
+    if SAFE_M_BOUNDARY:
+        q = tl.load(Q + q_offset + q_range0)
+        q1 = tl.load(Q + q_offset + q_range1)
+    else:
+        q = tl.load(Q + q_offset + q_range0, mask=off_m[None, :, None] < Q_LEN)
+        q1 = tl.load(Q + q_offset + q_range1, mask=off_m[None, :, None] < Q_LEN)
+
+    q = tl.reshape(q, [BLOCK_M, QK_HEAD_DIM_CHUNK0])
+    q1 = tl.reshape(q1, [BLOCK_M, QK_HEAD_DIM_CHUNK1])
+    {%- else %}
     q_range = stride_qg * off_g[:, None, None] + stride_qm * off_m[None, :, None] + stride_qk * offs_d[None, None, :]
 
     if not SAFE_M_BOUNDARY and not SAFE_HEAD_DIM:
@@ -113,6 +130,7 @@
         q = tl.load(Q + q_offset + q_range)
 
     q = tl.reshape(q, [BLOCK_M, QK_HEAD_DIM_ROUNDED])
+    {%- endif %}
 
 
     # ~~~~~~~~~~~~~~ normal blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -133,13 +151,32 @@
 
     desc_k = None
     desc_v = None
+    {%- if USE_HEAD_DIM_TILING and USE_TMA %}
+    desc_k1 = None
+    {%- endif %}
     {%- if USE_TMA %}
+    {%- if USE_HEAD_DIM_TILING %}
+    desc_k = tl.make_tensor_descriptor(
+        base=K,
+        shape=[KV_LEN, QK_HEAD_DIM],
+        strides=[stride_kn, 1],
+        block_shape=[BLOCK_N, QK_HEAD_DIM_CHUNK0],
+    )
+
+    desc_k1 = tl.make_tensor_descriptor(
+        base=K,
+        shape=[KV_LEN, QK_HEAD_DIM],
+        strides=[stride_kn, 1],
+        block_shape=[BLOCK_N, QK_HEAD_DIM_CHUNK1],
+    )
+    {%- else %}
     desc_k = tl.make_tensor_descriptor(
         base=K,
         shape=[KV_LEN, QK_HEAD_DIM],
         strides=[stride_kn, 1],
         block_shape=[BLOCK_N, QK_HEAD_DIM_ROUNDED],
     )
+    {%- endif %}
 
     desc_v = tl.make_tensor_descriptor(
         base=V,
@@ -163,6 +200,9 @@
         MATMUL_PRECISION,
         stride_kk, stride_kn, stride_vn, stride_vk,
         IS_FULL_BLOCKS=False,
+        {%- if USE_HEAD_DIM_TILING and USE_TMA %}
+        q1=q1, desc_k1=desc_k1,
+        {%- endif %}
     )
 
 
@@ -198,37 +238,29 @@
             MATMUL_PRECISION,
             stride_kk, stride_kn, stride_vn, stride_vk,
             IS_FULL_BLOCKS=True,
+            {%- if USE_HEAD_DIM_TILING and USE_TMA %}
+            q1=q1, desc_k1=desc_k1,
+            {%- endif %}
         )
 
     m_offset = off_t * stride_mt + off_z * stride_mz
     l_offset = off_t * stride_lt + off_z * stride_lz
 
-    M_block_ptr = tl.make_block_ptr(
-        base=M + m_offset,
-        shape=(G, Q_LEN),                   # (G, M)
-        strides=(stride_mh, stride_mm),
-        offsets=(off_hkv*G, 0),
-        block_shape=(G, BLOCK_M_PER_HQ),
-        order=(1, 0)
-    )
-    L_block_ptr = tl.make_block_ptr(
-        base=L + l_offset,
-        shape=(G, Q_LEN),                   # (G, M)
-        strides=(stride_lh, stride_lm),
-        offsets=(off_hkv*G, 0),
-        block_shape=(G, BLOCK_M_PER_HQ),
-        order=(1, 0)
-    )
+    ml_rows = off_hkv * G + off_g[:, None]
+    ml_cols = off_m[None, :]
+    m_ptrs = M + m_offset + ml_rows * stride_mh + ml_cols * stride_mm
+    l_ptrs = L + l_offset + ml_rows * stride_lh + ml_cols * stride_lm
 
     # Store output, logsumexp and rowmax for cross CTA reduction. (all in float32, even when input data are in fp16)
     m_i = m_i.reshape(G, BLOCK_M_PER_HQ)
     l_i = l_i.reshape(G, BLOCK_M_PER_HQ)
     if SAFE_M_BOUNDARY:
-        tl.store(M_block_ptr, m_i)
-        tl.store(L_block_ptr, l_i)
+        tl.store(m_ptrs, m_i)
+        tl.store(l_ptrs, l_i)
     else:
-        tl.store(M_block_ptr, m_i, boundary_check=(1,))
-        tl.store(L_block_ptr, l_i, boundary_check=(1,))
+        ml_mask = ml_cols < Q_LEN
+        tl.store(m_ptrs, m_i, mask=ml_mask)
+        tl.store(l_ptrs, l_i, mask=ml_mask)
 
     # -- store output
     idx_z = off_z

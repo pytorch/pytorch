@@ -1438,6 +1438,7 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
         }
         self.flex_attn_fwd_autotune_configs: list[FlexConfig] = [
             FlexConfig(32, 16, 2, 4),
+            FlexConfig(128, 64, 3, 16),
             FlexConfig(128, 64, 2, 16),
             FlexConfig(128, 64, 2, 8),
             FlexConfig(128, 32, 2, 16),
@@ -1466,6 +1467,12 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
                 FlexDecodeConfig(64, 2, 2),
                 FlexDecodeConfig(64, 2, 1),
             ]
+            self.flex_decode_autotune_configs += [
+                FlexDecodeConfig(block_n, num_stages, num_warps)
+                for block_n in [32, 64, 128]
+                for num_stages in [1, 2]
+                for num_warps in [4, 8]
+            ]
 
     def get_flex_attn_fwd_configs(self, head_dim: int, dtype: Any) -> list[FlexConfig]:
         flex_attn_fwd_configs: list[FlexConfig] = []
@@ -1487,7 +1494,7 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
             if dtype == torch.float32:
                 default_config = FlexConfig(32, 16, 1, 4)
             else:
-                default_config = FlexConfig(64, 32, 1, 8)
+                default_config = FlexConfig(128, 64, 3, 16)
 
         if default_config not in flex_attn_fwd_configs:
             flex_attn_fwd_configs.append(default_config)
@@ -1526,12 +1533,28 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
     ) -> list[FlexDecodeConfig]:
         flex_decode_configs: list[FlexDecodeConfig] = []
 
+        MIN_DECODE_WARPS_LARGE_HEAD_DIM = 4
+        needs_wide_warps = head_dim > 256
+
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self.exhaustive_flex_decode_configs
-            flex_decode_configs += self.flex_decode_autotune_configs
+                return [
+                    c
+                    for c in self.exhaustive_flex_decode_configs
+                    if not needs_wide_warps
+                    or c.num_warps >= MIN_DECODE_WARPS_LARGE_HEAD_DIM
+                ]
+            flex_decode_configs += [
+                c
+                for c in self.flex_decode_autotune_configs
+                if not needs_wide_warps
+                or c.num_warps >= MIN_DECODE_WARPS_LARGE_HEAD_DIM
+            ]
 
-        default_config = FlexDecodeConfig(64, 1, 2)
+        if needs_wide_warps:
+            default_config = FlexDecodeConfig(64, 2, 4)
+        else:
+            default_config = FlexDecodeConfig(64, 1, 2)
 
         if default_config not in flex_decode_configs:
             flex_decode_configs.append(default_config)
