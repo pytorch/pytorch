@@ -1,4 +1,3 @@
-from torch.fx.experimental.proxy_tensor import get_proxy_slot
 import ast
 import collections
 import copy
@@ -37,6 +36,7 @@ from torch._prims_common import (
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
+    get_proxy_slot,
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
@@ -1794,7 +1794,11 @@ def triton_kernel_wrapper_mutation_functionalize(
     for key in tensors_to_clone:
         tensor = kwargs[key]
         base = tensor._base if isinstance(tensor, Tensor) else None
-        if base is not None and proxy_mode is not None and isinstance(base, FunctionalTensor):
+        if (
+            base is not None
+            and proxy_mode is not None
+            and isinstance(base, FunctionalTensor)
+        ):
             view_bases[key] = base
             tensor_bases[key] = ctx.unwrap_tensors(base)
             view_metas[key] = ViewMetaSequence(tensor)
@@ -1840,19 +1844,26 @@ def triton_kernel_wrapper_mutation_functionalize(
         ctx.sync(input_arg)
 
         if proxy_mode is not None:
-            logical_input_base_val = tensor_bases.get(key)
-            if logical_input_base_val is None:
+            if (
+                replay_start is None
+                or (logical_input_base_val := tensor_bases.get(key)) is None
+            ):
                 continue
 
             node = get_proxy_slot(output_arg, proxy_mode.tracer).proxy.node
-            logical_input_base = get_proxy_slot(logical_input_base_val, proxy_mode.tracer).proxy.node
-            updated_base_val = ctx.unwrap_tensors(view_bases[key])  # unwrap AFTER calling sync()
-            updated_base = get_proxy_slot(updated_base_val, proxy_mode.tracer).proxy.node
+            logical_input_base = get_proxy_slot(
+                logical_input_base_val, proxy_mode.tracer
+            ).proxy.node
+            updated_base_val = ctx.unwrap_tensors(
+                view_bases[key]
+            )  # unwrap AFTER calling sync()
+            updated_base = get_proxy_slot(
+                updated_base_val, proxy_mode.tracer
+            ).proxy.node
             view_meta_sequence = view_metas[key]
             # Give the nodes emitted by sync() the same label so reinplace can
             # find them even if a graph rewrite replaces some of the nodes.
             view_replay_label = node.name
-            assert replay_start is not None
             replay_node = next(reversed(proxy_mode.tracer.graph.nodes))
             while replay_node is not replay_start:
                 replay_node.meta["triton_view_replay"] = view_replay_label

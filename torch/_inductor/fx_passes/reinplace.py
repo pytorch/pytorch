@@ -395,7 +395,10 @@ def canonicalize_view_scatter_ops(
             node.replace_all_uses_with(new_node)
             graph.erase_node(node)
 
-            assert isinstance(src, torch.fx.Node)
+            if not isinstance(src, torch.fx.Node):
+                raise AssertionError(
+                    f"expected src to be a torch.fx.Node, got {type(src)}"
+                )
 
             if src.users:  # type: ignore[union-attr]
                 new_src = graph_call_function(
@@ -535,7 +538,7 @@ def _match_functionalized_user_defined_triton_kernel(
     canonicalized_replacements: dict[torch.fx.Node, torch.fx.Node],
     nodes_by_name: dict[str, torch.fx.Node],
     view_replay_nodes_by_label: dict[str, list[torch.fx.Node]],
-) -> dict[tuple[torch.fx.Node, torch.fx.Node], TritonKernelReinplacementPlan] | None:
+) -> dict[tuple[torch.fx.Node, torch.fx.Node], TritonKernelReinplacementPlan]:
     """
     Attempts to in-place all triton_kernel_wrapper_functional ops that were
     emitted during functionalization. Using the metadata we create around the
@@ -544,7 +547,7 @@ def _match_functionalized_user_defined_triton_kernel(
     if we can't associate them with an epilogue copy.
     """
     if triton_kernel.target not in inplaceable_triton_ops:
-        return None
+        return {}
 
     kwargs = cast(Mapping[str, Any], triton_kernel.kwargs["kwargs"])
     tensors_to_clone = cast(list[str], triton_kernel.kwargs["tensors_to_clone"])
@@ -1270,27 +1273,13 @@ def reinplace_inplaceable_ops_core(
         elif (inplaceable_op := inplaceable_foreach_ops.get(node.target)) is not None:
             mutated_args = node.args[inplaceable_op.mutated_arg]
 
-            def has_matching_copy_back(mutated_arg: torch.fx.Node) -> bool:
-                key = (mutated_arg, node)
-                return key in copy_args_to_copy_nodes or (
-                    key in copy_args_to_triton_kernel_reinplacement_plans
-                    and key in copy_args_to_copy_nodes_via_views
-                )
-
-            if not all(has_matching_copy_back(arg) for arg in mutated_args):
+            if not all((arg, node) in copy_args_to_copy_nodes for arg in mutated_args):
                 continue
 
             if can_inplace(node, mutated_args):
                 for arg in mutated_args:
-                    key = (arg, node)
-                    if plan := copy_args_to_triton_kernel_reinplacement_plans.get(key):
-                        replace_dict[plan.updated_base] = plan.logical_input_base
-                        skip_nodes.add(plan.updated_base)
-                        copy_node = copy_args_to_copy_nodes_via_views[key]
-                        candidate_copy_nodes.add(copy_node)
-                    else:
-                        copy_node = copy_args_to_copy_nodes[key]
-                        replace_dict[copy_node] = copy_node.args[0]
+                    copy_node = copy_args_to_copy_nodes[(arg, node)]
+                    replace_dict[copy_node] = copy_node.args[0]
 
                 node.target = inplaceable_op.inplace_op
 
