@@ -27,6 +27,7 @@ from torch.testing._internal.common_distributed import (
     requires_nccl,
     requires_nccl_version,
     skip_if_lt_x_gpu,
+    skip_if_rocm_ver_atleast_multiprocess,
 )
 from torch.testing._internal.common_utils import (
     IS_FBCODE,
