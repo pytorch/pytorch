@@ -60,7 +60,36 @@ runs:
         # In the meantime, this is a quick fix to ensure that CI has the permission
         # to use the GITHUB_WORKSPACE while still allowing the GH hook (uid 1001,
         # gid 1001) to clean up the directory after the job
-        sudo chmod -R 777 "$GITHUB_WORKSPACE"
+        if [[ -w "$GITHUB_WORKSPACE" ]]; then
+          echo "Workspace is already writable"
+        else
+          sudo chmod -R 777 "$GITHUB_WORKSPACE"
+        fi
+
+    - name: Prepare writable Python environment
+      if: ${{ inputs.use-arc == 'true' }}
+      shell: bash
+      run: |
+        if [[ -z "${VIRTUAL_ENV:-}" ]]; then
+          exit 0
+        fi
+
+        SITE_PACKAGES=$("$VIRTUAL_ENV/bin/python3" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')
+        if [[ -w "$SITE_PACKAGES" ]]; then
+          echo "Python environment is already writable"
+          exit 0
+        fi
+
+        WRITABLE_VENV="${RUNNER_TEMP}/python-venv"
+        "$VIRTUAL_ENV/bin/python3" -m venv "$WRITABLE_VENV"
+        WRITABLE_SITE_PACKAGES=$("$WRITABLE_VENV/bin/python3" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')
+        printf '%s\n' "$SITE_PACKAGES" > "$WRITABLE_SITE_PACKAGES/pytorch-ci-base.pth"
+        test -w "$WRITABLE_SITE_PACKAGES"
+        {
+          echo "VIRTUAL_ENV=$WRITABLE_VENV"
+          echo "VENV_PATH=$WRITABLE_VENV"
+        } >> "$GITHUB_ENV"
+        echo "$WRITABLE_VENV/bin" >> "$GITHUB_PATH"
 
     - name: Ack Git cache ownership
       if: ${{ inputs.use-arc == 'true' }}
