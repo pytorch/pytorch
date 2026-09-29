@@ -2592,7 +2592,6 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
                 shard = remote_shard.to_here()
                 self.assertEqual((5, 5), shard.tensor.size())
 
-
     @with_comms(init_rpc=False, backend=BACKEND)
     @skip_if_lt_x_gpu(4)
     @requires_accelerator_dist_backend(["nccl", "xccl"])
@@ -2649,7 +2648,6 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
             with self.assertRaises(ValueError):
                 st = sharded_tensor.init_from_local_shards(local_shards)
 
-
     @with_comms(init_rpc=False, backend=BACKEND)
     @skip_if_lt_x_gpu(4)
     @requires_accelerator_dist_backend(["nccl", "xccl"])
@@ -2683,7 +2681,6 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
         ]
         with self.assertRaises(ValueError):
             sharded_tensor.init_from_local_shards(local_shards, 0, 0)
-
 
     @with_comms(init_rpc=False, backend=BACKEND)
     @skip_if_lt_x_gpu(4)
@@ -2783,7 +2780,6 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
                 f"rank:{rank}/{DEVICE_TYPE}:{rank}", str(shard_metadata.placement)
             )
 
-
     @with_comms(init_rpc=False, backend=BACKEND)
     @skip_if_lt_x_gpu(4)
     @requires_accelerator_dist_backend(["nccl", "xccl"])
@@ -2863,7 +2859,6 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
             self.assertEqual(
                 f"rank:{rank}/{DEVICE_TYPE}:{rank}", str(shard_metadata.placement)
             )
-
 
     @with_comms(init_rpc=False, backend=BACKEND)
     @skip_if_lt_x_gpu(4)
