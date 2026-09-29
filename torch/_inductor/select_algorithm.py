@@ -63,7 +63,12 @@ from .codegen.common import (
     WorkspaceArg,
     WorkspaceZeroMode,
 )
-from .codegen.simd import DerivedIterationRangesRoot
+from .codegen.simd import (
+    codegen_reduced_buffer,
+    COLUMN_REDUCTION_OPS,
+    DerivedIterationRangesRoot,
+    template_reduction_axis,
+)
 from .codegen.simd_kernel_features import SIMDKernelFeatures
 from .codegen.subgraph import SubgraphChoiceCaller
 from .codegen.triton import (
@@ -688,6 +693,10 @@ class TritonTemplateKernel(TritonKernel):
         self.output_tiles: dict[
             int, tuple[list[sympy.Symbol], tuple[int, int, int]]
         ] = {}
+        # Column reductions fused into the epilogue: (node, output buffer, finish
+        # op, workspace byte offset of the fp32 per-tile partials, row tiles).
+        # The wrapper reduces the partials after the kernel.
+        self.column_reductions: list[tuple[Any, str, str, int, int]] = []
 
         # When caching is enabled, the generated code is not dependent on the input nodes names, or
         # symbolic sizes names.
@@ -2009,7 +2018,38 @@ class TritonTemplateKernel(TritonKernel):
 
     def _emit_post_kernel_code(self, wrapper, kernel_name: str) -> None:
         """Hook for subclasses to emit code after kernel call, before workspace dealloc."""
-        pass  # noqa: PIE790
+        if not self.column_reductions:
+            return
+        if self.workspace_arg is None:
+            raise AssertionError("column reduction partials need a workspace")
+        ws, n = self.workspace_arg.outer_name, self.output_node.get_size()[1]
+        for _, name, op, offset, row_tiles in self.column_reductions:
+            end = offset + row_tiles * n * 4
+            partials = (
+                f"{ws}[{offset}:{end}].view(torch.float32).view({row_tiles}, {n})"
+            )
+            codegen_reduced_buffer(name, f"{partials}.{op}(dim=0)")
+
+    def codegen_benchmark_post_call(self, result, call_args, signature) -> None:
+        # Epilogue benchmarking should pay for the wrapper's finish of the
+        # column reduction partials, not just the kernel.
+        if not self.column_reductions:
+            return
+        if self.workspace_arg is None:
+            raise AssertionError("column reduction partials need a workspace")
+        idx = next(
+            i
+            for i, sig in enumerate(signature)
+            if isinstance(sig, WorkspaceArg)
+            and sig.outer_name == self.workspace_arg.outer_name
+        )
+        n = self.output_node.get_size()[1]
+        for _, _, op, offset, row_tiles in self.column_reductions:
+            end = offset + row_tiles * n * 4
+            result.writeline(
+                f"args[{idx}][{offset}:{end}].view(torch.float32)"
+                f".view({row_tiles}, {n}).{op}(dim=0)"
+            )
 
     def kernel_benchmark_extra_args(self) -> list[str]:
         # Grid args are only used for benchmarking, not correctness
@@ -2105,13 +2145,28 @@ class TritonTemplateKernel(TritonKernel):
                 subgraph_name = self._get_store_output_subgraph_name(i)
                 with self.set_subgraph_body(subgraph_name):
                     nodes = self._epilogue_nodes_by_subgraph[i]
+                    produced = template_node.get_buffer_names().union(
+                        *(node.get_buffer_names() for node in nodes)
+                    )
+                    columns = [
+                        node
+                        for node in nodes
+                        if node.is_reduction()
+                        and template_reduction_axis(node, template_node.node, produced)
+                        == 1
+                    ]
+                    if columns:
+                        # Nothing reads a column result, so they can go last.
+                        nodes = [n for n in nodes if not n.is_reduction()] + columns
                     first_red = next(
                         (j for j, n in enumerate(nodes) if n.is_reduction()), len(nodes)
                     )
                     for node in nodes[:first_red]:
                         node.codegen(self.split_and_set_ranges(node.get_ranges()))
                     if first_red < len(nodes):
-                        self.codegen_tile_reduction_epilogue(nodes[first_red:], i)
+                        self.codegen_tile_reduction_epilogue(
+                            nodes[first_red:], i, bool(columns)
+                        )
                     self.cse.invalidate(OrderedSet())
 
             self.codegen_prologues_in_subgraphs(
@@ -2153,13 +2208,25 @@ class TritonTemplateKernel(TritonKernel):
 
         return src_code
 
-    def codegen_tile_reduction_epilogue(self, nodes, subgraph_idx: int) -> None:
+    def codegen_tile_reduction_epilogue(
+        self, nodes, subgraph_idx: int, columns: bool = False
+    ) -> None:
         """Codegen row reductions of the output, and the nodes after them, as a
         persistent reduction over the output tile: x spans the tile's rows and
         r0_ its columns, so loads of the output buffer resolve to the
-        in-register tile."""
-        numels = dict(zip(("x", "r0_"), self.output_node.get_size()))
+        in-register tile.
+
+        Column reductions swap the roles (x spans columns, r0_ rows) and store
+        fp32 partials per row tile to the workspace, which the wrapper reduces
+        after the kernel (see _emit_post_kernel_code). Split column reductions
+        are generated whole."""
+        m, n = self.output_node.get_size()
         origin, (rows, cols, _) = self.output_tiles[subgraph_idx]
+        numels = {"x": m, "r0_": n}
+        sizes, offsets = (rows, cols), origin
+        if columns:
+            numels = {"x": n, "r0_": m}
+            sizes, offsets = (cols, rows), origin[::-1]
         with patch.object(self, "persistent_reduction", True):
             roots = self.construct_range_trees(None, True, True, numels, False)
         range_trees = [
@@ -2170,15 +2237,57 @@ class TritonTemplateKernel(TritonKernel):
                 block_offset=offset,
                 name_suffix="tile",
             )
-            for root, size, offset in zip(roots, (rows, cols), origin)
+            for root, size, offset in zip(roots, sizes, offsets)
         ]
         # Stored tile values carry the template's symbolic shape; restate it as
         # the concrete tile so they broadcast against loads in the tile space.
-        shape = (str(rows), str(cols))
-        store_cache = {
-            name: self.create_cse_var(str(v), v.bounds, v.dtype, shape)
-            for name, v in self.cse.store_cache.items()
-        }
+        store_cache = {}
+        for name, v in self.cse.store_cache.items():
+            if columns:
+                store_cache[name] = self.cse.newvar(
+                    v.bounds, v.dtype, (str(cols), str(rows))
+                )
+                self.body.writeline(f"{store_cache[name]} = tl.trans({v})")
+            else:
+                store_cache[name] = self.create_cse_var(
+                    str(v), v.bounds, v.dtype, (str(rows), str(cols))
+                )
+
+        def store_partials(column_node, reduction_type, name, index, value):
+            if column_node.node._split_size is not None:
+                # The whole reduction replaces the split's second stage.
+                stage2 = column_node.get_outputs()[0].users[0].node
+                name = stage2.get_outputs()[0].node.get_name()
+            row_tiles = ceildiv(int(m), rows)
+            nbytes = row_tiles * int(n) * 4
+            ws = next(
+                (w for w in self.args.workspace_args if w.inner_name == "ws_ptr"), None
+            )
+            pad = -int(ws.count) % 16 if ws is not None else 0
+            ws_ptr, ws_name, offset = self.args.workspace(pad + nbytes, False)
+            self.workspace_arg = next(
+                w for w in self.args.workspace_args if w.outer_name == ws_name
+            )
+            offset += pad
+            self.column_reductions.append(
+                (
+                    column_node,
+                    name,
+                    COLUMN_REDUCTION_OPS[reduction_type],
+                    offset,
+                    row_tiles,
+                )
+            )
+            indexing = self.indexing(index, block_ptr=False)
+            self.post_loop_store.writeline(
+                f"tl.store(({ws_ptr} + {offset}).to(tl.pointer_type(tl.float32)) + "
+                f"{n} * ({origin[0]} // {rows}) + {indexing.index_str}, "
+                f"{value}, {indexing.mask_str})"
+            )
+
+        codegen_nodes = [
+            node.unsplit_reduction() if columns else node for node in nodes
+        ]
         with (
             self.use_range_trees(range_trees),
             patch.object(self.cse, "store_cache", store_cache),
@@ -2190,7 +2299,7 @@ class TritonTemplateKernel(TritonKernel):
                 persistent_reduction=True,
                 template_mask=None,
                 template_out_shape=None,
-                features=SIMDKernelFeatures(nodes, numels["x"], numels["r0_"]),
+                features=SIMDKernelFeatures(codegen_nodes, numels["x"], numels["r0_"]),
                 # Tensor descriptors expect standard block symbols, not the tile's.
                 tma_store=False,
                 tma_load_for_template_epilogue=False,
@@ -2199,10 +2308,21 @@ class TritonTemplateKernel(TritonKernel):
             for tree in range_trees:
                 self.iteration_ranges_codegen_header(tree, self.body)
             self.body.writeline(f"rindex = {range_trees[1].name}")
-            for node in nodes:
+            for original, node in zip(nodes, codegen_nodes):
                 # Nodes over rows only (e.g. mean's division) run outside the reduction.
                 self.inside_reduction = node.group[1] != (numels["x"], sympy.S.One)
-                node.codegen(self.split_and_set_ranges(node.get_ranges()))
+                with (
+                    patch.object(
+                        self,
+                        "store_reduction",
+                        functools.partial(
+                            store_partials, original, node.node.get_reduction_type()
+                        ),
+                    )
+                    if columns
+                    else contextlib.nullcontext()
+                ):
+                    node.codegen(self.split_and_set_ranges(node.get_ranges()))
             self.codegen_body()
 
     def codegen_prologues_in_subgraphs(

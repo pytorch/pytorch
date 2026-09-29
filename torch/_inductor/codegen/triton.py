@@ -7387,6 +7387,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 result.writeline(
                     f"{str(Placeholder.KERNEL_NAME)}.run(*args, stream={stream_name})"
                 )
+                self.codegen_benchmark_post_call(result, call_args, signature)
 
         # benchmark all configs
         result.writelines(["\n", "\n", "def benchmark_all_configs(args):"])
@@ -7420,6 +7421,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             )
 
         return result
+
+    def codegen_benchmark_post_call(
+        self, result: IndentedBuffer, call_args: list[str], signature: list[Any]
+    ) -> None:
+        """Hook to emit code the benchmark times along with the kernel launch."""
 
     def imports_for_benchmark_kernel(self):
         # Dedent BEFORE substituting get_raw_stream: a multi-line override would
@@ -8661,8 +8667,8 @@ class TritonScheduling(SIMDScheduling):
     def can_fuse_template_reduction_epilogue(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
-        """Row reductions over a row-major template output, when some template
-        choice stores output tiles they fit. See
+        """Row or column reductions over a row-major template output, when some
+        template choice stores output tiles they fit. See
         TritonTemplateKernel.codegen_tile_reduction_epilogue."""
         template = node1.get_template_node()
         if not (
