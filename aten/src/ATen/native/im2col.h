@@ -104,36 +104,36 @@ static void col2im_slice(
     const int64_t dilation_h,
     const int64_t dilation_w,
     T* data_im) {
-  if (!std::is_same_v<T, c10::Half> && kernel_h == 2 && kernel_w == 2 &&
-      stride_h == 2 && stride_w == 2 && dilation_h == 1 && dilation_w == 1 &&
-      pad_h == 0 && pad_w == 0 && height % 2 == 0 && width % 2 == 0 &&
-      output_height == height / 2 && output_width == width / 2) {
-    const int64_t col_size = output_height * output_width;
-    for (int64_t c = 0; c < channels; ++c) {
-      for (int64_t h = 0; h < output_height; ++h) {
-        const T* src = data_col + c * 4 * col_size + h * output_width;
-        T* dst = data_im + c * height * width + h * 2 * width;
-        for (int64_t w = 0; w < output_width; ++w) {
-          // Keep the addition to zero for signed-zero behavior.
-          dst[2 * w] = T(0) + src[w];
-          dst[2 * w + 1] = T(0) + src[col_size + w];
-          dst[width + 2 * w] = T(0) + src[2 * col_size + w];
-          dst[width + 2 * w + 1] = T(0) + src[3 * col_size + w];
-        }
-      }
-    }
-    return;
-  }
-
-  if (dilation_h == 1 && dilation_w == 1 &&
-      stride_h == kernel_h && stride_w == kernel_w && pad_h == 0 && pad_w == 0 &&
+  const bool exact_tiling =
+      dilation_h == 1 && dilation_w == 1 && pad_h == 0 && pad_w == 0 &&
+      stride_h == kernel_h && stride_w == kernel_w &&
       height % kernel_h == 0 && width % kernel_w == 0 &&
-      output_height == height / kernel_h && output_width == width / kernel_w) {
-    if (!std::is_same_v<T, c10::Half> && kernel_h == 1 && kernel_w == 1) {
-      for (int64_t i = 0; i < channels * height * width; ++i) {
-        data_im[i] = T(0) + data_col[i];
+      output_height == height / kernel_h && output_width == width / kernel_w;
+  if (exact_tiling) {
+    if constexpr (!std::is_same_v<T, c10::Half>) {
+      if (kernel_h == 1 && kernel_w == 1) {
+        for (int64_t i = 0; i < channels * height * width; ++i) {
+          data_im[i] = T(0) + data_col[i];
+        }
+        return;
       }
-      return;
+      if (kernel_h == 2 && kernel_w == 2) {
+        const int64_t col_size = output_height * output_width;
+        for (int64_t c = 0; c < channels; ++c) {
+          for (int64_t h = 0; h < output_height; ++h) {
+            const T* src = data_col + c * 4 * col_size + h * output_width;
+            T* dst = data_im + c * height * width + h * 2 * width;
+            for (int64_t w = 0; w < output_width; ++w) {
+              // Keep the addition to zero for signed-zero behavior.
+              dst[2 * w] = T(0) + src[w];
+              dst[2 * w + 1] = T(0) + src[col_size + w];
+              dst[width + 2 * w] = T(0) + src[2 * col_size + w];
+              dst[width + 2 * w + 1] = T(0) + src[3 * col_size + w];
+            }
+          }
+        }
+        return;
+      }
     }
     for (int64_t c_col = 0; c_col < channels * kernel_h * kernel_w; ++c_col) {
       const int64_t w_offset = c_col % kernel_w;
