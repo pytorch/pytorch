@@ -699,7 +699,7 @@ class _DynamoCapture(Capture[_P, _R]):
 
     def __init__(
         self,
-        session: PrecompileSession,
+        session: PrecompileSession[_P, _R],
         artifact_path: str | os.PathLike[str],
         cache_path: str | os.PathLike[str],
         *,
